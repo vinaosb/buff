@@ -1,0 +1,274 @@
+//! [`TokenStream`] — a cursor over a slice of lexer-produced tokens.
+//!
+//! Provides peek/advance/expect helpers and span computation for the
+//! hand-rolled Pratt parser in [`crate::expr`].
+//!
+//! Layout tokens ([`TokenKind::Newline`], [`TokenKind::Indent`],
+//! [`TokenKind::Dedent`]) are *skipped automatically* by [`peek`]/[`next`]
+//! so the parser logic stays clean. Callers that care about layout should
+//! construct the stream from a pre-filtered token slice.
+
+use deox_error::{Diagnostic, ParseError, SourceId, Span};
+use deox_lexer::{Token, TokenKind};
+
+/// A read-only cursor over a slice of tokens.
+///
+/// Tracks the current position and the source id used to fabricate spans for
+/// synthetic nodes or unexpected-EOF errors.
+pub struct TokenStream<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+    source_id: SourceId,
+}
+
+impl<'a> TokenStream<'a> {
+    /// Construct a new cursor over `tokens`. The cursor does not clone; it
+    /// borrows the slice for its entire lifetime.
+    pub fn new(tokens: &'a [Token], source_id: SourceId) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            source_id,
+        }
+    }
+
+    /// The [`SourceId`] associated with this stream.
+    pub fn source_id(&self) -> SourceId {
+        self.source_id
+    }
+
+    /// Look at the current token (skipping any layout tokens). Returns
+    /// `None` at end-of-input or when an explicit [`TokenKind::Eof`] is
+    /// reached.
+    pub fn peek(&self) -> Option<&Token> {
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent => {
+                    i += 1;
+                }
+                TokenKind::Eof => return None,
+                _ => return Some(&self.tokens[i]),
+            }
+        }
+        None
+    }
+
+    /// Convenience: just the [`TokenKind`] of the next significant token.
+    pub fn peek_kind(&self) -> Option<&TokenKind> {
+        self.peek().map(|t| &t.kind)
+    }
+
+    /// Look at the token *after* the current one (skipping layout). Used to
+    /// disambiguate `obj.method` vs `obj.method(...)` without committing.
+    pub fn peek_second_kind(&self) -> Option<&TokenKind> {
+        let mut i = self.pos;
+        // Skip current token + any layout after it.
+        let mut saw_real = false;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent => {
+                    i += 1;
+                }
+                TokenKind::Eof => return None,
+                _ => {
+                    if !saw_real {
+                        saw_real = true;
+                        i += 1;
+                    } else {
+                        return Some(&self.tokens[i].kind);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Advance past the current significant token and return an *owned*
+    /// clone of it. Returns `None` at EOF.
+    ///
+    /// We return an owned [`Token`] (rather than `&Token`) because callers
+    /// routinely need to keep using the stream after consuming a token, and
+    /// a borrowed return would conflict with subsequent `&mut self` calls.
+    ///
+    /// Named `advance` (rather than `next`) so it is not confused with the
+    /// [`Iterator::next`] trait method (which would trigger clippy's
+    /// `should_implement_trait` lint).
+    pub fn advance(&mut self) -> Option<Token> {
+        // Skip any layout tokens first.
+        while self.pos < self.tokens.len() {
+            match self.tokens[self.pos].kind {
+                TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent => self.pos += 1,
+                _ => break,
+            }
+        }
+        if self.pos < self.tokens.len() {
+            // Don't return Eof as a real token.
+            if matches!(self.tokens[self.pos].kind, TokenKind::Eof) {
+                return None;
+            }
+            let tok = self.tokens[self.pos].clone();
+            self.pos += 1;
+            Some(tok)
+        } else {
+            None
+        }
+    }
+
+    /// True when the next significant token is `kind` (by structural match).
+    /// Use [`matches!`](core::matches) at the call site for variants that
+    /// carry data (e.g. `TokenKind::Ident(_)`).
+    pub fn check(&self, kind: &TokenKind) -> bool {
+        self.peek_kind() == Some(kind)
+    }
+
+    /// True when no more significant tokens remain.
+    pub fn is_at_end(&self) -> bool {
+        self.peek().is_none()
+    }
+
+    /// Consume the next token if its kind matches `expected_kind`. On
+    /// success returns an *owned* clone of the consumed token; on failure
+    /// returns a [`ParseError`] pointing at the offending (or EOF) position.
+    ///
+    /// `expected_kind` is compared structurally — variants carrying data
+    /// (like [`TokenKind::Ident`]) only match a token with the *same* inner
+    /// value. For "any identifier" matches, use [`Self::next`] plus a manual
+    /// kind-check instead.
+    pub fn expect(&mut self, expected_kind: TokenKind) -> Result<Token, ParseError> {
+        if let Some(tok) = self.peek() {
+            if tok.kind == expected_kind {
+                // SAFETY: peek returned Some(tok) at index self.pos (post-
+                // layout-skip). advance() will return the same token.
+                Ok(self.advance().expect("peek guaranteed a token"))
+            } else {
+                Err(ParseError::new(Diagnostic::error(
+                    format!("expected `{expected_kind}`, found `{}`", tok.kind),
+                    tok.span,
+                )))
+            }
+        } else {
+            Err(ParseError::new(Diagnostic::error(
+                format!("expected `{expected_kind}`, found end of input"),
+                self.eof_span(),
+            )))
+        }
+    }
+
+    /// Build an "unexpected token" error pointing at the current position.
+    pub fn unexpected(&self, what: impl core::fmt::Display) -> ParseError {
+        if let Some(tok) = self.peek() {
+            ParseError::new(Diagnostic::error(
+                format!("unexpected `{}`: {what}", tok.kind),
+                tok.span,
+            ))
+        } else {
+            ParseError::new(Diagnostic::error(
+                format!("unexpected end of input: {what}"),
+                self.eof_span(),
+            ))
+        }
+    }
+
+    /// Span for a synthetic "end of file" position. If we have any tokens,
+    /// use the last token's end offset; otherwise a dummy at offset 0.
+    pub fn eof_span(&self) -> Span {
+        let last = self.tokens.last();
+        match last {
+            Some(tok) => Span::new(tok.span.end, tok.span.end, self.source_id),
+            None => Span::dummy(),
+        }
+    }
+
+    /// Build a span covering `start_tok.span.start .. end_tok.span.end`,
+    /// using this stream's [`SourceId`]. Used to compute parent-node spans
+    /// from their children.
+    pub fn span_between(start_tok: &Token, end_tok: &Token, source_id: SourceId) -> Span {
+        Span::new(start_tok.span.start, end_tok.span.end, source_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ts(src: &str) -> (Vec<Token>, SourceId) {
+        let sid = SourceId(7);
+        let toks = deox_lexer::tokenize(src, sid).expect("tokenize failed");
+        (toks, sid)
+    }
+
+    #[test]
+    fn empty_input_is_at_end() {
+        let (toks, sid) = ts("");
+        let s = TokenStream::new(&toks, sid);
+        assert!(s.is_at_end());
+        assert!(s.peek().is_none());
+    }
+
+    #[test]
+    fn peek_does_not_consume() {
+        let (toks, sid) = ts("42");
+        let s = TokenStream::new(&toks, sid);
+        assert_eq!(s.peek().map(|t| &t.kind), Some(&TokenKind::IntLit(42)));
+        assert_eq!(s.peek().map(|t| &t.kind), Some(&TokenKind::IntLit(42)));
+    }
+
+    #[test]
+    fn next_advances_cursor() {
+        let (toks, sid) = ts("42 7");
+        let mut s = TokenStream::new(&toks, sid);
+        assert_eq!(s.advance().map(|t| t.kind), Some(TokenKind::IntLit(42)));
+        assert_eq!(s.advance().map(|t| t.kind), Some(TokenKind::IntLit(7)));
+        assert!(s.advance().is_none());
+    }
+
+    #[test]
+    fn layout_tokens_are_skipped() {
+        // Multi-line input: Newline tokens should be transparent to peek/advance.
+        let (toks, sid) = ts("foo\nbar");
+        let mut s = TokenStream::new(&toks, sid);
+        assert_eq!(
+            s.advance().map(|t| t.kind),
+            Some(TokenKind::Ident("foo".into()))
+        );
+        assert_eq!(
+            s.advance().map(|t| t.kind),
+            Some(TokenKind::Ident("bar".into()))
+        );
+    }
+
+    #[test]
+    fn expect_matches_succeeds() {
+        let (toks, sid) = ts("( )");
+        let mut s = TokenStream::new(&toks, sid);
+        assert!(s.expect(TokenKind::LParen).is_ok());
+        assert!(s.expect(TokenKind::RParen).is_ok());
+    }
+
+    #[test]
+    fn expect_mismatch_errors() {
+        let (toks, sid) = ts("(");
+        let mut s = TokenStream::new(&toks, sid);
+        assert!(s.expect(TokenKind::LParen).is_ok());
+        let err = s.expect(TokenKind::RParen).unwrap_err();
+        assert!(err.diagnostic.message.contains("expected"));
+    }
+
+    #[test]
+    fn eof_span_falls_back_to_last_token_end() {
+        let (toks, sid) = ts("foo");
+        let s = TokenStream::new(&toks, sid);
+        let span = s.eof_span();
+        assert_eq!(span.source_id, sid);
+        assert_eq!(span.start, 3);
+        assert_eq!(span.end, 3);
+    }
+
+    #[test]
+    fn peek_second_kind_skips_one_real_token() {
+        let (toks, sid) = ts("a . b");
+        let s = TokenStream::new(&toks, sid);
+        assert_eq!(s.peek_second_kind(), Some(&TokenKind::Dot));
+    }
+}
