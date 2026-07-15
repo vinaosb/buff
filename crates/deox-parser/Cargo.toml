@@ -1,0 +1,11 @@
+[package]
+name = "deox-parser"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+thiserror.workspace = true
+deox-ast.workspace = true
+deox-lexer.workspace = true
+deox-error.workspace = true

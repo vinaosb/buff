@@ -1,0 +1,3 @@
+// Deox v0.1 MVP example — runnable after Wave 4
+func main():
+    print("Olá, Deox!")
