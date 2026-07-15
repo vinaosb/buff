@@ -22,6 +22,14 @@
 //! - `TypeRef::Named` for the seven v0.1 primitive names (`Int`→`i64`, etc.)
 //!   plus `TypeRef::Option` and `TypeRef::Generic` (named base)
 //!
+//! ## Move semantics (T33a)
+//!
+//! All bindings are MOVED by default (Rust move semantics). The integrated
+//! [`MoveAnalyzer`] pre-classifies each binding as Copy or non-Copy, and
+//! `lower_expr` inserts `.clone()` at the use site of any non-Copy variable
+//! that has already been moved once. Generated Rust never contains `&`,
+//! `&mut`, or lifetime annotations in function signatures.
+//!
 //! Structs, enums, imports, traits, lambdas, match, method-call and
 //! struct-init lowering are deferred to later tasks.
 
@@ -39,6 +47,7 @@ use deox_ast::{
 use deox_error::{CodegenError, Diagnostic, Span as DeoxSpan};
 
 use crate::context::CodegenContext;
+use crate::move_analysis::MoveAnalyzer;
 
 /// The Rust code generator.
 ///
@@ -46,6 +55,7 @@ use crate::context::CodegenContext;
 /// Construct with [`RustCodegen::new`] (or `Default`).
 pub struct RustCodegen {
     ctx: CodegenContext,
+    move_analyzer: MoveAnalyzer,
 }
 
 impl RustCodegen {
@@ -53,6 +63,7 @@ impl RustCodegen {
     pub fn new() -> Self {
         Self {
             ctx: CodegenContext::new(),
+            move_analyzer: MoveAnalyzer::new(),
         }
     }
 
@@ -90,6 +101,10 @@ impl RustCodegen {
     }
 
     fn lower_func(&mut self, f: &FuncDecl) -> Result<ItemFn, CodegenError> {
+        // Reset move-analysis state and pre-classify Copy vars for this fn.
+        self.move_analyzer.reset();
+        self.move_analyzer.preanalyze_func(f);
+
         let name = ast_ident_to_syn(&f.name);
 
         let mut inputs: Punctuated<syn::FnArg, syn::Token![,]> = Punctuated::new();
@@ -215,7 +230,18 @@ impl RustCodegen {
             Stmt::Assignment {
                 target, op, value, ..
             } => {
-                let lhs = self.lower_expr(target)?;
+                // The LHS of an assignment is NOT a "use" — it doesn't
+                // consume a move. If the target is a bare Ident, lower it
+                // directly without consulting the move analyzer.
+                let lhs = if let Expr::Ident(name, _) = &target {
+                    SynExpr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path::from(ast_ident_to_syn(name)),
+                    })
+                } else {
+                    self.lower_expr(target)?
+                };
                 let rhs = self.lower_expr(value)?;
                 let assign = self.make_binary_op(*op, lhs, rhs)?;
                 Ok(SynStmt::Expr(assign, Some(Default::default())))
@@ -324,11 +350,27 @@ impl RustCodegen {
     fn lower_expr(&mut self, expr: &Expr) -> Result<SynExpr, CodegenError> {
         match expr {
             Expr::Literal(lit, _) => self.lower_literal(lit),
-            Expr::Ident(name, _) => Ok(SynExpr::Path(syn::ExprPath {
-                attrs: Vec::new(),
-                qself: None,
-                path: syn::Path::from(ast_ident_to_syn(name)),
-            })),
+            Expr::Ident(name, _) => {
+                let path = syn::ExprPath {
+                    attrs: Vec::new(),
+                    qself: None,
+                    path: syn::Path::from(ast_ident_to_syn(name)),
+                };
+                if self.move_analyzer.needs_clone(&name.name) {
+                    // Insert `.clone()` so this use is valid after a prior move.
+                    Ok(SynExpr::MethodCall(syn::ExprMethodCall {
+                        attrs: Vec::new(),
+                        receiver: Box::new(SynExpr::Path(path)),
+                        dot_token: Default::default(),
+                        method: Ident::new("clone", ProcSpan::call_site()),
+                        turbofish: None,
+                        paren_token: Default::default(),
+                        args: Default::default(),
+                    }))
+                } else {
+                    Ok(SynExpr::Path(path))
+                }
+            }
             Expr::BinaryOp { op, lhs, rhs, .. } => {
                 let lhs = self.lower_expr(lhs)?;
                 let rhs = self.lower_expr(rhs)?;
@@ -339,7 +381,18 @@ impl RustCodegen {
                 self.make_unary_op(*op, operand)
             }
             Expr::FuncCall { callee, args, .. } => {
-                let callee = self.lower_expr(callee)?;
+                // A function name (bare Ident callee) is NOT a variable
+                // use — it doesn't consume a move. Lower it without
+                // consulting the move analyzer; other callee shapes
+                // (MethodCall, etc.) go through the normal path.
+                let callee = match callee.as_ref() {
+                    Expr::Ident(name, _) => SynExpr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path::from(ast_ident_to_syn(name)),
+                    }),
+                    _ => self.lower_expr(callee)?,
+                };
                 let mut lowered: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
                 for a in args {
                     lowered.push(self.lower_expr(a)?);

@@ -38,10 +38,12 @@
 
 pub mod context;
 pub mod format;
+pub mod move_analysis;
 pub mod rust_codegen;
 
 pub use context::CodegenContext;
 pub use format::format;
+pub use move_analysis::MoveAnalyzer;
 pub use rust_codegen::RustCodegen;
 
 /// Convenience: lower a slice of Deox declarations to formatted Rust source.
