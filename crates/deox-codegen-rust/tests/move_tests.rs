@@ -128,8 +128,9 @@ fn test_move_simple_int() {
     );
     let src = generate_rust(&[f]).unwrap();
     assert!(!src.contains(".clone()"), "src = {src}");
-    assert!(src.contains("let x = 42"), "src = {src}");
-    assert!(src.contains("let y = x"), "src = {src}");
+    // T12: type annotations inferred — `let x: i64 = 42`, `let y: i64 = x`.
+    assert!(src.contains("let x: i64 = 42"), "src = {src}");
+    assert!(src.contains("let y: i64 = x"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
 
@@ -150,9 +151,10 @@ fn test_move_string_no_clone_on_first_use() {
     );
     let src = generate_rust(&[f]).unwrap();
     assert!(!src.contains(".clone()"), "src = {src}");
-    assert!(src.contains(r#"let s = "hi""#), "src = {src}");
+    // T12: type annotations inferred — `let s: String = "hi"`.
+    assert!(src.contains(r#"let s: String = "hi""#), "src = {src}");
     // First use of s — no clone.
-    assert!(src.contains("let s2 = s;"), "src = {src}");
+    assert!(src.contains("let s2: String = s;"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
 
@@ -185,20 +187,22 @@ fn test_string_used_after_move_gets_clone() {
 
 #[test]
 fn test_int_used_multiple_times_no_clone() {
-    // let x = 42; print(x); print(x);
+    // let x = 42; emit(x); emit(x);
+    // (Use `emit` instead of `print` so the print→println! mapping doesn't
+    // transform the call site — we want to count bare ident uses here.)
     let f = func_with(
         "f",
         Vec::new(),
         vec![
             let_stmt("x", int_expr(42)),
-            Stmt::ExprStmt(call_expr("print", vec![ident_expr("x")]), span()),
-            Stmt::ExprStmt(call_expr("print", vec![ident_expr("x")]), span()),
+            Stmt::ExprStmt(call_expr("emit", vec![ident_expr("x")]), span()),
+            Stmt::ExprStmt(call_expr("emit", vec![ident_expr("x")]), span()),
         ],
     );
     let src = generate_rust(&[f]).unwrap();
     assert!(!src.contains(".clone()"), "src = {src}");
     // Both uses of x without clone.
-    let occurrences = src.matches("print(x)").count();
+    let occurrences = src.matches("emit(x)").count();
     assert_eq!(occurrences, 2, "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
@@ -395,7 +399,9 @@ fn test_string_param_used_twice_gets_clone() {
 
 #[test]
 fn test_int_param_used_many_times_no_clone() {
-    // func add1(n: Int) { print(n); print(n); print(n); }
+    // func add1(n: Int) { emit(n); emit(n); emit(n); }
+    // (Use `emit` instead of `print` so the print→println! mapping doesn't
+    // transform the call site — we want to count bare ident uses here.)
     let f = func_with(
         "add1",
         vec![Param {
@@ -404,14 +410,14 @@ fn test_int_param_used_many_times_no_clone() {
             span: span(),
         }],
         vec![
-            Stmt::ExprStmt(call_expr("print", vec![ident_expr("n")]), span()),
-            Stmt::ExprStmt(call_expr("print", vec![ident_expr("n")]), span()),
-            Stmt::ExprStmt(call_expr("print", vec![ident_expr("n")]), span()),
+            Stmt::ExprStmt(call_expr("emit", vec![ident_expr("n")]), span()),
+            Stmt::ExprStmt(call_expr("emit", vec![ident_expr("n")]), span()),
+            Stmt::ExprStmt(call_expr("emit", vec![ident_expr("n")]), span()),
         ],
     );
     let src = generate_rust(&[f]).unwrap();
     assert!(!src.contains(".clone()"), "src = {src}");
-    let n_uses = src.matches("print(n)").count();
+    let n_uses = src.matches("emit(n)").count();
     assert_eq!(n_uses, 3, "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }

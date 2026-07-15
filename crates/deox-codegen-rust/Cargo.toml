@@ -8,10 +8,13 @@ license = "MIT OR Apache-2.0"
 thiserror.workspace = true
 deox-error.workspace = true
 deox-ast.workspace = true
+deox-types.workspace = true
 syn.workspace = true
 quote.workspace = true
 proc-macro2.workspace = true
 prettyplease.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

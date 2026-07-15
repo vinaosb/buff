@@ -98,9 +98,8 @@ fn test_codegen_let_int() {
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("fn f()"));
-    // prettyplease emits an unsuffixed integer literal; we accept either
-    // `42` or `42i64`.
-    assert!(src.contains("let x = 42"), "src = {src}");
+    // T12: type annotations are inferred; `let x = 42` → `let x: i64 = 42`.
+    assert!(src.contains("let x: i64 = 42"), "src = {src}");
 }
 
 // ---------------------------------------------------------------------------
@@ -337,8 +336,10 @@ fn test_codegen_string_and_bool_literals() {
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
-    assert!(src.contains(r#"let s = "hi";"#), "src = {src}");
-    assert!(src.contains("let b = true;"), "src = {src}");
+    // T12: type annotations inferred — `let s = "hi"` → `let s: String = "hi"`,
+    // `let b = true` → `let b: bool = true`.
+    assert!(src.contains(r#"let s: String = "hi";"#), "src = {src}");
+    assert!(src.contains("let b: bool = true;"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("literals must re-parse");
 }
 

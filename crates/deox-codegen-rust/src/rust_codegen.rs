@@ -22,6 +22,23 @@
 //! - `TypeRef::Named` for the seven v0.1 primitive names (`Int`→`i64`, etc.)
 //!   plus `TypeRef::Option` and `TypeRef::Generic` (named base)
 //!
+//! ## Type-annotated `let` bindings (T12)
+//!
+//! Every `let` binding emits an explicit Rust type annotation. If the Deox
+//! source provides one (`let x: Int = …`), it is used directly; otherwise
+//! the integrated [`TypeInferencer`] infers the type from the initializer
+//! expression and [`RustCodegen::deox_type_to_syn`] maps it to the
+//! corresponding Rust type. [`Type::Decimal`] maps to
+//! `rust_decimal::Decimal` (so generated crates must depend on
+//! `rust_decimal`/`rust_decimal_macros`).
+//!
+//! ## Control flow (T13)
+//!
+//! - `if cond { a } else { b }` → Rust `if` expression (with optional else)
+//! - `for x in iter { body }` → Rust `for x in iter { body }`
+//! - `for cond { body }` (Deox conditional loop) → Rust `while cond { body }`
+//! - `print(arg)` calls map to `println!("{}", arg)` macro invocations.
+//!
 //! ## Move semantics (T33a)
 //!
 //! All bindings are MOVED by default (Rust move semantics). The integrated
@@ -45,6 +62,7 @@ use deox_ast::{
     Block, Decl, Expr, FuncDecl, Literal, Stmt, TypeRef,
 };
 use deox_error::{CodegenError, Diagnostic, Span as DeoxSpan};
+use deox_types::{FloatWidth, IntWidth, Type, TypeInferencer};
 
 use crate::context::CodegenContext;
 use crate::move_analysis::MoveAnalyzer;
@@ -56,6 +74,11 @@ use crate::move_analysis::MoveAnalyzer;
 pub struct RustCodegen {
     ctx: CodegenContext,
     move_analyzer: MoveAnalyzer,
+    /// Local type inferencer used to derive Rust type annotations on
+    /// `let` bindings that lack an explicit Deox annotation (T12).
+    /// Reset between functions via [`TypeInferencer::env`] clear semantics
+    /// (we re-bind params + walk let-stmts at the top of each `lower_func`).
+    type_inferencer: TypeInferencer,
 }
 
 impl RustCodegen {
@@ -64,6 +87,7 @@ impl RustCodegen {
         Self {
             ctx: CodegenContext::new(),
             move_analyzer: MoveAnalyzer::new(),
+            type_inferencer: TypeInferencer::new(),
         }
     }
 
@@ -104,6 +128,16 @@ impl RustCodegen {
         // Reset move-analysis state and pre-classify Copy vars for this fn.
         self.move_analyzer.reset();
         self.move_analyzer.preanalyze_func(f);
+
+        // Reset the type inferencer for this function: re-bind parameters
+        // using the same primitive-mapping rules that TypeInferencer uses
+        // internally (see `typeref_to_type` in deox_types::infer).
+        self.type_inferencer = TypeInferencer::new();
+        for p in &f.params {
+            if let Some(ty) = typeref_to_type(&p.ty) {
+                self.type_inferencer.bind(&p.name.name, ty);
+            }
+        }
 
         let name = ast_ident_to_syn(&f.name);
 
@@ -181,18 +215,32 @@ impl RustCodegen {
             } => {
                 let ident = ast_ident_to_syn(name);
                 let init_expr = self.lower_expr(value)?;
+
+                // Run the inferencer on the value so we can emit an
+                // explicit Rust type annotation. If the user wrote an
+                // explicit Deox annotation (`ty: Some(..)`), prefer it;
+                // otherwise fall back to the inferred type (T12).
+                let inferred_syn_ty: Option<SynType> = if let Some(type_ref) = ty {
+                    Some(self.ast_typeref_to_syn(type_ref)?)
+                } else {
+                    // Bind in the inferencer so later statements can see
+                    // this name; on error we fall back to no annotation.
+                    let inferred = self
+                        .type_inferencer
+                        .infer_stmt(stmt)
+                        .unwrap_or(Type::Unknown);
+                    self.deox_type_to_syn(&inferred)
+                };
+
                 // Wrap the pattern in `Pat::Type` when an annotation is present
                 // so we emit `let x: T = v;` rather than `let x = v;`.
-                let pat = match ty {
-                    Some(type_ref) => {
-                        let ty_syn = self.ast_typeref_to_syn(type_ref)?;
-                        Pat::Type(PatType {
-                            attrs: Vec::new(),
-                            pat: Box::new(Self::make_let_pat(ident, *mutable)),
-                            colon_token: Default::default(),
-                            ty: Box::new(ty_syn),
-                        })
-                    }
+                let pat = match inferred_syn_ty {
+                    Some(ty_syn) => Pat::Type(PatType {
+                        attrs: Vec::new(),
+                        pat: Box::new(Self::make_let_pat(ident, *mutable)),
+                        colon_token: Default::default(),
+                        ty: Box::new(ty_syn),
+                    }),
                     None => Self::make_let_pat(ident, *mutable),
                 };
                 let local = syn::Local {
@@ -288,51 +336,18 @@ impl RustCodegen {
                 Ok(SynStmt::Expr(for_loop, Some(Default::default())))
             }
             Stmt::ForWhile { cond, body, .. } => {
+                // Deox's `for cond { body }` (conditional-loop form) maps
+                // directly to Rust's `while cond { body }` (T13).
                 let cond_expr = self.lower_expr(cond)?;
                 let body_block = self.lower_block(body)?;
-                // Rust has no `while` form without keyword, so approximate
-                // Deox's `for cond { body }` as `loop { if !cond { break } body }`.
-                let loop_body = syn::Block {
-                    brace_token: Default::default(),
-                    stmts: {
-                        let mut s = Vec::with_capacity(body_block.stmts.len() + 1);
-                        let if_stmt = SynStmt::Expr(
-                            SynExpr::If(syn::ExprIf {
-                                attrs: Vec::new(),
-                                if_token: Default::default(),
-                                cond: Box::new(SynExpr::Unary(syn::ExprUnary {
-                                    attrs: Vec::new(),
-                                    op: syn::UnOp::Not(Default::default()),
-                                    expr: Box::new(cond_expr),
-                                })),
-                                then_branch: syn::Block {
-                                    brace_token: Default::default(),
-                                    stmts: vec![SynStmt::Expr(
-                                        SynExpr::Break(syn::ExprBreak {
-                                            attrs: Vec::new(),
-                                            break_token: Default::default(),
-                                            label: None,
-                                            expr: None,
-                                        }),
-                                        Some(Default::default()),
-                                    )],
-                                },
-                                else_branch: None,
-                            }),
-                            Some(Default::default()),
-                        );
-                        s.push(if_stmt);
-                        s.extend(body_block.stmts);
-                        s
-                    },
-                };
-                let loop_expr = SynExpr::Loop(syn::ExprLoop {
+                let while_expr = SynExpr::While(syn::ExprWhile {
                     attrs: Vec::new(),
                     label: None,
-                    loop_token: Default::default(),
-                    body: loop_body,
+                    while_token: Default::default(),
+                    cond: Box::new(cond_expr),
+                    body: body_block,
                 });
-                Ok(SynStmt::Expr(loop_expr, Some(Default::default())))
+                Ok(SynStmt::Expr(while_expr, Some(Default::default())))
             }
         }
     }
@@ -381,6 +396,16 @@ impl RustCodegen {
                 self.make_unary_op(*op, operand)
             }
             Expr::FuncCall { callee, args, .. } => {
+                // Special case (T13): `print(x)` → `println!("{}", x)` macro.
+                // We require a bare-ident callee named exactly `print` with
+                // exactly one argument.
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    if name.name == "print" && args.len() == 1 {
+                        let arg = self.lower_expr(&args[0])?;
+                        return Ok(make_println_macro(arg));
+                    }
+                }
+
                 // A function name (bare Ident callee) is NOT a variable
                 // use — it doesn't consume a move. Lower it without
                 // consulting the move analyzer; other callee shapes
@@ -562,13 +587,10 @@ impl RustCodegen {
                     "Double" => "f64",
                     "Bool" => "bool",
                     "String" => "String",
+                    "Decimal" => "rust_decimal::Decimal",
                     other => other,
                 };
-                let ident = Ident::new(rust_name, ProcSpan::call_site());
-                Ok(SynType::Path(syn::TypePath {
-                    qself: None,
-                    path: syn::Path::from(ident),
-                }))
+                Ok(rust_path_type(rust_name))
             }
             TypeRef::Option(inner, _) => {
                 let inner_ty = self.ast_typeref_to_syn(inner)?;
@@ -587,6 +609,64 @@ impl RustCodegen {
             }
             TypeRef::Function { .. } => Err(self.unsupported("function-type codegen (T12/T13)")),
         }
+    }
+
+    /// Map a resolved Deox [`Type`] (post-inference) to a Rust [`syn::Type`].
+    ///
+    /// Returns `None` for [`Type::Unknown`] and [`Type::Void`] — callers
+    /// (notably `let` lowering) treat `None` as "no annotation emitted".
+    /// [`Type::Decimal`] maps to `rust_decimal::Decimal` (the crate is a
+    /// dependency of `deox-codegen-rust` so generated crates must depend
+    /// on it as well — the runtime/driver is responsible for that).
+    fn deox_type_to_syn(&self, ty: &Type) -> Option<SynType> {
+        let rust_name: &str = match ty {
+            Type::Int {
+                width: IntWidth::W8,
+            } => "i8",
+            Type::Int {
+                width: IntWidth::W16,
+            } => "i16",
+            Type::Int {
+                width: IntWidth::W32,
+            } => "i32",
+            Type::Int {
+                width: IntWidth::W64,
+            } => "i64",
+            Type::Int {
+                width: IntWidth::W128,
+            } => "i128",
+            Type::Bits {
+                width: IntWidth::W8,
+            } => "u8",
+            Type::Bits {
+                width: IntWidth::W16,
+            } => "u16",
+            Type::Bits {
+                width: IntWidth::W32,
+            } => "u32",
+            Type::Bits {
+                width: IntWidth::W64,
+            } => "u64",
+            Type::Bits {
+                width: IntWidth::W128,
+            } => "u128",
+            // f16 is unstable in std; we map to f32 as a safe approximation.
+            Type::Float {
+                width: FloatWidth::W16,
+            } => "f32",
+            Type::Float {
+                width: FloatWidth::W32,
+            } => "f32",
+            Type::Float {
+                width: FloatWidth::W64,
+            } => "f64",
+            Type::Double => "f64",
+            Type::Bool => "bool",
+            Type::String => "String",
+            Type::Decimal => "rust_decimal::Decimal",
+            Type::Unknown | Type::Void => return None,
+        };
+        Some(rust_path_type(rust_name))
     }
 
     fn unsupported(&self, what: &str) -> CodegenError {
@@ -613,6 +693,66 @@ impl Default for RustCodegen {
 /// line/col) is recorded separately in [`CodegenContext`].
 fn ast_ident_to_syn(ident: &deox_ast::common::Ident) -> Ident {
     Ident::new(&ident.name, ProcSpan::call_site())
+}
+
+/// Build a `syn::Type::Path` from a `::`-separated Rust type name string
+/// (e.g. `"i64"`, `"bool"`, `"rust_decimal::Decimal"`). Each `::`-separated
+/// segment becomes a [`syn::PathSegment`]. The result is always a plain path
+/// with no generic arguments.
+fn rust_path_type(name: &str) -> SynType {
+    let mut segments: Punctuated<syn::PathSegment, syn::Token![::]> = Punctuated::new();
+    for seg in name.split("::") {
+        segments.push(syn::PathSegment {
+            ident: Ident::new(seg, ProcSpan::call_site()),
+            arguments: syn::PathArguments::None,
+        });
+    }
+    SynType::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path {
+            leading_colon: None,
+            segments,
+        },
+    })
+}
+
+/// Build a `println!("{}", arg)` macro invocation as a `syn::Expr::Macro`.
+///
+/// Used by the `print(x)` → `println!("{}", x)` mapping (T13). The macro
+/// token stream is built via `quote!` so it round-trips through `syn`'s
+/// printer without any hand-rolled string formatting.
+fn make_println_macro(arg: SynExpr) -> SynExpr {
+    SynExpr::Macro(syn::ExprMacro {
+        attrs: Vec::new(),
+        mac: syn::Macro {
+            path: syn::Path::from(Ident::new("println", ProcSpan::call_site())),
+            bang_token: Default::default(),
+            delimiter: syn::MacroDelimiter::Paren(Default::default()),
+            tokens: quote::quote! { "{}", #arg },
+        },
+    })
+}
+
+/// Mirror of the private `typeref_to_type` in `deox_types::infer`.
+///
+/// Used by [`RustCodegen::lower_func`] to seed the [`TypeInferencer`]
+/// environment with function-parameter types so subsequent `let`
+/// bindings can refer to params and still get a useful inferred type.
+fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
+    match ty {
+        TypeRef::Named { name, .. } => match name.name.as_str() {
+            "Int" => Some(Type::int_default()),
+            "Float" => Some(Type::float_default()),
+            "Double" => Some(Type::double()),
+            "Bool" => Some(Type::bool()),
+            "String" => Some(Type::string()),
+            "Byte" => Some(Type::byte()),
+            "Decimal" => Some(Type::Decimal),
+            "Void" => Some(Type::Void),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Build a `Type::Path` with generic type arguments, e.g.
