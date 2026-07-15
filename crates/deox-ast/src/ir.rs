@@ -550,6 +550,55 @@ impl AstLowerer {
 
             Stmt::Break(span) => self.add_pure_control_node(stmt, *span, "Break"),
             Stmt::Continue(span) => self.add_pure_control_node(stmt, *span, "Continue"),
+
+            Stmt::ForIn {
+                var,
+                iter,
+                body,
+                span,
+            } => {
+                // Represent the loop header as a Compute node that consumes
+                // the iterator expression; the loop variable is bound inside
+                // the loop body.
+                let mut uses = Vec::new();
+                collect_uses(iter, &mut uses);
+                uses.retain(|i| i.name != var.name);
+                let header_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                    id: NodeId(0),
+                    source_expr: Some(iter.clone()),
+                    source_stmt: Some(stmt.clone()),
+                    defs: Vec::new(),
+                    uses: uses.clone(),
+                    span: *span,
+                    description: format!("ForIn({var} in {{...}})"),
+                }));
+                self.wire_dependencies(header_id, &[], &uses);
+                // Lower the loop body in this context. The resulting node IDs
+                // depend on the iterator header via the `bindings` map only if
+                // they read the loop variable; we model the loop var binding
+                // as a synthetic binding pointing at the header so reads
+                // inside the body wire back to it.
+                self.bindings.insert(var.name.clone(), header_id);
+                self.lower_block(body);
+                header_id
+            }
+
+            Stmt::ForWhile { cond, body, span } => {
+                let mut uses = Vec::new();
+                collect_uses(cond, &mut uses);
+                let header_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                    id: NodeId(0),
+                    source_expr: Some(cond.clone()),
+                    source_stmt: Some(stmt.clone()),
+                    defs: Vec::new(),
+                    uses: uses.clone(),
+                    span: *span,
+                    description: "ForWhile({...})".to_string(),
+                }));
+                self.wire_dependencies(header_id, &[], &uses);
+                self.lower_block(body);
+                header_id
+            }
         }
     }
 
@@ -721,6 +770,25 @@ fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
         Stmt::ExprStmt(e, _) => collect_uses(e, out),
         Stmt::Return(Some(e), _) => collect_uses(e, out),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::ForIn {
+            var, iter, body, ..
+        } => {
+            // The iterator expression's uses count; the loop variable is
+            // bound by the statement (introduces a new name, doesn't read
+            // an outer one).
+            collect_uses(iter, out);
+            for s in &body.stmts {
+                collect_stmt_uses(s, out);
+            }
+            // Remove the loop variable if it was added by the iter expr.
+            out.retain(|i| i.name != var.name);
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            collect_uses(cond, out);
+            for s in &body.stmts {
+                collect_stmt_uses(s, out);
+            }
+        }
     }
 }
 

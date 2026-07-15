@@ -509,14 +509,27 @@ fn test_unclosed_paren_errors() {
 }
 
 // ---------------------------------------------------------------------------
-// 12. parse() entry point smoke test (T7 stub returns empty Vec)
+// 12. parse() entry point smoke test (T8: real top-level decl parsing)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_parse_entrypoint_returns_empty_for_t7() {
-    // The T7 top-level parse() is a stub returning an empty Vec<Decl>.
-    // T8 will implement real declaration parsing.
+fn test_parse_entrypoint_rejects_non_func_top_level() {
+    // As of T8, parse() only accepts top-level `func` declarations. Any
+    // other token (like a stray expression) is an error — statements belong
+    // inside a function body.
     let tokens = tokenize("1 + 2", sid()).unwrap();
-    let decls = deox_parser::parse(&tokens, sid()).unwrap();
-    assert!(decls.is_empty(), "T7 parse() should return empty Vec");
+    let err = deox_parser::parse(&tokens, sid()).expect_err("non-func should error");
+    assert!(
+        err.diagnostic.message.contains("top level"),
+        "message was: {}",
+        err.diagnostic.message
+    );
+}
+
+#[test]
+fn test_parse_entrypoint_accepts_func_decl() {
+    let tokens = tokenize("func foo() { }", sid()).unwrap();
+    let decls = deox_parser::parse(&tokens, sid()).expect("func should parse");
+    assert_eq!(decls.len(), 1);
+    assert!(matches!(decls[0], deox_ast::Decl::FuncDecl(_)));
 }

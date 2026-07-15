@@ -15,11 +15,16 @@
 //!
 //! - [`stream`]: the [`TokenStream`] cursor (peek / next / expect).
 //! - [`expr`]: expression parser entry point ([`expr::parse_expression`]).
+//! - [`stmt`]: statement parser entry point ([`stmt::parse_statement`]).
 //! - [`parser`]: top-level [`parser::parse`] returning `Vec<Decl>`.
 
 pub mod expr;
 pub mod parser;
+pub mod stmt;
 pub mod stream;
 
 pub use parser::{parse, parse_expression};
+pub use stmt::{
+    parse_block_braces, parse_func_decl, parse_params, parse_statement, parse_type_ref,
+};
 pub use stream::TokenStream;

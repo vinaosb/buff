@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::common::Ident;
+use crate::common::{Block, Ident};
 use crate::expr::Expr;
 use crate::op::BinaryOp;
 use crate::ty::TypeRef;
@@ -37,6 +37,15 @@ pub enum Stmt {
     Break(Span),
     /// A `continue` statement.
     Continue(Span),
+    /// An iterator loop: `for var in iter { body }`.
+    ForIn {
+        var: Ident,
+        iter: Expr,
+        body: Block,
+        span: Span,
+    },
+    /// A conditional loop (while-style): `for cond { body }`.
+    ForWhile { cond: Expr, body: Block, span: Span },
 }
 
 impl fmt::Display for Stmt {
@@ -67,6 +76,10 @@ impl fmt::Display for Stmt {
             Stmt::Return(None, _) => f.write_str("Return"),
             Stmt::Break(_) => f.write_str("Break"),
             Stmt::Continue(_) => f.write_str("Continue"),
+            Stmt::ForIn {
+                var, iter, body, ..
+            } => write!(f, "ForIn({var} in {iter} {body})"),
+            Stmt::ForWhile { cond, body, .. } => write!(f, "ForWhile({cond} {body})"),
         }
     }
 }

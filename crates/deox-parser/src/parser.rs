@@ -1,40 +1,64 @@
 //! Top-level parser entry point.
 //!
 //! [`parse`] consumes a slice of lexer-produced tokens and emits a list of
-//! top-level declarations. Statement-level parsing (`let`, `if`, `func`)
-//! arrives in T8 — for now only expression-level parsing is implemented,
-//! via [`crate::expr::parse_expression`].
+//! top-level declarations ([`Decl`]). Statement-level parsing (`let`, `if`,
+//! `func`, `return`, `for`, …) lives in [`crate::stmt`]; this module only
+//! dispatches on top-level keywords.
 //!
 //! [`parse`] is the public boundary that downstream code calls. It hides
 //! [`TokenStream`] construction and any pre-filtering of layout tokens.
 
 use deox_ast::Decl;
 use deox_error::{ParseError, SourceId};
+use deox_lexer::TokenKind;
 
+use crate::stmt::parse_func_decl;
 use crate::stream::TokenStream;
 
 /// Parse a slice of tokens into zero or more top-level [`Decl`]s.
 ///
-/// # T7 status
+/// # T8 status
 ///
-/// Only the expression sub-parser is wired up. Top-level declaration parsing
-/// (`func`/`struct`/`enum`/`import`/`module`/`trait`) and statement parsing
-/// (`let`/`return`/`if`-as-stmt/...) arrive in T8 and T9. For T7 this
-/// function returns `Ok(vec![])` for any input that does not look like a
-/// declaration keyword, so callers can integrate the parser end-to-end
-/// without false errors.
+/// Recognizes only function declarations at the top level (`func name(...)
+/// -> Ret { body }`). Any other token at top level is an error — statements
+/// such as `let`/`return`/`if` belong inside a function body, not at module
+/// scope.
 ///
 /// # Errors
 ///
-/// Returns [`ParseError`] only on unrecoverable internal failure. Unknown
-/// top-level tokens are silently dropped in T7.
-pub fn parse(_tokens: &[deox_lexer::Token], _source_id: SourceId) -> Result<Vec<Decl>, ParseError> {
-    // T7 stub: statement/decl parsing is T8's responsibility.
-    Ok(Vec::new())
+/// Returns [`ParseError`] on any syntax error, including unknown top-level
+/// keywords or malformed function declarations.
+pub fn parse(tokens: &[deox_lexer::Token], source_id: SourceId) -> Result<Vec<Decl>, ParseError> {
+    let mut stream = TokenStream::new(tokens, source_id);
+    let mut decls = Vec::new();
+    while !stream.is_at_end() {
+        match stream.peek_kind() {
+            Some(TokenKind::KwFunc) => {
+                let f = parse_func_decl(&mut stream)?;
+                decls.push(Decl::FuncDecl(f));
+            }
+            other => {
+                let span = stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span());
+                return Err(ParseError::new(deox_error::Diagnostic::error(
+                    format!(
+                        "only function declarations are allowed at top level, found `{}`",
+                        other
+                            .map(|k| k.to_string())
+                            .unwrap_or_else(|| "end of input".into())
+                    ),
+                    span,
+                )));
+            }
+        }
+    }
+    Ok(decls)
 }
 
 /// Parse a single top-level expression from a token slice. Convenience
-/// wrapper for T7 tests and embedding tools that want to evaluate an
+/// wrapper for tests and embedding tools that want to evaluate an
 /// expression without setting up a [`TokenStream`] themselves.
 ///
 /// # Errors
