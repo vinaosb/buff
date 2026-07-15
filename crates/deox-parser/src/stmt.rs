@@ -22,11 +22,19 @@
 //! Inside `parse_statement`, encountering `func` is an error — function
 //! declarations are not statements.
 //!
-//! # Layout
+//! # Layout (T9)
 //!
-//! T8 only handles brace-delimited blocks `{ ... }`. Indent/Dedent-based
-//! layout is T9's responsibility; [`TokenStream`] transparently skips those
-//! tokens anyway, so this parser composes naturally with future layout work.
+//! Two block forms coexist:
+//!
+//! - **Braces**: `{ stmt; stmt; ... }` — explicit, indentation-agnostic.
+//! - **Layout (offside rule)**: `: NEWLINE INDENT stmt stmt ... DEDENT` —
+//!   Python/F#-style indentation-sensitive blocks.
+//!
+//! [`parse_block`] dispatches on the upcoming raw token: a `{` delegates to
+//! [`parse_block_braces`]; a `:` triggers the layout path. Layout tokens
+//! (`Newline`/`Indent`/`Dedent`) are observed via the `_raw` family of
+//! [`TokenStream`] methods, while statement bodies still use the regular
+//! skipping peek/advance so existing parsers compose unchanged.
 
 use deox_ast::{BinaryOp, Block, Expr, FuncDecl, Ident, Param, Stmt, TypeRef};
 use deox_error::{Diagnostic, ParseError, Span};
@@ -122,6 +130,105 @@ pub fn parse_block_braces(stream: &mut TokenStream<'_>) -> Result<Block, ParseEr
     })
 }
 
+/// Parse a block — *either* brace-delimited *or* layout-sensitive (T9).
+///
+/// Dispatch rules:
+///
+/// 1. If the next raw token is `{`, delegate to [`parse_block_braces`].
+/// 2. Otherwise, expect a `:` followed by `Newline Indent ... Dedent`
+///    (Python-style offside-rule block).
+///
+/// The layout form requires a newline immediately after `:`; single-line
+/// `func foo(): expr` is not supported in T9. An empty indented block
+/// (missing body after `:\n`) yields a [`ParseError`] with the message
+/// `"expected indented block after ':'"`.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] on any of:
+/// - missing `:` when neither `{` nor `:` is present,
+/// - missing newline after `:`,
+/// - missing `Indent` after the newline,
+/// - any malformed inner statement.
+///
+/// The closing `Dedent` is consumed if present but its absence is not an
+/// error (the lexer's `finalize` may have collapsed trailing dedents at
+/// EOF in some edge cases — defensive consumption keeps the parser robust).
+pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
+    // Form 1: braces — fast path.
+    if stream.check_raw(&TokenKind::LBrace) {
+        return parse_block_braces(stream);
+    }
+
+    // Form 2: layout-sensitive `: NEWLINE INDENT ... DEDENT`.
+    let source_id = stream.source_id();
+    let colon = stream.expect(TokenKind::Colon)?;
+    let start = colon.span.start;
+
+    // Expect Newline right after the colon.
+    if !stream.check_raw(&TokenKind::Newline) {
+        return Err(ParseError::new(Diagnostic::error(
+            "expected newline after `:` for layout block",
+            stream.span_here(),
+        )));
+    }
+    stream.advance_raw(); // consume Newline
+
+    // Expect Indent. Stray newlines/blanks between `:` line and first indented
+    // line should not happen given the lexer collapses them, but defensively
+    // skip extra newlines.
+    while stream.consume_newline() {}
+
+    if !stream.consume_indent() {
+        return Err(ParseError::new(Diagnostic::error(
+            "expected indented block after `:`",
+            stream.span_here(),
+        )));
+    }
+
+    // Parse statements until we hit a Dedent or run out of tokens.
+    let mut stmts: Vec<Stmt> = Vec::new();
+    let mut end_off = start;
+    loop {
+        // Stop on Dedent.
+        if stream.check_raw(&TokenKind::Dedent) {
+            break;
+        }
+        // Stop at end of significant input.
+        if stream.is_at_end() {
+            break;
+        }
+        // Skip stray Newlines/Indents between statements (the lexer emits
+        // Newline at the end of every non-blank line; extra Indents should
+        // not normally appear here but we tolerate them defensively).
+        if stream.check_raw(&TokenKind::Newline) {
+            stream.advance_raw();
+            continue;
+        }
+        if stream.check_raw(&TokenKind::Indent) {
+            // Defensive: a stray Indent at the start of an inner statement
+            // usually means nested layout — let the inner parser handle it.
+            // Don't consume here; parse_statement will route via parse_block
+            // when it sees the trailing `:` of the inner construct.
+            // However if we see Indent without a corresponding construct,
+            // silently consume to avoid an infinite loop.
+            stream.advance_raw();
+            continue;
+        }
+        let stmt = parse_statement(stream)?;
+        end_off = stmt_end(&stmt).max(end_off);
+        stmts.push(stmt);
+    }
+
+    // Consume the closing Dedent if present (may be absent at EOF).
+    let _ = stream.consume_dedent();
+
+    Ok(Block {
+        stmts,
+        span: Span::new(start, end_off, source_id),
+    })
+}
+
 /// Parse a function declaration: `func name(params) -> Ret { body }`.
 ///
 /// The leading `func` keyword is consumed here. Modifier keywords (`async`,
@@ -164,8 +271,8 @@ pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseEr
         None
     };
 
-    // Body: brace-delimited block.
-    let body = parse_block_braces(stream)?;
+    // Body: brace-delimited OR layout-sensitive block (T9).
+    let body = parse_block(stream)?;
     let span = Span::new(start, body.span.end.max(end), source_id);
 
     Ok(FuncDecl {
@@ -402,7 +509,7 @@ fn parse_for(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
         let var = extract_ident(var_tok)?;
         stream.expect(TokenKind::KwIn)?;
         let iter_expr = parse_expression(stream)?;
-        let body = parse_block_braces(stream)?;
+        let body = parse_block(stream)?;
         let span = Span::new(start, body.span.end, source_id);
         Ok(Stmt::ForIn {
             var,
@@ -412,7 +519,7 @@ fn parse_for(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
         })
     } else {
         let cond = parse_expression(stream)?;
-        let body = parse_block_braces(stream)?;
+        let body = parse_block(stream)?;
         let span = Span::new(start, body.span.end, source_id);
         Ok(Stmt::ForWhile { cond, body, span })
     }
@@ -464,24 +571,29 @@ fn parse_assignment_or_expr_stmt(stream: &mut TokenStream<'_>) -> Result<Stmt, P
     Ok(Stmt::ExprStmt(expr, span))
 }
 
-/// Parse an `if` expression: `if cond { then } [else { else } | else if ...]`.
+/// Parse an `if` expression: `if cond BLOCK [else BLOCK | else if ...]`.
 ///
 /// The leading `if` is consumed. The condition is parsed via
-/// [`parse_expression`]; the blocks via [`parse_block_braces`]. `else if`
-/// chains are desugared into a nested [`Expr::IfExpr`] wrapped in a
-/// single-statement block.
+/// [`parse_expression`]; the blocks via [`parse_block`] (so both
+/// brace-delimited `{ ... }` and layout-sensitive `: NEWLINE INDENT ...
+/// DEDENT` forms work, per T9). `else if` chains are desugared into a
+/// nested [`Expr::IfExpr`] wrapped in a single-statement block.
 ///
-/// This is invoked from [`parse_statement`] when an `if` starts a statement.
-/// In T8, if-expressions are NOT yet wired into [`crate::expr::parse_primary`],
-/// so they cannot appear nested inside other expressions (e.g. inside
-/// `let x = if c { 1 } else { 2 }`). That integration arrives in a later task.
+/// This is invoked from [`parse_statement`] when an `if` starts a statement
+/// AND from [`crate::expr::parse_primary`] (T9) so `if` can appear inside
+/// arbitrary expressions (e.g. `let x = if c { 1 } else { 2 }`).
+///
+/// **Dangling-else**: the recursive call inside the `else if` branch binds
+/// the else to the nearest (innermost) `if` — the standard lexical-scope
+/// rule. Layout blocks enforce the same: the lexer's Dedent tokens
+/// naturally delimit inner-if blocks before `else` is observed.
 pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let source_id = stream.source_id();
     let if_tok = stream.expect(TokenKind::KwIf)?;
     let start = if_tok.span.start;
 
     let cond = parse_expression(stream)?;
-    let then_block = parse_block_braces(stream)?;
+    let then_block = parse_block(stream)?;
     let mut end = then_block.span.end;
 
     let else_block = if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) {
@@ -495,7 +607,7 @@ pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                 span: nested.span(),
             })
         } else {
-            let blk = parse_block_braces(stream)?;
+            let blk = parse_block(stream)?;
             end = blk.span.end;
             Some(blk)
         }
@@ -535,6 +647,21 @@ fn type_end(ty: &TypeRef) -> usize {
         | TypeRef::Generic { span, .. }
         | TypeRef::Option(_, span)
         | TypeRef::Function { span, .. } => span.end,
+    }
+}
+
+/// End byte offset of a [`Stmt`]'s span. Used by [`parse_block`] to compute
+/// the parent block's end position from its last child statement.
+fn stmt_end(stmt: &Stmt) -> usize {
+    match stmt {
+        Stmt::LetDecl { span, .. }
+        | Stmt::Assignment { span, .. }
+        | Stmt::ExprStmt(_, span)
+        | Stmt::Return(_, span)
+        | Stmt::Break(span)
+        | Stmt::Continue(span)
+        | Stmt::ForIn { span, .. }
+        | Stmt::ForWhile { span, .. } => span.end,
     }
 }
 

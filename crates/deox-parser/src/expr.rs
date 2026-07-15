@@ -347,6 +347,13 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         )));
     };
 
+    // T9: `if` can appear as an expression (e.g. `let x = if c { 1 } else { 2 }`).
+    // Delegate to stmt::parse_if_expr which handles both braces and layout
+    // blocks.
+    if matches!(tok.kind, TokenKind::KwIf) {
+        return crate::stmt::parse_if_expr(stream);
+    }
+
     // If it's an open paren, parse a parenthesized expression.
     if matches!(tok.kind, TokenKind::LParen) {
         stream.advance(); // consume '('

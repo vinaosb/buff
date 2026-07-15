@@ -186,6 +186,94 @@ impl<'a> TokenStream<'a> {
     pub fn span_between(start_tok: &Token, end_tok: &Token, source_id: SourceId) -> Span {
         Span::new(start_tok.span.start, end_tok.span.end, source_id)
     }
+
+    // -----------------------------------------------------------------------
+    // T9: layout-sensitive (offside-rule) helpers.
+    //
+    // The peek/advance/expect helpers above transparently *skip* layout
+    // tokens (Newline, Indent, Dedent). For T9 we need RAW access so the
+    // parser can detect `: \n Indent ... Dedent` block shapes.
+    // -----------------------------------------------------------------------
+
+    /// Peek at the next RAW token, *including* layout tokens
+    /// ([`TokenKind::Newline`] / [`TokenKind::Indent`] / [`TokenKind::Dedent`]).
+    ///
+    /// Returns `None` past the end of the slice. Unlike [`Self::peek`], this
+    /// does *not* skip layout tokens and does *not* treat [`TokenKind::Eof`]
+    /// specially (the caller can observe it).
+    pub fn peek_raw(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
+    }
+
+    /// Convenience: just the [`TokenKind`] of the next raw token.
+    pub fn peek_raw_kind(&self) -> Option<&TokenKind> {
+        self.peek_raw().map(|t| &t.kind)
+    }
+
+    /// Advance past a single RAW token (does NOT skip layout tokens).
+    ///
+    /// Returns an *owned* clone of the consumed token, or `None` at the end
+    /// of the slice. Useful for consuming [`TokenKind::Indent`] /
+    /// [`TokenKind::Dedent`] / [`TokenKind::Newline`] in layout parsing.
+    pub fn advance_raw(&mut self) -> Option<Token> {
+        let t = self.tokens.get(self.pos).cloned();
+        if t.is_some() {
+            self.pos += 1;
+        }
+        t
+    }
+
+    /// True when the next *raw* token has kind `kind`. Use this for layout
+    /// detection (e.g. [`TokenKind::Dedent`], [`TokenKind::Colon`]) without
+    /// accidentally skipping past it like [`Self::check`] would.
+    pub fn check_raw(&self, kind: &TokenKind) -> bool {
+        matches!(self.peek_raw_kind(), Some(k) if k == kind)
+    }
+
+    /// Consume an [`TokenKind::Indent`] token if the next raw token is one.
+    /// Returns `true` if consumed, `false` otherwise. The cursor advances by
+    /// exactly one raw position on success.
+    pub fn consume_indent(&mut self) -> bool {
+        if self.check_raw(&TokenKind::Indent) {
+            self.advance_raw();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Consume a [`TokenKind::Dedent`] token if the next raw token is one.
+    /// Returns `true` if consumed, `false` otherwise.
+    pub fn consume_dedent(&mut self) -> bool {
+        if self.check_raw(&TokenKind::Dedent) {
+            self.advance_raw();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Consume a [`TokenKind::Newline`] token if the next raw token is one.
+    /// Returns `true` if consumed, `false` otherwise. Useful for skipping
+    /// the trailing newline that precedes an `Indent` in a layout block.
+    pub fn consume_newline(&mut self) -> bool {
+        if self.check_raw(&TokenKind::Newline) {
+            self.advance_raw();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Build a synthetic span anchored at the *current* raw position. Used
+    /// for error messages emitted by the layout parser when the cursor sits
+    /// on a layout token (which `eof_span` would skip past).
+    pub fn span_here(&self) -> Span {
+        match self.tokens.get(self.pos) {
+            Some(tok) => tok.span,
+            None => self.eof_span(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +358,74 @@ mod tests {
         let (toks, sid) = ts("a . b");
         let s = TokenStream::new(&toks, sid);
         assert_eq!(s.peek_second_kind(), Some(&TokenKind::Dot));
+    }
+
+    // -----------------------------------------------------------------
+    // T9 layout-helper tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn peek_raw_does_not_skip_layout() {
+        // Two lines: foo\nbar -> tokens include a Newline between them.
+        let (toks, sid) = ts("foo\nbar");
+        let mut s = TokenStream::new(&toks, sid);
+        // Consume `foo` raw.
+        assert_eq!(
+            s.advance_raw().map(|t| t.kind),
+            Some(TokenKind::Ident("foo".into()))
+        );
+        // peek_raw sees the Newline; peek would skip it.
+        assert_eq!(s.peek_raw_kind(), Some(&TokenKind::Newline));
+        assert_eq!(s.peek_kind(), Some(&TokenKind::Ident("bar".into())));
+    }
+
+    #[test]
+    fn check_raw_matches_layout_token() {
+        let (toks, sid) = ts("    x"); // indent=4 then Ident(x)
+                                       // Token stream: Indent, Ident("x"), Eof
+        let s = TokenStream::new(&toks, sid);
+        assert!(s.check_raw(&TokenKind::Indent));
+        assert!(!s.check_raw(&TokenKind::Dedent));
+    }
+
+    #[test]
+    fn consume_indent_advances_only_on_match() {
+        let (toks, sid) = ts("    x");
+        let mut s = TokenStream::new(&toks, sid);
+        assert!(s.consume_indent());
+        assert_eq!(s.peek_raw_kind(), Some(&TokenKind::Ident("x".into())));
+        // Second call: no more Indents.
+        assert!(!s.consume_indent());
+    }
+
+    #[test]
+    fn consume_newline_skips_exactly_one() {
+        let (toks, sid) = ts("foo\nbar");
+        let mut s = TokenStream::new(&toks, sid);
+        s.advance_raw(); // foo
+        assert!(s.consume_newline());
+        assert_eq!(s.peek_raw_kind(), Some(&TokenKind::Ident("bar".into())));
+    }
+
+    #[test]
+    fn span_here_uses_current_raw_position() {
+        let (toks, sid) = ts("foo\nbar");
+        let mut s = TokenStream::new(&toks, sid);
+        s.advance_raw(); // consume `foo`
+                         // Now sitting on the Newline token.
+        let sp = s.span_here();
+        assert_eq!(sp.source_id, sid);
+        // Newline span covers `\n` at offset 3..4.
+        assert_eq!(sp.start, 3);
+        assert_eq!(sp.end, 4);
+    }
+
+    #[test]
+    fn advance_raw_returns_none_at_end() {
+        let (toks, sid) = ts("x");
+        let mut s = TokenStream::new(&toks, sid);
+        let _ = s.advance_raw(); // x
+        let _ = s.advance_raw(); // Eof (still get clones)
+        assert!(s.advance_raw().is_none());
     }
 }
