@@ -1,0 +1,6 @@
+---
+source: crates/deox-ast/tests/snapshot_helper.rs
+assertion_line: 20
+expression: "format!(\"{}\", value)"
+---
+Lit(Int(42))

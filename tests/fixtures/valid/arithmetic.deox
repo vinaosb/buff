@@ -1,0 +1,6 @@
+// Arithmetic operators and precedence
+func main():
+    let x = 2 + 3 * 4     // x = 14
+    let y = (2 + 3) * 4   // y = 20
+    let z = x - y         // z = -6
+    print(z)

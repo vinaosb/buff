@@ -1,0 +1,4 @@
+// INVALID — mixed tabs and spaces
+func main():
+	print("a")
+    print("b")

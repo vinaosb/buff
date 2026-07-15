@@ -28,3 +28,7 @@ deox-codegen-rust = { path = "crates/deox-codegen-rust" }
 deox-codegen-wgsl = { path = "crates/deox-codegen-wgsl" }
 deox-runtime = { path = "crates/deox-runtime" }
 deox-error = { path = "crates/deox-error" }
+
+[workspace.dev-dependencies]
+insta = "1.40"
+proptest = "1.5"

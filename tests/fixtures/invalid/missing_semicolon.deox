@@ -1,0 +1,3 @@
+// INVALID — syntax error (incomplete let binding)
+func main():
+    let x =
