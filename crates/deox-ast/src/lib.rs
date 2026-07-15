@@ -12,20 +12,23 @@
 //! - `expr`: [`Literal`], [`Expr`], [`MatchArm`], [`Pattern`].
 //! - `stmt`: [`Stmt`].
 //! - `decl`: [`Decl`] and the specific declaration structs.
+//! - `ir`: the dataflow-graph intermediate representation
+//!   ([`IrGraph`], [`IrNode`], [`AstLowerer`]).
 //!
 //! [`Span`] is re-exported from `deox-error` for convenience.
 
 pub mod common;
 pub mod decl;
 pub mod expr;
+pub mod ir;
 pub mod op;
 pub mod stmt;
 pub mod ty;
-// IR module added by T88 (do NOT add `ir.rs` here).
 
 pub use common::*;
 pub use decl::*;
 pub use expr::*;
+pub use ir::*;
 pub use op::*;
 pub use stmt::*;
 pub use ty::*;
