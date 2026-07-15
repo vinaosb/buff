@@ -1,0 +1,46 @@
+---
+source: crates/deox-lexer/tests/lexer_tests.rs
+assertion_line: 708
+expression: "lines.join(\"\\n\")"
+---
+func
+ident(main)
+(
+)
+:
+newline
+indent
+let
+ident(x)
+=
+int(2)
++
+int(3)
+*
+int(4)
+newline
+let
+ident(y)
+=
+(
+int(2)
++
+int(3)
+)
+*
+int(4)
+newline
+let
+ident(z)
+=
+ident(x)
+-
+ident(y)
+newline
+ident(print)
+(
+ident(z)
+)
+newline
+dedent
+eof

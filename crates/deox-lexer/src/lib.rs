@@ -1,11 +1,23 @@
-//! Deox lexer crate — token definitions and lexer implementation.
+//! Deox lexer crate — token definitions, lexer implementation, indentation
+//! algorithm, and string interpolation scanner.
 //!
-//! This crate defines the token types ([`TokenKind`], [`Token`]) and error
-//! types ([`LexerError`]) used by the Deox compiler. The actual lexing
-//! implementation lives in the `lexer` module (T6).
+//! This crate defines the token types ([`TokenKind`], [`Token`]), the error
+//! type ([`LexerError`]), and the main entry point [`tokenize`].
+//!
+//! ## Layout
+//!
+//! - [`token`]: token kind enum and spanned-token struct.
+//! - [`error`]: lexer error wrapper around `deox_error::LexError`.
+//! - [`lexer`]: hand-rolled byte-scanner producing `Vec<Token>`.
+//! - [`indent`]: offside-rule indentation tracker.
+//! - [`string_interp`]: string-literal scanner with `{expr}` interpolation.
 
 pub mod error;
+pub mod indent;
+pub mod lexer;
+pub mod string_interp;
 pub mod token;
 
 pub use error::*;
+pub use lexer::tokenize;
 pub use token::*;

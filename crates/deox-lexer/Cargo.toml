@@ -7,6 +7,8 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 thiserror.workspace = true
 deox-error.workspace = true
+logos.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+insta.workspace = true

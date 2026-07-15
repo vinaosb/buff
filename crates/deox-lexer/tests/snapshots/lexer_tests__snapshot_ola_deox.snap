@@ -1,0 +1,21 @@
+---
+source: crates/deox-lexer/tests/lexer_tests.rs
+assertion_line: 700
+expression: "lines.join(\"\\n\")"
+---
+func
+ident(main)
+(
+)
+:
+newline
+indent
+ident(print)
+(
+string_start
+string_part("Olá, Deox!")
+string_end
+)
+newline
+dedent
+eof
