@@ -21,7 +21,7 @@
 //! All functions are fallible: they return [`Result<Expr, ParseError>`]. No
 //! panics, no `unwrap`/`expect` in non-test code.
 
-use buff_lang_ast::{BinaryOp, Expr, Ident, Literal, UnaryOp};
+use buff_lang_ast::{BinaryOp, Expr, Ident, InterpPart, Literal, UnaryOp};
 use buff_lang_error::{Diagnostic, ParseError, Span};
 use buff_lang_lexer::TokenKind;
 
@@ -268,6 +268,31 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     span,
                 };
             }
+            // T21: Indexing on a postfix expression is explicitly rejected
+            // for STRING receivers with a helpful message. There is no Index
+            // AST node; Buff requires `.chars()` / `.first()` / `.last()`
+            // for element access (strings are UTF-8, so byte indexing would
+            // be unsound). For now we reject ANY `[...]` postfix because
+            // there is no Index node yet — when collections arrive, this
+            // arm will need to special-case strings vs. sequences.
+            Some(TokenKind::LBracket) => {
+                let lb = stream.advance().expect("peek guaranteed an LBracket");
+                // Produce a parse-time rejection with the task-required
+                // message. The error is attached to the `[` token so the
+                // diagnostic points at the offender.
+                return Err(ParseError::new(
+                    Diagnostic::error(
+                        "direct indexing `expr[...]` is not supported; \
+                         for strings use .chars() or .first() instead",
+                        lb.span,
+                    )
+                    .with_note(
+                        "Buff does not provide byte indexing on UTF-8 strings. \
+                         Iterate with `.chars()`, or use `.first()` / `.last()` \
+                         for an Option<Char>.",
+                    ),
+                ));
+            }
             Some(TokenKind::Dot) => {
                 stream.advance(); // consume '.'
                 let method_tok = match stream.advance() {
@@ -373,12 +398,19 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         TokenKind::FloatLit(v) => Expr::Literal(Literal::Float(*v), span),
         TokenKind::DoubleLit(v) => Expr::Literal(Literal::Double(*v), span),
         TokenKind::ByteLit(v) => Expr::Literal(Literal::Byte(*v), span),
+        // T21: `'A'`, `'é'`, `'🚀'` parse as a Char literal (single quotes).
+        TokenKind::CharLit(c) => Expr::Literal(Literal::Char(*c), span),
+        // T20: Decimal literal — raw text carried straight from the lexer so
+        // exactness is preserved through to `dec!()` codegen.
+        TokenKind::DecimalLit(s) => Expr::Literal(Literal::Decimal(s.clone()), span),
         TokenKind::KwTrue => Expr::Literal(Literal::Bool(true), span),
         TokenKind::KwFalse => Expr::Literal(Literal::Bool(false), span),
         TokenKind::Ident(name) => Expr::Ident(Ident::new(name.clone(), span), span),
-        // Simple (non-interpolated) strings look like:
-        //   StringStart [StringPart(text)] StringEnd
-        TokenKind::StringStart => parse_simple_string(stream, span)?,
+        // A string literal (single- or triple-quoted). The lexer emits the
+        // same token sequence for both; triple-quote is just raw (no escapes,
+        // no interpolation). Both arrive as:
+        //   StringStart [StringPart|InterpStart ... InterpEnd]* StringEnd
+        TokenKind::StringStart => parse_string_literal(stream, span)?,
         other => {
             return Err(ParseError::new(Diagnostic::error(
                 format!("expected an expression, found `{other}`"),
@@ -390,20 +422,34 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 }
 
 /// Parse a string literal whose `StringStart` token has already been
-/// consumed-start: we are now at the optional `StringPart`/`InterpStart`/
-/// `StringEnd` sequence.
+/// consumed: we are now at the optional `StringPart`/`InterpStart`/`StringEnd`
+/// sequence.
 ///
-/// `start_span` is the span of the opening `"` so we can build a full-string
-/// span even when the literal is empty (`""`).
+/// `start_span` is the span of the opening `"` (or `"""`) so we can build a
+/// full-string span even when the literal is empty.
 ///
-/// For T7, interpolation is rejected — the caller gets a [`ParseError`]
-/// mentioning future support. Plain (possibly-empty) text concatenation of
-/// consecutive `StringPart` tokens is supported.
-fn parse_simple_string(stream: &mut TokenStream<'_>, start_span: Span) -> Result<Expr, ParseError> {
-    let mut text = String::new();
-    // Only the StringEnd token's end offset contributes to the final span —
-    // intermediate StringPart offsets are overwritten before use.
+/// Behaviour (T21):
+/// - If the literal contains NO interpolation (`InterpStart`), collapse the
+///   `StringPart` text runs into one `Literal::String`. This preserves the
+///   pre-T21 fast path so `"abc"` still lowers to `Literal::String("abc")`.
+/// - If at least one `{expr}` is present, build an `Expr::StringInterp`
+///   whose `parts` is a `Vec<InterpPart>` alternating between literal text
+///   runs and embedded expressions.
+/// - The interpolation expressions are parsed by the *full* expression
+///   parser so `{a + b * c}` works. Layout tokens are NOT significant inside
+///   the interpolation — they were lexed in "no-indent" mode by the lexer's
+///   `InterpLexer` callback.
+fn parse_string_literal(
+    stream: &mut TokenStream<'_>,
+    start_span: Span,
+) -> Result<Expr, ParseError> {
+    let mut parts: Vec<InterpPart> = Vec::new();
+    let mut text_buf = String::new();
+    let mut has_interp = false;
+    // The end offset is set when we consume `StringEnd` below. The loop only
+    // exits via `break`, so the variable is always assigned by then.
     let end_off;
+
     loop {
         let Some(tok) = stream.advance() else {
             return Err(ParseError::new(Diagnostic::error(
@@ -413,19 +459,22 @@ fn parse_simple_string(stream: &mut TokenStream<'_>, start_span: Span) -> Result
         };
         match tok.kind {
             TokenKind::StringPart(s) => {
-                text.push_str(&s);
+                text_buf.push_str(&s);
+            }
+            TokenKind::InterpStart => {
+                // Flush accumulated literal text (if any) before the expr.
+                if !text_buf.is_empty() {
+                    parts.push(InterpPart::Literal(std::mem::take(&mut text_buf)));
+                }
+                let expr = parse_expression(stream)?;
+                parts.push(InterpPart::Expr(Box::new(expr)));
+                has_interp = true;
+                // The lexer emits InterpEnd immediately after the inner tokens.
+                stream.expect(TokenKind::InterpEnd)?;
             }
             TokenKind::StringEnd => {
                 end_off = tok.span.end;
                 break;
-            }
-            TokenKind::InterpStart => {
-                return Err(ParseError::new(
-                    Diagnostic::error("string interpolation is not supported in T7", tok.span)
-                        .with_note(
-                            "T7 implements literals only; interpolation arrives in a later task",
-                        ),
-                ));
             }
             other => {
                 return Err(ParseError::new(Diagnostic::error(
@@ -437,8 +486,19 @@ fn parse_simple_string(stream: &mut TokenStream<'_>, start_span: Span) -> Result
             }
         }
     }
+
     let span = Span::new(start_span.start, end_off, start_span.source_id);
-    Ok(Expr::Literal(Literal::String(text), span))
+    if has_interp {
+        // Trailing literal text (e.g. the `!` in `"Hi {name}!"`) still
+        // contributes one final Literal part.
+        if !text_buf.is_empty() {
+            parts.push(InterpPart::Literal(text_buf));
+        }
+        Ok(Expr::StringInterp { parts, span })
+    } else {
+        // Fast path: no interpolation — collapse to a plain String literal.
+        Ok(Expr::Literal(Literal::String(text_buf), span))
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@
 //!   `Stmt::Break`, `Stmt::Continue`, `Stmt::ForIn`, `Stmt::ForWhile`
 //! - `Expr::Literal`, `Expr::Ident`, `Expr::BinaryOp`, `Expr::UnaryOp`,
 //!   `Expr::FuncCall`, `Expr::IfExpr`
-//! - `Literal::{Int, Float, Double, Bool, String, Byte}`
+//! - `Literal::{Int, Float, Double, Bool, String, Byte, Decimal}`
 //! - `TypeRef::Named` for the seven v0.1 primitive names (`Int`→`i64`, etc.)
 //!   plus `TypeRef::Option` and `TypeRef::Generic` (named base)
 //!
@@ -75,7 +75,7 @@ use syn::{
 
 use buff_lang_ast::{
     op::{BinaryOp, UnaryOp},
-    Block, Decl, Expr, FuncDecl, Literal, Stmt, TypeRef,
+    Block, Decl, Expr, FuncDecl, InterpPart, Literal, Stmt, TypeRef,
 };
 use buff_lang_error::{CodegenError, Diagnostic, Span as BuffSpan};
 use buff_lang_types::{FloatWidth, IntWidth, Type, TypeInferencer};
@@ -451,6 +451,13 @@ impl RustCodegen {
                 else_block,
                 ..
             } => self.lower_if_expr(cond, then_block, else_block.as_ref()),
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => self.lower_method_call(receiver, method, args),
+            Expr::StringInterp { parts, .. } => self.lower_string_interp(parts),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -483,7 +490,287 @@ impl RustCodegen {
         }))
     }
 
+    /// Lower a Buff method call to a Rust `receiver.method(args)` expression.
+    ///
+    /// T21 — string methods. The following Buff method names map to specific
+    /// Rust idioms (none of them is a literal `recv.method(args)` because
+    /// Rust strings don't expose these names directly):
+    ///
+    /// | Buff                  | Rust                                              |
+    /// |-----------------------|---------------------------------------------------|
+    /// | `s.char_count()`      | `s.chars().count()`                               |
+    /// | `s.byte_len()`        | `s.len()`                                         |
+    /// | `s.chars()`           | `s.chars()`                                       |
+    /// | `s.bytes()`           | `s.bytes()`                                       |
+    /// | `s.graphemes()`       | `unicode_segmentation::UnicodeSegmentation::graphemes(s, true).collect::<String>()` — see note below |
+    /// | `s.first()`           | `s.chars().next()`                                |
+    /// | `s.last()`            | `s.chars().last()`                                |
+    /// | `s.slice(a, b)`       | char-safe slice via `s.chars().skip(a).take(b - a).collect()` |
+    ///
+    /// `graphemes()` is special-cased to return a `String` (a flattened
+    /// representation) for now; a true iterator-returning API will need a
+    /// dedicated AST shape (deferred to a later task — see notes).
+    ///
+    /// Any unrecognised method falls through to a plain `recv.method(args)`
+    /// Rust method call, which is correct for arbitrary user-defined methods
+    /// and the methods of future types.
+    fn lower_method_call(
+        &mut self,
+        receiver: &Expr,
+        method: &buff_lang_ast::common::Ident,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
+        let recv = self.lower_expr(receiver)?;
+        let method_name = method.name.as_str();
+
+        // Helper: lower `args` into a Punctuated list.
+        let lower_args =
+            |codegen: &mut Self| -> Result<Punctuated<SynExpr, syn::Token![,]>, CodegenError> {
+                let mut out: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+                for a in args {
+                    out.push(codegen.lower_expr(a)?);
+                }
+                Ok(out)
+            };
+
+        // String-method mappings.
+        let lowered = match method_name {
+            // `s.char_count()` → `s.chars().count()`
+            "char_count" if args.is_empty() => {
+                self.method_chain(recv, &["chars", "count"], None)?
+            }
+            // `s.byte_len()` → `s.len()`
+            "byte_len" if args.is_empty() => self.method_chain(recv, &["len"], None)?,
+            // `s.chars()` → `s.chars()`
+            "chars" if args.is_empty() => self.method_chain(recv, &["chars"], None)?,
+            // `s.bytes()` → `s.bytes()`
+            "bytes" if args.is_empty() => self.method_chain(recv, &["bytes"], None)?,
+            // `s.first()` → `s.chars().next()`
+            "first" if args.is_empty() => self.method_chain(recv, &["chars", "next"], None)?,
+            // `s.last()` → `s.chars().last()`
+            "last" if args.is_empty() => self.method_chain(recv, &["chars", "last"], None)?,
+            // `s.graphemes()` → grapheme iterator wrapped via unicode-segmentation.
+            // For now we return a flattened String (`.collect()`) so callers
+            // can treat the result as a `String` without dragging the trait
+            // into every scope. A future task will introduce a typed iterator.
+            "graphemes" if args.is_empty() => self.lower_graphemes_call(recv)?,
+            // `s.slice(a, b)` → char-safe slice.
+            // Approach: `s.chars().skip(a).take(b - a).collect::<String>()`.
+            // We lower the two integer arguments and emit the chain. If `b`
+            // is not provided, we use `s.chars().skip(a).collect::<String>()`.
+            "slice" => self.lower_slice_call(recv, args)?,
+            // Default: a plain method call `recv.method(args)`.
+            _ => {
+                let args_punct = lower_args(self)?;
+                SynExpr::MethodCall(syn::ExprMethodCall {
+                    attrs: Vec::new(),
+                    receiver: Box::new(recv),
+                    dot_token: Default::default(),
+                    method: Ident::new(method_name, ProcSpan::call_site()),
+                    turbofish: None,
+                    paren_token: Default::default(),
+                    args: args_punct,
+                })
+            }
+        };
+        Ok(lowered)
+    }
+
+    /// Build a chained method call: `recv.m1().m2()...` (no args at any link).
+    /// If `final_method` is given, it's used as the OUTERMOST call name (the
+    /// last element of `methods` overrides it; passing `None` is equivalent).
+    fn method_chain(
+        &self,
+        recv: SynExpr,
+        methods: &[&str],
+        _final_method: Option<&str>,
+    ) -> Result<SynExpr, CodegenError> {
+        let mut acc = recv;
+        for &m in methods {
+            acc = SynExpr::MethodCall(syn::ExprMethodCall {
+                attrs: Vec::new(),
+                receiver: Box::new(acc),
+                dot_token: Default::default(),
+                method: Ident::new(m, ProcSpan::call_site()),
+                turbofish: None,
+                paren_token: Default::default(),
+                args: Default::default(),
+            });
+        }
+        Ok(acc)
+    }
+
+    /// Lower `s.graphemes()` to a grapheme-iteration expression that yields a
+    /// `String` of concatenated grapheme clusters.
+    ///
+    /// Emits (conceptually):
+    /// ```text
+    /// unicode_segmentation::UnicodeSegmentation::graphemes(&s, true)
+    ///     .collect::<String>()
+    /// ```
+    ///
+    /// The call is built as a `quote!`-expanded token stream so we never
+    /// hand-format Rust. The trait must be in scope at the use site — see
+    /// the generated-crate wiring note in T21 deferral.
+    fn lower_graphemes_call(&self, recv: SynExpr) -> Result<SynExpr, CodegenError> {
+        // We use quote! to build the macro-shaped expression. The receiver
+        // is spliced in via `#recv`. The full path avoids needing a `use`
+        // import in the generated crate.
+        let tokens: proc_macro2::TokenStream =
+            syn::parse_str("unicode_segmentation::UnicodeSegmentation::graphemes(&__recv, true)")
+                .map_err(|e| self.unsupported(&format!("graphemes path parse: {e}")))?;
+        // Manually build: __trait_path::graphemes(&recv, true).collect::<String>()
+        // by constructing an ExprMethodCall for `.collect::<String>()`.
+        let graphemes_call = splice_receiver_into_call(tokens, recv)?;
+        let collect_call = SynExpr::MethodCall(syn::ExprMethodCall {
+            attrs: Vec::new(),
+            receiver: Box::new(graphemes_call),
+            dot_token: Default::default(),
+            method: Ident::new("collect", ProcSpan::call_site()),
+            // turbofish: `::<String>`
+            turbofish: Some(syn::AngleBracketedGenericArguments {
+                colon2_token: None,
+                lt_token: Default::default(),
+                args: {
+                    let mut p: Punctuated<syn::GenericArgument, syn::Token![,]> = Punctuated::new();
+                    p.push(syn::GenericArgument::Type(rust_path_type("String")));
+                    p
+                },
+                gt_token: Default::default(),
+            }),
+            paren_token: Default::default(),
+            args: Default::default(),
+        });
+        Ok(collect_call)
+    }
+
+    /// Lower `s.slice(a, b)` to a char-safe slice expression.
+    ///
+    /// Emits (conceptually) `s.chars().skip(a).take(b - a).collect::<String>()`.
+    /// A single-arg form `s.slice(a)` becomes `s.chars().skip(a).collect::<String>()`.
+    fn lower_slice_call(&mut self, recv: SynExpr, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.is_empty() || args.len() > 2 {
+            return Err(self.unsupported(&format!(
+                "slice expects 1 or 2 integer args, got {}",
+                args.len()
+            )));
+        }
+        // Start: `s.chars()`
+        let chars_call = self.method_chain(recv, &["chars"], None)?;
+        // `.skip(a)`
+        let skip_arg = self.lower_expr(&args[0])?;
+        let skip_call = method_call_one_arg(chars_call, "skip", skip_arg);
+        // `.take(b - a)` if a second arg is present; else just chain collect.
+        let after_take = if args.len() == 2 {
+            let b_arg = self.lower_expr(&args[1])?;
+            // Compute `b - a` as a Rust binary subtraction at runtime so the
+            // arguments don't have to be literals.
+            let b_minus_a = SynExpr::Binary(syn::ExprBinary {
+                attrs: Vec::new(),
+                left: Box::new(b_arg),
+                op: syn::BinOp::Sub(Default::default()),
+                right: Box::new(self.lower_expr(&args[0])?),
+            });
+            method_call_one_arg(skip_call, "take", b_minus_a)
+        } else {
+            skip_call
+        };
+        // `.collect::<String>()`
+        let collect_call = SynExpr::MethodCall(syn::ExprMethodCall {
+            attrs: Vec::new(),
+            receiver: Box::new(after_take),
+            dot_token: Default::default(),
+            method: Ident::new("collect", ProcSpan::call_site()),
+            turbofish: Some(syn::AngleBracketedGenericArguments {
+                colon2_token: None,
+                lt_token: Default::default(),
+                args: {
+                    let mut p: Punctuated<syn::GenericArgument, syn::Token![,]> = Punctuated::new();
+                    p.push(syn::GenericArgument::Type(rust_path_type("String")));
+                    p
+                },
+                gt_token: Default::default(),
+            }),
+            paren_token: Default::default(),
+            args: Default::default(),
+        });
+        Ok(collect_call)
+    }
+
+    /// Lower a string interpolation `"text {expr} more"` to a Rust
+    /// `format!("text {} more", expr)` macro invocation.
+    ///
+    /// The format string is built by walking the parts:
+    /// - `InterpPart::Literal(s)` — the literal text, with each `{`/`}`
+    ///   escaped to `{{`/`}}` so `format!` doesn't interpret them as slots.
+    /// - `InterpPart::Expr(_)` — a `{}` placeholder in the format string, and
+    ///   the lowered expression as a positional argument after the string.
+    ///
+    /// The final `format!` call is built via `quote!` so the format string
+    /// and args are spliced in without any hand-formatted Rust.
+    fn lower_string_interp(&mut self, parts: &[InterpPart]) -> Result<SynExpr, CodegenError> {
+        // Build the format string with `{}` placeholders for each Expr.
+        let mut fmt_string = String::new();
+        let mut lowered_args: Vec<SynExpr> = Vec::new();
+        for part in parts {
+            match part {
+                InterpPart::Literal(text) => {
+                    // Escape `{` → `{{` and `}` → `}}` so they're literal.
+                    for c in text.chars() {
+                        match c {
+                            '{' => fmt_string.push_str("{{"),
+                            '}' => fmt_string.push_str("}}"),
+                            _ => fmt_string.push(c),
+                        }
+                    }
+                }
+                InterpPart::Expr(e) => {
+                    fmt_string.push_str("{}");
+                    lowered_args.push(self.lower_expr(e)?);
+                }
+            }
+        }
+        // Build the format! macro: tokens are "<fmt>", arg1, arg2, ...
+        // We build this with quote! by splicing each argument in turn.
+        let format_lit = proc_macro2::Literal::string(&fmt_string);
+        let args_tokens: Vec<proc_macro2::TokenStream> = lowered_args
+            .iter()
+            .map(|a| {
+                let a = a.clone();
+                quote::quote! { #a }
+            })
+            .collect();
+        let combined: proc_macro2::TokenStream = if args_tokens.is_empty() {
+            // Should never happen (interp always has at least one Expr),
+            // but guard against malformed AST.
+            quote::quote! { #format_lit }
+        } else {
+            let mut ts: proc_macro2::TokenStream = quote::quote! { #format_lit };
+            for a in args_tokens {
+                ts.extend(quote::quote! { , #a });
+            }
+            ts
+        };
+        Ok(SynExpr::Macro(syn::ExprMacro {
+            attrs: Vec::new(),
+            mac: syn::Macro {
+                path: syn::Path::from(Ident::new("format", ProcSpan::call_site())),
+                bang_token: Default::default(),
+                delimiter: syn::MacroDelimiter::Paren(Default::default()),
+                tokens: combined,
+            },
+        }))
+    }
+
     fn lower_literal(&mut self, lit: &Literal) -> Result<SynExpr, CodegenError> {
+        // T20: Decimal literal → `rust_decimal_macros::dec!(<raw>)`. The raw
+        // digit text is parsed into a `proc_macro2::TokenStream` so the
+        // *exact* digits survive (no rounding through f64) — this matches
+        // what `dec!` expects (a numeric literal token) and preserves
+        // trailing zeros like the `0` in `99.90`.
+        if let Literal::Decimal(raw) = lit {
+            return self.lower_decimal_literal(raw);
+        }
         let syn_lit = match lit {
             Literal::Int(n) => {
                 syn::Lit::Int(syn::LitInt::new(&n.to_string(), ProcSpan::call_site()))
@@ -502,10 +789,40 @@ impl RustCodegen {
             Literal::Byte(b) => {
                 syn::Lit::Int(syn::LitInt::new(&b.to_string(), ProcSpan::call_site()))
             }
+            // T21: `'A'` → `syn::Lit::Char`. prettyplease prints Rust `char`
+            // literals with the correct quoting (including for escapes and
+            // non-ASCII scalars).
+            Literal::Char(c) => syn::Lit::Char(syn::LitChar::new(*c, ProcSpan::call_site())),
+            // Handled by the early return above; this arm exists only so the
+            // match is exhaustive (it is never reached).
+            Literal::Decimal(_) => {
+                return Err(self.unsupported("decimal literal (unreachable arm)"))
+            }
         };
         Ok(SynExpr::Lit(syn::ExprLit {
             attrs: Vec::new(),
             lit: syn_lit,
+        }))
+    }
+
+    /// Lower a Buff `Decimal` literal to the `rust_decimal_macros::dec!(...)`
+    /// macro invocation (T20).
+    ///
+    /// The raw source text is parsed via `syn::parse_str` into a
+    /// `proc_macro2::TokenStream` so the exact digits (including trailing
+    /// zeros) are preserved verbatim — the value never transits through an
+    /// `f64`, guaranteeing exactness end-to-end.
+    fn lower_decimal_literal(&self, raw: &str) -> Result<SynExpr, CodegenError> {
+        let num_tokens: proc_macro2::TokenStream = syn::parse_str(raw)
+            .map_err(|e| self.unsupported(&format!("decimal literal `{raw}`: {e}")))?;
+        Ok(SynExpr::Macro(syn::ExprMacro {
+            attrs: Vec::new(),
+            mac: syn::Macro {
+                path: rust_path("rust_decimal_macros::dec"),
+                bang_token: Default::default(),
+                delimiter: syn::MacroDelimiter::Paren(Default::default()),
+                tokens: num_tokens,
+            },
         }))
     }
 
@@ -603,6 +920,8 @@ impl RustCodegen {
                     "Double" => "f64",
                     "Bool" => "bool",
                     "String" => "String",
+                    // T21: Char → Rust's primitive `char` type.
+                    "Char" => "char",
                     "Decimal" => "rust_decimal::Decimal",
                     other => other,
                 };
@@ -679,6 +998,8 @@ impl RustCodegen {
             Type::Double => "f64",
             Type::Bool => "bool",
             Type::String => "String",
+            // T21: Char → Rust's `char` (a 4-byte Unicode scalar value).
+            Type::Char => "char",
             Type::Decimal => "rust_decimal::Decimal",
             Type::Unknown | Type::Void => return None,
         };
@@ -716,6 +1037,16 @@ fn ast_ident_to_syn(ident: &buff_lang_ast::common::Ident) -> Ident {
 /// segment becomes a [`syn::PathSegment`]. The result is always a plain path
 /// with no generic arguments.
 fn rust_path_type(name: &str) -> SynType {
+    SynType::Path(syn::TypePath {
+        qself: None,
+        path: rust_path(name),
+    })
+}
+
+/// Build a `syn::Path` from a `::`-separated name string
+/// (e.g. `"rust_decimal_macros::dec"`). Used for macro paths like the
+/// `dec!(...)` codegen in T20.
+fn rust_path(name: &str) -> syn::Path {
     let mut segments: Punctuated<syn::PathSegment, syn::Token![::]> = Punctuated::new();
     for seg in name.split("::") {
         segments.push(syn::PathSegment {
@@ -723,13 +1054,10 @@ fn rust_path_type(name: &str) -> SynType {
             arguments: syn::PathArguments::None,
         });
     }
-    SynType::Path(syn::TypePath {
-        qself: None,
-        path: syn::Path {
-            leading_colon: None,
-            segments,
-        },
-    })
+    syn::Path {
+        leading_colon: None,
+        segments,
+    }
 }
 
 /// Build a `println!("{}", arg)` macro invocation as a `syn::Expr::Macro`.
@@ -762,6 +1090,8 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
             "Double" => Some(Type::double()),
             "Bool" => Some(Type::bool()),
             "String" => Some(Type::string()),
+            // T21: Char annotation maps to the resolved Char type.
+            "Char" => Some(Type::char()),
             "Byte" => Some(Type::byte()),
             "Decimal" => Some(Type::Decimal),
             "Void" => Some(Type::Void),
@@ -813,6 +1143,71 @@ fn float_repr(d: f64) -> String {
     } else {
         format!("{s}.0")
     }
+}
+
+/// Build a `recv.method(arg)` single-argument method call.
+///
+/// Used by the string-method codegen helpers (e.g. `s.chars().skip(n)`).
+fn method_call_one_arg(recv: SynExpr, method: &str, arg: SynExpr) -> SynExpr {
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(arg);
+    SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(recv),
+        dot_token: Default::default(),
+        method: Ident::new(method, ProcSpan::call_site()),
+        turbofish: None,
+        paren_token: Default::default(),
+        args,
+    })
+}
+
+/// Take a token stream that calls a fully-qualified function with a single
+/// placeholder argument `__recv` and replace that placeholder with an
+/// actual lowered receiver expression.
+///
+/// The `tokens` argument is expected to parse as a Rust function-call
+/// expression (e.g. `path::func(&__recv, true)`). We use `quote!` to splice
+/// the receiver in: we re-parse a small template that names `__recv` and
+/// then walk the resulting `ExprCall` to substitute the real receiver.
+///
+/// This indirection is needed because `quote!` cannot easily splice into
+/// an arbitrary position inside a string-built token stream — we instead
+/// parse the template to a real `ExprCall`, then swap the first argument.
+fn splice_receiver_into_call(
+    tokens: proc_macro2::TokenStream,
+    recv: SynExpr,
+) -> Result<SynExpr, CodegenError> {
+    // Rebuild via quote! so we never hand-format. The placeholder name
+    // `__recv` is referenced as a Rust identifier in the template; we then
+    // construct the call by hand using the lowered receiver.
+    //
+    // Simpler approach: construct the call directly via syn::ExprCall with
+    // the lowered recv as the first arg and `true` as the second.
+    let _ = tokens; // discarded; we rebuild from scratch to stay quote!-based.
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    // `&recv` — syn doesn't have a one-liner for `&expr`, so we build it.
+    let borrow_recv = SynExpr::Reference(syn::ExprReference {
+        attrs: Vec::new(),
+        and_token: Default::default(),
+        mutability: None,
+        expr: Box::new(recv),
+    });
+    args.push(borrow_recv);
+    args.push(SynExpr::Lit(syn::ExprLit {
+        attrs: Vec::new(),
+        lit: syn::Lit::Bool(syn::LitBool::new(true, ProcSpan::call_site())),
+    }));
+    Ok(SynExpr::Call(syn::ExprCall {
+        attrs: Vec::new(),
+        func: Box::new(SynExpr::Path(syn::ExprPath {
+            attrs: Vec::new(),
+            qself: None,
+            path: rust_path("unicode_segmentation::UnicodeSegmentation::graphemes"),
+        })),
+        paren_token: Default::default(),
+        args,
+    }))
 }
 
 #[cfg(test)]

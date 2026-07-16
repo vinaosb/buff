@@ -50,7 +50,9 @@ pub use rust_codegen::RustCodegen;
 ///
 /// Equivalent to building a [`RustCodegen`], calling [`RustCodegen::generate`],
 /// then [`format`] on the result.
-pub fn generate_rust(decls: &[buff_lang_ast::Decl]) -> Result<String, buff_lang_error::CodegenError> {
+pub fn generate_rust(
+    decls: &[buff_lang_ast::Decl],
+) -> Result<String, buff_lang_error::CodegenError> {
     let mut codegen = RustCodegen::new();
     let file = codegen.generate(decls)?;
     Ok(format(&file))

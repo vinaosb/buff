@@ -20,6 +20,19 @@ pub enum TokenKind {
     DoubleLit(f64),
     StringLit(String),
     ByteLit(u8),
+    /// A single Unicode scalar value literal, e.g. `'A'`, `'é'`, `'🚀'` (T21).
+    ///
+    /// Stored as a Rust [`char`] (a Unicode scalar value). Multi-byte UTF-8
+    /// sequences up to one scalar value are supported; combining marks and
+    /// grapheme clusters are NOT (those are Strings).
+    CharLit(char),
+    /// A 128-bit fixed-point decimal literal, e.g. `99.90m` (T20).
+    ///
+    /// Stores the **raw source text** of the digits (including the decimal
+    /// point but **excluding** the trailing `m`/`M` suffix), e.g. `"99.90"`.
+    /// Carrying the raw text avoids any rounding through `f32`/`f64` so the
+    /// exact value survives to the `rust_decimal_macros::dec!()` codegen.
+    DecimalLit(String),
 
     // --- String interpolation tokens ---
     StringStart,
@@ -193,6 +206,8 @@ impl fmt::Display for TokenKind {
             Self::DoubleLit(v) => write!(f, "double({})", v),
             Self::StringLit(v) => write!(f, "string({:?})", v),
             Self::ByteLit(v) => write!(f, "byte({})", v),
+            Self::CharLit(c) => write!(f, "char({:?})", c),
+            Self::DecimalLit(v) => write!(f, "decimal({:?})", v),
             // String interpolation
             Self::StringStart => write!(f, "string_start"),
             Self::StringPart(v) => write!(f, "string_part({:?})", v),

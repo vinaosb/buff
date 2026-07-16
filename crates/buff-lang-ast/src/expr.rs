@@ -14,6 +14,28 @@ use buff_lang_error::Span;
 ///
 /// NOTE: derives [`PartialEq`] but **not** [`Eq`] because `f32`/`f64` don't
 /// implement `Eq`. Same applies to any type that contains a [`Literal`].
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T20 — `Literal::Decimal`
+///
+/// `Literal::Decimal` was **added** in T20 (v0.5) to carry the raw text of a
+/// 128-bit fixed-point decimal literal (e.g. `99.90m`). It stores the source
+/// text verbatim as a [`String`] so the value never rounds through `f32`/`f64`
+/// — exactness is preserved all the way to the `rust_decimal_macros::dec!()`
+/// codegen call. [`Type`](buff_lang_types::Type)::Decimal already existed in
+/// `buff-lang-types`; the literal variant closed the gap.
+///
+/// ## T21 — `Literal::Char`
+///
+/// `Literal::Char` was **added** in T21 (v0.5) to represent a single Unicode
+/// scalar value literal written with single quotes: `'A'`, `'é'`, `'🚀'`. It
+/// stores a Rust [`char`] (which is always exactly one scalar value, never a
+/// grapheme cluster). This is **additive**: no existing variant was renamed,
+/// reordered, or had its payload altered, so all prior `match` arms remain
+/// exhaustive. [`Type`](buff_lang_types::Type)::Char was added in lockstep.
+/// `char` is `Copy + Eq`, so the `PartialEq`-but-not-`Eq` derivation rule is
+/// unaffected.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     /// An integer literal, e.g. `42`. Stored as `i64`.
@@ -28,6 +50,17 @@ pub enum Literal {
     String(String),
     /// A single byte literal, e.g. `0xFF`.
     Byte(u8),
+    /// A single Unicode scalar value literal, e.g. `'A'`, `'é'`, `'🚀'` (T21).
+    ///
+    /// Always exactly one `char`; never a grapheme cluster. The lexer rejects
+    /// `''` (empty) and `'ab'` (two scalar values).
+    Char(char),
+    /// A 128-bit fixed-point decimal literal, e.g. `99.90m` (T20).
+    ///
+    /// Stores the **raw source text** (without the trailing `m`/`M` suffix)
+    /// so the value is never rounded through `f32`/`f64`. Codegen emits this
+    /// verbatim as `rust_decimal_macros::dec!(<text>)`, preserving exactness.
+    Decimal(String),
 }
 
 impl fmt::Display for Literal {
@@ -39,6 +72,49 @@ impl fmt::Display for Literal {
             Literal::Bool(v) => write!(f, "Bool({v})"),
             Literal::String(v) => write!(f, "String({v:?})"),
             Literal::Byte(v) => write!(f, "Byte(0x{v:02X})"),
+            // T21: render the char in single quotes for visual distinction
+            // from String (which uses double quotes) and Byte (0x..).
+            Literal::Char(c) => write!(f, "Char({c:?})"),
+            // Show the decimal text double-quoted (consistent with String)
+            // so it's visually distinct from a bare number.
+            Literal::Decimal(v) => write!(f, "Decimal({v:?})"),
+        }
+    }
+}
+
+/// One piece of a string-interpolation expression (T21).
+///
+/// An interpolation like `"Hello {name}, you are {age}!"` parses to:
+///
+/// ```text
+/// StringInterp {
+///     parts: vec![
+///         InterpPart::Literal("Hello ".to_string()),
+///         InterpPart::Expr(Box::new(Expr::Ident("name"))),
+///         InterpPart::Literal(", you are ".to_string()),
+///         InterpPart::Expr(Box::new(Expr::Ident("age"))),
+///         InterpPart::Literal("!".to_string()),
+///     ],
+///     span: ...,
+/// }
+/// ```
+///
+/// Literal runs of zero or more `StringPart` tokens are collapsed into one
+/// `InterpPart::Literal` so adjacent strings stay readable. Adjacent
+/// expressions are kept separate (one `InterpPart::Expr` each).
+#[derive(Debug, Clone, PartialEq)]
+pub enum InterpPart {
+    /// A literal text run from the source string (no escapes processed yet).
+    Literal(String),
+    /// An embedded expression `{expr}`.
+    Expr(Box<Expr>),
+}
+
+impl fmt::Display for InterpPart {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InterpPart::Literal(s) => write!(f, "Lit({s:?})"),
+            InterpPart::Expr(e) => write!(f, "Expr({e})"),
         }
     }
 }
@@ -104,6 +180,18 @@ pub enum Expr {
     },
     /// A suspension point in an async context (placeholder for future async work).
     SuspendExpr { inner: Box<Expr>, span: Span },
+    /// A string interpolation: `"text {expr} more {expr2}"` (T21).
+    ///
+    /// Built from the lexer's `StringStart / StringPart / InterpStart / ...
+    /// InterpEnd / StringEnd` token stream. Each part is either literal text
+    /// or an arbitrary expression. Codegen lowers this to a Rust `format!(...)`
+    /// macro call with one `{}` per expression and comma-separated arguments.
+    ///
+    /// This is an **additive** change: no existing variant was renamed or
+    /// reordered. A simple `"abc"` (no `{...}`) still parses as
+    /// `Expr::Literal(Literal::String(_), _)`; only strings that actually
+    /// contain interpolation produce this variant.
+    StringInterp { parts: Vec<InterpPart>, span: Span },
 }
 
 impl Expr {
@@ -120,7 +208,8 @@ impl Expr {
             | Expr::Lambda { span: s, .. }
             | Expr::StructInit { span: s, .. }
             | Expr::MatchExpr { span: s, .. }
-            | Expr::SuspendExpr { span: s, .. } => *s,
+            | Expr::SuspendExpr { span: s, .. }
+            | Expr::StringInterp { span: s, .. } => *s,
         }
     }
 }
@@ -212,6 +301,16 @@ impl fmt::Display for Expr {
                 f.write_str("])")
             }
             Expr::SuspendExpr { inner, .. } => write!(f, "Suspend({inner})"),
+            Expr::StringInterp { parts, .. } => {
+                f.write_str("Interp[")?;
+                for (i, p) in parts.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{p}")?;
+                }
+                f.write_str("]")
+            }
         }
     }
 }
@@ -293,6 +392,36 @@ mod tests {
         assert_eq!(
             Literal::String("hi".to_string()).to_string(),
             "String(\"hi\")"
+        );
+        // T20: Decimal displays its raw source text, double-quoted.
+        assert_eq!(
+            Literal::Decimal("99.90".to_string()).to_string(),
+            "Decimal(\"99.90\")"
+        );
+        // T21: Char renders in single quotes via Debug ({:?}) form.
+        assert_eq!(Literal::Char('A').to_string(), "Char('A')");
+        assert_eq!(Literal::Char('é').to_string(), "Char('é')");
+        assert_eq!(Literal::Char('🚀').to_string(), "Char('🚀')");
+    }
+
+    #[test]
+    fn string_interp_display() {
+        // T21: StringInterp renders as `Interp[Lit("..."), Expr(...), ...]`.
+        let parts = vec![
+            InterpPart::Literal("Hello ".into()),
+            InterpPart::Expr(Box::new(Expr::Ident(
+                Ident::new("name", dummy_span()),
+                dummy_span(),
+            ))),
+            InterpPart::Literal("!".into()),
+        ];
+        let e = Expr::StringInterp {
+            parts,
+            span: dummy_span(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "Interp[Lit(\"Hello \"), Expr(Ident(name)), Lit(\"!\")]"
         );
     }
 

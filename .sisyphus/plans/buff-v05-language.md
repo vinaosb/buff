@@ -30,7 +30,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 5 — Remaining Primitive Types + Stdlib (parallel, depends on T10)
 
-- [ ] **T18**: Double (f64) full support [quick]
+- [x] **T18**: Double (f64) full support [quick]
 
   **What to do** (TDD):
   - **RED**: Write test: `3.14d` infers as Double (f64), not Float (f32)
@@ -62,7 +62,7 @@ Phase 1 (v0.1) must be complete:
 
   **Commit**: YES — Message: `feat(types): add Double (f64) type with d suffix inference`
 
-- [ ] **T19**: Byte (Bits<8>) support [quick]
+- [x] **T19**: Byte (Bits<8>) support [quick]
 
   **What to do** (TDD):
   - **RED**: Write test: `0xFF` infers as Byte (u8), `0b1010` infers as Byte
@@ -93,7 +93,7 @@ Phase 1 (v0.1) must be complete:
 
   **Commit**: YES — Message: `feat(types): add Byte (Bits<8>) with hex and binary literals`
 
-- [ ] **T20**: Decimal (128-bit) — rust_decimal integration [deep]
+- [x] **T20**: Decimal (128-bit) — rust_decimal integration [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `99.90m` infers as Decimal, NOT Double or Float
@@ -139,7 +139,7 @@ Phase 1 (v0.1) must be complete:
 
   **Commit**: YES — Message: `feat(types): add Decimal (128-bit) with m suffix and rust_decimal integration`
 
-- [ ] **T21**: String + Char operations + interpolation [deep]
+- [x] **T21**: String + Char operations + interpolation [deep]
 
   **What to do** (TDD):
   - **RED**: Write snapshot: `"Hello {name}!"` → `format!("Hello {}!", name)`

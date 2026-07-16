@@ -8,7 +8,7 @@
 //! identifiers, and operators. Function/method calls return [`Type::Unknown`]
 //! (full inference arrives in v0.5).
 
-use buff_lang_ast::{Block, Expr, Ident, Literal, Stmt, TypeRef, UnaryOp};
+use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, Stmt, TypeRef, UnaryOp};
 use buff_lang_error::{Diagnostic, Span, TypeError};
 
 use crate::env::TypeEnv;
@@ -64,6 +64,17 @@ impl TypeInferencer {
             // v0.5: real call resolution.
             Expr::FuncCall { .. } | Expr::MethodCall { .. } => Ok(Type::Unknown),
             Expr::SuspendExpr { inner, .. } => self.infer_expr(inner),
+            // T21: A string interpolation always evaluates to String.
+            // Each embedded expression is visited (so its sub-types are
+            // checked) but the parts themselves don't affect the result.
+            Expr::StringInterp { parts, .. } => {
+                for part in parts {
+                    if let InterpPart::Expr(e) = part {
+                        self.infer_expr(e)?;
+                    }
+                }
+                Ok(Type::string())
+            }
             // v0.5: lambda/struct/match inference.
             Expr::Lambda { .. } | Expr::StructInit { .. } | Expr::MatchExpr { .. } => {
                 Ok(Type::Unknown)
@@ -79,6 +90,11 @@ impl TypeInferencer {
             Literal::Bool(_) => Type::bool(),
             Literal::String(_) => Type::string(),
             Literal::Byte(_) => Type::byte(),
+            // T21: `'A'`, `'é'`, `'🚀'` infer as the Char type (one scalar).
+            Literal::Char(_) => Type::char(),
+            // T20: `99.90m` infers as the 128-bit fixed-point Decimal type
+            // (NOT Double/Float), so it stays exact and runs on CPU only.
+            Literal::Decimal(_) => Type::Decimal,
         })
     }
 
@@ -311,6 +327,7 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
             "Double" => Some(Type::double()),
             "Bool" => Some(Type::bool()),
             "String" => Some(Type::string()),
+            "Char" => Some(Type::char()),
             "Byte" => Some(Type::byte()),
             "Decimal" => Some(Type::Decimal),
             "Void" => Some(Type::Void),

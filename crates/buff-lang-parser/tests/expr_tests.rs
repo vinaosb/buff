@@ -143,6 +143,32 @@ fn test_byte_binary_literal() {
     assert_eq!(shape(&e), "Lit(Byte(0x0A))");
 }
 
+// T20: Decimal (`m` suffix) literal parsing. The raw digit text is carried
+// verbatim from the lexer so exactness is preserved to `dec!()` codegen.
+#[test]
+fn test_decimal_m_suffix_literal() {
+    // `99.90m` → Decimal("99.90")
+    let e = parse("99.90m");
+    assert_eq!(shape(&e), "Lit(Decimal(\"99.90\"))");
+}
+
+#[test]
+fn test_decimal_capital_m_suffix_literal() {
+    // `0.1M` is equivalent to `0.1m`.
+    let e = parse("0.1M");
+    assert_eq!(shape(&e), "Lit(Decimal(\"0.1\"))");
+}
+
+#[test]
+fn test_decimal_arithmetic_parses() {
+    // `0.1m + 0.2m` parses as BinaryOp(+, Decimal, Decimal).
+    let e = parse("0.1m + 0.2m");
+    assert_eq!(
+        shape(&e),
+        "BinaryOp(+, Lit(Decimal(\"0.1\")), Lit(Decimal(\"0.2\")))"
+    );
+}
+
 #[test]
 fn test_string_simple() {
     let e = parse("\"hello\"");
@@ -153,6 +179,64 @@ fn test_string_simple() {
 fn test_string_empty() {
     let e = parse("\"\"");
     assert_eq!(shape(&e), "Lit(String(\"\"))");
+}
+
+// T21: Char literal parsing — `'A'` is Char, distinct from `"A"` (String).
+#[test]
+fn test_char_ascii_literal() {
+    let e = parse("'A'");
+    assert_eq!(shape(&e), "Lit(Char('A'))");
+}
+
+#[test]
+fn test_char_multibyte_latin() {
+    let e = parse("'é'");
+    assert_eq!(shape(&e), "Lit(Char('é'))");
+}
+
+#[test]
+fn test_char_emoji_literal() {
+    let e = parse("'🚀'");
+    assert_eq!(shape(&e), "Lit(Char('🚀'))");
+}
+
+#[test]
+fn test_char_escape_literal() {
+    let e = parse("'\\n'");
+    assert_eq!(shape(&e), "Lit(Char('\\n'))");
+}
+
+// T21: Triple-quoted strings parse as plain String literals (no
+// interpolation, no escape processing — they're raw).
+#[test]
+fn test_triple_quoted_simple() {
+    let e = parse("\"\"\"hello\"\"\"");
+    assert_eq!(shape(&e), "Lit(String(\"hello\"))");
+}
+
+#[test]
+fn test_triple_quoted_preserves_special_chars() {
+    // `{x}` is literal text inside a raw string — no interpolation.
+    let e = parse("\"\"\"a{x}b\"\"\"");
+    assert_eq!(shape(&e), "Lit(String(\"a{x}b\"))");
+}
+
+#[test]
+fn test_triple_quoted_multiline() {
+    let e = parse("\"\"\"line1\nline2\"\"\"");
+    assert_eq!(shape(&e), "Lit(String(\"line1\\nline2\"))");
+}
+
+// T21: Direct string indexing `s[0]` is rejected at parse time with the
+// required helpful message.
+#[test]
+fn test_string_indexing_rejected() {
+    let err = parse_err("s[0]");
+    assert!(
+        err.diagnostic.message.contains("use .chars() or .first()"),
+        "got message: {}",
+        err.diagnostic.message
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -469,14 +553,38 @@ fn test_all_compound_assignments() {
 // 11. Error handling
 // ---------------------------------------------------------------------------
 
+// T21: String interpolation is now SUPPORTED — replaced the old T7 rejection
+// test with a positive test asserting the parsed shape.
 #[test]
-fn test_string_interpolation_unsupported() {
-    let err = parse_err("\"hello {name}\"");
-    assert!(
-        err.diagnostic.message.contains("interpolation"),
-        "got message: {}",
-        err.diagnostic.message
+fn test_string_interpolation_parses_to_string_interp() {
+    let e = parse("\"hello {name}\"");
+    // Display shape: Interp[Lit("hello "), Expr(Ident(name))]
+    assert_eq!(shape(&e), "Interp[Lit(\"hello \"), Expr(Ident(name))]");
+}
+
+#[test]
+fn test_string_interpolation_with_arithmetic() {
+    // `{x + 1}` parses as a full expression inside the interpolation.
+    let e = parse("\"v={x + 1}\"");
+    assert_eq!(
+        shape(&e),
+        "Interp[Lit(\"v=\"), Expr(BinaryOp(+, Ident(x), Lit(Int(1))))]"
     );
+}
+
+#[test]
+fn test_string_interpolation_multiple_expressions() {
+    // Multiple `{...}` produce alternating parts.
+    let e = parse("\"{a}{b}\"");
+    assert_eq!(shape(&e), "Interp[Expr(Ident(a)), Expr(Ident(b))]");
+}
+
+#[test]
+fn test_simple_string_still_collapses_to_literal() {
+    // A plain `"abc"` (no interpolation) is still Literal::String — the
+    // T21 fast path keeps backward compatibility with T7's shape.
+    let e = parse("\"abc\"");
+    assert_eq!(shape(&e), "Lit(String(\"abc\"))");
 }
 
 #[test]

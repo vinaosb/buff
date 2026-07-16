@@ -377,6 +377,120 @@ fn test_infer_if_without_else_is_void() {
 }
 
 // ---------------------------------------------------------------------------
+// T19: Byte (Bits<8>) support — named test for acceptance criteria
+// ---------------------------------------------------------------------------
+
+#[test]
+fn byte_type() {
+    let mut inf = TypeInferencer::new();
+
+    // 0xFF infers as Byte (Bits<8>)
+    assert_eq!(
+        inf.infer_expr(&byte_lit(0xFF)).unwrap(),
+        Type::Bits {
+            width: IntWidth::W8
+        }
+    );
+
+    // 0b1010 infers as Byte (Bits<8>)
+    assert_eq!(
+        inf.infer_expr(&byte_lit(0b1010)).unwrap(),
+        Type::Bits {
+            width: IntWidth::W8
+        }
+    );
+
+    // let b: Byte = 0xFF → type-checks (Byte annotation matches byte literal)
+    let stmt = Stmt::LetDecl {
+        name: Ident::new("b", sp()),
+        value: byte_lit(0xFF),
+        mutable: false,
+        ty: Some(TypeRef::Named {
+            name: Ident::new("Byte", sp()),
+            span: sp(),
+        }),
+        span: sp(),
+    };
+    assert_eq!(
+        inf.infer_stmt(&stmt).unwrap(),
+        Type::Bits {
+            width: IntWidth::W8
+        }
+    );
+    assert_eq!(
+        inf.lookup("b"),
+        Some(&Type::Bits {
+            width: IntWidth::W8
+        })
+    );
+
+    // Byte + Byte → Byte (Bits<8>)
+    let mut inf2 = TypeInferencer::new();
+    assert_eq!(
+        inf2.infer_expr(&binary(BinaryOp::Add, byte_lit(1), byte_lit(2)))
+            .unwrap(),
+        Type::Bits {
+            width: IntWidth::W8
+        }
+    );
+
+    // Byte + Int → Int (signed wins)
+    let mut inf3 = TypeInferencer::new();
+    assert_eq!(
+        inf3.infer_expr(&binary(BinaryOp::Add, byte_lit(1), int_lit(2)))
+            .unwrap(),
+        Type::int_default()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T18: Double (f64) full support — named test for acceptance criteria
+// ---------------------------------------------------------------------------
+
+#[test]
+fn double_inference() {
+    // 2.5d infers as Double (f64), not Float (f32)
+    let mut inf = TypeInferencer::new();
+    assert_eq!(inf.infer_expr(&double_lit(2.5)).unwrap(), Type::Double);
+
+    // 2.5 (no suffix) infers as Float (f32)
+    assert_eq!(
+        inf.infer_expr(&float_lit(2.5)).unwrap(),
+        Type::Float {
+            width: FloatWidth::W32
+        }
+    );
+
+    // Double + Double → Double
+    assert_eq!(
+        inf.infer_expr(&binary(BinaryOp::Add, double_lit(1.0), double_lit(2.0)))
+            .unwrap(),
+        Type::Double
+    );
+
+    // Double + Float → Double (widening)
+    assert_eq!(
+        inf.infer_expr(&binary(BinaryOp::Add, double_lit(1.0), float_lit(2.0)))
+            .unwrap(),
+        Type::Double
+    );
+
+    // Float + Double → Double (widening, reversed)
+    assert_eq!(
+        inf.infer_expr(&binary(BinaryOp::Add, float_lit(1.0), double_lit(2.0)))
+            .unwrap(),
+        Type::Double
+    );
+
+    // Int + Double → Double (widening)
+    assert_eq!(
+        inf.infer_expr(&binary(BinaryOp::Add, int_lit(1), double_lit(2.0)))
+            .unwrap(),
+        Type::Double
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Promotion rules (tests 22–23)
 // ---------------------------------------------------------------------------
 
@@ -543,4 +657,192 @@ fn test_infer_func_call_returns_unknown() {
         span: sp(),
     };
     assert_eq!(inf.infer_expr(&e).unwrap(), Type::Unknown);
+}
+
+// ---------------------------------------------------------------------------
+// T20: Decimal (128-bit fixed-point) — named module so the selector
+// `cargo test -p buff-lang-types decimal_type` matches all sub-tests.
+//
+// Decimal literals (`99.90m`) infer as `Type::Decimal` (NOT Double/Float),
+// Decimal arithmetic stays Decimal, and the type is flagged CPU-only
+// (never GPU-eligible). Exactness of `0.1m + 0.2m == 0.3m` is proven at the
+// codegen layer; here we prove the *type* of that comparison is `Bool`.
+// ---------------------------------------------------------------------------
+
+mod decimal_type {
+    use super::*;
+
+    /// Build a `Literal::Decimal(raw)` expression (raw digit text, no suffix).
+    fn dec_lit(raw: &str) -> Expr {
+        Expr::Literal(Literal::Decimal(raw.to_string()), sp())
+    }
+
+    #[test]
+    fn decimal_literal_infers_decimal() {
+        // `99.90m` infers as Decimal — NOT Double, NOT Float.
+        let mut inf = TypeInferencer::new();
+        let ty = inf.infer_expr(&dec_lit("99.90")).unwrap();
+        assert_eq!(ty, Type::Decimal);
+        assert_ne!(ty, Type::Double);
+        assert_ne!(
+            ty,
+            Type::Float {
+                width: FloatWidth::W32
+            }
+        );
+    }
+
+    #[test]
+    fn decimal_not_double_not_float() {
+        // Explicit double-negative: a Decimal literal is neither Double nor
+        // Float, even though its textual shape resembles both.
+        let mut inf = TypeInferencer::new();
+        let ty = inf.infer_expr(&dec_lit("0.1")).unwrap();
+        assert!(!ty.is_float_like() || ty == Type::Decimal);
+        assert_eq!(ty, Type::Decimal);
+        assert_ne!(ty, Type::double());
+    }
+
+    #[test]
+    fn decimal_add_decimal_is_decimal() {
+        // Decimal + Decimal → Decimal
+        let mut inf = TypeInferencer::new();
+        let e = binary(BinaryOp::Add, dec_lit("0.1"), dec_lit("0.2"));
+        assert_eq!(inf.infer_expr(&e).unwrap(), Type::Decimal);
+    }
+
+    #[test]
+    fn decimal_mul_decimal_is_decimal() {
+        // Decimal * Decimal → Decimal
+        let mut inf = TypeInferencer::new();
+        let e = binary(BinaryOp::Mul, dec_lit("2.0"), dec_lit("3.0"));
+        assert_eq!(inf.infer_expr(&e).unwrap(), Type::Decimal);
+    }
+
+    #[test]
+    fn decimal_sub_div_mod_stay_decimal() {
+        // Sub / Div / Mod all stay Decimal.
+        let mut inf = TypeInferencer::new();
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Sub, dec_lit("1.0"), dec_lit("0.5")))
+                .unwrap(),
+            Type::Decimal
+        );
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Div, dec_lit("1.0"), dec_lit("4.0")))
+                .unwrap(),
+            Type::Decimal
+        );
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Mod, dec_lit("1.0"), dec_lit("4.0")))
+                .unwrap(),
+            Type::Decimal
+        );
+    }
+
+    #[test]
+    fn decimal_dominates_other_numerics() {
+        // Decimal dominates Int, Float, Double (per promote.rs).
+        let mut inf = TypeInferencer::new();
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Add, dec_lit("1.0"), int_lit(2)))
+                .unwrap(),
+            Type::Decimal
+        );
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Add, dec_lit("1.0"), float_lit(2.0)))
+                .unwrap(),
+            Type::Decimal
+        );
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Add, dec_lit("1.0"), double_lit(2.0)))
+                .unwrap(),
+            Type::Decimal
+        );
+        // Reversed operand order still Decimal.
+        assert_eq!(
+            inf.infer_expr(&binary(BinaryOp::Add, int_lit(2), dec_lit("1.0")))
+                .unwrap(),
+            Type::Decimal
+        );
+    }
+
+    #[test]
+    fn decimal_comparison_infers_bool() {
+        // `0.1m + 0.2m == 0.3m` infers as Bool (the exactness proof itself
+        // lives in the codegen/rust_decimal layer; here we confirm the
+        // comparison type-checks to Bool).
+        let mut inf = TypeInferencer::new();
+        let lhs = binary(BinaryOp::Add, dec_lit("0.1"), dec_lit("0.2"));
+        let cmp = binary(BinaryOp::Eq, lhs, dec_lit("0.3"));
+        assert_eq!(inf.infer_expr(&cmp).unwrap(), Type::Bool);
+    }
+
+    #[test]
+    fn decimal_let_decl_binds_decimal() {
+        // `let price = 99.90m` binds `price` as Decimal in the environment.
+        let mut inf = TypeInferencer::new();
+        let stmt = Stmt::LetDecl {
+            name: Ident::new("price", sp()),
+            value: dec_lit("99.90"),
+            mutable: false,
+            ty: None,
+            span: sp(),
+        };
+        assert_eq!(inf.infer_stmt(&stmt).unwrap(), Type::Decimal);
+        assert_eq!(inf.lookup("price"), Some(&Type::Decimal));
+    }
+
+    #[test]
+    fn decimal_let_annotation_matches() {
+        // `let price: Decimal = 99.90m` type-checks (annotation matches).
+        let mut inf = TypeInferencer::new();
+        let stmt = Stmt::LetDecl {
+            name: Ident::new("price", sp()),
+            value: dec_lit("99.90"),
+            mutable: false,
+            ty: Some(TypeRef::Named {
+                name: Ident::new("Decimal", sp()),
+                span: sp(),
+            }),
+            span: sp(),
+        };
+        assert_eq!(inf.infer_stmt(&stmt).unwrap(), Type::Decimal);
+        assert_eq!(inf.lookup("price"), Some(&Type::Decimal));
+    }
+
+    #[test]
+    fn decimal_unary_neg_stays_decimal() {
+        // `-99.90m` is Decimal (negation preserves numeric type).
+        let mut inf = TypeInferencer::new();
+        let e = unary(UnaryOp::Neg, dec_lit("99.90"));
+        assert_eq!(inf.infer_expr(&e).unwrap(), Type::Decimal);
+    }
+
+    #[test]
+    fn decimal_is_cpu_only_never_gpu() {
+        // CRITICAL: Decimal must NEVER be GPU-eligible. The dispatch engine
+        // (v1.0) will consume this predicate to force Decimal onto CPU/Rayon.
+        assert!(!Type::Decimal.is_gpu_eligible());
+        assert!(Type::Decimal.must_run_on_cpu());
+
+        // Sanity: 32-bit WGSL-native scalars ARE gpu-eligible (contrast).
+        assert!(Type::float_default().is_gpu_eligible());
+    }
+
+    #[test]
+    fn decimal_is_numeric_and_float_like() {
+        // Decimal participates in numeric promotion and is float-like.
+        assert!(Type::Decimal.is_numeric());
+        assert!(Type::Decimal.is_float_like());
+    }
+
+    #[test]
+    fn decimal_compound_assign_ok() {
+        // `price += 0.1m` type-checks when price is Decimal.
+        let mut inf = TypeInferencer::new();
+        inf.bind("price", Type::Decimal);
+        let e = binary(BinaryOp::AddAssign, ident("price"), dec_lit("0.1"));
+        assert_eq!(inf.infer_expr(&e).unwrap(), Type::Decimal);
+    }
 }

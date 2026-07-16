@@ -28,7 +28,10 @@ use crate::stream::TokenStream;
 ///
 /// Returns [`ParseError`] on any syntax error, including unknown top-level
 /// keywords or malformed function declarations.
-pub fn parse(tokens: &[buff_lang_lexer::Token], source_id: SourceId) -> Result<Vec<Decl>, ParseError> {
+pub fn parse(
+    tokens: &[buff_lang_lexer::Token],
+    source_id: SourceId,
+) -> Result<Vec<Decl>, ParseError> {
     let mut stream = TokenStream::new(tokens, source_id);
     let mut decls = Vec::new();
     while !stream.is_at_end() {

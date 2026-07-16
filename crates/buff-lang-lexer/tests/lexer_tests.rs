@@ -357,14 +357,19 @@ fn test_double_literal_capital_d_suffix() {
     assert!(matches!(tokens[0], TokenKind::DoubleLit(_)));
 }
 
+// T20: the `m`/`M` decimal suffix is now SUPPORTED (it was rejected in
+// v0.1). `3.14m` lexes to a `DecimalLit("3.14")` token — the raw digit text
+// is carried verbatim so the value never rounds through f64.
 #[test]
-fn test_decimal_m_suffix_unsupported() {
-    let e = err("3.14m");
-    let msg = e.to_string();
-    assert!(
-        msg.contains("decimal") || msg.contains("'m' suffix"),
-        "expected decimal-suffix error, got: {msg}"
-    );
+fn test_decimal_m_suffix_now_supported() {
+    let tokens = kinds("3.14m");
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0], TokenKind::DecimalLit("3.14".into()));
+    assert_eq!(tokens[1], TokenKind::Eof);
+
+    // Capital `M` is equivalent.
+    let tokens = kinds("3.14M");
+    assert_eq!(tokens[0], TokenKind::DecimalLit("3.14".into()));
 }
 
 #[test]
@@ -666,6 +671,40 @@ fn test_unexpected_char_error() {
     let e = err("#");
     let msg = e.to_string();
     assert!(msg.contains("unexpected character"), "got: {msg}");
+}
+
+// ---------------------------------------------------------------------------
+// T19: Byte (Bits<8>) support — named test for acceptance criteria
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hex_binary_literals() {
+    // 0xFF infers as Byte (u8)
+    let tokens = kinds("0xFF");
+    assert_eq!(tokens, vec![TokenKind::ByteLit(255), TokenKind::Eof]);
+
+    // 0b1010 infers as Byte
+    let tokens = kinds("0b1010");
+    assert_eq!(tokens, vec![TokenKind::ByteLit(10), TokenKind::Eof]);
+
+    // 0x00 (zero)
+    let tokens = kinds("0x00");
+    assert_eq!(tokens, vec![TokenKind::ByteLit(0), TokenKind::Eof]);
+
+    // 0b0 (zero)
+    let tokens = kinds("0b0");
+    assert_eq!(tokens, vec![TokenKind::ByteLit(0), TokenKind::Eof]);
+
+    // 0xFF (max byte)
+    let tokens = kinds("0xFF");
+    assert_eq!(tokens, vec![TokenKind::ByteLit(255), TokenKind::Eof]);
+
+    // 0x100 (overflow) should error
+    let e = err("0x100");
+    assert!(
+        e.to_string().contains("invalid numeric literal"),
+        "got: {e}"
+    );
 }
 
 // ---------------------------------------------------------------------------

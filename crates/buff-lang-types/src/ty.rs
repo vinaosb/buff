@@ -27,6 +27,12 @@ pub enum Type {
     Bool,
     /// A UTF-8 string (`String`).
     String,
+    /// A single Unicode scalar value (`Char`). (T21 — additive.)
+    ///
+    /// Maps to Rust's `char` type (a 4-byte Unicode scalar value). Distinct
+    /// from `String` (a UTF-8 byte buffer): `'A'` is `Char`, `"A"` is
+    /// `String`. Not GPU-eligible (no WGSL scalar) — always CPU.
+    Char,
     /// A 128-bit fixed-point decimal (`Decimal`). The type exists in v0.1 but
     /// full arithmetic support arrives in v0.5.
     Decimal,
@@ -93,6 +99,11 @@ impl Type {
         Type::String
     }
 
+    /// The char type: `Char` (a single Unicode scalar value). (T21.)
+    pub fn char() -> Self {
+        Type::Char
+    }
+
     /// Returns `true` if this type is numeric (integer, byte, float, double, or decimal).
     pub fn is_numeric(&self) -> bool {
         matches!(
@@ -114,6 +125,41 @@ impl Type {
     /// Returns `true` if this type is integer-like (`Int` or `Bits`).
     pub fn is_integer_like(&self) -> bool {
         matches!(self, Type::Int { .. } | Type::Bits { .. })
+    }
+
+    /// Returns `true` if this type is eligible for GPU (WGSL) dispatch.
+    ///
+    /// Only the WGSL-native 32-bit scalar primitives are eligible:
+    /// `Float<32>`, `Int<32>`, `Bits<32>`, and `Bool`. Wider widths,
+    /// `Double` (f64 has no WGSL scalar), and especially [`Type::Decimal`]
+    /// (128-bit fixed-point, no GPU representation) are **not** GPU-eligible
+    /// and must run on the CPU (Rayon) path.
+    ///
+    /// This is **type metadata only** in v0.5 — there is no dispatch engine
+    /// yet (that arrives in v1.0). The predicate is consumed directly by
+    /// tests now and will feed the v1.0 heterogeneous dispatch analyzer.
+    pub fn is_gpu_eligible(&self) -> bool {
+        matches!(
+            self,
+            Type::Float {
+                width: FloatWidth::W32
+            } | Type::Int {
+                width: IntWidth::W32
+            } | Type::Bits {
+                width: IntWidth::W32
+            } | Type::Bool
+        )
+    }
+
+    /// Returns `true` if this type **must** run on the CPU (never GPU).
+    ///
+    /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
+    /// have no WGSL representation, so any expression involving a Decimal is
+    /// forced onto the CPU/Rayon path. This is the complement of
+    /// [`is_gpu_eligible`](Self::is_gpu_eligible) for the Decimal case, but
+    /// also flags `Double` (no f64 in WGSL) and non-32-bit widths.
+    pub fn must_run_on_cpu(&self) -> bool {
+        !self.is_gpu_eligible()
     }
 }
 
@@ -150,6 +196,7 @@ impl fmt::Display for Type {
             Type::Double => f.write_str("Double"),
             Type::Bool => f.write_str("Bool"),
             Type::String => f.write_str("String"),
+            Type::Char => f.write_str("Char"),
             Type::Decimal => f.write_str("Decimal"),
             Type::Unknown => f.write_str("Unknown"),
             Type::Void => f.write_str("Void"),
@@ -169,6 +216,7 @@ mod tests {
         assert_eq!(Type::double().to_string(), "Double");
         assert_eq!(Type::bool().to_string(), "Bool");
         assert_eq!(Type::string().to_string(), "String");
+        assert_eq!(Type::char().to_string(), "Char");
         assert_eq!(Type::Decimal.to_string(), "Decimal");
         assert_eq!(Type::Unknown.to_string(), "Unknown");
         assert_eq!(Type::Void.to_string(), "Void");
@@ -191,5 +239,37 @@ mod tests {
         assert!(Type::int_default().is_integer_like());
         assert!(Type::byte().is_integer_like());
         assert!(!Type::float_default().is_integer_like());
+    }
+
+    // T20: GPU/CPU dispatch type-metadata predicates.
+    #[test]
+    fn gpu_cpu_dispatch_metadata() {
+        // WGSL-native 32-bit scalars are GPU-eligible.
+        assert!(Type::float_default().is_gpu_eligible()); // Float<32>
+        assert!(Type::Bool.is_gpu_eligible());
+        assert!(Type::Int {
+            width: IntWidth::W32
+        }
+        .is_gpu_eligible());
+        assert!(Type::Bits {
+            width: IntWidth::W32
+        }
+        .is_gpu_eligible());
+
+        // Decimal is NEVER GPU-eligible — it must run on CPU (Rayon).
+        assert!(!Type::Decimal.is_gpu_eligible());
+        assert!(Type::Decimal.must_run_on_cpu());
+
+        // Double (f64) and wide integers are also CPU-only (no WGSL scalar).
+        assert!(!Type::Double.is_gpu_eligible());
+        assert!(Type::Double.must_run_on_cpu());
+        assert!(!Type::int_default().is_gpu_eligible()); // Int<64>
+        assert!(!Type::byte().is_gpu_eligible()); // Bits<8>
+
+        // Predicate complementarity for Decimal.
+        assert_ne!(
+            Type::Decimal.is_gpu_eligible(),
+            Type::Decimal.must_run_on_cpu()
+        );
     }
 }
