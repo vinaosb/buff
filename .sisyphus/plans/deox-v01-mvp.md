@@ -1291,7 +1291,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 17. v0.1 Milestone — "Olá Deox" Example + Integration Tests
+- [x] 17. v0.1 Milestone — "Olá Deox" Example + Integration Tests
 
   **What to do**:
   - Create `examples/ola.deox`, `examples/fibonacci.deox`, `examples/calculadora.deox`
@@ -1474,7 +1474,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### Additional Wave 4 Task: T110 — Project Scaffolding (deox new / deox init)
 
-- [ ] T110. `deox new` + `deox init` — Project Scaffolding with Standard Structure
+- [x] T110. `deox new` + `deox init` — Project Scaffolding with Standard Structure
 
   **What to do** (TDD):
   - **RED**: Test: `deox new my_app` creates directory with `deox.toml`, `src/main.deox`, `tests/`, `.gitignore`
