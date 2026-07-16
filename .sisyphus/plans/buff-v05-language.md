@@ -495,7 +495,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T28**: Option<T> + null safety [deep]
+- [x] **T28**: Option<T> + null safety [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `None` is valid Option<T> value (prelude enum variant)

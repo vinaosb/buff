@@ -680,3 +680,70 @@ parse_primary), revert the codegen changes (remove `lower_enum_decl` +
 `lower_match_expr` + `lower_pattern`, restore the `Err(unsupported)`
 arms), remove `exhaustiveness.rs` + its lib.rs re-exports, and delete
 the three test files. Clean reversal.
+
+## T28 — Option<T> built-in enum + null safety
+
+### Decision: Option is a BUILT-IN prelude enum (not a Type variant to model further)
+`Type::Option(Box<Type>)` already existed (T99). T28 makes Option a
+BUILT-IN ENUM in the prelude sense: its variants `Some(T)`/`None` resolve
+WITHOUT a user `enum Option` decl. Implementation: seed the T27 enum
+registry with `"Option" -> [Some, None]` via a NEW
+`build_enum_registry_with_prelude` (additive; `check_program` calls it).
+Did NOT touch the pure `build_enum_registry` — that keeps the T27
+size-count test stable and preserves a clean "user decls only" view for
+LSP/tooling.
+
+### Decision: None/Some are prelude variants, NOT keywords
+Confirmed the lexer's 25-keyword list never had None/Some. They lex as
+`Ident("None")`/`Ident("Some")` and resolve at the TYPE layer:
+- `Expr::Ident("None")` -> `Type::option(Type::Unknown)` (special-cased
+  in `infer_expr` before the undefined-variable lookup).
+- `Expr::FuncCall(Ident("Some"), [x])` -> `Type::option(type_of_x)`
+  (special-cased in `infer_expr` before the prelude-function lookup).
+No lexer/parser/keyword changes. This matches the plan's explicit
+"NOT reserved keywords" requirement.
+
+### Decision: Codegen maps None/Some 1:1 (no special-casing)
+`None` = `Expr::Ident` -> `SynExpr::Path(None)` = Rust `None`.
+`Some(x)` = `Expr::FuncCall(Ident("Some"), [x])` -> NOT a PreludeFn ->
+regular call path -> Rust `Some(x)`. Both map to std Option verbatim
+because Buff deliberately mirrors Rust's spelling. Only codegen TESTS
+were added; zero production codegen changes. Bonus: the type-inference
+change flows into codegen, so `let x = Some(42)` now emits
+`let x: Option<i64> = Some(42);`.
+
+### Decision: Option covariance + None-assigns-to-any-Option in assignable_to
+To make `let x: Option<Int> = None` type-check (None infers
+`Option<Unknown>`), extended `promote.rs::assignable_to` with two rules:
+- `Option<Unknown>` (None) assigns to ANY `Option<T>`.
+- `Option<U>` assigns to `Option<T>` when `U` assigns to `T` (covariant
+  inner, recursive).
+This is the minimal, sound extension. The null-safety case (Option<T>
+used as bare T) still falls through to `promote_binary` which returns
+None for Option -> the inferencer emits the error.
+
+### Decision: null-safety error message format
+`expected {annotated_ty}, found {value_ty}. Use if-let or ?? to unwrap.`
+when value is `Option<_>` and target is bare (non-Option). Types use
+their `Display` form (Int -> `Int<64>`). The suffix `. Use if-let or ??
+to unwrap.` is the literal T28 contract. Implemented via a new
+`is_null_safety_violation` helper in `infer.rs`. NOTE: this carries a
+trailing period, which technically conflicts with the conventions "no
+trailing period" rule — the T28 acceptance explicitly overrides it.
+
+### Decision: DEFER ?? (null coalescing) to T101 and if-let to T72
+The task text mentions `opt ?? 0` and `if let Some(x) = opt`. Neither
+syntax exists yet: `??` is T101 (Wave enhancement), `if let` is T72
+(Wave 6 enhancement). T28 implements the TYPE/CHECKER machinery and the
+null-safety ERROR (which mentions both as escape hatches per contract);
+the syntax landings are their own tasks. Safe-unwrap acceptance is
+exercised via the T27 `match opt { Some(x) => ..., None => ... }` path.
+
+### Migration note (additive AST/types)
+All changes are ADDITIVE to the types crate (no AST node renamed/removed):
+new `pub(crate) fn is_null_safety_violation`, new pub fn
+`build_enum_registry_with_prelude`, extended `typeref_to_type` arms,
+extended `assignable_to` rules, extended `infer_expr` Ident/FuncCall
+arms with early returns. Rollback: revert the 5 modified files + delete
+the 2 new test files + remove the `buff-lang-lexer` dev-dep line.
+Clean reversal.

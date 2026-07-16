@@ -636,3 +636,27 @@ inference arrives when the type system gains user-enum support.
 - cargo check --workspace -> exit 0
 - cargo clippy --workspace --all-targets -- -D warnings -> exit 0
 - cargo fmt -p buff-lang-{ast,parser,codegen-rust,types} -- --check -> exit 0
+
+## T28 — Option<T> + null safety
+
+### Status: COMPLETE
+
+### Key learnings
+- **None/Some need NO lexer/parser changes.** They lex as `Ident` (NOT in the 25-keyword list) and parse as `Expr::Ident("None")` / `Expr::FuncCall(Ident("Some"), [x])`. The task's "prelude enum variants, NOT keywords" is satisfied for free — the keyword list never had them.
+- **Codegen needs NO special-casing.** `None` lowers to `SynExpr::Path(None)` = Rust `None`; `Some(x)` falls through the regular `FuncCall` path (not a PreludeFn) to Rust `Some(x)`. Both map 1:1 to std Option because Buff mirrors Rust's spelling. Only TESTS were added to codegen.
+- **The type-system change ripples into codegen automatically.** The codegen crate reuses `TypeInferencer`; once `Some(42)` infers `Option<Int<64>>`, codegen emits `let x: Option<i64> = Some(42);` (inferred annotation). `None` stays unannotated (inner Unknown).
+- **`Option<Unknown>` (None) needs an assignment rule.** `assignable_to(Option<T>, Option<Unknown>)` must be true for `let x: Option<Int> = None`. Added Option covariance to `promote.rs::assignable_to`: None -> any Option<T>; Option<U> -> Option<T> when U assignable to T.
+- **Additive registry seeding beats mutating the pure builder.** Kept `build_enum_registry` PURE (existing T27 size-count test stable) and added `build_enum_registry_with_prelude` (seeds Option -> [Some,None]); `check_program` calls the prelude version. Zero existing tests changed.
+- **`Option<Int>` parses as `TypeRef::Generic { base: Named("Option"), args: [...] }`** (NOT `TypeRef::Option`). `typeref_to_type` must handle BOTH shapes (Generic from parser, Option variant from hand-built ASTs).
+- **`if let` is T72 (not done).** Task assumed it exists; it doesn't. Tested safe-unwrap via T27 `match opt { Some(x) => ..., None => ... }` instead. `??` is T101 (deferred); null-safety message mentions it as escape hatch per contract.
+
+### Verification (MSVC env LIB set)
+- cargo test -p buff-lang-types --test option_null_safety -> 22/22
+- cargo test -p buff-lang-codegen-rust --test option_codegen -> 7/7
+- cargo test --workspace -> ALL green, 0 failed
+- cargo check --workspace -> exit 0
+- cargo clippy --workspace --all-targets -- -D warnings -> exit 0
+- cargo fmt -p buff-lang-types -p buff-lang-codegen-rust -- --check -> exit 0
+
+### Exact null-safety message contract
+`expected {target}, found Option<{target}>. Use if-let or ?? to unwrap.` where {target} uses `Type::Display` (Int shows as `Int<64>`, the default width). For Int: `expected Int<64>, found Option<Int<64>>. Use if-let or ?? to unwrap.`

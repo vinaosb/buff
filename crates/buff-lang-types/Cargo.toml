@@ -11,3 +11,6 @@ buff-lang-ast.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+# T28: option_null_safety tests verify None/Some are NOT reserved lexer
+# keywords (they resolve as prelude Option variants).
+buff-lang-lexer.workspace = true

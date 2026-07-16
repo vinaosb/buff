@@ -53,7 +53,16 @@ impl TypeInferencer {
     pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type, TypeError> {
         match expr {
             Expr::Literal(lit, span) => self.infer_literal(lit, *span),
-            Expr::Ident(name, span) => self.lookup_ident(name, *span),
+            Expr::Ident(name, span) => {
+                // T28: `None` is a prelude Option variant, NOT a keyword. It
+                // resolves to `Option<T>` with a fresh (Unknown) inner type —
+                // the inner is pinned by context (e.g. a `let x: Option<Int>
+                // = None` annotation) or stays Unknown until a later use.
+                if name.name == "None" {
+                    return Ok(Type::option(Type::Unknown));
+                }
+                self.lookup_ident(name, *span)
+            }
             Expr::BinaryOp { op, lhs, rhs, span } => self.infer_binary(op, lhs, rhs, *span),
             Expr::UnaryOp { op, operand, span } => self.infer_unary(op, operand, *span),
             Expr::IfExpr {
@@ -68,6 +77,25 @@ impl TypeInferencer {
             // `prelude::return_type`. Non-prelude free-function calls stay
             // `Unknown` (full user-call resolution arrives later).
             Expr::FuncCall { callee, args, .. } => {
+                // T28: `Some(x)` is a prelude Option constructor, NOT a
+                // keyword and NOT a user function. It wraps its single
+                // argument's type in `Option<T>`. `None` (no args) is handled
+                // in the `Expr::Ident` arm above, but a defensive `None()`
+                // call shape also yields `Option<Unknown>` for robustness.
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    if name.name == "Some" && args.len() == 1 {
+                        let inner = self.infer_expr(&args[0])?;
+                        return Ok(Type::option(inner));
+                    }
+                    if name.name == "None" && args.is_empty() {
+                        return Ok(Type::option(Type::Unknown));
+                    }
+                }
+                // T96: standard-library prelude. A bare-ident callee whose name
+                // is a recognised prelude function is resolved WITHOUT an import
+                // — its return type is computed from the inferred arg types via
+                // `prelude::return_type`. Non-prelude free-function calls stay
+                // `Unknown` (full user-call resolution arrives later).
                 if let Expr::Ident(name, _) = callee.as_ref() {
                     if let Some(fn_) = prelude::lookup(&name.name) {
                         let mut arg_tys = Vec::with_capacity(args.len());
@@ -412,10 +440,23 @@ impl TypeInferencer {
                 if let Some(annotated_ref) = ty {
                     if let Some(annotated_ty) = typeref_to_type(annotated_ref) {
                         if !assignable_to(&annotated_ty, &value_ty) {
-                            return Err(TypeError::new(Diagnostic::error(
-                                format!("expected {annotated_ty}, found {value_ty}"),
-                                *span,
-                            )));
+                            // T28: null-safety. When a value of type
+                            // `Option<T>` is bound/used where the BARE inner
+                            // type `T` (non-Option) is expected (e.g.
+                            // `let y: Int = x` where `x: Option<Int>`), the
+                            // diagnostic carries the exact suffix
+                            // `. Use if-let or ?? to unwrap.` so the user
+                            // knows the escape hatch. The `??` operator is
+                            // implemented in T101 (deferred); the message
+                            // mentions it now per the T28 contract.
+                            let msg = if is_null_safety_violation(&annotated_ty, &value_ty) {
+                                format!(
+                                    "expected {annotated_ty}, found {value_ty}. Use if-let or ?? to unwrap."
+                                )
+                            } else {
+                                format!("expected {annotated_ty}, found {value_ty}")
+                            };
+                            return Err(TypeError::new(Diagnostic::error(msg, *span)));
                         }
                         self.env.insert(&name.name, annotated_ty.clone());
                         return Ok(annotated_ty);
@@ -462,6 +503,22 @@ fn const_int_value(expr: &Expr) -> Option<i128> {
 ///
 /// Returns `None` for unrecognised names (user types, generics, function
 /// types) — these are deferred to v0.5.
+///
+/// ## T28 — `Option<T>`
+///
+/// The built-in `Option<T>` type is recognised in two structural shapes:
+///
+/// - `TypeRef::Option(inner, _)` — the dedicated AST variant (hand-built
+///   ASTs / tests).
+/// - `TypeRef::Generic { base: Named("Option"), args: [inner], .. }` — the
+///   shape the parser produces for source annotations like `Option<Int>`
+///   (the parser treats `Option<T>` as a plain generic application; see
+///   `parse_type_ref`).
+///
+/// Both lower to [`Type::Option`] with the inner type resolved recursively
+/// (an unresolvable inner falls back to [`Type::Unknown`] so the Option
+/// wrapper still flows through — this lets `let x: Option<MyEnum> = None`
+/// type-check at the wrapper level even before user-enum resolution lands).
 fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
     match ty {
         TypeRef::Named { name, .. } => match name.name.as_str() {
@@ -476,8 +533,38 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
             "Void" => Some(Type::Void),
             _ => None,
         },
+        // T28: dedicated `Option<T>` AST variant.
+        TypeRef::Option(inner, _) => Some(Type::option(
+            typeref_to_type(inner).unwrap_or(Type::Unknown),
+        )),
+        // T28: source annotations `Option<Int>` parse as a generic
+        // application whose base name is "Option". Recognise it here so a
+        // `let x: Option<Int> = Some(42)` annotation resolves to a real
+        // `Type::Option(Int<64>)` and the null-safety check can fire.
+        TypeRef::Generic { base, args, .. } => {
+            if let TypeRef::Named { name, .. } = base.as_ref() {
+                if name.name == "Option" && args.len() == 1 {
+                    let inner = typeref_to_type(&args[0]).unwrap_or(Type::Unknown);
+                    return Some(Type::option(inner));
+                }
+            }
+            None
+        }
         _ => None,
     }
+}
+
+/// Returns `true` when assigning `value` to `annotated` is a **null-safety
+/// violation** (T28): the value is an `Option<T>` but the target is a bare,
+/// non-Option type. This is the case that triggers the extended diagnostic
+/// suffix (`. Use if-let or ?? to unwrap.`).
+///
+/// Concretely: `is_null_safety_violation(Int, Option<Int>)` is `true`, but
+/// `is_null_safety_violation(Option<Int>, Option<Int>)` is `false` (Option→Option
+/// is fine, handled by normal equality) and `is_null_safety_violation(Int,
+/// String)` is `false` (a plain type mismatch, not a null-safety issue).
+pub(crate) fn is_null_safety_violation(annotated: &Type, value: &Type) -> bool {
+    matches!(value, Type::Option(_)) && !matches!(annotated, Type::Option(_))
 }
 
 #[cfg(test)]

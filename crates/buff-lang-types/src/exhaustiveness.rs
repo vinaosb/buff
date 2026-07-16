@@ -81,8 +81,42 @@ pub type EnumRegistry = HashMap<String, Vec<String>>;
 /// matches Rust's shadowing semantics for items in the same module). This
 /// is a v0.5 simplification — full name-resolution arrives with the module
 /// system.
+///
+/// This function is **pure over user declarations** — it does NOT include
+/// the built-in prelude enums. Use [`build_enum_registry_with_prelude`] (or
+/// [`check_program`], which calls it) when you need the built-in `Option`
+/// variants (`Some`/`None`) registered so a `match opt { Some(x) => ...,
+/// None => ... }` can be checked for exhaustiveness (T28).
 pub fn build_enum_registry(decls: &[Decl]) -> EnumRegistry {
     let mut registry: EnumRegistry = EnumRegistry::new();
+    for decl in decls {
+        if let Decl::EnumDecl(e) = decl {
+            registry.insert(e.name.name.clone(), variant_names(e));
+        }
+    }
+    registry
+}
+
+/// Build an [`EnumRegistry`] seeded with the **built-in prelude enums**
+/// (T28), then folded with the program's user `Decl::EnumDecl`s.
+///
+/// Today the only prelude enum is `Option<T>` with variants `Some(T)` and
+/// `None`. Seeding it here means `None`/`Some` resolve as `Option` variants
+/// WITHOUT a user `enum Option` declaration — they are prelude enum
+/// variants, NOT reserved keywords (the lexer's keyword list deliberately
+/// omits them; see T28).
+///
+/// User declarations take precedence over the seed: if a program declares
+/// its own `enum Option`, the user's variant list overrides the prelude
+/// seed (user decls are inserted AFTER the seed).
+pub fn build_enum_registry_with_prelude(decls: &[Decl]) -> EnumRegistry {
+    let mut registry: EnumRegistry = EnumRegistry::new();
+    // T28: seed the built-in Option<T> enum so None/Some resolve as its
+    // variants without a user declaration.
+    registry.insert(
+        "Option".to_string(),
+        vec!["Some".to_string(), "None".to_string()],
+    );
     for decl in decls {
         if let Decl::EnumDecl(e) = decl {
             registry.insert(e.name.name.clone(), variant_names(e));
@@ -121,7 +155,9 @@ fn variant_names(e: &EnumDecl) -> Vec<String> {
 /// match c { ... }  // now `c` resolves to Color and coverage fires
 /// ```
 pub fn check_program(decls: &[Decl]) -> Result<(), TypeError> {
-    let registry = build_enum_registry(decls);
+    // T28: use the prelude-seeded registry so the built-in Option enum's
+    // variants (Some/None) are known without a user declaration.
+    let registry = build_enum_registry_with_prelude(decls);
     for decl in decls {
         let Decl::FuncDecl(f) = decl else {
             continue;
@@ -443,6 +479,20 @@ fn typeref_to_type(ty: &buff_lang_ast::TypeRef) -> Option<crate::Type> {
             "Void" => Some(crate::Type::Void),
             _ => None,
         },
+        // T28: recognise `Option<T>` annotations on function parameters so a
+        // `match opt { ... }` can resolve the scrutinee's type.
+        TypeRef::Option(inner, _) => Some(crate::Type::option(
+            typeref_to_type(inner).unwrap_or(crate::Type::Unknown),
+        )),
+        TypeRef::Generic { base, args, .. } => {
+            if let TypeRef::Named { name, .. } = base.as_ref() {
+                if name.name == "Option" && args.len() == 1 {
+                    let inner = typeref_to_type(&args[0]).unwrap_or(crate::Type::Unknown);
+                    return Some(crate::Type::option(inner));
+                }
+            }
+            None
+        }
         _ => None,
     }
 }

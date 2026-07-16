@@ -26,8 +26,10 @@ pub use env::TypeEnv;
 // crate root so downstream tools (CLI, LSP, snapshot tests) can call
 // `check_program`, `check_match_coverage`, `build_enum_registry`, and
 // `check_match_expr` without a long module path.
+// T28: `build_enum_registry_with_prelude` seeds the built-in Option enum.
 pub use exhaustiveness::{
-    build_enum_registry, check_match_coverage, check_match_expr, check_program, EnumRegistry,
+    build_enum_registry, build_enum_registry_with_prelude, check_match_coverage, check_match_expr,
+    check_program, EnumRegistry,
 };
 pub use infer::TypeInferencer;
 pub use promote::{assignable_to, promote_binary};

@@ -67,9 +67,32 @@ pub fn promote_binary(lhs: &Type, rhs: &Type) -> Option<Type> {
 /// Equality always passes. Numeric widening passes when `value` promotes up
 /// to `annotated` (e.g. `Int` → `Float`, `Int` → `Double`, `Float` → `Double`).
 /// Narrowing (e.g. `Float` → `Int`) is rejected.
+///
+/// ## T28 — Option assignment rules
+///
+/// `Option<T>` is treated **covariantly** in its inner type for assignment:
+///
+/// - `None` (which infers as `Option<Unknown>`) assigns to ANY `Option<T>`,
+///   because the empty case carries no inner evidence (the annotation pins T).
+/// - `Option<U>` assigns to `Option<T>` when `U` assigns to `T` (recursive).
+///
+/// This lets `let x: Option<Int> = None` and `let x: Option<String> =
+/// Some("hi")` both type-check, while `let y: Int = some_option` is still
+/// rejected (the bare-target case falls through to the numeric promote path,
+/// which returns `None` for an Option value and triggers the null-safety
+/// diagnostic in the inferencer).
 pub fn assignable_to(annotated: &Type, value: &Type) -> bool {
     if annotated == value {
         return true;
+    }
+    // T28: Option<T> covariance + None (Option<Unknown>) assigns to any Option.
+    if let (Type::Option(a_inner), Type::Option(v_inner)) = (annotated, value) {
+        // None (Option<Unknown>) is the empty case — it fits any Option<T>.
+        if matches!(v_inner.as_ref(), Type::Unknown) {
+            return true;
+        }
+        // Otherwise the inner types must be assignable (covariant Option).
+        return assignable_to(a_inner, v_inner);
     }
     if let Some(promoted) = promote_binary(annotated, value) {
         return promoted == *annotated;
