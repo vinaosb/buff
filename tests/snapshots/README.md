@@ -1,6 +1,6 @@
 # Snapshot Tests
 
-This directory documents the snapshot testing convention for Deox.
+This directory documents the snapshot testing convention for Buff.
 
 ## Workflow
 
@@ -13,10 +13,10 @@ This directory documents the snapshot testing convention for Deox.
 ## Per-crate snapshot location
 
 Insta writes snapshots next to the test file by default:
-- `crates/deox-ast/tests/snapshots/` — AST display snapshots
-- `crates/deox-lexer/tests/snapshots/` — token stream snapshots (T6)
-- `crates/deox-parser/tests/snapshots/` — AST parse snapshots (T7-T9)
-- `crates/deox-codegen-rust/tests/snapshots/` — generated Rust source snapshots (T11-T13)
+- `crates/buff-lang-ast/tests/snapshots/` — AST display snapshots
+- `crates/buff-lang-lexer/tests/snapshots/` — token stream snapshots (T6)
+- `crates/buff-lang-parser/tests/snapshots/` — AST parse snapshots (T7-T9)
+- `crates/buff-lang-codegen-rust/tests/snapshots/` — generated Rust source snapshots (T11-T13)
 
 ## CI behavior
 

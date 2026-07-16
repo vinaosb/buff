@@ -1,6 +1,5 @@
 ---
-source: crates/deox-lexer/tests/lexer_tests.rs
-assertion_line: 708
+source: crates/buff-lang-lexer/tests/lexer_tests.rs
 expression: "lines.join(\"\\n\")"
 ---
 func

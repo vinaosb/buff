@@ -1,6 +1,5 @@
 ---
-source: crates/deox-lexer/tests/lexer_tests.rs
-assertion_line: 700
+source: crates/buff-lang-lexer/tests/lexer_tests.rs
 expression: "lines.join(\"\\n\")"
 ---
 func
@@ -13,7 +12,7 @@ indent
 ident(print)
 (
 string_start
-string_part("Olá, Deox!")
+string_part("Olá, Buff!")
 string_end
 )
 newline

@@ -2,9 +2,20 @@
   "active_plan": "C:/Users/vsbb1/source/repos/Deox/.sisyphus/plans/rename-to-buff.md",
   "started_at": "2026-07-15T22:27:47-03:00",
   "session_ids": [
-    "ses_atlas_rename_buff"
+    "ses_atlas_rename_buff",
+    "ses_097c5b680ffeaDTHO7WB0Yquda"
   ],
   "plan_name": "rename-to-buff",
   "worktree_path": null,
-  "task_sessions": {}
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "**Rename .sisyphus plan/notepad files + repair internal links + update boulder.json**",
+      "session_id": "ses_09773e9a4ffeQxGicuNbJejIFF",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-07-16T01:50:17.898Z"
+    }
+  }
 }

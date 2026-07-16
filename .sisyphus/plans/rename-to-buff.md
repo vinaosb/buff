@@ -214,7 +214,7 @@ Max Concurrent: 3 (Wave 1)
 
 ---
 
-- [ ] 1. **Rename .sisyphus plan/notepad files + repair internal links + update boulder.json**
+- [x] 1. **Rename .sisyphus plan/notepad files + repair internal links + update boulder.json**
 
   **What to do**:
   - Use `git mv` to rename these files (PRESERVES HISTORY — never delete+create):
@@ -313,7 +313,7 @@ Max Concurrent: 3 (Wave 1)
 
 ---
 
-- [ ] 2. **Rewrite README.md for Buff (incl. ASCII architecture diagram manual realignment)**
+- [x] 2. **Rewrite README.md for Buff (incl. ASCII architecture diagram manual realignment)**
 
   **What to do**:
   - Update `README.md` content per the identifier mapping:
@@ -411,7 +411,7 @@ Max Concurrent: 3 (Wave 1)
 
 ---
 
-- [ ] 3. **ATOMIC CODE CORE: Rename crates, Cargo.tomls, all source identifiers (Deox→Buff)**
+- [x] 3. **ATOMIC CODE CORE: Rename crates, Cargo.tomls, all source identifiers (Deox→Buff)**
 
   > ⚠️ **THIS IS THE NON-SUBDIVISIBLE COMPILATION UNIT.** Cargo will NOT compile at intermediate states. The crate-dir rename, Cargo.toml name/path-dep edits, AND all `use` statement / identifier renames MUST land together before `cargo build` is attempted. Do NOT split across commits.
 
@@ -583,7 +583,7 @@ Max Concurrent: 3 (Wave 1)
 
 ---
 
-- [ ] 4. **Rename file extension `.deox` → `.buff` (examples, fixtures, path strings)**
+- [x] 4. **Rename file extension `.deox` → `.buff` (examples, fixtures, path strings)**
 
   **What to do**:
   - Use `git mv` to rename all `.deox` files to `.buff` (PRESERVES HISTORY):

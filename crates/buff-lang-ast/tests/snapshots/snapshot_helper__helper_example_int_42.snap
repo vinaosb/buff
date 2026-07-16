@@ -1,6 +1,5 @@
 ---
-source: crates/deox-ast/tests/snapshot_helper.rs
-assertion_line: 20
+source: crates/buff-lang-ast/tests/snapshot_helper.rs
 expression: "format!(\"{}\", value)"
 ---
 Lit(Int(42))
