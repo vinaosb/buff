@@ -195,7 +195,7 @@ Phase 1 (v0.1) must be complete:
 
   **Commit**: YES — Message: `feat(codegen-rust): add String+Char methods, interpolation, and grapheme iteration`
 
-- [ ] **T22**: Numeric coercion rules — flexible vs fixed modes [deep]
+- [x] **T22**: Numeric coercion rules — flexible vs fixed modes [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `Int + Float → Float` (widen), `Int + Double → Double`

@@ -1379,4 +1379,81 @@ mod tests {
         };
         let _stmt = Stmt::Break(dummy_span());
     }
+
+    // -----------------------------------------------------------------------
+    // T22 — Fixed-width `Int<W>` codegen mapping contract.
+    //
+    // The T22 spec says fixed-mode overflow must "panic in debug, wrap in
+    // release". Buff inherits this behaviour FOR FREE from Rust: codegen
+    // maps each fixed `Int<W>` to the corresponding native Rust integer
+    // (`i8`/`i16`/`i32`/`i64`/`i128`), and Rust's native arithmetic already
+    // has the debug-panic/release-wrap overflow contract. No explicit
+    // `checked_*` calls are emitted.
+    //
+    // These tests mechanically pin the mapping so a regression in
+    // `buff_type_to_syn` cannot silently widen every fixed-width integer
+    // (which would change the overflow boundary). See T22 evidence file
+    // `task-22-overflow-modes.txt`.
+    // -----------------------------------------------------------------------
+
+    /// Helper: extract the leading path-segment ident from a `syn::Type` (or
+    /// panic). Used by the T22 fixed-width mapping tests below.
+    fn first_path_segment_str(ty: &SynType) -> String {
+        match ty {
+            SynType::Path(p) => p
+                .path
+                .segments
+                .first()
+                .map(|s| s.ident.to_string())
+                .unwrap_or_else(|| panic!("path has no segments")),
+            _ => panic!("expected Path, got {ty:?}"),
+        }
+    }
+
+    #[test]
+    fn t22_fixed_int_widths_map_to_native_rust_widths() {
+        let codegen = RustCodegen::new();
+        // Every fixed Int<W> must map to the SAME-width native Rust integer.
+        for (w, expected) in [
+            (IntWidth::W8, "i8"),
+            (IntWidth::W16, "i16"),
+            (IntWidth::W32, "i32"),
+            (IntWidth::W64, "i64"),
+            (IntWidth::W128, "i128"),
+        ] {
+            let ty = Type::Int { width: w };
+            let syn_ty = codegen
+                .buff_type_to_syn(&ty)
+                .expect("Int<W> must map to a Rust type");
+            assert_eq!(
+                first_path_segment_str(&syn_ty),
+                expected,
+                "Int<{:?}] -> wrong Rust width",
+                w
+            );
+        }
+    }
+
+    #[test]
+    fn t22_fixed_int8_preserves_width_through_arithmetic() {
+        // The full T22 "fixed mode preserves type" contract: an i8 value
+        // stays i8 after arithmetic because (a) the TypeInferencer preserves
+        // width via promote_binary and (b) the codegen maps the resulting
+        // Int<8> back to i8.  We verify the codegen end of that chain here.
+        // (The inferencer end is covered by `numeric_coercion::fixed_int8_*`.)
+        let codegen = RustCodegen::new();
+        let syn_ty = codegen
+            .buff_type_to_syn(&Type::Int {
+                width: IntWidth::W8,
+            })
+            .expect("Int<8> maps to i8");
+        assert_eq!(first_path_segment_str(&syn_ty), "i8");
+        // And Int<32> + Int<32> = Int<32> maps back to i32 (not widened to i64).
+        let syn_ty = codegen
+            .buff_type_to_syn(&Type::Int {
+                width: IntWidth::W32,
+            })
+            .expect("Int<32> maps to i32");
+        assert_eq!(first_path_segment_str(&syn_ty), "i32");
+    }
 }

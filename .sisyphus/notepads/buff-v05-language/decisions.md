@@ -132,3 +132,103 @@ wiring lands; tracked as deferred work.
 `TokenKind::CharLit` token + the `LBracket` parser arm + the `lower_method_call`
 arm + the `unicode-segmentation` dep reverts T21 cleanly.
 
+## T22 — Numeric coercion (flexible vs fixed Int modes): pure module, no AST change
+
+**Date:** T22 (v0.5).  **Scope:** additive, non-breaking.
+
+**Change:** Added a NEW module `crates/buff-lang-types/src/range_analysis.rs`
+with a pure range-analysis API: `IntRange` (closed i128 interval with widening
+arithmetic via `Add`/`Sub`/`Mul`/`Neg` operator traits + `union` for joins),
+`smallest_int_width(min, max) -> IntWidth`, and `collection_int_width(values)
+-> IntWidth`. The module is re-exported at the crate root.
+
+**No AST or `Type` change** (unlike T20/T21). T22 lives entirely in the
+types crate and is consumed by tests today; the inference pass will call
+into it once flexible-mode literal inference is wired in (deferred to T23/T67
+— see below).
+
+### Design choices
+
+**1. Range analysis is a PURE module.** The T22 plan called for "extract
+range tracker into `buff-lang-types/src/range_analysis.rs`" (REFACTOR step).
+I went one step further and made it pure from the start: the module knows
+nothing about the AST, the `TypeInferencer`, or the parser. It exposes
+`IntRange` + two free functions. Tests today call it directly; the
+inference pass (and T23/T67 collection literals) will call it later.
+Benefits: (a) trivially testable, (b) reusable from any call-site,
+(c) no risk of circular deps with `infer.rs`.
+
+**2. i128 internal width.** `IntRange::min`/`max` are `i128`. A single
+interval type then soundly represents the bounds of every signed Rust
+width up to and including `i128` itself. Saturating arithmetic guards
+the (unreachable-in-practice) endpoints.
+
+**3. Operator traits over inherent methods.** Initial draft used inherent
+`add`/`sub`/`mul`/`neg` methods on `IntRange`. Clippy `-D warnings`
+rejected them (`should_implement_trait`). Switched to `Add`/`Sub`/`Mul`/`Neg`
+trait impls — more idiomatic Rust anyway (`x + y`, `-r`). The non-trait
+helpers `sub_interval` / `mul_interval` are kept as the documented
+implementation bodies the trait impls delegate to.
+
+**4. Overflow behaviour is inherited from Rust FOR FREE — no `checked_*` emitted.**
+The T22 spec said fixed-mode overflow must "panic in debug, wrap in
+release". Codegen ALREADY maps each fixed `Int<W>` to the corresponding
+native Rust integer (`i8`/`i16`/`i32`/`i64`/`i128`) via `buff_type_to_syn`,
+and Rust's native `+`/`-`/`*` operators ALREADY have exactly this overflow
+contract. So T22 does NOT emit explicit `checked_*` calls — the simplest
+correct path. The T22 codegen tests (`t22_fixed_int_widths_map_to_native_rust_widths`,
+`t22_fixed_int8_preserves_width_through_arithmetic`) pin the mapping contract
+so a regression in `buff_type_to_syn` cannot silently widen every fixed-width
+integer (which would change the overflow boundary).
+
+**5. Plain `Int` annotation still means `Int<64>`.** Flexible narrowing
+(value 5 → i8) is for UNANNOTATED `let x = 5`. An explicit `let x: Int = 5`
+keeps the default width (Int<64>) — pinned by `let_decl_int_annotation_uses_int64_default`.
+`typeref_to_type("Int")` returns `Type::int_default()` and T22 does not
+change that. The parser does not yet produce `Int<8>` TypeRefs (T11
+limitation), so `let x: Int<8>` is not parseable today; the fixed-width
+mapping is exercised via direct `IntRange` / `Type::Int { width: W8 }`
+construction in tests.
+
+### CRITICAL DEFERRAL: collection-literal end-to-end inference
+
+The T22 plan's "RED: `[20, 25, 18] → Vector<Int<8>>`" line cannot be
+tested end-to-end because **the AST has no array/collection-literal
+expression yet** — `[20,25,18]` does not parse until T23/T67 (Wave 6).
+Per the task instructions, T22 instead:
+
+1. Implements `collection_int_width(values: &[i128]) -> IntWidth` as a
+   pure, reusable function.
+2. Tests it directly with value slices: `collection_int_width(&[20,25,18]) == W8`,
+   `&[100000,200000] == W32`, etc. (4 dedicated tests + 5 unit tests in
+   the module).
+3. Documents (here) that end-to-end `[...] → Vector<Int<8>>` inference
+   is deferred to **T23/T67**, which will call `collection_int_width`
+   when lowering collection literals.
+
+This satisfies the auto-width acceptance intent without a fake end-to-end
+test.
+
+### DEFERRAL: flexible literal inference in `TypeInferencer`
+
+Today `infer_literal` maps `Literal::Int(_) => Type::int_default()` (always
+Int<64>); T22 does NOT change that mapping. Wiring range analysis into the
+inferencer (so `let x = 5` infers `Int<8>` rather than `Int<64>`) is a
+cross-cutting change that will land together with T23/T67's
+collection-literal inference. The pure-function foundation (`IntRange`,
+`smallest_int_width`, `collection_int_width`) is in place and tested; the
+wiring is deferred to keep T22 atomic and non-breaking.
+
+### Why no runtime overflow-panic test
+A `#[should_panic]` test that asserts `i8::MAX + 1` panics in debug builds
+would test *Rust's* overflow contract, not Buff's codegen. The
+mapping-contract test is the correct hook: it pins the *width* that flows
+into Rust's native operators, which is where the debug-panic/release-wrap
+behaviour actually comes from. T23/T67 (or a future runtime-evaluation
+task) can layer a runtime test on top.
+
+**Rollback:** removing `range_analysis.rs`, the `pub mod range_analysis;`
+line + 3 re-exports from `lib.rs`, the `tests/numeric_coercion.rs` file,
+and the 2 `t22_*` tests in `rust_codegen.rs::tests` reverts T22 cleanly
+(additive-only change set; no other crate's behaviour changes).
+

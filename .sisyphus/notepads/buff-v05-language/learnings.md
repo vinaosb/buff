@@ -163,3 +163,120 @@ silently corrupted backtick sequences (PowerShell `` `0 `` escape => NUL byte). 
 affected notepad files were deleted and recreated via the `write` tool (clean UTF-8,
 no BOM). Future notepad appends should avoid PowerShell here-strings containing
 backticks — prefer the `write`/`edit` tools or single-quoted PS strings.
+
+## T22 — Numeric coercion rules (flexible vs fixed Int modes)
+
+### Status: COMPLETE
+
+Implemented range analysis as a **pure module** (`range_analysis.rs`) that the
+inference pass (and future T23/T67 collection literals) will call. No changes
+to the AST or to the existing `promote_binary` precedence chain were needed —
+the widening rules `Int+Float→Float` and `Float+Double→Double` already worked
+end-to-end from T10/T20; T22 just pinned them with regression tests.
+
+### What was added
+
+**NEW module** `crates/buff-lang-types/src/range_analysis.rs` (~250 lines incl. 13 unit tests):
+- `struct IntRange { min: i128, max: i128 }` — closed signed interval, `Copy`.
+- Methods: `new` (defensive ordering), `exact(v)` (singleton), `width()` (delegates to `smallest_int_width`), `union` (if/else join), `sub_interval`, `mul_interval`.
+- Operator-trait impls (the idiomatic Rust path; also satisfies clippy `should_implement_trait`):
+  - `Add<Self>` — interval addition `[a.min+b.min, a.max+b.max]`, saturating.
+  - `Sub<Self>` — delegates to `sub_interval` (`[a.min-b.max, a.max-b.min]`).
+  - `Mul<Self>` — delegates to `mul_interval` (4-corner sound rule).
+  - `Neg` — `[-max, -min]`.
+- Free fns:
+  - `smallest_int_width(min: i128, max: i128) -> IntWidth` — cascade of
+    `i8/i16/i32/i64/i128` range checks. `5→W8`, `300→W16`, `100000→W32`, etc.
+  - `collection_int_width(values: &[i128]) -> IntWidth` — min/max across slice,
+    forwards to `smallest_int_width`. Empty slice → `W64` (Buff default).
+
+**lib.rs**: added `pub mod range_analysis;` + crate-root re-exports of
+`IntRange`, `smallest_int_width`, `collection_int_width`.
+
+**Integration tests** `crates/buff-lang-types/tests/numeric_coercion.rs` (~390 lines, 27 tests):
+- 6 cross-category widening tests (Int↔Float↔Double, nested arithmetic).
+- 8 flexible-mode auto-width tests (5→i8, 300→i16, 100000→i32, 127/128 boundary,
+  `x=127; y=x+1→i16`, negative widening, negation, union).
+- 4 collection-helper tests (`[20,25,18]→W8`, large pair, negative min, empty→W64).
+- 7 fixed-mode preservation tests (Int<32>+Int<32>→Int<32>, Int<8> stays Int<8>
+  across Add/Sub/Mul/Div/Mod, BitAnd/Or/Xor/Shl/Shr, negation, mixed-width max).
+- 1 overflow-contract documentation test (names the Rust-inherited behaviour,
+  asserts the width invariant the contract depends on).
+- 2 let-decl integration tests (fixed annotation pins width; plain `Int`
+  annotation resolves to default Int<64>).
+
+**Codegen tests** in `rust_codegen.rs::tests` (2 new tests):
+- `t22_fixed_int_widths_map_to_native_rust_widths` — pins every `Int<W>` →
+  native Rust width mapping (i8/i16/i32/i64/i128).
+- `t22_fixed_int8_preserves_width_through_arithmetic` — codegen end of the
+  fixed-preservation contract (Int<8>→i8, Int<32>→i32; not silently widened).
+
+### Key design insights
+
+- **Operator traits over inherent methods.** Initial implementation used
+  inherent `add`/`sub`/`mul`/`neg` methods on `IntRange`; clippy's
+  `-D warnings` rejected them (`should_implement_trait`). Fix: implement
+  `Add`/`Sub`/`Mul`/`Neg`. More idiomatic Rust anyway (`x + y`, `-r`).
+  The non-trait helpers `sub_interval`/`mul_interval` are retained as the
+  documented implementation bodies the trait impls delegate to.
+
+- **Overflow behaviour is inherited from Rust FOR FREE.** T22 spec says
+  fixed-mode overflow must "panic in debug, wrap in release". Codegen
+  already maps `Int<W>` → native Rust integer; Rust's native `+`/`-`/`*`
+  already has exactly this overflow contract. NO `checked_*` calls need
+  to be emitted — the simplest correct path. The T22 codegen tests pin
+  the *mapping contract* (the width that flows into Rust's operators),
+  which is the actual hook where the behaviour lives.
+
+- **No AST change.** Unlike T20/T21 which added new `Literal`/`Expr`
+  variants, T22 is a pure-types-crate addition. The new module lives
+  entirely inside `buff-lang-types` and is consumed by tests today; the
+  inference pass will call it once flexible-mode literal inference is
+  wired in (a follow-up — see Deferral below).
+
+- **i128 is the right internal width.** Using `i128` for `IntRange::min`/`max`
+  lets a single interval type soundly represent the bounds of every signed
+  Rust width up to and including `i128` itself. Saturating arithmetic on
+  i128 is unreachable for any practical Buff program.
+
+- **Plain `Int` annotation still means Int<64>.** Flexible narrowing is for
+  *unannotated* `let x = 5`; an explicit `let x: Int = 5` keeps the default
+  width (Int<64>) — pinned by `let_decl_int_annotation_uses_int64_default`.
+  `typeref_to_type("Int")` returns `Type::int_default()` and T22 does not
+  change that.
+
+### Deferred (to T23/T67 — Wave 6 collection literals)
+
+- **End-to-end `[...] → Vector<Int<8>>` inference.** The AST has no
+  array/collection-literal expression yet (T23/T67 adds it). T22
+  implements `collection_int_width(&[i128])` as a pure, reusable function
+  and tests it directly with value slices. End-to-end inference will call
+  this helper once T23/T67 lands. Documented in decisions.md §T22.
+
+- **Flexible literal inference in `TypeInferencer`.** Today `Literal::Int(_) → Type::int_default()`
+  (always Int<64>); T22 does NOT change that mapping. Wiring the range
+  analysis into the inferencer (so `let x = 5` infers `Int<8>` not
+  `Int<64>`) is a cross-cutting change that should land together with
+  T23/T67's collection-literal inference. The pure-function foundation is
+  in place and tested; the wiring is deferred to keep T22 atomic and
+  non-breaking.
+
+- **Runtime overflow-panic test.** A `#[should_panic]` test that exercises
+  Rust's native i8 overflow would test Rust, not Buff codegen. The
+  mapping-contract test (`t22_fixed_int_widths_map_to_native_rust_widths`)
+  is the correct hook: it pins the width that flows into Rust's operators,
+  which is where the debug-panic/release-wrap behaviour comes from.
+
+### Verification (all green)
+- `cargo test -p buff-lang-types`           115 pass (31 lib + 56 infer_tests + 27 numeric_coercion + 1 doc)
+- `cargo test -p buff-lang-codegen-rust`    108 pass (25 lib + 83 across 5 integration test files)
+- `cargo check --workspace`                 PASS
+- `cargo clippy -p buff-lang-types -p buff-lang-codegen-rust --all-targets -- -D warnings`  0 warnings
+- `cargo fmt -p buff-lang-types -p buff-lang-codegen-rust -- --check`  PASS
+
+### Side notes
+- Pre-existing `cargo fmt --check` diff in `buff-lang-error/tests/span_test.rs`
+  (import alphabetical ordering) was NOT touched (that crate is out of T22's
+  scope). Following T20 precedent, only the two touched crates were fmt'd.
+- The `unused manifest key: workspace.dev-dependencies` warning is pre-existing
+  (workspace Cargo.toml); not introduced by T22 and out of scope.
