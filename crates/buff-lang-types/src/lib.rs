@@ -21,6 +21,10 @@ pub mod env;
 pub mod exhaustiveness;
 pub mod infer;
 pub mod modules;
+// T33: ownership analysis (Copy classification, Arc-across-spawn detection,
+// CoW mutation detection). Re-exported at crate root so the codegen pass
+// can call `buff_lang_types::analyze_ownership(func)` without a long path.
+pub mod ownership;
 pub mod prelude;
 pub mod promote;
 pub mod range_analysis;
@@ -51,6 +55,12 @@ pub use modules::{
     build_graph, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph, ModuleLoader,
 };
 pub use promote::{assignable_to, promote_binary};
+// T33: ownership analysis (Copy/Arc/CoW facts). Re-exported at crate root
+// for the codegen pass (and snapshot tests) so callers can use
+// `buff_lang_types::OwnershipFacts` / `analyze_ownership` without a long
+// module path. Deterministic (BTreeSet based) — same AST → byte-identical
+// facts every time (the T29 flaky-test lesson).
+pub use ownership::{analyze_func as analyze_ownership, OwnershipFacts};
 // T96: standard-library prelude. Re-exported at the crate root so the
 // type inferencer and downstream crates (codegen, CLI) can call
 // `is_prelude` / `prelude::return_type` without a long path.

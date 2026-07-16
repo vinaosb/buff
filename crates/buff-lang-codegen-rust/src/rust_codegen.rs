@@ -123,6 +123,14 @@ pub struct RustCodegen {
     /// sync). Combined with [`Self::current_fn_is_async`] via
     /// [`Self::in_async_context`].
     async_block_depth: usize,
+    /// T33: depth of `spawn <expr>` bodies we're currently inside.
+    /// Incremented by [`Self::lower_spawn`] around the task-body lowering
+    /// so ident uses inside a spawn body can be rewritten to
+    /// `Arc::clone(&x)` (for Arc-shared bindings). Combined with
+    /// [`Self::move_analyzer`]'s `is_arc_var` to decide whether a bare
+    /// ident inside a spawn lowers to `Arc::clone(&x)` or to the regular
+    /// `.clone()` / move path.
+    spawn_depth: usize,
     /// T31: collected warning-level diagnostics (e.g. `block()` inside an
     /// async fn is a deadlock risk). Publicly accessible via
     /// [`Self::take_warnings`] so callers (CLI, tests) can render them
@@ -152,6 +160,7 @@ impl RustCodegen {
             async_fns: BTreeSet::new(),
             current_fn_name: None,
             async_block_depth: 0,
+            spawn_depth: 0,
             warnings: Vec::new(),
             extern_crates: BTreeSet::new(),
         }
@@ -732,11 +741,39 @@ impl RustCodegen {
                 let ident = ast_ident_to_syn(name);
                 let init_expr = self.lower_expr(value)?;
 
+                // T33: Arc-wrap the initializer of a binding captured
+                // across a `spawn` boundary. The resulting binding has
+                // type `Arc<T>` (rather than `T`); inside spawn bodies
+                // uses are lowered to `Arc::clone(&x)` (cheap refcount
+                // bump), and any subsequent mutation is lowered to
+                // `Arc::make_mut(&mut x)` (copy-on-write). This is how
+                // Buff hides the borrow-checker from the user when data
+                // is shared between the spawning thread and a spawned
+                // task — Rust's `Arc` gives sound shared ownership
+                // without exposing `Rc`/`Arc`/`Mutex` syntax in Buff.
+                let is_arc_var = self.move_analyzer.is_arc_var(&name.name);
+                let init_expr = if is_arc_var {
+                    wrap_in_arc_new(init_expr)
+                } else {
+                    init_expr
+                };
+
                 // Run the inferencer on the value so we can emit an
                 // explicit Rust type annotation. If the user wrote an
                 // explicit Buff annotation (`ty: Some(..)`), prefer it;
                 // otherwise fall back to the inferred type (T12).
-                let inferred_syn_ty: Option<SynType> = if let Some(type_ref) = ty {
+                //
+                // T33: when Arc-wrapping, SKIP the annotation — the
+                // binding's actual Rust type is `Arc<T>` (not the `T`
+                // the inferencer derives from the pre-wrap initializer),
+                // and emitting `let s: String = Arc::new(...)` would be
+                // incoherent. Letting Rust infer `Arc<T>` keeps the
+                // generated source compiling. (A future task may compute
+                // the wrapped type explicitly; for v0.5 inference is
+                // simpler and equally correct.)
+                let inferred_syn_ty: Option<SynType> = if is_arc_var {
+                    None
+                } else if let Some(type_ref) = ty {
                     Some(self.ast_typeref_to_syn(type_ref)?)
                 } else {
                     // Bind in the inferencer so later statements can see
@@ -797,12 +834,27 @@ impl RustCodegen {
                 // The LHS of an assignment is NOT a "use" — it doesn't
                 // consume a move. If the target is a bare Ident, lower it
                 // directly without consulting the move analyzer.
+                //
+                // T33: if the target is a bare Ident naming an
+                // Arc-shared-and-subsequently-mutated binding (CoW site),
+                // wrap it in `Arc::make_mut(&mut x)`. This gives
+                // copy-on-write semantics: the inner value is cloned
+                // only if the Arc's refcount > 1 (i.e. when the spawned
+                // task is actually observing the same Arc); otherwise
+                // `make_mut` borrows the value in place with no clone.
+                // The resulting LHS is `*Arc::make_mut(&mut x)` so the
+                // assignment writes through to the (possibly-cloned)
+                // inner value.
                 let lhs = if let Expr::Ident(name, _) = &target {
-                    SynExpr::Path(syn::ExprPath {
-                        attrs: Vec::new(),
-                        qself: None,
-                        path: syn::Path::from(ast_ident_to_syn(name)),
-                    })
+                    if self.move_analyzer.is_arc_mut_var(&name.name) {
+                        arc_make_mut_deref(name)
+                    } else {
+                        SynExpr::Path(syn::ExprPath {
+                            attrs: Vec::new(),
+                            qself: None,
+                            path: syn::Path::from(ast_ident_to_syn(name)),
+                        })
+                    }
                 } else {
                     self.lower_expr(target)?
                 };
@@ -887,6 +939,15 @@ impl RustCodegen {
                     qself: None,
                     path: syn::Path::from(ast_ident_to_syn(name)),
                 };
+                // T33: Arc-shared binding captured inside a spawn body —
+                // emit `Arc::clone(&x)` instead of moving or deep-cloning.
+                // The Arc wrap was inserted at the binding's `let` site
+                // (see [`Self::lower_stmt`]`'s LetDecl arm); here we grab
+                // a cheap refcount-bumping clone so the spawned task owns
+                // its own `Arc<T>` handle to the shared data.
+                if self.spawn_depth > 0 && self.move_analyzer.is_arc_var(&name.name) {
+                    return Ok(arc_clone_call(name));
+                }
                 if self.move_analyzer.needs_clone(&name.name) {
                     // Insert `.clone()` so this use is valid after a prior move.
                     Ok(SynExpr::MethodCall(syn::ExprMethodCall {
@@ -2236,7 +2297,13 @@ impl RustCodegen {
         // still get `.await` (the `async move { ... }` block IS an async
         // context, even if the spawning fn is sync).
         self.async_block_depth += 1;
+        // T33: bump spawn depth so ident uses inside the task body get
+        // rewritten to `Arc::clone(&x)` (for Arc-shared bindings) instead
+        // of moving or deep-cloning. Reset on exit so idents outside the
+        // spawn go back to the regular move/clone path.
+        self.spawn_depth += 1;
         let task_expr = self.lower_expr(task)?;
+        self.spawn_depth -= 1;
         self.async_block_depth -= 1;
         let tokens: proc_macro2::TokenStream = quote::quote! {
             tokio::spawn(async move { #task_expr })
@@ -2896,6 +2963,109 @@ fn make_await(base: SynExpr) -> SynExpr {
         base: Box::new(base),
         dot_token: Default::default(),
         await_token: Default::default(),
+    })
+}
+
+/// T33: wrap an initializer in `Arc::new(...)` (used for Arc-shared
+/// bindings — those captured across a `spawn` boundary).
+///
+/// Builds `std::sync::Arc::new(<inner>)` as a `syn::ExprCall` on the
+/// fully-qualified `std::sync::Arc::new` path. The fully-qualified form
+/// is used so generated code never needs a `use std::sync::Arc;` import
+/// (mirrors the T25 HashMap pattern and the T24 Matrix pattern —
+/// emit-on-demand codegen keeps the generated source self-contained).
+fn wrap_in_arc_new(inner: SynExpr) -> SynExpr {
+    let arc_new_path = rust_path("std::sync::Arc::new");
+    let callee = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: arc_new_path,
+    });
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(inner);
+    SynExpr::Call(syn::ExprCall {
+        attrs: Vec::new(),
+        func: Box::new(callee),
+        paren_token: Default::default(),
+        args,
+    })
+}
+
+/// T33: build `Arc::clone(&name)` (used at use sites of Arc-shared
+/// bindings INSIDE a spawn body).
+///
+/// The argument is a borrowed reference (`&name`) so `Arc::clone` bumps
+/// the refcount without cloning the underlying data. The fully-qualified
+/// path keeps generated source free of any `use std::sync::Arc;`.
+fn arc_clone_call(name: &buff_lang_ast::common::Ident) -> SynExpr {
+    let arc_clone_path = rust_path("std::sync::Arc::clone");
+    let callee = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: arc_clone_path,
+    });
+    // `&name` — single-segment borrow of the binding.
+    let borrowed_name = SynExpr::Reference(syn::ExprReference {
+        attrs: Vec::new(),
+        and_token: Default::default(),
+        mutability: None,
+        expr: Box::new(SynExpr::Path(syn::ExprPath {
+            attrs: Vec::new(),
+            qself: None,
+            path: syn::Path::from(ast_ident_to_syn(name)),
+        })),
+    });
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(borrowed_name);
+    SynExpr::Call(syn::ExprCall {
+        attrs: Vec::new(),
+        func: Box::new(callee),
+        paren_token: Default::default(),
+        args,
+    })
+}
+
+/// T33: build `*Arc::make_mut(&mut name)` — the LHS of an assignment to
+/// an Arc-shared-and-subsequently-mutated binding (CoW site).
+///
+/// `Arc::make_mut(&mut x)` returns `&mut T`, cloning the inner value
+/// only if the Arc's refcount > 1 (i.e. when the spawned task is
+/// actually observing the same Arc). The leading `*` dereferences so
+/// the assignment writes through to the (possibly-cloned) inner value:
+/// `*Arc::make_mut(&mut v) = vec![3, 4]`. The fully-qualified path
+/// keeps generated source free of any `use std::sync::Arc;`.
+fn arc_make_mut_deref(name: &buff_lang_ast::common::Ident) -> SynExpr {
+    let arc_make_mut_path = rust_path("std::sync::Arc::make_mut");
+    let callee = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: arc_make_mut_path,
+    });
+    // `&mut name` — mutable borrow of the binding.
+    let mut_borrowed_name = SynExpr::Reference(syn::ExprReference {
+        attrs: Vec::new(),
+        and_token: Default::default(),
+        mutability: Some(Default::default()),
+        expr: Box::new(SynExpr::Path(syn::ExprPath {
+            attrs: Vec::new(),
+            qself: None,
+            path: syn::Path::from(ast_ident_to_syn(name)),
+        })),
+    });
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(mut_borrowed_name);
+    let make_mut_call = SynExpr::Call(syn::ExprCall {
+        attrs: Vec::new(),
+        func: Box::new(callee),
+        paren_token: Default::default(),
+        args,
+    });
+    // `*<call>` — prefix dereference so the surrounding assignment writes
+    // through to the inner value.
+    SynExpr::Unary(syn::ExprUnary {
+        attrs: Vec::new(),
+        op: syn::UnOp::Deref(Default::default()),
+        expr: Box::new(make_mut_call),
     })
 }
 

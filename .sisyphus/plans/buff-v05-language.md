@@ -706,7 +706,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T33**: intelligent clone analysis [ultrabrain]
+- [x] **T33**: intelligent clone analysis [ultrabrain]
 
   **What to do** (TDD):
   - **RED**: Write test: `let s = "hi"; use(s); use(s)` → second use gets `.clone()` (use after move)
