@@ -159,6 +159,7 @@ name = "buff-lang-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "buff-lang-ast",
  "buff-lang-codegen-rust",
  "buff-lang-error",
  "buff-lang-lexer",
@@ -175,6 +176,8 @@ version = "0.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
  "buff-lang-types",
  "insta",
  "prettyplease",
@@ -199,6 +202,7 @@ dependencies = [
 name = "buff-lang-error"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "thiserror",
 ]
 
@@ -220,6 +224,7 @@ dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
  "buff-lang-lexer",
+ "buff-lang-types",
  "thiserror",
 ]
 
@@ -237,6 +242,8 @@ version = "0.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
  "insta",
  "thiserror",
 ]

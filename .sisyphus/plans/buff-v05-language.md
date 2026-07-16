@@ -822,7 +822,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T36**: Error message improvements + parser error recovery [unspecified-high]
+- [x] **T36**: Error message improvements + parser error recovery [unspecified-high]
 
   **What to do** (TDD):
   - **RED**: Write test: type error shows source line with caret (^) pointing to error location

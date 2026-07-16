@@ -6,3 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 thiserror.workspace = true
+
+[dev-dependencies]
+# T36: snapshot tests for stable error-message rendering (public API).
+insta.workspace = true

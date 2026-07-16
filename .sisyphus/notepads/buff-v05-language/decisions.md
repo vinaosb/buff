@@ -1144,3 +1144,136 @@ for v0.5 tests).
 **Rationale:** Minimal but useful. `test_*` is the common case. Recursive
 `glob_match` on byte slices (8 lines). No regex dependency. Case-sensitive.
 
+
+## T36 — Error rendering, Levenshtein, parser recovery design
+
+**Date:** T36 (v0.5 Wave 8).  **Scope:** additive + refactor, non-breaking.
+
+### A. `parse()` signature — UNCHANGED (delegation refactor)
+
+**Decision:** `parse(tokens, source_id) -> Result<Vec<Decl>, ParseError>`
+keeps its exact signature and fail-fast contract. NEW sibling
+`parse_recovering(tokens, source_id) -> (Vec<Decl>, Vec<ParseError>)`
+accumulates errors.
+
+**Implementation choice:** Instead of duplicating the 150-line top-level
+dispatch table, **extracted `parse_one_decl(stream) -> Result<Option<Decl>,
+ParseError>`** as the shared per-iteration body. `parse()` loops calling it
+with `?` (propagates first error); `parse_recovering()` loops calling it
+with `match` (records + syncs on error). Both entry points are guaranteed to
+agree on what counts as a top-level declaration because they share the SAME
+match arms.
+
+**Why not "keep `parse()` literally as-is":** The task offered "keep
+`parse()` as-is; document the choice" as the safe option. But literal
+duplication of the dispatch is a maintenance trap — future top-level decl
+kinds (struct, trait, module in v0.5/v1.0) would need to be added in TWO
+places, risking drift. The delegation refactor preserves `parse()`'s public
+contract exactly (`Result<Vec<Decl>, ParseError>`, first-error-fail-fast,
+discards partial decls) while halving the code surface. All 164 existing
+parser tests (stmt + expr + layout + module + enum_match) pass unchanged,
+proving behavior preservation.
+
+**Migration note:** None needed. `parse()` callers (pipeline.rs,
+test_runner.rs, test_command.rs, codegen tests, types/modules.rs) are
+unaffected. NEW callers wanting multi-error collection use
+`parse_recovering` explicitly.
+
+### B. Sync-point set — top-level starters only
+
+**Decision:** `TokenStream::sync_to_recovery_point` stops on `KwFunc`,
+`KwAsync`, `KwEnum`, `KwImport`, `KwExport`, `KwExtern`, `At` (attribute
+prefix). NOT on `KwLet`/`KwMatch`/`Newline` (the task spec's general list).
+
+**Rationale:** The task spec says "sync until func, let, match, newline" —
+that's the GENERAL guidance for panic-mode recovery, applicable to
+FUTURE statement-level recovery. For the TOP-LEVEL `parse_recovering` loop,
+only top-level declaration starters are valid resume points. If sync stopped
+on `KwLet` (a statement keyword), the loop would dispatch on it, hit the
+"only function declarations are allowed at top level" catch-all arm,
+record another error, and sync again — potentially looping. Restricting
+to decl starters avoids this. The infinite-loop guard (`if pos unchanged,
+force-advance`) is a belt-and-suspenders backup.
+
+**Future work:** When statement-level recovery is added (a separate task),
+a statement-scoped `sync_to_stmt_recovery_point` can stop on the broader
+`func/let/match/newline` set.
+
+### C. Levenshtein threshold = 2, char-based, ties broken alphabetically
+
+**Decision:** `SUGGESTION_MAX_DISTANCE = 2`. `levenshtein` is char-based
+(not byte-based) for correct multi-byte handling. `suggest_close` breaks
+distance ties by lexicographic order of the candidate (deterministic, no
+HashMap order dependency).
+
+**Rationale:**
+- **Threshold 2**: transpositions (`pritn` → `print`) cost 2 in classic
+  Levenshtein (two substitutions: i↔n, n↔i). Threshold 1 would miss them.
+  Threshold 3 starts surfacing spurious matches. 2 is the sweet spot used
+  by rustc and Clang.
+- **Char-based**: `Olá` vs `Ola` should be distance 1 (one accent
+  substitution), not distance 2 (byte-counting would see `á` as 2 bytes
+  vs `a` as 1 byte, yielding a deletion + insertion = 2). Char-based
+  matches user perception.
+- **Alphabetical tie-break**: `suggest_close("abx", &["abz", "aby"])`
+  returns `Some("aby")` regardless of slice order. Deterministic output
+  for snapshot tests (T29 lesson). The scan is linear; ties are replaced
+  only when `cand < best_so_far`, so the alphabetically smallest wins.
+
+### D. Render format — rustc-style with line-number gutter
+
+**Decision:** `Diagnostic::render(source)` produces:
+```
+[Error] <message>
+  |
+N | <source line>
+  | <col-padding>^^^
+  |
+  note: <note>
+```
+
+**Rationale:** Mirrors rustc's familiar layout. The line-number gutter is
+right-aligned to `line_no_str.len()`; empty/caret lines replace the line
+number with the same width of spaces so the pipes align. Multi-line spans
+are **clamped to the line containing `span.start`** so carets never
+overflow past the source-line newline (a span crossing lines is rare and
+pointing at the start line is the most useful behavior). Zero-width spans
+get exactly one caret. Out-of-bounds spans (`start > source.len()`,
+e.g. synthetic EOF spans) render only header + notes — no caret block —
+because there's no source line to point at.
+
+### E. Inline snapshots (insta `@r#"..."#`)
+
+**Decision:** 5 stable error-message snapshots are INLINE in the test source
+via `insta::assert_snapshot!(value, @r#"..."#)`. No external `.snap` files.
+
+**Rationale:**
+- Error wording is public API (per task spec). Snapshots pin it down.
+- Inline snapshots keep the expected output next to the test logic — easier
+  to review in PRs, no separate `.snap` file to navigate.
+- **Insta strips ONE leading newline** from inline snapshot literals (a
+  convention so `@r#"` can sit on its own line). The actual value must
+  NOT start with `\n`; trailing `\n` is preserved verbatim.
+- No `.snap.new` or `.pending-snap` files to commit/gitignore (the
+  project bans committing these).
+
+### Files changed (additive + refactor)
+
+- `crates/buff-lang-error/Cargo.toml` — added `[dev-dependencies] insta.workspace = true`.
+- `crates/buff-lang-error/src/diagnostic.rs` — +256 lines: `Diagnostic::render`, `render_span_in_source` (private), `render_diagnostics`, `levenshtein`, `SUGGESTION_MAX_DISTANCE`, `suggest_close`, `format_did_you_mean`.
+- `crates/buff-lang-error/tests/error_messages.rs` — NEW, 24 tests (19 functional + 5 inline snapshots).
+- `crates/buff-lang-parser/src/parser.rs` — refactored: extracted `parse_one_decl` (private helper), simplified `parse()` to delegate, added `parse_recovering`.
+- `crates/buff-lang-parser/src/stream.rs` — +52 lines: `sync_to_recovery_point`.
+- `crates/buff-lang-parser/src/lib.rs` — exported `parse_recovering`.
+- `crates/buff-lang-parser/tests/error_recovery.rs` — NEW, 5 tests.
+- `Cargo.lock` — insta added to buff-lang-error dev-deps (auto).
+
+### Existing parser error tests — UNCHANGED
+
+All 164 existing parser tests (stmt_tests 37, expr_tests 73, layout_tests 22,
+module_system 27, enum_match 5) pass without modification. The `parse()`
+refactor (extracting `parse_one_decl`) preserves fail-fast behavior exactly:
+same first-error semantics, same discarded-partial-decls semantics. No
+existing test's expected error message or span changed.
+
+

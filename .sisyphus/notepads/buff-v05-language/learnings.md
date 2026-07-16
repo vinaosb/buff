@@ -991,3 +991,110 @@ explicitly allows this fallback.
 - Workspace total: ALL pass (0 failed).
 
 
+## T36 — Error message improvements + parser error recovery
+
+### Status: COMPLETE. HEAD 7575af3 → uncommitted (orchestrator commits).
+
+### What landed
+
+1. **Diagnostic rendering** (`crates/buff-lang-error/src/diagnostic.rs`):
+   - `Diagnostic::render(source: &str) -> String` — rustc-style output:
+     `[<severity>] <msg>` header, source line with line-number gutter, caret
+     line (`^^^`) whose width = char-count of the span clamped to the line,
+     trailing empty gutter line, then `  note: <text>` per note.
+   - **Column accounting is char-based** (not byte), so multi-byte UTF-8
+     aligns under one caret column. Matches `SourceFile::lookup` convention
+     (T4). Zero-width spans still get one caret; out-of-bounds spans
+     (`start > source.len()`) render header + notes only (no caret block).
+   - `render_diagnostics(&[Diagnostic], source) -> String` — joins N
+     diagnostics with a blank line between them, for multi-error output.
+2. **Levenshtein + did-you-mean** (same file):
+   - `levenshtein(a, b) -> usize` — classic two-row DP, **char-based**.
+   - `SUGGESTION_MAX_DISTANCE = 2` (covers transpositions = distance 2 in
+     classic Levenshtein, single-char substitutions, and 1-2 typos).
+   - `suggest_close<'a>(input, candidates) -> Option<&'a str>` — closest
+     candidate within threshold. **Ties broken alphabetically** for
+     determinism (T29 lesson re-applied). Cheap length pre-filter skips the
+     DP when `|len(a) - len(b)| > threshold`.
+   - `format_did_you_mean(input, candidates) -> Option<String>` — wraps
+     `suggest_close` with the canonical `Did you mean \`<c>\`?` formatting.
+3. **Parser recovery** (`crates/buff-lang-parser/src/parser.rs` +
+   `stream.rs`):
+   - NEW `parse_recovering(tokens, source_id) -> (Vec<Decl>, Vec<ParseError>)`
+     — accumulates errors and continues. Exported from `lib.rs`.
+   - NEW `TokenStream::sync_to_recovery_point(&mut self) -> bool` — advances
+     past tokens until a top-level sync point (KwFunc/KwAsync/KwEnum/
+     KwImport/KwExport/KwExtern/At) or EOF. Does NOT consume the sync token.
+   - Refactored `parse()` loop body into **`parse_one_decl(stream)`** shared
+     helper; both `parse()` (fail-fast via `?`) and `parse_recovering()`
+     (accumulate+sync) call it. Zero behavior change for `parse()` —
+     verified by running ALL existing parser tests (37 stmt + 73 expr +
+     22 layout + 27 module + 5 enum_match, all green).
+   - **Infinite-loop guard**: in `parse_recovering`, after an error compare
+     cursor position before/after `sync_to_recovery_point`; if unchanged
+     AND not at EOF, force-advance one token. Cheap insurance against any
+     future change to the sync set that would cause `parse_one_decl` to
+     keep rejecting the same sync token.
+
+### Key decisions (see decisions.md T36 for full rationale)
+
+- **`parse()` signature unchanged**: still `Result<Vec<Decl>, ParseError>`.
+  The task allowed "keep parse() as-is; document the choice" — went one
+  step further by REFACTORING its internals to delegate to `parse_one_decl`
+  + `parse_recovering` is a sibling. No duplication of the 150-line
+  dispatch table. The shared helper guarantees both entry points agree on
+  what counts as a top-level declaration.
+- **Inline snapshots** (`@r#"..."#`) for the 5 stable error-message tests
+  instead of `.snap` files. Self-contained in test source, no `.snap.new`
+  / `.pending-snap` to manage. **insta strips a single leading `\n`** from
+  inline snapshot literals — so the literal `\n[Error]...` is compared
+  against the actual `[Error]...` (no leading newline). Trailing newline
+  is preserved.
+- **Sync set is top-level starters only** (func/async/enum/import/export/
+  extern/At). NOT `let`/`match`/`newline` (the task spec's general list)
+  because `let`/`match` at top level would just re-trigger the catch-all
+  arm and loop. The spec's list is the GENERAL guidance for future
+  statement-level recovery; for the TOP-LEVEL loop, only decl starters
+  are valid resume points.
+
+### Gotchas
+
+- **Insta inline snapshot leading newline**: writing `@r#"\n<content>\n"#`
+  (multi-line raw string) creates a literal with leading `\n`. Insta
+  strips ONE leading newline when parsing inline snapshots, so the actual
+  value must NOT start with `\n`. Trailing `\n` is kept verbatim.
+- **clippy `manual_contains`**: `names.iter().any(|n| *n == "x")` →
+  `names.contains(&"x")`. New clippy in 1.95 toolchain.
+- **rustfmt wants one-item-per-line** for long array literals. The
+  `candidates()` helper in error_messages.rs has 19+25 entries — rustfmt
+  explodes them to one per line. Accepted (project rule: fmt is enforced).
+- **`f.name` is `Ident`, not `String`**: in tests,
+  `Decl::FuncDecl(f).name.name.as_str()` (double `.name`) — the inner
+  `Ident.name: String`. Easy to miss.
+- **`workspace.dev-dependencies` is NOT a valid cargo key** (pre-existing
+  bug in root Cargo.toml). The warning `unused manifest key:
+  workspace.dev-dependencies` is NOT mine. `.workspace = true` in a
+  crate's `[dev-dependencies]` correctly resolves from
+  `[workspace.dependencies]` (where `insta = "1.40"` IS declared). My
+  buff-lang-error Cargo.toml addition is correct.
+- **Byte-offset pitfalls in tests**: when hand-crafting spans for
+  `Diagnostic::render`, count the `\n` byte too. "let a = 1\n" is 10
+  bytes (positions 0-9, `\n` at 9). Off-by-one here produces carets at
+  the wrong column; the inline snapshot test caught my mistake on first
+  run.
+
+### Test count
+- buff-lang-error/tests/error_messages.rs: **24 tests** (19 functional +
+  5 inline snapshots). Covers: render (single/multi-char/zero-width/
+  unicode/multiline/out-of-bounds/warning), levenshtein (identical/
+  substitution/insertion/deletion), suggest_close (print-for-pritn/
+  distant-rejected/tie-alphabetical), format_did_you_mean, did-you-mean
+  note integration, render_diagnostics (multi-error-ordering/empty),
+  5 snapshots (simple type error, multi-char caret, did-you-mean,
+  multi-error file, warning+notes).
+- buff-lang-parser/tests/error_recovery.rs: **5 tests** (two-errors-
+  in-one-pass, continues-after-error, clean-input-no-errors, garbled-
+  input-no-panic, parse()-still-fail-fast).
+- Workspace total after T36: ALL pass (0 failed). 66 `test result:` lines.
+
+

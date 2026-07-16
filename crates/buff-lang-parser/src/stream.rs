@@ -300,6 +300,58 @@ impl<'a> TokenStream<'a> {
             None => self.eof_span(),
         }
     }
+
+    // -----------------------------------------------------------------------
+    // T36: error-recovery sync helper.
+    //
+    // When a `ParseError` occurs mid-declaration, the caller needs to skip
+    // forward past the broken tokens until it reaches a point where a fresh
+    // top-level declaration could begin. This is the classic "panic mode"
+    // recovery strategy used by hand-rolled recursive-descent parsers.
+    // -----------------------------------------------------------------------
+
+    /// Skip tokens until the cursor sits on a **sync point** — a token that
+    /// could begin a fresh top-level declaration. Used by
+    /// [`parse_recovering`](crate::parse_recovering) to resume after a parse
+    /// error.
+    ///
+    /// # Sync set
+    ///
+    /// The cursor stops on (i.e. does NOT consume) any of:
+    ///
+    /// - `func`, `async`, `enum`, `import`, `export`, `extern` keywords
+    ///   (the top-level declaration starters),
+    /// - `@` (the attribute prefix — attributes precede `func`),
+    /// - end of input.
+    ///
+    /// Everything else (operators, literals, stray delimiters, layout tokens
+    /// like `Newline`/`Indent`/`Dedent`) is consumed.
+    ///
+    /// # Infinite-loop safety
+    ///
+    /// The caller is responsible for ensuring progress: if this method is
+    /// called when the cursor is *already* on a sync token, it returns
+    /// immediately without advancing. The caller should detect this case
+    /// (compare cursor position before/after) and force-advance if needed.
+    ///
+    /// Returns `true` if a sync token was found, `false` at end of input.
+    pub fn sync_to_recovery_point(&mut self) -> bool {
+        while let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenKind::KwFunc
+                | TokenKind::KwAsync
+                | TokenKind::KwEnum
+                | TokenKind::KwImport
+                | TokenKind::KwExport
+                | TokenKind::KwExtern
+                | TokenKind::At => return true,
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
