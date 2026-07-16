@@ -12,6 +12,7 @@ use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, Stmt, TypeRef, Unar
 use buff_lang_error::{Diagnostic, Span, TypeError};
 
 use crate::env::TypeEnv;
+use crate::prelude;
 use crate::promote::{assignable_to, promote_binary};
 use crate::ty::Type;
 
@@ -61,8 +62,25 @@ impl TypeInferencer {
                 else_block,
                 span,
             } => self.infer_if(cond, then_block, else_block, *span),
-            // v0.5: real call resolution.
-            Expr::FuncCall { .. } | Expr::MethodCall { .. } => Ok(Type::Unknown),
+            // T96: standard-library prelude. A bare-ident callee whose name
+            // is a recognised prelude function is resolved WITHOUT an import
+            // — its return type is computed from the inferred arg types via
+            // `prelude::return_type`. Non-prelude free-function calls stay
+            // `Unknown` (full user-call resolution arrives later).
+            Expr::FuncCall { callee, args, .. } => {
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    if let Some(fn_) = prelude::lookup(&name.name) {
+                        let mut arg_tys = Vec::with_capacity(args.len());
+                        for a in args {
+                            arg_tys.push(self.infer_expr(a)?);
+                        }
+                        return Ok(prelude::return_type(fn_, &arg_tys));
+                    }
+                }
+                // v0.5: real call resolution.
+                Ok(Type::Unknown)
+            }
+            Expr::MethodCall { .. } => Ok(Type::Unknown),
             Expr::SuspendExpr { inner, .. } => self.infer_expr(inner),
             // T21: A string interpolation always evaluates to String.
             // Each embedded expression is visited (so its sub-types are

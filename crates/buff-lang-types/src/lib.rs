@@ -6,6 +6,8 @@
 //! - the resolved [`Type`] representation ([`ty`]),
 //! - numeric promotion rules ([`promote`]),
 //! - a flat symbol table ([`env`]),
+//! - the **standard library prelude** ([`prelude`]) — implicit built-in
+//!   functions available without `import`,
 //! - a local [`TypeInferencer`] that walks the AST ([`infer`]).
 //!
 //! v0.1 supports only primitive types; v0.5 will add collections and
@@ -13,6 +15,7 @@
 
 pub mod env;
 pub mod infer;
+pub mod prelude;
 pub mod promote;
 pub mod range_analysis;
 pub mod ty;
@@ -20,6 +23,10 @@ pub mod ty;
 pub use env::TypeEnv;
 pub use infer::TypeInferencer;
 pub use promote::{assignable_to, promote_binary};
+// T96: standard-library prelude. Re-exported at the crate root so the
+// type inferencer and downstream crates (codegen, CLI) can call
+// `is_prelude` / `prelude::return_type` without a long path.
+pub use prelude::{category_of, is_prelude, lookup, PreludeCategory, PreludeFn};
 // T22: pure range-analysis primitives (flexible-mode Int width inference,
 // auto-width collection helper). Re-exported at crate root for convenience;
 // the module path `range_analysis::` is the canonical location.

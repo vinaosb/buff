@@ -5,7 +5,10 @@
 //! - `if cond { a } else { b }` → Rust if-expression
 //! - `for x in iter { body }` → Rust `for` loop
 //! - `for cond { body }` (Buff conditional loop) → Rust `while cond { body }`
-//! - `print(arg)` → `println!("{}", arg)` macro mapping
+//! - `print(arg)` → `println!(...)` macro mapping
+//!   (T96: a bare string-literal arg drops the `{}` placeholder so
+//!   `print("hello")` → `println!("hello")`; any other arg uses
+//!   `println!("{}", arg)`.)
 //!
 //! Each test builds a small Buff AST by hand, runs it through
 //! [`buff_lang_codegen_rust::generate_rust`], and asserts properties of the
@@ -247,7 +250,9 @@ fn test_codegen_for_while() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. print() with string literal → println!("{}", "hello")
+// 6. print() with string literal → println!("hello")
+//    (T96: bare string literal drops the `{}` placeholder, matching the
+//    T96 acceptance `print("hello")` → `println!("hello")` exactly.)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -262,7 +267,11 @@ fn test_codegen_print_string_literal() {
     let src = generate_rust(&[f]).unwrap();
     assert!(src.contains("println!"), "src = {src}");
     assert!(src.contains(r#""hello""#), "src = {src}");
-    assert!(src.contains(r#""{}""#), "src = {src}");
+    // T96: no `{}` placeholder when the arg is a string literal.
+    assert!(
+        !src.contains(r#""{}""#),
+        "T96: print(\"hello\") should be println!(\"hello\"), not println!(\"{{}}\", \"hello\"); src = {src}"
+    );
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
 
@@ -366,7 +375,7 @@ fn test_codegen_full_program_snapshot() {
     let src = generate_rust(&[f]).unwrap();
     insta::assert_snapshot!(src, @"
 fn main() {
-    println!(\"{}\", \"Olá, Buff!\");
+    println!(\"Olá, Buff!\");
 }
 ");
 }

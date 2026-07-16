@@ -78,7 +78,7 @@ use buff_lang_ast::{
     Block, Decl, Expr, FuncDecl, InterpPart, Literal, Stmt, TypeRef,
 };
 use buff_lang_error::{CodegenError, Diagnostic, Span as BuffSpan};
-use buff_lang_types::{FloatWidth, IntWidth, Type, TypeInferencer};
+use buff_lang_types::{prelude::PreludeFn, FloatWidth, IntWidth, Type, TypeInferencer};
 
 use crate::context::CodegenContext;
 use crate::move_analysis::MoveAnalyzer;
@@ -412,13 +412,19 @@ impl RustCodegen {
                 self.make_unary_op(*op, operand)
             }
             Expr::FuncCall { callee, args, .. } => {
-                // Special case (T13): `print(x)` → `println!("{}", x)` macro.
-                // We require a bare-ident callee named exactly `print` with
-                // exactly one argument.
+                // T96: standard-library prelude. A bare-ident callee whose
+                // name is a recognised prelude function is lowered to the
+                // corresponding Rust idiom (math, conversion, I/O) WITHOUT
+                // requiring an `import` in Buff source. The mapping table
+                // lives in [`RustCodegen::lower_prelude_call`].
+                //
+                // T13 legacy: `print(x)` was originally special-cased here
+                // to `println!("{}", x)`. T96 generalises that to the full
+                // prelude AND tightens the string-literal case so
+                // `print("hello")` now emits `println!("hello")` (no `{}`).
                 if let Expr::Ident(name, _) = callee.as_ref() {
-                    if name.name == "print" && args.len() == 1 {
-                        let arg = self.lower_expr(&args[0])?;
-                        return Ok(make_println_macro(arg));
+                    if let Some(fn_) = buff_lang_types::prelude::lookup(&name.name) {
+                        return self.lower_prelude_call(fn_, args);
                     }
                 }
 
@@ -490,7 +496,269 @@ impl RustCodegen {
         }))
     }
 
-    /// Lower a Buff method call to a Rust `receiver.method(args)` expression.
+    /// Lower a Buff **prelude** call to the corresponding Rust idiom (T96).
+    ///
+    /// The prelude is the implicit standard library — these functions are
+    /// available in every Buff program without an `import`. The mappings are
+    /// grouped by category (matching [`buff_lang_types::prelude`]):
+    ///
+    /// # Math
+    ///
+    /// | Buff            | Rust                              | Notes             |
+    /// |-----------------|-----------------------------------|-------------------|
+    /// | `abs(x)`        | `(x).abs()`                       | works for any numeric (i64 / f32 / f64) |
+    /// | `min(a, b)`     | `(a).min(b)`                      | `Ord::min` for ints, inherent `min` for floats |
+    /// | `max(a, b)`     | `(a).max(b)`                      | analogous         |
+    /// | `sqrt(x)`       | `((x) as f64).sqrt()`             | always returns `f64`; coerce arg up so int args work |
+    /// | `floor(x)`      | `((x) as f64).floor()`            | always returns `f64` |
+    /// | `ceil(x)`       | `((x) as f64).ceil()`             | always returns `f64` |
+    /// | `round(x)`      | `((x) as f64).round()`            | always returns `f64` |
+    /// | `pow(b, e)`     | `(b).powf((e) as f64)` if `b` is float-like; else `(b).pow((e) as u32)` | the inferencer picks the arm |
+    ///
+    /// # Type conversions
+    ///
+    /// The arg's inferred type drives the Rust idiom:
+    ///
+    /// | Buff            | Rust (arg is String)               | Rust (arg is numeric)         |
+    /// |-----------------|------------------------------------|-------------------------------|
+    /// | `Int(x)`        | `x.parse::<i64>().unwrap_or(0)`    | `(x) as i64`                  |
+    /// | `Float(x)`      | `x.parse::<f32>().unwrap_or(0.0)`  | `(x) as f32`                  |
+    /// | `Bool(x)`       | `x.parse::<bool>().unwrap_or(false)` | `(x) != 0`                  |
+    /// | `String(x)`     | `x.to_string()` (any `Display`)    | `x.to_string()`              |
+    ///
+    /// **Parse-failure policy (v0.5):** `Int("bad")` returns `0`,
+    /// `Float("bad")` returns `0.0`, `Bool("bad")` returns `false`. We use
+    /// `unwrap_or` (not `expect`/`unwrap`) so generated code never panics
+    /// on malformed runtime input. A proper `Result`-returning conversion
+    /// API is deferred — see T96 notes in `decisions.md`.
+    ///
+    /// # I/O
+    ///
+    /// | Buff                  | Rust                                                        |
+    /// |-----------------------|-------------------------------------------------------------|
+    /// | `print("lit")`        | `println!("lit")` (a bare string literal drops the `{}`)    |
+    /// | `print(x)` / `println(x)` (non-literal) | `println!("{}", x)`                          |
+    /// | `read_line()`         | `{ let mut s = String::new(); std::io::stdin().read_line(&mut s).ok(); s }` |
+    ///
+    /// `read_line()` swallows the trailing newline (matches Rust's
+    /// `read_line` semantics — callers can `.trim_end()` if they want it
+    /// gone). The `.ok()` discards the `io::Result` error as `Some(())`/
+    /// `None` (we don't panic on I/O failure).
+    fn lower_prelude_call(
+        &mut self,
+        fn_: PreludeFn,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
+        match fn_ {
+            // ----- Math ---------------------------------------------------
+            PreludeFn::Abs => {
+                self.lower_one_arg_method(args, "abs", /*wrap_parens*/ true)
+            }
+            PreludeFn::Min => self.lower_min_max(args, "min"),
+            PreludeFn::Max => self.lower_min_max(args, "max"),
+            PreludeFn::Sqrt => self.lower_float_unary(args, "sqrt"),
+            PreludeFn::Floor => self.lower_float_unary(args, "floor"),
+            PreludeFn::Ceil => self.lower_float_unary(args, "ceil"),
+            PreludeFn::Round => self.lower_float_unary(args, "round"),
+            PreludeFn::Pow => self.lower_pow(args),
+
+            // ----- Conversions -------------------------------------------
+            PreludeFn::Int => self.lower_convert(args, "i64", ConvKind::Numeric),
+            PreludeFn::Float => self.lower_convert(args, "f32", ConvKind::Numeric),
+            PreludeFn::Bool => self.lower_convert(args, "bool", ConvKind::Bool),
+            PreludeFn::String => self.lower_to_string(args),
+
+            // ----- I/O ---------------------------------------------------
+            PreludeFn::Print => self.lower_print(args),
+            PreludeFn::Println => self.lower_print(args),
+            PreludeFn::ReadLine => Ok(self.lower_read_line()),
+        }
+    }
+
+    /// Lower `abs(x)` → `(x).abs()`. Wrapping the receiver in parens
+    /// ensures integer literals like `5` lower to `(5).abs()` rather than
+    /// the ambiguous `5.abs()` (which Rust parses as a field access on a
+    /// float literal `5.`).
+    fn lower_one_arg_method(
+        &mut self,
+        args: &[Expr],
+        method: &str,
+        wrap_parens: bool,
+    ) -> Result<SynExpr, CodegenError> {
+        let recv = self.lower_one_arg(args)?;
+        let recv = if wrap_parens {
+            wrap_in_parens(recv)
+        } else {
+            recv
+        };
+        Ok(method_call_no_args(recv, method))
+    }
+
+    /// Lower `min(a, b)` / `max(a, b)` → `(a).<method>(b)`.
+    fn lower_min_max(&mut self, args: &[Expr], method: &str) -> Result<SynExpr, CodegenError> {
+        if args.len() != 2 {
+            return Err(self.unsupported(&format!(
+                "{method} expects exactly 2 args, got {}",
+                args.len()
+            )));
+        }
+        let a = wrap_in_parens(self.lower_expr(&args[0])?);
+        let b = self.lower_expr(&args[1])?;
+        Ok(method_call_one_arg(a, method, b))
+    }
+
+    /// Lower a float-returning unary math fn (`sqrt`/`floor`/`ceil`/`round`)
+    /// to `((x) as f64).<method>()`. Coercing to `f64` first means int args
+    /// compile without requiring the user to write `x as Double` manually.
+    fn lower_float_unary(&mut self, args: &[Expr], method: &str) -> Result<SynExpr, CodegenError> {
+        let recv = self.lower_one_arg(args)?;
+        let as_f64 = cast_to(recv, "f64");
+        Ok(method_call_no_args(as_f64, method))
+    }
+
+    /// Lower `pow(base, exp)` — picks `.powf` for float bases and `.pow` for
+    /// integer bases (Rust's `i64::pow` takes `u32`, hence the `as u32` cast).
+    fn lower_pow(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 2 {
+            return Err(
+                self.unsupported(&format!("pow expects exactly 2 args, got {}", args.len()))
+            );
+        }
+        let base = wrap_in_parens(self.lower_expr(&args[0])?);
+        let exp_raw = self.lower_expr(&args[1])?;
+        // Infer the base type to choose `.pow` vs `.powf`. Inference errors
+        // fall back to the integer form (which works for the common case).
+        let base_ty = self
+            .type_inferencer
+            .infer_expr(&args[0])
+            .unwrap_or(Type::Unknown);
+        if base_ty.is_float_like() {
+            let exp = cast_to(exp_raw, "f64");
+            Ok(method_call_one_arg(base, "powf", exp))
+        } else {
+            let exp = cast_to(exp_raw, "u32");
+            Ok(method_call_one_arg(base, "pow", exp))
+        }
+    }
+
+    /// Lower a type conversion (`Int(x)` / `Float(x)` / `Bool(x)`).
+    ///
+    /// For String args we emit `.parse::<T>().unwrap_or(default)`; for
+    /// numeric args we emit `(x) as T`. The `Bool` arm uses `x != 0` for
+    /// numerics (Rust has no `as bool` cast) and `.parse::<bool>()` for
+    /// strings.
+    fn lower_convert(
+        &mut self,
+        args: &[Expr],
+        target: &str,
+        kind: ConvKind,
+    ) -> Result<SynExpr, CodegenError> {
+        let arg = self.lower_one_arg(args)?;
+        // Infer the arg's type to dispatch on the source category.
+        let arg_ty = self
+            .type_inferencer
+            .infer_expr(&args[0])
+            .unwrap_or(Type::Unknown);
+        if matches!(arg_ty, Type::String) {
+            // String → parse
+            return Ok(parse_with_default(arg, target, &kind));
+        }
+        // Non-string → numeric coercion (`as T`) for Int/Float, or `!= 0` for Bool.
+        match kind {
+            ConvKind::Numeric => Ok(cast_to(arg, target)),
+            ConvKind::Bool => {
+                // `(x) != 0` — wrap the arg in parens so compound exprs bind right.
+                let zero = make_int_lit_expr(0);
+                Ok(make_binary_expr(
+                    syn::BinOp::Ne(Default::default()),
+                    wrap_in_parens(arg),
+                    zero,
+                ))
+            }
+        }
+    }
+
+    /// Lower `String(x)` → `(x).to_string()`. Works for any Rust `Display` type.
+    fn lower_to_string(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        let recv = self.lower_one_arg(args)?;
+        Ok(method_call_no_args(recv, "to_string"))
+    }
+
+    /// Lower `print(x)` / `println(x)`.
+    ///
+    /// A bare string-literal arg lowers to `println!("the literal text")`
+    /// — no `{}` placeholder (T96 acceptance). Any other arg lowers to
+    /// `println!("{}", x)`.
+    fn lower_print(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 1 {
+            return Err(self.unsupported(&format!(
+                "print/println expect exactly 1 arg, got {}",
+                args.len()
+            )));
+        }
+        // String-literal fast path: print("hello") → println!("hello").
+        if let Expr::Literal(Literal::String(text), _) = &args[0] {
+            return Ok(make_println_macro_literal(text));
+        }
+        // General path: print(x) → println!("{}", x).
+        let arg = self.lower_expr(&args[0])?;
+        Ok(make_println_macro(arg))
+    }
+
+    /// Lower `read_line()` → a block expression that reads one line of stdin.
+    ///
+    /// Emits (conceptually):
+    /// ```text
+    /// {
+    ///     let mut __buff_prelude_line = String::new();
+    ///     std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+    ///     __buff_prelude_line
+    /// }
+    /// ```
+    ///
+    /// The block is built via `quote!` and then re-parsed via
+    /// `syn::parse2` (which returns a `Result`, unlike `parse_quote!`'s
+    /// panic). The placeholder name `__buff_prelude_line` is intentionally
+    /// ugly to avoid colliding with any user binding.
+    fn lower_read_line(&self) -> SynExpr {
+        let tokens: proc_macro2::TokenStream = quote::quote! {{
+            let mut __buff_prelude_line = String::new();
+            std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+            __buff_prelude_line
+        }};
+        // `quote!`'s `{{...}}` produces a Rust block-expression token
+        // stream; re-parse it as a `syn::Expr` (the top-level enum) so it
+        // slots into the surrounding expression context. On the (unreachable)
+        // parse failure we fall back to a bare `String::new()` call.
+        match syn::parse2::<SynExpr>(tokens) {
+            Ok(e) => e,
+            Err(_) => {
+                // Defensive fallback: never panic in codegen. The quote!
+                // above is a compile-time-fixed template so a parse failure
+                // is a codegen bug, not a user-facing condition.
+                let path = rust_path("String::new");
+                SynExpr::Call(syn::ExprCall {
+                    attrs: Vec::new(),
+                    func: Box::new(SynExpr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path,
+                    })),
+                    paren_token: Default::default(),
+                    args: Default::default(),
+                })
+            }
+        }
+    }
+
+    /// Lower exactly one argument, returning an error if the arg count is wrong.
+    fn lower_one_arg(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 1 {
+            return Err(self.unsupported(&format!("expected exactly 1 arg, got {}", args.len())));
+        }
+        self.lower_expr(&args[0])
+    }
+
     ///
     /// T21 — string methods. The following Buff method names map to specific
     /// Rust idioms (none of them is a literal `recv.method(args)` because
@@ -1062,7 +1330,7 @@ fn rust_path(name: &str) -> syn::Path {
 
 /// Build a `println!("{}", arg)` macro invocation as a `syn::Expr::Macro`.
 ///
-/// Used by the `print(x)` → `println!("{}", x)` mapping (T13). The macro
+/// Used by the `print(x)` → `println!("{}", x)` mapping (T13/T96). The macro
 /// token stream is built via `quote!` so it round-trips through `syn`'s
 /// printer without any hand-rolled string formatting.
 fn make_println_macro(arg: SynExpr) -> SynExpr {
@@ -1075,6 +1343,131 @@ fn make_println_macro(arg: SynExpr) -> SynExpr {
             tokens: quote::quote! { "{}", #arg },
         },
     })
+}
+
+/// Build a `println!("literal_text")` macro invocation — the T96 string-
+/// literal fast path for `print("hello")` → `println!("hello")` (no `{}`
+/// placeholder, the literal text becomes the format string itself).
+fn make_println_macro_literal(text: &str) -> SynExpr {
+    // Build the format-string literal via `proc_macro2::Literal::string` so
+    // Rust-level escapes in `text` survive correctly (e.g. embedded quotes,
+    // backslashes, newlines).
+    let format_lit = proc_macro2::Literal::string(text);
+    SynExpr::Macro(syn::ExprMacro {
+        attrs: Vec::new(),
+        mac: syn::Macro {
+            path: syn::Path::from(Ident::new("println", ProcSpan::call_site())),
+            bang_token: Default::default(),
+            delimiter: syn::MacroDelimiter::Paren(Default::default()),
+            tokens: quote::quote! { #format_lit },
+        },
+    })
+}
+
+/// Build a `recv.method()` (zero-arg) method call.
+fn method_call_no_args(recv: SynExpr, method: &str) -> SynExpr {
+    SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(recv),
+        dot_token: Default::default(),
+        method: Ident::new(method, ProcSpan::call_site()),
+        turbofish: None,
+        paren_token: Default::default(),
+        args: Default::default(),
+    })
+}
+
+/// Wrap an expression in parentheses: `(e)`. Used to disambiguate method-
+/// call receivers so integer literals like `5` lower to `(5).abs()` rather
+/// than the ambiguous `5.abs()` (which Rust parses as a field access on the
+/// float literal `5.`).
+fn wrap_in_parens(e: SynExpr) -> SynExpr {
+    SynExpr::Paren(syn::ExprParen {
+        attrs: Vec::new(),
+        paren_token: Default::default(),
+        expr: Box::new(e),
+    })
+}
+
+/// Build a Rust `as` cast: `(e) as T`. The receiver is parenthesised so
+/// compound expressions bind correctly (e.g. `(a + b) as f64` not `a + b as f64`).
+fn cast_to(e: SynExpr, target: &str) -> SynExpr {
+    SynExpr::Cast(syn::ExprCast {
+        attrs: Vec::new(),
+        expr: Box::new(wrap_in_parens(e)),
+        as_token: Default::default(),
+        ty: Box::new(rust_path_type(target)),
+    })
+}
+
+/// Build a Rust integer-literal expression (`0`, `1`, etc.).
+fn make_int_lit_expr(n: i64) -> SynExpr {
+    SynExpr::Lit(syn::ExprLit {
+        attrs: Vec::new(),
+        lit: syn::Lit::Int(syn::LitInt::new(&n.to_string(), ProcSpan::call_site())),
+    })
+}
+
+/// Build a binary expression `lhs <op> rhs`.
+fn make_binary_expr(op: syn::BinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr {
+    SynExpr::Binary(syn::ExprBinary {
+        attrs: Vec::new(),
+        left: Box::new(lhs),
+        op,
+        right: Box::new(rhs),
+    })
+}
+
+/// Discriminates the two Rust idioms for type-constructor prelude functions.
+///
+/// - `Numeric` covers `Int(x)` / `Float(x)` — Rust emits `(x) as T`.
+/// - `Bool` is separate because Rust has no `as bool` cast; the numeric→bool
+///   mapping is `x != 0`.
+#[derive(Clone, Copy)]
+enum ConvKind {
+    Numeric,
+    Bool,
+}
+
+/// Build a `x.parse::<T>().unwrap_or(default)` expression for the string-arg
+/// branch of `Int(x)`/`Float(x)`/`Bool(x)`. Built via `quote!` so the
+/// turbofish `::<T>` and method chain are constructed without hand-formatted
+/// Rust.
+fn parse_with_default(arg: SynExpr, target: &str, kind: &ConvKind) -> SynExpr {
+    // Build `arg.parse::<target>()` as a method call with turbofish.
+    let parse_call = SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(arg),
+        dot_token: Default::default(),
+        method: Ident::new("parse", ProcSpan::call_site()),
+        turbofish: Some(syn::AngleBracketedGenericArguments {
+            colon2_token: None,
+            lt_token: Default::default(),
+            args: {
+                let mut p: Punctuated<syn::GenericArgument, syn::Token![,]> = Punctuated::new();
+                p.push(syn::GenericArgument::Type(rust_path_type(target)));
+                p
+            },
+            gt_token: Default::default(),
+        }),
+        paren_token: Default::default(),
+        args: Default::default(),
+    });
+    // `.unwrap_or(<default-lit>)` — for numerics the default is the unsuffixed
+    // integer `0`; for bool it's `false`. Both are valid Rust literal tokens.
+    let default_tokens: proc_macro2::TokenStream = match kind {
+        ConvKind::Numeric => {
+            let lit = proc_macro2::Literal::i64_unsuffixed(0);
+            quote::quote! { #lit }
+        }
+        ConvKind::Bool => {
+            quote::quote! { false }
+        }
+    };
+    let default_expr =
+        syn::parse2::<SynExpr>(default_tokens).unwrap_or_else(|_| make_int_lit_expr(0));
+    // `.unwrap_or(default_expr)` — single-arg method call on the parse result.
+    method_call_one_arg(parse_call, "unwrap_or", default_expr)
 }
 
 /// Mirror of the private `typeref_to_type` in `buff_lang_types::infer`.

@@ -240,7 +240,7 @@ Phase 1 (v0.1) must be complete:
 
   **Commit**: YES — Message: `feat(types): implement numeric coercion with flexible auto-width and fixed overflow modes`
 
-- [ ] **T96**: Standard library prelude [deep]
+- [x] **T96**: Standard library prelude [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `abs(-5)` returns 5 without import
