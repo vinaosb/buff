@@ -372,7 +372,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### ═══ PHASE v0.1 "Olá Deox" — MVP Foundation ═══
 
-- [ ] 1. Cargo Workspace + CI + Repository Structure
+- [x] 1. Cargo Workspace + CI + Repository Structure
 
   **What to do**:
   - Create Cargo workspace with crates: `deox-ast`, `deox-lexer`, `deox-parser`, `deox-types`, `deox-codegen-rust`, `deox-codegen-wgsl`, `deox-runtime`, `deox-cli`, `deox-error`
@@ -442,7 +442,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 2. deox-ast Crate — Complete AST Node Definitions
+- [x] 2. deox-ast Crate — Complete AST Node Definitions
 
   **What to do**:
   - Define ALL AST node types covering the full Deox language:
@@ -517,7 +517,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 3. deox-lexer Crate Skeleton — Token Definitions
+- [x] 3. deox-lexer Crate Skeleton — Token Definitions
 
   **What to do**:
   - Define `TokenKind` enum with all token types: identifiers, keywords (func, let, mut, struct, enum, trait, type, if, else, for, return, break, continue, in, match, async, spawn, import, export, from, as, true, false, extern, unsafe), literals (int, float, double suffix `d`, string, byte), operators (+, -, *, /, %, ==, !=, <, >, <=, >=, &&, ||, !, ?, =>, ->), delimiters (`{`, `}`, `(`, `)`, `[`, `]`, `:`), and special tokens (Newline, Indent, Dedent, EOF)
@@ -570,7 +570,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 4. deox-error Crate — Error Types + Source Spans
+- [x] 4. deox-error Crate — Error Types + Source Spans
 
   **What to do**:
   - Define `Span` struct: `start: ByteOffset`, `end: ByteOffset`, `source_file: SourceId`
@@ -626,7 +626,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 5. Testing Infrastructure — insta + proptest Setup
+- [x] 5. Testing Infrastructure — insta + proptest Setup
 
   **What to do**:
   - Configure `insta` crate for snapshot testing across all crates
@@ -685,7 +685,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### Wave 2: Core Lexing + Parsing
 
-- [ ] 6. Lexer Implementation — Tokens + Indentation Algorithm
+- [x] 6. Lexer Implementation — Tokens + Indentation Algorithm
 
   **What to do** (TDD — write tests FIRST):
   - **RED**: Write failing tests for: tokenizing identifiers, keywords, int literals, float literals (with `d` suffix for double), string literals (with interpolation `{expr}`), operators, comments (`//` line, `/* */` block)
@@ -770,7 +770,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 7. Parser — Expressions (Literals, Binary/Unary Ops, Function Calls)
+- [x] 7. Parser — Expressions (Literals, Binary/Unary Ops, Function Calls)
 
   **What to do** (TDD):
   - **RED**: Tests for: int literal `42`, float `3.14`, double `99.90d`, bool `true`/`false`, string `"hello"`, byte `0xFF`
@@ -848,7 +848,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 8. Parser — Statements (let, if/else, func, return, for)
+- [x] 8. Parser — Statements (let, if/else, func, return, for)
 
   **What to do** (TDD):
   - **RED**: Tests for: `let x = 42`, `let mut y = 0` (mutable), `let nome = "Deox"`
@@ -924,7 +924,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 9. Parser — Layout-Sensitive Blocks (Offside Rule)
+- [x] 9. Parser — Layout-Sensitive Blocks (Offside Rule)
 
   **What to do** (TDD):
   - **RED**: Tests for: function body via indentation (no braces): `func foo():\n    stmt1\n    stmt2`
@@ -998,7 +998,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 > **ENHANCEMENT**: Wave 3 now includes collection literals and range syntax (from best practices research)
 
-- [ ] 10. deox-types Crate — Type Representation + Inference + Flow-Sensitive Typing
+- [x] 10. deox-types Crate — Type Representation + Inference + Flow-Sensitive Typing
 
   **What to do** (TDD):
   - **RED**: Tests for type inference from literals (`42` → Int, `3.14` → Float, `99.9d` → Double, `true` → Bool, `"hi"` → String)
@@ -1051,7 +1051,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 11. deox-codegen-rust — syn/quote Infrastructure
+- [x] 11. deox-codegen-rust — syn/quote Infrastructure
 
   **What to do**:
   - Set up codegen crate with `syn`, `quote`, `prettyplease` dependencies
@@ -1091,7 +1091,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 12. Codegen — Literals, Let Bindings, Arithmetic → Rust
+- [x] 12. Codegen — Literals, Let Bindings, Arithmetic → Rust
 
   **What to do** (TDD):
   - **RED**: Snapshot tests for: `let x = 42` → `let x: i64 = 42;`, `let pi = 3.14` → `let pi: f32 = 3.14;`, `let z = 99.9d` → Decimal macro
@@ -1129,7 +1129,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 13. Codegen — If/Else Expression, Function Declarations → Rust
+- [x] 13. Codegen — If/Else Expression, Function Declarations → Rust
 
   **What to do** (TDD):
   - **RED**: Snapshot for `if cond { a } else { b }` → Rust if-expression
@@ -1173,7 +1173,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### Wave 4: CLI + Integration
 
-- [ ] 14. deox-cli — `deox build` Command
+- [x] 14. deox-cli — `deox build` Command
 
   **What to do** (TDD):
   - **RED**: Test `deox build examples/ola.deox` → creates executable
@@ -1224,7 +1224,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 15. deox-cli — `deox run` Command
+- [x] 15. deox-cli — `deox run` Command
 
   **What to do** (TDD):
   - **RED**: Test `deox run examples/ola.deox` → prints output, cleans up
@@ -1257,7 +1257,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [ ] 16. Source Map Infrastructure (Deox ↔ Rust Line Mapping)
+- [x] 16. Source Map Infrastructure (Deox ↔ Rust Line Mapping)
 
   **What to do** (TDD):
   - **RED**: Test runtime error at Rust line 15 → maps to Deox line 8
@@ -1335,7 +1335,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### Additional Wave 1 Task: T88 — Deox IR Design (Dataflow Graph)
 
-- [ ] T88. Deox IR Design — Dataflow Graph for Algorithm/Schedule Separation
+- [x] T88. Deox IR Design — Dataflow Graph for Algorithm/Schedule Separation
 
   **What to do** (TDD):
   - **RED**: Write tests for IR node types: ComputeNode (pure computation),IONode (I/O boundary — async), TransferNode (CPU↔GPU data movement), ScheduleNode (dispatch decision)
@@ -1405,7 +1405,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### Additional Wave 3a Task: T33a — Codegen Move-by-Default Semantics
 
-- [ ] T33a. Codegen Move Semantics — Every Codegen Task Assumes Moves
+- [x] T33a. Codegen Move Semantics — Every Codegen Task Assumes Moves
 
   **What to do** (TDD):
   - **RED**: Write test: `let x = 42; let y = x` generates Rust `let x = 42; let y = x;` (move, not copy)

@@ -83,25 +83,38 @@ pub fn compile_to_rust(file: &Path) -> Result<CompileOutput> {
 /// executable extension (see [`with_exe_extension`]) if they want a
 /// conventional name (e.g. `ola.exe` on Windows).
 ///
+/// `deox_file` is the original `.deox` source path. When `rustc` emits
+/// diagnostics referencing the intermediate `.rs` file, they are translated to
+/// reference the `.deox` file instead via
+/// [`error_mapper::translate_rustc_errors`].
+///
 /// # Errors
 ///
 /// - Fails if `rustc` cannot be invoked (not installed / not in `PATH`).
-/// - Fails if `rustc` exits with a non-zero status (rustc's own diagnostics
-///   are forwarded to the caller's stderr via inherited stdio).
-pub fn compile_rust_to_exe(rust_file: &Path, output: &Path) -> Result<PathBuf> {
-    let status = Command::new("rustc")
+/// - Fails if `rustc` exits with a non-zero status. Translated `rustc`
+///   diagnostics are forwarded to the caller's stderr before bailing.
+pub fn compile_rust_to_exe(rust_file: &Path, output: &Path, deox_file: &Path) -> Result<PathBuf> {
+    let result = Command::new("rustc")
         .arg("--edition")
         .arg("2021")
         .arg("-O")
         .arg(rust_file)
         .arg("-o")
         .arg(output)
-        // Inherit stdin/stdout/stderr so rustc's diagnostics surface directly.
-        .status()
+        // Capture output so we can translate rustc's file references.
+        .output()
         .context("failed to invoke `rustc` — is it installed and on your PATH?")?;
 
-    if !status.success() {
-        bail!("rustc exited with status {status}");
+    // Forward rustc's stderr (diagnostics / warnings), translating `.rs`
+    // references to `.deox` so the user sees their original source location.
+    if !result.stderr.is_empty() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let translated = crate::error_mapper::translate_rustc_errors(&stderr, deox_file, rust_file);
+        eprint!("{translated}");
+    }
+
+    if !result.status.success() {
+        bail!("rustc exited with status {}", result.status);
     }
 
     // rustc writes exactly the path passed to `-o` (it does NOT append a

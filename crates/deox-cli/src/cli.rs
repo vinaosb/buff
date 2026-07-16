@@ -1,13 +1,16 @@
 //! Command-line argument definitions for the `deox` binary.
 //!
-//! Built on [`clap`] derive. Two subcommands are supported in v0.1:
+//! Built on [`clap`] derive. Subcommands supported in v0.1:
 //!
 //! - `deox build <FILE>` — compile a `.deox` file to a native executable.
 //! - `deox run <FILE> [ARGS]...` — compile and immediately execute, cleaning
 //!   up temporary artifacts afterwards.
+//! - `deox new <NAME>` — scaffold a new Deox project in a fresh `<NAME>/`
+//!   directory.
+//! - `deox init` — scaffold a Deox project in the current directory.
 //!
 //! Future subcommands (`check`, `fmt`, `test`, `lsp`) will be added in later
-//! waves; v0.1 only needs `build` and `run`.
+//! waves.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -53,4 +56,14 @@ pub enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
+
+    /// Create a new Deox project in a fresh `<NAME>/` directory.
+    New {
+        /// Name of the project (must be a valid Deox identifier, not a keyword).
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
+    /// Initialize a Deox project in the current directory.
+    Init,
 }

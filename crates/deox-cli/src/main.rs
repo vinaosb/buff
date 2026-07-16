@@ -14,5 +14,7 @@ fn main() -> Result<()> {
     match args.command {
         Command::Build { file, output } => deox_cli::commands::build::run(&file, output.as_deref()),
         Command::Run { file, args } => deox_cli::commands::run::run(&file, &args),
+        Command::New { name } => deox_cli::commands::new::run(&name),
+        Command::Init => deox_cli::commands::init::run(),
     }
 }

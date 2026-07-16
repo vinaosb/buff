@@ -4,7 +4,13 @@
 //! → spawn the executable. Both the executable and the intermediate `.rs` file
 //! are removed afterwards (they live in a temp dir / next to the source
 //! respectively, so leaving them would pollute the user's workspace).
+//!
+//! Runtime panics from the compiled binary reference the intermediate `.rs`
+//! file. These are intercepted (T16) and translated back to the original
+//! `.deox` location via [`crate::error_mapper::translate_panic`] before being
+//! forwarded to the user's stderr.
 
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -42,22 +48,44 @@ pub fn run(file: &Path, args: &[String]) -> Result<()> {
         .unwrap_or_else(|| std::ffi::OsString::from("deox_program"));
     let exe_stem = pipeline::with_exe_extension(&temp_dir.join(stem));
 
-    let exe_path = pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &exe_stem)?;
+    let exe_path = pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &exe_stem, file)?;
 
-    // Execute, inheriting stdio so the program's output / stderr are visible.
-    let status = Command::new(&exe_path)
+    // Execute, capturing output so runtime panics can be translated (T16).
+    let output = Command::new(&exe_path)
         .args(args)
-        .status()
+        .output()
         .with_context(|| format!("failed to execute `{}`", exe_path.display()))?;
+
+    // Forward the program's stdout (its normal output).
+    if !output.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(&output.stdout);
+        let _ = std::io::stdout().flush();
+    }
+
+    // Translate and forward stderr (handles runtime panics that reference
+    // the intermediate .rs file — replaces with the original .deox path).
+    let stderr_str = String::from_utf8_lossy(&output.stderr);
+    if !stderr_str.is_empty() {
+        // v0.1: source map is empty (exact line tracking deferred); filename
+        // translation is the primary win. See error_mapper::translate_panic.
+        let source_map = deox_error::SourceMap::new();
+        let translated = crate::error_mapper::translate_panic(
+            &stderr_str,
+            &compile_out.rust_file_path,
+            file,
+            &source_map,
+        );
+        eprint!("{translated}");
+    }
 
     // Cleanup — best-effort, never propagates errors. On Windows the just-exited
     // executable may still be image-locked by the OS, so we retry briefly.
     let _ = remove_file_best_effort(&exe_path);
     let _ = remove_file_best_effort(&compile_out.rust_file_path);
 
-    if !status.success() {
+    if !output.status.success() {
         // Preserve the program's exit code (or fall back to 1).
-        std::process::exit(status.code().unwrap_or(1));
+        std::process::exit(output.status.code().unwrap_or(1));
     }
     Ok(())
 }

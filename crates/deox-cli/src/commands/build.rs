@@ -30,7 +30,7 @@ pub fn run(file: &Path, output: Option<&Path>) -> Result<()> {
         None => pipeline::with_exe_extension(&file.with_extension("")),
     };
 
-    let exe_path = pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &stem_output)?;
+    let exe_path = pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &stem_output, file)?;
 
     eprintln!("Built {}", exe_path.display());
     eprintln!("  source: {}", file.display());
