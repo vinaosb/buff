@@ -98,17 +98,20 @@ pub fn build_enum_registry(decls: &[Decl]) -> EnumRegistry {
 }
 
 /// Build an [`EnumRegistry`] seeded with the **built-in prelude enums**
-/// (T28), then folded with the program's user `Decl::EnumDecl`s.
+/// (T28, T30), then folded with the program's user `Decl::EnumDecl`s.
 ///
-/// Today the only prelude enum is `Option<T>` with variants `Some(T)` and
-/// `None`. Seeding it here means `None`/`Some` resolve as `Option` variants
-/// WITHOUT a user `enum Option` declaration — they are prelude enum
-/// variants, NOT reserved keywords (the lexer's keyword list deliberately
-/// omits them; see T28).
+/// Today the prelude enums are:
+/// - `Option<T>` with variants `Some(T)` and `None` (T28).
+/// - `Result<T, E>` with variants `Ok(T)` and `Err(E)` (T30).
+///
+/// Seeding them here means `None`/`Some`/`Ok`/`Err` resolve as prelude enum
+/// variants WITHOUT a user declaration — they are prelude enum variants, NOT
+/// reserved keywords (the lexer's keyword list deliberately omits them; see
+/// T28 and T30).
 ///
 /// User declarations take precedence over the seed: if a program declares
-/// its own `enum Option`, the user's variant list overrides the prelude
-/// seed (user decls are inserted AFTER the seed).
+/// its own `enum Option` or `enum Result`, the user's variant list overrides
+/// the prelude seed (user decls are inserted AFTER the seed).
 pub fn build_enum_registry_with_prelude(decls: &[Decl]) -> EnumRegistry {
     let mut registry: EnumRegistry = EnumRegistry::new();
     // T28: seed the built-in Option<T> enum so None/Some resolve as its
@@ -116,6 +119,12 @@ pub fn build_enum_registry_with_prelude(decls: &[Decl]) -> EnumRegistry {
     registry.insert(
         "Option".to_string(),
         vec!["Some".to_string(), "None".to_string()],
+    );
+    // T30: seed the built-in Result<T, E> enum so Ok/Err resolve as its
+    // variants without a user declaration. Mirrors the Option seed exactly.
+    registry.insert(
+        "Result".to_string(),
+        vec!["Ok".to_string(), "Err".to_string()],
     );
     for decl in decls {
         if let Decl::EnumDecl(e) = decl {
@@ -312,6 +321,9 @@ fn check_expr(
             }
             Ok(())
         }
+        // T30: `expr?` — recurse into the operand so nested matches inside
+        // the propagated expression are still checked.
+        Expr::Try { expr, .. } => check_expr(expr, registry, inferencer),
     }
 }
 
@@ -489,6 +501,14 @@ fn typeref_to_type(ty: &buff_lang_ast::TypeRef) -> Option<crate::Type> {
                 if name.name == "Option" && args.len() == 1 {
                     let inner = typeref_to_type(&args[0]).unwrap_or(crate::Type::Unknown);
                     return Some(crate::Type::option(inner));
+                }
+                // T30: recognise `Result<T, E>` annotations so a
+                // `match r { Ok(x) => ..., Err(e) => ... }` can resolve the
+                // scrutinee's type. Mirrors the Option arm.
+                if name.name == "Result" && args.len() == 2 {
+                    let ok_ty = typeref_to_type(&args[0]).unwrap_or(crate::Type::Unknown);
+                    let err_ty = typeref_to_type(&args[1]).unwrap_or(crate::Type::Unknown);
+                    return Some(crate::Type::result(ok_ty, err_ty));
                 }
             }
             None

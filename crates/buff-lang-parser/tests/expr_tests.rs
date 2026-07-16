@@ -701,3 +701,65 @@ fn test_parse_entrypoint_accepts_func_decl() {
     assert_eq!(decls.len(), 1);
     assert!(matches!(decls[0], buff_lang_ast::Decl::FuncDecl(_)));
 }
+
+// ---------------------------------------------------------------------------
+// 13. T30 — the `?` error-propagation postfix operator.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn t30_question_op_on_ident_parses() {
+    // `x?` parses as Expr::Try(Ident("x")).
+    let e = parse("x?");
+    assert_eq!(shape(&e), "Try(Ident(x))");
+    assert!(matches!(e, Expr::Try { .. }));
+}
+
+#[test]
+fn t30_question_op_on_call_parses() {
+    // `f()?` parses as Expr::Try(Call(f, [])).
+    let e = parse("f()?");
+    assert_eq!(shape(&e), "Try(Call(Ident(f), []))");
+    assert!(matches!(&e, Expr::Try { expr, .. } if matches!(expr.as_ref(), Expr::FuncCall { .. })));
+}
+
+#[test]
+fn t30_question_op_chained_parses() {
+    // `f()??` parses as Try(Try(Call(f, []))). Chained `?` works because the
+    // postfix loop continues after consuming one `?`.
+    let e = parse("f()??");
+    assert_eq!(shape(&e), "Try(Try(Call(Ident(f), [])))");
+    assert!(matches!(&e, Expr::Try { expr, .. } if matches!(expr.as_ref(), Expr::Try { .. })));
+}
+
+#[test]
+fn t30_question_op_in_let_binding_parses_via_stmt() {
+    // `let y = parse()?` exercises `?` inside a let-binding expression. We
+    // parse the whole func and inspect the body statement.
+    let src = "func f() { let y = parse()? }";
+    let tokens = tokenize(src, sid()).expect("lexer");
+    let decls = buff_lang_parser::parse(&tokens, sid()).expect("parser");
+    let buff_lang_ast::Decl::FuncDecl(f) = &decls[0] else {
+        panic!("expected func decl");
+    };
+    let first = &f.body.stmts[0];
+    let buff_lang_ast::Stmt::LetDecl { value, .. } = first else {
+        panic!("expected LetDecl, got {first:?}");
+    };
+    // `value` derefs to `&Expr` via Box's Deref coercions in the let-binding.
+    assert!(
+        matches!(value, Expr::Try { .. }),
+        "expected Try inside let-binding, got {value:?}"
+    );
+}
+
+#[test]
+fn t30_question_op_precedence_binds_tighter_than_binary() {
+    // `a? + 1` parses as BinaryOp(Try(a), +, 1) — `?` is a postfix operator
+    // (higher precedence than additive `+`), so it binds to `a` first.
+    let e = parse("a? + 1");
+    assert!(
+        matches!(e, Expr::BinaryOp { op: BinaryOp::Add, lhs, rhs, .. }
+        if matches!(*lhs, Expr::Try { .. })
+        && matches!(*rhs, Expr::Literal(Literal::Int(1), _)))
+    );
+}

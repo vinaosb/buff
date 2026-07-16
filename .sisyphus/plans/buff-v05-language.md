@@ -578,7 +578,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T30**: Error types + `?` operator [deep]
+- [x] **T30**: Error types + `?` operator [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `Result<T, E>` type works as enum with Ok/Err variants

@@ -160,6 +160,17 @@ impl RustCodegen {
         if program_uses_matrix(decls) {
             items.extend(matrix_struct_items());
         }
+        // T30: emit the builtin `Error` struct + impls on-demand when the
+        // program uses the `Error(...)` prelude constructor (which lowers to
+        // `Err(Error::new(...))`). Emitting on-demand (vs. always) keeps
+        // non-error programs free of the struct — mirroring the Matrix
+        // emit-on-demand pattern from T24. The struct implements
+        // `std::error::Error` + `Display` + `Debug` + `Clone` so it slots
+        // into Rust's `Result<T, E>: Termination` and `?`-propagation
+        // machinery directly.
+        if program_uses_error(decls) {
+            items.extend(error_struct_items());
+        }
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -663,6 +674,18 @@ impl RustCodegen {
                     if let Some(fn_) = buff_lang_types::prelude::lookup(&name.name) {
                         return self.lower_prelude_call(fn_, args);
                     }
+                    // T30: `Error("msg")` is a prelude error constructor
+                    // (NOT a reserved keyword and NOT a user function). It
+                    // lowers to `Err(Error::new(arg))` so it produces a
+                    // `Result<_, Error>` value directly — letting
+                    // `return Error("msg")` early-return an Err without the
+                    // user writing `Err(...)` themselves. The builtin `Error`
+                    // struct is emitted on-demand by [`Self::generate`] when
+                    // this constructor appears (mirroring the Matrix
+                    // emit-on-demand pattern from T24).
+                    if name.name == "Error" && args.len() == 1 {
+                        return self.lower_error_constructor(args);
+                    }
                 }
 
                 // A function name (bare Ident callee) is NOT a variable
@@ -762,6 +785,14 @@ impl RustCodegen {
             Expr::MatchExpr {
                 scrutinee, arms, ..
             } => self.lower_match_expr(scrutinee, arms),
+            // T30: `expr?` → Rust's NATIVE `?` operator (`<expr>?`). This is
+            // the cleanest mapping: Buff functions that use `?` already lower
+            // to Rust functions returning `Result<T, E>`, which is exactly
+            // what Rust's `?` requires. The explicit
+            // `match expr { Ok(v) => v, Err(e) => return Err(e) }` desugaring
+            // is NOT used; native `?` is simpler and equally correct. See the
+            // REFACTOR note on [`Self::lower_try`] for the extracted helper.
+            Expr::Try { expr, .. } => self.lower_try(expr),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -1820,6 +1851,66 @@ impl RustCodegen {
         }))
     }
 
+    /// Lower `expr?` to Rust's native `?` operator (T30 REFACTOR step).
+    ///
+    /// This is the extracted error-propagation codegen helper. It builds a
+    /// `syn::ExprTry` wrapping the lowered operand, which `prettyplease`
+    /// prints as `<expr>?`. Rust's `?` performs exactly the early-return
+    /// propagation the task requires (`match expr { Ok(v) => v, Err(e) =>
+    /// return Err(e.into()) }`), so we delegate to it rather than emitting
+    /// the explicit match. The enclosing Buff function must lower to a Rust
+    /// function returning `Result<T, E>` — which it does whenever the user
+    /// writes a `Result<T, E>` return-type annotation, the only context
+    /// where `?` is meaningful.
+    ///
+    /// Design choice (documented in the task): option (a) — Rust-native `?` —
+    /// over option (b) — the explicit match. (a) is simpler, equally correct,
+    /// and produces cleaner Rust that rustc optimises identically.
+    fn lower_try(&mut self, expr: &Expr) -> Result<SynExpr, CodegenError> {
+        let inner = self.lower_expr(expr)?;
+        Ok(SynExpr::Try(syn::ExprTry {
+            attrs: Vec::new(),
+            expr: Box::new(inner),
+            question_token: Default::default(),
+        }))
+    }
+
+    /// Lower the prelude error constructor `Error(arg)` to
+    /// `Err(Error::new(arg))` (T30).
+    ///
+    /// `Error("msg")` in Buff is sugar for an `Err` value carrying a
+    /// freshly-constructed `Error` (the builtin error type emitted on-demand
+    /// by [`Self::generate`]). It maps to `Err(Error::new(arg))` so a
+    /// `return Error("msg")` produces an early `Err` return without the user
+    /// writing `Err(...)` themselves.
+    ///
+    /// The single argument is lowered as a normal expression and spliced
+    /// into the `Error::new(...)` call via `quote!` (so no hand-formatted
+    /// Rust). The outer `Err(...)` is a path call built the same way.
+    fn lower_error_constructor(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 1 {
+            return Err(self.unsupported(&format!(
+                "Error() expects exactly 1 arg, got {}",
+                args.len()
+            )));
+        }
+        let arg = self.lower_expr(&args[0])?;
+        // `Error::new(#arg)` — built via quote! so the path + arg splice
+        // without hand-formatted Rust. The explicit type annotation pins the
+        // `parse2` target so type inference doesn't fall back to `()`.
+        let inner_call_tokens: proc_macro2::TokenStream = quote::quote! {
+            Error::new(#arg)
+        };
+        let inner_call: SynExpr = syn::parse2(inner_call_tokens)
+            .map_err(|e| self.unsupported(&format!("Error() codegen parse: {e}")))?;
+        // Wrap in `Err(...)`.
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            Err(#inner_call)
+        };
+        syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("Err() codegen parse: {e}")))
+    }
+
     /// Lower a Buff [`Pattern`] to a Rust [`syn::Pat`] (T27).
     ///
     /// Mapping:
@@ -2128,6 +2219,18 @@ impl RustCodegen {
                     vec![k, v],
                 ));
             }
+            // T30: Result<T, E> → Rust `Result<T, E>` (the std Result is in
+            // scope by default, so no fully-qualified path needed — mirroring
+            // Option<T>'s 1:1 mapping from T28). Both inners must resolve to
+            // a concrete Rust type; an Unknown inner (e.g. `Ok(42)` infers
+            // `Result<Int<64>, Unknown>`) makes the whole annotation
+            // indeterminate, so we return None and let Rust infer from
+            // context (function return type, etc.).
+            Type::Result(ok, err) => {
+                let ok_ty = self.buff_type_to_syn(ok)?;
+                let err_ty = self.buff_type_to_syn(err)?;
+                return Some(make_generic_path_type("Result", vec![ok_ty, err_ty]));
+            }
             _ => {}
         }
         let rust_name: &str = match ty {
@@ -2178,10 +2281,14 @@ impl RustCodegen {
             Type::Char => "char",
             Type::Decimal => "rust_decimal::Decimal",
             Type::Unknown | Type::Void => return None,
-            // Vector, Matrix, Map, and Option are handled by the early-return
-            // match above; this arm is unreachable but required for
-            // exhaustiveness.
-            Type::Vector(_) | Type::Matrix(_) | Type::Option(_) | Type::Map(_, _) => return None,
+            // Vector, Matrix, Map, Option, and Result are handled by the
+            // early-return match above; this arm is unreachable but required
+            // for exhaustiveness.
+            Type::Vector(_)
+            | Type::Matrix(_)
+            | Type::Option(_)
+            | Type::Map(_, _)
+            | Type::Result(_, _) => return None,
         };
         Some(rust_path_type(rust_name))
     }
@@ -2555,6 +2662,9 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
             scrutinee, arms, ..
         } => expr_uses_matrix(scrutinee) || arms.iter().any(|arm| block_uses_matrix(&arm.body)),
         Expr::SuspendExpr { inner, .. } => expr_uses_matrix(inner),
+        // T30: recurse into the `?` operand so a Matrix constructor inside a
+        // propagated expression is still detected.
+        Expr::Try { expr, .. } => expr_uses_matrix(expr),
     }
 }
 
@@ -2622,6 +2732,165 @@ fn matrix_struct_items() -> Vec<Item> {
                 }
             }
         }
+    "#;
+    match syn::parse_str::<File>(src) {
+        Ok(file) => file.items,
+        Err(_) => Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T30 — builtin `Error` struct (emit-on-demand, mirrors Matrix pattern).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `Error(...)` constructor call
+/// (T30). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to prepend the builtin `Error` struct.
+///
+/// Detection is conservative: only the canonical constructor shape
+/// (`FuncCall { callee: Ident("Error"), args.len() == 1 }`) triggers
+/// emission. A program that mentions `Error` only in a type annotation
+/// (`Result<_, Error>`) WITHOUT a constructor would not trigger emission by
+/// itself — but every well-formed error-producing program must call
+/// `Error(...)` to create one, so this signal is sufficient in practice.
+/// (The v0.5 limitation is documented in `decisions.md`.)
+fn program_uses_error(decls: &[Decl]) -> bool {
+    for decl in decls {
+        let Decl::FuncDecl(f) = decl else {
+            continue;
+        };
+        if block_uses_error(&f.body) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_error`]: scan a block's statements.
+fn block_uses_error(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_error)
+}
+
+/// Check a single statement (and its nested expressions) for `Error(...)`.
+fn stmt_uses_error(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. } | Stmt::ExprStmt(value, _) | Stmt::Return(Some(value), _) => {
+            expr_uses_error(value)
+        }
+        Stmt::Assignment { target, value, .. } => expr_uses_error(target) || expr_uses_error(value),
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_error(iter) || block_uses_error(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_error(cond) || block_uses_error(body),
+    }
+}
+
+/// Recursively scan an expression tree for an `Error(...)` constructor call.
+fn expr_uses_error(expr: &Expr) -> bool {
+    match expr {
+        Expr::FuncCall { callee, args, .. } => {
+            if let Expr::Ident(name, _) = callee.as_ref() {
+                if name.name == "Error" && args.len() == 1 {
+                    return true;
+                }
+            }
+            expr_uses_error(callee) || args.iter().any(expr_uses_error)
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            expr_uses_error(receiver) || args.iter().any(expr_uses_error)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_error(lhs) || expr_uses_error(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_error(operand),
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_error(cond)
+                || block_uses_error(then_block)
+                || else_block.as_ref().is_some_and(block_uses_error)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_error(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_error),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_error(base) || indices.iter().any(expr_uses_error)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_error(k) || expr_uses_error(v)),
+        Expr::Lambda { body, .. } => block_uses_error(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_error(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_error(scrutinee) || arms.iter().any(|arm| block_uses_error(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_error(inner),
+        // T30: recurse into the `?` operand.
+        Expr::Try { expr, .. } => expr_uses_error(expr),
+    }
+}
+
+/// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait
+/// impls as a `Vec<Item>` (T30).
+///
+/// Emits (conceptually):
+///
+/// ```rust,ignore
+/// #[derive(Clone, Debug)]
+/// pub struct Error {
+///     pub message: String,
+/// }
+///
+/// impl Error {
+///     pub fn new(message: impl Into<String>) -> Self {
+///         Self { message: message.into() }
+///     }
+/// }
+///
+/// impl std::fmt::Display for Error {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         write!(f, "{}", self.message)
+///     }
+/// }
+///
+/// impl std::error::Error for Error {}
+/// ```
+///
+/// This makes `Error` a proper Rust error type: it implements
+/// `std::error::Error` (so `?` propagation's `From` bound is satisfiable
+/// when the enclosing fn returns `Result<T, Error>`), `Display` (required by
+/// `std::error::Error`), and `Debug` + `Clone` (consistent with every other
+/// generated type via [`derive_and_repr_attrs`]).
+///
+/// Built via the same fixed-template-then-`syn::parse_str` approach as
+/// [`matrix_struct_items`] (T24). See that function's docstring for the
+/// "this is NOT raw-string codegen" rationale — the string is a
+/// compile-time-fixed scaffold re-parsed into `syn::Item`s.
+fn error_struct_items() -> Vec<Item> {
+    let src = r#"
+        #[derive(Clone, Debug)]
+        pub struct Error {
+            pub message: String,
+        }
+
+        impl Error {
+            pub fn new(message: impl Into<String>) -> Self {
+                Self {
+                    message: message.into(),
+                }
+            }
+        }
+
+        impl std::fmt::Display for Error {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.message)
+            }
+        }
+
+        impl std::error::Error for Error {}
     "#;
     match syn::parse_str::<File>(src) {
         Ok(file) => file.items,

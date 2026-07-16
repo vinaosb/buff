@@ -392,6 +392,22 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     span,
                 };
             }
+            // T30: the `?` error-propagation postfix operator. `expr?`
+            // wraps its operand in `Expr::Try`. The `?` token
+            // (`TokenKind::Question`) is NOT a reserved keyword — it lexes
+            // as a single-byte punctuation token. Chaining (`expr??`) works
+            // naturally because the loop continues after consuming one `?`.
+            // This mirrors Rust's `?` operator: the operand must be a
+            // `Result<T, E>` (or `Option<T>`); the codegen lowers it 1:1 to
+            // Rust's native `?`.
+            Some(TokenKind::Question) => {
+                let q = stream.advance().expect("peek guaranteed Question");
+                let span = Span::new(expr.span().start, q.span.end, stream.source_id());
+                expr = Expr::Try {
+                    expr: Box::new(expr),
+                    span,
+                };
+            }
             _ => break,
         }
     }

@@ -82,6 +82,26 @@ pub enum Type {
     /// literals with mixed key/value kinds fall back to the first entry's
     /// types (a future task will enforce uniformity).
     Map(Box<Type>, Box<Type>),
+    /// A result type: `Result<T, E>` (T30 — prelude error-handling enum).
+    ///
+    /// Maps 1:1 to Rust's `std::result::Result<T, E>`. Mirrors [`Type::Option`]
+    /// (T28): `Result` is a **built-in prelude enum** whose variants `Ok(T)`
+    /// and `Err(E)` resolve WITHOUT a user declaration and WITHOUT being
+    /// reserved keywords. The Ok type (first param) and Err type (second
+    /// param) are each boxed, mirroring [`Type::Map`]'s two-param shape.
+    ///
+    /// `Ok(x)` infers `Result<T, Unknown>` (the Err type is pinned by context
+    /// — e.g. a `let x: Result<Int, Error> = Ok(42)` annotation — or stays
+    /// `Unknown`). `Err(e)` infers `Result<Unknown, E>` symmetrically. The
+    /// `?` postfix operator (`Expr::Try`) propagates the Err and yields the
+    /// Ok type `T`.
+    ///
+    /// This is **additive** (T30): no existing variant was renamed, reordered,
+    /// or had its payload altered. All exhaustive `match`es on `Type` were
+    /// extended with an arm for the new variant: `Display`, `buff_type_to_syn`
+    /// (codegen), `typeref_to_type` (inferencer + exhaustiveness), and the
+    /// prelude-seeded enum registry (`build_enum_registry_with_prelude`).
+    Result(Box<Type>, Box<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -215,6 +235,14 @@ impl Type {
         Type::Map(Box::new(key), Box::new(value))
     }
 
+    /// Create a `Result<T, E>` type (T30). Maps 1:1 to Rust's
+    /// `std::result::Result<T, E>`. Mirrors [`Type::option`] (T28) for the
+    /// error-handling prelude enum. Both params are boxed, mirroring
+    /// [`Type::map`].
+    pub fn result(ok: Type, err: Type) -> Self {
+        Type::Result(Box::new(ok), Box::new(err))
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -268,6 +296,7 @@ impl fmt::Display for Type {
             Type::Matrix(elem) => write!(f, "Matrix<{elem}>"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
             Type::Map(key, value) => write!(f, "Map<{key}, {value}>"),
+            Type::Result(ok, err) => write!(f, "Result<{ok}, {err}>"),
         }
     }
 }

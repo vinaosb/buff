@@ -786,6 +786,8 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
                 collect_uses(v, out);
             }
         }
+        // T30: `expr?` uses its operand expression.
+        Expr::Try { expr, .. } => collect_uses(expr, out),
     }
 }
 

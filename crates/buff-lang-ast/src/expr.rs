@@ -176,6 +176,23 @@ impl fmt::Display for InterpPart {
 /// on the `TokenStream` position: it tries the closure shape first, and on
 /// failure rolls back and tries the map shape. Empty `{:}` is an empty map;
 /// bare `{}` is rejected (ambiguous with code blocks per layout).
+///
+/// ## T30 — `Expr::Try` (the `?` postfix operator)
+///
+/// A new variant was **added** in T30 (v0.5) to carry the error-propagation
+/// postfix operator `expr?`. The operand is boxed. This is **additive**: no
+/// existing variant was renamed, reordered, or had its payload altered, so
+/// all prior `match` arms remain exhaustive. The variant carries a
+/// `span: Span` for diagnostics.
+///
+/// The parser fills this node from the `?` postfix position in `parse_postfix`
+/// (the lexer already produced a `TokenKind::Question` token — `?` was never
+/// a reserved keyword, so no lexer change was needed). Codegen lowers it to
+/// Rust's **native `?` operator** (`<expr>?`) — the cleanest mapping because
+/// the enclosing Buff function already lowers to a Rust function returning
+/// `Result<T, E>`, which is exactly what Rust's `?` requires. The explicit
+/// `match expr { Ok(v) => v, Err(e) => return Err(e) }` desugaring (the task's
+/// option (b)) is NOT used; native `?` is simpler and equally correct.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A literal: `42`, `"hi"`, `true`, …
@@ -298,6 +315,20 @@ pub enum Expr {
         entries: Vec<(Expr, Expr)>,
         span: Span,
     },
+    /// The error-propagation postfix operator `expr?` (T30).
+    ///
+    /// Wraps its operand. Codegen lowers this to Rust's **native `?`**
+    /// (`<expr>?`), which requires (and assumes) the enclosing function
+    /// returns a `Result<T, E>` — Buff functions that use `?` lower to
+    /// Rust functions returning `Result`, so this lines up directly. The
+    /// `?` operator propagates the `Err(e)` early (via `return Err(e)`)
+    /// and yields the unwrapped `Ok(v)` value.
+    ///
+    /// This is **additive** (T30): see the migration note on [`Expr`].
+    /// Parsing happens in `parse_postfix` (the `?` token is
+    /// `TokenKind::Question`, already produced by the lexer — it is NOT a
+    /// reserved keyword).
+    Try { expr: Box<Expr>, span: Span },
 }
 
 impl Expr {
@@ -318,7 +349,8 @@ impl Expr {
             | Expr::ArrayLit { span: s, .. }
             | Expr::Index { span: s, .. }
             | Expr::StringInterp { span: s, .. }
-            | Expr::MapLit { span: s, .. } => *s,
+            | Expr::MapLit { span: s, .. }
+            | Expr::Try { span: s, .. } => *s,
         }
     }
 }
@@ -451,6 +483,8 @@ impl fmt::Display for Expr {
                 }
                 f.write_str("]")
             }
+            // T30: `expr?` -> `Try(expr)`.
+            Expr::Try { expr, .. } => write!(f, "Try({expr})"),
         }
     }
 }

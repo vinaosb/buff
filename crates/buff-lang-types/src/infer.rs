@@ -90,6 +90,20 @@ impl TypeInferencer {
                     if name.name == "None" && args.is_empty() {
                         return Ok(Type::option(Type::Unknown));
                     }
+                    // T30: `Ok(x)` and `Err(e)` are prelude Result constructors,
+                    // NOT keywords and NOT user functions. `Ok(x)` wraps its
+                    // argument's type in `Result<T, Unknown>` (the Err type is
+                    // pinned by context or stays Unknown). `Err(e)` wraps its
+                    // argument's type in `Result<Unknown, E>` symmetrically.
+                    // Neither is a reserved keyword.
+                    if name.name == "Ok" && args.len() == 1 {
+                        let ok_ty = self.infer_expr(&args[0])?;
+                        return Ok(Type::result(ok_ty, Type::Unknown));
+                    }
+                    if name.name == "Err" && args.len() == 1 {
+                        let err_ty = self.infer_expr(&args[0])?;
+                        return Ok(Type::result(Type::Unknown, err_ty));
+                    }
                 }
                 // T96: standard-library prelude. A bare-ident callee whose name
                 // is a recognised prelude function is resolved WITHOUT an import
@@ -197,6 +211,18 @@ impl TypeInferencer {
             // v0.5: lambda/struct/match inference.
             Expr::Lambda { .. } | Expr::StructInit { .. } | Expr::MatchExpr { .. } => {
                 Ok(Type::Unknown)
+            }
+            // T30: `expr?` yields the Ok type `T` of a `Result<T, E>`. When
+            // the operand infers to a known `Result(T, E)`, return `T`;
+            // otherwise (Unknown, Option, etc.) fall back to `Unknown` so the
+            // value flows through to codegen without a hard type error
+            // (matches v0.5's type-errors-as-warnings policy).
+            Expr::Try { expr, .. } => {
+                let inner_ty = self.infer_expr(expr)?;
+                match inner_ty {
+                    Type::Result(ok, _) => Ok((*ok).clone()),
+                    _ => Ok(Type::Unknown),
+                }
             }
         }
     }
@@ -541,11 +567,22 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
         // application whose base name is "Option". Recognise it here so a
         // `let x: Option<Int> = Some(42)` annotation resolves to a real
         // `Type::Option(Int<64>)` and the null-safety check can fire.
+        //
+        // T30: source annotations `Result<T, E>` parse as a generic
+        // application whose base name is "Result" with 2 args. Recognise it
+        // so a `let x: Result<Int, Error> = Ok(42)` annotation resolves to a
+        // real `Type::Result(Int<64>, Unknown)` (the Error user-enum falls
+        // back to Unknown — matching v0.5's user-type resolution gap).
         TypeRef::Generic { base, args, .. } => {
             if let TypeRef::Named { name, .. } = base.as_ref() {
                 if name.name == "Option" && args.len() == 1 {
                     let inner = typeref_to_type(&args[0]).unwrap_or(Type::Unknown);
                     return Some(Type::option(inner));
+                }
+                if name.name == "Result" && args.len() == 2 {
+                    let ok_ty = typeref_to_type(&args[0]).unwrap_or(Type::Unknown);
+                    let err_ty = typeref_to_type(&args[1]).unwrap_or(Type::Unknown);
+                    return Some(Type::result(ok_ty, err_ty));
                 }
             }
             None
