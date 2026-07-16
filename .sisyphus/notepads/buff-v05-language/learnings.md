@@ -474,3 +474,47 @@ cast_to + ield_access produce exactly that prettyplease output.
 - cargo check --workspace -> exit 0
 - cargo clippy --workspace --all-targets -- -D warnings -> exit 0
 - cargo fmt -p <4 touched crates> -- --check -> exit 0
+
+## T26 — Struct type + repr(C) codegen
+
+- T11 codegen returns `CodegenError` for unsupported Decl variants; T26
+  replaces that arm with a real `lower_struct_decl` that emits
+  `#[derive(Clone, Debug)] pub struct Name { pub f: <rust_ty>, ... }`.
+- Field types reuse the existing `ast_typeref_to_syn` (NOT
+  `buff_type_to_syn` — that one takes the post-inference `Type`, but
+  struct fields have a `TypeRef` in the AST). Int?i64, Float?f32,
+  String?String, Decimal?rust_decimal::Decimal, etc.
+- syn 2.0.119's `syn::Field` requires a `mutability: FieldMutability`
+  field (NOT `Option<...>`). Use `syn::FieldMutability::None` for
+  immutable fields.
+- syn's `Meta::List` for `#[derive(...)]` and `#[repr(...)]` can be
+  built by hand via `proc_macro2::TokenStream` + `quote!`; no need for
+  `parse_quote!` (which would panic on parse failure).
+- Parser struct-init disambiguation: `if cond { ... }`, `for x in iter
+  { ... }`, and `Type { field: value }` ALL produce an Ident-typed
+  expression followed by `{` at the postfix level. A peek-ahead is
+  REQUIRED: only consume the `{` if its contents start with `}` (empty
+  struct-init) or `Ident :` (first field). Otherwise fall through and
+  let the outer parser handle the `{` as a block body.
+- Buff's move-by-default semantics (T33a) insert `.clone()` on the
+  second use of a non-Copy local. Two field accesses on the same local
+  `p` produce `p.name` THEN `p.clone().age` — that's correct codegen,
+  not a bug.
+- prettyplease pins the type suffix on typed float literals:
+  `1.0f32` (not `1.0`) when the value comes from a Float Expr.
+- insta inline snapshot for a struct decl renders as 4 lines:
+  `#[derive(Clone, Debug)]` / `pub struct Point {` / `    pub x: f32,`
+  / `    pub y: f32,` / `}`.
+- The codegen-rust test crate needs `buff-lang-lexer` and
+  `buff-lang-parser` as DEV-deps to run parser round-trip tests from
+  inside the codegen test binary. Add to `[dev-dependencies]` only
+  (NOT regular deps — the codegen lib itself never depends on them).
+- pub API additions: `RustCodegen::mark_struct_repr_c` (setter),
+  `format_file` (alias for `format`).
+
+### Verification (all GREEN)
+- cargo test -p buff-lang-codegen-rust --test struct_codegen -> 19/19
+- cargo test --workspace -> 0 failed
+- cargo check --workspace -> exit 0
+- cargo clippy --workspace --all-targets -- -D warnings -> exit 0
+- cargo fmt --all -- --check -> exit 0

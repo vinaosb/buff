@@ -46,6 +46,16 @@ pub use format::format;
 pub use move_analysis::MoveAnalyzer;
 pub use rust_codegen::RustCodegen;
 
+/// Convenience alias for [`format`] so external callers (tests, the CLI)
+/// can refer to it without importing the module. T26 introduced the alias
+/// so the `struct_codegen` integration tests can format a `syn::File` they
+/// obtained from the lower-level [`RustCodegen::generate`] entry point
+/// (needed for the `#[repr(C)]` hook test which bypasses the convenience
+/// [`generate_rust`] wrapper).
+pub fn format_file(file: &syn::File) -> String {
+    format(file)
+}
+
 /// Convenience: lower a slice of Buff declarations to formatted Rust source.
 ///
 /// Equivalent to building a [`RustCodegen`], calling [`RustCodegen::generate`],

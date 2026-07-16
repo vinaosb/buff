@@ -257,6 +257,38 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let mut expr = parse_primary(stream)?;
     loop {
         match stream.peek_kind() {
+            // T26: struct-init `Type { field: value, ... }`. Fires ONLY when
+            // the receiver is a bare Ident (a type name) AND the brace
+            // contents match the struct-init field shape — we peek ahead
+            // using save/restore to confirm the `{` is followed by either
+            // `}` (empty init) or `Ident :` (first field). This avoids
+            // misinterpreting `if cond { ... }` / `for x in iter { ... }`
+            // block bodies as struct-inits: those bodies don't start with
+            // `Ident :`, so they fall through and the outer parser handles
+            // the `{` as a block.
+            //
+            // See [`parse_struct_init_fields`] for the field-list shape.
+            Some(TokenKind::LBrace) => {
+                if matches!(&expr, Expr::Ident(_, _)) && cursor_at_struct_init_body(stream) {
+                    let (type_name, type_span) = if let Expr::Ident(name, sp) = &expr {
+                        (name.clone(), *sp)
+                    } else {
+                        // Unreachable: matches! above gates this arm.
+                        break;
+                    };
+                    stream.expect(TokenKind::LBrace)?; // consume `{`
+                    let fields = parse_struct_init_fields(stream)?;
+                    let rb = stream.expect(TokenKind::RBrace)?;
+                    let span = Span::new(type_span.start, rb.span.end, stream.source_id());
+                    expr = Expr::StructInit {
+                        type_name,
+                        fields,
+                        span,
+                    };
+                } else {
+                    break;
+                }
+            }
             Some(TokenKind::LParen) => {
                 stream.advance(); // consume '('
                 let args = parse_call_args(stream)?;
@@ -502,6 +534,101 @@ fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         return_type: None,
         span,
     })
+}
+
+/// Speculative lookahead: return `true` if the cursor is positioned at an
+/// `LBrace` whose contents match the struct-init field shape (T26).
+///
+/// Used by [`parse_postfix`] to disambiguate `Ident { ... }` (struct init)
+/// from block bodies that happen to follow an Ident-typed expression (e.g.
+/// `if cond { ... }`, `for x in iter { ... }`).
+///
+/// Returns `true` when the token AT the cursor is `{` AND the first
+/// significant token AFTER `{` is either:
+/// - `}` — empty struct-init `Type { }`, or
+/// - `Ident` followed by `:` — the start of `field: value`.
+///
+/// Returns `false` for any other shape (e.g. `{ 1 }`, `{ print(x) }` —
+/// these are block bodies, not struct-inits).
+///
+/// Implementation: save the cursor, advance past `{`, peek the next two
+/// significant tokens, then restore. The cursor is UNCHANGED on return.
+fn cursor_at_struct_init_body(stream: &mut TokenStream<'_>) -> bool {
+    // The caller already saw `{` at the cursor via `peek_kind`; re-check.
+    if !matches!(stream.peek_kind(), Some(TokenKind::LBrace)) {
+        return false;
+    }
+    let saved = stream.save();
+    // Consume the `{` then peek the next two significant tokens.
+    stream.advance(); // past `{`
+    let result = match stream.peek_kind().cloned() {
+        Some(TokenKind::RBrace) => true,
+        Some(TokenKind::Ident(_)) => {
+            matches!(stream.peek_second_kind(), Some(TokenKind::Colon))
+        }
+        _ => false,
+    };
+    stream.restore(saved);
+    result
+}
+
+///
+/// Called by [`parse_postfix`] AFTER the opening `{` has been consumed
+/// (i.e. the cursor is positioned AT the first field name, or `}` for an
+/// empty struct-init). The closing `}` is left for the caller to expect.
+///
+/// Shape: each entry is `ident : expr` (named field). Trailing comma is
+/// allowed. Returns the list of `(Ident, Expr)` pairs.
+///
+/// This is structurally similar to [`parse_map_literal`]'s entry loop, but
+/// the KEY difference is that map keys are arbitrary expressions while
+/// struct-init field names are bare identifiers. The two parsers don't
+/// share code because the entry-point disambiguation already runs in
+/// `parse_brace_primary` (which only fires at PRIMARY position) — by the
+/// time `parse_struct_init_fields` runs, we KNOW we're in a struct-init
+/// (the leading `Type` Ident has been consumed).
+fn parse_struct_init_fields(
+    stream: &mut TokenStream<'_>,
+) -> Result<Vec<(Ident, Expr)>, ParseError> {
+    let mut fields: Vec<(Ident, Expr)> = Vec::new();
+    // Empty struct-init `Type { }` — no fields.
+    if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+        return Ok(fields);
+    }
+    loop {
+        // Field name MUST be a bare identifier.
+        let Some(tok) = stream.advance() else {
+            return Err(ParseError::new(Diagnostic::error(
+                "expected struct field name, found end of input",
+                stream.eof_span(),
+            )));
+        };
+        let TokenKind::Ident(name) = tok.kind.clone() else {
+            return Err(ParseError::new(Diagnostic::error(
+                format!(
+                    "expected struct field name (identifier), found `{}`",
+                    tok.kind
+                ),
+                tok.span,
+            )));
+        };
+        let field_ident = Ident::new(name, tok.span);
+        // `:` separator between field name and value.
+        stream.expect(TokenKind::Colon)?;
+        // Field value is a full expression.
+        let value = parse_expression(stream)?;
+        fields.push((field_ident, value));
+        if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+            stream.advance(); // consume ','
+                              // Allow trailing comma: `Type { a: 1, }`.
+            if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+    Ok(fields)
 }
 
 /// Parse a map literal `{"k": v, ...}` or `{:}` (empty) whose opening `{` is

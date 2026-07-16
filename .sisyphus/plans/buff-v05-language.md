@@ -404,7 +404,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T26**: Struct type + repr(C) codegen [deep]
+- [x] **T26**: Struct type + repr(C) codegen [deep]
 
   **What to do** (TDD):
   - **RED**: Write snapshot: `struct Person { name: String, age: Int }` → Rust struct with `#[derive(Clone, Debug)]`

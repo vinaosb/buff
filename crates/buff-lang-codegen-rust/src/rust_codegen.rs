@@ -66,16 +66,18 @@
 //! Structs, enums, imports, traits, lambdas, match, method-call and
 //! struct-init lowering are deferred to later tasks.
 
+use std::collections::HashSet;
+
 use proc_macro2::Span as ProcSpan;
 use syn::punctuated::Punctuated;
 use syn::{
-    Expr as SynExpr, File, Ident, Item, ItemFn, Pat, PatIdent, PatType, ReturnType, Signature,
-    Stmt as SynStmt, Type as SynType, Visibility,
+    Expr as SynExpr, Field as SynField, Fields as SynFields, File, Ident, Item, ItemFn, ItemStruct,
+    Pat, PatIdent, PatType, ReturnType, Signature, Stmt as SynStmt, Type as SynType, Visibility,
 };
 
 use buff_lang_ast::{
     op::{BinaryOp, UnaryOp},
-    Block, Decl, Expr, FuncDecl, InterpPart, Literal, Stmt, TypeRef,
+    Block, Decl, Expr, FuncDecl, InterpPart, Literal, Stmt, StructDecl as AstStructDecl, TypeRef,
 };
 use buff_lang_error::{CodegenError, Diagnostic, Span as BuffSpan};
 use buff_lang_types::{prelude::PreludeFn, FloatWidth, IntWidth, Type, TypeInferencer};
@@ -95,6 +97,11 @@ pub struct RustCodegen {
     /// Reset between functions via [`TypeInferencer::env`] clear semantics
     /// (we re-bind params + walk let-stmts at the top of each `lower_func`).
     type_inferencer: TypeInferencer,
+    /// T26 hook: names of structs that should be emitted with `#[repr(C)]`
+    /// between the derive attribute and the `pub struct` line. The full
+    /// GPU-dispatch auto-detection that populates this set lands in v1.0;
+    /// T26 provides the emission mechanism only. See [`Self::mark_struct_repr_c`].
+    repr_c_struct_names: HashSet<String>,
 }
 
 impl RustCodegen {
@@ -104,12 +111,25 @@ impl RustCodegen {
             ctx: CodegenContext::new(),
             move_analyzer: MoveAnalyzer::new(),
             type_inferencer: TypeInferencer::new(),
+            repr_c_struct_names: HashSet::new(),
         }
     }
 
     /// Borrow the inner context (read-only).
     pub fn context(&self) -> &CodegenContext {
         &self.ctx
+    }
+
+    /// T26 hook: mark a struct name to be emitted with `#[repr(C)]` between
+    /// the derive attribute and the `pub struct` line. The full GPU-dispatch
+    /// auto-detection that populates this set lands in v1.0; T26 provides the
+    /// emission mechanism only (plus the test
+    /// `struct_codegen_repr_c_emitted_when_struct_marked`).
+    ///
+    /// Multiple calls accumulate; the marker set is consumed by
+    /// [`Self::lower_struct_decl`] when it walks the declaration list.
+    pub fn mark_struct_repr_c(&mut self, name: &str) {
+        self.repr_c_struct_names.insert(name.to_string());
     }
 
     /// Generate a complete [`syn::File`] from a list of Buff declarations.
@@ -152,12 +172,80 @@ impl RustCodegen {
     fn lower_decl(&mut self, decl: &Decl) -> Result<Item, CodegenError> {
         match decl {
             Decl::FuncDecl(f) => Ok(Item::Fn(self.lower_func(f)?)),
-            Decl::StructDecl { .. } => Err(self.unsupported("struct codegen (T12/T13)")),
+            Decl::StructDecl(s) => Ok(Item::Struct(self.lower_struct_decl(s)?)),
             Decl::EnumDecl { .. } => Err(self.unsupported("enum codegen")),
             Decl::ImportDecl { .. } => Err(self.unsupported("import codegen")),
             Decl::ModuleDecl { .. } => Err(self.unsupported("module codegen")),
             Decl::TraitDecl { .. } => Err(self.unsupported("trait codegen")),
         }
+    }
+
+    /// Lower a Buff [`AstStructDecl`] to a Rust [`syn::ItemStruct`] (T26).
+    ///
+    /// Emits (conceptually):
+    ///
+    /// ```rust,ignore
+    /// #[derive(Clone, Debug)]
+    /// pub struct Name {
+    ///     pub field: <rust_type>,
+    ///     ...
+    /// }
+    /// ```
+    ///
+    /// Every field is `pub` so generated code can construct and read struct
+    /// values without accessor boilerplate (Buff hides encapsulation from
+    /// users; the generated Rust just compiles). Field types go through
+    /// [`Self::ast_typeref_to_syn`] so the same primitive mapping that drives
+    /// `let`-binding annotations (Int→i64, Float→f32, String→String, …)
+    /// applies to struct fields.
+    ///
+    /// # `#[repr(C)]` hook
+    ///
+    /// If the struct name has been marked via [`Self::mark_struct_repr_c`],
+    /// an additional `#[repr(C)]` attribute is emitted BETWEEN the derive
+    /// attribute and the `pub struct` line. The marker set is populated by
+    /// future GPU-dispatch analysis (v1.0); T26 provides the emission
+    /// mechanism only. See [`derive_and_repr_attrs`] for attribute ordering.
+    ///
+    /// # `traits` field
+    ///
+    /// The `traits` field on [`AstStructDecl`] is currently ignored at
+    /// codegen time — Buff emits blanket `Clone + Debug` derives; user-specified
+    /// trait impls are a later task.
+    fn lower_struct_decl(&mut self, s: &AstStructDecl) -> Result<ItemStruct, CodegenError> {
+        // Build named fields: each field is `pub name: <rust_type>`. Field
+        // visibility is always `pub` so any generated constructor / user
+        // code can initialise and read struct values without accessors.
+        let mut named_fields: Punctuated<SynField, syn::Token![,]> = Punctuated::new();
+        for (fname, ftype) in &s.fields {
+            let rust_ty = self.ast_typeref_to_syn(ftype)?;
+            named_fields.push(SynField {
+                attrs: Vec::new(),
+                vis: Visibility::Public(Default::default()),
+                ident: Some(ast_ident_to_syn(fname)),
+                colon_token: Some(Default::default()),
+                ty: rust_ty,
+                mutability: syn::FieldMutability::None,
+            });
+        }
+
+        // T26 repr(C) hook: emit `#[repr(C)]` between the derive attribute
+        // and `pub struct` when the struct name was marked via
+        // `mark_struct_repr_c`. Full GPU-dispatch auto-detection lands in v1.0.
+        let emit_repr_c = self.repr_c_struct_names.contains(&s.name.name);
+
+        Ok(ItemStruct {
+            attrs: derive_and_repr_attrs(emit_repr_c),
+            vis: Visibility::Public(Default::default()),
+            struct_token: Default::default(),
+            ident: ast_ident_to_syn(&s.name),
+            generics: syn::Generics::default(),
+            fields: SynFields::Named(syn::FieldsNamed {
+                brace_token: Default::default(),
+                named: named_fields,
+            }),
+            semi_token: Some(Default::default()),
+        })
     }
 
     fn lower_func(&mut self, f: &FuncDecl) -> Result<ItemFn, CodegenError> {
@@ -528,6 +616,14 @@ impl RustCodegen {
             // a Rust tuple `(key, value)`; the outer `[...]` is a const-eval
             // array literal that `HashMap::from` consumes.
             Expr::MapLit { entries, .. } => self.lower_map_lit(entries),
+            // T26: struct init `Type { field: value, ... }` → Rust struct
+            // expression of the same shape. Each field is lowered as a
+            // `field: value` pair inside `Type { ... }`. This mirrors the
+            // source form 1:1 because Buff deliberately matches Rust's
+            // struct-init syntax ( braces + named fields + colon ).
+            Expr::StructInit {
+                type_name, fields, ..
+            } => self.lower_struct_init(type_name, fields),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -893,6 +989,33 @@ impl RustCodegen {
         method: &buff_lang_ast::common::Ident,
         args: &[Expr],
     ) -> Result<SynExpr, CodegenError> {
+        // T26 field-access-vs-method-call disambiguation.
+        //
+        // Buff parses `obj.field` and `obj.method()` through the SAME AST
+        // shape (`Expr::MethodCall { receiver, method, args }`) — see the
+        // parser's `parse_postfix` Dot arm: a `.` followed by an Ident
+        // WITHOUT parens produces a zero-arg MethodCall. So `p.name` (a
+        // field access on a user struct) and `v.len()` (a real method call)
+        // are indistinguishable at the AST level.
+        //
+        // Heuristic (T26): when `args` is empty AND `method.name` is NOT in
+        // the [`KNOWN_ZERO_ARG_METHODS`] allow-list, emit a Rust field
+        // access `recv.field` instead of a method call `recv.field()`. This
+        // is the additive-only approach: no AST migration required, no new
+        // FieldAccess variant — just a codegen-time rewrite. A dedicated
+        // `Expr::FieldAccess` AST node is the cleaner long-term shape (see
+        // migration note in `decisions.md`), deferred to keep T26 additive.
+        //
+        // Trade-off: if a user defines a struct with a field literally named
+        // `len` / `push` / etc., `obj.len` will emit `obj.len()` (wrong). The
+        // allow-list is conservative (only names this codegen actually
+        // handles + the universal `clone`/`to_string`/etc.); new builtins
+        // added later must be added to the list to preserve the heuristic.
+        if args.is_empty() && !KNOWN_ZERO_ARG_METHODS.contains(&method.name.as_str()) {
+            let recv = self.lower_expr(receiver)?;
+            return Ok(field_access(recv, &method.name));
+        }
+
         // T24: `Matrix.new(rows, cols)` — the builtin Matrix constructor.
         // Buff's constructor convention is `Type.new()` / `Type.from()` (§7),
         // parsed as a MethodCall whose receiver is a bare Ident naming the
@@ -1458,6 +1581,46 @@ impl RustCodegen {
             .map_err(|e| self.unsupported(&format!("map literal codegen parse: {e}")))
     }
 
+    /// Lower a Buff struct-init expression `Type { field: value, ... }` to a
+    /// Rust [`syn::ExprStruct`] of the same shape (T26).
+    ///
+    /// Each field is a `field: <lowered_value>` pair; the type path uses the
+    /// struct name verbatim (Buff's struct names ARE Rust struct names — no
+    /// renaming). The output is built via `quote!` so the brace-delimited
+    /// body and comma-separated fields are constructed without any
+    /// hand-formatted Rust strings.
+    ///
+    /// This mirrors the source form 1:1 because Buff deliberately matches
+    /// Rust's struct-init syntax ( braces + named fields + colon ).
+    fn lower_struct_init(
+        &mut self,
+        type_name: &buff_lang_ast::common::Ident,
+        fields: &[(buff_lang_ast::common::Ident, Expr)],
+    ) -> Result<SynExpr, CodegenError> {
+        // Lower each field value first.
+        let mut lowered_fields: Vec<(Ident, SynExpr)> = Vec::with_capacity(fields.len());
+        for (fname, fval) in fields {
+            let v = self.lower_expr(fval)?;
+            lowered_fields.push((ast_ident_to_syn(fname), v));
+        }
+        // Build `Type { f1: v1, f2: v2, ... }` via `quote!`. Splice each
+        // field as `#fname: #fval` (both are syn expressions/idents that
+        // `quote!` can interpolate).
+        let type_path = rust_path(&type_name.name);
+        let mut fields_tokens: proc_macro2::TokenStream = proc_macro2::TokenStream::new();
+        for (i, (fname, fval)) in lowered_fields.iter().enumerate() {
+            if i > 0 {
+                fields_tokens.extend(quote::quote! { , });
+            }
+            fields_tokens.extend(quote::quote! { #fname: #fval });
+        }
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            #type_path { #fields_tokens }
+        };
+        syn::parse2(tokens)
+            .map_err(|e| self.unsupported(&format!("struct init codegen parse: {e}")))
+    }
+
     fn lower_literal(&mut self, lit: &Literal) -> Result<SynExpr, CodegenError> {
         // T20: Decimal literal → `rust_decimal_macros::dec!(<raw>)`. The raw
         // digit text is parsed into a `proc_macro2::TokenStream` so the
@@ -1872,6 +2035,152 @@ fn field_access(base: SynExpr, field: &str) -> SynExpr {
         dot_token: Default::default(),
         member: syn::Member::Named(Ident::new(field, ProcSpan::call_site())),
     })
+}
+
+/// Allow-list of method names that ALWAYS lower to a Rust method call even
+/// when called with zero arguments (T26 field-access heuristic).
+///
+/// Any zero-arg `obj.name` whose `name` is NOT in this list lowers to a Rust
+/// field access `obj.name`. Anything in the list stays a method call
+/// `obj.name()`. The list contains:
+///
+/// - The string-method family this codegen explicitly handles
+///   (`char_count`/`byte_len`/`chars`/`bytes`/`first`/`last`/`graphemes`).
+/// - Universal `clone`/`to_string`/`to_owned`/`into`/etc. that show up via
+///   move analysis and the standard library.
+/// - Common collection zero-arg methods (`len`/`is_empty`/`iter`/...).
+/// - Numeric methods that don't take args (`abs`/`sqrt`/`floor`/...).
+///
+/// Adding a new zero-arg builtin in a later task MUST extend this list,
+/// otherwise users calling `obj.<new_builtin>()` will see broken field
+/// access codegen. The unit test `t26_known_zero_arg_methods_table_is_load_bearing`
+/// pins the table so a careless rename is caught.
+const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
+    // String methods (this codegen explicitly lowers these).
+    "char_count",
+    "byte_len",
+    "chars",
+    "bytes",
+    "first",
+    "last",
+    "graphemes",
+    // Universal / standard-library methods.
+    "clone",
+    "to_string",
+    "to_owned",
+    "into",
+    "as_ref",
+    "as_mut",
+    "default",
+    "to_lowercase",
+    "to_uppercase",
+    "trim",
+    "trim_start",
+    "trim_end",
+    // Collection zero-arg methods.
+    "len",
+    "is_empty",
+    "iter",
+    "iter_mut",
+    "into_iter",
+    "keys",
+    "values",
+    "pop",
+    "clear",
+    // Iterator adaptors (zero-arg form).
+    "rev",
+    "count",
+    "sum",
+    "product",
+    "next",
+    "enumerate",
+    "flatten",
+    "step_by",
+    // Numeric zero-arg methods.
+    "abs",
+    "sqrt",
+    "floor",
+    "ceil",
+    "round",
+    "signum",
+    "trunc",
+    "fract",
+    "recip",
+    "is_nan",
+    "is_infinite",
+    "is_finite",
+    "is_sign_positive",
+    "is_sign_negative",
+    "to_degrees",
+    "to_radians",
+    "exp",
+    "ln",
+    "log2",
+    "log10",
+    "tan",
+    "sin",
+    "cos",
+    "atan",
+    "asin",
+    "acos",
+    "tanh",
+    "sinh",
+    "cosh",
+    "powi",
+    "powf",
+];
+
+/// Build the attribute list for a generated struct: always
+/// `#[derive(Clone, Debug)]`, plus an optional `#[repr(C)]` when
+/// `emit_repr_c` is true (T26 hook).
+///
+/// Ordering: derive attribute first, then `#[repr(C)]` (matching the layout
+/// the T26 snapshot asserts). Both attributes use `syn::Attribute::parse_attr`
+/// style construction (meta list / path) so they survive `prettyplease`
+/// formatting without round-tripping through strings.
+///
+/// This is the shared derive-attribute helper extracted during the T26
+/// REFACTOR step: future struct-like decls (enum repr hints, future trait
+/// derives) reuse this function. The signature is `(emit_repr_c: bool) -> Vec<Attribute>`
+/// so callers stay in control of whether repr(C) applies.
+fn derive_and_repr_attrs(emit_repr_c: bool) -> Vec<syn::Attribute> {
+    // Build `#[derive(Clone, Debug)]` via `syn::Attribute` construction.
+    let derive_attr = syn::Attribute {
+        pound_token: Default::default(),
+        style: syn::AttrStyle::Outer,
+        bracket_token: Default::default(),
+        meta: syn::Meta::List(syn::MetaList {
+            path: rust_path("derive"),
+            delimiter: syn::MacroDelimiter::Paren(Default::default()),
+            tokens: {
+                // Build `Clone, Debug` as a token stream — this is a
+                // fixed template parsed once at codegen time (not a runtime
+                // Rust-string assembler; the single string producer remains
+                // `prettyplease::unparse`).
+                let mut t = proc_macro2::TokenStream::new();
+                t.extend(quote::quote! { Clone });
+                t.extend(quote::quote! { , });
+                t.extend(quote::quote! { Debug });
+                t
+            },
+        }),
+    };
+    let mut attrs = vec![derive_attr];
+    if emit_repr_c {
+        // `#[repr(C)]` — a path with one generic-style argument `(C)`.
+        let repr_attr = syn::Attribute {
+            pound_token: Default::default(),
+            style: syn::AttrStyle::Outer,
+            bracket_token: Default::default(),
+            meta: syn::Meta::List(syn::MetaList {
+                path: rust_path("repr"),
+                delimiter: syn::MacroDelimiter::Paren(Default::default()),
+                tokens: quote::quote! { C },
+            }),
+        };
+        attrs.push(repr_attr);
+    }
+    attrs
 }
 
 /// Walk the declaration list looking for any `Matrix.new(...)` constructor
@@ -2443,7 +2752,9 @@ mod tests {
     }
 
     #[test]
-    fn struct_codegen_returns_unsupported_error() {
+    fn struct_codegen_lowers_empty_struct_to_pub_struct_with_derives() {
+        // T26: the pre-T26 behaviour returned CodegenError. T26 actually
+        // implements struct codegen; we now verify the new GREEN path.
         let sd = buff_lang_ast::decl::StructDecl {
             name: AstIdent::new("Foo", dummy_span()),
             fields: Vec::new(),
@@ -2452,7 +2763,9 @@ mod tests {
         };
         let mut codegen = RustCodegen::new();
         let result = codegen.generate(&[Decl::StructDecl(sd)]);
-        assert!(result.is_err());
+        let file = result.expect("struct codegen must succeed post-T26");
+        assert_eq!(file.items.len(), 1);
+        assert!(matches!(file.items[0], Item::Struct(_)));
     }
 
     #[test]

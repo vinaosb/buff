@@ -458,3 +458,88 @@ lower_matrix_new/field_access/program_uses_matrix/matrix_struct_items,
 remove the Matrix injection in generate(), restore the 2 parser Display
 assertions, restore the vector_codegen index_expr helper, delete
 matrix_codegen.rs. Clean reversal (the change set is self-contained).
+
+## T26 — Struct type + repr(C) codegen
+
+### Decision: field-access via codegen-time rewrite (additive only)
+
+T26 implements `obj.field` field access via a codegen-time rewrite of
+zero-arg `Expr::MethodCall`s rather than adding a dedicated
+`Expr::FieldAccess` AST variant. Rationale:
+
+- The parser already produces `MethodCall(receiver, "field", [])` for
+  `obj.field` (the Dot postfix arm with no `(` after the method name).
+- A codegen-time heuristic — "zero-args + method name NOT in the
+  KNOWN_ZERO_ARG_METHODS allow-list ? emit `recv.field`" — implements
+  the rewrite with ZERO AST migration (every existing match arm stays
+  exhaustive).
+- The cost: a user struct field literally named `len`/`push`/etc.
+  would mis-codegen to `obj.len()`. The allow-list is conservative and
+  documented; users should avoid naming fields after builtin methods.
+
+A dedicated `Expr::FieldAccess { receiver, field, span }` variant is
+the cleaner long-term shape and is the recommended future migration:
+introduce the variant, update the parser to emit it when next is not
+`(`, update codegen (delete the heuristic), update the move analyzer +
+IR. The migration is purely additive to the AST (new variant); existing
+code that pattern-matches `Expr` adds one new arm. DEFERRED to keep T26
+within scope.
+
+### Decision: repr(C) emission mechanism — opt-in setter, not auto-detect
+
+T26 provides a `RustCodegen::mark_struct_repr_c(name: &str)` setter
+that adds a struct name to a `HashSet<String>`. When the codegen walks
+the declaration list, structs whose names are in the set get
+`#[repr(C)]` between the derive attribute and the `pub struct` line.
+
+The full GPU-dispatch auto-detection (analyzing which structs are
+passed to GPU compute contexts) is deferred to v1.0 (per task spec).
+T26's mechanism is the EMISSION HOOK — the v1.0 detection will simply
+populate the set.
+
+### Decision: struct-init parser disambiguation via peek-ahead
+
+`parse_postfix` adds an LBrace arm for `Ident { ... }`. The arm fires
+ONLY when the receiver is a bare `Expr::Ident` AND a peek-ahead helper
+(`cursor_at_struct_init_body`) confirms the brace contents match the
+struct-init field shape (`}` for empty, or `Ident :` for the first
+field). Without the peek-ahead, `if cond { ... }` and `for x in iter
+{ ... }` block bodies (which also follow an Ident-typed expression)
+get misinterpreted as struct-inits.
+
+This is the same speculative-parse-with-save/restore pattern T25 uses
+for `parse_brace_primary` (closure vs map literal), but specialized to
+the postfix position so it does NOT interfere with primary-position
+disambiguation.
+
+### Decision: every struct field is `pub`
+
+Generated Rust struct fields are always `pub`. Rationale: Buff hides
+encapsulation from users (the language has no visibility modifiers);
+the generated Rust just needs to compile. Making fields `pub` lets
+generated constructor / user code initialise and read struct values
+without accessor boilerplate. Future trait-based encapsulation (if
+ever needed) is a separate task.
+
+### Decision: blanket `Clone + Debug` derives; ignore `traits` field
+
+`AstStructDecl` has a `traits: Vec<Ident>` field for future
+trait-based polymorphism. T26 IGNORES this field at codegen time and
+emits blanket `#[derive(Clone, Debug)]` on every struct. User-specified
+trait impls (e.g. `trait` declarations + `impl` blocks) are a future
+task — not blocking T26's deliverables (struct decl + struct init +
+field access + repr(C) hook).
+
+### Rollback recipe
+
+If T26 needs to be reverted (e.g. to redo with a different approach):
+revert the lower_decl StructDecl arm to the CodegenError variant;
+remove `lower_struct_decl`, `lower_struct_init`, the StructInit arm in
+lower_expr, the field-access heuristic at the top of
+`lower_method_call`, the `KNOWN_ZERO_ARG_METHODS` const, the
+`derive_and_repr_attrs` helper, the `repr_c_struct_names` field +
+`mark_struct_repr_c` setter on `RustCodegen`, the `format_file` alias
+in lib.rs; revert the Cargo.toml dev-deps additions; remove the
+parse_postfix LBrace arm + `cursor_at_struct_init_body` +
+`parse_struct_init_fields` in expr.rs; restore the pre-T26 inline test
+in rust_codegen.rs; delete `tests/struct_codegen.rs`. Clean reversal.
