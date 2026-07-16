@@ -868,7 +868,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T37**: v0.5 milestone — comprehensive example suite [deep]
+- [x] **T37**: v0.5 milestone — comprehensive example suite [deep]
 
   **What to do** (TDD):
   - **RED**: Write integration tests: each example compiles and runs correctly

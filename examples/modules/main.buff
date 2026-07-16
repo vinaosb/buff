@@ -1,0 +1,24 @@
+// Buff v0.5 example — modules: a multi-file program with imports.
+// Directory: examples/modules/
+//
+//   main.buff     — the entry point, imports `greet` from ./greet.buff
+//   greet.buff    — exports `greet` and `greeting_for`
+//
+// Run (when multi-file linking lands): `buff run examples/modules/main.buff`
+//
+// STATUS — CODEGEN-VERIFIED ONLY (does NOT run end-to-end yet):
+// The module GRAPH (parsing `import`/`export`, resolving paths, visibility,
+// circular-import detection, re-export flattening) is fully implemented and
+// tested in crates/buff-lang-types/tests/module_system.rs (T29). However the
+// CLI `buff run` pipeline compiles a SINGLE `.buff` file into a single `.rs`
+// and invokes `rustc` directly — it does not yet LINK imported modules into
+// one Rust program. So `main.buff` transpiles (the `import` decl parses and
+// the module graph resolves), but the generated single-file Rust does not
+// include `greet.buff`'s code. Multi-file linking is tracked as a v0.5
+// codegen/pipeline gap
+// (see .sisyphus/notepads/buff-v05-language/issues.md).
+
+import { greet } from "./greet.buff"
+
+func main():
+    print(greet("Buff"))

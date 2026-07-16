@@ -1,0 +1,44 @@
+// Buff v0.5 example — async without an `await` keyword.
+// Run: `buff run examples/async_demo.buff`   (see STATUS note below)
+//
+// Demonstrates Buff's async model (T31): there is NO `await` keyword in
+// Buff. A function declared `async func` runs asynchronously, and any caller
+// of an async function is propagated async-ness automatically (call-graph
+// fixpoint). The compiler inserts `.await` at async call sites and emits
+// `#[tokio::main]` on `main` when it joins the async set.
+//
+//   - `async func fetch():`           -> Rust `async fn fetch()`
+//   - a sync fn calling `fetch`        -> becomes `async fn` automatically
+//   - `spawn task()`                   -> `tokio::spawn(async move { task() })`
+//   - `task.result()`                  -> `task.await`
+//
+// STATUS — CODEGEN-VERIFIED ONLY (does NOT run end-to-end yet):
+// The generated Rust requires the external `tokio` crate (`tokio::spawn`,
+// `#[tokio::main]`, `Runtime::new`). The v0.1/v0.5 CLI pipeline invokes
+// `rustc` on a SINGLE generated `.rs` file with NO Cargo project model, so
+// external crates are not wired (T32 documented this deferral). The codegen
+// itself is fully tested in
+// crates/buff-lang-codegen-rust/tests/async_codegen.rs. End-to-end async
+// execution is a v1.0 runtime concern (buff-lang-runtime stub).
+// See .sisyphus/notepads/buff-v05-language/decisions.md (T31, T32).
+
+async func fetch_value() -> Int:
+    return 42
+
+// `pipeline` calls an async fn, so it is auto-propagated to `async fn` even
+// though the Buff source has no `async` keyword here. Inside it, the call to
+// `fetch_value()` gets an auto-inserted `.await`.
+func pipeline() -> Int:
+    return fetch_value()
+
+func main():
+    // `pipeline()` is async (propagated), so `main` becomes async too and
+    // receives `#[tokio::main]` automatically.
+    let value = pipeline()
+    print(value)
+
+    // Spawn a task onto the async runtime and await its result via
+    // `.result()`. The spawner itself stays synchronous.
+    let task = spawn fetch_value()
+    let answer = task.result()
+    print(answer)

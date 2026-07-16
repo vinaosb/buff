@@ -1,0 +1,60 @@
+// Buff v0.5 example — pattern matching.
+// Run: `buff run examples/pattern_matching.buff`
+//
+// Demonstrates `match` expressions: exhaustive matching over integer
+// literals (with a `_` catch-all), and destructuring `Option<T>` (from
+// `.pop()`) and `Result<T, E>` (Ok / Err) values produced by functions.
+//
+// NOTE: matching on user-defined `enum` *values* is codegen-verified (see
+// crates/buff-lang-codegen-rust/tests/enum_codegen.rs and the parser tests
+// in crates/buff-lang-parser/tests/enum_match.rs) but does not yet compile
+// end-to-end: generated Rust refers to a variant as `Red` rather than
+// `Color::Red`, so the name is unresolved. Tracked as a v0.5 codegen gap
+// (see .sisyphus/notepads/buff-v05-language/issues.md). The matches below
+// use the built-in `Option` and `Result` enums, which DO resolve.
+
+func classify(n: Int) -> Int:
+    // A small dispatch on an integer. (`match` in *value* position — e.g.
+    // `return match n { ... }` — is a documented codegen gap: arm bodies get
+    // a trailing `;` and read as `()`. We use `if`/`else` here and reserve
+    // `match` for the statement-form examples below, which do compile.)
+    if n == 0:
+        return 100
+    if n == 1:
+        return 200
+    if n == 2:
+        return 300
+    return 999
+
+// A function returning `Result<T, E>` so callers can match on Ok / Err.
+func lookup(id: Int) -> Result<Int, Error>:
+    if id == 1:
+        return Ok(111)
+    return Error("not found")
+
+func main():
+    // Exhaustive integer matching.
+    print(classify(0))
+    print(classify(2))
+    print(classify(5))
+
+    // --- Option<T> handling ---
+    // `.pop()` returns `Option<T>`: `Some(last)` when non-empty, `None`
+    // otherwise. We destructure both arms.
+    let mut drawer = [11, 22, 33]
+    let taken = drawer.pop()
+    match taken { Some(x) => print(x), None => print(0) }
+
+    // Popping an empty vector yields `None`.
+    let mut empty = [1]
+    let _first = empty.pop()
+    let none = empty.pop()
+    match none { Some(x) => print(x), None => print(0) }
+
+    // --- Result<T, E> handling ---
+    // `lookup` returns a `Result`; we match both the Ok and Err arms.
+    let found = lookup(1)
+    match found { Ok(v) => print(v), Err(_) => print(0) }
+
+    let missing = lookup(99)
+    match missing { Ok(v) => print(v), Err(_) => print(0) }

@@ -1,0 +1,36 @@
+// Buff v0.5 example — closures / lambdas.
+// Run: `buff run examples/closures.buff`
+//
+// Demonstrates the `{ params => body }` lambda syntax with the `.map()`
+// collection combinator. `.map()` consumes the vector (move-by-default, like
+// the rest of Buff), so each call below starts from a fresh literal.
+//
+// NOTE: `.filter()` and `.reduce()` are codegen-verified (see
+// crates/buff-lang-codegen-rust/tests/{vector_codegen,closures}.rs) but do
+// not yet compile end-to-end: `filter` predicates receive a borrowed element
+// (`&T`) and `reduce` yields an `Option<T>`. Both are tracked as v0.5
+// codegen gaps (see .sisyphus/notepads/buff-v05-language/issues.md).
+
+func main():
+    // `.map({ x => x * 2 })` — double every element of [1,2,3,4,5].
+    let doubled = [1, 2, 3, 4, 5].map({ x => x * 2 })
+    print(doubled[0])
+    print(doubled[4])
+
+    // `.map({ x => x * x })` — square every element (1, 4, 9, 16, 25).
+    let squared = [1, 2, 3, 4, 5].map({ x => x * x })
+    print(squared[2])
+
+    // Chained `.map()` calls: double, then add one. The first `.map()`
+    // collects into a fresh `Vec`, so the second `.map()` maps over it.
+    let plus_one = [1, 2, 3, 4, 5].map({ x => x * 2 }).map({ y => y + 1 })
+    print(plus_one[0])
+    print(plus_one[4])
+
+    // The closure's own parameter can be referenced more than once in the
+    // body without spurious clones (T34 capture-aware codegen): x + x.
+    let echo = [10, 20, 30].map({ x => x + x })
+    print(echo[1])
+
+    let count = [1, 2, 3, 4, 5].len()
+    print(count)

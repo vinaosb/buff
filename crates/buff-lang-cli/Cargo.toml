@@ -25,3 +25,4 @@ buff-lang-error.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+syn.workspace = true

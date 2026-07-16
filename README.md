@@ -59,7 +59,7 @@ Every modern language forces a painful trade-off:
 | Phase | Codename | Goal | State |
 |---|---|---|---|
 | **v0.1** | *Olá, Buff* | Prove transpilation end-to-end | ✅ Shipped |
-| **v0.5** | *Real Language* | Full type system, modules, async, FFI | ⏳ Planned |
+| **v0.5** | *Real Language* | Full type system, modules, async, FFI | ✅ Core shipped |
 | **v1.0** | *Production* | Heterogeneous CPU/GPU computing, tooling, release | ⏳ Planned |
 
 **Compiles today:** lexer (logos), parser (chumsky, Pratt, offside rule), AST
@@ -102,6 +102,10 @@ cargo test --workspace
 # Run an example:
 cargo run -p buff-lang-cli -- run examples/ola.buff
 
+# v0.5 examples (collections, pattern matching, error handling, closures):
+cargo run -p buff-lang-cli -- run examples/collections.buff
+cargo run -p buff-lang-cli -- run examples/error_handling.buff
+
 # Scaffold a new project:
 cargo run -p buff-lang-cli -- new my_app
 cargo run -p buff-lang-cli -- run my_app/src/main.buff
@@ -111,12 +115,26 @@ cargo run -p buff-lang-cli -- run my_app/src/main.buff
 
 | Example | Demonstrates | Status |
 |---|---|---|
-| [`examples/ola.buff`](./examples/ola.buff) | Hello world | ✅ v0.1 |
-| [`examples/fibonacci.buff`](./examples/fibonacci.buff) | Recursion, typed params, arithmetic | ✅ v0.1 |
-| [`examples/calculadora.buff`](./examples/calculadora.buff) | Function calls with multiple args | ✅ v0.1 |
-| `examples/collections.buff` | Vector, Map, closures | ⏳ v0.5 |
+| [`examples/ola.buff`](./examples/ola.buff) | Hello world | ✅ v0.1 (runs) |
+| [`examples/fibonacci.buff`](./examples/fibonacci.buff) | Recursion, typed params, arithmetic | ✅ v0.1 (runs) |
+| [`examples/calculadora.buff`](./examples/calculadora.buff) | Function calls with multiple args | ✅ v0.1 (runs) |
+| [`examples/closures.buff`](./examples/closures.buff) | Lambdas `{ x => ... }`, `.map()` combinators | ✅ v0.5 (runs) |
+| [`examples/collections.buff`](./examples/collections.buff) | `Vector<T>`, `Map<K,V>`, `.pop()`/`.len()` | ✅ v0.5 (runs) |
+| [`examples/pattern_matching.buff`](./examples/pattern_matching.buff) | `match`, `Option<T>`, `Result<T,E>` arms | ✅ v0.5 (runs) |
+| [`examples/error_handling.buff`](./examples/error_handling.buff) | `Result`, `?` propagation, builtin `Error` | ✅ v0.5 (runs) |
+| [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
+| [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
 | `examples/gpu_demo.buff` | Automatic GPU dispatch | ⏳ v1.0 |
 | `examples/web_server.buff` | Async without `await` | ⏳ v1.0 |
+
+> **Legend:** ✅ *runs* — `buff run` compiles and executes end-to-end.
+> 🔶 *codegen-only* — transpiles to valid Rust (verified by tests), but the
+> single-file `rustc` pipeline cannot yet link it:
+> ¹ async needs the external `tokio` crate (T32 deferred Cargo-project wiring);
+> ² modules need multi-file linking — `import`/`export` parse and the module
+> graph resolves (T29), but the CLI compiles one file at a time.
+> See [`.sisyphus/notepads/buff-v05-language/issues.md`](./.sisyphus/notepads/buff-v05-language/issues.md)
+> for the full list of v0.5 end-to-end gaps.
 
 ## Language reference
 

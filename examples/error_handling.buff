@@ -1,0 +1,49 @@
+// Buff v0.5 example — error handling: Result, the `?` operator, and errors.
+// Run: `buff run examples/error_handling.buff`
+//
+// Demonstrates Buff's error model, which maps directly onto Rust's `std`:
+//
+// - `Result<T, E>` return types
+// - the `?` operator for early-error propagation
+// - the builtin `Error("msg")` constructor (lowers to `Err(Error::new(...))`,
+//   with the `Error` struct + `std::error::Error` impl emitted on demand)
+// - `Ok(value)` success construction
+// - matching a `Result` on its `Ok` / `Err` arms
+//
+// NOTE: custom error *enums* (e.g. `enum MyErr { NotFound }`) are codegen-
+// verified (crates/buff-lang-codegen-rust/tests/error_handling.rs) but do
+// not compile end-to-end: variants are emitted unqualified (`NotFound`
+// rather than `MyErr::NotFound`). This example therefore uses the builtin
+// `Error` type, which resolves cleanly. Tracked as a v0.5 codegen gap
+// (see .sisyphus/notepads/buff-v05-language/issues.md).
+
+// A fallible function: halves `n`, or returns an `Error` if `n` is too small.
+// `return Error("msg")` lowers to `return Err(Error::new("msg"))`.
+func half(n: Int) -> Result<Int, Error>:
+    if n < 2:
+        return Error("input too small")
+    return Ok(n / 2)
+
+// The `?` operator propagates an error early. `half(n)?` unwraps the `Ok`
+// value on success, or returns the `Err` from `add_one` immediately on
+// failure — exactly like Rust's native `?`.
+func add_one(n: Int) -> Result<Int, Error>:
+    let h = half(n)?
+    return Ok(h + 1)
+
+func main():
+    // Success path: half(10) = 5, then +1 = 6.
+    let good = add_one(10)
+    match good { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Failure path: half(1) errors ("input too small"), propagated by `?`
+    // out of `add_one`. The caller matches the `Err` arm.
+    let bad = add_one(1)
+    match bad { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Calling the fallible function directly and matching both arms.
+    let direct = half(8)
+    match direct { Ok(v) => print(v), Err(_) => print(0) }
+
+    let failed = half(0)
+    match failed { Ok(v) => print(v), Err(_) => print(0) }

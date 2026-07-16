@@ -1,0 +1,11 @@
+// examples/modules/greet.buff — exports used by main.buff.
+//
+// `export func` wraps the function so it is visible to importers. The
+// module graph (crates/buff-lang-types/src/modules.rs) collects `export`
+// items and serves them to importing files.
+
+export func greeting_for(name: String) -> String:
+    return name
+
+export func greet(name: String) -> String:
+    return greeting_for(name)

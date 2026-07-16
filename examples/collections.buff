@@ -1,0 +1,42 @@
+// Buff v0.5 example — collections: Vector and Map.
+// Run: `buff run examples/collections.buff`
+//
+// Demonstrates the built-in collection types. Buff's `Vector<T>` lowers to
+// Rust's `Vec<T>` and `Map<K, V>` lowers to `HashMap<K, V>`.
+//
+// NOTE: `Matrix<T>` (T24) and `Map` key lookup by index are codegen-verified
+// (see crates/buff-lang-codegen-rust/tests/{matrix,map}_codegen.rs) but do
+// not compile end-to-end yet: nested array literals flatten in inference
+// (`[[1,2],[3,4]]` → `Vec<i64>`), and `HashMap` has no `Index` impl so
+// `m[k]` is invalid Rust. Both are tracked as v0.5 codegen gaps
+// (see .sisyphus/notepads/buff-v05-language/issues.md).
+
+func main():
+    // --- Vector<T> ---
+    // A vector literal. Small integer literals infer the narrowest width
+    // that fits (here i8), and indexing coerces the index to `usize`.
+    let v = [10, 20, 30, 40]
+    print(v[0])
+    print(v[3])
+    print(v.len())
+
+    // `.push()` mutates, so the binding must be `mut`.
+    let mut stack = [1, 2, 3]
+    stack.push(4)
+    print(stack.len())
+
+    // `.pop()` returns an `Option<T>` (the last element, or none). See
+    // examples/pattern_matching.buff for matching on it.
+    let mut drawer = [7, 8, 9]
+    let top = drawer.pop()
+    match top { Some(x) => print(x), None => print(0) }
+
+    // `.map({ x => x * 10 })` transforms a vector into a fresh one.
+    let scaled = [1, 2, 3].map({ x => x * 10 })
+    print(scaled[2])
+
+    // --- Map<K, V> ---
+    // A map literal with integer keys and values. Construction and `.len()`
+    // work end-to-end; keyed lookup (`m[k]`) is a documented gap above.
+    let scores = {1: 10, 2: 20, 3: 30}
+    print(scores.len())
