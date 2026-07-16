@@ -116,8 +116,28 @@ impl RustCodegen {
     ///
     /// Each top-level `Decl` becomes one top-level `syn::Item`. The output
     /// is a fully-formed Rust file ready for [`crate::format`].
+    ///
+    /// # Builtin `Matrix<T>` injection (T24)
+    ///
+    /// If the program references the builtin Matrix type — detected by the
+    /// presence of a `Matrix.new(...)` constructor call anywhere in the
+    /// declaration bodies — a flat-storage `Matrix<T>` struct definition +
+    /// `new` impl are **prepended** to the generated items. Emitting
+    /// on-demand (vs. always) keeps non-Matrix programs free of the struct.
+    /// The struct carries `data: Vec<T>, rows: usize, cols: usize` so its
+    /// buffer is contiguous and directly GPU-transferable; the `new(rows,
+    /// cols)` impl fills `data` with `T::default()` for `rows * cols`
+    /// elements (hence the `T: Default + Clone` bound). This is the
+    /// REFACTOR-ready flat-storage pattern shared with the future WGSL
+    /// storage-buffer codegen (v1.0).
     pub fn generate(&mut self, decls: &[Decl]) -> Result<File, CodegenError> {
         let mut items = Vec::with_capacity(decls.len());
+        // T24: emit the builtin Matrix<T> struct + impl on-demand, before
+        // any fn. The two items (struct decl + impl block) are prepended so
+        // user functions can refer to `Matrix` and `Matrix::new`.
+        if program_uses_matrix(decls) {
+            items.extend(matrix_struct_items());
+        }
         for decl in decls {
             let item = self.lower_decl(decl)?;
             items.push(item);
@@ -466,20 +486,35 @@ impl RustCodegen {
             Expr::StringInterp { parts, .. } => self.lower_string_interp(parts),
             // T23: `[e1, e2, ...]` -> Rust `vec![e1, e2, ...]` macro.
             Expr::ArrayLit { elements, .. } => self.lower_array_lit(elements),
-            // T23: `base[index]` -> Rust `base[index as usize]`. The index is
-            // coerced to `usize` so any Buff integer index works (Buff's Int
-            // maps to i64, which can't index a Rust Vec directly). Parens are
-            // added only around non-atomic indices so the common `v[0 as usize]`
-            // / `v[i as usize]` forms stay clean.
-            Expr::Index { base, index, .. } => {
-                let base_e = self.lower_expr(base)?;
-                let index_e = cast_to_usize(self.lower_expr(index)?);
-                Ok(SynExpr::Index(syn::ExprIndex {
-                    attrs: Vec::new(),
-                    expr: Box::new(base_e),
-                    bracket_token: Default::default(),
-                    index: Box::new(index_e),
-                }))
+            // T23/T24: Indexing dispatches on index arity.
+            // - 1 index (`v[i]`) → Rust `v[i as usize]` (Vector path).
+            // - 2 indices (`m[row, col]`) → Rust
+            //   `m.data[(row * m.cols + col) as usize]` (flat-storage Matrix
+            //   path). The `.data` / `.cols` fields come from the builtin
+            //   `Matrix<T>` struct this same codegen emits when a program uses
+            //   `Matrix.new(...)`. The flat index is `row * cols + col`
+            //   (row-major), cast to `usize` once at the end so any Buff
+            //   integer-typed indices work. The base expression is lowered
+            //   ONCE and spliced (via clone) into both field-access positions
+            //   so the move analyzer's clone decision is preserved.
+            Expr::Index { base, indices, .. } => {
+                if indices.len() == 2 {
+                    self.lower_matrix_index(base, &indices[0], &indices[1])
+                } else if indices.len() == 1 {
+                    let base_e = self.lower_expr(base)?;
+                    let index_e = cast_to_usize(self.lower_expr(&indices[0])?);
+                    Ok(SynExpr::Index(syn::ExprIndex {
+                        attrs: Vec::new(),
+                        expr: Box::new(base_e),
+                        bracket_token: Default::default(),
+                        index: Box::new(index_e),
+                    }))
+                } else {
+                    Err(self.unsupported(&format!(
+                        "indexing with {} indices (only 1 or 2 supported)",
+                        indices.len()
+                    )))
+                }
             }
             // T23: a minimal closure `{ params => expr }` -> Rust
             // `|p1, p2| body`. Param types are inferred by Rust; we emit no
@@ -851,6 +886,21 @@ impl RustCodegen {
         method: &buff_lang_ast::common::Ident,
         args: &[Expr],
     ) -> Result<SynExpr, CodegenError> {
+        // T24: `Matrix.new(rows, cols)` — the builtin Matrix constructor.
+        // Buff's constructor convention is `Type.new()` / `Type.from()` (§7),
+        // parsed as a MethodCall whose receiver is a bare Ident naming the
+        // type. We special-case `Matrix.new(...)` here to lower it to Rust's
+        // `Matrix::new(rows, cols)` associated-function call. The `Matrix<T>`
+        // struct definition itself is emitted on-demand by
+        // [`Self::generate`] when a program uses `Matrix.new(...)`.
+        if method.name == "new" {
+            if let Expr::Ident(id, _) = receiver {
+                if id.name == "Matrix" {
+                    return self.lower_matrix_new(args);
+                }
+            }
+        }
+
         let recv = self.lower_expr(receiver)?;
         let method_name = method.name.as_str();
 
@@ -1180,6 +1230,98 @@ impl RustCodegen {
         }))
     }
 
+    /// Lower a 2-D Matrix index `m[row, col]` to the flat-storage access
+    /// `m.data[(row * m.cols + col) as usize]` (T24).
+    ///
+    /// The base expression `m` is lowered ONCE and the resulting `SynExpr` is
+    /// spliced (via [`SynExpr::clone`]) into two positions:
+    /// - `m.data` — the field holding the flat `Vec<T>`.
+    /// - `m.cols` — the field carrying the column count.
+    ///
+    /// The flat index expression `row * m.cols + col` is built as a Rust
+    /// binary tree (`Mul(row, Field(m, cols))` then `Add(.., col)`) and the
+    /// whole thing is wrapped in a single `as usize` cast via [`cast_to`]
+    /// (which parenthesises its operand, yielding exactly
+    /// `(row * m.cols + col) as usize`). The outer `m.data[...]` is a Rust
+    /// index expression.
+    ///
+    /// Both `row` and `col` are lowered as-is (no per-operand cast); the
+    /// single trailing `as usize` covers the whole flat expression. This
+    /// matches the T24 acceptance string `m.data[(1 * m.cols + 2) as usize]`.
+    ///
+    /// **GPU-readiness note**: because storage is one contiguous `Vec<T>`,
+    /// the same flat-index expression is what a WGSL shader would compute to
+    /// address a storage buffer — the REFACTOR goal of "share flat-storage
+    /// pattern with GPU buffer codegen" lands naturally here.
+    fn lower_matrix_index(
+        &mut self,
+        base: &Expr,
+        row: &Expr,
+        col: &Expr,
+    ) -> Result<SynExpr, CodegenError> {
+        let base_e = self.lower_expr(base)?;
+        let row_e = self.lower_expr(row)?;
+        let col_e = self.lower_expr(col)?;
+        // `m.data` — field access on the lowered base.
+        let data_field = field_access(base_e.clone(), "data");
+        // `m.cols` — field access on the lowered base (clone preserves the
+        // move analyzer's clone decision, if any, that was baked into base_e).
+        let cols_field = field_access(base_e, "cols");
+        // `row * m.cols`
+        let row_times_cols = SynExpr::Binary(syn::ExprBinary {
+            attrs: Vec::new(),
+            left: Box::new(row_e),
+            op: syn::BinOp::Mul(Default::default()),
+            right: Box::new(cols_field),
+        });
+        // `(row * m.cols) + col`
+        let flat_expr = SynExpr::Binary(syn::ExprBinary {
+            attrs: Vec::new(),
+            left: Box::new(row_times_cols),
+            op: syn::BinOp::Add(Default::default()),
+            right: Box::new(col_e),
+        });
+        // `((row * m.cols) + col) as usize` — cast_to wraps in parens.
+        let flat_index = cast_to(flat_expr, "usize");
+        // `m.data[flat_index]`
+        Ok(SynExpr::Index(syn::ExprIndex {
+            attrs: Vec::new(),
+            expr: Box::new(data_field),
+            bracket_token: Default::default(),
+            index: Box::new(flat_index),
+        }))
+    }
+
+    /// Lower `Matrix.new(rows, cols)` to Rust's `Matrix::new(rows, cols)`
+    /// associated-function call (T24).
+    ///
+    /// The receiver `Matrix` is NOT lowered as a value (it names a type, not
+    /// a variable) — we build the path `Matrix::new` directly and splice the
+    /// lowered arguments. The arity is checked: exactly 2 args (rows, cols)
+    /// are required. The `Matrix<T>` struct + `new` impl are emitted by
+    /// [`Self::generate`] when this constructor appears in the program.
+    fn lower_matrix_new(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 2 {
+            return Err(self.unsupported(&format!(
+                "Matrix.new expects exactly 2 args (rows, cols), got {}",
+                args.len()
+            )));
+        }
+        let mut lowered: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+        lowered.push(self.lower_expr(&args[0])?);
+        lowered.push(self.lower_expr(&args[1])?);
+        Ok(SynExpr::Call(syn::ExprCall {
+            attrs: Vec::new(),
+            func: Box::new(SynExpr::Path(syn::ExprPath {
+                attrs: Vec::new(),
+                qself: None,
+                path: rust_path("Matrix::new"),
+            })),
+            paren_token: Default::default(),
+            args: lowered,
+        }))
+    }
+
     /// Lower a minimal closure `{ params => expr }` to a Rust closure
     /// `|p1, p2| body` (T23).
     ///
@@ -1431,11 +1573,21 @@ impl RustCodegen {
     /// dependency of `buff-lang-codegen-rust` so generated crates must depend
     /// on it as well — the runtime/driver is responsible for that).
     fn buff_type_to_syn(&self, ty: &Type) -> Option<SynType> {
-        // Handle generic types (Vector, Option) first.
+        // Handle generic types (Vector, Matrix, Option) first.
         match ty {
             Type::Vector(elem) => {
                 let inner = self.buff_type_to_syn(elem)?;
                 return Some(make_generic_path_type("Vec", vec![inner]));
+            }
+            Type::Matrix(elem) => {
+                // T24: Matrix<T> maps to the builtin `Matrix<T>` struct that
+                // this codegen emits on-demand. The inner element type uses
+                // the standard mapping; an Unknown element falls back to
+                // i64 (Buff's default Int) so the annotation still compiles.
+                let inner = self
+                    .buff_type_to_syn(elem)
+                    .unwrap_or_else(|| rust_path_type("i64"));
+                return Some(make_generic_path_type("Matrix", vec![inner]));
             }
             Type::Option(inner) => {
                 let inner = self.buff_type_to_syn(inner)?;
@@ -1491,9 +1643,10 @@ impl RustCodegen {
             Type::Char => "char",
             Type::Decimal => "rust_decimal::Decimal",
             Type::Unknown | Type::Void => return None,
-            // Vector and Option are handled by the early-return match above;
-            // this arm is unreachable but required for exhaustiveness.
-            Type::Vector(_) | Type::Option(_) => return None,
+            // Vector, Matrix, and Option are handled by the early-return
+            // match above; this arm is unreachable but required for
+            // exhaustiveness.
+            Type::Vector(_) | Type::Matrix(_) | Type::Option(_) => return None,
         };
         Some(rust_path_type(rust_name))
     }
@@ -1611,6 +1764,183 @@ fn wrap_in_parens(e: SynExpr) -> SynExpr {
         paren_token: Default::default(),
         expr: Box::new(e),
     })
+}
+
+/// Build a named field access `base.field` (T24).
+///
+/// Used by the Matrix 2-D index codegen to build `m.data` and `m.cols`. The
+/// base expression is taken by value (the caller clones when re-use is
+/// needed, as in [`RustCodegen::lower_matrix_index`]).
+fn field_access(base: SynExpr, field: &str) -> SynExpr {
+    SynExpr::Field(syn::ExprField {
+        attrs: Vec::new(),
+        base: Box::new(base),
+        dot_token: Default::default(),
+        member: syn::Member::Named(Ident::new(field, ProcSpan::call_site())),
+    })
+}
+
+/// Walk the declaration list looking for any `Matrix.new(...)` constructor
+/// call (T24). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to prepend the builtin `Matrix<T>` struct.
+///
+/// The detection is conservative: only the canonical constructor pattern
+/// (`Matrix` Ident receiver, `new` method) triggers injection. 2-D indexing
+/// on a Matrix-typed value WITHOUT a prior `Matrix.new(...)` would not
+/// trigger injection by itself — but every well-formed Matrix program must
+/// construct one first, so this signal is sufficient in practice. A
+/// type-annotation-only `Matrix<T>` (with no constructor) is a rare edge
+/// case deferred to a later task.
+fn program_uses_matrix(decls: &[Decl]) -> bool {
+    for decl in decls {
+        let Decl::FuncDecl(f) = decl else {
+            continue;
+        };
+        if block_uses_matrix(&f.body) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_matrix`]: scan a block's statements
+/// and their nested expressions for a `Matrix.new(...)` call.
+fn block_uses_matrix(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_matrix)
+}
+
+/// Check a single statement (and its nested expressions) for Matrix.new.
+fn stmt_uses_matrix(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. } | Stmt::ExprStmt(value, _) | Stmt::Return(Some(value), _) => {
+            expr_uses_matrix(value)
+        }
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_matrix(target) || expr_uses_matrix(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_matrix(iter) || block_uses_matrix(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_matrix(cond) || block_uses_matrix(body),
+    }
+}
+
+/// Recursively scan an expression tree for a `Matrix.new(...)` MethodCall.
+fn expr_uses_matrix(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            if method.name == "new" {
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if id.name == "Matrix" {
+                        return true;
+                    }
+                }
+            }
+            expr_uses_matrix(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_matrix(lhs) || expr_uses_matrix(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_matrix(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_matrix(callee) || args.iter().any(expr_uses_matrix)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_matrix(cond)
+                || block_uses_matrix(then_block)
+                || else_block.as_ref().is_some_and(block_uses_matrix)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_matrix(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_matrix),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_matrix(base) || indices.iter().any(expr_uses_matrix)
+        }
+        Expr::Lambda { body, .. } => block_uses_matrix(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_matrix(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_matrix(scrutinee) || arms.iter().any(|arm| block_uses_matrix(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_matrix(inner),
+    }
+}
+
+/// Build the builtin `Matrix<T>` struct AND its `new` impl as a
+/// `Vec<Item>` (T24).
+///
+/// Emits (conceptually):
+///
+/// ```rust,ignore
+/// #[derive(Clone, Debug)]
+/// pub struct Matrix<T> {
+///     pub data: Vec<T>,
+///     pub rows: usize,
+///     pub cols: usize,
+/// }
+///
+/// impl<T: Default + Clone> Matrix<T> {
+///     pub fn new(rows: usize, cols: usize) -> Self {
+///         Self {
+///             data: vec![T::default(); rows * cols],
+///             rows,
+///             cols,
+///         }
+///     }
+/// }
+/// ```
+///
+/// Built via `quote!`-equivalent (`syn::parse_str` on a string literal that
+/// is itself valid Rust source) and re-parsed via
+/// `syn::parse_str::<syn::File>` (returns `Result`, no panic — unlike
+/// `parse_quote!`). On the (unreachable) parse failure we return an empty
+/// vec; the generated program would then reference an undefined `Matrix`
+/// type and fail later at rustc, which is the correct degradation (a
+/// codegen bug, not a user-facing panic).
+///
+/// **Storage note**: `data` is a flat `Vec<T>` (NOT `Vec<Vec<T>>`) so the
+/// buffer is contiguous and GPU-transferable — a `Matrix<Float<32>>` of
+/// `rows * cols` f32 values can be uploaded to a WGSL storage buffer
+/// verbatim. This is the flat-storage pattern the REFACTOR goal targets
+/// for sharing with the GPU buffer codegen (v1.0).
+///
+/// **Note on the string source**: this is NOT raw-string Rust codegen —
+/// the string is a *fixed template* parsed once at codegen time into
+/// `syn::Item`s, after which all transformation goes through the syn tree
+/// and `prettyplease`. It plays the same role as the `quote!` token-stream
+/// templates used elsewhere in this file (e.g. `lower_read_line`,
+/// `lower_into_iter_collect`) — a compile-time-fixed scaffold that is
+/// re-parsed, not a runtime Rust-string assembler. The single string
+/// producer remains `prettyplease::unparse`.
+fn matrix_struct_items() -> Vec<Item> {
+    let src = r#"
+        #[derive(Clone, Debug)]
+        pub struct Matrix<T> {
+            pub data: Vec<T>,
+            pub rows: usize,
+            pub cols: usize,
+        }
+
+        impl<T: Default + Clone> Matrix<T> {
+            pub fn new(rows: usize, cols: usize) -> Self {
+                Self {
+                    data: vec![T::default(); rows * cols],
+                    rows,
+                    cols,
+                }
+            }
+        }
+    "#;
+    match syn::parse_str::<File>(src) {
+        Ok(file) => file.items,
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Build a Rust `as usize` cast for a vector index (T23).

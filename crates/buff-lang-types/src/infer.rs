@@ -80,7 +80,24 @@ impl TypeInferencer {
                 // v0.5: real call resolution.
                 Ok(Type::Unknown)
             }
-            Expr::MethodCall { .. } => Ok(Type::Unknown),
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
+                // T24: `Matrix.new(rows, cols)` infers as `Matrix<T>` where
+                // the element type is unknown without further evidence (a
+                // type annotation `let m: Matrix<Int> = ...` or a subsequent
+                // 2-D index). We return `Matrix<Unknown>` so the variant
+                // flows through to codegen, which emits the flat-storage
+                // struct regardless.
+                if method.name == "new" {
+                    if let Expr::Ident(id, _) = receiver.as_ref() {
+                        if id.name == "Matrix" {
+                            return Ok(Type::matrix(Type::Unknown));
+                        }
+                    }
+                }
+                Ok(Type::Unknown)
+            }
             Expr::SuspendExpr { inner, .. } => self.infer_expr(inner),
             // T23: A collection literal infers `Vector<T>`. For all-integer
             // literals the element width is auto-detected via T22 range
@@ -92,13 +109,27 @@ impl TypeInferencer {
             Expr::ArrayLit { elements, .. } => {
                 Ok(Type::vector(self.infer_collection_element(elements)?))
             }
-            // T23: Indexing `base[index]` yields the element type when `base`
-            // is a `Vector<T>`; otherwise `Unknown` (a later type check can
-            // reject e.g. string indexing).
-            Expr::Index { base, .. } => match self.infer_expr(base)? {
-                Type::Vector(elem) => Ok((*elem).clone()),
-                _ => Ok(Type::Unknown),
-            },
+            // T23/T24: Indexing `base[i]` (1 index) yields the element type
+            // when `base` is a `Vector<T>`; `base[row, col]` (2 indices)
+            // yields the element type when `base` is a `Matrix<T>`. Any
+            // other shape yields `Unknown` (a later type check can reject
+            // e.g. string indexing). The `indices` vec arity drives the
+            // dispatch — single-index stays the T23 Vector path, two-index
+            // takes the T24 Matrix path.
+            Expr::Index { base, indices, .. } => {
+                let base_ty = self.infer_expr(base)?;
+                if indices.len() == 2 {
+                    match base_ty {
+                        Type::Matrix(elem) => Ok((*elem).clone()),
+                        _ => Ok(Type::Unknown),
+                    }
+                } else {
+                    match base_ty {
+                        Type::Vector(elem) => Ok((*elem).clone()),
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+            }
             // T21: A string interpolation always evaluates to String.
             // Each embedded expression is visited (so its sub-types are
             // checked) but the parts themselves don't affect the result.

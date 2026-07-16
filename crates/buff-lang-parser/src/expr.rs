@@ -268,12 +268,15 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     span,
                 };
             }
-            // T23: Indexing on a postfix expression. String LITERAL receivers
+            // T23/T24: Indexing on a postfix expression. String LITERAL receivers
             // are rejected with the T21 helpful message (UTF-8 strings have no
             // sound byte indexing). All other receivers build an `Expr::Index`
-            // node; a later type check rejects typed-String indexing. The
-            // receiver type is generally unknown at parse time, so only the
-            // direct string-literal case is rejected here.
+            // node carrying one or more comma-separated indices; a later type
+            // check rejects typed-String indexing. The receiver type is
+            // generally unknown at parse time, so only the direct string-literal
+            // case is rejected here. T24 generalized the index list to a
+            // `Vec<Expr>` so `m[row, col]` (2-D Matrix) and `v[i]` (1-D Vector)
+            // share one node shape.
             Some(TokenKind::LBracket) => {
                 // Preserve the T21 string-literal rejection: `"abc"[0]` is
                 // rejected at parse time with the helpful message. Any other
@@ -294,12 +297,23 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     ));
                 }
                 stream.advance(); // consume '['
-                let index = parse_expression(stream)?;
+                                  // Parse the first index; then keep consuming comma-separated
+                                  // indices (T24). A trailing comma is allowed. The collected
+                                  // vec drives codegen arity (1 → Vector, 2 → Matrix).
+                let mut indices = vec![parse_expression(stream)?];
+                while matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+                    stream.advance(); // consume ','
+                                      // Allow trailing comma: `v[a,]` / `m[r, c,]`.
+                    if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
+                        break;
+                    }
+                    indices.push(parse_expression(stream)?);
+                }
                 let rb = stream.expect(TokenKind::RBracket)?;
                 let span = Span::new(expr.span().start, rb.span.end, stream.source_id());
                 expr = Expr::Index {
                     base: Box::new(expr),
-                    index: Box::new(index),
+                    indices,
                     span,
                 };
             }

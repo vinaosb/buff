@@ -241,19 +241,21 @@ fn test_string_literal_indexing_rejected() {
     );
 }
 
-// T23: Indexing on an identifier receiver now parses to an Index node
-// (previously rejected for all receivers).
+// T23/T24: Indexing on an identifier receiver now parses to an Index node
+// (previously rejected for all receivers). T24 generalized Index to carry
+// a `Vec<Expr>` of indices; the Display form wraps the list in `[...]`.
 #[test]
 fn test_ident_indexing_parses_to_index() {
     let e = parse("s[0]");
-    assert_eq!(shape(&e), "Index(Ident(s), Lit(Int(0)))");
+    assert_eq!(shape(&e), "Index(Ident(s), [Lit(Int(0))])");
 }
 
-// T23: Indexing on a call result `args()[0]` parses (unblocks T99).
+// T23/T24: Indexing on a call result `args()[0]` parses (unblocks T99).
+// The index list wraps in `[...]` after the T24 generalization.
 #[test]
 fn test_call_result_indexing_parses() {
     let e = parse("args()[0]");
-    assert_eq!(shape(&e), "Index(Call(Ident(args), []), Lit(Int(0)))");
+    assert_eq!(shape(&e), "Index(Call(Ident(args), []), [Lit(Int(0))])");
 }
 
 // T23: A collection literal `[1, 2, 3]` parses to an ArrayLit node.

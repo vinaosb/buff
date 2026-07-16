@@ -63,11 +63,12 @@ fn array_lit(elements: Vec<Expr>) -> Expr {
     }
 }
 
-/// Build an `Expr::Index { base, index }`.
+/// Build an `Expr::Index { base, indices }` with a single index (T23 shape;
+/// T24 generalized Index to carry a `Vec<Expr>` of indices).
 fn index_expr(base: Expr, index: Expr) -> Expr {
     Expr::Index {
         base: Box::new(base),
-        index: Box::new(index),
+        indices: vec![index],
         span: span(),
     }
 }

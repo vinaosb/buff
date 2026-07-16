@@ -342,7 +342,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T24**: Matrix<T> type + codegen [deep]
+- [x] **T24**: Matrix<T> type + codegen [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `Matrix.new(3, 3)` creates 3x3 matrix

@@ -371,3 +371,90 @@ infer/codegen) + `parse_array_literal`/`parse_closure`/postfix-index +
 cleanly (additive-only change set).
 
 
+
+## T24 — Matrix<T> type + codegen decisions
+
+### A. Index-2D representation: EXTEND Expr::Index to indices: Vec<Expr>
+
+**Decision**: Generalize T23's Expr::Index { base, index, span } to
+{ base, indices: Vec<Expr>, span }. **Rejected alternatives**:
+  - (b) A separate Expr::Index2D { base, row, col, span } variant — truly
+    additive but doesn't generalize to N-D, duplicates codegen arms.
+  - (c) A Matrix-specific desugar at parse time — leaks Matrix knowledge into
+    the parser, breaks AST generality.
+
+**Rationale**: the task explicitly preferred Vec<Expr> "if the ripple is
+manageable". The ripple was exactly 8 match sites (grep-enumerated). ONE node
+shape serves 1-D and 2-D today and N-D tensors (v1.0+) tomorrow. The
+generalization is forward-compatible — additional indices just lengthen the
+vec. This is a **migration** (not purely additive): the field was renamed +
+retyped, so every construction/match site was updated and documented in the
+T24 migration note (expr.rs). Single-index call sites now pass ec![index];
+the Display wraps the list in [...] (Index(base, [idx])).
+
+**Codegen dispatch** is on indices.len(): 1 -> Vector path
+(ase[idx as usize]), 2 -> Matrix path
+(ase.data[(row * base.cols + col) as usize]), other -> unsupported error.
+
+### B. Matrix builtin-struct injection: EMIT-ON-DEMAND
+
+**Decision**: Emit the Matrix<T> struct + 
+ew impl into generated Rust
+ONLY when a program references Matrix (detected via Matrix.new(...) scan),
+prepending the 2 items before any function item. **Rejected alternatives**:
+  - Always emit (like an implicit prelude) — bloats every program's output
+    even when Matrix is unused.
+  - Require an import — violates Buff's prelude-implicit philosophy.
+
+**Detection**: program_uses_matrix(decls) walks all FuncDecl bodies looking
+for any Expr::MethodCall { receiver: Ident("Matrix"), method: "new", .. }.
+Conservative but sufficient: every well-formed Matrix program must construct
+one first. A type-annotation-only Matrix<T> (no constructor) is a rare edge
+case deferred to a later task.
+
+**Build method**: the struct + impl are built via syn::parse_str::<File> on
+a fixed Rust template. This plays the SAME role as the quote! token-stream
+templates used elsewhere (lower_read_line, lower_into_iter_collect) — a
+compile-time-fixed scaffold re-parsed into syn Items. It is NOT raw-string
+Rust codegen: the single string producer remains prettyplease::unparse.
+
+### C. Type::Matrix(Box<Type>) — additive, mirrors Type::Vector
+
+**Decision**: Add Type::Matrix(Box<Type>) to the resolved-type enum (ty.rs),
+mirroring the T99 Type::Vector(Box<Type>) pattern. Constructor
+Type::matrix(elem), Display Matrix<{elem}>, codegen mapping
+Matrix<T> -> Matrix<i64> path (Unknown elem falls back to i64 so the
+annotation compiles). Inference: Matrix.new(...) -> Type::Matrix(Unknown)
+(element deferred without evidence); m[r, c] on Matrix<T> -> T.
+
+### D. 2-D index codegen: base lowered ONCE, spliced via clone
+
+**Decision**: In lower_matrix_index, lower the base expression ONCE and
+clone the resulting SynExpr into the two field-access positions (m.data,
+m.cols). This preserves whatever clone decision the move analyzer baked
+into the lowered base. The flat formula ow * cols + col is built as a
+binary tree (Mul(row, Field(m, cols)) then Add(.., col)) and wrapped in
+ONE s usize cast via cast_to (parenthesises operand). Output:
+m.data[(row * m.cols + col) as usize] — exactly the T24 spec string.
+
+**Note**: for a non-Ident base, the clone would double-evaluate in Rust, but
+well-formed Matrix programs index through an Ident binding, so this is the
+common path. A borrow-aware treatment is a future refinement.
+
+### E. Single-index regression guard
+
+The T24 Index generalization must not break T23's 1-D Vector indexing.
+matrix_codegen_single_index_unchanged asserts [0] still lowers to
+[0 as usize] (NOT the Matrix .data path). The codegen dispatch
+(indices.len() == 1 -> Vector path, == 2 -> Matrix path) keeps the two
+concerns cleanly separated in one node.
+
+### Rollback
+
+Reverting T24 means: restore Expr::Index { base, index: Box<Expr>, span }
+(update the 8 match sites back), remove Type::Matrix + its arms, remove the
+Matrix.new detection in lower_method_call, remove lower_matrix_index/
+lower_matrix_new/field_access/program_uses_matrix/matrix_struct_items,
+remove the Matrix injection in generate(), restore the 2 parser Display
+assertions, restore the vector_codegen index_expr helper, delete
+matrix_codegen.rs. Clean reversal (the change set is self-contained).

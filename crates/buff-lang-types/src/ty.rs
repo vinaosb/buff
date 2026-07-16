@@ -48,6 +48,21 @@ pub enum Type {
     /// variant can carry any inner type. Full collection support (indexing,
     /// iteration, methods) arrives in T23.
     Vector(Box<Type>),
+    /// A 2-D matrix type: `Matrix<T>` (T24 — flat contiguous storage).
+    ///
+    /// Maps to the builtin `Matrix<T>` struct emitted by the Rust codegen:
+    /// `struct Matrix<T> { data: Vec<T>, rows: usize, cols: usize }`. Storage
+    /// is a **single flat `Vec<T>`** (row-major, `row * cols + col` indexing)
+    /// so the buffer is contiguous and directly GPU-transferable (no
+    /// `Vec<Vec<T>>` nesting). This is the canonical GPU-ready collection —
+    /// a `Matrix<Float<32>>` of `rows * cols` elements can be uploaded to a
+    /// WGSL storage buffer verbatim.
+    ///
+    /// The element type is boxed, mirroring [`Type::Vector`]. Element-type
+    /// inference from `Matrix.new(rows, cols)` is deferred (the constructor
+    /// carries no element evidence by itself); `let m: Matrix<Int> = ...`
+    /// annotations and 2-D indexing `m[r, c]` both flow through this variant.
+    Matrix(Box<Type>),
     /// An optional value: `Option<T>` (T99 — prelude `env()`).
     ///
     /// Maps to Rust's `Option<T>`. Used by `env("HOME")` which returns
@@ -167,6 +182,12 @@ impl Type {
         Type::Vector(Box::new(elem))
     }
 
+    /// Create a `Matrix<T>` type (T24). The element type is the inner `T`;
+    /// storage is a flat `Vec<T>` in the emitted Rust struct.
+    pub fn matrix(elem: Type) -> Self {
+        Type::Matrix(Box::new(elem))
+    }
+
     /// Create an `Option<T>` type.
     pub fn option(inner: Type) -> Self {
         Type::Option(Box::new(inner))
@@ -222,6 +243,7 @@ impl fmt::Display for Type {
             Type::Unknown => f.write_str("Unknown"),
             Type::Void => f.write_str("Void"),
             Type::Vector(elem) => write!(f, "Vector<{elem}>"),
+            Type::Matrix(elem) => write!(f, "Matrix<{elem}>"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
         }
     }

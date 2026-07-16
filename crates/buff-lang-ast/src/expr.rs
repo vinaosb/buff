@@ -133,17 +133,33 @@ impl fmt::Display for InterpPart {
 ///   analysis, so `[1, 2, 3]` -> `Vector<Int<8>>`). This is **additive**: no
 ///   existing variant was renamed, reordered, or had its payload altered.
 ///
-/// - [`Expr::Index`] — an indexing expression `base[index]`. Lowers to Rust
-///   `base[index as usize]` (the index is coerced to `usize`). String-literal
-///   receivers are still rejected at parse time with the helpful T21 message
-///   ("for strings use .chars() or .first()"); all other receivers produce an
-///   `Expr::Index` node. This unblocks T99's deferred `args()[0]` and T21's
-///   typed string-index rejection.
+///     - [`Expr::Index`] — an indexing expression `base[index]`. Lowers to Rust
+///       `base[index as usize]` (the index is coerced to `usize`). String-literal
+///       receivers are still rejected at parse time with the helpful T21 message
+///       ("for strings use .chars() or .first()"); all other receivers produce an
+///       `Expr::Index` node. This unblocks T99's deferred `args()[0]` and T21's
+///       typed string-index rejection.
 ///
 /// Both variants derive the standard `Debug, Clone, PartialEq` (no `Eq` because
 /// the containing `Expr` already isn't `Eq` due to floats). All internal
 /// `match`es on `Expr` were extended with arms for the new variants: `span()`,
 /// `Display`, parser, type inference, and Rust codegen.
+///
+/// ## T24 — `Expr::Index` generalized to multi-index
+///
+/// The `Expr::Index` variant was **generalized** in T24 (v0.5) to carry a
+/// `Vec<Expr>` of indices instead of a single index, enabling 2-D matrix
+/// indexing `m[row, col]`. The shape changed from `{ base, index, span }` to
+/// `{ base, indices: Vec<Expr>, span }`. This is a **migration** (not purely
+/// additive — the field was renamed/retyped), so every `match`/construction
+/// site was updated: `span()`, `Display`, parser, type inference, Rust codegen,
+/// IR `collect_uses`, and the T23 `vector_codegen` test helper. Single-index
+/// `base[i]` still works (a one-element `indices` vec); it lowers identically
+/// to the pre-T24 form (`base[i as usize]`). Two-index `m[r, c]` lowers to the
+/// flat-storage Matrix access `m.data[(r * m.cols + c) as usize]`.
+///
+/// This generalization is forward-compatible with N-dimensional indexing
+/// (tensors, v1.0+) — additional indices simply lengthen the vec.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A literal: `42`, `"hi"`, `true`, …
@@ -214,19 +230,30 @@ pub enum Expr {
     ///
     /// This is **additive**: no existing variant was renamed or reordered.
     ArrayLit { elements: Vec<Expr>, span: Span },
-    /// An indexing expression: `base[index]` (T23).
+    /// An indexing expression: `base[index]` or `base[row, col]` (T23, T24).
     ///
-    /// Lowers to Rust `base[index as usize]` — the index is coerced to `usize`
-    /// so any Buff integer-typed index works (Buff's `Int` maps to `i64`,
-    /// which cannot index a Rust `Vec` directly). String-literal receivers are
-    /// rejected at parse time (the T21 helpful error); all other receivers
-    /// build this node and a type check rejects string indexing later.
+    /// Carries **one or more** indices in a `Vec` so the same node shape serves
+    /// 1-D Vector indexing (`v[i]`) and 2-D Matrix indexing (`m[row, col]`).
+    /// The parser fills `indices` from the comma-separated list inside `[...]`.
     ///
-    /// This unblocks T99's deferred `args()[0]` and T21's typed string-index
-    /// rejection. **Additive**: no existing variant was renamed or reordered.
+    /// Codegen dispatches on the arity:
+    /// - 1 index → Rust `base[index as usize]` (Vector path, T23).
+    /// - 2 indices → Rust `base.data[(row * base.cols + col) as usize]`
+    ///   (flat-storage Matrix path, T24). The `data`/`cols` fields come from
+    ///   the builtin `Matrix<T>` struct the codegen emits when a program uses
+    ///   `Matrix.new(...)`.
+    ///
+    /// String-literal receivers are rejected at parse time (the T21 helpful
+    /// error); all other receivers build this node.
+    ///
+    /// **T24 migration note**: this variant previously held a single
+    /// `index: Box<Expr>` (T23). It was generalized to `indices: Vec<Expr>` so
+    /// the same node can carry a comma-separated index list. Every match site
+    /// was updated; single-index call sites now pass a one-element vec. This
+    /// change is forward-compatible with N-D indexing (tensors, v1.0+).
     Index {
         base: Box<Expr>,
-        index: Box<Expr>,
+        indices: Vec<Expr>,
         span: Span,
     },
     /// A string interpolation: `"text {expr} more {expr2}"` (T21).
@@ -362,7 +389,16 @@ impl fmt::Display for Expr {
                 }
                 f.write_str("]")
             }
-            Expr::Index { base, index, .. } => write!(f, "Index({base}, {index})"),
+            Expr::Index { base, indices, .. } => {
+                write!(f, "Index({base}, [")?;
+                for (i, idx) in indices.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{idx}")?;
+                }
+                f.write_str("])")
+            }
             Expr::StringInterp { parts, .. } => {
                 f.write_str("Interp[")?;
                 for (i, p) in parts.iter().enumerate() {

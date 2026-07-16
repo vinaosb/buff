@@ -722,16 +722,19 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
         }
         Expr::SuspendExpr { inner, .. } => collect_uses(inner, out),
 
-        // T23: a collection literal uses every element expression; an index
-        // expression uses both its base and its index.
+        // T23/T24: a collection literal uses every element expression; an
+        // index expression uses its base plus every index in the (possibly
+        // multi-dimensional) index list.
         Expr::ArrayLit { elements, .. } => {
             for e in elements {
                 collect_uses(e, out);
             }
         }
-        Expr::Index { base, index, .. } => {
+        Expr::Index { base, indices, .. } => {
             collect_uses(base, out);
-            collect_uses(index, out);
+            for idx in indices {
+                collect_uses(idx, out);
+            }
         }
 
         // Compound expressions: conservatively recurse into nested blocks.

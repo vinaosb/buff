@@ -410,3 +410,67 @@ when writing parser shape() assertions.
 - `cargo fmt -p <4 crates> -- --check` → exit 0
 
 
+
+## T24 — Matrix<T> type + codegen (flat storage, 2-D indexing)
+
+### Index-2D decision: extend Expr::Index to indices: Vec<Expr>
+T23's Expr::Index { base, index, span } (single index) was GENERALIZED to
+{ base, indices: Vec<Expr>, span } so one node serves 1-D Vector and 2-D
+Matrix indexing. This is a MIGRATION (renamed/retyped field), not purely
+additive — but the ripple was exactly 8 match sites (grep-enumerated first):
+expr.rs (span + Display), ir.rs (collect_uses), infer.rs (Index arm),
+parser/expr.rs (LBracket arm), codegen rust_codegen.rs (lower_expr Index),
+vector_codegen.rs (index_expr helper), parser/expr_tests.rs (2 Display
+assertions). All updated in one pass; cargo check --workspace stayed green.
+
+**Key lesson**: when extending an AST variant's field shape, grep for ALL
+construction + match sites FIRST (Expr::Index\s*\{), enumerate them, then
+update in one batch. The Display format changed from Index(base, index) to
+Index(base, [index]) (list wrapped in [...]) — parser snapshot/shape
+tests that pin Display strings need updating too.
+
+### Matrix struct injection: emit-on-demand via AST scan
+The Matrix<T> builtin struct must be EMITTED into generated Rust (it's not a
+user struct — T26 not done). Chose emit-on-demand over always-emit: a
+program_uses_matrix(decls) walker scans for any Matrix.new(...)
+MethodCall (receiver Ident "Matrix", method "new"). If found, generate()
+PREPENDS the struct + impl (2 syn::Items) before any function item. The
+struct/impl are built via syn::parse_str::<File> on a fixed Rust template
+(same role as the quote! templates elsewhere — NOT raw-string codegen; the
+single string producer is still prettyplease::unparse).
+
+**On-demand keeps non-Matrix programs clean** — a program with no Matrix
+reference gets no Matrix struct leaked into its output (asserted by
+matrix_codegen_not_emitted_when_unused).
+
+### 2-D index codegen: lower base ONCE, clone into two field positions
+m[r, c] -> m.data[(r * m.cols + c) as usize]. The base m is lowered
+ONCE and the resulting SynExpr is cloned into m.data (field_access) and
+m.cols (field_access) positions. This preserves the move analyzer's clone
+decision (if any) baked into the lowered base. The flat formula gets ONE
+trailing s usize via cast_to (which parenthesises its operand) ->
+exactly (r * m.cols + c) as usize. prettyplease prints this verbatim, no
+extra parens.
+
+### Storage is flat Vec<T> (GPU-ready) — NOT Vec<Vec<T>>
+The Matrix struct carries data: Vec<T> (single contiguous buffer), not
+Vec<Vec<T>> (which would fragment and not be directly uploadable to a WGSL
+storage buffer). The 
+ew(rows, cols) impl fills with ec![T::default();
+rows * cols]. The flat-index formula ow * cols + col is the SAME formula
+a WGSL shader would compute to address a storage buffer -> the REFACTOR goal
+(share flat-storage with GPU buffer codegen) lands naturally here.
+
+### Test discipline (no insta snapshots needed)
+Followed vector_codegen.rs precedent: substring assertions on the functional
+signal + syn::parse_str::<syn::File> re-parse. No insta snapshots ->
+no .snap.new/.pending-snap files to manage. The exact T24 spec string
+m.data[(1 * m.cols + 2) as usize] is asserted verbatim and passes because
+cast_to + ield_access produce exactly that prettyplease output.
+
+### Verification (all GREEN)
+- cargo test -p buff-lang-codegen-rust --test matrix_codegen -> 15/15 pass
+- cargo test --workspace -> 0 failed, 0 errors across all binaries
+- cargo check --workspace -> exit 0
+- cargo clippy --workspace --all-targets -- -D warnings -> exit 0
+- cargo fmt -p <4 touched crates> -- --check -> exit 0
