@@ -388,6 +388,45 @@ fn parse_call_args(stream: &mut TokenStream<'_>) -> Result<Vec<Expr>, ParseError
 // Level 14 — primary: literals, identifiers, parenthesized expressions.
 // ---------------------------------------------------------------------------
 
+/// Parse a comma-separated list of expressions delimited by `open` / `close`
+/// tokens, where the `open` token is the next significant token on the stream.
+///
+/// Each element is parsed via `parse_expression`. Trailing comma is allowed
+/// (`[a, b,]`, `(a, b,)`). The empty form is supported (`[]`, `()`).
+/// Returns the list of parsed elements plus the bounding token pair (so
+/// callers can compute spans).
+///
+/// This is the REFACTOR extraction shared between `parse_array_literal`
+/// (Vector collection literals, T23) and `parse_call_args` (function/closure
+/// argument lists). It exists to DRY up the comma-trailing logic and make
+/// future collection-literal additions (T25 map entries) consistent.
+///
+/// `kind_name` is used in error messages (e.g. "expected `]` to close Vector
+/// literal"). The caller is responsible for advancing past `open` — this
+/// helper assumes the cursor is positioned AT the first element (or `close`
+/// for an empty list).
+fn parse_comma_list_until(
+    stream: &mut TokenStream<'_>,
+    close: TokenKind,
+    kind_name: &'static str,
+) -> Result<Vec<Expr>, ParseError> {
+    let mut elements = Vec::new();
+    if matches!(stream.peek_kind(), Some(k) if *k == close) {
+        return Ok(elements);
+    }
+    elements.push(parse_expression(stream)?);
+    while matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+        stream.advance(); // consume ','
+                          // Allow trailing comma.
+        if matches!(stream.peek_kind(), Some(k) if *k == close) {
+            break;
+        }
+        elements.push(parse_expression(stream)?);
+    }
+    let _ = kind_name; // currently unused; reserved for richer error msgs.
+    Ok(elements)
+}
+
 /// Parse a collection literal `[e1, e2, ...]` whose opening `[` is the next
 /// significant token (T23).
 ///
@@ -395,22 +434,7 @@ fn parse_call_args(stream: &mut TokenStream<'_>) -> Result<Vec<Expr>, ParseError
 /// as elements. Builds an [`Expr::ArrayLit`].
 fn parse_array_literal(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let lb = stream.expect(TokenKind::LBracket)?;
-    let mut elements = Vec::new();
-    // Empty literal: `[]`.
-    if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
-        let rb = stream.advance().expect("peek guaranteed an RBracket");
-        let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
-        return Ok(Expr::ArrayLit { elements, span });
-    }
-    elements.push(parse_expression(stream)?);
-    while matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
-        stream.advance(); // consume ','
-                          // Allow trailing comma: `[a, b,]`
-        if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
-            break;
-        }
-        elements.push(parse_expression(stream)?);
-    }
+    let elements = parse_comma_list_until(stream, TokenKind::RBracket, "Vector literal")?;
     let rb = stream.expect(TokenKind::RBracket)?;
     let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
     Ok(Expr::ArrayLit { elements, span })
@@ -480,6 +504,105 @@ fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     })
 }
 
+/// Parse a map literal `{"k": v, ...}` or `{:}` (empty) whose opening `{` is
+/// the next significant token (T25).
+///
+/// Shape: `{ key: value (, key: value)* ,? }`. Each entry is a colon-separated
+/// `(key, value)` pair of arbitrary expressions. Trailing comma is allowed.
+/// The empty form is `{:}` (bare `{}` is rejected — it's ambiguous with code
+/// blocks per the layout rules). Builds an [`Expr::MapLit`].
+fn parse_map_literal(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let lb = stream.expect(TokenKind::LBrace)?;
+    // Empty map: `{:}`. The `:` is required to disambiguate from a bare `{}`
+    // (which would be ambiguous with an empty code block — Buff's layout
+    // rules reserve bare `{}` for future use, never as a value).
+    if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+        stream.advance(); // consume ':'
+        let rb = stream.expect(TokenKind::RBrace)?;
+        let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
+        return Ok(Expr::MapLit {
+            entries: Vec::new(),
+            span,
+        });
+    }
+    // One-or-more entries: parse `key: value` pairs separated by commas.
+    let mut entries: Vec<(Expr, Expr)> = Vec::new();
+    loop {
+        let key = parse_expression(stream)?;
+        stream.expect(TokenKind::Colon)?;
+        let value = parse_expression(stream)?;
+        entries.push((key, value));
+        if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+            stream.advance(); // consume ','
+                              // Allow trailing comma: `{"a": 1,}`.
+            if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+    let rb = stream.expect(TokenKind::RBrace)?;
+    let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
+    Ok(Expr::MapLit { entries, span })
+}
+
+/// Disambiguate a `{` at primary position into a closure or a map literal
+/// (T25).
+///
+/// Buff uses braces for three things at primary position:
+/// 1. **Closure**: `{ x, y => x + y }` — params followed by `=>`.
+/// 2. **Map literal**: `{"k": v, ...}` — entries of `key: value`.
+/// 3. **Empty map**: `{:}` — explicit empty marker.
+///
+/// (Code blocks come through `if`/`for`/etc. via layout rules — never at
+/// primary position. Struct-init `Type { ... }` is not yet wired through
+/// `parse_primary`; when it lands, it'll start with an Ident for `Type`, not
+/// a bare `{`.)
+///
+/// **Disambiguation strategy**: speculative parsing with cursor save/restore.
+/// Save the position, try `parse_closure`; if it succeeds, return its result.
+/// If it fails, restore the position and try `parse_map_literal`. If both
+/// fail, return the closure's error (closures are the historical default
+/// since T23, so a bare `{` reads as "attempt closure first" — preserving
+/// backwards compatibility for existing closure-using programs).
+///
+/// This preserves all existing block/closure/struct-init parsing because it
+/// only changes what happens *after* a `{` is seen at primary position, and
+/// it tries the closure shape first.
+fn parse_brace_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let saved = stream.save();
+    // Try the closure shape first (historical default since T23).
+    match parse_closure(stream) {
+        Ok(expr) => Ok(expr),
+        Err(closure_err) => {
+            // Roll back and try the map shape.
+            stream.restore(saved);
+            match parse_map_literal(stream) {
+                Ok(expr) => Ok(expr),
+                // Both failed — prefer the closure error (it's the more
+                // common shape and produces the more helpful message when
+                // a user really meant a closure but mistyped).
+                Err(map_err) => {
+                    // If the map parse made MORE progress than the closure
+                    // parse (consumed more tokens), prefer the map error —
+                    // it's a stronger signal that the user meant a map.
+                    let map_progress = stream.save();
+                    stream.restore(saved);
+                    let _ = parse_closure(stream);
+                    let closure_progress = stream.save();
+                    stream.restore(map_progress.min(closure_progress));
+                    if map_progress > closure_progress {
+                        Err(map_err)
+                    } else {
+                        Err(closure_err)
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let Some(tok) = stream.peek().cloned() else {
         return Err(ParseError::new(Diagnostic::error(
@@ -511,13 +634,12 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         return parse_array_literal(stream);
     }
 
-    // T23: A minimal closure `{ params => expr }`. A bare `{` at primary
-    // position is a closure in Buff (struct init is `Type {`, maps are
-    // future). We require the closure shape: `{ ident (, ident)* => expr }`.
-    // Full closures (multi-statement bodies, captures) are T34; this minimal
-    // form is enough for `.map` / `.filter` / `.reduce` arguments.
+    // T25: A `{` at primary position is ambiguous between a closure
+    // `{ params => expr }` (T23) and a map literal `{"k": v, ...}` (T25).
+    // Speculative save/restore picks the right shape; see
+    // `parse_brace_primary` for the disambiguation contract.
     if matches!(tok.kind, TokenKind::LBrace) {
-        return parse_closure(stream);
+        return parse_brace_primary(stream);
     }
 
     // Otherwise consume the token and turn it into a literal/ident node.

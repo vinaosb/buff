@@ -160,6 +160,22 @@ impl fmt::Display for InterpPart {
 ///
 /// This generalization is forward-compatible with N-dimensional indexing
 /// (tensors, v1.0+) — additional indices simply lengthen the vec.
+///
+/// ## T25 — `Expr::MapLit`
+///
+/// A new variant was **added** in T25 (v0.5) to carry a map/dictionary literal
+/// `{"k": v, ...}` (note: braces + colon-separated entries). The `entries` are
+/// a `Vec<(Expr, Expr)>` of `(key, value)` pairs (so each pair preserves the
+/// span-bearing Expr nodes). This is **additive**: no existing variant was
+/// renamed, reordered, or had its payload altered, so all prior `match` arms
+/// remain exhaustive. The variant carries a `span: Span` for diagnostics.
+///
+/// Brace disambiguation (parser-side, see `parse_brace_primary`): a `{` at
+/// primary position can be a closure `{ params => expr }` (T23) or a map
+/// literal `{ key: value, ... }`. The parser uses speculative save/restore
+/// on the `TokenStream` position: it tries the closure shape first, and on
+/// failure rolls back and tries the map shape. Empty `{:}` is an empty map;
+/// bare `{}` is rejected (ambiguous with code blocks per layout).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A literal: `42`, `"hi"`, `true`, …
@@ -268,6 +284,20 @@ pub enum Expr {
     /// `Expr::Literal(Literal::String(_), _)`; only strings that actually
     /// contain interpolation produce this variant.
     StringInterp { parts: Vec<InterpPart>, span: Span },
+    /// A map literal: `{"key": value, ...}` or `{:}` (empty) (T25).
+    ///
+    /// Comma-separated `(key, value)` entries; trailing comma allowed; empty
+    /// map spelled `{:}` (bare `{}` is rejected to avoid ambiguity with code
+    /// blocks). Lowers to Rust's `std::collections::HashMap::from([...])`
+    /// (fully-qualified, so no `use` import is needed in generated code).
+    /// Both key and value types are inferred from the first entry — literals
+    /// with mixed kinds fall back to the first entry's types.
+    ///
+    /// This is **additive**: no existing variant was renamed or reordered.
+    MapLit {
+        entries: Vec<(Expr, Expr)>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -287,7 +317,8 @@ impl Expr {
             | Expr::SuspendExpr { span: s, .. }
             | Expr::ArrayLit { span: s, .. }
             | Expr::Index { span: s, .. }
-            | Expr::StringInterp { span: s, .. } => *s,
+            | Expr::StringInterp { span: s, .. }
+            | Expr::MapLit { span: s, .. } => *s,
         }
     }
 }
@@ -406,6 +437,17 @@ impl fmt::Display for Expr {
                         f.write_str(", ")?;
                     }
                     write!(f, "{p}")?;
+                }
+                f.write_str("]")
+            }
+            // T25: `{k: v, ...}` -> `Map[k: v, ...]`.
+            Expr::MapLit { entries, .. } => {
+                f.write_str("Map[")?;
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
                 }
                 f.write_str("]")
             }

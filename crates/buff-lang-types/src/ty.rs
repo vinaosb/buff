@@ -68,6 +68,20 @@ pub enum Type {
     /// Maps to Rust's `Option<T>`. Used by `env("HOME")` which returns
     /// `Option<String>`.
     Option(Box<Type>),
+    /// A hash-map type: `Map<K, V>` (T25 — keyed dictionary collection).
+    ///
+    /// Maps to Rust's `std::collections::HashMap<K, V>`. The key and value
+    /// types are each boxed so the enum can carry any inner types. The map
+    /// literal `{"k": v, ...}` (note: braces + colon-separated entries) lowers
+    /// to `HashMap::from([("k", v), ...])`. Map method dispatch
+    /// (`.get`/`.insert`/`.contains`/`.remove`/`.len`) is handled by the Rust
+    /// codegen via the standard `HashMap` inherent methods (`.contains` maps
+    /// to `contains_key`).
+    ///
+    /// Both type params are inferred from the first entry of a literal;
+    /// literals with mixed key/value kinds fall back to the first entry's
+    /// types (a future task will enforce uniformity).
+    Map(Box<Type>, Box<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -193,6 +207,14 @@ impl Type {
         Type::Option(Box::new(inner))
     }
 
+    /// Create a `Map<K, V>` type (T25). Maps to Rust's
+    /// `std::collections::HashMap<K, V>`. Both params are boxed so the
+    /// enum variant carries them inline without recursion through the
+    /// enum's own padding.
+    pub fn map(key: Type, value: Type) -> Self {
+        Type::Map(Box::new(key), Box::new(value))
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -245,6 +267,7 @@ impl fmt::Display for Type {
             Type::Vector(elem) => write!(f, "Vector<{elem}>"),
             Type::Matrix(elem) => write!(f, "Matrix<{elem}>"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
+            Type::Map(key, value) => write!(f, "Map<{key}, {value}>"),
         }
     }
 }

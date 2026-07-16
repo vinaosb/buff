@@ -521,6 +521,13 @@ impl RustCodegen {
             // type annotations. The body is a single expression (the parser
             // wraps it in a one-statement block).
             Expr::Lambda { params, body, .. } => self.lower_lambda(params, body),
+            // T25: a map literal `{"k": v, ...}` -> Rust
+            // `std::collections::HashMap::from([("k", v), ...])`. We use the
+            // fully-qualified path so generated programs need no `use`
+            // import (avoids import management in v0.5). Each entry becomes
+            // a Rust tuple `(key, value)`; the outer `[...]` is a const-eval
+            // array literal that `HashMap::from` consumes.
+            Expr::MapLit { entries, .. } => self.lower_map_lit(entries),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -958,6 +965,22 @@ impl RustCodegen {
                 let f = self.lower_expr(&args[0])?;
                 self.lower_into_iter_reduce(recv, f)?
             }
+            // T25: Map methods. The Buff names map to Rust's standard
+            // HashMap methods, except `.contains(k)` → `.contains_key(k)`
+            // (Buff hides the `_key` suffix for ergonomics). `.get(k)`
+            // returns `Option<&V>` in Rust; we keep it as-is (`Option<&V>`)
+            // for v0.5 — a future task may add `.cloned()` to recover an
+            // owned `Option<V>` if the move-by-default analysis requires it.
+            // `.insert(k, v)`, `.remove(k)`, and `.len()` pass through
+            // unchanged because Buff and Rust share those names.
+            "contains" if args.len() == 1 => {
+                let arg = self.lower_expr(&args[0])?;
+                method_call_one_arg(recv, "contains_key", arg)
+            }
+            // `.get`, `.insert`, `.remove`, `.len` all share Rust's name —
+            // they fall through to the default arm below with no special
+            // mapping. We keep this comment block to document the T25 design
+            // (so a future change doesn't accidentally rewrite these).
             // Default: a plain method call `recv.method(args)`.
             _ => {
                 let args_punct = lower_args(self)?;
@@ -1381,6 +1404,60 @@ impl RustCodegen {
         }))
     }
 
+    /// Lower a map literal `{"k": v, ...}` (or empty `{:}`) to Rust's
+    /// `std::collections::HashMap::from([("k", v), ...])` (T25).
+    ///
+    /// Each entry's key and value are lowered independently and spliced into
+    /// the outer array as Rust tuples. The fully-qualified path
+    /// `std::collections::HashMap::from` is used (not a bare `HashMap::from`
+    /// with a `use` import) so generated programs need NO import wiring.
+    ///
+    /// For an empty literal `{:}` we emit `HashMap::from([])` (Rust infers the
+    /// key/value types from the `let`-binding annotation, which the codegen's
+    /// type inferencer drives).
+    ///
+    /// The output is built via `quote!` so the outer `::from([...])` shell and
+    /// the comma-separated tuple entries are constructed without any
+    /// hand-formatted Rust strings.
+    fn lower_map_lit(&mut self, entries: &[(Expr, Expr)]) -> Result<SynExpr, CodegenError> {
+        // Lower each (key, value) pair into a Rust tuple expression. We
+        // build the tuple via `syn::ExprTuple` so it's a real AST node
+        // (not a token stream).
+        let mut lowered_entries: Vec<SynExpr> = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            let k_e = self.lower_expr(k)?;
+            let v_e = self.lower_expr(v)?;
+            let mut tuple_elems: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+            tuple_elems.push(k_e);
+            tuple_elems.push(v_e);
+            // A trailing comma is required by Rust for single-element tuples;
+            // for 2-element tuples it's optional but harmless. We always add
+            // one for uniformity.
+            let tuple = SynExpr::Tuple(syn::ExprTuple {
+                attrs: Vec::new(),
+                paren_token: Default::default(),
+                elems: tuple_elems,
+            });
+            lowered_entries.push(tuple);
+        }
+        // Build the outer `[<entries>]` array literal as a Rust expression
+        // via `quote!`. Each lowered tuple is spliced in comma-separated.
+        let mut entries_tokens: proc_macro2::TokenStream = proc_macro2::TokenStream::new();
+        for (i, e) in lowered_entries.iter().enumerate() {
+            if i > 0 {
+                entries_tokens.extend(quote::quote! { , });
+            }
+            let e = e.clone();
+            entries_tokens.extend(quote::quote! { #e });
+        }
+        // `std::collections::HashMap::from([<entries_tokens>])`
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            std::collections::HashMap::from([#entries_tokens])
+        };
+        syn::parse2(tokens)
+            .map_err(|e| self.unsupported(&format!("map literal codegen parse: {e}")))
+    }
+
     fn lower_literal(&mut self, lit: &Literal) -> Result<SynExpr, CodegenError> {
         // T20: Decimal literal → `rust_decimal_macros::dec!(<raw>)`. The raw
         // digit text is parsed into a `proc_macro2::TokenStream` so the
@@ -1593,6 +1670,23 @@ impl RustCodegen {
                 let inner = self.buff_type_to_syn(inner)?;
                 return Some(make_generic_path_type("Option", vec![inner]));
             }
+            // T25: Map<K, V> → Rust `std::collections::HashMap<K, V>`. We use
+            // the fully-qualified path so generated programs do NOT need a
+            // `use std::collections::HashMap;` import (the literal codegen
+            // also uses the fully-qualified path, keeping import-management
+            // out of the picture for v0.5).
+            Type::Map(key, value) => {
+                let k = self
+                    .buff_type_to_syn(key)
+                    .unwrap_or_else(|| rust_path_type("i64"));
+                let v = self
+                    .buff_type_to_syn(value)
+                    .unwrap_or_else(|| rust_path_type("i64"));
+                return Some(make_qualified_generic_path_type(
+                    "std::collections::HashMap",
+                    vec![k, v],
+                ));
+            }
             _ => {}
         }
         let rust_name: &str = match ty {
@@ -1643,10 +1737,10 @@ impl RustCodegen {
             Type::Char => "char",
             Type::Decimal => "rust_decimal::Decimal",
             Type::Unknown | Type::Void => return None,
-            // Vector, Matrix, and Option are handled by the early-return
+            // Vector, Matrix, Map, and Option are handled by the early-return
             // match above; this arm is unreachable but required for
             // exhaustiveness.
-            Type::Vector(_) | Type::Matrix(_) | Type::Option(_) => return None,
+            Type::Vector(_) | Type::Matrix(_) | Type::Option(_) | Type::Map(_, _) => return None,
         };
         Some(rust_path_type(rust_name))
     }
@@ -1863,6 +1957,11 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
         Expr::Index { base, indices, .. } => {
             expr_uses_matrix(base) || indices.iter().any(expr_uses_matrix)
         }
+        // T25: a map literal may contain a Matrix expression as a key/value;
+        // recurse conservatively.
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_matrix(k) || expr_uses_matrix(v)),
         Expr::Lambda { body, .. } => block_uses_matrix(body),
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_matrix(v)),
         Expr::MatchExpr {
@@ -2086,6 +2185,44 @@ fn make_generic_path_type(name: &str, args: Vec<SynType>) -> SynType {
     };
     let mut segments: Punctuated<syn::PathSegment, syn::Token![::]> = Punctuated::new();
     segments.push(segment);
+    SynType::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path {
+            leading_colon: None,
+            segments,
+        },
+    })
+}
+
+/// Like [`make_generic_path_type`] but accepts a `::`-separated qualified
+/// path (e.g. `"std::collections::HashMap"`) and attaches the generic
+/// arguments to the LAST segment. Used by the T25 Map codegen so generated
+/// programs can reference `std::collections::HashMap<K, V>` without a `use`
+/// import (avoiding import management in v0.5).
+fn make_qualified_generic_path_type(qualified_name: &str, args: Vec<SynType>) -> SynType {
+    let mut path_args: Punctuated<syn::GenericArgument, syn::Token![,]> = Punctuated::new();
+    for a in args {
+        path_args.push(syn::GenericArgument::Type(a));
+    }
+    let mut segments: Punctuated<syn::PathSegment, syn::Token![::]> = Punctuated::new();
+    let mut parts = qualified_name.split("::").collect::<Vec<_>>();
+    let last_idx = parts.len().saturating_sub(1);
+    for (i, seg) in parts.drain(..).enumerate() {
+        let arguments = if i == last_idx {
+            syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                colon2_token: None,
+                lt_token: Default::default(),
+                args: path_args.clone(),
+                gt_token: Default::default(),
+            })
+        } else {
+            syn::PathArguments::None
+        };
+        segments.push(syn::PathSegment {
+            ident: Ident::new(seg, ProcSpan::call_site()),
+            arguments,
+        });
+    }
     SynType::Path(syn::TypePath {
         qself: None,
         path: syn::Path {

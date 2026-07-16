@@ -188,6 +188,32 @@ impl<'a> TokenStream<'a> {
     }
 
     // -----------------------------------------------------------------------
+    // T25: speculative parsing — save / restore the cursor position.
+    //
+    // Brace disambiguation (`{` at primary position can be a closure OR a
+    // map literal) requires trial parsing: try the closure shape first, and
+    // on failure roll back and try the map shape. These accessors expose
+    // just enough of the cursor position for that — they are additive and
+    // carry no invariants beyond "restoring an earlier position is safe as
+    // long as no `&mut` borrow is outstanding".
+    // -----------------------------------------------------------------------
+
+    /// Snapshot the current cursor position (T25). Pass the returned value
+    /// to [`Self::restore`] to roll the cursor back to this point. Used by
+    /// the speculative parser to try one shape and fall back to another.
+    pub fn save(&self) -> usize {
+        self.pos
+    }
+
+    /// Restore the cursor to a previously-snapshotted position (T25).
+    /// The `pos` must come from a prior [`Self::save`] call on this same
+    /// stream. Restoring is safe at any time (no invariants are violated
+    /// by re-advancing over already-seen tokens).
+    pub fn restore(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
+    // -----------------------------------------------------------------------
     // T9: layout-sensitive (offside-rule) helpers.
     //
     // The peek/advance/expect helpers above transparently *skip* layout

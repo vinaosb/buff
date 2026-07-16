@@ -373,7 +373,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T25**: Map<K,V> type + codegen [deep]
+- [x] **T25**: Map<K,V> type + codegen [deep]
 
   **What to do** (TDD):
   - **RED**: Write snapshot: `{"key": 42}` → `HashMap::from([("key", 42)])`

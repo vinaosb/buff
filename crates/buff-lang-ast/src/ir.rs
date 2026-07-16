@@ -779,6 +779,13 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
                 }
             }
         }
+        // T25: a map literal uses every key and value expression.
+        Expr::MapLit { entries, .. } => {
+            for (k, v) in entries {
+                collect_uses(k, out);
+                collect_uses(v, out);
+            }
+        }
     }
 }
 

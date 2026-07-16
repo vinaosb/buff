@@ -141,6 +141,31 @@ impl TypeInferencer {
                 }
                 Ok(Type::string())
             }
+            // T25: A map literal infers `Map<K, V>`. Both key and value
+            // types come from the first entry (uniformity is enforced by a
+            // future task — for v0.5 we accept heterogeneous entries and
+            // pick the first's kind as the canonical type). An empty map
+            // (`{:}`) falls back to `Map<Int<64>, Int<64>>` so a bare
+            // `let m = {:}` still type-checks.
+            Expr::MapLit { entries, .. } => {
+                let (key_ty, val_ty) = if let Some((k, v)) = entries.first() {
+                    // `infer_collection_element` takes a `&[Expr]` slice;
+                    // use `std::slice::from_ref` to avoid an unnecessary
+                    // clone of the entry (clippy: cloned_ref_to_slice_refs).
+                    let kt = self.infer_collection_element(std::slice::from_ref(k))?;
+                    let vt = self.infer_collection_element(std::slice::from_ref(v))?;
+                    (kt, vt)
+                } else {
+                    (Type::int_default(), Type::int_default())
+                };
+                // Visit the remaining entries so their sub-types are checked
+                // (and so dependent inference side-effects run).
+                for (k, v) in entries.iter().skip(1) {
+                    let _ = self.infer_expr(k);
+                    let _ = self.infer_expr(v);
+                }
+                Ok(Type::map(key_ty, val_ty))
+            }
             // v0.5: lambda/struct/match inference.
             Expr::Lambda { .. } | Expr::StructInit { .. } | Expr::MatchExpr { .. } => {
                 Ok(Type::Unknown)
