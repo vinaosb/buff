@@ -459,7 +459,7 @@ remove the Matrix injection in generate(), restore the 2 parser Display
 assertions, restore the vector_codegen index_expr helper, delete
 matrix_codegen.rs. Clean reversal (the change set is self-contained).
 
-## T26 � Struct type + repr(C) codegen
+## T26 � Struct type + repr(C) codegen
 
 ### Decision: field-access via codegen-time rewrite (additive only)
 
@@ -469,8 +469,8 @@ zero-arg `Expr::MethodCall`s rather than adding a dedicated
 
 - The parser already produces `MethodCall(receiver, "field", [])` for
   `obj.field` (the Dot postfix arm with no `(` after the method name).
-- A codegen-time heuristic � "zero-args + method name NOT in the
-  KNOWN_ZERO_ARG_METHODS allow-list ? emit `recv.field`" � implements
+- A codegen-time heuristic � "zero-args + method name NOT in the
+  KNOWN_ZERO_ARG_METHODS allow-list ? emit `recv.field`" � implements
   the rewrite with ZERO AST migration (every existing match arm stays
   exhaustive).
 - The cost: a user struct field literally named `len`/`push`/etc.
@@ -485,7 +485,7 @@ IR. The migration is purely additive to the AST (new variant); existing
 code that pattern-matches `Expr` adds one new arm. DEFERRED to keep T26
 within scope.
 
-### Decision: repr(C) emission mechanism � opt-in setter, not auto-detect
+### Decision: repr(C) emission mechanism � opt-in setter, not auto-detect
 
 T26 provides a `RustCodegen::mark_struct_repr_c(name: &str)` setter
 that adds a struct name to a `HashSet<String>`. When the codegen walks
@@ -494,7 +494,7 @@ the declaration list, structs whose names are in the set get
 
 The full GPU-dispatch auto-detection (analyzing which structs are
 passed to GPU compute contexts) is deferred to v1.0 (per task spec).
-T26's mechanism is the EMISSION HOOK � the v1.0 detection will simply
+T26's mechanism is the EMISSION HOOK � the v1.0 detection will simply
 populate the set.
 
 ### Decision: struct-init parser disambiguation via peek-ahead
@@ -527,7 +527,7 @@ ever needed) is a separate task.
 trait-based polymorphism. T26 IGNORES this field at codegen time and
 emits blanket `#[derive(Clone, Debug)]` on every struct. User-specified
 trait impls (e.g. `trait` declarations + `impl` blocks) are a future
-task � not blocking T26's deliverables (struct decl + struct init +
+task � not blocking T26's deliverables (struct decl + struct init +
 field access + repr(C) hook).
 
 ### Rollback recipe
@@ -543,3 +543,140 @@ in lib.rs; revert the Cargo.toml dev-deps additions; remove the
 parse_postfix LBrace arm + `cursor_at_struct_init_body` +
 `parse_struct_init_fields` in expr.rs; restore the pre-T26 inline test
 in rust_codegen.rs; delete `tests/struct_codegen.rs`. Clean reversal.
+
+## T27 — Enum type + pattern matching (deep)
+
+### Decision 1 — AST change: add `generics: Vec<Ident>` to `EnumDecl`
+
+**Choice**: Add a new field `generics: Vec<Ident>` to `EnumDecl` (between
+`name` and `variants`), making it the LAST data field before `span` to
+preserve the convention that `span` is the trailing anchor.
+
+**Alternatives considered**:
+- Wrap variants in a new `EnumBody` struct with optional generics —
+  rejected: adds indirection for marginal cleanliness; downstream pattern
+  matching gets noisier.
+- Store generics inside each `EnumVariant` — rejected: generics are an
+  enum-level concern, not a variant-level concern.
+- Use the existing `traits: Vec<Ident>` field on `StructDecl` pattern —
+  rejected: `traits` carries trait impls (Clone, Debug, etc.); generics
+  are type parameters, semantically distinct.
+
+**Migration**: every construction site updated to pass `generics: Vec::new()`
+for non-generic enums. Internal `#[cfg(test)]` blocks in decl.rs build
+`EnumVariant` (not `EnumDecl`) so no test fixture needed updating. The
+only external consumer (`Decl::EnumDecl` in codegen) was upgraded from
+`Err(unsupported)` to a real `lower_enum_decl` in lockstep.
+
+**Migration note** in the AST doc comment records this as a migration
+(not purely additive). Precedent: T24 generalised `Index.index` from
+`Box<Expr>` to `Vec<Expr>` (similar field-add migration).
+
+### Decision 2 — Pattern disambiguation: Ident vs Variant deferred to type system
+
+**Choice**: At parse time, bare `Foo` becomes `Pattern::Ident(Foo)` and
+`Foo(x, y)` becomes `Pattern::Variant { enum_name: "", variant: Foo,
+subpatterns: [...] }`. The `enum_name` is a placeholder empty string
+because the parser doesn't know which enum each variant belongs to.
+
+**Alternatives considered**:
+- Change `Pattern::Variant.enum_name` to `Option<Ident>` — rejected:
+  would require another AST migration AND the empty-string sentinel
+  works fine (codegen ignores it; exhaustiveness matches by name).
+- Add a `Pattern::PathVariant { variant, subpatterns }` for the no-enum-
+  name case — rejected: adds a 5th Pattern variant that downstream
+  matches must handle, just to avoid an empty-string sentinel.
+- Resolve variants at parse time using a symbol table — rejected:
+  requires multi-pass parsing or forward declarations, neither of which
+  the hand-rolled parser supports today.
+
+**Rationale**: Rust has the same ambiguity and resolves it with type
+information. Buff inherits the approach. The new `Pattern::variant_name_key()`
+accessor unifies Ident and Variant patterns for the coverage check by
+extracting the name slot.
+
+### Decision 3 — Brace syntax for enum decls and match expressions
+
+**Choice**: Both `enum Name { ... }` and `match scrut { ... }` use BRACE
+form (not layout/offside-rule form).
+
+**Alternatives considered**:
+- Layout form `enum Color:\n    Red\n    Green\n    Blue` (Python/F#
+  style, consistent with `func` body blocks) — rejected: requires
+  Indent/Dedent token handling in the parser, more error-prone; brace
+  form is much simpler to parse and the README's "braces for data" rule
+  covers both (enum variants are data; match arms are data).
+- Mixed (braces for match, layout for enum) — rejected: inconsistency.
+
+**Rationale**: README says "Braces `{ }` reserved for data: struct
+literals, maps, lambdas, interpolation". Enum variant lists and match
+arms are data-shaped (they carry values), so braces fit. Brace form is
+the Rust idiom and Buff transpiles to Rust, so the source maps 1:1 to
+the generated code (less codegen translation). T26 (struct decl codegen)
+didn't add struct decl PARSING, so there's no prior convention to break.
+
+### Decision 4 — Exhaustiveness checker as a reusable analysis pass
+
+**Choice**: Implement three layers in `buff-lang-types::exhaustiveness`:
+1. `build_enum_registry(&[Decl]) -> EnumRegistry` — pure registry
+   construction.
+2. `check_match_coverage(&[String], &[MatchArm]) -> Option<String>` —
+   PURE name-coverage core (no inferencer, no registry). Returns the
+   first missing variant or None.
+3. `check_program(&[Decl]) -> Result<(), TypeError>` — program-level
+   walker that composes (1) + (2) with best-effort scrutinee-type
+   inference.
+
+**Alternatives considered**:
+- Single monolithic `check_program` that does everything inline —
+  rejected: not reusable by LSP tooling, the CLI check subcommand, or
+  snapshot tests.
+- Add the checker to `TypeInferencer` (a method `inferencer.check_match`)
+  — rejected: the inferencer's job is type assignment, not coverage
+  analysis. Separation of concerns.
+- Defer exhaustiveness to rustc (let Rust catch non-exhaustive matches
+  at compile time) — rejected: violates the "hide Rust errors from the
+  user" design principle. Buff must report its OWN diagnostic with the
+  Buff source span, not the generated Rust span.
+
+**Rationale**: The pure-core + registry composition (the REFACTOR step)
+makes the checker reusable downstream. The v0.5 limitation (scrutinee-
+type inference is best-effort; matches with unresolvable scrutinees are
+skipped) is documented and tested; full unannotated inference arrives
+when the type system gains `Type::UserEnum(name)`.
+
+### Decision 5 — `match x { }` empty-body limitation documented, not fixed
+
+**Choice**: Document that `match x { }` (zero arms on a bare-ident
+scrutinee) is rejected because the T26 struct-init disambiguator
+(`cursor_at_struct_init_body`) greedily parses `x { }` as an empty
+struct-init. Pin the current error behaviour with a test
+(`enum_match_empty_arms_known_limitation_errors`).
+
+**Alternatives considered**:
+- Add a "no struct-init" mode to primary parsing — rejected: would
+  require threading a context flag through the Pratt parser, a larger
+  refactor that needs its own task. The benefit is small (empty matches
+  are degenerate; real matches with at least one arm are unaffected).
+- Require parens around ALL scrutinees — rejected: too noisy for the
+  common case `match c { Red => 1, ... }` which works fine without
+  parens today.
+- Use a different keyword like `case` instead of `match` — rejected:
+  diverges from Rust idiom for no good reason.
+
+**Rationale**: Real matches have at least one arm. The arm pattern after
+`{` doesn't match the struct-init shape (`{}` or `Ident :`), so the
+disambiguator doesn't fire. Empty matches are degenerate and not
+required by the spec. A future parser task can lift this restriction
+by adding a "no struct-init" mode.
+
+### Reversibility
+
+T27 is fully reversible: revert the AST changes (remove `generics` from
+EnumDecl; remove `Pattern::span`/`variant_name_key`), revert the parser
+changes (remove `parse_enum_decl` from stmt.rs, `parse_match`/`parse_pattern`
+from expr.rs, the `KwEnum` arm in parser.rs, the `KwMatch` arm in
+parse_primary), revert the codegen changes (remove `lower_enum_decl` +
+`lower_match_expr` + `lower_pattern`, restore the `Err(unsupported)`
+arms), remove `exhaustiveness.rs` + its lib.rs re-exports, and delete
+the three test files. Clean reversal.

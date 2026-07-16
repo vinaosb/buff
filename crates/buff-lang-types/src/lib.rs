@@ -14,6 +14,7 @@
 //! user-defined types.
 
 pub mod env;
+pub mod exhaustiveness;
 pub mod infer;
 pub mod prelude;
 pub mod promote;
@@ -21,6 +22,13 @@ pub mod range_analysis;
 pub mod ty;
 
 pub use env::TypeEnv;
+// T27: exhaustiveness checker for `match` expressions. Re-exported at the
+// crate root so downstream tools (CLI, LSP, snapshot tests) can call
+// `check_program`, `check_match_coverage`, `build_enum_registry`, and
+// `check_match_expr` without a long module path.
+pub use exhaustiveness::{
+    build_enum_registry, check_match_coverage, check_match_expr, check_program, EnumRegistry,
+};
 pub use infer::TypeInferencer;
 pub use promote::{assignable_to, promote_binary};
 // T96: standard-library prelude. Re-exported at the crate root so the

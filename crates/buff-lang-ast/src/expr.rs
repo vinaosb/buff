@@ -487,6 +487,40 @@ pub enum Pattern {
     },
 }
 
+impl Pattern {
+    /// Returns the [`Span`] associated with this pattern (T27).
+    ///
+    /// Every variant carries its own `Span`; this accessor lets the match
+    /// parser (and downstream diagnostics) treat patterns uniformly.
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard(s)
+            | Pattern::Literal(_, s)
+            | Pattern::Ident(_, s)
+            | Pattern::Variant { span: s, .. } => *s,
+        }
+    }
+
+    /// Returns the canonical variant-name key this pattern would cover, if
+    /// it could be a variant reference (T27).
+    ///
+    /// Used by the exhaustiveness checker to match arms against enum
+    /// variants by NAME without needing to resolve the variant-vs-binding
+    /// ambiguity upfront. Returns:
+    /// - `Some(name)` for `Pattern::Ident(name)` and
+    ///   `Pattern::Variant { variant: name, .. }` (the parser fills
+    ///   `enum_name` with `""` for variant patterns it builds from source).
+    /// - `None` for `Pattern::Wildcard` and `Pattern::Literal` (these never
+    ///   cover a named variant).
+    pub fn variant_name_key(&self) -> Option<&str> {
+        match self {
+            Pattern::Ident(name, _) => Some(&name.name),
+            Pattern::Variant { variant, .. } => Some(&variant.name),
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
+        }
+    }
+}
+
 impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

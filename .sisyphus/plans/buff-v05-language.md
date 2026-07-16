@@ -440,7 +440,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T27**: Enum type + pattern matching [deep]
+- [x] **T27**: Enum type + pattern matching [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `enum Color { Red, Green, Blue }` → Rust enum

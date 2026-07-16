@@ -12,7 +12,7 @@ use buff_lang_ast::Decl;
 use buff_lang_error::{ParseError, SourceId};
 use buff_lang_lexer::TokenKind;
 
-use crate::stmt::parse_func_decl;
+use crate::stmt::{parse_enum_decl, parse_func_decl};
 use crate::stream::TokenStream;
 
 /// Parse a slice of tokens into zero or more top-level [`Decl`]s.
@@ -39,6 +39,13 @@ pub fn parse(
             Some(TokenKind::KwFunc) => {
                 let f = parse_func_decl(&mut stream)?;
                 decls.push(Decl::FuncDecl(f));
+            }
+            // T27: top-level enum declarations. Functions and enums are the
+            // two top-level forms supported at this stage; struct/trait/module
+            // parsing arrives in later waves.
+            Some(TokenKind::KwEnum) => {
+                let e = parse_enum_decl(&mut stream)?;
+                decls.push(Decl::EnumDecl(e));
             }
             other => {
                 let span = stream

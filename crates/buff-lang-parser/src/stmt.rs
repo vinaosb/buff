@@ -36,7 +36,9 @@
 //! [`TokenStream`] methods, while statement bodies still use the regular
 //! skipping peek/advance so existing parsers compose unchanged.
 
-use buff_lang_ast::{BinaryOp, Block, Expr, FuncDecl, Ident, Param, Stmt, TypeRef};
+use buff_lang_ast::{
+    BinaryOp, Block, EnumDecl, EnumVariant, Expr, FuncDecl, Ident, Param, Stmt, TypeRef,
+};
 use buff_lang_error::{Diagnostic, ParseError, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
@@ -620,6 +622,229 @@ pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         then_block,
         else_block,
         span: Span::new(start, end, source_id),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// T27 — Enum declarations.
+//
+// Buff enum syntax (brace form, consistent with map/struct-init "braces are
+// data" rule from the README):
+//
+//   enum Color { Red, Green, Blue }
+//   enum Shape { Circle(Float), Rect(Float, Float), Point }
+//   enum Result<T, E> { Ok(T), Err(E) }
+//
+// Each variant is either a unit variant (`Red`) or a data-carrying tuple
+// variant (`Circle(Float)`). Generic params `<T, E>` on the enum are parsed
+// and stored on the decl; they are NOT validated against variant payloads at
+// parse time (that is a later type-checking task). The closing `}` ends the
+// span.
+// ---------------------------------------------------------------------------
+
+/// Parse a top-level `enum Name<generics> { Variant, Variant(T, U), ... }`
+/// declaration (T27).
+///
+/// Shape:
+/// - `enum Name { ... }` — non-generic enum, unit + data variants.
+/// - `enum Name<T, E> { ... }` — generic enum; the `<...>` after the name
+///   introduces type parameters that variants may reference in their payloads.
+///
+/// Each variant is one of:
+/// - `Ident` — a unit variant (no payload).
+/// - `Ident ( Type, Type, ... )` — a data-carrying tuple variant.
+///
+/// Variants are comma-separated; trailing comma is allowed. The body is
+/// brace-delimited ( braces-for-data per the README convention, matching
+/// map literals and struct-init). An empty body `enum Empty { }` is allowed
+/// (zero variants — useful for type-level tricks and as a parsing edge case).
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if:
+/// - the token after `enum` is not an identifier,
+/// - the opening `{` is missing,
+/// - a variant name is missing or not an identifier,
+/// - a variant payload type fails to parse via [`parse_type_ref`],
+/// - the closing `}` is missing.
+pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseError> {
+    let enum_tok = stream.expect(TokenKind::KwEnum)?;
+    let start = enum_tok.span.start;
+    let source_id = stream.source_id();
+
+    // Enum name (mandatory identifier).
+    let name_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected enum name after `enum`",
+            stream.eof_span(),
+        ))
+    })?;
+    let name = extract_ident(name_tok)?;
+
+    // Optional generic parameters: `<T, E>`. These are bare identifiers (no
+    // bounds, no defaults — keep v0.5 minimal). The lexer already special-cases
+    // `>>` as a single token in type-arg position via `parse_type_ref`; here we
+    // only need to recognise a single `>` to close the param list (since the
+    // params themselves are idents, not nested type refs).
+    let mut generics: Vec<Ident> = Vec::new();
+    if matches!(stream.peek_kind(), Some(TokenKind::Lt)) {
+        stream.advance(); // consume `<`
+        loop {
+            let gtok = stream.advance().ok_or_else(|| {
+                ParseError::new(Diagnostic::error(
+                    "expected generic parameter name, found end of input",
+                    stream.eof_span(),
+                ))
+            })?;
+            let g = extract_ident(gtok)?;
+            generics.push(g);
+            match stream.peek_kind() {
+                Some(TokenKind::Comma) => {
+                    stream.advance();
+                    // Allow trailing comma: `<T,>`.
+                    if matches!(stream.peek_kind(), Some(TokenKind::Gt)) {
+                        stream.advance();
+                        break;
+                    }
+                }
+                Some(TokenKind::Gt) => {
+                    stream.advance();
+                    break;
+                }
+                Some(other) => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected `,` or `>` in generic param list, found `{other}`"),
+                        stream
+                            .peek()
+                            .map(|t| t.span)
+                            .unwrap_or_else(|| stream.eof_span()),
+                    )));
+                }
+                None => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        "unterminated generic param list (missing `>`)",
+                        stream.eof_span(),
+                    )));
+                }
+            }
+        }
+    }
+
+    // Opening `{` of the variant list.
+    stream.expect(TokenKind::LBrace)?;
+    let mut variants: Vec<EnumVariant> = Vec::new();
+    // Empty body: `enum Empty { }`.
+    if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+        let rb = stream.expect(TokenKind::RBrace)?;
+        return Ok(EnumDecl {
+            name,
+            generics,
+            variants,
+            span: Span::new(start, rb.span.end, source_id),
+        });
+    }
+    loop {
+        // Variant name (mandatory identifier).
+        let vname_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected enum variant name, found end of input",
+                stream.eof_span(),
+            ))
+        })?;
+        let vname = extract_ident(vname_tok.clone())?;
+        let vstart = vname_tok.span.start;
+        // Optional payload `( Type, Type, ... )`.
+        let mut data: Option<Vec<TypeRef>> = None;
+        if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
+            stream.advance(); // consume `(`
+            let mut tys: Vec<TypeRef> = Vec::new();
+            // Empty payload `()` is allowed — treat as no payload (unit variant).
+            if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                loop {
+                    let ty = parse_type_ref(stream)?;
+                    tys.push(ty);
+                    match stream.peek_kind() {
+                        Some(TokenKind::Comma) => {
+                            stream.advance();
+                            // Allow trailing comma.
+                            if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                                break;
+                            }
+                        }
+                        Some(TokenKind::RParen) => break,
+                        Some(other) => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                format!("expected `,` or `)` in variant payload, found `{other}`"),
+                                stream
+                                    .peek()
+                                    .map(|t| t.span)
+                                    .unwrap_or_else(|| stream.eof_span()),
+                            )));
+                        }
+                        None => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                "unterminated variant payload (missing `)`)",
+                                stream.eof_span(),
+                            )));
+                        }
+                    }
+                }
+            }
+            let rparen = stream.expect(TokenKind::RParen)?;
+            // Only record the payload if it has at least one type — `()` is
+            // equivalent to no payload (unit variant) for codegen purposes.
+            if !tys.is_empty() {
+                data = Some(tys);
+            }
+            // Span end of the variant covers the closing `)`.
+            let vend = rparen.span.end;
+            variants.push(EnumVariant {
+                name: vname,
+                data,
+                span: Span::new(vstart, vend, source_id),
+            });
+        } else {
+            // Unit variant (no payload).
+            let vend = vname_tok.span.end;
+            variants.push(EnumVariant {
+                name: vname,
+                data,
+                span: Span::new(vstart, vend, source_id),
+            });
+        }
+        // Comma separator or end of list.
+        match stream.peek_kind() {
+            Some(TokenKind::Comma) => {
+                stream.advance();
+                // Allow trailing comma.
+                if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                    break;
+                }
+            }
+            Some(TokenKind::RBrace) => break,
+            Some(other) => {
+                return Err(ParseError::new(Diagnostic::error(
+                    format!("expected `,` or `}}` in enum body, found `{other}`"),
+                    stream
+                        .peek()
+                        .map(|t| t.span)
+                        .unwrap_or_else(|| stream.eof_span()),
+                )));
+            }
+            None => {
+                return Err(ParseError::new(Diagnostic::error(
+                    "unterminated enum body (missing `}`)",
+                    stream.eof_span(),
+                )));
+            }
+        }
+    }
+    let rb = stream.expect(TokenKind::RBrace)?;
+    Ok(EnumDecl {
+        name,
+        generics,
+        variants,
+        span: Span::new(start, rb.span.end, source_id),
     })
 }
 

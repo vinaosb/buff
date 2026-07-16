@@ -113,16 +113,48 @@ impl fmt::Display for StructDecl {
 }
 
 /// An enum declaration: `enum Name { Variant, Variant(T, U), ... }`.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T27 — `generics` field
+///
+/// A `generics: Vec<Ident>` field was **added** in T27 (v0.5) to carry the
+/// list of type parameters declared on the enum (e.g. `Result<T, E>` carries
+/// `["T", "E"]`). This is a **migration** (not purely additive — a new field
+/// was inserted), so every construction site was updated to pass
+/// `generics: Vec::new()` for non-generic enums. The Display impl renders
+/// `<T, E>` after the name when the list is non-empty, matching Rust syntax.
+/// The new field is the LAST field before `span` to keep `span` as the
+/// trailing anchor (consistent with the other decl structs). Internal
+/// construction sites in this crate's `#[cfg(test)]` blocks build
+/// `EnumVariant` (not `EnumDecl`), so no test fixture needed updating; the
+/// only external `Decl::EnumDecl` consumer is the Rust codegen, which was
+/// upgraded from `Err(unsupported)` to a real `lower_enum_decl` in lockstep.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDecl {
     pub name: Ident,
+    /// Type parameters declared on the enum, e.g. `[T, E]` for `Result<T, E>`.
+    /// Empty for non-generic enums. T27 (additive).
+    pub generics: Vec<Ident>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
 }
 
 impl fmt::Display for EnumDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EnumDecl({} {{ ", self.name)?;
+        write!(f, "EnumDecl({}", self.name)?;
+        // T27: render `<T, E>` when generic params are present.
+        if !self.generics.is_empty() {
+            f.write_str("<")?;
+            for (i, g) in self.generics.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{g}")?;
+            }
+            f.write_str(">")?;
+        }
+        f.write_str(" { ")?;
         for (i, v) in self.variants.iter().enumerate() {
             if i > 0 {
                 f.write_str(", ")?;

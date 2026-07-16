@@ -71,13 +71,15 @@ use std::collections::HashSet;
 use proc_macro2::Span as ProcSpan;
 use syn::punctuated::Punctuated;
 use syn::{
-    Expr as SynExpr, Field as SynField, Fields as SynFields, File, Ident, Item, ItemFn, ItemStruct,
-    Pat, PatIdent, PatType, ReturnType, Signature, Stmt as SynStmt, Type as SynType, Visibility,
+    Expr as SynExpr, Field as SynField, Fields as SynFields, File, Ident, Item, ItemEnum, ItemFn,
+    ItemStruct, Pat, PatIdent, PatType, ReturnType, Signature, Stmt as SynStmt, Type as SynType,
+    Visibility,
 };
 
 use buff_lang_ast::{
     op::{BinaryOp, UnaryOp},
-    Block, Decl, Expr, FuncDecl, InterpPart, Literal, Stmt, StructDecl as AstStructDecl, TypeRef,
+    Block, Decl, EnumDecl as AstEnumDecl, Expr, FuncDecl, InterpPart, Literal, MatchArm, Pattern,
+    Stmt, StructDecl as AstStructDecl, TypeRef,
 };
 use buff_lang_error::{CodegenError, Diagnostic, Span as BuffSpan};
 use buff_lang_types::{prelude::PreludeFn, FloatWidth, IntWidth, Type, TypeInferencer};
@@ -173,7 +175,10 @@ impl RustCodegen {
         match decl {
             Decl::FuncDecl(f) => Ok(Item::Fn(self.lower_func(f)?)),
             Decl::StructDecl(s) => Ok(Item::Struct(self.lower_struct_decl(s)?)),
-            Decl::EnumDecl { .. } => Err(self.unsupported("enum codegen")),
+            // T27: enum codegen. Builds a Rust `pub enum Name<generics> {
+            // Variant, Variant(T), ... }` with `#[derive(Clone, Debug)]`,
+            // reusing the T26 derive helper.
+            Decl::EnumDecl(e) => Ok(Item::Enum(self.lower_enum_decl(e)?)),
             Decl::ImportDecl { .. } => Err(self.unsupported("import codegen")),
             Decl::ModuleDecl { .. } => Err(self.unsupported("module codegen")),
             Decl::TraitDecl { .. } => Err(self.unsupported("trait codegen")),
@@ -245,6 +250,110 @@ impl RustCodegen {
                 named: named_fields,
             }),
             semi_token: Some(Default::default()),
+        })
+    }
+
+    /// Lower a Buff [`AstEnumDecl`] to a Rust [`syn::ItemEnum`] (T27).
+    ///
+    /// Emits (conceptually):
+    ///
+    /// ```rust,ignore
+    /// #[derive(Clone, Debug)]
+    /// pub enum Name<T, E> {
+    ///     Variant,
+    ///     Tuple(T, E),
+    ///     ...
+    /// }
+    /// ```
+    ///
+    /// Unit variants become Rust unit variants; data-carrying variants
+    /// become Rust tuple variants. Every variant is `pub` (so generated code
+    /// can construct and pattern-match on values without accessor boilerplate,
+    /// matching the T26 struct-field policy). Variant payload types go through
+    /// [`Self::ast_typeref_to_syn`] so the same primitive mapping that drives
+    /// struct fields and `let`-binding annotations applies here too.
+    ///
+    /// Generic parameters declared on the enum (`<T, E>`) are emitted as Rust
+    /// generic params on the enum (no bounds — Buff does not have user-specified
+    /// trait bounds in v0.5). The variant payloads may reference any of these
+    /// type params by name (e.g. `Ok(T)`); they are lowered as ordinary named
+    /// type references via [`Self::ast_typeref_to_syn`].
+    ///
+    /// The `#[derive(Clone, Debug)]` attribute reuses the T26 helper
+    /// [`derive_and_repr_attrs`] so derive-attribute construction stays in one
+    /// place. We pass `emit_repr_c = false` — enums never get `#[repr(C)]`
+    /// in v0.5 (the GPU-dispatch repr-C hook is struct-only; enum repr hints
+    /// are deferred to v1.0 when tagged unions land).
+    fn lower_enum_decl(&mut self, e: &AstEnumDecl) -> Result<ItemEnum, CodegenError> {
+        // Build the variant list. Each variant becomes a `syn::Variant`:
+        // - unit variant (no payload) -> `Fields::Unit`
+        // - tuple variant (payload) -> `Fields::Unnamed` with one field per
+        //   payload type. The field names are anonymous (`_0`, `_1`, ... is
+        //   implicit in tuple structs/enums — `syn::Field` carries
+        //   `ident: None` for unnamed positions).
+        let mut variants: Punctuated<syn::Variant, syn::Token![,]> = Punctuated::new();
+        for v in &e.variants {
+            let fields = match &v.data {
+                None => syn::Fields::Unit,
+                Some(tys) => {
+                    let mut unnamed: Punctuated<SynField, syn::Token![,]> = Punctuated::new();
+                    for ty in tys {
+                        let rust_ty = self.ast_typeref_to_syn(ty)?;
+                        unnamed.push(SynField {
+                            attrs: Vec::new(),
+                            vis: Visibility::Inherited,
+                            ident: None,
+                            colon_token: None,
+                            ty: rust_ty,
+                            mutability: syn::FieldMutability::None,
+                        });
+                    }
+                    syn::Fields::Unnamed(syn::FieldsUnnamed {
+                        paren_token: Default::default(),
+                        unnamed,
+                    })
+                }
+            };
+            variants.push(syn::Variant {
+                attrs: Vec::new(),
+                ident: ast_ident_to_syn(&v.name),
+                fields,
+                discriminant: None,
+            });
+        }
+
+        // Generic params: build a `syn::Generics` with one type param per
+        // declared generic on the enum. No bounds, no defaults (v0.5 minimal).
+        let generics = if e.generics.is_empty() {
+            syn::Generics::default()
+        } else {
+            let mut params: Punctuated<syn::GenericParam, syn::Token![,]> = Punctuated::new();
+            for g in &e.generics {
+                params.push(syn::GenericParam::Type(syn::TypeParam {
+                    attrs: Vec::new(),
+                    ident: ast_ident_to_syn(g),
+                    colon_token: None,
+                    bounds: Default::default(),
+                    eq_token: None,
+                    default: None,
+                }));
+            }
+            syn::Generics {
+                lt_token: Some(Default::default()),
+                params,
+                gt_token: Some(Default::default()),
+                where_clause: None,
+            }
+        };
+
+        Ok(ItemEnum {
+            attrs: derive_and_repr_attrs(false),
+            vis: Visibility::Public(Default::default()),
+            enum_token: Default::default(),
+            ident: ast_ident_to_syn(&e.name),
+            generics,
+            brace_token: Default::default(),
+            variants,
         })
     }
 
@@ -624,6 +733,15 @@ impl RustCodegen {
             Expr::StructInit {
                 type_name, fields, ..
             } => self.lower_struct_init(type_name, fields),
+            // T27: `match scrutinee { arms }` → Rust `match scrutinee { arms }`.
+            // Each arm lowers `pattern => body` to the same Rust shape so the
+            // source form maps 1:1 to Rust (Buff deliberately matches Rust's
+            // match syntax). Patterns are lowered via [`Self::lower_pattern`]:
+            // wildcard → `_`, ident → ident (resolves as variant or binding),
+            // variant tuple → `Variant(subpats)`, literal → literal.
+            Expr::MatchExpr {
+                scrutinee, arms, ..
+            } => self.lower_match_expr(scrutinee, arms),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -1619,6 +1737,146 @@ impl RustCodegen {
         };
         syn::parse2(tokens)
             .map_err(|e| self.unsupported(&format!("struct init codegen parse: {e}")))
+    }
+
+    /// Lower a Buff `match scrutinee { arms }` to a Rust `syn::ExprMatch`
+    /// (T27).
+    ///
+    /// Emits (conceptually):
+    ///
+    /// ```rust,ignore
+    /// match <scrutinee> {
+    ///     <pattern> => <body>,
+    ///     <pattern> => <body>,
+    ///     ...
+    /// }
+    /// ```
+    ///
+    /// Each arm's body is a `Block` (the parser wraps the single body
+    /// expression in a one-statement block). The arm pattern goes through
+    /// [`Self::lower_pattern`]; the body goes through [`Self::lower_block`].
+    ///
+    /// This mirrors the source form 1:1 because Buff deliberately matches
+    /// Rust's `match` syntax. Exhaustiveness is checked separately by the
+    /// `buff-lang-types` analysis pass; if a match is non-exhaustive the
+    /// type-checker flags it BEFORE codegen runs (codegen assumes the match
+    /// is well-formed).
+    fn lower_match_expr(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+    ) -> Result<SynExpr, CodegenError> {
+        let scrut = self.lower_expr(scrutinee)?;
+        let mut arms_syn: Vec<syn::Arm> = Vec::with_capacity(arms.len());
+        for arm in arms {
+            let pat = self.lower_pattern(&arm.pattern)?;
+            // The parser wraps the body expression in a one-statement
+            // `ExprStmt` block. We lower the block and use it as the arm
+            // body — Rust accepts a block as an arm body. If the block has
+            // a single trailing expression, prettyplease will format it
+            // back as `pat => expr,`; if it's multiple statements, the
+            // block form `pat => { ... },` is emitted (also valid Rust).
+            let body_block = self.lower_block(&arm.body)?;
+            let body_expr = SynExpr::Block(syn::ExprBlock {
+                attrs: Vec::new(),
+                label: None,
+                block: body_block,
+            });
+            arms_syn.push(syn::Arm {
+                attrs: Vec::new(),
+                pat,
+                guard: None,
+                fat_arrow_token: Default::default(),
+                body: Box::new(body_expr),
+                comma: Some(Default::default()),
+            });
+        }
+        Ok(SynExpr::Match(syn::ExprMatch {
+            attrs: Vec::new(),
+            match_token: Default::default(),
+            expr: Box::new(scrut),
+            brace_token: Default::default(),
+            arms: arms_syn,
+        }))
+    }
+
+    /// Lower a Buff [`Pattern`] to a Rust [`syn::Pat`] (T27).
+    ///
+    /// Mapping:
+    /// - [`Pattern::Wildcard`] → `syn::Pat::Wild` (`_`)
+    /// - [`Pattern::Ident(name, _)`] → `syn::Pat::Ident(name)`. Rust resolves
+    ///   whether the name is a unit variant or a fresh binding using type
+    ///   information (matching Buff's deferred-resolve approach).
+    /// - [`Pattern::Literal(lit, _)`] → `syn::Pat::Lit` (literal pattern).
+    /// - [`Pattern::Variant { variant, subpatterns, .. }`] →
+    ///   - if `subpatterns` is empty: `syn::Pat::Path` (`Variant` alone — a
+    ///     unit variant reference; we never reach this from the parser since
+    ///     unit variants come through `Pattern::Ident`, but the arm covers
+    ///     hand-constructed ASTs from tests).
+    ///   - else: `syn::Pat::TupleStruct` with one sub-pattern per slot. The
+    ///     path is just `Variant` (no enum prefix) — Rust resolves it when
+    ///     the enum is in scope. The `enum_name` field of the AST node is
+    ///     ignored at codegen (the parser fills it with `""`).
+    fn lower_pattern(&mut self, pat: &Pattern) -> Result<Pat, CodegenError> {
+        let syn_pat: Pat = match pat {
+            Pattern::Wildcard(_) => Pat::Wild(syn::PatWild {
+                attrs: Vec::new(),
+                underscore_token: Default::default(),
+            }),
+            Pattern::Ident(name, _) => Pat::Ident(PatIdent {
+                attrs: Vec::new(),
+                ident: ast_ident_to_syn(name),
+                by_ref: None,
+                mutability: None,
+                subpat: None,
+            }),
+            Pattern::Literal(lit, _) => {
+                let lit_expr = self.lower_literal(lit)?;
+                // `syn::Pat::Lit` is an alias for `syn::ExprLit` in syn 2.0
+                // (see `syn::pat.rs`: `ExprLit as PatLit`). So a literal
+                // pattern is constructed exactly like a literal expression:
+                // wrap the `syn::Lit` in an `ExprLit` and hand it to
+                // `Pat::Lit(...)`.
+                let expr_lit = match lit_expr {
+                    SynExpr::Lit(el) => el,
+                    other => {
+                        return Err(self.unsupported(&format!(
+                            "literal pattern codegen expected Lit, got {other:?}"
+                        )))
+                    }
+                };
+                Pat::Lit(expr_lit)
+            }
+            Pattern::Variant {
+                variant,
+                subpatterns,
+                ..
+            } => {
+                if subpatterns.is_empty() {
+                    // Unit variant via path. Build `syn::Pat::Path` with a
+                    // single-segment path equal to the variant name.
+                    Pat::Path(syn::PatPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path::from(ast_ident_to_syn(variant)),
+                    })
+                } else {
+                    // Tuple-struct variant: `Variant(subpat1, subpat2, ...)`.
+                    let mut elems: Punctuated<Pat, syn::Token![,]> = Punctuated::new();
+                    for sub in subpatterns {
+                        elems.push(self.lower_pattern(sub)?);
+                    }
+                    Pat::TupleStruct(syn::PatTupleStruct {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path::from(ast_ident_to_syn(variant)),
+                        paren_token: Default::default(),
+                        elems,
+                    })
+                }
+            }
+        };
+        Ok(syn_pat)
     }
 
     fn lower_literal(&mut self, lit: &Literal) -> Result<SynExpr, CodegenError> {
