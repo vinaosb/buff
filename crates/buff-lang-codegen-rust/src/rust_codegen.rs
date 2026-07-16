@@ -131,6 +131,31 @@ pub struct RustCodegen {
     /// ident inside a spawn lowers to `Arc::clone(&x)` or to the regular
     /// `.clone()` / move path.
     spawn_depth: usize,
+    /// T34: stack of closure "bypass" sets. Each entry is the set of
+    /// variable NAMES that should bypass [`MoveAnalyzer::needs_clone`]
+    /// while lowering the closure body:
+    /// - **captured variables** (free vars of body not bound by params or
+    ///   closure-local lets) — computed via
+    ///   [`buff_lang_types::closure_captures`], the shared capture analysis
+    ///   extracted from T33's spawn free-var walker.
+    /// - **closure parameters** — fresh bindings owned by the closure body.
+    ///
+    /// When lowering an `Expr::Ident` inside a closure body, if the name
+    /// is in the top-of-stack bypass set, we emit it plainly WITHOUT
+    /// calling [`MoveAnalyzer::needs_clone`] — Rust handles the capture
+    /// (by ref or by move) and param ownership automatically, so Buff must
+    /// not insert a spurious `.clone()`.
+    ///
+    /// This is the key interaction between closures (T34) and the move /
+    /// clone analysis (T33): without this stack, (a) a non-Copy captured
+    /// variable used twice inside a closure would get a spurious
+    /// `.clone()` on its second use, and (b) a closure PARAM used
+    /// multiple times (e.g. `|x| x * x + x`) would also get spurious
+    /// clones — a pre-existing T23 limitation that T34 fixes.
+    ///
+    /// Nested closures push multiple entries; each closure's bypass set
+    /// is computed independently.
+    closure_capture_stack: Vec<BTreeSet<String>>,
     /// T31: collected warning-level diagnostics (e.g. `block()` inside an
     /// async fn is a deadlock risk). Publicly accessible via
     /// [`Self::take_warnings`] so callers (CLI, tests) can render them
@@ -161,6 +186,7 @@ impl RustCodegen {
             current_fn_name: None,
             async_block_depth: 0,
             spawn_depth: 0,
+            closure_capture_stack: Vec::new(),
             warnings: Vec::new(),
             extern_crates: BTreeSet::new(),
         }
@@ -947,6 +973,17 @@ impl RustCodegen {
                 // its own `Arc<T>` handle to the shared data.
                 if self.spawn_depth > 0 && self.move_analyzer.is_arc_var(&name.name) {
                     return Ok(arc_clone_call(name));
+                }
+                // T34: if this ident is a variable CAPTURED by the closure
+                // whose body we're currently lowering, emit it plainly
+                // WITHOUT consulting [`MoveAnalyzer::needs_clone`]. Rust
+                // closures handle capture (by ref or by move) automatically;
+                // Buff must not insert a spurious `.clone()` for uses of a
+                // captured variable INSIDE the closure body. Without this
+                // guard, a non-Copy captured var used twice inside a
+                // closure would get a wrong `.clone()` on its second use.
+                if self.is_captured_in_closure(&name.name) {
+                    return Ok(SynExpr::Path(path));
                 }
                 if self.move_analyzer.needs_clone(&name.name) {
                     // Insert `.clone()` so this use is valid after a prior move.
@@ -2007,13 +2044,29 @@ impl RustCodegen {
     }
 
     /// Lower a minimal closure `{ params => expr }` to a Rust closure
-    /// `|p1, p2| body` (T23).
+    /// `|p1, p2| body` (T23 + T34 capture analysis).
     ///
     /// Param types are inferred by Rust — we emit no annotations (matching
-    /// Buff's "hide the types" philosophy). The body is a single expression;
-    /// if the parser produced a multi-statement block, it is lowered as a
-    /// block expression. This minimal form covers `.map` / `.filter` /
-    /// `.reduce` arguments; full closures (typed params, captures) are T34.
+    /// Buff's "hide the types" philosophy). The body is a single expression
+    /// in T23's minimal shape; if the parser produced a multi-statement
+    /// block, it is lowered as a block expression.
+    ///
+    /// # T34: variable capture
+    ///
+    /// Before lowering the body, we compute the set of variables CAPTURED
+    /// by this closure (free vars of body minus params minus closure-local
+    /// lets) via [`buff_lang_types::closure_captures`] — the shared
+    /// capture analysis extracted from T33's spawn free-var walker. The
+    /// capture set is pushed onto [`Self::closure_capture_stack`] so that
+    /// [`Self::lower_expr`]'s `Expr::Ident` arm can emit captured
+    /// variables plainly WITHOUT calling [`MoveAnalyzer::needs_clone`].
+    ///
+    /// Rust closures handle capture automatically (by ref or by move based
+    /// on how the body uses the variable). Buff's job is only to AVOID
+    /// inserting spurious `.clone()` calls for captured-variable uses
+    /// INSIDE the closure body — without the capture stack, a non-Copy
+    /// captured var used twice in a closure would get a wrong `.clone()`
+    /// on its second use (MoveAnalyzer would see it as "use after move").
     fn lower_lambda(
         &mut self,
         params: &[buff_lang_ast::common::Param],
@@ -2030,9 +2083,32 @@ impl RustCodegen {
                 subpat: None,
             }));
         }
+        // T34: compute captures and push onto the stack so the body-
+        // lowering path knows which idents are captured (and should
+        // bypass needs_clone). Popped after the body is lowered so the
+        // stack correctly reflects the enclosing scope on exit.
+        //
+        // We ALSO insert the closure's own PARAM names into the pushed
+        // set: closure params are fresh bindings owned by the closure
+        // body, and Rust handles their ownership within the body (Copy
+        // params are copied, non-Copy by-value uses are Rust's concern).
+        // Without this, a param used multiple times in the body (e.g.
+        // `|x| x * x + x`) would get a spurious `.clone()` from the
+        // MoveAnalyzer on its second+ use — a pre-existing T23 limitation
+        // that T34's capture-aware codegen naturally fixes by treating
+        // params the same as captures (bypass needs_clone inside the body).
+        let mut bypass_set = buff_lang_types::closure_captures(params, body);
+        for p in params {
+            bypass_set.insert(p.name.name.clone());
+        }
+        self.closure_capture_stack.push(bypass_set);
         // Body: a single ExprStmt lowers to a bare expression; otherwise a
         // block expression.
-        let body_expr = self.lower_lambda_body(body)?;
+        let body_expr = self.lower_lambda_body(body);
+        // Always pop, even if body lowering errored, so the stack stays
+        // balanced across error recovery paths.
+        self.closure_capture_stack.pop();
+        let body_expr = body_expr?;
         Ok(SynExpr::Closure(syn::ExprClosure {
             attrs: Vec::new(),
             lifetimes: Default::default(),
@@ -2390,6 +2466,19 @@ impl RustCodegen {
     /// Drives the `.await` insertion decision in [`Self::lower_expr`].
     fn in_async_context(&self) -> bool {
         self.current_fn_is_async() || self.async_block_depth > 0
+    }
+
+    /// T34: should `name` bypass [`MoveAnalyzer::needs_clone`] because we're
+    /// inside a closure body and `name` is either a **captured variable**
+    /// or a **closure parameter**?
+    ///
+    /// Checks the top-of-stack entry in [`Self::closure_capture_stack`].
+    /// Returns `false` when not inside any closure body (empty stack).
+    fn is_captured_in_closure(&self, name: &str) -> bool {
+        match self.closure_capture_stack.last() {
+            Some(bypass) => bypass.contains(name),
+            None => false,
+        }
     }
 
     /// Lower a Buff [`Pattern`] to a Rust [`syn::Pat`] (T27).

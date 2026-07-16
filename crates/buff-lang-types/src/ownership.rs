@@ -166,6 +166,183 @@ pub fn analyze_func(func: &FuncDecl) -> OwnershipFacts {
 }
 
 // ---------------------------------------------------------------------------
+// Closure capture analysis (T34) — SHARED with T33's spawn free-var walker
+// ---------------------------------------------------------------------------
+
+/// Compute the set of variable NAMES **captured** by a closure (T34).
+///
+/// A captured variable is a free variable read inside the closure `body`
+/// that is neither:
+/// - a **closure parameter** (`params`), nor
+/// - a **let-binding local to the closure body** (including nested-closure
+///   params and `for` loop variables).
+///
+/// These are the variables the closure "closes over" from its enclosing
+/// scope. Rust handles the actual capture (by reference or by move)
+/// automatically when it sees `|params| body`; Buff's job is only to
+/// **identify** them so the codegen pass can avoid inserting spurious
+/// `.clone()` calls for captured variables inside the closure body
+/// (which would compile but be wasteful and semantically wrong for
+/// multi-use captures).
+///
+/// # Shared with T33
+///
+/// This reuses the SAME free-variable walker (`collect_free_vars_in_expr` /
+/// `collect_free_vars_in_block`) that T33's spawn-capture detection uses.
+/// Both T33 and T34 need "which variables does this sub-expression read
+/// from its enclosing scope?"; T33 intersects with function-level `locals`
+/// and filters Copy vars to find Arc-wrap candidates, while T34 subtracts
+/// closure-local bindings to find captures. The walker itself is shared;
+/// only the post-processing differs.
+///
+/// # Determinism
+///
+/// Returns a [`BTreeSet`] — sorted, so same closure → same capture set
+/// every time (the T29 flaky-test lesson). The codegen pass relies on
+/// this for deterministic snapshot output.
+///
+/// # Example
+///
+/// ```text
+/// closure_captures(params=[x], body={ x + f })  =>  { "f" }
+/// closure_captures(params=[x,y], body={ x + y }) =>  { }  (no captures)
+/// closure_captures(params=[x], body={ let y = 1; x + y + g }) => { "g" }
+/// ```
+pub fn closure_captures(params: &[buff_lang_ast::common::Param], body: &Block) -> BTreeSet<String> {
+    // 1. Collect every ident NAME read inside the body (free-variable walk).
+    //    This is the same walker T33 uses for spawn-capture detection.
+    let mut used: BTreeSet<String> = BTreeSet::new();
+    collect_free_vars_in_block(body, &mut used);
+    // 2. Collect names BOUND inside the closure: params + local lets +
+    //    for-loop vars + nested-closure params. These are NOT captures.
+    let mut bound: BTreeSet<String> = BTreeSet::new();
+    for p in params {
+        bound.insert(p.name.name.clone());
+    }
+    collect_bound_names_in_block(body, &mut bound);
+    // 3. Captures = used minus bound (deterministic via BTreeSet).
+    used.into_iter().filter(|n| !bound.contains(n)).collect()
+}
+
+/// Walk a block's statements collecting names bound by `let` / `for` /
+/// nested-closure params (T34). These are local to the closure body and
+/// therefore NOT captures.
+fn collect_bound_names_in_block(block: &Block, out: &mut BTreeSet<String>) {
+    for stmt in &block.stmts {
+        collect_bound_names_in_stmt(stmt, out);
+    }
+}
+
+fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
+    match stmt {
+        Stmt::LetDecl { name, value, .. } => {
+            out.insert(name.name.clone());
+            collect_bound_names_in_expr(value, out);
+        }
+        Stmt::Assignment { value, .. } => collect_bound_names_in_expr(value, out),
+        Stmt::ExprStmt(e, _) => collect_bound_names_in_expr(e, out),
+        Stmt::Return(Some(e), _) => collect_bound_names_in_expr(e, out),
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::ForIn {
+            var, iter, body, ..
+        } => {
+            out.insert(var.name.clone());
+            collect_bound_names_in_expr(iter, out);
+            collect_bound_names_in_block(body, out);
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            collect_bound_names_in_expr(cond, out);
+            collect_bound_names_in_block(body, out);
+        }
+    }
+}
+
+/// Recursively scan `expr` for names bound by nested `let`s / closure
+/// params / `for` loops (so they are excluded from the capture set of
+/// the ENCLOSING closure).
+fn collect_bound_names_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
+    match expr {
+        // A nested closure binds its own params (and its body's lets).
+        Expr::Lambda { params, body, .. } => {
+            for p in params {
+                out.insert(p.name.name.clone());
+            }
+            collect_bound_names_in_block(body, out);
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => {}
+        Expr::BinaryOp { lhs, rhs, .. } => {
+            collect_bound_names_in_expr(lhs, out);
+            collect_bound_names_in_expr(rhs, out);
+        }
+        Expr::UnaryOp { operand, .. } => collect_bound_names_in_expr(operand, out),
+        Expr::FuncCall { callee, args, .. } => {
+            collect_bound_names_in_expr(callee, out);
+            for a in args {
+                collect_bound_names_in_expr(a, out);
+            }
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            collect_bound_names_in_expr(receiver, out);
+            for a in args {
+                collect_bound_names_in_expr(a, out);
+            }
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_bound_names_in_expr(cond, out);
+            collect_bound_names_in_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_bound_names_in_block(eb, out);
+            }
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, v) in fields {
+                collect_bound_names_in_expr(v, out);
+            }
+        }
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            collect_bound_names_in_expr(scrutinee, out);
+            for arm in arms {
+                collect_bound_names_in_block(&arm.body, out);
+            }
+        }
+        Expr::SuspendExpr { inner, .. } => collect_bound_names_in_expr(inner, out),
+        Expr::ArrayLit { elements, .. } => {
+            for e in elements {
+                collect_bound_names_in_expr(e, out);
+            }
+        }
+        Expr::Index { base, indices, .. } => {
+            collect_bound_names_in_expr(base, out);
+            for i in indices {
+                collect_bound_names_in_expr(i, out);
+            }
+        }
+        Expr::StringInterp { parts, .. } => {
+            for part in parts {
+                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                    collect_bound_names_in_expr(e, out);
+                }
+            }
+        }
+        Expr::MapLit { entries, .. } => {
+            for (k, v) in entries {
+                collect_bound_names_in_expr(k, out);
+                collect_bound_names_in_expr(v, out);
+            }
+        }
+        Expr::Try { expr, .. } => collect_bound_names_in_expr(expr, out),
+        Expr::Spawn { task, .. } => collect_bound_names_in_expr(task, out),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Copy classification
 // ---------------------------------------------------------------------------
 
@@ -892,5 +1069,163 @@ mod tests {
         let a = analyze_func(&mk());
         let b = analyze_func(&mk());
         assert_eq!(a, b);
+    }
+
+    // -----------------------------------------------------------------
+    // T34: closure capture analysis tests
+    // -----------------------------------------------------------------
+
+    fn binary_op(op: buff_lang_ast::op::BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
+        Expr::BinaryOp {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            span: span(),
+        }
+    }
+
+    fn param(name: &str) -> buff_lang_ast::common::Param {
+        buff_lang_ast::common::Param {
+            name: Ident::new(name, span()),
+            ty: named_type("_"),
+            span: span(),
+        }
+    }
+
+    fn block(stmts: Vec<Stmt>) -> Block {
+        Block {
+            stmts,
+            span: span(),
+        }
+    }
+
+    fn expr_block(e: Expr) -> Block {
+        block(vec![Stmt::ExprStmt(e, span())])
+    }
+
+    #[test]
+    fn closure_no_captures_single_param() {
+        // { x => x * 2 } — body only uses param x; no captures.
+        let body = expr_block(binary_op(
+            buff_lang_ast::op::BinaryOp::Mul,
+            ident_expr("x"),
+            int_expr(2),
+        ));
+        let caps = closure_captures(&[param("x")], &body);
+        assert!(caps.is_empty(), "expected no captures, got {caps:?}");
+    }
+
+    #[test]
+    fn closure_no_captures_two_params() {
+        // { x, y => x + y } — body only uses params; no captures.
+        let body = expr_block(binary_op(
+            buff_lang_ast::op::BinaryOp::Add,
+            ident_expr("x"),
+            ident_expr("y"),
+        ));
+        let caps = closure_captures(&[param("x"), param("y")], &body);
+        assert!(caps.is_empty(), "expected no captures, got {caps:?}");
+    }
+
+    #[test]
+    fn closure_captures_external_var() {
+        // { x => x + f } — captures f.
+        let body = expr_block(binary_op(
+            buff_lang_ast::op::BinaryOp::Add,
+            ident_expr("x"),
+            ident_expr("f"),
+        ));
+        let caps = closure_captures(&[param("x")], &body);
+        assert_eq!(caps.len(), 1);
+        assert!(caps.contains("f"), "expected f captured, got {caps:?}");
+    }
+
+    #[test]
+    fn closure_captures_multiple_external_vars() {
+        // { x => x + f + g } — captures f and g.
+        let body = expr_block(binary_op(
+            buff_lang_ast::op::BinaryOp::Add,
+            binary_op(
+                buff_lang_ast::op::BinaryOp::Add,
+                ident_expr("x"),
+                ident_expr("f"),
+            ),
+            ident_expr("g"),
+        ));
+        let caps = closure_captures(&[param("x")], &body);
+        assert_eq!(caps.len(), 2);
+        assert!(caps.contains("f") && caps.contains("g"), "got {caps:?}");
+    }
+
+    #[test]
+    fn closure_local_let_is_not_capture() {
+        // { x => let y = 1; x + y + f } — y is local; only f is captured.
+        let body = block(vec![
+            let_stmt("y", int_expr(1)),
+            Stmt::ExprStmt(
+                binary_op(
+                    buff_lang_ast::op::BinaryOp::Add,
+                    binary_op(
+                        buff_lang_ast::op::BinaryOp::Add,
+                        ident_expr("x"),
+                        ident_expr("y"),
+                    ),
+                    ident_expr("f"),
+                ),
+                span(),
+            ),
+        ]);
+        let caps = closure_captures(&[param("x")], &body);
+        assert_eq!(caps.len(), 1);
+        assert!(caps.contains("f"), "expected only f captured, got {caps:?}");
+        assert!(!caps.contains("y"), "y is local, not a capture");
+    }
+
+    #[test]
+    fn closure_does_not_capture_function_names() {
+        // { x => print(x) } — print is a function name, not a captured variable.
+        let body = expr_block(call_expr("print", vec![ident_expr("x")]));
+        let caps = closure_captures(&[param("x")], &body);
+        assert!(
+            caps.is_empty(),
+            "print should NOT be a capture, got {caps:?}"
+        );
+    }
+
+    #[test]
+    fn closure_nested_inner_param_not_capture_of_outer() {
+        // { x => { y => x + y } } — outer captures nothing (x is param,
+        // y is the inner closure's param).
+        let inner = Expr::Lambda {
+            params: vec![param("y")],
+            body: expr_block(binary_op(
+                buff_lang_ast::op::BinaryOp::Add,
+                ident_expr("x"),
+                ident_expr("y"),
+            )),
+            return_type: None,
+            span: span(),
+        };
+        let outer_body = expr_block(inner);
+        let caps = closure_captures(&[param("x")], &outer_body);
+        assert!(caps.is_empty(), "expected no captures, got {caps:?}");
+    }
+
+    #[test]
+    fn closure_captures_are_deterministic() {
+        // Same closure → same capture set every time (BTreeSet).
+        let mk = || {
+            let body = expr_block(binary_op(
+                buff_lang_ast::op::BinaryOp::Add,
+                binary_op(
+                    buff_lang_ast::op::BinaryOp::Add,
+                    ident_expr("x"),
+                    ident_expr("g"),
+                ),
+                ident_expr("f"),
+            ));
+            closure_captures(&[param("x")], &body)
+        };
+        assert_eq!(mk(), mk());
     }
 }

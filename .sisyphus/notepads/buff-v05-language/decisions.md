@@ -1012,3 +1012,80 @@ T32 is cleanly reversible:
 - Restore `codegen_tests.rs::test_codegen_async_unsafe_extern_modifiers`
   to `is_extern: true` (and re-add the `extern` assertion)
 Clean reversal.
+
+## T34 — Closures/Lambdas Codegen: Capture Analysis
+
+**Date:** T34 (v0.5, Wave 8).  **Scope:** additive, non-breaking.
+
+### Decision: closure_captures() as a public pure function in buff-lang-types
+
+**Why:** The capture analysis (free vars of closure body minus params/lets)
+must be reusable by both the codegen pass (T34) and future tooling (LSP,
+refactors). Placing it in `buff-lang-types::ownership` keeps it alongside
+T33's `analyze_func` — both are pure, deterministic, BTreeSet-based
+analyses of AST structure.
+
+**Alternatives considered:**
+- Inline in codegen: rejected (not reusable, not testable in isolation).
+- New `capture_analysis.rs` module: rejected (over-engineering for one
+  function; ownership.rs already has the free-var walker it needs).
+
+### Decision: closure_capture_stack tracks captures ∪ params
+
+**Why:** Both captured variables AND closure params need to bypass
+`MoveAnalyzer::needs_clone` inside the closure body:
+- Captured vars: Rust handles capture (by ref/move); Buff must not clone.
+- Closure params: fresh bindings; multiple uses are fine (Rust handles
+  ownership within the body; a param used twice should NOT get .clone()).
+
+Combining them into one "bypass set" is simpler than two separate
+mechanisms and is semantically correct: "idents that should emit plainly
+inside this closure body".
+
+**Fixes pre-existing T23 limitation:** `|x| x * x + x` previously got
+`|x| x * x.clone() + x.clone()` (MoveAnalyzer treated param `x` as a
+regular non-Copy var with a move counter). T23 tests only used each param
+once, so this never surfaced. T34's bypass set naturally fixes it.
+
+### Decision: shared free-var walker with T33 (REFACTOR)
+
+**Why:** T33's spawn-capture detection (`collect_free_vars_in_expr` /
+`collect_free_vars_in_block` in ownership.rs) and T34's closure capture
+analysis both need "which variables does this sub-expression read from its
+enclosing scope?". T34's `closure_captures()` calls the SAME private
+walkers T33 uses. The walkers stay private; the public API is
+`closure_captures()` (T34) and `analyze_func()` (T33). The walker is
+shared; only the post-processing (intersection vs subtraction) differs.
+
+### Decision: don't increment move counter for the capture itself
+
+**Why:** Rust closures capture by reference when possible (e.g. `.map(|x|
+x + f)` borrows `f`). Incrementing the move counter for the capture would
+cause spurious `.clone()` on post-closure uses of a by-ref-captured var.
+Instead, captured vars bypass needs_clone entirely inside the closure body,
+and the capture does NOT count as a "use" for the move counter. This means
+a non-Copy var captured by a closure and then used after it will NOT get
+`.clone()` — which is correct if Rust captured by ref (common case), and
+a compile error if Rust moved it (rare: stored closures that consume).
+The latter is a documented v0.5 edge case limitation.
+
+### Deferred: multi-statement closure bodies
+
+**Why:** The T23 parser (`parse_closure`) only handles single-expression
+bodies (`{ x => expr }`). The AST (`Expr::Lambda` with `Block` body) and
+codegen (`lower_lambda_body` handles multi-stmt blocks) DO support it,
+but the parser restricts to single expr. Multi-stmt closures are not
+needed for `.map`/`.filter`/`.reduce` use cases. Deferred to a future
+parser enhancement.
+
+### Reversibility
+- Remove `closure_captures()` + helpers from ownership.rs
+- Remove `closure_captures` from lib.rs re-export
+- Remove `closure_capture_stack` field + init from rust_codegen.rs
+- Remove `is_captured_in_closure()` method
+- Remove the capture-stack push/pop in `lower_lambda`
+- Remove the `is_captured_in_closure` check in `lower_expr(Ident)`
+- Delete `tests/closures.rs`
+- Remove the 8 closure_captures tests from ownership.rs `#[cfg(test)]`
+Clean reversal — all changes are additive.
+

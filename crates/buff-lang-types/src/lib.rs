@@ -60,7 +60,7 @@ pub use promote::{assignable_to, promote_binary};
 // `buff_lang_types::OwnershipFacts` / `analyze_ownership` without a long
 // module path. Deterministic (BTreeSet based) — same AST → byte-identical
 // facts every time (the T29 flaky-test lesson).
-pub use ownership::{analyze_func as analyze_ownership, OwnershipFacts};
+pub use ownership::{analyze_func as analyze_ownership, closure_captures, OwnershipFacts};
 // T96: standard-library prelude. Re-exported at the crate root so the
 // type inferencer and downstream crates (codegen, CLI) can call
 // `is_prelude` / `prelude::return_type` without a long path.

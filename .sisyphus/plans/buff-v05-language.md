@@ -753,7 +753,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 8 — Closures + Polish (parallel, depends on Wave 7)
 
-- [ ] **T34**: Closures/lambdas codegen [deep]
+- [x] **T34**: Closures/lambdas codegen [deep]
 
   **What to do** (TDD):
   - **RED**: Write snapshot: `{ x => x * 2 }` → Rust `|x| x * 2`

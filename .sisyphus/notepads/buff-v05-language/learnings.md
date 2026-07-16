@@ -914,3 +914,53 @@ explicitly allows this fallback.
   regular `Ident("crate")`, so the dispatcher matches on
   `Some(TokenKind::Ident(s)) if s == "crate"`.
 
+## T34 — Closures/Lambdas Codegen (Capture Analysis)
+
+### Status: COMPLETE
+
+### What T34 extended beyond T23
+- T23 added minimal closures (`{x=>e}` → `Expr::Lambda` → `lower_lambda` →
+  `|x| body`). T34 added **variable capture analysis**.
+- **closure_captures()** in `buff-lang-types::ownership` — public function
+  computing free vars of a closure body minus params minus closure-local
+  lets. Returns `BTreeSet<String>` (deterministic).
+- **closure_capture_stack** in `RustCodegen` — a `Vec<BTreeSet<String>>`
+  tracking which idents should bypass `MoveAnalyzer::needs_clone` inside
+  each closure body. Pushed in `lower_lambda`, popped after body lowering.
+
+### Shared with T33 (REFACTOR)
+- T33's spawn-capture detection uses `collect_free_vars_in_expr` /
+  `collect_free_vars_in_block` (private walkers in ownership.rs).
+- T34's `closure_captures()` REUSES these same walkers. Both need "which
+  variables does this sub-expression read from its enclosing scope?". T33
+  intersects with function locals (for Arc-wrap); T34 subtracts closure
+  params + local lets (for capture identification). Walker shared, post-
+  processing differs.
+
+### Key discovery: closure params also need to bypass needs_clone
+- A closure PARAM used multiple times in the body (e.g. `|x| x * x + x`)
+  would get spurious `.clone()` from MoveAnalyzer (it doesn't know `x`
+  is a fresh closure-local binding). This was a pre-existing T23 limitation
+  that never surfaced because T23 tests only used each param once.
+- FIX: the bypass set pushed onto closure_capture_stack includes BOTH
+  captured variables AND closure params. Both emit plainly inside the
+  closure body — Rust handles their ownership.
+
+### Key discovery: capture stack scope
+- `is_captured_in_closure()` only checks the TOP-of-stack entry (innermost
+  closure). This is correct because a variable captured by an inner closure
+  is also a free var of the outer closure body, so it appears in both frames.
+- Uses OUTSIDE the closure body go through normal MoveAnalyzer path.
+
+### What was NOT changed
+- T23 vector_codegen tests (20 tests) — unchanged, all pass.
+- T33 clone_analysis + move_tests (15 tests) — unchanged, all pass.
+- Parser (`parse_closure`) — unchanged (single-expr body only; multi-stmt
+  bodies deferred — the AST/codegen support it, parser doesn't).
+
+### Test count
+- buff-lang-types: +8 closure_captures unit tests (21 total in ownership mod)
+- buff-lang-codegen-rust: +10 closures integration tests (new file)
+- Workspace total: ALL pass (0 failed).
+
+
