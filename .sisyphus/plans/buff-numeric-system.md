@@ -1,4 +1,4 @@
-﻿# Deox Extended Numeric Type System — Complete Specification
+# Buff Extended Numeric Type System — Complete Specification
 
 ## Core Philosophy (FINAL — Simplified)
 "Explicit width = fixed and predictable. Auto width = flexible, grows and shrinks as needed."
@@ -240,7 +240,7 @@ let mixed = fp8 + fp4     // COMPILE ERROR or Float<32>?
 | `Trit` | ❌ | **DEFERRED v2.0** | Not in WGSL spec |
 
 > **DEFERRED formats** (BFloat16, FP8, FP4, NF4, Trit) are documented in this spec for future reference.
-> They will be implemented in v2.0 either when: (a) WGSL adds native support, OR (b) Deox has robust bit-packing emulation in WGSL shaders.
+> They will be implemented in v2.0 either when: (a) WGSL adds native support, OR (b) Buff has robust bit-packing emulation in WGSL shaders.
 > Until then, users working with these formats use CPU parallel (Rayon) which handles them natively.
 
 ---

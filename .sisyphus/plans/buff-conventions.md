@@ -1,7 +1,7 @@
-﻿# Deox Conventions Standard
+# Buff Conventions Standard
 
 > 18 conventions covering naming, formatting, documentation, errors, testing, APIs, and more.
-> Enforced by `deox fmt` (formatter) and `deox check` (linter).
+> Enforced by `buff fmt` (formatter) and `buff check` (linter).
 
 ---
 
@@ -13,12 +13,12 @@
 | Variables | `snake_case` | `let item_count = 42` |
 | Types (Struct/Enum) | `PascalCase` | `struct HttpRequest`, `enum Color` |
 | Constants | `SCREAMING_SNAKE` | `let MAX_RETRIES = 3` |
-| Modules/Files | `snake_case` | `src/data_processor.deox` |
+| Modules/Files | `snake_case` | `src/data_processor.buff` |
 | Enum variants | `PascalCase` | `Red`, `Green`, `Ok`, `Err` |
 | Traits | `PascalCase` | `trait Iterable` |
 | Generic params | `PascalCase` (single letter ok) | `T`, `K`, `V`, `Item` |
 
-## 2. Formatting Rules (enforced by `deox fmt`)
+## 2. Formatting Rules (enforced by `buff fmt`)
 
 - Indentation: **4 spaces** (NO TABS — lexer rejects)
 - Line length: **100 characters** max
@@ -29,7 +29,7 @@
 
 ## 3. Documentation Comments
 
-```deox
+```buff
 /// Calculates the sum of a vector of integers.
 ///
 /// # Arguments
@@ -57,7 +57,7 @@ Standard sections: `# Arguments`, `# Returns`, `# Errors`, `# Example`, `# Panic
 ## 5. Test Naming
 
 - Functions: `test_*` prefix with descriptive name: `test_addition_returns_correct_sum`
-- Files: `test_*.deox` in `tests/` directory
+- Files: `test_*.buff` in `tests/` directory
 - Inline: `@test` attribute with optional description
 
 ## 6. Async API Naming
@@ -74,7 +74,7 @@ Standard sections: `# Arguments`, `# Returns`, `# Errors`, `# Example`, `# Panic
 
 ## 8. Import Ordering
 
-```deox
+```buff
 // 1. Standard library (alphabetical)
 import { print } from "std/io"
 
@@ -87,14 +87,14 @@ import { helper } from "./utils"
 
 ## 9. Deprecation
 
-```deox
+```buff
 @deprecated("use new_function() instead", since = "0.5.0")
 func old_function()
 ```
 
 ## 10. Logging
 
-```deox
+```buff
 log.debug("Processing {n} items")
 log.info("Server started on port {port}")
 log.warn("Cache miss for key {key}")
@@ -109,7 +109,7 @@ Structured logging with interpolation — no format strings.
 
 ## 12. Iterator Methods (Rust-compatible)
 
-```deox
+```buff
 items.iter()           // Borrow iterator
 items.iter_mut()       // Mutable borrow iterator
 items.into_iter()      // Consuming iterator
@@ -119,7 +119,7 @@ items.par_map({ ... }) // Parallel map
 
 ## 13. Result/Option Methods
 
-```deox
+```buff
 opt.unwrap()              // Panic if None
 opt.unwrap_or(default)    // Provide default
 opt.expect("message")     // Panic with message
@@ -133,7 +133,7 @@ result.map({ x => f(x) })
 result.map_err({ e => f(e) })
 ```
 
-## 14. File Organization (within a .deox file)
+## 14. File Organization (within a .buff file)
 
 ```
 // 1. Imports
@@ -166,7 +166,7 @@ result.map_err({ e => f(e) })
 
 ```gitignore
 target/
-deox.lock
+buff.lock
 .vscode/
 .idea/
 *.swp

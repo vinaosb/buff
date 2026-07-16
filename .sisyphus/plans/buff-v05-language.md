@@ -1,15 +1,15 @@
-﻿# Deox v0.5 "Real Language" — Complete Type System + Modern Syntax
+# Buff v0.5 "Real Language" — Complete Type System + Modern Syntax
 
-> **Phase 2 of 3.** Depends on [Phase 1 (v0.1)](./deox-v01-mvp.md) completion.
-> Shared context: [Master Plan](./deox-master.md) | Numeric spec: [deox-numeric-system.md](./deox-numeric-system.md) | [Conventions](./deox-conventions.md) | [Project Structure](./deox-project-structure.md)
+> **Phase 2 of 3.** Depends on [Phase 1 (v0.1)](./buff-v01-mvp.md) completion.
+> Shared context: [Master Plan](./buff-master.md) | Numeric spec: [buff-numeric-system.md](./buff-numeric-system.md) | [Conventions](./buff-conventions.md) | [Project Structure](./buff-project-structure.md)
 
 ---
 
 ## TL;DR
 
-> **Goal**: Transform Deox from MVP into a complete, usable language with all 13 types, pattern matching, modules, async, FFI, and modern syntax features.
+> **Goal**: Transform Buff from MVP into a complete, usable language with all 13 types, pattern matching, modules, async, FFI, and modern syntax features.
 >
-> **Exit criteria**: `deox build` compiles multi-file programs with collections, enums, closures, error handling, and async I/O. `deox test` runs test suites. `deox fmt` formats code.
+> **Exit criteria**: `buff build` compiles multi-file programs with collections, enums, closures, error handling, and async I/O. `buff test` runs test suites. `buff fmt` formats code.
 >
 > **Tasks**: 20 core (T18-T37) + 27 enhancement = **47 tasks**
 > **Waves**: 4 (Waves 5-8) + enhancement tasks within same waves
@@ -20,7 +20,7 @@
 
 Phase 1 (v0.1) must be complete:
 - Lexer, parser, AST, type checker, codegen all working
-- `deox run` and `deox build` functional
+- `buff run` and `buff build` functional
 - Int, Float, Double, Bool, String types supported
 - CLI with source maps
 
@@ -36,14 +36,14 @@ Phase 1 (v0.1) must be complete:
   - **RED**: Write test: `3.14d` infers as Double (f64), not Float (f32)
   - **RED**: Write test: `Double + Double → Double`, `Double + Float → Double` (widening)
   - **RED**: Write snapshot: `let x = 3.14d` → `let x: f64 = 3.14;`
-  - **GREEN**: Add f64 type inference for `d` suffix literals in deox-types
-  - **GREEN**: Add codegen mapping: Double → Rust f64 in deox-codegen-rust
+  - **GREEN**: Add f64 type inference for `d` suffix literals in buff-lang-types
+  - **GREEN**: Add codegen mapping: Double → Rust f64 in buff-lang-codegen-rust
   - **GREEN**: Implement widening: Float + Double → Double in type checker
   - **REFACTOR**: Extract suffix parsing into shared literal handler
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types double_inference` passes
-  - [ ] `cargo test -p deox-codegen-rust double_codegen` passes
+  - [ ] `cargo test -p buff-lang-types double_inference` passes
+  - [ ] `cargo test -p buff-lang-codegen-rust double_codegen` passes
   - [ ] `3.14d` infers as f64, `3.14` infers as f32
   - [ ] Snapshot: `let x = 3.14d` → `let x: f64 = 3.14;`
 
@@ -74,8 +74,8 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Group Byte with Bits<W> type family
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-lexer hex_binary_literals` passes
-  - [ ] `cargo test -p deox-types byte_type` passes
+  - [ ] `cargo test -p buff-lang-lexer hex_binary_literals` passes
+  - [ ] `cargo test -p buff-lang-types byte_type` passes
   - [ ] `0xFF` → Byte, `0b1010` → Byte
   - [ ] Snapshot: `let b: Byte = 0xFF` → `let b: u8 = 0xFF;`
 
@@ -101,7 +101,7 @@ Phase 1 (v0.1) must be complete:
   - **RED**: Write test: `Decimal + Decimal → Decimal`, `Decimal * Decimal → Decimal`
   - **RED**: Write test: `0.1m + 0.2m == 0.3m` → TRUE (unlike Float where 0.1 + 0.2 ≠ 0.3)
   - **RED**: Write test: Decimal type forces CPU parallel (NOT GPU dispatch)
-  - **GREEN**: Add Decimal type to deox-types using `rust_decimal::Decimal`
+  - **GREEN**: Add Decimal type to buff-lang-types using `rust_decimal::Decimal`
   - **GREEN**: Add `m` suffix literal parsing in lexer → Decimal
   - **GREEN**: Codegen Decimal literals via `rust_decimal_macros::dec!()` macro
   - **GREEN**: Implement Decimal arithmetic codegen (maps to Rust Decimal ops)
@@ -111,7 +111,7 @@ Phase 1 (v0.1) must be complete:
   **Must NOT do**: NO GPU dispatch for Decimal (always CPU parallel via Rayon)
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types decimal_type` passes (target: 12+ tests)
+  - [ ] `cargo test -p buff-lang-types decimal_type` passes (target: 12+ tests)
   - [ ] `99.90m` infers as Decimal
   - [ ] `0.1m + 0.2m == 0.3m` is TRUE (exact arithmetic)
   - [ ] Snapshot: `let price = 99.90m` → uses `dec!()` macro
@@ -157,7 +157,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract grapheme segmentation into `unicode-segmentation` crate wrapper
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust string_methods` passes (target: 15+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust string_methods` passes (target: 15+ tests)
   - [ ] `"Hello {name}"` → `format!("Hello {}", name)`
   - [ ] `'A'` → Char, `"A"` → String
   - [ ] `.char_count()`, `.byte_len()`, `.chars()`, `.graphemes()` all work
@@ -208,10 +208,10 @@ Phase 1 (v0.1) must be complete:
   - **GREEN**: Implement auto-width: pick smallest Rust type fitting the range
   - **GREEN**: Implement widening rules: `Int + Float → Float`, `Float + Double → Double`
   - **GREEN**: Implement checked arithmetic for fixed `Int<W>` (debug panic, release wrap)
-  - **REFACTOR**: Extract range tracker into `deox-types/src/range_analysis.rs`
+  - **REFACTOR**: Extract range tracker into `buff-lang-types/src/range_analysis.rs`
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types numeric_coercion` passes (target: 15+ tests)
+  - [ ] `cargo test -p buff-lang-types numeric_coercion` passes (target: 15+ tests)
   - [ ] `Int + Float → Float`, `Float + Double → Double`
   - [ ] Flexible Int: value 5 → i8, value 300 → i16
   - [ ] Collection auto-width: `[20, 25]` → `Vector<Int<8>>`
@@ -252,11 +252,11 @@ Phase 1 (v0.1) must be complete:
   - **GREEN**: Implement math: `abs()`, `min()`, `max()`, `sqrt()`, `floor()`, `ceil()`, `round()`, `pow()`
   - **GREEN**: Implement type conversions: `Int(x)`, `Float(x)`, `String(x)`, `Bool(x)`
   - **GREEN**: Implement I/O: `print()` → `println!()`, `println()` → `println!()`, `read_line()`
-  - **GREEN**: Auto-import prelude in every Deox program (no explicit import needed)
+  - **GREEN**: Auto-import prelude in every Buff program (no explicit import needed)
   - **REFACTOR**: Group prelude functions by category (math, conversion, io, collection)
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types prelude_functions` passes (target: 12+ tests)
+  - [ ] `cargo test -p buff-lang-types prelude_functions` passes (target: 12+ tests)
   - [ ] `abs(-5) == 5`, `min(3,7) == 3`, `max(3,7) == 7` — no import needed
   - [ ] `String(42)` → `"42"`, `Int("42")` → 42 — no import needed
   - [ ] `print("hello")` → generates `println!("hello")`
@@ -286,18 +286,18 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Group env functions in prelude
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust env_access` passes
+  - [ ] `cargo test -p buff-lang-codegen-rust env_access` passes
   - [ ] `args()` returns Vector<String>
   - [ ] `env("PATH")` returns Option<String>
   - [ ] `exit(0)` generates `std::process::exit(0)`
 
   **QA Scenarios (MANDATORY)**:
   ```
-  Scenario: CLI args accessible in Deox program
-    Tool: Bash (deox CLI)
+  Scenario: CLI args accessible in Buff program
+    Tool: Bash (buff CLI)
     Steps:
       1. Codegen: `func main(): let a = args(); print(a[0])`
-      2. Run `deox run prog.deox -- hello`
+      2. Run `buff run prog.buff -- hello`
       3. Assert output contains "hello"
     Expected Result: Command-line arguments accessible via args()
     Evidence: .sisyphus/evidence/task-99-cli-args.txt
@@ -322,7 +322,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract collection type family (Vector, Matrix, Map share patterns)
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust vector_codegen` passes (target: 12+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust vector_codegen` passes (target: 12+ tests)
   - [ ] `[1, 2, 3]` → `vec![1, 2, 3]`
   - [ ] `v[i]` generates `v[i as usize]`
   - [ ] `.map()`, `.filter()`, `.reduce()` chain correctly
@@ -354,7 +354,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Share flat-storage pattern with GPU buffer codegen
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust matrix_codegen` passes (target: 8+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust matrix_codegen` passes (target: 8+ tests)
   - [ ] `m[1, 2]` generates correct flat index
   - [ ] Matrix data is contiguous (no nesting) — GPU-transferable
 
@@ -385,7 +385,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract collection literal parsing shared with Vector
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust map_codegen` passes (target: 8+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust map_codegen` passes (target: 8+ tests)
   - [ ] `{"key": 42}` → `HashMap::from([("key", 42)])`
   - [ ] `.get()` returns Option<V>, `.insert()`, `.contains()` work
 
@@ -418,7 +418,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract derive attribute generation into shared codegen helper
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust struct_codegen` passes (target: 10+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust struct_codegen` passes (target: 10+ tests)
   - [ ] Struct declaration → Rust struct with `#[derive(Clone, Debug)]`
   - [ ] Init syntax: `Person { name: "X", age: 30 }` → valid Rust
   - [ ] Field access: `p.name` → `p.name`
@@ -457,8 +457,8 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract exhaustiveness checker into reusable analysis pass
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-parser enum_match` passes (target: 12+ tests)
-  - [ ] `cargo test -p deox-types exhaustiveness` passes
+  - [ ] `cargo test -p buff-lang-parser enum_match` passes (target: 12+ tests)
+  - [ ] `cargo test -p buff-lang-types exhaustiveness` passes
   - [ ] Simple enum: `Color { Red, Green, Blue }` → valid Rust enum
   - [ ] Match with `_` wildcard compiles
   - [ ] Missing case → "non-exhaustive match" error
@@ -510,7 +510,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Ensure None/Some are prelude imports, NOT reserved keywords
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types option_null_safety` passes (target: 10+ tests)
+  - [ ] `cargo test -p buff-lang-types option_null_safety` passes (target: 10+ tests)
   - [ ] `None` and `Some(x)` work as Option variants
   - [ ] Using `Option<Int>` as `Int` → compile error
   - [ ] `None`/`Some` are NOT in reserved keyword list (they're prelude)
@@ -533,21 +533,21 @@ Phase 1 (v0.1) must be complete:
 - [ ] **T29**: Module system (import/export, multi-file, path resolution) [deep]
 
   **What to do** (TDD):
-  - **RED**: Write test: `import { greet } from "./hello.deox"` resolves to file, finds `export func greet`
+  - **RED**: Write test: `import { greet } from "./hello.buff"` resolves to file, finds `export func greet`
   - **RED**: Write test: circular import (A imports B, B imports A) → compile error
   - **RED**: Write test: `export func public()` is visible to importers, `func private()` is NOT
   - **RED**: Write test: `export * from "./other"` re-exports all public symbols
-  - **RED**: Write test: path `./utils/math.deox` resolves relative to importing file
+  - **RED**: Write test: path `./utils/math.buff` resolves relative to importing file
   - **GREEN**: Implement import/export parsing in lexer/parser
   - **GREEN**: Implement module resolution: find file from import path, parse it
   - **GREEN**: Implement visibility: `export` = public, default = module-private
   - **GREEN**: Implement circular dependency detection (topological sort, cycle = error)
   - **GREEN**: Implement path resolution: relative (`./`), std (`std/`), canonicalization
-  - **REFACTOR**: Extract module graph into `deox-types/src/modules.rs`
+  - **REFACTOR**: Extract module graph into `buff-lang-types/src/modules.rs`
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-parser module_system` passes (target: 12+ tests)
-  - [ ] Multi-file program compiles: `main.deox` imports from `./utils.deox`
+  - [ ] `cargo test -p buff-lang-parser module_system` passes (target: 12+ tests)
+  - [ ] Multi-file program compiles: `main.buff` imports from `./utils.buff`
   - [ ] Circular import detected and rejected
   - [ ] `export` makes symbol public; non-exported = private
   - [ ] `export *` re-exports work
@@ -555,11 +555,11 @@ Phase 1 (v0.1) must be complete:
   **QA Scenarios (MANDATORY)**:
   ```
   Scenario: Multi-file program compiles
-    Tool: Bash (deox CLI)
+    Tool: Bash (buff CLI)
     Steps:
-      1. Create main.deox: `import { greet } from "./hello.deox"; func main(): greet()`
-      2. Create hello.deox: `export func greet(): print("Hello from module!")`
-      3. Run `deox run main.deox`
+      1. Create main.buff: `import { greet } from "./hello.buff"; func main(): greet()`
+      2. Create hello.buff: `export func greet(): print("Hello from module!")`
+      3. Run `buff run main.buff`
       4. Assert output: "Hello from module!"
     Expected Result: Module system resolves imports and links files
     Evidence: .sisyphus/evidence/task-29-multi-file.txt
@@ -567,9 +567,9 @@ Phase 1 (v0.1) must be complete:
   Scenario: Circular import detected
     Tool: Bash (cargo test)
     Steps:
-      1. a.deox imports from b.deox, b.deox imports from a.deox
-      2. Run `deox build a.deox`
-      3. Assert error: "circular import detected: a.deox → b.deox → a.deox"
+      1. a.buff imports from b.buff, b.buff imports from a.buff
+      2. Run `buff build a.buff`
+      3. Assert error: "circular import detected: a.buff → b.buff → a.buff"
     Expected Result: Circular dependency caught at compile time
     Evidence: .sisyphus/evidence/task-29-circular.txt
   ```
@@ -593,7 +593,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract error propagation into codegen visitor
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust error_handling` passes (target: 10+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust error_handling` passes (target: 10+ tests)
   - [ ] `?` operator generates correct early-return pattern
   - [ ] `Result<T, E>` maps to Rust `Result<T, E>`
   - [ ] Custom error enums work
@@ -632,13 +632,13 @@ Phase 1 (v0.1) must be complete:
   - **GREEN**: Implement `spawn` → `tokio::spawn`, `Task<T>` → `JoinHandle<T>`
   - **GREEN**: Implement `task.result()` → `.await` (the ONLY place await appears in generated Rust)
   - **GREEN**: Implement `block(expr)` → `tokio::runtime::Runtime::block_on(expr)`
-  - **REFACTOR**: Extract call graph + propagation into `deox-types/src/async_analysis.rs`
+  - **REFACTOR**: Extract call graph + propagation into `buff-lang-types/src/async_analysis.rs`
 
-  **Must NOT do**: NO `await` keyword in Deox source. The word `await` only appears in generated Rust.
+  **Must NOT do**: NO `await` keyword in Buff source. The word `await` only appears in generated Rust.
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types async_propagation` passes (target: 15+ tests)
-  - [ ] `cargo test -p deox-codegen-rust async_codegen` passes
+  - [ ] `cargo test -p buff-lang-types async_propagation` passes (target: 15+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust async_codegen` passes
   - [ ] Call graph propagation marks all transitive callers of async functions
   - [ ] Sync function calling async → auto-becomes async
   - [ ] `spawn` generates `tokio::spawn`
@@ -677,15 +677,15 @@ Phase 1 (v0.1) must be complete:
 
   **What to do** (TDD):
   - **RED**: Write test: `extern crate "serde"` → adds `serde` to generated Cargo.toml + `use serde;`
-  - **RED**: Write test: type mapping: Deox `String` → Rust `String`, Deox `Int` → Rust `i64`
+  - **RED**: Write test: type mapping: Buff `String` → Rust `String`, Buff `Int` → Rust `i64`
   - **RED**: Write test: calling extern function: `extern func rust_fn(x: Int) -> Int` → Rust `unsafe extern "C" fn`
   - **GREEN**: Implement `extern crate "name"` → add dependency to generated Cargo.toml
   - **GREEN**: Implement `extern func` declarations → Rust FFI function signatures
-  - **GREEN**: Implement type mapping table: Deox types ↔ Rust types
+  - **GREEN**: Implement type mapping table: Buff types ↔ Rust types
   - **REFACTOR**: Extract type mapping into configurable table
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust ffi` passes (target: 8+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust ffi` passes (target: 8+ tests)
   - [ ] `extern crate "serde"` → dependency in Cargo.toml
   - [ ] `extern func` → valid Rust FFI declaration
   - [ ] Type mapping correct for all 13 types
@@ -698,7 +698,7 @@ Phase 1 (v0.1) must be complete:
       1. Codegen: `extern crate "serde"`
       2. Assert generated Cargo.toml contains `serde = "..."`
       3. Assert generated Rust contains appropriate `use serde::*;`
-    Expected Result: Rust crate made available in Deox program
+    Expected Result: Rust crate made available in Buff program
     Evidence: .sisyphus/evidence/task-32-ffi-crate.txt
   ```
 
@@ -719,10 +719,10 @@ Phase 1 (v0.1) must be complete:
   - **GREEN**: Skip `.clone()` for Copy types (Int, Float, Bool, Byte, Char — these are copied, not moved)
   - **GREEN**: Insert `Arc::new()` for data shared across `spawn` boundaries
   - **GREEN**: Insert `Arc::make_mut()` when Arc-shared data is mutated (Copy-on-Write)
-  - **REFACTOR**: Extract ownership analysis into `deox-types/src/ownership.rs`
+  - **REFACTOR**: Extract ownership analysis into `buff-lang-types/src/ownership.rs`
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust clone_analysis` passes (target: 12+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust clone_analysis` passes (target: 12+ tests)
   - [ ] String used after move → `.clone()` inserted
   - [ ] Int used after move → NO clone (Copy type)
   - [ ] Shared across spawn → `Arc::new()` + `Arc::clone()`
@@ -760,12 +760,12 @@ Phase 1 (v0.1) must be complete:
   - **RED**: Write test: `{ x, y => x + y }` → `|x, y| x + y`
   - **RED**: Write test: closure captures external variable: `let f = 10; [1,2,3].map({ x => x + f })` → captures `f`
   - **GREEN**: Implement closure parsing: `{ params => body }` syntax
-  - **GREEN**: Codegen: Deox `{ x => expr }` → Rust `|x| expr`
+  - **GREEN**: Codegen: Buff `{ x => expr }` → Rust `|x| expr`
   - **GREEN**: Implement variable capture: analyze free variables, generate captures
   - **REFACTOR**: Extract capture analysis (shared with T33 clone analysis)
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust closures` passes (target: 8+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust closures` passes (target: 8+ tests)
   - [ ] `{ x => x * 2 }` → `|x| x * 2`
   - [ ] Multi-arg closures work
   - [ ] Variable capture generates correct Rust
@@ -785,12 +785,12 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T35**: `deox test` command [unspecified-high]
+- [ ] **T35**: `buff test` command [unspecified-high]
 
   **What to do** (TDD):
-  - **RED**: Write test: `@test func test_addition()` is discovered by `deox test`
-  - **RED**: Write test: `deox test` runs all `@test` functions and reports pass/fail
-  - **RED**: Write test: `deox test --pattern "test_*"` filters by name pattern
+  - **RED**: Write test: `@test func test_addition()` is discovered by `buff test`
+  - **RED**: Write test: `buff test` runs all `@test` functions and reports pass/fail
+  - **RED**: Write test: `buff test --pattern "test_*"` filters by name pattern
   - **RED**: Write test: failing test → exit code 1, output shows failure + source location
   - **GREEN**: Implement `@test` attribute parsing
   - **GREEN**: Implement test discovery: scan AST for `@test` functions
@@ -799,7 +799,7 @@ Phase 1 (v0.1) must be complete:
   - **REFACTOR**: Extract test runner into reusable module
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-cli test_command` passes (target: 8+ tests)
+  - [ ] `cargo test -p buff-lang-cli test_command` passes (target: 8+ tests)
   - [ ] `@test` functions discovered and run
   - [ ] Pass/fail count reported
   - [ ] `--pattern` filtering works
@@ -807,18 +807,18 @@ Phase 1 (v0.1) must be complete:
 
   **QA Scenarios (MANDATORY)**:
   ```
-  Scenario: deox test discovers and runs tests
-    Tool: Bash (deox CLI)
+  Scenario: buff test discovers and runs tests
+    Tool: Bash (buff CLI)
     Steps:
       1. Create file with: `@test func test_basic(): assert_eq(1 + 1, 2)`
-      2. Run `deox test`
+      2. Run `buff test`
       3. Assert exit code 0
       4. Assert output contains "1 passed, 0 failed"
     Expected Result: Test runner discovers and executes @test functions
-    Evidence: .sisyphus/evidence/task-35-deox-test.txt
+    Evidence: .sisyphus/evidence/task-35-buff-test.txt
   ```
 
-  **Commit**: YES — Message: `feat(cli): implement deox test command with @test discovery`
+  **Commit**: YES — Message: `feat(cli): implement buff test command with @test discovery`
 
 ---
 
@@ -834,10 +834,10 @@ Phase 1 (v0.1) must be complete:
   - **GREEN**: Implement Levenshtein distance for "Did you mean?" suggestions
   - **GREEN**: Implement parser error recovery: skip tokens until sync point (func, let, match, newline)
   - **GREEN**: Collect multiple errors before reporting (don't stop at first)
-  - **REFACTOR**: Extract error rendering into `deox-error/src/diagnostic.rs`
+  - **REFACTOR**: Extract error rendering into `buff-lang-error/src/diagnostic.rs`
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-error error_messages` passes (target: 10+ tests)
+  - [ ] `cargo test -p buff-lang-error error_messages` passes (target: 10+ tests)
   - [ ] Errors show source line + caret
   - [ ] "Did you mean?" suggestions for close matches
   - [ ] Multiple errors reported in one pass
@@ -873,16 +873,16 @@ Phase 1 (v0.1) must be complete:
   **What to do** (TDD):
   - **RED**: Write integration tests: each example compiles and runs correctly
   - **GREEN**: Create examples: collections, enums, pattern matching, async, modules, closures, error handling
-  - **GREEN**: Create `examples/collections.deox` — Vector, Matrix, Map usage
-  - **GREEN**: Create `examples/pattern_matching.deox` — exhaustive match, Option handling
-  - **GREEN**: Create `examples/async_demo.deox` — async propagation, spawn, task.result()
+  - **GREEN**: Create `examples/collections.buff` — Vector, Matrix, Map usage
+  - **GREEN**: Create `examples/pattern_matching.buff` — exhaustive match, Option handling
+  - **GREEN**: Create `examples/async_demo.buff` — async propagation, spawn, task.result()
   - **GREEN**: Create `examples/modules/` — multi-file program with imports
-  - **GREEN**: Create `examples/error_handling.deox` — Result, ? operator, custom errors
+  - **GREEN**: Create `examples/error_handling.buff` — Result, ? operator, custom errors
   - **GREEN**: Update README with v0.5 features
   - **GREEN**: Tag `v0.5.0`
 
   **Acceptance Criteria**:
-  - [ ] All example programs pass `deox run`
+  - [ ] All example programs pass `buff run`
   - [ ] `cargo test --workspace` → 100% pass
   - [ ] `cargo clippy --workspace -- -D warnings` → clean
   - [ ] Git tag `v0.5.0` created
@@ -890,12 +890,12 @@ Phase 1 (v0.1) must be complete:
   **QA Scenarios (MANDATORY)**:
   ```
   Scenario: All v0.5 examples work
-    Tool: Bash (deox CLI)
+    Tool: Bash (buff CLI)
     Steps:
-      1. Run `deox run examples/collections.deox` → correct output
-      2. Run `deox run examples/pattern_matching.deox` → correct output
-      3. Run `deox run examples/async_demo.deox` → correct output
-      4. Run `deox run examples/error_handling.deox` → correct output
+      1. Run `buff run examples/collections.buff` → correct output
+      2. Run `buff run examples/pattern_matching.buff` → correct output
+      3. Run `buff run examples/async_demo.buff` → correct output
+      4. Run `buff run examples/error_handling.buff` → correct output
       5. Run `cargo test --workspace` → 0 failures
       6. Run `cargo clippy --workspace -- -D warnings` → clean
     Expected Result: All v0.5 features working end-to-end
@@ -912,43 +912,43 @@ Phase 1 (v0.1) must be complete:
 
 - [ ] **T67**: Collection literals [deep]
   **What to do** (TDD): RED: snapshot `[1,2,3]` → `vec![1,2,3]`, `{"k":v}` → `HashMap::from`. GREEN: parse collection literals, codegen to vec!/HashMap::from.
-  **Acceptance**: `cargo test -p deox-codegen-rust collection_literals` passes. `[1,2,3]` → `vec![1,2,3]`.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust collection_literals` passes. `[1,2,3]` → `vec![1,2,3]`.
   **QA**: Codegen `[1,2,3]` → assert `vec![1, 2, 3]` in output. Evidence: task-67-collection-literals.txt
   **Commit**: `feat(parser): add collection literals for Vector and Map`
 
 - [ ] **T68**: Range syntax [quick]
   **What to do** (TDD): RED: `0..10` → exclusive range, `0..=10` → inclusive. GREEN: parse range operators, codegen to Rust ranges.
-  **Acceptance**: `cargo test -p deox-parser ranges` passes. `0..10` → Rust `0..10`.
+  **Acceptance**: `cargo test -p buff-lang-parser ranges` passes. `0..10` → Rust `0..10`.
   **QA**: Parse `for i in 0..5` → assert range expression in AST. Evidence: task-68-ranges.txt
   **Commit**: `feat(parser): add range syntax 0..10 and 0..=10`
 
 - [ ] **T69**: Pipeline operator `|>` [deep]
   **What to do** (TDD): RED: `data |> process() |> filter()` → `filter(process(data))`. GREEN: parse `|>` operator, desugar to nested calls in codegen.
-  **Acceptance**: `cargo test -p deox-codegen-rust pipeline` passes. `x |> f()` → `f(x)`.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust pipeline` passes. `x |> f()` → `f(x)`.
   **QA**: Codegen `"hello" |> print()` → assert `print("hello")`. Evidence: task-69-pipeline.txt
   **Commit**: `feat(parser): add pipeline operator |>`
 
 - [ ] **T70**: Null-conditional `?.` [deep]
   **What to do** (TDD): RED: `user?.name` → Option chain with short-circuit. GREEN: parse `?.` operator, codegen to `.and_then()` chain.
-  **Acceptance**: `cargo test -p deox-codegen-rust null_conditional` passes. `u?.name` → `u.and_then(|x| x.name)`.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust null_conditional` passes. `u?.name` → `u.and_then(|x| x.name)`.
   **QA**: Codegen `opt?.value` → assert `.and_then()` in output. Evidence: task-70-null-conditional.txt
   **Commit**: `feat(parser): add null-conditional operator ?.`
 
 - [ ] **T71**: Destructuring assignment [deep]
   **What to do** (TDD): RED: `let (x, y) = point` → tuple destructuring. `let Point { x, y } = p` → struct destructuring. GREEN: parse destructuring patterns in let, codegen to Rust.
-  **Acceptance**: `cargo test -p deox-parser destructuring` passes. Both tuple and struct destructuring work.
+  **Acceptance**: `cargo test -p buff-lang-parser destructuring` passes. Both tuple and struct destructuring work.
   **QA**: Codegen `let (a, b) = pair` → assert Rust destructuring. Evidence: task-71-destructuring.txt
   **Commit**: `feat(parser): add destructuring assignment for tuples and structs`
 
 - [ ] **T102**: Expression functions `=>` [quick]
   **What to do** (TDD): RED: `func double(x) => x * 2` → shorthand single-expression function. GREEN: parse `=>` in function decl, codegen as function with return.
-  **Acceptance**: `cargo test -p deox-parser expr_functions` passes. `func f(x) => x + 1` works.
+  **Acceptance**: `cargo test -p buff-lang-parser expr_functions` passes. `func f(x) => x + 1` works.
   **QA**: Parse `func sq(x: Int) => x * x` → assert FuncDecl with expression body. Evidence: task-102-expr-fn.txt
   **Commit**: `feat(parser): add expression function shorthand =>`
 
 - [ ] **T104**: Raw strings [quick]
   **What to do** (TDD): RED: `r"\d+"` → literal backslashes (no escape processing). GREEN: parse `r"..."` prefix in lexer, codegen to Rust raw string.
-  **Acceptance**: `cargo test -p deox-lexer raw_strings` passes. `r"\n"` → backslash-n literal (NOT newline).
+  **Acceptance**: `cargo test -p buff-lang-lexer raw_strings` passes. `r"\n"` → backslash-n literal (NOT newline).
   **QA**: Parse `r"C:\path"` → assert backslashes preserved. Evidence: task-104-raw-strings.txt
   **Commit**: `feat(lexer): add raw string literals r"..."`
 
@@ -956,67 +956,67 @@ Phase 1 (v0.1) must be complete:
 
 - [ ] **T72**: If-let / For-let [deep]
   **What to do** (TDD): RED: `if let Some(x) = opt` → conditional binding. `for let Some(x) = iter.next()` → looping binding. GREEN: parse let-patterns in if/for, codegen to Rust if let / while let.
-  **Acceptance**: `cargo test -p deox-parser let_bindings` passes. Both if-let and for-let work.
+  **Acceptance**: `cargo test -p buff-lang-parser let_bindings` passes. Both if-let and for-let work.
   **QA**: Codegen `if let Some(x) = opt { print(x) }` → assert Rust `if let`. Evidence: task-72-if-let.txt
   **Commit**: `feat(parser): add if-let and for-let pattern bindings`
 
 - [ ] **T73**: Early return guards [deep]
   **What to do** (TDD): RED: `guard let Some(x) = opt, x > 0 else { return }` → early exit if condition fails. GREEN: parse `guard` keyword, codegen to inverted if + early return.
-  **Acceptance**: `cargo test -p deox-parser guards` passes. Guard with multiple conditions works.
+  **Acceptance**: `cargo test -p buff-lang-parser guards` passes. Guard with multiple conditions works.
   **QA**: Codegen `guard x > 0 else { return 0 }` → assert early return pattern. Evidence: task-73-guards.txt
   **Commit**: `feat(parser): add guard statement for early returns`
 
 - [ ] **T74**: Let chains [deep]
   **What to do** (TDD): RED: `if let Some(x) = opt, let Some(y) = opt2, x > 0 { }` → flat conditions. GREEN: parse comma-separated let conditions, codegen to nested if-lets.
-  **Acceptance**: `cargo test -p deox-parser let_chains` passes. Multiple let conditions in one if.
+  **Acceptance**: `cargo test -p buff-lang-parser let_chains` passes. Multiple let conditions in one if.
   **QA**: Parse `if let Some(a) = x, let Some(b) = y, a > b { }` → assert AST has chain. Evidence: task-74-let-chains.txt
   **Commit**: `feat(parser): add let chains for flat conditional binding`
 
 - [ ] **T75**: Extension methods [deep]
   **What to do** (TDD): RED: `extend String { fn is_email() -> Bool { ... } }` → adds method to String type. GREEN: parse `extend` blocks, codegen to Rust trait + impl.
-  **Acceptance**: `cargo test -p deox-codegen-rust extensions` passes. `"x".is_email()` calls extension.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust extensions` passes. `"x".is_email()` calls extension.
   **QA**: Codegen `extend String { fn shout(self) -> String { self.to_uppercase() } }` → assert trait+impl. Evidence: task-75-extensions.txt
   **Commit**: `feat(parser): add extension methods via extend blocks`
 
 - [ ] **T76**: Union types `A | B` [deep]
   **What to do** (TDD): RED: `String | Int` as a type, match to discriminate. GREEN: parse `|` in type position, create auto-generated enum wrapper, codegen match.
-  **Acceptance**: `cargo test -p deox-types union_types` passes. `String | Int` usable as parameter type.
+  **Acceptance**: `cargo test -p buff-lang-types union_types` passes. `String | Int` usable as parameter type.
   **QA**: Codegen `func process(x: String | Int)` → assert generated enum wrapper. Evidence: task-76-union-types.txt
   **Commit**: `feat(types): add union types A | B with pattern discrimination`
 
 - [ ] **T77**: Expected-type driven inference [deep]
   **What to do** (TDD): RED: `items.map({ x => x * 2 })` — infer x type from items element type. GREEN: propagate expected types into lambda parameters during inference.
-  **Acceptance**: `cargo test -p deox-types expected_type_inference` passes. Lambda params inferred from context.
+  **Acceptance**: `cargo test -p buff-lang-types expected_type_inference` passes. Lambda params inferred from context.
   **QA**: Infer `{ x => x * 2 }` in context of `Vector<Float>.map()` → assert x: Float. Evidence: task-77-expected-type.txt
   **Commit**: `feat(types): add expected-type driven inference for lambda parameters`
 
 - [ ] **T92**: Struct embedding + delegation [deep]
   **What to do** (TDD): RED: `struct Employee { person: Person, salary: Float }` — `employee.name()` auto-delegates to `employee.person.name()`. GREEN: analyze struct fields, auto-generate delegation methods for embedded types.
-  **Acceptance**: `cargo test -p deox-codegen-rust embedding` passes. Embedded struct methods promoted.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust embedding` passes. Embedded struct methods promoted.
   **QA**: Codegen Employee with embedded Person → assert `employee.name()` delegates. Evidence: task-92-embedding.txt
   **Commit**: `feat(codegen-rust): add struct embedding with auto-delegation`
 
 - [ ] **T93**: Traits with default methods [deep]
   **What to do** (TDD): RED: `trait Greetable { fn name() -> String; fn greet() { print(name()) } }` — default impl uses required method. GREEN: parse trait keyword, default method bodies, codegen to Rust trait.
-  **Acceptance**: `cargo test -p deox-parser traits` passes. Traits with defaults and inheritance (`trait Pet : Animal`).
+  **Acceptance**: `cargo test -p buff-lang-parser traits` passes. Traits with defaults and inheritance (`trait Pet : Animal`).
   **QA**: Codegen trait with default method → assert Rust trait with default impl. Evidence: task-93-traits.txt
   **Commit**: `feat(parser): add traits with default methods and inheritance`
 
 - [ ] **T101**: Null coalescing `??` [quick]
   **What to do** (TDD): RED: `opt ?? "default"` → `.unwrap_or("default")`. GREEN: parse `??` operator, codegen to unwrap_or.
-  **Acceptance**: `cargo test -p deox-codegen-rust null_coalescing` passes. `opt ?? 0` → `opt.unwrap_or(0)`.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust null_coalescing` passes. `opt ?? 0` → `opt.unwrap_or(0)`.
   **QA**: Codegen `name ?? "unknown"` → assert `.unwrap_or()`. Evidence: task-101-coalescing.txt
   **Commit**: `feat(parser): add null coalescing operator ??`
 
 - [ ] **T103**: Tuples [deep]
   **What to do** (TDD): RED: `(String, Int)` as type, `(name, age)` as value. GREEN: parse tuple types and literals, codegen to Rust tuples.
-  **Acceptance**: `cargo test -p deox-types tuples` passes. `(String, Int)` works as return type.
+  **Acceptance**: `cargo test -p buff-lang-types tuples` passes. `(String, Int)` works as return type.
   **QA**: Codegen `func pair() -> (String, Int) { return ("A", 42) }` → assert Rust tuple. Evidence: task-103-tuples.txt
   **Commit**: `feat(types): add tuple types and multi-return`
 
 - [ ] **T107**: Auto-derived record methods [deep]
   **What to do** (TDD): RED: struct auto-generates equals, hash, to_string, copy. `p1.copy(age: 31)` → immutable update. GREEN: auto-derive Clone, PartialEq, Hash, Debug for structs in codegen.
-  **Acceptance**: `cargo test -p deox-codegen-rust record_derives` passes. Structs get auto-equals and copy.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust record_derives` passes. Structs get auto-equals and copy.
   **QA**: Codegen struct → assert `#[derive(Clone, PartialEq, Hash, Debug)]`. Evidence: task-107-record-derives.txt
   **Commit**: `feat(codegen-rust): auto-derive record methods (equals, hash, copy)`
 
@@ -1024,45 +1024,45 @@ Phase 1 (v0.1) must be complete:
 
 - [ ] **T78**: Error context chaining [deep]
   **What to do** (TDD): RED: `.context("msg")?` wraps error with context. GREEN: implement context method on Result, codegen to error wrapping.
-  **Acceptance**: `cargo test -p deox-codegen-rust error_context` passes. `.context("msg")?` adds context.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust error_context` passes. `.context("msg")?` adds context.
   **QA**: Codegen `read_file()?.context("config load")` → assert error chain. Evidence: task-78-error-context.txt
   **Commit**: `feat(codegen-rust): add error context chaining .context()`
 
 - [ ] **T79**: Regex literals [deep]
   **What to do** (TDD): RED: `/\d{3}/` → `Regex::new(r"\d{3}")`. Compile-time validation. GREEN: parse `/pattern/` in lexer, codegen to Regex::new with compile-time check.
-  **Acceptance**: `cargo test -p deox-lexer regex_literals` passes. `/\d+/` → valid Regex.
+  **Acceptance**: `cargo test -p buff-lang-lexer regex_literals` passes. `/\d+/` → valid Regex.
   **QA**: Parse `/\d{3}-\d{4}/` → assert Regex literal with pattern. Evidence: task-79-regex.txt
   **Commit**: `feat(lexer): add regex literals /pattern/`
 
 - [ ] **T100**: `defer` statement [deep]
   **What to do** (TDD): RED: `defer f.close()` runs on function exit (any path). Multiple defers LIFO. GREEN: parse `defer` keyword, codegen using RAII wrapper or scope guard.
-  **Acceptance**: `cargo test -p deox-codegen-rust defer` passes. Defer runs on all exit paths.
+  **Acceptance**: `cargo test -p buff-lang-codegen-rust defer` passes. Defer runs on all exit paths.
   **QA**: Codegen `func f(): defer print("done"); return 0` → assert "done" printed before return. Evidence: task-100-defer.txt
   **Commit**: `feat(codegen-rust): add defer statement with LIFO execution`
 
 - [ ] **T105**: Named arguments [deep]
   **What to do** (TDD): RED: `create(host: "x", port: 80)` — args by name not position. GREEN: parse `name: value` in call args, validate against params, codegen reordered.
-  **Acceptance**: `cargo test -p deox-parser named_args` passes. Args can be in any order with names.
+  **Acceptance**: `cargo test -p buff-lang-parser named_args` passes. Args can be in any order with names.
   **QA**: Codegen `greet(name: "Alice", greeting: "Hi")` → assert correct arg mapping. Evidence: task-105-named-args.txt
   **Commit**: `feat(parser): add named arguments for function calls`
 
 - [ ] **T106**: Default parameter values [deep]
   **What to do** (TDD): RED: `func fetch(url, timeout = 30)` — omit timeout → uses 30. GREEN: parse default values in func decl, codegen fills defaults for omitted args.
-  **Acceptance**: `cargo test -p deox-parser default_params` passes. Omitted params use defaults.
+  **Acceptance**: `cargo test -p buff-lang-parser default_params` passes. Omitted params use defaults.
   **QA**: Codegen `fetch("url")` where fetch has `timeout = 30` → assert `fetch("url", 30)`. Evidence: task-106-default-params.txt
   **Commit**: `feat(parser): add default parameter values`
 
-- [ ] **T111**: `deox.toml` config + project structure enforcement [deep]
-  **What to do** (TDD): RED: parse `deox.toml` with [package], [dependencies], [profile.release]. Enforce `src/`, `tests/` layout. GREEN: implement TOML parsing, workspace support, lock file generation.
-  **Acceptance**: `cargo test -p deox-cli config_parsing` passes. `deox.toml` parsed correctly.
-  **QA**: Parse sample `deox.toml` → assert name, version, deps extracted. Evidence: task-111-deox-toml.txt
-  **Commit**: `feat(cli): implement deox.toml config parsing with workspace support`
+- [ ] **T111**: `buff.toml` config + project structure enforcement [deep]
+  **What to do** (TDD): RED: parse `buff.toml` with [package], [dependencies], [profile.release]. Enforce `src/`, `tests/` layout. GREEN: implement TOML parsing, workspace support, lock file generation.
+  **Acceptance**: `cargo test -p buff-lang-cli config_parsing` passes. `buff.toml` parsed correctly.
+  **QA**: Parse sample `buff.toml` → assert name, version, deps extracted. Evidence: task-111-buff-toml.txt
+  **Commit**: `feat(cli): implement buff.toml config parsing with workspace support`
 
-- [ ] **T112**: `deox new` templates [unspecified-high]
-  **What to do** (TDD): RED: `deox new app --lib` creates library structure. `--server` creates async template. GREEN: implement template system with starter code for each type.
-  **Acceptance**: `cargo test -p deox-cli templates` passes. All 5 templates create valid projects.
-  **QA**: `deox new mylib --lib` → assert `src/lib.deox` exists. Evidence: task-112-templates.txt
-  **Commit**: `feat(cli): add deox new templates (--lib, --server, --gpu, --workspace)`
+- [ ] **T112**: `buff new` templates [unspecified-high]
+  **What to do** (TDD): RED: `buff new app --lib` creates library structure. `--server` creates async template. GREEN: implement template system with starter code for each type.
+  **Acceptance**: `cargo test -p buff-lang-cli templates` passes. All 5 templates create valid projects.
+  **QA**: `buff new mylib --lib` → assert `src/lib.buff` exists. Evidence: task-112-templates.txt
+  **Commit**: `feat(cli): add buff new templates (--lib, --server, --gpu, --workspace)`
 
 ---
 
@@ -1075,7 +1075,7 @@ Phase 1 (v0.1) must be complete:
 - [ ] Error handling with `?` operator
 - [ ] Closures with type inference
 - [ ] Modern syntax: pipeline, null-conditional, destructuring, guards, ranges, collection literals
-- [ ] `deox test` runs test suites
+- [ ] `buff test` runs test suites
 - [ ] Error messages with spans and suggestions
 - [ ] `cargo test --workspace` passes 100%
 - [ ] `cargo clippy --workspace -- -D warnings` clean

@@ -1,26 +1,10 @@
 {
-  "active_plan": "C:/Users/vsbb1/source/repos/Deox/.sisyphus/plans/deox-master.md",
-  "started_at": "2026-07-15T17:44:42-03:00",
+  "active_plan": "C:/Users/vsbb1/source/repos/Deox/.sisyphus/plans/rename-to-buff.md",
+  "started_at": "2026-07-15T22:27:47-03:00",
   "session_ids": [
-    "session-1",
-    "ses_09952e587ffeHXE3g6gdO91nTT",
-    "ses_098687ab2ffebyU4QjJ5fg5QCf",
-    "ses_098652af2ffe47J1uC3UKmTfGC",
-    "ses_0985cf83fffeMEEIUT9CQIVmaC",
-    "ses_0985a4199ffegVgc2DVU5DXxf2",
-    "ses_09857b2d0ffejQMHk72yxMCrd5",
-    "ses_0984ca731ffeb2mTSC7hB6v46t",
-    "ses_09838e6d1ffeK1Lm71FM4mbN2p",
-    "ses_0982b2747ffepjqQBls7qCXFxd",
-    "ses_0981bbbbeffeIrK71wqfiw1m07",
-    "ses_0980cd7c5ffe5gPXTNpdcmBJzn",
-    "ses_098047d1fffeEjZuPolb4WPZFK",
-    "ses_097f29265ffeDcPI8g0cVlC0vi",
-    "ses_097e3712affebT0MS1wtPn2zhV",
-    "ses_097d260bdffeAvRL21teElmdVU",
-    "ses_097a0983dffeFK4V5KhTCvWn15"
+    "ses_atlas_rename_buff"
   ],
-  "plan_name": "deox-master",
+  "plan_name": "rename-to-buff",
   "worktree_path": null,
   "task_sessions": {}
 }

@@ -1,20 +1,20 @@
-﻿
-# Deox v0.1 "Ol� Deox" � MVP Foundation
+
+# Buff v0.1 "Ol� Buff" � MVP Foundation
 
 > **Phase 1 of 3.** Foundational phase � proves transpilation works end-to-end.
-> Next: [Phase 2 (v0.5)](./deox-v05-language.md) | Master: [deox-master.md](./deox-master.md)
+> Next: [Phase 2 (v0.5)](./buff-v05-language.md) | Master: [buff-master.md](./buff-master.md)
 >
-> **Exit criteria**: `deox run ola.deox` prints "Ol�, Deox!"
+> **Exit criteria**: `buff run ola.buff` prints "Ol�, Buff!"
 > **Tasks**: 20 (fully detailed with TDD steps, QA scenarios, acceptance criteria)
 
 ## TL;DR
 
-> **Quick Summary**: Build "Deox" — a high-level language that transpiles to Rust, with automatic CPU/GPU parallelism, native async (Tokio), and Go/C#-like simplicity. Written in Rust (dogfooding). Delivers performance of Rust without the borrow-checker pain via intelligent clone+move semantics.
+> **Quick Summary**: Build "Buff" — a high-level language that transpiles to Rust, with automatic CPU/GPU parallelism, native async (Tokio), and Go/C#-like simplicity. Written in Rust (dogfooding). Delivers performance of Rust without the borrow-checker pain via intelligent clone+move semantics.
 >
 > **Deliverables**:
 > - Complete transpiler pipeline: Lexer (logos) → Parser (chumsky) → Type Checker → Rust Codegen (syn/quote) → WGSL Codegen
 > - Runtime library: wgpu 26.0 (GPU), Rayon (CPU parallel), Tokio (async)
-> - CLI tooling: `deox run`, `deox build`, `deox test`, `deox fmt`
+> - CLI tooling: `buff run`, `buff build`, `buff test`, `buff fmt`
 > - Full type system: 13 types (Int, Bits, Float, Double, Bool, Byte, String, Decimal, Vector, Matrix, Map, Struct, Enum)
 > - Heterogeneous computing: automatic CPU/GPU dispatch with hints (`@prefer(gpu)`)
 > - Low-precision AI types: FP4/FP8/Trits (DEFERRED to v2.0 — not WGSL-native)
@@ -28,11 +28,11 @@
 ## Context
 
 ### Original Request
-Create a simplified Rust-like language ("Deox") that transpiles to Rust, with maximum performance, maximum productivity, and automatic multithreading across CPU/GPU. Named "Deoxidizer" — removes the "rust/complexity" leaving pure performance.
+Create a simplified Rust-like language ("Buff") that transpiles to Rust, with maximum performance, maximum productivity, and automatic multithreading across CPU/GPU. Named "Deoxidizer" — removes the "rust/complexity" leaving pure performance.
 
 ### Interview Summary
 **Key Discussions**:
-- **Architecture**: Source-to-source transpiler (Deox → Rust), no VM/GC
+- **Architecture**: Source-to-source transpiler (Buff → Rust), no VM/GC
 - **Borrow strategy**: Intelligent clone + move semantics (v0.1-v0.5), design prepared for Arc+CoW (v1.0+)
 - **Types**: 13-type system with Float (f32) + Double (f64) as separate types, Decimal for finance
 - **GPU**: WebGPU via wgpu 26.0 → WGSL shaders → DirectX/Vulkan/Metal
@@ -66,20 +66,20 @@ Create a simplified Rust-like language ("Deox") that transpiles to Rust, with ma
 Deliver a production-ready programming language that achieves "Rust performance with Go productivity" through source-to-source transpilation, with invisible CPU/GPU heterogeneous computing.
 
 ### Concrete Deliverables
-- `deox` CLI binary (run/build/test/fmt/check)
-- Transpiler crates: `deox-lexer`, `deox-parser`, `deox-ast`, `deox-types`, `deox-codegen-rust`, `deox-codegen-wgsl`
-- Runtime crate: `deox-runtime` (wgpu + rayon + tokio integration)
+- `buff` CLI binary (run/build/test/fmt/check)
+- Transpiler crates: `buff-lang-lexer`, `buff-lang-parser`, `buff-lang-ast`, `buff-lang-types`, `buff-lang-codegen-rust`, `buff-lang-codegen-wgsl`
+- Runtime crate: `buff-lang-runtime` (wgpu + rayon + tokio integration)
 - Standard library prelude: `print`, type conversions, collection methods
-- Example programs: `ola.deox`, `fibonacci.deox`, `gpu_demo.deox`, `web_server.deox`
+- Example programs: `ola.buff`, `fibonacci.buff`, `gpu_demo.buff`, `web_server.buff`
 - **Unified numeric type system**: `Int<X>` (signed, auto-width), `Bits<X>` (unsigned, auto-width), `Float<X>` (16/32/64), `Decimal` (128-bit fixed)
 
 ### Definition of Done
-- [ ] `deox run examples/ola.deox` prints "Olá, Deox!"
-- [ ] `deox build --release examples/gpu_demo.deox` runs compute on GPU (or CPU fallback)
+- [ ] `buff run examples/ola.buff` prints "Olá, Buff!"
+- [ ] `buff build --release examples/gpu_demo.buff` runs compute on GPU (or CPU fallback)
 - [ ] `cargo test --workspace` passes 100%
 - [ ] `cargo clippy -- -D warnings` clean across all crates
 - [ ] Generated Rust passes `rustfmt --check`
-- [ ] Benchmark: Deox code within 10% of equivalent hand-written Rust
+- [ ] Benchmark: Buff code within 10% of equivalent hand-written Rust
 
 ### Must Have
 - All 13 types implemented with full type inference
@@ -89,7 +89,7 @@ Deliver a production-ready programming language that achieves "Rust performance 
 - Native async with call graph propagation (Tokio)
 - Error propagation via `?` operator
 - Null-safety via Option type (no null/nil)
-- Source maps for error reporting (Deox line ↔ Rust line)
+- Source maps for error reporting (Buff line ↔ Rust line)
 - Graceful GPU degradation (fallback to CPU when GPU unavailable/VRAM insufficient)
 
 ### Must NOT Have (Guardrails)
@@ -127,7 +127,7 @@ Deliver a production-ready programming language that achieves "Rust performance 
 **Literal Suffixes**: `42` (Int auto), `42b` (Bits auto), `3.14` (Float32), `3.14d` (Float64/Double), `3.14m` (Decimal), `0xFF` (Bits hex), `0b1010` (Bits binary)
 
 ### Extended Numeric System (AI/ML + Ternary + Auto-Sizing)
-> **Full specification**: See `.sisyphus/plans/deox-numeric-system.md` for complete details
+> **Full specification**: See `.sisyphus/plans/buff-numeric-system.md` for complete details
 
 **AI/ML Quantization Formats**:
 - `BFloat16` — brain float (AI training, wider range)
@@ -171,9 +171,9 @@ Every task MUST include agent-executed QA scenarios.
 Evidence saved to `.sisyphus/evidence/task-{N}-{scenario-slug}.{ext}`.
 
 - **Transpiler crates**: Use Bash (`cargo test`) — Run tests, assert pass count, check snapshots
-- **CLI**: Use Bash (`deox run/build`) — Execute commands, parse output, assert exit codes
+- **CLI**: Use Bash (`buff run/build`) — Execute commands, parse output, assert exit codes
 - **Codegen**: Use Bash (`cargo test codegen_snapshot`) — Compare generated Rust/WGSL against fixtures
-- **GPU**: Use Bash (`deox run gpu_demo.deox`) — Run compute demo, assert output correctness
+- **GPU**: Use Bash (`buff run gpu_demo.buff`) — Run compute demo, assert output correctness
 
 ---
 
@@ -183,9 +183,9 @@ Evidence saved to `.sisyphus/evidence/task-{N}-{scenario-slug}.{ext}`.
 
 ```
 ═══════════════════════════════════════════════════════════════
-PHASE v0.1 "Olá Deox" — MVP Foundation (Waves 1-4)
-Goal: Prove transpilation works. Compile & run basic Deox programs.
-Exit: `deox run ola.deox` prints "Olá, Deox!"
+PHASE v0.1 "Olá Buff" — MVP Foundation (Waves 1-4)
+Goal: Prove transpilation works. Compile & run basic Buff programs.
+Exit: `buff run ola.buff` prints "Olá, Buff!"
 ═══════════════════════════════════════════════════════════════
 
 PHASE v0.5 "Real Language" — Complete Type System (Waves 5-8)
@@ -206,11 +206,11 @@ PHASE v0.1 — MVP Foundation:
 
 Wave 1 (Start Immediately — scaffolding + contracts + IR foundation):
 ├── T1: Cargo workspace + CI + repo structure [quick]
-├── T2: deox-ast crate (ALL AST node types, includes IR dataflow nodes) [deep]
-├── T3: deox-lexer crate skeleton (logos tokens, preserves whitespace option) [quick]
-├── T4: deox-error crate (error types, source spans) [quick]
+├── T2: buff-lang-ast crate (ALL AST node types, includes IR dataflow nodes) [deep]
+├── T3: buff-lang-lexer crate skeleton (logos tokens, preserves whitespace option) [quick]
+├── T4: buff-lang-error crate (error types, source spans) [quick]
 ├── T5: Testing infrastructure (insta + proptest setup) [quick]
-└── T88: Deox IR design — dataflow graph for algorithm/schedule separation [ultrabrain]
+└── T88: Buff IR design — dataflow graph for algorithm/schedule separation [ultrabrain]
 
 Wave 2a (After Wave 1 — lexer):
 └── T6: Lexer implementation — tokens + indentation [deep]
@@ -223,8 +223,8 @@ Wave 2c (After T7 — statements + layout, can overlap):
 └── T9: Parser — layout-sensitive blocks (offside rule) [deep]
 
 Wave 3a (After Wave 2 — type system + codegen infra, parallel):
-├── T10: deox-types crate — type representation + inference + flow-sensitive [deep]
-├── T11: deox-codegen-rust — syn/quote infra + move-by-default semantics [deep]
+├── T10: buff-lang-types crate — type representation + inference + flow-sensitive [deep]
+├── T11: buff-lang-codegen-rust — syn/quote infra + move-by-default semantics [deep]
 └── T33a: Codegen move semantics — every codegen task assumes moves (T33b adds clones later) [deep]
 
 Wave 3b (After Wave 3a — actual codegen, parallel):
@@ -232,11 +232,11 @@ Wave 3b (After Wave 3a — actual codegen, parallel):
 └── T13: Codegen — if/else expression, func → Rust (via IR) [deep]
 
 Wave 4 (After Wave 3 — CLI + integration):
-├── T14: deox-cli — `deox build` command [unspecified-high]
-├── T15: deox-cli — `deox run` command [unspecified-high]
-├── T16: Source map infrastructure (Deox ↔ Rust line mapping) [unspecified-high]
-├── T110: `deox new` + `deox init` — project scaffolding with standard structure [deep]
-└── T17: v0.1 milestone — "Olá Deox" example + integration tests [deep]
+├── T14: buff-lang-cli — `buff build` command [unspecified-high]
+├── T15: buff-lang-cli — `buff run` command [unspecified-high]
+├── T16: Source map infrastructure (Buff ↔ Rust line mapping) [unspecified-high]
+├── T110: `buff new` + `buff init` — project scaffolding with standard structure [deep]
+└── T17: v0.1 milestone — "Olá Buff" example + integration tests [deep]
 
 
 PHASE v0.5 — Real Language:
@@ -265,7 +265,7 @@ Wave 7 (After Wave 6 — modules + async + FFI):
 
 Wave 8 (After Wave 7 — closures + polish):
 ├── T34: Closures/lambdas codegen [deep]
-├── T35: `deox test` command (test runner) [unspecified-high]
+├── T35: `buff test` command (test runner) [unspecified-high]
 ├── T36: Error message improvements (spans, context) [unspecified-high]
 └── T37: v0.5 milestone — comprehensive example suite [deep]
 
@@ -273,7 +273,7 @@ Wave 8 (After Wave 7 — closures + polish):
 PHASE v1.0 — Production:
 
 Wave 9 (After v0.5 — runtime + CPU parallelism):
-├── T38: deox-runtime crate skeleton (wgpu + rayon + tokio) [deep]
+├── T38: buff-lang-runtime crate skeleton (wgpu + rayon + tokio) [deep]
 ├── T39: CPU parallel dispatch (Rayon par_map/par_filter) [deep]
 ├── T40: Automatic dispatch threshold logic [deep]
 ├── T41: Data race detection in parallel closures [deep]
@@ -281,7 +281,7 @@ Wave 9 (After v0.5 — runtime + CPU parallelism):
 
 Wave 10 (After Wave 9 — GPU compute):
 ├── T43: wgpu context initialization (lazy, cached) [deep]
-├── T44: deox-codegen-wgsl crate (AST → WGSL) [deep]
+├── T44: buff-lang-codegen-wgsl crate (AST → WGSL) [deep]
 ├── T45: GPU dispatch pipeline (buffer create → shader → dispatch → readback) [deep]
 ├── T46: VRAM check + tiling + CPU fallback [deep]
 ├── T47: Cold start mitigation (async background init) [unspecified-high]
@@ -295,20 +295,20 @@ Wave 11 (After Wave 10 — advanced GPU features):
 └── T53: Matrix quantization API (.quantizar(Layout.FP4)) [deep]
 
 Wave 12 (After Wave 11 — tooling + polish):
-├── T54: `deox fmt` formatter [unspecified-high]
-├── T55: `deox check` type-checker-only mode [quick]
-├── T56: `deox build --release` optimization mode [quick]
+├── T54: `buff fmt` formatter [unspecified-high]
+├── T55: `buff check` type-checker-only mode [quick]
+├── T56: `buff build --release` optimization mode [quick]
 ├── T57: LSP-friendly AST (lossless, incremental-ready) [deep]
 └── T58: Wasm target support (wasm32-unknown-unknown) [deep]
 
 Wave 13 (After Wave 12 — diagnostics + DX):
 ├── T59: ariadne-based error diagnostics [visual-engineering]
-├── T60: Source map improvements (full Deox→Rust→binary) [deep]
+├── T60: Source map improvements (full Buff→Rust→binary) [deep]
 ├── T61: Standard library expansion (I/O, HTTP, JSON) [unspecified-high]
 └── T62: Documentation + examples + README [writing]
 
 Wave 14 (After Wave 13 — release):
-├── T63: Performance benchmarks (Deox vs Rust vs Go) [deep]
+├── T63: Performance benchmarks (Buff vs Rust vs Go) [deep]
 ├── T64: Cross-platform testing (Windows/Linux/macOS) [unspecified-high]
 ├── T65: v1.0 release preparation [deep]
 └── T66: Comprehensive integration test suite [deep]
@@ -370,16 +370,16 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ## TODOs
 
-### ═══ PHASE v0.1 "Olá Deox" — MVP Foundation ═══
+### ═══ PHASE v0.1 "Olá Buff" — MVP Foundation ═══
 
 - [x] 1. Cargo Workspace + CI + Repository Structure
 
   **What to do**:
-  - Create Cargo workspace with crates: `deox-ast`, `deox-lexer`, `deox-parser`, `deox-types`, `deox-codegen-rust`, `deox-codegen-wgsl`, `deox-runtime`, `deox-cli`, `deox-error`
+  - Create Cargo workspace with crates: `buff-lang-ast`, `buff-lang-lexer`, `buff-lang-parser`, `buff-lang-types`, `buff-lang-codegen-rust`, `buff-lang-codegen-wgsl`, `buff-lang-runtime`, `buff-lang-cli`, `buff-lang-error`
   - Root `Cargo.toml` with workspace dependencies (logos, chumsky, syn, quote, insta, proptest, wgpu, rayon, tokio, bytemuck, rust_decimal)
   - Create `examples/`, `tests/fixtures/`, `tests/snapshots/` directories
   - Add `.gitignore`, `rust-toolchain.toml` (stable channel), GitHub Actions CI (fmt + clippy + test on push)
-  - Add `examples/ola.deox` placeholder (will be runnable after Wave 4)
+  - Add `examples/ola.buff` placeholder (will be runnable after Wave 4)
 
   **Must NOT do**:
   - NO implementation logic yet — just scaffolding
@@ -436,16 +436,16 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   ```
 
   **Commit**: YES
-  - Message: `chore: initialize deox cargo workspace with 9 crates`
+  - Message: `chore: initialize buff cargo workspace with 9 crates`
   - Files: `Cargo.toml`, `crates/*/Cargo.toml`, `.github/workflows/ci.yml`, `rust-toolchain.toml`
   - Pre-commit: `cargo check --workspace`
 
 ---
 
-- [x] 2. deox-ast Crate — Complete AST Node Definitions
+- [x] 2. buff-lang-ast Crate — Complete AST Node Definitions
 
   **What to do**:
-  - Define ALL AST node types covering the full Deox language:
+  - Define ALL AST node types covering the full Buff language:
     - Expressions: Literal (Int/Float/Double/Bool/String/Byte), BinaryOp, UnaryOp, IfExpr, FuncCall, MethodCall, Lambda (closure), StructInit, MatchExpr, SuspendExpr
     - Statements: LetDecl, Assignment, ExprStmt, Return, Break, Continue
     - Declarations: FuncDecl, StructDecl, EnumDecl, ImportDecl, ModuleDecl
@@ -478,7 +478,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Acceptance Criteria**:
 
-  - [ ] `cargo test -p deox-ast` passes
+  - [ ] `cargo test -p buff-lang-ast` passes
   - [ ] All AST nodes have `Span` fields
   - [ ] `format!("{}", ast_node)` produces readable output
   - [ ] Snapshot test: 5 AST examples produce stable snapshots
@@ -488,11 +488,11 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   ```
   Scenario: AST nodes are constructible and displayable
     Tool: Bash (cargo test)
-    Preconditions: deox-ast crate exists
+    Preconditions: buff-lang-ast crate exists
     Steps:
-      1. Run `cargo test -p deox-ast`
+      1. Run `cargo test -p buff-lang-ast`
       2. Assert all tests pass
-      3. Run `cargo test -p deox-ast -- --nocapture pretty_print`
+      3. Run `cargo test -p buff-lang-ast -- --nocapture pretty_print`
       4. Assert output contains readable AST structure
     Expected Result: All AST node types constructible, display correctly
     Failure Indicators: Missing derive macros, Span not propagated, Display not implemented
@@ -502,7 +502,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
     Tool: Bash (cargo insta)
     Preconditions: insta crate configured
     Steps:
-      1. Run `cargo insta test -p deox-ast`
+      1. Run `cargo insta test -p buff-lang-ast`
       2. Assert 0 pending snapshots (all accepted)
       3. Run `git diff --exit-code tests/snapshots/`
       4. Assert exit code 0 (no uncommitted snapshot changes)
@@ -513,11 +513,11 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Commit**: YES
   - Message: `feat(ast): define complete AST node types with spans`
-  - Pre-commit: `cargo test -p deox-ast`
+  - Pre-commit: `cargo test -p buff-lang-ast`
 
 ---
 
-- [x] 3. deox-lexer Crate Skeleton — Token Definitions
+- [x] 3. buff-lang-lexer Crate Skeleton — Token Definitions
 
   **What to do**:
   - Define `TokenKind` enum with all token types: identifiers, keywords (func, let, mut, struct, enum, trait, type, if, else, for, return, break, continue, in, match, async, spawn, import, export, from, as, true, false, extern, unsafe), literals (int, float, double suffix `d`, string, byte), operators (+, -, *, /, %, ==, !=, <, >, <=, >=, &&, ||, !, ?, =>, ->), delimiters (`{`, `}`, `(`, `)`, `[`, `]`, `:`), and special tokens (Newline, Indent, Dedent, EOF)
@@ -547,10 +547,10 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Acceptance Criteria**:
 
-  - [ ] `TokenKind` covers all Deox syntax elements
+  - [ ] `TokenKind` covers all Buff syntax elements
   - [ ] `Token` struct has kind + span
   - [ ] `LexerError` enum defined with Display impl
-  - [ ] `cargo test -p deox-lexer` passes
+  - [ ] `cargo test -p buff-lang-lexer` passes
 
   **QA Scenarios (MANDATORY)**:
 
@@ -558,7 +558,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   Scenario: Token types are complete
     Tool: Bash (cargo test)
     Steps:
-      1. Run `cargo test -p deox-lexer token_coverage`
+      1. Run `cargo test -p buff-lang-lexer token_coverage`
       2. Assert test verifies all keywords exist: func, let, if, else, for, return, struct, enum
       3. Assert test verifies all operators exist: +, -, *, /, ==, !=, <=, >=, &&, ||, !, ?, =>
     Expected Result: All token variants present and testable
@@ -570,12 +570,12 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [x] 4. deox-error Crate — Error Types + Source Spans
+- [x] 4. buff-lang-error Crate — Error Types + Source Spans
 
   **What to do**:
   - Define `Span` struct: `start: ByteOffset`, `end: ByteOffset`, `source_file: SourceId`
   - Define `SourceMap`: maps `SourceId` → file path, stores line/column info for byte offsets
-  - Define `DeoxError` enum: `LexError`, `ParseError`, `TypeError`, `CodegenError`, `RuntimeError`
+  - Define `BuffError` enum: `LexError`, `ParseError`, `TypeError`, `CodegenError`, `RuntimeError`
   - Define `Diagnostic` struct: severity (Error/Warning), message, span, optional notes/suggestions
   - Implement `SourceSpan` lookup: given a byte offset, return (line, column)
   - Write tests for span calculation (multi-line files, unicode chars)
@@ -601,7 +601,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Acceptance Criteria**:
 
   - [ ] `Span` and `SourceMap` correctly calculate line/column from byte offset
-  - [ ] `DeoxError` covers all error categories
+  - [ ] `BuffError` covers all error categories
   - [ ] `Diagnostic` has severity + message + span
   - [ ] Test: 3-line file with unicode → correct (line, col) for offsets 0, 15, 30
 
@@ -634,8 +634,8 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   - Configure `proptest` for property-based testing
   - Write helper macros/functions: `assert_snapshot!(actual)` for codegen output
   - Write property test template for lexer (fuzz roundtrip: tokens → string → tokens)
-  - Create `tests/fixtures/` with sample `.deox` files (valid + invalid examples)
-  - Document testing conventions in `crates/deox-ast/TESTING.md`
+  - Create `tests/fixtures/` with sample `.buff` files (valid + invalid examples)
+  - Document testing conventions in `crates/buff-lang-ast/TESTING.md`
 
   **Must NOT do**:
   - NO actual test implementations (each task writes its own tests)
@@ -660,7 +660,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   - [ ] `insta` configured in workspace Cargo.toml as dev-dependency
   - [ ] `proptest` configured
   - [ ] `tests/snapshots/` exists with README
-  - [ ] `tests/fixtures/valid/ola.deox` exists with sample code
+  - [ ] `tests/fixtures/valid/ola.buff` exists with sample code
   - [ ] Helper function `assert_codegen_snapshot` compiles
 
   **QA Scenarios (MANDATORY)**:
@@ -720,7 +720,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Acceptance Criteria**:
 
-  - [ ] `cargo test -p deox-lexer` passes all tests (target: 30+ tests)
+  - [ ] `cargo test -p buff-lang-lexer` passes all tests (target: 30+ tests)
   - [ ] Lexer correctly tokenizes: `func ola():\n    print("Olá")`
   - [ ] Indentation: 4-space indent → Indent token; return to 0 → Dedent
   - [ ] String interpolation: `"valor {x}"` → correct token sequence
@@ -734,9 +734,9 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   Scenario: Tokenize hello world
     Tool: Bash (cargo test)
     Steps:
-      1. Input: `func main():\n    print("Olá, Deox!")`
+      1. Input: `func main():\n    print("Olá, Buff!")`
       2. Run lexer
-      3. Assert token sequence: [Func, Ident("main"), LParen, RParen, Colon, Newline, Indent, Ident("print"), LParen, StringStart, StringLit("Olá, Deox!"), StringEnd, RParen, Dedent, EOF]
+      3. Assert token sequence: [Func, Ident("main"), LParen, RParen, Colon, Newline, Indent, Ident("print"), LParen, StringStart, StringLit("Olá, Buff!"), StringEnd, RParen, Dedent, EOF]
     Expected Result: Exact token sequence match
     Evidence: .sisyphus/evidence/task-6-hello-world-tokens.txt
 
@@ -804,7 +804,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Acceptance Criteria**:
 
-  - [ ] `cargo test -p deox-parser expr` passes (target: 20+ expression tests)
+  - [ ] `cargo test -p buff-lang-parser expr` passes (target: 20+ expression tests)
   - [ ] Correct precedence: `2 + 3 * 4` parses as `2 + (3 * 4)`
   - [ ] Double suffix: `99.90d` → DoubleLiteral(99.90)
   - [ ] Function call: `foo(a, b)` → FuncCall("foo", [a, b])
@@ -851,7 +851,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 - [x] 8. Parser — Statements (let, if/else, func, return, for)
 
   **What to do** (TDD):
-  - **RED**: Tests for: `let x = 42`, `let mut y = 0` (mutable), `let nome = "Deox"`
+  - **RED**: Tests for: `let x = 42`, `let mut y = 0` (mutable), `let nome = "Buff"`
   - **RED**: Tests for: `if cond { ... } else { ... }` as expression (returns value)
   - **RED**: Tests for: `func nome(param: Tipo) -> Retorno { corpo }`
   - **RED**: Tests for: `return valor`, `return` (void)
@@ -883,7 +883,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Acceptance Criteria**:
 
-  - [ ] `cargo test -p deox-parser stmt` passes (target: 15+ statement tests)
+  - [ ] `cargo test -p buff-lang-parser stmt` passes (target: 15+ statement tests)
   - [ ] `let x = 42` → LetDecl("x", IntLit(42), mutable=false)
   - [ ] `if cond { 1 } else { 2 }` → IfExpr(cond, [1], Some([2]))
   - [ ] Function decl with params: `func add(a: Int, b: Int) -> Int`
@@ -960,7 +960,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **Acceptance Criteria**:
 
-  - [ ] `cargo test -p deox-parser layout` passes (target: 15+ layout tests)
+  - [ ] `cargo test -p buff-lang-parser layout` passes (target: 15+ layout tests)
   - [ ] Function body via indentation parses correctly
   - [ ] Nested indentation (2+ levels) works
   - [ ] `else` binds to nearest `if`
@@ -998,7 +998,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 > **ENHANCEMENT**: Wave 3 now includes collection literals and range syntax (from best practices research)
 
-- [x] 10. deox-types Crate — Type Representation + Inference + Flow-Sensitive Typing
+- [x] 10. buff-lang-types Crate — Type Representation + Inference + Flow-Sensitive Typing
 
   **What to do** (TDD):
   - **RED**: Tests for type inference from literals (`42` → Int, `3.14` → Float, `99.9d` → Double, `true` → Bool, `"hi"` → String)
@@ -1022,7 +1022,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   - **Blocked By**: Tasks 2 (AST), 9 (complete parser)
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-types` passes (target: 20+ tests)
+  - [ ] `cargo test -p buff-lang-types` passes (target: 20+ tests)
   - [ ] `42` infers as Int, `3.14` as Float, `99.9d` as Double
   - [ ] `Int + Float` promotes to Float
   - [ ] Type errors reported with span info
@@ -1051,7 +1051,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-- [x] 11. deox-codegen-rust — syn/quote Infrastructure
+- [x] 11. buff-lang-codegen-rust — syn/quote Infrastructure
 
   **What to do**:
   - Set up codegen crate with `syn`, `quote`, `prettyplease` dependencies
@@ -1109,7 +1109,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Parallelization**: Parallel with Task 13 | **Blocks**: Task 14 | **Blocked By**: Tasks 10, 11, 7
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust literals` passes
+  - [ ] `cargo test -p buff-lang-codegen-rust literals` passes
   - [ ] All 6 v0.1 types codegen correctly (Int→i64, Float→f32, Double→f64, Bool→bool, String→String, Byte→u8)
   - [ ] Generated code compiles via `cargo check`
 
@@ -1150,7 +1150,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Parallelization**: Parallel with Task 12 | **Blocks**: Task 14 | **Blocked By**: Tasks 8, 9, 11
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust stmts` passes
+  - [ ] `cargo test -p buff-lang-codegen-rust stmts` passes
   - [ ] if/else generates as Rust expression
   - [ ] `print("Olá")` → `println!("{}", "Olá")`
   - [ ] Generated main function compiles and runs
@@ -1160,9 +1160,9 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   Scenario: Full program codegen
     Tool: Bash (cargo test)
     Steps:
-      1. Codegen: `func main():\n    let nome = "Deox"\n    print("Olá, {nome}!")`
+      1. Codegen: `func main():\n    let nome = "Buff"\n    print("Olá, {nome}!")`
       2. Write to temp file, compile with rustc, run
-      3. Assert stdout: "Olá, Deox!"
+      3. Assert stdout: "Olá, Buff!"
     Expected Result: End-to-end codegen produces runnable program
     Evidence: .sisyphus/evidence/task-13-full-program.txt
   ```
@@ -1173,16 +1173,16 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ### Wave 4: CLI + Integration
 
-- [x] 14. deox-cli — `deox build` Command
+- [x] 14. buff-lang-cli — `buff build` Command
 
   **What to do** (TDD):
-  - **RED**: Test `deox build examples/ola.deox` → creates executable
-  - **RED**: Test `deox build nonexistent.deox` → error with clear message
+  - **RED**: Test `buff build examples/ola.buff` → creates executable
+  - **RED**: Test `buff build nonexistent.buff` → error with clear message
   - **GREEN**: Implement CLI with `clap` derive
-  - **GREEN**: Pipeline: read .deox → lex → parse → type check → codegen → write .rs → invoke rustc/cargo
-  - **GREEN**: Capture rustc errors, map back to .deox lines via source map
+  - **GREEN**: Pipeline: read .buff → lex → parse → type check → codegen → write .rs → invoke rustc/cargo
+  - **GREEN**: Capture rustc errors, map back to .buff lines via source map
 
-  **Must NOT do**: NO `deox run` (Task 15), NO optimization flags, NO incremental compilation
+  **Must NOT do**: NO `buff run` (Task 15), NO optimization flags, NO incremental compilation
 
   **Recommended Agent Profile**:
   - **Category**: `unspecified-high`
@@ -1191,44 +1191,44 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Parallelization**: Parallel with Tasks 15, 16 | **Blocks**: Task 17 | **Blocked By**: Tasks 12, 13
 
   **Acceptance Criteria**:
-  - [ ] `deox build examples/ola.deox` produces executable
+  - [ ] `buff build examples/ola.buff` produces executable
   - [ ] Running executable prints correct output
-  - [ ] Invalid .deox file → clear error, no panic
+  - [ ] Invalid .buff file → clear error, no panic
 
   **QA Scenarios**:
   ```
   Scenario: Build hello world
-    Tool: Bash (deox CLI)
-    Preconditions: examples/ola.deox exists
+    Tool: Bash (buff CLI)
+    Preconditions: examples/ola.buff exists
     Steps:
-      1. Run `deox build examples/ola.deox`
+      1. Run `buff build examples/ola.buff`
       2. Assert exit code 0
       3. Assert executable exists
       4. Run executable
-      5. Assert stdout contains "Olá, Deox!"
+      5. Assert stdout contains "Olá, Buff!"
     Expected Result: Full build pipeline works end-to-end
     Evidence: .sisyphus/evidence/task-14-build-hello.txt
 
   Scenario: Build with syntax error
-    Tool: Bash (deox CLI)
+    Tool: Bash (buff CLI)
     Steps:
       1. Create invalid file: `func main():\n    let x =`
-      2. Run `deox build invalid.deox`
+      2. Run `buff build invalid.buff`
       3. Assert exit code non-zero
-      4. Assert stderr references .deox line number
+      4. Assert stderr references .buff line number
     Expected Result: Graceful error with source location
     Evidence: .sisyphus/evidence/task-14-build-error.txt
   ```
 
-  **Commit**: YES — Message: `feat(cli): implement deox build command with full pipeline`
+  **Commit**: YES — Message: `feat(cli): implement buff build command with full pipeline`
 
 ---
 
-- [x] 15. deox-cli — `deox run` Command
+- [x] 15. buff-lang-cli — `buff run` Command
 
   **What to do** (TDD):
-  - **RED**: Test `deox run examples/ola.deox` → prints output, cleans up
-  - **GREEN**: Implement `deox run` = build to temp + execute + cleanup
+  - **RED**: Test `buff run examples/ola.buff` → prints output, cleans up
+  - **GREEN**: Implement `buff run` = build to temp + execute + cleanup
   - **GREEN**: Stream stdout/stderr in real-time
 
   **Recommended Agent Profile**:
@@ -1238,30 +1238,30 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Parallelization**: Parallel with Tasks 14, 16 | **Blocked By**: Task 14
 
   **Acceptance Criteria**:
-  - [ ] `deox run examples/ola.deox` prints "Olá, Deox!"
+  - [ ] `buff run examples/ola.buff` prints "Olá, Buff!"
   - [ ] No executable left behind (temp cleanup)
 
   **QA Scenarios**:
   ```
   Scenario: Run hello world
-    Tool: Bash (deox CLI)
+    Tool: Bash (buff CLI)
     Steps:
-      1. Run `deox run examples/ola.deox`
-      2. Assert stdout: "Olá, Deox!"
+      1. Run `buff run examples/ola.buff`
+      2. Assert stdout: "Olá, Buff!"
       3. Assert no temp files left in CWD
     Expected Result: Program runs and cleans up
     Evidence: .sisyphus/evidence/task-15-run-hello.txt
   ```
 
-  **Commit**: YES — Message: `feat(cli): implement deox run command`
+  **Commit**: YES — Message: `feat(cli): implement buff run command`
 
 ---
 
-- [x] 16. Source Map Infrastructure (Deox ↔ Rust Line Mapping)
+- [x] 16. Source Map Infrastructure (Buff ↔ Rust Line Mapping)
 
   **What to do** (TDD):
-  - **RED**: Test runtime error at Rust line 15 → maps to Deox line 8
-  - **GREEN**: During codegen, build mapping: Deox span → Rust line/col
+  - **RED**: Test runtime error at Rust line 15 → maps to Buff line 8
+  - **GREEN**: During codegen, build mapping: Buff span → Rust line/col
   - **GREEN**: Intercept rustc/panics, translate locations
   - **GREEN**: Backtrace filtering (hide Rust stdlib frames)
 
@@ -1272,29 +1272,29 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Parallelization**: Parallel with Tasks 14, 15 | **Blocked By**: Tasks 4, 11
 
   **Acceptance Criteria**:
-  - [ ] Rust panic location → mapped to correct Deox line
-  - [ ] Error shows Deox filename and line, not temp .rs
+  - [ ] Rust panic location → mapped to correct Buff line
+  - [ ] Error shows Buff filename and line, not temp .rs
 
   **QA Scenarios**:
   ```
-  Scenario: Error maps to Deox source
-    Tool: Bash (deox CLI)
+  Scenario: Error maps to Buff source
+    Tool: Bash (buff CLI)
     Steps:
       1. Create program with index out of bounds
-      2. Run `deox run prog.deox`
-      3. Assert error references line of prog.deox (NOT temp .rs)
-    Expected Result: Error points to user's .deox file
+      2. Run `buff run prog.buff`
+      3. Assert error references line of prog.buff (NOT temp .rs)
+    Expected Result: Error points to user's .buff file
     Evidence: .sisyphus/evidence/task-16-source-map.txt
   ```
 
-  **Commit**: YES — Message: `feat(error): implement source maps for Deox-to-Rust line mapping`
+  **Commit**: YES — Message: `feat(error): implement source maps for Buff-to-Rust line mapping`
 
 ---
 
-- [x] 17. v0.1 Milestone — "Olá Deox" Example + Integration Tests
+- [x] 17. v0.1 Milestone — "Olá Buff" Example + Integration Tests
 
   **What to do**:
-  - Create `examples/ola.deox`, `examples/fibonacci.deox`, `examples/calculadora.deox`
+  - Create `examples/ola.buff`, `examples/fibonacci.buff`, `examples/calculadora.buff`
   - Write integration tests: run each example, assert output
   - Update README.md with installation + quick start
   - Tag release: `v0.1.0`
@@ -1307,8 +1307,8 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Parallelization**: Sequential (final v0.1 task) | **Blocks**: All v0.5 | **Blocked By**: Tasks 14, 15, 16
 
   **Acceptance Criteria**:
-  - [ ] `deox run examples/ola.deox` → "Olá, Deox!"
-  - [ ] `deox run examples/fibonacci.deox 10` → "55"
+  - [ ] `buff run examples/ola.buff` → "Olá, Buff!"
+  - [ ] `buff run examples/fibonacci.buff 10` → "55"
   - [ ] `cargo test --workspace` → 100% pass
   - [ ] `cargo clippy --workspace -- -D warnings` → clean
   - [ ] Git tag `v0.1.0` created
@@ -1316,26 +1316,26 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **QA Scenarios**:
   ```
   Scenario: v0.1 milestone — all examples work
-    Tool: Bash (deox CLI)
+    Tool: Bash (buff CLI)
     Steps:
-      1. `deox run examples/ola.deox` → assert "Olá, Deox!"
-      2. `deox run examples/fibonacci.deox 10` → assert "55"
+      1. `buff run examples/ola.buff` → assert "Olá, Buff!"
+      2. `buff run examples/fibonacci.buff 10` → assert "55"
       3. `cargo test --workspace` → assert 0 failures
       4. `cargo clippy --workspace -- -D warnings` → exit 0
     Expected Result: All v0.1 functionality working, clean codebase
     Evidence: .sisyphus/evidence/task-17-v01-milestone.txt
   ```
 
-  **Commit**: YES — Message: `release: v0.1.0 "Olá Deox" — MVP transpiler working`
+  **Commit**: YES — Message: `release: v0.1.0 "Olá Buff" — MVP transpiler working`
 
 ---
 
 
 ---
 
-### Additional Wave 1 Task: T88 — Deox IR Design (Dataflow Graph)
+### Additional Wave 1 Task: T88 — Buff IR Design (Dataflow Graph)
 
-- [x] T88. Deox IR Design — Dataflow Graph for Algorithm/Schedule Separation
+- [x] T88. Buff IR Design — Dataflow Graph for Algorithm/Schedule Separation
 
   **What to do** (TDD):
   - **RED**: Write tests for IR node types: ComputeNode (pure computation),IONode (I/O boundary — async), TransferNode (CPU↔GPU data movement), ScheduleNode (dispatch decision)
@@ -1345,7 +1345,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   - **GREEN**: Implement `AstLowerer` that converts typed AST → IR graph
   - **GREEN**: Implement dependency analysis: build edges between nodes that share data
   - **GREEN**: Mark I/O nodes (function calls to `async` functions) as suspension points
-  - **REFACTOR**: Extract IR types into `deox-ast/src/ir.rs` module
+  - **REFACTOR**: Extract IR types into `buff-lang-ast/src/ir.rs` module
 
   **Must NOT do**:
   - NO scheduling logic (that is T40 in v1.0 — this task only builds the graph)
@@ -1368,7 +1368,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   - **Design**: IR nodes track data dependencies → enables automatic parallelization (v1.0) and CPU/GPU scheduling (v1.0)
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-ast ir` passes (target: 10+ tests)
+  - [ ] `cargo test -p buff-lang-ast ir` passes (target: 10+ tests)
   - [ ] IR graph can represent: let bindings, binary ops, function calls, if/else
   - [ ] Dependency edges correctly identify: A uses output of B → edge from B to A
   - [ ] I/O nodes (async function calls) are marked as suspension points
@@ -1399,7 +1399,7 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   ```
 
   **Commit**: YES
-  - Message: `feat(ast): implement Deox IR dataflow graph with dependency tracking`
+  - Message: `feat(ast): implement Buff IR dataflow graph with dependency tracking`
 
 ---
 
@@ -1420,8 +1420,8 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **Must NOT do**:
   - NO Arc<T> wrapping (that is T33b in v1.0)
   - NO CoW (Arc::make_mut) logic (that is T33b in v1.0)
-  - NO lifetime annotations in generated Rust (Deox never exposes lifetimes)
-  - NO borrow checker errors leaking to user — if Rust borrow checker complains, Deox codegen is wrong
+  - NO lifetime annotations in generated Rust (Buff never exposes lifetimes)
+  - NO borrow checker errors leaking to user — if Rust borrow checker complains, Buff codegen is wrong
 
   **Recommended Agent Profile**:
   - **Category**: `deep` — Core codegen pattern, affects all subsequent codegen
@@ -1434,11 +1434,11 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
   **References**:
   - **Pattern**: Rust ownership model — moves by default, explicit clone when needed
-  - **Design Decision**: Deox users never see `&`, `&mut`, or lifetimes. Transpiler generates Rust with direct ownership.
+  - **Design Decision**: Buff users never see `&`, `&mut`, or lifetimes. Transpiler generates Rust with direct ownership.
   - **Future**: T33b (v1.0) will add Arc<T> for cross-thread sharing and CoW for shared mutation
 
   **Acceptance Criteria**:
-  - [ ] `cargo test -p deox-codegen-rust move_semantics` passes (target: 8+ tests)
+  - [ ] `cargo test -p buff-lang-codegen-rust move_semantics` passes (target: 8+ tests)
   - [ ] Generated Rust has NO `&` or `&mut` in function signatures
   - [ ] Generated Rust has NO lifetime annotations (`'a`)
   - [ ] Variables used after move get `.clone()` inserted at move site
@@ -1472,26 +1472,26 @@ Max Concurrent: 6 (Waves 5, 6, 9)
 
 ---
 
-### Additional Wave 4 Task: T110 — Project Scaffolding (deox new / deox init)
+### Additional Wave 4 Task: T110 — Project Scaffolding (buff new / buff init)
 
-- [x] T110. `deox new` + `deox init` — Project Scaffolding with Standard Structure
+- [x] T110. `buff new` + `buff init` — Project Scaffolding with Standard Structure
 
   **What to do** (TDD):
-  - **RED**: Test: `deox new my_app` creates directory with `deox.toml`, `src/main.deox`, `tests/`, `.gitignore`
-  - **RED**: Test: `deox new my_app` generates `main.deox` with `func main(): print("Hello, Deox!")`
-  - **RED**: Test: `deox init` scaffolds in current directory (not new subdirectory)
-  - **RED**: Test: generated `deox.toml` has `[package]` section with name, version, edition
-  - **RED**: Test: generated `.gitignore` includes `target/` and `deox.lock`
-  - **GREEN**: Implement `deox new <name>` — creates new directory, scaffolds project
-  - **GREEN**: Implement `deox init` — scaffolds in current directory
-  - **GREEN**: Template files: `deox.toml`, `main.deox`, `.gitignore`, `README.md`
+  - **RED**: Test: `buff new my_app` creates directory with `buff.toml`, `src/main.buff`, `tests/`, `.gitignore`
+  - **RED**: Test: `buff new my_app` generates `main.buff` with `func main(): print("Hello, Buff!")`
+  - **RED**: Test: `buff init` scaffolds in current directory (not new subdirectory)
+  - **RED**: Test: generated `buff.toml` has `[package]` section with name, version, edition
+  - **RED**: Test: generated `.gitignore` includes `target/` and `buff.lock`
+  - **GREEN**: Implement `buff new <name>` — creates new directory, scaffolds project
+  - **GREEN**: Implement `buff init` — scaffolds in current directory
+  - **GREEN**: Template files: `buff.toml`, `main.buff`, `.gitignore`, `README.md`
   - **GREEN**: Validate project name (valid identifier, not a keyword)
   - **REFACTOR**: Extract template rendering into reusable module
 
   **Must NOT do**:
   - NO `--lib`, `--server`, `--gpu` templates (those are T112 in v0.5)
   - NO workspace support (that is T111 in v0.5)
-  - NO dependency management (`deox add` — future)
+  - NO dependency management (`buff add` — future)
   - NO editions system (that is T113 in v1.0)
 
   **Recommended Agent Profile**:
@@ -1506,36 +1506,36 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   **References**:
   - **Pattern**: `cargo new` — Rust project scaffolding (gold standard)
   - **Pattern**: `go mod init` — Go module initialization
-  - **Spec**: `.sisyphus/plans/deox-project-structure.md` — canonical project layout
-  - **Convention**: `.sisyphus/plans/deox-conventions.md` — naming, formatting rules
+  - **Spec**: `.sisyphus/plans/buff-project-structure.md` — canonical project layout
+  - **Convention**: `.sisyphus/plans/buff-conventions.md` — naming, formatting rules
 
   **Acceptance Criteria**:
-  - [ ] `deox new my_app` creates correct directory structure
-  - [ ] Generated `main.deox` contains valid Deox code
-  - [ ] Generated `deox.toml` has valid TOML with required fields
-  - [ ] Generated `.gitignore` includes `target/` and `deox.lock`
-  - [ ] `deox init` works in current directory
+  - [ ] `buff new my_app` creates correct directory structure
+  - [ ] Generated `main.buff` contains valid Buff code
+  - [ ] Generated `buff.toml` has valid TOML with required fields
+  - [ ] Generated `.gitignore` includes `target/` and `buff.lock`
+  - [ ] `buff init` works in current directory
   - [ ] Invalid project names (keywords, spaces) produce clear error
 
   **QA Scenarios (MANDATORY)**:
 
   ```
-  Scenario: deox new creates valid project
-    Tool: Bash (deox CLI)
+  Scenario: buff new creates valid project
+    Tool: Bash (buff CLI)
     Steps:
-      1. Run `deox new test_app` in temp directory
+      1. Run `buff new test_app` in temp directory
       2. Assert directory `test_app/` exists
-      3. Assert `test_app/deox.toml` exists with `[package]` section
-      4. Assert `test_app/src/main.deox` exists with `func main()` entry point
+      3. Assert `test_app/buff.toml` exists with `[package]` section
+      4. Assert `test_app/src/main.buff` exists with `func main()` entry point
       5. Assert `test_app/.gitignore` contains `target/`
-      6. Run `deox run test_app/src/main.deox` → assert "Hello, Deox!" output
+      6. Run `buff run test_app/src/main.buff` → assert "Hello, Buff!" output
     Expected Result: Fully scaffolded, runnable project
-    Evidence: .sisyphus/evidence/task-110-deox-new.txt
+    Evidence: .sisyphus/evidence/task-110-buff-new.txt
 
   Scenario: Invalid project name rejected
-    Tool: Bash (deox CLI)
+    Tool: Bash (buff CLI)
     Steps:
-      1. Run `deox new "func"` (keyword as name)
+      1. Run `buff new "func"` (keyword as name)
       2. Assert exit code non-zero
       3. Assert error message: "invalid project name: 'func' is a reserved keyword"
     Expected Result: Clear error for invalid names
@@ -1543,4 +1543,4 @@ Max Concurrent: 6 (Waves 5, 6, 9)
   ```
 
   **Commit**: YES
-  - Message: `feat(cli): implement deox new and deox init project scaffolding`
+  - Message: `feat(cli): implement buff new and buff init project scaffolding`
