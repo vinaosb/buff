@@ -231,11 +231,17 @@ fn test_codegen_func_call() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Async + unsafe + extern modifiers
+// 8. Async + unsafe modifiers (extern is exercised in tests/ffi.rs — T32)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_codegen_async_unsafe_extern_modifiers() {
+    // T32: an `is_extern` FuncDecl now lowers to a Rust `extern "C" { ... }`
+    // foreign-mod item (bodyless foreign-fn declaration) — see tests/ffi.rs
+    // for the full FFI coverage. Here we exercise the COMBINATION of the
+    // other two modifiers (`async` + `unsafe`) on a normal body-having fn.
+    // (`is_extern` stays `false` so the fn keeps its body and goes through
+    // the regular `ItemFn` lowering path.)
     let func = FuncDecl {
         name: ident("fancy"),
         params: Vec::new(),
@@ -243,16 +249,15 @@ fn test_codegen_async_unsafe_extern_modifiers() {
         body: Block::empty(span()),
         is_async: true,
         is_unsafe: true,
-        is_extern: true,
+        is_extern: false,
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("unsafe"), "src = {src}");
     assert!(src.contains("async"), "src = {src}");
-    assert!(src.contains("extern"), "src = {src}");
     assert!(src.contains("fn fancy"), "src = {src}");
     // Re-parse to make sure it's valid Rust.
-    syn::parse_str::<syn::File>(&src).expect("async/unsafe/extern func must re-parse");
+    syn::parse_str::<syn::File>(&src).expect("async/unsafe func must re-parse");
 }
 
 // ---------------------------------------------------------------------------

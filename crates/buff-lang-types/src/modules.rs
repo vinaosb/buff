@@ -573,7 +573,10 @@ fn decl_item_name(decl: &Decl) -> Option<String> {
         Decl::EnumDecl(e) => Some(e.name.name.clone()),
         Decl::TraitDecl(t) => Some(t.name.name.clone()),
         Decl::ExportDecl(e) => decl_item_name(&e.inner),
-        Decl::ImportDecl(_) | Decl::ModuleDecl(_) | Decl::ReexportDecl(_) => None,
+        Decl::ImportDecl(_)
+        | Decl::ModuleDecl(_)
+        | Decl::ReexportDecl(_)
+        | Decl::ExternCrateDecl(_) => None,
     }
 }
 

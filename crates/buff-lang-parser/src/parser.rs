@@ -12,7 +12,9 @@ use buff_lang_ast::Decl;
 use buff_lang_error::{ParseError, SourceId};
 use buff_lang_lexer::TokenKind;
 
-use crate::stmt::{parse_enum_decl, parse_export_decl, parse_func_decl, parse_import_decl};
+use crate::stmt::{
+    parse_enum_decl, parse_export_decl, parse_extern_crate_decl, parse_func_decl, parse_import_decl,
+};
 use crate::stream::TokenStream;
 
 /// Parse a slice of tokens into zero or more top-level [`Decl`]s.
@@ -27,6 +29,8 @@ use crate::stream::TokenStream;
 /// | `import`| [`Decl::ImportDecl`] (T29 — ES6 `from "..."` + legacy)|
 /// | `export`| [`Decl::ExportDecl`] / [`Decl::ReexportDecl`] (T29)  |
 /// | `export async func` | [`Decl::ExportDecl`] wrapping an async fn (T31) |
+/// | `extern crate "name"` | [`Decl::ExternCrateDecl`] (T32 — FFI)        |
+/// | `extern func ...`     | [`Decl::FuncDecl`] with `is_extern = true` (T32 — FFI) |
 ///
 /// Any other token at top level is an error — statements such as
 /// `let`/`return`/`if` belong inside a function body, not at module scope.
@@ -75,6 +79,34 @@ pub fn parse(
                 let exp = parse_export_decl(&mut stream)?;
                 decls.push(exp);
             }
+            // T32: top-level FFI declarations. Two shapes share the `extern`
+            // keyword:
+            //   1. `extern crate "name"` — record a dependency on an external
+            //      Rust crate (→ [`Decl::ExternCrateDecl`]).
+            //   2. `extern func name(...) -> Ret` — a foreign-function
+            //      declaration with NO body (→ [`Decl::FuncDecl`] with
+            //      `is_extern = true`; `parse_func_decl` consumes the leading
+            //      `extern` and skips body parsing).
+            // The dispatcher disambiguates by peeking at the second token.
+            Some(TokenKind::KwExtern) => match stream.peek_second_kind() {
+                Some(TokenKind::Ident(s)) if s == "crate" => {
+                    let d = parse_extern_crate_decl(&mut stream)?;
+                    decls.push(d);
+                }
+                Some(TokenKind::KwFunc) => {
+                    let f = parse_func_decl(&mut stream)?;
+                    decls.push(Decl::FuncDecl(f));
+                }
+                _ => {
+                    return Err(ParseError::new(buff_lang_error::Diagnostic::error(
+                        "expected `extern crate \"<name>\"` or `extern func ...` after `extern`",
+                        stream
+                            .peek()
+                            .map(|t| t.span)
+                            .unwrap_or_else(|| stream.eof_span()),
+                    )));
+                }
+            },
             other => {
                 let span = stream
                     .peek()

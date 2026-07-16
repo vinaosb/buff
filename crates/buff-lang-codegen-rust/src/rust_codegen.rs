@@ -129,6 +129,16 @@ pub struct RustCodegen {
     /// alongside generated Rust without losing the underlying codegen
     /// result.
     warnings: Vec<Diagnostic>,
+    /// T32: crate names recorded by `extern crate "<name>"` declarations.
+    /// Populated during [`Self::generate`] as each [`Decl::ExternCrateDecl`]
+    /// is lowered; emitted in codegen as a `use <name>;` item. Exposed via
+    /// [`Self::extern_crates`] so the pipeline (when it gains Cargo-project
+    /// assembly) can write `<name> = "*"` lines into the generated
+    /// `Cargo.toml`. A [`BTreeSet`] (not [`HashSet`]) is used so iteration
+    /// order is DETERMINISTIC across runs and independent of hash seed
+    /// (the T29 flaky-test lesson — never rely on HashSet iteration order
+    /// for codegen output).
+    extern_crates: BTreeSet<String>,
 }
 
 impl RustCodegen {
@@ -143,6 +153,7 @@ impl RustCodegen {
             current_fn_name: None,
             async_block_depth: 0,
             warnings: Vec::new(),
+            extern_crates: BTreeSet::new(),
         }
     }
 
@@ -165,6 +176,25 @@ impl RustCodegen {
     /// T31: borrow the collected warning diagnostics without draining.
     pub fn warnings(&self) -> &[Diagnostic] {
         &self.warnings
+    }
+
+    /// T32: borrow the set of `extern crate "<name>"` dependencies recorded
+    /// during [`Self::generate`]. The names are stored in a [`BTreeSet`] so
+    /// iteration order is deterministic (the T29 flaky-test lesson — never
+    /// rely on [`HashSet`] iteration order for codegen output).
+    ///
+    /// Each name corresponds to a Rust crate that the generated source
+    /// depends on. The codegen emits a `use <name>;` item for each; the
+    /// pipeline (when it switches from single-file `rustc` invocation to a
+    /// full Cargo-project model) should additionally write
+    /// `<name> = "*"` (or a pinned version) into the generated
+    /// `Cargo.toml`'s `[dependencies]` section. **CLI-Cargo.toml wiring is
+    /// deferred** — single-file `rustc` invocation (the current pipeline)
+    /// cannot consume external crates without a Cargo manifest, so this
+    /// accessor exists for the future Cargo-project pipeline and for
+    /// codegen-level tests to assert the recorded dep set.
+    pub fn extern_crates(&self) -> &BTreeSet<String> {
+        &self.extern_crates
     }
 
     /// T26 hook: mark a struct name to be emitted with `#[repr(C)]` between
@@ -247,6 +277,13 @@ impl RustCodegen {
 
     fn lower_decl(&mut self, decl: &Decl) -> Result<Item, CodegenError> {
         match decl {
+            // T32: an `extern func ...` declaration is a foreign-function
+            // signature with NO body. Lower it to a Rust
+            // `extern "C" { fn ...; }` foreign-mod item (the body-having
+            // `ItemFn` path cannot represent a bodyless declaration).
+            Decl::FuncDecl(f) if f.is_extern => {
+                Ok(Item::ForeignMod(self.lower_extern_func_decl(f)?))
+            }
             Decl::FuncDecl(f) => Ok(Item::Fn(self.lower_func(f)?)),
             Decl::StructDecl(s) => Ok(Item::Struct(self.lower_struct_decl(s)?)),
             // T27: enum codegen. Builds a Rust `pub enum Name<generics> {
@@ -270,6 +307,16 @@ impl RustCodegen {
             // T29: re-exports never reach lower_decl — generate() filters
             // them out. Keep a defensive arm for direct callers.
             Decl::ReexportDecl { .. } => Err(self.unsupported("reexport codegen")),
+            // T32: `extern crate "<name>"` — record the name in the
+            // extern-crate dep set (exposed via [`Self::extern_crates`])
+            // and emit a `use <name>;` item so generated code can refer
+            // to the crate by bare name. Wiring the recorded set into the
+            // generated Cargo.toml is deferred until the CLI switches to
+            // a Cargo-project pipeline.
+            Decl::ExternCrateDecl(d) => {
+                self.extern_crates.insert(d.name.clone());
+                Ok(Item::Use(self.lower_extern_crate_use(&d.name)))
+            }
         }
     }
 
@@ -540,6 +587,126 @@ impl RustCodegen {
             sig,
             block: Box::new(block),
         })
+    }
+
+    /// Lower a Buff `extern func name(params) -> Ret` declaration (T32 —
+    /// FFI) to a Rust [`syn::ItemForeignMod`] of the form
+    /// `extern "C" { fn name(params) -> Ret; }`.
+    ///
+    /// Foreign functions have NO body (the [`FuncDecl::body`] field holds an
+    /// empty placeholder Block that the parser synthesises; it is dropped
+    /// here). Each extern func becomes its own `extern "C" { ... }` block —
+    /// a per-decl block keeps codegen simple and the generated output easy
+    /// to read. The ABI is fixed to `"C"` for v0.5 (Buff exposes no way to
+    /// pick another ABI like `"system"`); a future task may add
+    /// `extern "system" func ...` syntax.
+    ///
+    /// Parameter and return-type lowering reuse [`Self::ast_typeref_to_syn`]
+    /// so the standard Buff→Rust primitive mapping (Int→i64, String→String,
+    /// …) applies uniformly to FFI signatures.
+    ///
+    /// The functions inside an `extern "C" { ... }` block are implicitly
+    /// `unsafe` to CALL (Rust requires an `unsafe { ... }` block at every
+    /// call site) — we do NOT stamp `unsafe` on the foreign-mod itself, so
+    /// the generated code compiles on every Rust edition/toolchain without
+    /// needing the `unsafe_extern_blocks` feature (stabilised in Rust 1.82
+    /// but kept off here for maximum compatibility).
+    fn lower_extern_func_decl(
+        &mut self,
+        f: &FuncDecl,
+    ) -> Result<syn::ItemForeignMod, CodegenError> {
+        // Build the parameter list (same shape as lower_func, but as
+        // ForeignItemFn inputs which are bare PatType pairs).
+        let mut inputs: Punctuated<syn::FnArg, syn::Token![,]> = Punctuated::new();
+        for p in &f.params {
+            let ident = ast_ident_to_syn(&p.name);
+            let ty = self.ast_typeref_to_syn(&p.ty)?;
+            inputs.push(syn::FnArg::Typed(PatType {
+                attrs: Vec::new(),
+                pat: Box::new(Pat::Ident(PatIdent {
+                    attrs: Vec::new(),
+                    ident,
+                    by_ref: None,
+                    mutability: None,
+                    subpat: None,
+                })),
+                colon_token: Default::default(),
+                ty: Box::new(ty),
+            }));
+        }
+
+        let output = match &f.return_type {
+            Some(ty) => {
+                ReturnType::Type(Default::default(), Box::new(self.ast_typeref_to_syn(ty)?))
+            }
+            None => ReturnType::Default,
+        };
+
+        // The signature inside a foreign-mod is a ForeignItemFn: it carries
+        // its own (smaller) Signature and ends with a semicolon — there is
+        // no body.
+        let foreign_fn = syn::ForeignItemFn {
+            attrs: Vec::new(),
+            vis: Visibility::Inherited,
+            sig: Signature {
+                constness: None,
+                asyncness: None,
+                unsafety: None,
+                abi: None,
+                fn_token: Default::default(),
+                ident: ast_ident_to_syn(&f.name),
+                generics: Default::default(),
+                paren_token: Default::default(),
+                inputs,
+                variadic: None,
+                output,
+            },
+            semi_token: Default::default(),
+        };
+
+        Ok(syn::ItemForeignMod {
+            attrs: Vec::new(),
+            // `unsafety: None` keeps the block compatible with all Rust
+            // editions; functions inside are implicitly unsafe to call.
+            unsafety: None,
+            abi: syn::Abi {
+                extern_token: Default::default(),
+                name: Some(syn::LitStr::new("C", ProcSpan::call_site())),
+            },
+            brace_token: Default::default(),
+            items: vec![syn::ForeignItem::Fn(foreign_fn)],
+        })
+    }
+
+    /// Build a `use <name>;` item for an `extern crate "<name>"`
+    /// declaration (T32). The `use` brings the crate's root into scope so
+    /// generated code can refer to its items by bare path
+    /// (e.g. `serde::Serialize`). We emit `use <name>;` (NOT
+    /// `use <name>::*;`) to avoid glob-import lint warnings — callers
+    /// qualify paths explicitly.
+    fn lower_extern_crate_use(&self, name: &str) -> syn::ItemUse {
+        // Build the `use <name>;` item. Crate names may contain `-`
+        // (e.g. `rust-decimal`) which is NOT a valid Rust identifier —
+        // crates.io normalises `-` to `_` in Rust source. We do the same
+        // here so generated `use rust_decimal;` matches what Cargo would
+        // expect. (If the user wrote `extern crate "rust-decimal"` the
+        // generated `use` becomes `use rust_decimal;`.)
+        //
+        // In Rust 2018+ `use <crate>;` brings the external crate into scope.
+        // In syn this is a `UseTree::Name` (a single-segment path), NOT a
+        // `UseTree::Path` with a nested name (which would wrongly emit
+        // `use serde::serde;`).
+        let rust_ident_name = name.replace('-', "_");
+        syn::ItemUse {
+            attrs: Vec::new(),
+            vis: Visibility::Inherited,
+            use_token: Default::default(),
+            leading_colon: None,
+            semi_token: Default::default(),
+            tree: syn::UseTree::Name(syn::UseName {
+                ident: Ident::new(&rust_ident_name, ProcSpan::call_site()),
+            }),
+        }
     }
 
     fn lower_block(&mut self, block: &Block) -> Result<syn::Block, CodegenError> {
@@ -2387,19 +2554,13 @@ impl RustCodegen {
     fn ast_typeref_to_syn(&self, ty: &TypeRef) -> Result<SynType, CodegenError> {
         match ty {
             TypeRef::Named { name, .. } => {
-                let rust_name = match name.name.as_str() {
-                    "Int" => "i64",
-                    "Byte" => "u8",
-                    "Bits" => "u64",
-                    "Float" => "f32",
-                    "Double" => "f64",
-                    "Bool" => "bool",
-                    "String" => "String",
-                    // T21: Char → Rust's primitive `char` type.
-                    "Char" => "char",
-                    "Decimal" => "rust_decimal::Decimal",
-                    other => other,
-                };
+                // T32: the Buff→Rust primitive-name mapping is now a
+                // single named, configurable table at
+                // [`buff_primitive_to_rust_name`] (covers all 9 primitive
+                // names: Int, Byte, Bits, Float, Double, Bool, String,
+                // Char, Decimal). Unknown names pass through unchanged so
+                // user-defined types (struct/enum names) keep their spelling.
+                let rust_name = buff_primitive_to_rust_name(&name.name);
                 Ok(rust_path_type(rust_name))
             }
             TypeRef::Option(inner, _) => {
@@ -2564,6 +2725,52 @@ impl Default for RustCodegen {
 /// line/col) is recorded separately in [`CodegenContext`].
 fn ast_ident_to_syn(ident: &buff_lang_ast::common::Ident) -> Ident {
     Ident::new(&ident.name, ProcSpan::call_site())
+}
+
+/// T32: the single named, configurable Buff→Rust primitive-type mapping
+/// table.
+///
+/// Maps each of Buff's 9 primitive type NAMES to the corresponding Rust
+/// type name (as written in source — the caller wraps it in a
+/// [`rust_path_type`] to form a [`SynType`]). This is the ONE place that
+/// knows how Buff primitive names spell in Rust; both
+/// [`RustCodegen::ast_typeref_to_syn`] (unresolved [`TypeRef`]s from
+/// user-written annotations) and any future "reverse" mapping (Rust→Buff
+/// for diagnostics) should consult this table.
+///
+/// The 9 primitive names covered (the task's "13 types" counts 9
+/// primitives + 4 generic containers — Vector, Option, Matrix, Map, Result
+/// — which are handled structurally in [`RustCodegen::ast_typeref_to_syn`]
+/// / [`RustCodegen::buff_type_to_syn`] because they carry type arguments):
+///
+/// | Buff name | Rust name            |
+/// |-----------|----------------------|
+/// | `Int`     | `i64`                |
+/// | `Byte`    | `u8`                 |
+/// | `Bits`    | `u64`                |
+/// | `Float`   | `f32`                |
+/// | `Double`  | `f64`                |
+/// | `Bool`    | `bool`               |
+/// | `String`  | `String`             |
+/// | `Char`    | `char`               |
+/// | `Decimal` | `rust_decimal::Decimal` |
+///
+/// Unknown names (anything not in the table) are returned unchanged so
+/// user-defined types (struct/enum names, generic type parameters like
+/// `T`) keep their spelling — they become Rust path types verbatim.
+pub fn buff_primitive_to_rust_name(buff_name: &str) -> &str {
+    match buff_name {
+        "Int" => "i64",
+        "Byte" => "u8",
+        "Bits" => "u64",
+        "Float" => "f32",
+        "Double" => "f64",
+        "Bool" => "bool",
+        "String" => "String",
+        "Char" => "char",
+        "Decimal" => "rust_decimal::Decimal",
+        other => other,
+    }
 }
 
 /// Build a `syn::Type::Path` from a `::`-separated Rust type name string

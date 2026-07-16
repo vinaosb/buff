@@ -234,11 +234,12 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
 
 /// Parse a function declaration: `func name(params) -> Ret { body }`.
 ///
-/// The leading `func` keyword is consumed here. Modifier keywords (`async`,
-/// `unsafe`, `extern`) are NOT supported in T8 — they will be handled in a
-/// later task. Encountering them before `func` is the caller's concern: this
-/// function is normally reached via [`crate::parser::parse`] which dispatches
-/// only on `KwFunc`.
+/// The leading `func` keyword is consumed here. Modifier keywords
+/// (`async`, `extern`) preceding `func` are consumed here too (T31 added
+/// `async`; T32 added `extern`). Encountering `unsafe` before `func` is the
+/// caller's concern (not yet wired through the dispatcher). This function
+/// is normally reached via [`crate::parser::parse`] which dispatches on
+/// `KwFunc`, `KwAsync`+`KwFunc`, or `KwExtern`+`KwFunc`.
 ///
 /// # T31 — `async func` modifier
 ///
@@ -248,11 +249,29 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
 /// Otherwise (`KwFunc` is the first token) `is_async` stays `false`.
 /// Either way the `func` keyword must follow (and is consumed here).
 ///
+/// # T32 — `extern func` modifier (FFI)
+///
+/// When the dispatcher routes `extern func` here, the leading `extern`
+/// keyword is consumed and `is_extern = true` is set. **Extern funcs have
+/// NO body** (they are foreign-function declarations); after parsing the
+/// signature (`name(params) -> Ret`) the parser DOES NOT expect a block.
+/// The codegen lowers an `is_extern` FuncDecl to a Rust
+/// `extern "C" { fn name(params) -> Ret; }` foreign-mod item (the empty
+/// placeholder [`Block`] stored on the AST is dropped at codegen time).
+///
 /// # Errors
 ///
 /// Returns [`ParseError`] on missing name, parameter list, return type
-/// syntax, or body block.
+/// syntax, or (for non-extern funcs) body block.
 pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseError> {
+    // T32: consume the optional leading `extern` modifier (FFI declaration).
+    let is_extern = if matches!(stream.peek_kind(), Some(TokenKind::KwExtern)) {
+        let extern_tok = stream.advance().expect("peek guaranteed KwExtern");
+        let _ = extern_tok; // span tracking not needed for v0.5
+        true
+    } else {
+        false
+    };
     // T31: consume the optional leading `async` modifier.
     let is_async = if matches!(stream.peek_kind(), Some(TokenKind::KwAsync)) {
         let async_tok = stream.advance().expect("peek guaranteed KwAsync");
@@ -291,7 +310,20 @@ pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseEr
     };
 
     // Body: brace-delimited OR layout-sensitive block (T9).
-    let body = parse_block(stream)?;
+    //
+    // T32: extern funcs are foreign-function declarations and have NO
+    // body — synthesize an empty placeholder Block whose span ends at the
+    // signature. The codegen detects `is_extern` and emits a Rust
+    // `extern "C" { fn ...; }` foreign-mod item instead of a body-having
+    // `ItemFn`, so the placeholder is never rendered.
+    let body = if is_extern {
+        Block {
+            stmts: Vec::new(),
+            span: Span::new(end, end, source_id),
+        }
+    } else {
+        parse_block(stream)?
+    };
     let span = Span::new(start, body.span.end.max(end), source_id);
 
     Ok(FuncDecl {
@@ -301,7 +333,7 @@ pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseEr
         body,
         is_async,
         is_unsafe: false,
-        is_extern: false,
+        is_extern,
         span,
     })
 }
@@ -1236,6 +1268,134 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
             stream.eof_span(),
         ))),
     }
+}
+
+/// Parse an `extern crate "name"` declaration (T32 — FFI basics).
+///
+/// Records a dependency on an external Rust crate. The Buff form uses a
+/// STRING literal for the crate name (`extern crate "serde"`) — unlike
+/// Rust's `extern crate serde;`, which uses a bare path — so the crate
+/// name may be any crates.io identifier (including names with `-`, which
+/// are not valid Buff identifiers). The codegen emits a `use <name>;`
+/// item and records the name in its extern-crate dep set.
+///
+/// The leading `extern` keyword is consumed here; this function expects
+/// the NEXT significant token to be the bare identifier `crate`. The
+/// crate name string follows immediately.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] on:
+/// - missing `crate` identifier after `extern`,
+/// - missing crate-name string after `crate`,
+/// - interpolation inside the crate-name string.
+pub fn parse_extern_crate_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseError> {
+    let source_id = stream.source_id();
+    let extern_tok = stream.expect(TokenKind::KwExtern)?;
+    let start = extern_tok.span.start;
+
+    // Expect the bare identifier `crate` (NOT a keyword in Buff — it is
+    // parsed as a regular Ident). Reject anything else with a helpful msg.
+    let crate_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected `crate` after `extern`, found end of input",
+            stream.eof_span(),
+        ))
+    })?;
+    match &crate_tok.kind {
+        TokenKind::Ident(s) if s == "crate" => {}
+        other => {
+            return Err(ParseError::new(Diagnostic::error(
+                format!(
+                    "expected `crate` after `extern`, found `{other}` \
+                     (Buff supports `extern crate \"<name>\"` and `extern func ...`)"
+                ),
+                crate_tok.span,
+            )));
+        }
+    }
+
+    // Consume the crate-name string literal (`"serde"`). Reuse the same
+    // StringStart/StringPart/StringEnd machinery the lexer uses for every
+    // string — interpolation is rejected (crate names must be plain).
+    let (name, name_end) = expect_crate_name_string(stream)?;
+    let span = Span::new(start, name_end, source_id);
+    Ok(Decl::ExternCrateDecl(buff_lang_ast::ExternCrateDecl {
+        name,
+        span,
+    }))
+}
+
+/// Expect a plain string literal naming a crate (the `"serde"` part of
+/// `extern crate "serde"`). Returns the crate name + the end offset of
+/// the closing `"`.
+///
+/// Mirrors [`expect_path_string`] but with crate-specific error messages.
+/// The Buff lexer tokenizes every `"..."` as `StringStart, StringPart,
+/// StringEnd`; we consume that three-token sequence and reject any
+/// interpolated form.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if the next token is not a `StringStart`, if
+/// the `StringPart` is missing, if interpolation appears, or if the
+/// closing `StringEnd` is missing.
+fn expect_crate_name_string(stream: &mut TokenStream<'_>) -> Result<(String, usize), ParseError> {
+    let start_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected crate-name string after `extern crate`, found end of input",
+            stream.eof_span(),
+        ))
+    })?;
+    if !matches!(start_tok.kind, TokenKind::StringStart) {
+        return Err(ParseError::new(Diagnostic::error(
+            format!(
+                "expected crate-name string after `extern crate`, found `{}`",
+                start_tok.kind
+            ),
+            start_tok.span,
+        )));
+    }
+
+    let part_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected crate-name string content, found end of input",
+            stream.eof_span(),
+        ))
+    })?;
+    let name = match part_tok.kind {
+        TokenKind::StringPart(s) => s,
+        TokenKind::InterpStart => {
+            return Err(ParseError::new(Diagnostic::error(
+                "crate-name string cannot contain interpolation",
+                part_tok.span,
+            )));
+        }
+        other => {
+            return Err(ParseError::new(Diagnostic::error(
+                format!("expected crate-name string content, found `{other}`"),
+                part_tok.span,
+            )));
+        }
+    };
+
+    let end_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "unterminated crate-name string (missing closing quote)",
+            stream.eof_span(),
+        ))
+    })?;
+    if !matches!(end_tok.kind, TokenKind::StringEnd) {
+        return Err(ParseError::new(Diagnostic::error(
+            format!(
+                "crate-name string cannot contain interpolation; expected end of string, found `{}`",
+                end_tok.kind
+            ),
+            end_tok.span,
+        )));
+    }
+
+    Ok((name, end_tok.span.end))
 }
 
 /// Expect a string-literal path token (the `"./foo.buff"` part of an

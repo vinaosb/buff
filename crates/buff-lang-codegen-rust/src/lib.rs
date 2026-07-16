@@ -44,7 +44,7 @@ pub mod rust_codegen;
 pub use context::CodegenContext;
 pub use format::format;
 pub use move_analysis::MoveAnalyzer;
-pub use rust_codegen::RustCodegen;
+pub use rust_codegen::{buff_primitive_to_rust_name, RustCodegen};
 
 /// Convenience alias for [`format`] so external callers (tests, the CLI)
 /// can refer to it without importing the module. T26 introduced the alias

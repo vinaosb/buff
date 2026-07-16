@@ -717,7 +717,7 @@ testable on its own (54 dedicated tests + 7 inline = 61 total).
 - `crates/buff-lang-types/src/modules.rs` (inline `#[cfg(test)]`) — 7 tests
 All passing; clippy clean; fmt clean.
 
-## T31 � Async with call graph propagation
+## T31 � Async with call graph propagation
 
 ### Status: COMPLETE (42 tests pass: 21 propagation + 21 codegen)
 
@@ -730,13 +730,13 @@ All passing; clippy clean; fmt clean.
 - `task.result()` ? `task.await` (the only `.await` from a method-call site)
 - `block(<expr>)` ? one-shot `Runtime::new().expect(...).block_on(<expr>)`
 - `block()` inside async fn ? deadlock-warning Diagnostic collected in `RustCodegen::warnings`
-- NO `await` keyword in Buff source (the lexer has no KwAwait � only KwAsync/KwSpawn)
+- NO `await` keyword in Buff source (the lexer has no KwAwait � only KwAsync/KwSpawn)
 
 ### Critical: deterministic data structures (T29 lesson applied)
 - `CallGraph` uses `BTreeMap<String, BTreeSet<String>>` (sorted iteration)
 - `AsyncSet` uses `BTreeSet<String>` (sorted output via `to_sorted_vec`)
 - Fixpoint scans edges in BTreeMap order ? byte-identical output every run
-- DO NOT use HashMap for the async set or call graph � iteration order is
+- DO NOT use HashMap for the async set or call graph � iteration order is
   non-deterministic and will make tests flaky (the lesson T29 taught us)
 
 ### Buff syntax surprise: `func name():` (colon is REQUIRED)
@@ -764,9 +764,9 @@ canonical shape whenever writing inline Buff source in tests.
 
 ### Codegen `current_fn_is_async` vs `in_async_context`
 Two distinct concepts in `RustCodegen`:
-- `current_fn_is_async()` � true when the fn being lowered is in the
+- `current_fn_is_async()` � true when the fn being lowered is in the
   propagated async set (per `async_fns` BTreeSet)
-- `in_async_context()` � true when EITHER `current_fn_is_async()` OR
+- `in_async_context()` � true when EITHER `current_fn_is_async()` OR
   `async_block_depth > 0` (we're inside one or more `async move { ... }`
   blocks, e.g. inside a `spawn` body)
 
@@ -777,7 +777,7 @@ block-in-async-block isn't a deadlock (the spawned task can run on
 another worker).
 
 ### Async block depth tracking
-`async_block_depth: usize` on RustCodegen � incremented by `lower_spawn`
+`async_block_depth: usize` on RustCodegen � incremented by `lower_spawn`
 around the task body lowering, decremented after. This lets nested
 async blocks (e.g. `spawn spawn work()`) work correctly.
 
@@ -785,20 +785,20 @@ async blocks (e.g. `spawn spawn work()`) work correctly.
 Per the spec `spawn task() -> tokio::spawn(async move { task() })`: the
 spawner stays sync. The spawned task IS async (inside `async move`),
 but the spawner isn't. Implemented by NOT recursing into `Spawn { task }`
-in `collect_func_calls` � a deliberate `Spawn { task: _, .. } => {}` arm.
+in `collect_func_calls` � a deliberate `Spawn { task: _, .. } => {}` arm.
 
 ### `result()` is special-cased BEFORE the T26 field-access heuristic
 `task.result()` parses as a zero-arg `MethodCall`, which the T26 heuristic
 would rewrite as a field access `task.result` (broken on a JoinHandle).
 The `if method.name == "result"` arm runs FIRST in `lower_method_call`,
-unconditionally returning `make_await(recv)` � no `args.is_empty()` gate
+unconditionally returning `make_await(recv)` � no `args.is_empty()` gate
 (so both `t.result()` and `t.result` work).
 
 ### Tests added (42 total)
-- `crates/buff-lang-types/tests/async_propagation.rs` � 21 tests
-- `crates/buff-lang-types/src/async_analysis.rs` (inline `#[cfg(test)]`) � 21 tests
-- `crates/buff-lang-codegen-rust/tests/async_codegen.rs` � 21 tests
-- `crates/buff-lang-parser/tests/stmt_tests.rs` � 1 test updated
+- `crates/buff-lang-types/tests/async_propagation.rs` � 21 tests
+- `crates/buff-lang-types/src/async_analysis.rs` (inline `#[cfg(test)]`) � 21 tests
+- `crates/buff-lang-codegen-rust/tests/async_codegen.rs` � 21 tests
+- `crates/buff-lang-parser/tests/stmt_tests.rs` � 1 test updated
   (`test_async_func_top_level_errors` ? `test_async_func_top_level_parses_with_is_async_flag`)
 
 ### Verifications
@@ -809,3 +809,108 @@ unconditionally returning `make_await(recv)` � no `args.is_empty()` gate
 - `cargo clippy --workspace --all-targets -- -D warnings` -> clean
 - `cargo fmt -p buff-lang-{ast,parser,types,codegen-rust} -- --check` -> clean
 - `cargo check --workspace` -> clean
+
+## T32 — FFI basics (extern crate + extern func + type table)
+
+### Status: COMPLETE
+
+Implemented FFI declarations: `extern crate "<name>"` records an
+external-Rust-crate dependency, and `extern func sig(...) -> Ret`
+declares a foreign function (bodyless). Also extracted the Buff→Rust
+primitive-name mapping into a single named, configurable table.
+
+### Additive AST change
+- `Decl::ExternCrateDecl(ExternCrateDecl)` — PURELY ADDITIVE new variant.
+- `ExternCrateDecl { name: String, span: Span }` — `name` is `String`
+  (NOT `Ident`) because crate names may contain `-` (e.g. `rust-decimal`),
+  which is not a valid Buff identifier character.
+- Migration note in `decl.rs` (T32 section), mirroring T20-T31 additive
+  precedents. Every `match` on `Decl` across the workspace gained an arm;
+  `async_analysis.rs`'s two matches already used `_ =>` catch-alls so no
+  change was needed there.
+
+### Parser (crates/buff-lang-parser/src/{parser,stmt,lib}.rs)
+- Dispatcher routes `KwExtern` by peeking the SECOND token:
+  - `Ident("crate")` → `parse_extern_crate_decl` → `Decl::ExternCrateDecl`
+  - `KwFunc` → `parse_func_decl` (consumes leading `extern`)
+- `parse_func_decl` now consumes an optional leading `extern` modifier
+  (mirrors T31's `async` handling). When `is_extern`, NO body is parsed
+  — an empty placeholder `Block` is synthesised (codegen drops it).
+- `parse_extern_crate_decl` consumes `extern crate "<name>"`; reuses
+  StringStart/StringPart/StringEnd lexer machinery via a dedicated
+  `expect_crate_name_string` helper (crate-specific error messages,
+  rejects interpolation).
+
+### Codegen (crates/buff-lang-codegen-rust/src/rust_codegen.rs)
+- `RustCodegen.extern_crates: BTreeSet<String>` — recorded dep set
+  (BTreeSet for DETERMINISM; the T29 flaky-test lesson — never use
+  HashSet for codegen output).
+- `RustCodegen::extern_crates()` accessor — public, for the future
+  Cargo-project pipeline + codegen-level tests.
+- `Decl::ExternCrateDecl` lower: records name + emits `use <name>;`
+  (hyphen→underscore normalised; `UseTree::Name`, NOT `Path`, so it
+  emits `use serde;` not the wrong `use serde::serde;`).
+- `Decl::FuncDecl where is_extern` lower: routes to
+  `lower_extern_func_decl` → `syn::ItemForeignMod` →
+  `extern "C" { fn name(params) -> Ret; }`. Bodyless foreign-fn
+  declaration. `unsafety: None` on the block for max Rust-edition
+  compatibility (functions inside are implicitly unsafe to call).
+- `buff_primitive_to_rust_name(&str) -> &str` — the T32 configurable
+  type table. Single source of truth consulted by
+  `ast_typeref_to_syn`. Covers all 9 primitives: Int→i64, Byte→u8,
+  Bits→u64, Float→f32, Double→f64, Bool→bool, String→String, Char→char,
+  Decimal→rust_decimal::Decimal. Unknown names pass through unchanged
+  (so struct/enum/generic-param names keep their spelling). Re-exported
+  at crate root for test ergonomics.
+
+### CLI→Cargo.toml wiring: DEFERRED
+The CLI pipeline (`buff-lang-cli/src/pipeline.rs`) currently invokes
+`rustc --edition 2021 <file>.rs` on a SINGLE generated .rs file — there
+is NO Cargo project model and NO generated Cargo.toml. Wiring the
+recorded `extern_crates()` set into a generated Cargo.toml's
+`[dependencies]` requires switching the pipeline to Cargo-project
+assembly, which is too large for T32's scope. T32 instead implements +
+tests the codegen-level collection (dep-set + `use` emission +
+foreign-mod signatures), and documents the deferral. The task spec §3
+explicitly allows this fallback.
+
+### Tests added (17 in crates/buff-lang-codegen-rust/tests/ffi.rs)
+- extern crate: records name in dep set, emits `use <name>;`, snapshot,
+  multiple crates deterministic BTreeSet order, hyphen→underscore,
+  duplicate dedup.
+- extern func: lowers to `extern "C" { fn ...; }`, bodyless, void
+  return, snapshot, String param mapping.
+- type table: all 9 primitives, unknown-name passthrough, generic
+  containers inner-arg mapping.
+- end-to-end: lexer→parser→codegen round-trip + reparse; parser error
+  cases (extern without crate/func, extern crate without string).
+
+### Pre-existing test updated
+- `codegen_tests.rs::test_codegen_async_unsafe_extern_modifiers`: the
+  old test combined `is_async + is_unsafe + is_extern` which is now
+  nonsensical (extern funcs are bodyless foreign-mods, can't be async).
+  Updated to `is_extern: false` so it exercises async+unsafe on a
+  body-having fn; the extern case is covered by the new ffi.rs suite.
+
+### Verifications (MSVC env)
+- `cargo test -p buff-lang-codegen-rust --test ffi` -> 17 passed; 0 failed
+- `cargo test --workspace` -> ALL crates 0 failed
+- `cargo check --workspace` -> clean
+- `cargo clippy --workspace --all-targets -- -D warnings` -> clean
+- `cargo fmt -p buff-lang-{ast,parser,types,codegen-rust} -- --check` -> clean
+- `cargo fmt --all -- --check` -> clean
+
+### Reusable patterns
+- For bodyless AST decls: store an empty placeholder `Block` (don't make
+  body `Option<Block>` — that's a breaking migration across every
+  FuncDecl construction site). Codegen drops the placeholder.
+- For syn `ItemUse` of a bare crate name: use `UseTree::Name`, NOT
+  `UseTree::Path` with a nested Name (which wrongly emits `X::X`).
+- For DETERMINISTIC dep-set collection: `BTreeSet<String>` (never
+  `HashSet` — the T29 flaky-test lesson applies to ALL codegen output).
+- syn 2.0.119 `ItemForeignMod` has NO `vis` field (visibility lives on
+  the inner `ForeignItem`s); `ItemUse` REQUIRES a `semi_token` field.
+- `crate` is NOT a Buff keyword (the 25-keyword list) — it parses as a
+  regular `Ident("crate")`, so the dispatcher matches on
+  `Some(TokenKind::Ident(s)) if s == "crate"`.
+

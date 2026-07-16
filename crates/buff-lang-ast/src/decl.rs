@@ -39,6 +39,16 @@ pub enum Decl {
     /// `wildcard = true` re-exports ALL public symbols from the target
     /// module; otherwise `names` lists the specific symbols re-exported.
     ReexportDecl(ReexportDecl),
+    /// An `extern crate "name"` declaration (T32 — FFI basics).
+    ///
+    /// Records that the generated Rust crate must depend on the named
+    /// crates.io/Rust crate AND that a `use <name>;` item should be
+    /// emitted at the top of the generated source. The RustCodegen
+    /// collects these into a `BTreeSet<String>` (exposed via
+    /// [`RustCodegen::extern_crates`](../../buff_lang_codegen_rust/struct.RustCodegen.html#method.extern_crates))
+    /// so the CLI/pipeline can write them into the generated `Cargo.toml`
+    /// when full Cargo-project wiring lands.
+    ExternCrateDecl(ExternCrateDecl),
 }
 
 impl fmt::Display for Decl {
@@ -52,6 +62,7 @@ impl fmt::Display for Decl {
             Decl::TraitDecl(d) => write!(f, "{d}"),
             Decl::ExportDecl(d) => write!(f, "{d}"),
             Decl::ReexportDecl(d) => write!(f, "{d}"),
+            Decl::ExternCrateDecl(d) => write!(f, "{d}"),
         }
     }
 }
@@ -386,6 +397,45 @@ pub struct ModuleDecl {
 impl fmt::Display for ModuleDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ModuleDecl({})", self.name)
+    }
+}
+
+/// An `extern crate "name"` declaration (T32 — FFI basics).
+///
+/// Records a dependency on an external Rust crate (e.g. `extern crate "serde"`
+/// records `serde`). Unlike Rust's `extern crate serde;` form, Buff uses a
+/// STRING literal for the crate name so it is unambiguous (Buff has no bare
+/// `crate` keyword) and so the same shape can later carry a version
+/// constraint (`extern crate "serde" "1.0"` — future work). The RustCodegen
+/// emits a `use <name>;` item for each and collects the names into a
+/// `BTreeSet<String>` exposed via `RustCodegen::extern_crates()` so the
+/// pipeline (when it gains Cargo-project assembly) can write
+/// `<name> = "*"` lines into the generated `Cargo.toml`.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T32 — new Decl variant
+///
+/// `Decl::ExternCrateDecl(ExternCrateDecl)` is **purely additive** (no
+/// existing variant changed). All `match` expressions on [`Decl`] across
+/// the codebase gained a `Decl::ExternCrateDecl { .. }` arm. The codegen
+/// pass records the crate name and emits a `use <name>;` item (single-file
+/// codegen); wiring the recorded set into the generated `Cargo.toml` is
+/// deferred until the CLI pipeline switches from single-file `rustc`
+/// invocation to a Cargo-project model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternCrateDecl {
+    /// Crate name as written in the string literal (`extern crate "serde"`
+    /// → `"serde"`). Stored as a `String` (not [`Ident`]) because crate
+    /// names may contain `-` (e.g. `rust_decimal`), which is not a valid
+    /// Buff identifier character.
+    pub name: String,
+    pub span: Span,
+}
+
+impl fmt::Display for ExternCrateDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ExternCrate({:?})", self.name)
     }
 }
 

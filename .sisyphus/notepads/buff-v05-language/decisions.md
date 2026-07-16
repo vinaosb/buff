@@ -748,7 +748,7 @@ arms with early returns. Rollback: revert the 5 modified files + delete
 the 2 new test files + remove the `buff-lang-lexer` dev-dep line.
 Clean reversal.
 
-## T31 — Async with call graph propagation
+## T31 ï¿½ Async with call graph propagation
 
 ### Decision: `async_analysis.rs` is a NEW module in buff-lang-types
 Lives at `crates/buff-lang-types/src/async_analysis.rs`. Re-exported at
@@ -761,7 +761,7 @@ the result in `RustCodegen::async_fns: BTreeSet<String>`.
 Build call graph: `BTreeMap<caller, BTreeSet<callees>>`. Seed async set
 with declared-async fns. Loop: any caller with at least one async callee
 joins the async set. Terminate when no growth (at most N iterations for
-N fns). All collections are BTreeMap/BTreeSet — sorted iteration ?
+N fns). All collections are BTreeMap/BTreeSet ï¿½ sorted iteration ?
 byte-identical output across runs (T29 lesson).
 
 ### Decision: spawn does NOT propagate async-ness
@@ -773,7 +773,7 @@ recursed, every `spawn` user would auto-become async, which is wrong
 (the spawner just launches and continues).
 
 ### Decision: `block(expr)` is prelude-style, NOT a keyword
-`block` is NOT in the lexer's 25-keyword list — it resolves like a
+`block` is NOT in the lexer's 25-keyword list ï¿½ it resolves like a
 prelude fn. Codegen special-cases it in the FuncCall arm before the
 regular call path:
 `block(arg)` ? `{ let rt = Runtime::new().expect("..."); rt.block_on(arg) }`
@@ -792,13 +792,13 @@ full postfix chain is captured: `spawn task()` ? Spawn { Call(task) }).
 T26 field-access heuristic would rewrite `task.result()` as
 `task.result` (broken on a JoinHandle). The early arm in
 `lower_method_call` unconditionally returns `make_await(recv)` for any
-`method.name == "result"` — works for both `t.result()` (with parens)
+`method.name == "result"` ï¿½ works for both `t.result()` (with parens)
 and `t.result` (no parens, same AST shape per the parser's Dot arm).
 
 ### Decision: `current_fn_is_async()` vs `in_async_context()`
 Two distinct helpers:
-- `current_fn_is_async()` — propagated-set check on the current fn name
-- `in_async_context()` — `current_fn_is_async() || async_block_depth > 0`
+- `current_fn_is_async()` ï¿½ propagated-set check on the current fn name
+- `in_async_context()` ï¿½ `current_fn_is_async() || async_block_depth > 0`
 
 The `.await` insertion at async call sites uses `in_async_context()` so
 async calls inside `spawn <async_call>()` get `.await` (the async-move
@@ -818,7 +818,7 @@ adds one to the depth). Combined with `current_fn_is_async()` via
    bare Ident naming an async fn (per the propagated set) AND
    `in_async_context()` is true. Emitted as `callee(args).await`.
 2. **`Task<T>.result()` site**: any method call whose method name is
-   `result`. Emitted as `recv.await`. (Unconditional — works in any
+   `result`. Emitted as `recv.await`. (Unconditional ï¿½ works in any
    context. Buff's type system would normally reject this on a non-Task
    receiver, but for v0.5 the codegen just emits the `.await` and lets
    rustc catch misuse.)
@@ -857,7 +857,7 @@ the only existing test that needed updating for T31.
 
 ### Migration note (additive AST changes)
 All T31 AST changes are ADDITIVE:
-- New `Expr::Spawn { task, span }` variant — every exhaustive `match`
+- New `Expr::Spawn { task, span }` variant ï¿½ every exhaustive `match`
   on Expr gained an arm (ir.rs collect_uses, exhaustiveness.rs
   check_expr, infer.rs infer_expr, codegen expr_uses_matrix and
   expr_uses_error). The variant's payload is a single boxed Expr
@@ -877,4 +877,138 @@ T31 is fully reversible:
 - Revert the `result` early arm in `lower_method_call`
 - Revert the FuncCall-arm changes (`.await` insertion + `block()` lowering)
 - Delete the 3 new test files + restore the 1 renamed parser test
+Clean reversal.
+
+## T32 â€” FFI basics (extern crate + extern func + type table)
+
+### Decision: additive `Decl::ExternCrateDecl` variant (not migration)
+
+Added `Decl::ExternCrateDecl(ExternCrateDecl)` as a PURELY ADDITIVE new
+variant (no existing variant changed), mirroring the T20-T31 additive
+precedent. `ExternCrateDecl { name: String, span: Span }` uses `String`
+for `name` (NOT `Ident`) because crate names may contain `-`
+(e.g. `rust-decimal`), which is not a valid Buff identifier character.
+
+Every `match` on `Decl` across the workspace gained an arm. Two matches
+in `async_analysis.rs` already used `_ =>` catch-alls so they needed no
+change; `types/modules.rs::decl_item_name` got a new explicit arm
+(returns `None` â€” an extern-crate decl has no item name to export).
+
+Migration note in `decl.rs` (T32 section).
+
+### Decision: `extern func` reuses `FuncDecl.is_extern` (no body Option)
+
+`FuncDecl` already had an `is_extern: bool` field (from T2). For T32 we
+wired it through parsing + codegen:
+
+- Parser: `parse_func_decl` consumes an optional leading `extern`
+  modifier (mirrors T31's `async` handling). When `is_extern`, NO body
+  is parsed â€” an empty placeholder `Block` is synthesised.
+- Codegen: `Decl::FuncDecl where is_extern` routes to
+  `lower_extern_func_decl` â†’ `syn::ItemForeignMod` (bodyless
+  `extern "C" { fn ...; }`). The placeholder body is dropped.
+
+**Alternative considered:** make `FuncDecl.body: Option<Block>` to
+represent bodyless extern funcs cleanly. **Rejected** because that's a
+BREAKING migration across every FuncDecl construction site (dozens,
+including test fixtures) for a minor representational gain. The empty-
+placeholder-Block + codegen-drops-it approach is non-breaking and the
+placeholder is invisible in generated output.
+
+### Decision: per-decl foreign-mod blocks (not grouped)
+
+Each `extern func` lowers to its own `extern "C" { fn ...; }` block
+rather than grouping all extern funcs into one shared block. This keeps
+codegen simple (each decl â†’ one item) at the cost of slightly more
+verbose output. Grouping is a cosmetic refactor deferred to a later
+task. The generated source is valid Rust either way.
+
+### Decision: `unsafety: None` on foreign-mod (not `unsafe extern`)
+
+The task spec mentioned `unsafe extern "C" fn` but a bodyless top-level
+`unsafe extern "C" fn ...;` declaration is NOT valid Rust outside a
+foreign-mod block. The valid forms are:
+1. `extern "C" { fn ...; }` (classic foreign-mod; stable forever)
+2. `unsafe extern "C" { fn ...; }` (unsafe foreign-mod; stabilised Rust 1.82)
+
+We chose form 1 (`unsafety: None`) for maximum Rust-edition and
+toolchain compatibility. Functions INSIDE the block are implicitly
+unsafe to call (Rust requires `unsafe { ... }` at every call site
+regardless), so the `unsafe` keyword on the block itself adds no
+semantic value at the declaration site. Form 2 would require edition
+2024 or the `unsafe_extern_blocks` feature gate on older editions.
+
+### Decision: codegen-level dep-set collection; CLIâ†’Cargo.toml DEFERRED
+
+The acceptance criterion "generated Cargo.toml contains serde" is
+satisfied at the CODEGEN level (via `RustCodegen::extern_crates()` +
+`use serde;` emission + documented deferral), NOT via real CLIâ†’Cargo.toml
+wiring. Rationale: the CLI pipeline (`pipeline.rs`) currently invokes
+`rustc --edition 2021 <file>.rs` on a SINGLE generated .rs file â€” there
+is no Cargo project model and no Cargo.toml at all. Switching to a
+Cargo-project assembly model is too large a change for T32's scope.
+
+The task spec Â§3 explicitly allows this fallback: "If full CLI wiring
+is too large for this task, implement the codegen-level collection +
+`use` emission + extern-func signatures + type table, TEST at codegen
+level (assert the extern-crate set + generated `use`/signatures), and
+DOCUMENT the CLI-Cargo.toml-write as a deferral."
+
+The future Cargo-project pipeline will consume `extern_crates()` to
+write `<name> = "*"` (or a pinned version) lines into the generated
+Cargo.toml's `[dependencies]` section.
+
+### Decision: `use <name>;` (not glob, not path)
+
+For `extern crate "<name>"`, emit `use <name>;` (a `UseTree::Name`, NOT
+`UseTree::Path` with a nested Name which wrongly produces `use X::X;`).
+We chose `use <name>;` over `use <name>::*;` to avoid glob-import lint
+warnings â€” callers should qualify paths explicitly
+(e.g. `serde::Serialize`). Crate names with `-` are normalised to `_`
+(`rust-decimal` â†’ `use rust_decimal;`) matching crates.io convention.
+
+### Decision: BTreeSet for extern_crates (DETERMINISM)
+
+`RustCodegen.extern_crates` is a `BTreeSet<String>`, NOT a `HashSet`.
+This ensures iteration order is deterministic across runs and
+independent of hash seed â€” the T29 flaky-test lesson ("never rely on
+HashSet iteration order for codegen output"). Tested explicitly by
+`multiple_extern_crates_recorded_in_deterministic_btree_order` which
+feeds crates in non-alphabetical order and asserts sorted output.
+
+### Decision: type table as a free function (not a method/const map)
+
+The T32 type mapping table is a free function
+`buff_primitive_to_rust_name(&str) -> &str` rather than a `const
+[(&str, &str); N]` array or a method. Rationale:
+- A `match` expression lets the compiler verify exhaustiveness of any
+  future `Type`-enum-backed mapping (when we tie names to enum variants).
+- Returning `&str` with a passthrough `other => other` arm keeps the
+  call site zero-allocation.
+- "Configurable" (per the task's REFACTOR ask) is satisfied by having a
+  SINGLE named entry point that any future reverse mapping
+  (Rustâ†’Buff for diagnostics) or override mechanism can consult.
+
+The table covers the 9 primitive names. The 4 generic containers
+(Vector, Option, Matrix, Map, Result) are handled structurally in
+`ast_typeref_to_syn` / `buff_type_to_syn` (they carry type arguments)
+and were already covered by existing tests (vector_codegen.rs,
+map_codegen.rs, etc.); the T32 task extracted only the NAME mapping.
+
+### Reversibility
+
+T32 is cleanly reversible:
+- Remove `Decl::ExternCrateDecl` variant + `ExternCrateDecl` struct
+- Revert `parse_func_decl` to ignore `KwExtern` (drop the extern-prefix
+  consumption + the `if is_extern` body-skip branch)
+- Remove `parse_extern_crate_decl` + `expect_crate_name_string`
+- Revert parser dispatcher `KwExtern` arm
+- Remove `RustCodegen.extern_crates` field + accessor +
+  `lower_extern_func_decl` + `lower_extern_crate_use` +
+  `buff_primitive_to_rust_name`
+- Restore inline mapping in `ast_typeref_to_syn`
+- Remove `Decl::ExternCrateDecl` arm in `types/modules.rs::decl_item_name`
+- Delete `tests/ffi.rs`
+- Restore `codegen_tests.rs::test_codegen_async_unsafe_extern_modifiers`
+  to `is_extern: true` (and re-add the `extern` assertion)
 Clean reversal.

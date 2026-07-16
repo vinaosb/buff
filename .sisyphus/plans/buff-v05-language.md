@@ -673,7 +673,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T32**: FFI basics — import Rust crates [unspecified-high]
+- [x] **T32**: FFI basics — import Rust crates [unspecified-high]
 
   **What to do** (TDD):
   - **RED**: Write test: `extern crate "serde"` → adds `serde` to generated Cargo.toml + `use serde;`
