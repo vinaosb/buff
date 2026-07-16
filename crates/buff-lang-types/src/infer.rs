@@ -224,6 +224,20 @@ impl TypeInferencer {
                     _ => Ok(Type::Unknown),
                 }
             }
+            // T31: `spawn expr` yields a `Task<T>` (Buff's alias for
+            // Rust's `tokio::task::JoinHandle<T>`). The inner `T` is the
+            // task body's return type. For v0.5 we leave it `Unknown`
+            // because the type-inferencer doesn't yet track `Task<T>` as
+            // a first-class `Type` variant — codegen handles it via the
+            // `t.result()` → `.await` rewrite, which yields the inner `T`
+            // at the await site.
+            Expr::Spawn { task, .. } => {
+                // Visit the task body so sub-inference runs, but the spawn
+                // expression itself returns Unknown (the Task<T> wrapper
+                // is opaque at the type level for v0.5).
+                let _ = self.infer_expr(task)?;
+                Ok(Type::Unknown)
+            }
         }
     }
 

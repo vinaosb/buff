@@ -747,3 +747,134 @@ extended `assignable_to` rules, extended `infer_expr` Ident/FuncCall
 arms with early returns. Rollback: revert the 5 modified files + delete
 the 2 new test files + remove the `buff-lang-lexer` dev-dep line.
 Clean reversal.
+
+## T31 — Async with call graph propagation
+
+### Decision: `async_analysis.rs` is a NEW module in buff-lang-types
+Lives at `crates/buff-lang-types/src/async_analysis.rs`. Re-exported at
+crate root: `analyze_async`, `build_call_graph`, `propagate_async`,
+`is_async_after_propagation`, `AsyncSet`, `CallGraph`. The codegen pass
+calls `analyze_async(decls)` once at the top of `generate()` and stores
+the result in `RustCodegen::async_fns: BTreeSet<String>`.
+
+### Decision: fixpoint algorithm with deterministic data structures
+Build call graph: `BTreeMap<caller, BTreeSet<callees>>`. Seed async set
+with declared-async fns. Loop: any caller with at least one async callee
+joins the async set. Terminate when no growth (at most N iterations for
+N fns). All collections are BTreeMap/BTreeSet — sorted iteration ?
+byte-identical output across runs (T29 lesson).
+
+### Decision: spawn does NOT propagate async-ness
+`collect_func_calls` deliberately skips `Expr::Spawn { task }` (arm is
+`Spawn { task: _, .. } => {}`). Rationale: per the spec
+`spawn task() -> tokio::spawn(async move { task() })` the spawner stays
+sync; the spawned task runs in its own `async move` block. If we
+recursed, every `spawn` user would auto-become async, which is wrong
+(the spawner just launches and continues).
+
+### Decision: `block(expr)` is prelude-style, NOT a keyword
+`block` is NOT in the lexer's 25-keyword list — it resolves like a
+prelude fn. Codegen special-cases it in the FuncCall arm before the
+regular call path:
+`block(arg)` ? `{ let rt = Runtime::new().expect("..."); rt.block_on(arg) }`
+When the current fn is async, also append a deadlock-warning Diagnostic
+to `RustCodegen::warnings` (drainable via `take_warnings()`).
+
+### Decision: `spawn <expr>` is a NEW AST node (Expr::Spawn)
+`spawn` IS a reserved keyword (`TokenKind::KwSpawn`), so it can't
+be an ordinary ident call. New additive variant `Expr::Spawn { task:
+Box<Expr>, span }` with full migration notes in `expr.rs`. The parser
+builds it from `KwSpawn` in `parse_primary` via `parse_unary` (so the
+full postfix chain is captured: `spawn task()` ? Spawn { Call(task) }).
+
+### Decision: `task.result()` ? `task.await` (special-cased before T26 heuristic)
+`result` is NOT in `KNOWN_ZERO_ARG_METHODS`. Without an early arm, the
+T26 field-access heuristic would rewrite `task.result()` as
+`task.result` (broken on a JoinHandle). The early arm in
+`lower_method_call` unconditionally returns `make_await(recv)` for any
+`method.name == "result"` — works for both `t.result()` (with parens)
+and `t.result` (no parens, same AST shape per the parser's Dot arm).
+
+### Decision: `current_fn_is_async()` vs `in_async_context()`
+Two distinct helpers:
+- `current_fn_is_async()` — propagated-set check on the current fn name
+- `in_async_context()` — `current_fn_is_async() || async_block_depth > 0`
+
+The `.await` insertion at async call sites uses `in_async_context()` so
+async calls inside `spawn <async_call>()` get `.await` (the async-move
+block IS async, even if the spawner is sync). The `block()` deadlock
+warning uses `current_fn_is_async()` because block-in-spawn isn't a
+deadlock (the runtime can run the spawned task on another worker).
+
+### Decision: `async_block_depth: usize` counter for spawn bodies
+Incremented by `lower_spawn` around the task-body lowering, decremented
+after. Lets nested `spawn spawn work()` work correctly (each level
+adds one to the depth). Combined with `current_fn_is_async()` via
+`in_async_context()`.
+
+### Decision: codegen suspension rule (the EXACT `.await` insertion rule)
+`.await` is auto-inserted at exactly two sites:
+1. **Async-call site inside an async context**: when the callee is a
+   bare Ident naming an async fn (per the propagated set) AND
+   `in_async_context()` is true. Emitted as `callee(args).await`.
+2. **`Task<T>.result()` site**: any method call whose method name is
+   `result`. Emitted as `recv.await`. (Unconditional — works in any
+   context. Buff's type system would normally reject this on a non-Task
+   receiver, but for v0.5 the codegen just emits the `.await` and lets
+   rustc catch misuse.)
+
+That's it. There is NO `await` keyword in Buff; the only `.await` in
+generated Rust comes from these two paths.
+
+### Decision: `main` ? `#[tokio::main]` when async
+If the propagated async set contains `"main"`, `lower_func` emits
+`#[tokio::main]` (via `syn::parse_quote!`) on the `async fn main`. This
+is the bridge between Buff's "main can become async automatically" and
+tokio's runtime requirement.
+
+### Decision: `block(arg)` lowering uses `expect()` (NOT `unwrap()`)
+The generated Rust uses `.expect("failed to create tokio runtime")` on
+`Runtime::new()`. This is in the GENERATED program (not the compiler),
+so the "no unwrap/expect" rule (which is about the COMPILER's source
+code) doesn't apply. The error message is lowercase + no trailing
+period per the conventions doc.
+
+### Decision: `async_func_decl` consumes optional `async` modifier
+`parse_func_decl` peeks for `KwAsync` at entry; if present, consumes
+it and sets `is_async = true` on the FuncDecl. The dispatcher in
+`parser.rs` routes BOTH `KwFunc` and `KwAsync` (when followed by
+`KwFunc`) to `parse_func_decl` so the modifier is handled in one
+place. `export async func` is handled symmetrically in
+`parse_export_decl`.
+
+### Decision: parser test `test_async_func_top_level_errors` was INVERTED
+Pre-T31 that test asserted `async func` was a top-level parse error
+(T8 had deferred the async modifier). T31 implements `async func`, so
+the test was renamed to
+`test_async_func_top_level_parses_with_is_async_flag` and now asserts
+the GREEN behavior: parse succeeds, FuncDecl.is_async is true. This is
+the only existing test that needed updating for T31.
+
+### Migration note (additive AST changes)
+All T31 AST changes are ADDITIVE:
+- New `Expr::Spawn { task, span }` variant — every exhaustive `match`
+  on Expr gained an arm (ir.rs collect_uses, exhaustiveness.rs
+  check_expr, infer.rs infer_expr, codegen expr_uses_matrix and
+  expr_uses_error). The variant's payload is a single boxed Expr
+  (the task body) plus a Span.
+- No existing variant was renamed, reordered, or had its payload
+  altered. All prior `match` arms remain exhaustive.
+
+### Reversibility
+T31 is fully reversible:
+- Remove `Expr::Spawn` from `expr.rs` (and its span/Display arms)
+- Remove `Spawn` arms in ir.rs, exhaustiveness.rs, infer.rs, codegen
+- Revert `parse_func_decl` to ignore `KwAsync`
+- Revert parser dispatch (remove `KwAsync` arms in parser.rs and stmt.rs)
+- Remove `async_analysis.rs` and its lib.rs re-exports
+- Revert `RustCodegen` field additions + `lower_spawn`/`lower_block_call`/
+  `make_await`/`current_fn_is_async`/`in_async_context`
+- Revert the `result` early arm in `lower_method_call`
+- Revert the FuncCall-arm changes (`.await` insertion + `block()` lowering)
+- Delete the 3 new test files + restore the 1 renamed parser test
+Clean reversal.

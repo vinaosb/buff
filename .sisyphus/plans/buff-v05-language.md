@@ -614,7 +614,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T31**: Async with call graph propagation [deep]
+- [x] **T31**: Async with call graph propagation [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `async func http_get(url)` is marked as I/O boundary in call graph

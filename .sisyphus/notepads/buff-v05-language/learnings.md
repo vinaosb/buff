@@ -716,3 +716,96 @@ testable on its own (54 dedicated tests + 7 inline = 61 total).
 - `crates/buff-lang-types/tests/modules.rs` â€” 27 tests
 - `crates/buff-lang-types/src/modules.rs` (inline `#[cfg(test)]`) â€” 7 tests
 All passing; clippy clean; fmt clean.
+
+## T31 — Async with call graph propagation
+
+### Status: COMPLETE (42 tests pass: 21 propagation + 21 codegen)
+
+### What works
+- `async func name(...)` declared-async fns seed the async set
+- Call-graph propagation (fixpoint): any fn transitively calling an async fn becomes async
+- `main` fn in async set gets `#[tokio::main]` attribute + `async fn main`
+- Auto-inserted `.await` at async call sites INSIDE async contexts
+- `spawn <expr>` ? `tokio::spawn(async move { <expr> })` (returns JoinHandle<T>)
+- `task.result()` ? `task.await` (the only `.await` from a method-call site)
+- `block(<expr>)` ? one-shot `Runtime::new().expect(...).block_on(<expr>)`
+- `block()` inside async fn ? deadlock-warning Diagnostic collected in `RustCodegen::warnings`
+- NO `await` keyword in Buff source (the lexer has no KwAwait — only KwAsync/KwSpawn)
+
+### Critical: deterministic data structures (T29 lesson applied)
+- `CallGraph` uses `BTreeMap<String, BTreeSet<String>>` (sorted iteration)
+- `AsyncSet` uses `BTreeSet<String>` (sorted output via `to_sorted_vec`)
+- Fixpoint scans edges in BTreeMap order ? byte-identical output every run
+- DO NOT use HashMap for the async set or call graph — iteration order is
+  non-deterministic and will make tests flaky (the lesson T29 taught us)
+
+### Buff syntax surprise: `func name():` (colon is REQUIRED)
+Buff's offside-rule layout requires `func name():` (trailing colon) before
+the indented body. A bare `func name()` without the colon is a parse
+error. This bit me in 2 round-trip tests: I wrote
+`"async func io()`n`    return 0`"` and the parser rejected it with
+`expected ':', found 'return'`. The fix was adding the colon:
+`"async func io():`n`    return 0"`. Check `examples/ola.buff` for the
+canonical shape whenever writing inline Buff source in tests.
+
+### Migration note: `Expr::Spawn` is additive
+- New AST variant `Expr::Spawn { task: Box<Expr>, span: Span }` (T31)
+- Parser builds it from `KwSpawn` in `parse_primary` (calls `parse_unary`
+  for the task body so `spawn task()` captures the full call)
+- `ir.rs::collect_uses` recurses into `Spawn { task }`
+- `exhaustiveness.rs::check_expr` recurses into `Spawn { task }` (so
+  matches inside spawned tasks are still checked)
+- `infer.rs::infer_expr` returns `Type::Unknown` for Spawn (Task<T> is
+  opaque at the type level for v0.5)
+- codegen's `expr_uses_matrix` and `expr_uses_error` recurse for
+  emit-on-demand detection
+- codegen lowers `spawn expr` ? `tokio::spawn(async move { <lowered> })`
+  via `quote!`
+
+### Codegen `current_fn_is_async` vs `in_async_context`
+Two distinct concepts in `RustCodegen`:
+- `current_fn_is_async()` — true when the fn being lowered is in the
+  propagated async set (per `async_fns` BTreeSet)
+- `in_async_context()` — true when EITHER `current_fn_is_async()` OR
+  `async_block_depth > 0` (we're inside one or more `async move { ... }`
+  blocks, e.g. inside a `spawn` body)
+
+The `.await` insertion rule uses `in_async_context()` so async calls
+inside `spawn <async_call>()` still get `.await` even when the spawner
+is sync. The deadlock warning uses `current_fn_is_async()` because
+block-in-async-block isn't a deadlock (the spawned task can run on
+another worker).
+
+### Async block depth tracking
+`async_block_depth: usize` on RustCodegen — incremented by `lower_spawn`
+around the task body lowering, decremented after. This lets nested
+async blocks (e.g. `spawn spawn work()`) work correctly.
+
+### spawn does NOT propagate async-ness
+Per the spec `spawn task() -> tokio::spawn(async move { task() })`: the
+spawner stays sync. The spawned task IS async (inside `async move`),
+but the spawner isn't. Implemented by NOT recursing into `Spawn { task }`
+in `collect_func_calls` — a deliberate `Spawn { task: _, .. } => {}` arm.
+
+### `result()` is special-cased BEFORE the T26 field-access heuristic
+`task.result()` parses as a zero-arg `MethodCall`, which the T26 heuristic
+would rewrite as a field access `task.result` (broken on a JoinHandle).
+The `if method.name == "result"` arm runs FIRST in `lower_method_call`,
+unconditionally returning `make_await(recv)` — no `args.is_empty()` gate
+(so both `t.result()` and `t.result` work).
+
+### Tests added (42 total)
+- `crates/buff-lang-types/tests/async_propagation.rs` — 21 tests
+- `crates/buff-lang-types/src/async_analysis.rs` (inline `#[cfg(test)]`) — 21 tests
+- `crates/buff-lang-codegen-rust/tests/async_codegen.rs` — 21 tests
+- `crates/buff-lang-parser/tests/stmt_tests.rs` — 1 test updated
+  (`test_async_func_top_level_errors` ? `test_async_func_top_level_parses_with_is_async_flag`)
+
+### Verifications
+- `cargo test -p buff-lang-types --test async_propagation` -> 21 passed
+- `cargo test -p buff-lang-codegen-rust --test async_codegen` -> 21 passed
+- `cargo test --workspace` -> all green (one pre-existing parser test
+  was updated to reflect that `async func` is now valid syntax)
+- `cargo clippy --workspace --all-targets -- -D warnings` -> clean
+- `cargo fmt -p buff-lang-{ast,parser,types,codegen-rust} -- --check` -> clean
+- `cargo check --workspace` -> clean

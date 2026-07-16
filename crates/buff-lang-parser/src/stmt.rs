@@ -240,11 +240,27 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
 /// function is normally reached via [`crate::parser::parse`] which dispatches
 /// only on `KwFunc`.
 ///
+/// # T31 — `async func` modifier
+///
+/// When this function is called with the cursor positioned at `KwAsync`
+/// (the dispatcher routes `async func` here), it consumes the `async`
+/// keyword and sets `is_async = true` on the resulting [`FuncDecl`].
+/// Otherwise (`KwFunc` is the first token) `is_async` stays `false`.
+/// Either way the `func` keyword must follow (and is consumed here).
+///
 /// # Errors
 ///
 /// Returns [`ParseError`] on missing name, parameter list, return type
 /// syntax, or body block.
 pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseError> {
+    // T31: consume the optional leading `async` modifier.
+    let is_async = if matches!(stream.peek_kind(), Some(TokenKind::KwAsync)) {
+        let async_tok = stream.advance().expect("peek guaranteed KwAsync");
+        let _ = async_tok; // span tracking not needed for v0.5
+        true
+    } else {
+        false
+    };
     let func_tok = stream.expect(TokenKind::KwFunc)?;
     let start = func_tok.span.start;
     let source_id = stream.source_id();
@@ -283,7 +299,7 @@ pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseEr
         params,
         return_type,
         body,
-        is_async: false,
+        is_async,
         is_unsafe: false,
         is_extern: false,
         span,
@@ -1105,6 +1121,20 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
     match stream.peek_kind() {
         // `export func ...` → wrap FuncDecl in ExportDecl.
         Some(TokenKind::KwFunc) => {
+            let f = parse_func_decl(stream)?;
+            let span = f.span;
+            Ok(Decl::ExportDecl(ExportDecl {
+                inner: Box::new(Decl::FuncDecl(f)),
+                span,
+            }))
+        }
+        // T31: `export async func ...` → wrap an async FuncDecl in ExportDecl.
+        // The dispatcher reaches this arm when the user wrote `export async
+        // func name(...)`; `parse_func_decl` consumes the leading `async`
+        // and sets `is_async = true` on the inner FuncDecl.
+        Some(TokenKind::KwAsync)
+            if matches!(stream.peek_second_kind(), Some(TokenKind::KwFunc)) =>
+        {
             let f = parse_func_decl(stream)?;
             let span = f.span;
             Ok(Decl::ExportDecl(ExportDecl {

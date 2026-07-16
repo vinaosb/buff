@@ -22,9 +22,11 @@ use crate::stream::TokenStream;
 /// | Token   | Result                                                |
 /// |---------|-------------------------------------------------------|
 /// | `func`  | [`Decl::FuncDecl`] (T8)                               |
+/// | `async func` | [`Decl::FuncDecl`] with `is_async = true` (T31) |
 /// | `enum`  | [`Decl::EnumDecl`] (T27)                              |
 /// | `import`| [`Decl::ImportDecl`] (T29 — ES6 `from "..."` + legacy)|
 /// | `export`| [`Decl::ExportDecl`] / [`Decl::ReexportDecl`] (T29)  |
+/// | `export async func` | [`Decl::ExportDecl`] wrapping an async fn (T31) |
 ///
 /// Any other token at top level is an error — statements such as
 /// `let`/`return`/`if` belong inside a function body, not at module scope.
@@ -42,6 +44,18 @@ pub fn parse(
     while !stream.is_at_end() {
         match stream.peek_kind() {
             Some(TokenKind::KwFunc) => {
+                let f = parse_func_decl(&mut stream)?;
+                decls.push(Decl::FuncDecl(f));
+            }
+            // T31: `async func name(...) { ... }` — the async modifier on a
+            // function declaration. The `async` keyword (`TokenKind::KwAsync`)
+            // precedes `func`; `parse_func_decl` consumes the leading `async`
+            // (if present) and sets `is_async` accordingly. The dispatcher
+            // routes both `async func` and `func` to `parse_func_decl` so
+            // the modifier is handled in one place.
+            Some(TokenKind::KwAsync)
+                if matches!(stream.peek_second_kind(), Some(TokenKind::KwFunc)) =>
+            {
                 let f = parse_func_decl(&mut stream)?;
                 decls.push(Decl::FuncDecl(f));
             }

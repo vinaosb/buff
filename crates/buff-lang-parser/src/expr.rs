@@ -1050,6 +1050,27 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         return parse_match(stream);
     }
 
+    // T31: `spawn <expr>` — async task spawn. `spawn` is a reserved
+    // keyword (`TokenKind::KwSpawn`), so it can never be parsed as an
+    // ordinary identifier. The operand is the next primary expression
+    // (which goes through the full postfix chain after parse_primary
+    // returns, so `spawn task()` parses as `Expr::Spawn { task: Call(task) }`
+    // — exactly the shape codegen wants).
+    if matches!(tok.kind, TokenKind::KwSpawn) {
+        let spawn_tok = stream.advance().expect("peek guaranteed KwSpawn");
+        let start = spawn_tok.span.start;
+        // Parse the task body. Use `parse_unary` (one level above
+        // parse_postfix) so `spawn task()` captures the full call, not
+        // just the bare `task`. The task expression's end determines the
+        // span's end.
+        let task = parse_unary(stream)?;
+        let end = task.span().end;
+        return Ok(Expr::Spawn {
+            task: Box::new(task),
+            span: Span::new(start, end, stream.source_id()),
+        });
+    }
+
     // If it's an open paren, parse a parenthesized expression.
     if matches!(tok.kind, TokenKind::LParen) {
         stream.advance(); // consume '('

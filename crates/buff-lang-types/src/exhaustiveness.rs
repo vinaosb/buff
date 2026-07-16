@@ -324,6 +324,9 @@ fn check_expr(
         // T30: `expr?` — recurse into the operand so nested matches inside
         // the propagated expression are still checked.
         Expr::Try { expr, .. } => check_expr(expr, registry, inferencer),
+        // T31: `spawn expr` — recurse into the task body so any match
+        // expressions inside the spawned task are still checked.
+        Expr::Spawn { task, .. } => check_expr(task, registry, inferencer),
     }
 }
 

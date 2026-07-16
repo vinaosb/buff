@@ -193,6 +193,28 @@ impl fmt::Display for InterpPart {
 /// `Result<T, E>`, which is exactly what Rust's `?` requires. The explicit
 /// `match expr { Ok(v) => v, Err(e) => return Err(e) }` desugaring (the task's
 /// option (b)) is NOT used; native `?` is simpler and equally correct.
+///
+/// ## T31 — `Expr::Spawn` (the `spawn <task>` async-spawn form)
+///
+/// A new variant was **added** in T31 (v0.5) to carry Buff's async-spawn
+/// prefix operator: `spawn <expr>`. The lexer tokenises `spawn` as a
+/// reserved keyword (`TokenKind::KwSpawn`); it can never be an ordinary
+/// identifier, so the parser MUST treat it specially — it builds an
+/// `Expr::Spawn` node in `parse_primary`. The operand (the task to spawn)
+/// is boxed.
+///
+/// This is **additive**: no existing variant was renamed, reordered, or had
+/// its payload altered, so all prior `match` arms remain exhaustive. The
+/// variant carries a `span: Span` for diagnostics.
+///
+/// Codegen lowers `spawn expr` to Rust's `tokio::spawn(async move { expr })`,
+/// yielding a `tokio::task::JoinHandle<T>`. Buff's `Task<T>` is a thin alias
+/// for `JoinHandle<T>`; the auto-inserted `.await` (the only `.await` ever
+/// emitted) lands when the user calls `t.result()` (see T31 codegen rules).
+/// The `spawn` keyword does NOT propagate async-ness up the call graph on
+/// its own — but every well-formed Buff program that uses `spawn` does so
+/// inside an already-async function (the codegen warning for `block()`
+/// inside async is the only direct effect of mis-use).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A literal: `42`, `"hi"`, `true`, …
@@ -329,6 +351,22 @@ pub enum Expr {
     /// `TokenKind::Question`, already produced by the lexer — it is NOT a
     /// reserved keyword).
     Try { expr: Box<Expr>, span: Span },
+    /// The async-spawn prefix operator `spawn <expr>` (T31).
+    ///
+    /// Buff tokenises `spawn` as a reserved keyword (`TokenKind::KwSpawn`)
+    /// so it can never be parsed as an ordinary identifier. The parser
+    /// builds this node in `parse_primary` when it sees `KwSpawn` at a
+    /// primary position; the operand is the next expression (the task to
+    /// spawn).
+    ///
+    /// Codegen lowers `spawn expr` to Rust's
+    /// `tokio::spawn(async move { expr })`, yielding a
+    /// `tokio::task::JoinHandle<T>`. Buff's `Task<T>` type is a thin alias
+    /// for `JoinHandle<T>`; the only `.await` ever emitted is at the
+    /// `t.result()` site (see T31 codegen rules).
+    ///
+    /// This is **additive** (T31): see the migration note on [`Expr`].
+    Spawn { task: Box<Expr>, span: Span },
 }
 
 impl Expr {
@@ -350,7 +388,8 @@ impl Expr {
             | Expr::Index { span: s, .. }
             | Expr::StringInterp { span: s, .. }
             | Expr::MapLit { span: s, .. }
-            | Expr::Try { span: s, .. } => *s,
+            | Expr::Try { span: s, .. }
+            | Expr::Spawn { span: s, .. } => *s,
         }
     }
 }
@@ -485,6 +524,8 @@ impl fmt::Display for Expr {
             }
             // T30: `expr?` -> `Try(expr)`.
             Expr::Try { expr, .. } => write!(f, "Try({expr})"),
+            // T31: `spawn expr` -> `Spawn(expr)`.
+            Expr::Spawn { task, .. } => write!(f, "Spawn({task})"),
         }
     }
 }

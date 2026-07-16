@@ -467,15 +467,28 @@ fn test_func_at_stmt_level_errors() {
 }
 
 #[test]
-fn test_async_func_top_level_errors() {
-    // `async` is not handled at top level — parse() should error.
+fn test_async_func_top_level_parses_with_is_async_flag() {
+    // T31: `async func foo() { }` is now valid Buff syntax. The `async`
+    // modifier is consumed by `parse_func_decl` and sets `is_async = true`
+    // on the resulting FuncDecl. The dispatcher in `parse()` routes
+    // `async func` (KwAsync followed by KwFunc) to `parse_func_decl` so
+    // the modifier is handled in one place.
+    //
+    // (Pre-T31 this test asserted the OPPOSITE — that `async func` was a
+    // top-level error — because T8 had deferred the async modifier. T31
+    // implements it; this test now pins the GREEN behavior.)
     let tokens = tokenize("async func foo() { }", sid()).expect("lex");
-    let err = parse(&tokens, sid()).expect_err("should error");
-    assert!(
-        err.diagnostic.message.contains("top level"),
-        "message was: {}",
-        err.diagnostic.message
-    );
+    let decls = parse(&tokens, sid()).expect("async func must now parse");
+    assert_eq!(decls.len(), 1, "expected exactly one top-level decl");
+    match &decls[0] {
+        buff_lang_ast::Decl::FuncDecl(f) => {
+            assert_eq!(f.name.name, "foo");
+            assert!(f.is_async, "is_async must be true for `async func`");
+            assert!(!f.is_unsafe);
+            assert!(!f.is_extern);
+        }
+        other => panic!("expected FuncDecl, got {other:?}"),
+    }
 }
 
 #[test]

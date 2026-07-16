@@ -66,7 +66,7 @@
 //! Structs, enums, imports, traits, lambdas, match, method-call and
 //! struct-init lowering are deferred to later tasks.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use proc_macro2::Span as ProcSpan;
 use syn::punctuated::Punctuated;
@@ -104,6 +104,31 @@ pub struct RustCodegen {
     /// GPU-dispatch auto-detection that populates this set lands in v1.0;
     /// T26 provides the emission mechanism only. See [`Self::mark_struct_repr_c`].
     repr_c_struct_names: HashSet<String>,
+    /// T31: the post-propagation async-function name set. Populated by
+    /// [`Self::generate`] via [`buff_lang_types::analyze_async`] BEFORE
+    /// per-function lowering starts, so [`Self::lower_func`] can override
+    /// each fn's `is_async` flag with the propagated value and
+    /// [`Self::lower_expr`] can auto-insert `.await` at async call sites
+    /// inside async fns.
+    async_fns: BTreeSet<String>,
+    /// T31: name of the function currently being lowered (`None` outside
+    /// `lower_func`). Used by [`Self::lower_expr`] to decide whether to
+    /// emit `.await` at async call sites and by [`Self::lower_method_call`]
+    /// to decide whether `.result()` should warn.
+    current_fn_name: Option<String>,
+    /// T31: depth of `async move { ... }` blocks we're currently inside.
+    /// Incremented by [`Self::lower_spawn`] around the task-body lowering
+    /// so async calls inside the spawned task still get `.await` (the
+    /// `async move` block IS an async context even if the spawning fn is
+    /// sync). Combined with [`Self::current_fn_is_async`] via
+    /// [`Self::in_async_context`].
+    async_block_depth: usize,
+    /// T31: collected warning-level diagnostics (e.g. `block()` inside an
+    /// async fn is a deadlock risk). Publicly accessible via
+    /// [`Self::take_warnings`] so callers (CLI, tests) can render them
+    /// alongside generated Rust without losing the underlying codegen
+    /// result.
+    warnings: Vec<Diagnostic>,
 }
 
 impl RustCodegen {
@@ -114,12 +139,32 @@ impl RustCodegen {
             move_analyzer: MoveAnalyzer::new(),
             type_inferencer: TypeInferencer::new(),
             repr_c_struct_names: HashSet::new(),
+            async_fns: BTreeSet::new(),
+            current_fn_name: None,
+            async_block_depth: 0,
+            warnings: Vec::new(),
         }
     }
 
     /// Borrow the inner context (read-only).
     pub fn context(&self) -> &CodegenContext {
         &self.ctx
+    }
+
+    /// T31: drain the collected warning diagnostics (e.g. `block()` inside
+    /// an async fn is a deadlock risk). Returns them in source order.
+    ///
+    /// Warnings are accumulated during [`Self::generate`]; calling this
+    /// afterwards gives the caller (CLI, tests) a chance to render them
+    /// alongside the generated Rust. Calling it twice in a row returns an
+    /// empty `Vec` the second time.
+    pub fn take_warnings(&mut self) -> Vec<Diagnostic> {
+        std::mem::take(&mut self.warnings)
+    }
+
+    /// T31: borrow the collected warning diagnostics without draining.
+    pub fn warnings(&self) -> &[Diagnostic] {
+        &self.warnings
     }
 
     /// T26 hook: mark a struct name to be emitted with `#[repr(C)]` between
@@ -171,6 +216,18 @@ impl RustCodegen {
         if program_uses_error(decls) {
             items.extend(error_struct_items());
         }
+        // T31: run async call-graph propagation BEFORE per-function
+        // lowering so each `lower_func` call can override `is_async` with
+        // the propagated value. Buff has no `await` keyword — async-ness
+        // propagates up the call graph from declared-async fns to all
+        // transitive callers. The result feeds two codegen decisions:
+        //   1. `lower_func`: emit `async fn` (and `#[tokio::main]` for
+        //      `main`) when the propagated set marks the fn async.
+        //   2. `lower_expr` / `lower_method_call`: auto-insert `.await`
+        //      at async-call sites inside async fns, and lower
+        //      `spawn expr` → `tokio::spawn(async move { expr })` and
+        //      `t.result()` → `t.await`.
+        self.async_fns = buff_lang_types::analyze_async(decls).names;
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -403,6 +460,19 @@ impl RustCodegen {
             }
         }
 
+        // T31: override the declared `is_async` flag with the PROPAGATED
+        // value from the call-graph fixpoint. Buff has no `await` keyword;
+        // a fn becomes async if it (transitively) calls an async fn, even
+        // when the user didn't write `async`. The propagated set is
+        // computed once at the top of [`Self::generate`].
+        let is_async = self.async_fns.contains(&f.name.name);
+
+        // T31: record the current fn name so `lower_expr` and
+        // `lower_method_call` can decide whether to emit `.await`.
+        // (The propagated `async_fns` set is program-wide — it doesn't
+        // change per-function.)
+        let prev_fn_name = self.current_fn_name.replace(f.name.name.clone());
+
         let name = ast_ident_to_syn(&f.name);
 
         let mut inputs: Punctuated<syn::FnArg, syn::Token![,]> = Punctuated::new();
@@ -432,7 +502,7 @@ impl RustCodegen {
 
         let sig = Signature {
             constness: None,
-            asyncness: f.is_async.then(Default::default),
+            asyncness: is_async.then(Default::default),
             unsafety: f.is_unsafe.then(Default::default),
             abi: f.is_extern.then(|| syn::Abi {
                 extern_token: Default::default(),
@@ -449,8 +519,23 @@ impl RustCodegen {
 
         let block = self.lower_block(&f.body)?;
 
+        // T31: emit `#[tokio::main]` on the entry `main` fn when it's in
+        // the propagated async set. Buff has no `await` keyword, so the
+        // `main` fn becomes async automatically when it transitively
+        // calls any async fn; tokio's runtime attribute is what makes
+        // that work.
+        let attrs = if is_async && f.name.name == "main" {
+            vec![syn::parse_quote!(#[tokio::main])]
+        } else {
+            Vec::new()
+        };
+
+        // Restore the previous fn context (in case of nested lowering —
+        // currently impossible but defensive).
+        self.current_fn_name = prev_fn_name;
+
         Ok(ItemFn {
-            attrs: Vec::new(),
+            attrs,
             vis: Visibility::Inherited,
             sig,
             block: Box::new(block),
@@ -686,12 +771,29 @@ impl RustCodegen {
                     if name.name == "Error" && args.len() == 1 {
                         return self.lower_error_constructor(args);
                     }
+                    // T31: `block(expr)` is a prelude-style async-blocking
+                    // form. It runs an async expression synchronously by
+                    // spinning up a one-shot tokio runtime and calling
+                    // `.block_on(expr)` on it. Inside an async fn this is a
+                    // DEADLOCK RISK (the runtime can't run the future while
+                    // the current task holds the worker thread), so we
+                    // emit a warning diagnostic AND still lower it (the
+                    // user gets the warning + the (broken) Rust; they can
+                    // then refactor). `block` is NOT a reserved keyword
+                    // — it's a builtin name resolved like a prelude fn.
+                    if name.name == "block" && args.len() == 1 {
+                        return self.lower_block_call(&args[0]);
+                    }
                 }
 
                 // A function name (bare Ident callee) is NOT a variable
                 // use — it doesn't consume a move. Lower it without
                 // consulting the move analyzer; other callee shapes
                 // (MethodCall, etc.) go through the normal path.
+                let callee_is_async = matches!(
+                    callee.as_ref(),
+                    Expr::Ident(name, _) if self.async_fns.contains(&name.name)
+                );
                 let callee = match callee.as_ref() {
                     Expr::Ident(name, _) => SynExpr::Path(syn::ExprPath {
                         attrs: Vec::new(),
@@ -704,12 +806,28 @@ impl RustCodegen {
                 for a in args {
                     lowered.push(self.lower_expr(a)?);
                 }
-                Ok(SynExpr::Call(syn::ExprCall {
+                let call = SynExpr::Call(syn::ExprCall {
                     attrs: Vec::new(),
                     func: Box::new(callee),
                     paren_token: Default::default(),
                     args: lowered,
-                }))
+                });
+
+                // T31: AUTO-INSERT `.await` at async call sites. Buff has
+                // no `await` keyword; the codegen inserts `.await` when:
+                //   - the callee is a bare Ident naming an async fn (per
+                //     the propagated async set), AND
+                //   - we're currently in an async context (the current fn
+                //     is async OR we're inside an `async move { ... }`
+                //     block — e.g. inside a `spawn` body).
+                // This is the ONLY place `.await` is emitted by the call-
+                // site rule; `t.result()` → `.await` is a separate path
+                // in `lower_method_call`.
+                if callee_is_async && self.in_async_context() {
+                    Ok(make_await(call))
+                } else {
+                    Ok(call)
+                }
             }
             Expr::IfExpr {
                 cond,
@@ -793,6 +911,14 @@ impl RustCodegen {
             // is NOT used; native `?` is simpler and equally correct. See the
             // REFACTOR note on [`Self::lower_try`] for the extracted helper.
             Expr::Try { expr, .. } => self.lower_try(expr),
+            // T31: `spawn expr` → Rust's `tokio::spawn(async move { expr })`.
+            // The operand becomes the body of an `async move` closure so the
+            // task owns all captured variables (Buff hides borrow-checker
+            // pain; the generated Rust must be move-clean). The result is a
+            // `tokio::task::JoinHandle<T>` — Buff's `Task<T>` is a thin
+            // alias for this type. The only `.await` on a Task lands at the
+            // `t.result()` site (see [`Self::lower_method_call`]).
+            Expr::Spawn { task, .. } => self.lower_spawn(task),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -1158,6 +1284,21 @@ impl RustCodegen {
         method: &buff_lang_ast::common::Ident,
         args: &[Expr],
     ) -> Result<SynExpr, CodegenError> {
+        // T31: `task.result()` → Rust's `task.await`. This is the ONLY
+        // `.await` form that originates from a method-call position; it's
+        // the suspension-point API on Buff's `Task<T>` (a thin alias for
+        // `tokio::task::JoinHandle<T>`). The check MUST run BEFORE the T26
+        // field-access-vs-method-call heuristic below, because `result()`
+        // is a zero-arg method call and would otherwise be rewritten as a
+        // field access `task.result` (which is meaningless on a JoinHandle).
+        // We accept both `task.result()` (with parens) and the postfix-
+        // form `task.result` (no parens — same AST shape per the parser's
+        // Dot arm) by NOT gating on `args.is_empty()` here.
+        if method.name == "result" {
+            let recv = self.lower_expr(receiver)?;
+            return Ok(make_await(recv));
+        }
+
         // T26 field-access-vs-method-call disambiguation.
         //
         // Buff parses `obj.field` and `obj.method()` through the SAME AST
@@ -1911,6 +2052,112 @@ impl RustCodegen {
             .map_err(|e| self.unsupported(&format!("Err() codegen parse: {e}")))
     }
 
+    /// T31: lower `spawn <expr>` to Rust's `tokio::spawn(async move { <expr> })`.
+    ///
+    /// The task body becomes the body of an `async move` closure so the
+    /// spawned task owns its captured variables (Buff hides borrow-checker
+    /// pain from users; the generated Rust must be move-clean). The result
+    /// is a `tokio::task::JoinHandle<T>` — Buff's `Task<T>` is a thin alias
+    /// for this type, and the only `.await` on a Task lands at the
+    /// `t.result()` site (see [`Self::lower_method_call`]).
+    ///
+    /// Built via `quote!` so the `tokio::spawn(async move { ... })` shape
+    /// is constructed from real `syn` tokens rather than hand-formatted
+    /// Rust. The single string producer remains `prettyplease::unparse`.
+    fn lower_spawn(&mut self, task: &Expr) -> Result<SynExpr, CodegenError> {
+        // T31: bump async-block depth so async calls inside the task body
+        // still get `.await` (the `async move { ... }` block IS an async
+        // context, even if the spawning fn is sync).
+        self.async_block_depth += 1;
+        let task_expr = self.lower_expr(task)?;
+        self.async_block_depth -= 1;
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            tokio::spawn(async move { #task_expr })
+        };
+        syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("spawn codegen parse: {e}")))
+    }
+
+    /// T31: lower `block(<expr>)` to a one-shot tokio runtime block.
+    ///
+    /// Emits (conceptually):
+    ///
+    /// ```rust,ignore
+    /// {
+    ///     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    ///     rt.block_on(<expr>)
+    /// }
+    /// ```
+    ///
+    /// This is the SYNC context form — it spins up a fresh current-thread
+    /// runtime and blocks the calling thread on the async expression. It's
+    /// the bridge between sync code and an async future when no runtime is
+    /// already running.
+    ///
+    /// # `block()` inside an async fn — DEADLOCK RISK warning
+    ///
+    /// If `block()` is called from inside an async fn (the current fn is in
+    /// the propagated async set), we emit a [`Diagnostic::warning`]
+    /// explaining the deadlock risk: the runtime worker thread is blocked
+    /// on `block_on`, so any future scheduled on the same worker can never
+    /// run, deadlocking the program. The warning is appended to
+    /// [`Self::warnings`]; the codegen still emits the (broken) Rust so the
+    /// user can see what they wrote and decide how to refactor (usually:
+    /// remove `block()` and let the async fn `return` the future directly).
+    fn lower_block_call(&mut self, expr: &Expr) -> Result<SynExpr, CodegenError> {
+        // Warn if we're inside an async fn — block_on in async is a deadlock.
+        if self.current_fn_is_async() {
+            let span = expr.span();
+            self.warnings.push(
+                Diagnostic::warning(
+                    "`block()` inside an async function can deadlock the runtime",
+                    span,
+                )
+                .with_note(
+                    "block_on parks the current worker thread, preventing any future \
+                     scheduled on the same worker from running. Consider returning the \
+                     future directly instead of blocking on it.",
+                ),
+            );
+        }
+        let arg = self.lower_expr(expr)?;
+        // Build the one-shot runtime block via quote! — no hand-formatted
+        // Rust string. The expect() message is intentionally lowercase +
+        // no trailing period per the conventions doc.
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            {
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                rt.block_on(#arg)
+            }
+        };
+        syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("block() codegen parse: {e}")))
+    }
+
+    /// T31: is the function we're currently lowering in the propagated
+    /// async set? Used by [`Self::lower_block_call`] to decide whether to
+    /// emit the deadlock warning.
+    ///
+    /// Returns `false` when called outside `lower_func` (e.g. when lowering
+    /// a free-floating expression in tests).
+    fn current_fn_is_async(&self) -> bool {
+        match &self.current_fn_name {
+            Some(name) => self.async_fns.contains(name),
+            None => false,
+        }
+    }
+
+    /// T31: are we currently inside an async context? True when either:
+    ///   - the current fn is async (per [`Self::current_fn_is_async`]), OR
+    ///   - we're inside one or more `async move { ... }` blocks (e.g.
+    ///     inside a `spawn` body — the spawned task is itself async even
+    ///     when the spawner is sync).
+    ///
+    /// Drives the `.await` insertion decision in [`Self::lower_expr`].
+    fn in_async_context(&self) -> bool {
+        self.current_fn_is_async() || self.async_block_depth > 0
+    }
+
     /// Lower a Buff [`Pattern`] to a Rust [`syn::Pat`] (T27).
     ///
     /// Mapping:
@@ -2422,6 +2669,29 @@ fn field_access(base: SynExpr, field: &str) -> SynExpr {
     })
 }
 
+/// T31: build a Rust `.await` expression `<base>.await` (T31).
+///
+/// This is the ONLY place in the codegen that produces a Rust `.await`.
+/// Buff has no `await` keyword — the codegen auto-inserts `.await` at two
+/// sites:
+///
+/// 1. **Async call sites inside async fns** — when the callee is a known
+///    async fn and the current fn is async, the call is wrapped:
+///    `callee(args)` → `callee(args).await`.
+/// 2. **`Task<T>.result()`** — `t.result()` → `t.await`.
+///
+/// The `ExprAwait` syn node is constructed by hand (NOT via `quote!`) so
+/// the base expression is spliced directly into the `base` slot — keeping
+/// the resulting syn tree as direct as possible.
+fn make_await(base: SynExpr) -> SynExpr {
+    SynExpr::Await(syn::ExprAwait {
+        attrs: Vec::new(),
+        base: Box::new(base),
+        dot_token: Default::default(),
+        await_token: Default::default(),
+    })
+}
+
 /// Allow-list of method names that ALWAYS lower to a Rust method call even
 /// when called with zero arguments (T26 field-access heuristic).
 ///
@@ -2665,6 +2935,9 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
         // T30: recurse into the `?` operand so a Matrix constructor inside a
         // propagated expression is still detected.
         Expr::Try { expr, .. } => expr_uses_matrix(expr),
+        // T31: `spawn expr` — does NOT use Matrix (the task body is opaque
+        // to the Matrix emit-on-demand detector for v0.5).
+        Expr::Spawn { task, .. } => expr_uses_matrix(task),
     }
 }
 
@@ -2830,6 +3103,8 @@ fn expr_uses_error(expr: &Expr) -> bool {
         Expr::SuspendExpr { inner, .. } => expr_uses_error(inner),
         // T30: recurse into the `?` operand.
         Expr::Try { expr, .. } => expr_uses_error(expr),
+        // T31: recurse into the spawn task body.
+        Expr::Spawn { task, .. } => expr_uses_error(task),
     }
 }
 

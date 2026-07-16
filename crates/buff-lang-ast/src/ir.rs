@@ -788,6 +788,8 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
         }
         // T30: `expr?` uses its operand expression.
         Expr::Try { expr, .. } => collect_uses(expr, out),
+        // T31: `spawn expr` uses its operand expression.
+        Expr::Spawn { task, .. } => collect_uses(task, out),
     }
 }
 

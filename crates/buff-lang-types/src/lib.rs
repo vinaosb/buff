@@ -13,6 +13,10 @@
 //! v0.1 supports only primitive types; v0.5 will add collections and
 //! user-defined types.
 
+// T31: async call-graph propagation (fixpoint algorithm). Re-exported at
+// the crate root so the codegen pass (and downstream tools) can call
+// `buff_lang_types::analyze_async(...)` without a long module path.
+pub mod async_analysis;
 pub mod env;
 pub mod exhaustiveness;
 pub mod infer;
@@ -23,6 +27,14 @@ pub mod range_analysis;
 pub mod ty;
 
 pub use env::TypeEnv;
+// T31: async call-graph propagation. Re-exported at crate root so callers
+// (codegen, CLI, snapshot tests) can use `analyze_async`, `build_call_graph`,
+// `propagate_async`, etc. without a long path. Deterministic (BTreeMap/
+// BTreeSet based) — same AST → byte-identical async set every time.
+pub use async_analysis::{
+    analyze_async, build_call_graph, is_async_after_propagation, propagate_async, AsyncSet,
+    CallGraph,
+};
 // T27: exhaustiveness checker for `match` expressions. Re-exported at the
 // crate root so downstream tools (CLI, LSP, snapshot tests) can call
 // `check_program`, `check_match_coverage`, `build_enum_registry`, and
