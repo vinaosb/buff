@@ -88,6 +88,7 @@ fn func(name: &str, is_async: bool, body_stmts: Vec<Stmt>) -> FuncDecl {
         is_async,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     }
 }

@@ -61,6 +61,8 @@ pub enum PreludeCategory {
     System,
     /// Reserved for the collection-prelude (T23/T67). Empty today.
     Collection,
+    /// `assert_eq` and (future) `assert` — testing assertions (T35).
+    Test,
 }
 
 /// A recognised prelude function name.
@@ -111,6 +113,12 @@ pub enum PreludeFn {
     Env,
     /// `exit(code)` — terminate the process with the given exit code.
     Exit,
+    // --- Testing (T35) -------------------------------------------------
+    /// `assert_eq(a, b)` — assert two values are equal (panics otherwise).
+    /// Maps to Rust's `assert_eq!` macro. Only meaningful inside `@test`
+    /// functions, but recognised everywhere (a bare `assert_eq` call in a
+    /// non-test fn still lowers to `assert_eq!` — Rust accepts it).
+    AssertEq,
 }
 
 impl PreludeFn {
@@ -138,6 +146,8 @@ impl PreludeFn {
         PreludeFn::Args,
         PreludeFn::Env,
         PreludeFn::Exit,
+        // Testing
+        PreludeFn::AssertEq,
     ];
 
     /// The source-name of this prelude function (the identifier the user
@@ -162,6 +172,7 @@ impl PreludeFn {
             PreludeFn::Args => "args",
             PreludeFn::Env => "env",
             PreludeFn::Exit => "exit",
+            PreludeFn::AssertEq => "assert_eq",
         }
     }
 
@@ -181,6 +192,7 @@ impl PreludeFn {
             }
             PreludeFn::Print | PreludeFn::Println | PreludeFn::ReadLine => PreludeCategory::Io,
             PreludeFn::Args | PreludeFn::Env | PreludeFn::Exit => PreludeCategory::System,
+            PreludeFn::AssertEq => PreludeCategory::Test,
         }
     }
 }
@@ -289,6 +301,10 @@ pub fn return_type(fn_: PreludeFn, arg_tys: &[Type]) -> Type {
         PreludeFn::Env => Type::option(Type::string()),
         // exit(code) -> Void (never returns)
         PreludeFn::Exit => Type::Void,
+
+        // --- Testing (T35) ---------------------------------------------
+        // assert_eq(a, b) -> Void (panics on mismatch, returns () on success)
+        PreludeFn::AssertEq => Type::Void,
     }
 }
 

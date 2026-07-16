@@ -218,6 +218,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: span(),
         }
     }

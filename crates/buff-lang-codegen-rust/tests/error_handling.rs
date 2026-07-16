@@ -105,6 +105,7 @@ fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }
@@ -119,6 +120,7 @@ fn func_typed(name: &str, ret_ty: TypeRef, stmts: Vec<Stmt>) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }

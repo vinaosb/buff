@@ -37,8 +37,8 @@
 //! skipping peek/advance so existing parsers compose unchanged.
 
 use buff_lang_ast::{
-    BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl, Ident, ImportDecl,
-    Param, ReexportDecl, Stmt, TypeRef,
+    Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl, Ident,
+    ImportDecl, Param, ReexportDecl, Stmt, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ParseError, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -239,7 +239,8 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
 /// `async`; T32 added `extern`). Encountering `unsafe` before `func` is the
 /// caller's concern (not yet wired through the dispatcher). This function
 /// is normally reached via [`crate::parser::parse`] which dispatches on
-/// `KwFunc`, `KwAsync`+`KwFunc`, or `KwExtern`+`KwFunc`.
+/// `KwFunc`, `KwAsync`+`KwFunc`, `KwExtern`+`KwFunc`, or `At`+...+`KwFunc`
+/// (T35 — attributes).
 ///
 /// # T31 — `async func` modifier
 ///
@@ -259,11 +260,21 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
 /// `extern "C" { fn name(params) -> Ret; }` foreign-mod item (the empty
 /// placeholder [`Block`] stored on the AST is dropped at codegen time).
 ///
+/// # T35 — `attributes` parameter
+///
+/// The caller may pass a `Vec<Attribute>` of already-parsed leading `@name`
+/// attributes (collected by the top-level dispatcher when it saw `@` before
+/// the function). These are attached verbatim to the resulting [`FuncDecl`].
+/// The vast majority of call sites pass `Vec::new()` (no attributes).
+///
 /// # Errors
 ///
 /// Returns [`ParseError`] on missing name, parameter list, return type
 /// syntax, or (for non-extern funcs) body block.
-pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseError> {
+pub fn parse_func_decl(
+    stream: &mut TokenStream<'_>,
+    attributes: Vec<Attribute>,
+) -> Result<FuncDecl, ParseError> {
     // T32: consume the optional leading `extern` modifier (FFI declaration).
     let is_extern = if matches!(stream.peek_kind(), Some(TokenKind::KwExtern)) {
         let extern_tok = stream.advance().expect("peek guaranteed KwExtern");
@@ -334,6 +345,7 @@ pub fn parse_func_decl(stream: &mut TokenStream<'_>) -> Result<FuncDecl, ParseEr
         is_async,
         is_unsafe: false,
         is_extern,
+        attributes,
         span,
     })
 }
@@ -1153,7 +1165,7 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
     match stream.peek_kind() {
         // `export func ...` → wrap FuncDecl in ExportDecl.
         Some(TokenKind::KwFunc) => {
-            let f = parse_func_decl(stream)?;
+            let f = parse_func_decl(stream, Vec::new())?;
             let span = f.span;
             Ok(Decl::ExportDecl(ExportDecl {
                 inner: Box::new(Decl::FuncDecl(f)),
@@ -1167,7 +1179,7 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
         Some(TokenKind::KwAsync)
             if matches!(stream.peek_second_kind(), Some(TokenKind::KwFunc)) =>
         {
-            let f = parse_func_decl(stream)?;
+            let f = parse_func_decl(stream, Vec::new())?;
             let span = f.span;
             Ok(Decl::ExportDecl(ExportDecl {
                 inner: Box::new(Decl::FuncDecl(f)),
@@ -1476,6 +1488,151 @@ fn expect_path_string(stream: &mut TokenStream<'_>) -> Result<(String, usize), P
     }
 
     Ok((path, end_tok.span.end))
+}
+
+// ---------------------------------------------------------------------------
+// T35 — Attribute parsing (`@name`).
+//
+// Buff attributes are `@`-prefixed identifiers preceding a declaration:
+//
+//   @test
+//   func test_addition():
+//       assert_eq(add(2, 3), 5)
+//
+// For v0.5 only the argument-less form `@test` is meaningful; the parser
+// also accepts `@name(arg, arg)` for forward-compat with the `@prefer(gpu)`
+// shape the README anticipates, storing the args as raw strings on the
+// [`Attribute`] node. Attributes attach to [`FuncDecl`]s today; attaching
+// them to structs/enums is a future task.
+// ---------------------------------------------------------------------------
+
+/// Parse zero-or-more leading `@name` attribute forms (T35).
+///
+/// Each attribute is one of:
+/// - `@ident` — argument-less form (e.g. `@test`).
+/// - `@ident(args, ...)` — parenthesised form (e.g. `@prefer(gpu)`). The
+///   args are stored as raw identifier/string text; no type-checking is
+///   done at parse time (deferred to the semantic pass).
+///
+/// The function consumes attributes greedily and stops as soon as the next
+/// significant token is not `@`. Returns the collected attributes in
+/// declaration order (leftmost first). An empty `Vec` means no attributes
+/// were present (the common case).
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if:
+/// - `@` is not followed by an identifier (the attribute name),
+/// - a parenthesised form is missing its closing `)`.
+pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, ParseError> {
+    let source_id = stream.source_id();
+    let mut attrs = Vec::new();
+    while matches!(stream.peek_kind(), Some(TokenKind::At)) {
+        let at_tok = stream.advance().expect("peek guaranteed At");
+        let start = at_tok.span.start;
+        let name_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected attribute name after `@`, found end of input",
+                stream.eof_span(),
+            ))
+        })?;
+        let name = extract_ident(name_tok.clone())?;
+        // Optional `( arg, arg, ... )` — args are bare identifiers or
+        // string-literal text. Stored as raw strings for forward-compat.
+        let mut args: Vec<String> = Vec::new();
+        let end = if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
+            stream.advance(); // consume `(`
+            if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                loop {
+                    let arg_tok = stream.advance().ok_or_else(|| {
+                        ParseError::new(Diagnostic::error(
+                            "expected attribute argument, found end of input",
+                            stream.eof_span(),
+                        ))
+                    })?;
+                    let arg = match &arg_tok.kind {
+                        TokenKind::Ident(s) => s.clone(),
+                        TokenKind::StringStart => {
+                            // Consume the full string-token triple.
+                            let part = stream.advance().ok_or_else(|| {
+                                ParseError::new(Diagnostic::error(
+                                    "expected string content in attribute argument",
+                                    stream.eof_span(),
+                                ))
+                            })?;
+                            let s = match part.kind {
+                                TokenKind::StringPart(s) => s,
+                                other => {
+                                    return Err(ParseError::new(Diagnostic::error(
+                                        format!(
+                                            "expected string content in attribute, found `{other}`"
+                                        ),
+                                        part.span,
+                                    )));
+                                }
+                            };
+                            let end_tok = stream.advance().ok_or_else(|| {
+                                ParseError::new(Diagnostic::error(
+                                    "unterminated string in attribute argument",
+                                    stream.eof_span(),
+                                ))
+                            })?;
+                            if !matches!(end_tok.kind, TokenKind::StringEnd) {
+                                return Err(ParseError::new(Diagnostic::error(
+                                    "string interpolation not allowed in attribute argument",
+                                    end_tok.span,
+                                )));
+                            }
+                            s
+                        }
+                        other => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                format!("expected identifier or string in attribute argument, found `{other}`"),
+                                arg_tok.span,
+                            )));
+                        }
+                    };
+                    args.push(arg);
+                    match stream.peek_kind() {
+                        Some(TokenKind::Comma) => {
+                            stream.advance();
+                            if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                                break;
+                            }
+                        }
+                        Some(TokenKind::RParen) => break,
+                        Some(other) => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                format!(
+                                    "expected `,` or `)` in attribute arguments, found `{other}`"
+                                ),
+                                stream
+                                    .peek()
+                                    .map(|t| t.span)
+                                    .unwrap_or_else(|| stream.eof_span()),
+                            )));
+                        }
+                        None => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                "unterminated attribute argument list (missing `)`)",
+                                stream.eof_span(),
+                            )));
+                        }
+                    }
+                }
+            }
+            let rp = stream.expect(TokenKind::RParen)?;
+            rp.span.end
+        } else {
+            name_tok.span.end
+        };
+        attrs.push(Attribute {
+            name,
+            args,
+            span: Span::new(start, end, source_id),
+        });
+    }
+    Ok(attrs)
 }
 
 // ---------------------------------------------------------------------------

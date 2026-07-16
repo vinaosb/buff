@@ -964,3 +964,30 @@ explicitly allows this fallback.
 - Workspace total: ALL pass (0 failed).
 
 
+## T35 — `buff test` command
+
+### Status: COMPLETE (all green — clippy -D warnings, 19 test_command tests, full workspace 0 failed)
+
+### What works
+- `buff test <FILE>` discovers `@test` funcs, runs them, prints `<n> passed, <m> failed`.
+- `--pattern <GLOB>` filters by simple glob (`*` = any chars).
+- Exit 0 all-pass, exit 1 any-fail, graceful empty report if no `@test` funcs.
+
+### Key learnings
+- **`@` token already existed** in the lexer (`TokenKind::At`) — no lexer change needed. Only parser + AST.
+- **Bulk FuncDecl migration**: 55 construction sites across 27 files. PowerShell `-replace 'is_extern: false,', 'is_extern: false, attributes: Vec::new(),'` handled 53; 2 shorthand `is_extern,` sites needed manual Edit (ffi.rs test + parser stmt.rs). ast_grep FAILED to match struct-field patterns (needs complete AST nodes, not bare field assignments).
+- **`quote!` inside `println!`**: `println!("test " #name " ... ok")` produces INVALID Rust (adjacent string literals don't concat inside macro args). Fix: `println!("test {} ... ok", #name)` — use `{}` format placeholder.
+- **rustc crate name from `.test.rs`**: writing harness as `<file>.test.rs` → rustc infers crate name `<stem>.test` → "invalid character '.'" error. Fix: write to `temp_dir/<stem>_test.rs` (underscore, not dot).
+- **Custom runner chosen over `rustc --test`**: QA requires `<n> passed, <m> failed` format; Rust's `--test` harness prints `1 passed; 0 failed` (semicolon + different wording). Custom runner via `catch_unwind` gives full output control + avoids `#[test]`-fn-vs-user-`main` conflict.
+- **`#[test]` stripping in harness**: codegen emits `#[test]` on `@test` fns (for `buff build`); the test harness STRIPS it (calls fns directly from custom `main`). Avoids ambiguity about `#[test]` fn callability in non-`--test` builds.
+- **clippy `needless_late_init`**: `let end; if cond { ...; end = x; } else { end = y; }` → refactor to `let end = if cond { ...; x } else { y };`. The `?` operator and early `return` work fine inside if-expression blocks.
+- **Discovery determinism**: `BTreeSet<String>` for test names → sorted output → byte-identical repeated runs (T29 lesson).
+- **`format_diagnostic_error` made `pub`** in pipeline.rs so test_runner reuses the same error formatting (DRY).
+- **Pure functions unit-testable without rustc**: `discover_test_names`, `matches_pattern`, `parse_report` — 11 inline unit tests run without the toolchain; 4 E2E tests are rustc-gated.
+
+### Test count
+- test_runner.rs inline: 11 unit tests (glob matching, report parsing, exit code).
+- tests/test_command.rs: 19 integration tests (discovery, pattern, report, harness codegen, front-end errors, 4 E2E).
+- Workspace total: ALL pass (0 failed).
+
+

@@ -1089,3 +1089,58 @@ parser enhancement.
 - Remove the 8 closure_captures tests from ownership.rs `#[cfg(test)]`
 Clean reversal — all changes are additive.
 
+## T35 — `buff test` command: `@test` attribute + custom test runner
+
+**Date:** T35 (v0.5, Wave 8).  **Scope:** additive AST change + new CLI subcommand.
+
+### Decision 1: `attributes: Vec<Attribute>` field on FuncDecl (not a wrapper variant)
+
+**Chosen:** Added `attributes: Vec<Attribute>` to `FuncDecl` (migration, 55 sites updated).
+
+**Rejected:** `Decl::TestDecl(TestDecl)` wrapper variant (analogous to `ExportDecl`).
+The wrapper would be purely additive (zero ripple on FuncDecl construction)
+but only handles `@test` — it doesn't generalise to `@prefer(gpu)`, `@inline`,
+etc. that the README anticipates. The field approach generalises to any
+future attribute without a second AST migration, matching the T27/T29
+"additive field" precedent.
+
+**Migration:** `Attribute { name: Ident, args: Vec<String>, span: Span }`.
+Field sits before `span` (trailing anchor convention). All construction sites
+pass `Vec::new()`. Bulk-migrated via PowerShell regex on `is_extern: false,`
+(53 sites) + 2 manual shorthand `is_extern,` fixes. ast_grep could NOT
+match struct-field patterns (requires complete AST nodes).
+
+### Decision 2: Custom runner (approach b) over `rustc --test` (approach a)
+
+**Chosen:** Custom test runner via `std::panic::catch_unwind`.
+**Rationale:** QA requires output format `<n> passed, <m> failed`. Rust's
+built-in `--test` harness prints `1 passed; 0 failed` (semicolon + different
+wording). Custom runner gives full output control AND avoids the
+`#[test]`-fn-vs-user-`main` conflict that `--test` introduces (a program can
+only have one `main`; `--test` provides its own, conflicting with the user's).
+
+### Decision 3: `#[test]` emitted by codegen AND stripped in harness
+
+**Chosen:** Codegen `lower_func` emits `#[test]` for `@test` funcs; the test
+harness generator (`generate_test_rust`) STRIPS `#[test]` from all items.
+**Rationale:** `#[test]` emission satisfies "GREEN: `#[test]` annotations" and
+makes `buff build` produce idiomatic Rust. In the test-harness build we call
+the fns directly from our custom `main` (not via `--test`), so `#[test]` is
+unnecessary and stripped to avoid any ambiguity about `#[test]` fn callability
+in non-`--test` builds.
+
+### Decision 4: `assert_eq` as a prelude builtin (not a keyword)
+
+**Chosen:** Added `PreludeFn::AssertEq` + `PreludeCategory::Test`.
+**Rationale:** `assert_eq(a, b)` parses as a regular `FuncCall` with a bare-ident
+callee; the prelude lookup recognises it and codegen lowers it to Rust's
+`assert_eq!` macro via `quote!`. No new keyword needed; the same mechanism as
+`print`/`abs`/etc. Single-arg `assert(cond)` deferred (only `assert_eq` needed
+for v0.5 tests).
+
+### Decision 5: `--pattern` as simple glob (`*` wildcard)
+
+**Chosen:** `*` matches any char sequence; all else literal; empty/omitted = all.
+**Rationale:** Minimal but useful. `test_*` is the common case. Recursive
+`glob_match` on byte slices (8 lines). No regex dependency. Case-sensitive.
+

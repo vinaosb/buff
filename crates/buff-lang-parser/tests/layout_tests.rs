@@ -92,7 +92,7 @@ fn test_func_body_via_indent_dedent_returns() {
     let src = "func foo():\n    print(\"a\")\nprint(\"fora\")";
     let tokens = tokenize(src, sid()).expect("lexer");
     let mut stream = TokenStream::new(&tokens, sid());
-    let f = parse_func_decl(&mut stream).expect("func parses");
+    let f = parse_func_decl(&mut stream, Vec::new()).expect("func parses");
     assert_eq!(
         f.body.stmts.len(),
         1,
@@ -405,7 +405,7 @@ fn test_empty_indented_block_error() {
     let src = "func foo():\n";
     let tokens = tokenize(src, sid()).expect("lexer");
     let mut stream = TokenStream::new(&tokens, sid());
-    let err = parse_func_decl(&mut stream).expect_err("should reject empty body");
+    let err = parse_func_decl(&mut stream, Vec::new()).expect_err("should reject empty body");
     assert!(
         err.diagnostic.message.contains("indented block"),
         "message was: {}",

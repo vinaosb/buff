@@ -16,6 +16,7 @@ path = "src/lib.rs"
 clap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
+buff-lang-ast.workspace = true
 buff-lang-lexer.workspace = true
 buff-lang-parser.workspace = true
 buff-lang-types.workspace = true

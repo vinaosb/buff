@@ -95,6 +95,7 @@ fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }
@@ -113,6 +114,7 @@ fn func_with_params_return(
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }

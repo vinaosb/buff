@@ -18,5 +18,8 @@ fn main() -> Result<()> {
         Command::Run { file, args } => buff_lang_cli::commands::run::run(&file, &args),
         Command::New { name } => buff_lang_cli::commands::new::run(&name),
         Command::Init => buff_lang_cli::commands::init::run(),
+        Command::Test { file, pattern } => {
+            buff_lang_cli::commands::test::run(&file, pattern.as_deref())
+        }
     }
 }

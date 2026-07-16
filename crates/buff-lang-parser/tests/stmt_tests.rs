@@ -80,7 +80,7 @@ fn parse_block(src: &str) -> Block {
 fn parse_func(src: &str) -> FuncDecl {
     let tokens = tokenize(src, sid()).expect("lexer should succeed");
     let mut stream = TokenStream::new(&tokens, sid());
-    parse_func_decl(&mut stream).expect("parser should succeed")
+    parse_func_decl(&mut stream, Vec::new()).expect("parser should succeed")
 }
 
 /// Tokenize + parse a type reference in isolation.

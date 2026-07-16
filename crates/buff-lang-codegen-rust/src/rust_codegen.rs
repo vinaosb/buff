@@ -606,11 +606,32 @@ impl RustCodegen {
         // `main` fn becomes async automatically when it transitively
         // calls any async fn; tokio's runtime attribute is what makes
         // that work.
-        let attrs = if is_async && f.name.name == "main" {
+        //
+        // T35: emit `#[test]` (and other recognised attributes) from the
+        // FuncDecl's `attributes` list. `@test` → `#[test]`; unknown
+        // attributes are a codegen error (so we don't silently drop user
+        // intent). The `#[tokio::main]` case is mutually exclusive with
+        // `#[test]` (a fn can't be both the entry point AND a test), so
+        // we handle them in separate branches.
+        let mut attrs: Vec<syn::Attribute> = if is_async && f.name.name == "main" {
             vec![syn::parse_quote!(#[tokio::main])]
         } else {
             Vec::new()
         };
+        for attr in &f.attributes {
+            match attr.name.name.as_str() {
+                "test" => attrs.push(syn::parse_quote!(#[test])),
+                // Unknown attribute — surface as a codegen error so the
+                // user knows it was not applied (rather than silently
+                // dropping it). Future tasks can add recognised attributes
+                // (e.g. `@inline` → `#[inline]`) here.
+                other => {
+                    return Err(self.unsupported(&format!(
+                        "unrecognised attribute `@{other}` (only `@test` is supported in v0.5)"
+                    )));
+                }
+            }
+        }
 
         // Restore the previous fn context (in case of nested lowering —
         // currently impossible but defensive).
@@ -1332,6 +1353,24 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("exit() codegen parse: {e}")))
+            }
+            // T35: assert_eq(a, b) → assert_eq!(a, b)
+            // The Rust `assert_eq!` macro panics when the two args are not
+            // equal, which is exactly Buff's semantics. Used inside `@test`
+            // functions (where the test runner catches the panic).
+            PreludeFn::AssertEq => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(
+                        "assert_eq() expects exactly 2 arguments (actual, expected)",
+                    ));
+                }
+                let lhs = self.lower_expr(&args[0])?;
+                let rhs = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    assert_eq!(#lhs, #rhs)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("assert_eq() codegen parse: {e}")))
             }
         }
     }
@@ -3940,6 +3979,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy_span(),
         };
         let mut codegen = RustCodegen::new();

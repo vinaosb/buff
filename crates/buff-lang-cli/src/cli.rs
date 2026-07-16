@@ -66,4 +66,16 @@ pub enum Command {
 
     /// Initialize a Buff project in the current directory.
     Init,
+
+    /// Discover and run `@test` functions in a `.buff` file (T35).
+    Test {
+        /// Input `.buff` source file containing `@test` functions.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Only run tests whose name matches this glob pattern (e.g.
+        /// `test_*`). When omitted, all `@test` functions run.
+        #[arg(long)]
+        pattern: Option<String>,
+    },
 }

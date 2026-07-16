@@ -96,6 +96,7 @@ fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }
@@ -409,6 +410,7 @@ fn test_codegen_param_type_propagates_to_let() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     });
     let src = generate_rust(&[f]).unwrap();

@@ -141,6 +141,7 @@ fn codegen_stmts(stmts: Vec<Stmt>) -> String {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
@@ -507,6 +508,7 @@ fn enum_codegen_end_to_end_decl_and_match_reparse() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::EnumDecl(color), Decl::FuncDecl(func)])
@@ -557,6 +559,7 @@ fn enum_codegen_result_end_to_end_with_binding() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::EnumDecl(result_decl), Decl::FuncDecl(func)])

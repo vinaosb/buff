@@ -147,6 +147,7 @@ fn func_with(name: &str, params: Vec<Param>, stmts: Vec<Stmt>) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }

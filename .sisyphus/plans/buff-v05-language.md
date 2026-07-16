@@ -785,7 +785,7 @@ Phase 1 (v0.1) must be complete:
 
 ---
 
-- [ ] **T35**: `buff test` command [unspecified-high]
+- [x] **T35**: `buff test` command [unspecified-high]
 
   **What to do** (TDD):
   - **RED**: Write test: `@test func test_addition()` is discovered by `buff test`

@@ -69,6 +69,7 @@ fn empty_body_func(name: &str, params: Vec<Param>, ret: Option<TypeRef>, is_exte
         is_async: false,
         is_unsafe: false,
         is_extern,
+        attributes: Vec::new(),
         span: span(),
     })
 }

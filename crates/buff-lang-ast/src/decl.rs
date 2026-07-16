@@ -68,6 +68,22 @@ impl fmt::Display for Decl {
 }
 
 /// A function declaration.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T35 — `attributes` field
+///
+/// An `attributes: Vec<Attribute>` field was **added** in T35 (v0.5) to carry
+/// the list of `@name` attributes preceding the function (e.g. `@test`, and
+/// future `@prefer(gpu)` / `@inline`). This is a **migration** (a new field
+/// was inserted, not purely additive — but every construction site was
+/// updated to pass `attributes: Vec::new()` for non-attributed funcs). The
+/// new field sits just before `span` to keep `span` as the trailing anchor
+/// (consistent with the other decl structs). The Display impl renders
+/// `@test ` (and other attributes) before the `fn` keyword. The codegen
+/// pass emits the corresponding Rust attribute (`#[test]`, etc.) when the
+/// attribute is recognised; unknown attributes are a codegen error (so we
+/// don't silently drop user intent).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncDecl {
     pub name: Ident,
@@ -77,12 +93,61 @@ pub struct FuncDecl {
     pub is_async: bool,
     pub is_unsafe: bool,
     pub is_extern: bool,
+    /// `@name` attributes preceding the function (T35). Empty for the vast
+    /// majority of funcs. The only attribute meaningful in v0.5 is `@test`
+    /// (→ `#[test]` at codegen); the design generalises to any future
+    /// attribute without another AST migration.
+    pub attributes: Vec<Attribute>,
     pub span: Span,
+}
+
+/// A `@name` attribute attached to a declaration (T35).
+///
+/// Buff attributes are the `@`-prefixed form (`@test`, `@prefer(gpu)`,
+/// `@inline`, …) analogous to Rust's `#[name]` / `#[name(args)]`. For v0.5
+/// only the argument-less `@test` form is meaningful; the `args` field is
+/// carried for forward-compatibility with the `@prefer(gpu)` shape the
+/// README anticipates, so a second AST migration isn't needed later.
+///
+/// Attributes are **attached to [`FuncDecl`]s** (collected in
+/// [`FuncDecl::attributes`]); in future they may attach to structs/enums
+/// too. The parser collects zero-or-more leading `@name` forms before a
+/// `func` declaration and stores them in declaration order (leftmost
+/// attribute first).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Attribute {
+    /// The attribute name without the leading `@` (e.g. `"test"`).
+    pub name: Ident,
+    /// Optional parenthesised arguments (e.g. `@prefer(gpu)` carries
+    /// `["gpu"]`). Empty for `@test`. Carried for forward-compat so the
+    /// v0.5→future `@prefer(gpu)` shape doesn't need another AST migration.
+    pub args: Vec<String>,
+    pub span: Span,
+}
+
+impl fmt::Display for Attribute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "@{}", self.name)?;
+        if !self.args.is_empty() {
+            f.write_str("(")?;
+            for (i, a) in self.args.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{a:?}")?;
+            }
+            f.write_str(")")?;
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for FuncDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("FuncDecl(")?;
+        for a in &self.attributes {
+            write!(f, "{a} ")?;
+        }
         if self.is_extern {
             f.write_str("extern ")?;
         }

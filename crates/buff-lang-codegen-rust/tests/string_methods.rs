@@ -82,6 +82,7 @@ fn codegen_one_stmt(stmt: Stmt) -> String {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
@@ -108,6 +109,7 @@ fn codegen_with_string_param(stmt: Stmt) -> String {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")

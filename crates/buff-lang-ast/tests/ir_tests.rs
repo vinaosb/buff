@@ -41,6 +41,7 @@ fn wrap_fn(stmts: Vec<Stmt>) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }
@@ -488,6 +489,7 @@ fn test_async_registration_and_display_of_ionode() {
         is_async: true,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     });
     // fn caller() { let r = producer(); }
@@ -512,6 +514,7 @@ fn test_async_registration_and_display_of_ionode() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     });
     let mut lowerer = AstLowerer::new();

@@ -45,6 +45,7 @@ fn empty_func(name: &str) -> Decl {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     })
 }
@@ -94,6 +95,7 @@ fn test_codegen_let_int() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -127,6 +129,7 @@ fn test_codegen_binary_op() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -150,6 +153,7 @@ fn test_codegen_func_with_return_snapshot() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -189,6 +193,7 @@ fn test_format_passes_rustfmt() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let mut codegen = RustCodegen::new();
@@ -224,6 +229,7 @@ fn test_codegen_func_call() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -250,6 +256,7 @@ fn test_codegen_async_unsafe_extern_modifiers() {
         is_async: true,
         is_unsafe: true,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -296,6 +303,7 @@ fn test_codegen_func_with_params_snapshot() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -338,6 +346,7 @@ fn test_codegen_string_and_bool_literals() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
@@ -371,6 +380,7 @@ fn test_codegen_let_with_type_annotation() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();

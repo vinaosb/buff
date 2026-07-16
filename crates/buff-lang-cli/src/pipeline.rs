@@ -149,7 +149,10 @@ pub fn with_exe_extension(path: &Path) -> PathBuf {
 
 /// Format a phase-specific error (lex / parse / codegen) as a user-facing
 /// anyhow error with line/column context when available.
-fn format_diagnostic_error(
+///
+/// (T35: made `pub` so [`crate::test_runner`] can reuse the same error
+/// formatting without duplicating the logic.)
+pub fn format_diagnostic_error(
     phase: &str,
     diagnostic: &buff_lang_error::Diagnostic,
     source_file: &SourceFile,

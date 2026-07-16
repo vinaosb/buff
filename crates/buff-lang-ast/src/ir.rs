@@ -1100,6 +1100,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1163,6 +1164,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1208,6 +1210,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1251,6 +1254,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1311,6 +1315,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1364,6 +1369,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1430,6 +1436,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();
@@ -1460,6 +1467,7 @@ mod tests {
             is_async: true,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let caller_body = Block {
@@ -1484,6 +1492,7 @@ mod tests {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         });
         let mut lowerer = AstLowerer::new();

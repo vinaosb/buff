@@ -470,6 +470,7 @@ mod tests {
             is_async,
             is_unsafe: false,
             is_extern: false,
+            attributes: Vec::new(),
             span: dummy(),
         }
     }

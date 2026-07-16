@@ -35,3 +35,4 @@ pub mod commands;
 pub mod error_mapper;
 pub mod pipeline;
 pub mod scaffold;
+pub mod test_runner;

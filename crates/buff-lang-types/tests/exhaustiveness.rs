@@ -376,6 +376,7 @@ fn exhaustiveness_check_program_skips_unknown_scrutinee_type() {
         is_async: false,
         is_unsafe: false,
         is_extern: false,
+        attributes: Vec::new(),
         span: span(),
     };
     let _ = Param {
