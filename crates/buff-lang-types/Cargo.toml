@@ -8,6 +8,9 @@ license = "MIT OR Apache-2.0"
 thiserror.workspace = true
 buff-lang-error.workspace = true
 buff-lang-ast.workspace = true
+# T29: module graph needs to lex+parse imported files.
+buff-lang-lexer.workspace = true
+buff-lang-parser.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

@@ -16,6 +16,7 @@
 pub mod env;
 pub mod exhaustiveness;
 pub mod infer;
+pub mod modules;
 pub mod prelude;
 pub mod promote;
 pub mod range_analysis;
@@ -32,6 +33,11 @@ pub use exhaustiveness::{
     check_program, EnumRegistry,
 };
 pub use infer::TypeInferencer;
+// T29: module-system graph. Re-exported at crate root for the CLI/LSP
+// so callers can `buff_lang_types::build_graph(...)` without a long path.
+pub use modules::{
+    build_graph, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph, ModuleLoader,
+};
 pub use promote::{assignable_to, promote_binary};
 // T96: standard-library prelude. Re-exported at the crate root so the
 // type inferencer and downstream crates (codegen, CLI) can call

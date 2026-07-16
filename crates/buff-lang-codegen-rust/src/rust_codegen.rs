@@ -161,6 +161,12 @@ impl RustCodegen {
             items.extend(matrix_struct_items());
         }
         for decl in decls {
+            // T29: re-export declarations are a multi-file module-graph
+            // concern — they emit no Rust item in single-file codegen.
+            // Filter them out so we don't generate inert placeholders.
+            if matches!(decl, Decl::ReexportDecl { .. }) {
+                continue;
+            }
             let item = self.lower_decl(decl)?;
             items.push(item);
         }
@@ -182,6 +188,20 @@ impl RustCodegen {
             Decl::ImportDecl { .. } => Err(self.unsupported("import codegen")),
             Decl::ModuleDecl { .. } => Err(self.unsupported("module codegen")),
             Decl::TraitDecl { .. } => Err(self.unsupported("trait codegen")),
+            // T29: export wraps an inner decl. In single-file codegen we
+            // simply lower the inner decl and stamp `pub` on its visibility
+            // (multi-file codegen will route through `mod` blocks in a later
+            // wave).
+            Decl::ExportDecl(e) => match self.lower_decl(&e.inner)? {
+                Item::Fn(mut f) => {
+                    f.vis = syn::Visibility::Public(Default::default());
+                    Ok(Item::Fn(f))
+                }
+                other => Ok(other),
+            },
+            // T29: re-exports never reach lower_decl — generate() filters
+            // them out. Keep a defensive arm for direct callers.
+            Decl::ReexportDecl { .. } => Err(self.unsupported("reexport codegen")),
         }
     }
 

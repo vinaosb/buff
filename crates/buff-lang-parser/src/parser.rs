@@ -12,17 +12,22 @@ use buff_lang_ast::Decl;
 use buff_lang_error::{ParseError, SourceId};
 use buff_lang_lexer::TokenKind;
 
-use crate::stmt::{parse_enum_decl, parse_func_decl};
+use crate::stmt::{parse_enum_decl, parse_export_decl, parse_func_decl, parse_import_decl};
 use crate::stream::TokenStream;
 
 /// Parse a slice of tokens into zero or more top-level [`Decl`]s.
 ///
-/// # T8 status
+/// # Dispatch table
 ///
-/// Recognizes only function declarations at the top level (`func name(...)
-/// -> Ret { body }`). Any other token at top level is an error — statements
-/// such as `let`/`return`/`if` belong inside a function body, not at module
-/// scope.
+/// | Token   | Result                                                |
+/// |---------|-------------------------------------------------------|
+/// | `func`  | [`Decl::FuncDecl`] (T8)                               |
+/// | `enum`  | [`Decl::EnumDecl`] (T27)                              |
+/// | `import`| [`Decl::ImportDecl`] (T29 — ES6 `from "..."` + legacy)|
+/// | `export`| [`Decl::ExportDecl`] / [`Decl::ReexportDecl`] (T29)  |
+///
+/// Any other token at top level is an error — statements such as
+/// `let`/`return`/`if` belong inside a function body, not at module scope.
 ///
 /// # Errors
 ///
@@ -46,6 +51,15 @@ pub fn parse(
             Some(TokenKind::KwEnum) => {
                 let e = parse_enum_decl(&mut stream)?;
                 decls.push(Decl::EnumDecl(e));
+            }
+            // T29: top-level import / export declarations.
+            Some(TokenKind::KwImport) => {
+                let imp = parse_import_decl(&mut stream)?;
+                decls.push(Decl::ImportDecl(imp));
+            }
+            Some(TokenKind::KwExport) => {
+                let exp = parse_export_decl(&mut stream)?;
+                decls.push(exp);
             }
             other => {
                 let span = stream

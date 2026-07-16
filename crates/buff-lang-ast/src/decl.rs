@@ -24,6 +24,21 @@ pub enum Decl {
     ModuleDecl(ModuleDecl),
     /// A trait declaration (used from v0.5 onward; defined now).
     TraitDecl(TraitDecl),
+    /// An `export <decl>` wrapper: `export func foo() { ... }`,
+    /// `export enum Color { ... }`, etc. (T29).
+    ///
+    /// The wrapped [`Decl`] is the inner item (currently
+    /// [`FuncDecl`](Decl::FuncDecl), [`StructDecl`](Decl::StructDecl),
+    /// [`EnumDecl`](Decl::EnumDecl)); other inner kinds are a parse error.
+    /// The module-graph pass treats the inner item as PUBLIC (visible to
+    /// importers) — non-wrapped decls stay module-private.
+    ExportDecl(ExportDecl),
+    /// A `export * from "./path"` (or `export { a, b } from "./path"`)
+    /// re-export declaration (T29).
+    ///
+    /// `wildcard = true` re-exports ALL public symbols from the target
+    /// module; otherwise `names` lists the specific symbols re-exported.
+    ReexportDecl(ReexportDecl),
 }
 
 impl fmt::Display for Decl {
@@ -35,6 +50,8 @@ impl fmt::Display for Decl {
             Decl::ImportDecl(d) => write!(f, "{d}"),
             Decl::ModuleDecl(d) => write!(f, "{d}"),
             Decl::TraitDecl(d) => write!(f, "{d}"),
+            Decl::ExportDecl(d) => write!(f, "{d}"),
+            Decl::ReexportDecl(d) => write!(f, "{d}"),
         }
     }
 }
@@ -191,17 +208,73 @@ impl fmt::Display for EnumVariant {
     }
 }
 
-/// An import: `import a.b.c as alias;`.
+/// An import declaration.
+///
+/// Two syntactic shapes are supported (T29 expanded the original module-path
+/// form with the ES6-style `from "..."` form used by the Buff v0.5 module
+/// system):
+///
+/// 1. **ES6 form (T29, v0.5)** — `import { greet, farewell } from "./hello.buff"`
+///    or `import * from "./utils.buff"`. Stored as:
+///    - `from_path: Some("./hello.buff")`
+///    - `imports: ["greet", "farewell"]` (or empty when `wildcard = true`)
+///    - `wildcard: false` (or `true` for `import * from`)
+///    - `path: []`, `alias: None` (legacy fields unused by this form)
+///
+/// 2. **Legacy module-path form** — `import a.b.c as alias`. Stored as:
+///    - `path: ["a", "b", "c"]`
+///    - `alias: Some("alias")`
+///    - `from_path: None`, `wildcard: false`
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T29 — `from_path` and `wildcard` fields
+///
+/// Two new fields — `from_path: Option<String>` and `wildcard: bool` — were
+/// added in T29 (v0.5) to support the ES6-style `from "..."` module-import
+/// syntax. This is a **migration** (new fields were appended, not purely
+/// additive — but every existing construction site was updated to pass
+/// `from_path: None` and `wildcard: false`). Both new fields default to
+/// "unused" values so legacy-shape ImportDecls continue to behave exactly
+/// as before. The Display impl renders whichever form is active (ES6 when
+/// `from_path` is `Some`, legacy otherwise).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
+    /// Legacy dotted module path (`a.b.c`). Empty when using the ES6 form.
     pub path: Vec<Ident>,
+    /// Imported symbol names (`{ greet, farewell }`). Empty when `wildcard`.
     pub imports: Vec<Ident>,
+    /// Legacy `as alias` rename. `None` for the ES6 form.
     pub alias: Option<Ident>,
+    /// ES6 source path string (`from "./hello.buff"`). `None` for the legacy
+    /// module-path form. T29 (additive).
+    pub from_path: Option<String>,
+    /// `import * from "..."` — re-export all public symbols of the target.
+    /// T29 (additive). When `true`, `imports` is empty by convention.
+    pub wildcard: bool,
     pub span: Span,
 }
 
 impl fmt::Display for ImportDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // ES6 form takes precedence when from_path is present.
+        if let Some(src) = &self.from_path {
+            f.write_str("Import(")?;
+            if self.wildcard {
+                f.write_str("*")?;
+            } else {
+                f.write_str("{ ")?;
+                for (i, n) in self.imports.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{n}")?;
+                }
+                f.write_str(" }")?;
+            }
+            return write!(f, " from {src:?})");
+        }
+        // Legacy form: `a.b.c [:: imports] [as alias]`.
         f.write_str("Import(")?;
         for (i, p) in self.path.iter().enumerate() {
             if i > 0 {
@@ -222,6 +295,84 @@ impl fmt::Display for ImportDecl {
             write!(f, " as {alias}")?;
         }
         f.write_str(")")
+    }
+}
+
+/// A `export <decl>` wrapper declaration (T29).
+///
+/// Wraps an inner [`Decl`] (currently [`FuncDecl`], [`StructDecl`], or
+/// [`EnumDecl`]) and marks it as PUBLIC — visible to importers. The
+/// module-graph pass treats any top-level decl NOT wrapped in `ExportDecl`
+/// as module-private.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T29 — new Decl variant
+///
+/// `Decl::ExportDecl(ExportDecl)` is a **purely additive** new variant (no
+/// existing variant changed). All `match` expressions on [`Decl`] across
+/// the codebase were updated to add a `Decl::ExportDecl { .. }` arm. The
+/// codegen pass unwboxes the inner decl and codegens it as usual (the
+/// visibility modifier is preserved on the wrapper, not duplicated on the
+/// inner decl — a Rust `pub` keyword will be emitted in a later wave when
+/// multi-file codegen lands).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportDecl {
+    /// The wrapped, exported declaration. Always one of the public-item
+    /// variants (FuncDecl / StructDecl / EnumDecl); the parser rejects
+    /// `export import` / `export module` / nested `export export`.
+    pub inner: Box<Decl>,
+    pub span: Span,
+}
+
+impl fmt::Display for ExportDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Export({})", self.inner)
+    }
+}
+
+/// A re-export declaration: `export * from "./path"` (wildcard) or
+/// `export { a, b } from "./path"` (named) (T29).
+///
+/// The module-graph pass resolves `from` to a target module and exposes
+/// the named symbols (or, when `wildcard`, ALL of the target's public
+/// symbols) as if they were declared in this module.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T29 — new Decl variant
+///
+/// `Decl::ReexportDecl(ReexportDecl)` is **purely additive**. Like
+/// [`ExportDecl`], every `match` on [`Decl`] gained a `Decl::ReexportDecl`
+/// arm.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReexportDecl {
+    /// Source path string (`from "./other.buff"`).
+    pub from: String,
+    /// Specific symbols re-exported (`export { greet } from ...`). Empty
+    /// when `wildcard = true`.
+    pub names: Vec<Ident>,
+    /// `export * from ...` — re-export all public symbols of the target.
+    pub wildcard: bool,
+    pub span: Span,
+}
+
+impl fmt::Display for ReexportDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Reexport(")?;
+        if self.wildcard {
+            f.write_str("*")?;
+        } else {
+            f.write_str("{ ")?;
+            for (i, n) in self.names.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{n}")?;
+            }
+            f.write_str(" }")?;
+        }
+        write!(f, " from {:?})", self.from)
     }
 }
 

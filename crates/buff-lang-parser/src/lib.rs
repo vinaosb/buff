@@ -25,8 +25,8 @@ pub mod stream;
 
 pub use parser::{parse, parse_expression};
 pub use stmt::{
-    parse_block, parse_block_braces, parse_enum_decl, parse_func_decl, parse_if_expr, parse_params,
-    parse_statement, parse_type_ref,
+    parse_block, parse_block_braces, parse_enum_decl, parse_export_decl, parse_func_decl,
+    parse_if_expr, parse_import_decl, parse_params, parse_statement, parse_type_ref,
 };
 pub use stream::TokenStream;
 

@@ -530,7 +530,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 7 — Modules + Async + FFI (parallel, depends on Wave 6)
 
-- [ ] **T29**: Module system (import/export, multi-file, path resolution) [deep]
+- [x] **T29**: Module system (import/export, multi-file, path resolution) [deep]
 
   **What to do** (TDD):
   - **RED**: Write test: `import { greet } from "./hello.buff"` resolves to file, finds `export func greet`

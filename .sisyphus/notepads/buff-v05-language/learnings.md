@@ -660,3 +660,59 @@ inference arrives when the type system gains user-enum support.
 
 ### Exact null-safety message contract
 `expected {target}, found Option<{target}>. Use if-let or ?? to unwrap.` where {target} uses `Type::Display` (Int shows as `Int<64>`, the default width). For Int: `expected Int<64>, found Option<Int<64>>. Use if-let or ?? to unwrap.`
+
+## T29 — Module system (import/export, multi-file, path resolution)
+
+### Status: COMPLETE (parser/types-level acceptance met; CLI multi-file codegen DEFERRED)
+
+### What works
+- ES6-style `import { a, b } from "./path"`, `import * from "./path"`, `import name from "./path"`
+- `export func/enum ...` wraps the inner decl in `Decl::ExportDecl`
+- `export * from "./other"` and `export { a, b } from "./other"` re-exports
+- Module-graph builder: `buff_lang_types::build_graph(root, loader)`
+  - DFS visiting-stack for cycle detection (chain in error: `a.buff -> b.buff -> a.buff`)
+  - Visibility check: importing private symbol → `"`X` is not exported from `mod`"`
+  - Re-export flattening (`export * from` chains)
+  - Topological order (deps before importers) emitted via `graph.topo_order`
+- Path resolution `buff_lang_types::resolve_path(importing, spec)`:
+  - `./foo` auto-appends `.buff`; `../` parent dir; `./utils/math` subdir
+  - `std/...` reserved (returns clear "not yet supported in v0.5")
+  - Real `fs::canonicalize` when file exists; lexical normalize otherwise
+
+### Critical lexer surprise (gotcha)
+Buff lexer wraps ALL string literals as `StringStart, StringPart(s), StringEnd`
+even when no `{}` interpolation is present. The module-system parser's
+`expect_path_string` must consume that 3-token sequence, NOT expect a single
+`StringLit` (which exists in `TokenKind` but is never produced by the lexer).
+Original wrong attempt failed with `expected path string, found string_start`.
+
+### Windows path canonicalization gotcha
+`Path::new("/main.buff").is_absolute()` returns `false` on Windows because
+Windows requires a drive prefix (`C:\`) for a path to be absolute. `/main.buff`
+becomes drive-relative. Tests using in-memory loaders must key by exactly
+the same string `build_graph` will produce via `lexical_canonicalize`
+(strip `.`/`..`, preserve otherwise). Do NOT prepend `current_dir` in
+build_graph — it breaks in-memory test paths.
+
+### CLI multi-file codegen (deferred)
+Single-file `generate(&[Decl])` is wired for `ExportDecl` (stamps `pub` on
+inner Rust fn) and `ReexportDecl` (filtered out — emits no Rust item).
+The actual multi-file walk — `buff run main.buff` recursively building the
+graph, codegen-ing each module as a Rust `mod` block (or inlining all decls)
+— is a later wave. The module graph + visibility + cycle detection is
+testable on its own (54 dedicated tests + 7 inline = 61 total).
+
+### Additive AST change pattern (precedent for future tasks)
+- New `Decl` variants: every `match Decl { ... }` site gained an arm.
+  Pattern: codegen's `lower_decl` got `Decl::ExportDecl(e) => self.lower_decl(&e.inner)`
+  and `Decl::ReexportDecl(_) => unsupported`. `generate()` filters reexports
+  before lowering.
+- New fields on ImportDecl (`from_path: Option<String>`, `wildcard: bool`):
+  documented in `decl.rs` "Migration notes" block, defaults keep legacy
+  shape unchanged.
+
+### Tests added (61 total)
+- `crates/buff-lang-parser/tests/module_system.rs` — 27 tests
+- `crates/buff-lang-types/tests/modules.rs` — 27 tests
+- `crates/buff-lang-types/src/modules.rs` (inline `#[cfg(test)]`) — 7 tests
+All passing; clippy clean; fmt clean.
