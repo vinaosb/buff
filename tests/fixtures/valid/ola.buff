@@ -1,0 +1,3 @@
+// Minimal "Olá Buff" program — runnable after Wave 4
+func main():
+    print("Olá, Buff!")

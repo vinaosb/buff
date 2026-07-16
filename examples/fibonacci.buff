@@ -1,0 +1,10 @@
+// Buff v0.1 example — recursive fibonacci.
+// Run: `buff run examples/fibonacci.buff`
+func fib(n: Int) -> Int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+func main():
+    let n = 10
+    print(fib(n))

@@ -145,6 +145,102 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-lang-ast"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-error",
+ "insta",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "buff-lang-codegen-rust",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "buff-lang-types",
+ "clap",
+ "insta",
+ "tokio",
+]
+
+[[package]]
+name = "buff-lang-codegen-rust"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "buff-lang-types",
+ "insta",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "syn 2.0.119",
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-codegen-wgsl"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-error",
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-error"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-lexer"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-error",
+ "insta",
+ "logos",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-parser"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-runtime"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-error",
+ "thiserror",
+]
+
+[[package]]
+name = "buff-lang-types"
+version = "0.1.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "insta",
+ "thiserror",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -245,102 +341,6 @@ dependencies = [
  "encode_unicode",
  "libc",
  "windows-sys",
-]
-
-[[package]]
-name = "deox-ast"
-version = "0.1.0"
-dependencies = [
- "deox-error",
- "insta",
- "proptest",
- "thiserror",
-]
-
-[[package]]
-name = "deox-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "deox-codegen-rust",
- "deox-error",
- "deox-lexer",
- "deox-parser",
- "deox-types",
- "insta",
- "tokio",
-]
-
-[[package]]
-name = "deox-codegen-rust"
-version = "0.1.0"
-dependencies = [
- "deox-ast",
- "deox-error",
- "deox-types",
- "insta",
- "prettyplease",
- "proc-macro2",
- "quote",
- "rust_decimal",
- "rust_decimal_macros",
- "syn 2.0.119",
- "thiserror",
-]
-
-[[package]]
-name = "deox-codegen-wgsl"
-version = "0.1.0"
-dependencies = [
- "deox-error",
- "thiserror",
-]
-
-[[package]]
-name = "deox-error"
-version = "0.1.0"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "deox-lexer"
-version = "0.1.0"
-dependencies = [
- "deox-error",
- "insta",
- "logos",
- "proptest",
- "thiserror",
-]
-
-[[package]]
-name = "deox-parser"
-version = "0.1.0"
-dependencies = [
- "deox-ast",
- "deox-error",
- "deox-lexer",
- "thiserror",
-]
-
-[[package]]
-name = "deox-runtime"
-version = "0.1.0"
-dependencies = [
- "deox-error",
- "thiserror",
-]
-
-[[package]]
-name = "deox-types"
-version = "0.1.0"
-dependencies = [
- "deox-ast",
- "deox-error",
- "insta",
- "thiserror",
 ]
 
 [[package]]

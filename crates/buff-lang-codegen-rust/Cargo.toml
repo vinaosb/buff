@@ -1,0 +1,20 @@
+[package]
+name = "buff-lang-codegen-rust"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+thiserror.workspace = true
+buff-lang-error.workspace = true
+buff-lang-ast.workspace = true
+buff-lang-types.workspace = true
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+prettyplease.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -1,0 +1,26 @@
+[package]
+name = "buff-lang-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "buff"
+path = "src/main.rs"
+
+[lib]
+name = "buff_lang_cli"
+path = "src/lib.rs"
+
+[dependencies]
+clap.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+buff-lang-lexer.workspace = true
+buff-lang-parser.workspace = true
+buff-lang-types.workspace = true
+buff-lang-codegen-rust.workspace = true
+buff-lang-error.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

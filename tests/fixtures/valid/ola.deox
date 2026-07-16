@@ -1,3 +1,0 @@
-// Minimal "Olá Deox" program — runnable after Wave 4
-func main():
-    print("Olá, Deox!")

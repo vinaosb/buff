@@ -1,0 +1,11 @@
+[package]
+name = "buff-lang-parser"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+thiserror.workspace = true
+buff-lang-ast.workspace = true
+buff-lang-lexer.workspace = true
+buff-lang-error.workspace = true

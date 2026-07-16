@@ -1,7 +1,0 @@
-// Deox v0.1 example — a simple calculator exercising function calls.
-// Run: `deox run examples/calculadora.deox`
-func add(a: Int, b: Int) -> Int:
-    return a + b
-
-func main():
-    print(add(2, 3))

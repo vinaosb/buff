@@ -20,14 +20,14 @@ rust_decimal_macros = "1.36"
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 thiserror = "1.0"
-deox-ast = { path = "crates/deox-ast" }
-deox-lexer = { path = "crates/deox-lexer" }
-deox-parser = { path = "crates/deox-parser" }
-deox-types = { path = "crates/deox-types" }
-deox-codegen-rust = { path = "crates/deox-codegen-rust" }
-deox-codegen-wgsl = { path = "crates/deox-codegen-wgsl" }
-deox-runtime = { path = "crates/deox-runtime" }
-deox-error = { path = "crates/deox-error" }
+buff-lang-ast = { path = "crates/buff-lang-ast" }
+buff-lang-lexer = { path = "crates/buff-lang-lexer" }
+buff-lang-parser = { path = "crates/buff-lang-parser" }
+buff-lang-types = { path = "crates/buff-lang-types" }
+buff-lang-codegen-rust = { path = "crates/buff-lang-codegen-rust" }
+buff-lang-codegen-wgsl = { path = "crates/buff-lang-codegen-wgsl" }
+buff-lang-runtime = { path = "crates/buff-lang-runtime" }
+buff-lang-error = { path = "crates/buff-lang-error" }
 
 [workspace.dev-dependencies]
 insta = "1.40"
