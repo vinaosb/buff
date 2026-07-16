@@ -1,4 +1,4 @@
-# Deox Learnings
+# Buff Learnings (historical — content below records Deox-era v0.1 development)
 
 ## Wave 1 (In Progress)
 - (none yet)

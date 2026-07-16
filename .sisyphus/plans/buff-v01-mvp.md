@@ -28,7 +28,7 @@
 ## Context
 
 ### Original Request
-Create a simplified Rust-like language ("Buff") that transpiles to Rust, with maximum performance, maximum productivity, and automatic multithreading across CPU/GPU. Named "Deoxidizer" — removes the "rust/complexity" leaving pure performance.
+Create a simplified Rust-like language ("Buff") that transpiles to Rust, with maximum performance, maximum productivity, and automatic multithreading across CPU/GPU. Polishes away Rust's rough edges (borrow checker, lifetimes), leaving pure performance.
 
 ### Interview Summary
 **Key Discussions**:

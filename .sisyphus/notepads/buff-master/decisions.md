@@ -1,4 +1,4 @@
-# Deox Decisions
+# Buff Decisions
 
 ## Project Setup
 - 9 crates workspace: deox-ast, deox-lexer, deox-parser, deox-types, deox-codegen-rust, deox-codegen-wgsl, deox-runtime, deox-cli, deox-error

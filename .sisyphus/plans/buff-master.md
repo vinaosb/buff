@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-> **Buff** (Deoxidizer) — a high-level language that transpiles to Rust, with automatic CPU/GPU parallelism, native async (Tokio), and Go/C#-like simplicity. Written in Rust (dogfooding). Delivers Rust performance without the borrow-checker pain via intelligent clone+move semantics.
+> **Buff** — a high-level language that transpiles to Rust, with automatic CPU/GPU parallelism, native async (Tokio), and Go/C#-like simplicity. Written in Rust (dogfooding). Delivers Rust performance without the borrow-checker pain via intelligent clone+move semantics.
 >
 > **Total scope**: ~111 tasks + 4 final verification across 3 phases
 > (Phase 1: 20 tasks, Phase 2: 47 tasks, Phase 3: 44 active + 3 deferred)
