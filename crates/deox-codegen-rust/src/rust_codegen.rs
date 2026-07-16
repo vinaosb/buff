@@ -39,6 +39,22 @@
 //! - `for cond { body }` (Deox conditional loop) → Rust `while cond { body }`
 //! - `print(arg)` calls map to `println!("{}", arg)` macro invocations.
 //!
+//! ## Source-map recording (T16)
+//!
+//! [`CodegenContext::record_mapping`] is available so that each lowered AST
+//! node can record its Deox [`Span`] → Rust `(line, col)` mapping. In v0.1
+//! the mapping is **not** automatically populated during lowering because:
+//!
+//! 1. `syn` nodes carry opaque `proc_macro2::Span`s (no source-line info).
+//! 2. `prettyplease` reformats the tree after construction, so line numbers
+//!    computed pre-format would be wrong.
+//!
+//! The pipeline (`deox_cli::error_mapper`) therefore uses **filename
+//! translation** for v0.1: it replaces the intermediate `.rs` path in
+//! `rustc`/panic messages with the original `.deox` path. Exact Deox line
+//! translation via the bidirectional [`SourceMap`](deox_error::SourceMap)
+//! will land in a later task once a post-prettyplease line scan is available.
+//!
 //! ## Move semantics (T33a)
 //!
 //! All bindings are MOVED by default (Rust move semantics). The integrated

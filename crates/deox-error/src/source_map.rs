@@ -1,9 +1,23 @@
 //! Source map — maps source IDs to file content and provides line/column lookup.
+//!
+//! [`SourceMap`] serves two roles:
+//!
+//! 1. **Front-end** — maps [`SourceId`] → [`SourceFile`] so the compiler can
+//!    resolve byte offsets to 1-based `(line, col)` pairs for diagnostics.
+//! 2. **Back-end** (T16) — maps Deox [`Span`]s ↔ generated-Rust line numbers
+//!    so that `rustc` and runtime errors that reference the intermediate `.rs`
+//!    file can be translated back to the original `.deox` source location.
+//!
+//! The back-end mapping is populated during codegen (see
+//! [`CodegenContext::record_mapping`][ccrm]) and consumed by
+//! `deox_cli::error_mapper`.
+//!
+//! [ccrm]: ../../deox_codegen_rust/context/struct.CodegenContext.html#method.record_mapping
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::span::{ByteOffset, SourceId};
+use crate::span::{ByteOffset, SourceId, Span};
 
 /// A source file with cached line-start byte offsets.
 #[derive(Debug, Clone)]
@@ -61,9 +75,23 @@ fn compute_line_starts(content: &str) -> Vec<usize> {
 }
 
 /// A collection of source files indexed by [`SourceId`].
+///
+/// In addition to front-end file/offset lookup, the map stores a **bidirectional
+/// Deox ↔ Rust line mapping** (T16). Each entry records that a Deox [`Span`]
+/// corresponds to a particular 1-based line in the generated Rust source, so
+/// that `rustc` diagnostics and runtime panics referencing the `.rs` file can
+/// be translated back to the original `.deox` location.
+///
+/// The mapping is populated during codegen via [`SourceMap::add_mapping`].
 #[derive(Debug, Clone)]
 pub struct SourceMap {
     sources: HashMap<SourceId, SourceFile>,
+
+    /// Rust line (1-based) → Deox [`Span`]. Populated during codegen.
+    rust_to_deox: HashMap<usize, Span>,
+
+    /// Deox [`Span`] → Rust line (1-based). Reverse of [`SourceMap::rust_to_deox`].
+    deox_to_rust: HashMap<Span, usize>,
 }
 
 impl SourceMap {
@@ -71,6 +99,8 @@ impl SourceMap {
     pub fn new() -> Self {
         Self {
             sources: HashMap::new(),
+            rust_to_deox: HashMap::new(),
+            deox_to_rust: HashMap::new(),
         }
     }
 
@@ -82,6 +112,53 @@ impl SourceMap {
     /// Look up the 1-based line and column for a byte offset in the given source.
     pub fn lookup(&self, id: SourceId, offset: ByteOffset) -> Option<(usize, usize)> {
         self.sources.get(&id).and_then(|sf| sf.lookup(offset))
+    }
+
+    // -----------------------------------------------------------------
+    // Deox ↔ Rust line mapping (T16)
+    // -----------------------------------------------------------------
+
+    /// Record that a Deox `span` maps to a specific 1-based `rust_line` in the
+    /// generated Rust source.
+    ///
+    /// If the same `rust_line` or `span` was previously recorded, the later
+    /// call wins (the previous entry is overwritten).
+    pub fn add_mapping(&mut self, deox_span: Span, rust_line: usize) {
+        self.rust_to_deox.insert(rust_line, deox_span);
+        self.deox_to_rust.insert(deox_span, rust_line);
+    }
+
+    /// Given a Rust line number, return the corresponding Deox [`Span`].
+    ///
+    /// Returns an exact match when `rust_line` was recorded via
+    /// [`add_mapping`](Self::add_mapping). Otherwise, falls back to the
+    /// **closest recorded line at or below** `rust_line` — this mirrors how
+    /// `rustc`/panic locations point at the *start* of the statement that
+    /// failed, so the nearest mapped statement above is the best candidate.
+    ///
+    /// Returns `None` when no mapping at or below `rust_line` exists.
+    pub fn lookup_deox(&self, rust_line: usize) -> Option<Span> {
+        if let Some(s) = self.rust_to_deox.get(&rust_line) {
+            return Some(*s);
+        }
+        // Find the closest recorded line at or below `rust_line`.
+        self.rust_to_deox
+            .iter()
+            .filter(|(rl, _)| **rl <= rust_line)
+            .max_by_key(|(rl, _)| **rl)
+            .map(|(_, s)| *s)
+    }
+
+    /// Given a Deox `span`, return the corresponding 1-based Rust line number.
+    ///
+    /// Returns `None` if no mapping was recorded for this exact span.
+    pub fn lookup_rust(&self, deox_span: Span) -> Option<usize> {
+        self.deox_to_rust.get(&deox_span).copied()
+    }
+
+    /// Returns `true` if no Deox ↔ Rust line mappings have been recorded.
+    pub fn is_line_map_empty(&self) -> bool {
+        self.rust_to_deox.is_empty()
     }
 }
 
