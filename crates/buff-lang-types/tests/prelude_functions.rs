@@ -304,6 +304,13 @@ fn prelude_functions_resolve_without_import() {
         ("print", vec![string_lit("x")], Type::Void),
         ("println", vec![string_lit("x")], Type::Void),
         ("read_line", vec![], Type::string()),
+        ("args", vec![], Type::vector(Type::string())),
+        (
+            "env",
+            vec![string_lit("PATH")],
+            Type::option(Type::string()),
+        ),
+        ("exit", vec![int_lit(0)], Type::Void),
     ];
     for (name, args, expected) in cases {
         let mut inf = TypeInferencer::new();
@@ -332,7 +339,7 @@ fn prelude_functions_registry_lookup_smoke() {
     // Unknown names are rejected.
     assert!(!is_prelude("not_in_prelude"));
     assert_eq!(lookup(""), None);
-    assert_eq!(category_of("args"), None); // reserved for T99
+    assert_eq!(category_of("nonexistent"), None);
 }
 
 #[test]
@@ -353,6 +360,18 @@ fn prelude_functions_categories_partition_correctly() {
     assert_eq!(
         lookup("read_line").map(PreludeFn::category),
         Some(PreludeCategory::Io)
+    );
+    assert_eq!(
+        lookup("args").map(PreludeFn::category),
+        Some(PreludeCategory::System)
+    );
+    assert_eq!(
+        lookup("env").map(PreludeFn::category),
+        Some(PreludeCategory::System)
+    );
+    assert_eq!(
+        lookup("exit").map(PreludeFn::category),
+        Some(PreludeCategory::System)
     );
 }
 

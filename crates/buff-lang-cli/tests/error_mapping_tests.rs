@@ -22,7 +22,8 @@ use buff_lang_cli::error_mapper;
 // ---------------------------------------------------------------------------
 
 fn temp_root() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("buff-lang-cli-errmap-tests-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("buff-lang-cli-errmap-tests-{}", std::process::id()));
     let _ = fs::create_dir_all(&dir);
     dir
 }

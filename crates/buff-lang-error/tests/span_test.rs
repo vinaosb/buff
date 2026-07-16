@@ -1,7 +1,7 @@
 //! Integration tests for span, source map, and diagnostic types.
 
 use buff_lang_error::{
-    CodegenError, BuffError, Diagnostic, LexError, ParseError, RuntimeError, Severity, SourceId,
+    BuffError, CodegenError, Diagnostic, LexError, ParseError, RuntimeError, Severity, SourceId,
     SourceMap, Span, TypeError,
 };
 use std::path::PathBuf;

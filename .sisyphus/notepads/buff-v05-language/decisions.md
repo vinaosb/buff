@@ -232,3 +232,40 @@ line + 3 re-exports from `lib.rs`, the `tests/numeric_coercion.rs` file,
 and the 2 `t22_*` tests in `rust_codegen.rs::tests` reverts T22 cleanly
 (additive-only change set; no other crate's behaviour changes).
 
+## T99 — Process environment access: args/env/exit codegen shape only
+
+**Date:** T99 (v0.5).  **Scope:** additive, non-breaking.
+
+**Change:** Added three prelude functions (`args`, `env`, `exit`) to the T96
+prelude infrastructure, plus two new generic type variants (`Type::Vector<T>`,
+`Type::Option<T>`) to represent their return types.
+
+### Design choices
+
+**1. `Type::Vector<T>` and `Type::Option<T>` are new enum variants.**
+These are needed so the type system can represent `args() -> Vector<String>`
+and `env("NAME") -> Option<String>`. They are additive (no existing variant
+changed). Full collection support (indexing, iteration, methods) is deferred
+to T23.
+
+**2. `quote!` + `syn::parse2` for codegen.** The `args()`/`env()`/`exit()`
+codegen arms use the same pattern as `lower_read_line`: build a token stream
+via `quote!`, then parse it via `syn::parse2` (which returns `Result`, not
+panic). This avoids raw-string codegen while keeping the expressions readable.
+
+**3. `PreludeCategory::System`.** The env functions are grouped under a new
+category separate from I/O (print/read_line) and Math/Convert.
+
+### DEFERRAL: `args()[0]` indexing
+
+The end-to-end scenario `func main(): let a = args(); print(a[0])` uses
+Vector indexing (`a[0]`), which requires the array/index expression AST node
+(T23 — not yet done). T99 verifies the codegen SHAPE of each prelude call
+individually; the indexing integration is deferred to T23.
+
+### Rollback
+Removing the `Type::Vector`/`Type::Option` variants + `PreludeFn::Args`/`Env`/`Exit`
++ `PreludeCategory::System` + the codegen arms + `tests/env_access.rs` reverts
+T99 cleanly (additive-only change set).
+
+

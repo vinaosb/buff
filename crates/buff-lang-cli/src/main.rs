@@ -12,7 +12,9 @@ use buff_lang_cli::cli::{Cli, Command};
 fn main() -> Result<()> {
     let args = Cli::parse();
     match args.command {
-        Command::Build { file, output } => buff_lang_cli::commands::build::run(&file, output.as_deref()),
+        Command::Build { file, output } => {
+            buff_lang_cli::commands::build::run(&file, output.as_deref())
+        }
         Command::Run { file, args } => buff_lang_cli::commands::run::run(&file, &args),
         Command::New { name } => buff_lang_cli::commands::new::run(&name),
         Command::Init => buff_lang_cli::commands::init::run(),

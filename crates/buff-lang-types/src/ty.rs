@@ -42,6 +42,17 @@ pub enum Type {
     /// The absence of a value (for functions without a return, or `if`
     /// expressions without an `else` branch).
     Void,
+    /// A generic vector/array type: `Vector<T>` (T99 — prelude `args()`).
+    ///
+    /// Maps to Rust's `Vec<T>`. The element type is boxed so the enum
+    /// variant can carry any inner type. Full collection support (indexing,
+    /// iteration, methods) arrives in T23.
+    Vector(Box<Type>),
+    /// An optional value: `Option<T>` (T99 — prelude `env()`).
+    ///
+    /// Maps to Rust's `Option<T>`. Used by `env("HOME")` which returns
+    /// `Option<String>`.
+    Option(Box<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -151,6 +162,16 @@ impl Type {
         )
     }
 
+    /// Create a `Vector<T>` type.
+    pub fn vector(elem: Type) -> Self {
+        Type::Vector(Box::new(elem))
+    }
+
+    /// Create an `Option<T>` type.
+    pub fn option(inner: Type) -> Self {
+        Type::Option(Box::new(inner))
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -200,6 +221,8 @@ impl fmt::Display for Type {
             Type::Decimal => f.write_str("Decimal"),
             Type::Unknown => f.write_str("Unknown"),
             Type::Void => f.write_str("Void"),
+            Type::Vector(elem) => write!(f, "Vector<{elem}>"),
+            Type::Option(inner) => write!(f, "Option<{inner}>"),
         }
     }
 }

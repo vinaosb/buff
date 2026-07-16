@@ -21,7 +21,8 @@ use buff_lang_cli::pipeline;
 
 /// Helper: create a unique temp dir for this test binary's fixtures.
 fn temp_root() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("buff-lang-cli-build-tests-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("buff-lang-cli-build-tests-{}", std::process::id()));
     let _ = fs::create_dir_all(&dir);
     dir
 }

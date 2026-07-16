@@ -274,7 +274,7 @@ Phase 1 (v0.1) must be complete:
 
   **Commit**: YES — Message: `feat(stdlib): add standard library prelude with math, conversion, and I/O functions`
 
-- [ ] **T99**: Process environment access [quick]
+- [x] **T99**: Process environment access [quick]
 
   **What to do** (TDD):
   - **RED**: Write test: `args()` returns Vector<String> with command-line arguments

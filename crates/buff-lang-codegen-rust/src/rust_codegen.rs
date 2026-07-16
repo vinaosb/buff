@@ -572,6 +572,47 @@ impl RustCodegen {
             PreludeFn::Print => self.lower_print(args),
             PreludeFn::Println => self.lower_print(args),
             PreludeFn::ReadLine => Ok(self.lower_read_line()),
+
+            // ----- System / environment (T99) ---------------------------
+            // args() → std::env::args().collect::<Vec<String>>()
+            PreludeFn::Args => {
+                if !args.is_empty() {
+                    return Err(self.unsupported("args() takes no arguments"));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::args().collect::<Vec<String>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("args() codegen parse: {e}")))
+            }
+            // env("NAME") → std::env::var("NAME").ok()
+            PreludeFn::Env => {
+                if args.len() != 1 {
+                    return Err(
+                        self.unsupported("env() expects exactly 1 argument (the variable name)")
+                    );
+                }
+                let arg = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::var(#arg).ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("env() codegen parse: {e}")))
+            }
+            // exit(code) → std::process::exit(code)
+            PreludeFn::Exit => {
+                if args.len() != 1 {
+                    return Err(
+                        self.unsupported("exit() expects exactly 1 argument (the exit code)")
+                    );
+                }
+                let arg = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::process::exit(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("exit() codegen parse: {e}")))
+            }
         }
     }
 
@@ -1222,6 +1263,18 @@ impl RustCodegen {
     /// dependency of `buff-lang-codegen-rust` so generated crates must depend
     /// on it as well — the runtime/driver is responsible for that).
     fn buff_type_to_syn(&self, ty: &Type) -> Option<SynType> {
+        // Handle generic types (Vector, Option) first.
+        match ty {
+            Type::Vector(elem) => {
+                let inner = self.buff_type_to_syn(elem)?;
+                return Some(make_generic_path_type("Vec", vec![inner]));
+            }
+            Type::Option(inner) => {
+                let inner = self.buff_type_to_syn(inner)?;
+                return Some(make_generic_path_type("Option", vec![inner]));
+            }
+            _ => {}
+        }
         let rust_name: &str = match ty {
             Type::Int {
                 width: IntWidth::W8,
@@ -1270,6 +1323,9 @@ impl RustCodegen {
             Type::Char => "char",
             Type::Decimal => "rust_decimal::Decimal",
             Type::Unknown | Type::Void => return None,
+            // Vector and Option are handled by the early-return match above;
+            // this arm is unreachable but required for exhaustiveness.
+            Type::Vector(_) | Type::Option(_) => return None,
         };
         Some(rust_path_type(rust_name))
     }

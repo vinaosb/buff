@@ -57,6 +57,8 @@ pub enum PreludeCategory {
     Convert,
     /// `print`, `println`, `read_line`.
     Io,
+    /// `args`, `env`, `exit` (T99 — process environment access).
+    System,
     /// Reserved for the collection-prelude (T23/T67). Empty today.
     Collection,
 }
@@ -102,6 +104,13 @@ pub enum PreludeFn {
     Println,
     /// `read_line()` — read a line of stdin, returns `String`.
     ReadLine,
+    // --- System / environment (T99) -------------------------------------
+    /// `args()` — command-line arguments, returns `Vector<String>`.
+    Args,
+    /// `env("NAME")` — environment variable lookup, returns `Option<String>`.
+    Env,
+    /// `exit(code)` — terminate the process with the given exit code.
+    Exit,
 }
 
 impl PreludeFn {
@@ -125,6 +134,10 @@ impl PreludeFn {
         PreludeFn::Print,
         PreludeFn::Println,
         PreludeFn::ReadLine,
+        // System
+        PreludeFn::Args,
+        PreludeFn::Env,
+        PreludeFn::Exit,
     ];
 
     /// The source-name of this prelude function (the identifier the user
@@ -146,6 +159,9 @@ impl PreludeFn {
             PreludeFn::Print => "print",
             PreludeFn::Println => "println",
             PreludeFn::ReadLine => "read_line",
+            PreludeFn::Args => "args",
+            PreludeFn::Env => "env",
+            PreludeFn::Exit => "exit",
         }
     }
 
@@ -164,6 +180,7 @@ impl PreludeFn {
                 PreludeCategory::Convert
             }
             PreludeFn::Print | PreludeFn::Println | PreludeFn::ReadLine => PreludeCategory::Io,
+            PreludeFn::Args | PreludeFn::Env | PreludeFn::Exit => PreludeCategory::System,
         }
     }
 }
@@ -264,6 +281,14 @@ pub fn return_type(fn_: PreludeFn, arg_tys: &[Type]) -> Type {
         // --- I/O -------------------------------------------------------
         PreludeFn::Print | PreludeFn::Println => Type::Void,
         PreludeFn::ReadLine => Type::string(),
+
+        // --- System / environment (T99) --------------------------------
+        // args() -> Vector<String>
+        PreludeFn::Args => Type::vector(Type::string()),
+        // env("NAME") -> Option<String>
+        PreludeFn::Env => Type::option(Type::string()),
+        // exit(code) -> Void (never returns)
+        PreludeFn::Exit => Type::Void,
     }
 }
 
@@ -288,7 +313,7 @@ mod tests {
     fn prelude_lookup_rejects_unknown() {
         assert!(!is_prelude("user_func"));
         assert!(!is_prelude(""));
-        assert!(!is_prelude("args")); // reserved for T99, not defined yet
+        assert!(!is_prelude("nonexistent"));
         assert_eq!(lookup("nonexistent"), None);
     }
 
@@ -426,13 +451,13 @@ mod tests {
 
     #[test]
     fn prelude_all_count_and_no_duplicates() {
-        // 14 prelude functions today (8 math + 4 convert + 3 io − 1 because
-        // println shares Println slot). Actually: 8 + 4 + 3 = 15.
+        // 15 prelude functions today (8 math + 4 convert + 3 io) + 3 env
+        // (args, env, exit) = 18.
         let all_names: Vec<&str> = PreludeFn::ALL.iter().map(|f| f.name()).collect();
         let unique: std::collections::HashSet<&str> = all_names.iter().copied().collect();
         assert_eq!(all_names.len(), unique.len(), "duplicate prelude names");
-        // Sanity: at least the eight math + four convert + three io.
-        assert!(PreludeFn::ALL.len() >= 15);
+        // Sanity: at least the eight math + four convert + three io + three env.
+        assert!(PreludeFn::ALL.len() >= 18);
         // Width helpers exist on IntWidth/FloatWidth.
         assert_eq!(IntWidth::W8.bits(), 8);
         assert_eq!(FloatWidth::W32.bits(), 32);

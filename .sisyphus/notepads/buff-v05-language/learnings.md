@@ -280,3 +280,58 @@ end-to-end from T10/T20; T22 just pinned them with regression tests.
   scope). Following T20 precedent, only the two touched crates were fmt'd.
 - The `unused manifest key: workspace.dev-dependencies` warning is pre-existing
   (workspace Cargo.toml); not introduced by T22 and out of scope.
+
+## T99 — Process environment access (args/env/exit)
+
+### Status: COMPLETE
+
+Added three prelude functions for process environment access, extending the T96
+prelude infrastructure. This is a small additive change — no new AST nodes, no
+new parser/lexer changes.
+
+### What was added
+
+**Types** (`buff-lang-types/src/ty.rs`):
+- `Type::Vector(Box<Type>)` — generic vector type (maps to Rust `Vec<T>`)
+- `Type::Option(Box<Type>)` — generic option type (maps to Rust `Option<T>`)
+- Constructors: `Type::vector(elem)`, `Type::option(inner)`
+
+**Prelude** (`buff-lang-types/src/prelude.rs`):
+- `PreludeCategory::System` — new category for process env functions
+- `PreludeFn::Args` — `args()` → `Vector<String>`
+- `PreludeFn::Env` — `env("NAME")` → `Option<String>`
+- `PreludeFn::Exit` — `exit(code)` → `Void`
+
+**Codegen** (`buff-lang-codegen-rust/src/rust_codegen.rs`):
+- `buff_type_to_syn`: early-return for `Type::Vector` → `Vec<T>` and `Type::Option` → `Option<T>` via `make_generic_path_type`
+- `lower_prelude_call` arms for `Args`/`Env`/`Exit` using `quote!` + `syn::parse2`
+
+**Codegen mappings:**
+| Buff | Rust |
+|------|------|
+| `args()` | `std::env::args().collect::<Vec<String>>()` |
+| `env("PATH")` | `std::env::var("PATH").ok()` |
+| `exit(0)` | `std::process::exit(0)` |
+
+### Key design decisions
+
+- **`quote!` + `syn::parse2`** for the codegen arms (same pattern as `lower_read_line`).
+  This avoids raw-string codegen while keeping the expressions readable.
+- **`Type::Vector` and `Type::Option`** are new generic type variants. They're
+  needed so the type system can represent the return types of `args()` and `env()`.
+  Full collection support (indexing, iteration) is deferred to T23.
+- **`PreludeCategory::System`** keeps the env functions grouped separately from
+  I/O (print/read_line) and Math/Convert.
+
+### Deferred
+- **`args()[0]` indexing** requires the array/index expression AST node (T23).
+  The end-to-end scenario `func main(): let a = args(); print(a[0])` cannot work
+  until T23 lands. The codegen shape of `args()` itself is verified.
+
+### Verification
+- `cargo test -p buff-lang-codegen-rust env_access` → 7/7 pass
+- `cargo test -p buff-lang-types` → 149 pass (all)
+- `cargo check --workspace` → clean
+- `cargo clippy -p buff-lang-types -p buff-lang-codegen-rust --all-targets -- -D warnings` → clean
+- `cargo fmt --check` → clean
+
