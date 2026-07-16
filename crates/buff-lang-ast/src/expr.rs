@@ -120,6 +120,30 @@ impl fmt::Display for InterpPart {
 }
 
 /// A top-level expression. Every variant is annotated with its source [`Span`].
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T23 — `Expr::ArrayLit` and `Expr::Index`
+///
+/// Two variants were **added** in T23 (v0.5) to bring collection support online:
+///
+/// - [`Expr::ArrayLit`] — a collection literal `[e1, e2, e3]` (or empty `[]`).
+///   Lowers to Rust's `vec![...]` macro and infers type `Vector<T>` where `T`
+///   is the element type (integer literals get auto-width via T22 range
+///   analysis, so `[1, 2, 3]` -> `Vector<Int<8>>`). This is **additive**: no
+///   existing variant was renamed, reordered, or had its payload altered.
+///
+/// - [`Expr::Index`] — an indexing expression `base[index]`. Lowers to Rust
+///   `base[index as usize]` (the index is coerced to `usize`). String-literal
+///   receivers are still rejected at parse time with the helpful T21 message
+///   ("for strings use .chars() or .first()"); all other receivers produce an
+///   `Expr::Index` node. This unblocks T99's deferred `args()[0]` and T21's
+///   typed string-index rejection.
+///
+/// Both variants derive the standard `Debug, Clone, PartialEq` (no `Eq` because
+/// the containing `Expr` already isn't `Eq` due to floats). All internal
+/// `match`es on `Expr` were extended with arms for the new variants: `span()`,
+/// `Display`, parser, type inference, and Rust codegen.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A literal: `42`, `"hi"`, `true`, …
@@ -180,6 +204,31 @@ pub enum Expr {
     },
     /// A suspension point in an async context (placeholder for future async work).
     SuspendExpr { inner: Box<Expr>, span: Span },
+    /// A collection literal: `[e1, e2, e3]` or `[]` (T23).
+    ///
+    /// Comma-separated elements; trailing comma allowed; empty literal allowed.
+    /// Lowers to Rust's `vec![...]` macro. The element type is inferred from
+    /// the elements — integer literals get auto-width via T22 range analysis
+    /// (`[1, 2, 3]` -> `Vector<Int<8>>`), so a `let v = [1, 2, 3]` binding
+    /// picks up a `Vec<i8>` Rust annotation automatically.
+    ///
+    /// This is **additive**: no existing variant was renamed or reordered.
+    ArrayLit { elements: Vec<Expr>, span: Span },
+    /// An indexing expression: `base[index]` (T23).
+    ///
+    /// Lowers to Rust `base[index as usize]` — the index is coerced to `usize`
+    /// so any Buff integer-typed index works (Buff's `Int` maps to `i64`,
+    /// which cannot index a Rust `Vec` directly). String-literal receivers are
+    /// rejected at parse time (the T21 helpful error); all other receivers
+    /// build this node and a type check rejects string indexing later.
+    ///
+    /// This unblocks T99's deferred `args()[0]` and T21's typed string-index
+    /// rejection. **Additive**: no existing variant was renamed or reordered.
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
     /// A string interpolation: `"text {expr} more {expr2}"` (T21).
     ///
     /// Built from the lexer's `StringStart / StringPart / InterpStart / ...
@@ -209,6 +258,8 @@ impl Expr {
             | Expr::StructInit { span: s, .. }
             | Expr::MatchExpr { span: s, .. }
             | Expr::SuspendExpr { span: s, .. }
+            | Expr::ArrayLit { span: s, .. }
+            | Expr::Index { span: s, .. }
             | Expr::StringInterp { span: s, .. } => *s,
         }
     }
@@ -301,6 +352,17 @@ impl fmt::Display for Expr {
                 f.write_str("])")
             }
             Expr::SuspendExpr { inner, .. } => write!(f, "Suspend({inner})"),
+            Expr::ArrayLit { elements, .. } => {
+                f.write_str("Array[")?;
+                for (i, e) in elements.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                f.write_str("]")
+            }
+            Expr::Index { base, index, .. } => write!(f, "Index({base}, {index})"),
             Expr::StringInterp { parts, .. } => {
                 f.write_str("Interp[")?;
                 for (i, p) in parts.iter().enumerate() {

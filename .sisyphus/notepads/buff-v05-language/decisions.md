@@ -268,4 +268,106 @@ Removing the `Type::Vector`/`Type::Option` variants + `PreludeFn::Args`/`Env`/`E
 + `PreludeCategory::System` + the codegen arms + `tests/env_access.rs` reverts
 T99 cleanly (additive-only change set).
 
+## T23 — Additive AST changes: Expr::ArrayLit + Expr::Index (+ minimal closures)
+
+**Date:** T23 (v0.5).  **Scope:** additive, non-breaking.
+
+### A. Two new `Expr` variants
+
+Added to `buff_lang_ast::Expr` (`crates/buff-lang-ast/src/expr.rs`), mirroring
+the T20/T21 additive pattern (migration doc-comment on the enum + per-variant
+doc-comment):
+
+- `Expr::ArrayLit { elements: Vec<Expr>, span: Span }` — collection literal
+  `[e1, e2, ...]` (empty `[]` and trailing comma allowed).
+- `Expr::Index { base: Box<Expr>, index: Box<Expr>, span: Span }` — indexing
+  `base[index]`.
+
+**Why additive is safe:** no existing variant was renamed, reordered, or had
+its payload altered. `Expr` derives only `Debug, Clone, PartialEq` (not `Eq`),
+so the new `Vec<Expr>`/`Box<Expr>` payloads are consistent. Every internal
+`match` on `Expr` was extended with arms: `span()`, `Display` (expr.rs),
+`collect_uses` (ir.rs), parser, type inferencer, Rust codegen. `cargo check`
+surfaces any missed match as a non-exhaustive error (it caught ir.rs).
+
+These two nodes unblock the deferred items: T99 `args()[0]`, T21 typed-String
+index rejection, and T22 collection auto-width end-to-end.
+
+### B. Closure decision: implemented MINIMAL (not deferred)
+
+`.map({x => x * 2})` needs closure parsing. Closures are officially T34, but
+T34 is not done. **Decision: implement a minimal closure form now** rather
+than defer, because it is small, additive, and unblocks the .map/.filter/
+.reduce acceptance immediately.
+
+The AST already had `Expr::Lambda { params, body, return_type, span }`
+(defined in T2) but it was never parsed. T23 adds:
+- **Parser:** `{ ident (, ident)* => expr }` -> `Expr::Lambda` with the body
+  wrapped in a one-statement `Block` (`Stmt::ExprStmt`). 1 or 2 params
+  (enough for map/filter/reduce).
+- **Codegen:** `Expr::Lambda` -> Rust closure `|p1, p2| body`. Param types
+  are NOT annotated (Rust infers) — a placeholder `TypeRef::Named{name:"_"}`
+  is stored on the `Param` and ignored by codegen.
+
+T34 will extend this to multi-statement bodies, typed params, and capture
+analysis. The minimal form is a strict subset, so T34 only ADDS capability.
+
+### C. Vector method codegen forms
+
+| Buff                       | Rust                                                          |
+|----------------------------|--------------------------------------------------------------|
+| `v.push(x)`                | `v.push(x)` (default passthrough arm)                        |
+| `v.pop()`                  | `v.pop()` (default passthrough arm)                          |
+| `v.len()`                  | `v.len()` (default passthrough arm)                          |
+| `v.map({x => e})`          | `v.into_iter().map(\|x\| e).collect::<Vec<_>>()`             |
+| `v.filter({x => e})`       | `v.into_iter().filter(\|x\| e).collect::<Vec<_>>()`          |
+| `v.reduce({a, b => e})`    | `v.into_iter().reduce(\|a, b\| e)` (returns `Option<T>`)     |
+
+**Why `.into_iter()` (not `.iter()`):** closure params must be OWNED values
+to match Buff's "hide references from the user" philosophy. `.iter()` yields
+references, which would force closure bodies to deref (`*x`) — leaking Rust
+borrow ergonomics into Buff. `.into_iter()` consumes the receiver, which is
+correct under Buff's move-by-default semantics. `.collect::<Vec<_>>()` rebuilds
+a `Vec` so the result is indexable/chainable.
+
+**Why `.reduce` returns `Option<T>`:** Rust parity. A non-Option fold-style
+reduce (with a required initial value) is deferred — the 2-arg `reduce`
+closure maps directly to `Iterator::reduce`.
+
+### D. Index codegen: dedicated `cast_to_usize`
+
+`base[index]` -> `base[index as usize]` (Buff's `Int` is `i64`, which can't
+index a Rust `Vec` directly). The shared `cast_to()` helper wraps EVERY
+operand in parens (`(0) as usize`), which is ugly for the common literal/ident
+index case. A dedicated `cast_to_usize()` wraps only non-atomic indices
+(`Binary`/`Unary`/`Cast`/`Range`), yielding clean `v[0 as usize]` /
+`v[i as usize]` while still protecting `(a + b) as usize` precedence.
+
+### E. Parser: string-literal-only index rejection (T21 preserve)
+
+The OLD `parse_postfix` `LBracket` arm rejected ALL `expr[...]`. T23 narrows
+the rejection to **string-LITERAL receivers only** (`"abc"[0]`), preserving
+the T21 helpful error ("for strings use .chars() or .first()"). All other
+receivers (ident, call result, nested index) build `Expr::Index`; a future
+type-check pass can reject typed-String indexing (e.g. `s[0]` where `s: String`).
+This is the documented trade-off: parse-time rejection stays for the
+unambiguous literal case; typed rejection is deferred to type checking.
+
+### F. Auto-width via T22 range analysis
+
+`TypeInferencer::infer_collection_element` recognises integer-literal
+collections and calls `range_analysis::collection_int_width` to pick the
+element width: `[1,2,3]` -> `Vector<Int<8>>`, `[300]` -> `Vector<Int<16>>`.
+A `const_int_value()` helper recognises BOTH `Literal::Int(v)` and
+`UnaryOp(Neg, Literal::Int(v))` (the parser-realistic form for negatives, since
+`-200` lexes as unary-minus-on-`200`), so `[-200, 5]` auto-widens to `i16`.
+
+### Rollback
+
+Removing the two `Expr` variants + their arms in (span/Display/ir/parser/
+infer/codegen) + `parse_array_literal`/`parse_closure`/postfix-index +
+`lower_array_lit`/`lower_lambda`/`lower_into_iter_*`/`cast_to_usize` +
+`infer_collection_element`/`const_int_value` + the two test files reverts T23
+cleanly (additive-only change set).
+
 

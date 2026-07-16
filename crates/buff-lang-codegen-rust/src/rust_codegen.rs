@@ -464,6 +464,28 @@ impl RustCodegen {
                 ..
             } => self.lower_method_call(receiver, method, args),
             Expr::StringInterp { parts, .. } => self.lower_string_interp(parts),
+            // T23: `[e1, e2, ...]` -> Rust `vec![e1, e2, ...]` macro.
+            Expr::ArrayLit { elements, .. } => self.lower_array_lit(elements),
+            // T23: `base[index]` -> Rust `base[index as usize]`. The index is
+            // coerced to `usize` so any Buff integer index works (Buff's Int
+            // maps to i64, which can't index a Rust Vec directly). Parens are
+            // added only around non-atomic indices so the common `v[0 as usize]`
+            // / `v[i as usize]` forms stay clean.
+            Expr::Index { base, index, .. } => {
+                let base_e = self.lower_expr(base)?;
+                let index_e = cast_to_usize(self.lower_expr(index)?);
+                Ok(SynExpr::Index(syn::ExprIndex {
+                    attrs: Vec::new(),
+                    expr: Box::new(base_e),
+                    bracket_token: Default::default(),
+                    index: Box::new(index_e),
+                }))
+            }
+            // T23: a minimal closure `{ params => expr }` -> Rust
+            // `|p1, p2| body`. Param types are inferred by Rust; we emit no
+            // type annotations. The body is a single expression (the parser
+            // wraps it in a one-statement block).
+            Expr::Lambda { params, body, .. } => self.lower_lambda(params, body),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -868,6 +890,24 @@ impl RustCodegen {
             // We lower the two integer arguments and emit the chain. If `b`
             // is not provided, we use `s.chars().skip(a).collect::<String>()`.
             "slice" => self.lower_slice_call(recv, args)?,
+            // T23: Vector iteration methods. `.map` / `.filter` take a single
+            // closure and return a new `Vec`; `.reduce` takes a 2-arg closure
+            // and returns `Option<T>`. We use `.into_iter()` so the closure
+            // params are owned values (Buff hides references from users).
+            // `.push(x)` / `.pop()` / `.len()` need no special mapping —
+            // they fall through to the default `recv.method(args)` arm below.
+            "map" if args.len() == 1 => {
+                let f = self.lower_expr(&args[0])?;
+                self.lower_into_iter_collect(recv, "map", f)?
+            }
+            "filter" if args.len() == 1 => {
+                let f = self.lower_expr(&args[0])?;
+                self.lower_into_iter_collect(recv, "filter", f)?
+            }
+            "reduce" if args.len() == 1 => {
+                let f = self.lower_expr(&args[0])?;
+                self.lower_into_iter_reduce(recv, f)?
+            }
             // Default: a plain method call `recv.method(args)`.
             _ => {
                 let args_punct = lower_args(self)?;
@@ -1006,6 +1046,41 @@ impl RustCodegen {
         Ok(collect_call)
     }
 
+    /// Lower a Vector iteration method that returns a new `Vec` (T23).
+    ///
+    /// `recv.<method>(closure)` → `recv.into_iter().<method>(closure).collect::<Vec<_>>()`.
+    /// Used by `.map` and `.filter`. We use `.into_iter()` so the closure
+    /// receives owned values (Buff hides references from users); this
+    /// consumes the receiver, matching Buff's move-by-default semantics.
+    /// The `.collect::<Vec<_>>()` rebuilds a Vec so the result can be indexed
+    /// or chained further.
+    fn lower_into_iter_collect(
+        &self,
+        recv: SynExpr,
+        method: &str,
+        closure: SynExpr,
+    ) -> Result<SynExpr, CodegenError> {
+        let method_ident = Ident::new(method, ProcSpan::call_site());
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            #recv.into_iter().#method_ident(#closure).collect::<Vec<_>>()
+        };
+        syn::parse2(tokens).map_err(|e| self.unsupported(&format!("{method} codegen parse: {e}")))
+    }
+
+    /// Lower `.reduce(closure)` → `recv.into_iter().reduce(closure)` (T23).
+    ///
+    /// Returns `Option<T>` (Rust parity). The closure is a 2-arg `|a, b| …`.
+    fn lower_into_iter_reduce(
+        &self,
+        recv: SynExpr,
+        closure: SynExpr,
+    ) -> Result<SynExpr, CodegenError> {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            #recv.into_iter().reduce(#closure)
+        };
+        syn::parse2(tokens).map_err(|e| self.unsupported(&format!("reduce codegen parse: {e}")))
+    }
+
     /// Lower a string interpolation `"text {expr} more"` to a Rust
     /// `format!("text {} more", expr)` macro invocation.
     ///
@@ -1068,6 +1143,99 @@ impl RustCodegen {
                 delimiter: syn::MacroDelimiter::Paren(Default::default()),
                 tokens: combined,
             },
+        }))
+    }
+
+    /// Lower a collection literal `[e1, e2, ...]` to Rust's `vec![...]` macro
+    /// (T23).
+    ///
+    /// The element expressions are lowered and spliced into the macro token
+    /// stream via `quote!`, comma-separated. An empty literal lowers to
+    /// `vec![]` (Rust infers the element type from context — typically the
+    /// `let`-binding's type annotation, which the type inferencer drove).
+    fn lower_array_lit(&mut self, elements: &[Expr]) -> Result<SynExpr, CodegenError> {
+        // Lower each element, then build `vec![e0, e1, ...]`. The `[` / `]`
+        // come from the `Bracket` delimiter; the `tokens` stream holds just
+        // the comma-separated element expressions (so `vec![]` for empty).
+        let mut lowered: Vec<SynExpr> = Vec::with_capacity(elements.len());
+        for e in elements {
+            lowered.push(self.lower_expr(e)?);
+        }
+        let mut tokens: proc_macro2::TokenStream = proc_macro2::TokenStream::new();
+        for (i, e) in lowered.iter().enumerate() {
+            let e = e.clone();
+            if i > 0 {
+                tokens.extend(quote::quote! { , });
+            }
+            tokens.extend(quote::quote! { #e });
+        }
+        Ok(SynExpr::Macro(syn::ExprMacro {
+            attrs: Vec::new(),
+            mac: syn::Macro {
+                path: syn::Path::from(Ident::new("vec", ProcSpan::call_site())),
+                bang_token: Default::default(),
+                delimiter: syn::MacroDelimiter::Bracket(Default::default()),
+                tokens,
+            },
+        }))
+    }
+
+    /// Lower a minimal closure `{ params => expr }` to a Rust closure
+    /// `|p1, p2| body` (T23).
+    ///
+    /// Param types are inferred by Rust — we emit no annotations (matching
+    /// Buff's "hide the types" philosophy). The body is a single expression;
+    /// if the parser produced a multi-statement block, it is lowered as a
+    /// block expression. This minimal form covers `.map` / `.filter` /
+    /// `.reduce` arguments; full closures (typed params, captures) are T34.
+    fn lower_lambda(
+        &mut self,
+        params: &[buff_lang_ast::common::Param],
+        body: &Block,
+    ) -> Result<SynExpr, CodegenError> {
+        // Build the closure parameter patterns: `|p1, p2, ...|`.
+        let mut pats: Punctuated<Pat, syn::Token![,]> = Punctuated::new();
+        for p in params {
+            pats.push(Pat::Ident(PatIdent {
+                attrs: Vec::new(),
+                ident: ast_ident_to_syn(&p.name),
+                by_ref: None,
+                mutability: None,
+                subpat: None,
+            }));
+        }
+        // Body: a single ExprStmt lowers to a bare expression; otherwise a
+        // block expression.
+        let body_expr = self.lower_lambda_body(body)?;
+        Ok(SynExpr::Closure(syn::ExprClosure {
+            attrs: Vec::new(),
+            lifetimes: Default::default(),
+            constness: None,
+            movability: None,
+            asyncness: None,
+            capture: None,
+            or1_token: Default::default(),
+            or2_token: Default::default(),
+            inputs: pats,
+            output: ReturnType::Default,
+            body: Box::new(body_expr),
+        }))
+    }
+
+    /// Lower a lambda body. If the block is a single `ExprStmt`, lower that
+    /// expression directly (so `|x| x * 2` not `|x| { x * 2 }`); otherwise
+    /// lower the block as a `syn::Expr::Block`.
+    fn lower_lambda_body(&mut self, body: &Block) -> Result<SynExpr, CodegenError> {
+        if body.stmts.len() == 1 {
+            if let Stmt::ExprStmt(e, _) = &body.stmts[0] {
+                return self.lower_expr(e);
+            }
+        }
+        let block = self.lower_block(body)?;
+        Ok(SynExpr::Block(syn::ExprBlock {
+            attrs: Vec::new(),
+            label: None,
+            block,
         }))
     }
 
@@ -1442,6 +1610,26 @@ fn wrap_in_parens(e: SynExpr) -> SynExpr {
         attrs: Vec::new(),
         paren_token: Default::default(),
         expr: Box::new(e),
+    })
+}
+
+/// Build a Rust `as usize` cast for a vector index (T23).
+///
+/// Unlike [`cast_to`], this only wraps the operand in parens when it is a
+/// non-atomic expression (binary/unary/cast), so the common cases stay clean:
+/// `0 as usize`, `i as usize`. Compound indices like `a + b` become
+/// `(a + b) as usize` so the cast doesn't bind tighter than the `+`.
+fn cast_to_usize(e: SynExpr) -> SynExpr {
+    let needs_parens = matches!(
+        e,
+        SynExpr::Binary(_) | SynExpr::Unary(_) | SynExpr::Cast(_) | SynExpr::Range(_)
+    );
+    let operand = if needs_parens { wrap_in_parens(e) } else { e };
+    SynExpr::Cast(syn::ExprCast {
+        attrs: Vec::new(),
+        expr: Box::new(operand),
+        as_token: Default::default(),
+        ty: Box::new(rust_path_type("usize")),
     })
 }
 

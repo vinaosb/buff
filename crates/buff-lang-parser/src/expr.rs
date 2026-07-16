@@ -268,30 +268,40 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     span,
                 };
             }
-            // T21: Indexing on a postfix expression is explicitly rejected
-            // for STRING receivers with a helpful message. There is no Index
-            // AST node; Buff requires `.chars()` / `.first()` / `.last()`
-            // for element access (strings are UTF-8, so byte indexing would
-            // be unsound). For now we reject ANY `[...]` postfix because
-            // there is no Index node yet — when collections arrive, this
-            // arm will need to special-case strings vs. sequences.
+            // T23: Indexing on a postfix expression. String LITERAL receivers
+            // are rejected with the T21 helpful message (UTF-8 strings have no
+            // sound byte indexing). All other receivers build an `Expr::Index`
+            // node; a later type check rejects typed-String indexing. The
+            // receiver type is generally unknown at parse time, so only the
+            // direct string-literal case is rejected here.
             Some(TokenKind::LBracket) => {
-                let lb = stream.advance().expect("peek guaranteed an LBracket");
-                // Produce a parse-time rejection with the task-required
-                // message. The error is attached to the `[` token so the
-                // diagnostic points at the offender.
-                return Err(ParseError::new(
-                    Diagnostic::error(
-                        "direct indexing `expr[...]` is not supported; \
-                         for strings use .chars() or .first() instead",
-                        lb.span,
-                    )
-                    .with_note(
-                        "Buff does not provide byte indexing on UTF-8 strings. \
-                         Iterate with `.chars()`, or use `.first()` / `.last()` \
-                         for an Option<Char>.",
-                    ),
-                ));
+                // Preserve the T21 string-literal rejection: `"abc"[0]` is
+                // rejected at parse time with the helpful message. Any other
+                // receiver (ident, call, nested index, …) builds an Index node.
+                if matches!(&expr, Expr::Literal(Literal::String(_), _)) {
+                    let lb = stream.advance().expect("peek guaranteed an LBracket");
+                    return Err(ParseError::new(
+                        Diagnostic::error(
+                            "direct indexing `expr[...]` is not supported on strings; \
+                             use .chars() or .first() instead",
+                            lb.span,
+                        )
+                        .with_note(
+                            "Buff does not provide byte indexing on UTF-8 strings. \
+                             Iterate with `.chars()`, or use `.first()` / `.last()` \
+                             for an Option<Char>.",
+                        ),
+                    ));
+                }
+                stream.advance(); // consume '['
+                let index = parse_expression(stream)?;
+                let rb = stream.expect(TokenKind::RBracket)?;
+                let span = Span::new(expr.span().start, rb.span.end, stream.source_id());
+                expr = Expr::Index {
+                    base: Box::new(expr),
+                    index: Box::new(index),
+                    span,
+                };
             }
             Some(TokenKind::Dot) => {
                 stream.advance(); // consume '.'
@@ -364,6 +374,98 @@ fn parse_call_args(stream: &mut TokenStream<'_>) -> Result<Vec<Expr>, ParseError
 // Level 14 — primary: literals, identifiers, parenthesized expressions.
 // ---------------------------------------------------------------------------
 
+/// Parse a collection literal `[e1, e2, ...]` whose opening `[` is the next
+/// significant token (T23).
+///
+/// Allows an empty literal `[]`, a trailing comma, and arbitrary expressions
+/// as elements. Builds an [`Expr::ArrayLit`].
+fn parse_array_literal(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let lb = stream.expect(TokenKind::LBracket)?;
+    let mut elements = Vec::new();
+    // Empty literal: `[]`.
+    if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
+        let rb = stream.advance().expect("peek guaranteed an RBracket");
+        let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
+        return Ok(Expr::ArrayLit { elements, span });
+    }
+    elements.push(parse_expression(stream)?);
+    while matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+        stream.advance(); // consume ','
+                          // Allow trailing comma: `[a, b,]`
+        if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
+            break;
+        }
+        elements.push(parse_expression(stream)?);
+    }
+    let rb = stream.expect(TokenKind::RBracket)?;
+    let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
+    Ok(Expr::ArrayLit { elements, span })
+}
+
+/// Parse a minimal closure `{ params => expr }` whose opening `{` is the next
+/// significant token (T23).
+///
+/// Shape: `{ ident (, ident)* => expr }`. The body is a single expression
+/// (wrapped in an `ExprStmt` to form a one-statement block). Parameter types
+/// are inferred (a placeholder `TypeRef` is stored; codegen ignores it for
+/// closures). Full closures (typed params, multi-statement bodies, capture
+/// analysis) are T34 — this minimal form covers `.map` / `.filter` / `.reduce`.
+fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    use buff_lang_ast::common::{Block, Param};
+    let lb = stream.expect(TokenKind::LBrace)?;
+    // Parse one or more comma-separated identifier parameters.
+    let mut params: Vec<Param> = Vec::new();
+    loop {
+        let ptok = match stream.advance() {
+            Some(t) if matches!(t.kind, TokenKind::Ident(_)) => t,
+            Some(other) => {
+                return Err(ParseError::new(Diagnostic::error(
+                    format!("expected closure parameter name, found `{}`", other.kind),
+                    other.span,
+                )));
+            }
+            None => {
+                return Err(ParseError::new(Diagnostic::error(
+                    "expected closure parameter name, found end of input",
+                    stream.eof_span(),
+                )));
+            }
+        };
+        let TokenKind::Ident(pname) = ptok.kind.clone() else {
+            unreachable!("matched Ident above");
+        };
+        params.push(Param {
+            name: Ident::new(pname, ptok.span),
+            // Placeholder type — closures infer their param types; codegen
+            // emits `|name|` (no annotation). T34 will add typed params.
+            ty: buff_lang_ast::TypeRef::Named {
+                name: Ident::new("_", ptok.span),
+                span: ptok.span,
+            },
+            span: ptok.span,
+        });
+        if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+            stream.advance(); // consume ','
+            continue;
+        }
+        break;
+    }
+    let arrow = stream.expect(TokenKind::FatArrow)?;
+    let body_expr = parse_expression(stream)?;
+    let rb = stream.expect(TokenKind::RBrace)?;
+    let body = Block {
+        stmts: vec![buff_lang_ast::Stmt::ExprStmt(body_expr, arrow.span)],
+        span: Span::new(lb.span.start, rb.span.end, stream.source_id()),
+    };
+    let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
+    Ok(Expr::Lambda {
+        params,
+        body,
+        return_type: None,
+        span,
+    })
+}
+
 fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let Some(tok) = stream.peek().cloned() else {
         return Err(ParseError::new(Diagnostic::error(
@@ -386,6 +488,22 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         stream.expect(TokenKind::RParen)?;
         // Parens don't change the span of the inner expression — keep inner.
         return Ok(inner);
+    }
+
+    // T23: A collection literal `[e1, e2, ...]` (or empty `[]`). Allow a
+    // trailing comma. The element expressions are full expressions so
+    // `[a + b, f(x)]` works.
+    if matches!(tok.kind, TokenKind::LBracket) {
+        return parse_array_literal(stream);
+    }
+
+    // T23: A minimal closure `{ params => expr }`. A bare `{` at primary
+    // position is a closure in Buff (struct init is `Type {`, maps are
+    // future). We require the closure shape: `{ ident (, ident)* => expr }`.
+    // Full closures (multi-statement bodies, captures) are T34; this minimal
+    // form is enough for `.map` / `.filter` / `.reduce` arguments.
+    if matches!(tok.kind, TokenKind::LBrace) {
+        return parse_closure(stream);
     }
 
     // Otherwise consume the token and turn it into a literal/ident node.

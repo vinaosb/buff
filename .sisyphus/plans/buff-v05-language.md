@@ -307,7 +307,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 6 — Collections + User Types (parallel, depends on Wave 5)
 
-- [ ] **T23**: Vector<T> type + codegen [deep]
+- [x] **T23**: Vector<T> type + codegen [deep]
 
   **What to do** (TDD):
   - **RED**: Write snapshot: `[1, 2, 3]` → `vec![1, 2, 3]`

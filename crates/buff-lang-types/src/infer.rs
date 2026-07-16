@@ -82,6 +82,23 @@ impl TypeInferencer {
             }
             Expr::MethodCall { .. } => Ok(Type::Unknown),
             Expr::SuspendExpr { inner, .. } => self.infer_expr(inner),
+            // T23: A collection literal infers `Vector<T>`. For all-integer
+            // literals the element width is auto-detected via T22 range
+            // analysis (`[1, 2, 3]` -> `Vector<Int<8>>`). For a single
+            // non-integer element kind the element type is that kind. Empty
+            // or mixed literals fall back to `Vector<Int<64>>` (Buff's
+            // default Int width) so a bare `let v = []` still type-checks
+            // against a plain Int element.
+            Expr::ArrayLit { elements, .. } => {
+                Ok(Type::vector(self.infer_collection_element(elements)?))
+            }
+            // T23: Indexing `base[index]` yields the element type when `base`
+            // is a `Vector<T>`; otherwise `Unknown` (a later type check can
+            // reject e.g. string indexing).
+            Expr::Index { base, .. } => match self.infer_expr(base)? {
+                Type::Vector(elem) => Ok((*elem).clone()),
+                _ => Ok(Type::Unknown),
+            },
             // T21: A string interpolation always evaluates to String.
             // Each embedded expression is visited (so its sub-types are
             // checked) but the parts themselves don't affect the result.
@@ -114,6 +131,42 @@ impl TypeInferencer {
             // (NOT Double/Float), so it stays exact and runs on CPU only.
             Literal::Decimal(_) => Type::Decimal,
         })
+    }
+
+    /// Infer the element type of a collection literal (T23).
+    ///
+    /// - All-integer literals: auto-width via T22 `collection_int_width`
+    ///   (`[1, 2, 3]` -> `Int<8>`; `[300]` -> `Int<16>`).
+    /// - All-same primitive literal kind (Bool/Char/Byte/Float/Double/String):
+    ///   that kind (the first element's).
+    /// - Empty or mixed: `Int<64>` (Buff's default Int width) so a bare
+    ///   `let v = []` type-checks against a plain Int element.
+    fn infer_collection_element(&self, elements: &[Expr]) -> Result<Type, TypeError> {
+        // Collect integer literal values for auto-width detection. We
+        // recognise both `Literal::Int(v)` and `UnaryOp(Neg, Literal::Int(v))`
+        // (the parser-realistic form for negative numbers, since `-200` lexes
+        // as a unary minus on `200`).
+        let mut int_values: Vec<i128> = Vec::new();
+        let mut all_int = !elements.is_empty();
+        for e in elements {
+            if let Some(v) = const_int_value(e) {
+                int_values.push(v);
+            } else {
+                all_int = false;
+                break;
+            }
+        }
+        if all_int {
+            let width = crate::range_analysis::collection_int_width(&int_values);
+            return Ok(Type::Int { width });
+        }
+        // Non-empty, non-all-int: try the first element's literal kind.
+        // Single collapsed pattern (avoids clippy's collapsible-nested-if-let).
+        if let Some(Expr::Literal(lit, _)) = elements.first() {
+            return self.infer_literal(lit, Span::dummy());
+        }
+        // Empty or mixed/non-literal: default Int<64>.
+        Ok(Type::int_default())
     }
 
     fn lookup_ident(&self, name: &Ident, span: Span) -> Result<Type, TypeError> {
@@ -329,6 +382,22 @@ impl TypeInferencer {
 impl Default for TypeInferencer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Extract a compile-time `i128` value from an integer-literal expression,
+/// recognising both `Literal::Int(v)` and `UnaryOp(Neg, Literal::Int(v))`
+/// (the parser-realistic form for negative numbers). Returns `None` for any
+/// non-integer-literal expression.
+fn const_int_value(expr: &Expr) -> Option<i128> {
+    match expr {
+        Expr::Literal(Literal::Int(v), _) => Some(*v as i128),
+        Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            operand,
+            ..
+        } => const_int_value(operand).map(|v| -v),
+        _ => None,
     }
 }
 

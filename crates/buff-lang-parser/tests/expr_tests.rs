@@ -227,15 +227,73 @@ fn test_triple_quoted_multiline() {
     assert_eq!(shape(&e), "Lit(String(\"line1\\nline2\"))");
 }
 
-// T21: Direct string indexing `s[0]` is rejected at parse time with the
-// required helpful message.
+// T21/T23: Direct string-LITERAL indexing `"abc"[0]` is rejected at parse
+// time with the required helpful message. Indexing on a non-string-literal
+// receiver (e.g. an ident `s[0]` or a call `args()[0]`) builds an Index node;
+// a later type check rejects typed-String indexing.
 #[test]
-fn test_string_indexing_rejected() {
-    let err = parse_err("s[0]");
+fn test_string_literal_indexing_rejected() {
+    let err = parse_err("\"abc\"[0]");
     assert!(
         err.diagnostic.message.contains("use .chars() or .first()"),
         "got message: {}",
         err.diagnostic.message
+    );
+}
+
+// T23: Indexing on an identifier receiver now parses to an Index node
+// (previously rejected for all receivers).
+#[test]
+fn test_ident_indexing_parses_to_index() {
+    let e = parse("s[0]");
+    assert_eq!(shape(&e), "Index(Ident(s), Lit(Int(0)))");
+}
+
+// T23: Indexing on a call result `args()[0]` parses (unblocks T99).
+#[test]
+fn test_call_result_indexing_parses() {
+    let e = parse("args()[0]");
+    assert_eq!(shape(&e), "Index(Call(Ident(args), []), Lit(Int(0)))");
+}
+
+// T23: A collection literal `[1, 2, 3]` parses to an ArrayLit node.
+#[test]
+fn test_array_literal_parses() {
+    let e = parse("[1, 2, 3]");
+    assert_eq!(shape(&e), "Array[Lit(Int(1)), Lit(Int(2)), Lit(Int(3))]");
+}
+
+// T23: An empty collection literal `[]` parses.
+#[test]
+fn test_empty_array_literal_parses() {
+    let e = parse("[]");
+    assert_eq!(shape(&e), "Array[]");
+}
+
+// T23: A trailing comma is allowed.
+#[test]
+fn test_array_literal_trailing_comma() {
+    let e = parse("[1, 2,]");
+    assert_eq!(shape(&e), "Array[Lit(Int(1)), Lit(Int(2))]");
+}
+
+// T23: A minimal single-param closure `{x => x}` parses to a Lambda. The
+// Param Display renders `name: ty` (the placeholder type `_`) and the body
+// is a Block whose Display shows the wrapping ExprStmt — so the full shape
+// is `Lambda(fn(x: _) { ExprStmt(Ident(x)) })`.
+#[test]
+fn test_closure_single_param_parses() {
+    let e = parse("{x => x}");
+    assert_eq!(shape(&e), "Lambda(fn(x: _) { ExprStmt(Ident(x)) })");
+}
+
+// T23: A two-param closure `{a, b => a + b}` parses (for .reduce).
+#[test]
+fn test_closure_two_param_parses() {
+    let e = parse("{a, b => a + b}");
+    assert_eq!(
+        shape(&e),
+        "Lambda(fn(a: _, b: _) { ExprStmt(BinaryOp(+, Ident(a), Ident(b))) })"
     );
 }
 

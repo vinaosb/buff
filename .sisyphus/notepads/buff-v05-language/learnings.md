@@ -335,3 +335,78 @@ new parser/lexer changes.
 - `cargo clippy -p buff-lang-types -p buff-lang-codegen-rust --all-targets -- -D warnings` → clean
 - `cargo fmt --check` → clean
 
+## T23 — Vector<T> type + codegen (collections, indexing, closures)
+
+### Status: COMPLETE (all green: test/check/clippy/fmt)
+
+### Two new ADDITIVE AST nodes (precedent: T20/T21 migration-note pattern)
+- `Expr::ArrayLit { elements: Vec<Expr>, span }` — collection literal `[1,2,3]`.
+- `Expr::Index { base: Box<Expr>, index: Box<Expr>, span }` — `base[index]`.
+Both added to `crates/buff-lang-ast/src/expr.rs` with doc-comment migration
+notes. MUST extend every `match` on `Expr`: `span()`, `Display` (expr.rs),
+`collect_uses` (ir.rs — caught by `cargo check` as non-exhaustive), parser,
+type inferencer, codegen. The ir.rs match was NOT obvious — `cargo check`
+surfaced it; always run check after adding an Expr variant.
+
+### Closure parsing decision: implemented MINIMAL (not deferred)
+`{ params => expr }` (1+ comma-separated ident params, single-expr body)
+parses to the existing `Expr::Lambda` node. Codegen lowers to Rust `|p| body`.
+This unblocked `.map/.filter/.reduce` WITHOUT waiting for T34. Param types
+use a placeholder `TypeRef::Named{name:"_"}` — codegen emits NO type
+annotation (Rust infers). Multi-stmt bodies / typed params / captures = T34.
+
+### Codegen forms that WORK (verified by re-parse + substring asserts)
+- `[1,2,3]` -> `vec![1, 2, 3]` via `syn::Macro` with `Bracket` delimiter.
+  **GOTCHA:** `quote!{ vec![ }` FAILS — proc-macro2 can't take raw `[`/`]`
+  as literal tokens in a quote. Build the macro with `MacroDelimiter::Bracket`
+  and put ONLY the comma-separated elements in `tokens` (the brackets come
+  from the delimiter). Empty -> `vec![]`.
+- `v[i]` -> `v[i as usize]`. **GOTCHA:** the shared `cast_to()` helper wraps
+  EVERY operand in parens -> `v[(0) as usize]`. Wrote a dedicated
+  `cast_to_usize()` that only wraps non-atomics (Binary/Unary/Cast/Range) so
+  the common `v[0 as usize]` / `v[i as usize]` forms stay clean.
+- `.map/.filter` -> `v.into_iter().<m>(closure).collect::<Vec<_>>()`.
+  `.reduce` -> `v.into_iter().reduce(closure)` (returns Option<T>).
+  Use `.into_iter()` (NOT `.iter()`) so closure params are OWNED — Buff hides
+  references. This consumes the receiver (move-by-default, correct).
+- `.push/.pop/.len` need NO special mapping — the default passthrough arm
+  `recv.method(args)` already produces the right Rust.
+
+### Auto-width (T22 integration)
+`infer_collection_element` calls `range_analysis::collection_int_width` for
+all-int-literal collections -> `let v = [1,2,3]` infers `Vec<i8>`.
+**GOTCHA:** the parser represents `-200` as `UnaryOp(Neg, Lit(Int(200)))`,
+NOT `Literal::Int(-200)`. Added `const_int_value()` helper that recognises
+both forms so `[-200, 5]` still auto-widens to `Vec<i16>`.
+
+### Parser: postfix index vs string rejection (T21 preserve)
+The OLD parse_postfix `LBracket` arm rejected ALL `expr[...]`. NEW behavior:
+reject ONLY string-LITERAL receivers (`"abc"[0]`) with the T21 helpful
+error; all other receivers (ident, call, nested) build `Expr::Index`. This
+unblocks T99 `args()[0]`. Updated the old `test_string_indexing_rejected`
+(used ident `s[0]`) to `test_string_literal_indexing_rejected` (uses
+`"abc"[0]`) + added `test_ident_indexing_parses_to_index`.
+
+### Clippy: collapsible nested `if let`
+`if let Some(first) = x.first() { if let Expr::Lit = first {...} }` trips
+clippy `collapsible_if_let`. Collapse to ONE pattern:
+`if let Some(Expr::Literal(lit, _)) = elements.first() { ... }` (match
+ergonomics binds `lit: &Literal`). Avoids let-chains (edition-2021 gated).
+
+### Test-assertion discipline (cost me re-runs)
+prettyplease inserts SPACES in macro token streams: `vec![- 200, 5]` (not
+`-200`), `collect:: < Vec < String > > ()` (spaced turbofish), `() [0]`
+(space before index). Assert on the FUNCTIONAL signal (`Vec<i16> =`,
+`[0 as usize]`, `as usize`) + `syn::parse_str::<syn::File>` re-parse, NOT
+on exact whitespace. The Lambda/Param/Block `Display` impls render
+`fn(x: _) { ExprStmt(...) }` — account for `: ty` and the `ExprStmt` wrapper
+when writing parser shape() assertions.
+
+### Verification (all GREEN)
+- `cargo test -p buff-lang-codegen-rust --test vector_codegen` → 20/20 pass
+- `cargo test -p buff-lang-parser -p buff-lang-types -p buff-lang-ast -p buff-lang-codegen-rust` → 0 failed across all binaries
+- `cargo check --workspace` → exit 0
+- `cargo clippy -p buff-lang-ast -p buff-lang-parser -p buff-lang-types -p buff-lang-codegen-rust --all-targets -- -D warnings` → exit 0
+- `cargo fmt -p <4 crates> -- --check` → exit 0
+
+
