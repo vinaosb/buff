@@ -2013,3 +2013,185 @@ Two pre-existing tests in `buff-lang-lexer/tests/` hardcoded the OLD
   bindings needed by later conditions — would need let-chain support,
   itself deferred to T74).
 
+## T74 — Let chains
+
+### Status: COMPLETE (all green: test/check/clippy/fmt). Parser-desugar approach — ZERO AST/codegen change.
+
+### Approach chosen: DESUGAR IN THE PARSER (the task's STRONGLY PREFERRED path)
+
+`if cond1, cond2, ..., condN { then } else { else }` (each cond is `let PATTERN = expr`
+OR a bool expr) rewrites in the PARSER into NESTED single-condition
+`Expr::IfLet` / `Expr::IfExpr`. **No new AST variant, no new codegen arm, no
+exhaustive-match ripple** across rust_codegen.rs / ir.rs / infer.rs /
+exhaustiveness.rs / async_analysis.rs / ownership.rs. The desugared nodes are
+nodes the existing `lower_if_let` / `lower_if_expr` (T72) already lower.
+
+### The desugar shape (else-block replication)
+
+```
+if c1, c2, c3 { BODY } else { ELSE }
+```
+becomes
+```
+if c1 {
+    if c2 {
+        if c3 {
+            BODY
+        } else { ELSE }
+    } else { ELSE }
+} else { ELSE }
+```
+
+Each `let PATTERN = expr` condition → a nested `Expr::IfLet`; each bool
+condition → a nested `Expr::IfExpr`. The INNERMOST holds the BODY; the
+else-block is REPLICATED (`.clone()` — `Block: Clone`) at EVERY nesting
+level so ANY failing condition triggers it. With NO else, each level has
+`else_block: None`. Replicating the else by clone is semantically
+equivalent to a single shared else (each failing condition independently
+runs the same user-written else) and is the simplest path that avoids
+control-flow-graph reshaping.
+
+### Implementation (single file: `crates/buff-lang-parser/src/stmt.rs`)
+
+- **`parse_if_expr` REWRITTEN**: now parses a comma-separated LIST of
+  conditions (each: peek `KwLet` → `let PATTERN = expr`; else →
+  `parse_expression` for a bool). The condition loop stops at the then-block
+  starter (`{` LBrace OR `:` Colon for the layout form) OR `else`. Trailing
+  comma before the block/else is allowed (`if a, { }`). Then parses
+  then-block + optional else (`else if` recursion preserved). Finally calls
+  `fold_if_chain(conditions, then_block, else_block, start, end, source_id)`.
+- **`parse_if_let` REMOVED** (subsumed by the unified `parse_if_expr` +
+  `fold_if_chain`). It was private, only called from `parse_if_let`; no
+  external callers. The single-condition if-let path now flows through the
+  same fold as multi-condition chains.
+- **NEW private `IfCondition` enum** (parser-local; never reaches the AST):
+  `Let { pattern, value, span }` and `Bool(Expr)`. Mirrors the shape of
+  `buff_lang_ast::GuardCondition` (T73) but kept parser-local to avoid
+  semantic conflation with the `guard` statement. Derives `Debug, Clone`.
+- **NEW `fold_if_chain` helper** (no panic/expect/unreachable — see below):
+  peels the FIRST condition (outermost), folds the REMAINING conditions
+  (innermost-first via `.rev()`) into the then-block, then wraps the first
+  condition around the folded body. The else-block is `.clone()`'d at each
+  inner level; the original is moved into the outermost. Outermost span
+  uses the overall `end` (which includes the else block if present); inner
+  spans are approximate (computed from their then-block + condition end).
+- **NEW import**: `Pattern` added to the `use buff_lang_ast::{...}` block
+  (needed by the `IfCondition::Let` field type).
+
+### Why no `unwrap`/`expect`/`unreachable!` was needed
+
+`fold_if_chain` takes `conditions: Vec<IfCondition>` but the caller
+(`parse_if_expr`) ALWAYS parses ≥1 condition before calling (an empty
+condition list is a parse error). To avoid any panic on the "guaranteed
+non-empty" invariant, the function PEELS the first element
+(`conds.remove(0)`) BEFORE the fold loop. Since `remove(0)` panics only on
+an empty Vec (which can't happen), and the loop over the remaining
+(possibly-empty) Vec naturally handles the single-condition case (loop body
+doesn't run, `body_block` stays as the original then_block), there is NO
+need for a sentinel result + expect. The outermost is built unconditionally
+at the end from the peeled element. Clean, panic-free.
+
+### Single-condition zero-regression proof
+
+The fold produces IDENTICAL AST for a single condition:
+- `if cond { }` → 1-element `conditions` vec `[Bool(cond)]`. `remove(0)`
+  peels it; the `inner_conds_rev` loop doesn't run; the outermost `match`
+  builds `Expr::IfExpr { cond, then_block, else_block, span }`. Byte-identical
+  to pre-T74.
+- `if let P = v { }` → 1-element `[Let{pattern, value, ..}]`. Same path;
+  builds `Expr::IfLet { pattern, value, then_block, else_block, span }`.
+  Byte-identical to pre-T74's `parse_if_let`.
+
+Verified by the T72 `let_bindings` regression suite (16 parser + 5 codegen
+tests) — ALL still pass unchanged after T74.
+
+### Stop-set for the condition loop
+
+After the first condition, the loop accepts `,` (with optional trailing
+comma) OR stops at:
+- `LBrace` (`{`) — brace-form then-block.
+- `Colon` (`:`) — layout-form then-block (`if cond:` NEWLINE INDENT ...).
+- `KwElse` — an `if` with no then-block is malformed, but the loop breaks
+  so `parse_block` produces the proper "expected block" error rather than
+  a confusing comma-related one.
+
+Any other token → `ParseError` (NOT a panic). EOF → `ParseError`.
+
+### Mixed-conditions work (not just all-let)
+
+The first condition may be a bool (`if a > 0, let Some(b) = opt { }`).
+`parse_if_expr` no longer dispatches to a let-only path based on the first
+token — the unified loop handles both Let and Bool at every position. The
+fold picks `Expr::IfLet` vs `Expr::IfExpr` per-condition independently, so
+`if a > 0, let Some(b) = opt { }` desugars to `IfExpr(a>0, { IfLet(b, opt, body) })`.
+Verified by `let_chains_bool_then_let`.
+
+### Codegen: ZERO change needed
+
+The existing `lower_if_let` (T72) and `lower_if_expr` lower the nested
+structure directly. The nested AST is `IfLet{..., then_block: {ExprStmt(IfLet{..., then_block: {ExprStmt(IfExpr{...})}})}}`
+— codegen recurses naturally. Verified by `let_chains_codegen_*` tests
+which hand-build the nested shape AND run the full lex→parse→codegen
+pipeline. No codegen file was edited for T74.
+
+### Tests added (15 total: 11 parser + 4 codegen)
+
+- `crates/buff-lang-parser/tests/let_chains.rs` — **11 tests**, all named
+  `let_chains_*` (the `cargo test ... let_chains` fn-name filter). Covers:
+  - `let_chains_two_lets` — `if let Some(x)=a, let Some(y)=b { }` →
+    IfLet→IfLet nesting (asserts both patterns + values at both levels).
+  - `let_chains_let_and_bool` — `if let Some(x)=opt, x>0 { }` → IfLet→IfExpr.
+  - `let_chains_else_replicated_at_every_level` — asserts BOTH outer AND
+    inner IfLet carry the else (clone replication).
+  - `let_chains_qa_case` — spec QA: `if let Some(a)=x, let Some(b)=y, a>b { }`
+    → 3-level IfLet→IfLet→IfExpr (asserts variant names a, b + innermost
+    BinaryOp cond).
+  - `let_chains_single_condition_unchanged` — single if-let stays FLAT
+    (then_block is the body, NOT a nested IfLet).
+  - `let_chains_single_bool_unchanged` — single bool if stays flat IfExpr.
+  - `let_chains_single_bool_with_else_unchanged` — single bool if-else flat.
+  - `let_chains_bool_then_let` — bool-first chain → outer IfExpr→inner IfLet.
+  - `let_chains_trailing_comma` — `if a, b, { }` trailing comma allowed.
+  - `let_chains_missing_value_errors` — empty value → ParseError.
+  - `let_chains_missing_assign_errors` — missing `=` → ParseError.
+- `crates/buff-lang-codegen-rust/tests/let_chains_codegen.rs` — **4 tests**,
+  all named `let_chains_codegen_*`. Covers:
+  - `let_chains_codegen_two_lets_nested` — hand-built nested IfLet→IfLet →
+    Rust `if let Some(x)=a { if let Some(y)=b { } }`.
+  - `let_chains_codegen_three_level_nested` — hand-built 3-level chain →
+    all 3 substrings present + re-parse valid Rust.
+  - `let_chains_codegen_else_replicated` — hand-built 2-level chain with
+    else at BOTH levels → asserts `else` count == 2.
+  - `let_chains_codegen_end_to_end` — full lex→parse→codegen on a layout-
+    form Buff source using a 3-condition let-chain.
+
+### Verification (all GREEN, MSVC env set for test/clippy)
+
+- `cargo test -p buff-lang-parser let_chains` → 11/11 pass
+- `cargo test -p buff-lang-codegen-rust let_chains` → 4/4 pass
+- `cargo test --workspace` → all green except the intentional T35 E2E
+  `test_fail` fixture (same as T71/T72/T73; its outer Rust test
+  `test_command_e2e_failing_test_exit_one` passes).
+- `cargo check --workspace` → exit 0
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0 (the
+  lone `unused manifest key: workspace.dev-dependencies` is a pre-existing
+  root Cargo.toml issue per T36, NOT T74's).
+- `cargo fmt --all -- --check` → exit 0 (after one `cargo fmt --all` pass
+  to normalize 3 multi-line-call collapsions in the new codegen test file).
+
+### Files changed
+
+- `crates/buff-lang-parser/src/stmt.rs` — `Pattern` added to imports;
+  `parse_if_expr` rewritten (chain-aware); `parse_if_let` removed;
+  `IfCondition` enum + `fold_if_chain` added.
+- `crates/buff-lang-parser/tests/let_chains.rs` — NEW (11 tests).
+- `crates/buff-lang-codegen-rust/tests/let_chains_codegen.rs` — NEW (4 tests).
+
+### Deferred
+
+- None. The parser-desugar approach means there's no AST/codegen/type-system
+  work to defer. The desugared nested IfLet/IfExpr flows through the existing
+  inference + codegen paths unchanged. Type errors (e.g. a bool condition
+  that doesn't produce a `bool`) are warnings in v0.5 per the project policy.
+
+

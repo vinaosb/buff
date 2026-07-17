@@ -38,7 +38,7 @@
 
 use buff_lang_ast::{
     Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl,
-    GuardCondition, Ident, ImportDecl, Param, ReexportDecl, Stmt, TypeRef,
+    GuardCondition, Ident, ImportDecl, Param, Pattern, ReexportDecl, Stmt, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -875,93 +875,90 @@ fn parse_assignment_or_expr_stmt(stream: &mut TokenStream<'_>) -> Result<Stmt, P
 /// the else to the nearest (innermost) `if` — the standard lexical-scope
 /// rule. Layout blocks enforce the same: the lexer's Dedent tokens
 /// naturally delimit inner-if blocks before `else` is observed.
+///
+/// **T74 — let-chains**: the condition may be a comma-separated list of
+/// conditions, each either `let PATTERN = EXPR` or a boolean `EXPR`. A
+/// multi-condition `if` desugars to NESTED single-condition [`Expr::IfLet`]
+/// / [`Expr::IfExpr`] via [`fold_if_chain`] (see its docs for the exact
+/// nesting shape and else-block replication). A single-condition `if`
+/// produces the identical AST shape as before T74 (zero regression).
 pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let source_id = stream.source_id();
     let if_tok = stream.expect(TokenKind::KwIf)?;
     let start = if_tok.span.start;
 
-    // T72: `if let PATTERN = EXPR { then } else { else }` — detect the `let`
-    // keyword immediately after `if` and route to the conditional-binding
-    // path. The plain `if cond { ... }` path is left 100% untouched (it
-    // fires only when `let` is NOT the next token). Single let-binding only;
-    // let-chains (`if let a = x, let b = y`) are T74, a separate task.
-    if matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
-        return parse_if_let(stream, start, source_id);
+    // Parse a comma-separated list of conditions. Each is either
+    // `let PATTERN = EXPR` (a binding condition) or a boolean `EXPR`. Stop
+    // at the then-block starter (`{` or `:` for the layout form) or `else`.
+    //
+    // A single condition reproduces the pre-T74 behaviour exactly. Two or
+    // more conditions trigger the nested-desugar in [`fold_if_chain`].
+    let mut conditions: Vec<IfCondition> = Vec::new();
+    loop {
+        // After the first condition, expect `,` (with optional trailing
+        // comma before the block/else) or stop at the block/else directly.
+        if !conditions.is_empty() {
+            match stream.peek_kind() {
+                Some(TokenKind::Comma) => {
+                    stream.advance(); // consume `,`
+                                      // Trailing comma: `if a, { }` / `if a, else { }`.
+                    if matches!(
+                        stream.peek_kind(),
+                        Some(TokenKind::LBrace) | Some(TokenKind::Colon) | Some(TokenKind::KwElse)
+                    ) {
+                        break;
+                    }
+                }
+                Some(TokenKind::LBrace) | Some(TokenKind::Colon) | Some(TokenKind::KwElse) => break,
+                Some(other) => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected `,`, `{{`, or `else` in if-chain, found `{other}`"),
+                        stream
+                            .peek()
+                            .map(|t| t.span)
+                            .unwrap_or_else(|| stream.eof_span()),
+                    )));
+                }
+                None => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        "unterminated if (missing block)",
+                        stream.eof_span(),
+                    )));
+                }
+            }
+        }
+        // Parse one condition. `let` starts a binding condition; anything
+        // else is a boolean expression.
+        let cond = if matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
+            let let_tok = stream.expect(TokenKind::KwLet)?;
+            let cond_start = let_tok.span.start;
+            let pattern = parse_pattern(stream)?;
+            stream.expect(TokenKind::Assign)?;
+            let value = parse_expression(stream)?;
+            let end = value.span().end;
+            IfCondition::Let {
+                pattern,
+                value,
+                span: Span::new(cond_start, end, source_id),
+            }
+        } else {
+            let expr = parse_expression(stream)?;
+            IfCondition::Bool(expr)
+        };
+        conditions.push(cond);
     }
 
-    let cond = parse_expression(stream)?;
+    // Then-block.
     let then_block = parse_block(stream)?;
     let mut end = then_block.span.end;
 
-    let else_block = if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) {
-        stream.advance(); // consume `else`
-        if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
-            // `else if` — wrap the nested if-expr in a single-stmt block.
-            let nested = parse_if_expr(stream)?;
-            end = nested.span().end;
-            Some(Block {
-                stmts: vec![Stmt::ExprStmt(nested.clone(), nested.span())],
-                span: nested.span(),
-            })
-        } else {
-            let blk = parse_block(stream)?;
-            end = blk.span.end;
-            Some(blk)
-        }
-    } else {
-        None
-    };
-
-    Ok(Expr::IfExpr {
-        cond: Box::new(cond),
-        then_block,
-        else_block,
-        span: Span::new(start, end, source_id),
-    })
-}
-
-/// Parse the conditional-binding form `if let PATTERN = EXPR { then } else { .. }`
-/// (T72). The leading `if` is already consumed; the cursor is positioned at
-/// the `let` keyword. The `start` offset is the `if`'s start (for the
-/// overall span); `source_id` is the current source.
-///
-/// Shape: `let PATTERN = EXPR`. The PATTERN is parsed via the shared
-/// [`parse_pattern`] (same one `match` arms and T71 destructuring use), so
-/// `if let Some(x) = opt`, `if let (a, b) = pair`, `if let Point { x } = p`
-/// all work. The `=` is mandatory (a missing `=` is a [`ParseError`], not a
-/// panic). The EXPR is parsed via [`parse_expression`].
-///
-/// `else if let ...` chains naturally: the else-branch handler below spots
-/// `KwIf`, recurses into [`parse_if_expr`] (which itself dispatches to this
-/// function if the nested form is also a `let`), and wraps the result in a
-/// single-statement block — the same shape the plain `else if` path uses.
-///
-/// Single let-binding only. Let-chains are T74.
-fn parse_if_let(
-    stream: &mut TokenStream<'_>,
-    start: usize,
-    source_id: SourceId,
-) -> Result<Expr, ParseError> {
-    // Consume `let`.
-    let _let_tok = stream.expect(TokenKind::KwLet)?;
-    // Parse the pattern (reuses the shared match/let-destructure parser).
-    let pattern = parse_pattern(stream)?;
-    // Expect `=`.
-    stream.expect(TokenKind::Assign)?;
-    // Parse the value expression.
-    let value = parse_expression(stream)?;
-    let value_end = value.span().end;
-    let value = Box::new(value);
-    // Then-block.
-    let then_block = parse_block(stream)?;
-    let mut end = then_block.span.end.max(value_end);
     // Optional else: `else BLOCK` or `else if ...` (chains).
     let else_block = if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) {
         stream.advance(); // consume `else`
         if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
-            // `else if ...` — recurse (handles both `else if let` and plain
-            // `else if`). Wrap the nested if-expr in a single-stmt block,
-            // matching the plain IfExpr path's shape.
+            // `else if ...` — recurse (handles both `else if let` chains and
+            // plain `else if`). Wrap the nested if-expr in a single-stmt
+            // block, matching the plain IfExpr path's shape.
             let nested = parse_if_expr(stream)?;
             end = nested.span().end;
             Some(Block {
@@ -976,13 +973,148 @@ fn parse_if_let(
     } else {
         None
     };
-    Ok(Expr::IfLet {
-        pattern,
-        value,
-        then_block,
-        else_block,
-        span: Span::new(start, end, source_id),
-    })
+
+    // Fold the conditions into a (possibly nested) IfLet/IfExpr chain.
+    // `end` carries the overall span end (includes the else block if present).
+    Ok(fold_if_chain(
+        conditions, then_block, else_block, start, end, source_id,
+    ))
+}
+
+/// Parser-internal accumulator for one condition in a T74 let-chain (`if cond,
+/// cond, ... { }`). Mirrors the shape of [`buff_lang_ast::GuardCondition`]
+/// (T73) but kept parser-local to avoid semantic conflation with the `guard`
+/// statement. The chain is desugared to nested [`Expr::IfLet`] / [`Expr::IfExpr`]
+/// by [`fold_if_chain`], so this type never appears in the final AST.
+#[derive(Debug, Clone)]
+enum IfCondition {
+    /// `let PATTERN = EXPR` — a binding condition. On match the pattern's
+    /// bindings are in scope for later conditions and the then-block.
+    Let {
+        pattern: Pattern,
+        value: Expr,
+        span: Span,
+    },
+    /// A boolean condition (`x > 0`, `flag`, …).
+    Bool(Expr),
+}
+
+/// Fold a comma-separated list of if-conditions into a (possibly nested)
+/// chain of single-condition [`Expr::IfLet`] / [`Expr::IfExpr`] (T74).
+///
+/// The desugar nests from the OUTER condition inward:
+///
+/// ```text
+/// if c1, c2, c3 { BODY } else { ELSE }
+/// ```
+///
+/// becomes
+///
+/// ```text
+/// if c1 {
+///     if c2 {
+///         if c3 {
+///             BODY
+///         } else { ELSE }
+///     } else { ELSE }
+/// } else { ELSE }
+/// ```
+///
+/// where each `ci` is `let PATTERN = EXPR` (→ [`Expr::IfLet`]) or a boolean
+/// `EXPR` (→ [`Expr::IfExpr`]).
+///
+/// **Else-block replication**: when an `else` is present, it is cloned at
+/// EVERY nesting level so ANY failing condition triggers it. This is
+/// semantically equivalent to a single shared else (each failing condition
+/// independently runs the same user-written else) and is the simplest path
+/// that avoids control-flow-graph reshaping. [`Block`] derives `Clone`, so
+/// the clone is cheap and correct. When there is NO else, each level gets
+/// `else_block: None` (Rust `if let ... { if let ... { body } }`).
+///
+/// **Single condition**: when `conditions` has exactly one element the fold
+/// produces a single flat [`Expr::IfLet`] or [`Expr::IfExpr`] whose shape is
+/// byte-identical to the pre-T74 single-condition `if`/`if let` — zero
+/// regression for existing programs.
+///
+/// `conditions` MUST be non-empty (the caller, [`parse_if_expr`], parses at
+/// least one condition or returns a [`ParseError`] first). This invariant is
+/// upheld by the peel-then-fold structure below (the first element is always
+/// consumed as the outermost), so no `unwrap`/`expect`/`unreachable!` is
+/// needed.
+fn fold_if_chain(
+    conditions: Vec<IfCondition>,
+    then_block: Block,
+    else_block: Option<Block>,
+    start: usize,
+    end: usize,
+    source_id: SourceId,
+) -> Expr {
+    // Peel the FIRST condition (the outermost). Fold the REMAINING conditions
+    // (indices 1..) into the then-block, building from the INNERMOST (last)
+    // outward; then wrap the first condition around the folded body.
+    let mut conds = conditions;
+    let outermost = conds.remove(0);
+    // Remaining conditions, innermost-first (reversed) for the fold.
+    let inner_conds_rev: Vec<IfCondition> = conds.into_iter().rev().collect();
+
+    // `body_block` is the then-block for the level currently being built.
+    // It starts as the original then-block (the innermost body) and is
+    // replaced by a wrapper block after each inner condition is folded in.
+    let mut body_block = then_block;
+    let mut body_end = body_block.span.end;
+
+    for cond in inner_conds_rev {
+        // The else for THIS level: a clone of the original (replicated).
+        let level_else = else_block.clone();
+        let cond_end = match &cond {
+            IfCondition::Let { span, .. } => span.end,
+            IfCondition::Bool(e) => e.span().end,
+        };
+        let level_end = body_end.max(cond_end);
+        let expr = match cond {
+            IfCondition::Let { pattern, value, .. } => Expr::IfLet {
+                pattern,
+                value: Box::new(value),
+                then_block: body_block,
+                else_block: level_else,
+                span: Span::new(start, level_end, source_id),
+            },
+            IfCondition::Bool(e) => Expr::IfExpr {
+                cond: Box::new(e),
+                then_block: body_block,
+                else_block: level_else,
+                span: Span::new(start, level_end, source_id),
+            },
+        };
+        let es = expr.span();
+        // Wrap the built expression as the then-block for the NEXT (outer)
+        // level. (Mirrors how `else if` wraps its nested if in a single-
+        // statement block.)
+        body_block = Block {
+            stmts: vec![Stmt::ExprStmt(expr, es)],
+            span: es,
+        };
+        body_end = es.end;
+    }
+
+    // Build the outermost condition wrapping the folded body. The outermost
+    // span end is the overall `end` (which includes the else block if any).
+    let outermost_else = else_block; // original moved here (last consumer)
+    match outermost {
+        IfCondition::Let { pattern, value, .. } => Expr::IfLet {
+            pattern,
+            value: Box::new(value),
+            then_block: body_block,
+            else_block: outermost_else,
+            span: Span::new(start, end, source_id),
+        },
+        IfCondition::Bool(e) => Expr::IfExpr {
+            cond: Box::new(e),
+            then_block: body_block,
+            else_block: outermost_else,
+            span: Span::new(start, end, source_id),
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------

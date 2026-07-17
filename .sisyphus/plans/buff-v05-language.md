@@ -966,7 +966,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `guard x > 0 else { return 0 }` → assert early return pattern. Evidence: task-73-guards.txt
   **Commit**: `feat(parser): add guard statement for early returns`
 
-- [ ] **T74**: Let chains [deep]
+- [x] **T74**: Let chains [deep]
   **What to do** (TDD): RED: `if let Some(x) = opt, let Some(y) = opt2, x > 0 { }` → flat conditions. GREEN: parse comma-separated let conditions, codegen to nested if-lets.
   **Acceptance**: `cargo test -p buff-lang-parser let_chains` passes. Multiple let conditions in one if.
   **QA**: Parse `if let Some(a) = x, let Some(b) = y, a > b { }` → assert AST has chain. Evidence: task-74-let-chains.txt
