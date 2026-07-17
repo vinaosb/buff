@@ -569,9 +569,22 @@ fn byte_lit(value: u32, span: Span) -> Result<TokenKind, LexerError> {
 // ---------------------------------------------------------------------------
 
 fn scan_operator(source: &str, pos: &mut usize, start: usize, end: usize) -> Option<TokenKind> {
+    // 3-char operators first (so `..=` is not split into `..` + `=`).
+    if start + 3 <= end {
+        let three = &source[start..start + 3];
+        let kind = match three {
+            "..=" => Some(TokenKind::DotDotEq),
+            _ => None,
+        };
+        if let Some(k) = kind {
+            *pos = start + 3;
+            return Some(k);
+        }
+    }
     if start + 2 <= end {
         let two = &source[start..start + 2];
         let kind = match two {
+            ".." => Some(TokenKind::DotDot),
             "==" => Some(TokenKind::EqEq),
             "!=" => Some(TokenKind::NotEq),
             "<=" => Some(TokenKind::LtEq),

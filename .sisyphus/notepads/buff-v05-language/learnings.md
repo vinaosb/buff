@@ -1097,4 +1097,86 @@ explicitly allows this fallback.
   input-no-panic, parse()-still-fail-fast).
 - Workspace total after T36: ALL pass (0 failed). 66 `test result:` lines.
 
+## T68 — Range syntax
+
+### Status: COMPLETE
+
+### What was added
+
+**Lexer** (`buff-lang-lexer/src/token.rs` + `lexer.rs`):
+- NEW `TokenKind::DotDot` (`..`) and `TokenKind::DotDotEq` (`..=`) tokens.
+- `scan_operator` now checks 3-char operators first (`..=` → DotDotEq) before
+  2-char operators (`..` → DotDot). This prevents `..=` from being split into
+  `..` + `=` (which would parse as range then assignment).
+
+**AST** (`buff-lang-ast/src/expr.rs`) — ADDITIVE change:
+- NEW `Expr::Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, span: Span }`.
+  Added at the end of the enum (after `Spawn`). Migration note in the doc comment.
+- `span()` match arm added.
+- Display: `Range(Lit(Int(0)), Lit(Int(10)), excl)` / `Range(Lit(Int(0)), Lit(Int(10)), incl)`.
+
+**Parser** (`buff-lang-parser/src/expr.rs`):
+- NEW `parse_range()` function inserted between `parse_assignment` (level 1) and
+  `parse_or` (level 2). Range has lower precedence than additive operators, so
+  `a+1..b*2` parses as `(a+1)..(b*2)`.
+- `parse_assignment` now calls `parse_range` instead of `parse_or` as its LHS.
+- `parse_range` checks for `DotDot` (exclusive) or `DotDotEq` (inclusive) after
+  the LHS, then parses the RHS at the `parse_or` level.
+
+**Codegen** (`buff-lang-codegen-rust/src/rust_codegen.rs`):
+- NEW `lower_range()` method builds `syn::ExprRange` via `quote!`:
+  - Exclusive: `#start_e .. #end_e`
+  - Inclusive: `#start_e ..= #end_e`
+- `lower_expr` dispatches `Expr::Range` to `self.lower_range()`.
+- All match sites updated: `expr_uses_matrix`, `expr_uses_error`.
+
+**Match sites updated across workspace** (11 files):
+- `buff-lang-ast/src/ir.rs` — `collect_uses`
+- `buff-lang-types/src/infer.rs` — `infer_expr` (returns Unknown for range)
+- `buff-lang-types/src/exhaustiveness.rs` — `check_expr`
+- `buff-lang-types/src/async_analysis.rs` — `collect_func_calls`
+- `buff-lang-types/src/ownership.rs` — 5 functions: `collect_bound_names_in_expr`,
+  `collect_spawn_free_vars_in_expr`, `collect_free_vars_in_expr`,
+  `collect_assignment_targets_in_expr`
+- `buff-lang-codegen-rust/src/rust_codegen.rs` — `expr_uses_matrix`, `expr_uses_error`
+
+### Key design decisions
+
+- **Range precedence: between assignment and `||`.** Range binds tighter than
+  assignment (`a = 0..10` parses as `a = (0..10)`) but looser than `||`/`&&`/
+  comparison/additive/multiplicative. This matches Rust's precedence and lets
+  `a+1..b*2` parse as `(a+1)..(b*2)`.
+- **`..=` is a 3-char token.** The lexer checks 3-char operators before 2-char
+  operators, so `..=` is never split into `..` + `=`.
+- **Codegen via `quote!`.** Range expressions are built via `quote!` (not
+  hand-formatted Rust), consistent with the codebase's `syn`/`quote`/`prettyplease`
+  discipline.
+- **Type inference returns `Type::Unknown`.** The type system doesn't track range
+  types in v0.5; ranges are expression-level constructs consumed by `for` loops
+  and codegen.
+
+### Tests added
+
+**Parser** (`crates/buff-lang-parser/tests/ranges.rs` — 7 tests):
+- `ranges_exclusive` — `0..10` parses as Range(0, 10, excl)
+- `ranges_inclusive` — `0..=10` parses as Range(0, 10, incl)
+- `ranges_ident_bounds` — `start..end` parses as Range(start, end, excl)
+- `ranges_precedence_additive` — `a+1..b*2` parses as (a+1)..(b*2)
+- `ranges_in_for_loop` — `0..5` parses as Range(0, 5, excl)
+- `ranges_display_exclusive` — Display format `Range(Lit(Int(0)), Lit(Int(10)), excl)`
+- `ranges_display_inclusive` — Display format `Range(Lit(Int(0)), Lit(Int(10)), incl)`
+
+**Codegen** (`crates/buff-lang-codegen-rust/tests/ranges.rs` — 4 tests):
+- `ranges_codegen_exclusive` — `0..10` → Rust `0..10` (re-parses as valid Rust)
+- `ranges_codegen_inclusive` — `0..=10` → Rust `0..=10` (re-parses as valid Rust)
+- `ranges_codegen_ident_bounds` — `start..end` → Rust `start..end`
+- `ranges_codegen_for_loop` — `for i in 0..5` → Rust `for i in 0..5`
+
+### Verification (all GREEN)
+- `cargo test -p buff-lang-parser ranges` → 7/7 pass
+- `cargo test -p buff-lang-codegen-rust ranges` → 4/4 pass
+- `cargo test --workspace` → ALL green (0 failed)
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean
+- `cargo fmt --check` → clean
+
 

@@ -337,6 +337,11 @@ fn collect_func_calls(expr: &Expr, out: &mut BTreeSet<String>) {
         // context, but that's a codegen concern, not a propagation one.)
         // We deliberately do NOT call `collect_func_calls(task, out)` here.
         Expr::Spawn { task: _, .. } => {}
+        // T68: `start..end` — recurse into both bounds for function calls.
+        Expr::Range { start, end, .. } => {
+            collect_func_calls(start, out);
+            collect_func_calls(end, out);
+        }
         Expr::Literal(_, _) | Expr::Ident(_, _) => {}
     }
 }

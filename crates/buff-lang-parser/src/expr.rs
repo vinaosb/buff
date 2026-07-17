@@ -43,7 +43,7 @@ pub fn parse_expression(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError
 // ---------------------------------------------------------------------------
 
 fn parse_assignment(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
-    let lhs = parse_or(stream)?;
+    let lhs = parse_range(stream)?;
     let Some(op) = stream.peek_kind().and_then(assignment_op) else {
         return Ok(lhs);
     };
@@ -58,6 +58,40 @@ fn parse_assignment(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         rhs: Box::new(rhs),
         span,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Level 1.5 — range `..` and `..=` (lower than additive, higher than assign)
+// ---------------------------------------------------------------------------
+
+fn parse_range(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let lhs = parse_or(stream)?;
+    // Check for `..` or `..=` after the LHS.
+    match stream.peek_kind() {
+        Some(TokenKind::DotDot) => {
+            stream.advance();
+            let rhs = parse_or(stream)?;
+            let span = combine_span(&lhs, &rhs);
+            Ok(Expr::Range {
+                start: Box::new(lhs),
+                end: Box::new(rhs),
+                inclusive: false,
+                span,
+            })
+        }
+        Some(TokenKind::DotDotEq) => {
+            stream.advance();
+            let rhs = parse_or(stream)?;
+            let span = combine_span(&lhs, &rhs);
+            Ok(Expr::Range {
+                start: Box::new(lhs),
+                end: Box::new(rhs),
+                inclusive: true,
+                span,
+            })
+        }
+        _ => Ok(lhs),
+    }
 }
 
 // ---------------------------------------------------------------------------

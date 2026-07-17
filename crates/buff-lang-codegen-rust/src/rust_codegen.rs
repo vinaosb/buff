@@ -1200,11 +1200,20 @@ impl RustCodegen {
             // T31: `spawn expr` → Rust's `tokio::spawn(async move { expr })`.
             // The operand becomes the body of an `async move` closure so the
             // task owns all captured variables (Buff hides borrow-checker
-            // pain; the generated Rust must be move-clean). The result is a
-            // `tokio::task::JoinHandle<T>` — Buff's `Task<T>` is a thin
-            // alias for this type. The only `.await` on a Task lands at the
+            // pain from users; the generated Rust must be move-clean). The result
+            // is a `tokio::task::JoinHandle<T>` — Buff's `Task<T>` is a thin
+            // alias for this type, and the only `.await` on a Task lands at the
             // `t.result()` site (see [`Self::lower_method_call`]).
             Expr::Spawn { task, .. } => self.lower_spawn(task),
+            // T68: `start..end` (exclusive) or `start..=end` (inclusive) → Rust
+            // range expression. Built via `quote!` so the `..` / `..=` operator
+            // is constructed from real `syn` tokens.
+            Expr::Range {
+                start,
+                end,
+                inclusive,
+                ..
+            } => self.lower_range(start, end, *inclusive),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -2427,6 +2436,31 @@ impl RustCodegen {
             .map_err(|e| self.unsupported(&format!("spawn codegen parse: {e}")))
     }
 
+    /// T68: lower `start..end` (exclusive) or `start..=end` (inclusive) to a
+    /// Rust range expression.
+    ///
+    /// Exclusive range `0..10` → Rust `0..10` via `syn::ExprRange`.
+    /// Inclusive range `0..=10` → Rust `0..=10` via `syn::ExprRange`.
+    ///
+    /// Built via `quote!` so the `..` / `..=` operator is constructed from
+    /// real `syn` tokens rather than hand-formatted Rust.
+    fn lower_range(
+        &mut self,
+        start: &Expr,
+        end: &Expr,
+        inclusive: bool,
+    ) -> Result<SynExpr, CodegenError> {
+        let start_e = self.lower_expr(start)?;
+        let end_e = self.lower_expr(end)?;
+        let tokens: proc_macro2::TokenStream = if inclusive {
+            quote::quote! { #start_e ..= #end_e }
+        } else {
+            quote::quote! { #start_e .. #end_e }
+        };
+        syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("range codegen parse: {e}")))
+    }
+
     /// T31: lower `block(<expr>)` to a one-shot tokio runtime block.
     ///
     /// Emits (conceptually):
@@ -3443,6 +3477,8 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
         // T31: `spawn expr` — does NOT use Matrix (the task body is opaque
         // to the Matrix emit-on-demand detector for v0.5).
         Expr::Spawn { task, .. } => expr_uses_matrix(task),
+        // T68: `start..end` — recurse into both bounds.
+        Expr::Range { start, end, .. } => expr_uses_matrix(start) || expr_uses_matrix(end),
     }
 }
 
@@ -3610,6 +3646,8 @@ fn expr_uses_error(expr: &Expr) -> bool {
         Expr::Try { expr, .. } => expr_uses_error(expr),
         // T31: recurse into the spawn task body.
         Expr::Spawn { task, .. } => expr_uses_error(task),
+        // T68: `start..end` — recurse into both bounds.
+        Expr::Range { start, end, .. } => expr_uses_error(start) || expr_uses_error(end),
     }
 }
 

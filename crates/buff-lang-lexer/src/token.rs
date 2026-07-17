@@ -72,6 +72,8 @@ pub enum TokenKind {
     KwUnsafe,
 
     // --- Operators ---
+    DotDot,
+    DotDotEq,
     Plus,
     Minus,
     Star,
@@ -243,6 +245,8 @@ impl fmt::Display for TokenKind {
             Self::KwExtern => write!(f, "extern"),
             Self::KwUnsafe => write!(f, "unsafe"),
             // Operators
+            Self::DotDot => write!(f, ".."),
+            Self::DotDotEq => write!(f, "..="),
             Self::Plus => write!(f, "+"),
             Self::Minus => write!(f, "-"),
             Self::Star => write!(f, "*"),

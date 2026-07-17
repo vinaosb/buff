@@ -327,6 +327,11 @@ fn check_expr(
         // T31: `spawn expr` — recurse into the task body so any match
         // expressions inside the spawned task are still checked.
         Expr::Spawn { task, .. } => check_expr(task, registry, inferencer),
+        // T68: `start..end` — recurse into both bounds.
+        Expr::Range { start, end, .. } => {
+            check_expr(start, registry, inferencer)?;
+            check_expr(end, registry, inferencer)
+        }
     }
 }
 

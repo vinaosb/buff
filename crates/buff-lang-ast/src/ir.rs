@@ -790,6 +790,11 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
         Expr::Try { expr, .. } => collect_uses(expr, out),
         // T31: `spawn expr` uses its operand expression.
         Expr::Spawn { task, .. } => collect_uses(task, out),
+        // T68: `start..end` uses both bounds.
+        Expr::Range { start, end, .. } => {
+            collect_uses(start, out);
+            collect_uses(end, out);
+        }
     }
 }
 

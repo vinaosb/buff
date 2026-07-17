@@ -238,6 +238,14 @@ impl TypeInferencer {
                 let _ = self.infer_expr(task)?;
                 Ok(Type::Unknown)
             }
+            // T68: `start..end` — infer both bounds, return Unknown (range
+            // is an expression-level construct; the type system doesn't
+            // track range types in v0.5).
+            Expr::Range { start, end, .. } => {
+                let _ = self.infer_expr(start)?;
+                let _ = self.infer_expr(end)?;
+                Ok(Type::Unknown)
+            }
         }
     }
 

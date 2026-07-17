@@ -339,6 +339,10 @@ fn collect_bound_names_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::Try { expr, .. } => collect_bound_names_in_expr(expr, out),
         Expr::Spawn { task, .. } => collect_bound_names_in_expr(task, out),
+        Expr::Range { start, end, .. } => {
+            collect_bound_names_in_expr(start, out);
+            collect_bound_names_in_expr(end, out);
+        }
     }
 }
 
@@ -520,6 +524,10 @@ fn collect_spawn_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
             }
         }
         Expr::SuspendExpr { inner, .. } => collect_spawn_free_vars_in_expr(inner, out),
+        Expr::Range { start, end, .. } => {
+            collect_spawn_free_vars_in_expr(start, out);
+            collect_spawn_free_vars_in_expr(end, out);
+        }
         Expr::ArrayLit { elements, .. } => {
             for e in elements {
                 collect_spawn_free_vars_in_expr(e, out);
@@ -635,6 +643,10 @@ fn collect_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         // A nested spawn inside a spawn — collect its task body's free
         // vars too (conservative; the outer Arc-wrap will handle them).
         Expr::Spawn { task, .. } => collect_free_vars_in_expr(task, out),
+        Expr::Range { start, end, .. } => {
+            collect_free_vars_in_expr(start, out);
+            collect_free_vars_in_expr(end, out);
+        }
     }
 }
 
@@ -784,6 +796,10 @@ fn collect_assignment_targets_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::Try { expr, .. } => collect_assignment_targets_in_expr(expr, out),
         Expr::Spawn { task, .. } => collect_assignment_targets_in_expr(task, out),
+        Expr::Range { start, end, .. } => {
+            collect_assignment_targets_in_expr(start, out);
+            collect_assignment_targets_in_expr(end, out);
+        }
     }
 }
 

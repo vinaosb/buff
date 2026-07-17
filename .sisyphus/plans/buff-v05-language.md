@@ -916,7 +916,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `[1,2,3]` → assert `vec![1, 2, 3]` in output. Evidence: task-67-collection-literals.txt
   **Commit**: `feat(parser): add collection literals for Vector and Map`
 
-- [ ] **T68**: Range syntax [quick]
+- [x] **T68**: Range syntax [quick]
   **What to do** (TDD): RED: `0..10` → exclusive range, `0..=10` → inclusive. GREEN: parse range operators, codegen to Rust ranges.
   **Acceptance**: `cargo test -p buff-lang-parser ranges` passes. `0..10` → Rust `0..10`.
   **QA**: Parse `for i in 0..5` → assert range expression in AST. Evidence: task-68-ranges.txt

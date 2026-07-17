@@ -111,8 +111,7 @@ fn copy_to_unique_temp(name: &str) -> PathBuf {
     fs::create_dir_all(&dir).expect("failed to create temp dir");
     let src = examples_dir().join(name);
     let dst = dir.join(name);
-    let content = fs::read(&src)
-        .unwrap_or_else(|e| panic!("failed to read example `{name}`: {e}"));
+    let content = fs::read(&src).unwrap_or_else(|e| panic!("failed to read example `{name}`: {e}"));
     fs::write(&dst, content).expect("failed to write temp copy");
     dst
 }
@@ -265,8 +264,9 @@ fn test_v05_async_demo_transpiles_with_tokio_markers() {
         "expected `.await` (from task.result()) in: {src}"
     );
     // Re-parse the generated source to guarantee it is valid Rust syntax.
-    syn::parse_str::<syn::File>(&src)
-        .unwrap_or_else(|e| panic!("generated async source must re-parse: {e}\n--- src ---\n{src}"));
+    syn::parse_str::<syn::File>(&src).unwrap_or_else(|e| {
+        panic!("generated async source must re-parse: {e}\n--- src ---\n{src}")
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -285,12 +285,9 @@ fn test_v05_modules_main_parses_import_decl() {
     let tokens = tokenize(&main_src, sid()).expect("modules/main.buff must lex");
     let decls = parse(&tokens, sid()).expect("modules/main.buff must parse");
     // At least one ImportDecl naming `greet` from "./greet.buff".
-    let has_import = decls.iter().any(|d| {
-        matches!(
-            d,
-            buff_lang_ast::Decl::ImportDecl(_)
-        )
-    });
+    let has_import = decls
+        .iter()
+        .any(|d| matches!(d, buff_lang_ast::Decl::ImportDecl(_)));
     assert!(has_import, "modules/main.buff must contain an import decl");
     // And it must still have a main function.
     let has_main = decls.iter().any(|d| {

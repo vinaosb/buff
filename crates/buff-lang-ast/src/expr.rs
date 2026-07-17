@@ -367,6 +367,21 @@ pub enum Expr {
     ///
     /// This is **additive** (T31): see the migration note on [`Expr`].
     Spawn { task: Box<Expr>, span: Span },
+    /// A range expression: `start..end` (exclusive) or `start..=end` (inclusive) (T68).
+    ///
+    /// The `inclusive` flag distinguishes `..` (exclusive, `0..10` → `0..10`)
+    /// from `..=` (inclusive, `0..=10` → `0..=10`). Both bounds are full
+    /// expressions so `a + 1..b * 2` works. Range has lower precedence than
+    /// additive operators, so `a+1..b*2` parses as `(a+1)..(b*2)`.
+    ///
+    /// This is **additive** (T68): no existing variant was renamed, reordered,
+    /// or had its payload altered, so all prior `match` arms remain exhaustive.
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -389,7 +404,8 @@ impl Expr {
             | Expr::StringInterp { span: s, .. }
             | Expr::MapLit { span: s, .. }
             | Expr::Try { span: s, .. }
-            | Expr::Spawn { span: s, .. } => *s,
+            | Expr::Spawn { span: s, .. }
+            | Expr::Range { span: s, .. } => *s,
         }
     }
 }
@@ -526,6 +542,16 @@ impl fmt::Display for Expr {
             Expr::Try { expr, .. } => write!(f, "Try({expr})"),
             // T31: `spawn expr` -> `Spawn(expr)`.
             Expr::Spawn { task, .. } => write!(f, "Spawn({task})"),
+            // T68: `start..end` -> `Range(start, end, excl/incl)`.
+            Expr::Range {
+                start,
+                end,
+                inclusive,
+                ..
+            } => {
+                let kind = if *inclusive { "incl" } else { "excl" };
+                write!(f, "Range({start}, {end}, {kind})")
+            }
         }
     }
 }
