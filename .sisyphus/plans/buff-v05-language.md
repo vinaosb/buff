@@ -972,7 +972,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Parse `if let Some(a) = x, let Some(b) = y, a > b { }` → assert AST has chain. Evidence: task-74-let-chains.txt
   **Commit**: `feat(parser): add let chains for flat conditional binding`
 
-- [ ] **T75**: Extension methods [deep]
+- [x] **T75**: Extension methods [deep]
   **What to do** (TDD): RED: `extend String { fn is_email() -> Bool { ... } }` → adds method to String type. GREEN: parse `extend` blocks, codegen to Rust trait + impl.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust extensions` passes. `"x".is_email()` calls extension.
   **QA**: Codegen `extend String { fn shout(self) -> String { self.to_uppercase() } }` → assert trait+impl. Evidence: task-75-extensions.txt

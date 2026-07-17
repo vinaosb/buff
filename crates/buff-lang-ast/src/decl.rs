@@ -45,10 +45,42 @@ pub enum Decl {
     /// crates.io/Rust crate AND that a `use <name>;` item should be
     /// emitted at the top of the generated source. The RustCodegen
     /// collects these into a `BTreeSet<String>` (exposed via
-    /// [`RustCodegen::extern_crates`](../../buff_lang_codegen_rust/struct.RustCodegen.html#method.extern_crates))
+    /// [`RustCodegen::extern_crates`](../../buff_lang_codegen_rust/struct.RustCodegen.html))
     /// so the CLI/pipeline can write them into the generated `Cargo.toml`
     /// when full Cargo-project wiring lands.
     ExternCrateDecl(ExternCrateDecl),
+    /// An `extend TYPE { fn ...; ... }` extension-method block (T75).
+    ///
+    /// Adds methods to an existing type (primitive or user-defined). The
+    /// target type is stored as a [`TypeRef`] (today always a
+    /// [`TypeRef::Named`]); the methods reuse the existing [`FuncDecl`]
+    /// shape (the parser routes each `fn` inside the block through
+    /// [`parse_func_decl`](../../buff_lang_parser/fn.parse_func_decl.html)).
+    ///
+    /// The codegen lowers this to a Rust "extension trait" + blanket-free
+    /// impl — the standard Rust extension-trait pattern:
+    ///
+    /// ```ignore
+    /// // Buff:  extend String { fn shout(self) -> String { ... } }
+    /// // Rust:
+    /// trait BuffExtString {
+    ///     fn shout(self) -> String;
+    /// }
+    /// impl BuffExtString for String {
+    ///     fn shout(self) -> String { ... }
+    /// }
+    /// ```
+    ///
+    /// The trait name is derived from the target type as `BuffExt{Type}`
+    /// (e.g. `extend String` → `BuffExtString`). This is the FIRST `Decl`
+    /// variant that lowers to TWO `syn::Item`s (the trait + the impl);
+    /// [`RustCodegen::generate`] handles the multi-item emission by
+    /// extending the items `Vec` rather than pushing a single item.
+    ///
+    /// v0.5 single extend-block per target type is the common case.
+    /// Multi-block merging (two `extend String { ... }` blocks for the
+    /// same target) and generic targets (`extend Vector<T>`) are deferred.
+    ExtendBlock(ExtendBlock),
 }
 
 impl fmt::Display for Decl {
@@ -63,6 +95,7 @@ impl fmt::Display for Decl {
             Decl::ExportDecl(d) => write!(f, "{d}"),
             Decl::ReexportDecl(d) => write!(f, "{d}"),
             Decl::ExternCrateDecl(d) => write!(f, "{d}"),
+            Decl::ExtendBlock(d) => write!(f, "{d}"),
         }
     }
 }
@@ -515,6 +548,82 @@ pub struct TraitDecl {
 impl fmt::Display for TraitDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TraitDecl({} {{ ", self.name)?;
+        for (i, m) in self.methods.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{m}")?;
+        }
+        f.write_str(" })")
+    }
+}
+
+/// An `extend TYPE { fn ...; ... }` extension-method block (T75).
+///
+/// Adds methods to an existing type (primitive or user-defined). The
+/// target is the type NAME (`String`, `Int`, `MyStruct`, …) — today
+/// always stored as a [`TypeRef::Named`]; generic targets
+/// (`extend Vector<T>`) are a future task.
+///
+/// The methods are full [`FuncDecl`]s (the parser routes each `fn` inside
+/// the block through the shared [`parse_func_decl`]). v0.5 single-block
+/// per type is the common case; multi-block merging is deferred.
+///
+/// # Codegen target
+///
+/// Lowers to a Rust extension trait + blanket-free impl — the standard
+/// Rust extension-trait pattern that lets `"x".my_method()` resolve on a
+/// type the user didn't define:
+///
+/// ```ignore
+/// // Buff:  extend String { fn shout(self) -> String { ... } }
+/// // Rust:
+/// trait BuffExtString {
+///     fn shout(self) -> String;
+/// }
+/// impl BuffExtString for String {
+///     fn shout(self) -> String { ... }
+/// }
+/// ```
+///
+/// The trait name is derived from the target type name as
+/// `BuffExt{Type}` (so `extend String` → `BuffExtString`). This is the
+/// ONLY `Decl` variant that lowers to TWO `syn::Item`s; see the migration
+/// note below.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T75 — new Decl variant
+///
+/// `Decl::ExtendBlock(ExtendBlock)` is **purely additive** (no existing
+/// variant changed). All `match` expressions on [`Decl`] across the
+/// codebase gained a `Decl::ExtendBlock { .. }` arm. The codegen pass
+/// emits TWO `syn::Item`s per block — a [`syn::ItemTrait`] (signatures)
+/// and a [`syn::ItemImpl`] (bodies) — making this the first decl variant
+/// whose lowering produces more than one top-level Rust item. The
+/// [`RustCodegen::generate`] item-collection loop was extended to push
+/// both items via a dedicated helper (see
+/// `RustCodegen::lower_extend_block_items`).
+///
+/// [`parse_func_decl`]: ../../buff_lang_parser/fn.parse_func_decl.html
+/// [`TypeRef::Named`]: crate::ty::TypeRef::Named
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtendBlock {
+    /// The target type's NAME (e.g. `"String"`, `"Int"`, `"MyStruct"`).
+    /// Stored as a [`TypeRef::Named`] so future support for generic
+    /// targets (`extend Vector<T>`) needs no AST migration — only the
+    /// parser widening + codegen handling the new shapes.
+    pub target: TypeRef,
+    /// The methods to add to the target type. Each is a full [`FuncDecl`]
+    /// (parsed via the shared `parse_func_decl`); bodies are kept (not
+    /// abstract signatures) because the extension-trait impl carries them.
+    pub methods: Vec<FuncDecl>,
+    pub span: Span,
+}
+
+impl fmt::Display for ExtendBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ExtendBlock({} {{ ", self.target)?;
         for (i, m) in self.methods.iter().enumerate() {
             if i > 0 {
                 f.write_str(", ")?;

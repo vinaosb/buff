@@ -319,8 +319,8 @@ impl<'a> TokenStream<'a> {
     ///
     /// The cursor stops on (i.e. does NOT consume) any of:
     ///
-    /// - `func`, `async`, `enum`, `import`, `export`, `extern` keywords
-    ///   (the top-level declaration starters),
+    /// - `func`, `async`, `enum`, `import`, `export`, `extern`, `extend`
+    ///   keywords (the top-level declaration starters),
     /// - `@` (the attribute prefix — attributes precede `func`),
     /// - end of input.
     ///
@@ -344,6 +344,7 @@ impl<'a> TokenStream<'a> {
                 | TokenKind::KwImport
                 | TokenKind::KwExport
                 | TokenKind::KwExtern
+                | TokenKind::KwExtend
                 | TokenKind::At => return true,
                 _ => {
                     self.advance();

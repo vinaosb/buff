@@ -2195,3 +2195,176 @@ pipeline. No codegen file was edited for T74.
   that doesn't produce a `bool`) are warnings in v0.5 per the project policy.
 
 
+
+## T75 — Extension methods (`extend TYPE { fn ...; ... }`)
+
+### Status: COMPLETE
+
+`extend TYPE { fn ...; ... }` blocks add methods to an existing type
+(primitive or user-defined) by lowering to a Rust "extension trait + impl"
+pair. The codegen emits TWO `syn::Item`s per block — making this the FIRST
+decl variant whose lowering produces more than one top-level Rust item.
+
+### AST design (additive, at END)
+
+**New variant** `Decl::ExtendBlock(ExtendBlock)` added at the END of the
+`Decl` enum (purely additive — no existing variant changed):
+
+```rust
+pub struct ExtendBlock {
+    pub target: TypeRef,         // today always TypeRef::Named
+    pub methods: Vec<FuncDecl>,  // reused! each `fn` parses via parse_func_decl
+    pub span: Span,
+}
+```
+
+The methods **REUSE the existing `FuncDecl` shape** (the parser routes each
+`fn` inside the block through `parse_func_decl`). No Eq/Hash (only Debug,
+Clone, PartialEq). Display impl renders `ExtendBlock(Type { ... })`.
+
+### Token + keyword bump
+
+- `TokenKind::KwExtend` added (lexer `token.rs`): `from_keyword("extend")`
+  + Display + `is_keyword` + `all_keywords` updated. **Reserved-keyword
+  count went 26 → 27**, so BOTH count-asserting lexer tests were bumped:
+  - `all_keywords_present` in `crates/buff-lang-lexer/tests/token_tests.rs`
+    (the `assert_eq!(... .len(), 26)` line + the keyword list)
+  - `test_all_25_keywords_tokenize` in `crates/buff-lang-lexer/tests/lexer_tests.rs`
+    (kept the historical `25` test-fn name but bumped `tokens.len()` to 28
+    and the per-index `i < 26` bound to `i < 27`)
+
+### Trait-name scheme
+
+Trait name is derived from the target type name as **`BuffExt{Type}`**:
+- `extend String { ... }` → `trait BuffExtString { ... }` + `impl
+  BuffExtString for String { ... }`
+- `extend Int { ... }` → `BuffExtInt` (the impl self-type becomes `i64`
+  via the standard Buff→Rust primitive mapping — `BuffExtInt for i64`)
+- `extend MyStruct { ... }` → `BuffExtMyStruct`
+
+### How the two `syn::Item`s are emitted
+
+`RustCodegen::generate` is the SINGLE place that builds the top-level
+`Vec<syn::Item>`. The loop normally does `items.push(self.lower_decl(decl)?)`
+for each decl (one item per decl). For `Decl::ExtendBlock` this is
+**special-cased** to `items.extend(self.lower_extend_block_items(e)?)`
+which returns `Vec<Item>` of length 2 (trait + impl). This is the ONLY
+decl variant that emits >1 item.
+
+`lower_extend_block_items` builds both items in ONE pass over the methods:
+for each method:
+1. Build the full `syn::ItemFn` via the existing `lower_func` (reused!).
+2. **Rewrite the signature's first param** via the `rewrite_self_receiver`
+   helper: when the first param is named `self` (typed `FnArg::Typed`),
+   swap it for a `FnArg::Receiver { self_token, colon_token: None, ty:
+   Self }` so the generated Rust reads `fn name(self) -> ...` instead of
+   the (valid but unusual) `fn name(self: Type) -> ...`. Mutability is
+   preserved. (Receiver in syn 2.0 needs `colon_token: Option<Colon>` AND
+   `ty: Box<Type>` even when `colon_token` is None — the `ty` is the
+   reconstructed shorthand type `Self`.)
+3. Push a `syn::TraitItem::Fn(TraitItemFn { sig, default: None, semi_token })`
+   to the trait item list (signature only — no body).
+4. Push a `syn::ImplItem::Fn(ImplItemFn { sig, block, vis: Inherited, ... })`
+   to the impl item list (full fn — body preserved).
+
+Then assemble:
+- `syn::ItemTrait { vis: Public, ident: "BuffExtString", items: trait_items, ... }`
+- `syn::ItemImpl { trait_: Some((None, Path, for_token)), self_ty: Box<Type>, items: impl_items, ... }`
+  (Note syn 2.0 ItemImpl's `trait_` tuple is `(Option<Bang>, Path, for_token)`
+   — three elements, NOT two; also has a separate `impl_token` field — easy
+   to miss.)
+
+### Parser design
+
+`parse_extend_decl` in `crates/buff-lang-parser/src/stmt.rs`:
+- `extend` keyword consumed
+- target = `parse_type_ref` (so future generic targets need no AST/parser
+  change, just codegen)
+- expect `{`
+- loop parsing `func`/`async func`/`extern func` declarations via the
+  shared `parse_func_decl(stream, Vec::new())` — Buff uses the `func`
+  keyword (NOT `fn`) inside extend blocks. Layout tokens between methods
+  are transparently skipped by `TokenStream::peek`/`advance`. Optional `;`
+  between methods tolerated.
+- expect `}`
+- **Empty body `extend T { }` is a parse error** (an extension block with
+  zero methods is meaningless).
+
+Dispatcher arm added to `parser.rs::parse_one_decl`:
+`Some(TokenKind::KwExtend) => parse_extend_decl(stream)`. Rejected when
+preceded by `@attributes`. Added `KwExtend` to the recovery sync-point set
+in `stream.rs::sync_to_recovery_point`.
+
+### Bare `self` receiver (parser + codegen)
+
+Buff's `parse_params` previously required `name: Type` for every param.
+**T75 added a special case**: the FIRST param may be a bare `self` (no
+`: Type`). Synthesised type = `TypeRef::Named { name: "Self" }` (a marker;
+the codegen keys on the param NAME `self`, not the stored type). After the
+first param, every subsequent param still requires the `: Type` shape. This
+makes `fn shout(self) -> String { ... }` (the spec QA shape) parse
+correctly.
+
+The codegen's `rewrite_self_receiver` helper (above) is the second half of
+the bare-`self` story: it converts the typed-first-param form back into a
+Rust `FnArg::Receiver` so the generated trait/impl signature reads
+`fn name(self) -> ...`.
+
+### Exhaustive-match (Decl) ripple sites
+
+Two `match` sites on `Decl` needed updating:
+1. `crates/buff-lang-ast/src/decl.rs::Display for Decl` — added the
+   `Decl::ExtendBlock(d) => write!(f, "{d}")` arm.
+2. `crates/buff-lang-types/src/modules.rs::decl_item_name` — added
+   `Decl::ExtendBlock(_) => None` (extension methods are NOT module-level
+   exported names today; the trait they produce is a private impl-detail
+   of the module).
+3. `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_decl` — added
+   `Decl::ExtendBlock(_) => Err(unsupported)` (defensive; the real path
+   is via `generate()`).
+
+`ir.rs::lower_decl` uses `if let Decl::FuncDecl(f) = decl` (NOT an
+exhaustive match) so no change needed. `program_uses_matrix`/`error` use
+`let Decl::FuncDecl(f) = decl else { continue }` — also non-exhaustive.
+
+### Acceptance evidence
+
+- `cargo test -p buff-lang-codegen-rust --test extensions` → 5 passed,
+  0 failed. Test fns (all named with `extensions*` substring for the
+  spec's filter):
+  - `extensions_trait_and_impl` — asserts BOTH `trait BuffExtString { fn
+    shout(self) -> String; }` AND `impl BuffExtString for String { fn
+    shout(self) -> String { ... } }` are emitted.
+  - `extensions_method_body` — asserts the method body content survives
+    into the impl block.
+  - `extensions_multiple_methods` — asserts multiple methods per block.
+  - `extensions_trait_name_scheme_for_int` — asserts `BuffExtInt` + the
+    target type maps to Rust's `i64` via the primitive mapping.
+  - `extensions_end_to_end_with_caller` — full program (extend + caller
+    fn with `"x".shout()` call) round-trips to valid Rust.
+
+- `cargo test -p buff-lang-parser --test extensions` → 9 passed, 0 failed.
+  Covers single-method, multiple-methods, primitive-target, empty-body
+  error, missing-target error, missing-`}` error, mixed decls, and Display
+  round-trip.
+
+- Full `cargo test --workspace` → 86 suites, all `0 failed`.
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean.
+- `cargo fmt --check` → clean.
+
+### Deferred (documented in T75 task)
+
+- **Multi-block merging**: two `extend String { ... }` blocks for the same
+  target would collide on the trait name `BuffExtString`. A future task
+  could suffix `_2`/`_3`/... or merge methods into one trait.
+- **Generic targets** (`extend Vector<T>`): the parser already accepts the
+  syntax (target is `parse_type_ref`), but the codegen errors out with
+  "extend block with nested generic target type" — emitting matching
+  generic params on both trait + impl needs work.
+- **`&self` / `&mut self` receiver variants**: Buff hides references from
+  users, so all extension methods today take `self` by value. A future
+  task could add `&self` / `&mut self` syntax (would extend
+  `rewrite_self_receiver` to set the `reference` field on
+  `syn::Receiver`).
+- **`return_type` inference for `Self`**: today the user writes the return
+  type explicitly; no inference for `Self`-typed returns.

@@ -25,8 +25,8 @@ use buff_lang_error::{Diagnostic, ParseError, SourceId};
 use buff_lang_lexer::TokenKind;
 
 use crate::stmt::{
-    parse_attributes, parse_enum_decl, parse_export_decl, parse_extern_crate_decl, parse_func_decl,
-    parse_import_decl,
+    parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl,
+    parse_extern_crate_decl, parse_func_decl, parse_import_decl,
 };
 use crate::stream::TokenStream;
 
@@ -156,6 +156,25 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
                 ))),
             }
         }
+        // T75: `extend TYPE { fn ...; fn ...; ... }` — extension-method
+        // block. Adds methods to an existing type (primitive or
+        // user-defined). Each method is parsed via the shared
+        // `parse_func_decl`; the resulting `ExtendBlock` lowers to a Rust
+        // extension trait + blanket-free impl at codegen time.
+        Some(TokenKind::KwExtend) => {
+            if saw_attributes {
+                let span = stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span());
+                return Err(ParseError::new(Diagnostic::error(
+                    "attributes are not supported on `extend` declarations",
+                    span,
+                )));
+            }
+            let e = parse_extend_decl(stream)?;
+            Ok(Some(Decl::ExtendBlock(e)))
+        }
         // T35: attributes were present but the next token is not a
         // recognised attribute-attachable declaration. This is a parse
         // error (e.g. `@test let x = 1` or `@test` at EOF).
@@ -206,6 +225,7 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
 /// | `extern crate "name"` | [`Decl::ExternCrateDecl`] (T32 — FFI)        |
 /// | `extern func ...`     | [`Decl::FuncDecl`] with `is_extern = true` (T32 — FFI) |
 /// | `@name ... func`      | [`Decl::FuncDecl`] with `attributes` populated (T35 — `buff test`) |
+/// | `extend TYPE { fn ... }` | [`Decl::ExtendBlock`] (T75 — extension methods) |
 ///
 /// Any other token at top level is an error — statements such as
 /// `let`/`return`/`if` belong inside a function body, not at module scope.

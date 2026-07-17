@@ -300,6 +300,18 @@ impl RustCodegen {
             if matches!(decl, Decl::ReexportDecl { .. }) {
                 continue;
             }
+            // T75: an `extend TYPE { ... }` block lowers to TWO top-level
+            // Rust items (an extension-trait declaration + a blanket-free
+            // impl). This is the ONLY decl variant whose lowering produces
+            // more than one `syn::Item`, so we special-case it here to
+            // extend the items Vec rather than pushing a single item. See
+            // [`Self::lower_extend_block_items`] for the trait-name scheme
+            // and the per-method lowering.
+            if let Decl::ExtendBlock(e) = decl {
+                let pair = self.lower_extend_block_items(e)?;
+                items.extend(pair);
+                continue;
+            }
             let item = self.lower_decl(decl)?;
             items.push(item);
         }
@@ -352,6 +364,15 @@ impl RustCodegen {
                 self.extern_crates.insert(d.name.clone());
                 Ok(Item::Use(self.lower_extern_crate_use(&d.name)))
             }
+            // T75: extend blocks lower to TWO `syn::Item`s (trait + impl),
+            // so they cannot be expressed via the single-`Item` return of
+            // `lower_decl`. The proper emission path is via
+            // [`Self::generate`], which special-cases `Decl::ExtendBlock`
+            // and pushes both items. A direct call here is a caller misuse
+            // — surface a clear error rather than dropping half the items.
+            Decl::ExtendBlock(_) => Err(self.unsupported(
+                "extend block codegen — use RustCodegen::generate (which emits trait + impl)",
+            )),
         }
     }
 
@@ -763,6 +784,156 @@ impl RustCodegen {
                 ident: Ident::new(&rust_ident_name, ProcSpan::call_site()),
             }),
         }
+    }
+
+    /// T75: lower an `extend TYPE { fn ...; ... }` block to TWO top-level
+    /// Rust items — an extension-trait declaration (signatures only) and a
+    /// blanket-free `impl Trait for Type { ... }` (the bodies).
+    ///
+    /// This is the ONLY decl variant whose lowering produces more than one
+    /// `syn::Item`; [`Self::generate`] special-cases `Decl::ExtendBlock` to
+    /// extend the items Vec with both items.
+    ///
+    /// # Trait-name scheme
+    ///
+    /// The trait name is derived from the target type name as
+    /// `BuffExt{Type}` (e.g. `extend String` → `BuffExtString`,
+    /// `extend Int` → `BuffExtInt`). v0.5 single extend-block per target
+    /// type is the common case; multi-block merging (`extend String { ... }`
+    /// twice) is deferred (would collide here today — a future task could
+    /// suffix `_2`, `_3`, … or merge the methods into one trait).
+    ///
+    /// # Per-method lowering
+    ///
+    /// Each [`FuncDecl`] inside the block is lowered TWICE:
+    /// - **trait side** — only the SIGNATURE (`fn name(params) -> Ret;`),
+    ///   built by reusing the same signature-construction logic as
+    ///   [`Self::lower_func`] (params, return type, asyncness) but WITHOUT
+    ///   a body. The signature is wrapped in a [`syn::TraitItemFn`] and
+    ///   pushed onto the trait's `items` list.
+    /// - **impl side** — the FULL [`syn::ItemFn`] produced by
+    ///   [`Self::lower_func`], rewrapped as a [`syn::ImplItemFn`] (we
+    ///   strip the ItemFn wrapper and reuse the inner `Signature` + body
+    ///   Block). The vis is `Inherited` (Rust impl items are always
+    ///   implicitly public via the trait).
+    ///
+    /// Async-extension methods (`fn async_fetch(self) -> String` inside an
+    /// `extend`) propagate the `async` flag the same way regular funcs do.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodegenError`] if any method body fails to lower (the
+    /// underlying `lower_func`/signature-builder propagates the error).
+    fn lower_extend_block_items(
+        &mut self,
+        e: &buff_lang_ast::ExtendBlock,
+    ) -> Result<Vec<Item>, CodegenError> {
+        // Derive the trait name: `BuffExt{TargetTypeName}`.
+        let target_name = match &e.target {
+            TypeRef::Named { name, .. } => &name.name,
+            // Generic targets (`extend Vector<T>`) are deferred — they'd
+            // need the trait + impl to carry matching generic params.
+            TypeRef::Generic { base, .. } => {
+                if let TypeRef::Named { name, .. } = base.as_ref() {
+                    &name.name
+                } else {
+                    return Err(self.unsupported(
+                        "extend block with nested generic target type (only named types supported in v0.5)",
+                    ));
+                }
+            }
+            _ => {
+                return Err(self.unsupported(
+                    "extend block with non-named target type (only TypeRef::Named supported in v0.5)",
+                ));
+            }
+        };
+        let trait_name_str = format!("BuffExt{target_name}");
+        let trait_ident = Ident::new(&trait_name_str, ProcSpan::call_site());
+        let target_type = self.ast_typeref_to_syn(&e.target)?;
+
+        // Build the trait item list (signatures only) and the impl item
+        // list (full fns) in one pass over the methods.
+        let mut trait_items: Vec<syn::TraitItem> = Vec::with_capacity(e.methods.len());
+        let mut impl_items: Vec<syn::ImplItem> = Vec::with_capacity(e.methods.len());
+        for method in &e.methods {
+            // Trait signature (no body). Reuse the signature-builder from
+            // lower_func by building the full ItemFn first, then peeling
+            // off the Signature and synthesising a TraitItemFn from it.
+            let item_fn = self.lower_func(method)?;
+            // T75: extension methods almost always take `self` as the
+            // first parameter. Rust's idiomatic spelling is a bare
+            // receiver `self` (NOT `self: Type`). When the Buff method's
+            // first param is named `self`, rewrite the FIRST signature
+            // input from a `FnArg::Typed(PatType { ident: self, ty })`
+            // into a `FnArg::Receiver { self_token }` so the generated
+            // Rust reads `fn shout(self) -> ...` instead of
+            // `fn shout(self: String) -> ...`. Both forms compile, but
+            // the bare form is the spec QA shape and matches what every
+            // other extension-trait library emits.
+            let trait_sig = rewrite_self_receiver(item_fn.sig.clone());
+            let impl_sig = rewrite_self_receiver(item_fn.sig.clone());
+            // The trait item carries the signature with NO default body.
+            // `default: None` means "no default implementation — impls
+            // must provide one" (exactly what the impl side below does).
+            trait_items.push(syn::TraitItem::Fn(syn::TraitItemFn {
+                attrs: Vec::new(),
+                sig: trait_sig,
+                default: None,
+                semi_token: Some(Default::default()),
+            }));
+            // The impl item carries the FULL fn (body + signature). We
+            // re-wrap the ItemFn's signature + block into an ImplItemFn.
+            // Visibility is Inherited — Rust impl items inherit from the
+            // trait, so emitting `pub` here would be a lint warning.
+            impl_items.push(syn::ImplItem::Fn(syn::ImplItemFn {
+                attrs: item_fn.attrs,
+                vis: Visibility::Inherited,
+                defaultness: None,
+                sig: impl_sig,
+                block: *item_fn.block,
+            }));
+        }
+
+        // Assemble the trait item: `trait BuffExtString { fn ...; ... }`.
+        let trait_item = Item::Trait(syn::ItemTrait {
+            attrs: Vec::new(),
+            vis: Visibility::Public(Default::default()),
+            unsafety: None,
+            auto_token: None,
+            restriction: None,
+            trait_token: Default::default(),
+            ident: trait_ident,
+            generics: Default::default(),
+            colon_token: None,
+            supertraits: Punctuated::new(),
+            brace_token: Default::default(),
+            items: trait_items,
+        });
+
+        // Assemble the impl item:
+        // `impl BuffExtString for String { fn ... { ... } ... }`.
+        // The `trait_` tuple is `(Option<Not>, Path, for_token)` —
+        // `None` for the bang means "implementing" (vs `!` for
+        // "auto-trait negative impl"), and `for_token` is the literal
+        // `for` keyword between the trait path and the self type.
+        let impl_item = Item::Impl(syn::ItemImpl {
+            attrs: Vec::new(),
+            defaultness: None,
+            unsafety: None,
+            generics: Default::default(),
+            impl_token: Default::default(),
+            trait_: Some((
+                None,
+                syn::Path::from(Ident::new(&trait_name_str, ProcSpan::call_site())),
+                Default::default(),
+            )),
+            self_ty: Box::new(target_type),
+            brace_token: Default::default(),
+            items: impl_items,
+        });
+
+        Ok(vec![trait_item, impl_item])
     }
 
     fn lower_block(&mut self, block: &Block) -> Result<syn::Block, CodegenError> {
@@ -3257,6 +3428,66 @@ impl Default for RustCodegen {
 /// line/col) is recorded separately in [`CodegenContext`].
 fn ast_ident_to_syn(ident: &buff_lang_ast::common::Ident) -> Ident {
     Ident::new(&ident.name, ProcSpan::call_site())
+}
+
+/// T75: rewrite the first parameter of a [`syn::Signature`] from a typed
+/// `FnArg::Typed { ident: "self", ty }` into a bare [`syn::FnArg::Receiver`]
+/// so the generated Rust reads `fn name(self, ...) -> ...` instead of the
+/// (valid but verbose) `fn name(self: Type, ...) -> ...`.
+///
+/// This is the canonical Rust extension-method shape: the trait declaration
+/// and impl body both spell the receiver as bare `self`, and Rust infers
+/// the receiver type from the `impl Trait for Type` header. Without this
+/// rewrite, the generated trait/impl would carry `self: Type` (also valid
+/// Rust — it's the "explicit-self-type" form — but unusual and the spec QA
+/// requires bare `self`).
+///
+/// The rewrite is a NO-OP when the first input is NOT named `self` (e.g.
+/// an extension method that takes the receiver by a different name, or
+/// one that takes only non-receiver args). Mutability is preserved: a
+/// param named `self` with `mut` becomes `mut self`.
+fn rewrite_self_receiver(mut sig: Signature) -> Signature {
+    let Some(first) = sig.inputs.first() else {
+        return sig;
+    };
+    let is_self = match first {
+        syn::FnArg::Typed(pat_type) => matches!(
+            pat_type.pat.as_ref(),
+            Pat::Ident(pi) if pi.ident == "self"
+        ),
+        _ => false,
+    };
+    if !is_self {
+        return sig;
+    }
+    // Replace the first input with a Receiver. We extract `mut` from the
+    // existing PatIdent (if present) and otherwise use defaults. No
+    // `colon_token` — bare `self`, NOT `self: Type`.
+    let mutability = match first {
+        syn::FnArg::Typed(pat_type) => match pat_type.pat.as_ref() {
+            Pat::Ident(pi) if pi.mutability.is_some() => Some(Default::default()),
+            _ => None,
+        },
+        _ => None,
+    };
+    // When `colon_token` is `None`, syn expects the `ty` field to be the
+    // reconstructed shorthand type — `Self` for bare `self`,
+    // `&Self` / `&mut Self` for ref forms (the latter not emitted here
+    // yet — references are hidden from Buff users). We synthesise a
+    // `Self` path type.
+    let self_ty = SynType::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path::from(Ident::new("Self", ProcSpan::call_site())),
+    });
+    sig.inputs[0] = syn::FnArg::Receiver(syn::Receiver {
+        attrs: Vec::new(),
+        reference: None,
+        mutability,
+        self_token: Default::default(),
+        colon_token: None,
+        ty: Box::new(self_ty),
+    });
+    sig
 }
 
 /// T32: the single named, configurable Buff→Rust primitive-type mapping

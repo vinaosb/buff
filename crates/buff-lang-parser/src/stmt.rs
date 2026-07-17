@@ -37,8 +37,8 @@
 //! skipping peek/advance so existing parsers compose unchanged.
 
 use buff_lang_ast::{
-    Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl,
-    GuardCondition, Ident, ImportDecl, Param, Pattern, ReexportDecl, Stmt, TypeRef,
+    Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, ExtendBlock,
+    FuncDecl, GuardCondition, Ident, ImportDecl, Param, Pattern, ReexportDecl, Stmt, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -457,6 +457,16 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
 /// Expects the cursor to be positioned just after `(`. Stops at the upcoming
 /// `)`. Parameters are comma-separated; each one is `name: Type`.
 ///
+/// # T75 — bare `self` receiver
+///
+/// As a SPECIAL CASE, the FIRST parameter may be a bare `self` (no
+/// `: Type` annotation) — the receiver syntax used by extension methods
+/// inside `extend TYPE { fn ... }` blocks. The synthesised type stored on
+/// the resulting [`Param`] is `TypeRef::Named { name: "Self" }` (a marker;
+/// the codegen uses the param NAME `self` to decide emission, not the
+/// stored type). After the first param, every subsequent param requires
+/// the `name: Type` shape as usual.
+///
 /// # Errors
 ///
 /// Returns [`ParseError`] if any parameter is malformed.
@@ -475,8 +485,20 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
         })?;
         let start = name_tok.span.start;
         let name = extract_ident(name_tok)?;
-        stream.expect(TokenKind::Colon)?;
-        let ty = parse_type_ref(stream)?;
+        // T75: bare `self` receiver — the first parameter of an extension
+        // method is `self` (no `: Type`). Synthesise a placeholder type so
+        // the resulting `Param` carries a valid TypeRef; the codegen emits
+        // a Rust receiver (`self` / `&self` / `&mut self`) based on the
+        // param NAME, not the stored type.
+        let ty = if name.name == "self" && !matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+            TypeRef::Named {
+                name: Ident::new("Self", Span::new(start, name.span.end, source_id)),
+                span: Span::new(start, name.span.end, source_id),
+            }
+        } else {
+            stream.expect(TokenKind::Colon)?;
+            parse_type_ref(stream)?
+        };
         let end = type_end(&ty);
         params.push(Param {
             name,
@@ -1711,6 +1733,103 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
             stream.eof_span(),
         ))),
     }
+}
+
+/// Parse a top-level `extend TYPE { fn ...; fn ...; ... }` extension-method
+/// block (T75).
+///
+/// Shape:
+/// - `extend String { fn shout(self) -> String { ... } }` — adds the
+///   method `shout` to the `String` type.
+/// - `extend Int { fn squared(self) -> Int { ... } }` — same shape with a
+///   different (primitive) target.
+/// - Multiple methods per block:
+///   `extend MyType { fn m1(self) { ... } fn m2(self) { ... } }`.
+///
+/// The target is a bare type name (parsed via [`parse_type_ref`] so future
+/// support for generic targets needs no AST migration). The method list is
+/// a brace-delimited block of `fn` declarations; each `fn` is parsed via
+/// the shared [`parse_func_decl`] (the leading `func`/`async func`/`extern
+/// func` keyword is consumed there). Trailing commas between methods are
+/// NOT supported — methods are separated by layout (newlines) which
+/// [`TokenStream`] transparently skips. An empty body `extend T { }` is a
+/// parse error (zero methods is meaningless for an extension block).
+///
+/// # Codegen target
+///
+/// The block lowers to a Rust extension trait + blanket-free impl — the
+/// standard Rust extension-trait pattern that lets `recv.my_method()`
+/// resolve on a type the user didn't define. The trait name is derived
+/// from the target type as `BuffExt{Type}` (e.g. `extend String` →
+/// `BuffExtString`). v0.5 single extend-block per target type is the
+/// common case; multi-block merging is deferred.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] on:
+/// - the token after `extend` is not a type name,
+/// - the opening `{` is missing,
+/// - a method's `fn` declaration fails to parse via `parse_func_decl`,
+/// - the body is empty (zero methods),
+/// - the closing `}` is missing.
+pub fn parse_extend_decl(stream: &mut TokenStream<'_>) -> Result<ExtendBlock, ParseError> {
+    let source_id = stream.source_id();
+    let extend_tok = stream.expect(TokenKind::KwExtend)?;
+    let start = extend_tok.span.start;
+
+    // Target type name. Today always a `TypeRef::Named`; the parser uses
+    // the shared `parse_type_ref` so future support for generic targets
+    // (`extend Vector<T>`) needs no AST or parser change beyond handling
+    // the new TypeRef shapes at codegen time.
+    let target = parse_type_ref(stream)?;
+    let target_end = type_end(&target);
+
+    // Opening `{` of the method list.
+    stream.expect(TokenKind::LBrace)?;
+
+    let mut methods: Vec<FuncDecl> = Vec::new();
+    // Empty body is a parse error — an extension block with zero methods
+    // is meaningless and almost certainly indicates a user typo.
+    if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+        let rb = stream.expect(TokenKind::RBrace)?;
+        return Err(ParseError::new(Diagnostic::error(
+            "extend block must declare at least one method",
+            Span::new(start, rb.span.end, source_id),
+        )));
+    }
+
+    // Parse `fn ...` declarations until the closing `}`. Layout tokens
+    // (newlines) between methods are transparently skipped by
+    // `TokenStream::peek`/`advance`, so no explicit separator handling is
+    // needed. An optional trailing `;` between methods is also tolerated.
+    while matches!(
+        stream.peek_kind(),
+        Some(TokenKind::KwFunc) | Some(TokenKind::KwAsync) | Some(TokenKind::KwExtern)
+    ) {
+        let f = parse_func_decl(stream, Vec::new())?;
+        methods.push(f);
+        // Optional `;` separator between methods.
+        if matches!(stream.peek_kind(), Some(TokenKind::Semicolon)) {
+            stream.advance();
+        }
+    }
+
+    if methods.is_empty() {
+        // Defensive: we already error on empty `{ }` above, but a body of
+        // only stray tokens (e.g. comments, which don't exist as tokens in
+        // Buff's lexer) would land here. Surface a helpful message.
+        return Err(ParseError::new(Diagnostic::error(
+            "extend block must contain at least one `fn` declaration",
+            stream.span_here(),
+        )));
+    }
+
+    let rb = stream.expect(TokenKind::RBrace)?;
+    Ok(ExtendBlock {
+        target,
+        methods,
+        span: Span::new(start, target_end.max(rb.span.end), source_id),
+    })
 }
 
 /// Parse an `extern crate "name"` declaration (T32 — FFI basics).

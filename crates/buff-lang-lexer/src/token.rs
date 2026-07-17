@@ -44,7 +44,7 @@ pub enum TokenKind {
     // --- Identifiers and keywords ---
     Ident(String),
 
-    // 25 keywords
+    // 26 keywords
     KwFunc,
     KwLet,
     KwMut,
@@ -78,6 +78,13 @@ pub enum TokenKind {
     /// expr` condition additionally binds the pattern's identifiers in the
     /// enclosing scope (lowered to Rust's let-else).
     KwGuard,
+    /// `extend TYPE { fn ...; ... }` extension-method block (T75).
+    ///
+    /// Adds methods to an existing type (primitive or user-defined) by
+    /// lowering to a Rust "extension trait" + blanket-free impl. The trait
+    /// name is derived from the target type as `BuffExt{Type}` (e.g.
+    /// `extend String { ... }` → `trait BuffExtString { ... }`).
+    KwExtend,
 
     // --- Operators ---
     DotDot,
@@ -182,6 +189,7 @@ impl TokenKind {
             "extern" => Some(Self::KwExtern),
             "unsafe" => Some(Self::KwUnsafe),
             "guard" => Some(Self::KwGuard),
+            "extend" => Some(Self::KwExtend),
             _ => None,
         }
     }
@@ -216,6 +224,7 @@ impl TokenKind {
                 | Self::KwExtern
                 | Self::KwUnsafe
                 | Self::KwGuard
+                | Self::KwExtend
         )
     }
 
@@ -224,7 +233,7 @@ impl TokenKind {
         &[
             "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
             "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-            "true", "false", "extern", "unsafe", "guard",
+            "true", "false", "extern", "unsafe", "guard", "extend",
         ]
     }
 }
@@ -275,6 +284,7 @@ impl fmt::Display for TokenKind {
             Self::KwExtern => write!(f, "extern"),
             Self::KwUnsafe => write!(f, "unsafe"),
             Self::KwGuard => write!(f, "guard"),
+            Self::KwExtend => write!(f, "extend"),
             // Operators
             Self::DotDot => write!(f, ".."),
             Self::DotDotEq => write!(f, "..="),

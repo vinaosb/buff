@@ -576,7 +576,8 @@ fn decl_item_name(decl: &Decl) -> Option<String> {
         Decl::ImportDecl(_)
         | Decl::ModuleDecl(_)
         | Decl::ReexportDecl(_)
-        | Decl::ExternCrateDecl(_) => None,
+        | Decl::ExternCrateDecl(_)
+        | Decl::ExtendBlock(_) => None,
     }
 }
 
