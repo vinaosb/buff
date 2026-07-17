@@ -2500,3 +2500,161 @@ Unknown). Then implemented -> 6/6 GREEN.
   changes to existing methods.
 - `crates/buff-lang-types/tests/expected_type_inference.rs` â€” NEW test file
   (6 tests, ~210 lines).
+
+## T92 — Struct embedding + auto-delegation
+
+### Status: COMPLETE
+
+Implemented Go-style struct embedding for Buff: when a struct `Employee`
+has a field whose type is another DECLARED struct `Person` (`person: Person`),
+and `Person` has methods (via an `extend Person { fn ... }` block), the
+compiler auto-generates a forwarding inherent `impl Employee { fn name(self)
+-> ... { self.person.name() } }` for each of Person's instance methods.
+The user writes `employee.name()` and it resolves through the auto-generated
+delegation.
+
+### Approach: CODEGEN-ONLY analysis (ZERO AST change)
+
+This is purely a codegen-time analysis — NO new AST variant, NO change to
+`StructDecl`/`ExtendBlock`/`FuncDecl` shapes. The delegation impls are
+emitted as additional top-level `syn::Item`s after the main lowering loop,
+mirroring how T76 emits collected union wrapper enums and how T75 emits
+its trait+impl pair via `items.extend(...)`.
+
+### How the struct + method maps are built
+
+In `RustCodegen::generate`, a new `emit_embedding_delegation(decls, &mut items)`
+pass runs AFTER the main decl-lowering loop AND after the T76 union emission.
+It builds two deterministic collections from `decls` in a single pass:
+
+- `struct_names: BTreeSet<String>` — names of all `Decl::StructDecl`s.
+  Used to gate delegation: ONLY fields whose `TypeRef::Named` name is a
+  DECLARED user struct get delegation (primitive named types like `Float`
+  that happen to share the `TypeRef::Named` shape are excluded — avoids
+  spurious `impl Employee { fn fancy(self) { self.salary.fancy() } }`
+  when someone does `extend Float { ... }`).
+- `methods_by_type: BTreeMap<String, Vec<&FuncDecl>>` — methods grouped by
+  extend-block target name. Populated from `Decl::ExtendBlock { target,
+  methods }` where `target` is `TypeRef::Named`. Multiple extend blocks
+  targeting the same type are merged via `entry().or_default().extend()`
+  (safe — only the method list is read; the trait-name collision is T75's
+  concern, not ours).
+
+`BTreeMap`/`BTreeSet` (NOT `HashMap`/`HashSet`) — the T29 determinism
+lesson. Iteration order is deterministic across runs.
+
+### How delegation impls are emitted
+
+After building the maps, iterate `decls` in SOURCE ORDER (deterministic —
+`decls` is a fixed `&[Decl]` slice) so delegation impls appear in a
+predictable position. For each `Decl::StructDecl(s)`:
+- For each field `(field_name, field_type)`:
+  - Match only `TypeRef::Named { name, .. }` (skip Generic/Option/Union).
+  - Skip if `name` not in `struct_names` (primitive or undeclared).
+  - Skip if `methods_by_type.get(name)` returns `None` (no methods).
+  - Filter to INSTANCE methods only (first param named `self`). Associated
+    functions (`fn new() -> Person` with no `self`) are SKIPPED because the
+    forwarding body `self.field.method()` doesn't type-check for a
+    no-receiver method (Rust needs `Type::method()` syntax).
+  - If any delegatable methods remain, call `build_delegation_impl(struct_name,
+    field_name, embedded_type_name, &delegatable)` and push the resulting
+    `Item::Impl` to `items`.
+
+### Per-method delegation construction (`build_delegation_impl`)
+
+For each delegatable `&FuncDecl`:
+1. Call `self.lower_func(method)?` to get the full `syn::ItemFn` (reuses
+   ALL the existing signature-building logic — params, return type,
+   asyncness, attribute handling). The method's ORIGINAL body is lowered
+   too (wasteful but harmless — Person's body is valid Buff) and discarded;
+   only `item_fn.sig` is kept.
+2. `rewrite_self_receiver(sig)` — the T75 helper — rewrites the first
+   `self: Person` typed param into a bare `FnArg::Receiver` so the
+   delegation reads `fn name(self) -> ...` (the receiver is now `Self` of
+   the EMBEDDING struct).
+3. Build the body as a single `SynStmt::Expr(field_method_call_expr(...), None)`:
+   `self.<field>.<method>(<forwarded_args>)` where `forwarded_args` are
+   the identifiers of all params AFTER `self` (extracted via the new
+   `ident_expr_from_fn_arg` helper — handles `FnArg::Typed` with
+   `Pat::Ident`, returns `None` for receivers / destructured patterns).
+4. Wrap in `syn::ImplItemFn { vis: Inherited, defaultness: None, sig, block }`.
+5. Assemble `syn::ItemImpl { trait_: None, self_ty: rust_path_type(struct_name),
+   items: impl_items, ... }` — `trait_: None` makes it an INHERENT impl
+   (`impl Employee { ... }`), NOT a trait impl.
+
+Two new free helpers added near `rewrite_self_receiver`:
+- `ident_expr_from_fn_arg(&syn::FnArg) -> Option<SynExpr>` — extracts a
+  bare-ident `SynExpr::Path` from a `FnArg::Typed` whose pat is `Pat::Ident`.
+- `field_method_call_expr(field, method, args) -> SynExpr` — builds
+  `self.<field>.<method>(<args>)` as a `SynExpr::Field` wrapped in a
+  `SynExpr::MethodCall`.
+
+### Acceptance evidence
+
+- `cargo test -p buff-lang-codegen-rust --test embedding` ? 6 passed,
+  0 failed. Test fns (all named with `embedding` substring for the spec's
+  `cargo test ... embedding` filter):
+  - `embedding_single_field_delegates` — the spec QA case: `struct Employee
+    { person: Person, salary: Float }` + `extend Person { fn name(self) ->
+    String {...} }` ? asserts `impl Employee`, `fn name(self) -> String`,
+    and body `self.person.name()` all appear.
+  - `embedding_multiple_methods` — two methods on Person both promoted.
+  - `embedding_no_methods_no_delegation` — embedded struct with NO extend
+    block ? NO `impl Employee` emitted.
+  - `embedding_method_with_extra_params_forwarded` — `fn greet(self, other:
+    String)` ? delegation sig keeps `other: String`, body forwards
+    `self.person.greet(other)`.
+  - `embedding_primitive_field_not_delegated` — `salary: Float` field never
+    triggers delegation.
+  - `embedding_end_to_end_with_caller` — full program (Person + extend +
+    Employee + caller fn with `Employee{...}.name()`) round-trips to valid
+    Rust.
+- `cargo test --workspace` ? ALL suites green (0 failed).
+- `cargo clippy --workspace --all-targets -- -D warnings` ? clean.
+- `cargo fmt --check` ? clean.
+- No regression: `struct_codegen` (19) + `extensions` (5) suites still pass.
+
+### Gotcha: tests must DECLARE the embedded struct
+
+Initial RED tests for `embedding_multiple_methods` and
+`embedding_method_with_extra_params_forwarded` referenced `Person` as a
+field type WITHOUT declaring `struct Person {...}` in the decls slice.
+The codegen correctly SKIPPED delegation in that case (Person not in
+`struct_names`), so the tests failed until the missing `Decl::StructDecl`
+was added. This is the intended behaviour: the embedded type must be a
+DECLARED struct in the same program (per spec: "another DECLARED struct").
+
+### Deferred (v0.5 ? future)
+
+- **Multi-level chains** (`A embeds B embeds C`): only ONE level of
+  delegation is generated. `a.b.c.method()` must be written explicitly
+  until a transitive-closure analysis lands (would iterate the delegation
+  fixpoint: if B gets methods delegated from C, then A embedding B should
+  pick up those too).
+- **Generic structs** (`struct Box<T> { inner: T }`): field type matched
+  by exact NAME only; generic instantiation not analysed.
+- **Conflict resolution**: if a struct embeds two types that both define a
+  method with the same name, BOTH delegation methods are emitted and Rust
+  rejects the duplicate (clear compile error vs silent shadowing). Smarter
+  resolution (first-field-wins, explicit `override` keyword) deferred.
+- **Associated-function delegation**: methods without a `self` first param
+  are skipped (the body `self.field.method()` doesn't type-check). Would
+  need `EmbeddedType::method()` syntax in the body.
+- **Inherent impls**: methods defined outside `extend` blocks (a future
+  `impl Person { ... }` Buff syntax) are not collected — v0.5 methods come
+  only from extend blocks.
+- **`&self` / `&mut self` receivers**: delegation always takes `self` by
+  value (matching T75's extension-method receiver policy). A future task
+  adding reference receivers to extension methods would need the delegation
+  to mirror the embedded method's receiver kind.
+
+### Files changed
+
+- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — added
+  `emit_embedding_delegation` method (~85 lines, additive), added
+  `build_delegation_impl` method (~55 lines, additive), added two free
+  helpers `ident_expr_from_fn_arg` + `field_method_call_expr` (~40 lines),
+  wired the new pass into `generate` after the T76 union emission (3 lines).
+  NO signature changes to existing methods; NO AST changes.
+- `crates/buff-lang-codegen-rust/tests/embedding.rs` — NEW test file
+  (6 tests, ~390 lines).

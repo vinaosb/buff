@@ -334,6 +334,16 @@ impl RustCodegen {
             let enum_item = self.union_enum_item(&union_name, &members)?;
             items.insert(0, Item::Enum(enum_item));
         }
+        // T92: emit auto-delegation `impl` blocks for struct embedding.
+        // When a struct `Employee` has a field `person: Person` where `Person`
+        // is a DECLARED struct with methods (from an `extend Person { ... }`
+        // block), the codegen promotes each of Person's methods to Employee
+        // by emitting `impl Employee { fn name(self) -> ... { self.person.name() } }`.
+        // Analysis + emission both run AFTER the main lowering loop so all
+        // struct decls + extend blocks have already been emitted (the
+        // delegation impls reference the structs by name and the embedded
+        // type's trait is in scope).
+        self.emit_embedding_delegation(decls, &mut items)?;
         Ok(File {
             shebang: None,
             attrs: Vec::new(),
@@ -3534,6 +3544,61 @@ fn rewrite_self_receiver(mut sig: Signature) -> Signature {
     sig
 }
 
+/// T92: extract a bare-ident [`SynExpr`] from a [`syn::FnArg::Typed`] whose
+/// pattern is `Pat::Ident`. Returns `None` for receivers or non-ident
+/// patterns (destructured params — not produced by Buff's parser today, but
+/// defended against so future pattern-param work doesn't silently drop a
+/// forwarded arg).
+fn ident_expr_from_fn_arg(arg: &syn::FnArg) -> Option<SynExpr> {
+    let syn::FnArg::Typed(pat_type) = arg else {
+        return None;
+    };
+    let Pat::Ident(pat_ident) = pat_type.pat.as_ref() else {
+        return None;
+    };
+    Some(SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: syn::Path::from(pat_ident.ident.clone()),
+    }))
+}
+
+/// T92: build the delegation forwarding body expression
+/// `self.<field>.<method>(<args>)`.
+///
+/// - `field` is the embedding struct's field name (e.g. `person`).
+/// - `method` is the embedded type's method name (e.g. `name`).
+/// - `args` are the forwarded param identifiers (params after `self`).
+fn field_method_call_expr(
+    field: &str,
+    method: &str,
+    args: Punctuated<SynExpr, syn::Token![,]>,
+) -> SynExpr {
+    // `self`
+    let self_expr = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: syn::Path::from(Ident::new("self", ProcSpan::call_site())),
+    });
+    // `self.<field>`
+    let field_expr = SynExpr::Field(syn::ExprField {
+        attrs: Vec::new(),
+        base: Box::new(self_expr),
+        dot_token: Default::default(),
+        member: syn::Member::Named(Ident::new(field, ProcSpan::call_site())),
+    });
+    // `self.<field>.<method>(<args>)`
+    SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(field_expr),
+        dot_token: Default::default(),
+        method: Ident::new(method, ProcSpan::call_site()),
+        turbofish: None,
+        paren_token: Default::default(),
+        args,
+    })
+}
+
 /// T32: the single named, configurable Buff→Rust primitive-type mapping
 /// table.
 ///
@@ -4549,6 +4614,211 @@ impl RustCodegen {
             generics: syn::Generics::default(),
             brace_token: Default::default(),
             variants,
+        })
+    }
+
+    /// T92: emit auto-delegation `impl` blocks for struct embedding.
+    ///
+    /// Scans all [`Decl::StructDecl`]s in `decls`. For each struct field
+    /// whose type is a NAMED DECLARED struct that has methods (collected
+    /// from [`Decl::ExtendBlock`]s targeting it), emits an inherent
+    /// `impl StructName { fn <m>(self, ...) -> ... { self.<field>.<m>(...) } }`
+    /// block — one forwarding method per method of the embedded type.
+    ///
+    /// This is the embedding/delegation pattern (à la Go): a struct that
+    /// embeds another struct inherits its methods automatically, with the
+    /// compiler generating the forwarding boilerplate. The user writes
+    /// `employee.name()` and the call resolves to
+    /// `employee.person.name()` via the auto-generated inherent impl.
+    ///
+    /// # Analysis (deterministic)
+    ///
+    /// Two maps are built from `decls`:
+    /// - `struct_names: BTreeSet<String>` — names of all declared structs.
+    ///   Used to decide whether a field's named type is a user struct
+    ///   (vs. a primitive like `Float` that happens to be `TypeRef::Named`).
+    /// - `methods_by_type: BTreeMap<String, Vec<&FuncDecl>>` — methods
+    ///   grouped by their extend-block target type name. Multiple extend
+    ///   blocks targeting the same type are merged (safe — only the
+    ///   method list is consulted; the trait/impl emission happens in
+    ///   [`Self::lower_extend_block_items`] and may itself collide on the
+    ///   `BuffExt{Type}` name, but that is T75's concern, not ours).
+    ///
+    /// Both use [`BTreeMap`]/[`BTreeSet`] (NOT [`HashSet`]) so iteration
+    /// order is deterministic across runs — the T29 flaky-test lesson.
+    ///
+    /// # Delegation per-method
+    ///
+    /// Only methods whose FIRST param is named `self` (instance methods)
+    /// are delegated. Methods without a `self` receiver (associated
+    /// functions like `Person::new()`) are skipped because the forwarding
+    /// body `self.field.method()` would not type-check for a no-receiver
+    /// method (Rust requires `Type::method()` syntax there). Supporting
+    /// them is deferred.
+    ///
+    /// The delegation method's signature mirrors the original (same name,
+    /// params, return type), with the first `self` param rewritten to a
+    /// bare [`syn::FnArg::Receiver`] via the T75 [`rewrite_self_receiver`]
+    /// helper. The body is a single method-call expression:
+    /// `self.<field>.<method>(<forwarded_args>)` where `forwarded_args`
+    /// are the identifiers of all params AFTER `self`.
+    ///
+    /// # Deferrals (v0.5)
+    ///
+    /// - **Multi-level chains** (`A embeds B embeds C`): only one level of
+    ///   delegation is generated. If `B` itself embeds `C`, the user must
+    ///   write `a.b.c.method()` until a transitive-closure analysis lands.
+    /// - **Generic structs** (`struct Box<T> { inner: T }`): the field
+    ///   type is matched by exact NAME only; generic instantiation is
+    ///   not analysed.
+    /// - **Conflict resolution**: if a struct embeds two types that both
+    ///   define a method with the same name, BOTH delegation methods are
+    ///   emitted and Rust will reject the duplicate (a clear compile
+    ///   error rather than silent shadowing). Smarter resolution
+    ///   (first-field-wins, explicit override) is deferred.
+    /// - **Inherent impls**: methods defined outside `extend` blocks
+    ///   (e.g. a future `impl Person { ... }` Buff syntax) are not
+    ///   collected — v0.5 methods come only from extend blocks.
+    fn emit_embedding_delegation(
+        &mut self,
+        decls: &[Decl],
+        items: &mut Vec<Item>,
+    ) -> Result<(), CodegenError> {
+        // Build the struct-name set and the methods-by-type map in one pass.
+        let mut struct_names: BTreeSet<String> = BTreeSet::new();
+        let mut methods_by_type: BTreeMap<String, Vec<&FuncDecl>> = BTreeMap::new();
+        for decl in decls {
+            match decl {
+                Decl::StructDecl(s) => {
+                    struct_names.insert(s.name.name.clone());
+                }
+                Decl::ExtendBlock(e) => {
+                    if let TypeRef::Named { name, .. } = &e.target {
+                        methods_by_type
+                            .entry(name.name.clone())
+                            .or_default()
+                            .extend(e.methods.iter());
+                    }
+                    // Generic / non-named extend targets don't contribute
+                    // embeddable methods (their target is a primitive or
+                    // generic container, not a user struct).
+                }
+                _ => {}
+            }
+        }
+
+        // Iterate decls in SOURCE ORDER (deterministic — decls is a fixed
+        // slice) so the delegation impls appear in a predictable position
+        // relative to the structs they extend.
+        for decl in decls {
+            let s = match decl {
+                Decl::StructDecl(s) => s,
+                _ => continue,
+            };
+            // For each field whose type is a declared struct WITH methods,
+            // build one delegation impl collecting every delegatable method.
+            for (field_name, field_type) in &s.fields {
+                let embedded_type_name = match field_type {
+                    TypeRef::Named { name, .. } => &name.name,
+                    // Generic/option/union field types are not simple struct
+                    // embeddings — skip (deferred).
+                    _ => continue,
+                };
+                // Must be a user-declared struct (not a primitive named type
+                // like Float/String which also lowers via TypeRef::Named).
+                if !struct_names.contains(embedded_type_name) {
+                    continue;
+                }
+                let Some(methods) = methods_by_type.get(embedded_type_name) else {
+                    // Embedded struct has no extend-block methods — nothing
+                    // to delegate.
+                    continue;
+                };
+                // Filter to instance methods (first param named `self`).
+                let delegatable: Vec<&FuncDecl> = methods
+                    .iter()
+                    .copied()
+                    .filter(|m| {
+                        m.params
+                            .first()
+                            .map(|p| p.name.name == "self")
+                            .unwrap_or(false)
+                    })
+                    .collect();
+                if delegatable.is_empty() {
+                    continue;
+                }
+                let impl_item = self.build_delegation_impl(
+                    &s.name.name,
+                    &field_name.name,
+                    embedded_type_name,
+                    &delegatable,
+                )?;
+                items.push(Item::Impl(impl_item));
+            }
+        }
+        Ok(())
+    }
+
+    /// T92: build one inherent `impl StructName { ... }` block that
+    /// promotes each method of the embedded type `embedded_type_name` to
+    /// the embedding struct, forwarding through `self.<field_name>`.
+    ///
+    /// See [`Self::emit_embedding_delegation`] for the analysis + the
+    /// deferrals. This helper builds the per-method signatures + bodies.
+    fn build_delegation_impl(
+        &mut self,
+        struct_name: &str,
+        field_name: &str,
+        _embedded_type_name: &str,
+        methods: &[&FuncDecl],
+    ) -> Result<syn::ItemImpl, CodegenError> {
+        let mut impl_items: Vec<syn::ImplItem> = Vec::with_capacity(methods.len());
+        for method in methods {
+            let item_fn = self.lower_func(method)?;
+            // The signature is identical to the embedded type's method
+            // signature (same params + return type), but with the first
+            // `self` param rewritten to a bare Receiver — same trick T75
+            // uses for extension traits. The receiver is now `Self` of
+            // the EMBEDDING struct, which is exactly what we want: the
+            // forwarded call `self.<field>.<method>(...)` consumes the
+            // embedded value through the field.
+            let sig = rewrite_self_receiver(item_fn.sig);
+            // Collect forwarded arg expressions: the identifiers of all
+            // params AFTER the first (which is the `self` receiver).
+            let mut forwarded_args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+            for arg in sig.inputs.iter().skip(1) {
+                if let Some(ident_expr) = ident_expr_from_fn_arg(arg) {
+                    forwarded_args.push(ident_expr);
+                }
+            }
+            // Body: `self.<field>.<method>(<forwarded_args>)`.
+            let body_expr = field_method_call_expr(field_name, &method.name.name, forwarded_args);
+            let block = syn::Block {
+                brace_token: Default::default(),
+                stmts: vec![SynStmt::Expr(body_expr, None)],
+            };
+            impl_items.push(syn::ImplItem::Fn(syn::ImplItemFn {
+                attrs: Vec::new(),
+                vis: Visibility::Inherited,
+                defaultness: None,
+                sig,
+                block,
+            }));
+        }
+        Ok(syn::ItemImpl {
+            attrs: Vec::new(),
+            defaultness: None,
+            unsafety: None,
+            generics: syn::Generics::default(),
+            impl_token: Default::default(),
+            // Inherent impl (NOT a trait impl) — `trait_: None` means
+            // `impl StructName { ... }`, the shape Rust uses for inherent
+            // methods on a type.
+            trait_: None,
+            self_ty: Box::new(rust_path_type(struct_name)),
+            brace_token: Default::default(),
+            items: impl_items,
         })
     }
 }

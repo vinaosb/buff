@@ -990,7 +990,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Infer `{ x => x * 2 }` in context of `Vector<Float>.map()` → assert x: Float. Evidence: task-77-expected-type.txt
   **Commit**: `feat(types): add expected-type driven inference for lambda parameters`
 
-- [ ] **T92**: Struct embedding + delegation [deep]
+- [x] **T92**: Struct embedding + delegation [deep]
   **What to do** (TDD): RED: `struct Employee { person: Person, salary: Float }` — `employee.name()` auto-delegates to `employee.person.name()`. GREEN: analyze struct fields, auto-generate delegation methods for embedded types.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust embedding` passes. Embedded struct methods promoted.
   **QA**: Codegen Employee with embedded Person → assert `employee.name()` delegates. Evidence: task-92-embedding.txt
