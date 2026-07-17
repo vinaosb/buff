@@ -5,8 +5,9 @@
 //! - `buff build <FILE>` — compile a `.buff` file to a native executable.
 //! - `buff run <FILE> [ARGS]...` — compile and immediately execute, cleaning
 //!   up temporary artifacts afterwards.
-//! - `buff new <NAME>` — scaffold a new Buff project in a fresh `<NAME>/`
-//!   directory.
+//! - `buff new <NAME> [--lib|--server|--gpu|--workspace]` — scaffold a new
+//!   Buff project in a fresh `<NAME>/` directory. Default (no flag) produces
+//!   a runnable binary; the flags select alternative starter layouts (T112).
 //! - `buff init` — scaffold a Buff project in the current directory.
 //!
 //! Future subcommands (`check`, `fmt`, `test`, `lsp`) will be added in later
@@ -58,10 +59,32 @@ pub enum Command {
     },
 
     /// Create a new Buff project in a fresh `<NAME>/` directory.
+    ///
+    /// By default scaffolds a runnable binary (`src/main.buff`). Pass exactly
+    /// one of the template flags to select an alternative starter layout
+    /// (T112): `--lib`, `--server`, `--gpu`, `--workspace`.
     New {
         /// Name of the project (must be a valid Buff identifier, not a keyword).
         #[arg(value_name = "NAME")]
         name: String,
+
+        /// Scaffold a library module (`src/lib.buff`, no `main`).
+        #[arg(long)]
+        lib: bool,
+
+        /// Scaffold an async-server starter template (v1.0 runtime to run).
+        #[arg(long)]
+        server: bool,
+
+        /// Scaffold a GPU-dispatch starter with `@prefer(gpu)` hints
+        /// (v1.0 runtime to run).
+        #[arg(long)]
+        gpu: bool,
+
+        /// Scaffold a multi-crate workspace layout (`crates/core`,
+        /// `crates/utils`).
+        #[arg(long)]
+        workspace: bool,
     },
 
     /// Initialize a Buff project in the current directory.

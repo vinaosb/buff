@@ -23,7 +23,7 @@ use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
 use buff_lang_cli::commands;
-use buff_lang_cli::scaffold;
+use buff_lang_cli::scaffold::{self, TemplateKind};
 
 /// Process-wide mutex serializing tests that call [`std::env::set_current_dir`].
 ///
@@ -150,7 +150,7 @@ fn test_new_creates_project_with_all_files() {
     let original = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&workdir).expect("chdir to workdir");
 
-    let result = commands::new::run(project_name);
+    let result = commands::new::run(project_name, TemplateKind::Binary);
 
     // Restore cwd unconditionally so a failure here can't poison other tests.
     std::env::set_current_dir(&original).expect("restore cwd");
@@ -199,7 +199,7 @@ fn test_new_refuses_existing_directory() {
 
     let original = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&workdir).expect("chdir to workdir");
-    let result = commands::new::run(project_name);
+    let result = commands::new::run(project_name, TemplateKind::Binary);
     std::env::set_current_dir(&original).expect("restore cwd");
     drop(_guard);
 
@@ -220,7 +220,7 @@ fn test_new_rejects_invalid_name() {
 
     let original = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&workdir).expect("chdir to workdir");
-    let result = commands::new::run("1bad");
+    let result = commands::new::run("1bad", TemplateKind::Binary);
     std::env::set_current_dir(&original).expect("restore cwd");
     drop(_guard);
 
@@ -321,7 +321,7 @@ fn test_new_generated_project_runs() {
 
     let original = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&workdir).expect("chdir to workdir");
-    commands::new::run(project_name).expect("scaffold");
+    commands::new::run(project_name, TemplateKind::Binary).expect("scaffold");
     let main_path = workdir.join(project_name).join("src/main.buff");
     std::env::set_current_dir(&original).expect("restore cwd");
     drop(_guard);

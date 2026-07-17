@@ -1058,7 +1058,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Parse sample `buff.toml` → assert name, version, deps extracted. Evidence: task-111-buff-toml.txt
   **Commit**: `feat(cli): implement buff.toml config parsing with workspace support`
 
-- [ ] **T112**: `buff new` templates [unspecified-high]
+- [x] **T112**: `buff new` templates [unspecified-high]
   **What to do** (TDD): RED: `buff new app --lib` creates library structure. `--server` creates async template. GREEN: implement template system with starter code for each type.
   **Acceptance**: `cargo test -p buff-lang-cli templates` passes. All 5 templates create valid projects.
   **QA**: `buff new mylib --lib` → assert `src/lib.buff` exists. Evidence: task-112-templates.txt
