@@ -2658,3 +2658,113 @@ DECLARED struct in the same program (per spec: "another DECLARED struct").
   NO signature changes to existing methods; NO AST changes.
 - `crates/buff-lang-codegen-rust/tests/embedding.rs` � NEW test file
   (6 tests, ~390 lines).
+
+## T93 — Traits with default methods + inheritance
+
+### Status: COMPLETE (cargo check + cargo test --workspace + clippy -D warnings + fmt --check ALL GREEN)
+
+### What shipped
+Buff traits with REQUIRED methods (bodyless, ;-terminated), DEFAULT methods (signature + body), and SUPERTRAIT inheritance (	rait Pet : Animal). Full parse + codegen pipeline. 14 parser tests + 7 codegen tests, all green.
+
+### TraitDecl / MethodSig design (additive AST migration)
+
+The pre-T93 `TraitDecl` had a single `methods: Vec<FuncDecl>` field — every method carried a body, with no way to express bodyless required methods or trait inheritance. T93 replaced `methods` with THREE fields:
+
+`
+pub struct TraitDecl {
+    pub name: Ident,
+    pub supertraits: Vec<TypeRef>,       // : A, B after the name
+    pub required: Vec<MethodSig>,        // n sig; — bodyless
+    pub defaults: Vec<FuncDecl>,         // n sig { body } — has body
+    pub span: Span,
+}
+
+pub struct MethodSig {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_type: Option<TypeRef>,
+    pub span: Span,
+}
+`
+
+This was a **migration** (the `methods` field was removed), but zero-impact: NO construction site existed pre-T93 (parser never produced a `Decl::TraitDecl`, codegen returned `unsupported`, no test built one). The migration is safe because:
+- `decl_item_name` in `modules.rs` only accessed `.name` (still present).
+- `ast/ir.rs lower_decl` uses `if let Decl::FuncDecl(f)` (not exhaustive — no change).
+- codegen `Decl::TraitDecl { .. }` arm used `{ .. }` (ignores all fields — still compiles).
+
+### Required-vs-default distinction
+
+The parser classifies each `fn` member by its TRAILING token:
+- `;` (semicolon) after the signature → REQUIRED method → `MethodSig` in `required`.
+- `{ body }` (brace block) or `=>` (expression shorthand) or layout `:` → DEFAULT method → `FuncDecl` in `defaults`.
+
+This mirrors Rust's trait syntax exactly: `fn sig;` is required, `fn sig { body }` is a default method. The semicolon is MANDATORY for required methods — a required method without `;` is a parse error (the parser tries to parse a body and fails).
+
+**Key gotcha**: The signature is parsed INLINE (not via `parse_func_decl`) because `parse_func_decl` ALWAYS expects a body (or `=>`) — it has no `;`-terminated path. Duplicating ~30 lines of signature parsing was cleaner than threading a "may be bodyless" flag through `parse_func_decl`.
+
+### Supertrait handling
+
+After the trait name, optional `: SuperA, SuperB, ...` clause. Each supertrait is parsed via `parse_type_ref` (today always `TypeRef::Named`). Multiple supertraits are comma-separated. The colon is consumed only when the next token after the name is `:`.
+
+At codegen: each `TypeRef::Named` supertrait → `syn::TypeParamBound::Trait` with a single-segment path. Populated into `syn::ItemTrait.supertraits` as a `Punctuated<TypeParamBound, Token![+]>`. Rust renders this as `trait Pet: Animal` (single) or `trait A: B + C` (multiple, `+`-separated). The `colon_token` is `Some` only when supertraits is non-empty.
+
+### Codegen syn::ItemTrait approach
+
+`lower_trait_decl` builds a `syn::ItemTrait`:
+- REQUIRED methods → `syn::TraitItem::Fn(TraitItemFn { sig, default: None, semi_token: Some })` — bodyless.
+- DEFAULT methods → `syn::TraitItem::Fn(TraitItemFn { sig, default: Some(block), semi_token: None })` — Rust default-method syntax.
+- `self` params rewritten to bare `syn::FnArg::Receiver` via T75 `rewrite_self_receiver` helper (same as extend blocks).
+- Visibility: `pub` (traits are public items).
+
+A shared `build_method_signature` helper builds a `syn::Signature` from name + params + return_type (used by required-method lowering; default methods go through `lower_func` for move-analysis, then the sig is extracted from the resulting `ItemFn`).
+
+### Exhaustive-match ripple sites (cargo check driven)
+
+The new TraitDecl fields did NOT ripple into any exhaustive `match Decl` site because:
+1. `modules.rs::decl_item_name` only matched on the `Decl` variant name + accessed `.name` — no field access to `methods`.
+2. `ast/ir.rs` uses `if let Decl::FuncDecl` — not exhaustive.
+3. `codegen` used `Decl::TraitDecl { .. }` (`{ .. }` ignores all fields).
+4. `async_analysis.rs` only matches `Decl::FuncDecl` + `Decl::ExportDecl` — not exhaustive on all variants.
+
+The only sites that needed updating were:
+- `parser.rs`: added `KwTrait` dispatch arm.
+- `stream.rs`: added `KwTrait` to `sync_to_recovery_point`.
+- `parser/lib.rs`: exported `parse_trait_decl`.
+- `codegen/rust_codegen.rs`: replaced `Decl::TraitDecl { .. } => Err(unsupported)` with `Decl::TraitDecl(t) => Ok(Item::Trait(self.lower_trait_decl(t)?))`.
+
+### Test fn names (contain "traits" per the spec)
+
+Parser (`crates/buff-lang-parser/tests/traits.rs`, 14 tests):
+- `traits_required_method`, `traits_default_method`, `traits_inheritance_supertrait`, `traits_multiple_supertraits`, `traits_mixed_required_and_default`, `traits_empty_body_errors`, `traits_missing_name_errors`, `traits_missing_close_brace_errors`, `traits_default_method_with_params_and_return`, `traits_required_method_with_params`, `traits_parse_mixed_with_other_decls`, `traits_parse_trait_after_func`, `traits_parse_trait_after_extend`, `traits_display_round_trip`.
+
+Codegen (`crates/buff-lang-codegen-rust/tests/traits.rs`, 7 tests):
+- `traits_codegen_required_bodyless`, `traits_codegen_default_body`, `traits_codegen_mixed_required_and_default`, `traits_codegen_supertrait`, `traits_codegen_multiple_supertraits`, `traits_codegen_required_with_self`, `traits_codegen_empty_trait_valid`.
+
+### Existing decls still parse unchanged
+
+Verified: `func`, `enum`, `extend`, `import`, `export` all parse correctly when a `trait` precedes or follows them (`traits_parse_mixed_with_other_decls`, `traits_parse_trait_after_func`, `traits_parse_trait_after_extend`).
+
+### Deferrals (NOT implemented in T93)
+
+- **`&self` auto-insertion**: The spec's ideal codegen target shows `fn name(&self) -> String` for a Buff `fn name() -> String`, but T93 emits methods as-is (if they have a `self` param, it's rewritten to bare `self`; if they don't, no `&self` is inserted). Auto-inserting `&self` + rewriting bare calls to `self.` calls is a deeper semantic task.
+- **Trait objects (`dyn Trait`)**: not implemented.
+- **Where clauses on traits**: not implemented.
+- **Associated types**: not implemented.
+- **Generics on traits (`trait Foo<T>`)**: not implemented (the `generics` field on `syn::ItemTrait` is `Default::default()` — empty).
+- **Impl blocks for traits (`impl Greetable for Person`)**: not implemented — T93 only emits the trait DECLARATION, not implementations. A future task would add `impl Trait for Type { ... }` parsing + codegen.
+- **Generic supertraits (`trait Foo : Bar<Int>`)**: codegen returns `unsupported` error for non-`TypeRef::Named` supertraits.
+
+### Files changed
+
+- `crates/buff-lang-ast/src/decl.rs` — redesigned `TraitDecl` (removed `methods`, added `supertraits`/`required`/`defaults`), added `MethodSig` struct, updated Display impls.
+- `crates/buff-lang-parser/src/stmt.rs` — added `parse_trait_decl` function + imported `MethodSig`/`TraitDecl`.
+- `crates/buff-lang-parser/src/parser.rs` — added `KwTrait` dispatch arm + updated dispatch table comment + recovering-parse sync comment.
+- `crates/buff-lang-parser/src/lib.rs` — exported `parse_trait_decl`.
+- `crates/buff-lang-parser/src/stream.rs` — added `KwTrait` to `sync_to_recovery_point`.
+- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — replaced `Decl::TraitDecl { .. } => Err(unsupported)` with real `lower_trait_decl` + added `build_method_signature` helper.
+- `crates/buff-lang-parser/tests/traits.rs` — NEW: 14 parser tests.
+- `crates/buff-lang-codegen-rust/tests/traits.rs` — NEW: 7 codegen tests.
+
+### Key lesson
+
+The `{ .. }` pattern in match arms works for TUPLE variants in Rust — `Decl::TraitDecl { .. }` compiles fine even though `TraitDecl(TraitDecl)` is a tuple variant. This is because `{ .. }` with only `..` (no field names) is valid for any variant shape. This made the TraitDecl struct migration safe — existing `{ .. }` arms continued to compile regardless of the inner struct's fields.

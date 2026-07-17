@@ -537,24 +537,133 @@ impl fmt::Display for ExternCrateDecl {
     }
 }
 
-/// A trait declaration: `trait Name { fn ...; ... }`.
+/// A trait declaration with default methods and inheritance (T93).
+///
+/// Shape:
+/// - `trait Greetable { fn name() -> String; fn greet() { print(name()) } }`
+///   — `name` is a REQUIRED method (bodyless, signature only); `greet` is a
+///   DEFAULT method (signature + body, may call required methods).
+/// - `trait Pet : Animal { fn pet() { ... } }` — inheritance via `: Supertrait`
+///   (comma-separated for multiple supertraits: `trait A : B, C { ... }`).
+///
+/// # Required vs default distinction
+///
+/// Inside the trait body, each `fn` member is classified by its trailing
+/// punctuation:
+/// - `fn name(params) -> Ret;` (semicolon) → REQUIRED method, stored as a
+///   [`MethodSig`] in [`TraitDecl::required`]. Implementors MUST provide a
+///   body.
+/// - `fn name(params) -> Ret { body }` (brace block) → DEFAULT method, stored
+///   as a full [`FuncDecl`] in [`TraitDecl::defaults`]. Implementors inherit
+///   the body unless they override it.
+///
+/// # Codegen target
+///
+/// Lowers to a Rust [`syn::ItemTrait`]: required methods become bodyless
+/// trait method signatures; default methods become trait methods WITH a
+/// default body (Rust default-method syntax); supertraits populate the
+/// trait's `supertraits` Punctuated list.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T93 — redesign of existing TraitDecl
+///
+/// The pre-T93 `TraitDecl` had a single `methods: Vec<FuncDecl>` field (every
+/// method carried a body, with no way to express bodyless required methods
+/// or trait inheritance). T93 replaces `methods` with THREE fields:
+/// `supertraits: Vec<TypeRef>`, `required: Vec<MethodSig>`, and
+/// `defaults: Vec<FuncDecl>`. This is a **migration** (the `methods` field
+/// was removed and three new fields inserted), but since NO construction
+/// site existed pre-T93 (the parser never produced a `Decl::TraitDecl`, the
+/// codegen returned `unsupported`, and no test built one), the migration is
+/// zero-impact — every existing `match` arm using `{ .. }` or accessing
+/// `.name` continues to compile unchanged.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitDecl {
+    /// The trait name (`trait Greetable` → `"Greetable"`).
     pub name: Ident,
-    pub methods: Vec<FuncDecl>,
+    /// Supertraits declared via `: A, B` after the trait name
+    /// (`trait Pet : Animal` → `[Animal]`). Empty when the trait has no
+    /// supertraits. Stored as [`TypeRef::Named`] (today always a bare name;
+    /// generic supertraits like `trait Foo : Bar<Int>` are deferred).
+    pub supertraits: Vec<TypeRef>,
+    /// REQUIRED (bodyless) method signatures — `fn name(params) -> Ret;`.
+    /// Implementors of the trait MUST provide a body for each. Stored as
+    /// [`MethodSig`] (signature only, no body).
+    pub required: Vec<MethodSig>,
+    /// DEFAULT methods — `fn name(params) -> Ret { body }`. Implementors
+    /// inherit the body unless they override it. Stored as full
+    /// [`FuncDecl`]s so the body, params, return type, and span are all
+    /// preserved (reuses the same shape as regular funcs + extend-block
+    /// methods).
+    pub defaults: Vec<FuncDecl>,
     pub span: Span,
 }
 
 impl fmt::Display for TraitDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "TraitDecl({} {{ ", self.name)?;
-        for (i, m) in self.methods.iter().enumerate() {
+        write!(f, "TraitDecl({}", self.name)?;
+        if !self.supertraits.is_empty() {
+            f.write_str(": ")?;
+            for (i, st) in self.supertraits.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{st}")?;
+            }
+        }
+        f.write_str(" { ")?;
+        let mut first = true;
+        for req in &self.required {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            write!(f, "{req}")?;
+        }
+        for def in &self.defaults {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            write!(f, "{def}")?;
+        }
+        f.write_str(" })")
+    }
+}
+
+/// A REQUIRED (bodyless) trait-method signature (T93).
+///
+/// Represents the `fn name(params) -> Ret;` form inside a trait body — a
+/// method that implementors MUST provide a body for. Unlike a full
+/// [`FuncDecl`], a [`MethodSig`] carries NO body (the semicolon-terminated
+/// form is bodyless by definition).
+///
+/// Stored in [`TraitDecl::required`]; lowered to a bodyless
+/// `syn::TraitItemFn` at codegen time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodSig {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_type: Option<TypeRef>,
+    pub span: Span,
+}
+
+impl fmt::Display for MethodSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "fn {}", self.name)?;
+        f.write_str("(")?;
+        for (i, p) in self.params.iter().enumerate() {
             if i > 0 {
                 f.write_str(", ")?;
             }
-            write!(f, "{m}")?;
+            write!(f, "{p}")?;
         }
-        f.write_str(" })")
+        f.write_str(")")?;
+        if let Some(rt) = &self.return_type {
+            write!(f, " -> {rt}")?;
+        }
+        f.write_str(";")
     }
 }
 

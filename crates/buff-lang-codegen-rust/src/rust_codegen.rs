@@ -368,7 +368,12 @@ impl RustCodegen {
             Decl::EnumDecl(e) => Ok(Item::Enum(self.lower_enum_decl(e)?)),
             Decl::ImportDecl { .. } => Err(self.unsupported("import codegen")),
             Decl::ModuleDecl { .. } => Err(self.unsupported("module codegen")),
-            Decl::TraitDecl { .. } => Err(self.unsupported("trait codegen")),
+            // T93: trait declarations lower to a Rust `syn::ItemTrait`.
+            // Required methods (MethodSig) become bodyless trait method
+            // signatures; default methods (FuncDecl with body) become
+            // trait methods WITH a default body; supertraits populate the
+            // trait's `supertraits` Punctuated list.
+            Decl::TraitDecl(t) => Ok(Item::Trait(self.lower_trait_decl(t)?)),
             // T29: export wraps an inner decl. In single-file codegen we
             // simply lower the inner decl and stamp `pub` on its visibility
             // (multi-file codegen will route through `mod` blocks in a later
@@ -963,6 +968,188 @@ impl RustCodegen {
         });
 
         Ok(vec![trait_item, impl_item])
+    }
+
+    /// T93: lower a Buff [`buff_lang_ast::TraitDecl`] to a Rust
+    /// [`syn::ItemTrait`] with default methods and supertrait inheritance.
+    ///
+    /// Emits (conceptually):
+    ///
+    /// ```ignore
+    /// // Buff:
+    /// //   trait Greetable {
+    /// //       fn name() -> String;
+    /// //       fn greet() { print(name()) }
+    /// //   }
+    /// //   trait Pet : Animal { fn pet() { ... } }
+    /// // Rust:
+    /// pub trait Greetable {
+    ///     fn name() -> String;
+    ///     fn greet() { /* default body */ }
+    /// }
+    /// pub trait Pet: Animal {
+    ///     fn pet() { /* default body */ }
+    /// }
+    /// ```
+    ///
+    /// # Required vs default methods
+    ///
+    /// - REQUIRED methods ([`buff_lang_ast::MethodSig`], bodyless) lower to
+    ///   `syn::TraitItemFn` with `default: None` — a bodyless trait method
+    ///   signature that implementors MUST provide a body for.
+    /// - DEFAULT methods ([`buff_lang_ast::FuncDecl`] with body) lower to
+    ///   `syn::TraitItemFn` with `default: Some(block)` — a trait method
+    ///   WITH a default body that implementors inherit unless they override.
+    ///
+    /// The member order is PRESERVED (required methods first, then
+    /// defaults), matching the source declaration order within each
+    /// category. (Buff syntax interleaves them; the codegen groups them
+    /// because the AST stores them in separate Vecs. This is acceptable
+    /// for Rust — trait method order is not semantically significant.)
+    ///
+    /// # Supertraits
+    ///
+    /// Each supertrait [`TypeRef`] (today always [`TypeRef::Named`]) lowers
+    /// to a `syn::TypeParamBound::Trait` with a single-segment path. The
+    /// supertraits populate the trait's `supertraits` Punctuated list,
+    /// producing Rust `trait Pet: Animal { ... }` syntax. Multiple
+    /// supertraits are `+`-separated in Rust (e.g. `trait A: B + C`).
+    ///
+    /// # `&self` receiver
+    ///
+    /// Trait methods that declare a `self` parameter (the first param named
+    /// `self`) are rewritten to a bare `syn::FnArg::Receiver` via the T75
+    /// [`rewrite_self_receiver`] helper, matching the extend-block
+    /// convention. Methods WITHOUT a `self` param (associated functions)
+    /// are emitted as-is — valid Rust trait syntax.
+    fn lower_trait_decl(
+        &mut self,
+        t: &buff_lang_ast::TraitDecl,
+    ) -> Result<syn::ItemTrait, CodegenError> {
+        let trait_ident = ast_ident_to_syn(&t.name);
+
+        // Build the supertraits Punctuated list. Each supertrait is a
+        // TypeParamBound::Trait with a single-segment path. We only
+        // support named supertraits today (generic supertraits like
+        // `trait Foo : Bar<Int>` are deferred).
+        let mut supertraits: Punctuated<syn::TypeParamBound, syn::Token![+]> = Punctuated::new();
+        for st in &t.supertraits {
+            let st_name = match st {
+                TypeRef::Named { name, .. } => &name.name,
+                _ => {
+                    return Err(self.unsupported(
+                        "trait supertrait that is not a simple named type (generic supertraits are deferred)",
+                    ));
+                }
+            };
+            let path = syn::Path::from(Ident::new(st_name, ProcSpan::call_site()));
+            supertraits.push(syn::TypeParamBound::Trait(syn::TraitBound {
+                paren_token: None,
+                modifier: syn::TraitBoundModifier::None,
+                lifetimes: None,
+                path,
+            }));
+        }
+
+        // Build the trait item list: required methods first, then defaults.
+        let mut trait_items: Vec<syn::TraitItem> =
+            Vec::with_capacity(t.required.len() + t.defaults.len());
+
+        // REQUIRED methods — bodyless signatures.
+        for req in &t.required {
+            let sig =
+                self.build_method_signature(req.name.clone(), &req.params, &req.return_type)?;
+            let sig = rewrite_self_receiver(sig);
+            trait_items.push(syn::TraitItem::Fn(syn::TraitItemFn {
+                attrs: Vec::new(),
+                sig,
+                // `default: None` → required method (no default body).
+                default: None,
+                semi_token: Some(Default::default()),
+            }));
+        }
+
+        // DEFAULT methods — signature + body. We reuse lower_func to get
+        // the full ItemFn (body + signature + move-analysis), then extract
+        // the signature and block for the TraitItemFn default body.
+        for def in &t.defaults {
+            let item_fn = self.lower_func(def)?;
+            let sig = rewrite_self_receiver(item_fn.sig);
+            trait_items.push(syn::TraitItem::Fn(syn::TraitItemFn {
+                attrs: item_fn.attrs,
+                sig,
+                // `default: Some(block)` → trait method WITH a default body.
+                default: Some(*item_fn.block),
+                // No semi_token when a default body is present.
+                semi_token: None,
+            }));
+        }
+
+        // Assemble the trait item.
+        Ok(syn::ItemTrait {
+            attrs: Vec::new(),
+            vis: Visibility::Public(Default::default()),
+            unsafety: None,
+            auto_token: None,
+            restriction: None,
+            trait_token: Default::default(),
+            ident: trait_ident,
+            generics: Default::default(),
+            // colon_token is Some only when supertraits is non-empty.
+            colon_token: (!t.supertraits.is_empty()).then(Default::default),
+            supertraits,
+            brace_token: Default::default(),
+            items: trait_items,
+        })
+    }
+
+    /// T93: build a [`syn::Signature`] from a method's name, params, and
+    /// optional return type. Shared by required-method lowering (no body)
+    /// and could be reused for default-method signatures (though those go
+    /// through [`Self::lower_func`] for move-analysis). The signature is
+    /// NOT async/unsafe/extern — trait methods in v0.5 are plain `fn`.
+    fn build_method_signature(
+        &mut self,
+        name: buff_lang_ast::Ident,
+        params: &[buff_lang_ast::Param],
+        return_type: &Option<TypeRef>,
+    ) -> Result<Signature, CodegenError> {
+        let mut inputs: Punctuated<syn::FnArg, syn::Token![,]> = Punctuated::new();
+        for p in params {
+            let ident = ast_ident_to_syn(&p.name);
+            let ty = self.ast_typeref_to_syn(&p.ty)?;
+            inputs.push(syn::FnArg::Typed(PatType {
+                attrs: Vec::new(),
+                pat: Box::new(Pat::Ident(PatIdent {
+                    attrs: Vec::new(),
+                    ident,
+                    by_ref: None,
+                    mutability: None,
+                    subpat: None,
+                })),
+                colon_token: Default::default(),
+                ty: Box::new(ty),
+            }));
+        }
+        let output = match return_type {
+            Some(ty) => {
+                ReturnType::Type(Default::default(), Box::new(self.ast_typeref_to_syn(ty)?))
+            }
+            None => ReturnType::Default,
+        };
+        Ok(Signature {
+            constness: None,
+            asyncness: None,
+            unsafety: None,
+            abi: None,
+            fn_token: Default::default(),
+            ident: ast_ident_to_syn(&name),
+            generics: Default::default(),
+            paren_token: Default::default(),
+            inputs,
+            variadic: None,
+            output,
+        })
     }
 
     fn lower_block(&mut self, block: &Block) -> Result<syn::Block, CodegenError> {

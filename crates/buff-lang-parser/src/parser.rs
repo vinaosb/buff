@@ -26,7 +26,7 @@ use buff_lang_lexer::TokenKind;
 
 use crate::stmt::{
     parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl,
-    parse_extern_crate_decl, parse_func_decl, parse_import_decl,
+    parse_extern_crate_decl, parse_func_decl, parse_import_decl, parse_trait_decl,
 };
 use crate::stream::TokenStream;
 
@@ -175,6 +175,25 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
             let e = parse_extend_decl(stream)?;
             Ok(Some(Decl::ExtendBlock(e)))
         }
+        // T93: `trait Name [: Super] { fn ...; fn ... { } }` — trait
+        // declaration with default methods and inheritance. The body
+        // contains a mix of REQUIRED methods (`fn ... ;`, bodyless) and
+        // DEFAULT methods (`fn ... { body }`, with body). Supertraits
+        // follow `:` after the name. Codegen lowers to a Rust trait.
+        Some(TokenKind::KwTrait) => {
+            if saw_attributes {
+                let span = stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span());
+                return Err(ParseError::new(Diagnostic::error(
+                    "attributes are not supported on `trait` declarations",
+                    span,
+                )));
+            }
+            let t = parse_trait_decl(stream)?;
+            Ok(Some(Decl::TraitDecl(t)))
+        }
         // T35: attributes were present but the next token is not a
         // recognised attribute-attachable declaration. This is a parse
         // error (e.g. `@test let x = 1` or `@test` at EOF).
@@ -226,6 +245,7 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
 /// | `extern func ...`     | [`Decl::FuncDecl`] with `is_extern = true` (T32 — FFI) |
 /// | `@name ... func`      | [`Decl::FuncDecl`] with `attributes` populated (T35 — `buff test`) |
 /// | `extend TYPE { fn ... }` | [`Decl::ExtendBlock`] (T75 — extension methods) |
+/// | `trait Name [: Super] { fn ...; fn ... { } }` | [`Decl::TraitDecl`] (T93 — traits with defaults + inheritance) |
 ///
 /// Any other token at top level is an error — statements such as
 /// `let`/`return`/`if` belong inside a function body, not at module scope.
@@ -254,7 +274,7 @@ pub fn parse(
 ///
 /// After each error the parser skips tokens forward to the next sync point
 /// (a token that could begin a fresh top-level declaration — `func`, `async`,
-/// `enum`, `import`, `export`, `extern`, or `@`) via
+/// `enum`, `import`, `export`, `extern`, `extend`, `trait`, or `@`) via
 /// [`TokenStream::sync_to_recovery_point`], then resumes parsing.
 ///
 /// # Returns

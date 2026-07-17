@@ -996,7 +996,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen Employee with embedded Person → assert `employee.name()` delegates. Evidence: task-92-embedding.txt
   **Commit**: `feat(codegen-rust): add struct embedding with auto-delegation`
 
-- [ ] **T93**: Traits with default methods [deep]
+- [x] **T93**: Traits with default methods [deep]
   **What to do** (TDD): RED: `trait Greetable { fn name() -> String; fn greet() { print(name()) } }` — default impl uses required method. GREEN: parse trait keyword, default method bodies, codegen to Rust trait.
   **Acceptance**: `cargo test -p buff-lang-parser traits` passes. Traits with defaults and inheritance (`trait Pet : Animal`).
   **QA**: Codegen trait with default method → assert Rust trait with default impl. Evidence: task-93-traits.txt

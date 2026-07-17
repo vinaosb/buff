@@ -38,7 +38,8 @@
 
 use buff_lang_ast::{
     Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, ExtendBlock,
-    FuncDecl, GuardCondition, Ident, ImportDecl, Param, Pattern, ReexportDecl, Stmt, TypeRef,
+    FuncDecl, GuardCondition, Ident, ImportDecl, MethodSig, Param, Pattern, ReexportDecl, Stmt,
+    TraitDecl, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -1851,6 +1852,279 @@ pub fn parse_extend_decl(stream: &mut TokenStream<'_>) -> Result<ExtendBlock, Pa
         target,
         methods,
         span: Span::new(start, target_end.max(rb.span.end), source_id),
+    })
+}
+
+/// Parse a top-level `trait Name [: Super, ...] { fn ...; fn ... { } }`
+/// declaration with default methods and inheritance (T93).
+///
+/// Shape:
+/// - `trait Greetable { fn name() -> String; fn greet() { print(name()) } }`
+///   — `name` is a REQUIRED method (`;`-terminated, bodyless →
+///   [`MethodSig`]); `greet` is a DEFAULT method (brace block → full
+///   [`FuncDecl`] with body).
+/// - `trait Pet : Animal { fn pet() { ... } }` — single supertrait.
+/// - `trait A : B, C { ... }` — multiple comma-separated supertraits.
+///
+/// # Required vs default classification
+///
+/// Each `fn` member inside the trait body is parsed via the shared
+/// [`parse_func_decl`] machinery UP TO the body decision point, then
+/// classified by the trailing token:
+/// - `;` (semicolon) → REQUIRED: the method has NO body; stored as a
+///   [`MethodSig`] in [`TraitDecl::required`].
+/// - `{ ... }` (brace block) or `=>` (expression shorthand) or layout
+///   `: NEWLINE INDENT ... DEDENT` → DEFAULT: the method HAS a body;
+///   stored as a full [`FuncDecl`] in [`TraitDecl::defaults`].
+///
+/// This mirrors Rust's trait syntax exactly: `fn sig;` is required,
+/// `fn sig { body }` is a default method.
+///
+/// # Supertrait parsing
+///
+/// After the trait name, an optional `: Supertrait` clause introduces one
+/// or more supertraits. Each supertrait is parsed via [`parse_type_ref`]
+/// (today always a [`TypeRef::Named`]); multiple supertraits are
+/// comma-separated. The colon is consumed only when the next token after
+/// the name is `:` — so `trait Foo { ... }` (no supertraits) and
+/// `trait Foo : Bar { ... }` (one supertrait) are both valid.
+///
+/// # Codegen target
+///
+/// Lowers to a Rust `syn::ItemTrait`: required methods become bodyless
+/// trait method signatures; default methods become trait methods WITH a
+/// default body (Rust default-method syntax); supertraits populate the
+/// trait's `supertraits` Punctuated list.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] on:
+/// - the token after `trait` is not an identifier,
+/// - the opening `{` is missing,
+/// - a method's `fn` declaration fails to parse,
+/// - the body is empty (zero methods),
+/// - the closing `}` is missing.
+pub fn parse_trait_decl(stream: &mut TokenStream<'_>) -> Result<TraitDecl, ParseError> {
+    let source_id = stream.source_id();
+    let trait_tok = stream.expect(TokenKind::KwTrait)?;
+    let start = trait_tok.span.start;
+
+    // Trait name (mandatory identifier).
+    let name_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected trait name after `trait`",
+            stream.eof_span(),
+        ))
+    })?;
+    let name = extract_ident(name_tok)?;
+    let name_end = name.span.end;
+
+    // Optional supertraits: `: SuperA, SuperB, ...`.
+    let mut supertraits: Vec<TypeRef> = Vec::new();
+    if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+        stream.advance(); // consume `:`
+        loop {
+            let st = parse_type_ref(stream)?;
+            supertraits.push(st);
+            match stream.peek_kind() {
+                Some(TokenKind::Comma) => {
+                    stream.advance();
+                    // Allow trailing comma: `: A, B,`.
+                    if matches!(stream.peek_kind(), Some(TokenKind::LBrace)) {
+                        break;
+                    }
+                }
+                Some(TokenKind::LBrace) => break,
+                Some(other) => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected `,` or `{{` in supertrait list, found `{other}`"),
+                        stream
+                            .peek()
+                            .map(|t| t.span)
+                            .unwrap_or_else(|| stream.eof_span()),
+                    )));
+                }
+                None => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        "unterminated supertrait list (missing `}`)",
+                        stream.eof_span(),
+                    )));
+                }
+            }
+        }
+    }
+
+    // Opening `{` of the member list.
+    stream.expect(TokenKind::LBrace)?;
+
+    let mut required: Vec<MethodSig> = Vec::new();
+    let mut defaults: Vec<FuncDecl> = Vec::new();
+
+    // Empty body `trait Foo { }` is a parse error — a trait with zero
+    // members is meaningless and almost certainly a user typo.
+    if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+        let rb = stream.expect(TokenKind::RBrace)?;
+        return Err(ParseError::new(Diagnostic::error(
+            "trait must declare at least one method",
+            Span::new(start, rb.span.end, source_id),
+        )));
+    }
+
+    // Parse members until the closing `}`. Each member starts with `func`
+    // (Buff's function keyword). Layout tokens (newlines) between members
+    // are transparently skipped by TokenStream::peek/advance.
+    while matches!(
+        stream.peek_kind(),
+        Some(TokenKind::KwFunc) | Some(TokenKind::KwAsync) | Some(TokenKind::KwExtern)
+    ) {
+        // Parse the fn up to the body decision. We reuse parse_func_decl
+        // but we need to intercept BEFORE it consumes the body — because
+        // a required method (`fn ... ;`) has NO body. The trick: parse
+        // the signature manually (name, params, return type), then peek
+        // at the next token to decide required (`;`) vs default (block).
+        //
+        // We parse the signature inline rather than calling parse_func_decl
+        // because parse_func_decl ALWAYS expects a body (or `=>`) — it has
+        // no `;`-terminated path. Duplicating the ~30 lines of signature
+        // parsing is cleaner than threading a "may be bodyless" flag
+        // through parse_func_decl.
+        let member_start_tok = stream
+            .advance()
+            .expect("peek guaranteed a fn-start keyword");
+        let member_start = member_start_tok.span.start;
+        // Consume optional `extern` / `async` modifiers (same order as
+        // parse_func_decl).
+        let mut is_extern = false;
+        let mut is_async = false;
+        match member_start_tok.kind {
+            TokenKind::KwExtern => {
+                is_extern = true;
+                // After `extern`, expect `func`.
+                if matches!(stream.peek_second_kind(), Some(TokenKind::KwFunc))
+                    && matches!(stream.peek_kind(), Some(TokenKind::Ident(_)))
+                {
+                    // `extern crate` — not valid inside a trait body.
+                    return Err(ParseError::new(Diagnostic::error(
+                        "`extern crate` is not allowed inside a trait body",
+                        member_start_tok.span,
+                    )));
+                }
+                // Consume optional async after extern (rare but valid).
+                if matches!(stream.peek_kind(), Some(TokenKind::KwAsync)) {
+                    is_async = true;
+                    stream.advance();
+                }
+                stream.expect(TokenKind::KwFunc)?;
+            }
+            TokenKind::KwAsync => {
+                is_async = true;
+                // After async, expect `func`.
+                stream.expect(TokenKind::KwFunc)?;
+            }
+            TokenKind::KwFunc => {}
+            _ => {
+                return Err(ParseError::new(Diagnostic::error(
+                    "expected `func`, `async func`, or `extern func` inside trait body",
+                    member_start_tok.span,
+                )));
+            }
+        }
+        // Now parse the signature: name(params) -> Ret.
+        let m_name_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected method name after `func` in trait body",
+                stream.eof_span(),
+            ))
+        })?;
+        let m_name = extract_ident(m_name_tok)?;
+        stream.expect(TokenKind::LParen)?;
+        let m_params = parse_params(stream)?;
+        let rparen = stream.expect(TokenKind::RParen)?;
+        let mut sig_end = rparen.span.end;
+        let m_return_type = if matches!(stream.peek_kind(), Some(TokenKind::Arrow)) {
+            stream.advance();
+            let ty = parse_type_ref(stream)?;
+            sig_end = type_end(&ty);
+            Some(ty)
+        } else {
+            None
+        };
+
+        // Body decision: `;` → required (bodyless); block/`=>`/layout → default.
+        if matches!(stream.peek_kind(), Some(TokenKind::Semicolon)) {
+            // REQUIRED method — bodyless signature.
+            let semi = stream.advance().expect("peek guaranteed Semicolon");
+            required.push(MethodSig {
+                name: m_name,
+                params: m_params,
+                return_type: m_return_type,
+                span: Span::new(member_start, semi.span.end, source_id),
+            });
+        } else {
+            // DEFAULT method — has a body. Build the FuncDecl by parsing
+            // the body via the same logic as parse_func_decl (brace block,
+            // `=>` expression shorthand, or layout block).
+            let body = if is_extern {
+                // extern fn inside a trait body with no `;` is unusual but
+                // we synthesize an empty placeholder to match parse_func_decl.
+                Block {
+                    stmts: Vec::new(),
+                    span: Span::new(sig_end, sig_end, source_id),
+                }
+            } else if matches!(stream.peek_kind(), Some(TokenKind::FatArrow)) {
+                let arrow_tok = stream.advance().ok_or_else(|| {
+                    ParseError::new(Diagnostic::error(
+                        "expected `=>` after method signature",
+                        stream.eof_span(),
+                    ))
+                })?;
+                let expr = parse_expression(stream)?;
+                let expr_end = expr.span().end;
+                let ret_stmt = Stmt::Return(
+                    Some(expr),
+                    Span::new(arrow_tok.span.start, expr_end, source_id),
+                );
+                Block {
+                    stmts: vec![ret_stmt],
+                    span: Span::new(arrow_tok.span.start, expr_end, source_id),
+                }
+            } else {
+                parse_block(stream)?
+            };
+            let body_end = body.span.end;
+            defaults.push(FuncDecl {
+                name: m_name,
+                params: m_params,
+                return_type: m_return_type,
+                body,
+                is_async,
+                is_unsafe: false,
+                is_extern,
+                attributes: Vec::new(),
+                span: Span::new(member_start, body_end.max(sig_end), source_id),
+            });
+        }
+        // Optional `;` separator between members (tolerated, not required).
+        if matches!(stream.peek_kind(), Some(TokenKind::Semicolon)) {
+            stream.advance();
+        }
+    }
+
+    // Defensive: if no methods were collected (stray tokens in body), error.
+    if required.is_empty() && defaults.is_empty() {
+        return Err(ParseError::new(Diagnostic::error(
+            "trait body must contain at least one `fn` declaration",
+            stream.span_here(),
+        )));
+    }
+
+    let rb = stream.expect(TokenKind::RBrace)?;
+    Ok(TraitDecl {
+        name,
+        supertraits,
+        required,
+        defaults,
+        span: Span::new(start, name_end.max(rb.span.end), source_id),
     })
 }
 
