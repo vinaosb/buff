@@ -1333,3 +1333,36 @@ The test `t30_question_op_chained_parses` used `f()??` (two adjacent `?` chars) 
 - `cargo test --workspace` → ALL green (0 failed)
 - `cargo clippy --workspace --all-targets -- -D warnings` → clean
 - `cargo fmt --check` → clean
+
+## T67 — Collection literals (verify-only)
+
+### Status: COMPLETE
+
+The functionality was already fully implemented by T23 (`Expr::ArrayLit` →
+`vec![...]`) and T25 (`Expr::MapLit` → `std::collections::HashMap::from([...])`).
+The only gap was that no test fn name contained `collection_literals`, so the
+T67 acceptance command `cargo test -p buff-lang-codegen-rust collection_literals`
+ran 0 tests.
+
+### What was added
+
+**New test file** `crates/buff-lang-codegen-rust/tests/collection_literals.rs` (5 tests):
+- `collection_literals_array_ints` — `[1, 2, 3]` → `vec![1, 2, 3]` + re-parse
+- `collection_literals_empty_array` — `[]` → `vec![]` + re-parse
+- `collection_literals_map_string_key` — `{"k": 42}` → `HashMap::from([("k", 42)])` + re-parse
+- `collection_literals_empty_map` — `{:}` → `HashMap::from([])` + re-parse
+- `collection_literals_map_multi_entry` — `{"name": "Alice", "age": 30}` → multi-tuple `HashMap::from([...])` + re-parse
+
+### Codegen output forms verified
+- `[1, 2, 3]` → `vec![1, 2, 3]`
+- `[]` → `vec![]`
+- `{"k": 42}` → `std::collections::HashMap::from([("k", 42)])`
+- `{:}` → `std::collections::HashMap::from([])`
+- Multi-entry maps produce comma-separated tuples inside `from([...])`
+
+### Verification
+- `cargo test -p buff-lang-codegen-rust collection_literals` → 5/5 pass
+- `cargo test --workspace` → ALL green (0 failed)
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean
+- `cargo fmt --check` → clean
+- No production code changed (only the new test file added)

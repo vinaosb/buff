@@ -910,7 +910,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 5 Enhancement — Modern Syntax Sugar (parallel with Wave 5)
 
-- [ ] **T67**: Collection literals [deep]
+- [x] **T67**: Collection literals [deep]
   **What to do** (TDD): RED: snapshot `[1,2,3]` → `vec![1,2,3]`, `{"k":v}` → `HashMap::from`. GREEN: parse collection literals, codegen to vec!/HashMap::from.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust collection_literals` passes. `[1,2,3]` → `vec![1,2,3]`.
   **QA**: Codegen `[1,2,3]` → assert `vec![1, 2, 3]` in output. Evidence: task-67-collection-literals.txt
