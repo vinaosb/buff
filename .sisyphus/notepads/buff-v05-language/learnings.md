@@ -1179,4 +1179,65 @@ explicitly allows this fallback.
 - `cargo clippy --workspace --all-targets -- -D warnings` → clean
 - `cargo fmt --check` → clean
 
+## T101 — Null coalescing `??` operator
+
+### Status: COMPLETE
+
+### What was added
+
+**Lexer** (`buff-lang-lexer/src/token.rs` + `lexer.rs`):
+- NEW `TokenKind::QuestionQuestion` token for `??`.
+- `scan_operator` 2-char section: `"??" => Some(TokenKind::QuestionQuestion)`.
+- `??` is scanned BEFORE the single `?` falls through to `single_char_kind` (which handles `b'?' => TokenKind::Question`). This is the same longest-match-first pattern used by `..=` / `..`.
+- Display: `??`.
+
+**AST** (`buff-lang-ast/src/op.rs`) — ADDITIVE change:
+- NEW `BinaryOp::NullCoalesce` variant added at the end of the enum.
+- Display: `??`.
+
+**Parser** (`buff-lang-parser/src/expr.rs`):
+- NEW `parse_null_coalesce()` function inserted between `parse_range` (level 1.5) and `parse_or` (level 2).
+- `parse_range` now calls `parse_null_coalesce` instead of `parse_or` as its LHS.
+- `parse_null_coalesce` checks for `TokenKind::QuestionQuestion` after the LHS, then parses the RHS at the `parse_or` level.
+- Precedence: `??` binds tighter than `||`/`&&`/comparison/additive/multiplicative but looser than range. This means `a ?? b == c` parses as `a ?? (b == c)` — the same as Rust's `??` precedence relative to comparison.
+
+**Codegen** (`buff-lang-codegen-rust/src/rust_codegen.rs`):
+- `make_binary_op` arm for `BinaryOp::NullCoalesce`: builds `#lhs.unwrap_or(#rhs)` via `quote!` + `syn::parse2`.
+- `opt ?? 0` → `opt.unwrap_or(0)`; `name ?? "unknown"` → `name.unwrap_or("unknown")`.
+
+**Types** (`buff-lang-types/src/infer.rs`):
+- `infer_binary_op` arm for `BinaryOp::NullCoalesce`: returns `Ok(rhs_ty)` (the default value's type).
+
+### AST representation decision: BinaryOp variant (NOT new Expr variant)
+
+Chose `BinaryOp::NullCoalesce` over a new `Expr::NullCoalesce` variant because:
+1. `??` is a true binary infix operator — it has a left and right operand, same shape as `+`, `||`, etc.
+2. Adding a `BinaryOp` variant is purely additive (no new match arms on `Expr` needed across the workspace).
+3. The existing `Expr::BinaryOp { op, lhs, rhs, span }` node already handles all binary ops uniformly.
+4. Codegen special-cases it in `make_binary_op` (not `lower_expr`), keeping the dispatch clean.
+
+### Precedence level chosen
+
+`??` sits between range (`..`/`..=`) and logical OR (`||`). This means:
+- `a ?? b == c` → `a ?? (b == c)` (null-coalesce binds looser than comparison)
+- `a + 1 ?? 0` → `(a + 1) ?? 0` (additive binds tighter)
+- `a ?? b ?? c` → `(a ?? b) ?? c` (left-associative, like `||`)
+
+### Side fix: T30 chained `?` test updated
+
+The test `t30_question_op_chained_parses` used `f()??` (two adjacent `?` chars) which now lexes as a single `QuestionQuestion` token. Updated to `f()? ?` (space between) so the two postfix `?` operators are lexed separately. This is the correct behavior — `??` is now the null-coalescing operator.
+
+### Tests added
+
+**Codegen** (`crates/buff-lang-codegen-rust/tests/null_coalescing.rs` — 3 tests):
+- `null_coalescing_default_int` — `opt ?? 0` → `opt.unwrap_or(0)` (re-parses as valid Rust)
+- `null_coalescing_string` — `name ?? "unknown"` → `name.unwrap_or("unknown")`
+- `null_coalescing_chained` — `a ?? b ?? c` → `a.unwrap_or(b.unwrap_or(c))`
+
+### Verification (all GREEN)
+- `cargo test -p buff-lang-codegen-rust null_coalescing` → 3/3 pass
+- `cargo test --workspace` → ALL green (0 failed)
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean
+- `cargo fmt --check` → clean
+
 

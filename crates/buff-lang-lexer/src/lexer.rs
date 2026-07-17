@@ -600,6 +600,7 @@ fn scan_operator(source: &str, pos: &mut usize, start: usize, end: usize) -> Opt
             "*=" => Some(TokenKind::StarEq),
             "/=" => Some(TokenKind::SlashEq),
             "%=" => Some(TokenKind::PercentEq),
+            "??" => Some(TokenKind::QuestionQuestion),
             _ => None,
         };
         if let Some(k) = kind {

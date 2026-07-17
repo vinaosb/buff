@@ -2749,6 +2749,14 @@ impl RustCodegen {
                     right: Box::new(rhs),
                 })
             }
+            // T101: `a ?? b` → `a.unwrap_or(b)` via quote! + syn::parse2.
+            BinaryOp::NullCoalesce => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #lhs.unwrap_or(#rhs)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("null coalesce codegen parse: {e}")))?
+            }
         };
         Ok(result)
     }

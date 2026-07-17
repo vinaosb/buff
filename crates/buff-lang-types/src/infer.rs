@@ -394,6 +394,11 @@ impl TypeInferencer {
                     )))
                 }
             }
+            // T101: null coalescing `??` — result type is the RHS type
+            // (the unwrap_or default). The LHS must be an Option<T> or
+            // Result<T,E>; the RHS must be assignable to T. For v0.5 we
+            // return the RHS type (the default value's type).
+            BinaryOp::NullCoalesce => Ok(rhs_ty),
         }
     }
 

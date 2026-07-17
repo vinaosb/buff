@@ -65,12 +65,12 @@ fn parse_assignment(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 // ---------------------------------------------------------------------------
 
 fn parse_range(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
-    let lhs = parse_or(stream)?;
+    let lhs = parse_null_coalesce(stream)?;
     // Check for `..` or `..=` after the LHS.
     match stream.peek_kind() {
         Some(TokenKind::DotDot) => {
             stream.advance();
-            let rhs = parse_or(stream)?;
+            let rhs = parse_null_coalesce(stream)?;
             let span = combine_span(&lhs, &rhs);
             Ok(Expr::Range {
                 start: Box::new(lhs),
@@ -81,7 +81,7 @@ fn parse_range(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         }
         Some(TokenKind::DotDotEq) => {
             stream.advance();
-            let rhs = parse_or(stream)?;
+            let rhs = parse_null_coalesce(stream)?;
             let span = combine_span(&lhs, &rhs);
             Ok(Expr::Range {
                 start: Box::new(lhs),
@@ -92,6 +92,26 @@ fn parse_range(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         }
         _ => Ok(lhs),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Level 1.75 — null coalescing `??` (between range and logical OR)
+// ---------------------------------------------------------------------------
+
+fn parse_null_coalesce(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let mut lhs = parse_or(stream)?;
+    while matches!(stream.peek_kind(), Some(TokenKind::QuestionQuestion)) {
+        stream.advance();
+        let rhs = parse_or(stream)?;
+        let span = combine_span(&lhs, &rhs);
+        lhs = Expr::BinaryOp {
+            op: BinaryOp::NullCoalesce,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            span,
+        };
+    }
+    Ok(lhs)
 }
 
 // ---------------------------------------------------------------------------

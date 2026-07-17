@@ -36,6 +36,8 @@ pub enum BinaryOp {
     MulAssign,
     DivAssign,
     ModAssign,
+    // T101: Null coalescing `??` — lowers to `.unwrap_or()`.
+    NullCoalesce,
 }
 
 /// A unary operator (e.g. `-x`, `!x`, `~x`).
@@ -81,6 +83,8 @@ impl fmt::Display for BinaryOp {
             BinaryOp::MulAssign => "*=",
             BinaryOp::DivAssign => "/=",
             BinaryOp::ModAssign => "%=",
+            // T101
+            BinaryOp::NullCoalesce => "??",
         };
         f.write_str(s)
     }

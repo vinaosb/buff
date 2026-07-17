@@ -724,9 +724,11 @@ fn t30_question_op_on_call_parses() {
 
 #[test]
 fn t30_question_op_chained_parses() {
-    // `f()??` parses as Try(Try(Call(f, []))). Chained `?` works because the
-    // postfix loop continues after consuming one `?`.
-    let e = parse("f()??");
+    // `f()? ?` parses as Try(Try(Call(f, []))). Chained `?` works because the
+    // postfix loop continues after consuming one `?`. Note: `??` is now the
+    // null-coalescing operator (T101), so a space is needed between two `?`
+    // postfix operators.
+    let e = parse("f()? ?");
     assert_eq!(shape(&e), "Try(Try(Call(Ident(f), [])))");
     assert!(matches!(&e, Expr::Try { expr, .. } if matches!(expr.as_ref(), Expr::Try { .. })));
 }

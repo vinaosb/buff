@@ -1002,7 +1002,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen trait with default method → assert Rust trait with default impl. Evidence: task-93-traits.txt
   **Commit**: `feat(parser): add traits with default methods and inheritance`
 
-- [ ] **T101**: Null coalescing `??` [quick]
+- [x] **T101**: Null coalescing `??` [quick]
   **What to do** (TDD): RED: `opt ?? "default"` → `.unwrap_or("default")`. GREEN: parse `??` operator, codegen to unwrap_or.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust null_coalescing` passes. `opt ?? 0` → `opt.unwrap_or(0)`.
   **QA**: Codegen `name ?? "unknown"` → assert `.unwrap_or()`. Evidence: task-101-coalescing.txt
