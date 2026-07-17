@@ -1293,4 +1293,43 @@ The test `t30_question_op_chained_parses` used `f()??` (two adjacent `?` chars) 
 - `cargo clippy --workspace --all-targets -- -D warnings` → clean
 - `cargo fmt --check` → clean
 
+## T102 — Expression functions `=>`
 
+### Status: COMPLETE
+
+### What was added
+
+**Parser** (`crates/buff-lang-parser/src/stmt.rs`):
+- In `parse_func_decl`, BEFORE the `parse_block(stream)?` fallback, added a check for `TokenKind::FatArrow` (`=>`).
+- When `=>` is found: consume it, parse a single expression via `parse_expression`, and synthesize a `Block` whose single statement is `Stmt::Return(Some(expr), ...)`.
+- The `=>` form works WITH and WITHOUT a return type annotation: `func f(x: Int) => x+1` (no return type) AND `func sq(x: Int) -> Int => x * x` (with return type) both parse.
+- Normal block-body functions (`func f(x) { ... }` and layout `func f(x): ...`) are unchanged — the `=>` check only fires when the next token is `FatArrow`.
+
+**No AST changes needed**: reuses existing `FuncDecl` + `Stmt::Return`. No new variants.
+
+**No codegen changes needed**: the synthesized `FuncDecl` has a normal `Block` with a `Stmt::Return(Some(expr), _)`, which the existing `lower_func` / `lower_stmt` already handles.
+
+### Key design decisions
+- **Hook point**: inserted in `parse_func_decl` between the return-type parsing and the `parse_block` call, in the `!is_extern` branch. This is the natural place — after the signature is fully parsed, before the body is consumed.
+- **Synthesized Block span**: starts at the `=>` token and ends at the expression's end. This is a reasonable span for error messages.
+- **No new `.expect`/`.unwrap`**: the `FatArrow` consumption uses `stream.advance().ok_or_else(|| ...)` returning a proper `ParseError`, consistent with the existing error-handling style.
+
+### Tests added
+
+**Parser** (`crates/buff-lang-parser/tests/expr_functions.rs` — 6 tests):
+- `expr_functions_untyped` — `func double(x: Int) => x * 2` (typed param, no return type)
+- `expr_functions_typed_param` — `func sq(x: Int) => x * x` (typed param, no return type)
+- `expr_functions_with_return_type` — `func sq(x: Int) -> Int => x * x` (with return type)
+- `expr_functions_via_parse_top_level` — `func f(x: Int) => x + 1` via top-level `parse()`
+- `expr_functions_multi_param` — `func add(a: Int, b: Int) => a + b` (multiple params)
+- `expr_functions_normal_block_still_works` — `func foo() { return 42 }` unchanged
+
+**Codegen** (`crates/buff-lang-codegen-rust/tests/codegen_tests.rs` — 1 test):
+- `test_codegen_expr_function_shorthand` — builds a FuncDecl with the same shape the parser produces for `=>`, verifies generated Rust contains `fn f(x: i64) -> i64` and `x + 1`, and re-parses as valid Rust.
+
+### Verification (all GREEN)
+- `cargo test -p buff-lang-parser expr_functions` → 6/6 pass
+- `cargo test -p buff-lang-codegen-rust test_codegen_expr_function_shorthand` → 1/1 pass
+- `cargo test --workspace` → ALL green (0 failed)
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean
+- `cargo fmt --check` → clean

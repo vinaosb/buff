@@ -320,7 +320,13 @@ pub fn parse_func_decl(
         None
     };
 
-    // Body: brace-delimited OR layout-sensitive block (T9).
+    // Body: brace-delimited OR layout-sensitive block (T9), OR expression
+    // function shorthand `=>` (T102).
+    //
+    // T102: `func f(x) => EXPR` is syntactic sugar for
+    // `func f(x) { return EXPR }`. If the next token is `=>`, consume it,
+    // parse a single expression, and synthesize a Block whose single
+    // statement is `return EXPR`.
     //
     // T32: extern funcs are foreign-function declarations and have NO
     // body — synthesize an empty placeholder Block whose span ends at the
@@ -331,6 +337,24 @@ pub fn parse_func_decl(
         Block {
             stmts: Vec::new(),
             span: Span::new(end, end, source_id),
+        }
+    } else if matches!(stream.peek_kind(), Some(TokenKind::FatArrow)) {
+        // T102: expression function shorthand `=>`.
+        let arrow_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected `=>` after function signature",
+                stream.eof_span(),
+            ))
+        })?;
+        let expr = parse_expression(stream)?;
+        let expr_end = expr.span().end;
+        let ret_stmt = Stmt::Return(
+            Some(expr),
+            Span::new(arrow_tok.span.start, expr_end, source_id),
+        );
+        Block {
+            stmts: vec![ret_stmt],
+            span: Span::new(arrow_tok.span.start, expr_end, source_id),
         }
     } else {
         parse_block(stream)?

@@ -940,7 +940,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `let (a, b) = pair` → assert Rust destructuring. Evidence: task-71-destructuring.txt
   **Commit**: `feat(parser): add destructuring assignment for tuples and structs`
 
-- [ ] **T102**: Expression functions `=>` [quick]
+- [x] **T102**: Expression functions `=>` [quick]
   **What to do** (TDD): RED: `func double(x) => x * 2` → shorthand single-expression function. GREEN: parse `=>` in function decl, codegen as function with return.
   **Acceptance**: `cargo test -p buff-lang-parser expr_functions` passes. `func f(x) => x + 1` works.
   **QA**: Parse `func sq(x: Int) => x * x` → assert FuncDecl with expression body. Evidence: task-102-expr-fn.txt

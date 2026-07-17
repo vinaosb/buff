@@ -400,3 +400,45 @@ fn test_codegen_multiple_funcs() {
     assert!(src.contains("fn second"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("multiple funcs must re-parse");
 }
+
+// ---------------------------------------------------------------------------
+// 13. Expression function `=>` — full pipeline: lex → parse → codegen
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_codegen_expr_function_shorthand() {
+    // `func f(x: Int) -> Int => x + 1` should produce a Rust fn returning
+    // `x + 1`. We build the AST directly (same shape the parser produces
+    // for `=>`), then verify the generated Rust.
+    let func = FuncDecl {
+        name: ident("f"),
+        params: vec![Param {
+            name: ident("x"),
+            ty: named_type("Int"),
+            span: span(),
+        }],
+        return_type: Some(named_type("Int")),
+        body: Block {
+            stmts: vec![Stmt::Return(
+                Some(Expr::BinaryOp {
+                    op: BinaryOp::Add,
+                    lhs: Box::new(ident_expr("x")),
+                    rhs: Box::new(int_expr(1)),
+                    span: span(),
+                }),
+                span(),
+            )],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
+    assert!(src.contains("fn f(x: i64) -> i64"), "src = {src}");
+    assert!(src.contains("x + 1"), "src = {src}");
+    // Re-parse to make sure it's valid Rust.
+    syn::parse_str::<syn::File>(&src).expect("expr-function codegen must re-parse");
+}
