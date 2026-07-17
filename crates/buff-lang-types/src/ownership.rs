@@ -294,6 +294,9 @@ fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             }
             collect_bound_names_in_block(else_block, out);
         }
+        // T100: `defer EXPR` — the deferred expression may bind nested
+        // names (e.g. inside a closure); introduces no bindings itself.
+        Stmt::Defer { expr, .. } => collect_bound_names_in_expr(expr, out),
     }
 }
 
@@ -484,6 +487,8 @@ fn classify_stmt(stmt: &Stmt, copy_vars: &mut BTreeSet<String>, locals: &mut BTr
         | Stmt::Return(_, _)
         | Stmt::Break(_)
         | Stmt::Continue(_) => {}
+        // T100: `defer EXPR` — introduces no bindings; no Copy classification.
+        Stmt::Defer { .. } => {}
     }
 }
 
@@ -588,6 +593,8 @@ fn collect_spawn_free_vars_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             }
             collect_spawn_free_vars_in_stmts(&else_block.stmts, out);
         }
+        // T100: `defer EXPR` — the deferred expression may read outer names.
+        Stmt::Defer { expr, .. } => collect_spawn_free_vars_in_expr(expr, out),
     }
 }
 
@@ -868,6 +875,8 @@ fn collect_free_vars_in_block(block: &Block, out: &mut BTreeSet<String>) {
                 }
                 collect_free_vars_in_block(else_block, out);
             }
+            // T100: `defer EXPR` — the deferred expression may read outer names.
+            Stmt::Defer { expr, .. } => collect_free_vars_in_expr(expr, out),
         }
     }
 }
@@ -934,6 +943,9 @@ fn collect_assignment_targets_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             }
             collect_assignment_targets_in_stmts(&else_block.stmts, out);
         }
+        // T100: `defer EXPR` — the deferred expression may contain nested
+        // assignment targets.
+        Stmt::Defer { expr, .. } => collect_assignment_targets_in_expr(expr, out),
     }
 }
 

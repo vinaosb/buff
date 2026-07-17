@@ -259,6 +259,8 @@ fn collect_func_calls_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             }
             collect_func_calls_in_block(else_block, out);
         }
+        // T100: `defer EXPR` — the deferred expression may contain calls.
+        Stmt::Defer { expr, .. } => collect_func_calls(expr, out),
     }
 }
 

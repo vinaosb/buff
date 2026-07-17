@@ -725,6 +725,13 @@ impl TypeInferencer {
                 }
                 Ok(Type::Void)
             }
+            // T100: `defer EXPR` — infer the deferred expression for its
+            // side effects on the env (no bindings introduced). The whole
+            // statement is `()` (Void).
+            Stmt::Defer { expr, .. } => {
+                let _ = self.infer_expr(expr)?;
+                Ok(Type::Void)
+            }
         }
     }
 }

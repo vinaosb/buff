@@ -1034,7 +1034,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Parse `/\d{3}-\d{4}/` → assert Regex literal with pattern. Evidence: task-79-regex.txt
   **Commit**: `feat(lexer): add regex literals /pattern/`
 
-- [ ] **T100**: `defer` statement [deep]
+- [x] **T100**: `defer` statement [deep]
   **What to do** (TDD): RED: `defer f.close()` runs on function exit (any path). Multiple defers LIFO. GREEN: parse `defer` keyword, codegen using RAII wrapper or scope guard.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust defer` passes. Defer runs on all exit paths.
   **QA**: Codegen `func f(): defer print("done"); return 0` → assert "done" printed before return. Evidence: task-100-defer.txt

@@ -97,6 +97,7 @@ pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError>
         }
         Some(TokenKind::KwFor) => parse_for(stream),
         Some(TokenKind::KwGuard) => parse_guard(stream),
+        Some(TokenKind::KwDefer) => parse_defer(stream),
         _ => parse_assignment_or_expr_stmt(stream),
     }
 }
@@ -924,6 +925,32 @@ fn parse_guard(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
         else_block,
         span,
     })
+}
+
+/// Parse a deferred-execution statement: `defer EXPR` (T100).
+///
+/// Shape: `defer <expression>`. The leading `defer` keyword is consumed
+/// here; then a single expression is parsed via [`parse_expression`]. The
+/// resulting [`Stmt::Defer`] carries that expression. The codegen collects
+/// all `Stmt::Defer` in a function body (in registration order) and emits
+/// them in REVERSE order at every function exit point (each `return` and
+/// the implicit fall-through at the body end), implementing LIFO semantics.
+///
+/// v0.5 defers a single expression. A deferred block (`defer { ... }`) is a
+/// future extension — the parser does NOT recognise the brace form today
+/// (the expression parser will reject a `{` at expression-statement start).
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if the deferred expression fails to parse.
+fn parse_defer(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    let source_id = stream.source_id();
+    let defer_tok = stream.expect(TokenKind::KwDefer)?;
+    let start = defer_tok.span.start;
+    let expr = parse_expression(stream)?;
+    let end = expr.span().end;
+    let span = Span::new(start, end, source_id);
+    Ok(Stmt::Defer { expr, span })
 }
 
 /// Either an assignment (`x = ...`, `x += ...`) or a bare expression
@@ -2592,7 +2619,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
         | Stmt::ForWhile { span, .. }
         | Stmt::LetPattern { span, .. }
         | Stmt::ForLet { span, .. }
-        | Stmt::Guard { span, .. } => span.end,
+        | Stmt::Guard { span, .. }
+        | Stmt::Defer { span, .. } => span.end,
     }
 }
 

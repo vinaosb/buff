@@ -189,6 +189,22 @@ pub struct RustCodegen {
     /// only queried by membership, but consistency with the rest of the
     /// state is easier to reason about).
     hash_safe_structs: BTreeSet<String>,
+    /// T100: deferred expressions collected for the function currently being
+    /// lowered, in REGISTRATION order (the order `defer EXPR` statements
+    /// appear in the source). Reset at the start of each [`Self::lower_func`].
+    /// [`Self::lower_block`] pushes each `Stmt::Defer`'s lowered expression
+    /// here and emits NOTHING at the defer site. At every function exit
+    /// point — each `Stmt::Return` and the implicit fall-through at the body
+    /// end (handled in [`Self::lower_func`]) — the accumulated expressions
+    /// are drained in REVERSE order (LIFO: last-registered runs first) and
+    /// emitted as sibling `syn::Stmt::Expr(_, Some(semi))` statements BEFORE
+    /// the return / at the body tail.
+    ///
+    /// Storing the already-lowered [`SynExpr`] (rather than re-lowering the
+    /// AST expression at each exit point) keeps the codegen single-pass and
+    /// deterministic. Limitation: move-analysis decisions are fixed at the
+    /// defer site (see the T100 note in learnings.md).
+    deferred_exprs: Vec<SynExpr>,
 }
 
 impl RustCodegen {
@@ -208,6 +224,7 @@ impl RustCodegen {
             extern_crates: BTreeSet::new(),
             collected_unions: BTreeMap::new(),
             hash_safe_structs: BTreeSet::new(),
+            deferred_exprs: Vec::new(),
         }
     }
 
@@ -637,6 +654,12 @@ impl RustCodegen {
         self.move_analyzer.reset();
         self.move_analyzer.preanalyze_func(f);
 
+        // T100: reset the per-function deferred-expression accumulator.
+        // `Stmt::Defer` arms inside the body (collected by lower_block)
+        // push here; we drain them in reverse (LIFO) at every return and
+        // at the body's fall-through tail (below).
+        self.deferred_exprs.clear();
+
         // Reset the type inferencer for this function: re-bind parameters
         // using the same primitive-mapping rules that TypeInferencer uses
         // internally (see `typeref_to_type` in buff_lang_types::infer).
@@ -704,7 +727,23 @@ impl RustCodegen {
             output,
         };
 
-        let block = self.lower_block(&f.body)?;
+        let mut block = self.lower_block(&f.body)?;
+
+        // T100: fall-through tail. Any defers still in the accumulator at
+        // this point were NOT drained by an explicit `return` inside the
+        // body — they fire at the implicit function exit (the body's last
+        // statement was something other than a return, OR the body ends
+        // with a trailing expr/let). Emit them in REVERSE order (LIFO:
+        // last-registered defer runs first) as tail sibling statements.
+        // `drain(..).rev()` consumes the accumulator so a second drain at
+        // a later exit point would be a no-op (defensive — there is no
+        // later exit point after the body, but the shape is symmetric with
+        // the return-site drain in lower_block).
+        for deferred in self.deferred_exprs.drain(..).rev() {
+            block
+                .stmts
+                .push(SynStmt::Expr(deferred, Some(Default::default())));
+        }
 
         // T31: emit `#[tokio::main]` on the entry `main` fn when it's in
         // the propagated async set. Buff has no `await` keyword, so the
@@ -1224,6 +1263,31 @@ impl RustCodegen {
                 self.lower_guard_conditions_into(conditions, else_block, &mut stmts)?;
                 continue;
             }
+            // T100: `Stmt::Defer` does NOT emit anything at its source
+            // position. Instead its lowered expression is pushed onto the
+            // per-function `deferred_exprs` accumulator (in registration
+            // order). The accumulated expressions are drained in REVERSE
+            // order (LIFO) at the next function exit point — either an
+            // explicit `Stmt::Return` (handled below) or the implicit
+            // fall-through at the body end (handled in lower_func).
+            if let Stmt::Defer { expr, .. } = stmt {
+                let lowered = self.lower_expr(expr)?;
+                self.deferred_exprs.push(lowered);
+                continue;
+            }
+            // T100: `Stmt::Return` is a function exit point. Before emitting
+            // the return, drain ALL currently-accumulated defers in REVERSE
+            // order (LIFO: last-registered runs first) and emit them as
+            // sibling statements immediately preceding the return. This
+            // makes `defer print("done"); return 0` print "done" BEFORE the
+            // return executes. `drain(..)` clears the accumulator so a
+            // subsequent exit point (a later return, or the fall-through
+            // tail) won't re-emit the same defers.
+            if let Stmt::Return(..) = stmt {
+                for deferred in self.deferred_exprs.drain(..).rev() {
+                    stmts.push(SynStmt::Expr(deferred, Some(Default::default())));
+                }
+            }
             stmts.push(self.lower_stmt(stmt)?);
         }
         Ok(syn::Block {
@@ -1489,6 +1553,18 @@ impl RustCodegen {
                     },
                 };
                 Ok(SynStmt::Expr(SynExpr::Block(block), None))
+            }
+            // T100: fallback single-stmt path for `Stmt::Defer`. Real call
+            // paths go through [`Self::lower_block`] which special-cases
+            // Defer (collects into `deferred_exprs`, emits nothing here).
+            // For the rare case where a Defer reaches the single-stmt API
+            // directly, lower its expression as a bare expression
+            // statement (it runs immediately, NOT deferred — this is a
+            // degenerate fallback; use [`Self::lower_block`] for proper
+            // function-exit deferral).
+            Stmt::Defer { expr, .. } => {
+                let e = self.lower_expr(expr)?;
+                Ok(SynStmt::Expr(e, Some(Default::default())))
             }
         }
     }
@@ -4770,6 +4846,8 @@ fn stmt_uses_matrix(stmt: &Stmt) -> bool {
                 buff_lang_ast::GuardCondition::Bool(e) => expr_uses_matrix(e),
             }) || block_uses_matrix(else_block)
         }
+        // T100: `defer EXPR` — the deferred expression may use Matrix.
+        Stmt::Defer { expr, .. } => expr_uses_matrix(expr),
     }
 }
 
@@ -4977,6 +5055,8 @@ fn stmt_uses_error(stmt: &Stmt) -> bool {
                 buff_lang_ast::GuardCondition::Bool(e) => expr_uses_error(e),
             }) || block_uses_error(else_block)
         }
+        // T100: `defer EXPR` — the deferred expression may use Error.
+        Stmt::Defer { expr, .. } => expr_uses_error(expr),
     }
 }
 

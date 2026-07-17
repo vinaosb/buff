@@ -109,6 +109,22 @@ pub enum Stmt {
         else_block: Block,
         span: Span,
     },
+    /// A deferred-execution statement: `defer EXPR` (T100).
+    ///
+    /// Schedules `expr` to run when the ENCLOSING FUNCTION exits — on ANY
+    /// exit path (return or fall-through end). Multiple defers run LIFO
+    /// (last-registered first). The codegen collects deferred expressions
+    /// during lowering (in registration order) and emits them in REVERSE
+    /// order at every function exit point (each `Stmt::Return` and the
+    /// implicit fall-through at the body end).
+    ///
+    /// v0.5 carries a single [`Expr`] (a deferred block is a future
+    /// extension). A typical use is `defer f.close()` (a method call) or
+    /// `defer print("done")` (a prelude call).
+    ///
+    /// This is **additive** (T100): no existing variant was renamed,
+    /// reordered, or had its payload altered.
+    Defer { expr: Expr, span: Span },
 }
 
 /// A single condition inside a [`Stmt::Guard`] (T73).
@@ -200,6 +216,7 @@ impl fmt::Display for Stmt {
                 }
                 write!(f, " else {else_block})")
             }
+            Stmt::Defer { expr, .. } => write!(f, "Defer({expr})"),
         }
     }
 }

@@ -246,6 +246,9 @@ fn check_stmt(
             }
             Ok(())
         }
+        // T100: `defer EXPR` — recurse into the deferred expression (it may
+        // contain a nested `match`).
+        Stmt::Defer { expr, .. } => check_expr(expr, registry, inferencer),
     }
 }
 

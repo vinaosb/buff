@@ -60,7 +60,7 @@ pub enum TokenKind {
     // --- Identifiers and keywords ---
     Ident(String),
 
-    // 26 keywords
+    // 28 keywords
     KwFunc,
     KwLet,
     KwMut,
@@ -101,6 +101,16 @@ pub enum TokenKind {
     /// name is derived from the target type as `BuffExt{Type}` (e.g.
     /// `extend String { ... }` → `trait BuffExtString { ... }`).
     KwExtend,
+    /// `defer EXPR` deferred-execution statement (T100).
+    ///
+    /// Schedules `EXPR` to run when the ENCLOSING FUNCTION exits — on ANY
+    /// exit path (return, fall-through end). Multiple defers run LIFO
+    /// (last-registered first). The codegen collects deferred expressions
+    /// during lowering and emits them in reverse order at every function
+    /// exit point (each `return` and the implicit fall-through at the body
+    /// end). A single expression is deferred in v0.5; a deferred BLOCK is a
+    /// future extension.
+    KwDefer,
 
     // --- Operators ---
     DotDot,
@@ -206,6 +216,7 @@ impl TokenKind {
             "unsafe" => Some(Self::KwUnsafe),
             "guard" => Some(Self::KwGuard),
             "extend" => Some(Self::KwExtend),
+            "defer" => Some(Self::KwDefer),
             _ => None,
         }
     }
@@ -241,6 +252,7 @@ impl TokenKind {
                 | Self::KwUnsafe
                 | Self::KwGuard
                 | Self::KwExtend
+                | Self::KwDefer
         )
     }
 
@@ -249,7 +261,7 @@ impl TokenKind {
         &[
             "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
             "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-            "true", "false", "extern", "unsafe", "guard", "extend",
+            "true", "false", "extern", "unsafe", "guard", "extend", "defer",
         ]
     }
 }
@@ -304,6 +316,7 @@ impl fmt::Display for TokenKind {
             Self::KwUnsafe => write!(f, "unsafe"),
             Self::KwGuard => write!(f, "guard"),
             Self::KwExtend => write!(f, "extend"),
+            Self::KwDefer => write!(f, "defer"),
             // Operators
             Self::DotDot => write!(f, ".."),
             Self::DotDotEq => write!(f, "..="),

@@ -709,6 +709,27 @@ impl AstLowerer {
                 self.lower_block(else_block);
                 last_id
             }
+            // T100: `defer EXPR` — model the deferred expression as a
+            // Compute node consuming its uses (the expression reads outer
+            // names at the defer site). The actual function-exit re-emission
+            // happens in codegen, not here; the IR just records the
+            // data-flow fact that the expression's uses are live at this
+            // point. No bindings are introduced.
+            Stmt::Defer { expr, span } => {
+                let mut uses = Vec::new();
+                collect_uses(expr, &mut uses);
+                let node_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                    id: NodeId(0),
+                    source_expr: Some(expr.clone()),
+                    source_stmt: Some(stmt.clone()),
+                    defs: Vec::new(),
+                    uses: uses.clone(),
+                    span: *span,
+                    description: format!("Defer({expr})"),
+                }));
+                self.wire_dependencies(node_id, &[], &uses);
+                node_id
+            }
         }
     }
 
@@ -1013,6 +1034,8 @@ fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
                 collect_stmt_uses(s, out);
             }
         }
+        // T100: `defer EXPR` — the deferred expression reads outer names.
+        Stmt::Defer { expr, .. } => collect_uses(expr, out),
     }
 }
 
