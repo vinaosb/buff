@@ -657,6 +657,58 @@ impl AstLowerer {
                 self.lower_block(body);
                 header_id
             }
+
+            // T73: `guard <conds> else { block }` — model each condition as
+            // a Compute node that consumes the condition's uses; the
+            // else-block is walked as a continuation. For `let` conditions,
+            // the pattern's bindings are introduced IN THE ENCLOSING SCOPE
+            // (mirroring Rust let-else semantics) — register each binding
+            // pointing at the condition's node so subsequent reads wire
+            // back to it. The whole guard collapses to its LAST condition's
+            // node ID (or the else-block's last node if conditions is empty,
+            // which is a parse-time error anyway).
+            Stmt::Guard {
+                conditions,
+                else_block,
+                span,
+            } => {
+                let mut last_id = self.add_pure_control_node(stmt, *span, "Guard");
+                for c in conditions {
+                    let (expr_opt, pat_bindings): (Option<Expr>, Vec<Ident>) = match c {
+                        crate::stmt::GuardCondition::Let { pattern, value, .. } => {
+                            (Some(value.clone()), pattern.bindings())
+                        }
+                        crate::stmt::GuardCondition::Bool(e) => (Some(e.clone()), Vec::new()),
+                    };
+                    let mut uses = Vec::new();
+                    if let Some(e) = &expr_opt {
+                        collect_uses(e, &mut uses);
+                    }
+                    let binding_names: std::collections::HashSet<String> =
+                        pat_bindings.iter().map(|i| i.name.clone()).collect();
+                    uses.retain(|i| !binding_names.contains(&i.name));
+                    let node_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                        id: NodeId(0),
+                        source_expr: expr_opt,
+                        source_stmt: Some(stmt.clone()),
+                        defs: pat_bindings.clone(),
+                        uses: uses.clone(),
+                        span: *span,
+                        description: format!("GuardCond({c})"),
+                    }));
+                    self.wire_dependencies(node_id, &[], &uses);
+                    // Register the let-pattern's bindings in the ENCLOSING
+                    // scope (let-else semantics: they survive the guard).
+                    for b in pat_bindings {
+                        self.bindings.insert(b.name, node_id);
+                    }
+                    last_id = node_id;
+                }
+                // Walk the else-block as a continuation (its stmts are
+                // reachable when any condition fails).
+                self.lower_block(else_block);
+                last_id
+            }
         }
     }
 
@@ -925,6 +977,34 @@ fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
             }
             for b in pattern.bindings() {
                 out.retain(|i| i.name != b.name);
+            }
+        }
+        // T73: `guard <conds> else { block }` — each condition's value/expr
+        // reads outer names; let-pattern bindings are introduced in the
+        // ENCLOSING scope (so they don't count as uses after the binding
+        // site, but we still scan them out defensively). The else-block's
+        // stmts are recursed.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                match c {
+                    crate::stmt::GuardCondition::Let { pattern, value, .. } => {
+                        collect_uses(value, out);
+                        // The pattern's bindings are introduced by this
+                        // guard; remove any same-named uses that the value
+                        // may have added (mirroring ForLet's treatment).
+                        for b in pattern.bindings() {
+                            out.retain(|i| i.name != b.name);
+                        }
+                    }
+                    crate::stmt::GuardCondition::Bool(e) => collect_uses(e, out),
+                }
+            }
+            for s in &else_block.stmts {
+                collect_stmt_uses(s, out);
             }
         }
     }

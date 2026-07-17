@@ -243,6 +243,22 @@ fn collect_func_calls_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_func_calls(value, out);
             collect_func_calls_in_block(body, out);
         }
+        // T73: `guard <conds> else { block }` — each condition's value/expr
+        // may contain calls; the else-block recurses.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                let e = match c {
+                    buff_lang_ast::GuardCondition::Let { value, .. } => value,
+                    buff_lang_ast::GuardCondition::Bool(e) => e,
+                };
+                collect_func_calls(e, out);
+            }
+            collect_func_calls_in_block(else_block, out);
+        }
     }
 }
 

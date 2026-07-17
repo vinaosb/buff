@@ -227,6 +227,25 @@ fn check_stmt(
             }
             Ok(())
         }
+        // T73: `guard <conds> else { block }` — recurse into each condition's
+        // value/expr and the else-block. The let-pattern is not an expr.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                let e = match c {
+                    buff_lang_ast::GuardCondition::Let { value, .. } => value,
+                    buff_lang_ast::GuardCondition::Bool(e) => e,
+                };
+                check_expr(e, registry, inferencer)?;
+            }
+            for s in &else_block.stmts {
+                check_stmt(s, registry, inferencer)?;
+            }
+            Ok(())
+        }
     }
 }
 

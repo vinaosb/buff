@@ -1818,3 +1818,198 @@ and fixed in one batch per file:
 - `cargo check --workspace` → exit 0
 - `cargo clippy --workspace --all-targets -- -D warnings` → exit 0 (0 warnings)
 - `cargo fmt --check` → exit 0 (after one `cargo fmt` pass to normalize a HashSet chained-call + a one-line literal collapse in the new test file)
+
+## T73 — Early return guards
+
+### Status: COMPLETE (all green: test/check/clippy/fmt)
+
+### What was added
+
+**Lexer** (`buff-lang-lexer/src/token.rs`):
+- NEW `TokenKind::KwGuard` variant (additive, at end of keyword block). The
+  keyword count went from 25 to 26 — the `all_keywords()` doc comment was
+  updated from "All 25 reserved keywords" to "All reserved keywords" (no
+  count in the docstring; the test pins the actual count).
+- Wired into `from_keyword` (`"guard" => Some(Self::KwGuard)`), `is_keyword`
+  (`| Self::KwGuard` arm), `all_keywords()` (the slice now ends with
+  `"guard"`), and `Display` (`Self::KwGuard => write!(f, "guard")`).
+- Reserved-keyword convention: adding `guard` means any Buff program that
+  used `guard` as an identifier now breaks. That's acceptable per the
+  README's reserved-keywords policy.
+
+**AST** (`buff-lang-ast/src/stmt.rs`):
+- NEW `Stmt::Guard { conditions: Vec<GuardCondition>, else_block: Block,
+  span: Span }` — additive, at END of the Stmt enum.
+- NEW supporting enum `GuardCondition` (in stmt.rs, re-exported via
+  `pub use stmt::*` at the crate root):
+  ```rust
+  pub enum GuardCondition {
+      Let { pattern: Pattern, value: Expr, span: Span },
+      Bool(Expr),
+  }
+  ```
+  Derives `Debug, Clone, PartialEq` only (NO Eq/Hash — consistent with
+  Stmt/Pattern siblings).
+- Display impls: `Stmt::Guard` formats as `Guard(cond1, cond2 else block)`;
+  `GuardCondition::Let` formats as `let PAT = VALUE`, `Bool(e)` as `{e}`.
+
+**Parser** (`buff-lang-parser/src/stmt.rs`):
+- NEW dispatcher arm: `Some(TokenKind::KwGuard) => parse_guard(stream)`.
+- NEW `parse_guard` function (~75 lines). Shape:
+  `guard cond ("," cond)* ","? "else" block`. Comma-separated conditions
+  (mixed `let PATTERN = expr` and bool `expr`); the first condition is
+  mandatory (an empty `guard else {...}` is a parse error); trailing
+  comma before `else` is allowed; layout-form else-block works
+  (`guard x > 0 else:\n    return 0`) via the shared `parse_block`.
+- The let-condition REUSES the shared `parse_pattern` (T71) — no
+  reimplementation. Bool conditions use `parse_expression`.
+- `stmt_end` extended with `| Stmt::Guard { span, .. } => span.end`.
+
+**Codegen** (`buff-lang-codegen-rust/src/rust_codegen.rs`):
+- **KEY DESIGN — multi-stmt lowering at SAME scope level.** A guard lowers
+  to MULTIPLE Rust statements (one per condition); the let-else bindings
+  from `Let` conditions MUST stay in scope for subsequent statements in
+  the SAME function block. Wrapping the sequence in an inner Rust block
+  would scope-kill the bindings — defeating guard's whole purpose.
+- `lower_block` special-cases `Stmt::Guard`: it calls
+  `lower_guard_conditions_into(conditions, else_block, &mut stmts)` which
+  appends each lowered condition as a sibling `syn::Stmt` at the same
+  scope level. Every non-Guard stmt still goes through `lower_stmt`.
+- `lower_stmt` has a Guard arm too (for API completeness) — it wraps the
+  multi-stmt sequence in a `syn::ExprBlock`. **Caveat**: this fallback
+  scopes the let-bindings to the inner block (wrong for let-else
+  propagation), but no current call path uses it (all real paths go
+  through `lower_block`). Documented in the arm's doc-comment.
+- NEW helper `lower_guard_conditions_into(&mut self, conditions, else_block,
+  &mut Vec<SynStmt>)`. Per condition:
+  - `Let { pattern, value }` → Rust let-else via `quote!{ let #pat = #val
+    else #else_blk ; }` + `syn::parse2::<SynStmt>`. Pattern bindings stay
+    in scope (the whole point of let-else).
+  - `Bool(expr)` → negated if via `quote!{ if ! ( #expr ) #else_blk }` +
+    `syn::parse2::<SynExpr>`. The else-block runs when the original is
+    FALSE (i.e. the guard fails).
+- The else-block is re-lowered for EACH condition (an N-condition guard
+  produces N copies of the else-block in the Rust output). Semantically
+  correct: each failing condition independently dispatches to the same
+  user-written else-block. A single-shared-else alternative would
+  require reshaping the control graph — overkill for v0.5.
+- `stmt_uses_matrix` and `stmt_uses_error` extended for Guard — emit-on-
+  demand detection for Matrix / Error scans each condition + the else-block.
+
+**Exhaustive-match ripple sites (10 total)** — every site gained a Guard arm:
+
+| File | Function | Guard arm semantics |
+|------|----------|---------------------|
+| `buff-lang-ast/src/ir.rs` | `AstLowerer::lower_stmt` | Model each condition as a Compute node; let-bindings registered in ENCLOSING scope (let-else semantics) |
+| `buff-lang-ast/src/ir.rs` | `collect_stmt_uses` | Recurse conditions + else-block; drop let-pattern bindings from uses |
+| `buff-lang-types/src/infer.rs` | `TypeInferencer::infer_stmt` | Infer each condition; bind let-pattern names to Unknown (v0.5 deferral); walk else-block; returns Void |
+| `buff-lang-types/src/exhaustiveness.rs` | `check_stmt` | Recurse into each condition's expr + else-block |
+| `buff-lang-types/src/async_analysis.rs` | `collect_func_calls_in_stmt` | Recurse into each condition + else-block |
+| `buff-lang-types/src/ownership.rs` | `collect_bound_names_in_stmt` | Let-condition bindings → ENCLOSING scope; recurse else-block |
+| `buff-lang-types/src/ownership.rs` | `classify_stmt` | Let-condition bindings → locals (Copy deferred); recurse else-block |
+| `buff-lang-types/src/ownership.rs` | `collect_spawn_free_vars_in_stmt` | Conditions + else-block may read outer/spawned names |
+| `buff-lang-types/src/ownership.rs` | `collect_free_vars_in_block` | Conditions + else-block free-var collection |
+| `buff-lang-types/src/ownership.rs` | `collect_assignment_targets_in_stmt` | Conditions + else-block may contain nested assignment targets |
+
+The ownership.rs pattern of one Guard arm per Stmt-walker (5 sites) mirrors
+the T72 ForLet ripple precedent exactly.
+
+### Tests added (11 total)
+
+- `crates/buff-lang-parser/tests/guards.rs` — **7 tests**, all named
+  `guards_*` (the `cargo test ... guards` fn-name filter). Covers:
+  - `guards_bool_condition` — `guard x > 0 else { return 0 }` →
+    `Stmt::Guard` with one `Bool` condition.
+  - `guards_let_binding` — `guard let Some(x) = opt else { return }` →
+    one `Let` condition with `Pattern::Variant { Some, [x] }`.
+  - `guards_multiple_conditions` — `guard let Some(x) = opt, x > 0 else
+    { return }` → two conditions in source order (let first, bool second).
+  - `guards_multiple_bool_conditions` — `guard x > 0, y > 0 else { return }`.
+  - `guards_missing_else_errors` — `guard x > 0` (no else) → ParseError
+    mentioning `else`.
+  - `guards_missing_condition_errors` — `guard else { return }` (empty
+    conditions) → ParseError.
+  - `guards_layout_else_block` — `guard x > 0 else:\n    return 0` (layout
+    form via `:` + Indent/Dedent).
+- `crates/buff-lang-codegen-rust/tests/guards_codegen.rs` — **4 tests**,
+  all named `guards_codegen_*`. Covers:
+  - `guards_codegen_bool_condition_early_return` — `Bool(x > 0)` →
+    `if !(x > 0) { return 0; }` (asserts `if !` + `return 0;`).
+  - `guards_codegen_let_binding_let_else` — `Let { Some(x), opt }` →
+    `let Some(x) = opt else { return; };` (Rust let-else).
+  - `guards_codegen_multiple_conditions_both_emitted` — both shapes
+    appear in order (let-else first, negated if second).
+  - `guards_codegen_end_to_end_from_source` — full pipeline
+    (lexer → parser → codegen) on a layout-form Buff source; asserts
+    `if !` + `return 0;` + `syn::parse_str` re-parse validity.
+
+### Key design insights
+
+- **Multi-stmt lowering requires breaking the lower_stmt single-stmt
+  contract.** The cleanest fix is to special-case Guard in `lower_block`
+  (where multi-stmt emission is natural) and leave `lower_stmt`'s Guard
+  arm as a wrapped-Block fallback that's documented as scope-defeating
+  but API-compatible. All real call paths go through `lower_block`, so
+  the fallback never fires in practice.
+- **Rust let-else is the natural codegen for `guard let`.** The pattern
+  bindings introduced by `let Some(x) = opt else { return; };` survive
+  to the enclosing scope — exactly what guard promises. Building it via
+  `quote!{ let #pat = #val else #else_blk ; }` + `syn::parse2::<SynStmt>`
+  is the most direct path (the syn let-else form IS `syn::Local` with
+  `init.diverge = Some((else, block))`, but `quote!` builds it for free).
+- **Bool conditions negate, let conditions don't.** A guard's else-block
+  runs when the guard FAILS. For a bool `x > 0`, "fails" means "x <= 0",
+  i.e. NOT(x > 0) — emit `if !(x > 0) else_blk`. For a let `let Some(x)
+  = opt`, "fails" means "the pattern didn't match" — Rust's let-else
+  handles this natively (no negation; the `else` block runs on non-match).
+- **Re-lower the else-block per condition.** A 3-condition guard emits 3
+  copies of the user's else-block in the Rust output. Looks redundant but
+  is semantically equivalent (each failing condition independently runs
+  the same user-written diverging block). A single-shared-else
+  alternative would need control-flow graph reshaping — overkill for v0.5.
+- **Parser control-flow gotcha (avoided on rewrite).** The first attempt
+  at `parse_guard` had a buggy loop where the empty-conditions check
+  fired BEFORE the comma check, so it always errored on iteration 1. Fix:
+  restructure to "after-first-condition, expect `,` or `else`; before
+  first condition, just parse". Cleaner: a single loop with a `!
+  conditions.is_empty()` gate around the separator expectation.
+
+### Verification (all GREEN, MSVC env set for test/clippy)
+
+- `cargo test -p buff-lang-parser guards` → 7/7 pass
+- `cargo test -p buff-lang-codegen-rust guards` → 4/4 pass
+- `cargo test --workspace` → all green except the intentional E2E
+  `test_fail` fixture in `test_command.rs` (T35 deliberately-failing
+  Buff `@test` — same as T71/T72; expected).
+- `cargo check --workspace` → exit 0
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0
+  (0 warnings)
+- `cargo fmt --check` → exit 0
+
+### Side fix (keyword-count tests)
+
+Two pre-existing tests in `buff-lang-lexer/tests/` hardcoded the OLD
+25-keyword count and were updated as part of T73's additive ripple:
+
+- `token_tests.rs::all_keywords_present` — the `expected` slice gained
+  `"guard"` and the `len()` assertion went from 25 to 26.
+- `lexer_tests.rs::test_all_25_keywords_tokenize` — kept the historical
+  name (for `cargo test ... 25` filter traceability) but updated the
+  source string (appended `guard`), the token count (26 → 27 incl EOF),
+  and the loop bound (25 → 26). The function doc-comment notes the name
+  is historical and the actual count is 26.
+
+### Deferred
+
+- **`@deprecation`-style warning for Buff programs using `guard` as an
+  identifier.** The lexer silently repurposes the name; no migration
+  warning is emitted. Out of scope for v0.5 (no diagnostic infrastructure
+  for "soft" reserved keywords).
+- **Single-shared-else codegen optimisation.** Today an N-condition guard
+  emits N copies of the else-block. A future task could lower this to a
+  single shared else-block via a synthetic label + `break`, or by
+  collapsing all conditions into one `if !(c1 && c2 && ...) else_blk`
+  (correct for bool conditions but NOT for let-conditions, which introduce
+  bindings needed by later conditions — would need let-chain support,
+  itself deferred to T74).
+

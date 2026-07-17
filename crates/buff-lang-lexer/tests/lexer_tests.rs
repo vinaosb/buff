@@ -420,12 +420,14 @@ fn test_int_then_dot_no_fraction() {
 
 #[test]
 fn test_all_25_keywords_tokenize() {
-    let src = "func let mut struct enum trait type if else for return break continue in match async spawn import export from as true false extern unsafe";
+    // T73 added `guard` (26 keywords total). The test name keeps the
+    // original "25" for historical traceability; the actual count is 26.
+    let src = "func let mut struct enum trait type if else for return break continue in match async spawn import export from as true false extern unsafe guard";
     let tokens = kinds(src);
-    // Expect exactly 25 keyword tokens followed by EOF.
-    assert_eq!(tokens.len(), 26);
+    // Expect exactly 26 keyword tokens followed by EOF.
+    assert_eq!(tokens.len(), 27);
     for (i, k) in tokens.iter().enumerate() {
-        if i < 25 {
+        if i < 26 {
             assert!(k.is_keyword(), "expected keyword at index {i}, got {k:?}");
         }
     }

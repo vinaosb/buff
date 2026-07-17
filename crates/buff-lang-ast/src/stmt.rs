@@ -81,6 +81,54 @@ pub enum Stmt {
         body: Block,
         span: Span,
     },
+    /// An early-return guard: `guard <cond>[, <cond>...] else { block }`
+    /// (T73).
+    ///
+    /// Each condition in `conditions` is checked IN ORDER; if ANY fails,
+    /// `else_block` runs (which must diverge via `return`/`break`/
+    /// `continue`). If ALL succeed, execution continues with the next
+    /// statement. A [`GuardCondition::Let`] additionally introduces its
+    /// pattern's bindings into the ENCLOSING scope (mirroring Rust's
+    /// let-else); a [`GuardCondition::Bool`] is a plain boolean check.
+    ///
+    /// Codegen emits ONE Rust statement per condition at the same scope
+    /// level (NOT wrapped in an inner block, which would scope-kill the
+    /// let-bindings):
+    /// - `Let { pattern, value, .. }` → `let #pat = #value else #else_block;`
+    ///   (Rust let-else; the bindings stay in scope).
+    /// - `Bool(expr)` → `if !(#expr) #else_block` (negated condition; the
+    ///   else-block runs when the original condition is FALSE).
+    ///
+    /// Multiple conditions all share the SAME `else_block` — every failing
+    /// condition dispatches to it.
+    ///
+    /// This is **additive** (T73): no existing variant was renamed, reordered,
+    /// or had its payload altered.
+    Guard {
+        conditions: Vec<GuardCondition>,
+        else_block: Block,
+        span: Span,
+    },
+}
+
+/// A single condition inside a [`Stmt::Guard`] (T73).
+///
+/// Either a let-binding (which introduces names into the enclosing scope via
+/// Rust's let-else codegen) or a boolean expression (which must hold for the
+/// guard to pass).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuardCondition {
+    /// `let PATTERN = expr` — binds `PATTERN` against `expr`; if the pattern
+    /// doesn't match, the guard's else-block runs (and `PATTERN`'s bindings
+    /// are NOT introduced).
+    Let {
+        pattern: Pattern,
+        value: Expr,
+        span: Span,
+    },
+    /// A boolean expression — must evaluate to `true` for the guard to pass.
+    /// Codegen negates it: `if !(expr) else_block`.
+    Bool(Expr),
 }
 
 impl fmt::Display for Stmt {
@@ -138,6 +186,31 @@ impl fmt::Display for Stmt {
                 body,
                 ..
             } => write!(f, "ForLet({pattern} = {value} {body})"),
+            Stmt::Guard {
+                conditions,
+                else_block,
+                ..
+            } => {
+                f.write_str("Guard(")?;
+                for (i, c) in conditions.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{c}")?;
+                }
+                write!(f, " else {else_block})")
+            }
+        }
+    }
+}
+
+impl fmt::Display for GuardCondition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GuardCondition::Let { pattern, value, .. } => {
+                write!(f, "let {pattern} = {value}")
+            }
+            GuardCondition::Bool(expr) => write!(f, "{expr}"),
         }
     }
 }

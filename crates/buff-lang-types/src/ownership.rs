@@ -274,6 +274,26 @@ fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_bound_names_in_expr(value, out);
             collect_bound_names_in_block(body, out);
         }
+        // T73: `guard <conds> else { block }` — `let` conditions introduce
+        // bindings in the ENCLOSING scope (let-else semantics); walk every
+        // condition + the else-block.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                if let buff_lang_ast::GuardCondition::Let { pattern, value, .. } = c {
+                    for b in pattern.bindings() {
+                        out.insert(b.name);
+                    }
+                    collect_bound_names_in_expr(value, out);
+                } else if let buff_lang_ast::GuardCondition::Bool(e) = c {
+                    collect_bound_names_in_expr(e, out);
+                }
+            }
+            collect_bound_names_in_block(else_block, out);
+        }
     }
 }
 
@@ -435,6 +455,23 @@ fn classify_stmt(stmt: &Stmt, copy_vars: &mut BTreeSet<String>, locals: &mut BTr
             }
             classify_stmts(&body.stmts, copy_vars, locals);
         }
+        // T73: `guard <conds> else { block }` — record `let`-condition
+        // bindings as locals (per-field Copy deferred — v0.5 whole-stmt
+        // coarse ownership); recurse into the else-block.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                if let buff_lang_ast::GuardCondition::Let { pattern, .. } = c {
+                    for b in pattern.bindings() {
+                        locals.insert(b.name);
+                    }
+                }
+            }
+            classify_stmts(&else_block.stmts, copy_vars, locals);
+        }
         Stmt::Assignment { .. }
         | Stmt::ExprStmt(_, _)
         | Stmt::Return(_, _)
@@ -527,6 +564,22 @@ fn collect_spawn_free_vars_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         Stmt::ForLet { value, body, .. } => {
             collect_spawn_free_vars_in_expr(value, out);
             collect_spawn_free_vars_in_stmts(&body.stmts, out);
+        }
+        // T73: `guard <conds> else { block }` — conditions may read outer
+        // names; else-block recurses.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                let e = match c {
+                    buff_lang_ast::GuardCondition::Let { value, .. } => value,
+                    buff_lang_ast::GuardCondition::Bool(e) => e,
+                };
+                collect_spawn_free_vars_in_expr(e, out);
+            }
+            collect_spawn_free_vars_in_stmts(&else_block.stmts, out);
         }
     }
 }
@@ -780,6 +833,22 @@ fn collect_free_vars_in_block(block: &Block, out: &mut BTreeSet<String>) {
                 collect_free_vars_in_expr(value, out);
                 collect_free_vars_in_block(body, out);
             }
+            // T73: `guard <conds> else { block }` — conditions read outer
+            // names; else-block recurses.
+            Stmt::Guard {
+                conditions,
+                else_block,
+                ..
+            } => {
+                for c in conditions {
+                    let e = match c {
+                        buff_lang_ast::GuardCondition::Let { value, .. } => value,
+                        buff_lang_ast::GuardCondition::Bool(e) => e,
+                    };
+                    collect_free_vars_in_expr(e, out);
+                }
+                collect_free_vars_in_block(else_block, out);
+            }
         }
     }
 }
@@ -829,6 +898,22 @@ fn collect_assignment_targets_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         Stmt::ForLet { value, body, .. } => {
             collect_assignment_targets_in_expr(value, out);
             collect_assignment_targets_in_stmts(&body.stmts, out);
+        }
+        // T73: `guard <conds> else { block }` — conditions + else-block may
+        // contain nested assignment targets.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            for c in conditions {
+                let e = match c {
+                    buff_lang_ast::GuardCondition::Let { value, .. } => value,
+                    buff_lang_ast::GuardCondition::Bool(e) => e,
+                };
+                collect_assignment_targets_in_expr(e, out);
+            }
+            collect_assignment_targets_in_stmts(&else_block.stmts, out);
         }
     }
 }

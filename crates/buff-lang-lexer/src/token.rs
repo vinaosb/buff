@@ -70,6 +70,14 @@ pub enum TokenKind {
     KwFalse,
     KwExtern,
     KwUnsafe,
+    /// `guard` early-return statement (T73).
+    ///
+    /// `guard <cond>[, <cond>...] else { <diverging-block> }` runs the
+    /// else-block (which must diverge via `return`/`break`/`continue`) when
+    /// ANY condition fails; otherwise execution continues. A `let PATTERN =
+    /// expr` condition additionally binds the pattern's identifiers in the
+    /// enclosing scope (lowered to Rust's let-else).
+    KwGuard,
 
     // --- Operators ---
     DotDot,
@@ -173,6 +181,7 @@ impl TokenKind {
             "false" => Some(Self::KwFalse),
             "extern" => Some(Self::KwExtern),
             "unsafe" => Some(Self::KwUnsafe),
+            "guard" => Some(Self::KwGuard),
             _ => None,
         }
     }
@@ -206,15 +215,16 @@ impl TokenKind {
                 | Self::KwFalse
                 | Self::KwExtern
                 | Self::KwUnsafe
+                | Self::KwGuard
         )
     }
 
-    /// All 25 reserved keywords as a slice of string literals.
+    /// All reserved keywords as a slice of string literals.
     pub fn all_keywords() -> &'static [&'static str] {
         &[
             "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
             "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-            "true", "false", "extern", "unsafe",
+            "true", "false", "extern", "unsafe", "guard",
         ]
     }
 }
@@ -264,6 +274,7 @@ impl fmt::Display for TokenKind {
             Self::KwFalse => write!(f, "false"),
             Self::KwExtern => write!(f, "extern"),
             Self::KwUnsafe => write!(f, "unsafe"),
+            Self::KwGuard => write!(f, "guard"),
             // Operators
             Self::DotDot => write!(f, ".."),
             Self::DotDotEq => write!(f, "..="),

@@ -37,8 +37,8 @@
 //! skipping peek/advance so existing parsers compose unchanged.
 
 use buff_lang_ast::{
-    Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl, Ident,
-    ImportDecl, Param, ReexportDecl, Stmt, TypeRef,
+    Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl,
+    GuardCondition, Ident, ImportDecl, Param, ReexportDecl, Stmt, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -95,6 +95,7 @@ pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError>
             Ok(Stmt::Continue(tok.span))
         }
         Some(TokenKind::KwFor) => parse_for(stream),
+        Some(TokenKind::KwGuard) => parse_guard(stream),
         _ => parse_assignment_or_expr_stmt(stream),
     }
 }
@@ -693,6 +694,121 @@ fn parse_for_let(
         pattern,
         value,
         body,
+        span,
+    })
+}
+
+/// Parse an early-return guard: `guard <cond>[, <cond>...] else { block }`
+/// (T73).
+///
+/// Shape:
+/// - `guard BOOL_EXPR else { ... }` — boolean condition.
+/// - `guard let PATTERN = EXPR else { ... }` — let-binding (introduces the
+///   pattern's names into the enclosing scope when the guard passes).
+/// - `guard let PATTERN = EXPR, BOOL_EXPR, ... else { ... }` — multiple
+///   comma-separated conditions (mixed let/bool); ALL must succeed for the
+///   guard to pass.
+///
+/// The leading `guard` is consumed here. Conditions are parsed left-to-right;
+/// for each, a peek of `let` routes to the let-binding path (reusing the
+/// shared [`parse_pattern`], same one match/T71-destructuring/T72-if-let use),
+/// anything else is parsed as a boolean expression via [`parse_expression`].
+/// The separator is `,` (comma). The list ends at the mandatory `else`
+/// keyword. The else-block is parsed via [`parse_block`] (brace OR layout).
+///
+/// Codegen emits, IN ORDER, one Rust statement per condition:
+/// - `let PATTERN = EXPR else { ... };` (Rust let-else; bindings stay in
+///   scope — that's the whole point of guard).
+/// - `if !(BOOL_EXPR) { ... }` (negated condition; the else-block runs when
+///   the original is false).
+///
+/// # Errors
+///
+/// Returns [`ParseError`] on:
+/// - missing `else` after the condition list,
+/// - empty condition list (`guard else { ... }`),
+/// - malformed pattern / expression / else-block.
+fn parse_guard(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    let source_id = stream.source_id();
+    let guard_tok = stream.expect(TokenKind::KwGuard)?;
+    let start = guard_tok.span.start;
+
+    // Parse a comma-separated list of conditions. Stop at `else`.
+    //
+    // Shape: `cond ("," cond)* ","? "else"`. The first condition is
+    // mandatory (an empty `guard else { ... }` is a parse error). After
+    // each condition we accept either `,` (with optional trailing comma
+    // before `else`) or `else` directly.
+    let mut conditions: Vec<GuardCondition> = Vec::new();
+    loop {
+        // After the first condition, the next token must be `,` or `else`.
+        if !conditions.is_empty() {
+            match stream.peek_kind() {
+                Some(TokenKind::KwElse) => break,
+                Some(TokenKind::Comma) => {
+                    stream.advance(); // consume `,`
+                                      // Trailing comma: `guard a, else { ... }` is allowed.
+                    if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) {
+                        break;
+                    }
+                }
+                Some(other) => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected `,` or `else` in guard, found `{other}`"),
+                        stream
+                            .peek()
+                            .map(|t| t.span)
+                            .unwrap_or_else(|| stream.eof_span()),
+                    )));
+                }
+                None => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        "unterminated guard (missing `else`)",
+                        stream.eof_span(),
+                    )));
+                }
+            }
+        }
+        // The next token starts a condition (or it's `else`/EOF, which is
+        // an error: empty condition list, or trailing-comma-only).
+        if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) | stream.peek_kind().is_none() {
+            return Err(ParseError::new(Diagnostic::error(
+                "expected at least one condition after `guard`",
+                stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span()),
+            )));
+        }
+        // Parse one condition: either `let PATTERN = EXPR` or a BOOL expr.
+        let cond = if matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
+            let let_tok = stream.expect(TokenKind::KwLet)?;
+            let cond_start = let_tok.span.start;
+            let pattern = parse_pattern(stream)?;
+            stream.expect(TokenKind::Assign)?;
+            let value = parse_expression(stream)?;
+            let end = value.span().end;
+            GuardCondition::Let {
+                pattern,
+                value,
+                span: Span::new(cond_start, end, source_id),
+            }
+        } else {
+            let expr = parse_expression(stream)?;
+            GuardCondition::Bool(expr)
+        };
+        conditions.push(cond);
+    }
+
+    // Consume `else`.
+    stream.expect(TokenKind::KwElse)?;
+
+    // Parse the else-block (brace OR layout form).
+    let else_block = parse_block(stream)?;
+    let span = Span::new(start, else_block.span.end, source_id);
+    Ok(Stmt::Guard {
+        conditions,
+        else_block,
         span,
     })
 }
@@ -1858,7 +1974,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
         | Stmt::ForIn { span, .. }
         | Stmt::ForWhile { span, .. }
         | Stmt::LetPattern { span, .. }
-        | Stmt::ForLet { span, .. } => span.end,
+        | Stmt::ForLet { span, .. }
+        | Stmt::Guard { span, .. } => span.end,
     }
 }
 

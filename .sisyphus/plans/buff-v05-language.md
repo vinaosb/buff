@@ -960,7 +960,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `if let Some(x) = opt { print(x) }` → assert Rust `if let`. Evidence: task-72-if-let.txt
   **Commit**: `feat(parser): add if-let and for-let pattern bindings`
 
-- [ ] **T73**: Early return guards [deep]
+- [x] **T73**: Early return guards [deep]
   **What to do** (TDD): RED: `guard let Some(x) = opt, x > 0 else { return }` → early exit if condition fails. GREEN: parse `guard` keyword, codegen to inverted if + early return.
   **Acceptance**: `cargo test -p buff-lang-parser guards` passes. Guard with multiple conditions works.
   **QA**: Codegen `guard x > 0 else { return 0 }` → assert early return pattern. Evidence: task-73-guards.txt

@@ -585,6 +585,36 @@ impl TypeInferencer {
                 }
                 Ok(Type::Void)
             }
+            // T73: `guard <conds> else { block }` — infer each condition's
+            // value/expr; for `let` conditions, bind each pattern name to
+            // Unknown (v0.5 deferral — same as ForLet/LetPattern). The
+            // let-bindings are introduced IN THE ENCLOSING SCOPE (the
+            // guard-passthrough path), so subsequent statements can read
+            // them. Walk the else-block for its side effects on the env.
+            // The whole statement is `()` (Void).
+            Stmt::Guard {
+                conditions,
+                else_block,
+                ..
+            } => {
+                for c in conditions {
+                    match c {
+                        buff_lang_ast::GuardCondition::Let { pattern, value, .. } => {
+                            let _ = self.infer_expr(value)?;
+                            for b in pattern.bindings() {
+                                self.env.insert(&b.name, Type::Unknown);
+                            }
+                        }
+                        buff_lang_ast::GuardCondition::Bool(e) => {
+                            let _ = self.infer_expr(e)?;
+                        }
+                    }
+                }
+                for s in &else_block.stmts {
+                    let _ = self.infer_stmt(s)?;
+                }
+                Ok(Type::Void)
+            }
         }
     }
 }

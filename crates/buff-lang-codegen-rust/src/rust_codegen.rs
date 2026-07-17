@@ -768,6 +768,25 @@ impl RustCodegen {
     fn lower_block(&mut self, block: &Block) -> Result<syn::Block, CodegenError> {
         let mut stmts = Vec::with_capacity(block.stmts.len());
         for stmt in &block.stmts {
+            // T73: `Stmt::Guard` lowers to MULTIPLE sibling `syn::Stmt`s at
+            // the same scope level (one per condition). The let-else form's
+            // pattern bindings MUST remain in scope for subsequent
+            // statements in the SAME function block — wrapping them in an
+            // inner block would scope-kill the bindings and defeat the
+            // purpose of guard. So we special-case Guard here and push all
+            // of its lowered conditions directly into `stmts`. The
+            // [`Self::lower_stmt`] arm for Guard emits a single wrapped
+            // `syn::Stmt::Block` as a fallback for non-block call paths
+            // (none currently exist, but the API contract requires it).
+            if let Stmt::Guard {
+                conditions,
+                else_block,
+                ..
+            } = stmt
+            {
+                self.lower_guard_conditions_into(conditions, else_block, &mut stmts)?;
+                continue;
+            }
             stmts.push(self.lower_stmt(stmt)?);
         }
         Ok(syn::Block {
@@ -1007,6 +1026,33 @@ impl RustCodegen {
                 body,
                 ..
             } => self.lower_for_let(pattern, value, body),
+            Stmt::Guard {
+                conditions,
+                else_block,
+                ..
+            } => {
+                // T73: fallback single-stmt path. Real call paths go
+                // through [`Self::lower_block`] which special-cases Guard
+                // and pushes each condition as a separate sibling stmt at
+                // the same scope level (preserving let-else bindings). For
+                // the rare case where a Guard reaches the single-stmt API
+                // directly, we wrap the multi-stmt sequence in a
+                // `syn::Expr::Block`. **Caveat**: this wrapping scopes the
+                // let-bindings to the inner block, defeating one of guard's
+                // main features; use [`Self::lower_block`] for proper
+                // scope-preserving lowering.
+                let mut inner = Vec::with_capacity(conditions.len());
+                self.lower_guard_conditions_into(conditions, else_block, &mut inner)?;
+                let block = syn::ExprBlock {
+                    attrs: Vec::new(),
+                    label: None,
+                    block: syn::Block {
+                        brace_token: Default::default(),
+                        stmts: inner,
+                    },
+                };
+                Ok(SynStmt::Expr(SynExpr::Block(block), None))
+            }
         }
     }
 
@@ -1370,6 +1416,75 @@ impl RustCodegen {
         let while_let_expr = syn::parse2::<SynExpr>(tokens)
             .map_err(|e| self.unsupported(&format!("while-let codegen parse: {e}")))?;
         Ok(SynStmt::Expr(while_let_expr, Some(Default::default())))
+    }
+
+    /// Lower a [`Stmt::Guard`]'s conditions into MULTIPLE sibling Rust
+    /// statements appended to `out` (T73).
+    ///
+    /// Each condition emits exactly ONE Rust statement, in source order:
+    ///
+    /// - [`GuardCondition::Let`] → Rust let-else:
+    ///   ```ignore
+    ///   let #pat = #value else #else_block;
+    ///   ```
+    ///   The pattern bindings stay in scope for subsequent statements in
+    ///   the SAME function block (the whole point of guard). Built via
+    ///   `quote!` + `syn::parse2::<syn::Stmt>` — syn's let-else is
+    ///   `syn::Local` with `init.diverge = Some((else, block))`.
+    ///
+    /// - [`GuardCondition::Bool`] → negated if:
+    ///   ```ignore
+    ///   if !(#expr) #else_block
+    ///   ```
+    ///   The else-block runs when the original condition is FALSE (i.e.
+    ///   the guard fails). Built via `quote!` + `syn::parse2::<syn::Stmt>`.
+    ///
+    /// The `else_block` is re-lowered for EACH condition (so a 3-condition
+    /// guard produces 3 copies of the else-block in the Rust output). This
+    /// is correct semantically: each failing condition independently
+    /// dispatches to the same user-written else-block. An alternative
+    /// (single shared else-block via control-flow manipulation) would
+    /// require reshaping the control graph — overkill for v0.5.
+    fn lower_guard_conditions_into(
+        &mut self,
+        conditions: &[buff_lang_ast::GuardCondition],
+        else_block: &Block,
+        out: &mut Vec<SynStmt>,
+    ) -> Result<(), CodegenError> {
+        for cond in conditions {
+            match cond {
+                buff_lang_ast::GuardCondition::Let { pattern, value, .. } => {
+                    let pat = self.lower_pattern(pattern, false)?;
+                    let val = self.lower_expr(value)?;
+                    let else_blk = self.lower_block(else_block)?;
+                    // Build `let #pat = #val else #else_blk ;` via quote. The
+                    // syn let-else form is `let pat = expr else block;` (the
+                    // block must diverge — Rust enforces this at compile time).
+                    let tokens: proc_macro2::TokenStream = quote::quote! {
+                        let #pat = #val else #else_blk ;
+                    };
+                    let stmt = syn::parse2::<SynStmt>(tokens).map_err(|e| {
+                        self.unsupported(&format!("guard let-else codegen parse: {e}"))
+                    })?;
+                    out.push(stmt);
+                }
+                buff_lang_ast::GuardCondition::Bool(expr) => {
+                    let cond_expr = self.lower_expr(expr)?;
+                    let else_blk = self.lower_block(else_block)?;
+                    // Build `if !(#cond_expr) #else_blk` — the negation
+                    // means the else-block runs when the ORIGINAL guard
+                    // condition is FALSE (i.e. the guard fails).
+                    let tokens: proc_macro2::TokenStream = quote::quote! {
+                        if ! ( #cond_expr ) #else_blk
+                    };
+                    let if_expr = syn::parse2::<SynExpr>(tokens).map_err(|e| {
+                        self.unsupported(&format!("guard bool-if codegen parse: {e}"))
+                    })?;
+                    out.push(SynStmt::Expr(if_expr, Some(Default::default())));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Lower a Buff **prelude** call to the corresponding Rust idiom (T96).
@@ -3609,6 +3724,19 @@ fn stmt_uses_matrix(stmt: &Stmt) -> bool {
         Stmt::ForWhile { cond, body, .. } => expr_uses_matrix(cond) || block_uses_matrix(body),
         // T72: `for let PAT = EXPR { body }` — value + body may use Matrix.
         Stmt::ForLet { value, body, .. } => expr_uses_matrix(value) || block_uses_matrix(body),
+        // T73: `guard <conds> else { block }` — conditions + else may use
+        // Matrix (any `Matrix.new` in a condition or the else-block triggers
+        // emit-on-demand). Let-value and Bool-expr both count.
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_matrix(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_matrix(e),
+            }) || block_uses_matrix(else_block)
+        }
     }
 }
 
@@ -3801,6 +3929,19 @@ fn stmt_uses_error(stmt: &Stmt) -> bool {
         Stmt::ForWhile { cond, body, .. } => expr_uses_error(cond) || block_uses_error(body),
         // T72: `for let PAT = EXPR { body }` — value + body may use Error.
         Stmt::ForLet { value, body, .. } => expr_uses_error(value) || block_uses_error(body),
+        // T73: `guard <conds> else { block }` — conditions + else may use
+        // Error (any `Error(...)` in a condition or the else-block triggers
+        // emit-on-demand of the builtin Error struct).
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_error(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_error(e),
+            }) || block_uses_error(else_block)
+        }
     }
 }
 
