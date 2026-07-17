@@ -248,10 +248,17 @@ fn embedding_no_methods_no_delegation() {
     ));
     let src = generate_rust(&[person, employee]).expect("codegen must succeed");
 
-    // No delegation impl for Employee.
+    // No DELEGATION body for Employee — the absence of an `extend Person`
+    // block means no methods to forward, so no `self.person.<method>()`
+    // forwarding appears in any impl block.
+    //
+    // NOTE: T107 emits per-field `copy_<field>` methods on every non-empty
+    // struct (so `impl Employee { pub fn copy_person(..) .. }` IS present),
+    // but those are NOT delegation — they're record-update methods. The
+    // delegation-specific assertion is on the forwarding-body pattern.
     assert!(
-        !src.contains("impl Employee"),
-        "expected NO `impl Employee` delegation when Person has no methods, got:\n{src}"
+        !src.contains("self.person."),
+        "expected NO delegation body `self.person.<method>()` when Person has no methods, got:\n{src}"
     );
     must_reparse(&src);
 }
@@ -309,9 +316,15 @@ fn embedding_primitive_field_not_delegated() {
     // struct Employee { salary: Float }   (Float is not a declared struct)
     let employee = Decl::StructDecl(struct_decl("Employee", vec![("salary", named_ty("Float"))]));
     let src = generate_rust(&[employee]).expect("codegen must succeed");
+    // No DELEGATION forwarding through `self.salary.<method>()` — Float is
+    // a primitive, not a declared struct, so it has no embeddable methods.
+    //
+    // NOTE: T107 still emits `impl Employee { pub fn copy_salary(..) .. }`
+    // (record-update method), but that's NOT delegation. The delegation-
+    // specific assertion is on the forwarding-body pattern.
     assert!(
-        !src.contains("impl Employee"),
-        "expected NO `impl Employee` for primitive-only fields, got:\n{src}"
+        !src.contains("self.salary."),
+        "expected NO delegation body `self.salary.<method>()` for primitive-only fields, got:\n{src}"
     );
     must_reparse(&src);
 }

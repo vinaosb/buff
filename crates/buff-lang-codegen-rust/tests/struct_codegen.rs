@@ -172,16 +172,33 @@ fn _param_smoke() -> Param {
 #[test]
 fn struct_codegen_decl_point_two_floats_snapshot() {
     // `struct Point { x: Float, y: Float }` →
-    // `#[derive(Clone, Debug)] pub struct Point { pub x: f32, pub y: f32 }`
+    // `#[derive(Clone, PartialEq, Debug)] pub struct Point { pub x: f32, pub y: f32 }`
+    //
+    // T107: floats don't impl Hash, so a struct with float fields derives
+    // `Clone, PartialEq, Debug` (NO `Hash`). PartialEq is always safe
+    // (floats impl PartialEq). T107 also emits per-field `copy_<field>`
+    // immutable-update methods in an `impl Point { ... }` block.
     let src = codegen_struct(struct_decl(
         "Point",
         vec![("x", named_ty("Float")), ("y", named_ty("Float"))],
     ));
     insta::assert_snapshot!(src, @r###"
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub struct Point {
         pub x: f32,
         pub y: f32,
+    }
+    impl Point {
+        pub fn copy_x(&self, x: f32) -> Self {
+            let mut c = self.clone();
+            c.x = x;
+            c
+        }
+        pub fn copy_y(&self, y: f32) -> Self {
+            let mut c = self.clone();
+            c.y = y;
+            c
+        }
     }
     "###);
     must_reparse(&src);
@@ -191,13 +208,16 @@ fn struct_codegen_decl_point_two_floats_snapshot() {
 fn struct_codegen_decl_person_string_int() {
     // `struct Person { name: String, age: Int }` →
     // `pub name: String, pub age: i64`
+    //
+    // T107: String + Int are both Hash-safe → derives
+    // `Clone, PartialEq, Hash, Debug` (the full set).
     let src = codegen_struct(struct_decl(
         "Person",
         vec![("name", named_ty("String")), ("age", named_ty("Int"))],
     ));
     assert!(
-        src.contains("#[derive(Clone, Debug)]"),
-        "expected derive attribute in: {src}"
+        src.contains("#[derive(Clone, PartialEq, Hash, Debug)]"),
+        "expected `#[derive(Clone, PartialEq, Hash, Debug)]` for Hash-safe struct in: {src}"
     );
     assert!(
         src.contains("pub struct Person"),
@@ -217,14 +237,23 @@ fn struct_codegen_decl_person_string_int() {
 #[test]
 fn struct_codegen_decl_empty_struct() {
     // An empty struct still gets derives + pub struct + empty body.
+    //
+    // T107: zero fields means all (zero) fields are Hash-safe → derives the
+    // full `Clone, PartialEq, Hash, Debug` set. No `impl Empty { ... }`
+    // block is emitted (no fields → no copy methods).
     let src = codegen_struct(struct_decl("Empty", Vec::new()));
     assert!(
-        src.contains("#[derive(Clone, Debug)]"),
-        "expected derive in: {src}"
+        src.contains("#[derive(Clone, PartialEq, Hash, Debug)]"),
+        "expected full derive set (incl. Hash) for empty struct in: {src}"
     );
     assert!(
         src.contains("pub struct Empty"),
         "expected pub struct in: {src}"
+    );
+    // T107: an empty struct emits NO copy methods (and NO empty impl block).
+    assert!(
+        !src.contains("impl Empty"),
+        "empty struct should NOT emit an empty impl block: {src}"
     );
     // Re-parsing confirms the empty body is valid Rust.
     must_reparse(&src);
@@ -423,6 +452,9 @@ fn struct_codegen_repr_c_emitted_when_struct_marked() {
     // declaration carries `#[repr(C)]` BETWEEN the derive attribute and the
     // `pub struct` line. Full GPU-dispatch auto-detection is deferred to v1.0;
     // T26 provides the emission mechanism only.
+    //
+    // T107: GpuPoint has Float fields → derives `Clone, PartialEq, Debug`
+    // (NO Hash — floats don't impl Hash). The repr(C) emission is unaffected.
     use buff_lang_codegen_rust::RustCodegen;
     let d = struct_decl(
         "GpuPoint",
@@ -435,8 +467,12 @@ fn struct_codegen_repr_c_emitted_when_struct_marked() {
         .expect("codegen must succeed");
     let src = buff_lang_codegen_rust::format_file(&file);
     assert!(
-        src.contains("#[derive(Clone, Debug)]"),
+        src.contains("#[derive(Clone, PartialEq, Debug)]"),
         "expected derive attribute in: {src}"
+    );
+    assert!(
+        !src.contains("Hash"),
+        "Float-field struct must NOT derive Hash: {src}"
     );
     assert!(
         src.contains("#[repr(C)]"),
@@ -448,7 +484,9 @@ fn struct_codegen_repr_c_emitted_when_struct_marked() {
     );
     // Ordering: derive attribute must come before repr(C), which must come
     // before `pub struct`. We check this by comparing byte offsets.
-    let derive_off = src.find("#[derive(Clone, Debug)]").expect("derive present");
+    let derive_off = src
+        .find("#[derive(Clone, PartialEq, Debug)]")
+        .expect("derive present");
     let repr_off = src.find("#[repr(C)]").expect("repr(C) present");
     let struct_off = src.find("pub struct GpuPoint").expect("pub struct present");
     assert!(

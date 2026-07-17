@@ -178,6 +178,17 @@ pub struct RustCodegen {
     /// (the T29 flaky-test lesson). Populated during [`Self::ast_typeref_to_syn`]
     /// when it encounters a `TypeRef::Union`.
     collected_unions: BTreeMap<String, Vec<TypeRef>>,
+    /// T107: names of USER-DEFINED structs that can safely derive `Hash`.
+    /// Populated by [`Self::compute_hash_safe_structs`] at the top of
+    /// [`Self::generate`] (BEFORE the main lowering loop, so
+    /// [`Self::lower_struct_decl`] can consult it when deciding whether to
+    /// include `Hash` in the struct's derive list). A struct is in this set
+    /// iff ALL its fields are of Hash-impl'ing Rust types — recursively
+    /// across user struct references (transitive Hash-safety). A `BTreeSet`
+    /// (not `HashSet`) for deterministic membership checks (the value is
+    /// only queried by membership, but consistency with the rest of the
+    /// state is easier to reason about).
+    hash_safe_structs: BTreeSet<String>,
 }
 
 impl RustCodegen {
@@ -196,6 +207,7 @@ impl RustCodegen {
             warnings: Vec::new(),
             extern_crates: BTreeSet::new(),
             collected_unions: BTreeMap::new(),
+            hash_safe_structs: BTreeSet::new(),
         }
     }
 
@@ -300,6 +312,14 @@ impl RustCodegen {
         //      `spawn expr` → `tokio::spawn(async move { expr })` and
         //      `t.result()` → `t.await`.
         self.async_fns = buff_lang_types::analyze_async(decls).names;
+        // T107: compute the set of user-defined structs that can safely
+        // derive `Hash`. Must run BEFORE the main lowering loop because
+        // `lower_struct_decl` consults `self.hash_safe_structs` when
+        // deciding whether to include `Hash` in the derive list. The
+        // analysis is a fixpoint iteration: a struct is Hash-safe iff ALL
+        // its fields are Hash-safe, recursively across user struct
+        // references (so `struct A { b: B }` is Hash-safe iff `B` is too).
+        self.hash_safe_structs = self.compute_hash_safe_structs(decls);
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -344,6 +364,16 @@ impl RustCodegen {
         // delegation impls reference the structs by name and the embedded
         // type's trait is in scope).
         self.emit_embedding_delegation(decls, &mut items)?;
+        // T107: emit auto-derived record methods — per-field
+        // `copy_<field>(&self, <field>: <ty>) -> Self` immutable-update
+        // methods. One `impl Struct { ... }` block per non-empty user
+        // struct, containing one `copy_<field>` method per field. The body
+        // clones `self`, reassigns the field, and returns the clone —
+        // providing the immutable-update ergonomics Buff mandates without
+        // exposing `&mut` to the user. Emitted AFTER the main lowering
+        // loop (alongside T92's delegation pass) so the struct decls are
+        // already in `items` by the time the impl blocks land.
+        self.emit_record_copy_methods(decls, &mut items)?;
         Ok(File {
             shebang: None,
             attrs: Vec::new(),
@@ -415,12 +445,18 @@ impl RustCodegen {
     /// Emits (conceptually):
     ///
     /// ```rust,ignore
-    /// #[derive(Clone, Debug)]
+    /// #[derive(Clone, PartialEq, Debug)]                 // or with `Hash` too
     /// pub struct Name {
     ///     pub field: <rust_type>,
     ///     ...
     /// }
     /// ```
+    ///
+    /// T107 extends T26's `#[derive(Clone, Debug)]` to also derive
+    /// `PartialEq` (always — every Rust primitive Buff uses impls
+    /// `PartialEq`, including floats) and `Hash` (CONDITIONALLY — only when
+    /// every field's Rust type impls `Hash`; see [`struct_derive_attrs`]
+    /// and [`Self::compute_hash_safe_structs`] for the conditional logic).
     ///
     /// Every field is `pub` so generated code can construct and read struct
     /// values without accessor boilerplate (Buff hides encapsulation from
@@ -435,13 +471,14 @@ impl RustCodegen {
     /// an additional `#[repr(C)]` attribute is emitted BETWEEN the derive
     /// attribute and the `pub struct` line. The marker set is populated by
     /// future GPU-dispatch analysis (v1.0); T26 provides the emission
-    /// mechanism only. See [`derive_and_repr_attrs`] for attribute ordering.
+    /// mechanism only. See [`struct_derive_attrs`] for attribute ordering.
     ///
     /// # `traits` field
     ///
     /// The `traits` field on [`AstStructDecl`] is currently ignored at
-    /// codegen time — Buff emits blanket `Clone + Debug` derives; user-specified
-    /// trait impls are a later task.
+    /// codegen time — Buff emits blanket `Clone + PartialEq + Debug`
+    /// derives (plus `Hash` when safe); user-specified trait impls are a
+    /// later task.
     fn lower_struct_decl(&mut self, s: &AstStructDecl) -> Result<ItemStruct, CodegenError> {
         // Build named fields: each field is `pub name: <rust_type>`. Field
         // visibility is always `pub` so any generated constructor / user
@@ -464,8 +501,21 @@ impl RustCodegen {
         // `mark_struct_repr_c`. Full GPU-dispatch auto-detection lands in v1.0.
         let emit_repr_c = self.repr_c_struct_names.contains(&s.name.name);
 
+        // T107: build the derive attribute set. ALWAYS include Clone,
+        // PartialEq, Debug. Include Hash ONLY when EVERY field's type is
+        // Hash-safe (recursively across user struct references — the
+        // transitive fixpoint is precomputed in `self.hash_safe_structs`).
+        // Rust's derived `Hash` impl requires ALL field types to impl
+        // `Hash`, so a struct with a Float/Double/Vector/Map field (or a
+        // field whose user-struct type itself can't derive Hash) must NOT
+        // carry the Hash derive — rustc would reject the impl.
+        let all_fields_hash_safe = s
+            .fields
+            .iter()
+            .all(|(_, ty)| type_is_hash_safe(ty, &self.hash_safe_structs));
+
         Ok(ItemStruct {
-            attrs: derive_and_repr_attrs(emit_repr_c),
+            attrs: struct_derive_attrs(emit_repr_c, all_fields_hash_safe),
             vis: Visibility::Public(Default::default()),
             struct_token: Default::default(),
             ident: ast_ident_to_syn(&s.name),
@@ -3838,6 +3888,175 @@ fn field_method_call_expr(
     })
 }
 
+/// T107: build ONE `copy_<field>` immutable-update method for a struct.
+///
+/// Emits:
+///
+/// ```rust,ignore
+/// pub fn copy_<field>(&self, <field>: <rust_ty>) -> Self {
+///     let mut c = self.clone();
+///     c.<field> = <field>;
+///     c
+/// }
+/// ```
+///
+/// The method is `pub` (so user code can call it), takes `&self` (so the
+/// original value is untouched — Buff's immutable-update ergonomics), and
+/// returns `Self` (the cloned-and-updated value). The body clones `self`,
+/// mutably reassigns the named field, and returns the clone.
+///
+/// Built entirely via `syn` struct construction (no `parse_quote!`, no
+/// string formatting — the single string producer is `prettyplease::unparse`
+/// via [`crate::format`]). The `&self` receiver is constructed by hand via
+/// [`syn::FnArg::Receiver`] with `reference: Some(..)`; the `ty` field is
+/// the reconstructed `&Self` reference type (syn's invariant when
+/// `colon_token` is `None`).
+fn build_record_copy_method(field_name: &str, field_ty: SynType) -> syn::ImplItemFn {
+    let method_ident = Ident::new(&format!("copy_{field_name}"), ProcSpan::call_site());
+    let field_ident = Ident::new(field_name, ProcSpan::call_site());
+
+    // `&self` receiver — `reference: Some((&, None))` spells the bare
+    // `&self` shorthand. The `ty` field carries the reconstructed `&Self`
+    // (syn's documented invariant: when `colon_token` is `None`, `ty` is
+    // the reconstructed receiver type — `Self` for `self`, `&Self` for
+    // `&self`, etc.).
+    let self_ty = SynType::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path::from(Ident::new("Self", ProcSpan::call_site())),
+    });
+    let ref_self_ty = SynType::Reference(syn::TypeReference {
+        and_token: Default::default(),
+        lifetime: None,
+        mutability: None,
+        elem: Box::new(self_ty),
+    });
+    let self_receiver = syn::FnArg::Receiver(syn::Receiver {
+        attrs: Vec::new(),
+        reference: Some((Default::default(), None)),
+        mutability: None,
+        self_token: Default::default(),
+        colon_token: None,
+        ty: Box::new(ref_self_ty),
+    });
+
+    // `<field>: <rust_ty>` — the new-value param.
+    let value_param = syn::FnArg::Typed(syn::PatType {
+        attrs: Vec::new(),
+        pat: Box::new(Pat::Ident(PatIdent {
+            attrs: Vec::new(),
+            by_ref: None,
+            mutability: None,
+            ident: field_ident.clone(),
+            subpat: None,
+        })),
+        colon_token: Default::default(),
+        ty: Box::new(field_ty),
+    });
+
+    // `-> Self` return type.
+    let return_ty = SynType::Path(syn::TypePath {
+        qself: None,
+        path: syn::Path::from(Ident::new("Self", ProcSpan::call_site())),
+    });
+
+    // Body statements, in order:
+    //   1. `let mut c = self.clone();`
+    //   2. `c.<field> = <field>;`
+    //   3. `c` (trailing expression — the returned clone).
+    let self_path = syn::Path::from(Ident::new("self", ProcSpan::call_site()));
+    let self_expr = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: self_path,
+    });
+    // `self.clone()` — zero-arg method call.
+    let clone_call = SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(self_expr),
+        dot_token: Default::default(),
+        method: Ident::new("clone", ProcSpan::call_site()),
+        turbofish: None,
+        paren_token: Default::default(),
+        args: Punctuated::new(),
+    });
+    let c_ident = Ident::new("c", ProcSpan::call_site());
+    let let_stmt = SynStmt::Local(syn::Local {
+        attrs: Vec::new(),
+        let_token: Default::default(),
+        pat: Pat::Ident(PatIdent {
+            attrs: Vec::new(),
+            by_ref: None,
+            mutability: Some(Default::default()),
+            ident: c_ident.clone(),
+            subpat: None,
+        }),
+        init: Some(syn::LocalInit {
+            eq_token: Default::default(),
+            expr: Box::new(clone_call),
+            diverge: None,
+        }),
+        semi_token: Default::default(),
+    });
+
+    // `c.<field> = <field>;` — assignment statement.
+    let c_expr = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: syn::Path::from(c_ident.clone()),
+    });
+    let field_access = SynExpr::Field(syn::ExprField {
+        attrs: Vec::new(),
+        base: Box::new(c_expr),
+        dot_token: Default::default(),
+        member: syn::Member::Named(field_ident.clone()),
+    });
+    let value_expr = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: syn::Path::from(field_ident),
+    });
+    let assign_stmt = SynStmt::Expr(
+        SynExpr::Assign(syn::ExprAssign {
+            attrs: Vec::new(),
+            left: Box::new(field_access),
+            eq_token: Default::default(),
+            right: Box::new(value_expr),
+        }),
+        Some(Default::default()),
+    );
+
+    // Trailing expression: `c` (the return value).
+    let trailing_expr = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: syn::Path::from(c_ident),
+    });
+    let trailing_stmt = SynStmt::Expr(trailing_expr, None);
+
+    syn::ImplItemFn {
+        attrs: Vec::new(),
+        vis: Visibility::Public(Default::default()),
+        defaultness: None,
+        sig: Signature {
+            constness: None,
+            asyncness: None,
+            unsafety: None,
+            abi: None,
+            fn_token: Default::default(),
+            ident: method_ident,
+            generics: syn::Generics::default(),
+            paren_token: Default::default(),
+            inputs: [self_receiver, value_param].into_iter().collect(),
+            variadic: None,
+            output: ReturnType::Type(Default::default(), Box::new(return_ty)),
+        },
+        block: syn::Block {
+            brace_token: Default::default(),
+            stmts: vec![let_stmt, assign_stmt, trailing_stmt],
+        },
+    }
+}
+
 /// T32: the single named, configurable Buff→Rust primitive-type mapping
 /// table.
 ///
@@ -4243,20 +4462,136 @@ fn derive_and_repr_attrs(emit_repr_c: bool) -> Vec<syn::Attribute> {
     };
     let mut attrs = vec![derive_attr];
     if emit_repr_c {
-        // `#[repr(C)]` — a path with one generic-style argument `(C)`.
-        let repr_attr = syn::Attribute {
-            pound_token: Default::default(),
-            style: syn::AttrStyle::Outer,
-            bracket_token: Default::default(),
-            meta: syn::Meta::List(syn::MetaList {
-                path: rust_path("repr"),
-                delimiter: syn::MacroDelimiter::Paren(Default::default()),
-                tokens: quote::quote! { C },
-            }),
-        };
-        attrs.push(repr_attr);
+        push_repr_c_attr(&mut attrs);
     }
     attrs
+}
+
+/// T107: build the derive attribute set for a STRUCT.
+///
+/// Structs ALWAYS derive `Clone`, `PartialEq`, `Debug` (T107 extends T26's
+/// `Clone + Debug` baseline). The `Hash` derive is added CONDITIONALLY —
+/// only when [`type_is_hash_safe`] reports that ALL the struct's field
+/// types (recursively, across user struct references) impl `Hash`.
+///
+/// Emits one of:
+///
+/// ```rust,ignore
+/// #[derive(Clone, PartialEq, Hash, Debug)]   // all fields Hash-safe
+/// #[derive(Clone, PartialEq, Debug)]         // some field non-Hash
+/// ```
+///
+/// followed by an optional `#[repr(C)]` (between derive and `pub struct`)
+/// when `emit_repr_c` is true — identical ordering to the T26 helper.
+///
+/// # Why `PartialEq` is unconditional
+///
+/// Every Rust primitive Buff maps to (`i64`, `f32`, `String`, `bool`,
+/// `rust_decimal::Decimal`, …) impls `PartialEq`, including floats (which
+/// impl `PartialEq` but NOT `Eq`/`Hash`). So `PartialEq` is always safe.
+///
+/// # Why `Hash` is conditional
+///
+/// Rust's derived `Hash` impl requires every field type to impl `Hash`.
+/// `f32` and `f64` do NOT impl `Hash` (NaN isn't hashable). `Vec<T>` and
+/// `HashMap<K,V>` do NOT impl `Hash` in std either. So a struct with a
+/// float/Vec/Map field cannot derive `Hash` — the caller must precompute
+/// field-Hash-safety (see [`RustCodegen::compute_hash_safe_structs`]) and
+/// pass the result via `include_hash`.
+fn struct_derive_attrs(emit_repr_c: bool, include_hash: bool) -> Vec<syn::Attribute> {
+    // Build the derive trait list as a single token stream. The order is
+    // `Clone, PartialEq, [Hash,] Debug` — `Debug` is always last (matches
+    // the existing T26 ordering and the test fixtures' expected spelling).
+    let mut trait_tokens = proc_macro2::TokenStream::new();
+    trait_tokens.extend(quote::quote! { Clone });
+    trait_tokens.extend(quote::quote! { , });
+    trait_tokens.extend(quote::quote! { PartialEq });
+    trait_tokens.extend(quote::quote! { , });
+    if include_hash {
+        trait_tokens.extend(quote::quote! { Hash });
+        trait_tokens.extend(quote::quote! { , });
+    }
+    trait_tokens.extend(quote::quote! { Debug });
+    let derive_attr = syn::Attribute {
+        pound_token: Default::default(),
+        style: syn::AttrStyle::Outer,
+        bracket_token: Default::default(),
+        meta: syn::Meta::List(syn::MetaList {
+            path: rust_path("derive"),
+            delimiter: syn::MacroDelimiter::Paren(Default::default()),
+            tokens: trait_tokens,
+        }),
+    };
+    let mut attrs = vec![derive_attr];
+    if emit_repr_c {
+        push_repr_c_attr(&mut attrs);
+    }
+    attrs
+}
+
+/// T107: push a `#[repr(C)]` outer attribute onto `attrs`. Shared by
+/// [`derive_and_repr_attrs`] (T26, enums + the legacy path) and
+/// [`struct_derive_attrs`] (T107, structs).
+fn push_repr_c_attr(attrs: &mut Vec<syn::Attribute>) {
+    attrs.push(syn::Attribute {
+        pound_token: Default::default(),
+        style: syn::AttrStyle::Outer,
+        bracket_token: Default::default(),
+        meta: syn::Meta::List(syn::MetaList {
+            path: rust_path("repr"),
+            delimiter: syn::MacroDelimiter::Paren(Default::default()),
+            tokens: quote::quote! { C },
+        }),
+    });
+}
+
+/// T107: is the given [`TypeRef`] "Hash-safe" — i.e. would the corresponding
+/// Rust type impl `Hash`?
+///
+/// Used by [`struct_derive_attrs`] (via [`RustCodegen::lower_struct_decl`])
+/// to decide whether a struct can carry the `Hash` derive. The check is
+/// RECURSIVE across composite types:
+///
+/// - **Named primitives**: `Int`/`Byte`/`Bits`/`Bool`/`String`/`Char`/
+///   `Decimal` → `true` (all map to Hash-impl'ing Rust types). `Float`/
+///   `Double` → `false` (f32/f64 don't impl Hash).
+/// - **Named user types** (struct/enum): `true` iff the type name is in
+///   `hash_safe_user_structs` — a precomputed set built by
+///   [`RustCodegen::compute_hash_safe_structs`] that does a fixpoint pass
+///   over all struct decls (so `struct A { b: B }` is Hash-safe iff `B` is
+///   too). Enums are conservatively assumed Hash-safe (their derived `Hash`
+///   impl requires all variant payload types to impl Hash; full conditional
+///   enum-Hash derivation is deferred to a later task).
+/// - **`Option<T>`**: `true` iff `T` is Hash-safe (Option<T>: Hash when T: Hash).
+/// - **`Tuple<T,U,…>` / `Union<A,B,…>`**: `true` iff EVERY member is
+///   Hash-safe. Union emits a wrapper enum, which derives Hash iff every
+///   variant payload impls Hash — same recursive rule.
+/// - **`Generic { base, args }`**: `false` — collections (`Vector<T>` →
+///   `Vec<T>`, `Map<K,V>` → `HashMap<K,V>`) don't impl Hash in std.
+///   Conservative: any named generic base is treated as a non-Hash collection.
+/// - **`Function { .. }`**: `false` — Buff closures lower to boxed `Fn` types
+///   which don't reliably impl Hash.
+fn type_is_hash_safe(ty: &TypeRef, hash_safe_user_structs: &BTreeSet<String>) -> bool {
+    match ty {
+        TypeRef::Named { name, .. } => match name.name.as_str() {
+            // Hash-impl'ing Rust primitives.
+            "Int" | "Byte" | "Bits" | "Bool" | "String" | "Char" | "Decimal" => true,
+            // Non-Hash primitives.
+            "Float" | "Double" => false,
+            // User-defined struct/enum name: consult the precomputed set.
+            // Unknown primitives (none today) and any name not in the table
+            // are user types — their Hash-safety is decided by the fixpoint
+            // analysis (struct) or the conservative-true rule (enum).
+            other => hash_safe_user_structs.contains(other),
+        },
+        TypeRef::Option(inner, _) => type_is_hash_safe(inner, hash_safe_user_structs),
+        // Tuple and Union: Hash-safe iff ALL members are Hash-safe.
+        TypeRef::Tuple(members, _) | TypeRef::Union(members, _) => members
+            .iter()
+            .all(|m| type_is_hash_safe(m, hash_safe_user_structs)),
+        // Collections (Vector, Map, …) and function types don't impl Hash.
+        TypeRef::Generic { .. } | TypeRef::Function { .. } => false,
+    }
 }
 
 /// Walk the declaration list looking for any `Matrix.new(...)` constructor
@@ -4858,6 +5193,165 @@ impl RustCodegen {
             brace_token: Default::default(),
             variants,
         })
+    }
+
+    /// T107: compute the set of USER-DEFINED struct names whose fields are
+    /// ALL Hash-safe (i.e. would let the struct carry the `#[derive(Hash)]`
+    /// attribute without rustc rejecting it).
+    ///
+    /// # Algorithm — fixpoint removal
+    ///
+    /// 1. Start with ALL declared user struct names in the "safe" set.
+    /// 2. Iterate: any struct whose fields are NOT all Hash-safe (consulting
+    ///    the current "safe" set for user-typed fields via [`type_is_hash_safe`])
+    ///    is REMOVED from the set.
+    /// 3. Repeat until no change (a fixpoint).
+    ///
+    /// The fixpoint handles TRANSITIVE Hash-safety: if `struct A { b: B }`
+    /// and `struct B { x: Float }`, then:
+    /// - Pass 1 removes `B` (Float field is not Hash-safe).
+    /// - Pass 2 removes `A` (its field `b: B` is no longer Hash-safe, since
+    ///   `B` was just evicted).
+    ///
+    /// Cycle safety: if `struct X { y: Y }` and `struct Y { x: X }` (a
+    /// cycle), both start in the set; if neither has any non-Hash field,
+    /// they STAY in the set (both derive Hash and Rust accepts it —
+    /// `#[derive(Hash)]` on a cyclic struct graph is fine because the
+    /// derived impl doesn't recurse infinitely; only the trait bounds need
+    /// to hold, which they do). If either has a Float field, both get
+    /// evicted in the fixpoint.
+    ///
+    /// # Why a precompute (not on-demand)
+    ///
+    /// `lower_struct_decl` is called in source order, so a struct may be
+    /// lowered BEFORE the structs it references. Precomputing the safe set
+    /// once, up-front in [`Self::generate`], means every per-struct
+    /// lowering decision sees the FULL program's Hash-safety info.
+    fn compute_hash_safe_structs(&self, decls: &[Decl]) -> BTreeSet<String> {
+        // Map: struct name → its fields (borrowed from decls).
+        let mut struct_fields: BTreeMap<String, &Vec<(buff_lang_ast::common::Ident, TypeRef)>> =
+            BTreeMap::new();
+        for decl in decls {
+            if let Decl::StructDecl(s) = decl {
+                struct_fields.insert(s.name.name.clone(), &s.fields);
+            }
+        }
+        // Fixpoint: start optimistic (all structs in), iteratively evict
+        // any struct whose fields aren't all Hash-safe. Bounded by
+        // struct count (each pass evicts at least one struct, or terminates).
+        let mut safe: BTreeSet<String> = struct_fields.keys().cloned().collect();
+        loop {
+            let prev_len = safe.len();
+            // Collect the names to evict this pass. We can't mutate `safe`
+            // while iterating its dependents, so buffer the evictions.
+            let to_evict: Vec<String> = struct_fields
+                .iter()
+                .filter_map(|(name, fields)| {
+                    // Only consider structs still in the running.
+                    if !safe.contains(name) {
+                        return None;
+                    }
+                    // If ANY field is not Hash-safe (against the current
+                    // `safe` set), this struct must be evicted.
+                    let all_safe = fields.iter().all(|(_, ty)| type_is_hash_safe(ty, &safe));
+                    if all_safe {
+                        None
+                    } else {
+                        Some(name.clone())
+                    }
+                })
+                .collect();
+            for name in &to_evict {
+                safe.remove(name);
+            }
+            if safe.len() == prev_len {
+                break;
+            }
+        }
+        safe
+    }
+
+    /// T107: emit per-struct `impl Struct { ... }` blocks containing the
+    /// auto-derived `copy_<field>` immutable-update methods.
+    ///
+    /// For each non-empty user struct, emits ONE inherent impl block with
+    /// one method per field:
+    ///
+    /// ```rust,ignore
+    /// impl Struct {
+    ///     pub fn copy_<field>(&self, <field>: <rust_ty>) -> Self {
+    ///         let mut c = self.clone();
+    ///         c.<field> = <field>;
+    ///         c
+    ///     }
+    ///     // … one per field
+    /// }
+    /// ```
+    ///
+    /// The method takes `&self` (immutable borrow — the original is
+    /// untouched, providing the immutable-update ergonomics Buff mandates),
+    /// CLONES it (requires the `Clone` derive — always present on structs
+    /// per T26+T107), reassigns the named field, and returns the clone.
+    ///
+    /// # Empty structs
+    ///
+    /// A struct with zero fields gets NO impl block (no methods to emit).
+    /// Emitting an empty `impl Struct { }` would be valid Rust but adds
+    /// noise to generated source for no value.
+    ///
+    /// # Ordering
+    ///
+    /// Impl blocks are pushed in SOURCE-STRUCT-DECLARATION ORDER (the
+    /// `decls` slice is walked in order, and only `Decl::StructDecl`
+    /// entries contribute). This makes the generated source deterministic
+    /// — the same input always produces byte-identical output (the T29
+    /// flaky-test lesson: never use HashMap iteration for codegen output).
+    ///
+    /// # Deferrals (v0.5)
+    ///
+    /// - **Multi-field copy**: `p.copy(name: "X", age: 31)` (multiple
+    ///   fields in one call) is not yet supported — only the per-field
+    ///   `copy_<field>(value)` form is generated.
+    /// - **Builder pattern**: a fluent `.with_<field>(value)` combinator
+    ///   chain is deferred.
+    /// - **Custom `to_string`**: a `Display` impl is not auto-derived.
+    fn emit_record_copy_methods(
+        &mut self,
+        decls: &[Decl],
+        items: &mut Vec<Item>,
+    ) -> Result<(), CodegenError> {
+        for decl in decls {
+            let s = match decl {
+                Decl::StructDecl(s) => s,
+                _ => continue,
+            };
+            // Skip empty structs — no fields means no copy methods (and we
+            // avoid emitting an empty `impl Struct { }` block).
+            if s.fields.is_empty() {
+                continue;
+            }
+            // Build one method per field, in source order.
+            let mut impl_items: Vec<syn::ImplItem> = Vec::with_capacity(s.fields.len());
+            for (field_name, field_type) in &s.fields {
+                let field_rust_ty = self.ast_typeref_to_syn(field_type)?;
+                let method = build_record_copy_method(&field_name.name, field_rust_ty);
+                impl_items.push(syn::ImplItem::Fn(method));
+            }
+            let impl_item = syn::ItemImpl {
+                attrs: Vec::new(),
+                defaultness: None,
+                unsafety: None,
+                generics: syn::Generics::default(),
+                impl_token: Default::default(),
+                // Inherent impl (`impl StructName { ... }`) — `trait_: None`.
+                trait_: None,
+                self_ty: Box::new(rust_path_type(&s.name.name)),
+                brace_token: Default::default(),
+                items: impl_items,
+            };
+            items.push(Item::Impl(impl_item));
+        }
+        Ok(())
     }
 
     /// T92: emit auto-delegation `impl` blocks for struct embedding.

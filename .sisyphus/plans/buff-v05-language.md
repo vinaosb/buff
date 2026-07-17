@@ -1014,7 +1014,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `func pair() -> (String, Int) { return ("A", 42) }` → assert Rust tuple. Evidence: task-103-tuples.txt
   **Commit**: `feat(types): add tuple types and multi-return`
 
-- [ ] **T107**: Auto-derived record methods [deep]
+- [x] **T107**: Auto-derived record methods [deep]
   **What to do** (TDD): RED: struct auto-generates equals, hash, to_string, copy. `p1.copy(age: 31)` → immutable update. GREEN: auto-derive Clone, PartialEq, Hash, Debug for structs in codegen.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust record_derives` passes. Structs get auto-equals and copy.
   **QA**: Codegen struct → assert `#[derive(Clone, PartialEq, Hash, Debug)]`. Evidence: task-107-record-derives.txt
