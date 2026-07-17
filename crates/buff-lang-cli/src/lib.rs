@@ -32,6 +32,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod config;
 pub mod error_mapper;
 pub mod pipeline;
 pub mod scaffold;

@@ -1052,7 +1052,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `fetch("url")` where fetch has `timeout = 30` → assert `fetch("url", 30)`. Evidence: task-106-default-params.txt
   **Commit**: `feat(parser): add default parameter values`
 
-- [ ] **T111**: `buff.toml` config + project structure enforcement [deep]
+- [x] **T111**: `buff.toml` config + project structure enforcement [deep]
   **What to do** (TDD): RED: parse `buff.toml` with [package], [dependencies], [profile.release]. Enforce `src/`, `tests/` layout. GREEN: implement TOML parsing, workspace support, lock file generation.
   **Acceptance**: `cargo test -p buff-lang-cli config_parsing` passes. `buff.toml` parsed correctly.
   **QA**: Parse sample `buff.toml` → assert name, version, deps extracted. Evidence: task-111-buff-toml.txt

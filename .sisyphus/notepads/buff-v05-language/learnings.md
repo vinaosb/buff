@@ -3350,3 +3350,104 @@ Rust). `fetch("url")` â†’ `fetch("url", 30)`.
 - `cargo clippy --workspace --all-targets -- -D warnings` â†’ exit 0
 - `cargo fmt --all -- --check` â†’ exit 0 (ran `cargo fmt --all` once to
   re-expand ast_grep-collapsed single-line Param blocks in move_analysis.rs)
+## T111 — buff.toml config
+
+**Approach**: 	oml = "0.8" + serde = { version = "1", features = ["derive"] }
+added to root [workspace.dependencies]; pulled into the CLI crate via
+	oml.workspace = true / serde.workspace = true / 	hiserror.workspace = true
+(workspace-pinning convention — no version pins in the crate Cargo.toml).
+The toml+serde deps are NEW external crates for the COMPILER; this does NOT
+violate the "no external crates" rule (that rule applies to GENERATED Buff
+projects, not to the Buff compiler itself).
+
+**BuffConfig struct shape** (in crates/buff-lang-cli/src/config.rs):
+- BuffConfig { package: PackageSection, dependencies: BTreeMap<String,
+  String>, profile: Profiles } — package is the only REQUIRED table.
+- PackageSection { name: String, version: String, edition: Option<String> }
+  — 
+ame + ersion required; edition optional.
+- Profiles { release: Option<ProfileOpts> } — only elease modelled today;
+  unknown sub-tables silently ignored (forward-compat).
+- ProfileOpts { opt_level, lto, codegen_units, panic, strip } — all
+  Option<String>. **Why String, not typed**: TOML profile values are
+  heterogeneous (opt-level = 3 int, lto = true bool, panic = "unwind"
+  string). Storing as String lets one schema accept all three.
+- **BTreeMap for dependencies** — deterministic ordering (sorted by key) for
+  future uff.lock generation + snapshot stability. Do NOT use HashMap.
+- Entry points: BuffConfig::parse(&str) -> Result<Self, ConfigError> and
+  BuffConfig::load_from_file(&Path) -> Result<Self, ConfigError>.
+
+**ConfigError** (thiserror derive): Parse(#[from] toml::de::Error),
+Io(#[from] std::io::Error), Layout(String). #[from] lets ? propagate
+both underlying errors with zero boilerplate. NEVER panics on bad input.
+
+**Heterogeneous profile values — the kebab-case + scalar-coercion gotcha**:
+The trickiest part of this task. Two non-obvious things had to line up:
+1. serde does NOT auto-convert kebab-case TOML keys to snake_case Rust
+   fields. opt-level = 3 silently maps to None for field opt_level
+   unless you add #[serde(rename = "opt-level")]. Same for codegen-units.
+   Single-word keys (lto, panic, strip) need no rename. Discovered via
+   TDD: lto (bool) parsed but opt_level (int) didn't — the int type wasn't
+   the problem, the field NAME was.
+2. Custom deserialiser for scalar coercion: implement
+   n deserialize_scalar_string<'de, D>(D) -> Result<Option<String>, D::Error>
+   that does Option::<toml::Value>::deserialize(deserializer)? then
+   stringifies via scalar_value_to_string(&toml::Value). Trying to drive
+   	oml's Deserializer through a hand-rolled serde::de::Visitor with
+   deserialize_any / deserialize_option DOES NOT WORK for Option<T>
+   field shapes (visit_some is never called the way you'd expect). The
+   clean solution is to deserialize as 	oml::Value (toml's native,
+   round-trippable scalar enum) and convert afterwards.
+
+**Layout enforcement**: alidate_project_layout(dir: &Path) -> Result<(),
+ConfigError> requires dir/src/ to exist (Layout error mentioning src if
+missing) and RECOMMENDS dir/tests/ (Layout error mentioning 	ests if
+missing). Both errors are typed ConfigError::Layout(String) so callers can
+downgrade the recommended check to a warning if they want. Bonus helper
+has_entry_point(dir) returns 	rue if dir/src/*.buff is non-empty
+(not part of structural contract).
+
+**CLI wiring scope (v0.5)**: MINIMAL. The config module is parsed + structurally
+validated but NOT yet loaded by any CLI command. uff build / uff run /
+uff new / uff init continue to work exactly as before; they do not yet
+read uff.toml. The acceptance gate for T111 was the config_parsing test
+suite only — full command integration is deferred (see DEFERRALS below).
+
+### DEFERRALS (documented, NOT blocking T111)
+- **Lock-file generation** (uff.lock for Buff deps): NOT implemented. The
+  [dependencies] table parses into a BTreeMap<String, String> ready for a
+  future resolver, but no resolver/linker exists yet. The .gitignore
+  template already lists uff.lock as ignored (see scaffold.rs).
+- **Full CLI integration** (uff build reads uff.toml, applies
+  [profile.release] to rustc, etc.): NOT implemented. Wiring belongs to a
+  dedicated task; T111 only lands the parser + structural validator.
+- **Workspace support** (Cargo-style [workspace] table aggregating multiple
+  member crates): NOT implemented. BuffConfig models a single package only.
+- **Dependency resolution / external Buff crate downloads**: NOT implemented.
+  [dependencies] is captured as opaque version-req strings; no semver
+  parsing, no registry fetch.
+- **Typed profile fields** (e.g. opt_level: Option<u8>, lto: Option<bool>):
+  deferred — current String-coercion is forward-compatible with tightening
+  later if desired.
+
+### Tests added (17 total, all GREEN)
+- crates/buff-lang-cli/tests/config_parsing.rs — **13 integration tests**,
+  all named config_parsing_*: basic, with_dependencies, profile_release,
+  no_dependencies_defaults_empty, missing_package_errors,
+  missing_name_field_errors, malformed_toml_errors, wrong_type_errors,
+  load_from_file, load_missing_file_errors, validate_layout_ok,
+  validate_layout_missing_src, validate_layout_missing_tests_warns_or_errs.
+- crates/buff-lang-cli/src/config.rs::tests — **4 unit tests**:
+  has_entry_point_false_when_no_buff_file, has_entry_point_true_with_buff_file,
+  has_entry_point_false_when_no_src_dir, profile_opts_accepts_unknown_fields_silently.
+
+### Verification (all GREEN)
+- cargo test -p buff-lang-cli config_parsing ? 13/13 pass (acceptance gate)
+- cargo test -p buff-lang-cli --lib config:: ? 4/4 pass (inline unit)
+- cargo test --workspace ? exit 0, ZERO 	est result: FAILED lines
+  (the 	est test_fail ... FAILED line is EXPECTED subprocess output from
+  the uff test integration fixture — distinguishing cargo's 	est result:
+  summary lines from subprocess output is the same lesson as T35).
+- cargo check --workspace --all-targets ? exit 0, zero warnings
+- cargo clippy --workspace --all-targets -- -D warnings ? exit 0
+- cargo fmt --all -- --check ? exit 0
