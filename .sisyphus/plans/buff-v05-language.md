@@ -1022,7 +1022,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 7 Enhancement — Error Context + Advanced Features (parallel with Wave 7)
 
-- [ ] **T78**: Error context chaining [deep]
+- [x] **T78**: Error context chaining [deep]
   **What to do** (TDD): RED: `.context("msg")?` wraps error with context. GREEN: implement context method on Result, codegen to error wrapping.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust error_context` passes. `.context("msg")?` adds context.
   **QA**: Codegen `read_file()?.context("config load")` → assert error chain. Evidence: task-78-error-context.txt

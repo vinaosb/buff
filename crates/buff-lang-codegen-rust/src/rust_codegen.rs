@@ -2348,6 +2348,48 @@ impl RustCodegen {
             }
         }
 
+        // T78: `recv.context("msg")` — error-context chaining.
+        //
+        // Attaches a human-readable context string to a `Result<T, E>`'s
+        // `Err` variant, then (typically) propagates with `?`. The parser
+        // already produces this as `Expr::MethodCall { method: "context",
+        // args: [string_literal] }`, often wrapped in `Expr::Try` for the
+        // trailing `?`. We special-case it HERE (before the field-access
+        // heuristic and the default `recv.method(args)` arm) so the name
+        // `context` NEVER falls through to a plain Rust method call.
+        //
+        // Desugar: `recv.context("msg")` →
+        //   `recv.map_err(|e| format!("msg: {:?}", e))`
+        //
+        // The trailing `?` (if any) is added by the EXISTING `lower_try`
+        // path — the wrapping `Expr::Try` lowers independently. So this
+        // codegen is purely additive: NO new AST variant, NO change to
+        // `lower_try`.
+        //
+        // Design choice — Debug (`{:?}`) over Display (`{}`):
+        //   The std `Error: Debug` bound is universally implemented (every
+        //   `T: Error` gets Debug via `#[derive(Debug)]` or manual impl),
+        //   while `Display` is NOT automatically implemented for many error
+        //   types. Using `{:?}` guarantees the generated Rust compiles for
+        //   ANY error type the user's `Result<T, E>` might carry. The Debug
+        //   rendering is also richer (shows variant names + fields), which
+        //   is what a developer debugging a chained error wants.
+        //
+        // Design choice — `map_err` + `format!` over `anyhow::Context`:
+        //   The codegen target is standalone `rustc` with NO external
+        //   runtime crate (the generated Cargo project has no `anyhow` /
+        //   `thiserror` dependency — confirmed by prior tasks where external
+        //   crates were deferred). Emitting `anyhow::Context` would require
+        //   adding `anyhow` to every generated project; the `map_err` +
+        //   `format!` desugar keeps the generated Rust self-contained. The
+        //   trade-off is loss of typed error context (we get a `String`
+        //   error, not a structured error chain) — typed context objects
+        //   are deferred (see decisions.md).
+        if method.name == "context" {
+            let recv = self.lower_expr(receiver)?;
+            return self.lower_context_call(recv, args);
+        }
+
         let recv = self.lower_expr(receiver)?;
         let method_name = method.name.as_str();
 
@@ -2504,6 +2546,74 @@ impl RustCodegen {
             args: Default::default(),
         });
         Ok(collect_call)
+    }
+
+    /// T78: lower `recv.context("msg")` to
+    /// `recv.map_err(|e| format!("msg: {:?}", e))`.
+    ///
+    /// Attaches a human-readable context string to a `Result<T, E>`'s `Err`
+    /// variant by wrapping the inner error into a formatted `String`. The
+    /// generated Rust compiles under standalone `rustc` (no `anyhow` /
+    /// `thiserror` needed) because it uses only `Result::map_err` and the
+    /// stdlib `format!` macro.
+    ///
+    /// Built via `quote!` + `syn::parse2::<SynExpr>` (the standard pattern
+    /// in this module — the single string producer remains
+    /// `prettyplease::unparse`). The message is spliced into a
+    /// [`syn::LitStr`] that already carries the `: {:?}` format-spec suffix
+    /// so the resulting `format!(...)` call has the right shape.
+    ///
+    /// Argument contract:
+    /// - EXACTLY one argument.
+    /// - The argument MUST be a `Expr::Literal(Literal::String(_), _)`. Any
+    ///   other shape (non-string literal, identifier, call, ...) returns an
+    ///   `unsupported` error — codegen does NOT do type checking, so this
+    ///   guards against silent mis-compilation of `.context(42)` or similar.
+    ///
+    /// The trailing `?` (if the source had `recv.context("msg")?`) is added
+    /// by the EXISTING [`Self::lower_try`] path: the parser produces
+    /// `Expr::Try { expr: MethodCall{...} }`, and `lower_try` wraps the
+    /// lowered MethodCall in Rust's native `?`. So NO change to `lower_try`
+    /// is required — this method only produces the `map_err` expression.
+    ///
+    /// Debug (`{:?}`) is chosen over Display (`{}`) because the std
+    /// `Error: Debug` bound is universally implemented while `Display` is
+    /// not — using `{:?}` guarantees the generated Rust compiles for ANY
+    /// error type the user's `Result<T, E>` might carry. See the design
+    /// note on the `context` arm in [`Self::lower_method_call`].
+    fn lower_context_call(&self, recv: SynExpr, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 1 {
+            return Err(self.unsupported(&format!(
+                "context() expects exactly 1 string-literal arg, got {}",
+                args.len()
+            )));
+        }
+        let msg: &str = match &args[0] {
+            Expr::Literal(Literal::String(s), _) => s.as_str(),
+            other => {
+                return Err(self.unsupported(&format!(
+                    "context() expects a string literal, got {:?}",
+                    other
+                )));
+            }
+        };
+        // Build the format-string literal: `"<msg>: {:?}"`.
+        //
+        // The user's message is the literal prefix; the `: {:?}` suffix
+        // renders the original error via Debug. If the message itself
+        // contains `{` or `}`, those WILL be interpreted as `format!`
+        // placeholders at runtime — this matches the documented behavior
+        // (context is a human-readable label, not a format template).
+        // Braces in context labels are rare; escaping them would silently
+        // rewrite the user's text. Keeping the message verbatim preserves
+        // the WYSIWYG property tested by `error_context_preserves_message_*`.
+        let fmt = format!("{}: {{:?}}", msg);
+        let fmt_lit = syn::LitStr::new(&fmt, ProcSpan::call_site());
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            #recv.map_err(|e| format!(#fmt_lit, e))
+        };
+        syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("context codegen parse: {e}")))
     }
 
     /// Lower `s.slice(a, b)` to a char-safe slice expression.

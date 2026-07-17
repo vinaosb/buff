@@ -2960,3 +2960,63 @@ incrementally). GREEN: 22/22 pass.
 - `crates/buff-lang-parser/tests/tuples.rs` — NEW (9 tests).
 - `crates/buff-lang-codegen-rust/tests/tuples.rs` — NEW (3 tests).
 
+
+## T78 — Error context chaining
+
+### Status: COMPLETE — codegen special-case, ZERO AST change, all green
+
+### The codegen-special-case approach (preferred for one-method desugars)
+.context("msg") parses as a normal Expr::MethodCall { method: "context", args: [string_literal] } (often wrapped in Expr::Try for ?). NO new AST variant needed — just a special-case arm in lower_method_call. Same pattern as T24 Matrix.new, T31 	ask.result(), and the string-method desugars (char_count, slice, ...). When the method NAME is the discriminator (not the receiver's type), a codegen arm is dramatically cheaper than a new AST node + parser grammar + type-checker rule.
+
+**Placement inside lower_method_call**: AFTER the esult arm (T31 await) and the Matrix.new constructor check, BEFORE the T26 field-access-vs-method-call heuristic. Rationale: context takes 1 arg so the rgs.is_empty() field-access branch never fires for it — but the early placement keeps the special-case logic grouped with esult and 
+ew (the other method-name discriminators), and avoids lowering the receiver twice.
+
+### The map_err + format! desugar
+`
+recv.context("msg")      →  recv.map_err(|e| format!("msg: {:?}", e))
+recv.context("msg")?     →  recv.map_err(|e| format!("msg: {:?}", e))?
+`
+Built via quote! + syn::parse2::<SynExpr> (the standard pattern — the single string producer remains prettyplease::unparse). The format string "<msg>: {:?}" is wrapped in a syn::LitStr and spliced into the ormat! call. The trailing ? comes FREE from the existing lower_try path — Expr::Try wraps the MethodCall, lowers independently to Rust's native ?, and chains naturally.
+
+### Why no nyhow::Context (standalone rustc target)
+The codegen target is the single-file ustc --edition 2021 pipeline (T28+). The generated Cargo project has NO nyhow / 	hiserror runtime dependency — confirmed by every prior v0.5 task that emitted raw Result/Option (T23-T31). Emitting .context() relying on anyhow would force every generated project to depend on anyhow; the map_err + ormat! desugar keeps the output self-contained. Trade-off: loss of typed error context (the propagated error becomes a String, not a structured chain). Typed context objects + a future error-chain crate integration are deferred (v1.0).
+
+### Debug ({:?}) over Display ({}) — the universally-compilable choice
+The std Error: Debug bound is implemented by every conventional error type (via #[derive(Debug)] or manual impl), while Display is NOT automatic (e.g. raw String / Box<dyn Error> interop, opaque FFI errors). Using ormat!("msg: {:?}", e) GUARANTEES the generated Rust compiles for ANY error type the user's Result<T, E> might carry. The Debug rendering is also richer (shows variant names + fields), which is what a developer debugging a chained error wants. Picked {:?} over {} after the task spec called out both options.
+
+### Argument contract (codegen-time guard, not type check)
+- EXACTLY 1 argument (arity check)
+- The argument MUST be Expr::Literal(Literal::String(_), _)
+Any other shape returns an unsupported CodegenError with a message mentioning both context and string. This guards against silent mis-compilation of .context(42) or .context(some_var) — codegen doesn't do type checking, so the literal-shape check is the cheapest correctness gate.
+
+### Braces in context messages
+If the user's message contains { or }, those WILL be interpreted as ormat! placeholders at runtime. Documented behavior — context is a human-readable label, not a format template. Escaping braces would silently rewrite the user's text and break the WYSIWYG property tested by error_context_preserves_message_verbatim / error_context_preserves_unicode_message_verbatim. Keep verbatim; revisit if it ever bites.
+
+### Test fn names (10 total, all contain error_context)
+- error_context_qa_case_produces_map_err_then_question — the task's signature case (ead_file()?.context("config load")-shaped)
+- error_context_qa_case_snapshot — pins the exact generated Rust
+- error_context_without_question_mark_lowers_to_map_err — bare .context() without ?
+- error_context_preserves_message_verbatim — multi-word punctuation message
+- error_context_preserves_unicode_message_verbatim — PT-BR message ("falha ao abrir o arquivo")
+- error_context_in_let_binding_emits_map_err_then_question — realistic let cfg = load().context("...")?
+- error_context_does_not_break_plain_method_calls — regression on s.len()
+- error_context_does_not_break_struct_field_access — regression on T26 p.name
+- error_context_with_non_string_arg_returns_unsupported_error — .context(42) → error
+- error_context_with_wrong_arity_returns_unsupported_error — .context("a","b") → error
+
+### Deferrals (out of T78 scope)
+- Chained .context().context() — works today because each .context() produces a Result-shaped map_err that the next .context() can chain on; but the resulting error is a nested String outer: inner: <orig>, not a structured chain. Typed chain is v1.0.
+- Non-Result receivers — codegen does NOT verify the receiver is a Result<T,E>. ecv.context("msg") on a non-Result will produce ecv.map_err(...) that won't compile under rustc. That's the type-checker's job (deferred to v0.5+ type system).
+- Typed error context objects (anyhow-style Context trait) — deferred.
+- Brace-escaping in context messages — deferred (see note above).
+
+### Files changed
+- crates/buff-lang-codegen-rust/src/rust_codegen.rs — added context arm in lower_method_call (after Matrix.new check) + new lower_context_call helper (after lower_graphemes_call). ~85 lines of code + ~70 lines of doc comments.
+- crates/buff-lang-codegen-rust/tests/error_context.rs — NEW test file, 10 fns, ~410 lines (including the doc-comment header explaining the desugar choice).
+
+### Verification (all green)
+- cargo check --workspace — clean
+- cargo test -p buff-lang-codegen-rust --test error_context — 10/10 pass
+- cargo test --workspace — ALL pass (no regressions)
+- cargo clippy --workspace --all-targets -- -D warnings — zero warnings
+- cargo fmt --check — clean
