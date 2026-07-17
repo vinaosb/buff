@@ -924,6 +924,12 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
                 }
             }
         }
+        // T103: a tuple literal `(e1, e2, ...)` uses every element expression.
+        Expr::TupleLit(members, _) => {
+            for e in members {
+                collect_uses(e, out);
+            }
+        }
     }
 }
 

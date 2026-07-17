@@ -1703,6 +1703,22 @@ impl RustCodegen {
                 else_block,
                 ..
             } => self.lower_if_let(pattern, value, then_block, else_block.as_ref()),
+            // T103: `(e1, e2, ...)` → Rust's native tuple expression. Lower
+            // each member expr and build `(e1, e2, ...)` via `quote!` + parse2.
+            // The 2+-element rule lives at parse time so this always carries
+            // 2+ members. Element order is preserved (Rust tuples are
+            // positional, matching Buff's source order).
+            Expr::TupleLit(members, _) => {
+                let lowered: Vec<SynExpr> = members
+                    .iter()
+                    .map(|m| self.lower_expr(m))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    ( #( #lowered ),* )
+                };
+                syn::parse2::<SynExpr>(tokens)
+                    .map_err(|e| self.unsupported(&format!("tuple codegen parse: {e}")))
+            }
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -3515,6 +3531,23 @@ impl RustCodegen {
                     .or_insert_with(|| members.clone());
                 Ok(rust_path_type(&union_name))
             }
+            // T103: tuple types `(T, U, ...)`. Lower each member to a syn::Type
+            // and build a Rust tuple type via `quote!` + `parse2`. The 2+-
+            // element rule lives at parse time, so this always carries 2+
+            // members (Rust tuples need 2+ fields to be a "real" tuple; a
+            // single-field `(T,)` is the trailing-comma idiom, which Buff
+            // does not produce at the TYPE layer).
+            TypeRef::Tuple(members, _) => {
+                let lowered: Vec<SynType> = members
+                    .iter()
+                    .map(|m| self.ast_typeref_to_syn(m))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    ( #( #lowered ),* )
+                };
+                syn::parse2::<SynType>(tokens)
+                    .map_err(|e| self.unsupported(&format!("tuple type codegen parse: {e}")))
+            }
         }
     }
 
@@ -3582,6 +3615,24 @@ impl RustCodegen {
             // determined in `ast_typeref_to_syn` which collects unions from
             // TypeRef::Union).
             Type::Union(_) => return None,
+            // T103: tuple types `(T, U, ...)`. Lower each member to a syn::Type
+            // and build a Rust tuple type via `quote!` + `parse2`. Any
+            // unresolvable member (Unknown/Void) makes the whole annotation
+            // indeterminate — return None so Rust infers the tuple type from
+            // context (function return type, etc.).
+            Type::Tuple(members) => {
+                let lowered: Vec<SynType> = members
+                    .iter()
+                    .map(|m| self.buff_type_to_syn(m))
+                    .collect::<Option<Vec<_>>>()?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    ( #( #lowered ),* )
+                };
+                match syn::parse2::<SynType>(tokens) {
+                    Ok(ty) => return Some(ty),
+                    Err(_) => return None,
+                }
+            }
             _ => {}
         }
         let rust_name: &str = match ty {
@@ -3640,7 +3691,8 @@ impl RustCodegen {
             | Type::Option(_)
             | Type::Map(_, _)
             | Type::Result(_, _)
-            | Type::Union(_) => return None,
+            | Type::Union(_)
+            | Type::Tuple(_) => return None,
         };
         Some(rust_path_type(rust_name))
     }
@@ -4337,6 +4389,8 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
                 || block_uses_matrix(then_block)
                 || else_block.as_ref().is_some_and(block_uses_matrix)
         }
+        // T103: `(e1, e2, ...)` — recurse into each element.
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_matrix),
     }
 }
 
@@ -4534,6 +4588,8 @@ fn expr_uses_error(expr: &Expr) -> bool {
                 || block_uses_error(then_block)
                 || else_block.as_ref().is_some_and(block_uses_error)
         }
+        // T103: `(e1, e2, ...)` — recurse into each element.
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_error),
     }
 }
 

@@ -2768,3 +2768,195 @@ Verified: `func`, `enum`, `extend`, `import`, `export` all parse correctly when 
 ### Key lesson
 
 The `{ .. }` pattern in match arms works for TUPLE variants in Rust — `Decl::TraitDecl { .. }` compiles fine even though `TraitDecl(TraitDecl)` is a tuple variant. This is because `{ .. }` with only `..` (no field names) is valid for any variant shape. This made the TraitDecl struct migration safe — existing `{ .. }` arms continued to compile regardless of the inner struct's fields.
+## T103 — Tuples
+
+### Status: COMPLETE
+
+Implemented tuple types `(String, Int)` and tuple values `("A", 42)` end-to-end
+(type ref → resolved type → inference → codegen → Rust tuple). Three additive
+variants at the END of their respective enums (zero migration):
+
+- `TypeRef::Tuple(Vec<TypeRef>, Span)` — unresolved type reference for tuple
+  type annotations. Mirrors `TypeRef::Union`'s shape (members + span).
+- `Type::Tuple(Vec<Type>)` — resolved tuple type. Mirrors `Type::Union`'s shape.
+  Added a `Type::tuple(Vec<Type>) -> Self` constructor for ergonomics.
+- `Expr::TupleLit(Vec<Expr>, Span)` — tuple value literal. TUPLE variant shape
+  (`Vec<Expr>, Span`, NOT struct), distinct from `Pattern::Tuple` (T71, which
+  already existed for DESTRUCTURING — left untouched). All three derive the
+  standard `Debug, Clone, PartialEq` (NO Eq/Hash — the containing `Expr` is
+  already non-Eq due to floats). Display + `span()` accessor added for each.
+
+### The 2+-element disambiguation (THE key design decision)
+
+A single `(T)` is grouping (returns the bare `T`); `(T, U)` is a tuple. Same
+for values `(e)` vs `(e1, e2)`. This disambiguation lives ENTIRELY at the
+PARSER layer (`parse_type_ref` for types, `parse_primary` for values) — the
+AST/type/codegen layers NEVER see a single-element `Tuple`/`TupleLit`. This
+keeps `TypeRef::Tuple` and `Type::Tuple` always carrying 2+ members, so
+downstream matches don't need to special-case the 1-member form.
+
+- **Type side** (`parse_type_ref`): peek for `LParen` BEFORE the identifier
+  advance. If `(`, parse comma-separated type refs until `)`. With 2+ members
+  → `TypeRef::Tuple(vec, span)`. With exactly 1 → return the lone member
+  (`members.swap_remove(0)` — O(1), avoids clone). With 0 (empty `()`) →
+  parse error "empty `()` is not a valid type". Trailing comma `(T, U,)`
+  allowed (2-member tuple).
+- **Value side** (`parse_primary`): the existing `( expr )` grouping path is
+  REPLACED. Parse `(`, the first expression. If NO comma follows → grouping,
+  return `first` (zero-regression: identical to the old path). If a comma
+  follows → collect the rest into a tuple. Trailing comma `(a, b,)` allowed.
+  A degenerate `(e,)` (single element + trailing comma) reaches the tuple
+  path as a 1-element vec — we treat it as grouping (`members.swap_remove(0)`)
+  to match the type layer's single-element rule (NO single-element tuples in
+  Buff v0.5).
+
+### Codegen via `quote!` + `parse2` (no raw-string codegen)
+
+Both tuple TYPE and tuple VALUE codegen lower each member to a `syn` node,
+then build the Rust tuple via `quote! { ( #( #members ),* ) }` + `parse2`.
+This is the SAME pattern as `lower_range` (T68) — `quote!` produces a real
+syn token tree, `parse2::<SynType>` / `parse2::<SynExpr>` re-parses it. The
+single string producer remains `prettyplease::unparse`.
+
+- `ast_typeref_to_syn` TypeRef::Tuple → `quote!{ ( #( #lowered ),* ) }` →
+  `parse2::<SynType>`. Never returns None (all members lower to a SynType).
+- `buff_type_to_syn` Type::Tuple → same `quote!` shape, but returns None if
+  ANY member is Unknown/Void (so Rust infers the tuple type from context —
+  e.g. a function return type with an unresolvable member).
+- `lower_expr` Expr::TupleLit → `quote!{ ( #( #lowered ),* ) }` →
+  `parse2::<SynExpr>`. Real Rust tuple literal `(e1, e2)`.
+
+QA-verified output for `func pair() -> (String, Int) { return ("A", 42) }`:
+```rust
+fn pair() -> (String, i64) {
+    return ("A", 42);
+}
+```
+
+### Exhaustive-match ripple sites (7 files, all additive arms)
+
+The cargo-check-driven ripple (same T76/T68 template):
+
+1. `crates/buff-lang-ast/src/ty.rs` — `TypeRef::Tuple` variant + Display arm.
+2. `crates/buff-lang-ast/src/expr.rs` — `Expr::TupleLit` variant + `span()`
+   arm (`TupleLit(_, s)`, tuple-variant shape NOT struct) + Display arm
+   (`Tuple[e1, e2, ...]`).
+3. `crates/buff-lang-ast/src/ir.rs` — `collect_uses` arm (recurse into each
+   element).
+4. `crates/buff-lang-types/src/ty.rs` — `Type::Tuple` variant + Display arm
+   (`(T, U)`) + `Type::tuple(Vec<Type>)` constructor.
+5. `crates/buff-lang-types/src/infer.rs` — TWO arms:
+   - `infer_expr` Expr::TupleLit → infer each member, return
+     `Type::tuple([T1, T2, ...])` (NO unification — heterogeneous element
+     types preserved).
+   - `typeref_to_type` TypeRef::Tuple → resolve each member recursively
+     (unresolvable members fall back to Unknown so the Tuple wrapper still
+     flows through). Mirrors the T76 Union arm.
+6. `crates/buff-lang-types/src/exhaustiveness.rs` — `check_expr` arm (recurse
+   into each element so nested matches are still checked).
+7. `crates/buff-lang-types/src/ownership.rs` — **FOUR** match sites (all
+   conservative recursion into members): `collect_bound_names_in_expr`,
+   `collect_spawn_free_vars_in_expr`, `collect_free_vars_in_expr`,
+   `collect_assignment_targets_in_expr`.
+8. `crates/buff-lang-types/src/async_analysis.rs` — `collect_func_calls` arm
+   (recurse into each element).
+9. `crates/buff-lang-parser/src/stmt.rs` — `type_end` helper
+   (`TypeRef::Tuple(_, span) => span.end`) + the `parse_type_ref` tuple
+   branch (the 2+-element disambiguation).
+10. `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — **FIVE** arms:
+    `ast_typeref_to_syn` (TypeRef::Tuple), `buff_type_to_syn`
+    (Type::Tuple in BOTH the early-return match AND the final unreachable
+    arm), `lower_expr` (Expr::TupleLit), `expr_uses_matrix` (recurse),
+    `expr_uses_error` (recurse).
+
+### Test fns (all named to contain `tuples` — substring filter passes)
+
+- `crates/buff-lang-types/tests/tuples.rs` (10 tests):
+  - `tuples_type_two_members`, `tuples_type_three_members`,
+    `tuples_type_nested_member_resolves_recursively`,
+    `tuples_type_unknown_member_becomes_unknown` — type-side resolution via
+    `Stmt::LetDecl` annotation (mirrors T76 union_types pattern).
+  - `tuples_value`, `tuples_value_three_members`,
+    `tuples_value_nested_tuple_member` — value-side inference via
+    `infer_expr` (asserts `Type::Tuple([T1, T2, ...])`).
+  - `tuples_return_type` — the acceptance case: a `let` annotation on a
+    tuple literal value (mirrors how a return-type annotation would pin the
+    type at the type-system layer).
+  - `tuples_display_formats_with_parens_and_commas`,
+    `tuples_display_three_members` — Display as `(String, Int<64>)`.
+- `crates/buff-lang-parser/tests/tuples.rs` (9 tests):
+  - `tuples_type_parses_two_members`,
+    `tuples_type_parses_three_members`,
+    `tuples_type_single_paren_is_grouping_not_tuple` (THE disambiguation),
+    `tuples_type_nested_member`, `tuples_type_trailing_comma_allowed`,
+    `tuples_value_parses_two_members`,
+    `tuples_value_single_paren_is_grouping_not_tuple`,
+    `tuples_value_trailing_comma_allowed`,
+    `tuples_value_display_formats_with_parens`.
+- `crates/buff-lang-codegen-rust/tests/tuples.rs` (3 tests):
+  - `tuples_codegen_pair_function` — THE QA case: `func pair() ->
+    (String, Int) { return ("A", 42) }` → real Rust tuple.
+  - `tuples_codegen_three_member_return` — 3-element tuple return type.
+  - `tuples_codegen_tuple_as_param_type` — tuple as a function param type.
+
+### No-regression evidence
+
+- `cargo test --workspace` → 0 failed across all binaries.
+- T71 destructuring still works (5 codegen + 16 parser tests pass — T71's
+  `Pattern::Tuple` was left 100% untouched; only NEW variants were added).
+- Single-paren grouping `(T)` / `(e)` still works (verified by
+  `tuples_type_single_paren_is_grouping_not_tuple` and
+  `tuples_value_single_paren_is_grouping_not_tuple`).
+- `cargo check --workspace` → exit 0, zero warnings.
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0.
+- `cargo fmt --check` → exit 0.
+
+### Deferred (documented in code comments)
+
+- **Tuple indexing** (`t.0`, `t.1`) — no `Expr::FieldAccess` / `Expr::TupleIndex`
+  variant yet. Users must destructure via `let (a, b) = t` (T71) or `match`.
+- **Single-element tuples `(x,)`** — Buff v0.5 treats `(x,)` as grouping
+  (`(x)`) at BOTH the type and value layers (no 1-element tuple). Rust's
+  trailing-comma-single-tuple idiom is NOT supported. The parser explicitly
+  collapses a 1-element `members` vec to the lone member.
+- **Variadic arity checking** — Buff does not enforce that a tuple literal's
+  arity matches a `(String, Int)` annotation (v0.5 treats type mismatches as
+  warnings; Rust catches arity errors at codegen time).
+- **Tuple member uniformity** — heterogeneous element types are PRESERVED
+  (no unification), matching Rust tuple semantics.
+
+### TDD discipline
+
+RED first: wrote all 22 tests across 3 files, ran `cargo test -p
+buff-lang-types tuples` → failed (variants didn't exist). Then added the 3
+variants → `cargo check --workspace` revealed the 9 ripple sites (fixed
+incrementally). GREEN: 22/22 pass.
+
+### Verification (all GREEN)
+
+- `cargo test -p buff-lang-types tuples` → 10 passed, 0 failed (acceptance).
+- `cargo test -p buff-lang-parser --test tuples` → 9 passed.
+- `cargo test -p buff-lang-codegen-rust --test tuples` → 3 passed.
+- `cargo test --workspace` → 0 failed.
+- `cargo check --workspace` → exit 0.
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0.
+- `cargo fmt --check` → exit 0.
+
+### Files changed
+
+- `crates/buff-lang-ast/src/ty.rs` — TypeRef::Tuple variant + Display.
+- `crates/buff-lang-ast/src/expr.rs` — Expr::TupleLit variant + span() + Display.
+- `crates/buff-lang-ast/src/ir.rs` — collect_uses arm.
+- `crates/buff-lang-types/src/ty.rs` — Type::Tuple variant + Display + tuple().
+- `crates/buff-lang-types/src/infer.rs` — infer_expr + typeref_to_type arms.
+- `crates/buff-lang-types/src/exhaustiveness.rs` — check_expr arm.
+- `crates/buff-lang-types/src/ownership.rs` — 4 collect_*_in_expr arms.
+- `crates/buff-lang-types/src/async_analysis.rs` — collect_func_calls arm.
+- `crates/buff-lang-parser/src/stmt.rs` — parse_type_ref tuple branch + type_end.
+- `crates/buff-lang-parser/src/expr.rs` — parse_primary tuple-value branch
+  (replaced the plain grouping path; grouping is the no-comma fast path).
+- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — 5 codegen arms.
+- `crates/buff-lang-types/tests/tuples.rs` — NEW (10 tests).
+- `crates/buff-lang-parser/tests/tuples.rs` — NEW (9 tests).
+- `crates/buff-lang-codegen-rust/tests/tuples.rs` — NEW (3 tests).
+

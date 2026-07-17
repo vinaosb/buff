@@ -1008,7 +1008,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `name ?? "unknown"` → assert `.unwrap_or()`. Evidence: task-101-coalescing.txt
   **Commit**: `feat(parser): add null coalescing operator ??`
 
-- [ ] **T103**: Tuples [deep]
+- [x] **T103**: Tuples [deep]
   **What to do** (TDD): RED: `(String, Int)` as type, `(name, age)` as value. GREEN: parse tuple types and literals, codegen to Rust tuples.
   **Acceptance**: `cargo test -p buff-lang-types tuples` passes. `(String, Int)` works as return type.
   **QA**: Codegen `func pair() -> (String, Int) { return ("A", 42) }` → assert Rust tuple. Evidence: task-103-tuples.txt

@@ -112,6 +112,22 @@ pub enum Type {
     /// `match` to discriminate first). Runtime discrimination / match-on-
     /// union coercion is a documented deferral.
     Union(Vec<Type>),
+    /// A tuple type: `(T, U, ...)`, e.g. `(String, Int)` (T103).
+    ///
+    /// Each member is a resolved [`Type`]. The 2+-element rule lives at
+    /// parse time (a single `(T)` is grouping, returning the bare `T`), so
+    /// this variant always carries 2+ members — there is no single-element
+    /// tuple in Buff. Maps 1:1 to a Rust tuple `(T, U, ...)` via codegen.
+    ///
+    /// A tuple is neither numeric nor GPU-eligible; it participates in no
+    /// promotion rules in v0.5. Tuple indexing (`t.0`), tuple-member arity
+    /// checking, and single-element tuples `(x,)` are documented deferrals.
+    ///
+    /// This is **additive** (T103): no existing variant was renamed,
+    /// reordered, or had its payload altered. See the T76 union-types entry
+    /// in `.sisyphus/notepads/buff-v05-language/learnings.md` for the
+    /// resolved-Type ripple template.
+    Tuple(Vec<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -253,6 +269,15 @@ impl Type {
         Type::Result(Box::new(ok), Box::new(err))
     }
 
+    /// Create a tuple type `(T, U, ...)` from its resolved members (T103).
+    /// Maps 1:1 to a Rust tuple. The caller MUST pass 2+ members (the
+    /// parser disallows single-element tuples, but this constructor does
+    /// not enforce it — a single-element `Tuple` is technically
+    /// constructible here for testing; downstream code treats it the same).
+    pub fn tuple(members: Vec<Type>) -> Self {
+        Type::Tuple(members)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -316,6 +341,18 @@ impl fmt::Display for Type {
                     write!(f, "{m}")?;
                 }
                 Ok(())
+            }
+            // T103: tuple `(T, U, ...)`. Renders with leading/trailing parens
+            // and comma-separated members, mirroring the source form.
+            Type::Tuple(members) => {
+                f.write_str("(")?;
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{m}")?;
+                }
+                f.write_str(")")
             }
         }
     }

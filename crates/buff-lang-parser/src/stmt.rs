@@ -395,6 +395,74 @@ pub fn parse_func_decl(
 /// generic argument list is missing its closing `>`.
 pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseError> {
     let source_id = stream.source_id();
+
+    // T103: tuple type `(T, U, ...)` or grouping `(T)`. When the next token
+    // is `(`, parse a comma-separated list of type refs until `)`. With 2+
+    // members (counting trailing-comma `((T,)` as a 1-member list — Buff
+    // does NOT have single-element tuples at the type layer for v0.5, so a
+    // single `(T)` is grouping → return the bare `T`). With 2+ real members
+    // build `TypeRef::Tuple(vec, span)`. This is the ONLY place tuple types
+    // are produced; the rest of `parse_type_ref` handles named/generic/
+    // option/union forms.
+    if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
+        let lp = stream.expect(TokenKind::LParen)?;
+        let start = lp.span.start;
+        let mut members: Vec<TypeRef> = Vec::new();
+        // Empty `()` is not a valid type (unit isn't supported as a value
+        // type in v0.5). Treat it as a 1-element error so the user gets a
+        // clear message.
+        if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+            loop {
+                members.push(parse_type_ref(stream)?);
+                match stream.peek_kind() {
+                    Some(TokenKind::Comma) => {
+                        stream.advance();
+                        // Trailing comma: `(T, U,)` is allowed.
+                        if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                            break;
+                        }
+                    }
+                    Some(TokenKind::RParen) => break,
+                    Some(other) => {
+                        return Err(ParseError::new(Diagnostic::error(
+                            format!("expected `,` or `)` in tuple type, found `{other}`"),
+                            stream
+                                .peek()
+                                .map(|t| t.span)
+                                .unwrap_or_else(|| stream.eof_span()),
+                        )));
+                    }
+                    None => {
+                        return Err(ParseError::new(Diagnostic::error(
+                            "unterminated tuple type (missing `)`)",
+                            stream.eof_span(),
+                        )));
+                    }
+                }
+            }
+        }
+        let rp = stream.expect(TokenKind::RParen)?;
+        let span = Span::new(start, rp.span.end, source_id);
+        // Empty `()` is not a valid type in v0.5 (unit is not a value type).
+        if members.is_empty() {
+            return Err(ParseError::new(Diagnostic::error(
+                "empty `()` is not a valid type",
+                span,
+            )));
+        }
+        // The 2+-element disambiguation: a single `(T)` is grouping, NOT a
+        // tuple. Return the lone member directly (its own span is preserved).
+        // 2+ members build `TypeRef::Tuple(vec, span)`.
+        return Ok(if members.len() >= 2 {
+            TypeRef::Tuple(members, span)
+        } else {
+            // `members.len() == 1` (the loop above guarantees non-empty here).
+            // `swap_remove(0)` is O(1) and avoids cloning; `members` is dropped
+            // after this expression so the move is safe.
+            members.swap_remove(0)
+        });
+    }
+
     let name_tok = stream.advance().ok_or_else(|| {
         ParseError::new(Diagnostic::error(
             "expected type name, found end of input",
@@ -2505,7 +2573,8 @@ fn type_end(ty: &TypeRef) -> usize {
         | TypeRef::Generic { span, .. }
         | TypeRef::Option(_, span)
         | TypeRef::Function { span, .. }
-        | TypeRef::Union(_, span) => span.end,
+        | TypeRef::Union(_, span)
+        | TypeRef::Tuple(_, span) => span.end,
     }
 }
 

@@ -380,6 +380,12 @@ fn collect_func_calls(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_func_calls_in_block(eb, out);
             }
         }
+        // T103: a tuple literal `(e1, e2, ...)` — recurse into each element.
+        Expr::TupleLit(members, _) => {
+            for m in members {
+                collect_func_calls(m, out);
+            }
+        }
         Expr::Literal(_, _) | Expr::Ident(_, _) => {}
     }
 }

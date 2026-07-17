@@ -43,6 +43,22 @@ pub enum TypeRef {
     /// codegen flattening is deferred). The span covers the whole
     /// `A | B | C` sequence.
     Union(Vec<TypeRef>, Span),
+    /// A tuple type: `(T, U, ...)`, e.g. `(String, Int)` (T103).
+    ///
+    /// Each member is itself a [`TypeRef`] (so nested tuples like
+    /// `(String, (Int, Bool))` compose). The 2+-element rule lives at
+    /// parse time: a single `(T)` is grouping (returns the bare `T`),
+    /// NOT a `TypeRef::Tuple`. So this variant always carries 2+ members
+    /// — there is no single-element tuple in Buff (a trailing comma
+    /// `(T,)` is the established Rust idiom but is deferred in Buff;
+    /// the parser treats `(T,)` as `(T)` grouping for v0.5). The span
+    /// covers the whole `( ... )` sequence.
+    ///
+    /// This is **additive** (T103): no existing variant was renamed,
+    /// reordered, or had its payload altered. See the migration-note
+    /// pattern on [`TypeRef`] and in `.sisyphus/notepads/` (T76 union
+    /// types for the TypeRef ripple template).
+    Tuple(Vec<TypeRef>, Span),
 }
 
 impl fmt::Display for TypeRef {
@@ -87,6 +103,19 @@ impl fmt::Display for TypeRef {
                     write!(f, "{m}")?;
                 }
                 Ok(())
+            }
+            // T103: tuple types `(T, U, ...)`. Each member is itself a
+            // [`TypeRef`]. Renders with leading/trailing parens and
+            // comma-separated members, mirroring the source form.
+            TypeRef::Tuple(members, _) => {
+                f.write_str("(")?;
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{m}")?;
+                }
+                f.write_str(")")
             }
         }
     }

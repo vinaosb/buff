@@ -309,6 +309,19 @@ impl TypeInferencer {
                 }
                 Ok(Type::Unknown)
             }
+            // T103: `(e1, e2, ...)` — a tuple literal infers
+            // `Type::Tuple([T1, T2, ...])` where each `Ti` is the inferred
+            // type of the corresponding element. The 2+-element rule lives
+            // at parse time, so this variant always carries 2+ members.
+            // Each element is independently inferred (no unification — a
+            // tuple `(Int, String)` keeps heterogeneous element types).
+            Expr::TupleLit(members, _) => {
+                let mut member_tys = Vec::with_capacity(members.len());
+                for m in members {
+                    member_tys.push(self.infer_expr(m)?);
+                }
+                Ok(Type::tuple(member_tys))
+            }
         }
     }
 
@@ -804,6 +817,18 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
                 .map(|m| typeref_to_type(m).unwrap_or(Type::Unknown))
                 .collect();
             Some(Type::Union(resolved))
+        }
+        // T103: tuple types `(T, U, ...)`. Resolve each member recursively;
+        // unresolvable members fall back to `Unknown` so the Tuple wrapper
+        // still flows through codegen. A `TypeRef::Tuple` always carries 2+
+        // members (the parser's single-element disambiguation), so no
+        // single-element `Type::Tuple` is produced here.
+        TypeRef::Tuple(members, _) => {
+            let resolved: Vec<Type> = members
+                .iter()
+                .map(|m| typeref_to_type(m).unwrap_or(Type::Unknown))
+                .collect();
+            Some(Type::Tuple(resolved))
         }
         _ => None,
     }

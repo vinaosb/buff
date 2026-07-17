@@ -1446,13 +1446,55 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         });
     }
 
-    // If it's an open paren, parse a parenthesized expression.
+    // If it's an open paren, parse a parenthesized expression. T103: a
+    // comma-separated list with 2+ elements is a TUPLE `(e1, e2, ...)` →
+    // `Expr::TupleLit`; a single `( e )` is grouping → return `e` (existing
+    // behaviour, zero regression). Trailing comma `(a, b,)` is allowed and
+    // produces a 2-element tuple (NOT a 1-element `(a,)` — Buff does not
+    // have single-element tuples at the value layer for v0.5).
     if matches!(tok.kind, TokenKind::LParen) {
-        stream.advance(); // consume '('
-        let inner = parse_expression(stream)?;
-        stream.expect(TokenKind::RParen)?;
-        // Parens don't change the span of the inner expression — keep inner.
-        return Ok(inner);
+        let lp = stream.expect(TokenKind::LParen)?;
+        let source_id = stream.source_id();
+        // Empty `()` is not a valid expression in v0.5 (unit is not a value).
+        if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+            return Err(ParseError::new(Diagnostic::error(
+                "empty `()` is not a valid expression",
+                lp.span,
+            )));
+        }
+        let first = parse_expression(stream)?;
+        // No comma → plain grouping `( expr )`. Return `first` (no span wrap).
+        if !matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+            stream.expect(TokenKind::RParen)?;
+            return Ok(first);
+        }
+        // One or more commas → tuple. Collect the rest of the members.
+        let mut members = vec![first];
+        loop {
+            // We saw a comma (or the loop advanced past one); consume it.
+            stream.advance(); // consume `,`
+                              // Trailing comma: `(a, b,)` is allowed and terminates the tuple.
+            if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                break;
+            }
+            members.push(parse_expression(stream)?);
+            if !matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+                break;
+            }
+        }
+        let rp = stream.expect(TokenKind::RParen)?;
+        let span = Span::new(lp.span.start, rp.span.end, source_id);
+        // The 2+-element disambiguation: a single `(e,)` would be a 1-element
+        // tuple, which Buff does not support at the value layer for v0.5.
+        // The parser produces grouping instead — drop the trailing comma's
+        // effect by returning the lone member when there's exactly one.
+        // (In practice `(e,)` reaches here as a 1-element vec; we treat it
+        // as grouping `(e)` so the value layer matches the type layer's
+        // single-element rule.)
+        if members.len() == 1 {
+            return Ok(members.swap_remove(0));
+        }
+        return Ok(Expr::TupleLit(members, span));
     }
 
     // T23: A collection literal `[e1, e2, ...]` (or empty `[]`). Allow a

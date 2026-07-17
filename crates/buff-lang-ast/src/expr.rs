@@ -409,6 +409,24 @@ pub enum Expr {
         else_block: Option<Block>,
         span: Span,
     },
+    /// A tuple value literal: `(e1, e2, ...)` with 2+ members, e.g.
+    /// `("A", 42)` (T103).
+    ///
+    /// Each element is a full [`Expr`] so `(a + 1, foo(), [1, 2])` works.
+    /// The 2+-element rule lives at parse time: a single `(e)` is grouping
+    /// (returns the bare `e`), NOT an `Expr::TupleLit`. So this variant
+    /// always carries 2+ elements. A trailing comma `(a, b,)` is allowed
+    /// and lowered to the same shape as `(a, b)`. Element order is
+    /// preserved as written (Vec, never a HashMap — determinism).
+    ///
+    /// Codegen lowers `(e1, e2)` to Rust's native tuple `(e1, e2)`, so the
+    /// resulting type is a real Rust tuple `(T1, T2)`.
+    ///
+    /// This is **additive** (T103): no existing variant was renamed,
+    /// reordered, or had its payload altered, so all prior `match` arms
+    /// remain exhaustive. See the migration-note block on [`Expr`] for the
+    /// established pattern (T68 `Expr::Range` is the closest template).
+    TupleLit(Vec<Expr>, Span),
 }
 
 impl Expr {
@@ -433,7 +451,8 @@ impl Expr {
             | Expr::Try { span: s, .. }
             | Expr::Spawn { span: s, .. }
             | Expr::Range { span: s, .. }
-            | Expr::IfLet { span: s, .. } => *s,
+            | Expr::IfLet { span: s, .. }
+            | Expr::TupleLit(_, s) => *s,
         }
     }
 }
@@ -591,6 +610,17 @@ impl fmt::Display for Expr {
                 Some(els) => write!(f, "IfLet({pattern} = {value}, {then_block}, {els})"),
                 None => write!(f, "IfLet({pattern} = {value}, {then_block})"),
             },
+            // T103: `(e1, e2, ...)` -> Tuple[e1, e2, ...].
+            Expr::TupleLit(members, _) => {
+                f.write_str("Tuple[")?;
+                for (i, e) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                f.write_str("]")
+            }
         }
     }
 }

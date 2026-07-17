@@ -402,6 +402,13 @@ fn collect_bound_names_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_bound_names_in_block(eb, out);
             }
         }
+        // T103: `(e1, e2, ...)` — recurse into each element for nested
+        // bindings (tuple literals carry no bindings of their own).
+        Expr::TupleLit(members, _) => {
+            for m in members {
+                collect_bound_names_in_expr(m, out);
+            }
+        }
     }
 }
 
@@ -684,6 +691,12 @@ fn collect_spawn_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_spawn_free_vars_in_block(eb, out);
             }
         }
+        // T103: `(e1, e2, ...)` — recurse into each element.
+        Expr::TupleLit(members, _) => {
+            for m in members {
+                collect_spawn_free_vars_in_expr(m, out);
+            }
+        }
     }
 }
 
@@ -790,6 +803,12 @@ fn collect_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
             collect_free_vars_in_block(then_block, out);
             if let Some(eb) = else_block {
                 collect_free_vars_in_block(eb, out);
+            }
+        }
+        // T103: `(e1, e2, ...)` — recurse into each element.
+        Expr::TupleLit(members, _) => {
+            for m in members {
+                collect_free_vars_in_expr(m, out);
             }
         }
     }
@@ -1007,6 +1026,12 @@ fn collect_assignment_targets_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
             collect_assignment_targets_in_block(then_block, out);
             if let Some(eb) = else_block {
                 collect_assignment_targets_in_block(eb, out);
+            }
+        }
+        // T103: `(e1, e2, ...)` — recurse into each element.
+        Expr::TupleLit(members, _) => {
+            for m in members {
+                collect_assignment_targets_in_expr(m, out);
             }
         }
     }

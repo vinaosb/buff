@@ -380,6 +380,14 @@ fn check_expr(
             }
             Ok(())
         }
+        // T103: a tuple literal `(e1, e2, ...)` — recurse into each element so
+        // any nested match expressions inside tuple members are still checked.
+        Expr::TupleLit(members, _) => {
+            for m in members {
+                check_expr(m, registry, inferencer)?;
+            }
+            Ok(())
+        }
     }
 }
 
