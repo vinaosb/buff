@@ -670,21 +670,78 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 /// Parse a comma-separated argument list, *excluding* the surrounding parens.
 /// The opening `(` must already have been consumed; the closing `)` is left
 /// for the caller to expect.
+///
+/// Each argument may be either:
+/// - **Positional** — a bare expression (`f(1, 2)`).
+/// - **Named** — `name: value` (`f(host: "x")`), parsed into an
+///   [`Expr::NamedArg`] node (T105).
+///
+/// Named args can appear in ANY order at any position; reorder to the callee's
+/// declared param order is done at codegen time (the parser does NOT have
+/// cross-function param-name info). Mixed positional + named is allowed (the
+/// common convention is positional-first; the parser is permissive). A
+/// trailing comma is allowed (`foo(a, b,)`).
 fn parse_call_args(stream: &mut TokenStream<'_>) -> Result<Vec<Expr>, ParseError> {
     let mut args = Vec::new();
     if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
         return Ok(args);
     }
-    args.push(parse_expression(stream)?);
+    args.push(parse_one_call_arg(stream)?);
     while matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
         stream.advance();
-        // Allow trailing comma: `foo(a, b,)`
+        // Allow trailing comma: `foo(a, b,)`.
         if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
             break;
         }
-        args.push(parse_expression(stream)?);
+        args.push(parse_one_call_arg(stream)?);
     }
     Ok(args)
+}
+
+/// Parse ONE call argument — either a positional expression or a
+/// `name: value` named arg (T105).
+///
+/// The disambiguation is purely lexical: peek the next TWO significant tokens.
+/// If they are `Ident Colon`, this is a named arg; otherwise it's a positional
+/// expression (parsed via the normal [`parse_expression`] path). This is the
+/// same shape test that `parse_params` uses (`name: Type`), but for argument
+/// position. The `:` token is not consumed by any Pratt operator, so its
+/// presence unambiguously signals a named arg.
+///
+/// **Why two-token lookahead and not trial parse?** Trial parsing (save /
+/// restore) would also work, but it adds complexity for no gain here: the
+/// `Ident Colon` shape at an argument position is unambiguous (Rust has no
+/// type-ascript expressions, and no Buff operator consumes `:`). A two-token
+/// peek is cheaper and clearer.
+fn parse_one_call_arg(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    // Named arg: `Ident Colon Expr`. Peek the next two significant tokens.
+    let is_named = matches!(
+        (stream.peek_kind(), stream.peek_second_kind()),
+        (Some(TokenKind::Ident(_)), Some(TokenKind::Colon))
+    );
+    if is_named {
+        let name_tok = stream
+            .advance()
+            .expect("peek guaranteed an Ident for named arg");
+        let name_span = name_tok.span;
+        let name = match name_tok.kind {
+            TokenKind::Ident(s) => Ident::new(s, name_span),
+            _ => unreachable!("peek guaranteed an Ident for named arg"),
+        };
+        // Consume the `:` — its position is implied by `name_span.end` so we
+        // don't need to keep the token; the value's span end is the
+        // authoritative arg-end.
+        stream.expect(TokenKind::Colon)?;
+        let value = parse_expression(stream)?;
+        let span = Span::new(name_span.start, value.span().end, stream.source_id());
+        Ok(Expr::NamedArg {
+            name,
+            value: Box::new(value),
+            span,
+        })
+    } else {
+        parse_expression(stream)
+    }
 }
 
 // ---------------------------------------------------------------------------

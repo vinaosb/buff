@@ -388,6 +388,9 @@ fn collect_func_calls(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_func_calls(m, out);
             }
         }
+        // T105: a named arg `name: value` — recurse into the value (the
+        // name is metadata, not a call).
+        Expr::NamedArg { value, .. } => collect_func_calls(value, out),
         Expr::Literal(_, _) | Expr::Ident(_, _) => {}
     }
 }

@@ -391,6 +391,9 @@ fn check_expr(
             }
             Ok(())
         }
+        // T105: a named arg `name: value` — recurse into the value so any
+        // nested match expressions inside the arg value are still checked.
+        Expr::NamedArg { value, .. } => check_expr(value, registry, inferencer),
     }
 }
 

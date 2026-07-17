@@ -1040,7 +1040,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `func f(): defer print("done"); return 0` → assert "done" printed before return. Evidence: task-100-defer.txt
   **Commit**: `feat(codegen-rust): add defer statement with LIFO execution`
 
-- [ ] **T105**: Named arguments [deep]
+- [x] **T105**: Named arguments [deep]
   **What to do** (TDD): RED: `create(host: "x", port: 80)` — args by name not position. GREEN: parse `name: value` in call args, validate against params, codegen reordered.
   **Acceptance**: `cargo test -p buff-lang-parser named_args` passes. Args can be in any order with names.
   **QA**: Codegen `greet(name: "Alice", greeting: "Hi")` → assert correct arg mapping. Evidence: task-105-named-args.txt

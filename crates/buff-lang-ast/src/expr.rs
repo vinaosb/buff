@@ -461,6 +461,36 @@ pub enum Expr {
     /// remain exhaustive. See the migration-note block on [`Expr`] for the
     /// established pattern (T68 `Expr::Range` is the closest template).
     TupleLit(Vec<Expr>, Span),
+    /// A named call argument: `name: value` inside a call's arg list (T105).
+    ///
+    /// Appears ONLY as an element of [`Expr::FuncCall::args`] or
+    /// [`Expr::MethodCall::args`] — never as a stand-alone expression. The
+    /// parser builds this node when it sees the `Ident Colon Expr` shape at
+    /// an argument position; a pure positional arg stays its bare [`Expr`]
+    /// (no NamedArg wrapper). This is the LIGHTER additive design (option A
+    /// in the T105 spec): [`Expr::FuncCall`] / [`Expr::MethodCall`] keep
+    /// their `args: Vec<Expr>` shape; a NamedArg is just one Expr variant
+    /// that flows through the existing vec.
+    ///
+    /// **Mixed positional + named** is allowed (positional first, then
+    /// named — the common convention; Buff v0.5 also accepts named-before-
+    /// positional for parser simplicity, but the canonical form is
+    /// positional-first). Reorder to the callee's declared param order is
+    /// done at **codegen** time when the callee's signature is resolvable
+    /// in the same compilation unit; otherwise (foreign callee, method
+    /// dispatch) the value is emitted positionally in the order written
+    /// (see the codegen note in `lower_func_call_args` for the v0.5 scope).
+    ///
+    /// This is **additive** (T105): no existing variant was renamed,
+    /// reordered, or had its payload altered, so all prior `match` arms
+    /// remain exhaustive. See the migration-note block on [`Expr`] for the
+    /// established pattern (T68 `Expr::Range` / T103 `Expr::TupleLit` are
+    /// the closest templates).
+    NamedArg {
+        name: Ident,
+        value: Box<Expr>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -486,7 +516,8 @@ impl Expr {
             | Expr::Spawn { span: s, .. }
             | Expr::Range { span: s, .. }
             | Expr::IfLet { span: s, .. }
-            | Expr::TupleLit(_, s) => *s,
+            | Expr::TupleLit(_, s)
+            | Expr::NamedArg { span: s, .. } => *s,
         }
     }
 }
@@ -654,6 +685,10 @@ impl fmt::Display for Expr {
                     write!(f, "{e}")?;
                 }
                 f.write_str("]")
+            }
+            // T105: `name: value` -> Named(name, value).
+            Expr::NamedArg { name, value, .. } => {
+                write!(f, "Named({name}: {value})")
             }
         }
     }

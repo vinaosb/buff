@@ -412,6 +412,9 @@ fn collect_bound_names_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_bound_names_in_expr(m, out);
             }
         }
+        // T105: a named arg `name: value` — recurse into the value (the
+        // name binds to a callee param, not a local).
+        Expr::NamedArg { value, .. } => collect_bound_names_in_expr(value, out),
     }
 }
 
@@ -704,6 +707,8 @@ fn collect_spawn_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_spawn_free_vars_in_expr(m, out);
             }
         }
+        // T105: a named arg `name: value` — recurse into the value.
+        Expr::NamedArg { value, .. } => collect_spawn_free_vars_in_expr(value, out),
     }
 }
 
@@ -818,6 +823,9 @@ fn collect_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_free_vars_in_expr(m, out);
             }
         }
+        // T105: a named arg `name: value` — the value reads outer names;
+        // the name binds to a callee param, not a free var.
+        Expr::NamedArg { value, .. } => collect_free_vars_in_expr(value, out),
     }
 }
 
@@ -1046,6 +1054,9 @@ fn collect_assignment_targets_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
                 collect_assignment_targets_in_expr(m, out);
             }
         }
+        // T105: a named arg `name: value` — recurse into the value for
+        // nested assignment targets.
+        Expr::NamedArg { value, .. } => collect_assignment_targets_in_expr(value, out),
     }
 }
 

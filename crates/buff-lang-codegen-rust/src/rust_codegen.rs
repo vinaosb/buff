@@ -205,6 +205,20 @@ pub struct RustCodegen {
     /// deterministic. Limitation: move-analysis decisions are fixed at the
     /// defer site (see the T100 note in learnings.md).
     deferred_exprs: Vec<SynExpr>,
+    /// T105: param-name lists for user-defined free functions in this
+    /// compilation unit, keyed by function name. Populated by
+    /// [`Self::generate`] BEFORE the per-function lowering loop so
+    /// [`Self::lower_expr`] can REORDER named call arguments to match the
+    /// callee's declared parameter order. A [`BTreeMap`] (not [`HashMap`])
+    /// for deterministic membership and iteration (the T29 flaky-test
+    /// lesson — never rely on hash-seed-dependent iteration for codegen).
+    ///
+    /// **v0.5 scope**: only SAME-compilation-unit free functions are
+    /// resolved. Cross-module callees (T29 multi-file programs) and
+    /// method-call param names (receiver-type resolution) are deferred to
+    /// v1.0 — for those, named-arg values are extracted positionally
+    /// (names dropped), so the call still lowers but without reorder.
+    func_param_names: BTreeMap<String, Vec<String>>,
 }
 
 impl RustCodegen {
@@ -225,6 +239,7 @@ impl RustCodegen {
             collected_unions: BTreeMap::new(),
             hash_safe_structs: BTreeSet::new(),
             deferred_exprs: Vec::new(),
+            func_param_names: BTreeMap::new(),
         }
     }
 
@@ -337,6 +352,17 @@ impl RustCodegen {
         // its fields are Hash-safe, recursively across user struct
         // references (so `struct A { b: B }` is Hash-safe iff `B` is too).
         self.hash_safe_structs = self.compute_hash_safe_structs(decls);
+        // T105: collect param-name lists for every user-defined free
+        // function in this compilation unit. Used by [`Self::lower_expr`]'s
+        // FuncCall arm to REORDER named call arguments to match the
+        // callee's declared parameter order (`create(port: 80, host: "x")`
+        // → `create("x", 80)` when `func create(host, port)`). Methods
+        // (inside `extend TYPE { ... }` blocks) are NOT included here —
+        // their param names require receiver-type resolution, which is a
+        // v1.0 concern. Cross-module callees (T29) are also out-of-scope.
+        // Built BEFORE the main lowering loop so per-function lowering can
+        // consult it.
+        self.func_param_names = collect_func_param_names(decls);
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -1633,6 +1659,25 @@ impl RustCodegen {
                 self.make_unary_op(*op, operand)
             }
             Expr::FuncCall { callee, args, .. } => {
+                // T105: named-arg resolution. When the arg list contains
+                // any `Expr::NamedArg`, materialize a POSITIONAL `Vec<Expr>`
+                // either REORDERED (if the callee is a user fn whose param
+                // names we know) or with values EXTRACTED (names dropped)
+                // for prelude/builtin/method/foreign callees. Pure-
+                // positional call lists pass through unchanged.
+                let resolved_args: Option<Vec<Expr>> =
+                    if args.iter().any(|a| matches!(a, Expr::NamedArg { .. })) {
+                        let params: Option<&[String]> = match callee.as_ref() {
+                            Expr::Ident(name, _) => {
+                                self.func_param_names.get(&name.name).map(|v| v.as_slice())
+                            }
+                            _ => None,
+                        };
+                        Some(materialize_named_args(args, params))
+                    } else {
+                        None
+                    };
+                let args_ref: &[Expr] = resolved_args.as_deref().unwrap_or(args);
                 // T96: standard-library prelude. A bare-ident callee whose
                 // name is a recognised prelude function is lowered to the
                 // corresponding Rust idiom (math, conversion, I/O) WITHOUT
@@ -1645,7 +1690,7 @@ impl RustCodegen {
                 // `print("hello")` now emits `println!("hello")` (no `{}`).
                 if let Expr::Ident(name, _) = callee.as_ref() {
                     if let Some(fn_) = buff_lang_types::prelude::lookup(&name.name) {
-                        return self.lower_prelude_call(fn_, args);
+                        return self.lower_prelude_call(fn_, args_ref);
                     }
                     // T30: `Error("msg")` is a prelude error constructor
                     // (NOT a reserved keyword and NOT a user function). It
@@ -1656,8 +1701,8 @@ impl RustCodegen {
                     // struct is emitted on-demand by [`Self::generate`] when
                     // this constructor appears (mirroring the Matrix
                     // emit-on-demand pattern from T24).
-                    if name.name == "Error" && args.len() == 1 {
-                        return self.lower_error_constructor(args);
+                    if name.name == "Error" && args_ref.len() == 1 {
+                        return self.lower_error_constructor(args_ref);
                     }
                     // T31: `block(expr)` is a prelude-style async-blocking
                     // form. It runs an async expression synchronously by
@@ -1669,8 +1714,8 @@ impl RustCodegen {
                     // user gets the warning + the (broken) Rust; they can
                     // then refactor). `block` is NOT a reserved keyword
                     // — it's a builtin name resolved like a prelude fn.
-                    if name.name == "block" && args.len() == 1 {
-                        return self.lower_block_call(&args[0]);
+                    if name.name == "block" && args_ref.len() == 1 {
+                        return self.lower_block_call(&args_ref[0]);
                     }
                 }
 
@@ -1691,7 +1736,7 @@ impl RustCodegen {
                     _ => self.lower_expr(callee)?,
                 };
                 let mut lowered: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
-                for a in args {
+                for a in args_ref {
                     lowered.push(self.lower_expr(a)?);
                 }
                 let call = SynExpr::Call(syn::ExprCall {
@@ -1728,7 +1773,24 @@ impl RustCodegen {
                 method,
                 args,
                 ..
-            } => self.lower_method_call(receiver, method, args),
+            } => {
+                // T105: named-arg resolution for method calls. Method
+                // callee param names are NOT resolved in v0.5 (no
+                // receiver-type analysis), so we fall back to value-
+                // extraction (drop names) via `materialize_named_args`
+                // with `params=None`. Pure-positional call lists pass
+                // through unchanged. Full method-param reorder is a v1.0
+                // concern (requires resolving the receiver's type to find
+                // its method set + signatures).
+                let resolved_args: Option<Vec<Expr>> =
+                    if args.iter().any(|a| matches!(a, Expr::NamedArg { .. })) {
+                        Some(materialize_named_args(args, None))
+                    } else {
+                        None
+                    };
+                let args_ref: &[Expr] = resolved_args.as_deref().unwrap_or(args);
+                self.lower_method_call(receiver, method, args_ref)
+            }
             Expr::StringInterp { parts, .. } => self.lower_string_interp(parts),
             // T23: `[e1, e2, ...]` -> Rust `vec![e1, e2, ...]` macro.
             Expr::ArrayLit { elements, .. } => self.lower_array_lit(elements),
@@ -1845,6 +1907,13 @@ impl RustCodegen {
                 syn::parse2::<SynExpr>(tokens)
                     .map_err(|e| self.unsupported(&format!("tuple codegen parse: {e}")))
             }
+            // T105: a NamedArg at this position is a parser bug — it
+            // should only appear INSIDE a FuncCall/MethodCall args vec,
+            // where it's resolved to a positional value BEFORE reaching
+            // lower_expr. As a defensive fallback, lower the value (so
+            // the generated Rust compiles even if a NamedArg slips
+            // through). This never triggers for well-formed Buff source.
+            Expr::NamedArg { value, .. } => self.lower_expr(value),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -4789,6 +4858,144 @@ fn type_is_hash_safe(ty: &TypeRef, hash_safe_user_structs: &BTreeSet<String>) ->
     }
 }
 
+// ---------------------------------------------------------------------------
+// T105 — named-argument resolution helpers.
+//
+// Named args (`name: value` inside a call's arg list) carry their param
+// name through the AST. At codegen, the codegen reorders them to match the
+// callee's declared parameter order (when known) so the generated Rust
+// call uses POSITIONAL arguments (Rust has no named-arg call syntax for
+// free functions). This block has two free helpers:
+//
+// - [`collect_func_param_names`]: scans the decl list once at the start of
+//   [`RustCodegen::generate`] and returns a `fn_name -> Vec<param_name>`
+//   map. Same-compilation-unit free functions only.
+// - [`materialize_named_args`]: given a call's `args` and an OPTIONAL
+//   param-name list, returns a positional `Vec<Expr>`:
+//     * `Some(params)` → reorder named args to match param order;
+//       unmatched/extra args are appended defensively (Rust then errors
+//       on arity mismatch).
+//     * `None` → extract the value from each NamedArg (drop the name);
+//       pure-positional call lists pass through unchanged.
+// ---------------------------------------------------------------------------
+
+/// Collect param-name lists for every user-defined free function in `decls`
+/// (T105).
+///
+/// Returns a [`BTreeMap`] keyed by function name; the value is the
+/// parameter-name list in DECLARATION ORDER (so reorder is positional).
+/// Methods (inside `extend TYPE { ... }` blocks) are NOT collected — their
+/// param names require receiver-type resolution (a v1.0 concern); for
+/// method calls the codegen falls back to value-extraction (drop names).
+///
+/// A [`BTreeMap`] (not [`HashMap`]) is used so iteration is deterministic
+/// across runs (the T29 flaky-test lesson). Last-declaration-wins on name
+/// collisions (Buff allows shadowing at module level; the visible binding
+/// at a call site is the last one in source order in single-file
+/// compilation).
+fn collect_func_param_names(decls: &[Decl]) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            out.insert(
+                f.name.name.clone(),
+                f.params.iter().map(|p| p.name.name.clone()).collect(),
+            );
+        }
+    }
+    out
+}
+
+/// Convert a call's `args` into a POSITIONAL [`Vec<Expr>`] (T105).
+///
+/// Two modes:
+///
+/// - **Reorder** (`params = Some(pnames)`): walk `pnames` in declaration
+///   order; for each param name, pull the matching named arg's value if
+///   present, else take the next positional arg in source order. Unmatched
+///   leftover args (positional or named) are appended AFTER the params so
+///   the caller still sees them (Rust will then diagnose the arity
+///   mismatch — Buff does not validate arg counts at codegen in v0.5).
+///   `create(port: 80, host: "x")` with `params=[host, port]` becomes
+///   `["x", 80]`.
+///
+/// - **Extract** (`params = None`): no param-order info available (method
+///   call, prelude, builtin, foreign callee). Drop the names from any
+///   NamedArg and emit the values in SOURCE order; pure-positional args
+///   pass through unchanged. This is the v0.5 fallback for cases where
+///   full callee-signature resolution isn't done.
+///
+/// Pure-positional call lists (no NamedArg at all) pass through unchanged
+/// in BOTH modes (a defensive clone — the caller's args are borrowed, the
+/// return is owned). The common case (`f(1, 2)`) therefore pays one
+/// shallow clone of the args vec, which is cheap.
+///
+/// Determinism: the reorder is driven by walking `pnames` (declaration
+/// order) and `args` (source order) — no [`HashMap`] iteration. The
+/// output is byte-identical for the same `(args, params)` pair across
+/// runs.
+fn materialize_named_args(args: &[Expr], params: Option<&[String]>) -> Vec<Expr> {
+    // Fast path: no NamedArg → pass through (clone the slice; cheap for the
+    // typical small arg list).
+    if !args.iter().any(|a| matches!(a, Expr::NamedArg { .. })) {
+        return args.to_vec();
+    }
+    match params {
+        Some(pnames) => {
+            // Reorder. Collect positional args in source order; named args
+            // are looked up by name when walking pnames.
+            let positional: Vec<&Expr> = args
+                .iter()
+                .filter(|a| !matches!(a, Expr::NamedArg { .. }))
+                .collect();
+            let mut pos_idx = 0usize;
+            let mut out: Vec<Expr> = Vec::with_capacity(pnames.len());
+            for pn in pnames {
+                // Linear search (arg lists are tiny — no need for a map).
+                let found = args.iter().find_map(|a| match a {
+                    Expr::NamedArg { name, value, .. } if &name.name == pn => Some(value),
+                    _ => None,
+                });
+                if let Some(v) = found {
+                    out.push((**v).clone());
+                } else if pos_idx < positional.len() {
+                    out.push(positional[pos_idx].clone());
+                    pos_idx += 1;
+                }
+                // else: missing arg for this param — leave it out so Rust
+                // diagnoses the arity mismatch (Buff v0.5 does no arity
+                // checking at codegen).
+            }
+            // Defensive: leftover positional args go AFTER the params so
+            // variadic-style callers don't silently lose data.
+            while pos_idx < positional.len() {
+                out.push(positional[pos_idx].clone());
+                pos_idx += 1;
+            }
+            // Defensive: leftover named args (no matching param) go AFTER
+            // leftover positionals, in SOURCE order (walk `args`, not a
+            // map — determinism).
+            for a in args {
+                if let Expr::NamedArg { name, value, .. } = a {
+                    if !pnames.iter().any(|p| p == &name.name) {
+                        out.push((**value).clone());
+                    }
+                }
+            }
+            out
+        }
+        None => {
+            // Extract: drop names, keep values, source order.
+            args.iter()
+                .map(|a| match a {
+                    Expr::NamedArg { value, .. } => (**value).clone(),
+                    _ => a.clone(),
+                })
+                .collect()
+        }
+    }
+}
+
 /// Walk the declaration list looking for any `Matrix.new(...)` constructor
 /// call (T24). Returns `true` if at least one is found, signalling
 /// [`RustCodegen::generate`] to prepend the builtin `Matrix<T>` struct.
@@ -4923,6 +5130,8 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
         }
         // T103: `(e1, e2, ...)` — recurse into each element.
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_matrix),
+        // T105: a named arg `name: value` — recurse into the value.
+        Expr::NamedArg { value, .. } => expr_uses_matrix(value),
     }
 }
 
@@ -5124,6 +5333,8 @@ fn expr_uses_error(expr: &Expr) -> bool {
         }
         // T103: `(e1, e2, ...)` — recurse into each element.
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_error),
+        // T105: a named arg `name: value` — recurse into the value.
+        Expr::NamedArg { value, .. } => expr_uses_error(value),
     }
 }
 

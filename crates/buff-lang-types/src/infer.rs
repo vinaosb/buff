@@ -322,6 +322,11 @@ impl TypeInferencer {
                 }
                 Ok(Type::tuple(member_tys))
             }
+            // T105: a named arg `name: value` infers the value's type. The
+            // name is metadata for codegen reorder; it carries no type of
+            // its own. The enclosing FuncCall/MethodCall inference decides
+            // the call's overall type (typically Unknown in v0.5).
+            Expr::NamedArg { value, .. } => self.infer_expr(value),
         }
     }
 

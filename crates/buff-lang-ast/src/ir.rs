@@ -951,6 +951,9 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
                 collect_uses(e, out);
             }
         }
+        // T105: a named arg `name: value` uses the value expression. The
+        // name is not a use (it binds to a param name, not a variable).
+        Expr::NamedArg { value, .. } => collect_uses(value, out),
     }
 }
 
