@@ -449,6 +449,28 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
         };
     }
 
+    // T76: union types `A | B | C`. After parsing one type, if the next
+    // token is `|` (Pipe), keep consuming `| Type` and collect into a
+    // `TypeRef::Union`. This is ONLY active in TYPE position (here in
+    // parse_type_ref) — it does NOT affect expression-level `|` (bitwise-
+    // or), `||` (logical-or), or `|>` (pipeline).
+    if matches!(stream.peek_kind(), Some(TokenKind::Pipe)) {
+        let mut members = vec![ty];
+        loop {
+            stream.advance(); // consume `|`
+            let member = parse_type_ref(stream)?;
+            members.push(member);
+            if !matches!(stream.peek_kind(), Some(TokenKind::Pipe)) {
+                break;
+            }
+        }
+        let union_end = match members.last() {
+            Some(last) => type_end(last),
+            None => start,
+        };
+        ty = TypeRef::Union(members, Span::new(start, union_end, source_id));
+    }
+
     Ok(ty)
 }
 
@@ -2208,7 +2230,8 @@ fn type_end(ty: &TypeRef) -> usize {
         TypeRef::Named { span, .. }
         | TypeRef::Generic { span, .. }
         | TypeRef::Option(_, span)
-        | TypeRef::Function { span, .. } => span.end,
+        | TypeRef::Function { span, .. }
+        | TypeRef::Union(_, span) => span.end,
     }
 }
 

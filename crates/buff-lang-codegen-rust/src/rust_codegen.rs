@@ -66,7 +66,7 @@
 //! Structs, enums, imports, traits, lambdas, match, method-call and
 //! struct-init lowering are deferred to later tasks.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use proc_macro2::Span as ProcSpan;
 use syn::punctuated::Punctuated;
@@ -166,12 +166,18 @@ pub struct RustCodegen {
     /// Populated during [`Self::generate`] as each [`Decl::ExternCrateDecl`]
     /// is lowered; emitted in codegen as a `use <name>;` item. Exposed via
     /// [`Self::extern_crates`] so the pipeline (when it gains Cargo-project
-    /// assembly) can write `<name> = "*"` lines into the generated
+    /// wiring) can write `<name> = "*"` lines into the generated
     /// `Cargo.toml`. A [`BTreeSet`] (not [`HashSet`]) is used so iteration
     /// order is DETERMINISTIC across runs and independent of hash seed
     /// (the T29 flaky-test lesson — never rely on HashSet iteration order
     /// for codegen output).
     extern_crates: BTreeSet<String>,
+    /// T76: collected union types for emission as wrapper enums.
+    /// Keyed by canonical union name (`StringOrInt`, `IntOrFloatOrBool`), value
+    /// is the member TypeRefs. A `BTreeMap` (not `HashMap`) for determinism
+    /// (the T29 flaky-test lesson). Populated during [`Self::ast_typeref_to_syn`]
+    /// when it encounters a `TypeRef::Union`.
+    collected_unions: BTreeMap<String, Vec<TypeRef>>,
 }
 
 impl RustCodegen {
@@ -189,6 +195,7 @@ impl RustCodegen {
             closure_capture_stack: Vec::new(),
             warnings: Vec::new(),
             extern_crates: BTreeSet::new(),
+            collected_unions: BTreeMap::new(),
         }
     }
 
@@ -314,6 +321,18 @@ impl RustCodegen {
             }
             let item = self.lower_decl(decl)?;
             items.push(item);
+        }
+        // T76: emit collected union wrapper enums (deduplicated by canonical
+        // name). Collection happens during decl lowering, so emission must
+        // happen after the main lowering loop.
+        let unions: Vec<(String, Vec<TypeRef>)> = self
+            .collected_unions
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        for (union_name, members) in unions {
+            let enum_item = self.union_enum_item(&union_name, &members)?;
+            items.insert(0, Item::Enum(enum_item));
         }
         Ok(File {
             shebang: None,
@@ -3254,7 +3273,7 @@ impl RustCodegen {
     ///
     /// Returns an error for unsupported forms (function types); these will
     /// land in T12/T13.
-    fn ast_typeref_to_syn(&self, ty: &TypeRef) -> Result<SynType, CodegenError> {
+    fn ast_typeref_to_syn(&mut self, ty: &TypeRef) -> Result<SynType, CodegenError> {
         match ty {
             TypeRef::Named { name, .. } => {
                 // T32: the Buff→Rust primitive-name mapping is now a
@@ -3282,6 +3301,23 @@ impl RustCodegen {
                 Ok(make_generic_path_type(&base_name, lowered_args))
             }
             TypeRef::Function { .. } => Err(self.unsupported("function-type codegen (T12/T13)")),
+            // T76: union types `A | B | C`. Compute canonical name
+            // (join member display names with "Or"), collect into
+            // `collected_unions`, and return the wrapper enum name as a
+            // SynType::Path.
+            TypeRef::Union(members, _) => {
+                // Compute canonical union name: "String | Int" → "StringOrInt".
+                let union_name: String = members
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join("Or");
+                // Collect for dedup emission (emit once per unique union).
+                self.collected_unions
+                    .entry(union_name.clone())
+                    .or_insert_with(|| members.clone());
+                Ok(rust_path_type(&union_name))
+            }
         }
     }
 
@@ -3342,6 +3378,13 @@ impl RustCodegen {
                 let err_ty = self.buff_type_to_syn(err)?;
                 return Some(make_generic_path_type("Result", vec![ok_ty, err_ty]));
             }
+            // T76: union types — resolved `Type::Union` is only reached via
+            // `typeref_to_type` for source unions; there's no inference
+            // path that produces Union directly. Return None so Rust
+            // inference handles the annotation (the wrapper enum type is
+            // determined in `ast_typeref_to_syn` which collects unions from
+            // TypeRef::Union).
+            Type::Union(_) => return None,
             _ => {}
         }
         let rust_name: &str = match ty {
@@ -3399,7 +3442,8 @@ impl RustCodegen {
             | Type::Matrix(_)
             | Type::Option(_)
             | Type::Map(_, _)
-            | Type::Result(_, _) => return None,
+            | Type::Result(_, _)
+            | Type::Union(_) => return None,
         };
         Some(rust_path_type(rust_name))
     }
@@ -4427,7 +4471,85 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
             "Void" => Some(Type::Void),
             _ => None,
         },
+        // T76: union types (for match param resolution). Resolve each
+        // member recursively; unknown members become Unknown.
+        TypeRef::Union(members, _) => {
+            let resolved: Vec<Type> = members.iter().filter_map(typeref_to_type).collect();
+            Some(Type::Union(resolved))
+        }
         _ => None,
+    }
+}
+
+impl RustCodegen {
+    /// Build a Rust enum item for a union wrapper. T76.
+    ///
+    /// Example: members `[TypeRef::Named("String"), TypeRef::Named("Int")]`
+    /// → `enum StringOrInt { String(String), Int(i64), }` (each variant
+    /// named after the member's display name, carrying that member's Rust
+    /// type). For v0.5, only Named and Generic-with-Named-base members
+    /// are supported (Variant name = member name or Generic base name).
+    fn union_enum_item(
+        &mut self,
+        name: &str,
+        members: &[TypeRef],
+    ) -> Result<ItemEnum, CodegenError> {
+        let mut variants: Punctuated<syn::Variant, syn::Token![,]> = Punctuated::new();
+        for member in members {
+            // Variant name = member's display name (e.g. "String", "Int").
+            // For Named it's the name; for Generic it's the base name (v0.5
+            // limitation — nested unions deferred).
+            let variant_name = match member {
+                TypeRef::Named { name, .. } => name.name.clone(),
+                TypeRef::Generic { base, .. } => {
+                    if let TypeRef::Named { name, .. } = base.as_ref() {
+                        name.name.clone()
+                    } else {
+                        return Err(self.unsupported(
+                            "union member variant name: only Named or Generic with Named base supported in v0.5",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(self.unsupported(
+                        "union member variant name: only Named or Generic supported in v0.5",
+                    ))
+                }
+            };
+            // Inner Rust type: lower the member TypeRef.
+            let inner_ty = self.ast_typeref_to_syn(member)?;
+            // Create a tuple variant with one field.
+            let variant = syn::Variant {
+                attrs: Vec::new(),
+                ident: Ident::new(&variant_name, ProcSpan::call_site()),
+                fields: syn::Fields::Unnamed(syn::FieldsUnnamed {
+                    paren_token: Default::default(),
+                    unnamed: {
+                        let mut punct: Punctuated<syn::Field, syn::Token![,]> = Punctuated::new();
+                        punct.push(syn::Field {
+                            attrs: Vec::new(),
+                            vis: Visibility::Inherited,
+                            ident: None,
+                            colon_token: None,
+                            ty: inner_ty,
+                            mutability: syn::FieldMutability::None,
+                        });
+                        punct
+                    },
+                }),
+                discriminant: None,
+            };
+            variants.push(variant);
+        }
+        Ok(ItemEnum {
+            attrs: derive_and_repr_attrs(false), // No #[repr(C)] for unions.
+            vis: Visibility::Public(Default::default()),
+            enum_token: Default::default(),
+            ident: Ident::new(name, ProcSpan::call_site()),
+            generics: syn::Generics::default(),
+            brace_token: Default::default(),
+            variants,
+        })
     }
 }
 
@@ -4651,7 +4773,7 @@ mod tests {
 
     #[test]
     fn type_int_maps_to_i64() {
-        let codegen = RustCodegen::new();
+        let mut codegen = RustCodegen::new();
         let tr = TypeRef::Named {
             name: AstIdent::new("Int", dummy_span()),
             span: dummy_span(),
@@ -4668,7 +4790,7 @@ mod tests {
 
     #[test]
     fn type_option_maps_to_rust_option() {
-        let codegen = RustCodegen::new();
+        let mut codegen = RustCodegen::new();
         let tr = TypeRef::Option(
             Box::new(TypeRef::Named {
                 name: AstIdent::new("Int", dummy_span()),

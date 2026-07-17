@@ -29,7 +29,3 @@ buff-lang-codegen-rust = { path = "crates/buff-lang-codegen-rust" }
 buff-lang-codegen-wgsl = { path = "crates/buff-lang-codegen-wgsl" }
 buff-lang-runtime = { path = "crates/buff-lang-runtime" }
 buff-lang-error = { path = "crates/buff-lang-error" }
-
-[workspace.dev-dependencies]
-insta = "1.40"
-proptest = "1.5"

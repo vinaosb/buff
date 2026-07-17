@@ -569,6 +569,14 @@ fn typeref_to_type(ty: &buff_lang_ast::TypeRef) -> Option<crate::Type> {
             }
             None
         }
+        // T76: union types `A | B | C`.
+        TypeRef::Union(members, _) => {
+            let resolved: Vec<crate::Type> = members
+                .iter()
+                .map(|m| typeref_to_type(m).unwrap_or(crate::Type::Unknown))
+                .collect();
+            Some(crate::Type::Union(resolved))
+        }
         _ => None,
     }
 }

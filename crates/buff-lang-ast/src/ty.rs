@@ -29,6 +29,20 @@ pub enum TypeRef {
         is_async: bool,
         span: Span,
     },
+    /// A union (sum) type: `A | B | C` (T76).
+    ///
+    /// Rust has no anonymous unions, so codegen emits a named enum wrapper
+    /// (e.g. `String | Int` → `enum StringOrInt { String(String), Int(i64) }`).
+    /// The wrapper name is deterministic: join the member type names with
+    /// `Or` in source order (`String | Int` → `StringOrInt`,
+    /// `Int | Float | Bool` → `IntOrFloatOrBool`). Codegen collects unique
+    /// unions and emits each wrapper enum ONCE as a top-level item.
+    ///
+    /// Each member is itself a [`TypeRef`] (so unions compose with named,
+    /// generic, option, and even nested-union members — though nested-union
+    /// codegen flattening is deferred). The span covers the whole
+    /// `A | B | C` sequence.
+    Union(Vec<TypeRef>, Span),
 }
 
 impl fmt::Display for TypeRef {
@@ -63,6 +77,16 @@ impl fmt::Display for TypeRef {
                     write!(f, "{p}")?;
                 }
                 write!(f, ") -> {return_type}")
+            }
+            // T76: union `A | B | C`.
+            TypeRef::Union(members, _) => {
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" | ")?;
+                    }
+                    write!(f, "{m}")?;
+                }
+                Ok(())
             }
         }
     }

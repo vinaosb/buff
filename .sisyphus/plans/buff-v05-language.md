@@ -978,7 +978,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `extend String { fn shout(self) -> String { self.to_uppercase() } }` → assert trait+impl. Evidence: task-75-extensions.txt
   **Commit**: `feat(parser): add extension methods via extend blocks`
 
-- [ ] **T76**: Union types `A | B` [deep]
+- [x] **T76**: Union types `A | B` [deep]
   **What to do** (TDD): RED: `String | Int` as a type, match to discriminate. GREEN: parse `|` in type position, create auto-generated enum wrapper, codegen match.
   **Acceptance**: `cargo test -p buff-lang-types union_types` passes. `String | Int` usable as parameter type.
   **QA**: Codegen `func process(x: String | Int)` → assert generated enum wrapper. Evidence: task-76-union-types.txt

@@ -704,6 +704,16 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
             }
             None
         }
+        // T76: union types `A | B | C`. Resolve each member recursively;
+        // unresolvable members fall back to `Unknown` so the Union wrapper
+        // still flows through codegen.
+        TypeRef::Union(members, _) => {
+            let resolved: Vec<Type> = members
+                .iter()
+                .map(|m| typeref_to_type(m).unwrap_or(Type::Unknown))
+                .collect();
+            Some(Type::Union(resolved))
+        }
         _ => None,
     }
 }

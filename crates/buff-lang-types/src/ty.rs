@@ -102,6 +102,16 @@ pub enum Type {
     /// (codegen), `typeref_to_type` (inferencer + exhaustiveness), and the
     /// prelude-seeded enum registry (`build_enum_registry_with_prelude`).
     Result(Box<Type>, Box<Type>),
+    /// A union (sum) type: `A | B | C` (T76).
+    ///
+    /// Each member is a resolved [`Type`]. Rust has no anonymous unions, so
+    /// codegen lowers this to a named enum wrapper (e.g. `String | Int` →
+    /// `enum StringOrInt { String(String), Int(i64) }`). A union is neither
+    /// numeric nor GPU-eligible; it participates in no promotion rules in
+    /// v0.5 (arithmetic on a union value is a type error — the user must
+    /// `match` to discriminate first). Runtime discrimination / match-on-
+    /// union coercion is a documented deferral.
+    Union(Vec<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -297,6 +307,16 @@ impl fmt::Display for Type {
             Type::Option(inner) => write!(f, "Option<{inner}>"),
             Type::Map(key, value) => write!(f, "Map<{key}, {value}>"),
             Type::Result(ok, err) => write!(f, "Result<{ok}, {err}>"),
+            // T76: union `A | B | C`.
+            Type::Union(members) => {
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" | ")?;
+                    }
+                    write!(f, "{m}")?;
+                }
+                Ok(())
+            }
         }
     }
 }

@@ -2368,3 +2368,11 @@ exhaustive match) so no change needed. `program_uses_matrix`/`error` use
   `syn::Receiver`).
 - **`return_type` inference for `Self`**: today the user writes the return
   type explicitly; no inference for `Self`-typed returns.
+## T76 — Union types
+
+- `TypeRef::Named` in this codebase is the simple shape `{ name: Ident, span: Span }`; generic arguments belong on `TypeRef::Generic { base, args, span }`.
+- `buff-lang-types` tests should exercise type-reference resolution through real public surfaces (`TypeInferencer::infer_stmt` with `Stmt::LetDecl` annotations), not private helpers like `typeref_to_type`.
+- `buff-lang-codegen-rust` integration tests should mirror existing helpers: build `Decl::FuncDecl(FuncDecl { ... })`, use `common::Param`, `return_type`, and top-level `generate_rust(&[Decl])` rather than calling internal codegen methods directly.
+- Changing `ast_typeref_to_syn` from `&self` to `&mut self` requires adjusting internal unit tests that instantiate `RustCodegen`.
+- Union wrapper collection happens during lowering of type references, so wrapper-enum emission must run AFTER declaration lowering, not before; otherwise generated function signatures reference wrapper names that were never emitted.
+- For parser union spans, deriving the end from `members.last()` avoids dead temporary state and keeps `cargo clippy -D warnings` clean.

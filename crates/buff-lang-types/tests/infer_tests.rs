@@ -845,4 +845,106 @@ mod decimal_type {
         let e = binary(BinaryOp::AddAssign, ident("price"), dec_lit("0.1"));
         assert_eq!(inf.infer_expr(&e).unwrap(), Type::Decimal);
     }
+
+    // T76: Union types `A | B` tests.
+
+    fn named_type(name: &str) -> TypeRef {
+        TypeRef::Named {
+            name: Ident::new(name, sp()),
+            span: sp(),
+        }
+    }
+
+    #[test]
+    fn union_types_two_members_annotation_resolves() {
+        let annotated = TypeRef::Union(vec![named_type("String"), named_type("Int")], sp());
+        let expected = Type::Union(vec![Type::string(), Type::int_default()]);
+
+        let mut inf = TypeInferencer::new();
+        inf.bind("input", expected.clone());
+
+        let stmt = Stmt::LetDecl {
+            name: Ident::new("value", sp()),
+            value: ident("input"),
+            mutable: false,
+            ty: Some(annotated),
+            span: sp(),
+        };
+
+        assert_eq!(inf.infer_stmt(&stmt).unwrap(), expected.clone());
+        assert_eq!(inf.lookup("value"), Some(&expected));
+    }
+
+    #[test]
+    fn union_types_three_members_annotation_resolves() {
+        let annotated = TypeRef::Union(
+            vec![named_type("String"), named_type("Int"), named_type("Bool")],
+            sp(),
+        );
+        let expected = Type::Union(vec![Type::string(), Type::int_default(), Type::bool()]);
+
+        let mut inf = TypeInferencer::new();
+        inf.bind("input", expected.clone());
+
+        let stmt = Stmt::LetDecl {
+            name: Ident::new("value", sp()),
+            value: ident("input"),
+            mutable: false,
+            ty: Some(annotated),
+            span: sp(),
+        };
+
+        assert_eq!(inf.infer_stmt(&stmt).unwrap(), expected.clone());
+        assert_eq!(inf.lookup("value"), Some(&expected));
+    }
+
+    #[test]
+    fn union_types_display_formats_with_pipe() {
+        let ty = Type::Union(vec![Type::string(), Type::int_default()]);
+        assert_eq!(format!("{ty}"), "String | Int<64>");
+    }
+
+    #[test]
+    fn union_types_nested_annotation_resolves_recursively() {
+        let inner = TypeRef::Union(vec![named_type("String"), named_type("Int")], sp());
+        let annotated = TypeRef::Union(vec![inner, named_type("Bool")], sp());
+        let expected = Type::Union(vec![
+            Type::Union(vec![Type::string(), Type::int_default()]),
+            Type::bool(),
+        ]);
+
+        let mut inf = TypeInferencer::new();
+        inf.bind("input", expected.clone());
+
+        let stmt = Stmt::LetDecl {
+            name: Ident::new("value", sp()),
+            value: ident("input"),
+            mutable: false,
+            ty: Some(annotated),
+            span: sp(),
+        };
+
+        assert_eq!(inf.infer_stmt(&stmt).unwrap(), expected.clone());
+        assert_eq!(inf.lookup("value"), Some(&expected));
+    }
+
+    #[test]
+    fn union_types_unknown_member_becomes_unknown() {
+        let annotated = TypeRef::Union(vec![named_type("String"), named_type("Mystery")], sp());
+        let expected = Type::Union(vec![Type::string(), Type::Unknown]);
+
+        let mut inf = TypeInferencer::new();
+        inf.bind("input", expected.clone());
+
+        let stmt = Stmt::LetDecl {
+            name: Ident::new("value", sp()),
+            value: ident("input"),
+            mutable: false,
+            ty: Some(annotated),
+            span: sp(),
+        };
+
+        assert_eq!(inf.infer_stmt(&stmt).unwrap(), expected.clone());
+        assert_eq!(inf.lookup("value"), Some(&expected));
+    }
 }
