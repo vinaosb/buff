@@ -246,6 +246,35 @@ impl TypeInferencer {
                 let _ = self.infer_expr(end)?;
                 Ok(Type::Unknown)
             }
+            // T72: `if let PAT = EXPR { then } else { else }` — infer the
+            // value for side effects (binding the pattern's names to Unknown
+            // since v0.5 doesn't track per-binding types through patterns),
+            // then walk both blocks. The whole expression is `()` (unit)
+            // when used as a statement, which is the common case. Mirrors
+            // the IfExpr treatment: we don't unify the branch types.
+            Expr::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+                ..
+            } => {
+                let _ = self.infer_expr(value)?;
+                // Bind each pattern name to Unknown (v0.5 deferral — Rust
+                // does the real per-binding inference at codegen time).
+                for b in pattern.bindings() {
+                    self.env.insert(&b.name, Type::Unknown);
+                }
+                for s in &then_block.stmts {
+                    let _ = self.infer_stmt(s)?;
+                }
+                if let Some(eb) = else_block {
+                    for s in &eb.stmts {
+                        let _ = self.infer_stmt(s)?;
+                    }
+                }
+                Ok(Type::Unknown)
+            }
         }
     }
 
@@ -535,6 +564,24 @@ impl TypeInferencer {
                 let _ = self.infer_expr(value)?;
                 for b in pattern.bindings() {
                     self.env.insert(&b.name, Type::Unknown);
+                }
+                Ok(Type::Void)
+            }
+            // T72: `for let PAT = EXPR { body }` — infer the value, bind
+            // each pattern name to Unknown (v0.5 deferral), walk the body.
+            // The whole statement is `()` (Void), matching ForIn/ForWhile.
+            Stmt::ForLet {
+                pattern,
+                value,
+                body,
+                ..
+            } => {
+                let _ = self.infer_expr(value)?;
+                for b in pattern.bindings() {
+                    self.env.insert(&b.name, Type::Unknown);
+                }
+                for s in &body.stmts {
+                    let _ = self.infer_stmt(s)?;
                 }
                 Ok(Type::Void)
             }

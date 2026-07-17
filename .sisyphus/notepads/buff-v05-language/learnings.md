@@ -1655,27 +1655,27 @@ this; it's a clippy-only lint).
   (e.g. applying `?.` to a non-Option receiver) are warnings in v0.5 per
   the project policy; no enforcement added.
 
-## T71 � Destructuring assignment (let-destructuring for tuples + structs)
+## T71 � Destructuring assignment (let-destructuring for tuples + structs)
 
 **Design (additive AST, as the spec mandated).** Unlike T69 (`|>`) and T70 (`?.`),
 which desugared in-parser to AVOID new AST nodes, T71 genuinely needs new
-variants � destructuring can't be expressed with the existing bare-name
+variants � destructuring can't be expressed with the existing bare-name
 `Stmt::LetDecl`. So this is a real additive-AST task with exhaustive-match
 ripple.
 
-- `Pattern` gained TWO variants at the END of the enum (additive � existing
+- `Pattern` gained TWO variants at the END of the enum (additive � existing
   Wildcard/Literal/Ident/Variant untouched):
-  - `Pattern::Tuple(Vec<Pattern>, Span)` � `(x, y)`, `(a, _, c)`.
-  - `Pattern::Struct { name: Ident, fields: Vec<(Ident, Pattern)>, span }` �
+  - `Pattern::Tuple(Vec<Pattern>, Span)` � `(x, y)`, `(a, _, c)`.
+  - `Pattern::Struct { name: Ident, fields: Vec<(Ident, Pattern)>, span }` �
     `Point { x, y }`. Shorthand `Point { x }` parses as field `x` binding to
     `Pattern::Ident(x)` (the parser stores it explicitly; codegen re-derives
     shorthand by name-equality).
 - `Stmt` gained `Stmt::LetPattern { pattern, value, mutable, ty, span }` at
-  the END. `Stmt::LetDecl` is 100% untouched � `let x = 5` STILL produces
+  the END. `Stmt::LetDecl` is 100% untouched � `let x = 5` STILL produces
   `LetDecl`. New `Pattern::bindings()` helper (returns `Vec<Ident>`) added so
   infer/ownership/IR can collect the names a destructuring introduces.
 - Derives stay `Debug, Clone, PartialEq` (NO Eq/Hash). Field order is a `Vec`
-  everywhere � never a HashMap (determinism).
+  everywhere � never a HashMap (determinism).
 
 **Shared match-pattern parser WAS extended (bonus).** `parse_pattern` in
 `crates/buff-lang-parser/src/expr.rs` is shared by `match` arms AND
@@ -1692,20 +1692,20 @@ a struct destructuring (a struct literal can't be a binding target), so the
 disambiguation is unambiguous. `mut`/`: Type` are honored on the LetPattern.
 
 **Ripple sites updated (every exhaustive `match stmt` / `match pat`):**
-  - `crates/buff-lang-ast/src/ir.rs` � `lower_stmt` (LetPattern: register each
+  - `crates/buff-lang-ast/src/ir.rs` � `lower_stmt` (LetPattern: register each
     binding in the `bindings` map pointing at the value's IR node; the `defs`
     Vec on the node stays empty since the bindings map is the source of truth
     for dependency wiring) + `collect_stmt_uses` (recurse into value).
-  - `crates/buff-lang-types/src/infer.rs` � `infer_stmt` (v0.5 deferral: bind
+  - `crates/buff-lang-types/src/infer.rs` � `infer_stmt` (v0.5 deferral: bind
     each pattern name to `Type::Unknown`; Rust does real per-field inference).
-  - `crates/buff-lang-types/src/ownership.rs` � 4 sites:
+  - `crates/buff-lang-types/src/ownership.rs` � 4 sites:
     `collect_bound_names_in_stmt`, `collect_spawn_free_vars_in_stmt`,
     `collect_free_vars_in_block`, `collect_assignment_targets_in_stmt`,
     `classify_stmt`.
-  - `crates/buff-lang-types/src/async_analysis.rs` � `collect_func_calls_in_stmt`.
-  - `crates/buff-lang-types/src/exhaustiveness.rs` � `check_stmt`.
-  - `crates/buff-lang-parser/src/stmt.rs` � `stmt_end` helper (LetPattern has span).
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs` � `lower_stmt`
+  - `crates/buff-lang-types/src/async_analysis.rs` � `collect_func_calls_in_stmt`.
+  - `crates/buff-lang-types/src/exhaustiveness.rs` � `check_stmt`.
+  - `crates/buff-lang-parser/src/stmt.rs` � `stmt_end` helper (LetPattern has span).
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs` � `lower_stmt`
     (LetPattern arm), `lower_pattern` (Tuple/Struct arms + `mutable` param),
     `stmt_uses_matrix`, `stmt_uses_error`.
 
@@ -1715,7 +1715,7 @@ disambiguation is unambiguous. `mut`/`: Type` are honored on the LetPattern.
     `mutable` flag so `let mut (a, b) = ...` ? `let (mut a, mut b) = ...`.
   - `Pattern::Tuple` ? `syn::Pat::Tuple` (direct construction).
   - `Pattern::Struct` ? `syn::Pat::Struct` with `syn::FieldPat` entries (syn
-    2.0.119 � NOTE: the field type is `FieldPat`, NOT `PatField` which was the
+    2.0.119 � NOTE: the field type is `FieldPat`, NOT `PatField` which was the
     syn 1.0 name; `Pat` does NOT impl `Parse` in syn 2.0 so `syn::parse2::<Pat>`
     is a trap). Shorthand (immutable + field name == binding name) emitted
     with `colon_token: None` so `Point { x, y }` reproduces as shorthand.
@@ -1724,10 +1724,10 @@ disambiguation is unambiguous. `mut`/`: Type` are honored on the LetPattern.
   - syn 2.0.119: `PatField` ? `FieldPat`; `Pat: Parse` is NOT implemented
     (can't `syn::parse2::<Pat>` a token stream). Hand-construct `PatStruct`/`FieldPat`.
   - `IrGraph` has NO `node_mut` method (I assumed one existed from a grep hit
-    that was actually my own newly-added line) � register destructuring defs in
+    that was actually my own newly-added line) � register destructuring defs in
     the `bindings` map instead, not by mutating the node.
   - `let (x, )` is a VALID 1-element tuple with trailing comma (same as Rust),
-    NOT a malformed pattern � the RED test `destructuring_malformed_*` had to
+    NOT a malformed pattern � the RED test `destructuring_malformed_*` had to
     use `let (x, ,)` (double comma) instead.
   - Trailing comma is allowed in all delimited pattern forms (`(...)`, `Name { ... }`).
 
@@ -1743,9 +1743,78 @@ bindings is coarse (whole-binding ownership; CoW detection not per-field).
 name `destructuring_*` for the fn-name filter) + `crates/buff-lang-codegen-rust/
 tests/destructuring_codegen.rs` (5 fns). `cargo test -p buff-lang-parser
 destructuring` ? 13 passed. Full `cargo test --workspace` green (the lone
-`test test_fail ... FAILED` is the INTENTIONAL T35 `buff test` E2E fixture � a
+`test test_fail ... FAILED` is the INTENTIONAL T35 `buff test` E2E fixture � a
 generated Buff `@test` at `Temp\buff-test\test_command_e2e_fail_test.rs:2:5`
 that is supposed to fail; its outer Rust test
 `test_command_e2e_failing_test_exit_one ... ok` passes, and the whole
 `test_command` binary reports `19 passed; 0 failed`). `cargo clippy
 --workspace --all-targets -- -D warnings` exit 0. `cargo fmt --check` exit 0.
+
+## T72 — If-let / For-let pattern bindings (conditional + looping bindings)
+
+**Status: COMPLETE.** Additive AST extension mirroring the T71 destructuring
+precedent. Two new variants, driven by `cargo check --workspace` for the
+exhaustive-match ripple.
+
+### Additive design (precedent: T20-T31, T71)
+
+- `Expr::IfLet { pattern, value: Box<Expr>, then_block, else_block: Option<Block>, span }` — added at END of `Expr`. For `if let PAT = EXPR { then } else { else }`. `pattern: Pattern` (NOT boxed). `Expr::IfExpr` 100% untouched — the plain `if cond { }` path is left unchanged.
+- `Stmt::ForLet { pattern, value: Expr, body: Block, span }` — added at END of `Stmt`. For `for let PAT = EXPR { body }` → lowers to Rust `while let PAT = EXPR { body }` (Buff spells it `for let` because `while` is NOT a reserved Buff keyword). `Stmt::ForIn` and `Stmt::ForWhile` 100% untouched.
+- Both reuse the shared `Pattern` enum (Variant/Ident/Tuple/Struct/Wildcard/Literal) — same one `match` arms and T71 destructuring use. `Some(x)` parses via `Pattern::Variant`; bare `None` parses as `Pattern::Ident("None")` (T27 disambiguation — bare idents are conservatively Ident; the exhaustiveness checker unifies them via `variant_name_key()`).
+- Derives stay `Debug, Clone, PartialEq` (NO Eq/Hash). Field order is `Vec` everywhere (determinism).
+- Updated `Expr::span()`, both `Display` impls, and the parser's `stmt_end` helper.
+
+### Parser (crates/buff-lang-parser/src/stmt.rs)
+
+- `parse_if_expr`: after `expect(KwIf)`, PEEK for `KwLet`. If present → `parse_if_let` helper (consume `let`, `parse_pattern`, `expect(Assign)`, `parse_expression` value, `parse_block` then, optional else with `else if` chain support). Else → EXISTING plain `parse_expression` cond path (unchanged).
+- `parse_for`: after `expect(KwFor)`, PEEK for `KwLet`. If present → `parse_for_let` helper (same shape: `let`, pattern, `=`, value, body block). Else → existing `ForIn`/`ForWhile` paths unchanged.
+- Both helpers reject missing `=` / missing value as `ParseError` (no panic). `else if let ...` chains work via the existing `else if` recursion (the nested form dispatches back through `parse_if_expr` → `parse_if_let` if it's also a let).
+- Added `SourceId` to the `use buff_lang_error::{...}` import (needed by the helper signatures).
+
+### Codegen (crates/buff-lang-codegen-rust/src/rust_codegen.rs) — syn/quote ONLY
+
+- `lower_if_let`: `quote!{ if let #pat = #val #then_blk }` (or `... else #else_blk`) → `syn::parse2::<SynExpr>`. Chose `quote!` over hand-building `syn::ExprIf` with an `syn::Expr::Let` condition because syn 2.0's `ExprLet` has many fiddly fields (`Eq`, `Let`, `pat`, `expr`, `attrs`) and `quote!` builds them all correctly from surface syntax. Pattern via `lower_pattern(pattern, false)` (shared with match arms + T71); value via `lower_expr`; blocks via `lower_block`. Single string producer remains `prettyplease::unparse`.
+- `lower_for_let`: `quote!{ while let #pat = #val #body_blk }` → `syn::parse2::<SynExpr>` → wrap as `SynStmt::Expr(...)` mirroring how `Stmt::ForWhile` becomes a Rust `while` statement.
+- Both return `Result<_, CodegenError>` via `self.unsupported(&format!("... codegen parse: {e}"))` on parse failure (no panic).
+
+### Ripple sites updated (every exhaustive `match` on `Expr` / `Stmt`)
+
+Driven by `cargo check --workspace` — every non-exhaustive match was listed
+and fixed in one batch per file:
+
+- `crates/buff-lang-ast/src/ir.rs` — `lower_stmt` (ForLet: register each pattern binding in the `bindings` map pointing at the value's IR node; mirror ForIn's loop-variable treatment, including dropping the binding name from `uses` if the value happens to mention it), `collect_uses` (IfLet: recurse into value + both blocks), `collect_stmt_uses` (ForLet: recurse into value + body, drop pattern bindings from uses).
+- `crates/buff-lang-types/src/infer.rs` — `infer_expr` (IfLet: infer value, bind each pattern name to `Type::Unknown` via `self.env.insert` — NOT `bind`, that method doesn't exist; v0.5 deferral), `infer_stmt` (ForLet: same Unknown-binding + body walk; returns `Type::Void`).
+- `crates/buff-lang-types/src/exhaustiveness.rs` — `check_stmt` (ForLet: recurse value + body), `check_expr` (IfLet: recurse value + both blocks so nested matches are still checked).
+- `crates/buff-lang-types/src/async_analysis.rs` — `collect_func_calls_in_stmt` (ForLet), `collect_func_calls` (IfLet).
+- `crates/buff-lang-types/src/ownership.rs` — **7 sites**: `collect_bound_names_in_stmt` (ForLet), `collect_bound_names_in_expr` (IfLet), `classify_stmt` (ForLet: record pattern bindings as locals + recurse body), `collect_spawn_free_vars_in_stmt` (ForLet), `collect_spawn_free_vars_in_expr` (IfLet), `collect_free_vars_in_expr` (IfLet), `collect_free_vars_in_block` (ForLet), `collect_assignment_targets_in_stmt` (ForLet), `collect_assignment_targets_in_expr` (IfLet).
+- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — `lower_expr` (IfLet arm before the `_` catch-all), `lower_stmt` (ForLet arm), `stmt_uses_matrix` (ForLet), `expr_uses_matrix` (IfLet), `stmt_uses_error` (ForLet), `expr_uses_error` (IfLet). The Matrix/Error emit-on-demand detectors recurse so a `Matrix.new(...)` or `Error(...)` inside an if-let/for-let still triggers emission.
+- `crates/buff-lang-parser/src/stmt.rs` — `stmt_end` helper (ForLet has span).
+
+### Gotchas hit
+
+- **`&*pattern` vs `&pattern`**: my first parser-test draft wrote `match &*pattern` assuming `pattern` was `Box<Pattern>`. It's NOT — `IfLet.pattern: Pattern` (unboxed). Fixed to `&pattern`. The T71 `Stmt::LetPattern.pattern` is also unboxed, so the destructuring tests borrow via `&Stmt` matching.
+- **Bare `None` is `Pattern::Ident`, not `Pattern::Variant`**: per the T27 disambiguation rule, bare idents in pattern position are conservatively parsed as `Pattern::Ident` (they can't be disambiguated as unit-variant vs fresh-binding at parse time). So `if let None = opt` parses `None` as `Pattern::Ident("None")`; the exhaustiveness checker unifies them via `variant_name_key()`. My initial test expected `Pattern::Variant` and failed — corrected to expect Ident.
+- **`self.env.bind` doesn't exist**: my first infer.rs draft used `self.env.bind(name, ty)`. The TypeEnv API is `insert(&str, ty)` + `lookup(&str)`. Fixed to `self.env.insert(&b.name, Type::Unknown)`.
+- **`else if let ...` works for free**: the existing `parse_if_expr` else-branch handler recurses into `parse_if_expr` for `else if`, and `parse_if_expr` dispatches to `parse_if_let` if the nested form is also a `let`. No special handling needed for the chain.
+- **`std::collections::HashSet` import in ir.rs**: the ForLet arm in `lower_stmt` needed to filter binding names from `uses`; I inlined `std::collections::HashSet<String>` rather than adding a `use` (keep the diff localized). rustfmt later collapsed the chained `.into_iter().map().collect()` to a one-liner.
+
+### Deferred (intentionally, per spec)
+
+- **Let-chains** (`if let a = x, let b = y`) — T74, a separate task. Single let-binding condition only.
+- **Per-binding TYPE inference through patterns** — v0.5 binds each pattern name to `Type::Unknown`; Rust does the real per-binding inference at codegen time (same v0.5 deferral as T71 destructuring).
+- **`@`-bindings** (`x @ pat`) — not supported (same as T71).
+- **`while let` as a Buff keyword** — Buff spells it `for let`; `while` is not a reserved Buff keyword.
+
+### Tests added (21 total)
+
+- `crates/buff-lang-parser/tests/let_bindings.rs` — **16 tests**, all named `let_bindings_*` (the `cargo test ... let_bindings` fn-name filter). Covers: if-let-Some, if-let-with-else, if-let-None-unit-variant (Ident per T27), if-let-ident-pattern (always-bind), if-let-tuple-pattern, for-let-Some, for-let-None, for-let-ident, plain-if regression, plain-if-else regression, plain-for-in regression, plain-for-while regression, missing-`=` errors (if-let + for-let), missing-value error, else-if-let chain.
+- `crates/buff-lang-codegen-rust/tests/let_bindings_codegen.rs` — **5 tests**, all named `let_bindings_codegen_*`. Covers: if-let-Some → `if let Some(x) = opt`, if-let-with-else, if-let-wildcard (`if let _ = opt`), for-let → `while let Some(x) =`, for-let-wildcard (`while let _ =`). Each asserts the functional substring AND `must_reparse` via `syn::parse_str::<syn::File>` so a bad codegen shape is caught early.
+
+### Verification (all GREEN, MSVC env set for test/clippy)
+
+- `cargo test -p buff-lang-parser --test let_bindings` → 16/16 pass
+- `cargo test -p buff-lang-codegen-rust --test let_bindings_codegen` → 5/5 pass
+- `cargo test --workspace` → all green (the lone `test test_fail ... FAILED` is the INTENTIONAL T35 `buff test` E2E fixture — same as T71; its outer Rust test `test_command_e2e_failing_test_exit_one` passes, and the whole `test_command` binary reports `19 passed; 0 failed`).
+- `cargo check --workspace` → exit 0
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0 (0 warnings)
+- `cargo fmt --check` → exit 0 (after one `cargo fmt` pass to normalize a HashSet chained-call + a one-line literal collapse in the new test file)

@@ -382,6 +382,33 @@ pub enum Expr {
         inclusive: bool,
         span: Span,
     },
+    /// A conditional binding: `if let PATTERN = EXPR { then } else { else }` (T72).
+    ///
+    /// The `pattern` is matched against `value`; on success the `then_block`
+    /// runs with the pattern's bindings in scope; on failure the optional
+    /// `else_block` runs (or the whole expression evaluates to `()` when no
+    /// `else` is present). Codegen lowers this to Rust's native `if let`
+    /// expression, so the borrow-checker enforces the binding lifetime for
+    /// free.
+    ///
+    /// This variant carries a single `let`-binding condition only (NOT a
+    /// let-chain — `if let a = x, let b = y` is T74, a separate task). The
+    /// `pattern` reuses the shared [`Pattern`] enum (Variant/Ident/Tuple/
+    /// Struct/...) that `match` arms and T71 destructuring already use, so
+    /// `if let Some(x) = opt` parses the `Some(x)` via the same
+    /// `parse_pattern` path as `match opt { Some(x) => ... }`.
+    ///
+    /// This is **additive** (T72): no existing variant was renamed, reordered,
+    /// or had its payload altered, so all prior `match` arms remain
+    /// exhaustive. See the migration-note block on [`Expr`] for the
+    /// established pattern.
+    IfLet {
+        pattern: Pattern,
+        value: Box<Expr>,
+        then_block: Block,
+        else_block: Option<Block>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -405,7 +432,8 @@ impl Expr {
             | Expr::MapLit { span: s, .. }
             | Expr::Try { span: s, .. }
             | Expr::Spawn { span: s, .. }
-            | Expr::Range { span: s, .. } => *s,
+            | Expr::Range { span: s, .. }
+            | Expr::IfLet { span: s, .. } => *s,
         }
     }
 }
@@ -552,6 +580,17 @@ impl fmt::Display for Expr {
                 let kind = if *inclusive { "incl" } else { "excl" };
                 write!(f, "Range({start}, {end}, {kind})")
             }
+            // T72: `if let PAT = EXPR { then } else { else }` -> IfLet(...).
+            Expr::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+                ..
+            } => match else_block {
+                Some(els) => write!(f, "IfLet({pattern} = {value}, {then_block}, {els})"),
+                None => write!(f, "IfLet({pattern} = {value}, {then_block})"),
+            },
         }
     }
 }

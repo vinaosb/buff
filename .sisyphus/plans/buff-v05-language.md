@@ -954,7 +954,7 @@ Phase 1 (v0.1) must be complete:
 
 ### Wave 6 Enhancement — Advanced Control Flow + Types (parallel with Wave 6)
 
-- [ ] **T72**: If-let / For-let [deep]
+- [x] **T72**: If-let / For-let [deep]
   **What to do** (TDD): RED: `if let Some(x) = opt` → conditional binding. `for let Some(x) = iter.next()` → looping binding. GREEN: parse let-patterns in if/for, codegen to Rust if let / while let.
   **Acceptance**: `cargo test -p buff-lang-parser let_bindings` passes. Both if-let and for-let work.
   **QA**: Codegen `if let Some(x) = opt { print(x) }` → assert Rust `if let`. Evidence: task-72-if-let.txt

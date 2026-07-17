@@ -1001,6 +1001,12 @@ impl RustCodegen {
                 });
                 Ok(SynStmt::Expr(while_expr, Some(Default::default())))
             }
+            Stmt::ForLet {
+                pattern,
+                value,
+                body,
+                ..
+            } => self.lower_for_let(pattern, value, body),
         }
     }
 
@@ -1251,6 +1257,19 @@ impl RustCodegen {
                 inclusive,
                 ..
             } => self.lower_range(start, end, *inclusive),
+            // T72: `if let PAT = EXPR { then } else { else }` → Rust's native
+            // `if let`. Built via `quote!` so the `let` binding in the
+            // condition is constructed from real `syn` tokens (syn 2.0's
+            // `Expr::Let` is fiddly to hand-construct; `quote!` + `parse2` is
+            // the clean path). The pattern is lowered via [`Self::lower_pattern`]
+            // (shared with match arms + T71 destructuring).
+            Expr::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+                ..
+            } => self.lower_if_let(pattern, value, then_block, else_block.as_ref()),
             _ => Err(self.unsupported(&format!("expr codegen not yet implemented for {:?}", expr))),
         }
     }
@@ -1281,6 +1300,76 @@ impl RustCodegen {
             then_branch,
             else_branch,
         }))
+    }
+
+    /// T72: lower `if let PAT = EXPR { then } else { else }` to Rust's native
+    /// `if let`.
+    ///
+    /// Built via `quote!` + `syn::parse2::<SynExpr>` rather than hand-building
+    /// `syn::ExprIf` with an `syn::Expr::Let` condition — syn 2.0's `ExprLet`
+    /// has many fiddly fields (`Eq`, `Let`, `pat`, `expr`, `attrs`) and
+    /// `quote!` builds them all correctly from the surface syntax. The
+    /// pattern is lowered via [`Self::lower_pattern`] (shared with match arms
+    /// and T71 destructuring); the value via [`Self::lower_expr`]; the blocks
+    /// via [`Self::lower_block`]. The single string producer remains
+    /// `prettyplease::unparse`.
+    ///
+    /// Single let-binding only. Let-chains (`if let a = x, let b = y`) are
+    /// T74, a separate task.
+    fn lower_if_let(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expr,
+        then_block: &Block,
+        else_block: Option<&Block>,
+    ) -> Result<SynExpr, CodegenError> {
+        let pat = self.lower_pattern(pattern, false)?;
+        let val = self.lower_expr(value)?;
+        let then_blk = self.lower_block(then_block)?;
+        let tokens: proc_macro2::TokenStream = if let Some(eb) = else_block {
+            let else_blk = self.lower_block(eb)?;
+            quote::quote! {
+                if let #pat = #val #then_blk else #else_blk
+            }
+        } else {
+            quote::quote! {
+                if let #pat = #val #then_blk
+            }
+        };
+        syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("if-let codegen parse: {e}")))
+    }
+
+    /// T72: lower `for let PAT = EXPR { body }` (Buff) to Rust's
+    /// `while let PAT = EXPR { body }`.
+    ///
+    /// Buff spells the looping-binding form `for let` because `while` is NOT
+    /// a reserved Buff keyword and the loop reads like the iterator-form
+    /// `for v in iter`. The natural Rust target is `while let` (semantically
+    /// identical: re-evaluate EXPR each iteration, run the body while it
+    /// matches PAT, terminate when it doesn't).
+    ///
+    /// Built via `quote!` + `syn::parse2::<SynExpr>` (same approach as
+    /// [`Self::lower_if_let`]). The lowered expression is then wrapped in a
+    /// `SynStmt::Expr(...)` to mirror how `Stmt::ForWhile` becomes a Rust
+    /// `while` statement (see the ForWhile arm in [`Self::lower_stmt`]).
+    ///
+    /// Single let-binding only. Let-chains are T74.
+    fn lower_for_let(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expr,
+        body: &Block,
+    ) -> Result<SynStmt, CodegenError> {
+        let pat = self.lower_pattern(pattern, false)?;
+        let val = self.lower_expr(value)?;
+        let body_blk = self.lower_block(body)?;
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            while let #pat = #val #body_blk
+        };
+        let while_let_expr = syn::parse2::<SynExpr>(tokens)
+            .map_err(|e| self.unsupported(&format!("while-let codegen parse: {e}")))?;
+        Ok(SynStmt::Expr(while_let_expr, Some(Default::default())))
     }
 
     /// Lower a Buff **prelude** call to the corresponding Rust idiom (T96).
@@ -3518,6 +3607,8 @@ fn stmt_uses_matrix(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_matrix(iter) || block_uses_matrix(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_matrix(cond) || block_uses_matrix(body),
+        // T72: `for let PAT = EXPR { body }` — value + body may use Matrix.
+        Stmt::ForLet { value, body, .. } => expr_uses_matrix(value) || block_uses_matrix(body),
     }
 }
 
@@ -3579,6 +3670,18 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
         Expr::Spawn { task, .. } => expr_uses_matrix(task),
         // T68: `start..end` — recurse into both bounds.
         Expr::Range { start, end, .. } => expr_uses_matrix(start) || expr_uses_matrix(end),
+        // T72: `if let PAT = EXPR { then } else { else }` — recurse into
+        // value + both blocks (pattern carries no Matrix construction).
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_matrix(value)
+                || block_uses_matrix(then_block)
+                || else_block.as_ref().is_some_and(block_uses_matrix)
+        }
     }
 }
 
@@ -3696,6 +3799,8 @@ fn stmt_uses_error(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_error(iter) || block_uses_error(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_error(cond) || block_uses_error(body),
+        // T72: `for let PAT = EXPR { body }` — value + body may use Error.
+        Stmt::ForLet { value, body, .. } => expr_uses_error(value) || block_uses_error(body),
     }
 }
 
@@ -3749,6 +3854,18 @@ fn expr_uses_error(expr: &Expr) -> bool {
         Expr::Spawn { task, .. } => expr_uses_error(task),
         // T68: `start..end` — recurse into both bounds.
         Expr::Range { start, end, .. } => expr_uses_error(start) || expr_uses_error(end),
+        // T72: `if let PAT = EXPR { then } else { else }` — recurse into
+        // value + both blocks (pattern carries no Error construction).
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_error(value)
+                || block_uses_error(then_block)
+                || else_block.as_ref().is_some_and(block_uses_error)
+        }
     }
 }
 

@@ -57,6 +57,30 @@ pub enum Stmt {
         ty: Option<TypeRef>,
         span: Span,
     },
+    /// A looping binding: `for let PATTERN = EXPR { body }` (T72).
+    ///
+    /// On each iteration the `pattern` is matched against `value`; if it
+    /// matches, the `body` runs and the loop repeats; if it doesn't, the
+    /// loop terminates. Codegen lowers this to Rust's `while let PAT = EXPR
+    /// { body }` (the natural Rust form — Buff spells it `for let` because
+    /// `while` is NOT a reserved Buff keyword and the loop reads like the
+    /// iterator-form `for v in iter`).
+    ///
+    /// Carries a single `let`-binding condition only (NOT a let-chain — T74).
+    /// The `pattern` reuses the shared [`Pattern`] enum. The typical use is
+    /// `for let Some(x) = iter.next() { ... }` which lowers to Rust
+    /// `while let Some(x) = iter.next() { ... }`.
+    ///
+    /// This is **additive** (T72): no existing variant was renamed, reordered,
+    /// or had its payload altered. `Stmt::ForIn` and `Stmt::ForWhile` stay
+    /// 100% untouched — `for v in iter { }` and `for cond { }` still produce
+    /// their respective variants.
+    ForLet {
+        pattern: Pattern,
+        value: Expr,
+        body: Block,
+        span: Span,
+    },
 }
 
 impl fmt::Display for Stmt {
@@ -108,6 +132,12 @@ impl fmt::Display for Stmt {
                 }
                 write!(f, " = {value})")
             }
+            Stmt::ForLet {
+                pattern,
+                value,
+                body,
+                ..
+            } => write!(f, "ForLet({pattern} = {value} {body})"),
         }
     }
 }

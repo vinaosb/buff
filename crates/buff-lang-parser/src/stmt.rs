@@ -40,7 +40,7 @@ use buff_lang_ast::{
     Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, FuncDecl, Ident,
     ImportDecl, Param, ReexportDecl, Stmt, TypeRef,
 };
-use buff_lang_error::{Diagnostic, ParseError, Span};
+use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
 use crate::expr::{parse_expression, parse_pattern};
@@ -621,6 +621,15 @@ fn parse_for(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     let for_tok = stream.expect(TokenKind::KwFor)?;
     let start = for_tok.span.start;
 
+    // T72: `for let PATTERN = EXPR { body }` — detect the `let` keyword
+    // immediately after `for` and route to the looping-binding path. The
+    // existing iterator-form (`for v in iter`) and conditional-form
+    // (`for cond`) paths stay 100% untouched. Single let-binding only;
+    // let-chains are T74.
+    if matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
+        return parse_for_let(stream, start, source_id);
+    }
+
     let is_iterator = matches!(
         (stream.peek_kind(), stream.peek_second_kind()),
         (Some(TokenKind::Ident(_)), Some(TokenKind::KwIn))
@@ -645,6 +654,47 @@ fn parse_for(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
         let span = Span::new(start, body.span.end, source_id);
         Ok(Stmt::ForWhile { cond, body, span })
     }
+}
+
+/// Parse the looping-binding form `for let PATTERN = EXPR { body }` (T72).
+/// The leading `for` is already consumed; the cursor is positioned at the
+/// `let` keyword. `start` is the `for`'s start offset; `source_id` is the
+/// current source.
+///
+/// Shape: `let PATTERN = EXPR`. The PATTERN is parsed via the shared
+/// [`parse_pattern`] (same one `match` arms, T71 destructuring, and T72
+/// if-let use), so `for let Some(x) = iter.next()`,
+/// `for let (a, b) = pair_stream.next()`, etc. all work. The `=` is
+/// mandatory. The EXPR is re-evaluated each iteration; when it stops
+/// matching the pattern, the loop terminates.
+///
+/// Codegen lowers this to Rust's `while let PAT = EXPR { body }` (Buff
+/// spells it `for let` because `while` is NOT a reserved Buff keyword and
+/// the loop reads like the iterator-form `for v in iter`).
+///
+/// Single let-binding only. Let-chains are T74.
+fn parse_for_let(
+    stream: &mut TokenStream<'_>,
+    start: usize,
+    source_id: SourceId,
+) -> Result<Stmt, ParseError> {
+    // Consume `let`.
+    let _let_tok = stream.expect(TokenKind::KwLet)?;
+    // Parse the pattern.
+    let pattern = parse_pattern(stream)?;
+    // Expect `=`.
+    stream.expect(TokenKind::Assign)?;
+    // Parse the value expression.
+    let value = parse_expression(stream)?;
+    // Parse the body block.
+    let body = parse_block(stream)?;
+    let span = Span::new(start, body.span.end, source_id);
+    Ok(Stmt::ForLet {
+        pattern,
+        value,
+        body,
+        span,
+    })
 }
 
 /// Either an assignment (`x = ...`, `x += ...`) or a bare expression
@@ -714,6 +764,15 @@ pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let if_tok = stream.expect(TokenKind::KwIf)?;
     let start = if_tok.span.start;
 
+    // T72: `if let PATTERN = EXPR { then } else { else }` — detect the `let`
+    // keyword immediately after `if` and route to the conditional-binding
+    // path. The plain `if cond { ... }` path is left 100% untouched (it
+    // fires only when `let` is NOT the next token). Single let-binding only;
+    // let-chains (`if let a = x, let b = y`) are T74, a separate task.
+    if matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
+        return parse_if_let(stream, start, source_id);
+    }
+
     let cond = parse_expression(stream)?;
     let then_block = parse_block(stream)?;
     let mut end = then_block.span.end;
@@ -739,6 +798,71 @@ pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 
     Ok(Expr::IfExpr {
         cond: Box::new(cond),
+        then_block,
+        else_block,
+        span: Span::new(start, end, source_id),
+    })
+}
+
+/// Parse the conditional-binding form `if let PATTERN = EXPR { then } else { .. }`
+/// (T72). The leading `if` is already consumed; the cursor is positioned at
+/// the `let` keyword. The `start` offset is the `if`'s start (for the
+/// overall span); `source_id` is the current source.
+///
+/// Shape: `let PATTERN = EXPR`. The PATTERN is parsed via the shared
+/// [`parse_pattern`] (same one `match` arms and T71 destructuring use), so
+/// `if let Some(x) = opt`, `if let (a, b) = pair`, `if let Point { x } = p`
+/// all work. The `=` is mandatory (a missing `=` is a [`ParseError`], not a
+/// panic). The EXPR is parsed via [`parse_expression`].
+///
+/// `else if let ...` chains naturally: the else-branch handler below spots
+/// `KwIf`, recurses into [`parse_if_expr`] (which itself dispatches to this
+/// function if the nested form is also a `let`), and wraps the result in a
+/// single-statement block — the same shape the plain `else if` path uses.
+///
+/// Single let-binding only. Let-chains are T74.
+fn parse_if_let(
+    stream: &mut TokenStream<'_>,
+    start: usize,
+    source_id: SourceId,
+) -> Result<Expr, ParseError> {
+    // Consume `let`.
+    let _let_tok = stream.expect(TokenKind::KwLet)?;
+    // Parse the pattern (reuses the shared match/let-destructure parser).
+    let pattern = parse_pattern(stream)?;
+    // Expect `=`.
+    stream.expect(TokenKind::Assign)?;
+    // Parse the value expression.
+    let value = parse_expression(stream)?;
+    let value_end = value.span().end;
+    let value = Box::new(value);
+    // Then-block.
+    let then_block = parse_block(stream)?;
+    let mut end = then_block.span.end.max(value_end);
+    // Optional else: `else BLOCK` or `else if ...` (chains).
+    let else_block = if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) {
+        stream.advance(); // consume `else`
+        if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
+            // `else if ...` — recurse (handles both `else if let` and plain
+            // `else if`). Wrap the nested if-expr in a single-stmt block,
+            // matching the plain IfExpr path's shape.
+            let nested = parse_if_expr(stream)?;
+            end = nested.span().end;
+            Some(Block {
+                stmts: vec![Stmt::ExprStmt(nested.clone(), nested.span())],
+                span: nested.span(),
+            })
+        } else {
+            let blk = parse_block(stream)?;
+            end = blk.span.end;
+            Some(blk)
+        }
+    } else {
+        None
+    };
+    Ok(Expr::IfLet {
+        pattern,
+        value,
         then_block,
         else_block,
         span: Span::new(start, end, source_id),
@@ -1733,7 +1857,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
         | Stmt::Continue(span)
         | Stmt::ForIn { span, .. }
         | Stmt::ForWhile { span, .. }
-        | Stmt::LetPattern { span, .. } => span.end,
+        | Stmt::LetPattern { span, .. }
+        | Stmt::ForLet { span, .. } => span.end,
     }
 }
 

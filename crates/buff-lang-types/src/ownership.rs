@@ -261,6 +261,19 @@ fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_bound_names_in_expr(cond, out);
             collect_bound_names_in_block(body, out);
         }
+        // T72: every pattern binding is a new local name (loop-scoped).
+        Stmt::ForLet {
+            pattern,
+            value,
+            body,
+            ..
+        } => {
+            for b in pattern.bindings() {
+                out.insert(b.name);
+            }
+            collect_bound_names_in_expr(value, out);
+            collect_bound_names_in_block(body, out);
+        }
     }
 }
 
@@ -350,6 +363,25 @@ fn collect_bound_names_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
             collect_bound_names_in_expr(start, out);
             collect_bound_names_in_expr(end, out);
         }
+        // T72: `if let PAT = EXPR { then } else { else }` — the pattern's
+        // bindings are new local names (then-scoped); recurse into value
+        // and both blocks for further nested bindings.
+        Expr::IfLet {
+            pattern,
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            for b in pattern.bindings() {
+                out.insert(b.name);
+            }
+            collect_bound_names_in_expr(value, out);
+            collect_bound_names_in_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_bound_names_in_block(eb, out);
+            }
+        }
     }
 }
 
@@ -393,6 +425,14 @@ fn classify_stmt(stmt: &Stmt, copy_vars: &mut BTreeSet<String>, locals: &mut BTr
         // Recurse into nested blocks so lets inside if/for/match branches
         // are classified too. (Cross-scope flattening — see LIMITATIONS.)
         Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } => {
+            classify_stmts(&body.stmts, copy_vars, locals);
+        }
+        // T72: `for let PAT = EXPR { body }` — record pattern bindings as
+        // locals and recurse into the body (mirroring ForIn/ForWhile).
+        Stmt::ForLet { pattern, body, .. } => {
+            for b in pattern.bindings() {
+                locals.insert(b.name);
+            }
             classify_stmts(&body.stmts, copy_vars, locals);
         }
         Stmt::Assignment { .. }
@@ -480,6 +520,12 @@ fn collect_spawn_free_vars_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         }
         Stmt::ForWhile { cond, body, .. } => {
             collect_spawn_free_vars_in_expr(cond, out);
+            collect_spawn_free_vars_in_stmts(&body.stmts, out);
+        }
+        // T72: `for let PAT = EXPR { body }` — the value may read outer
+        // names; the pattern binds (loop-local).
+        Stmt::ForLet { value, body, .. } => {
+            collect_spawn_free_vars_in_expr(value, out);
             collect_spawn_free_vars_in_stmts(&body.stmts, out);
         }
     }
@@ -571,6 +617,20 @@ fn collect_spawn_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
             }
         }
         Expr::Try { expr, .. } => collect_spawn_free_vars_in_expr(expr, out),
+        // T72: `if let PAT = EXPR { then } else { else }` — recurse into
+        // the value and both blocks (the pattern's bindings are then-scoped).
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_spawn_free_vars_in_expr(value, out);
+            collect_spawn_free_vars_in_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_spawn_free_vars_in_block(eb, out);
+            }
+        }
     }
 }
 
@@ -665,6 +725,20 @@ fn collect_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
             collect_free_vars_in_expr(start, out);
             collect_free_vars_in_expr(end, out);
         }
+        // T72: `if let PAT = EXPR { then } else { else }` — the value reads
+        // outer names; the pattern's bindings are then-scoped locals.
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_free_vars_in_expr(value, out);
+            collect_free_vars_in_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_free_vars_in_block(eb, out);
+            }
+        }
     }
 }
 
@@ -698,6 +772,12 @@ fn collect_free_vars_in_block(block: &Block, out: &mut BTreeSet<String>) {
             }
             Stmt::ForWhile { cond, body, .. } => {
                 collect_free_vars_in_expr(cond, out);
+                collect_free_vars_in_block(body, out);
+            }
+            // T72: `for let PAT = EXPR { body }` — value reads outer names;
+            // pattern bindings are loop-local.
+            Stmt::ForLet { value, body, .. } => {
+                collect_free_vars_in_expr(value, out);
                 collect_free_vars_in_block(body, out);
             }
         }
@@ -742,6 +822,12 @@ fn collect_assignment_targets_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         }
         Stmt::ForWhile { cond, body, .. } => {
             collect_assignment_targets_in_expr(cond, out);
+            collect_assignment_targets_in_stmts(&body.stmts, out);
+        }
+        // T72: `for let PAT = EXPR { body }` — value + body may contain
+        // nested assignment targets.
+        Stmt::ForLet { value, body, .. } => {
+            collect_assignment_targets_in_expr(value, out);
             collect_assignment_targets_in_stmts(&body.stmts, out);
         }
     }
@@ -823,6 +909,20 @@ fn collect_assignment_targets_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         Expr::Range { start, end, .. } => {
             collect_assignment_targets_in_expr(start, out);
             collect_assignment_targets_in_expr(end, out);
+        }
+        // T72: `if let PAT = EXPR { then } else { else }` — recurse into
+        // the value and both blocks for nested assignment targets.
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_assignment_targets_in_expr(value, out);
+            collect_assignment_targets_in_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_assignment_targets_in_block(eb, out);
+            }
         }
     }
 }

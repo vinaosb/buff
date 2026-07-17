@@ -218,6 +218,15 @@ fn check_stmt(
             }
             Ok(())
         }
+        // T72: `for let PAT = EXPR { body }` — recurse into the value and
+        // the body. The pattern is not an expression (no match to check).
+        Stmt::ForLet { value, body, .. } => {
+            check_expr(value, registry, inferencer)?;
+            for s in &body.stmts {
+                check_stmt(s, registry, inferencer)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -332,6 +341,25 @@ fn check_expr(
         Expr::Range { start, end, .. } => {
             check_expr(start, registry, inferencer)?;
             check_expr(end, registry, inferencer)
+        }
+        // T72: `if let PAT = EXPR { then } else { else }` — recurse into
+        // the value and both blocks so any nested matches are still checked.
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            check_expr(value, registry, inferencer)?;
+            for s in &then_block.stmts {
+                check_stmt(s, registry, inferencer)?;
+            }
+            if let Some(eb) = else_block {
+                for s in &eb.stmts {
+                    check_stmt(s, registry, inferencer)?;
+                }
+            }
+            Ok(())
         }
     }
 }

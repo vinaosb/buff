@@ -618,6 +618,45 @@ impl AstLowerer {
                 self.lower_block(body);
                 header_id
             }
+
+            // T72: `for let PAT = EXPR { body }` — a looping binding. The
+            // value expression is the data-flow source (consumed each
+            // iteration); the pattern's bindings are introduced inside the
+            // loop body only. We model the header as a Compute node that
+            // consumes the value's uses, then register each pattern binding
+            // pointing at the header so reads inside the body wire back to
+            // it (mirroring the ForIn treatment of the loop variable).
+            Stmt::ForLet {
+                pattern,
+                value,
+                body,
+                span,
+            } => {
+                let mut uses = Vec::new();
+                collect_uses(value, &mut uses);
+                // The pattern's bindings don't read outer names (they bind),
+                // but a binding NAME that also appears in `value` would be a
+                // shadow — drop it from the header's uses for the same reason
+                // ForIn drops the loop variable.
+                let binding_names: std::collections::HashSet<String> =
+                    pattern.bindings().into_iter().map(|i| i.name).collect();
+                uses.retain(|i| !binding_names.contains(&i.name));
+                let header_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                    id: NodeId(0),
+                    source_expr: Some(value.clone()),
+                    source_stmt: Some(stmt.clone()),
+                    defs: Vec::new(),
+                    uses: uses.clone(),
+                    span: *span,
+                    description: format!("ForLet({pattern} = {{...}})"),
+                }));
+                self.wire_dependencies(header_id, &[], &uses);
+                for b in pattern.bindings() {
+                    self.bindings.insert(b.name, header_id);
+                }
+                self.lower_block(body);
+                header_id
+            }
         }
     }
 
@@ -814,6 +853,25 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
             collect_uses(start, out);
             collect_uses(end, out);
         }
+        // T72: `if let PAT = EXPR { then } else { else }` uses the value
+        // expression and conservatively recurses into both blocks. The
+        // pattern's bindings are NOT uses (they bind names in the then-block).
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_uses(value, out);
+            for s in &then_block.stmts {
+                collect_stmt_uses(s, out);
+            }
+            if let Some(eb) = else_block {
+                for s in &eb.stmts {
+                    collect_stmt_uses(s, out);
+                }
+            }
+        }
     }
 }
 
@@ -849,6 +907,24 @@ fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
             collect_uses(cond, out);
             for s in &body.stmts {
                 collect_stmt_uses(s, out);
+            }
+        }
+        // T72: `for let PAT = EXPR { body }` — the value's uses count; the
+        // pattern's bindings are loop-local (drop them from uses if the
+        // value happened to mention the same name). Mirrors ForIn's handling
+        // of the loop variable.
+        Stmt::ForLet {
+            pattern,
+            value,
+            body,
+            ..
+        } => {
+            collect_uses(value, out);
+            for s in &body.stmts {
+                collect_stmt_uses(s, out);
+            }
+            for b in pattern.bindings() {
+                out.retain(|i| i.name != b.name);
             }
         }
     }

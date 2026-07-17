@@ -237,6 +237,12 @@ fn collect_func_calls_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_func_calls(cond, out);
             collect_func_calls_in_block(body, out);
         }
+        // T72: `for let PAT = EXPR { body }` — the value may contain calls;
+        // the pattern's bindings don't.
+        Stmt::ForLet { value, body, .. } => {
+            collect_func_calls(value, out);
+            collect_func_calls_in_block(body, out);
+        }
     }
 }
 
@@ -343,6 +349,20 @@ fn collect_func_calls(expr: &Expr, out: &mut BTreeSet<String>) {
         Expr::Range { start, end, .. } => {
             collect_func_calls(start, out);
             collect_func_calls(end, out);
+        }
+        // T72: `if let PAT = EXPR { then } else { else }` — recurse into the
+        // value and both blocks (the pattern's bindings don't contain calls).
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_func_calls(value, out);
+            collect_func_calls_in_block(then_block, out);
+            if let Some(eb) = else_block {
+                collect_func_calls_in_block(eb, out);
+            }
         }
         Expr::Literal(_, _) | Expr::Ident(_, _) => {}
     }
