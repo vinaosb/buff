@@ -2376,3 +2376,127 @@ exhaustive match) so no change needed. `program_uses_matrix`/`error` use
 - Changing `ast_typeref_to_syn` from `&self` to `&mut self` requires adjusting internal unit tests that instantiate `RustCodegen`.
 - Union wrapper collection happens during lowering of type references, so wrapper-enum emission must run AFTER declaration lowering, not before; otherwise generated function signatures reference wrapper names that were never emitted.
 - For parser union spans, deriving the end from `members.last()` avoids dead temporary state and keeps `cargo clippy -D warnings` clean.
+
+## T77 — Expected-type driven inference (lambda param from .map()/.filter() receiver)
+
+### Status: COMPLETE
+
+Implemented expected-type-driven lambda-parameter inference: when a .map()
+or .filter() call's receiver infers to `Vector<T>`, the element type `T`
+is propagated as the EXPECTED type of the lambda's single parameter, so
+`{ x => x * 2 }` infers `x` correctly WITHOUT an explicit annotation.
+
+### Approach chosen: HYBRID — additive helper + MethodCall special-case
+
+Considered two designs from the task spec:
+- (A) a new `infer_expr_with_expected(expr, expected: Option<&Type>)` helper.
+- (B) special-case `.map()`/`.filter()` in the MethodCall inference arm.
+
+Chose a HYBRID of both (cleanest for this codebase, fully additive):
+
+1. **NEW public method** `TypeInferencer::infer_expr_expected(&mut self, expr, expected: Option<&Type>)`
+   in `infer.rs`. For `Expr::Lambda`: when `expected = Some(T)` and the
+   lambda has exactly ONE param, it binds the param name -> `T` in the env
+   and returns the body's tail type (the lambda's RESULT type). With
+   `expected = None` OR a multi-param lambda, it returns `Unknown` (the
+   v0.5 fallback — NO regression of the closures/codegen path). For all
+   non-Lambda expressions, it delegates to `self.infer_expr(expr)`.
+
+2. **MethodCall arm extended** in `infer_expr` (NOT a new arm — added a
+   guarded block BEFORE the `Ok(Type::Unknown)` fallback). When
+   `method.name` is `"map"` or `"filter"`, `args.len() == 1`, the arg
+   is an `Expr::Lambda`, and the receiver infers to `Type::Vector(elem_ty)`,
+   it calls `infer_expr_expected(&args[0], Some(elem_ty))` and returns:
+   - `.map`    -> `Vector<body_result_type>`
+   - `.filter` -> `Vector<elem_ty>` (element type preserved; the body's
+     Bool-ness is NOT enforced — v0.5 treats type mismatches as warnings).
+
+`infer_expr`'s SIGNATURE is unchanged — all existing callers
+(`let` annotations in codegen, `infer_stmt`, etc.) are untouched. The
+`Expr::Lambda` arm in `infer_expr` still returns `Unknown` when called
+directly (no context) — that is the documented "no expected type" fallback.
+
+### How the element type is extracted + lambda param bound
+
+- `Type::Vector(Box<Type>)` — the element type is the boxed inner. Pattern:
+  `if let Type::Vector(elem_ty) = &recv_ty { ... }`. `elem_ty` is
+  `&Box<Type>`; `Some(elem_ty)` passes `&Box<Type>` as `Option<&Type>`
+  via auto-deref coercion (`&Box<Type>` -> `&Type`). Clean.
+- Binding the lambda param: `self.env.insert(&params[0].name.name, elem_ty)`
+  where `elem_ty` is the CLONED element type (the env owns its types). The
+  placeholder `TypeRef::Named { name: "_" }` on the param is IGNORED — the
+  expected type overrides it (if the user wrote an explicit annotation that
+  conflicts, that's a v0.5 deferral, not caught here).
+- The lambda's RESULT type is the body's tail type (`infer_block_tail`).
+  Buff's `Type` enum has NO function variant in v0.5, so the lambda "type"
+  is its body's type; `.map()` composes the final `Vector<R>` itself.
+
+### Combinators covered
+
+- `.map(lambda)` — ACCEPTANCE case. Result = `Vector<body_type>`.
+- `.filter(lambda)` — trivial extension. Result = `Vector<elem_ty>`.
+- `.reduce` — NOT covered (yields `Option<T>`, deferred to a future task).
+
+### Test fns (all named to contain `expected_type_inference` — substring filter)
+
+File: `crates/buff-lang-types/tests/expected_type_inference.rs` (6 tests):
+- `expected_type_inference_map_float_element` — ACCEPTANCE: `Vector<Float>.map({ x => x * 2 })` -> x: Float, result Vector<Float>. Asserts BOTH the result type AND `inf.lookup("x") == Some(&Float<32>)`.
+- `expected_type_inference_map_int_element` — ACCEPTANCE: `Vector<Int>.map({ x => x + 1 })` -> x: Int, result Vector<Int>.
+- `expected_type_inference_filter_preserves_element_type` — `Vector<Float>.filter({ x => x > 0 })` -> Vector<Float>.
+- `expected_type_inference_map_over_array_literal_receiver` — `[1.0, 2.0].map({ x => x * 2 })` (receiver is an ArrayLit, infers Vector<Float>).
+- `expected_type_inference_lambda_without_context_stays_unknown` — NO regression: bare lambda with no expected type -> Unknown.
+- `expected_type_inference_map_on_non_vector_falls_back_to_unknown` — `String.map(...)` -> Unknown (no false positive).
+
+### No-regression evidence
+
+- Existing closures/lambda handling: the `Expr::Lambda` arm in `infer_expr`
+  STILL returns `Unknown` when called directly (no context). The new
+  `infer_expr_expected` is the ONLY path that binds the param — and it's
+  called ONLY from the MethodCall `.map`/`.filter` special-case. So the
+  codegen closures path (which emits `|x| body` with NO type annotation,
+  letting Rust infer) is unaffected.
+- Codegen `.map()` lowering (`lower_method_call`) emits
+  `.into_iter().map(closure).collect::<Vec<_>>()` — it does NOT consume the
+  inferencer's result type for the method call itself. The inferencer's new
+  `Vector<R>` result MAY flow into a `let` annotation (`let r: Vec<i64>`)
+  but codegen tests use substring assertions (`src.contains(...)`), so the
+  added annotation doesn't break them. Confirmed: all closures.rs codegen
+  tests pass.
+- `cargo test --workspace` -> 0 failed across all binaries.
+- `cargo clippy --workspace --all-targets -- -D warnings` -> clean.
+- `cargo fmt -p buff-lang-types -- --check` -> clean.
+
+### TDD discipline
+
+RED first: wrote all 6 tests, ran `cargo test -p buff-lang-types expected_type_inference`
+-> 4 failed (the 2 negative-case tests passed since current behavior returns
+Unknown). Then implemented -> 6/6 GREEN.
+
+### Deferred
+
+- Multi-param lambdas (e.g. `.fold(init, { acc, x => ... })`) — fall back to
+  Unknown. The helper explicitly checks `params.len() != 1`.
+- `.reduce` (yields `Option<T>`).
+- Enforcing `.filter` body is `Bool` (v0.5 type-errors-as-warnings policy).
+- Lambda param annotation conflict detection (user wrote `{ x: Int => ... }`
+  on a `Vector<Float>.map` — not caught; expected type wins silently).
+- A real `Type::Function(Vec<Type>, Box<Type>)` variant so the lambda's full
+  type (`(T) -> R`) is first-class (v0.5 has no function variant).
+
+### Verification (all GREEN)
+
+- `cargo test -p buff-lang-types --test expected_type_inference` -> 6/6
+- `cargo test -p buff-lang-types` -> 305 passed, 0 failed
+- `cargo test --workspace` -> 0 failed across all binaries
+- `cargo check --workspace` -> exit 0
+- `cargo clippy --workspace --all-targets -- -D warnings` -> exit 0
+- `cargo fmt -p buff-lang-types -- --check` -> exit 0
+
+### Files changed
+
+- `crates/buff-lang-types/src/infer.rs` — added `infer_expr_expected` public
+  method (~50 lines, additive); extended the `Expr::MethodCall` arm with the
+  `.map`/`.filter` expected-type special-case (~25 lines). NO signature
+  changes to existing methods.
+- `crates/buff-lang-types/tests/expected_type_inference.rs` — NEW test file
+  (6 tests, ~210 lines).

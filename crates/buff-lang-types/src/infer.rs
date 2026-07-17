@@ -123,7 +123,10 @@ impl TypeInferencer {
                 Ok(Type::Unknown)
             }
             Expr::MethodCall {
-                receiver, method, ..
+                receiver,
+                method,
+                args,
+                ..
             } => {
                 // T24: `Matrix.new(rows, cols)` infers as `Matrix<T>` where
                 // the element type is unknown without further evidence (a
@@ -135,6 +138,37 @@ impl TypeInferencer {
                     if let Expr::Ident(id, _) = receiver.as_ref() {
                         if id.name == "Matrix" {
                             return Ok(Type::matrix(Type::Unknown));
+                        }
+                    }
+                }
+                // T77: Expected-type driven inference for the `.map()` /
+                // `.filter()` collection combinators. When the receiver
+                // infers to `Vector<T>` and the single argument is a lambda,
+                // the element type `T` is propagated as the EXPECTED type of
+                // the lambda's single parameter (see
+                // [`infer_expr_expected`]). This lets `{ x => x * 2 }` infer
+                // `x` from the receiver without an explicit annotation.
+                //
+                // - `.map(lambda)`  -> `Vector<body_result_type>`
+                // - `.filter(lambda)` -> `Vector<T>` (element type preserved;
+                //   the body's Bool-ness is not enforced here — v0.5 treats
+                //   type mismatches as warnings).
+                //
+                // Non-Vector receivers, multi-arg calls, and non-lambda
+                // args fall through to the `Unknown` default (no regression
+                // of the pre-T77 path).
+                if matches!(method.name.as_str(), "map" | "filter") && args.len() == 1 {
+                    if let Expr::Lambda { .. } = &args[0] {
+                        let recv_ty = self.infer_expr(receiver)?;
+                        if let Type::Vector(elem_ty) = &recv_ty {
+                            let body_ty = self.infer_expr_expected(&args[0], Some(elem_ty))?;
+                            let result_elem = if method.name == "map" {
+                                body_ty
+                            } else {
+                                // filter preserves the element type.
+                                (**elem_ty).clone()
+                            };
+                            return Ok(Type::vector(result_elem));
                         }
                     }
                 }
@@ -275,6 +309,63 @@ impl TypeInferencer {
                 }
                 Ok(Type::Unknown)
             }
+        }
+    }
+
+    /// Infers the type of `expr` with an optional EXPECTED-type hint (T77).
+    ///
+    /// `expected` is currently consumed only by [`Expr::Lambda`], where it is
+    /// interpreted as the expected type of the lambda's SINGLE parameter —
+    /// i.e. the element type propagated down from a `.map()` / `.filter()`
+    /// receiver (`Vector<T>`). All other expressions ignore `expected` and
+    /// behave identically to [`infer_expr`].
+    ///
+    /// This is an **additive** helper: existing `infer_expr(&expr)` callers
+    /// are unchanged (they effectively pass `expected = None`). The
+    /// [`Expr::MethodCall`] inference arm uses this to propagate the
+    /// receiver's element type into a lambda argument.
+    ///
+    /// # Lambda semantics
+    ///
+    /// - With `expected = Some(T)` and a single-param lambda: the param name
+    ///   is bound to `T` in the type environment, the body is inferred, and
+    ///   the body's tail type is returned as the lambda's result type.
+    ///   (Buff's `Type` enum has no function variant in v0.5, so the lambda
+    ///   "type" itself is its body's type; callers like `.map()` compose the
+    ///   final `Vector<R>` themselves.)
+    /// - With `expected = None`, a multi-param lambda, or any other shape:
+    ///   falls back to the v0.5 default (`Type::Unknown`) so the existing
+    ///   closures/codegen path is unaffected.
+    pub fn infer_expr_expected(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&Type>,
+    ) -> Result<Type, TypeError> {
+        match expr {
+            Expr::Lambda { params, body, .. } => {
+                // Without an expected param type, keep the v0.5 fallback so
+                // we don't regress the existing closure/codegen path.
+                let elem_ty = match expected {
+                    Some(t) => t.clone(),
+                    None => return Ok(Type::Unknown),
+                };
+                // Only single-param lambdas are supported by the
+                // map/filter combinators. Multi-param lambdas fall back to
+                // Unknown (a v0.5 deferral — Rust does the real inference at
+                // codegen time).
+                if params.len() != 1 {
+                    return Ok(Type::Unknown);
+                }
+                // Bind the param name to the expected element type, then
+                // infer the body's tail type. The lambda's RESULT type IS
+                // the body's tail type for the purpose of `.map()` result
+                // composition.
+                self.env.insert(&params[0].name.name, elem_ty);
+                self.infer_block_tail(body)
+            }
+            // All other expressions ignore `expected` and delegate to the
+            // plain inference path.
+            _ => self.infer_expr(expr),
         }
     }
 

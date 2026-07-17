@@ -984,7 +984,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `func process(x: String | Int)` → assert generated enum wrapper. Evidence: task-76-union-types.txt
   **Commit**: `feat(types): add union types A | B with pattern discrimination`
 
-- [ ] **T77**: Expected-type driven inference [deep]
+- [x] **T77**: Expected-type driven inference [deep]
   **What to do** (TDD): RED: `items.map({ x => x * 2 })` — infer x type from items element type. GREEN: propagate expected types into lambda parameters during inference.
   **Acceptance**: `cargo test -p buff-lang-types expected_type_inference` passes. Lambda params inferred from context.
   **QA**: Infer `{ x => x * 2 }` in context of `Vector<Float>.map()` → assert x: Float. Evidence: task-77-expected-type.txt
