@@ -662,6 +662,119 @@ fn test_newline_lf_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
+// T104: Raw string literals `r"..."` — no escape processing.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_raw_strings_simple() {
+    // `r"hello"` → StringStart, StringPart("hello"), StringEnd
+    let tokens = kinds(r#"r"hello""#);
+    assert_eq!(
+        tokens,
+        vec![
+            TokenKind::StringStart,
+            TokenKind::StringPart("hello".into()),
+            TokenKind::StringEnd,
+            TokenKind::Eof,
+        ]
+    );
+}
+
+#[test]
+fn test_raw_strings_backslash_preserved() {
+    // `r"\n"` → content is literal backslash-n (NOT newline)
+    let tokens = kinds(r#"r"\n""#);
+    assert_eq!(
+        tokens,
+        vec![
+            TokenKind::StringStart,
+            TokenKind::StringPart(r"\n".into()),
+            TokenKind::StringEnd,
+            TokenKind::Eof,
+        ]
+    );
+}
+
+#[test]
+fn test_raw_strings_windows_path() {
+    // `r"C:\path"` → backslashes preserved
+    let tokens = kinds(r#"r"C:\path""#);
+    assert_eq!(
+        tokens,
+        vec![
+            TokenKind::StringStart,
+            TokenKind::StringPart(r"C:\path".into()),
+            TokenKind::StringEnd,
+            TokenKind::Eof,
+        ]
+    );
+}
+
+#[test]
+fn test_raw_strings_regex() {
+    // `r"\d+"` → literal `\d+`
+    let tokens = kinds(r#"r"\d+""#);
+    assert_eq!(
+        tokens,
+        vec![
+            TokenKind::StringStart,
+            TokenKind::StringPart(r"\d+".into()),
+            TokenKind::StringEnd,
+            TokenKind::Eof,
+        ]
+    );
+}
+
+#[test]
+fn test_raw_strings_empty() {
+    // `r""` → empty raw string
+    let tokens = kinds(r#"r"""#);
+    assert_eq!(
+        tokens,
+        vec![TokenKind::StringStart, TokenKind::StringEnd, TokenKind::Eof]
+    );
+}
+
+#[test]
+fn test_raw_strings_identifier_r_not_followed_by_quote() {
+    // `r` as a normal identifier (NOT followed by `"`) must still work.
+    let tokens = kinds("r");
+    assert_eq!(tokens, vec![TokenKind::Ident("r".into()), TokenKind::Eof]);
+}
+
+#[test]
+fn test_raw_strings_identifier_rain() {
+    // `rain` starts with `r` but is NOT `r"` — must lex as identifier.
+    let tokens = kinds("rain");
+    assert_eq!(
+        tokens,
+        vec![TokenKind::Ident("rain".into()), TokenKind::Eof]
+    );
+}
+
+#[test]
+fn test_raw_strings_unterminated() {
+    // `r"abc` with no closing quote → error.
+    let e = err(r#"r"abc"#);
+    assert!(e.to_string().contains("unterminated string"), "got: {e}");
+}
+
+#[test]
+fn test_raw_strings_no_interpolation() {
+    // `{expr}` is literal text inside a raw string.
+    let tokens = kinds(r#"r"x {y} z""#);
+    assert_eq!(
+        tokens,
+        vec![
+            TokenKind::StringStart,
+            TokenKind::StringPart("x {y} z".into()),
+            TokenKind::StringEnd,
+            TokenKind::Eof,
+        ]
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Unexpected character handling
 // ---------------------------------------------------------------------------
 

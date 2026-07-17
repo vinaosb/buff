@@ -946,7 +946,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Parse `func sq(x: Int) => x * x` → assert FuncDecl with expression body. Evidence: task-102-expr-fn.txt
   **Commit**: `feat(parser): add expression function shorthand =>`
 
-- [ ] **T104**: Raw strings [quick]
+- [x] **T104**: Raw strings [quick]
   **What to do** (TDD): RED: `r"\d+"` → literal backslashes (no escape processing). GREEN: parse `r"..."` prefix in lexer, codegen to Rust raw string.
   **Acceptance**: `cargo test -p buff-lang-lexer raw_strings` passes. `r"\n"` → backslash-n literal (NOT newline).
   **QA**: Parse `r"C:\path"` → assert backslashes preserved. Evidence: task-104-raw-strings.txt

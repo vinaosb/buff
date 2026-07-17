@@ -230,6 +230,51 @@ fn test_codegen_let_bool() {
 }
 
 // ---------------------------------------------------------------------------
+// T104: Raw string literal `r"..."` — no escape processing.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_codegen_raw_string_backslash_preserved() {
+    // `r"\n"` → the raw content is `\n` (backslash + n).
+    // The codegen emits `syn::LitStr::new("\\n", ...)` which prettyplease
+    // renders as `"\\n"` — a Rust string whose VALUE is backslash-n.
+    let f = func_with_stmts("f", vec![let_stmt("s", string_expr(r"\n"))]);
+    let src = generate_rust(&[f]).unwrap();
+    // The generated Rust should contain `"\\n"` (escaped backslash + n).
+    assert!(
+        src.contains(r#""\\n""#),
+        "expected escaped backslash-n in output, got: {src}"
+    );
+    syn::parse_str::<syn::File>(&src).expect("must re-parse");
+}
+
+#[test]
+fn test_codegen_raw_string_windows_path() {
+    // `r"C:\path"` → raw content is `C:\path`.
+    let f = func_with_stmts("f", vec![let_stmt("s", string_expr(r"C:\path"))]);
+    let src = generate_rust(&[f]).unwrap();
+    // The generated Rust should contain `"C:\\path"` (escaped backslashes).
+    assert!(
+        src.contains(r#""C:\\path""#),
+        "expected escaped path in output, got: {src}"
+    );
+    syn::parse_str::<syn::File>(&src).expect("must re-parse");
+}
+
+#[test]
+fn test_codegen_raw_string_regex() {
+    // `r"\d+"` → raw content is `\d+`.
+    let f = func_with_stmts("f", vec![let_stmt("s", string_expr(r"\d+"))]);
+    let src = generate_rust(&[f]).unwrap();
+    // The generated Rust should contain `"\\d+"` (escaped backslash-d-plus).
+    assert!(
+        src.contains(r#""\\d+""#),
+        "expected escaped regex in output, got: {src}"
+    );
+    syn::parse_str::<syn::File>(&src).expect("must re-parse");
+}
+
+// ---------------------------------------------------------------------------
 // 5. `let s = "hi"` — inferred String → `let s: String = "hi";`
 // ---------------------------------------------------------------------------
 

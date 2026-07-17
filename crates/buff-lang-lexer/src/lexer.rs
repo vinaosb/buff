@@ -203,6 +203,14 @@ fn lex_range(
             continue;
         }
 
+        // T104: Raw string literal `r"..."` — no escape processing, no
+        // interpolation. Check BEFORE the identifier branch so `r"` is
+        // consumed as a raw string, not as identifier `r` followed by `"`.
+        if c == b'r' && pos + 1 < end && bytes[pos + 1] == b'"' {
+            pos = scan_raw_string(source, pos, source_id, out)?;
+            continue;
+        }
+
         // Identifiers / keywords.
         if c.is_ascii_alphabetic() || c == b'_' {
             let id_start = pos;
@@ -247,6 +255,63 @@ fn lex_range(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// T104: Raw string literal `r"..."` scanning.
+// ---------------------------------------------------------------------------
+
+/// Scan a raw string literal `r"..."` (T104).
+///
+/// Raw strings have NO escape processing and NO interpolation — every byte
+/// between the opening `"` and the next `"` is captured verbatim. This lets
+/// backslashes, braces, and other special characters appear literally.
+///
+/// Returns the absolute byte position immediately after the closing `"`.
+/// Pushes `StringStart`, `StringPart(text)`, `StringEnd` into `out` — the
+/// same token sequence as a plain (non-interpolated) string, so the parser
+/// and codegen handle it without changes.
+///
+/// # Limitations (v0.5)
+///
+/// - A raw string cannot contain a literal `"` character (no `r#"..."#`
+///   hash-delimited form). This is deferred to a future version.
+/// - Multi-line raw strings use the existing `"""..."""` triple-quote form
+///   (T21), not `r"..."`.
+fn scan_raw_string(
+    source: &str,
+    r_pos: usize,
+    source_id: SourceId,
+    out: &mut Vec<Token>,
+) -> Result<usize, LexerError> {
+    let bytes = source.as_bytes();
+    let span = |a, b| Span::new(a, b, source_id);
+
+    // `r_pos` is at `r`, the opening `"` is at `r_pos + 1`.
+    let quote_start = r_pos + 1;
+
+    out.push(Token::new(
+        TokenKind::StringStart,
+        span(r_pos, quote_start + 1),
+    ));
+
+    // Body starts right after the opening `"`. Scan verbatim until the next
+    // `"` — no escape processing, no interpolation.
+    let body_start = quote_start + 1;
+    let mut i = body_start;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            let text = source[body_start..i].to_string();
+            if !text.is_empty() {
+                out.push(Token::new(TokenKind::StringPart(text), span(body_start, i)));
+            }
+            out.push(Token::new(TokenKind::StringEnd, span(i, i + 1)));
+            return Ok(i + 1);
+        }
+        i += 1;
+    }
+
+    Err(LexerError::unterminated_string(span(r_pos, bytes.len())))
 }
 
 // ---------------------------------------------------------------------------

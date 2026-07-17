@@ -281,6 +281,59 @@ end-to-end from T10/T20; T22 just pinned them with regression tests.
 - The `unused manifest key: workspace.dev-dependencies` warning is pre-existing
   (workspace Cargo.toml); not introduced by T22 and out of scope.
 
+## T104 — Raw string literals `r"..."`
+
+### Status: COMPLETE
+
+### What existed before
+- Triple-quoted raw strings `"""..."""` (T21) via `scan_triple_string` — no escape processing, no interpolation, multi-line.
+- Regular `"..."` strings via `scan_string` — with escape processing and `{expr}` interpolation.
+- The lexer produces `StringStart, StringPart(text), StringEnd` for ALL non-interpolated strings.
+
+### What was added
+
+**Lexer** (`buff-lang-lexer/src/lexer.rs`):
+- NEW `scan_raw_string` function (~50 lines) — scans `r"..."` with NO escape processing and NO interpolation. Reads bytes verbatim between the quotes.
+- NEW check in `lex_range` main loop: `if c == b'r' && pos+1 < end && bytes[pos+1] == b'"'` — placed BEFORE the identifier branch (line 207) so `r"` is consumed as a raw string, not as identifier `r` followed by `"`.
+- `r` as a normal identifier (NOT followed by `"`) still works — falls through to the identifier branch.
+- Unterminated raw string (`r"abc` with no closing quote) returns `LexerError::unterminated_string` — no panic.
+
+**Token variant reused**: `StringStart` / `StringPart(text)` / `StringEnd` — the same token sequence as a plain (non-interpolated) string. ZERO new token variants. The parser and codegen handle it without changes.
+
+**Codegen**: No changes needed. The raw content string flows through `syn::LitStr::new(s, ...)` which re-escapes it correctly for Rust. `r"\n"` → `"\\n"` in Rust output (value = backslash-n).
+
+### Key design decisions
+- **Additive only**: reused existing `StringStart/StringPart/StringEnd` token sequence. No new `TokenKind`, no new `Literal` variant, no new `Expr` variant.
+- **Placement before identifier branch**: critical — `r` is a valid identifier start, so the `r"` check must run before the identifier scanner.
+- **No hash-delimited form**: `r#"..."#` is deferred. Raw strings cannot contain `"` in v0.5. Documented in the function doc-comment.
+
+### Tests added
+- **Lexer** (`crates/buff-lang-lexer/tests/lexer_tests.rs`): 9 tests named `test_raw_strings_*`:
+  - `test_raw_strings_simple` — `r"hello"` → StringStart, StringPart("hello"), StringEnd
+  - `test_raw_strings_backslash_preserved` — `r"\n"` → content is `\n` (backslash + n)
+  - `test_raw_strings_windows_path` — `r"C:\path"` → backslashes preserved
+  - `test_raw_strings_regex` — `r"\d+"` → literal `\d+`
+  - `test_raw_strings_empty` — `r""` → empty raw string
+  - `test_raw_strings_identifier_r_not_followed_by_quote` — `r` alone → Ident("r")
+  - `test_raw_strings_identifier_rain` — `rain` → Ident("rain")
+  - `test_raw_strings_unterminated` — `r"abc` → error
+  - `test_raw_strings_no_interpolation` — `r"x {y} z"` → literal `x {y} z`
+- **Codegen** (`crates/buff-lang-codegen-rust/tests/literal_tests.rs`): 3 tests named `test_codegen_raw_string_*`:
+  - `test_codegen_raw_string_backslash_preserved` — `r"\n"` → `"\\n"` in Rust output
+  - `test_codegen_raw_string_windows_path` — `r"C:\path"` → `"C:\\path"` in Rust output
+  - `test_codegen_raw_string_regex` — `r"\d+"` → `"\\d+"` in Rust output
+
+### Verification
+- `cargo test -p buff-lang-lexer raw_strings` → 9/9 pass
+- `cargo test -p buff-lang-codegen-rust test_codegen_raw_string` → 3/3 pass
+- `cargo test --workspace` → all green
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean
+- `cargo fmt --check` → clean
+
+### Deferred
+- Hash-delimited raw strings `r#"..."#` (to allow `"` inside raw strings) — v1.0+
+- Multi-line raw strings already exist via `"""..."""` (T21)
+
 ## T99 — Process environment access (args/env/exit)
 
 ### Status: COMPLETE
