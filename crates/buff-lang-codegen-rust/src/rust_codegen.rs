@@ -856,6 +856,43 @@ impl RustCodegen {
                 };
                 Ok(SynStmt::Local(local))
             }
+            Stmt::LetPattern {
+                pattern,
+                value,
+                mutable,
+                ty,
+                ..
+            } => {
+                // T71: destructuring `let` → Rust `let PAT = value;`. The
+                // pattern is lowered via [`Self::lower_pattern`] (extended for
+                // Tuple/Struct); `mutable` propagates to each binding. An
+                // optional type annotation wraps the whole pattern in
+                // `Pat::Type` (rare for destructuring, but supported).
+                let init_expr = self.lower_expr(value)?;
+                let lowered_pat = self.lower_pattern(pattern, *mutable)?;
+                let pat = if let Some(type_ref) = ty {
+                    Pat::Type(PatType {
+                        attrs: Vec::new(),
+                        pat: Box::new(lowered_pat),
+                        colon_token: Default::default(),
+                        ty: Box::new(self.ast_typeref_to_syn(type_ref)?),
+                    })
+                } else {
+                    lowered_pat
+                };
+                let local = syn::Local {
+                    attrs: Vec::new(),
+                    let_token: Default::default(),
+                    pat,
+                    init: Some(syn::LocalInit {
+                        eq_token: Default::default(),
+                        expr: Box::new(init_expr),
+                        diverge: None,
+                    }),
+                    semi_token: Default::default(),
+                };
+                Ok(SynStmt::Local(local))
+            }
             Stmt::ExprStmt(expr, _) => {
                 let e = self.lower_expr(expr)?;
                 Ok(SynStmt::Expr(e, Some(Default::default())))
@@ -2313,7 +2350,7 @@ impl RustCodegen {
         let scrut = self.lower_expr(scrutinee)?;
         let mut arms_syn: Vec<syn::Arm> = Vec::with_capacity(arms.len());
         for arm in arms {
-            let pat = self.lower_pattern(&arm.pattern)?;
+            let pat = self.lower_pattern(&arm.pattern, false)?;
             // The parser wraps the body expression in a one-statement
             // `ExprStmt` block. We lower the block and use it as the arm
             // body — Rust accepts a block as an arm body. If the block has
@@ -2554,7 +2591,7 @@ impl RustCodegen {
         }
     }
 
-    /// Lower a Buff [`Pattern`] to a Rust [`syn::Pat`] (T27).
+    /// Lower a Buff [`Pattern`] to a Rust [`syn::Pat`] (T27 / T71).
     ///
     /// Mapping:
     /// - [`Pattern::Wildcard`] → `syn::Pat::Wild` (`_`)
@@ -2571,7 +2608,18 @@ impl RustCodegen {
     ///     path is just `Variant` (no enum prefix) — Rust resolves it when
     ///     the enum is in scope. The `enum_name` field of the AST node is
     ///     ignored at codegen (the parser fills it with `""`).
-    fn lower_pattern(&mut self, pat: &Pattern) -> Result<Pat, CodegenError> {
+    /// - [`Pattern::Tuple(subs, _)`] → `syn::Pat::Tuple` (`(a, b)`). T71.
+    /// - [`Pattern::Struct { name, fields, .. }`] → `syn::Pat::Struct`
+    ///   (`Point { x, y }`). Shorthand fields (name == binding name) are
+    ///   reproduced as shorthand (no colon). T71.
+    ///
+    /// `mutable` (T71) — when `true`, every [`Pattern::Ident`] binding is
+    /// emitted with `mut` (e.g. `mut x`). Match-arm callers pass `false`
+    /// (patterns never carry `mut` in Buff syntax); the `let`-destructuring
+    /// caller passes the binding's `mutable` flag so `let mut (a, b) = ...`
+    /// lowers to `let (mut a, mut b) = ...`. `mutable` propagates recursively
+    /// into sub-patterns so nested bindings all pick it up.
+    fn lower_pattern(&mut self, pat: &Pattern, mutable: bool) -> Result<Pat, CodegenError> {
         let syn_pat: Pat = match pat {
             Pattern::Wildcard(_) => Pat::Wild(syn::PatWild {
                 attrs: Vec::new(),
@@ -2581,7 +2629,7 @@ impl RustCodegen {
                 attrs: Vec::new(),
                 ident: ast_ident_to_syn(name),
                 by_ref: None,
-                mutability: None,
+                mutability: mutable.then(Default::default),
                 subpat: None,
             }),
             Pattern::Literal(lit, _) => {
@@ -2618,7 +2666,7 @@ impl RustCodegen {
                     // Tuple-struct variant: `Variant(subpat1, subpat2, ...)`.
                     let mut elems: Punctuated<Pat, syn::Token![,]> = Punctuated::new();
                     for sub in subpatterns {
-                        elems.push(self.lower_pattern(sub)?);
+                        elems.push(self.lower_pattern(sub, mutable)?);
                     }
                     Pat::TupleStruct(syn::PatTupleStruct {
                         attrs: Vec::new(),
@@ -2628,6 +2676,49 @@ impl RustCodegen {
                         elems,
                     })
                 }
+            }
+            Pattern::Tuple(subs, _) => {
+                // T71: tuple destructuring `(a, b, ...)`.
+                let mut elems: Punctuated<Pat, syn::Token![,]> = Punctuated::new();
+                for sub in subs {
+                    elems.push(self.lower_pattern(sub, mutable)?);
+                }
+                Pat::Tuple(syn::PatTuple {
+                    attrs: Vec::new(),
+                    paren_token: Default::default(),
+                    elems,
+                })
+            }
+            Pattern::Struct { name, fields, .. } => {
+                // T71: struct destructuring `Name { field: subpat, ... }`.
+                // Hand-built via `syn::PatStruct` + `syn::FieldPat` (syn 2.0
+                // renamed the field type `PatField`→`FieldPat`). Shorthand
+                // (immutable + field name == binding name) is reproduced
+                // without a colon: `Point { x }` not `Point { x: x }`.
+                let mut field_pats: Punctuated<syn::FieldPat, syn::Token![,]> = Punctuated::new();
+                for (field_name, subpat) in fields {
+                    let is_shorthand = !mutable
+                        && matches!(subpat, Pattern::Ident(id, _) if id.name == field_name.name);
+                    let lowered = self.lower_pattern(subpat, mutable)?;
+                    field_pats.push(syn::FieldPat {
+                        attrs: Vec::new(),
+                        member: ast_ident_to_syn(field_name).into(),
+                        colon_token: if is_shorthand {
+                            None
+                        } else {
+                            Some(Default::default())
+                        },
+                        pat: Box::new(lowered),
+                    });
+                }
+                Pat::Struct(syn::PatStruct {
+                    attrs: Vec::new(),
+                    qself: None,
+                    path: syn::Path::from(ast_ident_to_syn(name)),
+                    brace_token: Default::default(),
+                    fields: field_pats,
+                    rest: None,
+                })
             }
         };
         Ok(syn_pat)
@@ -3417,9 +3508,10 @@ fn block_uses_matrix(block: &Block) -> bool {
 /// Check a single statement (and its nested expressions) for Matrix.new.
 fn stmt_uses_matrix(stmt: &Stmt) -> bool {
     match stmt {
-        Stmt::LetDecl { value, .. } | Stmt::ExprStmt(value, _) | Stmt::Return(Some(value), _) => {
-            expr_uses_matrix(value)
-        }
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_matrix(value),
         Stmt::Assignment { target, value, .. } => {
             expr_uses_matrix(target) || expr_uses_matrix(value)
         }
@@ -3596,9 +3688,10 @@ fn block_uses_error(block: &Block) -> bool {
 /// Check a single statement (and its nested expressions) for `Error(...)`.
 fn stmt_uses_error(stmt: &Stmt) -> bool {
     match stmt {
-        Stmt::LetDecl { value, .. } | Stmt::ExprStmt(value, _) | Stmt::Return(Some(value), _) => {
-            expr_uses_error(value)
-        }
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_error(value),
         Stmt::Assignment { target, value, .. } => expr_uses_error(target) || expr_uses_error(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_error(iter) || block_uses_error(body),

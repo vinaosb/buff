@@ -43,7 +43,7 @@ use buff_lang_ast::{
 use buff_lang_error::{Diagnostic, ParseError, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
-use crate::expr::parse_expression;
+use crate::expr::{parse_expression, parse_pattern};
 use crate::stream::TokenStream;
 
 // ---------------------------------------------------------------------------
@@ -524,6 +524,41 @@ fn parse_let(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     let mutable = matches!(stream.peek_kind(), Some(TokenKind::KwMut));
     if mutable {
         stream.advance();
+    }
+
+    // T71: destructuring dispatch. Two shapes route to `Stmt::LetPattern`
+    // (the existing bare-name `Stmt::LetDecl` path is left 100% untouched):
+    // - `let (x, y) = ...`        → tuple pattern (next token is `(`).
+    // - `let Point { x, y } = ...` → struct pattern (next is an `Ident`
+    //   immediately followed by `{`; in `let`-target position `Ident {` can
+    //   ONLY be a struct destructuring pattern — a struct literal can't be a
+    //   binding target).
+    let is_tuple_pat = matches!(stream.peek_kind(), Some(TokenKind::LParen));
+    let is_struct_pat = matches!(
+        (stream.peek_kind(), stream.peek_second_kind()),
+        (Some(TokenKind::Ident(_)), Some(TokenKind::LBrace))
+    );
+    if is_tuple_pat || is_struct_pat {
+        let pattern = parse_pattern(stream)?;
+        // Optional type annotation `: Type` (rare for destructuring, but the
+        // AST carries the field so we honour it for parity with `LetDecl`).
+        let ty = if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+            stream.advance();
+            Some(parse_type_ref(stream)?)
+        } else {
+            None
+        };
+        stream.expect(TokenKind::Assign)?;
+        let value = parse_expression(stream)?;
+        let end = value.span().end;
+        let span = Span::new(start, end, source_id);
+        return Ok(Stmt::LetPattern {
+            pattern,
+            value,
+            mutable,
+            ty,
+            span,
+        });
     }
 
     // Expect identifier
@@ -1697,7 +1732,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
         | Stmt::Break(span)
         | Stmt::Continue(span)
         | Stmt::ForIn { span, .. }
-        | Stmt::ForWhile { span, .. } => span.end,
+        | Stmt::ForWhile { span, .. }
+        | Stmt::LetPattern { span, .. } => span.end,
     }
 }
 

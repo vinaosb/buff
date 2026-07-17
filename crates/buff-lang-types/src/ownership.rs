@@ -239,6 +239,13 @@ fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             out.insert(name.name.clone());
             collect_bound_names_in_expr(value, out);
         }
+        // T71: every destructured binding is a new local name.
+        Stmt::LetPattern { pattern, value, .. } => {
+            for b in pattern.bindings() {
+                out.insert(b.name);
+            }
+            collect_bound_names_in_expr(value, out);
+        }
         Stmt::Assignment { value, .. } => collect_bound_names_in_expr(value, out),
         Stmt::ExprStmt(e, _) => collect_bound_names_in_expr(e, out),
         Stmt::Return(Some(e), _) => collect_bound_names_in_expr(e, out),
@@ -375,6 +382,14 @@ fn classify_stmt(stmt: &Stmt, copy_vars: &mut BTreeSet<String>, locals: &mut BTr
             }
             locals.insert(name.name.clone());
         }
+        // T71: a destructuring let introduces each bound name as a local.
+        // Per-field Copy classification is deferred (v0.5 keeps whole-tuple
+        // ownership coarse); the names are still recorded as locals.
+        Stmt::LetPattern { pattern, .. } => {
+            for b in pattern.bindings() {
+                locals.insert(b.name);
+            }
+        }
         // Recurse into nested blocks so lets inside if/for/match branches
         // are classified too. (Cross-scope flattening — see LIMITATIONS.)
         Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } => {
@@ -449,6 +464,9 @@ fn collect_spawn_free_vars_in_stmts(stmts: &[Stmt], out: &mut BTreeSet<String>) 
 fn collect_spawn_free_vars_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
     match stmt {
         Stmt::LetDecl { value, .. } => collect_spawn_free_vars_in_expr(value, out),
+        // T71: the pattern itself binds (no outer free vars); only the RHS
+        // value can read outer names.
+        Stmt::LetPattern { value, .. } => collect_spawn_free_vars_in_expr(value, out),
         Stmt::Assignment { target, value, .. } => {
             collect_spawn_free_vars_in_expr(target, out);
             collect_spawn_free_vars_in_expr(value, out);
@@ -665,6 +683,8 @@ fn collect_free_vars_in_block(block: &Block, out: &mut BTreeSet<String>) {
         // naturally filtered out.
         match stmt {
             Stmt::LetDecl { value, .. } => collect_free_vars_in_expr(value, out),
+            // T71: destructured bindings are local; only the value reads.
+            Stmt::LetPattern { value, .. } => collect_free_vars_in_expr(value, out),
             Stmt::Assignment { target, value, .. } => {
                 collect_free_vars_in_expr(target, out);
                 collect_free_vars_in_expr(value, out);
@@ -707,6 +727,10 @@ fn collect_assignment_targets_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_assignment_targets_in_expr(value, out);
         }
         Stmt::LetDecl { value, .. } => {
+            collect_assignment_targets_in_expr(value, out);
+        }
+        // T71: a destructuring let introduces no assignment targets.
+        Stmt::LetPattern { value, .. } => {
             collect_assignment_targets_in_expr(value, out);
         }
         Stmt::ExprStmt(e, _) => collect_assignment_targets_in_expr(e, out),

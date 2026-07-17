@@ -6,7 +6,7 @@
 use std::fmt;
 
 use crate::common::{Block, Ident};
-use crate::expr::Expr;
+use crate::expr::{Expr, Pattern};
 use crate::op::BinaryOp;
 use crate::ty::TypeRef;
 use buff_lang_error::Span;
@@ -46,6 +46,17 @@ pub enum Stmt {
     },
     /// A conditional loop (while-style): `for cond { body }`.
     ForWhile { cond: Expr, body: Block, span: Span },
+    /// A destructuring `let`: `let (x, y) = expr` or `let Point { x, y } = e`
+    /// (T71). The binding target is a full [`Pattern`] rather than a bare
+    /// name. `mutable`/`ty` mirror [`Stmt::LetDecl`] (applied per-binding at
+    /// codegen); both are usually `false`/`None` for destructuring.
+    LetPattern {
+        pattern: Pattern,
+        value: Expr,
+        mutable: bool,
+        ty: Option<TypeRef>,
+        span: Span,
+    },
 }
 
 impl fmt::Display for Stmt {
@@ -80,6 +91,23 @@ impl fmt::Display for Stmt {
                 var, iter, body, ..
             } => write!(f, "ForIn({var} in {iter} {body})"),
             Stmt::ForWhile { cond, body, .. } => write!(f, "ForWhile({cond} {body})"),
+            Stmt::LetPattern {
+                pattern,
+                value,
+                mutable,
+                ty,
+                ..
+            } => {
+                f.write_str("LetPattern(")?;
+                if *mutable {
+                    f.write_str("mut ")?;
+                }
+                write!(f, "{pattern}")?;
+                if let Some(t) = ty {
+                    write!(f, ": {t}")?;
+                }
+                write!(f, " = {value})")
+            }
         }
     }
 }

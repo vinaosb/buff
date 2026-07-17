@@ -1654,3 +1654,98 @@ this; it's a clippy-only lint).
   through the existing inference + codegen paths unchanged. Type errors
   (e.g. applying `?.` to a non-Option receiver) are warnings in v0.5 per
   the project policy; no enforcement added.
+
+## T71 — Destructuring assignment (let-destructuring for tuples + structs)
+
+**Design (additive AST, as the spec mandated).** Unlike T69 (`|>`) and T70 (`?.`),
+which desugared in-parser to AVOID new AST nodes, T71 genuinely needs new
+variants — destructuring can't be expressed with the existing bare-name
+`Stmt::LetDecl`. So this is a real additive-AST task with exhaustive-match
+ripple.
+
+- `Pattern` gained TWO variants at the END of the enum (additive — existing
+  Wildcard/Literal/Ident/Variant untouched):
+  - `Pattern::Tuple(Vec<Pattern>, Span)` — `(x, y)`, `(a, _, c)`.
+  - `Pattern::Struct { name: Ident, fields: Vec<(Ident, Pattern)>, span }` —
+    `Point { x, y }`. Shorthand `Point { x }` parses as field `x` binding to
+    `Pattern::Ident(x)` (the parser stores it explicitly; codegen re-derives
+    shorthand by name-equality).
+- `Stmt` gained `Stmt::LetPattern { pattern, value, mutable, ty, span }` at
+  the END. `Stmt::LetDecl` is 100% untouched — `let x = 5` STILL produces
+  `LetDecl`. New `Pattern::bindings()` helper (returns `Vec<Ident>`) added so
+  infer/ownership/IR can collect the names a destructuring introduces.
+- Derives stay `Debug, Clone, PartialEq` (NO Eq/Hash). Field order is a `Vec`
+  everywhere — never a HashMap (determinism).
+
+**Shared match-pattern parser WAS extended (bonus).** `parse_pattern` in
+`crates/buff-lang-parser/src/expr.rs` is shared by `match` arms AND
+`let`-destructuring. I extended the SAME function (rather than a separate
+let-only parser):
+  - Added a leading `(` ? `Pattern::Tuple` branch (before the Ident branch).
+  - Added a `Name { ... }` ? `Pattern::Struct` branch inside the Ident arm
+    (after the existing `Name(subpats)` Variant branch).
+So `match` arms ALSO now support tuple/struct patterns (bonus, not required by
+the spec). `parse_let` does two-token-lookahead dispatch: `(` ? tuple pattern;
+`Ident` immediately followed by `{` ? struct pattern; else fall through to the
+existing bare-name `LetDecl` path. In let-target position `Ident {` can ONLY be
+a struct destructuring (a struct literal can't be a binding target), so the
+disambiguation is unambiguous. `mut`/`: Type` are honored on the LetPattern.
+
+**Ripple sites updated (every exhaustive `match stmt` / `match pat`):**
+  - `crates/buff-lang-ast/src/ir.rs` — `lower_stmt` (LetPattern: register each
+    binding in the `bindings` map pointing at the value's IR node; the `defs`
+    Vec on the node stays empty since the bindings map is the source of truth
+    for dependency wiring) + `collect_stmt_uses` (recurse into value).
+  - `crates/buff-lang-types/src/infer.rs` — `infer_stmt` (v0.5 deferral: bind
+    each pattern name to `Type::Unknown`; Rust does real per-field inference).
+  - `crates/buff-lang-types/src/ownership.rs` — 4 sites:
+    `collect_bound_names_in_stmt`, `collect_spawn_free_vars_in_stmt`,
+    `collect_free_vars_in_block`, `collect_assignment_targets_in_stmt`,
+    `classify_stmt`.
+  - `crates/buff-lang-types/src/async_analysis.rs` — `collect_func_calls_in_stmt`.
+  - `crates/buff-lang-types/src/exhaustiveness.rs` — `check_stmt`.
+  - `crates/buff-lang-parser/src/stmt.rs` — `stmt_end` helper (LetPattern has span).
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — `lower_stmt`
+    (LetPattern arm), `lower_pattern` (Tuple/Struct arms + `mutable` param),
+    `stmt_uses_matrix`, `stmt_uses_error`.
+
+**Codegen lowering (Pattern ? syn::Pat, via syn/quote only):**
+  - `lower_pattern` gained a `mutable: bool` param (propagated recursively).
+    Match-arm caller passes `false`; let-destructuring passes the binding's
+    `mutable` flag so `let mut (a, b) = ...` ? `let (mut a, mut b) = ...`.
+  - `Pattern::Tuple` ? `syn::Pat::Tuple` (direct construction).
+  - `Pattern::Struct` ? `syn::Pat::Struct` with `syn::FieldPat` entries (syn
+    2.0.119 — NOTE: the field type is `FieldPat`, NOT `PatField` which was the
+    syn 1.0 name; `Pat` does NOT impl `Parse` in syn 2.0 so `syn::parse2::<Pat>`
+    is a trap). Shorthand (immutable + field name == binding name) emitted
+    with `colon_token: None` so `Point { x, y }` reproduces as shorthand.
+
+**Gotchas hit:**
+  - syn 2.0.119: `PatField` ? `FieldPat`; `Pat: Parse` is NOT implemented
+    (can't `syn::parse2::<Pat>` a token stream). Hand-construct `PatStruct`/`FieldPat`.
+  - `IrGraph` has NO `node_mut` method (I assumed one existed from a grep hit
+    that was actually my own newly-added line) — register destructuring defs in
+    the `bindings` map instead, not by mutating the node.
+  - `let (x, )` is a VALID 1-element tuple with trailing comma (same as Rust),
+    NOT a malformed pattern — the RED test `destructuring_malformed_*` had to
+    use `let (x, ,)` (double comma) instead.
+  - Trailing comma is allowed in all delimited pattern forms (`(...)`, `Name { ... }`).
+
+**Deferred (intentionally, v0.5+):** nested-destructuring depth is unbounded
+(recursion handles it) but per-field TYPE inference is coarse (each binding ?
+`Type::Unknown`); `..` rest patterns in structs (`Point { x, .. }`) are NOT
+supported (the struct pattern lists all fields explicitly); `@`-bindings
+(`x @ pat`) not supported; destructuring in `for`/`match`-arm-closure-params
+not wired (only `let`). Move/copy classification of individual destructured
+bindings is coarse (whole-binding ownership; CoW detection not per-field).
+
+**Tests added:** `crates/buff-lang-parser/tests/destructuring.rs` (13 fns, all
+name `destructuring_*` for the fn-name filter) + `crates/buff-lang-codegen-rust/
+tests/destructuring_codegen.rs` (5 fns). `cargo test -p buff-lang-parser
+destructuring` ? 13 passed. Full `cargo test --workspace` green (the lone
+`test test_fail ... FAILED` is the INTENTIONAL T35 `buff test` E2E fixture — a
+generated Buff `@test` at `Temp\buff-test\test_command_e2e_fail_test.rs:2:5`
+that is supposed to fail; its outer Rust test
+`test_command_e2e_failing_test_exit_one ... ok` passes, and the whole
+`test_command` binary reports `19 passed; 0 failed`). `cargo clippy
+--workspace --all-targets -- -D warnings` exit 0. `cargo fmt --check` exit 0.

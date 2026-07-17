@@ -499,6 +499,25 @@ impl AstLowerer {
                 name, value, span, ..
             } => self.create_expr_node(value, Some(name), Some(stmt), *span),
 
+            // T71: destructuring let — the value is the data-flow source; the
+            // pattern's bindings are all defined by this one node (we register
+            // each in the `bindings` map so later reads wire back here). The
+            // node's own `defs` list stays empty (the IR `defs` field is a
+            // single-name nicety; the `bindings` map is the source of truth
+            // for dependency wiring — see `wire_dependencies`).
+            Stmt::LetPattern {
+                pattern,
+                value,
+                span,
+                ..
+            } => {
+                let node = self.create_expr_node(value, None, Some(stmt), *span);
+                for b in pattern.bindings() {
+                    self.bindings.insert(b.name, node);
+                }
+                node
+            }
+
             Stmt::ExprStmt(expr, span) => self.create_expr_node(expr, None, Some(stmt), *span),
 
             Stmt::Assignment {
@@ -803,6 +822,9 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
 fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
     match stmt {
         Stmt::LetDecl { value, .. } => collect_uses(value, out),
+        // T71: the destructured bindings don't read outer names (they bind);
+        // only the RHS value contributes uses.
+        Stmt::LetPattern { value, .. } => collect_uses(value, out),
         Stmt::Assignment { target, value, .. } => {
             collect_uses(target, out);
             collect_uses(value, out);

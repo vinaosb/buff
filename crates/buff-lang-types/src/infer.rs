@@ -525,6 +525,19 @@ impl TypeInferencer {
             Stmt::Assignment { .. } => Ok(Type::Void),
             Stmt::Break(_) | Stmt::Continue(_) => Ok(Type::Void),
             Stmt::ForIn { .. } | Stmt::ForWhile { .. } => Ok(Type::Void),
+            // T71: destructuring let. v0.5 deferral — the per-binding types
+            // can't be split out without knowing the tuple/struct shape, so
+            // each binding is recorded as `Type::Unknown` (the value type is
+            // still inferred for any type-annotation check). This keeps
+            // downstream uses compiling (Unknown is permissive); Rust does the
+            // real per-field inference at codegen.
+            Stmt::LetPattern { pattern, value, .. } => {
+                let _ = self.infer_expr(value)?;
+                for b in pattern.bindings() {
+                    self.env.insert(&b.name, Type::Unknown);
+                }
+                Ok(Type::Void)
+            }
         }
     }
 }

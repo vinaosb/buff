@@ -586,6 +586,19 @@ pub enum Pattern {
         subpatterns: Vec<Pattern>,
         span: Span,
     },
+    /// A tuple destructuring pattern: `(x, y)`, `(a, _, c)` (T71).
+    Tuple(Vec<Pattern>, Span),
+    /// A struct destructuring pattern: `Point { x, y }` (T71).
+    ///
+    /// Each entry is `(field_name, subpattern)`. Shorthand `Point { x, y }`
+    /// is parsed as `{ x: x, y: y }` — i.e. a field whose name equals its
+    /// binding. Field order is preserved as written (determinism: never use a
+    /// HashMap here).
+    Struct {
+        name: Ident,
+        fields: Vec<(Ident, Pattern)>,
+        span: Span,
+    },
 }
 
 impl Pattern {
@@ -598,7 +611,9 @@ impl Pattern {
             Pattern::Wildcard(s)
             | Pattern::Literal(_, s)
             | Pattern::Ident(_, s)
-            | Pattern::Variant { span: s, .. } => *s,
+            | Pattern::Variant { span: s, .. }
+            | Pattern::Tuple(_, s)
+            | Pattern::Struct { span: s, .. } => *s,
         }
     }
 
@@ -617,7 +632,35 @@ impl Pattern {
         match self {
             Pattern::Ident(name, _) => Some(&name.name),
             Pattern::Variant { variant, .. } => Some(&variant.name),
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Tuple(_, _)
+            | Pattern::Struct { .. } => None,
+        }
+    }
+
+    /// Returns the identifiers bound by this pattern (T71).
+    ///
+    /// - `Ident(name)` → `[name]`
+    /// - `Tuple(subs)` / `Variant { subpatterns, .. }` → bindings of each
+    ///   sub-pattern (flattened, order preserved).
+    /// - `Struct { fields, .. }` → bindings of each field's sub-pattern.
+    /// - `Wildcard` / `Literal` → `[]` (they bind nothing).
+    ///
+    /// Used by inference, ownership analysis, and IR lowering to introduce
+    /// the names a destructuring `let` brings into scope. Determinism is
+    /// preserved by walking the source-order `Vec`s (never a HashMap).
+    pub fn bindings(&self) -> Vec<Ident> {
+        match self {
+            Pattern::Ident(name, _) => vec![name.clone()],
+            Pattern::Tuple(subs, _) => subs.iter().flat_map(Pattern::bindings).collect(),
+            Pattern::Variant { subpatterns, .. } => {
+                subpatterns.iter().flat_map(Pattern::bindings).collect()
+            }
+            Pattern::Struct { fields, .. } => {
+                fields.iter().flat_map(|(_, p)| p.bindings()).collect()
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) => Vec::new(),
         }
     }
 }
@@ -646,6 +689,26 @@ impl fmt::Display for Pattern {
                     f.write_str(")")?;
                 }
                 Ok(())
+            }
+            Pattern::Tuple(subs, _) => {
+                f.write_str("(")?;
+                for (i, p) in subs.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{p}")?;
+                }
+                f.write_str(")")
+            }
+            Pattern::Struct { name, fields, .. } => {
+                write!(f, "{name} {{ ")?;
+                for (i, (fname, p)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{fname}: {p}")?;
+                }
+                f.write_str(" }}")
             }
         }
     }

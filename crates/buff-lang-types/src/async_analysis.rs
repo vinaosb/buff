@@ -216,6 +216,8 @@ fn collect_func_calls_in_block(block: &Block, out: &mut BTreeSet<String>) {
 fn collect_func_calls_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
     match stmt {
         Stmt::LetDecl { value, .. } => collect_func_calls(value, out),
+        // T71: only the RHS value can contain callee references.
+        Stmt::LetPattern { value, .. } => collect_func_calls(value, out),
         Stmt::ExprStmt(e, _) => collect_func_calls(e, out),
         Stmt::Return(opt_e, _) => {
             if let Some(e) = opt_e {

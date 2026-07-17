@@ -195,9 +195,10 @@ fn check_stmt(
     inferencer: &mut TypeInferencer,
 ) -> Result<(), TypeError> {
     match stmt {
-        Stmt::LetDecl { value, .. } | Stmt::ExprStmt(value, _) | Stmt::Return(Some(value), _) => {
-            check_expr(value, registry, inferencer)
-        }
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => check_expr(value, registry, inferencer),
         Stmt::Assignment { target, value, .. } => {
             check_expr(target, registry, inferencer)?;
             check_expr(value, registry, inferencer)

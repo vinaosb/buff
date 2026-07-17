@@ -934,7 +934,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `opt?.value` → assert `.and_then()` in output. Evidence: task-70-null-conditional.txt
   **Commit**: `feat(parser): add null-conditional operator ?.`
 
-- [ ] **T71**: Destructuring assignment [deep]
+- [x] **T71**: Destructuring assignment [deep]
   **What to do** (TDD): RED: `let (x, y) = point` → tuple destructuring. `let Point { x, y } = p` → struct destructuring. GREEN: parse destructuring patterns in let, codegen to Rust.
   **Acceptance**: `cargo test -p buff-lang-parser destructuring` passes. Both tuple and struct destructuring work.
   **QA**: Codegen `let (a, b) = pair` → assert Rust destructuring. Evidence: task-71-destructuring.txt

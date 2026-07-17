@@ -862,7 +862,10 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     })
 }
 
-/// Parse a single match-arm pattern (T27).
+/// Parse a single pattern (T27, extended in T71).
+///
+/// This parser is shared by `match` arms and `let`-destructuring bindings, so
+/// extending it benefits both contexts.
 ///
 /// Supported shapes:
 /// - `_` — wildcard. Emits [`Pattern::Wildcard`].
@@ -872,18 +875,24 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 ///   [`Pattern::Variant`] with an empty `enum_name` placeholder (the parser
 ///   does not know which enum the variant belongs to; exhaustiveness and
 ///   codegen resolve it by name).
+/// - `Ident { field: pat, ... }` — struct destructuring. Emits
+///   [`Pattern::Struct`] (T71). Shorthand `Ident { field }` binds the field
+///   to a pattern of the same name.
+/// - `(pat, pat, ...)` — tuple destructuring. Emits [`Pattern::Tuple`] (T71).
 /// - `-N`, `42`, `"hi"`, `true`, `'a'` — literal patterns. Emits
 ///   [`Pattern::Literal`] (negative literals are encoded as a unary-minus
 ///   AST expr that we collapse into the literal value; the parser handles
 ///   the sign here so downstream codegen sees a plain `Literal::Int(-N)`).
 ///
-/// Subpatterns inside a variant tuple recursively call `parse_pattern`, so
-/// nesting (`Ok(Err(_))`) works. Trailing comma inside the tuple is allowed.
+/// Subpatterns inside a variant tuple / tuple pattern / struct field
+/// recursively call `parse_pattern`, so nesting (`Ok(Err(_))`, `(a, (b, c))`,
+/// `Outer { inner: Inner { x } }`) works. Trailing comma is allowed in all
+/// delimited forms.
 ///
 /// # Errors
 ///
-/// Returns [`ParseError`] if a subpattern fails to parse or the closing `)`
-/// is missing.
+/// Returns [`ParseError`] if a subpattern fails to parse or a closing
+/// delimiter (`)` or `}`) is missing.
 pub fn parse_pattern(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError> {
     let source_id = stream.source_id();
     // Wildcard `_`. The lexer produces this as `Ident("_")` (underscore is a
@@ -948,6 +957,48 @@ pub fn parse_pattern(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError
             // handling (which will error on `-` as a non-ident).
             stream.restore(saved);
         }
+        // T71: tuple destructuring pattern `(subpat, subpat, ...)`. Recurses
+        // into `parse_pattern` so nesting (`(a, (b, c))`) works. Trailing
+        // comma inside the tuple is allowed. Empty `()` is allowed (zero
+        // sub-patterns).
+        if matches!(tok.kind, TokenKind::LParen) {
+            let lp = stream.expect(TokenKind::LParen)?;
+            let mut subs: Vec<Pattern> = Vec::new();
+            if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                loop {
+                    subs.push(parse_pattern(stream)?);
+                    match stream.peek_kind() {
+                        Some(TokenKind::Comma) => {
+                            stream.advance();
+                            if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                                break;
+                            }
+                        }
+                        Some(TokenKind::RParen) => break,
+                        Some(other) => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                format!("expected `,` or `)` in tuple pattern, found `{other}`"),
+                                stream
+                                    .peek()
+                                    .map(|t| t.span)
+                                    .unwrap_or_else(|| stream.eof_span()),
+                            )));
+                        }
+                        None => {
+                            return Err(ParseError::new(Diagnostic::error(
+                                "unterminated tuple pattern (missing `)`)",
+                                stream.eof_span(),
+                            )));
+                        }
+                    }
+                }
+            }
+            let rp = stream.expect(TokenKind::RParen)?;
+            return Ok(Pattern::Tuple(
+                subs,
+                Span::new(lp.span.start, rp.span.end, source_id),
+            ));
+        }
         // Identifier-starting patterns: bare ident OR `Ident(subpatterns)`.
         if matches!(tok.kind, TokenKind::Ident(_)) {
             stream.advance();
@@ -1000,6 +1051,77 @@ pub fn parse_pattern(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError
                     variant: ident,
                     subpatterns: subpats,
                     span: Span::new(tok.span.start, rparen.span.end, source_id),
+                });
+            }
+            // T71: struct destructuring pattern `Name { field: subpat, ... }`
+            // (shorthand `Name { field }` == `Name { field: field }`). Field
+            // order is preserved as written (Vec, never a HashMap — determinism).
+            // Trailing comma inside the braces is allowed. Empty `Name { }` is
+            // allowed.
+            if matches!(stream.peek_kind(), Some(TokenKind::LBrace)) {
+                stream.expect(TokenKind::LBrace)?; // consume `{`
+                let mut fields: Vec<(Ident, Pattern)> = Vec::new();
+                if !matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                    loop {
+                        // Field name MUST be a bare identifier.
+                        let Some(ftok) = stream.advance() else {
+                            return Err(ParseError::new(Diagnostic::error(
+                                "expected struct field name, found end of input",
+                                stream.eof_span(),
+                            )));
+                        };
+                        let TokenKind::Ident(fname) = ftok.kind.clone() else {
+                            return Err(ParseError::new(Diagnostic::error(
+                                format!(
+                                    "expected struct field name (identifier), found `{}`",
+                                    ftok.kind
+                                ),
+                                ftok.span,
+                            )));
+                        };
+                        let field_ident = Ident::new(fname, ftok.span);
+                        // Explicit `field: subpattern` OR shorthand `field`
+                        // (which binds the field to a pattern of the same name).
+                        let subpat = if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+                            stream.advance(); // consume `:`
+                            parse_pattern(stream)?
+                        } else {
+                            Pattern::Ident(field_ident.clone(), ftok.span)
+                        };
+                        fields.push((field_ident, subpat));
+                        match stream.peek_kind() {
+                            Some(TokenKind::Comma) => {
+                                stream.advance();
+                                if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                                    break;
+                                }
+                            }
+                            Some(TokenKind::RBrace) => break,
+                            Some(other) => {
+                                return Err(ParseError::new(Diagnostic::error(
+                                    format!(
+                                        "expected `,` or `}}` in struct pattern, found `{other}`"
+                                    ),
+                                    stream
+                                        .peek()
+                                        .map(|t| t.span)
+                                        .unwrap_or_else(|| stream.eof_span()),
+                                )));
+                            }
+                            None => {
+                                return Err(ParseError::new(Diagnostic::error(
+                                    "unterminated struct pattern (missing `}`)",
+                                    stream.eof_span(),
+                                )));
+                            }
+                        }
+                    }
+                }
+                let rb = stream.expect(TokenKind::RBrace)?;
+                return Ok(Pattern::Struct {
+                    name: ident,
+                    fields,
+                    span: Span::new(tok.span.start, rb.span.end, source_id),
                 });
             }
             // Bare unit variant / binding.
