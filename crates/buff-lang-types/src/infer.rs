@@ -395,6 +395,12 @@ impl TypeInferencer {
             // T20: `99.90m` infers as the 128-bit fixed-point Decimal type
             // (NOT Double/Float), so it stays exact and runs on CPU only.
             Literal::Decimal(_) => Type::Decimal,
+            // T79: Regex literal infers as `String` to match the v0.5 codegen
+            // stub (which emits the pattern as a plain String literal). When
+            // real `Regex::new` codegen lands in v1.0, this should become a
+            // dedicated `Type::Regex` (or a structured type wrapping the
+            // pattern + compile-time-validated flag).
+            Literal::Regex(_) => Type::string(),
         })
     }
 

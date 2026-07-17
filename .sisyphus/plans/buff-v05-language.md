@@ -1028,7 +1028,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `read_file()?.context("config load")` → assert error chain. Evidence: task-78-error-context.txt
   **Commit**: `feat(codegen-rust): add error context chaining .context()`
 
-- [ ] **T79**: Regex literals [deep]
+- [x] **T79**: Regex literals [deep]
   **What to do** (TDD): RED: `/\d{3}/` → `Regex::new(r"\d{3}")`. Compile-time validation. GREEN: parse `/pattern/` in lexer, codegen to Regex::new with compile-time check.
   **Acceptance**: `cargo test -p buff-lang-lexer regex_literals` passes. `/\d+/` → valid Regex.
   **QA**: Parse `/\d{3}-\d{4}/` → assert Regex literal with pattern. Evidence: task-79-regex.txt

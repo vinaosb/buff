@@ -36,6 +36,24 @@ use buff_lang_error::Span;
 /// exhaustive. [`Type`](buff_lang_types::Type)::Char was added in lockstep.
 /// `char` is `Copy + Eq`, so the `PartialEq`-but-not-`Eq` derivation rule is
 /// unaffected.
+///
+/// ## T79 — `Literal::Regex`
+///
+/// `Literal::Regex` was **added** in T79 (v0.5) to carry the raw pattern
+/// text of a regex literal written with slashes: `/\d+/`, `/\d{3}-\d{4}/`.
+/// It stores the source text BETWEEN the slashes (excluding both
+/// delimiters) so backslash classes survive verbatim (`/\d+/` →
+/// `Regex("\\d+")`). This is **additive**: no existing variant was renamed,
+/// reordered, or had its payload altered, so all prior `match` arms remain
+/// exhaustive.
+///
+/// **Codegen is deferred in v0.5.** The generated Cargo project has no
+/// `regex` crate dependency (T32-style dep wiring is a separate v1.0 task),
+/// so emitting `Regex::new(...)` would fail to compile. As a documented
+/// stub, codegen lowers `Literal::Regex(p)` to the pattern string `"<p>"`
+/// (valid standalone Rust) so the pipeline stays green. Real
+/// `regex::Regex::new` lowering + Cargo-project dep injection arrives in v1.0.
+/// Inference treats the value as `Type::String` to match the stub.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     /// An integer literal, e.g. `42`. Stored as `i64`.
@@ -61,6 +79,19 @@ pub enum Literal {
     /// so the value is never rounded through `f32`/`f64`. Codegen emits this
     /// verbatim as `rust_decimal_macros::dec!(<text>)`, preserving exactness.
     Decimal(String),
+    /// A regex literal, e.g. `/\d+/`, `/\d{3}-\d{4}/` (T79).
+    ///
+    /// Stores the raw source text BETWEEN the slashes (excluding both
+    /// delimiters). Backslash classes survive verbatim (`/\d+/` →
+    /// `Regex("\\d+")`); an escaped `\/` inside the pattern keeps its
+    /// backslash in the stored text.
+    ///
+    /// **Codegen is deferred in v0.5** — the generated Cargo project has no
+    /// `regex` crate dep, so codegen stubs this as a plain `String` literal
+    /// (valid standalone Rust). Real `regex::Regex::new(...)` lowering +
+    /// Cargo-project dep injection arrives in v1.0. Inference treats the
+    /// value as `Type::String` to match the stub.
+    Regex(String),
 }
 
 impl fmt::Display for Literal {
@@ -78,6 +109,9 @@ impl fmt::Display for Literal {
             // Show the decimal text double-quoted (consistent with String)
             // so it's visually distinct from a bare number.
             Literal::Decimal(v) => write!(f, "Decimal({v:?})"),
+            // T79: show the regex pattern double-quoted with the `Regex`
+            // prefix so it's visually distinct from a plain String.
+            Literal::Regex(v) => write!(f, "Regex({v:?})"),
         }
     }
 }

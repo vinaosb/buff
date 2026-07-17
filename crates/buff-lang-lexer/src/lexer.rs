@@ -181,6 +181,33 @@ fn lex_range(
         seen_token_on_line = true;
         line_lead_ended = true;
 
+        // T79: Regex literal `/pattern/`. Disambiguate from division by
+        // checking the previous SIGNIFICANT token: a regex is valid where an
+        // expression primary is expected (after `(`, `,`, `=`, operators,
+        // keywords like `return`/`if`, or at start of input); division is
+        // valid between two expressions. At this point `//` and `/* */`
+        // (comments) are already handled above, and `/=` (SlashEq) is
+        // explicitly excluded so compound-assign still wins. Only a lone `/`
+        // that is NOT followed by `=`, IS in expression context, AND is
+        // immediately followed by a non-whitespace pattern byte is scanned
+        // as a regex; everything else falls through to division.
+        //
+        // The next-byte-whitespace guard is essential: a regex literal
+        // `/pattern/` has NO whitespace between the opening `/` and the
+        // pattern, but a division like `a / b` or `* / %` (operator runs)
+        // has a space after `/`. Without this guard the disambiguator would
+        // wrongly scan `/` (followed by space) as a regex start and run to
+        // EOF looking for a closing `/`, e.g. `"+ - * / % < >"` → the `/`
+        // after `* ` would mis-fire (regression: test_all_single_char_operators).
+        if c == b'/'
+            && !(pos + 1 < end && bytes[pos + 1] == b'=')
+            && regex_context(out)
+            && bytes.get(pos + 1).is_some_and(|b| !b.is_ascii_whitespace())
+        {
+            pos = scan_regex(source, pos, source_id, out)?;
+            continue;
+        }
+
         // String literal (with interpolation) and triple-quoted raw string.
         // Triple-quote `"""..."""` MUST be checked before single `"` so the
         // first quote isn't swallowed by scan_string.
@@ -312,6 +339,199 @@ fn scan_raw_string(
     }
 
     Err(LexerError::unterminated_string(span(r_pos, bytes.len())))
+}
+
+// ---------------------------------------------------------------------------
+// T79: Regex literal `/pattern/` scanning + `/`-disambiguation.
+// ---------------------------------------------------------------------------
+
+/// Decide whether a `/` at the current position should begin a regex literal
+/// (T79) rather than division.
+///
+/// Uses the JS/Perl "previous token" heuristic: a regex is valid where an
+/// expression primary is expected — i.e. at a statement boundary, after a
+/// delimiter/operator/assignment that opens an expression slot, or after a
+/// keyword like `return`/`if`. Division is valid between two expressions
+/// (after an identifier, literal, `)`, `]`, `}`).
+///
+/// The previous token is whatever was LAST pushed to `out` (layout tokens
+/// included). Layout tokens ([`Newline`](TokenKind::Newline),
+/// [`Indent`](TokenKind::Indent), [`Dedent`](TokenKind::Dedent),
+/// [`Eof`](TokenKind::Eof)) indicate a statement boundary, so a `/` following
+/// any of them (or at the start of input) is treated as a regex start. This
+/// makes block-body-leading regexes work:
+///
+/// ```text
+/// func f()
+///     /\d+/.is_match(x)   # Indent precedes the `/` → regex context
+/// ```
+///
+/// # Edge cases (v0.5, documented)
+///
+/// - **Regex after an identifier on the same line** (`x /abc/`) is lexed as
+///   DIVISION (`x`, `/`, `abc`, `/`) because an identifier precedes the `/`.
+///   This matches JS behaviour. Use parentheses — `(x) /abc/` is still
+///   division (after `)`), but `f(/abc/)` is regex (after `(`).
+/// - **Flags** (`/abc/gi`) are NOT supported; the closing `/` ends the
+///   literal and `gi` lexes as a separate identifier. Deferred.
+/// - **Full regex-syntax validation** (compile-time check that the pattern is
+///   a well-formed regex) is deferred — the scanner only verifies the
+///   delimiters are balanced and the pattern is non-empty and single-line.
+fn regex_context(out: &[Token]) -> bool {
+    match out.last().map(|t| &t.kind) {
+        // No previous token (start of input) → expression context.
+        None => true,
+        // Layout tokens indicate a statement boundary → expression context.
+        // A regex literal can begin a fresh statement or block body.
+        Some(TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent | TokenKind::Eof) => true,
+        // Delimiters that open an expression slot.
+        Some(
+            TokenKind::LParen
+            | TokenKind::LBracket
+            | TokenKind::LBrace
+            | TokenKind::Comma
+            | TokenKind::Colon
+            | TokenKind::Semicolon
+            | TokenKind::InterpStart,
+        ) => true,
+        // Assignment + arrow family.
+        Some(
+            TokenKind::Assign
+            | TokenKind::FatArrow
+            | TokenKind::Arrow
+            | TokenKind::PlusEq
+            | TokenKind::MinusEq
+            | TokenKind::StarEq
+            | TokenKind::SlashEq
+            | TokenKind::PercentEq,
+        ) => true,
+        // Binary operators (a regex primary can follow any of them).
+        Some(
+            TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Percent
+            | TokenKind::EqEq
+            | TokenKind::NotEq
+            | TokenKind::Lt
+            | TokenKind::Gt
+            | TokenKind::LtEq
+            | TokenKind::GtEq
+            | TokenKind::AndAnd
+            | TokenKind::OrOr
+            | TokenKind::Pipe
+            | TokenKind::Amp
+            | TokenKind::Caret
+            | TokenKind::Tilde
+            | TokenKind::Not
+            | TokenKind::Question
+            | TokenKind::QuestionQuestion
+            | TokenKind::QuestionDot
+            | TokenKind::PipeGt
+            | TokenKind::Shl
+            | TokenKind::Shr
+            | TokenKind::DotDot
+            | TokenKind::DotDotEq
+            | TokenKind::Dot,
+        ) => true,
+        // Keywords that introduce an expression next.
+        Some(
+            TokenKind::KwReturn
+            | TokenKind::KwIf
+            | TokenKind::KwElse
+            | TokenKind::KwFor
+            | TokenKind::KwIn
+            | TokenKind::KwMatch
+            | TokenKind::KwSpawn
+            | TokenKind::KwGuard,
+        ) => true,
+        // Otherwise (after Ident, any literal, RParen, RBracket, RBrace,
+        // KwTrue/KwFalse, or keywords like KwLet/KwFunc that expect a NAME
+        // rather than an expression) → division context.
+        _ => false,
+    }
+}
+
+/// Scan a regex literal `/pattern/` starting at `slash_start` (T79).
+///
+/// Captures the raw source text BETWEEN the two slashes (excluding both
+/// delimiters) as a [`TokenKind::RegexLit`]. A backslash escapes the next
+/// byte, so `\/` is a literal slash inside the pattern and does NOT
+/// terminate the scan (the backslash itself is preserved in the stored
+/// text). Newlines are NOT allowed inside a regex literal — the pattern
+/// must fit on one line (a newline before the closing `/` is an
+/// "unterminated regex" error).
+///
+/// Returns the absolute byte position immediately after the closing `/`.
+/// Pushes a single [`TokenKind::RegexLit`] token into `out`.
+///
+/// # Errors
+///
+/// Returns [`LexerError`] if:
+/// - the pattern is empty (`//` — though `//` is a line comment, handled
+///   earlier, so this is a defensive guard);
+/// - a newline appears before the closing `/`;
+/// - the end of input is reached before the closing `/`.
+///
+/// # Limitations (v0.5)
+///
+/// - No flags (`/abc/gi`) — only `/pattern/` is scanned.
+/// - No character-class-aware bracket matching (`[a/z]` is fine because the
+///   `/` inside `[...]` is NOT specially handled — it WILL terminate the
+///   literal. Workaround: escape it as `\/`. Full bracket-aware scanning is
+///   deferred; document and use escapes for now).
+fn scan_regex(
+    source: &str,
+    slash_start: usize,
+    source_id: SourceId,
+    out: &mut Vec<Token>,
+) -> Result<usize, LexerError> {
+    let bytes = source.as_bytes();
+    let span = |a, b| Span::new(a, b, source_id);
+
+    // Body starts right after the opening `/`.
+    let body_start = slash_start + 1;
+    let mut i = body_start;
+    let mut escaped = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\n' || b == b'\r' {
+            // Regex literals cannot span lines.
+            return Err(LexerError::new(
+                "unterminated regex literal (no closing `/` before end of line)",
+                span(slash_start, i),
+            ));
+        }
+        if escaped {
+            // Previous byte was `\`; this byte is consumed literally (it
+            // cannot close the literal). Clear the escape flag.
+            escaped = false;
+        } else if b == b'\\' {
+            // Start an escape — the next byte is literal.
+            escaped = true;
+        } else if b == b'/' {
+            // Closing slash. Pattern is body_start..i.
+            let pattern = source[body_start..i].to_string();
+            if pattern.is_empty() {
+                return Err(LexerError::new(
+                    "empty regex literal",
+                    span(slash_start, i + 1),
+                ));
+            }
+            out.push(Token::new(
+                TokenKind::RegexLit(pattern),
+                span(slash_start, i + 1),
+            ));
+            return Ok(i + 1);
+        }
+        i += 1;
+    }
+    // End of input without a closing `/`.
+    Err(LexerError::new(
+        "unterminated regex literal (missing closing `/`)",
+        span(slash_start, bytes.len()),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,6 +1314,209 @@ mod tests {
             assert_eq!(
                 TokenKind::DecimalLit("99.90".into()).to_string(),
                 "decimal(\"99.90\")"
+            );
+        }
+    }
+
+    // T79: Regex literals `/pattern/`. The hard part is `/`-disambiguation
+    // (division vs comment vs regex); these tests pin the behaviour.
+    mod regex_literals {
+        use super::*;
+
+        #[test]
+        fn regex_literals_simple() {
+            // `/\d+/` at start of input → regex context (no previous token).
+            let tokens = kinds("/\\d+/").unwrap();
+            assert_eq!(
+                tokens,
+                vec![TokenKind::RegexLit("\\d+".into()), TokenKind::Eof]
+            );
+        }
+
+        #[test]
+        fn regex_literals_after_assign() {
+            // `let r = /\d+/` → after `=`, regex context.
+            let tokens = kinds("let r = /\\d+/").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::KwLet,
+                    TokenKind::Ident("r".into()),
+                    TokenKind::Assign,
+                    TokenKind::RegexLit("\\d+".into()),
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_with_backslash_class() {
+            // `/\d{3}-\d{4}/` — digit classes + literal dash.
+            let tokens = kinds("/\\d{3}-\\d{4}/").unwrap();
+            assert_eq!(
+                tokens,
+                vec![TokenKind::RegexLit("\\d{3}-\\d{4}".into()), TokenKind::Eof]
+            );
+        }
+
+        #[test]
+        fn regex_literals_escaped_slash_inside() {
+            // `/a\/b/` — the `\/` is an escaped slash (NOT the terminator);
+            // the raw pattern text is `a\/b`.
+            let tokens = kinds("/a\\/b/").unwrap();
+            assert_eq!(
+                tokens,
+                vec![TokenKind::RegexLit("a\\/b".into()), TokenKind::Eof]
+            );
+        }
+
+        #[test]
+        fn regex_literals_after_return() {
+            // `return /abc/` — after `return`, regex context.
+            let tokens = kinds("return /abc/").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::KwReturn,
+                    TokenKind::RegexLit("abc".into()),
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_after_comma() {
+            // `f(/a/, /b/)` — regex context after `(` and after `,`.
+            let tokens = kinds("f(/a/, /b/)").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::Ident("f".into()),
+                    TokenKind::LParen,
+                    TokenKind::RegexLit("a".into()),
+                    TokenKind::Comma,
+                    TokenKind::RegexLit("b".into()),
+                    TokenKind::RParen,
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_in_brackets() {
+            // `[/a/, /b/]` — collection of regexes.
+            let tokens = kinds("[/a/, /b/]").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::LBracket,
+                    TokenKind::RegexLit("a".into()),
+                    TokenKind::Comma,
+                    TokenKind::RegexLit("b".into()),
+                    TokenKind::RBracket,
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_division_not_regex() {
+            // `a / b` — after an identifier, division context: `/` is Slash.
+            let tokens = kinds("a / b").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::Ident("a".into()),
+                    TokenKind::Slash,
+                    TokenKind::Ident("b".into()),
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_division_after_number() {
+            // `10 / 2` — after a numeric literal, division context.
+            let tokens = kinds("10 / 2").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::IntLit(10),
+                    TokenKind::Slash,
+                    TokenKind::IntLit(2),
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_division_after_paren_expr() {
+            // `(a) / (b)` — after `)`, division context.
+            let tokens = kinds("(a) / (b)").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::LParen,
+                    TokenKind::Ident("a".into()),
+                    TokenKind::RParen,
+                    TokenKind::Slash,
+                    TokenKind::LParen,
+                    TokenKind::Ident("b".into()),
+                    TokenKind::RParen,
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_slash_eq_not_regex() {
+            // `x /= 2` — `/=` is SlashEq (compound-assign), never regex.
+            let tokens = kinds("x /= 2").unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::Ident("x".into()),
+                    TokenKind::SlashEq,
+                    TokenKind::IntLit(2),
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn regex_literals_comment_not_regex() {
+            // `//comment\nx` — line comment still wins over regex.
+            let tokens = kinds("//comment\nx").unwrap();
+            assert_eq!(tokens, vec![TokenKind::Ident("x".into()), TokenKind::Eof]);
+        }
+
+        #[test]
+        fn regex_literals_block_comment_not_regex() {
+            // `/* c */ x` — block comment still wins over regex.
+            let tokens = kinds("/* c */ x").unwrap();
+            assert_eq!(tokens, vec![TokenKind::Ident("x".into()), TokenKind::Eof]);
+        }
+
+        #[test]
+        fn regex_literals_unterminated_errors() {
+            // `/abc` with no closing `/` → LexerError (not panic).
+            assert!(kinds("/abc").is_err());
+        }
+
+        #[test]
+        fn regex_literals_unterminated_newline_errors() {
+            // `/abc\n` — newline before closing `/` → error.
+            assert!(kinds("/abc\n").is_err());
+        }
+
+        #[test]
+        fn regex_literals_display_format() {
+            // Display uses Debug ({:?}) on the pattern so backslashes are
+            // escaped: pattern `\d+` renders as `regex("\\d+")`.
+            assert_eq!(
+                TokenKind::RegexLit("\\d+".into()).to_string(),
+                // Rust source "\\d+" inside {:?} → "\\d+" (two chars shown).
+                "regex(\"\\\\d+\")"
             );
         }
     }

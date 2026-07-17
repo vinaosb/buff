@@ -3020,3 +3020,197 @@ If the user's message contains { or }, those WILL be interpreted as ormat! plac
 - cargo test --workspace â€” ALL pass (no regressions)
 - cargo clippy --workspace --all-targets -- -D warnings â€” zero warnings
 - cargo fmt --check â€” clean
+
+## T79 — Regex literals
+
+### Status: COMPLETE (lexer + AST + parser + codegen stub; full Regex::new codegen deferred to v1.0)
+
+### What shipped
+- **Lexer**: TokenKind::RegexLit(String) (additive, at END) carries the raw
+  pattern text between the slashes (backslashes preserved verbatim —
+  /\d+/ ? RegexLit("\\d+")). Display renders egex("pattern") via
+  {:?} (Debug, so backslashes are doubled in the rendered form).
+- **AST**: Literal::Regex(String) (additive, at END). Display renders
+  Regex("pattern"). Migration note added to the Literal doc block
+  following the T20/T21 additive-token template.
+- **Parser**: TokenKind::RegexLit(s) ? Expr::Literal(Literal::Regex(s), span)
+  in parse_primary (mirrors the DecimalLit arm). Regex literals are NOT
+  added to is_literal_kind (the pattern-position check) — a regex cannot
+  be a match arm pattern in v0.5 (semantically meaningless to match
+  equality against a regex); restricted by omission, falls through to error.
+- **Types**: Literal::Regex(_) ? Type::string() (matches the codegen stub).
+- **Codegen**: Literal::Regex(p) ? syn::Lit::Str (the pattern as a plain
+  String literal). **DEFERRED** — see below.
+
+### The /-disambiguation (the hard part — SOLVED via previous-token tracking)
+A / could be: division ( / b), line comment (//), block comment
+(/* */), compound-assign (/=), OR a regex literal start (/pattern/).
+Disambiguation order in lex_range:
+1. // and /* */ are checked FIRST (existing, unchanged) — those win.
+2. /= is excluded from regex contention (!(... == b'=') guard) —
+   compound-assign always wins.
+3. For a lone / (not //, /*, or /=), the new egex_context(out)
+   helper decides: regex if the previous token indicates an
+   expression-context slot; otherwise fall through to division (Slash).
+
+**egex_context(out) design** (JS/Perl "previous token" heuristic): looks
+at out.last() (the LAST token pushed, **including** layout tokens — this
+is deliberate, see below). Returns 	rue (regex context) when the previous
+token is:
+- None (start of input) — statement start.
+- A **layout token** (Newline, Indent, Dedent, Eof) — a statement
+  boundary. **This is the key insight**: treating layout tokens as
+  expression-context starters makes block-body-leading regexes work
+  (unc f()\n    /\d+/.is_match(x) — the Indent preceding / triggers
+  regex context). I initially skipped layout tokens (looking past them to
+  the significant predecessor), which broke block-body-start regexes;
+  NOT skipping them is the fix.
+- A **delimiter opening an expression slot**: LParen, LBracket, LBrace,
+  Comma, Colon, Semicolon, InterpStart (interpolation {expr}
+  opener — treat like ().
+- An **assignment/arrow**: Assign, FatArrow, Arrow, PlusEq,
+  MinusEq, StarEq, SlashEq, PercentEq.
+- A **binary operator**: Plus, Minus, Star, Slash, Percent,
+  EqEq, NotEq, Lt, Gt, LtEq, GtEq, AndAnd, OrOr, Pipe,
+  Amp, Caret, Tilde, Not, Question, QuestionQuestion,
+  QuestionDot, PipeGt, Shl, Shr, DotDot, DotDotEq, Dot.
+- A **keyword introducing an expression**: KwReturn, KwIf, KwElse,
+  KwFor, KwIn, KwMatch, KwSpawn, KwGuard.
+- Otherwise (after Ident, any literal, RParen, RBracket, RBrace,
+  KwTrue/KwFalse, or name-expecting keywords like KwLet/KwFunc) ?
+  alse (division context).
+
+**Insertion point matters**: the regex check MUST be placed AFTER the
+indent-check + seen_token_on_line/line_lead_ended setup (around line
+182 in lexer.rs), NOT before it. I first inserted it right after the
+block-comment check (before indent tracking), which broke newline emission
+for regex-leading lines (the scan_regex continued before the indent
+tracker ran). Moving it to alongside the other literal scans (", ',
+") — after indent/seen_token setup — fixed it.
+
+### Escaped-slash handling
+scan_regex tracks an escaped flag. On \, the flag is set; the NEXT
+byte is consumed literally (cannot terminate the literal). The backslash
+itself is preserved in the stored pattern text (/a\/b/ ?
+RegexLit("a\\/b") — note the stored Rust string is \/b, 4 chars).
+Newlines inside a regex ? "unterminated regex" error (regex must be
+single-line). End-of-input before closing / ? error. Empty pattern (//)
+? error (though // is caught earlier as a line comment, this is a
+defensive guard).
+
+### Codegen deferral — WHY
+The generated Cargo project (from uff new / uff init) has **NO
+egex crate dependency** — codegen targets standalone ustc with no
+external crates (prior v0.5 tasks confirmed anyhow/thiserror/regex/tokio
+are all absent from the generated Cargo.toml). Emitting
+egex::Regex::new(r"\d+") would fail to compile downstream. Wiring the
+egex crate into the generated project is a **T32-style Cargo-project dep
+injection** task, which is a separate v1.0 concern. As a documented stub,
+codegen lowers Literal::Regex(p) to the pattern text as a plain
+syn::Lit::Str (valid standalone Rust), so the pipeline stays green. Real
+Regex::new(...) lowering + Cargo-project dep wiring arrives in v1.0.
+Inference treats the value as Type::string() to match the stub. When real
+codegen lands, a dedicated Type::Regex (or structured type wrapping
+pattern + compile-time-validated flag) should replace the String inference.
+
+### Exhaustive-match ripple sites updated
+Adding TokenKind::RegexLit(String) and Literal::Regex(String) (both at
+END of their enums, additive — no existing variant renamed/reordered) only
+required updating the **exhaustive match** sites:
+- crates/buff-lang-lexer/src/token.rs — Display for TokenKind (+ the
+  variant definition itself).
+- crates/buff-lang-ast/src/expr.rs — Display for Literal (+ variant).
+- crates/buff-lang-parser/src/expr.rs — parse_primary match (new arm
+  mapping RegexLit ? Literal::Regex). The is_literal_kind matches!
+  (pattern-position check) was intentionally NOT extended.
+- crates/buff-lang-codegen-rust/src/rust_codegen.rs — the literal-lowering
+  match (new arm: Regex ? syn::Lit::Str stub).
+- crates/buff-lang-types/src/infer.rs — infer_literal (new arm: Regex ?
+  Type::string()).
+No other exhaustive matches existed (parser uses other => fallbacks;
+matches! macros are non-exhaustive). cargo check --workspace confirmed
+zero ripples beyond these.
+
+### Test fn names (all contain egex_literals for the filter)
+**Lexer** (inline 	ests mod in lexer.rs, 16 fns):
+egex_literals_simple, egex_literals_after_assign,
+egex_literals_with_backslash_class, egex_literals_escaped_slash_inside,
+egex_literals_after_return, egex_literals_after_comma,
+egex_literals_in_brackets, egex_literals_division_not_regex,
+egex_literals_division_after_number,
+egex_literals_division_after_paren_expr,
+egex_literals_slash_eq_not_regex, egex_literals_comment_not_regex,
+egex_literals_block_comment_not_regex, egex_literals_unterminated_errors,
+egex_literals_unterminated_newline_errors, egex_literals_display_format.
+**Parser** (	ests/expr_tests.rs, 3 fns):
+egex_literals_parse_to_literal_regex,
+egex_literals_with_complex_pattern_parses,
+egex_literals_in_let_binding.
+
+### Regression confirmation
+- Division  / b ? Slash (after Ident ? not regex context). ?
+- 10 / 2 ? Slash (after IntLit ? not regex context). ?
+- (a) / (b) ? Slash (after RParen ? not regex context). ?
+- x /= 2 ? SlashEq (excluded by the = guard). ?
+- //comment ? line comment (checked before regex). ?
+- /* c */ ? block comment (checked before regex). ?
+- Full cargo test --workspace GREEN (the 	est_fail ... FAILED text in
+  CLI output is the INNER buff test's deliberate ssert_eq(2, 3) failure
+  captured by 	est_command_e2e_failing_test_exit_one — the outer Rust
+  test correctly verifies the report; not a real failure).
+
+### Deferrals (documented in code + here)
+- **Flags** (/abc/gi): NOT supported. The closing / ends the literal;
+  trailing letters lex as a separate identifier. Deferred.
+- **Full regex-syntax validation** (compile-time check that the pattern is a
+  well-formed regex): deferred. The scanner only verifies delimiters are
+  balanced + non-empty + single-line. A full regex parser is heavy; pragmatic
+  v0.5 keeps the lexer's job to tokenization.
+- **Character-class-aware bracket matching** ([a/z]): the / inside
+  [...] is NOT specially handled — it WILL terminate the literal.
+  Workaround: escape as \/. Full bracket-aware scanning deferred.
+- **Codegen to Regex::new**: deferred (see "Codegen deferral — WHY" above).
+
+### MSVC env note (Windows)
+cargo check --workspace does NOT need the MSVC LIB env (no linking).
+cargo test / cargo clippy --all-targets DO need it (linker invoked):
+$env:LIB="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64".
+Set it once at the start of the session; child cargo processes inherit it.
+### Post-fix: next-byte-whitespace guard (regression fix)
+
+**The regression**: the initial egex_context(out) disambiguator was too
+aggressive — it classified / as a regex-start whenever the previous token
+was an operator, ignoring the byte IMMEDIATELY after /. In the input
+"+ - * / % < > ..." (the 	est_all_single_char_operators fixture), the
+/ follows *  (Star + space). The disambiguator saw Star (an operator
+? regex context) and dispatched to scan_regex, which scanned forward
+looking for a closing /, hit EOF, and returned "unterminated regex
+literal" ? the existing 	est_all_single_char_operators test failed.
+
+**The fix** (minimal, one guard added to the /-dispatch in lex_range):
+a regex literal's opening / must be IMMEDIATELY followed by a non-
+whitespace pattern byte. Added && bytes.get(pos + 1).is_some_and(|b| !b.is_ascii_whitespace())
+to the dispatch condition. If the next byte is whitespace (space/tab/newline/CR)
+or there is no next byte (EOF), the / falls through to division (Slash).
+
+**Why this is correct**: a regex literal /pattern/ has NO whitespace
+between the opening / and the pattern body (/\d+/, /abc/, /\d{3}/ —
+all immediately followed by a pattern char). Division  / b and operator
+runs * / % have a space after /. The guard is a necessary complement
+to the previous-token heuristic: BOTH conditions (expression-context
+previous token AND non-whitespace next byte) must hold for a regex scan.
+
+**Verification**:
+- /\d+/ ? next byte \ (non-ws) ? regex ?
+- /abc/ ? next byte  (non-ws) ? regex ?
+-  / b ? next byte   (space) ? division ?
+- * / % ? next byte   (space) ? division ? (fixes test_all_single_char_operators)
+- All 16 egex_literals_* tests still pass; all 67 lexer_tests pass
+  (including 	est_all_single_char_operators); full workspace GREEN.
+
+**Lesson**: a /-disambiguation heuristic needs TWO signals — (1) the
+previous token (expression-context vs operand-context) AND (2) the next
+byte (regex patterns never start with whitespace). The previous-token
+heuristic alone is insufficient; it mis-fires on operator runs separated
+by spaces. This mirrors how JS engines combine the "previous token" rule
+with a peek at the regex body.

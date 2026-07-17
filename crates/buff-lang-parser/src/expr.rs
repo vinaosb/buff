@@ -1527,6 +1527,11 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         // T20: Decimal literal — raw text carried straight from the lexer so
         // exactness is preserved through to `dec!()` codegen.
         TokenKind::DecimalLit(s) => Expr::Literal(Literal::Decimal(s.clone()), span),
+        // T79: Regex literal — the raw pattern text (between the slashes) is
+        // carried straight from the lexer. Codegen is a documented stub in
+        // v0.5 (no `regex` crate in the generated project yet); see the
+        // `Literal::Regex` doc on the AST for the deferral rationale.
+        TokenKind::RegexLit(s) => Expr::Literal(Literal::Regex(s.clone()), span),
         TokenKind::KwTrue => Expr::Literal(Literal::Bool(true), span),
         TokenKind::KwFalse => Expr::Literal(Literal::Bool(false), span),
         TokenKind::Ident(name) => Expr::Ident(Ident::new(name.clone(), span), span),

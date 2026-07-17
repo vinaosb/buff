@@ -33,6 +33,22 @@ pub enum TokenKind {
     /// Carrying the raw text avoids any rounding through `f32`/`f64` so the
     /// exact value survives to the `rust_decimal_macros::dec!()` codegen.
     DecimalLit(String),
+    /// A regex literal, e.g. `/\d+/`, `/\d{3}-\d{4}/` (T79).
+    ///
+    /// Stores the **raw source text between the slashes** (excluding both
+    /// delimiters), so backslash classes survive verbatim (`/\d+/` →
+    /// `RegexLit("\\d+")`). An escaped slash `\/` inside the pattern does NOT
+    /// terminate the literal — the `\` escapes the next byte in the scanner,
+    /// so `a\/b` is captured as `a\/b` (the backslash is preserved in the
+    /// stored text). Flags (e.g. `/abc/gi`) are NOT supported in v0.5 and are
+    /// deferred — only `/pattern/` is lexed today.
+    ///
+    /// The `/`-disambiguation (division vs regex) happens in the lexer via a
+    /// JS/Perl-style "previous significant token" heuristic: a regex is valid
+    /// where an expression primary is expected (after `(`, `,`, `=`,
+    /// operators, keywords like `return`/`if`, or at the start of input);
+    /// division is valid between two expressions.
+    RegexLit(String),
 
     // --- String interpolation tokens ---
     StringStart,
@@ -249,6 +265,9 @@ impl fmt::Display for TokenKind {
             Self::ByteLit(v) => write!(f, "byte({})", v),
             Self::CharLit(c) => write!(f, "char({:?})", c),
             Self::DecimalLit(v) => write!(f, "decimal({:?})", v),
+            // T79: render the raw pattern double-quoted, consistent with
+            // StringLit / DecimalLit so the diagnostic is unambiguous.
+            Self::RegexLit(v) => write!(f, "regex({:?})", v),
             // String interpolation
             Self::StringStart => write!(f, "string_start"),
             Self::StringPart(v) => write!(f, "string_part({:?})", v),

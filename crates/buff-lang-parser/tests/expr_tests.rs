@@ -765,3 +765,50 @@ fn t30_question_op_precedence_binds_tighter_than_binary() {
         && matches!(*rhs, Expr::Literal(Literal::Int(1), _)))
     );
 }
+
+// T79: Regex literal parsing. The lexer produces `TokenKind::RegexLit(pat)`;
+// the parser maps it to `Expr::Literal(Literal::Regex(pat), span)`.
+#[test]
+fn regex_literals_parse_to_literal_regex() {
+    // `/\d+/` at primary position → Literal::Regex with pattern "\\d+".
+    let e = parse("/\\d+/");
+    match e {
+        Expr::Literal(Literal::Regex(ref p), _) => {
+            assert_eq!(p, "\\d+", "pattern text must be carried verbatim");
+        }
+        other => panic!("expected Literal::Regex, got {other:?}"),
+    }
+}
+
+#[test]
+fn regex_literals_with_complex_pattern_parses() {
+    // QA: `/\d{3}-\d{4}/` → Literal::Regex carrying the full pattern.
+    let e = parse("/\\d{3}-\\d{4}/");
+    match e {
+        Expr::Literal(Literal::Regex(ref p), _) => {
+            assert_eq!(p, "\\d{3}-\\d{4}");
+        }
+        other => panic!("expected Literal::Regex, got {other:?}"),
+    }
+}
+
+#[test]
+fn regex_literals_in_let_binding() {
+    // `let r = /abc/` parses via the statement parser; the value is a Regex.
+    let src = "func f() { let r = /abc/ }";
+    let tokens = tokenize(src, sid()).expect("lexer");
+    let decls = buff_lang_parser::parse(&tokens, sid()).expect("parser");
+    let buff_lang_ast::Decl::FuncDecl(f) = &decls[0] else {
+        panic!("expected func decl");
+    };
+    let first = &f.body.stmts[0];
+    let buff_lang_ast::Stmt::LetDecl { value, .. } = first else {
+        panic!("expected LetDecl, got {first:?}");
+    };
+    // `value` is `&Box<Expr>` via match ergonomics; match through it (same
+    // idiom as the t30 test above).
+    assert!(
+        matches!(value, Expr::Literal(Literal::Regex(p), _) if p == "abc"),
+        "expected Literal::Regex(\"abc\") in let-binding, got {value:?}"
+    );
+}

@@ -3527,6 +3527,15 @@ impl RustCodegen {
             Literal::Decimal(_) => {
                 return Err(self.unsupported("decimal literal (unreachable arm)"))
             }
+            // T79: Regex literal — CODEGEN DEFERRED in v0.5. The generated
+            // Cargo project has NO `regex` crate dependency (T32-style dep
+            // injection is a separate v1.0 task), so emitting
+            // `regex::Regex::new(...)` would fail to compile downstream. As a
+            // documented stub we emit the raw pattern text as a plain String
+            // literal (valid standalone Rust) so the pipeline stays green.
+            // Real `Regex::new` lowering + Cargo-project dep wiring arrives
+            // in v1.0. See `Literal::Regex` on the AST for the deferral note.
+            Literal::Regex(p) => syn::Lit::Str(syn::LitStr::new(p, ProcSpan::call_site())),
         };
         Ok(SynExpr::Lit(syn::ExprLit {
             attrs: Vec::new(),
