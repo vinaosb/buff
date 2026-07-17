@@ -922,7 +922,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Parse `for i in 0..5` → assert range expression in AST. Evidence: task-68-ranges.txt
   **Commit**: `feat(parser): add range syntax 0..10 and 0..=10`
 
-- [ ] **T69**: Pipeline operator `|>` [deep]
+- [x] **T69**: Pipeline operator `|>` [deep]
   **What to do** (TDD): RED: `data |> process() |> filter()` → `filter(process(data))`. GREEN: parse `|>` operator, desugar to nested calls in codegen.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust pipeline` passes. `x |> f()` → `f(x)`.
   **QA**: Codegen `"hello" |> print()` → assert `print("hello")`. Evidence: task-69-pipeline.txt

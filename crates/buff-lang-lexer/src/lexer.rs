@@ -666,6 +666,10 @@ fn scan_operator(source: &str, pos: &mut usize, start: usize, end: usize) -> Opt
             "/=" => Some(TokenKind::SlashEq),
             "%=" => Some(TokenKind::PercentEq),
             "??" => Some(TokenKind::QuestionQuestion),
+            // T69: pipeline operator `|>`. MUST appear in the 2-char section
+            // (which runs BEFORE single_char_kind) so `|>` is matched
+            // greedily instead of splitting into `|` (Pipe) + `>` (Gt).
+            "|>" => Some(TokenKind::PipeGt),
             _ => None,
         };
         if let Some(k) = kind {

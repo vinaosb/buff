@@ -1366,3 +1366,118 @@ ran 0 tests.
 - `cargo clippy --workspace --all-targets -- -D warnings` → clean
 - `cargo fmt --check` → clean
 - No production code changed (only the new test file added)
+
+## T69 — Pipeline operator `|>`
+
+### Status: COMPLETE (parser-desugar approach — zero AST/codegen change)
+
+### Approach chosen: DESUGAR IN THE PARSER (the task's STRONGLY PREFERRED path)
+
+`LHS |> f(args...)` rewrites DIRECTLY in the parser into a plain `Expr::FuncCall`
+(or `Expr::MethodCall` / bare-`Ident` shorthand) with the LHS prepended as the
+first argument. **No new AST variant, no new BinaryOp, no codegen arm, no
+exhaustive-match ripple** across rust_codegen.rs / ir.rs / infer.rs /
+exhaustiveness.rs / async_analysis.rs / ownership.rs. The result of the desugar
+is a node codegen already lowers, so `cargo check` stayed green with zero
+non-test codegen edits.
+
+### Precedence level: LOWEST binary operator (just below assignment, above range)
+
+Wired into the chain as:
+`parse_assignment -> parse_pipeline -> parse_range -> parse_null_coalesce -> parse_or -> ...`
+
+Pipeline binds looser than EVERY other binary operator. This satisfies the spec
+contract `a + b |> f()` = `f(a + b)` (the LHS groups first — verified by
+`pipeline_precedence_looser_than_additive`). Both LHS and RHS of `|>` are
+parsed via `parse_range` (the next-higher level), which is the standard
+left-assoc Pratt shape.
+
+### RHS handling (3 accepted shapes + error)
+
+`desugar_pipeline(lhs, rhs, pipe_tok)`:
+- `Expr::FuncCall { callee, args }` → `FuncCall { callee, args: [lhs, ...args] }`
+  (the canonical case; `x |> f(a, b)` → `f(x, a, b)`).
+- `Expr::MethodCall { receiver, method, args }` → same prepend pattern
+  (`x |> obj.m(a)` → `obj.m(x, a)`). Trivially supported — same shape as
+  FuncCall; avoids a confusing error on a natural use case.
+- `Expr::Ident(name)` (bare callee, NO parens) → builds
+  `FuncCall { callee: Ident(name), args: [lhs] }` (`x |> f` → `f(x)`). The
+  spec's "support if easy" branch — it IS easy, so supported.
+- ANYTHING ELSE → `ParseError::new(Diagnostic::error("right-hand side of `|>`
+  must be a function call, found `{other}`"))` pointing at the `|>` token span.
+  NOT a panic (the `other` arm uses `Expr::Display` for the message).
+
+### Lexer (additive, greedy longest-match)
+
+- NEW `TokenKind::PipeGt` added at the END of the operators block (after
+  `PercentEq`), with a doc-comment + Display arm `Self::PipeGt => write!(f, "|>")`.
+- `scan_operator` 2-char section: added `"|>" => Some(TokenKind::PipeGt)`.
+  CRITICAL: the 2-char section runs BEFORE `single_char_kind`, so `|>` is
+  matched greedily; a lone `|` (NOT followed by `>`) still falls through to
+  `single_char_kind(b'|') => TokenKind::Pipe` (bitwise OR) — UNCHANGED.
+  `||` still matches `OrOr` (it's checked earlier in the same 2-char section).
+  The full workspace test suite (including bitor tests) confirms `|` is intact.
+
+### Key design decision: `x |> f() * 2` ERRORS (not `(x |> f()) * 2`)
+
+Because `|>` is the lowest-precedence binary operator, its RHS greedily
+consumes a full range-level expression: `x |> f() * 2` parses the RHS as
+`f() * 2` (a BinaryOp Mul), which is NOT a call → desugar rejects it with the
+"must be a function call" error. This is the natural consequence of uniform
+Pratt parsing (both operands at the next-higher precedence). Users who want
+`(x |> f()) * 2` must parenthesize (verified by `pipeline_parens_then_multiply`).
+This is DEFENSIBLE and consistent — the spec only mandates `a + b |> f()` =
+`f(a + b)` (LHS grouping), which passes. Asymmetric RHS parsing (parse just
+one call) would break the clean Pratt chain and leave trailing operators
+unconsumed; rejected as over-engineering.
+
+### QA note: `print` prelude lowers to `println!`
+
+The QA spec says `"hello" |> print()` → assert `print("hello")`. The DESUGAR
+correctly produces a `print` call with `"hello"` as its first arg — but Buff's
+`print` prelude lowers a bare-string-literal arg to Rust's `println!("hello")`
+(the `{}` format is dropped for literals; see `lower_print`). So the substring
+assertion is `println!("hello")`, NOT `print("hello")` (the latter never
+appears because `print` → `println!`). Asserting `println!("hello")` proves
+the LHS landed as the print call's argument. The desugar's correctness for
+non-prelude callees (`f`, `g`, `process`, `filter`) is pinned by tests that
+codegen to the verbatim Rust call shape (`f(x)`, `filter(process(data))`, etc.).
+
+### Tests added (17 total: 7 codegen + 10 parser)
+
+- `crates/buff-lang-codegen-rust/tests/pipeline.rs` — 7 tests, all named
+  `pipeline_codegen_*`. Mix of hand-built AST (precise FuncCall shape) and
+  end-to-end parse-from-source (proves the full lex→parse→codegen pipeline).
+  Covers: `"hello" |> print()` → `println!("hello")`, `x |> f()` → `f(x)`,
+  `data |> process() |> filter()` → `filter(process(data))`, `x |> f(a, b)`
+  → `f(x, a, b)`, bare-callee `x |> f` → `f(x)`, chained hand-built
+  `g(f(a))`, hand-built `"hello"`→print.
+- `crates/buff-lang-parser/tests/pipeline.rs` — 10 tests, all named
+  `pipeline_*`. Covers: simple `x |> f()` → `Call(f, [x])`, `"hello" |>
+  print()` → `Call(print, ["hello"])`, chained → `Call(filter,
+  [Call(process, [data])])`, extra args, bare callee, precedence-looser-than-
+  additive (`a + b |> f()` → `Call(f, [a+b])`), RHS-consumes-full-expr errors
+  (`x |> f() * 2`), parens-then-multiply (`(x |> f()) * 2`), and two error
+  cases (`x |> 5`, `x |> a + b`).
+
+### Verification (all GREEN, MSVC env LIB set for test/clippy)
+- `cargo test -p buff-lang-codegen-rust pipeline` → 7/7 pass (acceptance)
+- `cargo test -p buff-lang-parser --test pipeline` → 10/10 pass
+- `cargo test --workspace` → exit 0 (74 "test result: ok" binaries, 0 FAILED)
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0, clean
+- `cargo fmt --check` → clean (cargo fmt applied to 3 touched files first)
+- `cargo check --workspace` → exit 0
+
+### Files changed
+- `crates/buff-lang-lexer/src/token.rs` — +`PipeGt` variant + Display arm + doc
+- `crates/buff-lang-lexer/src/lexer.rs` — +1 line in `scan_operator` 2-char section
+- `crates/buff-lang-parser/src/expr.rs` — +`parse_pipeline` + `desugar_pipeline`,
+  rewired `parse_assignment` → `parse_pipeline` → `parse_range`, updated
+  precedence-ladder doc comment + section-header numbering
+- `crates/buff-lang-codegen-rust/tests/pipeline.rs` — NEW (7 tests)
+- `crates/buff-lang-parser/tests/pipeline.rs` — NEW (10 tests)
+
+### Deferred
+- None. The parser-desugar approach means there's no type-system or codegen
+  work to defer — the desugared FuncCall flows through the existing inference
+  + codegen paths unchanged.

@@ -104,6 +104,14 @@ pub enum TokenKind {
     StarEq,
     SlashEq,
     PercentEq,
+    /// The pipeline operator `|>` (T69).
+    ///
+    /// `LHS |> f(args...)` desugars to `f(LHS, args...)` — the left operand
+    /// is inserted as the FIRST argument of the right-hand call. The desugar
+    /// happens entirely in the parser (no new AST variant), so this token
+    /// never reaches codegen. Lexed as a 2-char operator BEFORE the single
+    /// `|` ([`TokenKind::Pipe`]) so `|>` is matched greedily.
+    PipeGt,
 
     // --- Delimiters ---
     LParen,
@@ -278,6 +286,8 @@ impl fmt::Display for TokenKind {
             Self::StarEq => write!(f, "*="),
             Self::SlashEq => write!(f, "/="),
             Self::PercentEq => write!(f, "%="),
+            // T69: pipeline operator `|>`.
+            Self::PipeGt => write!(f, "|>"),
             // Delimiters
             Self::LParen => write!(f, "("),
             Self::RParen => write!(f, ")"),

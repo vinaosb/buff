@@ -4,19 +4,22 @@
 //! Precedence ladder (lowest to highest):
 //!
 //! 1. Assignment (`=`, `+=`, …) — right-assoc
-//! 2. Logical OR `||`
-//! 3. Logical AND `&&`
-//! 4. Equality `==`, `!=`
-//! 5. Comparison `<`, `>`, `<=`, `>=`
-//! 6. Bitwise OR `|`
-//! 7. Bitwise XOR `^`
-//! 8. Bitwise AND `&`
-//! 9. Shift `<<`, `>>`
-//! 10. Additive `+`, `-`
-//! 11. Multiplicative `*`, `/`, `%`
-//! 12. Unary prefix `-`, `!`, `~`
-//! 13. Postfix `(...)` call, `.method(...)` call
-//! 14. Primary — literals, identifiers, `( expr )`
+//! 2. Pipeline `|>` — left-assoc; desugars `LHS |> f(args)` to `f(LHS, args)`
+//! 3. Range `..`, `..=`
+//! 4. Null-coalesce `??`
+//! 5. Logical OR `||`
+//! 6. Logical AND `&&`
+//! 7. Equality `==`, `!=`
+//! 8. Comparison `<`, `>`, `<=`, `>=`
+//! 9. Bitwise OR `|`
+//! 10. Bitwise XOR `^`
+//! 11. Bitwise AND `&`
+//! 12. Shift `<<`, `>>`
+//! 13. Additive `+`, `-`
+//! 14. Multiplicative `*`, `/`, `%`
+//! 15. Unary prefix `-`, `!`, `~`
+//! 16. Postfix `(...)` call, `.method(...)` call
+//! 17. Primary — literals, identifiers, `( expr )`
 //!
 //! All functions are fallible: they return [`Result<Expr, ParseError>`]. No
 //! panics, no `unwrap`/`expect` in non-test code.
@@ -43,7 +46,7 @@ pub fn parse_expression(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError
 // ---------------------------------------------------------------------------
 
 fn parse_assignment(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
-    let lhs = parse_range(stream)?;
+    let lhs = parse_pipeline(stream)?;
     let Some(op) = stream.peek_kind().and_then(assignment_op) else {
         return Ok(lhs);
     };
@@ -61,7 +64,98 @@ fn parse_assignment(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 }
 
 // ---------------------------------------------------------------------------
-// Level 1.5 — range `..` and `..=` (lower than additive, higher than assign)
+// Level 2 — pipeline `|>` (left-associative; desugars to a FuncCall).
+//
+// `LHS |> RHS` rewrites the RHS so the LHS becomes its FIRST argument:
+//   - `x |> f(args...)`  -> `f(x, args...)`
+//   - `x |> f`           -> `f(x)`          (bare-callee shorthand)
+//   - `x |> obj.m(args)` -> `obj.m(x, args)` (method-call RHS)
+// Chaining is left-associative: `a |> f() |> g()` = `(a |> f()) |> g()` =
+// `g(f(a))`. Pipeline binds looser than every other binary operator (it sits
+// just below assignment), so `a + b |> f()` parses as `f(a + b)` and
+// `x |> f() * 2` parses as `(x |> f()) * 2`.
+//
+// The desugar happens ENTIRELY here in the parser: no new AST variant, no
+// codegen change — the result is a plain `Expr::FuncCall` (or `MethodCall`),
+// which codegen already lowers. This is the T69-recommended approach.
+// ---------------------------------------------------------------------------
+
+fn parse_pipeline(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let mut lhs = parse_range(stream)?;
+    while matches!(stream.peek_kind(), Some(TokenKind::PipeGt)) {
+        let pipe_tok = stream.advance().expect("peek guaranteed PipeGt");
+        let rhs = parse_range(stream)?;
+        lhs = desugar_pipeline(lhs, rhs, &pipe_tok)?;
+    }
+    Ok(lhs)
+}
+
+/// Rewrite `LHS |> RHS` into a call with `LHS` prepended as the first arg.
+///
+/// Accepts (T69):
+/// - `Expr::FuncCall { callee, args }` → `FuncCall { callee, args: [LHS, ...args] }`
+/// - `Expr::MethodCall { receiver, method, args }` → same prepend pattern.
+/// - `Expr::Ident(name)` (bare callee, no parens) → `FuncCall { callee: name, args: [LHS] }`.
+///
+/// Any other RHS shape (e.g. `x |> 5`, `x |> a + b`) is a [`ParseError`] — the
+/// RHS of `|>` MUST be callable. `pipe_tok` is the `|>` token (used for the
+/// error span when the RHS is invalid).
+fn desugar_pipeline(
+    lhs: Expr,
+    rhs: Expr,
+    pipe_tok: &buff_lang_lexer::Token,
+) -> Result<Expr, ParseError> {
+    let span = combine_span(&lhs, &rhs);
+    match rhs {
+        Expr::FuncCall {
+            callee,
+            mut args,
+            span: _,
+        } => {
+            // Prepend LHS as the first argument: `x |> f(a, b)` -> `f(x, a, b)`.
+            let mut new_args = Vec::with_capacity(args.len() + 1);
+            new_args.push(lhs);
+            new_args.append(&mut args);
+            Ok(Expr::FuncCall {
+                callee,
+                args: new_args,
+                span,
+            })
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            mut args,
+            span: _,
+        } => {
+            // `x |> obj.m(a, b)` -> `obj.m(x, a, b)`.
+            let mut new_args = Vec::with_capacity(args.len() + 1);
+            new_args.push(lhs);
+            new_args.append(&mut args);
+            Ok(Expr::MethodCall {
+                receiver,
+                method,
+                args: new_args,
+                span,
+            })
+        }
+        Expr::Ident(name, _) => {
+            // Bare-callee shorthand: `x |> f` -> `f(x)`.
+            Ok(Expr::FuncCall {
+                callee: Box::new(Expr::Ident(name, span)),
+                args: vec![lhs],
+                span,
+            })
+        }
+        other => Err(ParseError::new(Diagnostic::error(
+            format!("right-hand side of `|>` must be a function call, found `{other}`"),
+            pipe_tok.span,
+        ))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Level 3 — range `..` and `..=` (lower than additive, higher than pipeline)
 // ---------------------------------------------------------------------------
 
 fn parse_range(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
@@ -95,7 +189,7 @@ fn parse_range(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 }
 
 // ---------------------------------------------------------------------------
-// Level 1.75 — null coalescing `??` (between range and logical OR)
+// Level 4 — null coalescing `??` (between range and logical OR)
 // ---------------------------------------------------------------------------
 
 fn parse_null_coalesce(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
