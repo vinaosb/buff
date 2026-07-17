@@ -2501,7 +2501,7 @@ Unknown). Then implemented -> 6/6 GREEN.
 - `crates/buff-lang-types/tests/expected_type_inference.rs` â€” NEW test file
   (6 tests, ~210 lines).
 
-## T92 — Struct embedding + auto-delegation
+## T92 ï¿½ Struct embedding + auto-delegation
 
 ### Status: COMPLETE
 
@@ -2515,7 +2515,7 @@ delegation.
 
 ### Approach: CODEGEN-ONLY analysis (ZERO AST change)
 
-This is purely a codegen-time analysis — NO new AST variant, NO change to
+This is purely a codegen-time analysis ï¿½ NO new AST variant, NO change to
 `StructDecl`/`ExtendBlock`/`FuncDecl` shapes. The delegation impls are
 emitted as additional top-level `syn::Item`s after the main lowering loop,
 mirroring how T76 emits collected union wrapper enums and how T75 emits
@@ -2527,25 +2527,25 @@ In `RustCodegen::generate`, a new `emit_embedding_delegation(decls, &mut items)`
 pass runs AFTER the main decl-lowering loop AND after the T76 union emission.
 It builds two deterministic collections from `decls` in a single pass:
 
-- `struct_names: BTreeSet<String>` — names of all `Decl::StructDecl`s.
+- `struct_names: BTreeSet<String>` ï¿½ names of all `Decl::StructDecl`s.
   Used to gate delegation: ONLY fields whose `TypeRef::Named` name is a
   DECLARED user struct get delegation (primitive named types like `Float`
-  that happen to share the `TypeRef::Named` shape are excluded — avoids
+  that happen to share the `TypeRef::Named` shape are excluded ï¿½ avoids
   spurious `impl Employee { fn fancy(self) { self.salary.fancy() } }`
   when someone does `extend Float { ... }`).
-- `methods_by_type: BTreeMap<String, Vec<&FuncDecl>>` — methods grouped by
+- `methods_by_type: BTreeMap<String, Vec<&FuncDecl>>` ï¿½ methods grouped by
   extend-block target name. Populated from `Decl::ExtendBlock { target,
   methods }` where `target` is `TypeRef::Named`. Multiple extend blocks
   targeting the same type are merged via `entry().or_default().extend()`
-  (safe — only the method list is read; the trait-name collision is T75's
+  (safe ï¿½ only the method list is read; the trait-name collision is T75's
   concern, not ours).
 
-`BTreeMap`/`BTreeSet` (NOT `HashMap`/`HashSet`) — the T29 determinism
+`BTreeMap`/`BTreeSet` (NOT `HashMap`/`HashSet`) ï¿½ the T29 determinism
 lesson. Iteration order is deterministic across runs.
 
 ### How delegation impls are emitted
 
-After building the maps, iterate `decls` in SOURCE ORDER (deterministic —
+After building the maps, iterate `decls` in SOURCE ORDER (deterministic ï¿½
 `decls` is a fixed `&[Decl]` slice) so delegation impls appear in a
 predictable position. For each `Decl::StructDecl(s)`:
 - For each field `(field_name, field_type)`:
@@ -2564,28 +2564,28 @@ predictable position. For each `Decl::StructDecl(s)`:
 
 For each delegatable `&FuncDecl`:
 1. Call `self.lower_func(method)?` to get the full `syn::ItemFn` (reuses
-   ALL the existing signature-building logic — params, return type,
+   ALL the existing signature-building logic ï¿½ params, return type,
    asyncness, attribute handling). The method's ORIGINAL body is lowered
-   too (wasteful but harmless — Person's body is valid Buff) and discarded;
+   too (wasteful but harmless ï¿½ Person's body is valid Buff) and discarded;
    only `item_fn.sig` is kept.
-2. `rewrite_self_receiver(sig)` — the T75 helper — rewrites the first
+2. `rewrite_self_receiver(sig)` ï¿½ the T75 helper ï¿½ rewrites the first
    `self: Person` typed param into a bare `FnArg::Receiver` so the
    delegation reads `fn name(self) -> ...` (the receiver is now `Self` of
    the EMBEDDING struct).
 3. Build the body as a single `SynStmt::Expr(field_method_call_expr(...), None)`:
    `self.<field>.<method>(<forwarded_args>)` where `forwarded_args` are
    the identifiers of all params AFTER `self` (extracted via the new
-   `ident_expr_from_fn_arg` helper — handles `FnArg::Typed` with
+   `ident_expr_from_fn_arg` helper ï¿½ handles `FnArg::Typed` with
    `Pat::Ident`, returns `None` for receivers / destructured patterns).
 4. Wrap in `syn::ImplItemFn { vis: Inherited, defaultness: None, sig, block }`.
 5. Assemble `syn::ItemImpl { trait_: None, self_ty: rust_path_type(struct_name),
-   items: impl_items, ... }` — `trait_: None` makes it an INHERENT impl
+   items: impl_items, ... }` ï¿½ `trait_: None` makes it an INHERENT impl
    (`impl Employee { ... }`), NOT a trait impl.
 
 Two new free helpers added near `rewrite_self_receiver`:
-- `ident_expr_from_fn_arg(&syn::FnArg) -> Option<SynExpr>` — extracts a
+- `ident_expr_from_fn_arg(&syn::FnArg) -> Option<SynExpr>` ï¿½ extracts a
   bare-ident `SynExpr::Path` from a `FnArg::Typed` whose pat is `Pat::Ident`.
-- `field_method_call_expr(field, method, args) -> SynExpr` — builds
+- `field_method_call_expr(field, method, args) -> SynExpr` ï¿½ builds
   `self.<field>.<method>(<args>)` as a `SynExpr::Field` wrapped in a
   `SynExpr::MethodCall`.
 
@@ -2594,19 +2594,19 @@ Two new free helpers added near `rewrite_self_receiver`:
 - `cargo test -p buff-lang-codegen-rust --test embedding` ? 6 passed,
   0 failed. Test fns (all named with `embedding` substring for the spec's
   `cargo test ... embedding` filter):
-  - `embedding_single_field_delegates` — the spec QA case: `struct Employee
+  - `embedding_single_field_delegates` ï¿½ the spec QA case: `struct Employee
     { person: Person, salary: Float }` + `extend Person { fn name(self) ->
     String {...} }` ? asserts `impl Employee`, `fn name(self) -> String`,
     and body `self.person.name()` all appear.
-  - `embedding_multiple_methods` — two methods on Person both promoted.
-  - `embedding_no_methods_no_delegation` — embedded struct with NO extend
+  - `embedding_multiple_methods` ï¿½ two methods on Person both promoted.
+  - `embedding_no_methods_no_delegation` ï¿½ embedded struct with NO extend
     block ? NO `impl Employee` emitted.
-  - `embedding_method_with_extra_params_forwarded` — `fn greet(self, other:
+  - `embedding_method_with_extra_params_forwarded` ï¿½ `fn greet(self, other:
     String)` ? delegation sig keeps `other: String`, body forwards
     `self.person.greet(other)`.
-  - `embedding_primitive_field_not_delegated` — `salary: Float` field never
+  - `embedding_primitive_field_not_delegated` ï¿½ `salary: Float` field never
     triggers delegation.
-  - `embedding_end_to_end_with_caller` — full program (Person + extend +
+  - `embedding_end_to_end_with_caller` ï¿½ full program (Person + extend +
     Employee + caller fn with `Employee{...}.name()`) round-trips to valid
     Rust.
 - `cargo test --workspace` ? ALL suites green (0 failed).
@@ -2641,7 +2641,7 @@ DECLARED struct in the same program (per spec: "another DECLARED struct").
   are skipped (the body `self.field.method()` doesn't type-check). Would
   need `EmbeddedType::method()` syntax in the body.
 - **Inherent impls**: methods defined outside `extend` blocks (a future
-  `impl Person { ... }` Buff syntax) are not collected — v0.5 methods come
+  `impl Person { ... }` Buff syntax) are not collected ï¿½ v0.5 methods come
   only from extend blocks.
 - **`&self` / `&mut self` receivers**: delegation always takes `self` by
   value (matching T75's extension-method receiver policy). A future task
@@ -2650,13 +2650,13 @@ DECLARED struct in the same program (per spec: "another DECLARED struct").
 
 ### Files changed
 
-- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — added
+- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` ï¿½ added
   `emit_embedding_delegation` method (~85 lines, additive), added
   `build_delegation_impl` method (~55 lines, additive), added two free
   helpers `ident_expr_from_fn_arg` + `field_method_call_expr` (~40 lines),
   wired the new pass into `generate` after the T76 union emission (3 lines).
   NO signature changes to existing methods; NO AST changes.
-- `crates/buff-lang-codegen-rust/tests/embedding.rs` — NEW test file
+- `crates/buff-lang-codegen-rust/tests/embedding.rs` ï¿½ NEW test file
   (6 tests, ~390 lines).
 
 ## T93 â€” Traits with default methods + inheritance
@@ -3021,13 +3021,13 @@ If the user's message contains { or }, those WILL be interpreted as ormat! plac
 - cargo clippy --workspace --all-targets -- -D warnings â€” zero warnings
 - cargo fmt --check â€” clean
 
-## T79 — Regex literals
+## T79 ï¿½ Regex literals
 
 ### Status: COMPLETE (lexer + AST + parser + codegen stub; full Regex::new codegen deferred to v1.0)
 
 ### What shipped
 - **Lexer**: TokenKind::RegexLit(String) (additive, at END) carries the raw
-  pattern text between the slashes (backslashes preserved verbatim —
+  pattern text between the slashes (backslashes preserved verbatim ï¿½
   /\d+/ ? RegexLit("\\d+")). Display renders egex("pattern") via
   {:?} (Debug, so backslashes are doubled in the rendered form).
 - **AST**: Literal::Regex(String) (additive, at END). Display renders
@@ -3035,39 +3035,39 @@ If the user's message contains { or }, those WILL be interpreted as ormat! plac
   following the T20/T21 additive-token template.
 - **Parser**: TokenKind::RegexLit(s) ? Expr::Literal(Literal::Regex(s), span)
   in parse_primary (mirrors the DecimalLit arm). Regex literals are NOT
-  added to is_literal_kind (the pattern-position check) — a regex cannot
+  added to is_literal_kind (the pattern-position check) ï¿½ a regex cannot
   be a match arm pattern in v0.5 (semantically meaningless to match
   equality against a regex); restricted by omission, falls through to error.
 - **Types**: Literal::Regex(_) ? Type::string() (matches the codegen stub).
 - **Codegen**: Literal::Regex(p) ? syn::Lit::Str (the pattern as a plain
-  String literal). **DEFERRED** — see below.
+  String literal). **DEFERRED** ï¿½ see below.
 
-### The /-disambiguation (the hard part — SOLVED via previous-token tracking)
+### The /-disambiguation (the hard part ï¿½ SOLVED via previous-token tracking)
 A / could be: division ( / b), line comment (//), block comment
 (/* */), compound-assign (/=), OR a regex literal start (/pattern/).
 Disambiguation order in lex_range:
-1. // and /* */ are checked FIRST (existing, unchanged) — those win.
-2. /= is excluded from regex contention (!(... == b'=') guard) —
+1. // and /* */ are checked FIRST (existing, unchanged) ï¿½ those win.
+2. /= is excluded from regex contention (!(... == b'=') guard) ï¿½
    compound-assign always wins.
 3. For a lone / (not //, /*, or /=), the new egex_context(out)
    helper decides: regex if the previous token indicates an
    expression-context slot; otherwise fall through to division (Slash).
 
 **egex_context(out) design** (JS/Perl "previous token" heuristic): looks
-at out.last() (the LAST token pushed, **including** layout tokens — this
+at out.last() (the LAST token pushed, **including** layout tokens ï¿½ this
 is deliberate, see below). Returns 	rue (regex context) when the previous
 token is:
-- None (start of input) — statement start.
-- A **layout token** (Newline, Indent, Dedent, Eof) — a statement
+- None (start of input) ï¿½ statement start.
+- A **layout token** (Newline, Indent, Dedent, Eof) ï¿½ a statement
   boundary. **This is the key insight**: treating layout tokens as
   expression-context starters makes block-body-leading regexes work
-  (unc f()\n    /\d+/.is_match(x) — the Indent preceding / triggers
+  (unc f()\n    /\d+/.is_match(x) ï¿½ the Indent preceding / triggers
   regex context). I initially skipped layout tokens (looking past them to
   the significant predecessor), which broke block-body-start regexes;
   NOT skipping them is the fix.
 - A **delimiter opening an expression slot**: LParen, LBracket, LBrace,
   Comma, Colon, Semicolon, InterpStart (interpolation {expr}
-  opener — treat like ().
+  opener ï¿½ treat like ().
 - An **assignment/arrow**: Assign, FatArrow, Arrow, PlusEq,
   MinusEq, StarEq, SlashEq, PercentEq.
 - A **binary operator**: Plus, Minus, Star, Slash, Percent,
@@ -3086,21 +3086,21 @@ indent-check + seen_token_on_line/line_lead_ended setup (around line
 block-comment check (before indent tracking), which broke newline emission
 for regex-leading lines (the scan_regex continued before the indent
 tracker ran). Moving it to alongside the other literal scans (", ',
-") — after indent/seen_token setup — fixed it.
+") ï¿½ after indent/seen_token setup ï¿½ fixed it.
 
 ### Escaped-slash handling
 scan_regex tracks an escaped flag. On \, the flag is set; the NEXT
 byte is consumed literally (cannot terminate the literal). The backslash
 itself is preserved in the stored pattern text (/a\/b/ ?
-RegexLit("a\\/b") — note the stored Rust string is \/b, 4 chars).
+RegexLit("a\\/b") ï¿½ note the stored Rust string is \/b, 4 chars).
 Newlines inside a regex ? "unterminated regex" error (regex must be
 single-line). End-of-input before closing / ? error. Empty pattern (//)
 ? error (though // is caught earlier as a line comment, this is a
 defensive guard).
 
-### Codegen deferral — WHY
+### Codegen deferral ï¿½ WHY
 The generated Cargo project (from uff new / uff init) has **NO
-egex crate dependency** — codegen targets standalone ustc with no
+egex crate dependency** ï¿½ codegen targets standalone ustc with no
 external crates (prior v0.5 tasks confirmed anyhow/thiserror/regex/tokio
 are all absent from the generated Cargo.toml). Emitting
 egex::Regex::new(r"\d+") would fail to compile downstream. Wiring the
@@ -3115,17 +3115,17 @@ pattern + compile-time-validated flag) should replace the String inference.
 
 ### Exhaustive-match ripple sites updated
 Adding TokenKind::RegexLit(String) and Literal::Regex(String) (both at
-END of their enums, additive — no existing variant renamed/reordered) only
+END of their enums, additive ï¿½ no existing variant renamed/reordered) only
 required updating the **exhaustive match** sites:
-- crates/buff-lang-lexer/src/token.rs — Display for TokenKind (+ the
+- crates/buff-lang-lexer/src/token.rs ï¿½ Display for TokenKind (+ the
   variant definition itself).
-- crates/buff-lang-ast/src/expr.rs — Display for Literal (+ variant).
-- crates/buff-lang-parser/src/expr.rs — parse_primary match (new arm
+- crates/buff-lang-ast/src/expr.rs ï¿½ Display for Literal (+ variant).
+- crates/buff-lang-parser/src/expr.rs ï¿½ parse_primary match (new arm
   mapping RegexLit ? Literal::Regex). The is_literal_kind matches!
   (pattern-position check) was intentionally NOT extended.
-- crates/buff-lang-codegen-rust/src/rust_codegen.rs — the literal-lowering
+- crates/buff-lang-codegen-rust/src/rust_codegen.rs ï¿½ the literal-lowering
   match (new arm: Regex ? syn::Lit::Str stub).
-- crates/buff-lang-types/src/infer.rs — infer_literal (new arm: Regex ?
+- crates/buff-lang-types/src/infer.rs ï¿½ infer_literal (new arm: Regex ?
   Type::string()).
 No other exhaustive matches existed (parser uses other => fallbacks;
 matches! macros are non-exhaustive). cargo check --workspace confirmed
@@ -3156,7 +3156,7 @@ zero ripples beyond these.
 - /* c */ ? block comment (checked before regex). ?
 - Full cargo test --workspace GREEN (the 	est_fail ... FAILED text in
   CLI output is the INNER buff test's deliberate ssert_eq(2, 3) failure
-  captured by 	est_command_e2e_failing_test_exit_one — the outer Rust
+  captured by 	est_command_e2e_failing_test_exit_one ï¿½ the outer Rust
   test correctly verifies the report; not a real failure).
 
 ### Deferrals (documented in code + here)
@@ -3167,9 +3167,9 @@ zero ripples beyond these.
   balanced + non-empty + single-line. A full regex parser is heavy; pragmatic
   v0.5 keeps the lexer's job to tokenization.
 - **Character-class-aware bracket matching** ([a/z]): the / inside
-  [...] is NOT specially handled — it WILL terminate the literal.
+  [...] is NOT specially handled ï¿½ it WILL terminate the literal.
   Workaround: escape as \/. Full bracket-aware scanning deferred.
-- **Codegen to Regex::new**: deferred (see "Codegen deferral — WHY" above).
+- **Codegen to Regex::new**: deferred (see "Codegen deferral ï¿½ WHY" above).
 
 ### MSVC env note (Windows)
 cargo check --workspace does NOT need the MSVC LIB env (no linking).
@@ -3179,7 +3179,7 @@ Set it once at the start of the session; child cargo processes inherit it.
 ### Post-fix: next-byte-whitespace guard (regression fix)
 
 **The regression**: the initial egex_context(out) disambiguator was too
-aggressive — it classified / as a regex-start whenever the previous token
+aggressive ï¿½ it classified / as a regex-start whenever the previous token
 was an operator, ignoring the byte IMMEDIATELY after /. In the input
 "+ - * / % < > ..." (the 	est_all_single_char_operators fixture), the
 / follows *  (Star + space). The disambiguator saw Star (an operator
@@ -3194,7 +3194,7 @@ to the dispatch condition. If the next byte is whitespace (space/tab/newline/CR)
 or there is no next byte (EOF), the / falls through to division (Slash).
 
 **Why this is correct**: a regex literal /pattern/ has NO whitespace
-between the opening / and the pattern body (/\d+/, /abc/, /\d{3}/ —
+between the opening / and the pattern body (/\d+/, /abc/, /\d{3}/ ï¿½
 all immediately followed by a pattern char). Division  / b and operator
 runs * / % have a space after /. The guard is a necessary complement
 to the previous-token heuristic: BOTH conditions (expression-context
@@ -3208,9 +3208,145 @@ previous token AND non-whitespace next byte) must hold for a regex scan.
 - All 16 egex_literals_* tests still pass; all 67 lexer_tests pass
   (including 	est_all_single_char_operators); full workspace GREEN.
 
-**Lesson**: a /-disambiguation heuristic needs TWO signals — (1) the
+**Lesson**: a /-disambiguation heuristic needs TWO signals â€” (1) the
 previous token (expression-context vs operand-context) AND (2) the next
 byte (regex patterns never start with whitespace). The previous-token
 heuristic alone is insufficient; it mis-fires on operator runs separated
 by spaces. This mirrors how JS engines combine the "previous token" rule
 with a peek at the regex body.
+
+## T106 â€” Default parameter values
+
+### Status: COMPLETE (all green: test/check/clippy/fmt)
+
+Implemented `func fetch(url: String, timeout: Int = 30)` end-to-end: parser
+parses the `= expr` default into a new `Param.default_value` field; codegen
+FILLS omitted trailing args at the CALL SITE (Rust has no native default-
+param support, so expansion happens positionally in the codegen, not in
+Rust). `fetch("url")` â†’ `fetch("url", 30)`.
+
+### Additive AST change â€” `Param.default_value: Option<Expr>`
+- `crates/buff-lang-ast/src/common.rs`: added `pub default_value: Option<Expr>`
+  to `Param` (between `ty` and `span`). Imported `crate::expr::Expr` into
+  common.rs (sibling-module import; common.rs already imported `TypeRef`
+  from `ty.rs` and `Stmt` from `stmt.rs`). `Option<Expr>` derives
+  Debug/Clone/PartialEq â€” matches Param's existing derives. Did NOT add
+  Eq/Hash (Expr carries f32/f64 floats â€” same reason Literal is PartialEq-
+  only). Updated `Display` impl to render `name: Type = expr` when a
+  default is present.
+- **Ripple scope**: this is the ripple source. `cargo check --workspace
+  --all-targets` (NOT just `cargo check` â€” that skips test code) lists
+  EVERY `Param { ... }` struct literal missing the field. Found ~30 sites
+  across parser (stmt.rs parse_params + 2 closure-param sites in expr.rs),
+  types (ownership.rs inline tests), codegen-rust (move_analysis.rs inline
+  tests, rust_codegen.rs smoke test), and ~20 test files. Fixed ALL with
+  `default_value: None`.
+- **ast_grep trick**: `ast_grep_replace` with pattern `Param { name: $N,
+  ty: $T, span: $S }` â†’ rewrite adding `default_value: None` caught 21
+  sites in ONE pass (the multi-line `Param {\n name...\n}` form). But it
+  MISSED sites where `Param {` is inline with `vec![` on the same line
+  (e.g. `vec![Param { name: ident("x"), ... }]`) â€” those needed manual
+  edits. Lesson: ast_grep's structural match normalises whitespace but the
+  inline-`vec![` head form somehow didn't match the same pattern; always
+  re-run `cargo check --all-targets` after ast_grep to catch stragglers.
+  Re-running the same ast_grep pattern is IDEMPOTENT (already-fixed sites
+  have `default_value` so don't match) â€” safe to re-run.
+- For DUPLICATE identical blocks (e.g. two `vec![Param { name:
+  ident("data"), ... }]` in move_tests.rs), the `edit` tool errors on
+  multiple matches â€” use `replaceAll: true` to fix all copies at once.
+
+### Parser â€” `= expr` after the type in `parse_params`
+- `crates/buff-lang-parser/src/stmt.rs::parse_params`: after parsing
+  `name: Type`, peek for `TokenKind::Assign`. If present, consume `=` and
+  call `parse_expression(stream)` (already imported in stmt.rs at line 47
+  via `use crate::expr::{parse_expression, parse_pattern}`). Store
+  `default_value: Some(expr)`; extend the param's span `.end` to the
+  default expr's `span().end` (via the existing `Expr::span()` method).
+  If no `=`, `default_value: None`.
+- The bare-`self` receiver (T75) never has a default (no `=` follows it
+  in well-formed source), so the uniform `=`-peek is safe â€” it won't
+  accidentally trigger on self receivers.
+- `Expr::span(&self) -> Span` exists in expr.rs (line 498) â€” returns the
+  expression's span via a match on all variants. `Span` has `.end`.
+
+### Codegen â€” call-site default-fill (reuses T105's callee-map pattern)
+- Added a parallel map `func_param_defaults: BTreeMap<String,
+  Vec<Option<Expr>>>` to `RustCodegen` (sibling to T105's
+  `func_param_names`). Populated in `generate()` by
+  `collect_func_param_defaults(decls)` â€” mirrors `collect_func_param_names`
+  exactly (same scope: user-defined free FuncDecls only; methods and
+  cross-module callees deferred to v1.0). Each entry is `None` (required)
+  or `Some(expr)` (defaulted), in DECLARATION ORDER so positional fill is
+  correct. BTreeMap (not HashMap) for determinism (the T29 lesson).
+- **New helper `fill_default_args(args, defaults) -> Option<Vec<Expr>>`**:
+  if `args.len() < defaults.len()`, walk `defaults[args.len()..]` and push
+  each `Some(dv).clone()` (a defaulted param the caller omitted â†’ fill the
+  default). Required params left out (`None`) are skipped â€” Rust diagnoses
+  the arity mismatch. Returns `Some(filled)` iff at least one default was
+  actually filled (so the caller skips a clone when nothing changed);
+  `None` means no fill needed.
+- **clippy gotcha â€” `manual_flatten`**: the initial loop
+  `for dv in &defaults[..] { if let Some(dv) = dv { push } }` trips
+  clippy `manual_flatten` (only the Some variant is used). Fix: iterate
+  `defaults[..].iter().flatten()` â€” the idiomatic "only Some values" walk.
+  Same semantics, clippy-clean.
+- **Integration in FuncCall arm**: runs AFTER T105's named-arg resolution.
+  The pipeline is: (1) `materialize_named_args` (T105) reorders named args
+  to positional â†’ `after_named: &[Expr]`; (2) look up callee defaults;
+  (3) `fill_default_args(after_named, defaults)` â†’ `filled: Option<Vec>`;
+  (4) `args_ref = filled.unwrap_or(after_named)`. This naturally composes
+  with named args: `fetch(url: "x")` with `timeout=30` reorders to `["x"]`
+  then fills the missing trailing default â†’ `fetch("x", 30)`. The default-
+  fill is the SECOND step in a two-stage arg-materialisation pipeline.
+- Method calls (`Expr::MethodCall`) do NOT get default-fill in v0.5 (no
+  receiver-type resolution â†’ no callee signature). Documented deferral.
+
+### v0.5 scope (what works)
+- Same-compilation-unit free functions only (callee resolved by bare-Ident
+  name lookup in the defaults map). The canonical QA case
+  `fetch("url") â†’ fetch("url", 30)` works end-to-end.
+- Pure-positional omission AND named-arg + default interaction both work
+  (default-fill runs after named-arg reorder).
+- Multiple defaults, partial omission (supply first default, omit last),
+  string/bool/int defaults all covered by tests.
+
+### Deferred (documented)
+- **Method defaults**: receiver-type resolution is a v1.0 concern; method
+  calls skip default-fill in v0.5.
+- **Cross-module callees** (T29 multi-file programs): the defaults map is
+  single-compilation-unit only.
+- **Middle omission**: `f(1, , 3)` (omitting a middle arg) is not Buff
+  syntax â€” only trailing omission is supported (the sane rule, matching
+  Rust/Python). Defaults should be declared after required params; the
+  parser does NOT enforce this ordering in v0.5 (a default-before-required
+  decl parses, but the codegen fill assumes trailing-only omission).
+- **named+default COMBINATION edge cases**: the common cases work, but
+  exotic mixes (e.g. a named arg supplying a defaulted param by name while
+  also omitting a different defaulted param) are exercised only by the
+  basic test; full combinatorial coverage is deferred.
+
+### Tests added (16 total, all pass)
+- `crates/buff-lang-parser/tests/default_params.rs` â€” **8 tests**, all named
+  `default_params_*`: single default, string default, multiple defaults,
+  no-default regression guard, mixed required+default, Display includes
+  default, zero-param func, bool default.
+- `crates/buff-lang-codegen-rust/tests/default_params.rs` â€” **8 tests**,
+  all named `default_params_codegen_*`: fills-omitted (the QA case),
+  all-supplied-no-fill, multiple-defaults-fill, partial-omit-fills-only-
+  trailing, named-arg-with-default-fill, no-default-func-no-fill, unknown-
+  callee-no-fill, string-default-fill. Each asserts on the generated Rust
+  substring + re-parses via `syn::parse_str::<syn::File>`.
+
+### Verification (all GREEN)
+- `cargo test -p buff-lang-parser default_params` â†’ 8/8 pass
+- `cargo test -p buff-lang-codegen-rust default_params` â†’ 8/8 pass
+- `cargo test --workspace` â†’ exit 0, ZERO `test result: FAILED` lines
+  (the `test test_fail ... FAILED` line in the full-run output is
+  SUBPROCESS output from a CLI `buff test` integration fixture that's
+  EXPECTED to fail â€” the wrapping Rust test passes; `test result: ok.
+  19 passed` for that binary confirms it. Distinguish cargo's `test
+  result:` lines from subprocess `test X ... FAILED` output.)
+- `cargo check --workspace --all-targets` â†’ exit 0, zero warnings
+- `cargo clippy --workspace --all-targets -- -D warnings` â†’ exit 0
+- `cargo fmt --all -- --check` â†’ exit 0 (ran `cargo fmt --all` once to
+  re-expand ast_grep-collapsed single-line Param blocks in move_analysis.rs)

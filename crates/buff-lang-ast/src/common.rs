@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use crate::expr::Expr;
 use crate::stmt::Stmt;
 use crate::ty::TypeRef;
 use buff_lang_error::Span;
@@ -66,17 +67,37 @@ impl fmt::Display for Block {
     }
 }
 
-/// A function parameter: `name: Type`.
+/// A function parameter: `name: Type`, optionally with a default value
+/// `name: Type = expr` (T106).
+///
+/// The `default_value` field carries the parsed default expression when the
+/// parameter was declared with `= expr`. Rust has NO native default-param
+/// support, so the codegen fills omitted trailing args at the CALL SITE
+/// (`fetch("x")` → `fetch("x", 30)` when `timeout` defaults to `30`) — it
+/// does NOT rely on Rust defaults. [`Option::None`] means the parameter is
+/// required (no default).
+///
+/// This field is **additive** (T106): existing params without a default
+/// carry [`Option::None`], so all prior `Param { ... }` construction sites
+/// just need `default_value: None` appended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: Ident,
     pub ty: TypeRef,
+    /// T106: optional default value expression (`name: Type = expr`). When
+    /// present and the caller omits this parameter, the codegen fills the
+    /// default into the call site positionally.
+    pub default_value: Option<Expr>,
     pub span: Span,
 }
 
 impl fmt::Display for Param {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.name, self.ty)
+        write!(f, "{}: {}", self.name, self.ty)?;
+        if let Some(dv) = &self.default_value {
+            write!(f, " = {dv}")?;
+        }
+        Ok(())
     }
 }
 

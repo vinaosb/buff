@@ -156,6 +156,7 @@ fn param(name: &str, ty: &str) -> Param {
     Param {
         name: ident(name),
         ty: named_type(ty),
+        default_value: None,
         span: span(),
     }
 }

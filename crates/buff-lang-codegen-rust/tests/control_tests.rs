@@ -395,11 +395,13 @@ fn test_codegen_func_returns_value() {
             Param {
                 name: ident("a"),
                 ty: named_type("Int"),
+                default_value: None,
                 span: span(),
             },
             Param {
                 name: ident("b"),
                 ty: named_type("Int"),
+                default_value: None,
                 span: span(),
             },
         ],
@@ -477,6 +479,7 @@ fn test_codegen_while_with_break() {
         vec![Param {
             name: ident("n"),
             ty: named_type("Int"),
+            default_value: None,
             span: span(),
         }],
         None,

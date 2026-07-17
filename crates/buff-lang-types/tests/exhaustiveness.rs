@@ -385,6 +385,7 @@ fn exhaustiveness_check_program_skips_unknown_scrutinee_type() {
             name: ident("Int"),
             span: span(),
         },
+        default_value: None,
         span: span(),
     };
     let decls = vec![

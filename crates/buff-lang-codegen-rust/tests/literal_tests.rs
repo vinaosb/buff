@@ -445,6 +445,7 @@ fn test_codegen_param_type_propagates_to_let() {
         params: vec![Param {
             name: ident("n"),
             ty: named_type("Int"),
+            default_value: None,
             span: span(),
         }],
         return_type: None,

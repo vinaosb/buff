@@ -1046,7 +1046,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `greet(name: "Alice", greeting: "Hi")` → assert correct arg mapping. Evidence: task-105-named-args.txt
   **Commit**: `feat(parser): add named arguments for function calls`
 
-- [ ] **T106**: Default parameter values [deep]
+- [x] **T106**: Default parameter values [deep]
   **What to do** (TDD): RED: `func fetch(url, timeout = 30)` — omit timeout → uses 30. GREEN: parse default values in func decl, codegen fills defaults for omitted args.
   **Acceptance**: `cargo test -p buff-lang-parser default_params` passes. Omitted params use defaults.
   **QA**: Codegen `fetch("url")` where fetch has `timeout = 30` → assert `fetch("url", 30)`. Evidence: task-106-default-params.txt

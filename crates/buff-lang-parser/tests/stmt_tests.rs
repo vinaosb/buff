@@ -560,6 +560,7 @@ fn test_param_display() {
     let p = Param {
         name: Ident::new("x", dummy_span()),
         ty: named_type("Int"),
+        default_value: None,
         span: dummy_span(),
     };
     assert_eq!(shape(&p), "x: Int");

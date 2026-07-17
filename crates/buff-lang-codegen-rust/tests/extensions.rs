@@ -54,6 +54,7 @@ fn self_param(target: &str) -> Param {
     Param {
         name: ident("self"),
         ty: named_ty(target),
+        default_value: None,
         span: span(),
     }
 }
@@ -106,6 +107,7 @@ fn _param_smoke() -> Param {
     Param {
         name: ident("_"),
         ty: named_ty("Int"),
+        default_value: None,
         span: span(),
     }
 }

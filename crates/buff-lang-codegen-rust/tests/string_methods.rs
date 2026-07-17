@@ -99,6 +99,7 @@ fn codegen_with_string_param(stmt: Stmt) -> String {
                 name: ident("String"),
                 span: span(),
             },
+            default_value: None,
             span: span(),
         }],
         return_type: None,

@@ -175,6 +175,7 @@ fn test_format_passes_rustfmt() {
         params: vec![Param {
             name: ident("a"),
             ty: named_type("Int"),
+            default_value: None,
             span: span(),
         }],
         return_type: Some(named_type("Int")),
@@ -279,11 +280,13 @@ fn test_codegen_func_with_params_snapshot() {
             Param {
                 name: ident("a"),
                 ty: named_type("Int"),
+                default_value: None,
                 span: span(),
             },
             Param {
                 name: ident("b"),
                 ty: named_type("Int"),
+                default_value: None,
                 span: span(),
             },
         ],
@@ -415,6 +418,7 @@ fn test_codegen_expr_function_shorthand() {
         params: vec![Param {
             name: ident("x"),
             ty: named_type("Int"),
+            default_value: None,
             span: span(),
         }],
         return_type: Some(named_type("Int")),

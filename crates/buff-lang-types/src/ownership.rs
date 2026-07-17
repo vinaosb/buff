@@ -1175,6 +1175,7 @@ mod tests {
             params: vec![Param {
                 name: Ident::new(name, span()),
                 ty: named_type(ty),
+                default_value: None,
                 span: span(),
             }],
             return_type: None,
@@ -1363,6 +1364,7 @@ mod tests {
         buff_lang_ast::common::Param {
             name: Ident::new(name, span()),
             ty: named_type("_"),
+            default_value: None,
             span: span(),
         }
     }

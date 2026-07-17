@@ -219,6 +219,23 @@ pub struct RustCodegen {
     /// v1.0 — for those, named-arg values are extracted positionally
     /// (names dropped), so the call still lowers but without reorder.
     func_param_names: BTreeMap<String, Vec<String>>,
+    /// T106: default-value expressions for each parameter of user-defined
+    /// free functions in this compilation unit, keyed by function name.
+    /// Populated by [`Self::generate`] BEFORE the per-function lowering
+    /// loop so [`Self::lower_expr`] can FILL omitted trailing args at the
+    /// CALL SITE with the callee's declared default (Rust has NO native
+    /// default-param support, so the expansion must happen here). Each
+    /// entry is `None` (required param) or `Some(expr)` (has a default);
+    /// the list is in DECLARATION ORDER so positional fill is correct.
+    ///
+    /// A [`BTreeMap`] (not [`HashMap`]) for deterministic membership
+    /// (the T29 flaky-test lesson).
+    ///
+    /// **v0.5 scope**: same-compilation-unit free functions only. Methods
+    /// and cross-module callees are deferred (no receiver-type / module
+    /// resolution at codegen in v0.5). For those, omitted args are left as-
+    /// is and Rust will diagnose the arity mismatch.
+    func_param_defaults: BTreeMap<String, Vec<Option<Expr>>>,
 }
 
 impl RustCodegen {
@@ -240,6 +257,7 @@ impl RustCodegen {
             hash_safe_structs: BTreeSet::new(),
             deferred_exprs: Vec::new(),
             func_param_names: BTreeMap::new(),
+            func_param_defaults: BTreeMap::new(),
         }
     }
 
@@ -363,6 +381,14 @@ impl RustCodegen {
         // Built BEFORE the main lowering loop so per-function lowering can
         // consult it.
         self.func_param_names = collect_func_param_names(decls);
+        // T106: collect default-value expressions for every user-defined
+        // free function's params (same scope rules as
+        // `func_param_names` above). Used by `lower_expr`'s FuncCall arm
+        // to FILL omitted trailing args at the call site with the callee's
+        // declared default. Rust has no native default-param support, so
+        // the expansion happens here, positionally. Built BEFORE the main
+        // lowering loop so per-function lowering can consult it.
+        self.func_param_defaults = collect_func_param_defaults(decls);
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -1677,7 +1703,27 @@ impl RustCodegen {
                     } else {
                         None
                     };
-                let args_ref: &[Expr] = resolved_args.as_deref().unwrap_or(args);
+                let after_named: &[Expr] = resolved_args.as_deref().unwrap_or(args);
+                // T106: default-arg fill. If the callee is a resolvable
+                // user fn whose param-default list we know, and the caller
+                // OMITTED trailing defaulted params, fill the default
+                // expressions into the call site positionally (Rust has no
+                // native default-param support). Runs AFTER named-arg
+                // resolution so a named call omitting a defaulted param
+                // (`fetch(url: "x")` with `timeout = 30`) also gets the
+                // default filled. Returns None when no fill was needed
+                // (callee unknown, or all params supplied) — in that case
+                // we keep the post-named-resolution arg slice unchanged.
+                let defaults: Option<&[Option<Expr>]> = match callee.as_ref() {
+                    Expr::Ident(name, _) => self
+                        .func_param_defaults
+                        .get(&name.name)
+                        .map(|v| v.as_slice()),
+                    _ => None,
+                };
+                let filled: Option<Vec<Expr>> =
+                    defaults.and_then(|ds| fill_default_args(after_named, ds));
+                let args_ref: &[Expr] = filled.as_deref().unwrap_or(after_named);
                 // T96: standard-library prelude. A bare-ident callee whose
                 // name is a recognised prelude function is lowered to the
                 // corresponding Rust idiom (math, conversion, I/O) WITHOUT
@@ -4996,6 +5042,97 @@ fn materialize_named_args(args: &[Expr], params: Option<&[String]>) -> Vec<Expr>
     }
 }
 
+// ---------------------------------------------------------------------------
+// T106 — default-argument fill helpers.
+//
+// A parameter may declare a default value (`name: Type = expr`). Rust has NO
+// native default-param support, so the codegen must FILL omitted trailing
+// args at the CALL SITE with the callee's declared default expression —
+// `fetch("x")` becomes `fetch("x", 30)` when `timeout` defaults to `30`.
+//
+// This block has two free helpers:
+//
+// - [`collect_func_param_defaults`]: scans the decl list once at the start of
+//   [`RustCodegen::generate`] and returns a `fn_name -> Vec<Option<Expr>>`
+//   map (one entry per param, in declaration order; `None` = required,
+//   `Some(expr)` = has a default). Same-compilation-unit free functions
+//   only — mirrors [`collect_func_param_names`] (T105) scope rules.
+// - [`fill_default_args`]: given a call's already-positional `args` and the
+//   callee's `defaults` list, appends default expressions for any trailing
+//   params the caller omitted. Returns `Some(filled)` only when at least
+//   one default was filled (so the caller can skip a clone when nothing
+//   changed); `None` means no fill was needed.
+// ---------------------------------------------------------------------------
+
+/// Collect default-value expressions for every parameter of every user-
+/// defined free function in `decls` (T106).
+///
+/// Returns a [`BTreeMap`] keyed by function name; the value is the per-param
+/// default list in DECLARATION ORDER (`None` for required params, `Some(expr)`
+/// for defaulted ones). Mirrors [`collect_func_param_names`] (T105) for
+/// scope: methods (inside `extend TYPE { ... }`) and cross-module callees are
+/// NOT collected (deferred to v1.0).
+///
+/// A [`BTreeMap`] (not [`HashMap`]) is used so iteration is deterministic
+/// across runs (the T29 flaky-test lesson). Last-declaration-wins on name
+/// collisions (consistent with [`collect_func_param_names`]).
+fn collect_func_param_defaults(decls: &[Decl]) -> BTreeMap<String, Vec<Option<Expr>>> {
+    let mut out = BTreeMap::new();
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            out.insert(
+                f.name.name.clone(),
+                f.params.iter().map(|p| p.default_value.clone()).collect(),
+            );
+        }
+    }
+    out
+}
+
+/// Fill omitted trailing defaulted params at the call site (T106).
+///
+/// Given a call's already-positional `args` and the callee's per-param
+/// `defaults` list (in declaration order), append the default expression for
+/// each trailing param the caller omitted:
+///
+/// - If `args.len() >= defaults.len()`: no fill needed (caller supplied all
+///   params, or too many — Rust diagnoses the surplus). Returns [`None`].
+/// - If `args.len() < defaults.len()`: walk `defaults[args.len() ..]`. For
+///   each `Some(dv)`, push `dv.clone()` (a defaulted param the caller
+///   omitted → fill the default). For each `None` (a REQUIRED param the
+///   caller omitted), push nothing — Rust will diagnose the missing arg.
+///   Returns `Some(filled)` iff at least one default was filled.
+///
+/// Determinism: the fill walks `defaults` in declaration (positional) order —
+/// no [`HashMap`] iteration. The output is byte-identical for the same
+/// `(args, defaults)` pair across runs.
+///
+/// **Interaction with T105 named-arg resolution**: this runs AFTER
+/// [`materialize_named_args`], on the already-positional arg list. So a
+/// named-arg call that omits a defaulted param (`fetch(url: "x")` with
+/// `timeout` defaulted) is reordered first, then the missing trailing
+/// default is filled — yielding `fetch("x", 30)` correctly.
+fn fill_default_args(args: &[Expr], defaults: &[Option<Expr>]) -> Option<Vec<Expr>> {
+    if args.len() >= defaults.len() {
+        return None;
+    }
+    let mut filled = args.to_vec();
+    let mut filled_any = false;
+    // Iterate over the defaulted params the caller omitted, dropping the
+    // `None`s (required params left out — Rust diagnoses those). Using
+    // `.iter().flatten()` keeps clippy's `manual_flatten` happy and is the
+    // idiomatic "only the Some values" walk.
+    for dv in defaults[args.len()..].iter().flatten() {
+        filled.push(dv.clone());
+        filled_any = true;
+    }
+    if filled_any {
+        Some(filled)
+    } else {
+        None
+    }
+}
+
 /// Walk the declaration list looking for any `Matrix.new(...)` constructor
 /// call (T24). Returns `true` if at least one is found, signalling
 /// [`RustCodegen::generate`] to prepend the builtin `Matrix<T>` struct.
@@ -6287,6 +6424,7 @@ mod tests {
                 name: AstIdent::new("Int", dummy_span()),
                 span: dummy_span(),
             },
+            default_value: None,
             span: dummy_span(),
         };
         let _stmt = Stmt::Break(dummy_span());

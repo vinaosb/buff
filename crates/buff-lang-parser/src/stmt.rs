@@ -591,10 +591,26 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
             stream.expect(TokenKind::Colon)?;
             parse_type_ref(stream)?
         };
-        let end = type_end(&ty);
+        let mut end = type_end(&ty);
+        // T106: optional default value `name: Type = expr`. After the type,
+        // if the next token is `=` (Assign), consume it and parse an
+        // expression — the param carries `default_value: Some(expr)`. The
+        // codegen fills omitted trailing args at the CALL SITE with this
+        // default (Rust has no native default-param support). A bare `self`
+        // receiver never has a default (no `=` follows it in well-formed
+        // source), so this check is uniformly safe.
+        let default_value = if matches!(stream.peek_kind(), Some(TokenKind::Assign)) {
+            stream.advance(); // consume `=`
+            let dv = parse_expression(stream)?;
+            end = dv.span().end;
+            Some(dv)
+        } else {
+            None
+        };
         params.push(Param {
             name,
             ty,
+            default_value,
             span: Span::new(start, end, source_id),
         });
         match stream.peek_kind() {

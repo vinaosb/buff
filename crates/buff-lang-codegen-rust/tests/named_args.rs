@@ -58,6 +58,7 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
             .map(|(n, t)| Param {
                 name: ident(n),
                 ty: named_type(t),
+                default_value: None,
                 span: span(),
             })
             .collect(),

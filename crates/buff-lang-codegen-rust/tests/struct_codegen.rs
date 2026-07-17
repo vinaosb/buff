@@ -161,6 +161,7 @@ fn _param_smoke() -> Param {
     Param {
         name: ident("_"),
         ty: named_ty("Int"),
+        default_value: None,
         span: span(),
     }
 }

@@ -99,6 +99,7 @@ fn closure(params: &[&str], body: Expr) -> Expr {
         .map(|p| Param {
             name: ident(p),
             ty: placeholder_ty(),
+            default_value: None,
             span: span(),
         })
         .collect();

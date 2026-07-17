@@ -57,6 +57,7 @@ fn self_param(target: &str) -> Param {
     Param {
         name: ident("self"),
         ty: named_ty(target),
+        default_value: None,
         span: span(),
     }
 }
@@ -66,6 +67,7 @@ fn typed_param(name: &str, ty: &str) -> Param {
     Param {
         name: ident(name),
         ty: named_ty(ty),
+        default_value: None,
         span: span(),
     }
 }

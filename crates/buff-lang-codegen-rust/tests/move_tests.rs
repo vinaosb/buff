@@ -221,6 +221,7 @@ fn test_func_param_no_ref() {
         vec![Param {
             name: ident("data"),
             ty: named_type("String"),
+            default_value: None,
             span: span(),
         }],
         Vec::new(),
@@ -251,6 +252,7 @@ fn test_func_param_move() {
         vec![Param {
             name: ident("data"),
             ty: named_type("String"),
+            default_value: None,
             span: span(),
         }],
         Vec::new(),
@@ -312,11 +314,13 @@ fn test_no_lifetimes_in_signature() {
             Param {
                 name: ident("a"),
                 ty: named_type("String"),
+                default_value: None,
                 span: span(),
             },
             Param {
                 name: ident("b"),
                 ty: named_type("String"),
+                default_value: None,
                 span: span(),
             },
         ],
@@ -383,8 +387,9 @@ fn test_string_param_used_twice_gets_clone() {
     let f = func_with(
         "greet",
         vec![Param {
-            name: ident("name"),
+            name: ident("data"),
             ty: named_type("String"),
+            default_value: None,
             span: span(),
         }],
         vec![take_stmt(ident_expr("name")), take_stmt(ident_expr("name"))],
@@ -409,6 +414,7 @@ fn test_int_param_used_many_times_no_clone() {
         vec![Param {
             name: ident("n"),
             ty: named_type("Int"),
+            default_value: None,
             span: span(),
         }],
         vec![

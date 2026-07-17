@@ -641,6 +641,7 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                         name: Ident::new("_", qd.span),
                         span: qd.span,
                     },
+                    default_value: None,
                     span: qd.span,
                 };
                 let lambda = Expr::Lambda {
@@ -1242,6 +1243,7 @@ fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                 name: Ident::new("_", ptok.span),
                 span: ptok.span,
             },
+            default_value: None,
             span: ptok.span,
         });
         if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {

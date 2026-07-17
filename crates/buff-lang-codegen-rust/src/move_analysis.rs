@@ -310,6 +310,7 @@ mod tests {
         f.params.push(Param {
             name: Ident::new("n", span()),
             ty: named_type("Int"),
+            default_value: None,
             span: span(),
         });
         let mut a = MoveAnalyzer::new();
@@ -326,6 +327,7 @@ mod tests {
         f.params.push(Param {
             name: Ident::new("c", span()),
             ty: named_type("Char"),
+            default_value: None,
             span: span(),
         });
         let mut a = MoveAnalyzer::new();
@@ -340,6 +342,7 @@ mod tests {
         f.params.push(Param {
             name: Ident::new("s", span()),
             ty: named_type("String"),
+            default_value: None,
             span: span(),
         });
         let mut a = MoveAnalyzer::new();

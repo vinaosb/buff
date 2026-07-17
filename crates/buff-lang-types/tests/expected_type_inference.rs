@@ -47,6 +47,7 @@ fn lambda(param: &str, body_expr: Expr) -> Expr {
         params: vec![Param {
             name: Ident::new(param, sp()),
             ty: placeholder_tyref(),
+            default_value: None,
             span: sp(),
         }],
         body: Block {

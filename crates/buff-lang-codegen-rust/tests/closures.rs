@@ -100,6 +100,7 @@ fn closure(params: &[&str], body: Expr) -> Expr {
         .map(|p| Param {
             name: ident(p),
             ty: placeholder_ty(),
+            default_value: None,
             span: span(),
         })
         .collect();
@@ -122,6 +123,7 @@ fn nested_closure(outer_params: &[&str], inner_params: &[&str], inner_body: Expr
         .map(|p| Param {
             name: ident(p),
             ty: placeholder_ty(),
+            default_value: None,
             span: span(),
         })
         .collect();

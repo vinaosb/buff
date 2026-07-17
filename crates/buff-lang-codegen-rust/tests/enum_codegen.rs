@@ -164,6 +164,7 @@ fn _param_smoke() -> Param {
     Param {
         name: ident("_"),
         ty: named_ty("Int"),
+        default_value: None,
         span: span(),
     }
 }
@@ -498,6 +499,7 @@ fn enum_codegen_end_to_end_decl_and_match_reparse() {
         params: vec![Param {
             name: ident("c"),
             ty: named_ty("Color"),
+            default_value: None,
             span: span(),
         }],
         return_type: Some(named_ty("Int")),
@@ -549,6 +551,7 @@ fn enum_codegen_result_end_to_end_with_binding() {
                 args: vec![named_ty("Int"), named_ty("String")],
                 span: span(),
             },
+            default_value: None,
             span: span(),
         }],
         return_type: Some(named_ty("Int")),

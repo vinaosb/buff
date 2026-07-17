@@ -42,6 +42,7 @@ fn union_func(name: &str, param_name: &str, ty: TypeRef) -> Decl {
         params: vec![Param {
             name: ident(param_name),
             ty: ty.clone(),
+            default_value: None,
             span: span(),
         }],
         return_type: Some(ty),
