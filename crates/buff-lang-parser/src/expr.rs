@@ -556,6 +556,111 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     span,
                 };
             }
+            // T70: null-conditional `?.` operator. `receiver ?. name`
+            // desugars IN THE PARSER to `receiver.and_then(|x| x.name)`,
+            // an `Option`-chain with short-circuit semantics (the closure
+            // is NOT called when the receiver is `None`). Chaining
+            // `a?.b?.c` nests left-associatively because the loop
+            // continues after each `?.`, so the receiver of the next
+            // iteration is the just-built `and_then` MethodCall:
+            //   inner  = a.and_then(|x| x.b)
+            //   outer  = inner.and_then(|x| x.c)
+            //
+            // If a `(` follows the field/method name, it's the method-call
+            // form: `u?.m(args)` desugars to `u.and_then(|x| x.m(args))`.
+            //
+            // The closure param name is `x` (matches the spec's literal
+            // `|x| x.name` output). The placeholder param type reuses the
+            // SAME mechanism as `parse_closure` (TypeRef::Named{"_"}) so
+            // type inference + codegen treat it identically to a normal
+            // `{ x => ... }` closure (codegen emits `|x|` with no
+            // annotation; Rust infers the inner type from `and_then`).
+            //
+            // The desugar produces existing AST nodes (MethodCall + Lambda)
+            // so NO codegen arm, NO type-inference change, and NO new Expr
+            // variant are needed — same strategy as T69 (`|>`) and T101
+            // (`??`).
+            Some(TokenKind::QuestionDot) => {
+                let qd = stream.advance().expect("peek guaranteed QuestionDot");
+                // Parse the field/method name (must be an Ident, like the
+                // Dot arm above).
+                let name_tok = match stream.advance() {
+                    Some(t) if matches!(t.kind, TokenKind::Ident(_)) => t,
+                    Some(other) => {
+                        return Err(ParseError::new(Diagnostic::error(
+                            format!(
+                                "expected field or method name after `?.`, found `{}`",
+                                other.kind
+                            ),
+                            other.span,
+                        )));
+                    }
+                    None => {
+                        return Err(ParseError::new(Diagnostic::error(
+                            "expected field or method name after `?.`, found end of input",
+                            stream.eof_span(),
+                        )));
+                    }
+                };
+                let TokenKind::Ident(field_name) = name_tok.kind.clone() else {
+                    unreachable!("matched Ident above");
+                };
+                let field_ident = Ident::new(field_name, name_tok.span);
+                // Method-call form: `u?.m(args...)` — parse the arg list.
+                // Field form: `u?.name` — zero args. Same shape as the Dot
+                // arm above.
+                let (field_args, end_off) = if matches!(stream.peek_kind(), Some(TokenKind::LParen))
+                {
+                    stream.advance();
+                    let args = parse_call_args(stream)?;
+                    let rparen = stream.expect(TokenKind::RParen)?;
+                    (args, rparen.span.end)
+                } else {
+                    (Vec::new(), name_tok.span.end)
+                };
+                // Build the closure body: `x.name` or `x.m(args...)` — a
+                // MethodCall whose receiver is the closure's `x` param.
+                let x_ident = Ident::new("x".to_string(), qd.span);
+                let x_expr = Expr::Ident(x_ident.clone(), qd.span);
+                let body_inner = Expr::MethodCall {
+                    receiver: Box::new(x_expr),
+                    method: field_ident,
+                    args: field_args,
+                    span: Span::new(name_tok.span.start, end_off, stream.source_id()),
+                };
+                // Build the closure `|x| body_inner` — single-ExprStmt body
+                // (same shape as parse_closure).
+                let param = buff_lang_ast::common::Param {
+                    name: x_ident,
+                    // Placeholder type — closures infer their param types;
+                    // codegen emits `|x|` (no annotation). Mirrors
+                    // parse_closure's placeholder exactly so type inference
+                    // + codegen handle this identically to a user-written
+                    // `{ x => ... }` closure.
+                    ty: buff_lang_ast::TypeRef::Named {
+                        name: Ident::new("_", qd.span),
+                        span: qd.span,
+                    },
+                    span: qd.span,
+                };
+                let lambda = Expr::Lambda {
+                    params: vec![param],
+                    body: buff_lang_ast::common::Block {
+                        stmts: vec![Stmt::ExprStmt(body_inner, qd.span)],
+                        span: Span::new(qd.span.start, end_off, stream.source_id()),
+                    },
+                    return_type: None,
+                    span: Span::new(qd.span.start, end_off, stream.source_id()),
+                };
+                // Build the outer MethodCall: `receiver.and_then(lambda)`.
+                let outer_span = Span::new(expr.span().start, end_off, stream.source_id());
+                expr = Expr::MethodCall {
+                    receiver: Box::new(expr),
+                    method: Ident::new("and_then".to_string(), qd.span),
+                    args: vec![lambda],
+                    span: outer_span,
+                };
+            }
             _ => break,
         }
     }

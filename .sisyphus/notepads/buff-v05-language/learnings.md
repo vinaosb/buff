@@ -1481,3 +1481,176 @@ codegen to the verbatim Rust call shape (`f(x)`, `filter(process(data))`, etc.).
 - None. The parser-desugar approach means there's no type-system or codegen
   work to defer — the desugared FuncCall flows through the existing inference
   + codegen paths unchanged.
+
+
+## T70 — Null-conditional operator `?.`
+
+### Status: COMPLETE (parser-desugar approach — zero AST/codegen change)
+
+### Approach chosen: DESUGAR IN THE PARSER (the task's STRONGLY PREFERRED path)
+
+`receiver ?. name` rewrites DIRECTLY in `parse_postfix` into a plain
+`Expr::MethodCall { receiver, method: "and_then", args: [Lambda] }` where
+the Lambda is `|x| x.name` (or `|x| x.m(args)` for the method-call form).
+**No new AST variant, no new codegen arm, no exhaustive-match ripple** across
+rust_codegen.rs / ir.rs / infer.rs / exhaustiveness.rs / async_analysis.rs /
+ownership.rs. The desugar emits nodes codegen already lowers:
+
+- `MethodCall { method: "and_then", args: [lambda] }` → falls through the
+  default arm of `lower_method_call` (`and_then` is NOT in any special-
+  case list, and `args` is non-empty so the field-access heuristic at
+  line 1637 doesn't fire). Emits `recv.and_then(lambda)`.
+- The Lambda lowers via `lower_lambda` to `|x| body_expr` (single
+  ExprStmt body → bare expression, no block wrapper).
+- The body `x.name` is itself a zero-arg `MethodCall { receiver: x,
+  method: "name", args: [] }` → hits the field-access heuristic (args
+  empty + `name` not in KNOWN_ZERO_ARG_METHODS) → emits `x.name`.
+- Final codegen: `recv.and_then(|x| x.name)` — exactly the spec contract.
+
+### Lexer (additive, greedy longest-match)
+
+- NEW `TokenKind::QuestionDot` variant added at the END of the operators
+  block (after `QuestionQuestion`), with doc-comment + Display arm
+  `Self::QuestionDot => write!(f, "?.")`.
+- `scan_operator` 2-char section: added `"?." => Some(TokenKind::QuestionDot)`.
+  CRITICAL: the 2-char section runs BEFORE `single_char_kind`, so `?.`
+  is matched greedily instead of splitting into `?` (Question, T30 Try)
+  + `.` (Dot, member access). A lone `?` (NOT followed by `.`) still
+  falls through to `single_char_kind(b'?') => TokenKind::Question` —
+  T30 Try is UNCHANGED. `??` (QuestionQuestion, T101) is matched EARLIER
+  in the same 2-char section, so `??` is UNCHANGED. The full workspace
+  test suite (including T30 `x?` tests and T101 `??` tests) confirms
+  both are intact.
+
+### Parser (`parse_postfix` — additive arm)
+
+NEW `Some(TokenKind::QuestionDot) =>` arm inserted AFTER the existing
+`Some(TokenKind::Question) =>` (Try) arm. The arm:
+
+1. Consumes the `?.` token.
+2. Parses the following Ident (field/method name) — same logic as the
+   existing Dot arm. Errors cleanly with `expected field or method name
+   after `?.`, found ...` if a non-Ident follows (NOT a panic).
+3. If `(` follows, parses the arg list (method-call form); else zero
+   args (field form). Same shape as the Dot arm.
+4. Builds the closure body: `x.name` or `x.m(args)` as a
+   `MethodCall { receiver: Ident("x"), method: name, args }`.
+5. Wraps in `Lambda { params: [Param { name: "x", ty: placeholder, .. }],
+   body: Block { stmts: [Stmt::ExprStmt(body_inner)] }, return_type: None }`.
+6. Wraps that in the outer `MethodCall { receiver: <original expr>,
+   method: "and_then", args: [lambda] }`.
+7. The loop continues, so `a?.b?.c` naturally chains: the receiver of
+   the next iteration is the just-built `and_then` MethodCall →
+   `a.and_then(|x| x.b).and_then(|x| x.c)` (left-associative, exactly
+   the spec).
+
+### Lambda placeholder param type
+
+REUSES the SAME mechanism as `parse_closure` (the existing `{ x => ... }`
+parser): `TypeRef::Named { name: Ident::new("_", span), span }`. This
+matches the convention documented in T23's closure-parsing decision and the
+`placeholder_ty()` helpers in `map_codegen.rs` / `closures.rs` /
+`null_conditional.rs` test files. Codegen ignores the placeholder (emits
+`|x|` with no annotation); Rust infers the inner type from `and_then`'s
+`FnOnce(T) -> U` signature. Type inference treats the desugared lambda
+identically to a user-written `{ x => x.name }` closure.
+
+### Closure param name choice: `x` (literal)
+
+The closure param is named `x` (matching the spec's literal `|x| x.name`
+output). Trade-off considered: if the receiver expression happens to capture
+an outer variable also named `x`, the closure param shadows it inside the
+body. But the body ONLY references the param `x` (it never reads the
+receiver directly — the receiver is the OUTER MethodCall's receiver, not
+inside the lambda body). So shadowing is benign. Renaming to a synthetic
+`__buff_qd_x` would deviate from the spec's expected output and break
+`assert!(src.contains(".and_then(|x| x.name)"))` substring assertions.
+
+### Method-call form handling
+
+`u?.greet(42)` desugars to `u.and_then(|x| x.greet(42))` — the args
+parsed after the method name are spliced into the LAMBDA BODY's MethodCall
+(`x.greet(42)`), NOT into the outer `and_then` call. The outer
+`and_then` always takes exactly ONE arg (the closure). Verified by
+`null_conditional_method_call_e2e` and `null_conditional_method_call_handbuilt`
+which assert both `u.and_then` and `.greet(42)` substrings.
+
+### Chaining behavior
+
+`a?.b?.c` produces `a.and_then(|x| x.b).and_then(|x| x.c)` — the
+postfix loop's natural left-associativity. Each `?.` iteration wraps the
+accumulator in one more `and_then`. Verified by counting `.and_then`
+occurrences in the generated Rust (exactly 2 for `a?.b?.c`):
+`null_conditional_chained_e2e` and `null_conditional_chained_handbuilt`.
+
+### Precedence (postfix → tighter than additive)
+
+`?.` is a postfix operator (handled in `parse_postfix`), so it binds
+tighter than EVERY binary operator. `a?.b + 1` parses as
+`(a?.b) + 1` (BinaryOp(Add, MethodCall(and_then), 1)) — verified by
+`null_conditional_precedence_tighter_than_additive`. This matches Rust's
+`?.` precedence (postfix > additive) and the T30 `?` postfix precedent
+(`a? + 1` parses as `(a?) + 1`).
+
+### Side fix: clippy `doc_overindented_list_items`
+
+The module-level doc comment in `crates/buff-lang-parser/tests/null_conditional.rs`
+originally had a continuation line indented to column 21 (aligning with
+`inner = ...` after the `a?.b?.c` bullet). Clippy 1.95 flagged it as
+`doc_overindented_list_items` (treats it as a nested list item). Fix:
+reduce continuation-line indent to 2 spaces (`cargo fmt` would not catch
+this; it's a clippy-only lint).
+
+### Tests added (18 total: 8 codegen + 10 parser)
+
+- `crates/buff-lang-codegen-rust/tests/null_conditional.rs` — 8 tests,
+  all named `null_conditional_*`. Mix of hand-built AST (precise
+  MethodCall+Lambda shape) and end-to-end parse-from-source (proves the
+  full lex→parse→codegen pipeline). Covers: `opt?.value` hand-built;
+  `u?.name` e2e; `opt?.value` e2e; chained `a?.b?.c` e2e; chained
+  hand-built (asserts 2 `.and_then` calls); method-call `u?.greet(42)`
+  e2e + hand-built; and a short-circuit contract test asserting
+  `and_then` (not `map`) is the lowering target.
+- `crates/buff-lang-parser/tests/null_conditional.rs` — 10 tests, all
+  named `null_conditional_*`. Covers: `u?.name` → MethodCall(and_then)
+  with Ident(u) receiver and Lambda arg; `opt?.value`; chained
+  `a?.b?.c` (inner+outer both `and_then`, innermost receiver Ident(a));
+  method-call `u?.m(42)` with deep lambda-body inspection; precedence
+  (tighter than additive); REGRESSIONS for single `?` (Try) and plain
+  `.` (member access) both intact; error cases (leading `?.` no
+  receiver; `x ?. 5` non-ident after `?.`).
+
+### Verification (all GREEN, MSVC env LIB set for test/clippy)
+
+- `cargo test -p buff-lang-codegen-rust null_conditional` → 8/8 pass (acceptance)
+- `cargo test -p buff-lang-parser null_conditional` → 10/10 pass
+- `cargo test --workspace` → 0 FAILED across all binaries (one apparent
+  `test test_fail ... FAILED` is Buff's CUSTOM test runner reporting an
+  intentionally-failing Buff `@test` inside the Rust e2e test
+  `test_command_e2e_failing_test_exit_one` — the Rust test itself PASSES
+  by asserting `report.failed == 1`. Pre-existing T35 behavior, NOT
+  caused by T70.)
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0, clean
+- `cargo fmt --all -- --check` → exit 0, clean (after `cargo fmt --all`)
+- `cargo check --workspace` → exit 0
+
+### Files changed
+
+- `crates/buff-lang-lexer/src/token.rs` — +`QuestionDot` variant (with
+  doc comment) + Display arm `"?."`.
+- `crates/buff-lang-lexer/src/lexer.rs` — +1 line in `scan_operator`
+  2-char section (`"?." => Some(TokenKind::QuestionDot)`).
+- `crates/buff-lang-parser/src/expr.rs` — +`Some(TokenKind::QuestionDot)
+  =>` arm in `parse_postfix` (after the existing Question/Try arm). The
+  arm builds the desugared MethodCall(and_then, Lambda) in 6 steps
+  documented inline.
+- `crates/buff-lang-codegen-rust/tests/null_conditional.rs` — NEW (8 tests).
+- `crates/buff-lang-parser/tests/null_conditional.rs` — NEW (10 tests).
+
+### Deferred
+
+- None. The parser-desugar approach means there's no type-system or
+  codegen work to defer — the desugared MethodCall(and_then, Lambda) flows
+  through the existing inference + codegen paths unchanged. Type errors
+  (e.g. applying `?.` to a non-Option receiver) are warnings in v0.5 per
+  the project policy; no enforcement added.

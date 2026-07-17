@@ -90,6 +90,17 @@ pub enum TokenKind {
     Not,
     Question,
     QuestionQuestion,
+    /// The null-conditional operator `?.` (T70).
+    ///
+    /// `receiver ?. name` desugars in the parser to
+    /// `receiver.and_then(|x| x.name)` — an `Option`-chain with short-circuit
+    /// semantics. Chaining `a?.b?.c` nests left-associatively. The desugar
+    /// happens entirely in the parser (no new AST variant), so this token
+    /// never reaches codegen. Lexed as a 2-char operator BEFORE the single
+    /// `?` ([`TokenKind::Question`]) so `?.` is matched greedily instead of
+    /// splitting into `?` + `.` (which would parse as `Try` then a stray
+    /// field access).
+    QuestionDot,
     Caret,
     Pipe,
     Amp,
@@ -272,6 +283,8 @@ impl fmt::Display for TokenKind {
             Self::Not => write!(f, "!"),
             Self::Question => write!(f, "?"),
             Self::QuestionQuestion => write!(f, "??"),
+            // T70: null-conditional operator `?.`.
+            Self::QuestionDot => write!(f, "?."),
             Self::Caret => write!(f, "^"),
             Self::Pipe => write!(f, "|"),
             Self::Amp => write!(f, "&"),

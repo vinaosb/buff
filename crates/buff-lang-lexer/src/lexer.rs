@@ -666,6 +666,14 @@ fn scan_operator(source: &str, pos: &mut usize, start: usize, end: usize) -> Opt
             "/=" => Some(TokenKind::SlashEq),
             "%=" => Some(TokenKind::PercentEq),
             "??" => Some(TokenKind::QuestionQuestion),
+            // T70: null-conditional operator `?.`. MUST appear in the 2-char
+            // section (which runs BEFORE single_char_kind) so `?.` is matched
+            // greedily instead of splitting into `?` (Question) + `.` (Dot).
+            // A lone `?` (NOT followed by `.`) still falls through to
+            // `single_char_kind(b'?') => TokenKind::Question` (the T30 Try
+            // postfix). `??` (QuestionQuestion, T101) is matched earlier in
+            // this same 2-char section, so `??` is unaffected.
+            "?." => Some(TokenKind::QuestionDot),
             // T69: pipeline operator `|>`. MUST appear in the 2-char section
             // (which runs BEFORE single_char_kind) so `|>` is matched
             // greedily instead of splitting into `|` (Pipe) + `>` (Gt).

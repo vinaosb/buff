@@ -928,7 +928,7 @@ Phase 1 (v0.1) must be complete:
   **QA**: Codegen `"hello" |> print()` → assert `print("hello")`. Evidence: task-69-pipeline.txt
   **Commit**: `feat(parser): add pipeline operator |>`
 
-- [ ] **T70**: Null-conditional `?.` [deep]
+- [x] **T70**: Null-conditional `?.` [deep]
   **What to do** (TDD): RED: `user?.name` → Option chain with short-circuit. GREEN: parse `?.` operator, codegen to `.and_then()` chain.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust null_conditional` passes. `u?.name` → `u.and_then(|x| x.name)`.
   **QA**: Codegen `opt?.value` → assert `.and_then()` in output. Evidence: task-70-null-conditional.txt
