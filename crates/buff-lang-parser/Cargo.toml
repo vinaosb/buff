@@ -1,6 +1,6 @@
 [package]
 name = "buff-lang-parser"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
@@ -12,5 +12,5 @@ buff-lang-error.workspace = true
 
 [dev-dependencies]
 # T29: module_system integration tests exercise the module-graph pass from
-# the parser surface (parse imports/exports → build_graph → verify).
+# the parser surface (parse imports/exports â†’ build_graph â†’ verify).
 buff-lang-types.workspace = true

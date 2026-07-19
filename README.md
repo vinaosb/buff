@@ -60,7 +60,7 @@ Every modern language forces a painful trade-off:
 |---|---|---|---|
 | **v0.1** | *Olá, Buff* | Prove transpilation end-to-end | ✅ Shipped |
 | **v0.5** | *Real Language* | Full type system, modules, async, FFI | ✅ Core shipped |
-| **v1.0** | *Production* | Heterogeneous CPU/GPU computing, tooling, release | ⏳ Planned |
+| **v1.0** | *Production* | Heterogeneous CPU/GPU computing, tooling, release | ✅ Core shipped |
 
 **Compiles today:** lexer (logos), parser (chumsky, Pratt, offside rule), AST
 with spans, type inference, Rust codegen infrastructure with move-by-default
