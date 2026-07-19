@@ -1511,3 +1511,328 @@ Same as T38/T39/T40/T42/T43/T44/T38b/T45. Exact strings used for this task:
 $env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
 $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
 ```
+
+
+
+## T47 Findings (2026-07-19)
+
+### Outcome
+T47 GREEN: cold-start mitigation (pipeline caching + buffer pooling +
+async device init) implemented as `crates/buff-lang-runtime/src/cold_start.rs`.
+**33 new tests added** (14 inline unit + 18 integration + 1 ignored
+doctest; target was 12+, achieved 2.75x). Total buff-lang-runtime tests
+now **215 passed + 5 ignored** (was 183 + 4 after T46).
+cargo check / test / clippy --all-targets -D warnings / fmt --check all
+exit 0. cargo check --workspace still exit 0.
+
+### Real-GPU cold-start QA RAN ON THIS BOX
+Confirmed: dispatching the SAME WGSL shader twice through
+`ColdStartBackend` compiles the pipeline EXACTLY ONCE
+(`pipeline_compile_count() == 1` after 3 dispatches). Dispatching two
+DIFFERENT shaders compiles twice (`pipeline_compile_count() == 2`).
+Dispatching the same shader + same input size 7 times allocates
+exactly 3 buffers (`buffer_allocation_count() == 3` — pool reuse
+steady-state). All on a real wgpu device.
+
+Evidence: `.sisyphus/evidence/task-47-cold-start.txt`.
+
+### Public API surface (re-exported from buff_lang_runtime crate root)
+```rust
+pub struct PipelineCache { /* private */ }
+impl PipelineCache {
+    pub fn new() -> Self;
+    pub fn compile_count(&self) -> usize;   // cache miss count
+    pub fn len(&self) -> usize;
+    pub fn is_empty(&self) -> bool;
+    pub fn contains(&self, shader_wgsl: &str) -> bool;
+    // pub(crate) fn get_or_compile(device, shader) -> Result<CachedPipeline, RuntimeError>
+}
+
+pub struct BufferPool { /* private */ }
+impl BufferPool {
+    pub fn new() -> Self;
+    pub fn allocation_count(&self) -> usize;  // pool miss count
+    pub fn free_count(&self) -> usize;
+    pub fn is_empty(&self) -> bool;
+    // pub(crate) fn acquire(device, size, usage) -> Result<wgpu::Buffer, RuntimeError>
+    // pub(crate) fn release(size, usage, buffer)
+}
+
+pub struct ColdStartBackend { /* private */ }
+impl ColdStartBackend {
+    pub fn new() -> Result<Self, RuntimeError>;
+    pub fn from_backend(backend: WgpuBackend) -> Self;
+    pub fn from_context(context: GpuContext) -> Self;
+    pub fn inner(&self) -> &WgpuBackend;
+    pub fn context(&self) -> &GpuContext;
+    pub fn has_device(&self) -> bool;
+    pub fn pipeline_compile_count(&self) -> usize;
+    pub fn buffer_allocation_count(&self) -> usize;
+    pub fn cached_pipeline_count(&self) -> usize;
+    pub fn pooled_buffer_count(&self) -> usize;
+    pub fn spawn_init(&self) -> Result<(), RuntimeError>;
+    pub fn is_ready(&self) -> bool;
+    pub fn wait_ready_blocking(&self);
+    pub async fn wait_ready(&self);
+}
+impl Default for ColdStartBackend;  // = from_context(GpuContext::unavailable())
+impl GpuBackend for ColdStartBackend;  // drop-in for WgpuBackend
+```
+
+### Cache design (BTreeMap, not HashMap — full justification in module rustdoc)
+- **Key**: `String` (WGSL source text — totally orderable).
+- **Value**: `CachedPipeline` (ShaderModule + BindGroupLayout +
+  PipelineLayout + ComputePipeline — all Arc-backed cheap-to-clone
+  handles in wgpu 26).
+- **Counter**: `AtomicUsize compile_count` incremented ONLY on cache
+  miss (i.e. when `create_compute_pipeline` actually runs). Concurrent
+  first-time dispatches of the same shader serialize on the map Mutex;
+  the second caller sees the entry inserted by the first (compile_count
+  is a precise count of distinct compilations, not distinct callers).
+- **Project rule compliance**: BTreeMap chosen over HashMap for
+  deterministic iteration order. The HARD RULE forbids HashMap in
+  codegen/graph paths; a runtime pipeline cache is technically
+  exempt but we use BTreeMap anyway to stay consistent with the rule's
+  spirit.
+
+### Buffer pool design
+- **Key**: `(u64 byte_size, BufferUsageKey)` where `BufferUsageKey` is
+  a totally-ordered newtype over `u32` (`wgpu::BufferUsages::bits()`).
+  Required because `wgpu::BufferUsages` derives Eq+Hash but NOT Ord
+  (bitflags types don't auto-derive Ord).
+- **Free-list**: `Vec<wgpu::Buffer>` per key, LIFO pop/push for best
+  GPU allocator locality. `acquire()` pops from end; `release()`
+  pushes to end.
+- **Counter**: `AtomicUsize allocation_count` incremented ONLY on pool
+  miss (i.e. when `device.create_buffer` actually runs).
+- **Lifecycle safety**: staging buffer is `unmap()`'d BEFORE `release()`
+  so the next caller can `map_async` without hitting wgpu's
+  "already mapped" panic. Input/output buffers are never mapped (only
+  bound + written), so they're returned as-is. Pool release happens
+  STRICTLY AFTER readback completes.
+- **No zeroing on release**: defensive zeroing was considered but
+  skipped — the compute pass always fully writes the output before
+  readback, and the input is always fully overwritten via
+  `queue.write_buffer` before the next dispatch's compute pass reads
+  it. Keeps the release path allocation-free.
+
+### Async init design
+- **`spawn_init()`**: uses `std::thread::Builder::spawn` (not
+  `tokio::spawn`) so it works without an active tokio runtime. The
+  spawned thread calls `Arc<WgpuBackend>::context().device_queue()` to
+  warm T43's OnceLock cache. Errors are swallowed (cached on context
+  OnceLock just like a sync call would).
+- **`is_ready()`**: reads an `Arc<AtomicBool>` set by the spawned
+  thread's completion callback.
+- **`wait_ready_blocking()`**: `JoinHandle::join()` on the spawned
+  thread. Returns immediately if `spawn_init` was never called
+  (`spawn_attempted` flag check) — this is critical to prevent an
+  infinite spin-yield loop.
+- **`wait_ready()`** (async): uses `tokio::task::spawn_blocking` to
+  await the std JoinHandle from within an async context without
+  blocking the runtime.
+- **Idempotency**: `spawn_init` checks-and-sets `spawn_attempted`
+  atomic flag with `swap(true, AcqRel)`. Second call is a no-op.
+- **Arc<WgpuBackend> sharing**: `ColdStartBackend` holds
+  `Arc<WgpuBackend>` so the spawned thread can clone the Arc and
+  call `backend.context().device_queue()` (the &self method).
+
+### Files changed (all under buff-lang-runtime/ — no other crate touched)
+1. `crates/buff-lang-runtime/src/cold_start.rs` (NEW, ~900 lines):
+   PipelineCache + BufferPool + ColdStartBackend + 14 inline unit tests.
+2. `crates/buff-lang-runtime/src/gpu_pipeline.rs` (MODIFIED — promoted
+   `gpu_ctx_err_to_runtime` from `fn` to `pub(crate) fn`).
+3. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED — +1 module decl,
+   +1 re-export block with 3 items, +9 doc lines in crate-level docs).
+4. `crates/buff-lang-runtime/tests/cold_start_tests.rs` (NEW, ~480
+   lines, 18 integration tests). All test names contain `cold_start`.
+5. `crates/buff-lang-runtime/Cargo.toml`: **NO CHANGE**.
+6. `.sisyphus/evidence/task-47-cold-start.txt` (NEW).
+
+### Test coverage matrix (33 NEW test points)
+- **PipelineCache state (3 inline)**: default_is_empty,
+  compile_count_starts_at_zero, contains_returns_false_for_any_unseen_shader.
+- **BufferPool state (2 inline)**: default_is_empty,
+  allocation_count_starts_at_zero.
+- **ColdStartBackend no-GPU state (8 inline)**: default_is_unavailable,
+  is_ready_false_before_spawn, wait_ready_blocking_returns_if_never_spawned
+  (the spin-loop bug catch), spawn_init_idempotent_on_unavailable_context,
+  dispatch_empty_input_no_compile_no_alloc,
+  dispatch_on_unavailable_context_returns_unavailable, send_sync_compile_time,
+  has_debug_repr.
+- **BufferUsageKey ordering (1 inline)**: orders_correctly.
+- **QA case (1 integration)**: same shader dispatched 3 times → compile count 1.
+- **Distinct shaders (1 integration)**: 2 different shaders → compile count 2;
+  re-dispatching both → still 2.
+- **Buffer pool reuse (1 integration)**: same shader+size 7x → 3 allocations;
+  different size triggers 3 more (now 6); reuse across both sizes verified.
+- **Async init (4 integration)**: is_ready_false_before_spawn,
+  is_ready_true_after_wait_ready_blocking, idempotent,
+  warms_device_on_real_gpu (asserts device_init_count == 1 after spawn).
+- **Async wait_ready (1 integration, #[tokio::test])**: wait_ready_async_path.
+- **Roundtrip correctness unchanged (3 integration)**: QA 1,2,3→2,4,6;
+  matches CPU oracle across 5 cached dispatches;
+  singleton 42→84 after cache warm.
+- **No-GPU graceful (2 integration)**: returns GpuUnavailable (never panic);
+  empty input returns empty Vec.
+- **Object-safety + Send+Sync (2 integration)**: Box<dyn GpuBackend> works;
+  Arc<ColdStartBackend> cross-thread dispatch works.
+- **Construction + accessors (2 integration)**: from_context/default yield
+  unavailable; accessors_initial_state_zero.
+- **Multiple input sizes coexist (1 integration)**: 5 distinct sizes allocated
+  15 buffers; re-dispatching all 5 sizes served entirely from pool (0 new
+  allocations); pipeline_compile_count stayed at 1.
+- **Doctest (1 ignored)**: ColdStartBackend example in rustdoc — `ignore`-tagged
+  (references multiple types across module boundaries like T38b/T46).
+
+### Clippy lints hit during development (all fixed before GREEN)
+1. `dead_code` warning on `shader_module` and `pipeline_layout` fields
+   of `CachedPipeline` (kept alive defensively but not directly read
+   after `create_compute_pipeline`). Fix: `#[allow(dead_code)]` on the
+   struct with a rustdoc comment explaining the defensive retention.
+2. `unused_imports` on `wgpu::util::DeviceExt` and `GpuContextError`
+   (initially imported but not used after refactoring away from
+   `create_buffer_init`). Fix: removed both imports.
+
+### Dispatch flow bug caught during development
+Initial implementation of `wait_ready_blocking` had an infinite
+spin-yield loop when `spawn_init` was never called: `is_ready()` was
+false, no thread would ever set the flag, so the while-loop spun
+forever. Caught by the inline test
+`cold_start_cold_start_backend_wait_ready_blocking_returns_if_never_spawned`
+timing out at 60s. Fix: check `spawn_attempted` flag at the top of
+`wait_ready_blocking` / `wait_ready` and return early if no task was
+ever scheduled. Same fix applied to both sync and async variants.
+
+### wgpu 26 API specifics (T47 additions to the T45 knowledge base)
+- **`ComputePipeline` / `BindGroupLayout` / `PipelineLayout` / `ShaderModule`
+  are all Arc-backed cheap-to-clone handles in wgpu 26**. Cloning is one
+  atomic increment + small struct copy. The expensive driver work
+  (SPIR-V → ISA compilation, descriptor-set layout negotiation) happens
+  once during the `create_*` calls; subsequent clones reuse the cached
+  driver state. This is the win that makes pipeline caching worthwhile.
+- **`wgpu::Buffer` is also Arc-backed** — cloning is cheap. Buffer pool
+  stores clones of the same Arc handle, so acquiring from the pool is
+  a single atomic increment.
+- **`wgpu::BufferUsages` derives `Eq + Hash + Copy` but NOT `Ord`**
+  (it's a `bitflags!` type). To use it as a BTreeMap key, wrap the
+  underlying `u32` bits in a newtype that derives `Ord`.
+- **`queue.write_buffer(&buffer, offset, bytes)`** replaces the need
+  for `create_buffer_init` (which always allocates a fresh buffer).
+  Used in the cached dispatch path to upload input data into a pooled
+  buffer (which is uninitialized after pool-acquire).
+- **Staging buffer must be `unmap()`'d before next `map_async`**. The
+  pool's `release()` does NOT call `unmap()` itself — the dispatch
+  path is responsible for calling `staging_buffer.unmap()` BEFORE
+  calling `release()` for the staging buffer.
+
+### Integration with T45 / T43 / T46
+- **T45 (WgpuBackend)**: NO PUBLIC API CHANGE. The
+  `gpu_ctx_err_to_runtime` helper was promoted from `fn` to
+  `pub(crate) fn` so cold_start::ColdStartBackend::dispatch_map can
+  reuse it. ColdStartBackend wraps WgpuBackend in `Arc<WgpuBackend>`
+  and provides an alternative dispatch_map implementation that adds
+  cache + pool — it does NOT modify WgpuBackend's behavior. T45's
+  full suite (16 integration + 7 inline) still passes unchanged.
+- **T43 (GpuContext)**: spawn_init() warms the OnceLock cache by
+  calling `GpuContext::device_queue()`. This is a `&self` method on
+  GpuContext, so the background thread needs only `&Arc<WgpuBackend>`
+  (which holds `GpuContext`). device_init_count after spawn_init ==
+  1, proven by `test_cold_start_async_init_warms_device_on_real_gpu`.
+- **T46 (tiling)**: NOT MODIFIED. T46's `dispatch_tiled` /
+  `TiledDispatcher` / `dispatch_map_with_tiling` are agnostic to the
+  backend type — they take `&dyn GpuBackend`. T46 could route through
+  ColdStartBackend instead of WgpuBackend for additional speedup
+  (the pipeline cache would amortize across tiles since they share
+  the same shader), but T47 does NOT change T46's default behavior.
+
+### Conventions honored
+- All deps via `.workspace = true`; T47 added ZERO new deps.
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- NO `[features]` section added.
+- NO `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!` in non-test
+  code. `Mutex::lock` errors map to `RuntimeError::GpuInit` via
+  `map_err`. `std::thread::Builder::spawn` errors map to
+  `RuntimeError::GpuInit`. The init thread swallows
+  `device_queue()` errors (they're cached on the context OnceLock).
+- Derives Debug on ColdStartBackend + PipelineCache + BufferPool.
+  Manual Debug impl on InitState (JoinHandle isn't Debug; uses
+  finish_non_exhaustive).
+- NOT Clone — Arc<WgpuBackend> field is shared, not cloneable.
+- BTreeMap, not HashMap (project hard rule; full justification in
+  module-level rustdoc).
+- All new test names contain `cold_start` for QA filter consistency.
+- 4 spaces only. No tabs. No trailing whitespace.
+- `#[must_use]` on accessors returning useful info
+  (pipeline_compile_count, buffer_allocation_count,
+  cached_pipeline_count, pooled_buffer_count, has_device, inner,
+  context, from_backend, from_context).
+
+### Verification gate results
+- FMT     (cargo fmt -p buff-lang-runtime -- --check):                EXIT 0
+- CLIPPY  (cargo clippy -p buff-lang-runtime --all-targets -- -D warnings): EXIT 0
+- TEST    (cargo test -p buff-lang-runtime):                          EXIT 0
+                                                                       215 passed + 5 ignored
+                                                                       (was 183 + 4; +32 pass + 1 ignored)
+- WORKSPACE CHECK (cargo check --workspace):                          EXIT 0
+
+### Gotchas / lessons for T48+
+1. **BTreeMap needs Ord keys, wgpu bitflags types don't auto-derive Ord**.
+   When using `wgpu::BufferUsages` (or any bitflags type) as a BTreeMap
+   key, wrap it in a newtype over its `u32` bits.
+2. **`spawn_init` + `wait_ready_*` need a "never spawned" early-return**.
+   Without it, `wait_ready_blocking()` enters an infinite spin-yield
+   loop when `spawn_init` was never called — `is_ready()` is false,
+   no thread will ever set the flag. The fix: check `spawn_attempted`
+   at the top of the wait function and return early.
+3. **`tokio::task::spawn_blocking` requires an active tokio runtime**.
+   The async `wait_ready()` will panic if called outside a runtime.
+   Provide a sync `wait_ready_blocking()` alternative for non-async
+   callers.
+4. **Pool release AFTER unmap**: the dispatch path must call
+   `staging_buffer.unmap()` BEFORE `buffer_pool.release(staging)`.
+   Otherwise the next caller's `map_async(Read)` panics with
+   "buffer already mapped".
+5. **`queue.write_buffer` replaces `create_buffer_init` for pooled
+   buffers**: `create_buffer_init` allocates a NEW buffer every call,
+   defeating the pool. The cached dispatch path uses
+   `device.create_buffer` (in `BufferPool::acquire`) to allocate
+   fresh, then `queue.write_buffer` to upload input data into the
+   pooled buffer.
+6. **CachedPipeline holds 4 Arc handles, not just ComputePipeline**.
+   `#[allow(dead_code)]` on the struct.
+7. **PipelineCache holds the Mutex for the duration of the compile
+   on a miss** — concurrent first-time dispatches of DIFFERENT
+   shaders serialize. Alternative: lock only for the map read,
+   drop the lock during compile, re-lock for insert. T47 chose the
+   DROP-THEN-RE-LOCK variant for better concurrency.
+8. **`tokio::task::yield_now().await` for async spin-yield**: the
+   async `wait_ready()` uses `tokio::task::yield_now().await` instead
+   of `std::thread::yield_now()` because the latter would block the
+   async runtime's worker thread.
+
+### What's deferred (correctly out of scope for T47)
+- **T48**: recursion detection (CPU-only marking for recursive functions).
+- **T49**: `@prefer(gpu)` / `@prefer(cpu)` hints layered over T40's
+  `decide()`. T47's ColdStartBackend is hint-agnostic — it caches
+  whatever shader it's given.
+- **T50**: GPU memory alignment / packing concerns (vec3, struct
+  layouts).
+- **Pipeline cache eviction policy**: T47's cache is unbounded (real-
+  world Buff programs have a small finite set of distinct shaders).
+- **Pipeline cache persistence** (across process restarts): wgpu 26's
+  `ComputePipelineDescriptor::cache: Option<&PipelineCache>` field
+  accepts a wgpu-level cache object. T47 passes `None`.
+- **Cross-thread dispatch via cached backend**: the integration test
+  `test_cold_start_send_sync_across_threads` proves compile-time +
+  runtime Send+Sync, but doesn't exercise the cache under concurrent
+  dispatch (multi-threaded cache-hit race).
+
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for cargo check)
+Same as T38/T39/T40/T42/T43/T44/T38b/T45/T46. Exact strings used for
+this task:
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```
+

@@ -92,7 +92,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: 250 elements, max_tile=100 → 3 tiles, combined result correct. Evidence: task-46-tiling.txt
   **Commit**: `feat(runtime): implement VRAM check, tiled dispatch, CPU fallback`
 
-- [ ] **T47**: Cold start mitigation [unspecified-high]
+- [x] **T47**: Cold start mitigation [unspecified-high]
   **What to do** (TDD): RED: pipeline cache hit avoids recompile. Buffer pool reuses. Async init ready before dispatch. GREEN: HashMap cache, buffer pool, tokio::spawn background init, batch dispatch.
   **Acceptance**: `cargo test -p buff-lang-runtime cold_start` passes. Second dispatch reuses pipeline.
   **QA**: dispatch shader A twice → assert create_pipeline called once. Evidence: task-47-cold-start.txt

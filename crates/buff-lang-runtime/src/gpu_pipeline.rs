@@ -96,9 +96,11 @@ use crate::mock_gpu::GpuBackend;
 /// `From<GpuContextError>` impl in [`crate::gpu`] requires owned; we
 /// only have a borrow from the OnceLock cache, so match manually).
 ///
-/// Kept as a private helper so [`WgpuBackend::dispatch_map`] stays a
-/// one-liner.
-fn gpu_ctx_err_to_runtime(e: &GpuContextError) -> RuntimeError {
+/// Kept as a `pub(crate)` helper so both [`WgpuBackend::dispatch_map`]
+/// (T45) and [`crate::cold_start::ColdStartBackend::dispatch_map`] (T47)
+/// can map the same borrow-only error without duplicating the variant
+/// match.
+pub(crate) fn gpu_ctx_err_to_runtime(e: &GpuContextError) -> RuntimeError {
     match e {
         GpuContextError::NoAdapter => RuntimeError::GpuUnavailable,
         GpuContextError::DeviceRequest(detail) => RuntimeError::GpuInit {

@@ -40,11 +40,24 @@
 //!   can't fit. The VRAM budget formula is
 //!   `max_elements_per_tile(vram, bpe) = vram / (3 * bpe)` (3 buffers per
 //!   dispatch — input + output + staging).
+//! * [`PipelineCache`] / [`BufferPool`] / [`ColdStartBackend`] — T47's
+//!   cold-start mitigation. [`PipelineCache`] is a `BTreeMap<String,
+//!   CachedPipeline>` keyed by WGSL source so the second dispatch of the
+//!   same shader reuses the compiled pipeline (cache hit, compile counter
+//!   unchanged). [`BufferPool`] reuses GPU buffers across dispatches
+//!   (keyed by `(byte_size, usage_flags)`). [`ColdStartBackend`] wraps
+//!   T45's [`WgpuBackend`] in an [`std::sync::Arc`], integrates both
+//!   caches, and exposes [`ColdStartBackend::spawn_init`] for background
+//!   device warm-up + [`ColdStartBackend::wait_ready`] /
+//!   [`ColdStartBackend::wait_ready_blocking`] for awaiting it. Implements
+//!   [`GpuBackend`], so it's a drop-in replacement for [`WgpuBackend`]
+//!   in dispatch sites that want cold-start amortization.
 //!
 //! Real parallel/GPU logic is deferred: see T39 (CPU `par_map`), T43 (lazy
 //! GPU device init via `OnceLock`), T45 (real GPU dispatch pipeline —
 //! implements [`GpuBackend`] for a wgpu-backed type), T46 (VRAM tiling +
-//! CPU fallback), T49 (`@prefer` hints layered over [`decide`]).
+//! CPU fallback), T47 (cold-start pooling — pipeline cache + buffer pool
+//! + async init), T49 (`@prefer` hints layered over [`decide`]).
 //!
 //! # Determinism
 //!
@@ -52,6 +65,7 @@
 //! [`std::collections::BTreeSet`] — never `HashMap`/`HashSet` — to keep
 //! behavior reproducible across hosts (project hard rule).
 
+pub mod cold_start;
 pub mod cpu;
 pub mod dispatch;
 pub mod error;
@@ -61,6 +75,7 @@ pub mod mock_gpu;
 pub mod threshold;
 pub mod tiling;
 
+pub use cold_start::{BufferPool, ColdStartBackend, PipelineCache};
 pub use cpu::{CpuDispatcher, CpuDispatcherError};
 pub use dispatch::{DispatchKind, Dispatcher};
 pub use error::RuntimeError;
