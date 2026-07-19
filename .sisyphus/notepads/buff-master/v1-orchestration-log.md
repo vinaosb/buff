@@ -228,3 +228,153 @@ also `Sync`, so this costs nothing in practice.
 - T42: AtomicI64 auto-insertion for `par_reduce` accumulators.
 - T43: GpuContext device+queue lazy init via `OnceLock`.
 - T44/T45: WGSL codegen + GPU dispatch pipeline.
+## T40 Findings (2026-07-19)
+
+### Outcome
+T40 GREEN: pure automatic dispatch threshold logic implemented.
+**35 new tests added** (32 integration/unit + 3 doc tests in run count).
+All **85 buff-lang-runtime tests pass** (50 prior + 35 new).
+cargo check / test / clippy --all-targets -D warnings / fmt --check all exit 0.
+
+### Public API surface (re-exported from buff_lang_runtime crate root)
+```rust
+pub const SINGLE_THREAD_MAX: usize = 999;   // inclusive upper bound for SingleThread
+pub const CPU_PARALLEL_MAX:  usize = 50_000; // inclusive upper bound for CpuParallel
+
+// Pure O(1), allocation-free routing decision. No I/O, no hashing.
+pub fn decide(
+    element_count: usize,
+    gpu_available: bool,
+    available_vram_bytes: Option<u64>,
+    bytes_per_element: u64,
+) -> DispatchKind
+
+// Thin struct wrapper around decide() — exists as the T49 (@prefer hints)
+// extension point. new() == default().
+pub struct DispatchPlanner;
+impl DispatchPlanner {
+    pub const fn new() -> Self;
+    pub fn decide(self, element_count, gpu_available, vram, bpe) -> DispatchKind;
+}
+```
+
+### Decision table (exhaustive)
+| element_count            | gpu_available | data fits VRAM      | result         |
+|--------------------------|---------------|---------------------|----------------|
+| <= 999                   | (ignored)     | (ignored)           | SingleThread   |
+| 1000..=50_000            | (ignored)     | (ignored)           | CpuParallel    |
+| > 50_000                 | true          | yes                 | GpuCompute     |
+| > 50_000                 | true          | no (exceeds VRAM)   | CpuParallel    |
+| > 50_000                 | false         | (ignored)           | CpuParallel    |
+
+Fallback is **always** CpuParallel — never SingleThread (large data still
+benefits from rayon), never GpuCompute (no GPU or data doesn't fit).
+`decide()` is infallible — VRAM/GPU-unavailable cases return CpuParallel,
+NOT `Result::Err`.
+
+### VRAM semantics
+- `None`               -> "unknown / assume fits" — GPU stays eligible.
+- `Some(cap)`          -> fits iff `element_count * bytes_per_element <= cap` (inclusive).
+- Multiplication overflow -> treated as "does not fit" -> CpuParallel fallback.
+- `fits_vram` helper is private but stable; T49 (hints) and T45 (GPU dispatch)
+  can reuse the same overflow-aware check by promoting it to pub if needed.
+
+### Files changed (buff-lang-runtime only — no other crate touched)
+- `src/threshold.rs`: NEW — ~220 lines. decide() + DispatchPlanner + 2 pub consts.
+  Thorough rustdoc with routing table, examples for `decide`/constants,
+  overflow semantics, future-wiring notes for T49/T45.
+- `src/lib.rs`: MODIFIED — +1 module decl (`pub mod threshold;`), +1 re-export
+  line (`pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};`),
+  +4 doc lines mentioning T40's surface in the crate-level docs.
+- `tests/threshold_tests.rs`: NEW — ~380 lines, 31 integration tests.
+  Every test name contains the substring `dispatch_threshold` so the QA
+  filter `cargo test -p buff-lang-runtime dispatch_threshold` matches all of them.
+
+### Test coverage matrix (31 integration + 1 inline smoke + 2 new doc = 34 new test points)
+- QA acceptance (6)   : all 6 cases from T40 spec verbatim — boundary values pinned.
+- Boundaries (8)      : 0, 1, 998, 999, 1000, 49999, 50000, 50001.
+- VRAM (8)            : None with/without GPU, exactly-fits, one-byte-under,
+                        one-byte-over, zero-cap non-zero bpe, zero-cap zero bpe,
+                        multiplication overflow.
+- GPU toggle (3)      : GPU ignored in SingleThread band, ignored in CpuParallel
+                        band, decisive in GPU band.
+- bytes_per_element (2): same count + small cap + bpe=1 fits, bpe=8 exceeds.
+- Constants (1)       : SINGLE_THREAD_MAX and CPU_PARALLEL_MAX pinned to spec values.
+- DispatchPlanner (3) : new() == default(), planner.decide == free decide across
+                        all 3 bands, VRAM-aware fallback parity.
+- Inline smoke (1)    : 6 QA boundaries in one fast lib-unittest catch.
+- Doc tests (2 NEW)   : rustdoc example on `decide` and on the two constants.
+
+### Clippy lints hit during development (both fixed before GREEN)
+1. `clippy::assertions_on_constants` on `assert!(SINGLE_THREAD_MAX < CPU_PARALLEL_MAX)`.
+   Fix: removed the assertion. The values are already pinned by two preceding
+   `assert_eq!` calls; the ordering check was redundant.
+2. `clippy::default_constructed_unit_structs` on `DispatchPlanner::default()`.
+   Fix: scoped `#![allow(clippy::default_constructed_unit_structs)]` to the
+   single test that explicitly verifies `new() == default()`. The lint is
+   correct that production code should write `DispatchPlanner` directly; the
+   test deliberately exercises the Default impl.
+
+### Gotchas / lessons for T41-T49
+1. **QA filter substring matching**: cargo test's filter matches against the
+   full path `binary::module::test_name`. Naming every test
+   `dispatch_threshold_*` AND keeping the test file name `threshold_tests.rs`
+   means the binary name alone doesn't match the filter — the per-test names
+   are what carry the substring. Verified: `cargo test dispatch_threshold`
+   matches 32 tests across 2 binaries (lib unittests + integration file).
+2. **Inline `#[cfg(test)] mod tests` AND integration file are BOTH worth
+   keeping**. The inline one is a fast regression catch (single test, no
+   extra binary). The integration file is the behavioral coverage. T38/T39
+   used only integration files; T40 shows the inline+integration pattern
+   works cleanly.
+3. **Overflow-aware VRAM check matters**: `u64::MAX * 2` overflows to a
+   wrong (smaller) value if naively multiplied. Use
+   `count.checked_mul(bytes_per_element)` and treat `None` as "does not fit".
+   This is the kind of edge case T49's hint overrides will need to preserve.
+4. **DispatchPlanner is a unit struct**: zero state, just a documented
+   extension point. T49 will likely add fields like `Prefer::Gpu` /
+   `Prefer::Cpu` overrides — at that point it stops being unit and the
+   `default_constructed_unit_structs` lint goes away naturally.
+5. **rustfmt wraps 4-arg fn calls past 100 cols** — pre-emptively break
+   long argument lists across lines if writing similar 4-arg signatures.
+6. **The `as u64` cast from `usize` is lossless** on every platform Buff
+   targets (16/32/64-bit). Not worth a `try_from` — `usize <= u64` always.
+
+### Conventions honored
+- All deps via `.workspace = true`; NO new deps added (T40 needs none — pure
+  integer arithmetic).
+- No `[features]` section. No HashMap/HashSet. No `Box<dyn ...>` either
+  (T40 is the decision function only; the `Vec<Box<dyn Dispatcher>>` wiring
+  is a later task's concern).
+- NO `unwrap`/`expect`/`panic`/`todo`/`unimplemented` in non-test code.
+  `decide()` is infallible — the VRAM/GPU-unavailable cases return
+  `CpuParallel`, never `Result::Err`.
+- `#[must_use]` on `decide`, `DispatchPlanner::new`, `DispatchPlanner::decide`.
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- Doc comments on every public item; rustdoc examples for `decide` and the
+  two constants (3 doctests run).
+- Tests follow `*_tests.rs` naming. Behavioral assertions, not rubber-stamps.
+
+### What's deferred (correctly out of scope for T40)
+- T41: race detection — closure `&mut` capture rejection.
+- T42: AtomicI64 auto-insertion for par_reduce accumulators.
+- T43: GpuContext device+queue lazy init via OnceLock (extends T38 GpuContext).
+- T44: WGSL codegen (separate crate buff-lang-codegen-wgsl).
+- T45: GPU dispatch pipeline (storage buffers + compute pass + readback).
+  Will consume `DispatchKind::GpuCompute` results from `decide()`.
+- T46: real VRAM query via wgpu. T40 takes VRAM as a `Option<u64>` parameter;
+  it does NOT probe hardware itself.
+- T49: `@prefer(gpu)` / `@prefer(cpu)` hints. Will wrap `decide()` with a
+  thin override layer (likely by extending `DispatchPlanner` with a
+  `Prefer::Gpu` / `Prefer::Cpu` field).
+
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for check)
+Same as T38/T39. The exact strings used for this task:
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```
+All 6 paths verified to exist via `Test-Path -LiteralPath` before use.
+Note: `C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\...`
+also exists on this box and would work as a fallback for the MSVC include/lib.
+

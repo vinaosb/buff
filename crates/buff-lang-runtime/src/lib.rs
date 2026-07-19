@@ -14,9 +14,15 @@
 //!   backends will both implement (T39, T45). Kept object-safe so callers
 //!   can hold a `Box<dyn Dispatcher>` and pick a backend at execution time
 //!   (T40 thresholds).
+//! * [`decide`] / [`DispatchPlanner`] — T40's pure threshold logic that
+//!   routes a dispatch site to [`DispatchKind::SingleThread`],
+//!   [`DispatchKind::CpuParallel`], or [`DispatchKind::GpuCompute`] based
+//!   on element count + GPU availability + VRAM capacity. O(1),
+//!   allocation-free.
 //!
 //! Real parallel/GPU logic is deferred: see T39 (CPU `par_map`), T43 (lazy
-//! GPU device init via `OnceLock`), T45 (GPU dispatch pipeline).
+//! GPU device init via `OnceLock`), T45 (GPU dispatch pipeline), T49
+//! (`@prefer` hints layered over [`decide`]).
 //!
 //! # Determinism
 //!
@@ -28,8 +34,10 @@ pub mod cpu;
 pub mod dispatch;
 pub mod error;
 pub mod gpu;
+pub mod threshold;
 
 pub use cpu::{CpuDispatcher, CpuDispatcherError};
 pub use dispatch::{DispatchKind, Dispatcher};
 pub use error::RuntimeError;
 pub use gpu::{AdapterInfoSnapshot, GpuContext, GpuContextError};
+pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};

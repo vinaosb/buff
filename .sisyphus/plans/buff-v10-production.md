@@ -42,7 +42,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: par_map([1,2,3], {x=>x*2}) → assert [2,4,6]. Evidence: task-39-par-map.txt
   **Commit**: `feat(runtime): implement CPU parallel dispatch via Rayon`
 
-- [ ] **T40**: Automatic dispatch threshold logic [deep]
+- [x] **T40**: Automatic dispatch threshold logic [deep]
   **What to do** (TDD): RED: <1000→SingleThread, 1000-50000→CpuParallel, >50000→GpuCompute. VRAM check fallback. GREEN: implement decide() with thresholds, <1μs decision.
   **Acceptance**: `cargo test -p buff-lang-runtime dispatch_threshold` passes. Boundaries correct.
   **QA**: decide(999,true,_) → SingleThread. decide(50001,true,_) → GpuCompute. Evidence: task-40-thresholds.txt
