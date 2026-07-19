@@ -1,0 +1,109 @@
+================================================================================
+Functions
+================================================================================
+
+func main():
+    print("Olá, Buff!")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            function: (primary_expression
+              (identifier))
+            arguments: (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)))))))
+        (dedent)))))
+
+================================================================================
+Typed function with return
+================================================================================
+
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_expression
+          (named_type
+            (identifier))))
+      (parameter
+        name: (identifier)
+        type: (type_expression
+          (named_type
+            (identifier)))))
+    return_type: (type_expression
+      (named_type
+        (identifier)))
+    body: (block
+      (layout_block
+        (indent)
+        (return_statement
+          value: (binary_expression
+            left: (primary_expression
+              (identifier))
+            right: (primary_expression
+              (identifier))))
+        (dedent)))))
+
+================================================================================
+Two functions
+================================================================================
+
+func hello():
+    print("hi")
+
+func world():
+    print("earth")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            function: (primary_expression
+              (identifier))
+            arguments: (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)))))))
+        (dedent))))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            function: (primary_expression
+              (identifier))
+            arguments: (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)))))))
+        (dedent)))))

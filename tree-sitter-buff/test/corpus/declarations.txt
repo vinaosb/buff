@@ -1,0 +1,404 @@
+================================================================================
+Enum declaration
+================================================================================
+
+enum Color { Red, Green, Blue }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    (identifier)
+    (enum_body
+      (enum_variant
+        (identifier))
+      (enum_variant
+        (identifier))
+      (enum_variant
+        (identifier)))))
+
+================================================================================
+Enum with data variants
+================================================================================
+
+enum Shape { Circle(Float), Rect(Float, Float), Point }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    (identifier)
+    (enum_body
+      (enum_variant
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier))))
+      (enum_variant
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))
+        (type_expression
+          (named_type
+            (identifier))))
+      (enum_variant
+        (identifier)))))
+
+================================================================================
+Generic enum
+================================================================================
+
+enum Result<T, E> { Ok(T), Err(E) }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    (identifier)
+    (type_parameters
+      (identifier)
+      (identifier))
+    (enum_body
+      (enum_variant
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier))))
+      (enum_variant
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))))
+
+================================================================================
+Trait declaration (required only)
+================================================================================
+
+trait Greetable { func name() -> String; }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    (identifier)
+    (trait_body
+      (trait_method_required
+        (identifier)
+        (parameter_list)
+        (type_expression
+          (named_type
+            (identifier)))))))
+
+================================================================================
+Trait with supertrait
+================================================================================
+
+trait Pet : Animal { func pet(); }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    (identifier)
+    (type_expression
+      (named_type
+        (identifier)))
+    (trait_body
+      (trait_method_required
+        (identifier)
+        (parameter_list)))))
+
+================================================================================
+Trait with default method (braces)
+================================================================================
+
+trait Greetable { func greet() { return "hi" } }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_declaration
+    (identifier)
+    (trait_body
+      (trait_method_default
+        (identifier)
+        (parameter_list)
+        (block
+          (brace_block
+            (return_statement
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)))))))))))
+
+================================================================================
+Extend block
+================================================================================
+
+extend String { func shout(self) -> String { return self } }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (extend_block
+    (type_expression
+      (named_type
+        (identifier)))
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)))
+      (type_expression
+        (named_type
+          (identifier)))
+      (block
+        (brace_block
+          (return_statement
+            (primary_expression
+              (identifier))))))))
+
+================================================================================
+Import named
+================================================================================
+
+import { greet, farewell } from "./hello.buff"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier)
+    (string
+      (string_fragment))))
+
+================================================================================
+Import wildcard
+================================================================================
+
+import * from "./utils.buff"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (string
+      (string_fragment))))
+
+================================================================================
+Import default
+================================================================================
+
+import greet from "./hello.buff"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (identifier)
+    (string
+      (string_fragment))))
+
+================================================================================
+Import legacy dotted
+================================================================================
+
+import a.b.c as alias
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier)
+    (identifier)
+    (identifier)))
+
+================================================================================
+Export function
+================================================================================
+
+export func public_func():
+    print("public")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (export_declaration
+    (function_declaration
+      (identifier)
+      (parameter_list)
+      (block
+        (layout_block
+          (indent)
+          (expression_statement
+            (call_expression
+              (primary_expression
+                (identifier))
+              (argument_list
+                (primary_expression
+                  (literal
+                    (string
+                      (string_fragment)))))))
+          (dedent))))))
+
+================================================================================
+Export enum
+================================================================================
+
+export enum Color { Red, Green, Blue }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (export_declaration
+    (enum_declaration
+      (identifier)
+      (enum_body
+        (enum_variant
+          (identifier))
+        (enum_variant
+          (identifier))
+        (enum_variant
+          (identifier))))))
+
+================================================================================
+Export wildcard
+================================================================================
+
+export * from "./other.buff"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (export_declaration
+    (string
+      (string_fragment))))
+
+================================================================================
+Extern crate
+================================================================================
+
+extern crate "serde"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (extern_crate_declaration
+    (string
+      (string_fragment))))
+
+================================================================================
+Async function
+================================================================================
+
+async func fetch_value() -> Int:
+    return 42
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_expression
+      (named_type
+        (identifier)))
+    (block
+      (layout_block
+        (indent)
+        (return_statement
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (dedent)))))
+
+================================================================================
+Attributes
+================================================================================
+
+@test
+func test_addition():
+    assert_eq(add(2, 3), 5)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (attribute
+      (identifier))
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (literal
+                      (integer_literal)))
+                  (primary_expression
+                    (literal
+                      (integer_literal)))))
+              (primary_expression
+                (literal
+                  (integer_literal))))))
+        (dedent)))))
+
+================================================================================
+Attribute with argument
+================================================================================
+
+@prefer(gpu)
+func heavy_compute(data: Vector<Float>) -> Float:
+    return data.reduce({ a, b => a + b })
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (attribute
+      (identifier)
+      (identifier))
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (type_expression
+      (named_type
+        (identifier)))
+    (block
+      (layout_block
+        (indent)
+        (return_statement
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list
+              (primary_expression
+                (closure_expression
+                  (identifier)
+                  (identifier)
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (identifier))))))))
+        (dedent)))))

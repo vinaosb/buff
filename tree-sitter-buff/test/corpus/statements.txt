@@ -1,0 +1,439 @@
+================================================================================
+Let declarations
+================================================================================
+
+func foo():
+    let x = 1
+    let mut y = 2
+    let z: Int = 3
+    let mut w: Int = 4
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (type_expression
+            (named_type
+              (identifier)))
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (type_expression
+            (named_type
+              (identifier)))
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (dedent)))))
+
+================================================================================
+Let tuple destructure
+================================================================================
+
+func foo(pair: (Int, String)):
+    let (a, b) = pair
+    print(a)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (tuple_type
+            (type_expression
+              (named_type
+                (identifier)))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (tuple_pattern
+            (identifier_pattern
+              (identifier))
+            (identifier_pattern
+              (identifier)))
+          (primary_expression
+            (identifier)))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (identifier)))))
+        (dedent)))))
+
+================================================================================
+Let struct destructure
+================================================================================
+
+func foo(p: Point):
+    let Point { x, y } = p
+    print(x)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (struct_pattern
+            (identifier)
+            (struct_pattern_field
+              (identifier))
+            (struct_pattern_field
+              (identifier)))
+          (primary_expression
+            (identifier)))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (identifier)))))
+        (dedent)))))
+
+================================================================================
+Return statement
+================================================================================
+
+func foo():
+    return
+    return 42
+    return compute(x)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (return_statement)
+        (return_statement
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (return_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (identifier)))))
+        (dedent)))))
+
+================================================================================
+Break and continue
+================================================================================
+
+func loop():
+    for i in [1, 2, 3]:
+        if i == 2:
+            continue
+        if i == 5:
+            break
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (for_statement
+          (identifier)
+          (primary_expression
+            (array_expression
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal)))))
+          (block
+            (layout_block
+              (indent)
+              (if_statement
+                (if_condition
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (literal
+                        (integer_literal)))))
+                (block
+                  (layout_block
+                    (indent)
+                    (continue_statement)
+                    (dedent))))
+              (if_statement
+                (if_condition
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (literal
+                        (integer_literal)))))
+                (block
+                  (layout_block
+                    (indent)
+                    (break_statement)
+                    (dedent))))
+              (dedent))))
+        (dedent)))))
+
+================================================================================
+Assignment statement
+================================================================================
+
+func foo():
+    let mut x = 1
+    x = 2
+    x += 1
+    x -= 1
+    x *= 5
+    x /= 2
+    x %= 3
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (expression_statement
+          (assignment_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (expression_statement
+          (assignment_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (expression_statement
+          (assignment_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (expression_statement
+          (assignment_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (expression_statement
+          (assignment_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (expression_statement
+          (assignment_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (dedent)))))
+
+================================================================================
+Expression statement
+================================================================================
+
+func foo():
+    print("hello")
+    foo()
+    obj.method()
+    obj.field
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)))))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list)))
+        (expression_statement
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list)))
+        (expression_statement
+          (field_access_expression
+            (primary_expression
+              (identifier))
+            (identifier)))
+        (dedent)))))
+
+================================================================================
+Spawn expression
+================================================================================
+
+async func fetch():
+    return 42
+
+func run():
+    let task = spawn fetch()
+    let value = task.result()
+    print(value)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (return_statement
+          (primary_expression
+            (literal
+              (integer_literal))))
+        (dedent))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (spawn_expression
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list)))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list)))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (identifier)))))
+        (dedent)))))
+
+================================================================================
+Pipeline operator
+================================================================================
+
+func pipeline(x: Int):
+    x |> double |> print
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (binary_expression
+            (binary_expression
+              (primary_expression
+                (identifier))
+              (primary_expression
+                (identifier)))
+            (primary_expression
+              (identifier))))
+        (dedent)))))

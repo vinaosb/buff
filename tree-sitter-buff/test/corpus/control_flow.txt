@@ -1,0 +1,623 @@
+================================================================================
+If else (layout form)
+================================================================================
+
+func classify(n: Int) -> Int:
+    if n < 0:
+        return 0
+    else if n == 0:
+        return 1
+    else:
+        return 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (type_expression
+      (named_type
+        (identifier)))
+    (block
+      (layout_block
+        (indent)
+        (if_statement
+          (if_condition
+            (binary_expression
+              (primary_expression
+                (identifier))
+              (primary_expression
+                (literal
+                  (integer_literal)))))
+          (block
+            (layout_block
+              (indent)
+              (return_statement
+                (primary_expression
+                  (literal
+                    (integer_literal))))
+              (dedent)))
+          (elif_clause
+            (if_condition
+              (binary_expression
+                (primary_expression
+                  (identifier))
+                (primary_expression
+                  (literal
+                    (integer_literal)))))
+            (block
+              (layout_block
+                (indent)
+                (return_statement
+                  (primary_expression
+                    (literal
+                      (integer_literal))))
+                (dedent))))
+          (else_clause
+            (block
+              (layout_block
+                (indent)
+                (return_statement
+                  (primary_expression
+                    (literal
+                      (integer_literal))))
+                (dedent)))))
+        (dedent)))))
+
+================================================================================
+If expression (let binding)
+================================================================================
+
+func foo():
+    let x = if cond { 1 } else { 2 }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (if_expression
+              (if_condition
+                (primary_expression
+                  (identifier)))
+              (block
+                (brace_block
+                  (expression_statement
+                    (primary_expression
+                      (literal
+                        (integer_literal))))))
+              (else_clause
+                (block
+                  (brace_block
+                    (expression_statement
+                      (primary_expression
+                        (literal
+                          (integer_literal))))))))))
+        (dedent)))))
+
+================================================================================
+Nested if (3 levels)
+================================================================================
+
+func deep(a: Int, b: Int):
+    if a > 0:
+        if b > 0:
+            if a > b:
+                print("a > b > 0")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier))))
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (if_statement
+          (if_condition
+            (binary_expression
+              (primary_expression
+                (identifier))
+              (primary_expression
+                (literal
+                  (integer_literal)))))
+          (block
+            (layout_block
+              (indent)
+              (if_statement
+                (if_condition
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (literal
+                        (integer_literal)))))
+                (block
+                  (layout_block
+                    (indent)
+                    (if_statement
+                      (if_condition
+                        (binary_expression
+                          (primary_expression
+                            (identifier))
+                          (primary_expression
+                            (identifier))))
+                      (block
+                        (layout_block
+                          (indent)
+                          (expression_statement
+                            (call_expression
+                              (primary_expression
+                                (identifier))
+                              (argument_list
+                                (primary_expression
+                                  (literal
+                                    (string
+                                      (string_fragment)))))))
+                          (dedent))))
+                    (dedent))))
+              (dedent))))
+        (dedent)))))
+
+================================================================================
+Guard statement
+================================================================================
+
+func half(n: Int) -> Int:
+    guard n >= 0 else:
+        return 0
+    return n / 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (type_expression
+      (named_type
+        (identifier)))
+    (block
+      (layout_block
+        (indent)
+        (guard_statement
+          (guard_condition
+            (binary_expression
+              (primary_expression
+                (identifier))
+              (primary_expression
+                (literal
+                  (integer_literal)))))
+          (block
+            (layout_block
+              (indent)
+              (return_statement
+                (primary_expression
+                  (literal
+                    (integer_literal))))
+              (dedent))))
+        (return_statement
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (dedent)))))
+
+================================================================================
+Guard with let binding
+================================================================================
+
+func foo(x: Option<Int>):
+    guard let Some(v) = x else:
+        return
+    print(v)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (guard_statement
+          (guard_condition
+            (variant_pattern
+              (identifier)
+              (identifier_pattern
+                (identifier)))
+            (primary_expression
+              (identifier)))
+          (block
+            (layout_block
+              (indent)
+              (return_statement)
+              (dedent))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (identifier)))))
+        (dedent)))))
+
+================================================================================
+For-in loop
+================================================================================
+
+func loop():
+    for item in [1, 2, 3]:
+        print(item)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (for_statement
+          (identifier)
+          (primary_expression
+            (array_expression
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal)))))
+          (block
+            (layout_block
+              (indent)
+              (expression_statement
+                (call_expression
+                  (primary_expression
+                    (identifier))
+                  (argument_list
+                    (primary_expression
+                      (identifier)))))
+              (dedent))))
+        (dedent)))))
+
+================================================================================
+For while loop
+================================================================================
+
+func countdown():
+    for count > 0:
+        count = count - 1
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (for_statement
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (literal
+                (integer_literal))))
+          (block
+            (layout_block
+              (indent)
+              (expression_statement
+                (assignment_expression
+                  (primary_expression
+                    (identifier))
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (literal
+                        (integer_literal))))))
+              (dedent))))
+        (dedent)))))
+
+================================================================================
+For let loop
+================================================================================
+
+func poll(stream: Stream):
+    for let Some(item) = stream.next():
+        print(item)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (for_statement
+          (variant_pattern
+            (identifier)
+            (identifier_pattern
+              (identifier)))
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list))
+          (block
+            (layout_block
+              (indent)
+              (expression_statement
+                (call_expression
+                  (primary_expression
+                    (identifier))
+                  (argument_list
+                    (primary_expression
+                      (identifier)))))
+              (dedent))))
+        (dedent)))))
+
+================================================================================
+Defer statement
+================================================================================
+
+func with_resource():
+    let f = open("file.txt")
+    defer close(f)
+    return f.read()
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)))))))
+        (defer_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (identifier)))))
+        (return_statement
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list)))
+        (dedent)))))
+
+================================================================================
+Match statement on integer
+================================================================================
+
+func describe(n: Int):
+    match n { 0 => print("zero"), _ => print("nonzero") }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (match_statement
+          (primary_expression
+            (identifier))
+          (match_body
+            (match_arm
+              (literal_pattern
+                (literal
+                  (integer_literal)))
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (literal
+                      (string
+                        (string_fragment)))))))
+            (match_arm
+              (wildcard_pattern)
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (literal
+                      (string
+                        (string_fragment)))))))))
+        (dedent)))))
+
+================================================================================
+Match with Option
+================================================================================
+
+func pop_or_default(drawer: Vector<Int>):
+    let value = drawer.pop()
+    match value { Some(x) => print(x), None => print(0) }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list)))
+        (match_statement
+          (primary_expression
+            (identifier))
+          (match_body
+            (match_arm
+              (variant_pattern
+                (identifier)
+                (identifier_pattern
+                  (identifier)))
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (identifier)))))
+            (match_arm
+              (identifier_pattern
+                (identifier))
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (literal
+                      (integer_literal))))))))
+        (dedent)))))
+
+================================================================================
+Match with Result
+================================================================================
+
+func handle(result: Result<Int, Error>):
+    match result { Ok(v) => print(v), Err(_) => print(0) }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (match_statement
+          (primary_expression
+            (identifier))
+          (match_body
+            (match_arm
+              (variant_pattern
+                (identifier)
+                (identifier_pattern
+                  (identifier)))
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (identifier)))))
+            (match_arm
+              (variant_pattern
+                (identifier)
+                (wildcard_pattern))
+              (call_expression
+                (primary_expression
+                  (identifier))
+                (argument_list
+                  (primary_expression
+                    (literal
+                      (integer_literal))))))))
+        (dedent)))))

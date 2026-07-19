@@ -1,0 +1,711 @@
+================================================================================
+Vector literal + indexing
+================================================================================
+
+func vec():
+    let v = [1, 2, 3, 4]
+    print(v[0])
+    print(v[3])
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (array_expression
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal))))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (index_expression
+                (primary_expression
+                  (identifier))
+                (primary_expression
+                  (literal
+                    (integer_literal)))))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (index_expression
+                (primary_expression
+                  (identifier))
+                (primary_expression
+                  (literal
+                    (integer_literal)))))))
+        (dedent)))))
+
+================================================================================
+Map literal
+================================================================================
+
+func map():
+    let scores = {1: 10, 2: 20, 3: 30}
+    print(scores.len())
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (map_expression
+              (map_entry
+                (primary_expression
+                  (literal
+                    (integer_literal)))
+                (primary_expression
+                  (literal
+                    (integer_literal))))
+              (map_entry
+                (primary_expression
+                  (literal
+                    (integer_literal)))
+                (primary_expression
+                  (literal
+                    (integer_literal))))
+              (map_entry
+                (primary_expression
+                  (literal
+                    (integer_literal)))
+                (primary_expression
+                  (literal
+                    (integer_literal)))))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (method_call_expression
+                (primary_expression
+                  (identifier))
+                (identifier)
+                (argument_list)))))
+        (dedent)))))
+
+================================================================================
+Empty map
+================================================================================
+
+func empty():
+    let m = {:}
+    print(m.len())
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (map_expression)))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (method_call_expression
+                (primary_expression
+                  (identifier))
+                (identifier)
+                (argument_list)))))
+        (dedent)))))
+
+================================================================================
+Closure lambda
+================================================================================
+
+func transform(nums: Vector<Int>):
+    let doubled = nums.map({ x => x * 2 })
+    let squared = nums.map({ x => x * x })
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list
+              (primary_expression
+                (closure_expression
+                  (identifier)
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (literal
+                        (integer_literal)))))))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (primary_expression
+              (identifier))
+            (identifier)
+            (argument_list
+              (primary_expression
+                (closure_expression
+                  (identifier)
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (identifier))))))))
+        (dedent)))))
+
+================================================================================
+Closure chained
+================================================================================
+
+func chain(nums: Vector<Int>):
+    let result = nums.map({ x => x * 2 }).map({ y => y + 1 })
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (method_call_expression
+              (primary_expression
+                (identifier))
+              (identifier)
+              (argument_list
+                (primary_expression
+                  (closure_expression
+                    (identifier)
+                    (binary_expression
+                      (primary_expression
+                        (identifier))
+                      (primary_expression
+                        (literal
+                          (integer_literal))))))))
+            (identifier)
+            (argument_list
+              (primary_expression
+                (closure_expression
+                  (identifier)
+                  (binary_expression
+                    (primary_expression
+                      (identifier))
+                    (primary_expression
+                      (literal
+                        (integer_literal)))))))))
+        (dedent)))))
+
+================================================================================
+Tuple expression
+================================================================================
+
+func tuples():
+    let pair = (1, 2)
+    let triple = (1, "two", true)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (tuple_expression
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (integer_literal))))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (primary_expression
+            (tuple_expression
+              (primary_expression
+                (literal
+                  (integer_literal)))
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment))))
+              (primary_expression
+                (literal
+                  (boolean))))))
+        (dedent)))))
+
+================================================================================
+Method call chain
+================================================================================
+
+func chained(nums: Vector<Int>):
+    let n = nums.push(1).len()
+    let s = nums.iter().map({ x => x + 1 }).count()
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (generic_type
+            (named_type
+              (identifier))
+            (type_expression
+              (named_type
+                (identifier)))))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (method_call_expression
+              (primary_expression
+                (identifier))
+              (identifier)
+              (argument_list
+                (primary_expression
+                  (literal
+                    (integer_literal)))))
+            (identifier)
+            (argument_list)))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (method_call_expression
+            (method_call_expression
+              (method_call_expression
+                (primary_expression
+                  (identifier))
+                (identifier)
+                (argument_list))
+              (identifier)
+              (argument_list
+                (primary_expression
+                  (closure_expression
+                    (identifier)
+                    (binary_expression
+                      (primary_expression
+                        (identifier))
+                      (primary_expression
+                        (literal
+                          (integer_literal))))))))
+            (identifier)
+            (argument_list)))
+        (dedent)))))
+
+================================================================================
+Field access
+================================================================================
+
+func fields(p: Point):
+    print(p.x)
+    print(p.y)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (field_access_expression
+                (primary_expression
+                  (identifier))
+                (identifier)))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (field_access_expression
+                (primary_expression
+                  (identifier))
+                (identifier)))))
+        (dedent)))))
+
+================================================================================
+Binary operators
+================================================================================
+
+func ops():
+    let a = 1 + 2
+    let b = 10 - 5
+    let c = 4 * 3
+    let d = 12 / 4
+    let e = 13 % 5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (literal
+                (integer_literal)))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (literal
+                (integer_literal)))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (literal
+                (integer_literal)))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (literal
+                (integer_literal)))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (literal
+                (integer_literal)))
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (dedent)))))
+
+================================================================================
+Comparison operators
+================================================================================
+
+func cmp(a: Int, b: Int):
+    let lt = a < b
+    let gt = a > b
+    let le = a <= b
+    let ge = a >= b
+    let eq = a == b
+    let ne = a != b
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier))))
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (dedent)))))
+
+================================================================================
+Logical operators
+================================================================================
+
+func logic(a: Bool, b: Bool):
+    let and = a && b
+    let or = a || b
+    let not = !a
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier))))
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (binary_expression
+            (primary_expression
+              (identifier))
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (unary_expression
+            (primary_expression
+              (identifier))))
+        (dedent)))))
+
+================================================================================
+Unary minus
+================================================================================
+
+func neg(n: Int):
+    let m = -n
+    let p = -5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (unary_expression
+            (primary_expression
+              (identifier))))
+        (let_declaration
+          (identifier_pattern
+            (identifier))
+          (unary_expression
+            (primary_expression
+              (literal
+                (integer_literal)))))
+        (dedent)))))
+
+================================================================================
+String interpolation
+================================================================================
+
+func greet(name: String):
+    print("Hello, {name}!")
+    print("{name} is {age} years old")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_expression
+          (named_type
+            (identifier)))))
+    (block
+      (layout_block
+        (indent)
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (string_fragment)
+                    (interpolation
+                      (primary_expression
+                        (identifier)))
+                    (string_fragment)))))))
+        (expression_statement
+          (call_expression
+            (primary_expression
+              (identifier))
+            (argument_list
+              (primary_expression
+                (literal
+                  (string
+                    (interpolation
+                      (primary_expression
+                        (identifier)))
+                    (string_fragment)
+                    (interpolation
+                      (primary_expression
+                        (identifier)))
+                    (string_fragment)))))))
+        (dedent)))))

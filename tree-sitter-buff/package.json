@@ -1,0 +1,30 @@
+{
+  "name": "tree-sitter-buff",
+  "version": "0.1.0",
+  "description": "Buff grammar for tree-sitter (offside-rule; layout-sensitive language that transpiles to Rust).",
+  "license": "MIT OR Apache-2.0",
+  "main": "grammar.js",
+  "author": "Buff Lang Project",
+  "keywords": [
+    "tree-sitter",
+    "grammars",
+    "buff",
+    "lexer",
+    "parser"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buff-lang/buff.git",
+    "directory": "tree-sitter-buff"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.26.0"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.buff",
+      "file-types": ["buff"],
+      "injection-regex": "^buff$"
+    }
+  ]
+}
