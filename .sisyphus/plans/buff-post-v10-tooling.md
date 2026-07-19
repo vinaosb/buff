@@ -323,7 +323,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `test(fixtures): v1.0 backward-compat fixture and snapshot for regression testing`
 
-  **Status**: ✅ Done at commit `a70a250` (2026-07-19). Fixture: `tests/fixtures/v10-compat.buff` (89 lines). Snapshot: `tests/fixtures/v10-compat.snapshot.rs` (116 lines). Test: `crates/buff-lang-cli/tests/v10_compat.rs` (byte-identical assertion + `#[ignored]` regen helper). Excludes async/modules/user-enum (codegen-only — documented in fixture header).
+  **Status**: ✅ Done at commit `a70a250` (2026-07-19). Fixture: `tests/fixtures/v10-compat.buff` (137 lines, expanded post-cleanup to cover all arithmetic/comparison/logical operators + else if/else + integer-literal match). Snapshot: `tests/fixtures/v10-compat.snapshot.rs` (145 lines). Test: `crates/buff-lang-cli/tests/v10_compat.rs` (byte-identical assertion + `#[ignored]` regen helper). Excludes async/modules/user-enum (codegen-only — documented in fixture header).
 
 - [ ] **T57b: Integrate LosslessTree into `buff fmt` (comment preservation)** [deep]
 

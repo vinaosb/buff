@@ -1,12 +1,12 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-16
-**Commit:** 7d58448
-**Branch:** v0.1-dev
+**Generated:** 2026-07-16 (originally for v0.1); **updated 2026-07-19 for v1.0 state**
+**Commit:** d394ed8 (master, post-v1.0 cleanup)
+**Branch:** master (v0.1-dev preserved as historical marker at v1.0.0 tag)
 
 ## OVERVIEW
 
-Buff — high-level language that transpiles `.buff` → Rust → native via rustc/LLVM. Implemented as a 9-crate Rust workspace. v0.1 "Olá, Buff" shipped end-to-end. Hides borrow-checker pain from users; compiler emits only "easy" Rust.
+Buff — high-level language that transpiles `.buff` → Rust → native via rustc/LLVM. Implemented as a 9-crate Rust workspace. v1.0 "Production" shipped: heterogeneous CPU/GPU computing, full CLI tooling, v1.0.0 tagged. Hides borrow-checker pain from users; compiler emits only "easy" Rust.
 
 ## STRUCTURE
 
@@ -14,13 +14,13 @@ Buff — high-level language that transpiles `.buff` → Rust → native via rus
 buff/
 ├── crates/                     # 9 workspace members (the compiler)
 │   ├── buff-lang-error/        # LEAF: Span + Diagnostic + SourceMap (depended on by all)
-│   ├── buff-lang-ast/          # Pure AST data nodes (decl/expr/stmt/ty/op/ir)
+│   ├── buff-lang-ast/          # Pure AST data nodes (decl/expr/stmt/ty/op/ir) + lossless (T57)
 │   ├── buff-lang-lexer/        # Hand-rolled byte-scanner + offside-rule indent tracker
 │   ├── buff-lang-parser/       # Hand-rolled recursive-descent + Pratt (NOT chumsky)
-│   ├── buff-lang-types/        # Type inference + prelude + range analysis
-│   ├── buff-lang-codegen-rust/ # AST → syn::File → prettyplease → Rust source
-│   ├── buff-lang-codegen-wgsl/ # STUB (v1.0): AST → WGSL GPU shaders
-│   ├── buff-lang-runtime/      # STUB (v1.0): rayon + wgpu + tokio host
+│   ├── buff-lang-types/        # Type inference + prelude + range analysis + recursion detection
+│   ├── buff-lang-codegen-rust/ # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses)
+│   ├── buff-lang-codegen-wgsl/ # AST → WGSL GPU shaders (T44, 446 lines lib.rs + tests)
+│   ├── buff-lang-runtime/      # Heterogeneous compute host: rayon + wgpu + tokio (T38-T50, ~170KB)
 │   └── buff-lang-cli/          # Binary + library: pipeline orchestration
 ├── crates-io/                  # EMPTY (reserved for future crates.io publishing)
 ├── examples/                   # ola.buff, fibonacci.buff, calculadora.buff (PT-BR names)
@@ -62,12 +62,12 @@ buff-lang-codegen-rust::generate_rust  →  syn::File → String   (prettyplease
 native executable
 ```
 
-**v0.1 wiring**: lexer → parser → codegen-rust → rustc. Type errors are WARNINGS today (deferred to v0.5). WGSL + runtime are stubs.
+**v0.1 wiring**: lexer → parser → codegen-rust → rustc. Type errors are WARNINGS today (deferred to v0.5). WGSL codegen + runtime are fully implemented in v1.0 (T44 + T38-T50).
 
 ## CONVENTIONS
 
 - **Workspace dependency resolution**: every crate uses `dep.workspace = true`. NEVER pin a version in a crate `Cargo.toml` — add to root `[workspace.dependencies]` first.
-- **Edition 2021, license `MIT OR Apache-2.0`, version `0.1.0`** on every crate.
+- **Edition 2021, license `MIT OR Apache-2.0`, version `1.0.0`** on every crate (bumped from 0.1.0 at commit 88c7be0).
 - **Rust crate naming**: folder `buff-lang-<thing>` (hyphen) → crate ident `buff_lang_<thing>` (underscore) → import `buff_lang_<thing>::...`.
 - **Derive defaults**: `Debug, Clone, PartialEq` (+ `Eq, Hash` when used in maps/sets).
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants.
@@ -94,7 +94,7 @@ native executable
 - **`compile_to_rust` vs `compile_rust_to_exe`** split in `pipeline.rs`: callers can inspect intermediate Rust source before invoking rustc.
 - **Type checking is INSIDE codegen** for v0.1 (separate pass deferred to v0.5). Type errors are warnings today.
 - **Prelude**: `print`, etc. are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs`.
-- **`logos` + `chumsky` listed in `Cargo.toml` but UNUSED** — both lexer and parser are hand-rolled. See crate AGENTS.md for the reason.
+- **`logos` + `chumsky` REMOVED** from `Cargo.toml` at commit 9af2f5c — both lexer and parser are hand-rolled (chumsky 1.0.0-alpha.8 transitively required `stacker` → `cc-rs` → C shim that failed on Windows hosts).
 
 ## COMMANDS
 
@@ -128,5 +128,5 @@ cargo insta accept        # accept ALL pending (use sparingly)
 - **CI runs on 3 OSes**: ubuntu-latest, windows-latest, macos-latest.
 - **`crates-io/` is empty** — reserved for future crates.io publishing workflow.
 - **`buff.lock`** is gitignored — Buff's future lockfile (not yet generated).
-- **Hand-rolled lexer/parser**: chumsky 1.0.0-alpha.8 transitively requires `stacker` → `cc-rs` → C shim that fails on Windows hosts missing `excpt.h` from the Windows SDK. Same family of issues pushed the lexer to hand-roll. Cleanup of unused `logos`/`chumsky` deps is a TODO.
+- **Hand-rolled lexer/parser**: chumsky 1.0.0-alpha.8 transitively required `stacker` → `cc-rs` → C shim that failed on Windows hosts missing `excpt.h` from the Windows SDK. Same family of issues pushed the lexer to hand-roll. Unused `logos`/`chumsky` deps were removed in cleanup commit 9af2f5c.
 - **See per-crate `AGENTS.md`** in `crates/buff-lang-{cli,ast,codegen-rust,types,lexer,parser,error}/` and `tests/AGENTS.md` for detailed file-level guidance.
