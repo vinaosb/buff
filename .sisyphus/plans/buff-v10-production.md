@@ -68,7 +68,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: MockGpuBackend.dispatch() → assert recorded_dispatches==1. Evidence: task-38b-mock-gpu.txt
   **Commit**: `test(runtime): add mock GPU backend and WGSL snapshot harness`
 
-- [ ] **T43**: wgpu context initialization [deep]
+- [x] **T43**: wgpu context initialization [deep]
   **What to do** (TDD): RED: GpuContext::init() creates Device+Queue. Cached on second call. No GPU → graceful error. GREEN: implement lazy init with OnceLock, platform detection.
   **Acceptance**: `cargo test -p buff-lang-runtime gpu_context` passes. Lazy + cached + graceful fallback.
   **QA**: init() → device is Some. init() again → same instance. Evidence: task-43-gpu-init.txt

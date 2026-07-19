@@ -523,3 +523,102 @@ etc.). Every T41 negative/positive case still represented.
 Same as T38/T39/T40 (see evidence file
 `.sisyphus/evidence/task-42-auto-atomic.txt` for exact strings).
 
+
+
+
+## T43 Findings (2026-07-19)
+
+### Outcome
+T43 GREEN: GpuContext extended to lazily acquire + cache a (Device, Queue)
+pair via OnceLock. **17 new tests added** in gpu_context_tests.rs (target:
+10+). Total buff-lang-runtime tests now **102** (was 85 prior).
+cargo check / test / clippy --all-targets -D warnings / fmt --check all exit 0.
+cargo check --workspace still exit 0 (no other crate touched).
+
+### API added (concrete on GpuContext, NOT on Dispatcher trait)
+`ust
+pub struct GpuContext {
+    adapter: Option<wgpu::Adapter>,
+    adapter_info: AdapterInfoSnapshot,
+    device_queue_cache: OnceLock<Result<(wgpu::Device, wgpu::Queue), GpuContextError>>,
+    device_init_count: AtomicUsize,  // diagnostic counter
+}
+
+pub fn device_queue(&self) -> Result<&(wgpu::Device, wgpu::Queue), &GpuContextError>
+pub fn device(&self)      -> Result<&wgpu::Device, &GpuContextError>
+pub fn queue(&self)       -> Result<&wgpu::Queue, &GpuContextError>
+pub fn has_device(&self)  -> bool   // purely observational, no init
+pub fn device_init_count(&self) -> usize // for cached-ness tests
+`
+
+Cached-ness design: OnceLock<Result<...>> caches BOTH success and failure.
+Failure caching is REQUIRED by wgpu 26's equest_device which panics on
+second call. device_init_count proves cached-ness in tests (stays at 1
+across N calls).
+
+### wgpu 26 request_device API (CRITICAL for T45)
+- **Signature**: dapter.request_device(&DeviceDescriptor<'_>) -> impl Future<Output = Result<(Device, Queue), RequestDeviceError>> + WasmNotSend
+- **Single-arg**: NO separate trace path param in wgpu 26 (was 2-arg in older versions). 	race is a field of DeviceDescriptor.
+- **Drive synchronously**: pollster::block_on(adapter.request_device(&desc)) — same pattern as T38's request_adapter.
+- **DeviceDescriptor fields (wgpu 26 / wgpu-types 26.0.0)**:
+  - label: Label<'a> (= Option<&'a str>, default = None)
+  - equired_features: Features (default = Features::empty())
+  - equired_limits: Limits (default = Limits::downlevel_defaults() via Limits::default())
+  - memory_hints: MemoryHints (default = MemoryHints::Performance)
+  - 	race: Trace (default = Trace::Off; non_exhaustive enum, only constructible via Trace::default())
+- **wgpu::DeviceDescriptor::default() works**: Label<'a>: Default since Option<&str>: Default.
+- **T45 will need to query**: device.limits().max_compute_workgroups_per_dimension for the real parallelism() (T43 leaves it at 0 by design).
+
+### wgpu 26 Adapter/Device/Queue Send+Sync properties
+- wgpu::Adapter: Send + Sync (Arc-backed, but the Hub contains RwLock)
+- wgpu::Device: Send + Sync
+- wgpu::Queue: Send + Sync
+- OnceLock<(Device, Queue)>: sound (Send + Sync requirement for T in get_or_init satisfied)
+- **GpuContext is NOT UnwindSafe** (transitively contains RwLock/Mutex inside wgpu-core's Hub). Tests that catch_unwind a closure capturing &GpuContext MUST wrap in std::panic::AssertUnwindSafe(...). Documented in test comments.
+
+### Files changed (all under buff-lang-runtime/)
+- src/gpu.rs: +2 struct fields (device_queue_cache OnceLock, device_init_count AtomicUsize), +6 methods (device_queue/device/queue/has_device/device_init_count/acquire_device_queue private), +Default impl. Removed #[allow(dead_code)] from DeviceRequest variant (T38 reserved, T43 wired up). Kept all T38 API + Dispatcher impl unchanged.
+- 	ests/gpu_context_tests.rs: +17 tests (T38's 7 preserved unchanged). All named 	est_gpu_context_* so cargo test gpu_context finds the suite.
+
+### Cached-ness proof mechanism (TWO complementary proofs)
+1. **Semantic**: device_init_count() stays at exactly 1 across 5+ device_queue() calls. Proves OnceLock prevented re-init.
+2. **Pointer-identity**: std::ptr::eq on device() / queue() returns true across calls. Proves the SAME cached reference is returned.
+
+### Error model
+- GpuContextError::DeviceRequest(String) — now used. Constructed from
+  RequestDeviceError via ormat!("{e:?}") (preserves detail, keeps
+  snapshot Clone-able and deterministic). Bridges to
+  RuntimeError::GpuInit { detail } via existing From impl.
+- GpuContextError::NoAdapter — returned from device_queue() when
+  context was built via unavailable() (no adapter to request device from).
+  Bridges to RuntimeError::GpuUnavailable.
+- **No panics on any path**: device init failure → graceful Err; missing
+  adapter → graceful Err; second+ device_queue() call → cached value
+  (not re-request, which would panic).
+
+### Conventions honored
+- No deps added (wgpu + pollster already present from T38).
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- NO [features] section. NO cfg-gate.
+- NO unwrap/expect/panic!/unimplemented!/todo! in non-test code (two .expect() in tests, allowed).
+- Derives Debug on GpuContext (OnceLock<T: Debug> + AtomicUsize: Debug).
+- No HashMap/HashSet.
+- All new test names contain gpu_context for filter consistency.
+
+### Gotchas / lessons
+- **wgpu::Adapter not UnwindSafe**: catch_unwind tests need AssertUnwindSafe wrapper. Error E0277 chain is enormous (links through RwLock → Hub → Global → ContextWgpuCore → CoreAdapter → DispatchAdapter → Adapter → Option<Adapter> → GpuContext). Don't try to make GpuContext UnwindSafe — just wrap the closure.
+- **fmt gate discipline**: ran cargo fmt -p buff-lang-runtime (no --check) BEFORE the final cargo fmt -- --check gate per MUST-DO list. No diff needed — file was already rustfmt-clean.
+- **Trace non_exhaustive**: cannot construct Trace::Off explicitly. Must use DeviceDescriptor::default() or Trace::default(). Chose the former for brevity.
+
+### What's deferred (correctly out of scope for T43)
+- T44: WGSL codegen (separate crate buff-lang-codegen-wgsl).
+- T45: GPU dispatch pipeline — storage buffers, compute pass, readback.
+  Will query device.limits().max_compute_workgroups_per_dimension for
+  the real parallelism() (T43 leaves it at 0 by design).
+- T46: Tiling.
+- T47: Cold-start pooling.
+
+### MSVC env vars
+Same as T38/T39/T40/T42 (see evidence file
+.sisyphus/evidence/task-43-gpu-init.txt for the exact strings used).
+Required for test/clippy/build — NOT for cargo check.
