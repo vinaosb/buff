@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buff — Rust performance with Go productivity</title>
+    <meta name="description" content="Buff is a high-level language that transpiles to Rust. Removes the borrow-checker pain, keeps native performance." />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- Fonts: same stack as playground for visual consistency. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+    <!-- ── Header ───────────────────────────────────────────────────────── -->
+    <header class="site-header" role="banner">
+        <div class="header-inner">
+            <a class="brand" href="#" aria-label="Buff home">
+                <svg viewBox="0 0 32 32" class="brand-glyph" aria-hidden="true">
+                    <path d="M6 4 C 2 8 2 22 6 26 L 12 22 C 10 18 10 14 12 10 Z" fill="currentColor"/>
+                    <path d="M26 4 C 30 8 30 22 26 26 L 20 22 C 22 18 22 14 20 10 Z" fill="currentColor"/>
+                    <rect x="13" y="14" width="6" height="6" rx="1" fill="currentColor"/>
+                </svg>
+                <span class="brand-word">BUFF</span>
+            </a>
+            <nav class="site-nav" aria-label="Main navigation">
+                <a class="nav-btn nav-btn-ghost" href="#examples">Examples</a>
+                <a class="nav-btn nav-btn-ghost" href="#quickstart">Quick start</a>
+                <a class="nav-btn nav-btn-accent" href="../playground/index.html">
+                    <span class="nav-btn-label">Playground</span>
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+
+        <!-- ── Hero ───────────────────────────────────────────────────────── -->
+        <section class="hero">
+            <div class="hero-inner">
+                <p class="hero-eyebrow">A high-level language that transpiles to Rust</p>
+                <h1 class="hero-kicker">Rust performance with Go productivity</h1>
+                <p class="hero-body">
+                    Write clean, indentation-based code. Get a native binary with zero
+                    garbage-collection pauses. The compiler fights the borrow checker
+                    so you don't have to.
+                </p>
+                <div class="hero-actions">
+                    <a class="nav-btn nav-btn-accent hero-cta" href="../playground/index.html">Try in playground</a>
+                    <a class="nav-btn nav-btn-ghost hero-cta" href="#quickstart">Install locally</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Side-by-side examples ──────────────────────────────────────── -->
+        <section class="examples" id="examples">
+            <div class="examples-inner">
+                <h2 class="section-heading">See the difference</h2>
+                <p class="section-sub">Rust's power without Rust's pain. Six real patterns where Buff removes the friction.</p>
+
+                <!-- Example 1: Hello World -->
+                <article class="example" data-example="hello">
+                    <h3 class="example-title">Hello, world</h3>
+                    <div class="example-grid">
+                        <div class="example-col example-col-rust">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-rust">Rust</span>
+                                <span class="col-label">Verbose ceremony</span>
+                            </div>
+                            <pre class="col-code"><code>fn main() {
+    println!("Olá, Buff!");
+}</code></pre>
+                        </div>
+                        <div class="example-col example-col-buff">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-buff">Buff</span>
+                                <span class="col-label">Indentation-based</span>
+                            </div>
+                            <pre class="col-code"><code>func main():
+    print("Olá, Buff!")</code></pre>
+                        </div>
+                        <div class="example-col example-col-why">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-why">Why easier</span>
+                            </div>
+                            <div class="col-body">
+                                <p>No braces, no semicolons. Indentation defines blocks. <code>func</code> replaces <code>fn</code>, <code>print</code> is a built-in prelude function. One less concept to learn.</p>
+                                <a class="try-link" data-buff-source="func main():&#10;    print(&quot;Olá, Buff!&quot;)" href="../playground/index.html#s=">Try this in playground →</a>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Example 2: Borrow-checker pain -->
+                <article class="example" data-example="borrow">
+                    <h3 class="example-title">Borrow-checker fights</h3>
+                    <div class="example-grid">
+                        <div class="example-col example-col-rust">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-rust">Rust</span>
+                                <span class="col-label">Ownership headaches</span>
+                            </div>
+                            <pre class="col-code"><code>fn process(data: &amp;Vec&lt;i64&gt;) {
+    let sum: i64 = data.iter().sum();
+    let avg = sum / data.len() as i64;
+    println!("avg: {avg}");
+}</code></pre>
+                        </div>
+                        <div class="example-col example-col-buff">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-buff">Buff</span>
+                                <span class="col-label">No references, no pain</span>
+                            </div>
+                            <pre class="col-code"><code>func process(data: Vector&lt;Int&gt;):
+    let sum = data.iter().sum()
+    let avg = sum / data.len()
+    print("avg: {avg}")</code></pre>
+                        </div>
+                        <div class="example-col example-col-why">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-why">Why easier</span>
+                            </div>
+                            <div class="col-body">
+                                <p>No <code>&amp;</code> references. No <code>as i64</code> casts for simple integer math. The transpiler owns data and emits <code>Arc</code> or clones where needed. You never see a lifetime.</p>
+                                <a class="try-link" data-buff-source="func process(data: Vector&lt;Int&gt;):&#10;    let sum = data.iter().sum()&#10;    let avg = sum / data.len()&#10;    print(&quot;avg: {avg}&quot;)" href="../playground/index.html#s=">Try this in playground →</a>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Example 3: Pattern matching -->
+                <article class="example" data-example="pattern">
+                    <h3 class="example-title">Pattern matching</h3>
+                    <div class="example-grid">
+                        <div class="example-col example-col-rust">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-rust">Rust</span>
+                                <span class="col-label">Match with braces</span>
+                            </div>
+                            <pre class="col-code"><code>fn classify(n: i64) {
+    let label = match n {
+        0 =&gt; "zero",
+        1 =&gt; "one",
+        _ =&gt; "other",
+    };
+    println!("{label}");
+}</code></pre>
+                        </div>
+                        <div class="example-col example-col-buff">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-buff">Buff</span>
+                                <span class="col-label">Clean one-liners</span>
+                            </div>
+                            <pre class="col-code"><code>func classify(n: Int):
+    match n { 0 =&gt; print("zero"), 1 =&gt; print("one"), _ =&gt; print("other") }</code></pre>
+                        </div>
+                        <div class="example-col example-col-why">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-why">Why easier</span>
+                            </div>
+                            <div class="col-body">
+                                <p>Compact <code>match</code> on a single line when arms are simple. No variable binding boilerplate. The <code>_</code> catch-all works the same as Rust's.</p>
+                                <a class="try-link" data-buff-source="func classify(n: Int):&#10;    match n { 0 =&gt; print(&quot;zero&quot;), 1 =&gt; print(&quot;one&quot;), _ =&gt; print(&quot;other&quot;) }" href="../playground/index.html#s=">Try this in playground →</a>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Example 4: Error handling -->
+                <article class="example" data-example="errors">
+                    <h3 class="example-title">Error handling</h3>
+                    <div class="example-grid">
+                        <div class="example-col example-col-rust">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-rust">Rust</span>
+                                <span class="col-label">Boilerplate returns</span>
+                            </div>
+                            <pre class="col-code"><code>fn half(n: i64) -> Result&lt;i64, Box&lt;dyn Error&gt;&gt; {
+    if n &lt; 2 {
+        return Err("input too small".into());
+    }
+    Ok(n / 2)
+}
+
+fn main() {
+    match half(10) {
+        Ok(v) =&gt; println!("{v}"),
+        Err(_) =&gt; println!("err"),
+    }
+}</code></pre>
+                        </div>
+                        <div class="example-col example-col-buff">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-buff">Buff</span>
+                                <span class="col-label">Ergonomic Result</span>
+                            </div>
+                            <pre class="col-code"><code>func half(n: Int) -> Result&lt;Int, Error&gt;:
+    if n &lt; 2:
+        return Error("input too small")
+    return Ok(n / 2)
+
+func main():
+    let result = half(10)
+    match result { Ok(v) =&gt; print(v), Err(_) =&gt; print(0) }</code></pre>
+                        </div>
+                        <div class="example-col example-col-why">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-why">Why easier</span>
+                            </div>
+                            <div class="col-body">
+                                <p>No <code>Box&lt;dyn Error&gt;</code>. No <code>.into()</code>. The builtin <code>Error("msg")</code> constructor maps to Rust's <code>Err(Error::new(...))</code>. The <code>?</code> operator works identically to Rust for propagation.</p>
+                                <a class="try-link" data-buff-source="func half(n: Int) -> Result&lt;Int, Error&gt;:&#10;    if n &lt; 2:&#10;        return Error(&quot;input too small&quot;)&#10;    return Ok(n / 2)&#10;&#10;func main():&#10;    let result = half(10)&#10;    match result { Ok(v) =&gt; print(v), Err(_) =&gt; print(0) }" href="../playground/index.html#s=">Try this in playground →</a>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Example 5: Async without await -->
+                <article class="example" data-example="async">
+                    <h3 class="example-title">Async without the coloring problem</h3>
+                    <div class="example-grid">
+                        <div class="example-col example-col-rust">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-rust">Rust</span>
+                                <span class="col-label">Function coloring</span>
+                            </div>
+                            <pre class="col-code"><code>async fn fetch_value() -> i64 {
+    42
+}
+
+async fn pipeline() -> i64 {
+    fetch_value().await
+}
+
+#[tokio::main]
+async fn main() {
+    let value = pipeline().await;
+    println!("{value}");
+
+    let handle = tokio::spawn(async move {
+        fetch_value().await
+    });
+    let answer = handle.await.unwrap();
+    println!("{answer}");
+}</code></pre>
+                        </div>
+                        <div class="example-col example-col-buff">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-buff">Buff</span>
+                                <span class="col-label">No await keyword</span>
+                            </div>
+                            <pre class="col-code"><code>async func fetch_value() -> Int:
+    return 42
+
+func pipeline() -> Int:
+    return fetch_value()
+
+func main():
+    let value = pipeline()
+    print(value)
+    let task = spawn fetch_value()
+    let answer = task.result()
+    print(answer)</code></pre>
+                        </div>
+                        <div class="example-col example-col-why">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-why">Why easier</span>
+                            </div>
+                            <div class="col-body">
+                                <p>No <code>.await</code> keyword. Async propagates automatically through the call graph. <code>spawn</code> creates tasks, <code>.result()</code> replaces <code>.await</code>. No <code>#[tokio::main]</code>, no function coloring.</p>
+                                <a class="try-link" data-buff-source="async func fetch_value() -> Int:&#10;    return 42&#10;&#10;func pipeline() -> Int:&#10;    return fetch_value()&#10;&#10;func main():&#10;    let value = pipeline()&#10;    print(value)&#10;    let task = spawn fetch_value()&#10;    let answer = task.result()&#10;    print(answer)" href="../playground/index.html#s=">Try this in playground →</a>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- Example 6: Closures and collections -->
+                <article class="example" data-example="closures">
+                    <h3 class="example-title">Closures and collections</h3>
+                    <div class="example-grid">
+                        <div class="example-col example-col-rust">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-rust">Rust</span>
+                                <span class="col-label">Verbose closures</span>
+                            </div>
+                            <pre class="col-code"><code>fn main() {
+    let doubled: Vec&lt;i64&gt; = vec![1, 2, 3, 4, 5]
+        .iter()
+        .map(|x| x * 2)
+        .collect();
+    println!("{}", doubled[4]);
+
+    let stacked: Vec&lt;i64&gt; = vec![1, 2, 3]
+        .into_iter()
+        .map(|y| y * 2)
+        .map(|y| y + 1)
+        .collect();
+    println!("{}", stacked[0]);
+}</code></pre>
+                        </div>
+                        <div class="example-col example-col-buff">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-buff">Buff</span>
+                                <span class="col-label">Chained and clean</span>
+                            </div>
+                            <pre class="col-code"><code>func main():
+    let doubled = [1, 2, 3, 4, 5].map({ x =&gt; x * 2 })
+    print(doubled[4])
+    let stacked = [1, 2, 3].map({ x =&gt; x * 2 }).map({ y =&gt; y + 1 })
+    print(stacked[0])</code></pre>
+                        </div>
+                        <div class="example-col example-col-why">
+                            <div class="col-header">
+                                <span class="col-tag col-tag-why">Why easier</span>
+                            </div>
+                            <div class="col-body">
+                                <p>No <code>.iter()</code>, no <code>.collect()</code>, no type annotations on the binding. Lambdas use <code>{ x =&gt; body }</code> syntax. Chains read left-to-right naturally.</p>
+                                <a class="try-link" data-buff-source="func main():&#10;    let doubled = [1, 2, 3, 4, 5].map({ x =&gt; x * 2 })&#10;    print(doubled[4])&#10;    let stacked = [1, 2, 3].map({ x =&gt; x * 2 }).map({ y =&gt; y + 1 })&#10;    print(stacked[0])" href="../playground/index.html#s=">Try this in playground →</a>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+            </div>
+        </section>
+
+        <!-- ── Quick start ─────────────────────────────────────────────────── -->
+        <section class="quickstart" id="quickstart">
+            <div class="quickstart-inner">
+                <h2 class="section-heading">Quick start</h2>
+                <div class="quickstart-steps">
+                    <div class="step">
+                        <div class="step-num">1</div>
+                        <div class="step-content">
+                            <p class="step-label">Install</p>
+                            <pre class="step-code"><code>cargo install --path crates/buff-lang-cli --locked</code></pre>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">2</div>
+                        <div class="step-content">
+                            <p class="step-label">Write your first program</p>
+                            <pre class="step-code"><code>print("Rust performance with Go productivity")</code></pre>
+                            <p class="step-hint">Save as <code>hello.buff</code></p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">3</div>
+                        <div class="step-content">
+                            <p class="step-label">Run it</p>
+                            <pre class="step-code"><code>buff run hello.buff</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Feature strip ───────────────────────────────────────────────── -->
+        <section class="features">
+            <div class="features-inner">
+                <h2 class="section-heading">What Buff removes</h2>
+                <div class="feature-grid">
+                    <div class="feature">
+                        <span class="feature-strike">Lifetime annotations</span>
+                        <span class="feature-note">Compiler handles ownership</span>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-strike">The borrow checker</span>
+                        <span class="feature-note">Emits "easy" Rust only</span>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-strike">Function coloring</span>
+                        <span class="feature-note">Async propagates automatically</span>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-strike">Braces for control flow</span>
+                        <span class="feature-note">Indentation defines blocks</span>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-strike">Null pointers</span>
+                        <span class="feature-note">Only Option&lt;T&gt; exists</span>
+                    </div>
+                    <div class="feature">
+                        <span class="feature-strike">Garbage collection</span>
+                        <span class="feature-note">Native via rustc + LLVM</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <span class="footer-copy">Buff language. Open source under MIT + Apache-2.0.</span>
+            <a class="footer-link" href="https://github.com/buff-lang/buff" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+        </div>
+    </footer>
+
+    <script src="./app.js"></script>
+</body>
+</html>
