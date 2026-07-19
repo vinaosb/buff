@@ -123,7 +123,7 @@ Deliver tooling that makes Buff the obvious choice for Rust devs who want Rust's
 - **NO auto-pulling between registries** — Buff packages and Rust crates are separate; bindgen is the only bridge
 - **NO compiler-TDD-everywhere** — use protocol-conformance tests for LSP/DAP, corpus for tree-sitter, Playwright for playground
 - **NO `buff audit` with Rust CVE database** — Buff-advisories only (defer RustSec integration to v2.0)
-- **NO premature optimization** — LSP starts with full reparse (incremental is v2.0 non-goal for Phase 1-2)
+- **NO premature optimization** — LSP starts with full reparse (incremental is v2.0 non-goal for Phase 1-2; aligns with v1.0 T91 deferral)
 - **NO bindgen for arbitrary generic/trait-heavy Rust crates** — extern-C + concrete types only in v1.3
 - **NO server-side playground execution** — transpile-only (shows `.buff`→`.rs`)
 - **NO accounts/auth in playground** — anonymous, ephemeral, share-by-URL
@@ -194,7 +194,7 @@ Phase 1: ADOPTION (capture Rust-curious — BARE MINIMUM)
 
 Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
-  v1.4 "Stdlib + Ecosystem foundations" (v1.0 already ships File/HTTP/JSON)
+  v1.4 "Stdlib + Ecosystem foundations" (v1.0 defers File/HTTP/JSON to v1.4 — see T124+ below)
   ├── DateTime (chrono)                          [deep]
   ├── Log (tracing)                              [unspecified-high]
   ├── Regex (regex)                              [unspecified-high]
@@ -227,7 +227,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   ├── Execution engine + cross-cell state        [deep]
   └── Rich display + introspection               [deep]
 
-  v1.8 "Web/frontend foundations" (depends: v1.3 bindgen + T121b PoC, T58 Wasm)
+  v1.8 "Web/frontend foundations" (depends: v1.3 bindgen + T121b PoC, T114 Wasm)
   ├── Wrap Dioxus core (builds on v1.3 PoC)      [deep]
   ├── buff ui dev (hot reload server)            [unspecified-high]
   └── Tauri scaffolding                          [quick]
@@ -262,14 +262,14 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 | Release | Depends On | Blocks | Parallelizable With |
 |---|---|---|---|
-| v1.1 | v1.0 (T58 Wasm) | v1.2 (tree-sitter) | — |
+| v1.1 | v1.0 (T114 playground prerequisite: Wasm target) | v1.2 (tree-sitter) | — |
 | v1.2 | v1.1 (tree-sitter), v1.0 (compiler APIs) | v1.6 (VSCode pattern) | v1.3 |
 | v1.3 | v1.0 (extern keyword, Cargo) | v1.8 (bindgen + T121b Dioxus PoC gate) | v1.2 |
 | v1.4 | v1.0 (buff.toml) | v1.6 (registry) | v1.5, v1.7, v1.10 |
 | v1.5 | v1.0 | — | v1.4, v1.7, v1.10 |
 | v1.6 | v1.4 (git deps) | — | v1.5, v1.7, v1.8, v1.10 |
 | v1.7 | v1.0; **T129b depends on T125a/b (shared eval core)** | — | v1.4, v1.6, v1.10 (NOT v1.5 — T129b blocked on T125a/b) |
-| v1.8 | v1.3 (bindgen + T121b PoC verdict PASS), T58 (Wasm) | v1.9 | v1.6, v1.7, v1.10 |
+| v1.8 | v1.3 (bindgen + T121b PoC verdict PASS), T114 (playground prerequisite: Wasm target) | v1.9 | v1.6, v1.7, v1.10 |
 | v1.9 | v1.8 (Dioxus wrap) ⚠️ | — | — (language change, sequential) |
 | v1.10 | T60 (source maps) | — | v1.4-v1.8, v1.11 |
 | v1.11 | v1.0 (compiler pipeline for T138c verification), v1.5 (T125c REPL file eval, reused by T138a) | — | v1.10 |
@@ -1245,7 +1245,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - `Path`: `Path.join(a, b)`, `.parent() -> Option<Path>`, `.extension() -> Option<String>`, `.basename() -> String`, `.exists() -> Bool` — wrap `std::path::Path`
   - `Dir`: `Dir.list(path) -> Vector<String>`, `Dir.create(path)`, `Dir.remove(path)`, `Dir.walk(path) -> Vector<Path>` — wrap `std::fs::read_dir`, `walkdir` crate
   - `Tempfile`: `Tempfile.create() -> Path` (temp file in system temp dir), `Tempfile.dir() -> Path` — wrap `tempfile` crate
-  - All prelude-implicit. Complements existing File I/O (v1.0 T61).
+  - All prelude-implicit. Establishes File I/O (replaces deferred v1.0 T61).
 
   **Leverages**: `std::path::Path`, `std::fs`, `tempfile` crate, `walkdir` crate.
 
