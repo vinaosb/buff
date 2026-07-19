@@ -136,7 +136,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: `buff check file_with_type_error.buff` → exit 1. Evidence: task-55-check.txt
   **Commit**: `feat(cli): implement buff check type-checker and linter`
 
-- [ ] **T56**: `buff build --release` [quick]
+- [x] **T56**: `buff build --release` [quick]
   **What to do** (TDD): RED: --release → cargo build --release with LTO. Default → debug. GREEN: propagate --release flag, inject [profile.release] lto=true.
   **Acceptance**: `cargo test -p buff-lang-cli build_release` passes. LTO enabled in release.
   **QA**: `buff build --release` → assert Cargo.toml has lto=true. Evidence: task-56-release.txt

@@ -19,11 +19,15 @@ use anyhow::{Context, Result};
 
 use crate::pipeline;
 
-/// Entry point for `buff run <FILE> [-- ARGS]...`.
+/// Entry point for `buff run <FILE> [-- ARGS]... [--release]`.
 ///
 /// - Compiles `file` to Rust + executable (the executable goes into
 ///   `std::env::temp_dir().join("buff-run")` so it never pollutes the
 ///   user's source tree).
+/// - When `release` is `true`, compiles with release-grade optimization
+///   (T56): `-C lto=fat -C opt-level=3 -C codegen-units=1`. Off by default
+///   — `buff run`'s tight edit-run loop usually values compile speed over
+///   runtime speed.
 /// - Executes the compiled program with `args`, inheriting stdio.
 /// - Cleans up both the executable and the `.rs` file.
 /// - If the program exits non-zero, exits the `buff` process with the same
@@ -34,7 +38,7 @@ use crate::pipeline;
 /// Propagates pipeline errors. A non-zero program exit code is *not* an
 /// `Err` from this function — instead the process exits directly so the exit
 /// code is preserved.
-pub fn run(file: &Path, args: &[String]) -> Result<()> {
+pub fn run(file: &Path, args: &[String], release: bool) -> Result<()> {
     let compile_out = pipeline::compile_to_rust(file)?;
 
     // Build a deterministic temp location for the executable.
@@ -48,7 +52,9 @@ pub fn run(file: &Path, args: &[String]) -> Result<()> {
         .unwrap_or_else(|| std::ffi::OsString::from("buff_program"));
     let exe_stem = pipeline::with_exe_extension(&temp_dir.join(stem));
 
-    let exe_path = pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &exe_stem, file)?;
+    let mode = pipeline::BuildMode::from_release_flag(release);
+    let exe_path =
+        pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &exe_stem, file, mode)?;
 
     // Execute, capturing output so runtime panics can be translated (T16).
     let output = Command::new(&exe_path)

@@ -13,10 +13,16 @@ use buff_lang_cli::scaffold;
 fn main() -> Result<()> {
     let args = Cli::parse();
     match args.command {
-        Command::Build { file, output } => {
-            buff_lang_cli::commands::build::run(&file, output.as_deref())
-        }
-        Command::Run { file, args } => buff_lang_cli::commands::run::run(&file, &args),
+        Command::Build {
+            file,
+            output,
+            release,
+        } => buff_lang_cli::commands::build::run(&file, output.as_deref(), release),
+        Command::Run {
+            file,
+            args,
+            release,
+        } => buff_lang_cli::commands::run::run(&file, &args, release),
         Command::New {
             name,
             lib,

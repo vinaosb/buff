@@ -287,11 +287,18 @@ pub fn run_tests(file: &Path, pattern: &str) -> Result<TestReport> {
         .with_context(|| format!("failed to write `{}`", rust_file.display()))?;
 
     // 6. Compile with rustc (reuse the existing pipeline helper so rustc
-    //    diagnostics are translated `.rs`→`.buff`).
+    //    diagnostics are translated `.rs`→`.buff`). Test compilation stays
+    //    in BuildMode::Debug for fast iteration — release-grade LTO would
+    //    slow the test loop without changing which tests pass.
     let exe_stem = crate::pipeline::with_exe_extension(
         &temp_dir.join(format!("{}_test", stem.to_string_lossy())),
     );
-    let exe_path = crate::pipeline::compile_rust_to_exe(&rust_file, &exe_stem, file)?;
+    let exe_path = crate::pipeline::compile_rust_to_exe(
+        &rust_file,
+        &exe_stem,
+        file,
+        crate::pipeline::BuildMode::Debug,
+    )?;
 
     // 7. Execute, capturing stdout.
     let output = Command::new(&exe_path)

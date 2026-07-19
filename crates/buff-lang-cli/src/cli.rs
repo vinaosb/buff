@@ -2,9 +2,14 @@
 //!
 //! Built on [`clap`] derive. Subcommands supported:
 //!
-//! - `buff build <FILE>` — compile a `.buff` file to a native executable.
-//! - `buff run <FILE> [ARGS]...` — compile and immediately execute, cleaning
-//!   up temporary artifacts afterwards.
+//! - `buff build <FILE> [--release]` — compile a `.buff` file to a native
+//!   executable. `--release` (T56) compiles with `-C opt-level=3 -C lto=fat
+//!   -C codegen-units=1` for maximum optimization at the cost of slower
+//!   compile times; default is the fast-debug profile (mirrors `cargo build`
+//!   vs `cargo build --release`).
+//! - `buff run <FILE> [ARGS]... [--release]` — compile and immediately
+//!   execute, cleaning up temporary artifacts afterwards. `--release` selects
+//!   the release optimization profile (T56).
 //! - `buff new <NAME> [--lib|--server|--gpu|--workspace]` — scaffold a new
 //!   Buff project in a fresh `<NAME>/` directory. Default (no flag) produces
 //!   a runnable binary; the flags select alternative starter layouts (T112).
@@ -48,6 +53,13 @@ pub enum Command {
         /// platform-appropriate executable extension).
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Build with release optimizations: `-C opt-level=3 -C lto=fat
+        /// -C codegen-units=1` (T56). Slower to compile, faster to run.
+        /// Mirrors `cargo build --release`. Default (omitted) keeps the
+        /// fast-debug profile used since v0.1.
+        #[arg(long)]
+        release: bool,
     },
 
     /// Compile a `.buff` file and immediately execute it.
@@ -62,6 +74,12 @@ pub enum Command {
         /// Arguments passed verbatim to the compiled program (after `--`).
         #[arg(last = true)]
         args: Vec<String>,
+
+        /// Build with release optimizations before executing (T56). Off by
+        /// default — debug compiles are faster, which usually matters more
+        /// for `buff run`'s tight edit-run loop than the runtime speedup.
+        #[arg(long)]
+        release: bool,
     },
 
     /// Create a new Buff project in a fresh `<NAME>/` directory.

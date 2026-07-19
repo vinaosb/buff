@@ -331,7 +331,7 @@ fn test_new_generated_project_runs() {
     // doesn't let us assert — so spawn the `buff` lib pipeline via a captured
     // Command isn't trivial; instead we call the run entrypoint and rely on
     // the fact that it prints to stdout that the test runner captures.
-    let result = commands::run::run(&main_path, &[]);
+    let result = commands::run::run(&main_path, &[], false);
     cleanup(&workdir);
 
     result.expect("generated `buff new` project should run end-to-end");

@@ -47,7 +47,7 @@ fn cleanup(path: &std::path::Path) {
 #[test]
 fn test_run_nonexistent_file_returns_clear_error() {
     let bogus = temp_root().join("no-such-file.buff");
-    let err = commands::run::run(&bogus, &[]).unwrap_err();
+    let err = commands::run::run(&bogus, &[], false).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.contains("failed to read"),
@@ -62,7 +62,7 @@ fn test_run_invalid_syntax_returns_error_before_rustc() {
     let file = write_fixture("run_invalid.buff", src);
     let rs_path = file.with_extension("rs");
 
-    let err = commands::run::run(&file, &[]).unwrap_err();
+    let err = commands::run::run(&file, &[], false).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.contains("parse error"),
@@ -99,7 +99,7 @@ fn test_run_ola_buff_end_to_end() {
     let src = "func main():\n    print(\"Olá, Buff!\")\n";
     let file = write_fixture("run_ola.buff", src);
 
-    let result = commands::run::run(&file, &[]);
+    let result = commands::run::run(&file, &[], false);
 
     cleanup(&file);
     // After run, the .rs file should have been cleaned up; remove if lingering.
@@ -119,7 +119,7 @@ fn test_run_cleans_up_rust_file_after_success() {
     let file = write_fixture("run_cleanup.buff", src);
     let rs_path = file.with_extension("rs");
 
-    commands::run::run(&file, &[]).expect("run should succeed");
+    commands::run::run(&file, &[], false).expect("run should succeed");
 
     assert!(
         !rs_path.exists(),
@@ -141,7 +141,7 @@ fn test_run_cleans_up_temp_executable_after_success() {
     let src = "func main():\n    print(1)\n";
     let file = write_fixture("run_exe_cleanup.buff", src);
 
-    commands::run::run(&file, &[]).expect("run should succeed");
+    commands::run::run(&file, &[], false).expect("run should succeed");
 
     let temp_exe_dir = std::env::temp_dir().join("buff-run");
     // The exe name is `<file-stem>` with platform extension; verify it's gone.
@@ -178,7 +178,7 @@ fn test_run_args_passed_to_program() {
     let src = "func main():\n    print(\"args ok\")\n";
     let file = write_fixture("run_args.buff", src);
 
-    let result = commands::run::run(&file, &["alpha".to_string(), "beta".to_string()]);
+    let result = commands::run::run(&file, &["alpha".to_string(), "beta".to_string()], false);
 
     cleanup(&file);
     cleanup(&file.with_extension("rs"));
