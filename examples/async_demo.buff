@@ -19,7 +19,8 @@
 // external crates are not wired (T32 documented this deferral). The codegen
 // itself is fully tested in
 // crates/buff-lang-codegen-rust/tests/async_codegen.rs. End-to-end async
-// execution is a v1.0 runtime concern (buff-lang-runtime stub).
+// execution requires the Cargo-project pipeline (multi-crate linking for
+// tokio), which is deferred to post-v1.0 T120 (v1.3 "Cargo polish").
 // See .sisyphus/notepads/buff-v05-language/decisions.md (T31, T32).
 
 async func fetch_value() -> Int:

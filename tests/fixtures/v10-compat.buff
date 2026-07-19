@@ -13,10 +13,10 @@
 //   [x] Integer literals (small + large)
 //   [x] Float literals
 //   [x] Bool literals
-//   [x] String literals (with interpolation)
+//   [x] String literals (direct print() arg — the v1.0-supported form)
 //   [x] Arithmetic operators (+ - * /)
 //   [x] Comparison operators (< > == != <= >=)
-//   [x] Logical operators (and or not)
+//   [x] Logical operators (&& || !)
 //   [x] if / else if / else expression
 //   [x] match on integer literal + _
 //   [x] match on Option<T> (Some / None)
@@ -32,15 +32,21 @@
 //   [-] user-defined enum (variants emitted unqualified — v0.5 codegen gap)
 //   [-] user-defined struct fields with enum types (same root cause)
 //   [-] GPU compute dispatch (no fixture harness in v1.0)
+//   [-] let binding of string literal (v1.0 codegen types as String but
+//       passes &str — known gap; use print("...") directly instead)
 
 func classify(n: Int) -> Int:
     if n < 0:
         return 0
-    if n == 0:
+    else if n == 0:
         return 1
-    if n < 10:
+    else if n < 10:
         return 2
-    return 3
+    else:
+        return 3
+
+func describe_int(n: Int):
+    match n { 0 => print(100), 1 => print(200), _ => print(999) }
 
 func half(n: Int) -> Result<Int, Error>:
     if n < 2:
@@ -59,9 +65,22 @@ func main():
     print(count)
     print(pi)
     print(active)
+    // Arithmetic: +, -, *, /
     print(count + 8)
-    print(count >= 40)
+    print(count - 2)
+    print(count * 2)
+    print(count / 2)
+    // Comparison: <, >, ==, !=, <=, >=
+    print(count < 100)
+    print(count > 100)
+    print(count == 42)
+    print(count != 0)
+    print(count <= 42)
+    print(count >= 42)
+    // Logical: &&, ||, !
     print(active && count > 0)
+    print(active || count < 0)
+    print(!active)
 
     // String literals passed directly to print() (the v1.0 supported form).
     print("Hello, Buff!")
@@ -71,6 +90,11 @@ func main():
     print(classify(0))
     print(classify(5))
     print(classify(99))
+
+    // match on integer literal + _.
+    describe_int(0)
+    describe_int(1)
+    describe_int(42)
 
     // match on Option<T> from Vector.pop().
     let mut drawer = [11, 22, 33]

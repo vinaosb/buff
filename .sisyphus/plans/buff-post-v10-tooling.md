@@ -361,7 +361,16 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - `crates/buff-lang-cli/src/fmt.rs:84` (`format_source` entry — where LosslessTree plugs in)
   - `crates/buff-lang-ast/src/lossless.rs:295` (`LosslessTree` API: `comments()`, `piece_at()`, `Piece`, `TriviaKind`)
   - `crates/buff-lang-lexer/src/lexer.rs:130-167` (where comments are currently stripped)
-  - Oracle design spec output from v1.0 cleanup session (review the session transcript)
+
+  **Inline design summary** (Walk-With-Trivia, derived from Oracle spec):
+  - Add `Option<&LosslessTree>` field to `Formatter` struct; thread it through `format_source()` → `format_decls_with_comments()`.
+  - Pre-extract `Vec<&Piece>` of comment pieces (sorted by start byte) at construction; iterate via `next_comment_idx`.
+  - For each AST node `N` with span `[s_N, e_N]`, drain comments in window `(last_emitted_byte, s_N)`:
+    - No newline between `last_emitted_byte` and comment.start → TRAILING (emit inline with space prefix)
+    - Newline but not blank-line-separated → LEADING (emit at current indent before node)
+    - Blank-line-separated both sides → ORPHAN (emit at current indent with forced blank line after)
+  - **Critical insight missed in v1.0 attempt**: `drain_comments_in` MUST be called recursively at every block level (`write_func` body, `write_struct` body, `write_match` arms), NOT just from top-level `write_decls`. The v1.0 attempt failed because drain happened only at indent_level=0.
+  - Idempotency: emit comments at canonical indent (`indent_level × 4 spaces`); re-indent multi-line block comments by stripping original indent and re-applying canonical.
 
   **Acceptance Criteria**:
   - [ ] All 39 existing lossless tests stay green
@@ -1521,7 +1530,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - Build a static site (`errors.buff-lang.org/E1001`) with detailed explanations + examples for each code
   - Error messages reference the code: `error[E1001]: type mismatch...`
 
-  **Leverages**: Rust error index (rust-lang.org/error-index). T59 ariadne diagnostics (deferred to v2.0 — re-enable in T161 if pursuing rich error rendering).
+  **Leverages**: Rust error index (rust-lang.org/error-index). T59 ariadne diagnostics (deferred to v2.0 — re-enable if pursuing rich error rendering when T59 lands).
 
   **References**: `crates/buff-lang-error/src/`, Rust error index format
 
@@ -2148,7 +2157,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - Conditional rendering: `if` in RSX context (existing keyword, reused)
   - List rendering: `for` in RSX context (existing keyword, reused)
 
-  > **⚠️ PREREQUISITE — v1.0 attribute system**: `@component`, `@click`, `@input` all depend on the attribute parsing system planned for v0.5/v1.0 (T49 `@prefer`, T84 `@test.parametrize`). If v1.0 does not ship attribute parsing, T134 is **blocked**. Declare this dependency explicitly in the v1.0 plan. No attribute system → no `@component` → T134 cannot proceed without introducing new keywords (which violates the guardrail).
+  > **⚠️ PREREQUISITE — v1.0 attribute system**: `@component`, `@click`, `@input` all depend on the attribute parsing system shipped in v1.0 (T49 `@prefer` — done at commit 24043de). T84 `@test.parametrize` was deferred to v2.0. If v1.0 attribute parsing is insufficient for UI needs, T134 is **blocked** — declare additional attribute requirements explicitly. No attribute system → no `@component` → T134 cannot proceed without introducing new keywords (which violates the guardrail).
 
   > **Guardrail**: Do NOT add new reserved keywords (e.g., `component`, `state`, `signal`). Use the attribute system (`@component`, `@click`) and regular stdlib function calls (`signal()`). The 25 keywords must remain unchanged even in v1.9 — RSX syntax is the only addition.
 

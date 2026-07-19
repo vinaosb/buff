@@ -25,7 +25,7 @@
 ## Shared Context
 
 ### Architecture
-- **Transpiler pipeline**: `.buff` source → Lexer (logos) → Parser (chumsky) → Type Checker → Rust Codegen (syn/quote/prettyplease) → rustc/LLVM → native binary
+- **Transpiler pipeline**: `.buff` source → Lexer (hand-rolled byte-scanner + offside rule) → Parser (hand-rolled recursive-descent + Pratt) → Type Checker → Rust Codegen (syn/quote/prettyplease) → rustc/LLVM → native binary
 - **Cargo workspace**: 9 crates (`buff-lang-ast`, `buff-lang-lexer`, `buff-lang-parser`, `buff-lang-types`, `buff-lang-codegen-rust`, `buff-lang-codegen-wgsl`, `buff-lang-runtime`, `buff-lang-cli`, `buff-lang-error`)
 - **NO raw string codegen** — MUST use syn/quote/prettyplease
 - **NO raw string WGSL** — MUST use AST-based WGSL codegen

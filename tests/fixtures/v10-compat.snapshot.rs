@@ -16,14 +16,30 @@ impl std::error::Error for Error {}
 fn classify(n: i64) -> i64 {
     if n < 0 {
         return 0;
-    }
-    if n == 0 {
-        return 1;
-    }
-    if n < 10 {
-        return 2;
-    }
-    return 3;
+    } else {
+        if n == 0 {
+            return 1;
+        } else {
+            if n < 10 {
+                return 2;
+            } else {
+                return 3;
+            };
+        };
+    };
+}
+fn describe_int(n: i64) {
+    match n {
+        0 => {
+            println!("{}", 100);
+        }
+        1 => {
+            println!("{}", 200);
+        }
+        _ => {
+            println!("{}", 999);
+        }
+    };
 }
 fn half(n: i64) -> Result<i64, Error> {
     if n < 2 {
@@ -43,13 +59,26 @@ fn main() {
     println!("{}", pi);
     println!("{}", active);
     println!("{}", count + 8);
-    println!("{}", count >= 40);
+    println!("{}", count - 2);
+    println!("{}", count * 2);
+    println!("{}", count / 2);
+    println!("{}", count < 100);
+    println!("{}", count > 100);
+    println!("{}", count == 42);
+    println!("{}", count != 0);
+    println!("{}", count <= 42);
+    println!("{}", count >= 42);
     println!("{}", active && count > 0);
+    println!("{}", active || count < 0);
+    println!("{}", ! active);
     println!("Hello, Buff!");
     println!("{}", classify(- 1));
     println!("{}", classify(0));
     println!("{}", classify(5));
     println!("{}", classify(99));
+    describe_int(0);
+    describe_int(1);
+    describe_int(42);
     let mut drawer: Vec<i8> = vec![11, 22, 33];
     let taken = drawer.pop();
     match taken {
