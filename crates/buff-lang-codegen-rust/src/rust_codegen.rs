@@ -190,6 +190,20 @@ pub struct RustCodegen {
     /// only queried by membership, but consistency with the rest of the
     /// state is easier to reason about).
     hash_safe_structs: BTreeSet<String>,
+    /// T50: names of user-defined structs that participate in a parallel
+    /// combinator (`par_map` / `par_filter` / `par_reduce`) pipeline and
+    /// therefore must be emitted with `#[repr(C)]` +
+    /// `#[derive(..., Copy, bytemuck::Pod, bytemuck::Zeroable)]` so their
+    /// memory layout is stable + GPU-upload-safe (bytemuck cast_slice).
+    /// Populated by [`crate::gpu_alignment::gpu_bound_structs`] at the top
+    /// of [`Self::generate`] BEFORE per-decl lowering, so
+    /// [`Self::lower_struct_decl`] can consult it when choosing between
+    /// the regular derive path and the GPU derive path. A `BTreeSet` for
+    /// deterministic membership + iteration (the T29 flaky-test lesson).
+    /// See the [`gpu_alignment`](crate::gpu_alignment) module docs for the
+    /// detection rule (closure-param annotation OR struct-init inside a
+    /// parallel closure body).
+    gpu_bound_structs: BTreeSet<String>,
     /// T100: deferred expressions collected for the function currently being
     /// lowered, in REGISTRATION order (the order `defer EXPR` statements
     /// appear in the source). Reset at the start of each [`Self::lower_func`].
@@ -277,6 +291,7 @@ impl RustCodegen {
             extern_crates: BTreeSet::new(),
             collected_unions: BTreeMap::new(),
             hash_safe_structs: BTreeSet::new(),
+            gpu_bound_structs: BTreeSet::new(),
             deferred_exprs: Vec::new(),
             func_param_names: BTreeMap::new(),
             func_param_defaults: BTreeMap::new(),
@@ -438,6 +453,15 @@ impl RustCodegen {
         // its fields are Hash-safe, recursively across user struct
         // references (so `struct A { b: B }` is Hash-safe iff `B` is too).
         self.hash_safe_structs = self.compute_hash_safe_structs(decls);
+        // T50: compute the set of user-defined structs that participate
+        // in a parallel combinator pipeline (par_map / par_filter /
+        // par_reduce). Must run BEFORE the main lowering loop so
+        // `lower_struct_decl` can emit `#[repr(C)]` + bytemuck derives
+        // for those structs (GPU-upload-safe layout) without affecting
+        // non-GPU-bound structs. Detection rule: closure param type
+        // annotation OR struct init inside the parallel closure body.
+        // See `gpu_alignment` module docs for the full rationale.
+        self.gpu_bound_structs = crate::gpu_alignment::gpu_bound_structs(decls);
         // T105: collect param-name lists for every user-defined free
         // function in this compilation unit. Used by [`Self::lower_expr`]'s
         // FuncCall arm to REORDER named call arguments to match the
@@ -651,8 +675,26 @@ impl RustCodegen {
             .iter()
             .all(|(_, ty)| type_is_hash_safe(ty, &self.hash_safe_structs));
 
+        // T50: GPU-bound structs (those that flow through a parallel
+        // combinator) get a STRICT SUPERSET of the regular derive list
+        // PLUS `#[repr(C)]` for stable C layout. The GPU path replaces
+        // the regular derive path entirely: it always emits
+        // `Clone, Copy, PartialEq, Debug, bytemuck::Pod,
+        // bytemuck::Zeroable` + `#[repr(C)]`, and NEVER includes `Hash`
+        // (Pod + floats are incompatible with Hash; GPU-bound structs
+        // typically have Float fields anyway). The original T26 hook
+        // (`emit_repr_c` via `mark_struct_repr_c`) is preserved as a
+        // manual override — a struct is emitted with repr(C) if EITHER
+        // the gpu-bound analysis marks it OR the manual hook does.
+        let is_gpu_bound = self.gpu_bound_structs.contains(&s.name.name);
+        let attrs = if is_gpu_bound {
+            gpu_struct_derive_attrs()
+        } else {
+            struct_derive_attrs(emit_repr_c, all_fields_hash_safe)
+        };
+
         Ok(ItemStruct {
-            attrs: struct_derive_attrs(emit_repr_c, all_fields_hash_safe),
+            attrs,
             vis: Visibility::Public(Default::default()),
             struct_token: Default::default(),
             ident: ast_ident_to_syn(&s.name),
@@ -5095,6 +5137,85 @@ fn push_repr_c_attr(attrs: &mut Vec<syn::Attribute>) {
             tokens: quote::quote! { C },
         }),
     });
+}
+
+/// T50: build the derive + repr attribute list for a GPU-bound struct.
+///
+/// GPU-bound structs (those that flow through a `par_map` / `par_filter`
+/// / `par_reduce` combinator — see [`gpu_alignment`](crate::gpu_alignment))
+/// must have a stable C layout so their byte representation is
+/// well-defined for `wgpu` storage-buffer upload / readback via
+/// `bytemuck::cast_slice`. This helper emits:
+///
+/// ```rust,ignore
+/// #[derive(Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+/// #[repr(C)]
+/// ```
+///
+/// # Why `Copy` is unconditional
+///
+/// `bytemuck::Pod` REQUIRES `Copy` (it's part of the unsafe contract —
+/// Pod types must be freely bit-copyable). So every GPU-bound struct
+/// must be `Copy`. For v1.0 we assume GPU-bound structs have only
+/// primitive Pod fields (Int / Float / Bool / Byte / nested Pod structs
+/// / arrays-of-Pod) — if a field is NOT Pod-compatible (e.g. `String`,
+/// `Vec`, `Map`), the generated `#[derive(... bytemuck::Pod ...)]` will
+/// fail to compile and rustc surfaces the error at build time. This is
+/// an acceptable v1.0 limitation: GPU kernels over collections-of-
+/// collections are out of scope.
+///
+/// # Why `Hash` is omitted
+///
+/// `Hash` requires every field to impl `Hash`. `f32` / `f64` (the most
+/// common GPU-struct field types — coordinates, colours, intensities)
+/// do NOT impl `Hash` (NaN is not hashable). So a GPU-bound struct
+/// CANNOT generally derive `Hash`. We omit it unconditionally from the
+/// GPU derive path; users who need Hash on a GPU-bound struct can
+/// implement it manually (a v1.0+ concern).
+///
+/// # Why `PartialEq` is kept
+///
+/// `f32` / `f64` DO impl `PartialEq` (bit-equality, with the usual NaN
+/// caveat). So a GPU-bound struct with Float fields CAN derive
+/// `PartialEq`, and it's useful for testing (asserting CPU-vs-GPU
+/// parity in dispatch tests). Kept unconditional.
+///
+/// # Ordering
+///
+/// Derive attribute first (with the bytemuck paths LAST so users reading
+/// generated source see the familiar std derives first), then
+/// `#[repr(C)]` between the derive and `pub struct` — identical
+/// ordering to [`struct_derive_attrs`].
+fn gpu_struct_derive_attrs() -> Vec<syn::Attribute> {
+    // Build the derive trait list as a single token stream. The order is
+    // `Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable`
+    // — std derives first, bytemuck derives last. Matches the layout
+    // recommended in the `bytemuck` documentation.
+    let mut trait_tokens = proc_macro2::TokenStream::new();
+    trait_tokens.extend(quote::quote! { Clone });
+    trait_tokens.extend(quote::quote! { , });
+    trait_tokens.extend(quote::quote! { Copy });
+    trait_tokens.extend(quote::quote! { , });
+    trait_tokens.extend(quote::quote! { PartialEq });
+    trait_tokens.extend(quote::quote! { , });
+    trait_tokens.extend(quote::quote! { Debug });
+    trait_tokens.extend(quote::quote! { , });
+    trait_tokens.extend(quote::quote! { bytemuck::Pod });
+    trait_tokens.extend(quote::quote! { , });
+    trait_tokens.extend(quote::quote! { bytemuck::Zeroable });
+    let derive_attr = syn::Attribute {
+        pound_token: Default::default(),
+        style: syn::AttrStyle::Outer,
+        bracket_token: Default::default(),
+        meta: syn::Meta::List(syn::MetaList {
+            path: rust_path("derive"),
+            delimiter: syn::MacroDelimiter::Paren(Default::default()),
+            tokens: trait_tokens,
+        }),
+    };
+    let mut attrs = vec![derive_attr];
+    push_repr_c_attr(&mut attrs);
+    attrs
 }
 
 /// T107: is the given [`TypeRef`] "Hash-safe" — i.e. would the corresponding

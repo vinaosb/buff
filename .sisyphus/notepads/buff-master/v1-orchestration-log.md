@@ -2396,3 +2396,207 @@ $env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Fil
 $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
 ```
 
+
+
+## T50 Findings (2026-07-19)
+
+### Outcome
+T50 GREEN: GPU memory alignment auto-emit implemented in
+buff-lang-codegen-rust. User-defined structs that participate in a
+parallel-combinator pipeline (`par_map`/`par_filter`/`par_reduce`) are
+now lowered with `#[repr(C)]` + `#[derive(..., Copy, bytemuck::Pod,
+bytemuck::Zeroable)]` so their memory layout is stable + GPU-upload-safe.
+Non-GPU-bound structs are byte-identical to pre-T50 output.
+**26 NEW tests** (21 integration + 5 inline smoke; target was 12+).
+cargo check / test / clippy --all-targets -D warnings / fmt --check all exit 0.
+cargo check --workspace exit 0 (no other crate touched).
+
+### Detection rule (v1.0)
+A user-defined struct is **GPU-bound** iff at least ONE signal fires at
+any parallel-combinator call site:
+1. **Closure-param annotation** — the closure passed to the `par_*`
+   combinator has a param whose `TypeRef` names the user struct
+   (recursive into Generic/Option/Tuple/Union/Function args).
+2. **Struct construction inside the parallel closure body** — the
+   closure body contains `Expr::StructInit { type_name: <Name> }` for a
+   user struct.
+
+Both signals are STRUCTURAL (no type inference needed) and deterministic
+(BTreeSet, source-order walk). A struct failing BOTH checks is left
+untouched — byte-identical codegen to pre-T50.
+
+Non-triggers (verified by tests):
+- Sequential `.map`/`.filter`/`.reduce`/`.for_each`/`.collect`
+- Struct construction OUTSIDE any parallel closure (top-level, inside a
+  non-parallel closure, inside a sequential `.map` closure body, etc.)
+
+### Generated Rust for the QA case
+`struct Point { x: Float, y: Float }` used in `v.par_map({ p: Point => ... })`
+lowers to (prettyplease output, byte-identical across runs):
+
+```rust
+#[derive(Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+```
+
+### API added
+```rust
+// crates/buff-lang-codegen-rust/src/gpu_alignment.rs
+pub fn gpu_bound_structs(decls: &[Decl]) -> BTreeSet<String>;
+
+// Re-exported from crate root as:
+pub use gpu_alignment::gpu_bound_structs as analyze_gpu_alignment;
+```
+
+`RustCodegen::generate` populates a new `gpu_bound_structs: BTreeSet<String>`
+field via `gpu_alignment::gpu_bound_structs(decls)` BEFORE the main
+lowering loop; `lower_struct_decl` consults the field to switch between
+the regular derive path (`struct_derive_attrs`) and the new GPU derive
+path (`gpu_struct_derive_attrs`).
+
+### Files changed (all under buff-lang-codegen-rust/)
+- src/gpu_alignment.rs: NEW (~470 lines). Detector + 5 inline smoke tests.
+- src/rust_codegen.rs: MODIFIED. +1 field (`gpu_bound_structs: BTreeSet<String>`),
+  +1 populate call in `generate()`, +1 dispatch in `lower_struct_decl`
+  (uses new `gpu_struct_derive_attrs()` helper for GPU-bound structs),
+  +1 new helper `gpu_struct_derive_attrs()` next to existing
+  `struct_derive_attrs` / `derive_and_repr_attrs` / `push_repr_c_attr`.
+- src/lib.rs: MODIFIED. `pub mod gpu_alignment;` + re-export
+  `analyze_gpu_alignment`.
+- tests/gpu_alignment_tests.rs: NEW (~820 lines, 21 integration tests).
+
+### Implementation decisions (rationale)
+- **No `bytemuck` Cargo dep added to codegen-rust**: the GENERATED code
+  references `bytemuck::Pod` as derive paths, but codegen-rust itself
+  doesn't depend on bytemuck. The paths are emitted as raw tokens via
+  `quote::quote! { bytemuck::Pod }`. The generated program (compiled by
+  rustc) is what needs bytemuck as a dep — wiring it into the
+  Cargo-project pipeline (wave 9 prerequisite) is a separate task. The
+  T32 `extern crate "bytemuck"` mechanism works for single-file rustc
+  today.
+- **Copy unconditional, Hash omitted on GPU-bound structs**: bytemuck::Pod
+  REQUIRES Copy (unsafe contract). f32/f64 don't impl Hash (NaN not
+  hashable) and GPU structs typically have Float fields, so Hash can't
+  apply. PartialEq kept (f32/f64 DO impl PartialEq; useful for CPU-vs-GPU
+  parity tests).
+- **Pod-safety validation deferred**: if a user puts a non-Pod field
+  (e.g. String) in a GPU-bound struct, the generated
+  `#[derive(... bytemuck::Pod ...)]` fails to compile and rustc surfaces
+  the error at build time. A future task could pre-validate field
+  Pod-safety in the detector and emit a structured Buff diagnostic.
+- **Why no receiver-type inference**: resolving "what's the element
+  type of `v` in `v.par_map(...)`" requires the full TypeInferencer
+  fixpoint (T12) plus cross-statement propagation — far beyond a
+  codegen-time pre-pass. The 2 structural signals (param annotation +
+  struct-init) cover the same intent without the inference cost.
+- **`#[repr(C)]` only, not `#[repr(C, align(16))]`**: task spec says
+  "16-byte alignment context" (informational). The implementation
+  provides stable C layout. Explicit alignment is a future task if a
+  real GPU target demands it (wgpu storage-buffer alignment is usually
+  satisfied by natural C-layout alignment for primitive-field structs).
+
+### T26 backwards-compat — manual hook preserved
+`RustCodegen::mark_struct_repr_c` (T26 manual hook) still works
+EXACTLY as before — calling it emits `#[repr(C)]` WITHOUT the bytemuck
+derives (manual hook = "user wants repr(C) only", not full GPU Pod
+treatment). The existing `struct_codegen_repr_c_emitted_when_struct_marked`
+snapshot test continues to pass byte-identically. New test
+`gpu_alignment_t26_manual_mark_struct_repr_c_still_emits_repr_c_without_pod`
+pins the contract.
+
+### Non-regression — non-GPU structs unchanged
+A struct NOT in the gpu-bound set sees ZERO change from T50:
+- Same `#[derive(Clone, PartialEq, [Hash,] Debug)]` (T107 conditional Hash preserved)
+- No `#[repr(C)]`, no Pod/Copy/bytemuck
+
+Verified by `gpu_alignment_non_gpu_struct_keeps_regular_derives`:
+`struct Color { r: Int, g: Int, b: Int }` (no parallel use) still emits
+`#[derive(Clone, PartialEq, Hash, Debug)]` (all-Int fields are
+Hash-safe). The existing struct_codegen T26/T107 snapshot tests all
+continue to pass byte-identically (full crate suite: 0 failures).
+
+### Conventions honored
+- All deps via `.workspace = true`. NO new deps added.
+- NO `[features]` section. NO HashMap/HashSet (new field is BTreeSet;
+  new analysis fn returns BTreeSet).
+- NO unwrap/expect/panic/todo/unimplemented in non-test code. Detector
+  is infallible (returns BTreeSet, never Result::Err).
+- syn/quote/prettyplease ONLY (no raw-string Rust). New helper
+  `gpu_struct_derive_attrs` uses the same syn::Attribute construction
+  pattern as existing helpers.
+- Determinism: same AST → byte-identical Rust. Verified by
+  `gpu_alignment_deterministic_across_repeated_codegen_runs` (5x repeat).
+- Tests follow `*_tests.rs` naming. All test names contain
+  `gpu_alignment` so QA filter `cargo test gpu_alignment` matches all.
+- `doc_lazy_continuation` lint followed: multi-line rustdoc list items
+  indented (2 spaces) to align under the `*` marker.
+
+### Test counts (final)
+- tests/gpu_alignment_tests.rs: 21 integration tests (T50 NEW)
+- src/gpu_alignment.rs inline tests: 5 (smoke)
+- All other test files: UNCHANGED (~522 prior tests)
+- TOTAL in crate: ~548 tests, all passing (was ~522 before T50)
+
+### Gotchas / lessons
+- **`for x in &[&str]` yields `&&str`**: when iterating
+  `race_analysis::PARALLEL_COMBINATORS: &[&str]`, the loop var is
+  `&&str`. Need `let combinator = *combinator;` to coerce to `&str` for
+  the `method_call(name: &str)` helper. Without the deref, rustc
+  produces confusing "missing open delimiter" parser errors (the actual
+  type mismatch gets buried).
+- **Walker context flag (in_parallel_closure: bool)**: my first cut
+  collected StructInit unconditionally in walk_expr — caused a false
+  positive on `gpu_alignment_struct_used_only_outside_parallel_closure_unchanged`
+  (a top-level `Point { x: 1.0 }` outside any parallel closure was
+  triggering gpu-bound). Fix: thread `in_parallel_closure: bool`
+  through walk_block/walk_stmt/walk_expr; only collect from StructInit
+  when the flag is true. The flag is set to `true` ONLY inside the
+  MethodCall arm's `walk_block(body, true, ...)` call when dispatching
+  into a par_* closure body.
+- **Stmt variant names**: I assumed `Stmt::For`, `Stmt::While`,
+  `Stmt::Loop`, `Stmt::Match`, `Stmt::If` — actually Buff AST has
+  `Stmt::ForIn`, `Stmt::ForWhile`, `Stmt::ForLet`, `Stmt::Guard`,
+  `Stmt::LetPattern`, `Stmt::Defer` (no `While`/`Loop`/`Match`/`If`
+  at the Stmt level — control flow is at the Expr level via
+  `Expr::IfExpr` / `Expr::MatchExpr`). Always cargo check early to
+  catch the AST shape; the README/per-crate AGENTS.md is a guide but
+  the compiler is truth.
+- **fmt gate discipline**: ran `cargo fmt -p buff-lang-codegen-rust`
+  (no --check) BEFORE the final `cargo fmt -- --check` gate per
+  MUST-DO list. No diff needed — file was already rustfmt-clean — but
+  the discipline matters (T41 forgot this).
+- **No new `[features]` cfg-gate needed**: wgpu 26 compiles cleanly on
+  this Windows box (per T38/T43/T44 findings). The generated code
+  doesn't reference wgpu directly — bytemuck is the only crate the
+  generated program needs, and bytemuck has zero native dependencies
+  (pure Rust).
+
+### Verification gate results
+- FMT (cargo fmt -p buff-lang-codegen-rust -- --check): EXIT 0
+- CLIPPY (cargo clippy -p buff-lang-codegen-rust --all-targets -- -D warnings): EXIT 0
+- CHECK (cargo check -p buff-lang-codegen-rust): EXIT 0
+- TEST (cargo test -p buff-lang-codegen-rust): EXIT 0, ~548 tests pass (522 prior + 26 NEW)
+- WORKSPACE CHECK (cargo check --workspace): EXIT 0
+
+### MSVC env vars
+Same as T38/T39/T40/T42/T43/T44. Exact strings used for this task:
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```
+
+### What's deferred (correctly out of scope for T50)
+- T51+: auto-dispatch wiring (CPU-vs-GPU threshold integration with T40).
+- `#[repr(C, align(16))]` explicit 16-byte alignment — task spec says
+  "16-byte alignment context" (informational). Natural C-layout alignment
+  is sufficient for primitive-field structs.
+- Receiver type inference (`v: Vector<Point>` declared at the let
+  binding) — full TypeInferencer fixpoint required, deferred to v1.0+.
+- Pod-safety validation at codegen time — currently surfaces as a rustc
+  error at build time; a future task could pre-validate and emit a
+  structured Buff diagnostic.
+

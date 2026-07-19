@@ -39,6 +39,7 @@
 pub mod atomic_analysis;
 pub mod context;
 pub mod format;
+pub mod gpu_alignment;
 pub mod move_analysis;
 pub mod race_analysis;
 pub mod rust_codegen;
@@ -52,6 +53,7 @@ use syn::{Ident, Item, ItemFn};
 pub use atomic_analysis::{analyze as analyze_atomic_promotions, AtomicPromotions, AtomicSet};
 pub use context::CodegenContext;
 pub use format::format;
+pub use gpu_alignment::gpu_bound_structs as analyze_gpu_alignment;
 pub use move_analysis::MoveAnalyzer;
 pub use race_analysis::{
     analyze as analyze_parallel_races,

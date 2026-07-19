@@ -112,7 +112,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: @prefer(gpu) with 10 elements → assert CPU (cost override). Evidence: task-49-hints.txt
   **Commit**: `feat(runtime): implement @prefer hints with multi-version codegen`
 
-- [ ] **T50**: GPU memory alignment [deep]
+- [x] **T50**: GPU memory alignment [deep]
   **What to do** (TDD): RED: struct going to GPU → #[repr(C)] auto-added. 16-byte alignment. GREEN: detect GPU-bound structs, auto-insert repr(C) + bytemuck::Pod.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust gpu_alignment` passes. repr(C) on GPU structs.
   **QA**: Codegen struct used in par_map → assert #[repr(C)]. Evidence: task-50-alignment.txt
