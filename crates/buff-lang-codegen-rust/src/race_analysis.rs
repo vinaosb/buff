@@ -219,13 +219,44 @@ pub fn is_assignment_op(op: &buff_lang_ast::op::BinaryOp) -> bool {
 /// before codegen emits a single line of Rust. Returning `Err` here
 /// propagates up through `generate_rust` as a [`CodegenError`]
 /// (via the `From` impl).
+///
+/// Equivalent to [`analyze_with_exemptions`] called with a predicate
+/// that always returns `false` (no captures are exempt).
 pub fn analyze(decls: &[Decl]) -> Result<(), ParallelMutabilityError> {
+    analyze_with_exemptions(decls, |_, _| false)
+}
+
+/// T42: race detection with an exemption predicate.
+///
+/// `is_exempt(func_name, var_name)` returning `true` for a given
+/// (function, captured-variable) pair means the parallel-closure
+/// mutation of that variable is INTENTIONALLY handled (e.g. promoted
+/// to `AtomicI64` by [`crate::atomic_analysis`]) and MUST NOT raise a
+/// [`ParallelMutabilityError`].
+///
+/// The exemption is per-VARIABLE, not per-mutation: if `t` is exempt
+/// in function `foo`, then EVERY captured mutation of `t` inside any
+/// parallel closure in `foo` is suppressed. The atomic-analysis pass
+/// is responsible for ensuring `t`'s mutations are all `+=` before
+/// marking it exempt (so the suppressed mutations are guaranteed to
+/// lower to `fetch_add`).
+///
+/// When in doubt, callers should use the simpler [`analyze`] entry
+/// point — it treats no captures as exempt and reports every captured
+/// mutation in a parallel closure.
+pub fn analyze_with_exemptions<F>(
+    decls: &[Decl],
+    mut is_exempt: F,
+) -> Result<(), ParallelMutabilityError>
+where
+    F: FnMut(&str, &str) -> bool,
+{
     for decl in decls {
         // T41: race analysis only concerns itself with function bodies.
         // Other top-level decls (struct/enum/trait/extend/import/etc.)
         // don't contain executable closure-receiving call sites.
         if let Decl::FuncDecl(func) = decl {
-            analyze_func(func)?;
+            analyze_func_with_exemptions(func, &mut is_exempt)?;
         }
     }
     Ok(())
@@ -238,8 +269,21 @@ pub fn analyze(decls: &[Decl]) -> Result<(), ParallelMutabilityError> {
 /// can drive it directly on a synthesized [`FuncDecl`] without
 /// wrapping in a `Vec<Decl>`.
 pub fn analyze_func(func: &FuncDecl) -> Result<(), ParallelMutabilityError> {
+    analyze_func_with_exemptions(func, &mut |_, _| false)
+}
+
+/// T42: per-function race detection with exemption predicate. See
+/// [`analyze_with_exemptions`] for the semantics of `is_exempt`.
+pub fn analyze_func_with_exemptions<F>(
+    func: &FuncDecl,
+    is_exempt: &mut F,
+) -> Result<(), ParallelMutabilityError>
+where
+    F: FnMut(&str, &str) -> bool,
+{
+    let func_name = func.name.name.clone();
     let mut errors: Vec<ParallelMutabilityError> = Vec::new();
-    walk_block_for_parallel_calls(&func.body, &mut errors);
+    walk_block_for_parallel_calls(&func.body, &func_name, is_exempt, &mut errors);
     // Determinism: errors are collected in source order; pick the
     // first. (There can be more than one — we report the earliest
     // mutation site the walker reached.)
@@ -253,35 +297,53 @@ pub fn analyze_func(func: &FuncDecl) -> Result<(), ParallelMutabilityError> {
 // Walker — find parallel-combinator call sites
 // ---------------------------------------------------------------------
 
-fn walk_block_for_parallel_calls(block: &Block, errors: &mut Vec<ParallelMutabilityError>) {
+fn walk_block_for_parallel_calls<F>(
+    block: &Block,
+    func_name: &str,
+    is_exempt: &mut F,
+    errors: &mut Vec<ParallelMutabilityError>,
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     for stmt in &block.stmts {
-        walk_stmt_for_parallel_calls(stmt, errors);
+        walk_stmt_for_parallel_calls(stmt, func_name, is_exempt, errors);
     }
 }
 
 #[allow(clippy::too_many_lines)]
-fn walk_stmt_for_parallel_calls(stmt: &Stmt, errors: &mut Vec<ParallelMutabilityError>) {
+fn walk_stmt_for_parallel_calls<F>(
+    stmt: &Stmt,
+    func_name: &str,
+    is_exempt: &mut F,
+    errors: &mut Vec<ParallelMutabilityError>,
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     match stmt {
-        Stmt::LetDecl { value, .. } => walk_expr_for_parallel_calls(value, errors),
-        Stmt::LetPattern { value, .. } => walk_expr_for_parallel_calls(value, errors),
-        Stmt::Assignment { target, value, .. } => {
-            walk_expr_for_parallel_calls(target, errors);
-            walk_expr_for_parallel_calls(value, errors);
+        Stmt::LetDecl { value, .. } => {
+            walk_expr_for_parallel_calls(value, func_name, is_exempt, errors)
         }
-        Stmt::ExprStmt(e, _) => walk_expr_for_parallel_calls(e, errors),
-        Stmt::Return(Some(e), _) => walk_expr_for_parallel_calls(e, errors),
+        Stmt::LetPattern { value, .. } => {
+            walk_expr_for_parallel_calls(value, func_name, is_exempt, errors)
+        }
+        Stmt::Assignment { target, value, .. } => {
+            walk_expr_for_parallel_calls(target, func_name, is_exempt, errors);
+            walk_expr_for_parallel_calls(value, func_name, is_exempt, errors);
+        }
+        Stmt::ExprStmt(e, _) => walk_expr_for_parallel_calls(e, func_name, is_exempt, errors),
+        Stmt::Return(Some(e), _) => walk_expr_for_parallel_calls(e, func_name, is_exempt, errors),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::ForIn { iter, body, .. } => {
-            walk_expr_for_parallel_calls(iter, errors);
-            walk_block_for_parallel_calls(body, errors);
+            walk_expr_for_parallel_calls(iter, func_name, is_exempt, errors);
+            walk_block_for_parallel_calls(body, func_name, is_exempt, errors);
         }
         Stmt::ForWhile { cond, body, .. } => {
-            walk_expr_for_parallel_calls(cond, errors);
-            walk_block_for_parallel_calls(body, errors);
+            walk_expr_for_parallel_calls(cond, func_name, is_exempt, errors);
+            walk_block_for_parallel_calls(body, func_name, is_exempt, errors);
         }
         Stmt::ForLet { value, body, .. } => {
-            walk_expr_for_parallel_calls(value, errors);
-            walk_block_for_parallel_calls(body, errors);
+            walk_expr_for_parallel_calls(value, func_name, is_exempt, errors);
+            walk_block_for_parallel_calls(body, func_name, is_exempt, errors);
         }
         Stmt::Guard {
             conditions,
@@ -291,20 +353,29 @@ fn walk_stmt_for_parallel_calls(stmt: &Stmt, errors: &mut Vec<ParallelMutability
             for cond in conditions {
                 match cond {
                     GuardCondition::Let { value, .. } => {
-                        walk_expr_for_parallel_calls(value, errors);
+                        walk_expr_for_parallel_calls(value, func_name, is_exempt, errors);
                     }
                     GuardCondition::Bool(e) => {
-                        walk_expr_for_parallel_calls(e, errors);
+                        walk_expr_for_parallel_calls(e, func_name, is_exempt, errors);
                     }
                 }
             }
-            walk_block_for_parallel_calls(else_block, errors);
+            walk_block_for_parallel_calls(else_block, func_name, is_exempt, errors);
         }
-        Stmt::Defer { expr, .. } => walk_expr_for_parallel_calls(expr, errors),
+        Stmt::Defer { expr, .. } => {
+            walk_expr_for_parallel_calls(expr, func_name, is_exempt, errors)
+        }
     }
 }
 
-fn walk_expr_for_parallel_calls(expr: &Expr, errors: &mut Vec<ParallelMutabilityError>) {
+fn walk_expr_for_parallel_calls<F>(
+    expr: &Expr,
+    func_name: &str,
+    is_exempt: &mut F,
+    errors: &mut Vec<ParallelMutabilityError>,
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     match expr {
         Expr::MethodCall {
             receiver,
@@ -317,30 +388,32 @@ fn walk_expr_for_parallel_calls(expr: &Expr, errors: &mut Vec<ParallelMutability
             if PARALLEL_COMBINATORS.contains(&method.name.as_str()) {
                 for arg in args {
                     if let Expr::Lambda { params, body, .. } = unwrap_named_arg(arg) {
-                        check_parallel_lambda(params, body, errors);
+                        check_parallel_lambda(params, body, func_name, is_exempt, errors);
                     }
                 }
             }
             // Recurse regardless — nested method calls may contain
             // further parallel combinators (e.g.
             // `u.filter(...).par_map({...})`).
-            walk_expr_for_parallel_calls(receiver, errors);
+            walk_expr_for_parallel_calls(receiver, func_name, is_exempt, errors);
             for arg in args {
-                walk_expr_for_parallel_calls(arg, errors);
+                walk_expr_for_parallel_calls(arg, func_name, is_exempt, errors);
             }
         }
         // Recurse into the sub-expressions of every other variant so
         // we catch parallel calls nested inside binary ops, function
         // call args, struct init values, array literals, etc.
         Expr::BinaryOp { lhs, rhs, .. } => {
-            walk_expr_for_parallel_calls(lhs, errors);
-            walk_expr_for_parallel_calls(rhs, errors);
+            walk_expr_for_parallel_calls(lhs, func_name, is_exempt, errors);
+            walk_expr_for_parallel_calls(rhs, func_name, is_exempt, errors);
         }
-        Expr::UnaryOp { operand, .. } => walk_expr_for_parallel_calls(operand, errors),
+        Expr::UnaryOp { operand, .. } => {
+            walk_expr_for_parallel_calls(operand, func_name, is_exempt, errors)
+        }
         Expr::FuncCall { callee, args, .. } => {
-            walk_expr_for_parallel_calls(callee, errors);
+            walk_expr_for_parallel_calls(callee, func_name, is_exempt, errors);
             for a in args {
-                walk_expr_for_parallel_calls(a, errors);
+                walk_expr_for_parallel_calls(a, func_name, is_exempt, errors);
             }
         }
         Expr::IfExpr {
@@ -349,10 +422,10 @@ fn walk_expr_for_parallel_calls(expr: &Expr, errors: &mut Vec<ParallelMutability
             else_block,
             ..
         } => {
-            walk_expr_for_parallel_calls(cond, errors);
-            walk_block_for_parallel_calls(then_block, errors);
+            walk_expr_for_parallel_calls(cond, func_name, is_exempt, errors);
+            walk_block_for_parallel_calls(then_block, func_name, is_exempt, errors);
             if let Some(eb) = else_block {
-                walk_block_for_parallel_calls(eb, errors);
+                walk_block_for_parallel_calls(eb, func_name, is_exempt, errors);
             }
         }
         // Lambda: recurse into its body. The body may itself contain
@@ -360,50 +433,56 @@ fn walk_expr_for_parallel_calls(expr: &Expr, errors: &mut Vec<ParallelMutability
         // `par_map`). The captures of THIS lambda don't matter —
         // they only matter when THIS lambda is itself the arg to a
         // parallel combinator (handled above).
-        Expr::Lambda { body, .. } => walk_block_for_parallel_calls(body, errors),
+        Expr::Lambda { body, .. } => {
+            walk_block_for_parallel_calls(body, func_name, is_exempt, errors)
+        }
         Expr::StructInit { fields, .. } => {
             for (_, v) in fields {
-                walk_expr_for_parallel_calls(v, errors);
+                walk_expr_for_parallel_calls(v, func_name, is_exempt, errors);
             }
         }
         Expr::MatchExpr {
             scrutinee, arms, ..
         } => {
-            walk_expr_for_parallel_calls(scrutinee, errors);
+            walk_expr_for_parallel_calls(scrutinee, func_name, is_exempt, errors);
             for arm in arms {
-                walk_block_for_parallel_calls(&arm.body, errors);
+                walk_block_for_parallel_calls(&arm.body, func_name, is_exempt, errors);
             }
         }
-        Expr::SuspendExpr { inner, .. } => walk_expr_for_parallel_calls(inner, errors),
+        Expr::SuspendExpr { inner, .. } => {
+            walk_expr_for_parallel_calls(inner, func_name, is_exempt, errors)
+        }
         Expr::ArrayLit { elements, .. } => {
             for e in elements {
-                walk_expr_for_parallel_calls(e, errors);
+                walk_expr_for_parallel_calls(e, func_name, is_exempt, errors);
             }
         }
         Expr::Index { base, indices, .. } => {
-            walk_expr_for_parallel_calls(base, errors);
+            walk_expr_for_parallel_calls(base, func_name, is_exempt, errors);
             for i in indices {
-                walk_expr_for_parallel_calls(i, errors);
+                walk_expr_for_parallel_calls(i, func_name, is_exempt, errors);
             }
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
                 if let buff_lang_ast::InterpPart::Expr(e) = part {
-                    walk_expr_for_parallel_calls(e, errors);
+                    walk_expr_for_parallel_calls(e, func_name, is_exempt, errors);
                 }
             }
         }
         Expr::MapLit { entries, .. } => {
             for (k, v) in entries {
-                walk_expr_for_parallel_calls(k, errors);
-                walk_expr_for_parallel_calls(v, errors);
+                walk_expr_for_parallel_calls(k, func_name, is_exempt, errors);
+                walk_expr_for_parallel_calls(v, func_name, is_exempt, errors);
             }
         }
-        Expr::Try { expr, .. } => walk_expr_for_parallel_calls(expr, errors),
-        Expr::Spawn { task, .. } => walk_expr_for_parallel_calls(task, errors),
+        Expr::Try { expr, .. } => walk_expr_for_parallel_calls(expr, func_name, is_exempt, errors),
+        Expr::Spawn { task, .. } => {
+            walk_expr_for_parallel_calls(task, func_name, is_exempt, errors)
+        }
         Expr::Range { start, end, .. } => {
-            walk_expr_for_parallel_calls(start, errors);
-            walk_expr_for_parallel_calls(end, errors);
+            walk_expr_for_parallel_calls(start, func_name, is_exempt, errors);
+            walk_expr_for_parallel_calls(end, func_name, is_exempt, errors);
         }
         Expr::IfLet {
             value,
@@ -411,18 +490,20 @@ fn walk_expr_for_parallel_calls(expr: &Expr, errors: &mut Vec<ParallelMutability
             else_block,
             ..
         } => {
-            walk_expr_for_parallel_calls(value, errors);
-            walk_block_for_parallel_calls(then_block, errors);
+            walk_expr_for_parallel_calls(value, func_name, is_exempt, errors);
+            walk_block_for_parallel_calls(then_block, func_name, is_exempt, errors);
             if let Some(eb) = else_block {
-                walk_block_for_parallel_calls(eb, errors);
+                walk_block_for_parallel_calls(eb, func_name, is_exempt, errors);
             }
         }
         Expr::TupleLit(members, _) => {
             for m in members {
-                walk_expr_for_parallel_calls(m, errors);
+                walk_expr_for_parallel_calls(m, func_name, is_exempt, errors);
             }
         }
-        Expr::NamedArg { value, .. } => walk_expr_for_parallel_calls(value, errors),
+        Expr::NamedArg { value, .. } => {
+            walk_expr_for_parallel_calls(value, func_name, is_exempt, errors)
+        }
         // Leaves — no recursion needed.
         Expr::Literal(_, _) | Expr::Ident(_, _) => {}
     }
@@ -441,12 +522,17 @@ fn unwrap_named_arg(arg: &Expr) -> &Expr {
 }
 
 /// Check one parallel-combinator lambda argument for mutable-capture
-/// races. Appends any detected mutations to `errors` (in source order).
-fn check_parallel_lambda(
+/// races. Appends any detected mutations to `errors` (in source order)
+/// UNLESS the captured variable is exempt per `is_exempt(func_name, var)`.
+fn check_parallel_lambda<F>(
     params: &[buff_lang_ast::common::Param],
     body: &Block,
+    func_name: &str,
+    is_exempt: &mut F,
     errors: &mut Vec<ParallelMutabilityError>,
-) {
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     // Reuse the deterministic capture analysis from buff_lang_types.
     // This returns the set of names the lambda reads or writes that
     // are NOT bound by params or by lets inside the body — i.e. the
@@ -457,7 +543,7 @@ fn check_parallel_lambda(
         // (cheap fast path that also keeps error messages focused).
         return;
     }
-    walk_body_for_captured_mutations(body, &captures, errors);
+    walk_body_for_captured_mutations(body, &captures, func_name, is_exempt, errors);
 }
 
 // ---------------------------------------------------------------------
@@ -465,21 +551,29 @@ fn check_parallel_lambda(
 // closure body
 // ---------------------------------------------------------------------
 
-fn walk_body_for_captured_mutations(
+fn walk_body_for_captured_mutations<F>(
     block: &Block,
     captures: &BTreeSet<String>,
+    func_name: &str,
+    is_exempt: &mut F,
     errors: &mut Vec<ParallelMutabilityError>,
-) {
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     for stmt in &block.stmts {
-        walk_stmt_for_captured_mutations(stmt, captures, errors);
+        walk_stmt_for_captured_mutations(stmt, captures, func_name, is_exempt, errors);
     }
 }
 
-fn walk_stmt_for_captured_mutations(
+fn walk_stmt_for_captured_mutations<F>(
     stmt: &Stmt,
     captures: &BTreeSet<String>,
+    func_name: &str,
+    is_exempt: &mut F,
     errors: &mut Vec<ParallelMutabilityError>,
-) {
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     match stmt {
         Stmt::Assignment {
             target,
@@ -493,39 +587,49 @@ fn walk_stmt_for_captured_mutations(
             if is_assignment_op(op) {
                 if let Expr::Ident(name, _) = target {
                     if captures.contains(&name.name) {
-                        errors.push(ParallelMutabilityError::new(name.name.clone(), *span));
+                        // T42: suppress the error when the captured
+                        // variable has been promoted to AtomicI64 by
+                        // atomic_analysis. The exemption is per-variable
+                        // (not per-mutation): if `t` is exempt, every
+                        // captured mutation of `t` in this function is
+                        // suppressed. Atomic-analysis is responsible for
+                        // ensuring all such mutations are `+=` so they
+                        // lower to `fetch_add`.
+                        if !is_exempt(func_name, &name.name) {
+                            errors.push(ParallelMutabilityError::new(name.name.clone(), *span));
+                        }
                     }
                 }
             }
             // Recurse in case the target or value contains a nested
             // closure with its own mutations of these captures.
-            walk_expr_for_captured_mutations(target, captures, errors);
-            walk_expr_for_captured_mutations(value, captures, errors);
+            walk_expr_for_captured_mutations(target, captures, func_name, is_exempt, errors);
+            walk_expr_for_captured_mutations(value, captures, func_name, is_exempt, errors);
         }
         Stmt::LetDecl { value, .. } => {
-            walk_expr_for_captured_mutations(value, captures, errors);
+            walk_expr_for_captured_mutations(value, captures, func_name, is_exempt, errors);
         }
         Stmt::LetPattern { value, .. } => {
-            walk_expr_for_captured_mutations(value, captures, errors);
+            walk_expr_for_captured_mutations(value, captures, func_name, is_exempt, errors);
         }
         Stmt::ExprStmt(e, _) => {
-            walk_expr_for_captured_mutations(e, captures, errors);
+            walk_expr_for_captured_mutations(e, captures, func_name, is_exempt, errors);
         }
         Stmt::Return(Some(e), _) => {
-            walk_expr_for_captured_mutations(e, captures, errors);
+            walk_expr_for_captured_mutations(e, captures, func_name, is_exempt, errors);
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::ForIn { iter, body, .. } => {
-            walk_expr_for_captured_mutations(iter, captures, errors);
-            walk_body_for_captured_mutations(body, captures, errors);
+            walk_expr_for_captured_mutations(iter, captures, func_name, is_exempt, errors);
+            walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
         }
         Stmt::ForWhile { cond, body, .. } => {
-            walk_expr_for_captured_mutations(cond, captures, errors);
-            walk_body_for_captured_mutations(body, captures, errors);
+            walk_expr_for_captured_mutations(cond, captures, func_name, is_exempt, errors);
+            walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
         }
         Stmt::ForLet { value, body, .. } => {
-            walk_expr_for_captured_mutations(value, captures, errors);
-            walk_body_for_captured_mutations(body, captures, errors);
+            walk_expr_for_captured_mutations(value, captures, func_name, is_exempt, errors);
+            walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
         }
         Stmt::Guard {
             conditions,
@@ -535,47 +639,53 @@ fn walk_stmt_for_captured_mutations(
             for cond in conditions {
                 match cond {
                     GuardCondition::Let { value, .. } => {
-                        walk_expr_for_captured_mutations(value, captures, errors);
+                        walk_expr_for_captured_mutations(
+                            value, captures, func_name, is_exempt, errors,
+                        );
                     }
                     GuardCondition::Bool(e) => {
-                        walk_expr_for_captured_mutations(e, captures, errors);
+                        walk_expr_for_captured_mutations(e, captures, func_name, is_exempt, errors);
                     }
                 }
             }
-            walk_body_for_captured_mutations(else_block, captures, errors);
+            walk_body_for_captured_mutations(else_block, captures, func_name, is_exempt, errors);
         }
         Stmt::Defer { expr, .. } => {
-            walk_expr_for_captured_mutations(expr, captures, errors);
+            walk_expr_for_captured_mutations(expr, captures, func_name, is_exempt, errors);
         }
     }
 }
 
-fn walk_expr_for_captured_mutations(
+fn walk_expr_for_captured_mutations<F>(
     expr: &Expr,
     captures: &BTreeSet<String>,
+    func_name: &str,
+    is_exempt: &mut F,
     errors: &mut Vec<ParallelMutabilityError>,
-) {
+) where
+    F: FnMut(&str, &str) -> bool,
+{
     // (see `walk_expr_for_parallel_calls` for the per-variant
     // recursion rationale — this walker mirrors its shape but
     // searches for ASSIGNMENTS rather than method calls.)
     match expr {
         Expr::MethodCall { receiver, args, .. } => {
-            walk_expr_for_captured_mutations(receiver, captures, errors);
+            walk_expr_for_captured_mutations(receiver, captures, func_name, is_exempt, errors);
             for a in args {
-                walk_expr_for_captured_mutations(a, captures, errors);
+                walk_expr_for_captured_mutations(a, captures, func_name, is_exempt, errors);
             }
         }
         Expr::BinaryOp { lhs, rhs, .. } => {
-            walk_expr_for_captured_mutations(lhs, captures, errors);
-            walk_expr_for_captured_mutations(rhs, captures, errors);
+            walk_expr_for_captured_mutations(lhs, captures, func_name, is_exempt, errors);
+            walk_expr_for_captured_mutations(rhs, captures, func_name, is_exempt, errors);
         }
         Expr::UnaryOp { operand, .. } => {
-            walk_expr_for_captured_mutations(operand, captures, errors);
+            walk_expr_for_captured_mutations(operand, captures, func_name, is_exempt, errors);
         }
         Expr::FuncCall { callee, args, .. } => {
-            walk_expr_for_captured_mutations(callee, captures, errors);
+            walk_expr_for_captured_mutations(callee, captures, func_name, is_exempt, errors);
             for a in args {
-                walk_expr_for_captured_mutations(a, captures, errors);
+                walk_expr_for_captured_mutations(a, captures, func_name, is_exempt, errors);
             }
         }
         Expr::IfExpr {
@@ -584,10 +694,10 @@ fn walk_expr_for_captured_mutations(
             else_block,
             ..
         } => {
-            walk_expr_for_captured_mutations(cond, captures, errors);
-            walk_body_for_captured_mutations(then_block, captures, errors);
+            walk_expr_for_captured_mutations(cond, captures, func_name, is_exempt, errors);
+            walk_body_for_captured_mutations(then_block, captures, func_name, is_exempt, errors);
             if let Some(eb) = else_block {
-                walk_body_for_captured_mutations(eb, captures, errors);
+                walk_body_for_captured_mutations(eb, captures, func_name, is_exempt, errors);
             }
         }
         // Lambda: recurse into its body. A nested closure that
@@ -599,57 +709,57 @@ fn walk_expr_for_captured_mutations(
         // (so mutating a nested-closure-local is correctly NOT
         // flagged).
         Expr::Lambda { body, .. } => {
-            walk_body_for_captured_mutations(body, captures, errors);
+            walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
         }
         Expr::StructInit { fields, .. } => {
             for (_, v) in fields {
-                walk_expr_for_captured_mutations(v, captures, errors);
+                walk_expr_for_captured_mutations(v, captures, func_name, is_exempt, errors);
             }
         }
         Expr::MatchExpr {
             scrutinee, arms, ..
         } => {
-            walk_expr_for_captured_mutations(scrutinee, captures, errors);
+            walk_expr_for_captured_mutations(scrutinee, captures, func_name, is_exempt, errors);
             for arm in arms {
-                walk_body_for_captured_mutations(&arm.body, captures, errors);
+                walk_body_for_captured_mutations(&arm.body, captures, func_name, is_exempt, errors);
             }
         }
         Expr::SuspendExpr { inner, .. } => {
-            walk_expr_for_captured_mutations(inner, captures, errors);
+            walk_expr_for_captured_mutations(inner, captures, func_name, is_exempt, errors);
         }
         Expr::ArrayLit { elements, .. } => {
             for e in elements {
-                walk_expr_for_captured_mutations(e, captures, errors);
+                walk_expr_for_captured_mutations(e, captures, func_name, is_exempt, errors);
             }
         }
         Expr::Index { base, indices, .. } => {
-            walk_expr_for_captured_mutations(base, captures, errors);
+            walk_expr_for_captured_mutations(base, captures, func_name, is_exempt, errors);
             for i in indices {
-                walk_expr_for_captured_mutations(i, captures, errors);
+                walk_expr_for_captured_mutations(i, captures, func_name, is_exempt, errors);
             }
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
                 if let buff_lang_ast::InterpPart::Expr(e) = part {
-                    walk_expr_for_captured_mutations(e, captures, errors);
+                    walk_expr_for_captured_mutations(e, captures, func_name, is_exempt, errors);
                 }
             }
         }
         Expr::MapLit { entries, .. } => {
             for (k, v) in entries {
-                walk_expr_for_captured_mutations(k, captures, errors);
-                walk_expr_for_captured_mutations(v, captures, errors);
+                walk_expr_for_captured_mutations(k, captures, func_name, is_exempt, errors);
+                walk_expr_for_captured_mutations(v, captures, func_name, is_exempt, errors);
             }
         }
         Expr::Try { expr, .. } => {
-            walk_expr_for_captured_mutations(expr, captures, errors);
+            walk_expr_for_captured_mutations(expr, captures, func_name, is_exempt, errors);
         }
         Expr::Spawn { task, .. } => {
-            walk_expr_for_captured_mutations(task, captures, errors);
+            walk_expr_for_captured_mutations(task, captures, func_name, is_exempt, errors);
         }
         Expr::Range { start, end, .. } => {
-            walk_expr_for_captured_mutations(start, captures, errors);
-            walk_expr_for_captured_mutations(end, captures, errors);
+            walk_expr_for_captured_mutations(start, captures, func_name, is_exempt, errors);
+            walk_expr_for_captured_mutations(end, captures, func_name, is_exempt, errors);
         }
         Expr::IfLet {
             value,
@@ -657,19 +767,19 @@ fn walk_expr_for_captured_mutations(
             else_block,
             ..
         } => {
-            walk_expr_for_captured_mutations(value, captures, errors);
-            walk_body_for_captured_mutations(then_block, captures, errors);
+            walk_expr_for_captured_mutations(value, captures, func_name, is_exempt, errors);
+            walk_body_for_captured_mutations(then_block, captures, func_name, is_exempt, errors);
             if let Some(eb) = else_block {
-                walk_body_for_captured_mutations(eb, captures, errors);
+                walk_body_for_captured_mutations(eb, captures, func_name, is_exempt, errors);
             }
         }
         Expr::TupleLit(members, _) => {
             for m in members {
-                walk_expr_for_captured_mutations(m, captures, errors);
+                walk_expr_for_captured_mutations(m, captures, func_name, is_exempt, errors);
             }
         }
         Expr::NamedArg { value, .. } => {
-            walk_expr_for_captured_mutations(value, captures, errors);
+            walk_expr_for_captured_mutations(value, captures, func_name, is_exempt, errors);
         }
         // Leaves — no recursion needed.
         Expr::Literal(_, _) | Expr::Ident(_, _) => {}

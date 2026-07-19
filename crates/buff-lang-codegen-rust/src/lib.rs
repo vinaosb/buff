@@ -36,6 +36,7 @@
 //! assert!(src.contains("fn empty()"));
 //! ```
 
+pub mod atomic_analysis;
 pub mod context;
 pub mod format;
 pub mod move_analysis;
@@ -48,12 +49,14 @@ pub mod rust_codegen;
 // private imports.
 use syn::{Ident, Item, ItemFn};
 
+pub use atomic_analysis::{analyze as analyze_atomic_promotions, AtomicPromotions, AtomicSet};
 pub use context::CodegenContext;
 pub use format::format;
 pub use move_analysis::MoveAnalyzer;
 pub use race_analysis::{
-    analyze as analyze_parallel_races, is_assignment_op, ParallelMutabilityError,
-    PARALLEL_COMBINATORS,
+    analyze as analyze_parallel_races,
+    analyze_with_exemptions as analyze_parallel_races_with_exemptions, is_assignment_op,
+    ParallelMutabilityError, PARALLEL_COMBINATORS,
 };
 pub use rust_codegen::{buff_primitive_to_rust_name, RustCodegen};
 

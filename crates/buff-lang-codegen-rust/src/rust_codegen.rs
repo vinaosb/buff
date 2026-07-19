@@ -84,6 +84,7 @@ use buff_lang_ast::{
 use buff_lang_error::{CodegenError, Diagnostic, Span as BuffSpan};
 use buff_lang_types::{prelude::PreludeFn, FloatWidth, IntWidth, Type, TypeInferencer};
 
+use crate::atomic_analysis::AtomicPromotions;
 use crate::context::CodegenContext;
 use crate::move_analysis::MoveAnalyzer;
 
@@ -236,6 +237,27 @@ pub struct RustCodegen {
     /// resolution at codegen in v0.5). For those, omitted args are left as-
     /// is and Rust will diagnose the arity mismatch.
     func_param_defaults: BTreeMap<String, Vec<Option<Expr>>>,
+    /// T42: program-wide atomic-promotion decisions (function name →
+    /// set of captured-integer accumulators that should be promoted
+    /// to `AtomicI64`). Populated by [`Self::generate`] BEFORE the
+    /// main lowering loop via [`crate::atomic_analysis::analyze`], so
+    /// [`Self::lower_func`] can install the current function's set
+    /// into [`Self::current_atomic_set`] for consultation by the
+    /// `LetDecl`, `Assignment`, and `Expr::Ident` arms.
+    ///
+    /// A [`BTreeMap`] (not [`HashMap`]) for deterministic membership
+    /// and iteration (the T29 flaky-test lesson — never rely on
+    /// hash-seed-dependent iteration for codegen-feeding data).
+    atomic_promotions: AtomicPromotions,
+    /// T42: the set of atomic-promotable captures for the function
+    /// currently being lowered. Reset at the top of each
+    /// [`Self::lower_func`] from [`Self::atomic_promotions`]. The
+    /// `LetDecl` arm consults this to wrap the initializer in
+    /// `AtomicI64::new(...)` (and drop `mut`); the `Assignment` arm
+    /// consults this to lower `t += x` to `t.fetch_add(x as i64,
+    /// Ordering::Relaxed)`; the `Expr::Ident` arm consults this to
+    /// lower bare reads of `t` to `t.load(Ordering::Relaxed)`.
+    current_atomic_set: crate::atomic_analysis::AtomicSet,
 }
 
 impl RustCodegen {
@@ -258,6 +280,8 @@ impl RustCodegen {
             deferred_exprs: Vec::new(),
             func_param_names: BTreeMap::new(),
             func_param_defaults: BTreeMap::new(),
+            atomic_promotions: AtomicPromotions::empty(),
+            current_atomic_set: crate::atomic_analysis::AtomicSet::new(),
         }
     }
 
@@ -303,14 +327,32 @@ impl RustCodegen {
 
     /// T26 hook: mark a struct name to be emitted with `#[repr(C)]` between
     /// the derive attribute and the `pub struct` line. The full GPU-dispatch
-    /// auto-detection that populates this set lands in v1.0; T26 provides the
-    /// emission mechanism only (plus the test
+    /// auto-detection that populates this set lands in v1.0; T26 provides
+    /// the emission mechanism only (plus the test
     /// `struct_codegen_repr_c_emitted_when_struct_marked`).
     ///
     /// Multiple calls accumulate; the marker set is consumed by
     /// [`Self::lower_struct_decl`] when it walks the declaration list.
     pub fn mark_struct_repr_c(&mut self, name: &str) {
         self.repr_c_struct_names.insert(name.to_string());
+    }
+
+    /// T42: is `name` an atomic-promotable capture in the function
+    /// currently being lowered? Consulted by the `LetDecl`,
+    /// `Assignment`, and `Expr::Ident` lowering arms to decide whether
+    /// to emit `AtomicI64::new` / `fetch_add` / `load` lowering.
+    fn is_atomic_var(&self, name: &str) -> bool {
+        self.current_atomic_set.contains_key(name)
+    }
+
+    /// T42: the integer initial value to which the atomic-promoted
+    /// binding was declared (`let mut t = N`). Unused at the call sites
+    /// today (we lower the existing initializer expression directly
+    /// rather than re-materialising the literal), but kept for
+    /// future-proofing and for assertion-style tests.
+    #[allow(dead_code)]
+    fn atomic_initial_value(&self, name: &str) -> Option<i64> {
+        self.current_atomic_set.get(name).copied()
     }
 
     /// Generate a complete [`syn::File`] from a list of Buff declarations.
@@ -332,16 +374,32 @@ impl RustCodegen {
     /// REFACTOR-ready flat-storage pattern shared with the future WGSL
     /// storage-buffer codegen (v1.0).
     pub fn generate(&mut self, decls: &[Decl]) -> Result<File, CodegenError> {
-        // T41: race detection — REJECT before codegen any closure
+        // T42: atomic-promotion analysis. Identifies captured integer
+        // accumulators (`let mut t = <int>`; mutated ONLY by `+=` inside
+        // a `par_map` / `par_reduce` closure) that we can mechanically
+        // promote to `AtomicI64` instead of rejecting as a T41 race.
+        // The resulting [`AtomicPromotions`] set is consulted by
+        // `lower_func` (to install the per-function set) and by the
+        // `LetDecl` / `Assignment` / `Expr::Ident` lowering arms (to
+        // emit `AtomicI64::new` / `fetch_add` / `load`). Runs BEFORE
+        // race analysis so the race detector's exemption predicate can
+        // consult it (every captured mutation of a promoted variable
+        // is suppressed — atomic-analysis has already verified they're
+        // all `+=`, so they'll lower to `fetch_add`).
+        self.atomic_promotions = crate::atomic_analysis::analyze(decls);
+        // T41/T42: race detection — REJECT before codegen any closure
         // passed to a parallel combinator (par_map / par_filter /
         // par_reduce) that mutates a variable captured from the
-        // enclosing scope. Pure detection: T42 will later transform
-        // SOME of these into atomic operations (e.g.
-        // `AtomicI64`-backed accumulators for par_reduce); until
-        // then, every captured-mutable write in a parallel closure
-        // is a hard error. Runs FIRST (before any other pre-pass) so
-        // a clean rejection never produces partial codegen state.
-        crate::race_analysis::analyze(decls)?;
+        // enclosing scope, UNLESS that variable has been promoted to
+        // `AtomicI64` by the T42 atomic-analysis pass above (the
+        // exemption predicate). Pure detection for the non-promotable
+        // cases; the promotable cases are transformed during lowering.
+        // Runs FIRST (before any other pre-pass) so a clean rejection
+        // never produces partial codegen state.
+        let promotions = self.atomic_promotions.clone();
+        crate::race_analysis::analyze_with_exemptions(decls, move |func, var| {
+            promotions.is_promotable(func, var)
+        })?;
         let mut items = Vec::with_capacity(decls.len());
         // T24: emit the builtin Matrix<T> struct + impl on-demand, before
         // any fn. The two items (struct decl + impl block) are prepended so
@@ -715,6 +773,14 @@ impl RustCodegen {
         // Reset move-analysis state and pre-classify Copy vars for this fn.
         self.move_analyzer.reset();
         self.move_analyzer.preanalyze_func(f);
+
+        // T42: install this function's atomic-promotable captures.
+        // The set is consulted by the `LetDecl`, `Assignment`, and
+        // `Expr::Ident` lowering arms to emit `AtomicI64::new(...)` /
+        // `fetch_add(...)` / `load(...)` instead of plain mutable
+        // integer codegen. Reset per function (a different function's
+        // `t` is independent even if it shares the name).
+        self.current_atomic_set = self.atomic_promotions.for_func(&f.name.name);
 
         // T100: reset the per-function deferred-expression accumulator.
         // `Stmt::Defer` arms inside the body (collected by lower_block)
@@ -1370,6 +1436,18 @@ impl RustCodegen {
                 let ident = ast_ident_to_syn(name);
                 let init_expr = self.lower_expr(value)?;
 
+                // T42: AtomicI64-wrap the initializer of a binding
+                // promoted by atomic-analysis. The binding becomes
+                // `let t = std::sync::atomic::AtomicI64::new(N)` (note:
+                // `mut` is DROPPED — the atomic itself is immutable;
+                // interior mutability happens through `&self` methods
+                // like `fetch_add` and `load`). Promotion is a strict
+                // escape hatch from T41's race detector: the binding
+                // is the SAME source-level `let mut t = 0` that would
+                // have raced if naively lowered; promoting it makes
+                // the resulting Rust sound across worker threads.
+                let is_atomic_var = self.is_atomic_var(&name.name);
+
                 // T33: Arc-wrap the initializer of a binding captured
                 // across a `spawn` boundary. The resulting binding has
                 // type `Arc<T>` (rather than `T`); inside spawn bodies
@@ -1381,11 +1459,25 @@ impl RustCodegen {
                 // task — Rust's `Arc` gives sound shared ownership
                 // without exposing `Rc`/`Arc`/`Mutex` syntax in Buff.
                 let is_arc_var = self.move_analyzer.is_arc_var(&name.name);
-                let init_expr = if is_arc_var {
+                let init_expr = if is_atomic_var {
+                    wrap_in_atomic_i64_new(init_expr)
+                } else if is_arc_var {
                     wrap_in_arc_new(init_expr)
                 } else {
                     init_expr
                 };
+
+                // T42: atomic-promoted bindings drop `mut` (the
+                // atomic is immutable; interior mutability is via
+                // `&self` methods). Mirrors the Arc case's annotation
+                // skip: the binding's actual Rust type is `AtomicI64`
+                // (not the `i64` the inferencer derives), so emitting
+                // `let t: i64 = AtomicI64::new(0)` would be
+                // incoherent. Letting Rust infer keeps the generated
+                // source compiling. The user's `mut` and any
+                // explicit type annotation are also dropped — the
+                // promotion rewrites the binding's semantics.
+                let effective_mutable = if is_atomic_var { false } else { *mutable };
 
                 // Run the inferencer on the value so we can emit an
                 // explicit Rust type annotation. If the user wrote an
@@ -1400,7 +1492,7 @@ impl RustCodegen {
                 // generated source compiling. (A future task may compute
                 // the wrapped type explicitly; for v0.5 inference is
                 // simpler and equally correct.)
-                let inferred_syn_ty: Option<SynType> = if is_arc_var {
+                let inferred_syn_ty: Option<SynType> = if is_atomic_var || is_arc_var {
                     None
                 } else if let Some(type_ref) = ty {
                     Some(self.ast_typeref_to_syn(type_ref)?)
@@ -1419,11 +1511,11 @@ impl RustCodegen {
                 let pat = match inferred_syn_ty {
                     Some(ty_syn) => Pat::Type(PatType {
                         attrs: Vec::new(),
-                        pat: Box::new(Self::make_let_pat(ident, *mutable)),
+                        pat: Box::new(Self::make_let_pat(ident, effective_mutable)),
                         colon_token: Default::default(),
                         ty: Box::new(ty_syn),
                     }),
-                    None => Self::make_let_pat(ident, *mutable),
+                    None => Self::make_let_pat(ident, effective_mutable),
                 };
                 let local = syn::Local {
                     attrs: Vec::new(),
@@ -1497,6 +1589,36 @@ impl RustCodegen {
             Stmt::Assignment {
                 target, op, value, ..
             } => {
+                // T42: atomic-promoted `+=` shortcut. If the target
+                // is a bare Ident naming an atomic-promoted binding
+                // and the op is `+=`, lower the whole statement to
+                // `t.fetch_add((rhs) as i64, std::sync::atomic::Ordering::Relaxed);`
+                // — a method-call statement (NOT an assignment). The
+                // return value of `fetch_add` (the previous atomic
+                // value) is discarded, matching the semantics of
+                // Buff's `t += x` (whose result is unit).
+                //
+                // Other compound ops on atomic-promoted vars
+                // (`-=`, `*=`, `/=`, `%=`) should not occur —
+                // atomic-analysis has already verified all mutations
+                // are `+=` before promoting, and T41's race detector
+                // rejects the non-`+=` cases. A plain `=` to an
+                // atomic-promoted var would also be a T41 error
+                // (atomic-analysis only promotes `+=`-only vars).
+                // Defensive: if such a case slips through, emit the
+                // `fetch_add` for `+=` and fall through to the
+                // regular assignment lowering for anything else
+                // (which will not compile downstream — surfacing the
+                // bug rather than silently mis-lowering).
+                if let Expr::Ident(name, _) = &target {
+                    if self.is_atomic_var(&name.name)
+                        && *op == buff_lang_ast::op::BinaryOp::AddAssign
+                    {
+                        let rhs = self.lower_expr(value)?;
+                        let call = atomic_fetch_add_stmt(name, rhs);
+                        return Ok(SynStmt::Expr(call, Some(Default::default())));
+                    }
+                }
                 // The LHS of an assignment is NOT a "use" — it doesn't
                 // consume a move. If the target is a bare Ident, lower it
                 // directly without consulting the move analyzer.
@@ -1658,6 +1780,21 @@ impl RustCodegen {
                 // its own `Arc<T>` handle to the shared data.
                 if self.spawn_depth > 0 && self.move_analyzer.is_arc_var(&name.name) {
                     return Ok(arc_clone_call(name));
+                }
+                // T42: atomic-promoted binding — emit
+                // `t.load(std::sync::atomic::Ordering::Relaxed)`. The
+                // promotion rewrites the binding to `AtomicI64`; reads
+                // of the original integer value must go through `load`
+                // (AtomicI64 has no `Copy` impl and no `Deref<Target=i64>`).
+                // This branch fires for EVERY read of an atomic Ident
+                // — both reads inside the parallel closure body (which
+                // are fine, just non-mutating) and reads after the
+                // parallel call. The mutation case (`t += x`) is
+                // handled separately in [`Self::lower_stmt`]'s
+                // Assignment arm and never reaches `lower_expr` for
+                // the target Ident (we short-circuit to `fetch_add`).
+                if self.is_atomic_var(&name.name) {
+                    return Ok(atomic_load_expr(SynExpr::Path(path)));
                 }
                 // T34: if this ident is a variable CAPTURED by the closure
                 // whose body we're currently lowering, emit it plainly
@@ -4569,6 +4706,101 @@ fn wrap_in_arc_new(inner: SynExpr) -> SynExpr {
     SynExpr::Call(syn::ExprCall {
         attrs: Vec::new(),
         func: Box::new(callee),
+        paren_token: Default::default(),
+        args,
+    })
+}
+
+/// T42: wrap an integer initializer in `std::sync::atomic::AtomicI64::new(...)`.
+///
+/// Used at the `let` site of a captured integer accumulator promoted
+/// by [`crate::atomic_analysis`]. The fully-qualified path keeps
+/// generated source free of any `use std::sync::atomic::AtomicI64;`
+/// import (mirrors the [`wrap_in_arc_new`] pattern).
+fn wrap_in_atomic_i64_new(inner: SynExpr) -> SynExpr {
+    let path = rust_path("std::sync::atomic::AtomicI64::new");
+    let callee = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path,
+    });
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(inner);
+    SynExpr::Call(syn::ExprCall {
+        attrs: Vec::new(),
+        func: Box::new(callee),
+        paren_token: Default::default(),
+        args,
+    })
+}
+
+/// T42: build `t.fetch_add((rhs) as i64, std::sync::atomic::Ordering::Relaxed)`.
+///
+/// Used at the `t += x` site of an atomic-promoted accumulator (inside
+/// the parallel closure body). The first argument is the RHS cast to
+/// `i64` (a no-op when the RHS is already `i64`, but defensively
+/// typed for any numeric source). The ordering is `Relaxed` — T42
+/// accumulator semantics do not synchronise with other atomics or
+/// establish happens-before relations; the program-order
+/// single-thread semantics Buff presents to the user is preserved by
+/// the post-parallel `.load()`.
+fn atomic_fetch_add_stmt(name: &buff_lang_ast::common::Ident, rhs: SynExpr) -> SynExpr {
+    // `t` — the bare atomic binding.
+    let atomic_path = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: syn::Path::from(ast_ident_to_syn(name)),
+    });
+    // `(rhs) as i64` — cast the RHS defensively. `as` is a valid Rust
+    // cast for any numeric type to i64; if `rhs` is already i64 this
+    // is a no-op and Rust's `clippy::useless_conversion` does not
+    // flag it (it's an `as` cast, not a `.into()`).
+    let rhs_cast = SynExpr::Cast(syn::ExprCast {
+        attrs: Vec::new(),
+        expr: Box::new(rhs),
+        as_token: Default::default(),
+        ty: Box::new(rust_path_type("i64")),
+    });
+    // `std::sync::atomic::Ordering::Relaxed` — the ordering argument.
+    let ordering = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: rust_path("std::sync::atomic::Ordering::Relaxed"),
+    });
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(rhs_cast);
+    args.push(ordering);
+    SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(atomic_path),
+        dot_token: Default::default(),
+        method: Ident::new("fetch_add", ProcSpan::call_site()),
+        turbofish: None,
+        paren_token: Default::default(),
+        args,
+    })
+}
+
+/// T42: build `t.load(std::sync::atomic::Ordering::Relaxed)`.
+///
+/// Used at every READ of an atomic-promoted binding (both inside and
+/// outside the parallel closure body). The ordering is `Relaxed`,
+/// matching the [`atomic_fetch_add_stmt`] choice — Buf's accumulator
+/// pattern does not require cross-atomic synchronisation.
+fn atomic_load_expr(atomic_path: SynExpr) -> SynExpr {
+    let ordering = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: rust_path("std::sync::atomic::Ordering::Relaxed"),
+    });
+    let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    args.push(ordering);
+    SynExpr::MethodCall(syn::ExprMethodCall {
+        attrs: Vec::new(),
+        receiver: Box::new(atomic_path),
+        dot_token: Default::default(),
+        method: Ident::new("load", ProcSpan::call_site()),
+        turbofish: None,
         paren_token: Default::default(),
         args,
     })

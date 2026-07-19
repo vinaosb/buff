@@ -378,3 +378,148 @@ All 6 paths verified to exist via `Test-Path -LiteralPath` before use.
 Note: `C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\...`
 also exists on this box and would work as a fallback for the MSVC include/lib.
 
+
+
+## T42 Findings (2026-07-19)
+
+### Outcome
+T42 GREEN: AtomicI64 auto-insertion for shared mutable state in parallel
+closures implemented. **18 new tests in tests/atomic_tests.rs** (target was
+12+); 3 T41 tests updated to assert atomic promotion instead of error;
+13 T41 tests preserved unchanged for non-promotable coverage.
+cargo check / test / clippy --all-targets -D warnings / fmt --check all exit 0.
+cargo check --workspace still exit 0 (no other crate touched).
+
+### Pattern promoted (narrow escape hatch from T41)
+`let mut t = <int literal>; v.par_map({ x => t += x }); print(t)` is now
+mechanically rewritten to:
+  let t = std::sync::atomic::AtomicI64::new(<int literal>);
+  v.par_map({ x => t.fetch_add(x as i64, std::sync::atomic::Ordering::Relaxed) });
+  print(t.load(std::sync::atomic::Ordering::Relaxed));
+
+5 promotion rules (see atomic_analysis.rs file-level doc):
+  1. `let mut NAME = <int literal>` in same fn as the parallel call
+  2. NAME is captured by the parallel closure
+  3. ALL top-level mutations of NAME in the closure body are `+=`
+  4. enclosing combinator in {par_map, par_reduce} (NOT par_filter)
+  5. NO nested-closure mutations of NAME (narrow T42 scope — safety)
+
+A capture failing ANY rule is left to T41 -> ParallelMutabilityError.
+
+### T41 reconciliation — test changes
+3 T41 tests CHANGED in tests/race_detection_tests.rs (coverage preserved):
+  1. race_detection_qa_par_map_mutable_capture_via_add_assign
+     QA case `let mut t = 0; v.par_map({ x => t += x })` — now expects
+     Ok + AtomicI64::new + fetch_add (was: expects Err).
+  2. race_detection_par_reduce_mutable_capture
+     par_reduce accumulator — now expects Ok + AtomicI64::new +
+     fetch_add (was: expects Err). par_reduce is an accumulating
+     combinator per spec section 2.
+  3. race_detection_multiple_captures_first_mutable_one_flagged
+     Both `a` and `b` (both int `+=` accumulators) — now expects Ok
+     with both promoted (was: expects Err naming `a`). The "first
+     error in source order" determinism property of T41 is still
+     exercised by the remaining non-promotable tests in the file
+     (plain_assign, sub_assign, par_filter, nested_closure_mutates).
+
+13 T41 tests UNCHANGED — all assert ParallelMutabilityError for the
+non-promotable patterns (`=`, `-=`, par_filter, nested closure,
+immutable read OK, param mutation OK, inner let OK, sequential .map OK,
+etc.). Every T41 negative/positive case still represented.
+
+### Files changed (all under buff-lang-codegen-rust/)
+- src/atomic_analysis.rs: NEW (~700 lines). AtomicPromotions, analyze,
+  analyze_func, is_integer_literal_init. 5-rule promotion algorithm.
+  7 inline smoke tests.
+- src/race_analysis.rs: MODIFIED. Added analyze_with_exemptions +
+  analyze_func_with_exemptions (signature: FnMut(&str,&str)->bool).
+  Existing analyze() wraps with always-false predicate (no behaviour
+  change). Walker fns threaded with (func_name, is_exempt).
+- src/rust_codegen.rs: MODIFIED. Added fields atomic_promotions,
+  current_atomic_set. generate() runs atomic FIRST then race-with-
+  exemption. lower_func installs per-fn atomic set. lower_stmt LetDecl
+  wraps init in AtomicI64::new + drops mut + skips annotation.
+  lower_stmt Assignment arm short-circuits to fetch_add for atomic
+  AddAssign. lower_expr Ident wraps reads in .load(). 3 new helpers:
+  wrap_in_atomic_i64_new, atomic_fetch_add_stmt, atomic_load_expr.
+- src/lib.rs: MODIFIED. pub mod atomic_analysis; re-exported
+  AtomicPromotions, AtomicSet, analyze as analyze_atomic_promotions.
+- tests/atomic_tests.rs: NEW (~470 lines, 18 tests). All test names
+  contain `atomic` so `cargo test -p buff-lang-codegen-rust atomic`
+  matches.
+- tests/race_detection_tests.rs: MODIFIED (3 tests changed).
+
+### Implementation decisions (rationale)
+- **AtomicI64, not AtomicI32/AtomicUsize**: spec named AtomicI64.
+  Buff's `Int` lowers to Rust `i64`, so AtomicI64 matches the
+  declared type exactly. The `as i64` cast on fetch_add RHS is a
+  no-op for i64 source; defensively accepts any numeric type.
+- **Ordering::Relaxed everywhere**: Buff's accumulator pattern
+  presents single-threaded program-order semantics to the user.
+  The post-parallel `.load()` reads the final value after the
+  parallel computation has been `.join()`-ed (synchronisation happens
+  at the runtime level, outside codegen). Relaxed is correct AND
+  fastest. A future task may expose explicit ordering hints.
+- **Narrow scope (no nested closures)**: T42 is intentionally narrow.
+  A nested closure inside a par_map closure that mutates the captured
+  accumulator is REJECTED by T41 (not promoted). Rationale: the
+  nested closure may escape the parallel context (be returned,
+  stored, invoked later), in which case the promotion would be
+  unsound. The race_detection_nested_closure_mutates_outer_capture
+  test still passes (asserts T41 error).
+- **par_filter NOT promotable**: spec section 2 explicit. A filter closure
+  returns bool; an accumulator mutation inside it is almost certainly
+  a user bug rather than an intentional reduction. Keep T41 error.
+- **Exemption by (func_name, var_name)**: race_analysis::analyze_with_exemptions
+  takes a predicate FnMut(&str, &str) -> bool. atomic_analysis produces
+  a program-wide AtomicPromotions set; the predicate consults it. This
+  keeps race_analysis free of any dependency on atomic_analysis — the
+  two analyses are decoupled, race_analysis just receives an exemption
+  predicate from its caller.
+- **Effective_mutable for atomic**: the LetDecl arm computes
+  `effective_mutable = if is_atomic_var { false } else { *mutable }`.
+  This drops `mut` for promoted bindings (the AtomicI64 itself is
+  immutable; interior mutability is via &self methods).
+
+### Gotchas / lessons
+- **AST threading cost**: race_analysis has 4 mutually-recursive walker
+  functions; threading (func_name, is_exempt) through every call site
+  is mechanical but verbose (~100 lines of signature changes). The
+  alternative — storing is_exempt in a struct field — would require
+  a lifetime parameter on the walker state, which the existing
+  function-based design avoids. Verbose-but-simple won.
+- **Mut drop subtlety**: the LetDecl arm computes the SynType
+  annotation BEFORE the pattern. To drop `mut` correctly we need to
+  know is_atomic_var at the `make_let_pat` call site. Introduced a
+  local `effective_mutable` so the rest of the arm is unchanged.
+- **fmt gate gotcha (recurring)**: per the task's MUST-DO list, ran
+  `cargo fmt -p buff-lang-codegen-rust` (WITHOUT --check) BEFORE the
+  final `--check` gate. No diff needed — the file was already
+  rustfmt-clean — but the discipline matters (T41 forgot this).
+- **No `parse_quote!` in non-test code**: per the file-level rule,
+  atomic helpers are built via explicit syn construction +
+  `rust_path()` (the existing helper for `::`-separated names).
+  Verified no new `parse_quote!` / `parse_str` usage in atomic
+  codegen paths.
+
+### Test counts (final)
+- tests/atomic_tests.rs: 18 integration tests (T42 NEW)
+- src/atomic_analysis.rs inline tests: 7 (within lib smoke tests)
+- tests/race_detection_tests.rs: 16 (3 updated, 13 unchanged)
+- buff-lang-codegen-rust full crate: 478 tests total, all passing.
+
+### What's deferred (correctly out of scope for T42)
+- T43+: GPU dispatch (Wave 10).
+- Other atomic types (AtomicBool, AtomicUsize) — only AtomicI64 needed
+  for the accumulator pattern.
+- Cross-atomic synchronisation (Release/Acquire orderings) — Relaxed
+  is sufficient for the accumulator pattern; future task may expose
+  hints.
+- T42 promotion for nested-closure mutations (currently REJECTED by
+  T41 for safety; future task could analyse nested closure escape
+  to safely promote).
+
+### MSVC env vars
+Same as T38/T39/T40 (see evidence file
+`.sisyphus/evidence/task-42-auto-atomic.txt` for exact strings).
+

@@ -54,7 +54,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: `let mut t=0; v.par_map({x=>t+=x})` → assert ParallelMutabilityError. Evidence: task-41-race-detection.txt
   **Commit**: `feat(codegen-rust): detect data races in parallel closures`
 
-- [ ] **T42**: AtomicI64 auto-insertion [deep]
+- [x] **T42**: AtomicI64 auto-insertion [deep]
   **What to do** (TDD): RED: `total+=x` in par_map → AtomicI64::fetch_add. Post-parallel read → .load(). GREEN: auto-promote mutable shared vars to atomics in parallel context.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust atomic` passes. Atomic only in parallel context.
   **QA**: Codegen accumulator in par_map → assert AtomicI64::fetch_add. Evidence: task-42-auto-atomic.txt

@@ -204,12 +204,23 @@ fn assert_parallel_mutability(result: Result<String, CodegenError>, expected_var
 
 #[test]
 fn race_detection_qa_par_map_mutable_capture_via_add_assign() {
-    // The EXACT QA case from the task spec:
+    // The EXACT QA case from the T41 task spec:
     //   let mut t = 0
     //   v.par_map({ x => t += x })
     //
-    // `t` is declared `mut` in the enclosing function and captured by
-    // the par_map closure; the closure mutates it via `+=` → race.
+    // T41 (initially): `t` is captured + mutated → race →
+    // `ParallelMutabilityError`.
+    //
+    // T42 (NOW): the integer-accumulator pattern (`let mut t = <int>`,
+    // mutated ONLY via `+=` inside `par_map`) is mechanically
+    // promotable to `AtomicI64`. The race detector's exemption
+    // predicate (fed by `atomic_analysis`) suppresses the error; the
+    // codegen side emits `let t = AtomicI64::new(0)` +
+    // `t.fetch_add(x as i64, Ordering::Relaxed)`. This test was
+    // CHANGED from "expects Err" to "expects Ok + atomic markers" to
+    // reflect the T42 escape hatch. Coverage of the racy pattern
+    // (`-=`/`=`/par_filter/etc.) remains in the sibling tests below
+    // and in `tests/atomic_tests.rs`.
     let body = closure_stmts(
         &["x"],
         vec![assign(
@@ -218,11 +229,19 @@ fn race_detection_qa_par_map_mutable_capture_via_add_assign() {
             ident_expr("x"),
         )],
     );
-    let result = codegen_stmts(vec![
+    let src = codegen_stmts(vec![
         let_stmt("t", int_expr(0), true),
         expr_stmt(method_call(ident_expr("v"), "par_map", vec![body])),
-    ]);
-    assert_parallel_mutability(result, "t");
+    ])
+    .expect("T42: integer `+=` accumulator in par_map must codegen (promoted to AtomicI64)");
+    assert!(
+        src.contains("AtomicI64::new"),
+        "expected AtomicI64::new in promoted codegen:\n{src}"
+    );
+    assert!(
+        src.contains("fetch_add"),
+        "expected fetch_add in promoted codegen:\n{src}"
+    );
 }
 
 #[test]
@@ -277,7 +296,14 @@ fn race_detection_par_filter_mutable_capture() {
 #[test]
 fn race_detection_par_reduce_mutable_capture() {
     // `let mut t = 0; v.par_reduce(0, { a, b => { t += a; a + b } })`.
-    // The closure has 2 params; the captured `t` is mutated inside.
+    //
+    // T41 (initially): the closure captures `t` and mutates it → race.
+    //
+    // T42 (NOW): `par_reduce` is an accumulating combinator (spec §2),
+    // so the integer-accumulator pattern promotes to `AtomicI64`. This
+    // test was CHANGED from "expects Err" to "expects Ok + atomic
+    // markers". Coverage of non-promotable par_reduce patterns (e.g.
+    // `-=` or `=`) lives in `tests/atomic_tests.rs`.
     let body = closure_stmts(
         &["a", "b"],
         vec![
@@ -285,15 +311,23 @@ fn race_detection_par_reduce_mutable_capture() {
             expr_stmt(binary_op(BinaryOp::Add, ident_expr("a"), ident_expr("b"))),
         ],
     );
-    let result = codegen_stmts(vec![
+    let src = codegen_stmts(vec![
         let_stmt("t", int_expr(0), true),
         expr_stmt(method_call(
             ident_expr("v"),
             "par_reduce",
             vec![int_expr(0), body],
         )),
-    ]);
-    assert_parallel_mutability(result, "t");
+    ])
+    .expect("T42: par_reduce integer accumulator must codegen (promoted to AtomicI64)");
+    assert!(
+        src.contains("AtomicI64::new"),
+        "expected AtomicI64::new in par_reduce codegen:\n{src}"
+    );
+    assert!(
+        src.contains("fetch_add"),
+        "expected fetch_add in par_reduce codegen:\n{src}"
+    );
 }
 
 #[test]
@@ -325,8 +359,16 @@ fn race_detection_nested_closure_mutates_outer_capture() {
 fn race_detection_multiple_captures_first_mutable_one_flagged() {
     // `let mut a = 0; let mut b = 0; v.par_map({ x => { a += x; b += x } })`
     //
-    // Both `a` and `b` are captured and mutated, but the detector
-    // reports the FIRST one in source order (`a`). Deterministic.
+    // T41 (initially): both `a` and `b` are captured + mutated → the
+    // FIRST one in source order (`a`) was flagged.
+    //
+    // T42 (NOW): BOTH are integer `+=` accumulators → BOTH get
+    // promoted to `AtomicI64`. The T41 race detector does not flag
+    // either. This test was CHANGED from "expects Err naming `a`" to
+    // "expects Ok with both accumulators promoted". The "first error
+    // in source order" determinism property is still exercised by the
+    // remaining non-promotable tests (`race_detection_*_via_*_assign`
+    // and `race_detection_par_filter_mutable_capture`).
     let body = closure_stmts(
         &["x"],
         vec![
@@ -334,12 +376,18 @@ fn race_detection_multiple_captures_first_mutable_one_flagged() {
             assign(ident_expr("b"), BinaryOp::AddAssign, ident_expr("x")),
         ],
     );
-    let result = codegen_stmts(vec![
+    let src = codegen_stmts(vec![
         let_stmt("a", int_expr(0), true),
         let_stmt("b", int_expr(0), true),
         expr_stmt(method_call(ident_expr("v"), "par_map", vec![body])),
-    ]);
-    assert_parallel_mutability(result, "a");
+    ])
+    .expect("T42: both integer `+=` accumulators must codegen");
+    // Two AtomicI64::new occurrences expected (one per accumulator).
+    let count = src.matches("AtomicI64::new").count();
+    assert_eq!(
+        count, 2,
+        "expected both `a` and `b` promoted (2 AtomicI64::new), got {count}:\n{src}"
+    );
 }
 
 // =====================================================================
