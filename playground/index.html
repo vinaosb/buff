@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buff — Playground</title>
+    <meta name="description" content="Buff transpile-only playground. Write .buff on the left, see the generated Rust on the right. No server." />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- Fonts: Space Mono (display/brand) + IBM Plex Mono (code) + IBM Plex Sans (body).
+         Deliberately warm + characterful — avoids Inter/Roboto/system-ui/Space Grotesk. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+    <!-- CodeMirror 5 editor (CDN). Battle-tested, simple wiring, sufficient for transpile-only. -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/rust/rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body data-state="loading">
+    <!-- ── Header ───────────────────────────────────────────────────────── -->
+    <header class="site-header" role="banner">
+        <div class="brand">
+            <a class="brand-mark" href="#" aria-label="Buff home">
+                <!-- Ox-horn glyph evokes the "Buff" name (leather, ox, polished).
+                     Pure SVG, no external assets so it works offline. -->
+                <svg viewBox="0 0 32 32" class="brand-glyph" aria-hidden="true">
+                    <path d="M6 4 C 2 8 2 22 6 26 L 12 22 C 10 18 10 14 12 10 Z" fill="currentColor"/>
+                    <path d="M26 4 C 30 8 30 22 26 26 L 20 22 C 22 18 22 14 20 10 Z" fill="currentColor"/>
+                    <rect x="13" y="14" width="6" height="6" rx="1" fill="currentColor"/>
+                </svg>
+                <span class="brand-word">BUFF</span>
+            </a>
+            <span class="brand-tag">transpile-only playground</span>
+        </div>
+
+        <nav class="site-nav" aria-label="Playground controls">
+            <button id="example-picker" class="nav-btn" type="button" aria-haspopup="menu" aria-expanded="false">
+                <span class="nav-btn-label">examples</span>
+                <span class="nav-btn-caret" aria-hidden="true"></span>
+            </button>
+            <button id="share-btn" class="nav-btn nav-btn-accent" type="button" aria-label="Copy a URL that restores the current code">
+                <span class="nav-btn-label">share</span>
+            </button>
+            <a  id="docs-link"
+                class="nav-btn nav-btn-ghost"
+                href="https://github.com/buff-lang/buff/blob/master/README.md"
+                target="_blank" rel="noopener noreferrer">
+                <span class="nav-btn-label">docs ↗</span>
+            </a>
+        </nav>
+    </header>
+
+    <!-- Example dropdown — hidden by default, shown when #example-picker is clicked. -->
+    <div id="example-menu" class="example-menu" role="menu" hidden>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="fibonacci">fibonacci</button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="ola">olá, buff</button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="calculadora">calculadora</button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="error_demo">error demo</button>
+    </div>
+
+    <!-- ── Main split: editor | output ─────────────────────────────────── -->
+    <main class="split" role="main">
+        <section class="pane pane-input" aria-label="Buff source editor">
+            <header class="pane-header">
+                <span class="pane-tag">.buff</span>
+                <span class="pane-meta" id="input-meta">input</span>
+            </header>
+            <div class="pane-body">
+                <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+            </div>
+        </section>
+
+        <section class="pane pane-output" aria-label="Generated Rust source">
+            <header class="pane-header pane-header-output" id="output-header">
+                <span class="pane-tag pane-tag-output">.rs</span>
+                <span class="pane-meta" id="output-meta">output</span>
+            </header>
+            <div class="pane-body">
+                <pre id="output" class="output-pre" tabindex="0"><code id="output-code" class="output-code">-- awaiting input --</code></pre>
+            </div>
+        </section>
+    </main>
+
+    <!-- ── Status / error rail ─────────────────────────────────────────── -->
+    <footer class="site-footer" id="status-bar" data-status="idle">
+        <span class="status-pill" id="status-pill" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="status-text" id="status-text">idle</span>
+        </span>
+        <div class="status-message" id="status-message" role="status"></div>
+    </footer>
+
+    <!-- Wasm bundle is loaded as an ES module (target=web output from wasm-bindgen). -->
+    <script type="module" src="./app.js"></script>
+</body>
+</html>

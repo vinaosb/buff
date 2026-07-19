@@ -283,6 +283,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-playground-wasm"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-codegen-rust",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "console_error_panic_hook",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -414,6 +427,16 @@ dependencies = [
  "encode_unicode",
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
 ]
 
 [[package]]
