@@ -397,7 +397,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - Deploy as static site (GitHub Pages / Netlify / Vercel — no server needed)
 
   **Leverages**:
-  - T58 (Wasm target, v1.0) — compiler already compiles to wasm32
+  - T114 prerequisite (Wasm target co-delivered with playground, post-v1.0) — compiler already compiles to wasm32
   - Existing `compile_to_rust()` pipeline (buff-lang-cli/src/pipeline.rs) — call from Wasm
   - Monaco Editor or CodeMirror — proven web code editors
   - Rust playground architecture (open source) — reference for URL-sharing pattern
@@ -962,7 +962,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
     - **FAIL** (codegen cannot emit valid Dioxus macros) → trigger replan of v1.8/v1.9 BEFORE Phase 2 begins
   - Note: no public transpilation precedent exists (no language emits Dioxus from non-Rust source). Buff is breaking ground — document this risk honestly.
 
-  **Leverages**: `syn`/`quote`/`prettyplease` (codegen stack, already in workspace). T58 Wasm target (v1.0). Dioxus 0.7.x (pin). `web-sys`.
+  **Leverages**: `syn`/`quote`/`prettyplease` (codegen stack, already in workspace). T114 prerequisite (Wasm target, post-v1.0). Dioxus 0.7.x (pin). `web-sys`.
 
   **Must NOT do**: Build the full UI foundation (that's v1.8's T130). Build a dev server or Tauri scaffold. Use extern-C/FFI to wrap Dioxus (wrong mechanism). This is a THROWAWAY spike — output is a decision record + a proof, not production code.
 
@@ -1013,7 +1013,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 >
 > **Prelude shadowing**: All modules are prelude-implicit. User-defined names shadow prelude (e.g., user can define their own `URL` type). Document this behavior — it's intentional (matches Buff's simplicity goal).
 >
-> **Method syntax on prelude types**: These modules use `Type.method()` syntax (e.g., `DateTime.now()`, `Math.sqrt()`, `Regex.match()`). The existing prelude only has `print` (a free function). v1.0's T61 (File/HTTP/JSON) MUST establish the pattern for types-with-methods in the prelude. If v1.0's stdlib modules don't use method syntax, these tasks need to verify/establish it first.
+> **Method syntax on prelude types**: These modules use `Type.method()` syntax (e.g., `DateTime.now()`, `Math.sqrt()`, `Regex.match()`). The existing prelude only has `print` (a free function). **T124+ (v1.4 stdlib, replacing deferred v1.0 T61) MUST establish the pattern for types-with-methods in the prelude.** If T124b's DateTime module doesn't use method syntax, the remaining v1.4 tasks need to verify/establish it first.
 
 > **WHY**: Buff's pitch is "Go productivity." Go ships a rich stdlib (datetime, regexp, log, encoding in-box). Rust's stdlib is thin — devs hunt for chrono/regex/tracing crates. Buff should absorb the most common dependencies so users get zero-frustrure productivity. Each module wraps a proven Rust crate (leverage mandate). These are prelude-implicit (no `import` needed, like `print` today).
 
@@ -1521,7 +1521,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - Build a static site (`errors.buff-lang.org/E1001`) with detailed explanations + examples for each code
   - Error messages reference the code: `error[E1001]: type mismatch...`
 
-  **Leverages**: Rust error index (rust-lang.org/error-index). T59 ariadne diagnostics (v1.0).
+  **Leverages**: Rust error index (rust-lang.org/error-index). T59 ariadne diagnostics (deferred to v2.0 — re-enable in T161 if pursuing rich error rendering).
 
   **References**: `crates/buff-lang-error/src/`, Rust error index format
 
@@ -1968,7 +1968,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - Expose: component definition, RSX-equivalent (string template or function call — full RSX-for-Buff syntax is v1.9/T133), state (signals), event handlers
   - Harden the "Hello World" PoC into a maintained example + test
 
-  **Leverages**: **T121b PoC (v1.3) — the proven feasibility base**. Dioxus (MIT). T119 extern/bindgen. T58 Wasm. `web-sys`.
+  **Leverages**: **T121b PoC (v1.3) — the proven feasibility base**. Dioxus (MIT). T119 extern/bindgen. T114 prerequisite (Wasm, post-v1.0). `web-sys`.
 
   **Must NOT do**: Fork Dioxus. Full component library. Theming/design system. RSX-for-Buff syntax (that's v1.9). Re-run the feasibility spike (done in T121b).
 
@@ -2049,7 +2049,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   - Cross-platform: builds for Win/macOS/Linux via Tauri's tooling
   - Template includes: window config, IPC bridge, buff.toml for Tauri
 
-  **Leverages**: Tauri 2.0 (production-ready, 80k+ stars, mobile since Oct 2024). T130 Dioxus wrap. T58 Wasm.
+  **Leverages**: Tauri 2.0 (production-ready, 80k+ stars, mobile since Oct 2024). T130 Dioxus wrap. T114 prerequisite (Wasm, post-v1.0).
 
   **Must NOT do**: Mobile build (iOS/Android) in v1.8 — that's v1.9. Custom windowing.
 

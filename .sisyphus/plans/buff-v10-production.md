@@ -372,7 +372,8 @@ Full spec for deferred numeric types: [buff-numeric-system.md](./buff-numeric-sy
 - [x] Recursion detection (CPU-only marking) — Evidence: T48 commit 96c97bd, crates/buff-lang-types/src/recursion.rs
 - [x] Hints system (@prefer) with graceful degradation — Evidence: T49 commit 24043de, crates/buff-lang-runtime/src/hints.rs
 - [ ] Auto-sizing arithmetic (overflow prevention) → **v2.0** — Reason: T94 deferred
-- [x] Full CLI: run, build, test, fmt, check, doc — Evidence: run/build/test/fmt/check all in crates/buff-lang-cli/src/commands/. Note: `buff doc` not implemented → `[ ] → post-v1.0 T82`
+- [x] Full CLI: run, build, test, fmt, check — Evidence: all 5 commands in `crates/buff-lang-cli/src/commands/` (Build/Run/Test/Fmt/Check submodules). `buff doc` deferred to post-v1.0 T82 (see separate line below).
+- [ ] `buff doc` HTML documentation generation → **post-v1.0 T82** — Reason: not implemented in v1.0
 - [ ] Watch mode → **v2.0** — Reason: T80 deferred
 - [ ] Mold fast linker → **v2.0** — Reason: T81 deferred (Linux-only; Windows host can't verify)
 - [ ] Incremental compilation → **v2.0** — Reason: T91 deferred (post-v10 line 126 explicitly "v2.0 non-goal")

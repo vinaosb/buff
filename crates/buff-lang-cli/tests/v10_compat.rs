@@ -92,10 +92,11 @@ fn v10_compat_transpilation_frozen() {
         );
     }
 
-    // Cleanup: compile_to_rust writes a `<file>.rs` next to the .buff source.
+    // Cleanup: compile_to_rust writes a `<file>.rs` next to the .buff source
+    // (pipeline.rs:113 uses `file.with_extension("rs")` → `v10-compat.rs`).
     // We don't want that artifact tracked (the .snapshot.rs is the canonical
     // frozen form); remove it if present.
-    let side_artifact = fixture.with_extension("buff.rs");
+    let side_artifact = fixture.with_extension("rs");
     let _ = std::fs::remove_file(side_artifact);
 }
 
@@ -114,8 +115,8 @@ fn v10_regenerate_snapshot() {
 
     std::fs::write(&snapshot_path, &out.rust_source).expect("failed to write snapshot file");
 
-    // Cleanup the .buff.rs side artifact.
-    let side_artifact = fixture.with_extension("buff.rs");
+    // Cleanup the .rs side artifact (compile_to_rust writes <name>.rs).
+    let side_artifact = fixture.with_extension("rs");
     let _ = std::fs::remove_file(side_artifact);
 
     eprintln!(

@@ -5,8 +5,10 @@ target/
 # Examples (build artifacts)
 examples/**/*.rs
 
-# Test fixtures (compile_to_rust writes <name>.buff.rs side artifacts)
-tests/fixtures/**/*.buff.rs
+# Test fixtures (compile_to_rust writes <name>.rs side artifacts)
+tests/fixtures/**/*.rs
+# Exception: snapshot files ARE tracked as backward-compat contract
+!tests/fixtures/**/*.snapshot.rs
 
 # Buff
 buff.lock
