@@ -288,7 +288,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### Prerequisite (v1.0 → v1.1 bridge)
 
-- [ ] **T113b: Backward-compat fixture + snapshot (MUST complete before any v1.1+ task)** [quick]
+- [x] **T113b: Backward-compat fixture + snapshot (MUST complete before any v1.1+ task)** [quick]
 
   **What to do**:
   - Create `tests/fixtures/v10-compat.buff` — a representative program exercising the full v1.0 feature surface (types, functions, structs, enums, pattern matching, modules, async, collections, error handling)
@@ -304,10 +304,10 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `tests/` (existing test directory), `crates/buff-lang-cli/src/pipeline.rs:46 compile_to_rust()`
 
   **Acceptance Criteria**:
-  - [ ] `tests/fixtures/v10-compat.buff` exists and exercises all v1.0 features
-  - [ ] `tests/fixtures/v10-compat.snapshot.rs` exists (transpiled output snapshot)
-  - [ ] CI job runs: build fixture → diff snapshot → pass if identical
-  - [ ] Runtime output snapshot exists
+  - [x] `tests/fixtures/v10-compat.buff` exists and exercises all v1.0 features
+  - [x] `tests/fixtures/v10-compat.snapshot.rs` exists (transpiled output snapshot)
+  - [x] CI job runs: build fixture → diff snapshot → pass if identical
+  - [x] Runtime output snapshot exists
 
   **QA Scenarios**:
   ```
@@ -322,6 +322,67 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   ```
 
   **Commit**: `test(fixtures): v1.0 backward-compat fixture and snapshot for regression testing`
+
+  **Status**: ✅ Done at commit `a70a250` (2026-07-19). Fixture: `tests/fixtures/v10-compat.buff` (89 lines). Snapshot: `tests/fixtures/v10-compat.snapshot.rs` (116 lines). Test: `crates/buff-lang-cli/tests/v10_compat.rs` (byte-identical assertion + `#[ignored]` regen helper). Excludes async/modules/user-enum (codegen-only — documented in fixture header).
+
+- [ ] **T57b: Integrate LosslessTree into `buff fmt` (comment preservation)** [deep]
+
+  > **WHY THIS EXISTS**: T57 (v1.0) shipped the `LosslessTree` data structure at `crates/buff-lang-ast/src/lossless.rs` (743 lines, 39 passing tests, byte-exact roundtrip proven). However, `crates/buff-lang-cli/src/fmt.rs:format_source()` still strips comments because `tokenize()` drops them at `lexer.rs:130-167`. An attempt to integrate during v1.0 cleanup was reverted (architectural issue: comment draining happened only at top-level indent, not recursively at every block level — 14/15 Phase 1 tests failed). This task finishes the integration.
+
+  **What to do**:
+  - Phase 1 (the easy 80%): comment positions on their own line
+    - File-header comments
+    - Comment above top-level decl (func/struct/enum/trait/import)
+    - Comment above struct/enum field
+    - Comment above stmt in block body
+    - Comment above match-arm body stmt
+    - Orphan comments between top-level decls (blank-line-separated)
+    - Multi-line block comments (re-indented to canonical form)
+    - File-end / last-stmt-in-body comments
+    - Trailing comments on `let`/`return`/simple expr stmts
+  - Phase 2 (the harder 15%): trailing on type headers, single-line match arm trailers, comments between attrs — DEFER to v2.0
+  - Phase 3 (explicit unsupported, ≤5%): drop with `tracing::warn!`
+
+  **Design**: Follow the Oracle design spec from v1.0 cleanup (Walk-With-Trivia approach). Key insight missed in v1.0 attempt: `drain_comments_in` must be called RECURSIVELY at every block level (write_func body, write_struct body, write_match arms), not just from `write_decls`. The previous attempt called drain only from `write_decls` which is why indent was wrong.
+
+  **Leverages**:
+  - `crates/buff-lang-ast/src/lossless.rs` (T57 v1.0 — the data structure)
+  - Oracle design spec for Walk-With-Trivia pattern
+  - rustfmt's missed-spans approach (reference)
+  - Prettier's attachComments pattern (reference)
+
+  **Recommended Agent Profile**:
+  - **Category**: `deep`
+    - **Skills**: []
+
+  **Parallelization**: Blocks T117 LSP (which assumes `buff fmt` preserves comments for formatting-on-save). Otherwise independent.
+
+  **References**:
+  - `crates/buff-lang-cli/src/fmt.rs:84` (`format_source` entry — where LosslessTree plugs in)
+  - `crates/buff-lang-ast/src/lossless.rs:295` (`LosslessTree` API: `comments()`, `piece_at()`, `Piece`, `TriviaKind`)
+  - `crates/buff-lang-lexer/src/lexer.rs:130-167` (where comments are currently stripped)
+  - Oracle design spec output from v1.0 cleanup session (review the session transcript)
+
+  **Acceptance Criteria**:
+  - [ ] All 39 existing lossless tests stay green
+  - [ ] All 30 existing fmt snapshot tests stay green (comment-free input → byte-identical output)
+  - [ ] 10+ new fmt_comment_* tests pass (file header, above func, above struct field, trailing on let, leading in match arm, trailing in match arm, multi-line block, after last stmt, multiple consecutive, orphan between funcs)
+  - [ ] Idempotency: `format_source(format_source(src)) == format_source(src)` for all v1.0 example files
+  - [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean
+  - [ ] No new external dependencies
+
+  **QA Scenarios**:
+  ```
+  Scenario: Comment above func preserved
+    Tool: Bash
+    Steps:
+      1. echo "// hello\nfunc main():\n    print(\"hi\")\n" > /tmp/test.buff
+      2. buff fmt /tmp/test.buff
+      3. cat /tmp/test.buff
+      4. Assert output contains "// hello" line above "func main():"
+  ```
+
+  **Commit**: `feat(fmt): preserve comments via LosslessTree integration (T57b)`
 
 ### v1.1 "Try Buff" — Playground + tree-sitter + Website
 
