@@ -1,0 +1,18 @@
+# Files excluded from the packaged .vsix.
+# Keep the published extension small — only ship what's needed at runtime.
+
+.vscode/**
+.vscode-test/**
+src/**
+test/**
+node_modules/**
+out/**/*.map
+out/**/*.ts
+tsconfig.json
+.github/**
+.gitignore
+.eslintignore
+.eslintrc*
+*.log
+npm-debug.log*
+yarn-error.log*

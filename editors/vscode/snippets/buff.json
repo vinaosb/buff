@@ -1,0 +1,126 @@
+{
+    "Function": {
+        "prefix": "func",
+        "body": [
+            "func ${1:name}(${2:params})${3: -> ${4:ReturnType}}:",
+            "    ${0:body}"
+        ],
+        "description": "Function declaration (layout-based body)"
+    },
+    "Async Function": {
+        "prefix": "async func",
+        "body": [
+            "async func ${1:name}(${2:params})${3: -> ${4:ReturnType}}:",
+            "    ${0:body}"
+        ],
+        "description": "Async function declaration"
+    },
+    "Let binding": {
+        "prefix": "let",
+        "body": [
+            "let ${1:name} = ${0:value}"
+        ],
+        "description": "Immutable let binding"
+    },
+    "Let mutable": {
+        "prefix": "let mut",
+        "body": [
+            "let mut ${1:name} = ${0:value}"
+        ],
+        "description": "Mutable let binding"
+    },
+    "If": {
+        "prefix": "if",
+        "body": [
+            "if ${1:condition}:",
+            "    ${0:body}"
+        ],
+        "description": "If block (layout body)"
+    },
+    "If-Else": {
+        "prefix": "if else",
+        "body": [
+            "if ${1:condition}:",
+            "    ${2:then}",
+            "else:",
+            "    ${0:else}"
+        ],
+        "description": "If-Else block"
+    },
+    "Elif chain": {
+        "prefix": "elif",
+        "body": [
+            "elif ${1:condition}:",
+            "    ${0:body}"
+        ],
+        "description": "Elif branch"
+    },
+    "For-in": {
+        "prefix": "for",
+        "body": [
+            "for ${1:item} in ${2:iterator}:",
+            "    ${0:body}"
+        ],
+        "description": "For-in loop (layout body)"
+    },
+    "Match": {
+        "prefix": "match",
+        "body": [
+            "match ${1:scrutinee}:",
+            "    ${2:pattern} => ${3:value}",
+            "    ${4:pattern} => ${5:value}${0:}"
+        ],
+        "description": "Match expression over a scrutinee"
+    },
+    "Match arm": {
+        "prefix": "=>",
+        "body": [
+            "${1:pattern} => ${0:value}"
+        ],
+        "description": "Single match arm"
+    },
+    "Return": {
+        "prefix": "return",
+        "body": [
+            "return ${0:value}"
+        ],
+        "description": "Return statement"
+    },
+    "Print": {
+        "prefix": "print",
+        "body": [
+            "print(${1:\"${0:text}\"})"
+        ],
+        "description": "Print to stdout (prelude)"
+    },
+    "Struct-style enum variant": {
+        "prefix": "enum",
+        "body": [
+            "enum ${1:Name}:",
+            "    ${2:Variant}${0:}"
+        ],
+        "description": "Enum declaration"
+    },
+    "Trait": {
+        "prefix": "trait",
+        "body": [
+            "trait ${1:Name}:",
+            "    ${0:body}"
+        ],
+        "description": "Trait declaration"
+    },
+    "Import": {
+        "prefix": "import",
+        "body": [
+            "import ${1:name} from \"${0:module}\""
+        ],
+        "description": "Import declaration"
+    },
+    "Spawn": {
+        "prefix": "spawn",
+        "body": [
+            "spawn ${0:task}"
+        ],
+        "description": "Spawn an async task (no await needed)"
+    }
+}

@@ -1,0 +1,203 @@
+{
+  "name": "buff-vscode",
+  "displayName": "Buff",
+  "description": "Language support for Buff — the high-level language that transpiles to Rust. Syntax highlighting, LSP intelligence (hover/completion/goto-def/diagnostics/formatting), and run/build/check commands.",
+  "version": "1.2.0",
+  "publisher": "buff-lang",
+  "license": "MIT",
+  "author": "Buff Lang Project",
+  "homepage": "https://github.com/buff-lang/buff/tree/master/editors/vscode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buff-lang/buff.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/buff-lang/buff/issues"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "buff",
+    "rust",
+    "language",
+    "transpiler",
+    "tree-sitter"
+  ],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onLanguage:buff",
+    "workspaceContains:**/*.buff"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "buff",
+        "aliases": [
+          "Buff",
+          "buff"
+        ],
+        "extensions": [
+          ".buff"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "buff",
+        "scopeName": "source.buff",
+        "path": "./syntaxes/buff.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "buff",
+        "path": "./snippets/buff.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "buff.run",
+        "title": "Buff: Run Current File",
+        "category": "Buff",
+        "enablement": "resourceLangId == buff",
+        "icon": "$(play)"
+      },
+      {
+        "command": "buff.build",
+        "title": "Buff: Build Current File",
+        "category": "Buff",
+        "enablement": "resourceLangId == buff",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "buff.check",
+        "title": "Buff: Check Current File",
+        "category": "Buff",
+        "enablement": "resourceLangId == buff",
+        "icon": "$(check)"
+      },
+      {
+        "command": "buff.restartServer",
+        "title": "Buff: Restart Language Server",
+        "category": "Buff"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "buff.run",
+          "when": "resourceLangId == buff"
+        },
+        {
+          "command": "buff.build",
+          "when": "resourceLangId == buff"
+        },
+        {
+          "command": "buff.check",
+          "when": "resourceLangId == buff"
+        },
+        {
+          "command": "buff.restartServer"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "buff.run",
+          "when": "resourceLangId == buff",
+          "group": "Buff@1"
+        },
+        {
+          "command": "buff.build",
+          "when": "resourceLangId == buff",
+          "group": "Buff@2"
+        },
+        {
+          "command": "buff.check",
+          "when": "resourceLangId == buff",
+          "group": "Buff@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Buff",
+      "properties": {
+        "buff.serverPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `buff-lsp` binary (the language server). When empty, the extension searches (in order): `target/release/buff-lsp[.exe]` in each workspace folder, then `buff-lsp` on `PATH`."
+        },
+        "buff.binaryPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `buff` CLI binary (used by `Buff: Run`, `Buff: Build`, `Buff: Check`). When empty, the extension searches (in order): `target/release/buff[.exe]` in each workspace folder, then `buff` on `PATH`."
+        },
+        "buff.formatOnSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "When enabled, the extension sets `editor.formatOnSave` for Buff documents so the language server formats the file before each save. The formatting itself is performed by `buff fmt` (via `buff-lsp`)."
+        },
+        "buff.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "markdownDescription": "Trace level for LSP communication with the `buff-lsp` server. Output goes to the `Buff Language Server` output channel."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[buff]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4,
+        "editor.detectIndentation": false,
+        "editor.defaultFormatter": "buff-lang.buff-vscode"
+      }
+    },
+    "keybindings": [
+      {
+        "command": "buff.run",
+        "key": "f5",
+        "mac": "f5",
+        "when": "resourceLangId == buff"
+      },
+      {
+        "command": "buff.check",
+        "key": "shift+f6",
+        "mac": "shift+f6",
+        "when": "resourceLangId == buff"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.4.0"
+  }
+}

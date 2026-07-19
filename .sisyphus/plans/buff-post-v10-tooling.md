@@ -614,7 +614,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.2 "Use Buff" — LSP Server + VSCode Extension
 
-- [ ] **T117: LSP server (buff-lsp crate)** [deep]
+- [x] **T117: LSP server (buff-lsp crate)** [deep]
 
   **What to do**:
   - Create `crates/buff-lsp/` crate
@@ -713,7 +713,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(lsp): buff-lsp server with diagnostics, hover, completion, goto-def`
 
-- [ ] **T118: VSCode extension** [visual-engineering]
+- [x] **T118: VSCode extension** [visual-engineering]
 
   **What to do**:
   - Create `editors/vscode/` directory with extension scaffold

@@ -1,0 +1,6 @@
+# Editors / VSCode extension build artifacts
+editors/vscode/node_modules/
+editors/vscode/out/
+editors/vscode/.vscode-test/
+editors/vscode/*.vsix
+editors/vscode/**/*.vsix

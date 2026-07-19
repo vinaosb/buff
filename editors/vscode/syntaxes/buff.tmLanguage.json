@@ -1,0 +1,202 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Buff",
+    "scopeName": "source.buff",
+    "fileTypes": ["buff"],
+    "firstLineMatch": "^#!.*\\bbuff\\b",
+    "patterns": [
+        {"include": "#comments"},
+        {"include": "#attributes"},
+        {"include": "#keywords"},
+        {"include": "#literals"},
+        {"include": "#strings"},
+        {"include": "#types"},
+        {"include": "#functions"},
+        {"include": "#punctuation"}
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.buff",
+                    "begin": "//",
+                    "beginCaptures": {
+                        "0": {"name": "punctuation.definition.comment.buff"}
+                    },
+                    "end": "$",
+                    "patterns": [
+                        {"include": "#string-interpolation"}
+                    ]
+                },
+                {
+                    "name": "comment.block.buff",
+                    "begin": "/\\*",
+                    "beginCaptures": {
+                        "0": {"name": "punctuation.definition.comment.buff"}
+                    },
+                    "end": "\\*/",
+                    "endCaptures": {
+                        "0": {"name": "punctuation.definition.comment.buff"}
+                    }
+                }
+            ]
+        },
+        "string-interpolation": {
+            "comment": "Reserved for shell-style ${} interpolation inside string literals; Buff itself uses {expr}.",
+            "patterns": [
+                {
+                    "name": "string.interpolated.buff",
+                    "match": "\\$\\{[^}]*\\}"
+                }
+            ]
+        },
+        "attributes": {
+            "patterns": [
+                {
+                    "name": "meta.attribute.buff",
+                    "match": "@[A-Za-z_][A-Za-z0-9_]*",
+                    "captures": {
+                        "0": {"name": "entity.other.attribute-name.buff"}
+                    }
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "comment": "Declaration keywords",
+                    "name": "keyword.control.declaration.buff",
+                    "match": "\\b(func|let|enum|trait|type|import|export|extern|spawn|extend|guard|defer)\\b"
+                },
+                {
+                    "comment": "Control-flow keywords",
+                    "name": "keyword.control.buff",
+                    "match": "\\b(if|else|elif|for|while|return|break|continue|match|in)\\b"
+                },
+                {
+                    "comment": "Operator-like keywords (import-as, cast)",
+                    "name": "keyword.operator.buff",
+                    "match": "\\b(as|from|crate)\\b"
+                },
+                {
+                    "comment": "Storage modifiers",
+                    "name": "storage.modifier.buff",
+                    "match": "\\b(mut|async|extern|unsafe)\\b"
+                },
+                {
+                    "comment": "Booleans are constants",
+                    "name": "constant.language.boolean.buff",
+                    "match": "\\b(true|false)\\b"
+                },
+                {
+                    "comment": "Booleans self",
+                    "name": "variable.language.buff",
+                    "match": "\\bself\\b"
+                }
+            ]
+        },
+        "literals": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.buff",
+                    "match": "\\b[0-9][0-9_]*(\\.[0-9][0-9_]*([eE][+-]?[0-9]+)?)?\\b"
+                },
+                {
+                    "comment": "Character literal",
+                    "name": "string.quoted.single.buff",
+                    "match": "'([^'\\\\\\n]|\\\\.|\\\\u\\{[0-9a-fA-F]+\\})'"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "comment": "String literal with interpolation",
+                    "name": "string.quoted.double.buff",
+                    "begin": "\"",
+                    "beginCaptures": {
+                        "0": {"name": "punctuation.definition.string.begin.buff"}
+                    },
+                    "end": "\"",
+                    "endCaptures": {
+                        "0": {"name": "punctuation.definition.string.end.buff"}
+                    },
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.buff",
+                            "match": "\\\\([^xuU]|[0-7]{1,3}|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|u\\{[0-9a-fA-F]+\\})"
+                        },
+                        {
+                            "comment": "Interpolation: {expr}",
+                            "name": "meta.interpolation.buff",
+                            "begin": "\\{",
+                            "beginCaptures": {
+                                "0": {"name": "punctuation.section.interpolation.begin.buff"}
+                            },
+                            "end": "\\}",
+                            "endCaptures": {
+                                "0": {"name": "punctuation.section.interpolation.end.buff"}
+                            },
+                            "patterns": [
+                                {"include": "$base"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "comment": "PascalCase identifiers are types",
+                    "name": "entity.name.type.buff",
+                    "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+                }
+            ]
+        },
+        "functions": {
+            "patterns": [
+                {
+                    "comment": "Function declaration: func <name>",
+                    "match": "\\bfunc\\s+([A-Za-z_][A-Za-z0-9_]*)",
+                    "captures": {
+                        "1": {"name": "entity.name.function.buff"}
+                    }
+                },
+                {
+                    "comment": "Function call sites",
+                    "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "1": {"name": "support.function.buff"}
+                    }
+                },
+                {
+                    "comment": "Method call: .method(...)",
+                    "match": "(\\.)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+                    "captures": {
+                        "2": {"name": "entity.name.function.method.buff"}
+                    }
+                }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                {
+                    "comment": "Operators",
+                    "name": "keyword.operator.buff",
+                    "match": "(\\+|\\-|\\*|/|%|==|!=|<|>|<=|>=|&&|\\|\\||!|&|\\||\\^|~|<<|>>|->|=>|=|\\+=|\\-=|\\*=|/=|%=|\\.\\.|\\.\\.=|\\|>|\\?\\.|\\?|\\.\\.)"
+                },
+                {
+                    "comment": "Punctuation: delimiters",
+                    "name": "punctuation.separator.buff",
+                    "match": "(\\.|,|:|;)"
+                },
+                {
+                    "comment": "Punctuation: braces/brackets",
+                    "name": "punctuation.section.brackets.buff",
+                    "match": "(\\(|\\)|\\{|\\}|\\[|\\])"
+                }
+            ]
+        }
+    }
+}
