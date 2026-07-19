@@ -12,3 +12,8 @@ tokio.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+buff-lang-ast.workspace = true
+buff-lang-codegen-wgsl.workspace = true

@@ -789,3 +789,187 @@ $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared
 - CHECK (cargo check -p buff-lang-codegen-wgsl): EXIT 0
 - TEST (cargo test -p buff-lang-codegen-wgsl): EXIT 0, 81 tests pass (36+43+2)
 - WORKSPACE CHECK (cargo check --workspace): EXIT 0
+
+## T38b Findings (2026-07-19)
+
+### Outcome
+T38b GREEN: Mock GPU backend + CPU-fallback oracle + WGSL snapshot harness
+implemented in buff-lang-runtime. All 4 gates pass. 19 NEW gpu_harness
+integration tests + 1 module smoke test + 3 NEW doctests (1 active,
+2 informational-ignored). Total runtime crate tests: 123 passed + 2 ignored
+(was 102 after T43). cargo test -p buff-lang-runtime gpu_harness matches
+all 19 integration tests.
+
+### Public API surface (re-exported from buff_lang_runtime crate root)
+`ust
+pub trait GpuBackend: std::fmt::Debug + Send + Sync {
+    fn dispatch_map(&self, shader_wgsl: &str, input: &[f32]) -> Result<Vec<f32>, RuntimeError>;
+}
+
+pub struct DispatchRecord { pub shader: String, pub input_len: usize }
+
+pub struct MockGpuBackend<F> where F: Fn(&[f32]) -> Vec<f32> + Send + Sync { /* private */ }
+
+impl<F: ...> MockGpuBackend<F> {
+    pub fn new(cpu_fn: F) -> Self;
+    pub fn recorded_dispatches(&self) -> usize;  // QA spec: == 1 after one dispatch
+    pub fn dispatch_count(&self) -> usize;        // alias
+    pub fn records(&self) -> Vec<DispatchRecord>;
+    pub fn clear_records(&self);
+}
+
+impl<F: ...> GpuBackend for MockGpuBackend<F>;  // records first, runs closure second
+impl<F: ...> std::fmt::Debug for MockGpuBackend<F>;  // manual (closures don't derive Debug)
+
+pub fn cpu_fallback_map<F: Fn(f32) -> f32>(input: &[f32], f: F) -> Vec<f32>;
+`
+
+### GpuBackend trait shape (T45 implements this for real)
+- Object-safe: single method, &self receiver, no generics, no Self by-value.
+- Supertrait bounds: Debug + Send + Sync (mirrors the existing Dispatcher trait).
+- Single method dispatch_map(&self, shader_wgsl: &str, input: &[f32]) -> Result<Vec<f32>, RuntimeError>.
+- Designed for the v1.0 element-wise map kernel scope (T44 codegen produces
+  one @compute shader per {x => <expr>} lambda). Reductions/scans deferred.
+- Error type is uff_lang_runtime::RuntimeError (GpuUnavailable / GpuInit / Unsupported).
+  The MOCK never errors — its oracle is infallible — but T45's real backend
+  will use these variants.
+
+### How the mock records dispatches
+- ecords: std::sync::Mutex<Vec<DispatchRecord>> (interior-mutable).
+- dispatch_map records FIRST (under lock, dropped immediately), THEN runs
+  the CPU closure. This guarantees the mutex is NOT poisoned via the
+  recording path even if the closure panics.
+- ecorded_dispatches() returns Vec::len of the records (count).
+- ecords() returns a cloned snapshot of all records in dispatch order
+  (push order = invocation order — deterministic).
+- dispatch_count() is an alias for ecorded_dispatches().
+- clear_records() empties the Vec (for test reuse).
+- Poisoned mutex is handled gracefully via .unwrap_or(0) / .unwrap_or_default()
+  (cannot happen via this module's code paths but is defensive).
+
+### Why MockGpuBackend<F> and not dyn Fn directly
+- Generic-over-closure (F: Fn(...) + Send + Sync) means the mock is
+  monomorphized per closure type — zero-cost dispatch, no v-table per call.
+- The closure field is cpu_fn: F, stored by value.
+- Manual Debug impl required (closures don't auto-derive Debug) —
+  reports the record count via inish_non_exhaustive().
+- Bound is Fn + Send + Sync so MockGpuBackend itself is Send + Sync
+  (GpuBackend trait requires it).
+- NOT Clone — closures may not be Clone. Tests that need sharing use
+  Arc<MockGpuBackend<F>> (proven by test_gpu_harness_mock_is_send_sync_across_threads).
+
+### CPU-fallback oracle design
+- cpu_fallback_map<F: Fn(f32) -> f32>(input: &[f32], f: F) -> Vec<f32> —
+  sequential per-element map. Deterministic (no thread pool to spin up,
+  no scheduling nondeterminism).
+- Why not use CpuDispatcher::par_map (T39)?
+  par_map is the parallel production path. It's overkill for an oracle
+  that needs to be maximally simple. Sequential iter().copied().map(f).collect()
+  is harder to get wrong. rayon preserves input order, so both produce
+  identical element-order results for the same closure — but this one is cheaper.
+- Used INSIDE MockGpuBackend's CPU closure (so mock output == oracle output)
+  AND in tests as the expected value.
+
+### WGSL snapshot harness
+- Wired uff-lang-codegen-wgsl + uff-lang-ast as DEV-deps of buff-lang-runtime.
+- Test 	est_gpu_harness_wgsl_snapshot_x_times_two_stable constructs the
+  reference lambda {x: Float => x * 2.0} (byte-identical to T44's own
+  snapshot test lambda) and asserts insta::assert_snapshot on
+  generate_wgsl(&lambda).
+- The resulting snapshot is BYTE-IDENTICAL to T44's existing snapshot
+  (wgsl_codegen_tests__wgsl_full_shader_x_times_two.snap) — proves the
+  harness produces stable WGSL across crates.
+- Renamed .snap.new to .snap manually (no cargo-insta CLI on this toolchain).
+- T45 will wire generate_wgsl(...) output as wgpu::ShaderSource::Wgsl(Cow::Borrowed(...))
+  and rely on this byte-stability.
+
+### QA case proven
+`ust
+let backend = MockGpuBackend::new(|input: &[f32]| cpu_fallback_map(input, |x| x * 2.0));
+let _ = backend.dispatch_map("@compute ...", &vec![1.0_f32, 2.0, 3.0]);
+assert_eq!(backend.recorded_dispatches(), 1);  // <-- spec literal
+`
+Test: 	est_gpu_harness_qa_single_dispatch_records_one.
+
+### Files changed (buff-lang-runtime only — no other crate source touched)
+1. crates/buff-lang-runtime/src/mock_gpu.rs (NEW, ~330 lines)
+2. crates/buff-lang-runtime/src/lib.rs (MODIFIED — module wire + re-exports + doc)
+3. crates/buff-lang-runtime/Cargo.toml (MODIFIED — added [dev-dependencies] insta+ast+wgsl)
+4. crates/buff-lang-runtime/tests/gpu_harness_tests.rs (NEW, ~330 lines, 19 tests)
+5. crates/buff-lang-runtime/tests/snapshots/gpu_harness_tests__gpu_harness_wgsl_snapshot_x_times_two_stable.snap (NEW)
+
+### Test breakdown
+- mock_gpu module smoke (lib unittests): 1 NEW
+- gpu_harness_tests.rs integration tests: 19 NEW
+- doctests buff_lang_runtime: 1 NEW active (cpu_fallback_map) + 2 NEW ignored (MockGpuBackend struct/new — informational, tagged `ignore to avoid doctest scope issues)
+- TOTAL NEW: 21 (19 pass via filter gpu_harness + 1 module smoke + 1 doctest)
+- TOTAL passed in crate: 123 (was 102)
+- TOTAL ignored in crate: 2 (informational doctests)
+
+### Gotchas / lessons
+- **Mutex::lock returns MutexGuard, not &Vec**:
+  Result::map(Vec::len) fails because Vec::len expects &Vec<_> but
+  the map argument is MutexGuard<...>. Fix: .map(|guard| guard.len())
+  so the closure explicitly takes the guard and auto-derefs.
+  Same fix needed in the manual Debug impl.
+
+- **Closures don't derive Debug**:
+  MockGpuBackend<F> needs a manual impl Debug that reports the record
+  count via inish_non_exhaustive() (avoids claiming all fields are shown
+  when the closure field cannot be printed).
+
+- **Doctests that use crate-internal types across module boundaries**:
+  Marked ignore for the two MockGpuBackend struct/new doctests. They
+  demonstrate API shape but the surrounding rustdoc indentation can confuse
+  the doctest runner on some toolchains. The active doctest on
+  cpu_fallback_map itself passes — it's self-contained.
+
+- **insta snapshot first-run generates .snap.new**:
+  Same workflow as T44: run tests → .snap.new appears → Rename-Item to
+  .snap → rerun. The snapshot is byte-stable because T44 codegen is
+  deterministic. The snapshot content matches T44's existing snapshot for
+  the same lambda exactly — proving the harness can feed real codegen
+  output through the mock backend.
+
+- **Recording FIRST, closure SECOND (poison-safety)**:
+  Critical design decision. If we ran the closure first and it panicked,
+  the lock would be held across the panic boundary, poisoning the mutex
+  for ALL future dispatches on that backend. Recording first means the
+  lock guard is short-lived and dropped before the closure runs.
+
+### Conventions honored
+- All NEW deps via .workspace = true (no in-crate version pins).
+- buff-lang-codegen-wgsl + buff-lang-ast added as DEV-deps ONLY (per MUST NOT).
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- NO [features] section added.
+- NO unwrap/expect/panic!/unimplemented!/todo! in non-test code.
+  unwrap_or and unwrap_or_default are used on Mutex::lock — these are
+  infallible and do not panic.
+- Derives Debug+Clone+PartialEq on DispatchRecord. MockGpuBackend has
+  manual Debug impl. NOT Clone (closures may not be Clone).
+- No HashMap/HashSet. Mutex<Vec> for records is deterministic (push order).
+- All new test names contain gpu_harness for filter consistency.
+- 4 spaces only. No tabs. No trailing whitespace.
+
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for cargo check)
+Same as T38/T39/T40/T42/T43/T44. Exact strings used for this task:
+`powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+`
+
+### Verification gate results
+- FMT     (cargo fmt -p buff-lang-runtime -- --check):                EXIT 0
+- CLIPPY  (cargo clippy -p buff-lang-runtime --all-targets -D warnings): EXIT 0
+- TEST    (cargo test -p buff-lang-runtime):                          EXIT 0
+                                                                     123 passed + 2 ignored (21 NEW T38b)
+- WORKSPACE CHECK (cargo check --workspace):                          EXIT 0
+
+### What's deferred (out of scope for T38b)
+- T45: REAL wgpu dispatch pipeline. Will impl GpuBackend for a real
+  wgpu-backed type. Consumes generate_wgsl(...) output as wgpu::ShaderSource.
+- T46: Tiling (large inputs split across multiple dispatches).
+- T47: Cold-start pooling (device pre-warming at startup).
+- Reductions/scans/gather kernels (post-v1.0 — will extend the trait
+  non-breakingly with default-bodied methods).
+

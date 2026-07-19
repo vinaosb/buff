@@ -19,10 +19,16 @@
 //!   [`DispatchKind::CpuParallel`], or [`DispatchKind::GpuCompute`] based
 //!   on element count + GPU availability + VRAM capacity. O(1),
 //!   allocation-free.
+//! * [`GpuBackend`] / [`MockGpuBackend`] / [`cpu_fallback_map`] — T38b's
+//!   mock GPU backend + CPU-fallback oracle so T45/T46/T47 dispatch
+//!   logic can be unit-tested WITHOUT a real GPU. The mock records every
+//!   dispatch in a `Mutex<Vec<DispatchRecord>>` and produces the "GPU"
+//!   output via a caller-provided CPU closure.
 //!
 //! Real parallel/GPU logic is deferred: see T39 (CPU `par_map`), T43 (lazy
-//! GPU device init via `OnceLock`), T45 (GPU dispatch pipeline), T49
-//! (`@prefer` hints layered over [`decide`]).
+//! GPU device init via `OnceLock`), T45 (real GPU dispatch pipeline —
+//! implements [`GpuBackend`] for a wgpu-backed type), T49 (`@prefer` hints
+//! layered over [`decide`]).
 //!
 //! # Determinism
 //!
@@ -34,10 +40,12 @@ pub mod cpu;
 pub mod dispatch;
 pub mod error;
 pub mod gpu;
+pub mod mock_gpu;
 pub mod threshold;
 
 pub use cpu::{CpuDispatcher, CpuDispatcherError};
 pub use dispatch::{DispatchKind, Dispatcher};
 pub use error::RuntimeError;
 pub use gpu::{AdapterInfoSnapshot, GpuContext, GpuContextError};
+pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
 pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};

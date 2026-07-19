@@ -62,7 +62,7 @@ Phase 2 (v0.5) must be complete:
 
 ### Wave 10 — GPU Compute (depends on Wave 9)
 
-- [ ] **T38b**: GPU test harness [deep]
+- [x] **T38b**: GPU test harness [deep]
   **What to do** (TDD): RED: MockGpuBackend records dispatches. WGSL snapshot stable. CPU-fallback testable. GREEN: implement mock backend, shader snapshot testing, fallback runner.
   **Acceptance**: `cargo test -p buff-lang-runtime gpu_harness` passes. Mock works without GPU.
   **QA**: MockGpuBackend.dispatch() → assert recorded_dispatches==1. Evidence: task-38b-mock-gpu.txt
