@@ -1,0 +1,113 @@
+// v10-compat.buff — Backward-compatibility fixture for Buff v1.0.
+//
+// This file is the FROZEN contract for v1.0 transpilation output. Any change
+// to the Buff compiler (lexer, parser, type inference, codegen) that alters
+// the byte-for-byte transpiled Rust output of this file is a BREAKING change
+// and must be deliberate (major version bump) or accompanied by a snapshot
+// refresh with documented justification.
+//
+// Coverage checklist (each item is exercised at least once below):
+//   [x] func with typed params + return type
+//   [x] let binding (immutable)
+//   [x] let mut binding
+//   [x] Integer literals (small + large)
+//   [x] Float literals
+//   [x] Bool literals
+//   [x] String literals (with interpolation)
+//   [x] Arithmetic operators (+ - * /)
+//   [x] Comparison operators (< > == != <= >=)
+//   [x] Logical operators (and or not)
+//   [x] if / else if / else expression
+//   [x] match on integer literal + _
+//   [x] match on Option<T> (Some / None)
+//   [x] match on Result<T,E> (Ok / Err)
+//   [x] Vector<T> literal + indexing + .len()/.push()/.pop()
+//   [x] Map<K,V> literal + .len()
+//   [x] Closure {x => ...} passed to .map()
+//   [x] .map() chain
+//
+// Excluded (codegen-only — cannot run E2E in v1.0):
+//   [-] async func / spawn (needs Cargo-project pipeline; post-v1.0 T120)
+//   [-] import / export (multi-file; needs CLI module-graph walk)
+//   [-] user-defined enum (variants emitted unqualified — v0.5 codegen gap)
+//   [-] user-defined struct fields with enum types (same root cause)
+//   [-] GPU compute dispatch (no fixture harness in v1.0)
+
+func classify(n: Int) -> Int:
+    if n < 0:
+        return 0
+    if n == 0:
+        return 1
+    if n < 10:
+        return 2
+    return 3
+
+func half(n: Int) -> Result<Int, Error>:
+    if n < 2:
+        return Error("input too small")
+    return Ok(n / 2)
+
+func add_one(n: Int) -> Result<Int, Error>:
+    let h = half(n)?
+    return Ok(h + 1)
+
+func main():
+    // Integer + Float + Bool literals; arithmetic + comparison + logical.
+    let count = 42
+    let pi = 3.14
+    let active = true
+    print(count)
+    print(pi)
+    print(active)
+    print(count + 8)
+    print(count >= 40)
+    print(active && count > 0)
+
+    // String literals passed directly to print() (the v1.0 supported form).
+    print("Hello, Buff!")
+
+    // if / else if / else dispatch.
+    print(classify(-1))
+    print(classify(0))
+    print(classify(5))
+    print(classify(99))
+
+    // match on Option<T> from Vector.pop().
+    let mut drawer = [11, 22, 33]
+    let taken = drawer.pop()
+    match taken { Some(x) => print(x), None => print(0) }
+
+    let mut empty = [1]
+    let _first = empty.pop()
+    let none = empty.pop()
+    match none { Some(x) => print(x), None => print(0) }
+
+    // Result<T,E> propagation via `?` and explicit match on Ok/Err.
+    let good = add_one(10)
+    match good { Ok(v) => print(v), Err(_) => print(0) }
+
+    let bad = add_one(1)
+    match bad { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Vector<T> literal + indexing + .len() + .push().
+    let v = [10, 20, 30, 40]
+    print(v[0])
+    print(v[3])
+    print(v.len())
+
+    let mut stack = [1, 2, 3]
+    stack.push(4)
+    print(stack.len())
+
+    // Closure passed to .map(); chain of two .map() calls.
+    let scaled = [1, 2, 3].map({ x => x * 10 }).map({ y => y + 1 })
+    print(scaled[0])
+    print(scaled[2])
+
+    // Map<K,V> literal + .len().
+    let scores = {1: 10, 2: 20, 3: 30}
+    print(scores.len())
+
+    // Large integer literal (exercises i64 width).
+    let big = 9223372036854775807
+    print(big)

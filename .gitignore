@@ -5,6 +5,9 @@ target/
 # Examples (build artifacts)
 examples/**/*.rs
 
+# Test fixtures (compile_to_rust writes <name>.buff.rs side artifacts)
+tests/fixtures/**/*.buff.rs
+
 # Buff
 buff.lock
 
