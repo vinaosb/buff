@@ -32,5 +32,13 @@ fn main() -> Result<()> {
         Command::Test { file, pattern } => {
             buff_lang_cli::commands::test::run(&file, pattern.as_deref())
         }
+        Command::Fmt { file, check } => {
+            use buff_lang_cli::commands::fmt::FmtOutcome;
+            let outcome = buff_lang_cli::commands::fmt::run(&file, check)?;
+            if matches!(outcome, FmtOutcome::NeedsFormat) {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
     }
 }

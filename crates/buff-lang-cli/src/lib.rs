@@ -34,6 +34,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod error_mapper;
+pub mod fmt;
 pub mod pipeline;
 pub mod scaffold;
 pub mod test_runner;

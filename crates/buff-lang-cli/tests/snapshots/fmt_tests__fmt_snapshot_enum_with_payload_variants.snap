@@ -1,0 +1,12 @@
+---
+source: crates/buff-lang-cli/tests/fmt_tests.rs
+assertion_line: 87
+expression: out
+---
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+func main():
+    print("defined")

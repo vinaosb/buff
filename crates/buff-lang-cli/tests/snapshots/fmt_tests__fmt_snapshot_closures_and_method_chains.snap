@@ -1,0 +1,16 @@
+---
+source: crates/buff-lang-cli/tests/fmt_tests.rs
+assertion_line: 72
+expression: out
+---
+func main():
+    let doubled = [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ].map({ x => x * 2 })
+    print(doubled[0])
+    let plus_one = [1, 2, 3].map({ x => x * 2 }).map({ y => y + 1 })
+    print(plus_one[0])

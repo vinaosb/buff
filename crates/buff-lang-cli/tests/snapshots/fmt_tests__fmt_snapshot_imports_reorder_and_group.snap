@@ -1,0 +1,11 @@
+---
+source: crates/buff-lang-cli/tests/fmt_tests.rs
+assertion_line: 57
+expression: out
+---
+import { alpha } from "./a"
+import { mango } from "./m"
+import { zebra } from "./z"
+
+func main():
+    print("hi")

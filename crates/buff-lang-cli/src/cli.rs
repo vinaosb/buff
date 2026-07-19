@@ -1,6 +1,6 @@
 //! Command-line argument definitions for the `buff` binary.
 //!
-//! Built on [`clap`] derive. Subcommands supported in v0.1:
+//! Built on [`clap`] derive. Subcommands supported:
 //!
 //! - `buff build <FILE>` — compile a `.buff` file to a native executable.
 //! - `buff run <FILE> [ARGS]...` — compile and immediately execute, cleaning
@@ -9,9 +9,11 @@
 //!   Buff project in a fresh `<NAME>/` directory. Default (no flag) produces
 //!   a runnable binary; the flags select alternative starter layouts (T112).
 //! - `buff init` — scaffold a Buff project in the current directory.
+//! - `buff fmt <FILE> [--check]` — format a `.buff` file in place (T54).
+//!   `--check` exits non-zero without writing when the file isn't already
+//!   formatted (mirrors `cargo fmt --check`).
 //!
-//! Future subcommands (`check`, `fmt`, `test`, `lsp`) will be added in later
-//! waves.
+//! Future subcommands (`check`, `lsp`) will be added in later waves.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -100,5 +102,21 @@ pub enum Command {
         /// `test_*`). When omitted, all `@test` functions run.
         #[arg(long)]
         pattern: Option<String>,
+    },
+
+    /// Format a `.buff` file into canonical form (T54).
+    ///
+    /// By default rewrites the file in place. Pass `--check` to verify
+    /// without writing (exits non-zero if the file isn't already
+    /// formatted, mirroring `cargo fmt --check`).
+    Fmt {
+        /// Input `.buff` source file.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Verify the file is already formatted; do NOT write. Exits with
+        /// code 1 if the file would be reformatted.
+        #[arg(long)]
+        check: bool,
     },
 }

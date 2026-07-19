@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-cli/tests/fmt_tests.rs
+assertion_line: 35
+expression: out
+---
+func main():
+    print("Olá, Buff!")

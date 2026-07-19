@@ -2600,3 +2600,123 @@ $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared
   error at build time; a future task could pre-validate and emit a
   structured Buff diagnostic.
 
+
+## T54 Findings
+
+**Task:** T54 (uff fmt formatter, Wave 12).
+**Status:** COMPLETE. All 4 gates green. No commit made (per task rule).
+
+### Architecture
+- Source pretty-printer at crates/buff-lang-cli/src/fmt.rs (~1340 lines).
+- Public API: mt::format_source(src) -> Result<String, FormatError>,
+  mt::format_decls(decls) -> String, mt::is_already_formatted(src)
+  -> Result<bool>.
+- CLI: commands::fmt::run(file, check) -> Result<FmtOutcome> where
+  FmtOutcome = AlreadyFormatted | Formatted | NeedsFormat. main.rs
+  translates NeedsFormat into exit(1) (so --check mirrors
+  cargo fmt --check). Avoids process::exit inside the library fn so
+  tests can inspect the outcome without aborting the test process.
+- Subcommand wired via clap Command::Fmt { file, check } variant in
+  cli.rs + dispatch arm in main.rs + pub mod fmt; in
+  commands/mod.rs + lib.rs.
+
+### Enforced conventions (out of 18)
+- **#2 (4-space indent)** — yes; converts any 2-space / tab-indented
+  source to canonical 4-space (the QA case).
+- **#2 (no trailing whitespace)** — yes.
+- **#2 (max 2 consecutive blank lines)** — yes (inish collapses
+  trailing \n\n runs; writer never emits >2).
+- **#2 (trailing comma in multi-line collections)** — yes (multi-line
+  array/struct/map literals end with ,).
+- **#2 (line =100 chars)** — partial; wraps arg lists + collections on
+  a heuristic estimate (=4 args/elements + projected width). Long
+  single-statement lines are NOT wrapped.
+- **#8 (import ordering)** — yes; ES6 imports sorted alphabetically by
+  rom path; legacy imports sorted by dotted-path.
+- **#14 (file organization)** — yes; imports hoisted to top (sorted),
+  other decls preserve source order.
+- Other conventions (#1, #3–#7, #9–#13, #15–#18) are naming / docs /
+  lint rules — NOT a formatter's mechanical job. Deferred to T55
+  (uff check linter).
+
+### Idempotency strategy
+- ormat_source(format_source(x)) == format_source(x) for any
+  well-formed input.
+- Achieved by:
+  - Conservative parenthesization (any BinaryOp/UnaryOp/IfExpr/Lambda/
+    MatchExpr/Range/IfLet/StructInit/MapLit/Spawn/Suspend in operand
+    position gets parens). Mild over-paren, guaranteed to re-parse to
+    the same AST.
+  - Deterministic output: only Vec (source order) + sort_by_key
+    (alphabetical) — never HashMap. Same AST ? byte-identical output.
+  - Pattern Variant { enum_name: "" (empty), ... } is re-emitted
+    WITHOUT the enum_name:: prefix (the parser produces empty
+    enum_name for bare Some(x) style).
+  - else: aligned to its if via indent_level tracking (after
+    write_block_body dedents, 
+l() writes newline + outer indent
+    ? naturally aligns with the matching if).
+
+### Snapshot workflow
+- 10 insta snapshots accepted in one batch (.snap.new ? .snap).
+- All examples are PT-BR (ola.buff, calculadora.buff) or
+  real-English (ibonacci.buff, collections.buff).
+- Snapshots live in crates/buff-lang-cli/tests/snapshots/.
+
+### Known limitations (documented in evidence + fmt.rs rustdoc)
+- **Comments are dropped** (Buff lexer doesn't preserve them — T57
+  lossless AST closes this).
+- Operator-precedence parenthesization is conservative.
+- Line-wrapping is heuristic, not exact-width.
+
+### Tests (49 fmt tests total)
+- 5 inline #[cfg(test)] mod tests in mt.rs (smoke tests).
+- 44 in 	ests/fmt_tests.rs:
+  - 10 snapshots (covers: hello_world, typed_func, recursive_func,
+    imports_reorder, match_inline, closures_chains, multi_line_collection,
+    enum_with_payloads, map_literal, error_propagation).
+  - 10 inline idempotency fixtures.
+  - 8 example-file idempotency fixtures (ola, fibonacci, calculadora,
+    collections, closures, pattern_matching, error_handling, prelude_demo).
+  - 4 QA cases (2-space?4-space, no trailing ws, max 2 blanks, trailing
+    comma).
+  - 3 import-sorting tests.
+  - 3 --check tests (already-formatted ok, unformatted ? NeedsFormat,
+    write-mode round-trip).
+  - 2 determinism + error propagation tests.
+  - 2 is_already_formatted helper tests.
+
+### Buff syntax canonical forms (the formatter's choices)
+- **Func bodies**: : + newline + indented block (NOT braces) —
+  matches the v0.1/v0.5 example style.
+- **Enum / Struct / Trait / Extend bodies**: { + newline + indented
+  members + } — these decl kinds use BRACES per the parser (the
+  lexer rejects bare : for them; e.g. enum X: is a parse error).
+- **Match arms**: inline { Pat => body, Pat => body } when =2 arms +
+  each body is a single simple statement; multi-line match scrut: +
+  indented arms otherwise.
+- **Lambda**: { params => body } single-line.
+- **Literals**: Float uses {v:?} (Rust Debug) for lossless f32
+  round-trip; Double uses {v:?}d; Decimal uses <text>m; Byte uses
+   x{v:02X}; Char uses {c:?} (single-quoted); String escapes
+  " \ \n \r \t.
+
+### MSVC env (REQUIRED for test/clippy, NOT for check)
+Same as T38/T39/T40/T42:
+- LIB=C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;...\um\x64;...\ucrt\x64
+- INCLUDE=5 Win10 SDK dirs + MSVC 14.44.35207 include
+
+### Files changed (count)
+- crates/buff-lang-cli/src/lib.rs — +1 line
+- crates/buff-lang-cli/src/cli.rs — +14 lines
+- crates/buff-lang-cli/src/main.rs — +8 lines
+- crates/buff-lang-cli/src/commands/mod.rs — +1 line
+- crates/buff-lang-cli/src/fmt.rs — +1340 lines (NEW)
+- crates/buff-lang-cli/src/commands/fmt.rs — +87 lines (NEW)
+- crates/buff-lang-cli/tests/fmt_tests.rs — +500 lines (NEW)
+- crates/buff-lang-cli/tests/snapshots/fmt_tests__*.snap — 10 NEW files
+- .sisyphus/evidence/task-54-fmt.txt — +210 lines (NEW)
+- NO changes to ast / lexer / parser / types / codegen-* / runtime.
+- NO changes to Cargo.toml (insta was already in dev-deps).
+- NO commit made.
+- NO plan files touched.

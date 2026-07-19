@@ -124,7 +124,7 @@ Phase 2 (v0.5) must be complete:
 
 ### Wave 12 — Tooling + Targets (depends on Wave 11)
 
-- [ ] **T54**: `buff fmt` formatter [unspecified-high]
+- [x] **T54**: `buff fmt` formatter [unspecified-high]
   **What to do** (TDD): RED: mixed indent → 4-space. Line >100 → wrapped. Imports unsorted → reordered. Idempotent. GREEN: implement formatter using AST, enforce 18 conventions.
   **Acceptance**: `cargo test -p buff-lang-cli fmt` passes. Idempotent, 10 snapshots stable.
   **QA**: Format file with 2-space indent → assert 4-space output. Evidence: task-54-fmt.txt
