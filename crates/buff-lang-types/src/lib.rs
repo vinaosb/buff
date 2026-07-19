@@ -27,7 +27,13 @@ pub mod modules;
 pub mod ownership;
 pub mod prelude;
 pub mod promote;
+// T48: recursion detection (call-graph cycle detection). Re-exported at
+// the crate root so the codegen pass + T49 hint-driven codegen can call
+// `buff_lang_types::analyze_recursion(decls)` without a long module path.
+// Deterministic (BTreeMap/BTreeSet based) — same AST → byte-identical
+// cpu_only set every time (the T29 flaky-test lesson).
 pub mod range_analysis;
+pub mod recursion;
 pub mod ty;
 
 pub use env::TypeEnv;
@@ -55,6 +61,13 @@ pub use modules::{
     build_graph, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph, ModuleLoader,
 };
 pub use promote::{assignable_to, promote_binary};
+// T48: recursion detection (call-graph cycle detection). Re-exported at
+// crate root for the codegen pass + T49 hint-driven codegen so callers can
+// use `buff_lang_types::RecursionFacts` / `analyze_recursion` /
+// `is_cpu_only_after_recursion_analysis` without a long module path.
+// Deterministic (BTreeSet based) — same AST → byte-identical cpu_only set
+// every time (the T29 flaky-test lesson).
+pub use recursion::{analyze_recursion, detect_cycles, has_prefer_gpu_attr, RecursionFacts};
 // T33: ownership analysis (Copy/Arc/CoW facts). Re-exported at crate root
 // for the codegen pass (and snapshot tests) so callers can use
 // `buff_lang_types::OwnershipFacts` / `analyze_ownership` without a long

@@ -1836,3 +1836,165 @@ $env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Fil
 $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
 ```
 
+## T48 Findings — Recursion detection (call-graph cycle → cpu_only)
+
+### Task summary
+Implemented `crates/buff-lang-types/src/recursion.rs` — builds a deterministic
+call graph (REUSES `async_analysis::build_call_graph` from T31), runs DFS
+cycle detection with an on-stack set, and marks every function on any cycle
+into `RecursionFacts::cpu_only`. `@prefer(gpu)` on a recursive function →
+`Err(TypeError)` with a deterministic, lexicographically-first offender name.
+
+### Files changed (ADDITIVE — no other crates touched)
+- **NEW** `crates/buff-lang-types/src/recursion.rs` (~600 lines):
+  - `pub type CallEdges = BTreeMap<String, BTreeSet<String>>`
+  - `pub struct RecursionFacts { cpu_only: BTreeSet<String> }` with
+    `is_cpu_only(name) -> bool`, `len`, `is_empty`, `to_sorted_vec`.
+  - `pub fn build_call_graph(decls) -> CallEdges` — thin adapter over T31's
+    `async_analysis::build_call_graph`. Returns the raw BTreeMap.
+  - `pub fn detect_cycles(graph: &CallGraph) -> BTreeSet<String>` — DFS
+    with explicit `on_stack` set + sorted iteration (deterministic).
+  - `pub fn has_prefer_gpu_attr(f: &FuncDecl) -> bool` — exact-match for
+    `@prefer(gpu)` (name="prefer", args=["gpu"]).
+  - `pub fn analyze_recursion(decls) -> Result<RecursionFacts, TypeError>`
+    — main entry point. Combines build_call_graph + detect_cycles + the
+    @prefer(gpu) conflict check.
+- **EDIT** `crates/buff-lang-types/src/lib.rs`: added `pub mod recursion;`
+  + re-exports `analyze_recursion`, `detect_cycles`, `has_prefer_gpu_attr`,
+  `RecursionFacts` at crate root.
+- **NEW** `crates/buff-lang-types/tests/recursion_test.rs` (18 tests).
+- **NEW** `.sisyphus/evidence/task-48-recursion.txt` — captured test output.
+
+### `@prefer(gpu)` representation in the AST (CRITICAL for T49)
+The Buff AST ALREADY supports `@prefer(gpu)` from T35 — no AST changes
+were needed for T48. The shape is:
+```rust
+// crates/buff-lang-ast/src/decl.rs (T35)
+pub struct Attribute {
+    pub name: Ident,            // "prefer"
+    pub args: Vec<String>,      // vec!["gpu".to_string()]
+    pub span: Span,
+}
+```
+- Lives on `FuncDecl::attributes: Vec<Attribute>` (declared in T35).
+- Parser already accepts `@name(arg, arg, ...)` form (see
+  `crates/buff-lang-parser/src/stmt.rs` line ~2484: `parse_attributes`).
+- For T49 hint-driven codegen, the predicate is:
+  `f.attributes.iter().any(|a| a.name.name == "prefer" && a.args.len() == 1 && a.args[0] == "gpu")`
+  — exactly what `recursion::has_prefer_gpu_attr(f)` implements (exported
+  at crate root for T49 reuse).
+- Future `@prefer(cpu)` and other targets use the same shape — T49 will
+  add a sibling `has_prefer_cpu_attr(f)` (or generalise to a
+  `PreferTarget` enum).
+- Multi-arg `@prefer(gpu, force)` is INTENTIONALLY not matched — only
+  the exact `args == ["gpu"]` form counts. If T49 wants to honour
+  multi-arg hints, it should widen the predicate.
+
+### Call-graph / DFS design (mirrors async_analysis + modules.rs)
+- **Determinism HARD rule**: BTreeMap/BTreeSet only, sorted iteration
+  everywhere. No HashMap/HashSet (T29 flaky-test lesson).
+- **Reused**: `async_analysis::build_call_graph` (T31) — it already walks
+  every compound expression (if/match/lambda/for/binop/string-interp/
+  struct-init/...) and records bare-ident callee names. NO duplication.
+- **DFS** (in `detect_cycles`): for each unvisited node (sorted by name),
+  launch a DFS maintaining `on_stack: BTreeSet<String>` (current path)
+  + `stack: Vec<String>` (for marking the cycle slice). When a callee
+  already on `on_stack` is encountered, every node from that callee
+  upward in `stack` (inclusive) is on a cycle → inserted into
+  `on_cycle: BTreeSet<String>`.
+- **Edges to undeclared callees** (prelude `print`, free vars): the T31
+  walker RECORDS these but they have no graph node. The DFS skips any
+  callee not in `graph.edges` — they can't close a cycle.
+- **On-cycle classification only** (NOT transitive): a function that
+  merely CALLS a recursive fn is NOT cpu_only. The spec defines
+  "recursive = on a cycle" explicitly. Transitive marking ("calls
+  cpu_only") is deferred to T49's hint-driven codegen if needed.
+- **No `unwrap`/`expect`/`panic`/`todo`** in non-test code (hard rule).
+- Recursion depth = call-graph depth, ≤ number of declared functions.
+  Realistic Buff programs are tiny; default 8 MB stack is plenty.
+
+### Error type
+- `TypeError` (from `buff_lang_error`) is a STRUCT wrapping a
+  `Diagnostic`, not an enum. NO variant changes needed. The error
+  message is:
+  ```
+  cannot @prefer(gpu) on recursive function `<name>`: recursion is not GPU-dispatchable
+  ```
+- Deterministic: offenders are collected into a BTreeSet and the
+  lex-smallest name is reported first.
+
+### QA confirmed (test names contain `recursion` per filter convention)
+1. **fib → cpu_only==true**: `recursion_qa_fib_calls_fib_minus_one_and_two_marks_cpu_only`
+   constructs `fib(n) { fib(n-1) + fib(n-2) }` and asserts
+   `facts.is_cpu_only("fib") == true`. ✅
+2. **non-recursive double → NOT cpu_only**: `recursion_qa_non_recursive_double_not_cpu_only`
+   asserts `facts.is_cpu_only("double") == false`. ✅
+3. **@prefer(gpu) on recursive → Err**: `recursion_prefer_gpu_on_recursive_returns_err`
+   asserts `Err` with message containing `\`fib\``, `@prefer(gpu)`, `recursive`. ✅
+4. **@prefer(gpu) on non-recursive → Ok**: `recursion_prefer_gpu_on_non_recursive_returns_ok`. ✅
+5. **mutual recursion a↔b → both cpu_only** ✅
+6. **3-cycle a→b→c→a → all cpu_only** ✅
+7. **deep non-recursive chain a→b→c→d → none cpu_only** ✅
+8. **caller-of-recursive-fn (not on cycle) → NOT cpu_only** ✅
+9. **disconnected components: self-loop + chain + isolated → only self-loop** ✅
+10. **empty program → empty facts** ✅
+11. **determinism: same input → byte-identical cpu_only set** ✅
+12. **export-wrapped recursive func → still detected** ✅
+13. **@prefer(cpu) on recursive → Ok (cpu_only marked but no err)** ✅
+14. **@prefer(gpu, force) multi-arg → NOT matched → Ok** ✅
+15. **calls to undefined/prelude names ignored** ✅
+16. **function with no calls → never cpu_only** ✅
+17. **lexicographically-first offender reported (aaa over zzz)** ✅
+18. **realistic mixed program (main+fib+helper+double)** ✅
+
+Plus 24 inline `#[cfg(test)] mod tests` in recursion.rs (build_call_graph
+shape, detect_cycles primitives, has_prefer_gpu_attr edge cases, etc.).
+
+Total: **42 recursion-related tests**, all passing.
+
+### Verification gate results
+- FMT     (cargo fmt -p buff-lang-types -- --check):                EXIT 0
+- CLIPPY  (cargo clippy -p buff-lang-types --all-targets -- -D warnings): EXIT 0
+- TEST    (cargo test -p buff-lang-types):                          EXIT 0
+                                                                       (full crate green)
+- WORKSPACE CHECK (cargo check --workspace):                        EXIT 0
+
+### MSVC env vars (REQUIRED for test/clippy — NOT for cargo check)
+Same as T38–T47. Exact strings used:
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```
+
+### Gotchas / lessons for T49+
+1. **`@prefer(gpu)` is already representable from T35** — T49 needs NO
+   AST changes. The `Attribute { name, args, span }` shape carries it
+   directly. Use `buff_lang_types::has_prefer_gpu_attr(f)` (re-exported
+   at crate root) for the predicate.
+2. **`TypeError` is a struct, not an enum** — additive variant changes
+   don't apply. Construct via `TypeError::new(Diagnostic::error(msg, span))`.
+3. **Recursion is on-cycle only** — T49 may want to extend to
+   transitive ("calls cpu_only") classification. If so, run a fixpoint
+   on top of T48's `cpu_only` set (mirrors async_analysis's fixpoint).
+4. **Self-edges are detected naturally** by the on-stack check — no
+   special-casing needed. A node calling itself has `node` on_stack when
+   its own callee list is iterated → back-edge → mark.
+5. **Multi-arg `@prefer(gpu, force)` is intentionally NOT matched** by
+   `has_prefer_gpu_attr` (requires exactly `args == ["gpu"]`). If T49
+   wants to honour multi-arg hints, widen the predicate.
+6. **Recursion depth is bounded by call-graph depth** — at most the
+   number of declared functions. Recursive DFS is fine for realistic
+   inputs; pathological depth would OOM the parser first.
+
+### What's deferred (correctly out of scope for T48)
+- **T49**: @prefer hints full hint-driven codegen (T48 only ERRORS when
+  @prefer(gpu) conflicts with recursion).
+- **T50**: GPU memory alignment / packing concerns.
+- **Transitive cpu_only marking** ("calls a cpu_only fn"): deferred to
+  T49 if it wants that conservative layer.
+- **Trait-default-method recursion / extend-block method recursion**:
+  the call graph (T31) intentionally includes only top-level `func`
+  declarations; trait-method recursion is a future concern.
+- **Commit**: per task instructions, did NOT commit. The commit message
+  per the plan is: `feat(types): implement recursion detection via call graph`.
+

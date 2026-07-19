@@ -98,7 +98,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: dispatch shader A twice → assert create_pipeline called once. Evidence: task-47-cold-start.txt
   **Commit**: `perf(runtime): add pipeline caching, buffer pooling, async GPU init`
 
-- [ ] **T48**: Recursion detection [deep]
+- [x] **T48**: Recursion detection [deep]
   **What to do** (TDD): RED: fib(n) calls fib(n-1) → cycle detected → CPU-only. @prefer(gpu) on recursive → error. GREEN: build call graph, DFS cycle detection, mark cpu_only.
   **Acceptance**: `cargo test -p buff-lang-types recursion` passes. Recursive = CPU-only.
   **QA**: Analyze fib → assert cpu_only==true. Evidence: task-48-recursion.txt
