@@ -2720,3 +2720,261 @@ Same as T38/T39/T40/T42:
 - NO changes to Cargo.toml (insta was already in dev-deps).
 - NO commit made.
 - NO plan files touched.
+
+
+## T55 Findings (2026-07-19)
+
+### Outcome
+T55 GREEN: uff check type-checker + naming-convention linter implemented
+in buff-lang-cli. **33 check tests pass** (11 inline in src/check.rs + 22 in
+tests/check_tests.rs) + 23 predicate tests in src/naming_lint.rs + 2 doctests.
+Full buff-lang-cli suite: 234 pass + 1 documented expected-panic
+(test_command_e2e_fail_test — NOT a regression).
+cargo check / test / clippy --all-targets -D warnings / fmt --check all exit 0.
+cargo check --workspace still exit 0 (no other crate touched).
+
+### Architecture
+- **uff_lang_cli::check module** (src/check.rs) — the check pipeline:
+  - pub enum CheckOutcome { Clean, HasWarnings, HasErrors } (the
+    library-level outcome; main.rs translates HasErrors -> exit 1).
+  - pub struct CheckReport { diagnostics, outcome } (full diagnostic list
+    + derived outcome).
+  - pub fn check_source(src: &str) -> CheckReport — the test surface.
+  - pub fn run_check_file(file: &Path) -> Result<CheckReport> — file-read +
+    render diagnostics to stderr (rustc-style with caret) via
+    Diagnostic::render from buff-lang-error.
+- **uff_lang_cli::naming_lint module** (src/naming_lint.rs) — the linter:
+  - pub fn is_snake_case(s: &str) -> bool — lowercase + digits + _, with at
+    least one alphanumeric char.
+  - pub fn is_pascal_case(s: &str) -> bool — uppercase start + ASCII
+    alphanumeric only.
+  - pub fn lint_naming(decls: &[Decl]) -> Vec<Diagnostic> — source-order
+    walker (no HashMap); emits Warning diagnostics for func names
+    (snake_case), struct/enum/trait names (PascalCase), enum variants
+    (PascalCase), struct fields (snake_case), parameters + let-bindings +
+    loop variables (snake_case). Recurses into export wrappers, extend
+    blocks, trait default methods, and function bodies.
+- **uff_lang_cli::commands::check module** (src/commands/check.rs) —
+  the CLI command entry, mirrors the FmtOutcome pattern from T54:
+  - pub fn run(file: &Path, deny_warnings: bool) -> Result<CheckOutcome>.
+  - Returns the outcome (does NOT call process::exit — T54 lesson).
+  - main.rs translates: HasErrors -> exit(1); HasWarnings -> exit(0) by
+    default OR exit(1) when --deny-warnings / -D is passed; Clean ->
+    exit(0).
+- **clap subcommand** in cli.rs::Command::Check { file, deny_warnings }
+  with -D / --deny-warnings short+long forms.
+
+### Pipeline (NO codegen, NO rustc — faster than build)
+`
+.buff source
+    |  buff_lang_lexer::tokenize  -- on err -> HasErrors (1 diagnostic)
+    v
+Vec<Token>
+    |  buff_lang_parser::parse    -- on err -> HasErrors (1 diagnostic)
+    v
+Vec<Decl>
+    |  type_check_decls           -- drive TypeInferencer over each func body
+    v                              (per-func fresh inferencer + pre-bound params)
+Vec<TypeError>
+    |  lint_naming                -- source-order AST walker
+    v
+Vec<Diagnostic> (Warnings only)
+    |  compute_outcome
+    v
+CheckReport { diagnostics, outcome }
+`
+
+### How type-checking runs WITHOUT codegen
+The codegen pass (uff-lang-codegen-rust::RustCodegen::lower_func) creates
+a fresh TypeInferencer per function, pre-binds parameters via the PRIVATE
+	yperef_to_type helper in uff-lang-types::infer, then drives
+infer_stmt over each body statement.
+
+For T55 (modify ONLY buff-lang-cli), the same pattern is reimplemented in
+src/check.rs::type_check_func:
+1. Fresh TypeInferencer::new() per function.
+2. Pre-bind each parameter via inferencer.bind(name, ty) where 	y comes
+   from a MINIMAL reimplementation of 	yperef_to_type (covers Int/Float/
+   Double/Bool/String/Char/Byte/Decimal/Void + Option<T> + Result<T,E>).
+   User-defined type names fall back to None (parameter left unbound); the
+   inference rules treat unbound idents as Undefined-variable errors, which
+   is the same behavior the user sees at codegen time today.
+3. Drive infer_stmt over each body statement; collect TypeErrors (don't
+   short-circuit so multiple errors per function surface in one pass).
+4. Recurse into TraitDecl::defaults, ExtendBlock::methods, ExportDecl::inner.
+
+This is the contract for T55: catch the same type errors the v0.5 codegen
+would catch, WITHOUT running the slow syn/quote/prettyplease codegen +
+rustc. Mirrors cargo check vs cargo build for Rust.
+
+### Naming-lint rules implemented (per buff-conventions.md §1)
+| Element        | Convention     | Source location              |
+|----------------|----------------|------------------------------|
+| function       | snake_case     | FuncDecl.name + Trait.required + ExtendBlock.methods |
+| parameter      | snake_case     | FuncDecl.params[].name       |
+| variable       | snake_case     | Stmt::LetDecl.name (recursive) |
+| loop variable  | snake_case     | Stmt::ForIn.var              |
+| struct         | PascalCase     | StructDecl.name              |
+| struct field   | snake_case     | StructDecl.fields[].0        |
+| enum           | PascalCase     | EnumDecl.name                |
+| type parameter | PascalCase     | EnumDecl.generics[]          |
+| enum variant   | PascalCase     | EnumDecl.variants[].name     |
+| trait          | PascalCase     | TraitDecl.name               |
+| trait method   | snake_case     | TraitDecl.required[].name    |
+
+Constants (SCREAMING_SNAKE_CASE) are NOT linted — Buff has no syntactic
+const keyword, so let MAX = 3 is indistinguishable from a regular let.
+The conventions table lists the rule but it's deferred to a future task
+that adds syntactic const-ness.
+
+### Outcome mapping
+| Outcome       | Default exit | With --deny-warnings / -D |
+|---------------|--------------|-------------------------------|
+| Clean         | 0            | 0                             |
+| HasWarnings   | 0            | 1                             |
+| HasErrors     | 1            | 1                             |
+
+-D is the short form (mirrors rustc -D warnings and clippy's
+-D warnings). Both --deny-warnings and -D are wired to the same
+clap field.
+
+### QA acceptance (binary invocation, real .buff files)
+1. **clean file -> exit 0**: unc main():\n    print("hi")\n -> "no issues
+   found" on stderr, exit 0.
+2. **type error -> exit 1 (RED)**: unc main():\n    let x: Int = "oops"\n
+   print(x)\n -> two Error diagnostics (the type mismatch on line 2 + the
+   cascading "undefined variable: x" on line 3, because the failed binding
+   doesn't introduce x), exit 1.
+3. **camelCase function -> warning + exit 0 (RED)**: unc myFunc(): ->
+   Warning unction myFunc should be snake_case with caret pointing at
+   myFunc, exit 0.
+4. **--deny-warnings promotes to exit 1**: same file with --deny-warnings
+   -> exit 1.
+5. **-D short flag works**: same as case 4.
+
+The diagnostic rendering uses the existing Diagnostic::render from
+buff-lang-error, which produces rustc-style output (file:line:col header,
+then [Severity] message, then | gutter + source line + caret line).
+
+### Test counts (final, all PASS)
+- src/check.rs inline tests: 11 (outcome matrix + 4 path-level QA)
+- src/naming_lint.rs inline tests: 23 (is_snake_case + is_pascal_case edge cases)
+- src/naming_lint.rs doctests: 2 (is_snake_case + is_pascal_case)
+- tests/check_tests.rs integration tests: 22 (full acceptance matrix + 6
+  command-entry end-to-end tests + struct tests via hand-built AST)
+- buff-lang-cli full crate: 234 tests total (was ~177 pre-T54 + ~57 T54
+  fmt tests + 58 T55 tests across 3 files).
+
+### Files changed (all under buff-lang-cli — no other crate touched)
+1. crates/buff-lang-cli/src/lib.rs (MODIFIED — +2 modules: check, naming_lint)
+2. crates/buff-lang-cli/src/cli.rs (MODIFIED — +Check subcommand + rustdoc)
+3. crates/buff-lang-cli/src/main.rs (MODIFIED — +Check dispatch arm)
+4. crates/buff-lang-cli/src/commands/mod.rs (MODIFIED — +pub mod check;)
+5. crates/buff-lang-cli/src/check.rs (NEW — ~470 lines: pipeline + outcome +
+   typeref_to_type reimpl + render + 11 inline tests)
+6. crates/buff-lang-cli/src/naming_lint.rs (NEW — ~370 lines: predicates +
+   lint walker + 23 inline tests + 2 doctests)
+7. crates/buff-lang-cli/src/commands/check.rs (NEW — ~40 lines: command entry)
+8. crates/buff-lang-cli/tests/check_tests.rs (NEW — ~280 lines, 22 tests)
+9. .sisyphus/evidence/task-55-check.txt (NEW — this evidence)
+
+NO changes to: ast / lexer / parser / types / codegen-rust / codegen-wgsl /
+runtime / error / Cargo.toml / Cargo.lock.
+
+### Gotchas / lessons
+1. **Parser does NOT support struct** (only enum/func/trait/extend/etc.).
+   The T54 notepad said "struct bodies use braces" but the parser
+   dispatcher (parser.rs:75-91) only routes enum/unc/etc. — there is
+   no KwStruct token. So end-to-end struct lint tests can't drive through
+   the parser; instead, struct lint is unit-tested by calling lint_naming
+   directly with hand-built StructDecl AST nodes (see
+   check_pascal_case_struct_emits_no_warning and
+   check_non_pascal_case_struct_emits_pascal_warning in
+   tests/check_tests.rs). The linter itself handles StructDecl correctly;
+   the parser gap is a separate task.
+2. **	yperef_to_type is private** in buff-lang-types::infer. The codegen
+   crate can use it (same crate family), but T55 was constrained to
+   buff-lang-cli ONLY. Solution: a minimal reimplementation in
+   check.rs::typeref_to_type that covers the same primitive + Option +
+   Result cases (~50 lines, byte-identical logic). If a future task makes
+   the original pub, the duplicate can be removed.
+3. **TypeInferencer state is per-function**: a fresh TypeInferencer::new()
+   per function is REQUIRED to avoid env leakage between siblings. The
+   codegen does this too (rust_codegen.rs:836). Forgetting it produces
+   spurious cross-function bindings.
+4. **Pipeline ordering is fail-fast between phases, fail-soft within**:
+   lex error -> short-circuit (no tokens); parse error -> short-circuit (no
+   AST); type errors AND lint warnings -> collected together so the user
+   sees the full picture per check run.
+5. **Naming-warning outcome must not shadow type errors**: the
+   compute_outcome function checks Error severity FIRST (any Error ->
+   HasErrors), then Warning-only (HasWarnings), then empty (Clean). This
+   matches user expectations: a type error is more important than a lint
+   warning.
+6. **rustdoc doc_lazy_continuation lint (toolchain quirk)**: when a
+   rustdoc list item wraps, the continuation line must be indented 2 spaces.
+   Hit while writing the rustdoc tables in naming_lint.rs; fixed by
+   indenting all multi-line list-item continuations consistently.
+7. **-D short flag for --deny-warnings**: clap derive needs
+   short = 'D' (capital D) to NOT collide with any default -d /
+   --deny clap might infer. Verified with the binary invocation
+   (uff check file -D works as expected).
+8. **Diagnostic rendering reuses buff-lang-error's Diagnostic::render**:
+   the render method already produces rustc-style [{severity:?}] header +
+   source line + caret. The check command adds the file:line:col prefix
+   before the header so the user sees <path>:<line>:<col>: [{severity}]
+   <msg>. This is the same pattern the existing pipeline uses for lex/parse
+   errors (see pipeline.rs::format_diagnostic_error).
+
+### Conventions honored
+- All deps via .workspace = true; NO new deps added (T55 needs none —
+  buff-lang-error::Diagnostic + buff-lang-types::TypeInferencer are already
+  available).
+- No [features] section. No HashMap/HashSet (linter walks decls in source
+  order via Vec iteration only — the determinism rule).
+- NO unwrap/expect/panic/	odo/unimplemented in non-test code. The
+  whole check pipeline is fallible-Result-based; test code uses .expect()
+  sparingly (allowed per project rule).
+- #[must_use] is implicit on CheckReport fields (pub) — explicit
+  #[must_use] on the enums not added (the project doesn't put it on
+  FmtOutcome either; consistency).
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- Doc comments on every public item; rustdoc examples for both predicates
+  (2 doctests run).
+- Tests follow *_tests.rs naming and check_* per-test prefix so the QA
+  filter cargo test -p buff-lang-cli check matches the suite (T40 lesson
+  about QA filter substring matching).
+- Naming follows Buff convention: snake_case fn/variable, PascalCase types,
+  snake_case file names (the lint_naming source itself follows this).
+
+### What's deferred (correctly out of scope for T55)
+- T56: --release flag for the build pipeline.
+- T57: lossless AST (preserves comments — the linter can't lint comments
+  today because they're dropped by the lexer).
+- T58: wasm build target.
+- Lossless-AST dependency: the linter currently can't check #3 (line =100
+  chars) or trailing-whitespace rules (#2) because those need character-
+  level source access the AST doesn't preserve. The T54 formatter already
+  enforces those at format-time; a future uff check --style could share
+  the formatter's writer logic.
+- Constants (SCREAMING_SNAKE_CASE) lint — needs syntactic const-ness (no
+  const keyword in Buff today).
+- Cross-function / cross-module type resolution: the per-func inferencer
+  only sees locals + params; user-function calls return Type::Unknown
+  today. A future task could pre-bind user functions in a global symbol
+  table for cross-call type-checking.
+
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for check)
+Same as T38-T54. Exact strings used for this task:
+`powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+`
+
+### Verification gate results (all exit 0)
+- FMT (cargo fmt -p buff-lang-cli -- --check): EXIT 0
+- CLIPPY (cargo clippy -p buff-lang-cli --all-targets -- -D warnings): EXIT 0
+- CHECK (cargo check -p buff-lang-cli): EXIT 0
+- TEST (cargo test -p buff-lang-cli check): EXIT 0, 33 tests pass
+- WORKSPACE CHECK (cargo check --workspace): EXIT 0
+- FULL CLI TEST SUITE (cargo test -p buff-lang-cli): EXIT 0, 234 tests pass

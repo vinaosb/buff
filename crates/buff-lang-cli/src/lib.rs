@@ -30,11 +30,13 @@
 //! `let`-binding annotations) in T12, so the CLI does not run a separate
 //! typecheck pass. v0.1 treats type errors as warnings (deferred to v0.5).
 
+pub mod check;
 pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod error_mapper;
 pub mod fmt;
+pub mod naming_lint;
 pub mod pipeline;
 pub mod scaffold;
 pub mod test_runner;

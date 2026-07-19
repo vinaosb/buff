@@ -12,8 +12,12 @@
 //! - `buff fmt <FILE> [--check]` — format a `.buff` file in place (T54).
 //!   `--check` exits non-zero without writing when the file isn't already
 //!   formatted (mirrors `cargo fmt --check`).
+//! - `buff check <FILE> [-D/--deny-warnings]` — type-check + naming-convention
+//!   linter (T55). Runs lex + parse + type inference WITHOUT codegen or
+//!   rustc (faster than `buff build`). Type errors → exit 1. Lint warnings
+//!   (e.g. camelCase function names) → exit 0 by default, exit 1 with `-D`.
 //!
-//! Future subcommands (`check`, `lsp`) will be added in later waves.
+//! Future subcommands (`doc`, `watch`, `lsp`) will be added in later waves.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -118,5 +122,22 @@ pub enum Command {
         /// code 1 if the file would be reformatted.
         #[arg(long)]
         check: bool,
+    },
+
+    /// Type-check and lint a `.buff` file WITHOUT running codegen (T55).
+    ///
+    /// Faster than `buff build` because it skips the syn/quote/prettyplease
+    /// codegen pass and the `rustc` compilation. Type errors exit 1.
+    /// Naming-convention warnings (e.g. camelCase function names) exit 0
+    /// by default; pass `--deny-warnings` / `-D` to treat them as errors.
+    Check {
+        /// Input `.buff` source file.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Treat lint warnings as errors (exit non-zero on any warning).
+        /// Mirrors `rustc -D warnings` / `cargo clippy -- -D warnings`.
+        #[arg(short = 'D', long = "deny-warnings")]
+        deny_warnings: bool,
     },
 }

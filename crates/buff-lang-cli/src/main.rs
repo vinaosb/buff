@@ -40,5 +40,16 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Check {
+            file,
+            deny_warnings,
+        } => {
+            use buff_lang_cli::check::CheckOutcome;
+            let outcome = buff_lang_cli::commands::check::run(&file, deny_warnings)?;
+            if matches!(outcome, CheckOutcome::HasErrors) {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
     }
 }

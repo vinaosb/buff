@@ -130,7 +130,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: Format file with 2-space indent → assert 4-space output. Evidence: task-54-fmt.txt
   **Commit**: `feat(cli): implement buff fmt with 18 convention rules`
 
-- [ ] **T55**: `buff check` type-checker + linter [quick]
+- [x] **T55**: `buff check` type-checker + linter [quick]
   **What to do** (TDD): RED: type error → exit 1. camelCase function → warning. Faster than build (no codegen). GREEN: run lexer+parser+types without codegen, lint naming conventions.
   **Acceptance**: `cargo test -p buff-lang-cli check` passes. Errors + warnings reported.
   **QA**: `buff check file_with_type_error.buff` → exit 1. Evidence: task-55-check.txt
