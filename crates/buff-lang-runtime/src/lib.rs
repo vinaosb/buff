@@ -24,6 +24,13 @@
 //!   logic can be unit-tested WITHOUT a real GPU. The mock records every
 //!   dispatch in a `Mutex<Vec<DispatchRecord>>` and produces the "GPU"
 //!   output via a caller-provided CPU closure.
+//! * [`WgpuBackend`] / [`workgroup_count`] — T45's REAL wgpu-backed GPU
+//!   dispatch pipeline. Implements [`GpuBackend`] over a [`GpuContext`]'s
+//!   cached `(Device, Queue)`: uploads `&[f32]` to a storage buffer,
+//!   runs a `ceil(len/64)`-workgroup compute pass, and reads the output
+//!   back via `map_async` + `device.poll(PollType::Wait)`. Returns empty
+//!   Vec on empty input; returns [`RuntimeError::GpuUnavailable`] on
+//!   hosts without a GPU (graceful — never panics).
 //!
 //! Real parallel/GPU logic is deferred: see T39 (CPU `par_map`), T43 (lazy
 //! GPU device init via `OnceLock`), T45 (real GPU dispatch pipeline —
@@ -40,6 +47,7 @@ pub mod cpu;
 pub mod dispatch;
 pub mod error;
 pub mod gpu;
+pub mod gpu_pipeline;
 pub mod mock_gpu;
 pub mod threshold;
 
@@ -47,5 +55,6 @@ pub use cpu::{CpuDispatcher, CpuDispatcherError};
 pub use dispatch::{DispatchKind, Dispatcher};
 pub use error::RuntimeError;
 pub use gpu::{AdapterInfoSnapshot, GpuContext, GpuContextError};
+pub use gpu_pipeline::{workgroup_count, WgpuBackend, WORKGROUP_SIZE};
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
 pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};

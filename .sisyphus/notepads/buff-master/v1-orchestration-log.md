@@ -973,3 +973,281 @@ $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared
 - Reductions/scans/gather kernels (post-v1.0 â€” will extend the trait
   non-breakingly with default-bodied methods).
 
+
+
+## T45 Findings (2026-07-19)
+
+### Outcome
+T45 GREEN: real wgpu-backed GPU dispatch pipeline implemented as
+`WgpuBackend` in `crates/buff-lang-runtime/src/gpu_pipeline.rs`.
+**23 new tests added** (7 inline unit + 16 integration, target: 12+).
+Total buff-lang-runtime tests now **147** (was 123 after T38b; +24 with
+the new workgroup_count doctest).
+cargo check / test / clippy --all-targets -D warnings / fmt --check all exit 0.
+cargo check --workspace still exit 0 (no other crate touched).
+
+### Real GPU roundtrip RAN ON THIS BOX
+Confirmed: `WgpuBackend.dispatch_map(generate_wgsl({x: Float => x*2.0}), &[1.0, 2.0, 3.0])`
+returned `vec![2.0, 4.0, 6.0]` from a real wgpu dispatch (adapter?device?
+shader?storage buffers?compute pass?copy_buffer_to_buffer?map_async?
+device.poll(Wait)?get_mapped_range?cast_slice). Took ~1 second total for
+the 16-test gpu_dispatch suite (device init dominates; per-dispatch is
+milliseconds).
+
+Evidence: `.sisyphus/evidence/task-45-gpu-roundtrip.txt` — raw cargo
+test output including `test_gpu_dispatch_qa_one_two_three_x_two_yields_two_four_six ... ok`
+and `test_gpu_dispatch_real_gpu_with_generated_wgsl_runs_on_device ... ok`.
+
+### Public API surface (re-exported from `buff_lang_runtime` crate root)
+```rust
+pub const WORKGROUP_SIZE: usize = 64;  // matches T44's @workgroup_size(64)
+
+pub fn workgroup_count(len: usize) -> u32;   // len.div_ceil(64) as u32
+
+pub struct WgpuBackend { context: GpuContext }  // Debug; Send+Sync; NOT Clone
+
+impl WgpuBackend {
+    pub fn new() -> Result<Self, RuntimeError>;          // GpuContext::new under the hood
+    pub fn from_context(context: GpuContext) -> Self;    // for tests / unavailable-context
+    pub fn context(&self) -> &GpuContext;                // probe has_adapter/has_device/device_init_count
+    pub fn has_device(&self) -> bool;                    // observational only
+}
+
+impl GpuBackend for WgpuBackend {
+    fn dispatch_map(&self, shader_wgsl: &str, input: &[f32]) -> Result<Vec<f32>, RuntimeError>;
+}
+```
+
+### `dispatch_map` pipeline (12 steps; each fallible ? RuntimeError::GpuInit)
+1. **Empty guard**: `input.is_empty()` ? return `Ok(Vec::new())` immediately.
+   No device() call, no buffers, no dispatch — works on no-GPU hosts.
+2. **Acquire cached device+queue** via T43's `GpuContext::device()` / `queue()`.
+   `&GpuContextError` mapped to `RuntimeError` via local helper
+   `gpu_ctx_err_to_runtime` (the existing `From<GpuContextError>` impl
+   takes owned; we have a borrow from the OnceLock cache).
+3. **Shader module**: `device.create_shader_module(ShaderModuleDescriptor)`
+   with `ShaderSource::Wgsl(Cow::Borrowed(shader_wgsl))`. T44's codegen
+   names the entry point `main`.
+4. **Input storage buffer**: `device.create_buffer_init(BufferInitDescriptor)`
+   (via `wgpu::util::DeviceExt` trait — must `use wgpu::util::DeviceExt;`).
+   Usage: `STORAGE | COPY_DST` (COPY_DST defensive for future re-upload).
+5. **Output storage buffer**: `device.create_buffer(BufferDescriptor)`
+   Usage: `STORAGE | COPY_SRC`.
+6. **Staging buffer** (host-visible readback): `device.create_buffer(BufferDescriptor)`
+   Usage: `MAP_READ | COPY_DST`.
+7. **Bind group layout**: 2 entries matching T44's binding layout EXACTLY
+   — binding 0 read-only Storage, binding 1 read_write Storage.
+8. **Bind group**: binds our actual buffers to the layout.
+9. **Pipeline layout + compute pipeline**: explicit `entry_point: Some("main")`
+   (avoids relying on the implicit "exactly one entry point" fallback).
+   `compilation_options: PipelineCompilationOptions::default()`,
+   `cache: None`.
+10. **Command encoder + compute pass**: `dispatch_workgroups(workgroup_count(len), 1, 1)`
+    followed by `encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, byte_size)`.
+    COPY_BUFFER_ALIGNMENT = 4 — satisfied trivially since `byte_size = len*4`.
+11. **Submit + poll**: `queue.submit(once(cmd))` then
+    `device.poll(wgpu::PollType::Wait) -> Result<PollStatus, PollError>`.
+    PollError mapped to RuntimeError::GpuInit.
+12. **map_async + drain + read**: `staging_buffer.slice(..).map_async(MapMode::Read, cb)`
+    with an mpsc channel callback; second `device.poll(PollType::Wait)`
+    drains the callback; `rx.recv()` returns the map result; bind the
+    BufferView to a local, `bytemuck::cast_slice::<u8, f32>(&bytes).to_vec()`,
+    explicit `drop(view)` BEFORE `staging_buffer.unmap()` (wgpu panics
+    on unmap while a view is alive); defensive `destroy()` on all three
+    buffers for prompt GPU-memory reclamation.
+
+### wgpu 26 API specifics (CRITICAL for T46/T47 reuse)
+- **`device.poll(poll_type: PollType) -> Result<PollStatus, PollError>`**
+  (wgpu 26 signature — NOT `Maintain::Wait` from older versions).
+  Use `wgpu::PollType::Wait` to block until queue empty.
+  PollStatus has `QueueEmpty` / `WaitSucceeded` / `Poll` variants.
+  PollError has only `Timeout`.
+- **`map_async` is callback-based, NOT future-based in wgpu 26**:
+  `slice(..).map_async(MapMode::Read, |result: Result<(), BufferAsyncError>| { ... })`.
+  Callback must be `FnOnce(...) + WasmNotSend + 'static`. Drive
+  completion by calling `device.poll(PollType::Wait)` AFTER submit AND
+  AFTER the map_async call. Used an mpsc channel to surface the
+  callback's result back to the calling thread.
+- **`get_mapped_range()` returns `BufferView<'_>`** (a temporary, not
+  a borrow into the buffer). For correct unmap-after-read sequencing,
+  bind the BufferView to a local (`let view = ...get_mapped_range();`)
+  and `drop(view);` BEFORE `staging_buffer.unmap();`. Writing
+  `let bytes: &[u8] = &staging_buffer.slice(..).get_mapped_range();`
+  would NOT extend the BufferView's lifetime past the statement
+  (`bytes` would reference a dropped temporary — clippy::dropping_references
+  catches `drop(bytes)` on a `&[u8]` but NOT the subtler issue).
+- **`wgpu::util::DeviceExt::create_buffer_init`**: import the trait
+  explicitly (`use wgpu::util::DeviceExt;`). Handles `mapped_at_creation`
+  + copy + unmap internally. Pads buffer size to COPY_BUFFER_ALIGNMENT=4
+  (irrelevant for f32 input which is always 4-aligned).
+- **`ComputePipelineDescriptor::entry_point: Option<&str>`**: wgpu 26
+  allows `None` if the shader has exactly one entry point. We pass
+  `Some("main")` explicitly because T44 codegen names the entry point
+  `main` and future shaders might add helpers.
+- **`ComputePipelineDescriptor::compilation_options`**: REQUIRED field
+  in wgpu 26 (was optional in older versions). Use `PipelineCompilationOptions::default()`.
+- **`ComputePipelineDescriptor::cache: Option<&PipelineCache>`**:
+  REQUIRED field in wgpu 26. We pass `None` — T47 (cold-start pooling)
+  may wire a real cache here.
+- **`BindGroupLayoutEntry.ty = BindingType::Buffer { ty: BufferBindingType::Storage { read_only: bool }, has_dynamic_offset, min_binding_size }`**:
+  BufferBindingType::Storage is a struct variant with `read_only: bool`
+  in wgpu 26. Match T44's shader layout: `read_only: true` for input
+  (binding 0), `read_only: false` for output (binding 1).
+- **`command_encoder.copy_buffer_to_buffer(src, src_off, dst, dst_off, size: impl Into<Option<BufferAddress>>)`**:
+  pass `byte_size` directly (the `impl Into<Option<u64>>` accepts a bare u64).
+
+### Files changed (all under buff-lang-runtime/)
+1. `crates/buff-lang-runtime/src/gpu_pipeline.rs` (NEW, ~470 lines).
+   WgpuBackend struct, workgroup_count fn, run_dispatch free fn,
+   gpu_ctx_err_to_runtime helper, 7 inline unit tests.
+2. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED — +1 module decl,
+   +1 re-export line for `gpu_pipeline::{workgroup_count, WgpuBackend,
+   WORKGROUP_SIZE}`, +6 doc lines in the crate-level doc).
+3. `crates/buff-lang-runtime/tests/gpu_dispatch_tests.rs` (NEW, ~560 lines,
+   16 integration tests). All names contain `gpu_dispatch` so the QA
+   filter `cargo test -p buff-lang-runtime gpu_dispatch` matches all 23
+   tests (7 inline unit + 16 integration).
+4. `crates/buff-lang-runtime/Cargo.toml`: NO CHANGE — `wgpu` + `bytemuck`
+   + `pollster` already in `[dependencies]` from T38; `buff-lang-ast` +
+   `buff-lang-codegen-wgsl` + `insta` already in `[dev-dependencies]` from T38b.
+5. `.sisyphus/evidence/task-45-gpu-roundtrip.txt` (NEW — raw cargo test
+   output proving the QA roundtrip ran on the real GPU).
+
+### Test coverage matrix (24 NEW test points: 7 unit + 16 integration + 1 doc)
+- workgroup_count boundaries (7 inline): 0?0, 1?1, 64?1, 65?2, 128?2,
+  129?3, plus a property test verifying ceiling-division invariant
+  for all n in 1..1000.
+- QA roundtrip (1 integration): [1,2,3]?[2,4,6] on real GPU; skips
+  with early return on no-GPU hosts.
+- Empty input (2 integration): empty ? empty without dispatch (works
+  on no-GPU hosts); empty does NOT trigger device init.
+- No-GPU graceful path (1 integration): backend from unavailable context
+  returns Err(GpuUnavailable), never panics.
+- Larger input (1 integration): 1000-element dispatch matches CPU
+  oracle within 1e-4 tolerance.
+- GPU == CPU oracle (1 integration): {x => x*x + 1} shader, mixed
+  sign/magnitude inputs.
+- Singleton input (1 integration): [42.0] ? [84.0].
+- Workgroup sizing dispatch (1 integration): sizes 1, 64, 65, 128, 129,
+  1000 all succeed and match oracle.
+- Real GPU with generated WGSL (1 integration): end-to-end test that
+  feeds T44's `generate_wgsl` output through the real pipeline on this
+  host; asserts has_device()=true after dispatch.
+- Object-safety (1 integration): Box<dyn GpuBackend> works.
+- Construction + accessors (3 integration): from_context preserves
+  context, new() Result shape, has_device() observational.
+- Cached device (1 integration): three dispatches share one device-init
+  (device_init_count stays at 1).
+- Mixed sign/magnitude (1 integration): GPU == CPU oracle for negative
+  and large-magnitude inputs.
+- Debug repr (1 integration): format!("{backend:?}") contains "WgpuBackend".
+- Send + Sync (1 integration): compile-time + Arc<dyn GpuBackend>
+  cross-thread dispatch.
+- Doctest (1 NEW): workgroup_count rustdoc example.
+
+### GPU-availability-aware testing pattern (reused from T38/T43/T44)
+Every real-dispatch test starts with:
+```rust
+let Some(backend) = try_get_real_backend() else {
+    return;  // skip real-GPU assertion on hosts without GPU
+};
+```
+where `try_get_real_backend()` calls `WgpuBackend::new()` and returns
+`None` on `GpuUnavailable`. This lets CI hosts without GPU still pass
+the test file (they exercise only the host-independent tests: empty
+input, no-GPU error path, workgroup_count arithmetic).
+
+### Clippy lints hit during development (all fixed before GREEN)
+1. `clippy::manual_div_ceil` on `((len + 63) / 64)`. Fix: use
+   `len.div_ceil(WORKGROUP_SIZE) as u32` (Rust 1.73+; we're on 1.95).
+2. `clippy::double_must_use` on `pub fn new() -> Result<Self, _>`
+   (Result is already must_use). Fix: removed redundant `#[must_use]`.
+3. `clippy::approx_constant` on `3.14159` and `2.71828` literals in
+   test inputs (math constants PI and E). Fix: used `42.4242` instead.
+4. `clippy::dropping_references` on `drop(bytes)` where bytes is `&[u8]`.
+   Fix: restructured to bind `let view = ...get_mapped_range();` then
+   `drop(view);` before `unmap()` — the actual borrow holder is the
+   BufferView, not the byte slice.
+
+### Conventions honored
+- All NEW deps via .workspace = true — but T45 added NO new deps. wgpu,
+  bytemuck, pollster already in [dependencies] from T38; buff-lang-ast
+  + buff-lang-codegen-wgsl + insta already in [dev-dependencies] from T38b.
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- NO [features] section added.
+- NO unwrap/expect/panic!/unimplemented!/todo! in non-test code.
+  mpsc::Receiver::recv and the send-side `let _ = tx.send(...)` are
+  both non-panicking. map_async callback explicitly ignores the send
+  error (the receiver may have been dropped if the caller's thread
+  terminated — that's correct, the callback's job is to fire the
+  completion, not to outlive the caller's interest).
+- Derives Debug on WgpuBackend (GpuContext: Debug from T43).
+- NOT Clone — wgpu backend handles are uniquely owned.
+- No HashMap/HashSet (project hard rule).
+- All new test names contain `gpu_dispatch` for filter consistency.
+- 4 spaces only. No tabs. No trailing whitespace.
+- `#[must_use]` only on `from_context`, `context`, `has_device`
+  (workgroup_count and new() would trigger double_must_use per clippy).
+
+### What's deferred (correctly out of scope for T45)
+- T46: VRAM tiling (large inputs split across multiple dispatches).
+  Current impl uploads the whole input in one buffer; would OOM on
+  inputs larger than VRAM.
+- T47: Cold-start pooling (pre-warm the device at startup, pipeline
+  cache reuse across dispatches). Current impl re-creates shader+pipeline
+  per dispatch — acceptable for correctness, suboptimal for throughput.
+- T49: `@prefer(gpu)` / `@prefer(cpu)` hints. T45 returns graceful
+  Err on no-GPU; T49 will layer an override on top of T40's decide().
+- Reductions/scans/gather kernels (post-v1.0 — will extend the trait
+  non-breakingly with default-bodied methods).
+
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for cargo check)
+Same as T38/T39/T40/T42/T43/T44/T38b. Exact strings used for this task:
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```
+
+### Verification gate results
+- FMT     (cargo fmt -p buff-lang-runtime -- --check):                EXIT 0
+- CLIPPY  (cargo clippy -p buff-lang-runtime --all-targets -D warnings): EXIT 0
+- TEST    (cargo test -p buff-lang-runtime):                          EXIT 0
+                                                                      147 passed + 2 ignored
+                                                                      (was 123 after T38b; +24 T45)
+- WORKSPACE CHECK (cargo check --workspace):                          EXIT 0
+
+### Gotchas / lessons for T46/T47
+1. **map_async is callback-based, not future-based in wgpu 26**. The
+   callback is `FnOnce(Result<(), BufferAsyncError>) + WasmNotSend + 'static`.
+   Use an mpsc channel to bridge the callback into the calling thread.
+   T46 (tiling) will reuse the same pattern for each tile's readback.
+2. **Two polls are needed**: one after `queue.submit` (drains the
+   dispatch + copy) and one after `map_async` (drains the map
+   callback). Forgetting the second poll hangs `rx.recv()` forever.
+   T47 may want to batch these into a single poll after multiple
+   dispatches share a submit.
+3. **`get_mapped_range()` returns a `BufferView`** (owned temporary,
+   NOT a borrow into the Buffer). Bind it to a local and `drop(view)`
+   BEFORE `unmap()`. The borrow-checker doesn't catch the lifetime
+   issue if you slice through a `&[u8]` reference — clippy does.
+4. **`GpuContextError` does NOT derive Clone** (only Debug + thiserror::Error).
+   T43 stores it in `OnceLock<Result<...>>` which returns `&_`. To
+   convert to RuntimeError (which needs owned for the existing From
+   impl), match the variants manually — done in `gpu_ctx_err_to_runtime`.
+   T46/T47 will likely want to add `Clone, PartialEq` to
+   GpuContextError to simplify this — out of scope for T45.
+5. **`PipelineCompilationOptions::default()`** is required as a field
+   on `ComputePipelineDescriptor` in wgpu 26 — was optional before.
+6. **Real GPU dispatch on this box takes ~1 second total** for 16
+   tests including device init. Per-dispatch after init is ~30ms.
+   T47 cold-start pooling should bring the per-dispatch cost down
+   further by amortizing shader+pipeline compilation.
+7. **Empty input MUST short-circuit before device init**: wgpu
+   forbids 0-sized dispatches AND 0-sized copy_buffer_to_buffer. The
+   early-return at the top of `dispatch_map` saves ~1s on empty tests.
+8. **Buffer sizes for f32 input are always 4-byte aligned** so
+   COPY_BUFFER_ALIGNMENT=4 is satisfied trivially. T46 tiling will
+   need to be careful if tile sizes aren't a multiple of 4.
+9. **`destroy()` is defensive but recommended**: wgpu frees GPU memory
+   on Drop anyway, but explicit `destroy()` triggers faster reclamation
+   — important for T46 where many dispatches happen in a loop.

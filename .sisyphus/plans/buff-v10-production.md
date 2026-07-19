@@ -80,7 +80,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: Lower `{x=>x*2.0}` → assert `@compute @workgroup_size(64)`. Evidence: task-44-wgsl-codegen.txt
   **Commit**: `feat(codegen-wgsl): implement AST to WGSL compute shader codegen`
 
-- [ ] **T45**: GPU dispatch pipeline [deep]
+- [x] **T45**: GPU dispatch pipeline [deep]
   **What to do** (TDD): RED: full pipeline buffer→shader→dispatch→readback produces correct result. Workgroup sizing ceil(len/64). GREEN: implement storage buffers, compute pass, readback via map_async.
   **Acceptance**: `cargo test -p buff-lang-runtime gpu_dispatch` passes. Roundtrip correct.
   **QA**: dispatch([1.0,2.0,3.0], {x=>x*2}) → assert [2.0,4.0,6.0]. Evidence: task-45-gpu-roundtrip.txt
