@@ -1068,15 +1068,15 @@ Phase 1 (v0.1) must be complete:
 
 ## Phase Exit Criteria
 
-- [ ] all 13 types working: Int, Bits, Float, Double, Decimal, Byte, Bool, String, Vector, Matrix, Map, Struct, Enum
-- [ ] Pattern matching with exhaustiveness checking
-- [ ] Module system with import/export
-- [ ] async with Tokio
-- [ ] Error handling with `?` operator
-- [ ] Closures with type inference
-- [ ] Modern syntax: pipeline, null-conditional, destructuring, guards, ranges, collection literals
-- [ ] `buff test` runs test suites
-- [ ] Error messages with spans and suggestions
-- [ ] `cargo test --workspace` passes 100%
-- [ ] `cargo clippy --workspace -- -D warnings` clean
-- [ ] Git tag `v0.5.0` created
+- [x] all 13 types working: Int, Bits, Float, Double, Decimal, Byte, Bool, String, Vector, Matrix, Map, Struct, Enum — Verified — Int/Bits/Float/Double/Decimal/Byte/Bool/String/Vector/Matrix/Map/Struct/Enum all in buff-lang-types/src/ty.rs and exercised by examples/{collections,pattern_matching}.buff
+- [x] Pattern matching with exhaustiveness checking — Verified — exhaustiveness checker at crates/buff-lang-types/src/exhaustiveness.rs; exercised by examples/pattern_matching.buff
+- [x] Module system with import/export — Verified — crates/buff-lang-types/src/modules.rs (646 lines, 61 tests). NOTE: module codegen works but CLI compiles one file at a time — multi-file E2E deferred to post-v1.0 T120.
+- [ ] async with Tokio — NOT MET E2E — async_demo.buff produces valid Rust but the single-file rustc pipeline cannot link tokio. Accepted as v1.0 limitation since v0.5 explicitly deferred Cargo-project pipeline. E2E delivery in post-v1.0 T120 (v1.3).
+- [x] Error handling with `?` operator — Verified — Expr::Try in ast/src/expr.rs; exercised by examples/error_handling.buff
+- [x] Closures with type inference — Verified — Expr::Lambda + closure_captures(); exercised by examples/closures.buff
+- [x] Modern syntax: pipeline, null-conditional, destructuring, guards, ranges, collection literals — Verified — all in parser + codegen (T67-T77)
+- [x] `buff test` runs test suites — Verified — crates/buff-lang-cli/src/commands/test.rs
+- [x] Error messages with spans and suggestions — Verified — crates/buff-lang-error/
+- [x] `cargo test --workspace` passes 100% — Verified post-cleanup at commit 210bb33 — all tests pass on Windows host with MSVC env
+- [x] `cargo clippy --workspace -- -D warnings` clean — Verified post-cleanup at commit 210bb33 — clippy clean with --all-targets -D warnings
+- [x] Git tag `v0.5.0` created — Tag exists (verified via git tag)
