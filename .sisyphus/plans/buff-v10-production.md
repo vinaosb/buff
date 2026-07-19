@@ -74,7 +74,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: init() → device is Some. init() again → same instance. Evidence: task-43-gpu-init.txt
   **Commit**: `feat(runtime): implement wgpu context lazy init with caching`
 
-- [ ] **T44**: buff-lang-codegen-wgsl crate [deep]
+- [x] **T44**: buff-lang-codegen-wgsl crate [deep]
   **What to do** (TDD): RED: `{x=>x*2.0}` → WGSL compute shader. Type filtering: f64 rejected. GREEN: AST→WGSL lowering, shader templates, buffer bindings.
   **Acceptance**: `cargo test -p buff-lang-codegen-wgsl` passes (15+ tests). Valid WGSL output.
   **QA**: Lower `{x=>x*2.0}` → assert `@compute @workgroup_size(64)`. Evidence: task-44-wgsl-codegen.txt
