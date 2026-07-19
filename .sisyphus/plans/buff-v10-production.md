@@ -30,7 +30,7 @@ Phase 2 (v0.5) must be complete:
 
 ### Wave 9 — Runtime + CPU Parallelism (depends on v0.5)
 
-- [ ] **T38**: buff-lang-runtime crate scaffold [deep]
+- [x] **T38**: buff-lang-runtime crate scaffold [deep]
   **What to do** (TDD): RED: GpuContext::new() returns Result. CpuDispatcher::new() returns thread pool. GREEN: create crate with wgpu/rayon/tokio deps, define dispatch traits.
   **Acceptance**: `cargo test -p buff-lang-runtime` passes (10+ tests). Crate compiles with all deps.
   **QA**: `cargo check -p buff-lang-runtime` → exit 0. Evidence: task-38-runtime-scaffold.txt
