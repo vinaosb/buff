@@ -36,6 +36,6 @@ src/
 - **Both bin + lib targets** in `Cargo.toml` — keep them in sync. Lib is what tests import.
 - **Integration tests** in `tests/` (6 files: `cli_build_tests`, `cli_run_tests`, `error_mapping_tests`, `integration_tests`, `milestone_tests`, `scaffold_tests`). **Milestone tests** (`test_example_ola`, `test_example_fibonacci`) are v0.1 acceptance gates — do not skip or weaken.
 - **rustc invocation** uses `--edition 2021`. Match the workspace edition.
-- **Type-checking is INSIDE codegen** for v0.1 — CLI does not run a separate typecheck pass. v0.5 will add it.
+- **Type-checking is INSIDE codegen** for v1.0 — CLI does not run a separate typecheck pass (T55 `buff check` surfaces warnings from codegen). A standalone typecheck pass remains post-v1.0 work.
 - **Error path**: every `Result::Err` from pipeline must flow through `error_mapper` before reaching the user. Don't `eprintln!` raw errors.
 - **Pipeline order** (see `lib.rs` doc comment): `read_to_string` → `tokenize` → `parse` → `generate_rust` → `compile_rust_to_exe`.

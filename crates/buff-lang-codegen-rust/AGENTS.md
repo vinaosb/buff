@@ -31,4 +31,4 @@ src/
 - **Numerics**: `rust_decimal` for decimals, `rust_decimal_macros` for literals. Used here only.
 - **Unicode**: `unicode-segmentation` for string operations.
 - **Tests**: 6 files in `tests/` — `codegen_tests`, `control_tests`, `literal_tests`, `move_tests`, `prelude_codegen`, `string_methods`. Snapshots in `tests/snapshots/`.
-- **v0.1 scope**: primitives + funcs + control flow. Collections/structs/async deferred to v0.5.
+- **v1.0 scope**: primitives, funcs, control flow, collections (Vector/Map/Matrix), structs, enums, traits, closures, async (codegen-only — no Cargo pipeline), pattern matching, error handling, GPU-bound struct repr(C) auto-alignment, race/atomic analysis. All shipped.

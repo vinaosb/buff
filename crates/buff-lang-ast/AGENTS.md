@@ -31,6 +31,6 @@ src/
 - **`Span` is re-exported from `buff-lang-error`**, not redefined: `pub use buff_lang_error::Span;`. Do NOT add a local Span.
 - **Every node carries a `span: Span` field** for diagnostics. Don't add spanless nodes.
 - **Derive `Debug, Clone, PartialEq`** on every node (+ `Eq, Hash` if needed for IR).
-- **`ir.rs` is the lowering target** for future optimizations (dataflow graph). v0.1 has it scaffolded; full use is v0.5+.
+- **`ir.rs` is the lowering target** for future optimizations (dataflow graph). Scaffolded in v0.1; full use is post-v1.0 work.
 - **Snapshot tests** in `tests/snapshots/` — insta captures `format!("{:#?}", node)`. Run `cargo insta review` after structural changes (snapshots will need re-acceptance).
 - **Tests**: `ir_tests.rs`, `snapshot_tests.rs`, `snapshot_helper.rs` in `tests/`.

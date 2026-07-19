@@ -31,6 +31,6 @@ src/
 - **Prelude is implicit**: `print` etc. don't need `import`. Add new built-ins in `prelude.rs` — they auto-appear in every Buff program.
 - **Re-exports at crate root** (see `lib.rs`): `is_prelude`, `lookup`, `category_of`, `PreludeFn`, `PreludeCategory`, `IntRange`, `smallest_int_width`, `collection_int_width` — all top-level for downstream callers.
 - **Numeric width inference** is "flexible mode" — picks smallest Int width that fits the range. See `range_analysis.rs::smallest_int_width`.
-- **v0.1 scope**: primitives only. Collections, user-defined types, full generics → v0.5.
+- **v1.0 scope**: primitives, collections (Vector/Map/Matrix), user-defined types (struct/enum), traits, full type inference, exhaustiveness checking, recursion detection. All shipped.
 - **`Span` re-exported** from `buff_lang_error` (don't redefine).
 - **Tests**: 3 files in `tests/` including `prelude_functions.rs` and `infer_tests.rs`.

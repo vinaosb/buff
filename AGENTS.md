@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-16 (originally for v0.1); **updated 2026-07-19 for v1.0 state**
-**Commit:** d394ed8 (master, post-v1.0 cleanup)
+**Commit:** 416f3c1 (master, post-per-crate-AGENTS.md refresh)
 **Branch:** master (v0.1-dev preserved as historical marker at v1.0.0 tag)
 
 ## OVERVIEW

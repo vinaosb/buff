@@ -1,6 +1,6 @@
 # buff-lang-parser
 
-Parses `Vec<Token>` → `Vec<Decl>`. **Hand-rolled recursive-descent + Pratt** (NOT chumsky, despite Cargo.toml).
+Parses `Vec<Token>` → `Vec<Decl>`. **Hand-rolled recursive-descent + Pratt** (chumsky was removed from Cargo.toml at commit 9af2f5c).
 
 ## STRUCTURE
 
@@ -25,8 +25,7 @@ src/
 
 ## CONVENTIONS (this crate only)
 
-- **HAND-ROLLED, not chumsky.** chumsky 1.0.0-alpha.8 transitively needs `stacker`, which uses `cc-rs` to compile a C shim — fails on Windows hosts missing `excpt.h` from the Windows SDK. Hand-rolling won. Do NOT re-introduce chumsky without solving the stacker/cc-rs issue.
-- **chumsky is still in `Cargo.toml`** as unused dep — cleanup TODO.
+- **HAND-ROLLED, not chumsky.** chumsky 1.0.0-alpha.8 transitively needed `stacker`, which uses `cc-rs` to compile a C shim — fails on Windows hosts missing `excpt.h` from the Windows SDK. Hand-rolling won. chumsky was removed from Cargo.toml at commit 9af2f5c. Do NOT re-introduce chumsky without solving the stacker/cc-rs issue.
 - **Pratt parsing** for expressions (operator precedence via binding powers). Statements use recursive descent.
 - **Layout-sensitive**: parser consumes synthetic `Indent`/`Dedent` tokens emitted by `crates/buff-lang-lexer/src/indent.rs`. Don't re-implement indentation tracking here.
 - **Public API** (see `lib.rs`): `parse()` (top-level, returns `Vec<Decl>`), plus lower-level helpers `parse_block`, `parse_func_decl`, `parse_if_expr`, `parse_params`, `parse_type_ref`, `parse_statement`, `parse_expression`, `TokenStream`.

@@ -1,6 +1,6 @@
 # buff-lang-lexer
 
-Tokenizes `.buff` source → `Vec<Token>`. **Hand-rolled byte-scanner** (NOT logos, despite Cargo.toml).
+Tokenizes `.buff` source → `Vec<Token>`. **Hand-rolled byte-scanner** (logos was removed from Cargo.toml at commit 9af2f5c).
 
 ## STRUCTURE
 
@@ -25,7 +25,7 @@ src/
 
 ## CONVENTIONS (this crate only)
 
-- **HAND-ROLLED, not logos.** `logos` is still in `Cargo.toml` `[workspace.dependencies]` but UNUSED here. Do not switch back without a plan to also fix the parser's chumsky issue (same root cause — see root AGENTS.md NOTES).
+- **HAND-ROLLED, not logos.** `logos` was removed from `[workspace.dependencies]` at commit 9af2f5c (it was never actually used — kept only as a v0.1 placeholder). Do not switch back without a plan to also fix the parser's chumsky issue (same root cause — see root AGENTS.md NOTES).
 - **Offside rule** (Python/Haskell-style): indentation level defines blocks. `indent.rs` synthesizes synthetic `Indent` / `Dedent` tokens. Tabs are REJECTED — 4 spaces only.
 - **String interpolation** is lexed here, not parsed: `"hello {name}!"` produces a sequence of tokens the parser assembles. See `string_interp.rs`.
 - **Entry point**: `tokenize(source: &str) -> Result<Vec<Token>, LexerError>`.
