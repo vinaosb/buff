@@ -395,7 +395,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.1 "Try Buff" — Playground + tree-sitter + Website
 
-- [ ] **T114: Web playground (Wasm transpile-only)** [visual-engineering]
+- [x] **T114: Web playground (Wasm transpile-only)** [visual-engineering]
 
   **What to do**:
   - Build a Wasm target for the Buff compiler (lexer + parser + codegen-rust only — no runtime/GPU)
@@ -473,7 +473,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(playground): Wasm transpile-only web playground with URL sharing`
 
-- [ ] **T115: tree-sitter grammar for Buff** [deep]
+- [x] **T115: tree-sitter grammar for Buff** [deep]
 
   **What to do**:
   - Write `grammar.js` defining Buff syntax (25 keywords, offside rule, braces-for-data)
