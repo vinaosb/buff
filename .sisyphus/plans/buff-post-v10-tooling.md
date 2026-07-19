@@ -325,7 +325,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Status**: ✅ Done at commit `a70a250` (2026-07-19). Fixture: `tests/fixtures/v10-compat.buff` (137 lines, expanded post-cleanup to cover all arithmetic/comparison/logical operators + else if/else + integer-literal match). Snapshot: `tests/fixtures/v10-compat.snapshot.rs` (145 lines). Test: `crates/buff-lang-cli/tests/v10_compat.rs` (byte-identical assertion + `#[ignored]` regen helper). Excludes async/modules/user-enum (codegen-only — documented in fixture header).
 
-- [ ] **T57b: Integrate LosslessTree into `buff fmt` (comment preservation)** [deep]
+- [x] **T57b: Integrate LosslessTree into `buff fmt` (comment preservation)** [deep]
 
   > **WHY THIS EXISTS**: T57 (v1.0) shipped the `LosslessTree` data structure at `crates/buff-lang-ast/src/lossless.rs` (743 lines, 39 passing tests, byte-exact roundtrip proven). However, `crates/buff-lang-cli/src/fmt.rs:format_source()` still strips comments because `tokenize()` drops them at `lexer.rs:130-167`. An attempt to integrate during v1.0 cleanup was reverted (architectural issue: comment draining happened only at top-level indent, not recursively at every block level — 14/15 Phase 1 tests failed). This task finishes the integration.
 
