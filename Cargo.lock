@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-ast"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-error",
  "insta",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "buff-lang-ast",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-codegen-rust"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-codegen-wgsl"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-error"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "insta",
  "thiserror 1.0.69",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-lexer"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-error",
  "insta",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-parser"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-runtime"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-codegen-wgsl",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-types"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "buff-playground-wasm"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "buff-lang-codegen-rust",
  "buff-lang-error",
