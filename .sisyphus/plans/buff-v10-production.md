@@ -106,7 +106,7 @@ Phase 2 (v0.5) must be complete:
 
 ### Wave 11 — Advanced GPU Features (depends on Wave 10)
 
-- [ ] **T49**: Hints system `@prefer(gpu/npu)` [deep]
+- [x] **T49**: Hints system `@prefer(gpu/npu)` [deep]
   **What to do** (TDD): RED: @prefer(gpu) generates both GPU+CPU code. Cost model overrides for small data. GREEN: parse @prefer attr, multi-version codegen, runtime dispatch.
   **Acceptance**: `cargo test -p buff-lang-runtime hints` passes. GPU chosen when available, CPU for small data.
   **QA**: @prefer(gpu) with 10 elements → assert CPU (cost override). Evidence: task-49-hints.txt

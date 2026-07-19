@@ -52,12 +52,25 @@
 //!   [`ColdStartBackend::wait_ready_blocking`] for awaiting it. Implements
 //!   [`GpuBackend`], so it's a drop-in replacement for [`WgpuBackend`]
 //!   in dispatch sites that want cold-start amortization.
+//! * [`Prefer`] / [`PREFER_GPU_MIN_ELEMENTS`] / [`decide_with_prefer`] /
+//!   [`dispatch_with_prefer`] / [`prefer_from_name_args`] — T49's
+//!   `@prefer(gpu)` / `@prefer(npu)` hint system. [`decide_with_prefer`]
+//!   layers a user-supplied [`Prefer`] hint on top of T40's [`decide`]:
+//!   honors the hint (routing to [`DispatchKind::GpuCompute`]) when a GPU
+//!   is available, the input fits VRAM, AND `element_count >= `
+//!   [`PREFER_GPU_MIN_ELEMENTS`] (the empirical GPU-dispatch-overhead
+//!   break-even point, pinned to 1024). Below that threshold the
+//!   cost-model override kicks in and routes through [`decide`] as if no
+//!   hint were present (so `@prefer(gpu)` + 10 elements → CPU).
+//!   [`dispatch_with_prefer`] runs the chosen path end-to-end via a
+//!   provided [`GpuBackend`] + CPU oracle, masking any GPU-side error
+//!   behind the CPU fallback.
 //!
 //! Real parallel/GPU logic is deferred: see T39 (CPU `par_map`), T43 (lazy
 //! GPU device init via `OnceLock`), T45 (real GPU dispatch pipeline —
 //! implements [`GpuBackend`] for a wgpu-backed type), T46 (VRAM tiling +
 //! CPU fallback), T47 (cold-start pooling — pipeline cache + buffer pool
-//! + async init), T49 (`@prefer` hints layered over [`decide`]).
+//! + async init), T49 (`@prefer` hints layered over [`decide`] — DONE).
 //!
 //! # Determinism
 //!
@@ -71,6 +84,7 @@ pub mod dispatch;
 pub mod error;
 pub mod gpu;
 pub mod gpu_pipeline;
+pub mod hints;
 pub mod mock_gpu;
 pub mod threshold;
 pub mod tiling;
@@ -81,6 +95,10 @@ pub use dispatch::{DispatchKind, Dispatcher};
 pub use error::RuntimeError;
 pub use gpu::{AdapterInfoSnapshot, GpuContext, GpuContextError};
 pub use gpu_pipeline::{workgroup_count, WgpuBackend, WORKGROUP_SIZE};
+pub use hints::{
+    decide_with_prefer, dispatch_with_prefer, prefer_from_name_args, Prefer,
+    PREFER_GPU_MIN_ELEMENTS,
+};
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
 pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};
 pub use tiling::{

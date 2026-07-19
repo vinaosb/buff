@@ -190,10 +190,15 @@ pub fn decide(
 /// - Multiplication overflow (data > 2^64 bytes) is treated as "does not
 ///   fit" — any real VRAM is smaller than 2^64.
 ///
-/// Kept private: callers should go through [`decide`]. Exposed as a separate
-/// fn so T49 (hints) and T45 (GPU dispatch) can reuse the exact same
-/// overflow-aware check without re-implementing it.
-fn fits_vram(element_count: usize, bytes_per_element: u64, available: Option<u64>) -> bool {
+/// Kept `pub(crate)`: T49 (hints::decide_with_prefer) reuses this exact
+/// overflow-aware check when honoring `@prefer(gpu)` so the VRAM-edge
+/// behavior stays byte-identical to T40's [`decide`]. T45 / T46 / T47
+/// also reach the same predicate through their dispatch paths.
+pub(crate) fn fits_vram(
+    element_count: usize,
+    bytes_per_element: u64,
+    available: Option<u64>,
+) -> bool {
     match available {
         None => true,
         Some(cap) => {
