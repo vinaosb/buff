@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-16 (originally for v0.1); **updated 2026-07-19 for v1.0 state**
-**Commit:** 416f3c1 (master, post-per-crate-AGENTS.md refresh)
+**Commit:** 44d39a0 (master, post-per-crate-AGENTS.md refresh)
 **Branch:** master (v0.1-dev preserved as historical marker at v1.0.0 tag)
 
 ## OVERVIEW
@@ -55,14 +55,14 @@ buff-lang-lexer::tokenize        →  Vec<Token>      (hand-rolled, offside-rule
     ▼
 buff-lang-parser::parse          →  Vec<Decl>       (hand-rolled recursive-descent + Pratt)
     │
-    ▼  (types: TypeInferencer runs INSIDE codegen in v0.1, no separate pass yet)
+    ▼  (types: TypeInferencer runs INSIDE codegen; no separate pass — standalone typecheck is post-v1.0 work)
 buff-lang-codegen-rust::generate_rust  →  syn::File → String   (prettyplease)
     │
     ▼  pipeline::compile_rust_to_exe   (rustc --edition 2021)
 native executable
 ```
 
-**v0.1 wiring**: lexer → parser → codegen-rust → rustc. Type errors are WARNINGS today (deferred to v0.5). WGSL codegen + runtime are fully implemented in v1.0 (T44 + T38-T50).
+**Pipeline wiring**: lexer → parser → codegen-rust → rustc. Type errors are WARNINGS today (standalone typecheck pass is post-v1.0 work). WGSL codegen + runtime shipped in v1.0 (T44 + T38-T50).
 
 ## CONVENTIONS
 
@@ -92,7 +92,7 @@ native executable
 - **`.sisyphus/` orchestration**: plans track v0.1/v0.5/v1.0 task breakdown. `boulder.json` is active session state. Read `buff-conventions.md` for Buff-language rules.
 - **Dual bin+lib in CLI**: `main.rs` (20 lines, thin) + `lib.rs` (real logic). Lets integration tests drive the pipeline without subprocess.
 - **`compile_to_rust` vs `compile_rust_to_exe`** split in `pipeline.rs`: callers can inspect intermediate Rust source before invoking rustc.
-- **Type checking is INSIDE codegen** for v0.1 (separate pass deferred to v0.5). Type errors are warnings today.
+- **Type checking is INSIDE codegen** for v1.0 (T55 `buff check` surfaces warnings). Standalone typecheck pass is post-v1.0 work.
 - **Prelude**: `print`, etc. are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs`.
 - **`logos` + `chumsky` REMOVED** from `Cargo.toml` at commit 9af2f5c — both lexer and parser are hand-rolled (chumsky 1.0.0-alpha.8 transitively required `stacker` → `cc-rs` → C shim that failed on Windows hosts).
 
