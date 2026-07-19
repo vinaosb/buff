@@ -62,10 +62,11 @@ Every modern language forces a painful trade-off:
 | **v0.5** | *Real Language* | Full type system, modules, async, FFI | ✅ Core shipped |
 | **v1.0** | *Production* | Heterogeneous CPU/GPU computing, tooling, release | ✅ Core shipped |
 
-**Compiles today:** lexer (logos), parser (chumsky, Pratt, offside rule), AST
-with spans, type inference, Rust codegen infrastructure with move-by-default
-semantics, error/source-map crate, testing infrastructure (insta + proptest),
-CLI (`buff build` / `buff run` / `buff new` / `buff init`).
+**Compiles today:** hand-rolled lexer (byte-scanner + offside rule), hand-rolled
+parser (recursive-descent + Pratt), AST with spans, type inference, Rust
+codegen infrastructure with move-by-default semantics, error/source-map crate,
+testing infrastructure (insta + proptest), CLI (`buff build` / `buff run` /
+`buff new` / `buff init`).
 
 **v0.1 exit criteria (met):**
 
@@ -83,14 +84,16 @@ Full task breakdown: [`.sisyphus/plans/`](./.sisyphus/plans/)
 
 ## Installation
 
-The `buff` CLI is built from source today; a `cargo install` flow is planned
-for a later wave.
+The `buff` CLI can be installed from source:
 
 ```bash
-# From a clone of this repo:
-cargo build --release -p buff-lang-cli
-# The binary lands at target/release/buff[.exe]
+cargo install --path crates/buff-lang-cli --locked
+# Or, in a clone of this repo:
+cargo install --path crates/buff-lang-cli --locked --force
 ```
+
+A `cargo install buff-cli` flow (publishing to crates.io) is planned for a
+future release.
 
 ## Quick start
 
@@ -122,10 +125,9 @@ cargo run -p buff-lang-cli -- run my_app/src/main.buff
 | [`examples/collections.buff`](./examples/collections.buff) | `Vector<T>`, `Map<K,V>`, `.pop()`/`.len()` | ✅ v0.5 (runs) |
 | [`examples/pattern_matching.buff`](./examples/pattern_matching.buff) | `match`, `Option<T>`, `Result<T,E>` arms | ✅ v0.5 (runs) |
 | [`examples/error_handling.buff`](./examples/error_handling.buff) | `Result`, `?` propagation, builtin `Error` | ✅ v0.5 (runs) |
+| [`examples/prelude_demo.buff`](./examples/prelude_demo.buff) | Minimal `print(1+2)` prelude smoke test | ✅ v0.1 (runs) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
-| `examples/gpu_demo.buff` | Automatic GPU dispatch | ⏳ v1.0 |
-| `examples/web_server.buff` | Async without `await` | ⏳ v1.0 |
 
 > **Legend:** ✅ *runs* — `buff run` compiles and executes end-to-end.
 > 🔶 *codegen-only* — transpiles to valid Rust (verified by tests), but the
@@ -138,7 +140,8 @@ cargo run -p buff-lang-cli -- run my_app/src/main.buff
 
 ## Language reference
 
-> The reference grows phase by phase. Full docs site planned for v1.0.
+> The reference grows phase by phase. A docs site and language reference are
+> planned for post-v1.0 tooling (see [`.sisyphus/plans/buff-post-v10-tooling.md`](./.sisyphus/plans/buff-post-v10-tooling.md)).
 
 **Syntax at a glance**
 - Layout-sensitive: indentation defines blocks (no braces for control flow)
@@ -153,15 +156,6 @@ async spawn import export from as true false extern unsafe`
 `class`, inheritance, `null`/`nil`, manual pointers (`*` `&`), visible lifetimes
 (`'a`), `await`, `try`/`catch`.
 
-<!-- TODO(v0.1): Primitive types reference (Int, Float, Double, Bool, String, Byte) -->
-<!-- TODO(v0.5): Collections (Vector, Matrix, Map), Struct/Enum, Pattern matching -->
-<!-- TODO(v0.5): Module system (import/export/from) -->
-<!-- TODO(v0.5): Error handling (`?` operator) -->
-<!-- TODO(v0.5): Numeric system deep-dive — see .sisyphus/plans/buff-numeric-system.md -->
-<!-- TODO(v1.0): Async model (call-graph propagation) -->
-<!-- TODO(v1.0): CPU/GPU dispatch & `@prefer(gpu)` hints -->
-<!-- TODO(v1.0): FFI (importing Rust crates) -->
-
 ## Architecture
 
 ```
@@ -169,7 +163,7 @@ async spawn import export from as true false extern unsafe`
     │
     ▼
  buff-lang-lexer  ──▶  buff-lang-parser  ──▶  buff-lang-ast
-     (logos)              (chumsky)             (+ spans)
+  (hand-rolled)        (recursive-descent + Pratt)  (+ spans)
                                                     │
                                                     ▼
                                              buff-lang-types  (inference + checking)
@@ -221,9 +215,10 @@ cargo clippy --workspace -- -D warnings
 
 ## Contributing
 
-<!-- TODO: CONTRIBUTING.md, good-first-issue labels, dev workflow -->
+Contributions are welcome! Please read the [contributing guide](./CONTRIBUTING.md)
+for development workflow, code conventions, and pull request guidelines.
 
-While the contributing guide is pending, the coding conventions live in
+The coding conventions also live in
 [`.sisyphus/plans/buff-conventions.md`](./.sisyphus/plans/buff-conventions.md)
 (18 conventions covering naming, formatting, docs, errors, testing, and APIs).
 

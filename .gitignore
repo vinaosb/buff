@@ -2,6 +2,9 @@
 target/
 *.rs.bk
 
+# Examples (build artifacts)
+examples/**/*.rs
+
 # Buff
 buff.lock
 
