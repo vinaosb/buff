@@ -689,7 +689,7 @@ Max Concurrent: 3 (Wave 1)
 
 ---
 
-- [ ] 5. **Regenerate insta snapshots + Cargo.lock + snapshots/README.md**
+- [x] 5. **Regenerate insta snapshots + Cargo.lock + snapshots/README.md**
 
   **What to do**:
   - Run `cargo insta test --accept --workspace` (or `cargo test --workspace` with `INSTA_UPDATE=always` env var). This regenerates ALL `.snap` snapshot files with the new `buff`/`buff-lang-*` names.
@@ -772,7 +772,7 @@ Max Concurrent: 3 (Wave 1)
 
 ---
 
-- [ ] 6. **FULL VERIFICATION SUITE + residual-`deox` audit (gate before review)**
+- [x] 6. **FULL VERIFICATION SUITE + residual-`deox` audit (gate before review)**
 
   **What to do**:
   - This is the integration gate. Run the COMPLETE verification battery and capture evidence for each. Fix any issue found (loop back to the relevant task if something was missed).
