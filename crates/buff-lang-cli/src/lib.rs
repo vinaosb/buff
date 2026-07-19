@@ -28,7 +28,8 @@
 //!
 //! Type-checking (buff-lang-types) is already integrated *inside* codegen (for
 //! `let`-binding annotations) in T12, so the CLI does not run a separate
-//! typecheck pass. v0.1 treats type errors as warnings (deferred to v0.5).
+//! typecheck pass. v1.0 treats type errors as warnings (standalone typecheck
+//! pass is post-v1.0 work).
 
 pub mod check;
 pub mod cli;

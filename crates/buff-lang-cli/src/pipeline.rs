@@ -79,7 +79,7 @@ pub struct CompileOutput {
 ///
 /// Writes the generated Rust source to `file.with_extension("rs")` (i.e. the
 /// `.rs` file sits next to the `.buff` source). The type-checking pass is
-/// already integrated inside codegen (T12) and is non-fatal in v0.1.
+/// already integrated inside codegen (T12) and is non-fatal in v1.0.
 ///
 /// # Errors
 ///

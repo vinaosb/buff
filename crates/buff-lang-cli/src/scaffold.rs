@@ -14,7 +14,7 @@
 ///
 /// Sourcing this as a static array here (instead of importing from the lexer)
 /// keeps `buff new` / `buff init` decoupled from lexer internals — the keyword
-/// list is small and stable for v0.1.
+/// list is small and stable since v0.1.
 pub const KEYWORDS: &[&str] = &[
     "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
     "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as", "true",

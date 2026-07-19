@@ -5,14 +5,15 @@
 //! [`TypeRef`](buff_lang_ast::TypeRef), which is a *reference* to a type written
 //! in source annotations.
 //!
-//! v0.1 supports **only** primitive types. v0.5 will add collections and
-//! user-defined types.
+//! v1.0 ships primitives, collections (Vector/Map/Matrix), user-defined types
+//! (struct/enum), traits, full type inference, exhaustiveness checking, and
+//! recursion detection.
 
 use std::fmt;
 
 /// The compile-time type of a Buff expression.
 ///
-/// v0.1 supports ONLY primitive types. v0.5 adds collections/user types.
+/// v1.0 ships primitives, collections, user-defined types (struct/enum), traits.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     /// A signed integer, `Int<W>` (defaults to `Int<64>`).
@@ -33,8 +34,8 @@ pub enum Type {
     /// from `String` (a UTF-8 byte buffer): `'A'` is `Char`, `"A"` is
     /// `String`. Not GPU-eligible (no WGSL scalar) — always CPU.
     Char,
-    /// A 128-bit fixed-point decimal (`Decimal`). The type exists in v0.1 but
-    /// full arithmetic support arrives in v0.5.
+    /// A 128-bit fixed-point decimal (`Decimal`). Full arithmetic support
+    /// shipped in v0.5+ via `rust_decimal`.
     Decimal,
     /// Unknown / a placeholder emitted after a type error to suppress
     /// cascading diagnostics.

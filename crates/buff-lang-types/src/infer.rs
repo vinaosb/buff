@@ -1,12 +1,12 @@
-//! Local type inference for the Buff language (v0.1).
+//! Local type inference for the Buff language.
 //!
 //! [`TypeInferencer`] walks the AST bottom-up, assigning a [`Type`] to each
 //! expression and reporting [`TypeError`]s with source span information when
 //! operands are incompatible.
 //!
-//! v0.1 supports only primitive types and local inference from literals,
-//! identifiers, and operators. Function/method calls return [`Type::Unknown`]
-//! (full inference arrives in v0.5).
+//! v1.0 ships primitives, collections, user-defined types, full inference
+//! from literals/identifiers/operators/calls, exhaustiveness checking, and
+//! recursion detection.
 
 use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, Stmt, TypeRef, UnaryOp};
 use buff_lang_error::{Diagnostic, Span, TypeError};
@@ -764,10 +764,10 @@ fn const_int_value(expr: &Expr) -> Option<i128> {
 }
 
 /// Converts a parse-time [`TypeRef`] into a resolved [`Type`] for the
-/// primitive names recognised in v0.1.
+/// primitive names recognised in v1.0.
 ///
-/// Returns `None` for unrecognised names (user types, generics, function
-/// types) — these are deferred to v0.5.
+/// Returns `None` for unrecognised names (full generics beyond builtin
+/// collections, function types) — these are post-v1.0 work.
 ///
 /// ## T28 — `Option<T>`
 ///

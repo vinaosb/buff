@@ -10,8 +10,9 @@
 //!   functions available without `import`,
 //! - a local [`TypeInferencer`] that walks the AST ([`infer`]).
 //!
-//! v0.1 supports only primitive types; v0.5 will add collections and
-//! user-defined types.
+//! v1.0 ships primitives, collections (Vector/Map/Matrix), user-defined types
+//! (struct/enum), traits, full type inference, exhaustiveness checking, and
+//! recursion detection.
 
 // T31: async call-graph propagation (fixpoint algorithm). Re-exported at
 // the crate root so the codegen pass (and downstream tools) can call

@@ -150,7 +150,7 @@ pub struct ScheduleNode {
     pub id: NodeId,
     /// The nodes this schedule governs.
     pub governed: Vec<NodeId>,
-    /// Current dispatch decision (placeholder in v0.1).
+    /// Current dispatch decision (placeholder — full lowering is post-v1.0 work).
     pub decision: DispatchDecision,
     pub span: Span,
 }
@@ -480,7 +480,7 @@ impl AstLowerer {
 
     /// Lower a single declaration. Currently only [`Decl::FuncDecl`] produces
     /// IR nodes; other declarations (struct/enum/import/module/trait) are type
-    /// metadata and are skipped in v0.1.
+    /// metadata and are skipped (full IR lowering is post-v1.0 work).
     fn lower_decl(&mut self, decl: &Decl) {
         if let Decl::FuncDecl(f) = decl {
             // Auto-register async-declared functions as I/O boundaries.

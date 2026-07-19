@@ -50,7 +50,7 @@
 //!    computed pre-format would be wrong.
 //!
 //! The pipeline (`buff_lang_cli::error_mapper`) therefore uses **filename
-//! translation** for v0.1: it replaces the intermediate `.rs` path in
+//! translation** for v1.0: it replaces the intermediate `.rs` path in
 //! `rustc`/panic messages with the original `.buff` path. Exact Buff line
 //! translation via the bidirectional [`SourceMap`](buff_lang_error::SourceMap)
 //! will land in a later task once a post-prettyplease line scan is available.

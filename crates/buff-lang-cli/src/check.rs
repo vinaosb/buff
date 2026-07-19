@@ -226,7 +226,7 @@ fn type_check_decl(decl: &Decl, errors: &mut Vec<buff_lang_error::TypeError>) {
         Decl::ExportDecl(inner) => type_check_decl(&inner.inner, errors),
         // Struct / Enum / Import / Module / Reexport / ExternCrate: no
         // function bodies to type-check at this layer (struct/enum field
-        // types are checked at codegen in v0.1).
+        // types are checked at codegen in v1.0).
         _ => {}
     }
 }
@@ -255,7 +255,7 @@ fn type_check_func(f: &buff_lang_ast::FuncDecl, errors: &mut Vec<buff_lang_error
 // ---------------------------------------------------------------------------
 
 /// Convert a parse-time [`TypeRef`] into a resolved [`Type`] for the
-/// primitive names + Option/Result wrappers recognised in v0.1.
+/// primitive names + Option/Result wrappers recognised in v1.0.
 ///
 /// This mirrors the private `typeref_to_type` helper in
 /// `crates/buff-lang-types/src/infer.rs` so the CLI's check pass can pre-bind
