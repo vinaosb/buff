@@ -10,6 +10,7 @@ buff.lock
 
 # Snapshot new files
 *.snap.new
+*.pending-snap
 
 # IDEs
 .idea/

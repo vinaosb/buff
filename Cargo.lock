@@ -225,7 +225,9 @@ dependencies = [
 name = "buff-lang-codegen-wgsl"
 version = "0.1.0"
 dependencies = [
+ "buff-lang-ast",
  "buff-lang-error",
+ "insta",
  "thiserror 1.0.69",
 ]
 
@@ -263,8 +265,11 @@ dependencies = [
 name = "buff-lang-runtime"
 version = "0.1.0"
 dependencies = [
+ "buff-lang-ast",
+ "buff-lang-codegen-wgsl",
  "buff-lang-error",
  "bytemuck",
+ "insta",
  "pollster",
  "rayon",
  "thiserror 1.0.69",

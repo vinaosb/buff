@@ -1,21 +1,32 @@
 {
-  "active_plan": "C:/Users/vsbb1/source/repos/Deox/.sisyphus/plans/rename-to-buff.md",
-  "started_at": "2026-07-15T22:27:47-03:00",
+  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/buff-master.md",
+  "started_at": "2026-07-19T00:00:00.0000000-03:00",
   "session_ids": [
-    "ses_atlas_rename_buff",
-    "ses_097c5b680ffeaDTHO7WB0Yquda"
+    "ses_current_atlas_buff_master",
+    "ses_087555ce0ffeNOqNTee60G0RhT",
+    "ses_087523db6ffevQfUqDQrFATgrG",
+    "ses_087523d91ffept2kDRx2gDhVD2",
+    "ses_0874b116dffewisCL82uEL1OqZ",
+    "ses_08737d8d3ffeJYnRh5pd06160t",
+    "ses_0872b51ccffe5N4nSlcBkPz35Z",
+    "ses_086fa4b7fffexRGZITQxlO6jaU",
+    "ses_086d4ef09ffeSxxfFcqjKDY3PH",
+    "ses_086c6dea6ffehbSqsDgH4cEZ1U",
+    "ses_086acead9ffeB71CXHuIEowj1e",
+    "ses_0869bd901ffe46u3RZ99ehORpc",
+    "ses_086876398ffe2zLHSirmsXt57a",
+    "ses_08673a426ffevJ1jwpR5ACaGOe",
+    "ses_0863c8359ffeI58sHcAVLzioPq",
+    "ses_0862cf2edffevLMiPgEUS596MK",
+    "ses_086120a51ffeCj2XznZ2esmcS4",
+    "ses_085f09cf8ffeo5CABpxlKWfbTV",
+    "ses_085cb509cffemI7YzItuTEeOYr",
+    "ses_0857f0cbeffe5hFn7rExYPV7m2"
   ],
-  "plan_name": "rename-to-buff",
+  "plan_name": "buff-master",
   "worktree_path": null,
-  "task_sessions": {
-    "todo:1": {
-      "task_key": "todo:1",
-      "task_label": "1",
-      "task_title": "**Rename .sisyphus plan/notepad files + repair internal links + update boulder.json**",
-      "session_id": "ses_09773e9a4ffeQxGicuNbJejIFF",
-      "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-07-16T01:50:17.898Z"
-    }
-  }
+  "task_sessions": {},
+  "previous_active_plan": "buff-v05-language",
+  "previous_session_count": 28,
+  "notes": "Master orchestrator resumed. v0.1 + v0.5 shipped per README. Next phase: v1.0 Production starting at Wave 9 / T38."
 }
