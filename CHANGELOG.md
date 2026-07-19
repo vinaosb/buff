@@ -5,6 +5,13 @@ All notable changes to the Buff transpiler are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-19
+
+### Added
+
+- **buff-lsp**: Language Server Protocol server (`crates/buff-lsp`) with diagnostics, hover, completion, single-file goto-definition, document symbols, and formatting (via `buff fmt`). Communicates over stdio. Includes a typecheck-only analysis mode that runs the `TypeInferencer` without Rust codegen.
+- **VSCode extension**: Editor support in [`editors/vscode/`](editors/vscode/) with TextMate syntax highlighting derived from the tree-sitter-buff grammar, automatic `buff-lsp` integration, `buff.run`/`buff.build`/`buff.check` commands, 16 code snippets, and format-on-save. Packaged as `buff-vscode-1.2.0.vsix`.
+
 ## [1.1.0] - 2026-07-19
 
 ### Added

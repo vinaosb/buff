@@ -3,6 +3,7 @@
 > **Buff** — a high-level language that transpiles to Rust.
 > Removes the "rust" (complexity), leaving pure performance.
 
+> ✅ **v1.2 *Use Buff* shipped** — LSP server + VSCode extension.
 > ✅ **v1.1 *Try Buff* shipped** — playground, tree-sitter grammar, website.
 > ✅ **v0.1 *Olá, Buff* shipped** — transpiles & runs end-to-end.
 
@@ -63,6 +64,7 @@ Every modern language forces a painful trade-off:
 | **v0.5** | *Real Language* | Full type system, modules, async, FFI | ✅ Core shipped |
 | **v1.0** | *Production* | Heterogeneous CPU/GPU computing, tooling, release | ✅ Core shipped |
 | **v1.1** | *Try Buff* | Playground, tree-sitter grammar, website — discover and try Buff | ✅ Shipped |
+| **v1.2** | *Use Buff* | LSP server + VSCode extension — editor intelligence | ✅ Shipped |
 
 **Compiles today:** hand-rolled lexer (byte-scanner + offside rule), hand-rolled
 parser (recursive-descent + Pratt), AST with spans, type inference, Rust
@@ -124,6 +126,12 @@ The repo ships two static assets you can deploy as-is:
 - **Website** ([`website/index.html`](./website/index.html)) — landing page with side-by-side Rust-vs-Buff examples and links into the playground.
 
 Both are plain HTML/CSS/JS with no build step. Deploy them as static sites to any host (GitHub Pages, Netlify, a bucket, wherever). Hosting URLs are not yet assigned; check back for links.
+
+## Editor support
+
+A VSCode extension is included in [`editors/vscode/`](./editors/vscode/) and ships as `buff-vscode-1.2.0.vsix`. It provides syntax highlighting, LSP-powered diagnostics, hover, completion, goto-definition, document symbols, formatting, and `buff.run`/`buff.build`/`buff.check` commands.
+
+To build the LSP server: `cargo build --release -p buff-lsp`. To install the extension: `code --install-extension editors/vscode/buff-vscode-1.2.0.vsix`.
 
 ## Examples
 
