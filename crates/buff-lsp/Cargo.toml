@@ -1,0 +1,31 @@
+[package]
+name = "buff-lsp"
+version = "1.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "buff-lsp"
+path = "src/main.rs"
+
+[lib]
+name = "buff_lsp"
+path = "src/lib.rs"
+
+[dependencies]
+lsp-server.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+crossbeam-channel.workspace = true
+url.workspace = true
+buff-lang-ast.workspace = true
+buff-lang-lexer.workspace = true
+buff-lang-parser.workspace = true
+buff-lang-types.workspace = true
+buff-lang-error.workspace = true
+buff-lang-cli.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

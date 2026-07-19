@@ -31,6 +31,20 @@ toml = "0.8"
 # for the version-pinning procedure.
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1.7"
+# T117: LSP server scaffolding (rust-analyzer's JSON-RPC framework) + the
+# canonical LSP types crate. Both pin to the published crates.io versions
+# (no path deps). `lsp-types` 0.97 implements LSP 3.17; `lsp-server` 0.10
+# is the small stdio/JSON-RPC scaffold extracted from rust-analyzer. Both
+# are wasm-free, sink-only deps — pure Rust.
+lsp-server = "0.10"
+lsp-types = "0.97"
+# `url` is required by lsp-types for `Url`. Workspace pin keeps it in sync
+# with any future transitive consumers.
+url = "2"
+# `crossbeam-channel` is the channel type used by `lsp-server::Connection`.
+# Already pulled transitively; pinning at workspace level keeps it explicit
+# so the LSP crate can use synchronous `select!` for debouncing.
+crossbeam-channel = "0.5"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }
@@ -39,3 +53,5 @@ buff-lang-codegen-rust = { path = "crates/buff-lang-codegen-rust" }
 buff-lang-codegen-wgsl = { path = "crates/buff-lang-codegen-wgsl" }
 buff-lang-runtime = { path = "crates/buff-lang-runtime" }
 buff-lang-error = { path = "crates/buff-lang-error" }
+buff-lang-cli = { path = "crates/buff-lang-cli" }
+buff-lsp = { path = "crates/buff-lsp" }
