@@ -542,7 +542,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(tree-sitter): Buff grammar with offside-rule external scanner`
 
-- [ ] **T116: Website + side-by-side example library** [writing]
+- [x] **T116: Website + side-by-side example library** [writing]
 
   **What to do**:
   - Build a landing page for Buff with the core pitch: "Rust performance with Go productivity"
