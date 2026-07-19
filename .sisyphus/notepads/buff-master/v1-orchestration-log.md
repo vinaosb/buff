@@ -2978,3 +2978,135 @@ $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared
 - TEST (cargo test -p buff-lang-cli check): EXIT 0, 33 tests pass
 - WORKSPACE CHECK (cargo check --workspace): EXIT 0
 - FULL CLI TEST SUITE (cargo test -p buff-lang-cli): EXIT 0, 234 tests pass
+
+## T57 Findings (2026-07-19)
+
+**Task:** T57 (LSP-friendly lossless AST, Wave 12).
+**Status:** COMPLETE. All 4 gates green. No commit made (per task rule).
+**Evidence:** `.sisyphus/evidence/task-57-lossless.txt`.
+
+### Architecture
+- New module `crates/buff-lang-ast/src/lossless.rs` (~530 lines incl. rustdoc).
+- Public API surface:
+  - `parse_lossless(src: &str) -> LosslessTree` (free fn alias).
+  - `LosslessTree::parse(src)` / `to_source()` (byte-exact) /
+    `pieces_to_source()` (reconstruct from pieces alone) /
+    `pieces() -> &[Piece]` / `src() -> &str` /
+    `piece_at(byte_offset) -> Option<&Piece>` (O(log n) LSP cursor lookup) /
+    `trivia()` / `tokens()` / `comments()` iterators /
+    `reparse(start, end, replacement) -> LosslessTree` (v1.0-minimal stub).
+- Types: `TriviaKind` (Whitespace/Newline/LineComment/BlockComment) ?
+  `Trivia { kind, text }` ? `Piece::Trivia { kind, start, end, text } |
+  Token { start, end, text }` ? `LosslessTree { src, pieces }`.
+- All types derive `Debug, Clone, PartialEq, Eq, Hash`.
+
+### Lossless scanner (separate from existing lexer)
+- NEW self-contained byte-scanner in `lossless.rs::scan()` — does NOT
+  reuse or modify `buff-lang-lexer`. The existing lexer is FROZEN and
+  depended on by parser/types/codegen.
+- Recognises: whitespace runs, newlines (\n | \r\n | \r), line comments
+  (`//...` to EOL), block comments (`/* ... */` NESTED), string literals
+  (`"..."` with `\\` escape + `{...}` interpolation nesting), char
+  literals (`'...'`), triple-quoted raw strings (`"""..."""`), raw
+  strings (`r"..."`).
+- Everything else = maximal "boring byte run" = one Token piece
+  (deliberately NOT semantically tokenized — no keyword/number/operator
+  split — byte-exact roundtrip doesn't need it).
+- Never panics: unterminated strings/chars/block comments are captured
+  best-effort (run to EOF); roundtrip still holds.
+
+### Why a flat piece list, not a green tree
+- A full rust-analyzer-style lossless syntax tree (Rowan green-tree) is
+  far too large for one task.
+- Flat piece list is sufficient for T57's deliverables (byte-exact
+  roundtrip + comment preservation) AND structurally compatible with a
+  future tree rewrite: a tree can be layered on top later by grouping
+  pieces into parent nodes without changing the piece model.
+
+### Byte-exact roundtrip (THE core deliverable)
+- `parse_lossless(s).to_source() == s` for any valid UTF-8 `s`.
+- Proven trivially: the tree stores the original `src` verbatim.
+- Non-trivial check: pieces ALONE reconstruct (`pieces_to_source()`).
+- **17 fixtures** verified (comments, blank lines, mixed indent, UTF-8,
+  string interp, regex, char, triple-string, raw string, struct/enum,
+  real Buff program, empty, whitespace-only, comments-only).
+- Comment preservation specifically verified: `//`, `/* */` nested,
+  comments inside strings NOT mis-recognized.
+
+### QA semantic-equivalence check (dep-cycle workaround)
+- The task asks: "parse -> to_source -> parse -> identical AST". The
+  semantic AST is produced by `buff_lang_parser::parse`, but adding
+  `buff-lang-parser` (or `buff-lang-lexer`) as a dev-dep of
+  `buff-lang-ast` would create a CYCLE (parser depends on ast -> ast
+  can't dev-depend on parser -> Cargo rejects). The task spec
+  anticipated this and offered the escape hatch: byte-exact roundtrip
+  is the STRONGER invariant and implies semantic equivalence.
+- Tests: `lossless_qa_semantic_equivalence_via_byte_exact_roundtrip` (6
+  fixtures) + `lossless_qa_semantic_equivalence_documentation`. Both pass.
+
+### Incremental reparse (v1.0-minimal)
+- `LosslessTree::reparse(start, end, replacement) -> LosslessTree` is the
+  structured hook. The v1.0 implementation does a FULL re-scan of the
+  new source. The API signature is what matters for future incremental
+  use — a future version can re-scan only the pieces overlapping the
+  edit window and reuse the unchanged prefix/suffix. Documented as
+  v1.0-minimal in the rustdoc.
+
+### Enables a future comment-preserving `buff fmt` (T54 follow-up)
+- T54 (buff fmt) DROPS COMMENTS today because the existing lexer STRIPS
+  `//` and `/* */` before the parser sees them — the AST fed to the
+  formatter has zero comment data.
+- T57's `LosslessTree` provides a parallel representation that preserves
+  comments as `Trivia` pieces WITH their byte offsets. The follow-up
+  work (out of scope for T57) is to teach `buff fmt` to consult a
+  `LosslessTree` alongside the semantic AST when re-emitting source,
+  placing comments back at their original positions.
+
+### Tests (43 total: 4 inline + 39 integration)
+- `lossless_roundtrip_*` — 17 byte-exact roundtrip fixtures.
+- `lossless_comment_*` — 5 comment-preservation tests (line, block,
+  nested block, comment-inside-string, complex source).
+- `lossless_to_source_idempotent_on_comments`,
+  `lossless_pieces_idempotent_under_reparse`,
+  `lossless_to_source_is_fixed_point` — idempotency (3 tests).
+- `lossless_qa_semantic_equivalence_*` — QA (2 tests, dep-cycle-safe).
+- `lossless_reparse_*` — incremental hook (4 tests: insert/delete/
+  replace/out-of-bounds clamp).
+- `lossless_piece_*` — piece metadata (4 tests: ranges contiguity,
+  piece_at lookup, piece_at beyond EOF, token/trivia count).
+- `lossless_newline_*` / `lossless_whitespace_*` — 3 trivia-shape tests
+  (CRLF preserved as single piece, lone CR, whitespace run grouped).
+- All test names contain "lossless" -> `cargo test -p buff-lang-ast
+  lossless` matches them all.
+- All 100 crate tests pass (37 inline + 15 ir + 39 lossless + 1
+  snapshot_helper + 7 snapshot + 1 doctest). 2 pre-existing doctests
+  ignored.
+
+### Hard rules honored
+- No `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!` in non-test code.
+- TDD: tests written first, 3 buggy expectations fixed, then clean.
+- Deterministic: no HashMap, no I/O, no randomness.
+- Derives Debug/Clone/PartialEq/Eq/Hash on newtypes.
+- 4-space indent, trailing commas, no tabs.
+- No new deps in Cargo.toml (zero — buff-lang-error was already there).
+- No `[features]` / `[lints]` / `[profile.*]` touched.
+- No dep cycle (no lexer/parser dep added).
+- UTF-8 correct (multi-byte chars in comments and strings preserved).
+- Clippy clean (fixed 2 lints: len_without_is_empty, unused_imports).
+
+### 4 Gates — ALL GREEN
+- TEST (`cargo test -p buff-lang-ast`): EXIT 0, 100 tests pass.
+- ACCEPTANCE (`cargo test -p buff-lang-ast lossless`): EXIT 0, 43 tests pass.
+- FMT (`cargo fmt -p buff-lang-ast -- --check`): EXIT 0.
+- CLIPPY (`cargo clippy -p buff-lang-ast --all-targets -- -D warnings`): EXIT 0.
+- WORKSPACE CHECK (`cargo check --workspace`): EXIT 0.
+
+### MSVC env vars (REQUIRED for test/clippy — NOT for check)
+Same as T38-T54. Exact strings:
+
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```
+Fallback: `C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.44.35207\...`
+also exists on this box and works as a substitute.

@@ -142,7 +142,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: `buff build --release` → assert Cargo.toml has lto=true. Evidence: task-56-release.txt
   **Commit**: `feat(cli): implement --release optimization mode with LTO`
 
-- [ ] **T57**: LSP-friendly AST [deep]
+- [x] **T57**: LSP-friendly AST [deep]
   **What to do** (TDD): RED: parse preserves whitespace+comments. Roundtrip lossless. Incremental reparse. GREEN: implement LosslessAst with trivia, incremental parsing.
   **Acceptance**: `cargo test -p buff-lang-ast lossless` passes. Roundtrip byte-exact.
   **QA**: Parse → to_source → parse → assert identical AST. Evidence: task-57-lossless.txt

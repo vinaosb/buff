@@ -14,6 +14,8 @@
 //! - `decl`: [`Decl`] and the specific declaration structs.
 //! - `ir`: the dataflow-graph intermediate representation
 //!   ([`IrGraph`], [`IrNode`], [`AstLowerer`]).
+//! - `lossless`: trivia-preserving source representation for LSP and
+//!   comment-preserving `buff fmt` (T57). See [`lossless::LosslessTree`].
 //!
 //! [`Span`] is re-exported from `buff-lang-error` for convenience.
 
@@ -21,6 +23,7 @@ pub mod common;
 pub mod decl;
 pub mod expr;
 pub mod ir;
+pub mod lossless;
 pub mod op;
 pub mod stmt;
 pub mod ty;
