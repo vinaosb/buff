@@ -39,6 +39,7 @@
 pub mod context;
 pub mod format;
 pub mod move_analysis;
+pub mod race_analysis;
 pub mod rust_codegen;
 
 // T35: `generate_test_rust` (below) uses `syn::{Item, ItemFn, Ident}` and
@@ -50,6 +51,10 @@ use syn::{Ident, Item, ItemFn};
 pub use context::CodegenContext;
 pub use format::format;
 pub use move_analysis::MoveAnalyzer;
+pub use race_analysis::{
+    analyze as analyze_parallel_races, is_assignment_op, ParallelMutabilityError,
+    PARALLEL_COMBINATORS,
+};
 pub use rust_codegen::{buff_primitive_to_rust_name, RustCodegen};
 
 /// Convenience alias for [`format`] so external callers (tests, the CLI)

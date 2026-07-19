@@ -48,7 +48,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: decide(999,true,_) → SingleThread. decide(50001,true,_) → GpuCompute. Evidence: task-40-thresholds.txt
   **Commit**: `feat(runtime): implement dispatch threshold with VRAM fallback`
 
-- [ ] **T41**: Data race detection [deep]
+- [x] **T41**: Data race detection [deep]
   **What to do** (TDD): RED: `par_map({x=> total+=x})` where total is external mutable → error. Immutable capture OK. GREEN: analyze closures, reject mutable capture.
   **Acceptance**: `cargo test -p buff-lang-codegen-rust race_detection` passes. Mutable capture rejected.
   **QA**: `let mut t=0; v.par_map({x=>t+=x})` → assert ParallelMutabilityError. Evidence: task-41-race-detection.txt

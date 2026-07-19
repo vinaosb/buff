@@ -332,6 +332,16 @@ impl RustCodegen {
     /// REFACTOR-ready flat-storage pattern shared with the future WGSL
     /// storage-buffer codegen (v1.0).
     pub fn generate(&mut self, decls: &[Decl]) -> Result<File, CodegenError> {
+        // T41: race detection — REJECT before codegen any closure
+        // passed to a parallel combinator (par_map / par_filter /
+        // par_reduce) that mutates a variable captured from the
+        // enclosing scope. Pure detection: T42 will later transform
+        // SOME of these into atomic operations (e.g.
+        // `AtomicI64`-backed accumulators for par_reduce); until
+        // then, every captured-mutable write in a parallel closure
+        // is a hard error. Runs FIRST (before any other pre-pass) so
+        // a clean rejection never produces partial codegen state.
+        crate::race_analysis::analyze(decls)?;
         let mut items = Vec::with_capacity(decls.len());
         // T24: emit the builtin Matrix<T> struct + impl on-demand, before
         // any fn. The two items (struct decl + impl block) are prepended so
