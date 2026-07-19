@@ -1251,3 +1251,263 @@ $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared
 9. **`destroy()` is defensive but recommended**: wgpu frees GPU memory
    on Drop anyway, but explicit `destroy()` triggers faster reclamation
    � important for T46 where many dispatches happen in a loop.
+
+
+## T46 Findings (2026-07-19)
+
+### Outcome
+T46 GREEN: VRAM-aware tiling dispatcher with CPU fallback implemented as
+`crates/buff-lang-runtime/src/tiling.rs`. **38 new tests added** (target:
+12+; achieved 3.2x). Total buff-lang-runtime tests now **183 passed +
+4 ignored** (was 147 passed + 2 ignored after T45). All 4 gates exit 0.
+cargo check / test / clippy --all-targets -D warnings / fmt --check all
+EXIT 0. cargo check --workspace still EXIT 0.
+
+### Real-GPU tiled dispatch RAN ON THIS BOX
+Confirmed: `dispatch_tiled(&WgpuBackend, &generate_wgsl({x:Float=>x*2.0}),
+(0..250).map(|i|i as f32).collect::<Vec<f32>>(), 100)` returned a 250-f32
+Vec that matched the CPU oracle within 1e-4 tolerance, dispatched through
+3 sequential tiles of 100+100+50 elements. Also verified: 1000-element
+input at max_tile=100 (10 tiles) produces byte-identical output to a
+single non-tiled dispatch (element-wise map is order-independent).
+
+Evidence: `.sisyphus/evidence/task-46-tiling.txt`.
+
+### Public API surface (re-exported from `buff_lang_runtime` crate root)
+```rust
+// Pure helpers â€” unit-testable without a GPU.
+pub fn tile_ranges(total_len: usize, max_tile: usize) -> Vec<(usize, usize)>;
+pub fn max_elements_per_tile(vram_budget_bytes: u64, bytes_per_element: u64) -> usize;
+pub fn vram_budget_from_device(device: &wgpu::Device) -> u64;
+
+// Mid-level tiled GPU dispatch (no fallback; errors propagate).
+pub fn dispatch_tiled(
+    backend: &dyn GpuBackend,
+    shader_wgsl: &str,
+    input: &[f32],
+    max_tile_elements: usize,
+) -> Result<Vec<f32>, RuntimeError>;
+
+// Fluent wrapper around dispatch_tiled.
+pub struct TiledDispatcher<'a> { backend: &'a dyn GpuBackend, max_tile_elements: usize }
+impl<'a> TiledDispatcher<'a> {
+    pub fn new(backend: &'a dyn GpuBackend, max_tile_elements: usize) -> Self;
+    pub fn dispatch(&self, shader_wgsl: &str, input: &[f32]) -> Result<Vec<f32>, RuntimeError>;
+    pub fn backend(&self) -> &dyn GpuBackend;
+    pub fn max_tile_elements(&self) -> usize;
+}
+
+// High-level entry: GPU-tiled with CPU fallback. Always returns Vec<f32>.
+pub fn dispatch_map_with_tiling<F: Fn(&[f32]) -> Vec<f32>>(
+    gpu_backend: Option<&dyn GpuBackend>,
+    shader_wgsl: &str,
+    input: &[f32],
+    max_tile_elements: usize,
+    cpu_oracle: F,
+) -> Vec<f32>;
+```
+
+### VRAM budget formula (T47 reuses)
+```
+max_elements_per_tile(vram_budget_bytes, bytes_per_element)
+    = vram_budget_bytes / (3 * bytes_per_element)
+```
+- **3 = headroom factor**: each tile uses THREE buffers (input storage +
+  output storage + host-visible staging). Each buffer is `tile_size *
+  bytes_per_element` bytes; total VRAM per tile = 3 * tile_size * bpe.
+- **vram_budget_bytes** comes from `vram_budget_from_device(device)` =
+  `min(max_storage_buffer_binding_size, max_buffer_size)`. wgpu 26 does
+  NOT expose total VRAM; the per-buffer binding cap is the practical
+  limit. (`max_storage_buffer_binding_size` is u32, always
+  `<= max_buffer_size` in practice; the min is defensive for future
+  wgpu versions.)
+- **Edge cases**: `bytes_per_element == 0` â†’ 0 (avoid div-by-zero);
+  `vram < 3*bpe` â†’ 0 (can't fit one element â†’ caller falls back to CPU);
+  `3 * bpe` overflow â†’ 0 (saturating_mul prevents wrong small result).
+
+### tile_ranges behavior (documented edge cases)
+```
+total_len == 0          -> []                          (no tiles)
+max_tile == 0           -> [(0, total_len)]            // "no tiling" semantics
+total_len <= max_tile   -> [(0, total_len)]            (single tile)
+otherwise               -> ceil(total_len/max_tile) tiles, last is partial
+```
+QA case: `tile_ranges(250, 100) -> [(0,100),(100,200),(200,250)]` (3 tiles).
+
+### `max_tile == 0` semantics â€” IMPORTANT (different per API level)
+- **`tile_ranges` / `dispatch_tiled` / `TiledDispatcher`**: `0` means
+  "no tiling" â€” a single tile covers the whole input. Caller's manual
+  opt-out.
+- **`dispatch_map_with_tiling`**: `0` means "VRAM budget too small to
+  fit one element â€” CPU fallback". This is because
+  `max_elements_per_tile()` returns 0 precisely in that case.
+- The two conventions coexist because they serve different callers:
+  low-level helper vs high-level entry. Documented in the module-level
+  rustdoc.
+
+### CPU fallback decision tree (`dispatch_map_with_tiling`)
+1. `input.is_empty()` â†’ return empty Vec (no work).
+2. `gpu_backend == None` â†’ run `cpu_oracle(input)` (no GPU adapter).
+3. `max_tile_elements == 0` â†’ run `cpu_oracle(input)` (can't fit one
+   element through VRAM budget formula).
+4. `dispatch_tiled(...)` succeeds â†’ return GPU output.
+5. `dispatch_tiled(...)` errors â†’ run `cpu_oracle(input)` (defensive â€”
+   includes `GpuUnavailable`, `GpuInit`, etc).
+
+The CPU oracle is typically T38b's `cpu_fallback_map` (sequential,
+deterministic) or T39's `CpuDispatcher::par_map` (parallel, rayon).
+Both return `Vec<f32>` directly (infallible) â€” so the high-level entry
+can promise to always return a value: GPU failure is invisible to the
+caller. This is the contract the T46 task spec demands.
+
+### Files changed (all under buff-lang-runtime/ â€” no other crate touched)
+1. `crates/buff-lang-runtime/src/tiling.rs` (NEW, ~430 lines).
+   - `tile_ranges` pure helper (~30 lines + rustdoc).
+   - `max_elements_per_tile` pure helper (~25 lines + rustdoc).
+   - `vram_budget_from_device` query (~10 lines + rustdoc).
+   - `dispatch_tiled` mid-level dispatch (~40 lines + rustdoc).
+   - `TiledDispatcher` struct + impl (~50 lines + rustdoc).
+   - `dispatch_map_with_tiling` high-level entry (~45 lines + rustdoc).
+   - 11 inline unit tests (`#[cfg(test)] mod tests`).
+2. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED â€” +1 module decl,
+   +1 re-export block with 6 items, +6 doc lines in crate-level docs).
+3. `crates/buff-lang-runtime/tests/tiling_tests.rs` (NEW, ~370 lines,
+   22 integration tests). All test names contain `tiling` so the QA
+   filter `cargo test -p buff-lang-runtime tiling` matches the whole
+   suite (inline + integration + doctests).
+4. `crates/buff-lang-runtime/Cargo.toml`: **NO CHANGE** â€” all required
+   deps (`wgpu`, `bytemuck`, `pollster`) already in `[dependencies]`
+   from T38; `buff-lang-ast` + `buff-lang-codegen-wgsl` + `insta` already
+   in `[dev-dependencies]` from T38b. T46 added ZERO new deps.
+5. `.sisyphus/evidence/task-46-tiling.txt` (NEW â€” raw cargo test output
+   proving the QA roundtrip ran on the real GPU + 4-gate summary).
+
+### Test coverage matrix (38 NEW test points)
+- **tile_ranges** (11 inline + 6 integration = 17 tests):
+  QA 250/100 â†’ 3 tiles; empty input â†’ empty; input â‰¤ max â†’ 1 tile;
+  exact multiple (200/100, 300/100); max_tile=0 disables tiling;
+  max_tile=1 yields N tiles; singleton input.
+- **max_elements_per_tile** (4 inline + 2 integration = 6 tests):
+  basic formula (1200/12=100, 2400/24=100); 4 GiB budget â†’
+  357_913_941 elements; budget-too-small (11 bytes < 12 â†’ 0);
+  zero budget â†’ 0; zero bpe â†’ 0; exactly fits one element (12/12=1).
+- **dispatch_tiled via MockGpuBackend** (6 integration):
+  QA 250/100 â†’ 3 recorded dispatches + output == CPU oracle;
+  input-order preservation across tiles (per-tile offset encoding);
+  per-tile input lengths (100/100/50 for 250@100); single tile when
+  input fits; empty input â†’ no dispatch.
+- **TiledDispatcher struct API** (2 integration):
+  dispatch produces same output as free fn; accessors
+  (`max_tile_elements()`, `backend()`).
+- **dispatch_map_with_tiling CPU fallback** (5 integration):
+  `None` backend â†’ CPU; `max_tile=0` â†’ CPU even with backend; empty
+  input â†’ empty Vec; GPU error (`GpuUnavailable` from unavailable
+  context) â†’ CPU fallback fires; happy path (mock backend + max_tile>0)
+  uses GPU path.
+- **Real-GPU tiled dispatch** (3 integration â€” ALL RAN on this host):
+  250 elements at max_tile=100 via WgpuBackend matches CPU oracle;
+  1000 elements at max_tile=100 (10 tiles) == single dispatch; high-level
+  `dispatch_map_with_tiling` with real GPU produces oracle output.
+- **Doc-tests** (5 NEW: 3 active + 2 ignored):
+  `tile_ranges` QA snippet; `max_elements_per_tile` formula snippet;
+  `dispatch_map_with_tiling` CPU-only example; `TiledDispatcher` +
+  `vram_budget_from_device` are `ignore`-tagged (they reference types
+  across module boundaries that confuse the doctest runner on some
+  toolchains â€” same pattern as T38b's MockGpuBackend doctests).
+
+### Determinism + no-unwrap contract
+- **Tiles processed sequentially in input order**: `for (start, end) in
+  ranges { output.extend(backend.dispatch_map(shader, &input[start..end])?); }`
+  No interior reordering, no hashing, no threads.
+- **Pre-allocated output**: `Vec::with_capacity(input.len())` â€” zero
+  reallocations as tiles append.
+- **NO `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!`** in non-test
+  code. `usize::try_from(...).unwrap_or(usize::MAX)` is `unwrap_or`
+  (not `unwrap`) â€” handles 32-bit platform u64â†’usize overflow soundly.
+- **No HashMap/HashSet** anywhere in the module.
+
+### Conventions honored
+- All deps via `.workspace = true`; T46 added ZERO new deps.
+- Edition 2021, license MIT OR Apache-2.0, version 0.1.0.
+- NO `[features]` section added.
+- `#[must_use]` on `tile_ranges`, `max_elements_per_tile`,
+  `vram_budget_from_device`, `dispatch_map_with_tiling`,
+  `TiledDispatcher::new`, `TiledDispatcher::backend`,
+  `TiledDispatcher::max_tile_elements`.
+- `#[derive(Debug)]` on `TiledDispatcher<'a>` (works because
+  `&dyn GpuBackend: Debug` via the trait's `Debug` supertrait bound).
+- All new test names contain `tiling` for filter consistency.
+- 4 spaces only. No tabs. No trailing whitespace.
+
+### wgpu 26 API specifics (verified)
+- **`device.limits()` returns `wgpu::Limits` by value** â€” copying the
+  fields we need (`max_storage_buffer_binding_size: u32`,
+  `max_buffer_size: u64`) is cheap.
+- **`max_storage_buffer_binding_size` is `u32`** in wgpu 26 â€” cast via
+  `u64::from(...)` (zero-cost widening).
+- **`max_buffer_size` is `u64`** in wgpu 26 â€” direct assignment to `u64`
+  local works without any cast.
+- Both fields are `Copy` (lifted from `Limits` which is `Clone + Copy`).
+
+### Verification gate results
+- FMT     (cargo fmt -p buff-lang-runtime -- --check):                EXIT 0
+- CLIPPY  (cargo clippy -p buff-lang-runtime --all-targets -D warnings): EXIT 0
+- TEST    (cargo test -p buff-lang-runtime):                          EXIT 0
+                                                                       183 passed + 4 ignored
+                                                                       (was 147 + 2; +36 pass + 2 ignored)
+- WORKSPACE CHECK (cargo check --workspace):                          EXIT 0
+
+### Gotchas / lessons for T47
+1. **T47 (cold-start pooling) can reuse `vram_budget_from_device`**
+   verbatim â€” the formula `max_elements_per_tile(vram, bpe) = vram / (3*bpe)`
+   is stable. T47 will likely add buffer-pool reuse (keep the three
+   per-tile buffers alive across dispatches instead of recreating them).
+   The factor of 3 stays the same.
+2. **`GpuBackend` trait has no `has_device()` method** â€” the high-level
+   `dispatch_map_with_tiling` therefore decides GPU vs CPU by ATTEMPTING
+   the dispatch and catching errors. This is more robust than pre-checking
+   (the backend could fail mid-dispatch anyway). T49 (`@prefer` hints)
+   may want to add `has_device()` to the trait for explicit hint-driven
+   routing â€” currently the routing is purely reactive.
+3. **`MockGpuBackend` never errors** â€” to test the CPU-fallback-on-error
+   path, use `WgpuBackend::from_context(GpuContext::unavailable())`
+   which always returns `Err(GpuUnavailable)` from `dispatch_map`. This
+   is the same trick T45's `unavailable_backend()` helper uses.
+4. **Tiled output == single-dispatch output** is provable for ANY
+   element-wise map (the kernel has no inter-element dependencies).
+   Reductions/scans (post-v1.0) will need a different tiling strategy
+   (cross-tile combining step). T46 only covers maps.
+5. **The `cpu_oracle` parameter is `Fn(&[f32]) -> Vec<f32>`** (not
+   `Fn(f32) -> f32`) so callers can wrap richer CPU computations (e.g.
+   `|input| cpu_dispatcher.par_map(input.to_vec(), |x| x * 2.0)` for
+   T39's parallel CPU path, or `|input| cpu_fallback_map(input, |x|
+   x * 2.0)` for T38b's sequential oracle).
+6. **rustfmt wraps long `assert_eq!` macro args past 100 cols** â€”
+   pre-emptively break them across lines. The `tile_ranges(300, 100)`
+   test assertion does this.
+7. **`u64::from(limits.max_storage_buffer_binding_size)`** avoids
+   `as u64` which would trigger `clippy::unnecessary_cast` if the field
+   were already u64. Reflexive `From<u32> for u64` is the idiomatic
+   zero-cost widening.
+8. **No MSVC env vars needed for `cargo check`** â€” only `cargo test`
+   and `cargo clippy --all-targets` need them (link step requires
+   `msvcrt.lib`). Same convention as T38-T45.
+
+### What's deferred (correctly out of scope for T46)
+- T47: cold-start pooling (pre-warm device at startup, pipeline cache
+  reuse across dispatches). Currently `dispatch_tiled` recreates the
+  shader+pipeline per tile via T45's `WgpuBackend::dispatch_map` â€”
+  acceptable for correctness, suboptimal for throughput. T47 will
+  likely add a per-backend pipeline cache keyed by shader source hash.
+- T48: recursion detection (CPU-only marking for recursive functions).
+- T49: `@prefer(gpu)` / `@prefer(cpu)` hints. Will layer an override
+  on top of `dispatch_map_with_tiling`'s decision tree.
+- Reductions/scans with cross-tile combining (post-v1.0).
+- Multi-GPU dispatch (one tile per GPU, run in parallel) â€” post-v1.0.
+
+### MSVC env vars (REQUIRED for test/clippy/build â€” NOT for cargo check)
+Same as T38/T39/T40/T42/T43/T44/T38b/T45. Exact strings used for this task:
+```powershell
+$env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"
+```

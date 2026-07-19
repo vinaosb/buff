@@ -31,11 +31,20 @@
 //!   back via `map_async` + `device.poll(PollType::Wait)`. Returns empty
 //!   Vec on empty input; returns [`RuntimeError::GpuUnavailable`] on
 //!   hosts without a GPU (graceful — never panics).
+//! * [`tile_ranges`] / [`max_elements_per_tile`] / [`dispatch_tiled`] /
+//!   [`TiledDispatcher`] / [`dispatch_map_with_tiling`] — T46's VRAM-aware
+//!   tiling dispatcher. Splits a large `&[f32]` into tiles that fit VRAM,
+//!   dispatches each tile through [`WgpuBackend`] (or any [`GpuBackend`]),
+//!   concatenates per-tile outputs in input order, and falls back to a
+//!   caller-provided CPU oracle when no GPU is available or even one tile
+//!   can't fit. The VRAM budget formula is
+//!   `max_elements_per_tile(vram, bpe) = vram / (3 * bpe)` (3 buffers per
+//!   dispatch — input + output + staging).
 //!
 //! Real parallel/GPU logic is deferred: see T39 (CPU `par_map`), T43 (lazy
 //! GPU device init via `OnceLock`), T45 (real GPU dispatch pipeline —
-//! implements [`GpuBackend`] for a wgpu-backed type), T49 (`@prefer` hints
-//! layered over [`decide`]).
+//! implements [`GpuBackend`] for a wgpu-backed type), T46 (VRAM tiling +
+//! CPU fallback), T49 (`@prefer` hints layered over [`decide`]).
 //!
 //! # Determinism
 //!
@@ -50,6 +59,7 @@ pub mod gpu;
 pub mod gpu_pipeline;
 pub mod mock_gpu;
 pub mod threshold;
+pub mod tiling;
 
 pub use cpu::{CpuDispatcher, CpuDispatcherError};
 pub use dispatch::{DispatchKind, Dispatcher};
@@ -58,3 +68,7 @@ pub use gpu::{AdapterInfoSnapshot, GpuContext, GpuContextError};
 pub use gpu_pipeline::{workgroup_count, WgpuBackend, WORKGROUP_SIZE};
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
 pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};
+pub use tiling::{
+    dispatch_map_with_tiling, dispatch_tiled, max_elements_per_tile, tile_ranges,
+    vram_budget_from_device, TiledDispatcher,
+};

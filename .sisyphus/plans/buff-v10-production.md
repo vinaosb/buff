@@ -86,7 +86,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: dispatch([1.0,2.0,3.0], {x=>x*2}) → assert [2.0,4.0,6.0]. Evidence: task-45-gpu-roundtrip.txt
   **Commit**: `feat(runtime): implement GPU dispatch pipeline with readback`
 
-- [ ] **T46**: VRAM check + tiling + CPU fallback [deep]
+- [x] **T46**: VRAM check + tiling + CPU fallback [deep]
   **What to do** (TDD): RED: data fits VRAM→single dispatch. Exceeds→tiled. Tile too big→CPU fallback. GREEN: implement VRAM query, tile calculator, sequential tiled dispatch.
   **Acceptance**: `cargo test -p buff-lang-runtime tiling` passes. Tiled result == CPU result.
   **QA**: 250 elements, max_tile=100 → 3 tiles, combined result correct. Evidence: task-46-tiling.txt
