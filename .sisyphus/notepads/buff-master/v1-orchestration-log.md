@@ -124,3 +124,107 @@ Paths that exist on this box:
 - T43: GpuContext device+queue lazy init via OnceLock (extends T38 GpuContext).
 - T44: WGSL codegen in buff-lang-codegen-wgsl crate (separate crate).
 - T45: GPU dispatch pipeline (storage buffers + compute pass + readback).
+
+
+## T39 Findings (2026-07-19)
+
+### Outcome
+T39 GREEN: real Rayon-backed `par_map`/`par_filter`/`par_reduce` on `CpuDispatcher`.
+**25 new tests added** (target: 15+). All 50 buff-lang-runtime tests pass.
+clippy --all-targets -D warnings / fmt --check / cargo check --workspace all exit 0.
+
+### API (concrete on `CpuDispatcher`, NOT on `Dispatcher` trait — preserves object-safety)
+```rust
+pub fn par_map<T: Send, U: Send, F: Fn(T) -> U + Sync + Send>(
+    &self, input: Vec<T>, f: F,
+) -> Vec<U>
+// Order-preserving. Backed by `input.into_par_iter().map(f).collect()`.
+
+pub fn par_filter<T: Send, P: Fn(&T) -> bool + Sync + Send>(
+    &self, input: Vec<T>, pred: P,
+) -> Vec<T>
+// Order-preserving. Backed by `input.into_par_iter().filter(pred).collect()`.
+
+pub fn par_reduce<T: Send + Sync + Clone, O: Fn(T, T) -> T + Sync + Send>(
+    &self, input: Vec<T>, identity: T, op: O,
+) -> T
+// Associative-only deterministic. Backed by
+// `input.into_par_iter().reduce(|| identity.clone(), op)`.
+```
+
+All three run inside `self.with_pool(|| { ... })` so they execute on this
+dispatcher's owned rayon pool, NOT the global one. Verified by
+`par_filter_uses_owned_pool_with_dispatcher_thread_count` test (calls
+`rayon::current_num_threads()` inside `with_pool` and asserts it matches
+`dispatcher.thread_count()`).
+
+### Type bound deviation from task spec (justified)
+Spec said `par_reduce<T: Send + Clone, ...>`. **Actual bound: `T: Send + Sync + Clone`**.
+Reason: rayon's `reduce(identity, op)` requires the `identity: ID` closure to be
+`Fn() -> T + Sync + Send`. Our identity closure captures `&T` (for
+`|| identity.clone()`), and `&T: Sync` requires `T: Sync`. No way around this
+without `Arc<T>` indirection (which still requires `T: Sync` for `Arc<T>: Sync`).
+The bound is honest about rayon's requirements. Almost all real-world types
+that are `Send + Clone` (i32, String, Vec, custom structs of primitives) are
+also `Sync`, so this costs nothing in practice.
+
+### Determinism contract (documented in rustdoc, asserted in tests)
+- `par_map` / `par_filter`: order-preserving via rayon's `collect()` over
+  `par_iter`. Same input + same closure/predicate -> byte-identical output
+  every run. **Tested across 10 runs on 10k elements each.**
+- `par_reduce`: fully deterministic for any **associative** op with a true
+  two-sided identity (`op(identity, x) == x == op(x, identity)`). Non-associative
+  ops (e.g. `f32 +`) give per-run deterministic but thread-count-dependent
+  results — caller owns this caveat (documented in the method's rustdoc).
+
+### Files changed (buff-lang-runtime only — no other crate touched)
+- `src/cpu.rs`: MODIFIED — added `rayon::prelude::*` import, expanded module
+  docs, added 3 concrete methods with thorough rustdoc explaining bounds,
+  determinism contract, and the rayon primitives backing each.
+- `tests/cpu_parallel_tests.rs`: NEW — 25 integration tests:
+  - par_map (7): acceptance [2,4,6], empty, single, 100k order, env capture,
+    type-change (i32 -> String), non-Copy String input
+  - par_filter (6): even/odd, empty, all-true, all-false, 100k order, String
+  - par_reduce (7): sum, product, empty->identity, single, max (assoc+commut),
+    100k sum matches sequential + closed-form n*(n-1)/2, String concat assoc
+  - determinism (3): 10-run repeats on each op
+  - custom Send+Sync+Clone struct + pool-scoping check (2)
+
+### Conventions honored
+- All deps via `.workspace = true`; rayon already in tree (T38 added it).
+- No new deps. No `[features]` section. No HashMap/HashSet.
+- NO `unwrap`/`expect`/`panic`/`todo`/`unimplemented` in non-test code
+  (the three new methods don't even return Result — pure CPU work can't fail).
+- Edition 2021, license MIT OR Apache-2.0.
+- Tests follow `*_tests.rs` naming. Pattern of T38: behavioral assertions,
+  not rubber-stamps. Includes helper `dispatcher()` fn for brevity.
+- `#[must_use]` on all three methods (return value is the entire point).
+
+### Gotchas / lessons for T40-T42
+1. **Generic methods CAN'T go on `Dispatcher` trait** — confirmed in T38, holds
+   for T39. `dyn Dispatcher` would break. T40's threshold logic will need to
+   downcast `Box<dyn Dispatcher>` to `CpuDispatcher` (or hold concrete types).
+   Alternative: T40 might define a separate non-object-safe `Parallel` trait
+   with generic methods, implemented alongside `Dispatcher`.
+2. **`rayon::current_num_threads()` inside `pool.install(...)` reports the
+   owned pool's thread count**, not the global one. Useful assertion pattern
+   for future pool-scoping tests (T40 sizing, T42 atomic accumulator sharing).
+3. **`clippy::redundant_closure`** flags `|| rayon::current_num_threads()` —
+   pass the fn directly: `pool.install(rayon::current_num_threads)`.
+4. **`#[must_use]` triggers no clippy lint** for these signatures. Safe to add.
+5. **100k-element tests are FAST** (~0.05s for all 25 tests including 100k
+   variants x 3 ops). No need to gate large-input tests behind `#[ignore]`.
+6. **rustfmt** wraps `assert_eq!(out, vec![...])` if the vec literal is on one
+   line past 100 chars. Pre-emptively wrap if you write long assertions.
+
+### What's deferred (correctly out of scope for T39)
+- T40: dispatch thresholds (`<1000` SingleThread, `1000-50000` CpuParallel via
+  these methods, `>50000` GpuCompute). Will likely need to hold
+  `Vec<Box<dyn Dispatcher>>` plus a separate concrete-typed fast path for
+  CpuDispatcher (since trait can't carry generic `par_map`).
+- T41: race detection — reject closures that capture `&mut`. The current Sync
+  bound on `F` already prevents `FnMut`, but interior mutability via
+  `Cell`/`RefCell` is still possible and would need explicit rejection.
+- T42: AtomicI64 auto-insertion for `par_reduce` accumulators.
+- T43: GpuContext device+queue lazy init via `OnceLock`.
+- T44/T45: WGSL codegen + GPU dispatch pipeline.

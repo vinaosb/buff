@@ -1,16 +1,22 @@
-//! CPU dispatcher — owns a rayon thread pool, ready for T39's `par_map`.
+//! CPU dispatcher — owns a rayon thread pool and exposes the three
+//! deterministic parallel primitives [`CpuDispatcher::par_map`],
+//! [`CpuDispatcher::par_filter`], [`CpuDispatcher::par_reduce`].
 //!
-//! T38 only proves that:
+//! T38 proved that:
 //!
 //! 1. A default rayon pool can be built without panicking.
 //! 2. The pool's thread count is `>= 1`.
 //! 3. The dispatcher implements [`Dispatcher`] for runtime backend
 //!    selection (T40).
 //!
-//! The real parallel `map`/`filter`/`reduce` logic is T39.
+//! T39 adds the real parallel `map`/`filter`/`reduce` logic. The methods
+//! are **concrete** on [`CpuDispatcher`] (not on the [`Dispatcher`] trait)
+//! because their generic bounds would break object-safety — see the trait
+//! docs in [`crate::dispatch`] for the rationale.
 
 use crate::dispatch::{DispatchKind, Dispatcher};
 use crate::error::RuntimeError;
+use rayon::prelude::*;
 
 /// Error raised while constructing a [`CpuDispatcher`].
 ///
@@ -78,6 +84,115 @@ impl CpuDispatcher {
     /// be sendable across worker threads.
     pub fn with_pool<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
         self.pool.install(f)
+    }
+
+    /// Apply `f` to every element of `input` in parallel and collect the
+    /// results in **input order**.
+    ///
+    /// Backed by `rayon::par_iter::map` + `collect::<Vec<_>>()`, which
+    /// preserves input order regardless of how work is distributed across
+    /// threads. Runs on this dispatcher's owned pool via
+    /// [`with_pool`](Self::with_pool), not the global rayon pool.
+    ///
+    /// Acceptance case: `par_map(vec![1, 2, 3], |x| x * 2) == vec![2, 4, 6]`.
+    ///
+    /// Determinism contract: same input + same closure → same output,
+    /// regardless of thread count (rayon's ordered `collect` guarantees
+    /// this).
+    ///
+    /// The closure consumes its argument (`Fn(T) -> U`, not `Fn(&T) -> U`).
+    /// Pass references inside the closure if you need to keep the source
+    /// data.
+    ///
+    /// # Bounds (why each is required)
+    ///
+    /// * `T: Send` — input elements are moved onto worker threads.
+    /// * `U: Send` — output elements are moved back to the collecting
+    ///   thread.
+    /// * `F: Fn(T) -> U + Sync + Send` — rayon requires the closure be
+    ///   callable from multiple threads (`Sync`) and movable to them
+    ///   (`Send`). `Fn` (not `FnMut`/`FnOnce`) because it may be invoked
+    ///   many times across threads.
+    #[must_use]
+    pub fn par_map<T, U, F>(&self, input: Vec<T>, f: F) -> Vec<U>
+    where
+        T: Send,
+        U: Send,
+        F: Fn(T) -> U + Sync + Send,
+    {
+        self.with_pool(|| input.into_par_iter().map(f).collect::<Vec<U>>())
+    }
+
+    /// Keep only the elements of `input` for which `pred` returns `true`,
+    /// preserving **input order**.
+    ///
+    /// Backed by `rayon::par_iter::filter` + `collect::<Vec<_>>()`, which
+    /// preserves input order. Runs on this dispatcher's owned pool.
+    ///
+    /// Determinism contract: same input + same predicate → same output,
+    /// regardless of thread count.
+    ///
+    /// # Bounds
+    ///
+    /// * `T: Send` — elements flow across worker threads. `filter` borrows
+    ///   each element by reference (`Fn(&T) -> bool`), so `T` does **not**
+    ///   need to be `Clone` — ownership is retained and the kept elements
+    ///   are returned in their original form.
+    /// * `P: Fn(&T) -> bool + Sync + Send` — rayon requires the predicate
+    ///   be callable from multiple worker threads.
+    #[must_use]
+    pub fn par_filter<T, P>(&self, input: Vec<T>, pred: P) -> Vec<T>
+    where
+        T: Send,
+        P: Fn(&T) -> bool + Sync + Send,
+    {
+        self.with_pool(|| input.into_par_iter().filter(pred).collect::<Vec<T>>())
+    }
+
+    /// Reduce `input` to a single value using `op`, parallelized across
+    /// this dispatcher's pool.
+    ///
+    /// Backed by `rayon::par_iter::reduce`. Each worker thread reduces its
+    /// slice using `op` starting from a clone of `identity`; the per-thread
+    /// results are then combined with `op` again. Runs on this
+    /// dispatcher's owned pool.
+    ///
+    /// # Determinism contract — READ CAREFULLY
+    ///
+    /// For fully deterministic results **independent of thread count**, the
+    /// caller must provide:
+    ///
+    /// 1. An `identity` that is a true two-sided identity for `op`
+    ///    (`op(identity, x) == x == op(x, identity)`).
+    /// 2. An `op` that is **associative** (`op(a, op(b, c)) == op(op(a, b), c)`).
+    ///
+    /// If both hold, the result is reproducible across all thread counts
+    /// and all runs (e.g. integer addition, multiplication, `max`, `min`,
+    /// string concatenation with a canonical ordering, set union).
+    ///
+    /// If `op` is **not** associative (e.g. floating-point `+`), the result
+    /// is **deterministic per run on a fixed thread count** but may differ
+    /// across runs with different thread counts. The caller owns this
+    /// caveat — use integer math, fixed-point, or a strictly-associative
+    /// monoid where determinism matters.
+    ///
+    /// Reducing an empty `input` always returns `identity` (cloned).
+    ///
+    /// # Bounds
+    ///
+    /// * `T: Send + Sync + Clone` — elements flow across worker threads
+    ///   (`Send`); the identity closure captures `&identity` and must be
+    ///   callable from multiple threads (`Sync`); `identity` is cloned
+    ///   once per worker thread as its starting accumulator (`Clone`).
+    /// * `O: Fn(T, T) -> T + Sync + Send` — rayon requires the operator be
+    ///   callable from multiple worker threads.
+    #[must_use]
+    pub fn par_reduce<T, O>(&self, input: Vec<T>, identity: T, op: O) -> T
+    where
+        T: Send + Sync + Clone,
+        O: Fn(T, T) -> T + Sync + Send,
+    {
+        self.with_pool(|| input.into_par_iter().reduce(|| identity.clone(), op))
     }
 }
 

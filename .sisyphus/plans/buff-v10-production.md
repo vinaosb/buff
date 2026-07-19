@@ -36,7 +36,7 @@ Phase 2 (v0.5) must be complete:
   **QA**: `cargo check -p buff-lang-runtime` → exit 0. Evidence: task-38-runtime-scaffold.txt
   **Commit**: `feat(runtime): scaffold buff-lang-runtime with dispatch interfaces`
 
-- [ ] **T39**: CPU parallel dispatch via Rayon [deep]
+- [x] **T39**: CPU parallel dispatch via Rayon [deep]
   **What to do** (TDD): RED: par_map([1,2,3], {x=>x*2}) → [2,4,6]. par_filter, par_reduce. GREEN: implement using rayon par_iter, work-stealing.
   **Acceptance**: `cargo test -p buff-lang-runtime par_map` passes (15+ tests). Deterministic output.
   **QA**: par_map([1,2,3], {x=>x*2}) → assert [2,4,6]. Evidence: task-39-par-map.txt
