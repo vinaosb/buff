@@ -1,18 +1,26 @@
 //! Integration tests for `buff-repl`'s pure formatting + evaluation layer.
 //!
-//! These tests exercise [`buff_repl::evaluate_and_format`] end-to-end —
-//! they invoke the real `buff_eval::Evaluator`, which means each happy-path
-//! test spawns `rustc` on real generated Rust source. They need the host's
-//! MSVC env (`LIB` / `INCLUDE`) set up — see the workspace root AGENTS.md
+//! These tests exercise [`buff_repl::evaluate_and_format`] (T125a) and
+//! [`buff_repl::dispatch_line`] (T125b) end-to-end — they invoke the real
+//! `buff_eval::Evaluator`, which means each happy-path test spawns
+//! `rustc` on real generated Rust source. They need the host's MSVC env
+//! (`LIB` / `INCLUDE`) set up — see the workspace root AGENTS.md
 //! "COMMANDS" section for the canonical vcvars invocation.
 //!
-//! Acceptance scenarios (per task T125a §2 EXPECTED OUTCOME):
+//! Acceptance scenarios:
 //!
-//! 1. `2 + 3` → output contains `5`                  — [`bare_expr_evaluates_to_value`]
-//! 2. State persists across calls                    — [`state_persists_across_lines`]
-//! 3. Parse error → diagnostic, no panic             — [`broken_input_yields_diagnostic_no_panic`]
-//! 4. `print(...)` output is forwarded               — [`print_output_appears_in_formatted`]
-//! 5. Diagnostic survives a second evaluation        — [`repl_continues_after_diagnostic`]
+//! - T125a §2 EXPECTED OUTCOME:
+//!   1. `2 + 3` → output contains `5`                  — [`bare_expr_evaluates_to_value`]
+//!   2. State persists across calls                    — [`state_persists_across_lines`]
+//!   3. Parse error → diagnostic, no panic             — [`broken_input_yields_diagnostic_no_panic`]
+//!   4. `print(...)` output is forwarded               — [`print_output_appears_in_formatted`]
+//!   5. Diagnostic survives a second evaluation        — [`repl_continues_after_diagnostic`]
+//!
+//! - T125b §2 EXPECTED OUTCOME:
+//!   6. State persists through the dispatcher          — [`state_persists_via_dispatcher`]
+//!   7. `:type x` after `let x = 42` prints `Int`      — [`type_command_after_let`]
+//!   8. Shadowing: `let x = 1` then `let x = 99` → 99  — [`shadowing_uses_newest_binding`]
+//!   9. `:type` with no arg → usage hint, no panic     — covered in `src/lib.rs` unit tests
 //!
 //! All tests are independent (each builds a fresh [`Evaluator`]).
 //!
@@ -22,7 +30,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use buff_eval::Evaluator;
-use buff_repl::evaluate_and_format;
+use buff_repl::{dispatch_line, evaluate_and_format};
 
 // ---------------------------------------------------------------------------
 // Acceptance bullet 1: `2 + 3` → output contains `5`.
@@ -149,5 +157,131 @@ fn formatted_output_always_ends_with_newline_when_nonempty() {
     assert!(
         out.is_empty() || out.ends_with('\n'),
         "expected trailing newline, got: {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T125b acceptance bullet 6: state persists through the dispatcher.
+// ---------------------------------------------------------------------------
+//
+// The dispatcher must thread accumulated state across calls when the
+// caller reuses ONE Evaluator (this is the same invariants as
+// `state_persists_across_lines`, but routed through `dispatch_line`
+// instead of `evaluate_and_format` directly — proving the dispatch
+// layer doesn't accidentally fork state).
+
+#[test]
+fn state_persists_via_dispatcher() {
+    let mut ev = Evaluator::new();
+
+    // Line 1: declare `let x = 42`. Spawns rustc, accumulates state.
+    let out1 = dispatch_line(&mut ev, "let x = 42");
+    assert!(
+        !out1.contains("[Error]"),
+        "let-statement should not produce a diagnostic, got: {out1:?}"
+    );
+
+    // Line 2: reference `x + 8`. Should print 50.
+    let out2 = dispatch_line(&mut ev, "x + 8");
+    assert!(
+        out2.contains("50"),
+        "expected `50` in output via dispatcher (x=42 + 8), got: {out2:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T125b acceptance bullet 7: `:type <expr>` after a `let` resolves to Int.
+// ---------------------------------------------------------------------------
+//
+// Type inference is a PURE pass — it consults the accumulated body_stmts_src
+// via buff_eval::Evaluator::type_of, which runs lex + parse + the
+// TypeInferencer over a synthetic program. NO rustc spawn on this path.
+
+#[test]
+fn type_command_after_let() {
+    let mut ev = Evaluator::new();
+
+    // Seed the evaluator with a let-binding. This DOES spawn rustc on
+    // the composed program, but the side effect we care about — the
+    // body_stmts_src accumulating `let x = 42` — happens BEFORE the
+    // spawn.
+    let _ = dispatch_line(&mut ev, "let x = 42");
+
+    // Query the type of `x`. Should resolve to `Int<64>` (Buff's default
+    // Int width — see buff-lang-types/src/ty.rs Display impl). We use
+    // `contains("Int")` rather than an exact match so this test stays
+    // robust to width-inference tuning.
+    let out = dispatch_line(&mut ev, ":type x");
+    assert!(
+        out.contains("Int"),
+        "expected `Int` in :type output after `let x = 42`, got: {out:?}"
+    );
+    assert!(
+        !out.contains("[Error]"),
+        "type query should not surface a diagnostic on success, got: {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T125b acceptance bullet 8: shadowing uses the newest binding.
+// ---------------------------------------------------------------------------
+//
+// Buff lowers `let` to Rust's `let`, which natively supports shadowing
+// (a later `let x = ...` shadows an earlier one in the same scope). The
+// composed program after `let x = 1` then `let x = 99` is:
+//
+// ```text
+// func main():
+//     let x = 1
+//     let x = 99
+//     print(x)
+// ```
+//
+// Rust compiles this with the second binding winning, so `print(x)`
+// writes `99`. The REPL inherits this behavior verbatim from buff-eval's
+// source-accumulation strategy.
+
+#[test]
+fn shadowing_uses_newest_binding() {
+    let mut ev = Evaluator::new();
+
+    let _ = dispatch_line(&mut ev, "let x = 1");
+    let _ = dispatch_line(&mut ev, "let x = 99");
+
+    // Reference `x` — should resolve to the LATEST binding (99).
+    let out = dispatch_line(&mut ev, "x");
+    assert!(
+        out.contains("99"),
+        "expected `99` (newest binding) in output, got: {out:?}"
+    );
+    // The original binding should NOT appear in the output.
+    assert!(
+        !out.contains("99\n1") && !out.trim_end_matches('\n').ends_with('1'),
+        "expected only the newest binding to appear, got: {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T125b: shadowing also reflects in `:type` queries.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn type_command_after_shadow_reflects_current_binding() {
+    let mut ev = Evaluator::new();
+
+    // Shadow with a different-TYPE value: `let x = 1` (Int) then
+    // `let x = "hi"` (String). The type_of query should see the
+    // LATEST binding.
+    let _ = dispatch_line(&mut ev, "let x = 1");
+    let _ = dispatch_line(&mut ev, "let x = \"hi\"");
+
+    let out = dispatch_line(&mut ev, ":type x");
+    assert!(
+        out.contains("String"),
+        "expected `String` after shadowing with a string literal, got: {out:?}"
+    );
+    assert!(
+        !out.contains("Int"),
+        "shadowed Int binding should not leak into :type output, got: {out:?}"
     );
 }

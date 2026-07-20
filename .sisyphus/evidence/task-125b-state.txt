@@ -1,0 +1,46 @@
+T125b: Session state + type introspection — evidence
+======================================================
+Date: 2026-07-20
+Commit: feat(repl): session state persistence and :type introspection
+
+Changes (crates/buff-repl only — no new deps, Cargo.toml/lock unchanged):
+  src/lib.rs:
+    - NEW pub fn dispatch_line(ev: &mut Evaluator, input: &str) -> String
+      Pure REPL entry: strips leading ws; if input starts with ":type" (EOL or
+      whitespace-delimited) routes to handle_type_command, else forwards to
+      evaluate_and_format. run_with_writer now calls dispatch_line (single call site).
+    - NEW fn handle_type_command(ev: &Evaluator, expr_arg: &str) -> String
+      Trims arg; empty -> usage hint; else ev.type_of(expr): Some(t)->"{t}\n",
+      None->"cannot infer type of `{expr}`\n".
+    - NEW const TYPE_CMD = ":type".
+    - +10 hermetic unit tests (no rustc spawn).
+  tests/repl_tests.rs: +4 integration tests (state_persists_via_dispatcher,
+    type_command_after_let, shadowing_uses_newest_binding [let x=1 -> let x=99 -> x = 99],
+    type_command_after_shadow_reflects_current_binding [Int -> String]).
+
+Consumed buff-eval API (verbatim, unchanged): 
+  pub fn type_of(&self, expr: &str) -> Option<Type>   (crates/buff-eval/src/lib.rs:219)
+  &self read-only, pure (no rustc spawn; TypeInferencer over synthetic program).
+  Type::Display renders width-annotated e.g. "Int<64>"; tests assert contains("Int").
+
+Resilience preserved: :type with no/blank arg -> usage hint, no panic, loop continues;
+  None from type_of -> printed, loop continues. No unwrap/expect/panic outside #[cfg(test)].
+
+End-to-end smoke (buff.exe repl via stdin pipe):
+  let x = 42 / :type x / x + 8 / :type / 2 + 3  =>
+  Int<64>
+  50
+  :type requires an expression, e.g. `:type x` or `:type 2 + 3`
+  5
+  bye.
+
+Acceptance (plan L1652-1655):
+  [x] `let x = 42` then `x + 8` -> 50 (state persists)
+  [x] `:type x` -> Int (renders Int<64>)
+  [x] Redefining a variable shadows correctly (newest binding wins)
+
+Verification (Atlas, MSVC env, scoped -p):
+  cargo test  -p buff-repl                     -> 17 unit + 10 integration = 27 passed, 0 failed. EXIT 0
+  cargo clippy -p buff-repl --all-targets -D w -> Finished, no warnings. EXIT 0
+  cargo fmt   -p buff-repl --check             -> clean. EXIT 0
+  cargo build -p buff-lang-cli                 -> Finished. EXIT 0 (subagent-reported; unchanged CLI)

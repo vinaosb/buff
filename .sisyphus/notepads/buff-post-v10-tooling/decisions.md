@@ -474,3 +474,27 @@ On `ReadlineError::Interrupted`, we write `\n` + `bye.` + `\n`. The leading `\n`
 
 **Decision 7: NO `Default` impl on `Repl`.**
 `Default::default()` can't return `Result`. Since `Repl::new()` is fallible (`DefaultEditor::new()` can fail without a TTY), we drop `Default` entirely. Tests that want a `Repl` without a TTY should call `evaluate_and_format(ev, input)` directly — that's the testability contract.
+
+
+## [T125b] 2026-07-20T14:30:00-03:00 - REPL `:type` meta-command + state-persistence lock-in
+
+**Decision 1: separate `dispatch_line` from `evaluate_and_format`.**
+T125a's `evaluate_and_format` is the bare-eval-and-format path. T125b adds `dispatch_line` as the REPL's TRUE entry point — it routes meta-commands (`:type`) and forwards everything else. `evaluate_and_format` stays public for backward compat (T125a tests use it directly) and as the documented "non-meta-command" path. The interactive `Repl::run_with_writer` loop now calls `dispatch_line`, NOT `evaluate_and_format` — so behavior is identical between TTY and the test harness.
+
+**Decision 2: `:type` is matched by literal prefix + whitespace-or-EOL.**
+`dispatch_line` strips leading whitespace, then checks `strip_prefix(":type")` AND verifies what follows is either empty OR starts with `is_whitespace`. This rejects `:typex` (no separator) which would otherwise be misinterpreted as the meta-command. A constant `TYPE_CMD = ":type"` is the single source of truth for both the dispatcher check and the usage-hint string. `:foo` (unknown meta-command) is NOT intercepted — it falls through to the lexer, which surfaces a parse diagnostic. T125c will add the generic dispatcher.
+
+**Decision 3: `:type` surfaces `Type::Display` verbatim — NO normalization.**
+The task spec said `:type x` prints `Int`; reality is `Int<64>` (Buff's default Int width). Rather than strip the width annotation in the REPL, we surface `Type`'s Display form unchanged. Three reasons: (a) the width is real semantic information the user may want; (b) the REPL is a debug tool, hiding info makes it less useful; (c) any future `:type --verbose` or `:type --brief` mode can layer on top of the raw Display form. Tests use `contains("Int")` to stay robust to width-inference tuning.
+
+**Decision 4: empty `:type` arg is a USAGE HINT, not a diagnostic.**
+`:type` with no expression (or whitespace-only arg) prints `:type requires an expression, e.g. \`:_type x\` or \`:type 2 + 3\`` — a USAGE hint, NOT a `[Error]` diagnostic. The distinction matters: usage hints are user-error recovery (the REPL is teaching the user the syntax), diagnostics are pipeline failures (lex/parse/codegen/rustc/spawn). Mixing them would make the REPL feel hostile. The hint is intentionally NOT a `Diagnostic::info()` because it should not look like a compiler message.
+
+**Decision 5: `type_of` returning `None` prints a one-line inference-failure message.**
+`Evaluator::type_of` returns `None` on ANY lex/parse/inference failure (it deliberately does not surface a diagnostic — the buff-eval contract). The REPL formats this as `cannot infer type of \`<expr>\``. This mirrors the `python -c "type(x)"` UX: when the type can't be determined, the REPL tells you what it tried. The expression is echoed back in backticks so the user can copy it for re-editing. No `[Error]` tag because there's no Diagnostic object involved — this is REPL-side formatting of an Option<Type>.
+
+**Decision 6: ALL `:type` unit tests live in src/lib.rs (not tests/).**
+`type_of` is a pure lex+parse+infer pass — NO rustc spawn. So `:type` tests are FAST (<1ms each) and hermetic. Placing them in `src/lib.rs` next to the other formatting-layer unit tests keeps the test pyramid honest: fast unit tests for the formatting/dispatch layer, slower integration tests (with rustc spawn) for state-persistence and shadowing in `tests/repl_tests.rs`. Mirrors how buff-eval splits its tests.
+
+**Decision 7: the dispatcher takes `&mut Evaluator` even though `:type` only needs `&`.**
+`Evaluator::type_of` is `&self` (read-only). But `dispatch_line` is `&mut Evaluator` because the OTHER branch (`evaluate_and_format`) requires `&mut` to accumulate `let`/`func` state. The single dispatcher signature accommodates both paths without caller-side branching. Cost: a `&mut` borrow that's never exercised for the `:type` path. Benefit: ONE call site in `run_with_writer`, uniform behavior between TTY and tests.
