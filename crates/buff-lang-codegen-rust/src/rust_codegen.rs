@@ -499,6 +499,23 @@ impl RustCodegen {
         if program_uses_regex(decls) {
             self.extern_crates.insert("regex".to_string());
         }
+        // T124e: register the `toml` crate as an external dependency when
+        // the program references the prelude `Toml` namespace module
+        // (`Toml.parse(s)` / `Toml.stringify(v)`). Generated code uses
+        // fully-qualified `toml::from_str` / `toml::to_string` paths so
+        // no `use` import is emitted — but the recorded name signals to
+        // the pipeline / build-driver that the generated Cargo project
+        // must declare `toml` in `[dependencies]`.
+        //
+        // Mirrors the chrono/tracing/regex registration pattern
+        // (T124b/T124c/T124d): single-file `buff run` rustc path does
+        // NOT link this crate; the codegen-only linking boundary is the
+        // accepted acceptance criterion for v1.4 prelude modules.
+        // Cargo-project wiring is deferred (snapshots + extern_crates
+        // set is the verifiable contract).
+        if program_uses_toml(decls) {
+            self.extern_crates.insert("toml".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -2862,6 +2879,68 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Regex.compile codegen parse: {e}")))
+            }
+            // T124e: Toml.parse(s) -> Map<String, Unknown>. Mirrors the
+            // Regex.compile "unwrap_or_else(<default>)" panic-free
+            // pattern: `toml::from_str` is fallible
+            // (`Result<T, toml::de::Error>`), but Buff's prelude-type
+            // surface is infallible. A parse failure yields an empty
+            // Map via `.unwrap_or_default()` (HashMap impls Default) —
+            // NO panic, matching the T124b/T124d precedent.
+            //
+            // The turbofish `::<std::collections::HashMap<String,
+            // toml::Value>>` makes the concrete return type explicit in
+            // the generated Rust. Buff's inferred return type
+            // (Map<String, Unknown>) is the looser surface contract;
+            // the turbofish pins the runtime representation so the
+            // generated Rust is fully typed without requiring a let-
+            // binding's type annotation to drive inference.
+            //
+            // The turbofish path can NOT be built via `rust_call_expr`
+            // (which splits on `::` and creates Idents —
+            // `<std::collections::...>` is a turbofish arg, not a path
+            // segment). We build the whole call via `quote!` instead.
+            //
+            // String literals lower to `&'static str` already (no
+            // borrow needed); non-literal String-typed args get an `&`
+            // via `coerce_str_arg_to_ref` so Rust's Deref coercion
+            // turns `&String` into `&str` (the type `toml::from_str`
+            // requires).
+            (T::Toml, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                // toml::from_str::<HashMap<String, toml::Value>>(s)
+                //     .unwrap_or_default()
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    toml::from_str::<std::collections::HashMap<String, toml::Value>>(#arg)
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Toml.parse codegen parse: {e}")))
+            }
+            // T124e: Toml.stringify(v) -> String. Mirrors the
+            // Toml.parse panic-free pattern: `toml::to_string` is
+            // fallible (`Result<String, toml::ser::Error>`), but Buff
+            // surfaces it as infallible. A serialization failure yields
+            // the empty string via `.unwrap_or_default()` (String
+            // impls Default) — NO panic.
+            //
+            // The arg is taken by `&v` because `toml::to_string`
+            // requires `&impl Serialize`. Any value the user passes (a
+            // Map<String, ?>, a struct, ...) is borrowed — the Rust
+            // Serialize bound is checked at the rustc level (a value
+            // that doesn't impl Serialize surfaces as a regular Rust
+            // compile error, not a Buff codegen error).
+            //
+            // Built via `quote!` directly so the `& #arg` borrow is a
+            // real syn::ExprRef (not a path-segment hack).
+            (T::Toml, A::Stringify) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    toml::to_string(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Toml.stringify codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
@@ -7416,6 +7495,155 @@ fn expr_uses_regex(expr: &Expr) -> bool {
         }
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_regex),
         Expr::NamedArg { value, .. } => expr_uses_regex(value),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T124e — toml emit-on-demand detection (Toml namespace module).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `Toml.parse(...)` or
+/// `Toml.stringify(...)` call (T124e). Returns `true` if at least one is
+/// found, signalling [`RustCodegen::generate`] to record `"toml"` in the
+/// extern-crate set so the pipeline knows the generated Cargo project
+/// depends on the `toml` crate.
+///
+/// Detection recognises the `Toml` namespace as the receiver of a method
+/// call (`Toml.parse(s)`, `Toml.stringify(v)`). The method name is NOT
+/// matched here — `Toml` is a reserved prelude namespace, so any
+/// `Toml.<anything>()` triggers `toml` registration. Codegen will surface
+/// a clear error if `<anything>` is not one of parse/stringify.
+///
+/// Mirrors the tracing/regex detection patterns (T124c/T124d); the
+/// recursive walker covers every Stmt / Expr variant that could host a
+/// Toml call. Toml has NO instance methods (only assoc fns on the
+/// namespace), so detection is simpler than Regex: only the bare-ident
+/// receiver pattern (`Toml.method(...)`) is flagged.
+fn program_uses_toml(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_toml(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_toml`]: scan a block's statements.
+fn block_uses_toml(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_toml)
+}
+
+/// Check a single statement (and its nested expressions) for `Toml.*(...)`
+/// usage.
+fn stmt_uses_toml(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_toml(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_toml(target) || expr_uses_toml(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_toml(iter) || block_uses_toml(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_toml(cond) || block_uses_toml(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_toml(value) || block_uses_toml(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_toml(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_toml(e),
+            }) || block_uses_toml(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_toml(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `Toml.<method>(...)` call.
+///
+/// Detection is on the receiver NAME (`Toml`) only — the method name is
+/// validated at codegen time. This means a hypothetical user-defined
+/// variable named `Toml` whose method is called would trigger a false
+/// positive (registering toml unnecessarily); but since `Toml` is a
+/// reserved prelude namespace, the user can't legitimately bind to that
+/// name anyway. Same conservative strategy as the tracing walker (T124c).
+fn expr_uses_toml(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall { receiver, method, .. } => {
+            if let Expr::Ident(id, _) = receiver.as_ref() {
+                if id.name == "Toml" {
+                    return true;
+                }
+            }
+            // Conservatively flag any call whose method name matches a
+            // Toml assoc fn — same conservative strategy T124c uses for
+            // tracing instance-method detection. The codegen arm will
+            // then either emit a Toml lowering or surface a clear error
+            // if the receiver isn't actually the `Toml` namespace.
+            if matches!(method.name.as_str(), "stringify") {
+                // Only flag if the receiver could plausibly be Toml
+                // (bare Ident). We already covered `Toml` above; other
+                // receivers (values, calls) might be user methods that
+                // happen to share the name — those should NOT trigger
+                // toml registration. So this branch is a no-op; we
+                // leave the method-name check in place as documentation
+                // of the design decision.
+            }
+            expr_uses_toml(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_toml(lhs) || expr_uses_toml(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_toml(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_toml(callee) || args.iter().any(expr_uses_toml)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_toml(cond)
+                || block_uses_toml(then_block)
+                || else_block.as_ref().is_some_and(block_uses_toml)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_toml(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_toml),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_toml(base) || indices.iter().any(expr_uses_toml)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_toml(k) || expr_uses_toml(v)),
+        Expr::Lambda { body, .. } => block_uses_toml(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_toml(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_toml(scrutinee) || arms.iter().any(|arm| block_uses_toml(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_toml(inner),
+        Expr::Try { expr, .. } => expr_uses_toml(expr),
+        Expr::Spawn { task, .. } => expr_uses_toml(task),
+        Expr::Range { start, end, .. } => expr_uses_toml(start) || expr_uses_toml(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_toml(value)
+                || block_uses_toml(then_block)
+                || else_block.as_ref().is_some_and(block_uses_toml)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_toml),
+        Expr::NamedArg { value, .. } => expr_uses_toml(value),
     }
 }
 

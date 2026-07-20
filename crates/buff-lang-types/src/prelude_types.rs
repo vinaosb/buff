@@ -110,6 +110,26 @@ pub enum PreludeType {
     /// (Regex IS a runtime value); `is_prelude_datetime()` returns
     /// `false` (Regex is not a chrono type — see [`Type::is_prelude_regex`]).
     Regex,
+    /// `Toml` — the TOML serialization namespace (T124e). Wraps the
+    /// `toml` Rust crate. Like [`Self::Log`], `Toml` is **never a
+    /// runtime value** — it's a NAMESPACE that exposes two associated
+    /// functions:
+    /// - `Toml.parse(string)` — parse a TOML document into a Buff `Map`
+    ///   (heterogeneous values); lowers to
+    ///   `toml::from_str::<std::collections::HashMap<String,
+    ///   toml::Value>>(s).unwrap_or_default()`.
+    /// - `Toml.stringify(value)` — serialize a Map/value back to TOML
+    ///   text; lowers to `toml::to_string(&v).unwrap_or_default()`.
+    ///
+    /// This is critical because Buff's own `buff.toml` project config is
+    /// TOML — exposing a TOML module in the prelude lets Buff programs
+    /// read/write their own project files. `buff_type()` returns
+    /// [`Type::Void`] (Toml has no value representation, exactly like
+    /// `Log`); `is_namespace_only()` returns `true`. This is the second
+    /// namespace-only prelude module after `Log` (T124c) and the
+    /// established precedent for future namespace-only modules
+    /// (`Process`, `Cli`, `Http`, ...).
+    Toml,
 }
 
 impl PreludeType {
@@ -123,6 +143,9 @@ impl PreludeType {
         PreludeType::Log,
         // T124d: Regex — runtime value type with rich instance methods.
         PreludeType::Regex,
+        // T124e: Toml — namespace-only module wrapping the `toml` crate
+        // (parse + stringify). Mirrors Log's namespace-only shape.
+        PreludeType::Toml,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -138,6 +161,10 @@ impl PreludeType {
             // name so the codegen can splice `regex::Regex::...` paths
             // without rewriting.
             PreludeType::Regex => "Regex",
+            // T124e: the Toml prelude type name. Mirrors the Rust crate
+            // name so the codegen can splice `toml::from_str` /
+            // `toml::to_string` paths without rewriting.
+            PreludeType::Toml => "Toml",
         }
     }
 
@@ -162,6 +189,11 @@ impl PreludeType {
             // compiled-regex type (mapped to `regex::Regex` at codegen
             // time). Distinct from Log (which returns Void).
             PreludeType::Regex => Type::Regex,
+            // T124e: namespace-only — Toml has no value representation.
+            // Mirrors Log: the namespace itself is never a value, only
+            // its associated functions (`Toml.parse` / `Toml.stringify`)
+            // are callable.
+            PreludeType::Toml => Type::Void,
         }
     }
 
@@ -172,7 +204,7 @@ impl PreludeType {
     /// `true`. Used by the prelude-types tests to skip the datetime-only
     /// `is_prelude_datetime` assertion for namespace modules.
     pub const fn is_namespace_only(self) -> bool {
-        matches!(self, PreludeType::Log)
+        matches!(self, PreludeType::Log | PreludeType::Toml)
     }
 }
 
@@ -256,6 +288,21 @@ pub enum PreludeAssocFn {
     /// nothing, never a panic. The codegen details live in
     /// `lower_prelude_type_assoc_fn`).
     Compile,
+    // ---- Toml (T124e) --------------------------------------------------
+    /// `Toml.stringify(value)` — serialize a Map/value back to TOML
+    /// text. One arg (the value to serialize, typically a Map). Returns
+    /// `String`. The codegen-lowered `toml::to_string(&v)` is fallible
+    /// in Rust (`Result<String, Error>`) — Buff surfaces it as an
+    /// infallible String via `.unwrap_or_default()` (NO panic — the
+    /// empty string is the round-trip-failure fallback, mirroring
+    /// Regex.compile / DateTime.parse's "no panicking generated code"
+    /// stance from T124b/T124d).
+    ///
+    /// Note `Toml.parse` is NOT a new variant — it REUSES the existing
+    /// [`Self::Parse`] (also used by `DateTime.parse(s)` /
+    /// `Date.parse(s)`). Dispatch on `(PreludeType::Toml, Parse)` is
+    /// resolved in [`assoc_fn_return_type`].
+    Stringify,
 }
 
 impl PreludeAssocFn {
@@ -278,6 +325,8 @@ impl PreludeAssocFn {
         PreludeAssocFn::Error,
         // T124d: Regex.compile.
         PreludeAssocFn::Compile,
+        // T124e: Toml.stringify (Toml.parse reuses `Parse`).
+        PreludeAssocFn::Stringify,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -303,6 +352,10 @@ impl PreludeAssocFn {
             // the `new` constructor convention reserved for user types
             // (`Type.new()` per §7 of the conventions).
             PreludeAssocFn::Compile => "compile",
+            // T124e: Toml.stringify — canonical name for "serialize back
+            // to text". Mirrors JSON.stringify from JS / `dumps` from
+            // Python's `json` / `to_string` from Rust's `toml` crate.
+            PreludeAssocFn::Stringify => "stringify",
         }
     }
 }
@@ -363,6 +416,31 @@ pub fn assoc_fn_return_type(
         // returned `regex::Regex` value is the receiver for the four
         // instance methods (match / find / replace / captures).
         (PreludeType::Regex, PreludeAssocFn::Compile) => Some(Type::Regex),
+        // T124e: Toml module — `Toml.parse(s)` returns a Buff `Map`
+        // whose keys are String (TOML top-level keys are always
+        // strings) and whose values are Unknown (TOML values are
+        // heterogeneous: scalars, arrays, sub-tables; representing
+        // them all as a single Buff type would require a `TomlValue`
+        // variant we deliberately don't add to keep the surface
+        // minimal — parse + stringify, no schema). The codegen emits
+        // the concrete `std::collections::HashMap<String, toml::Value>`
+        // via turbofish so the generated Rust is fully typed; the
+        // inferred Buff Type::Map<String, Unknown> is the surface
+        // contract (a user can pass the result around, index into it,
+        // re-stringify it). The Unknown value type is consistent with
+        // Buff's "don't pre-implement the world" stance — when a
+        // future task adds proper TOML-schema typing, this return
+        // type narrows.
+        (PreludeType::Toml, PreludeAssocFn::Parse) => {
+            Some(Type::map(Type::string(), Type::Unknown))
+        }
+        // T124e: Toml module — `Toml.stringify(v)` returns a TOML-
+        // formatted String. The arg is the value to serialize
+        // (typically a Map<String, ?>); the codegen borrows it via
+        // `&v` so Rust's serde-Serialize bound on `toml::to_string`
+        // is satisfied for any Map<String, toml::Value> / suitable
+        // Serialize-implementing value.
+        (PreludeType::Toml, PreludeAssocFn::Stringify) => Some(Type::string()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -812,8 +890,9 @@ mod tests {
         assert_eq!(names.len(), unique.len(), "duplicate prelude type names");
         // 5 datetime-family members shipped in T124b + 1 namespace module
         // (Log) shipped in T124c + 1 runtime-value-with-methods type
-        // (Regex) shipped in T124d = 7 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 7);
+        // (Regex) shipped in T124d + 1 namespace-only module (Toml)
+        // shipped in T124e = 8 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 8);
     }
 
     #[test]
@@ -1000,5 +1079,119 @@ mod tests {
             instance_fn_return_type(&Type::Regex, PreludeInstanceFn::Format, &[Type::string()]),
             None
         );
+    }
+
+    // T124e: Toml module — `Toml.parse(s)` / `Toml.stringify(v)` assoc-fn
+    // lookups + return types. Mirrors the Log namespace-only precedent
+    // (T124c) but with non-Void return types (Map / String).
+    #[test]
+    fn prelude_toml_assoc_fn_lookup_valid_pairs() {
+        // `Toml.parse` reuses the registry's shared `Parse` variant
+        // (also used by DateTime.parse / Date.parse).
+        assert_eq!(
+            assoc_fn_lookup("Toml", "parse"),
+            Some((PreludeType::Toml, PreludeAssocFn::Parse))
+        );
+        // `Toml.stringify` is the dedicated Toml-only assoc fn.
+        assert_eq!(
+            assoc_fn_lookup("Toml", "stringify"),
+            Some((PreludeType::Toml, PreludeAssocFn::Stringify))
+        );
+        // `Toml` is recognised as a prelude type.
+        assert!(is_prelude_type("Toml"));
+        // `Toml.buff_type()` is `Void` (no runtime value — namespace-only
+        // like Log).
+        assert_eq!(PreludeType::Toml.buff_type(), Type::Void);
+        // `Toml.is_namespace_only()` is true.
+        assert!(PreludeType::Toml.is_namespace_only());
+        // The datetime-family types are NOT namespace-only.
+        assert!(!PreludeType::DateTime.is_namespace_only());
+        // Regex is NOT namespace-only (it's a real runtime value).
+        assert!(!PreludeType::Regex.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_toml_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Toml.now is invalid (now is not a Toml method).
+        assert_eq!(assoc_fn_lookup("Toml", "now"), None);
+        // Toml.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("Toml", "compile"), None);
+        // Toml.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Toml", "unknown"), None);
+        // Toml.debug is invalid (debug belongs to Log).
+        assert_eq!(assoc_fn_lookup("Toml", "debug"), None);
+        // DateTime.stringify is invalid (stringify belongs to Toml).
+        assert_eq!(assoc_fn_lookup("DateTime", "stringify"), None);
+        // Regex.stringify is invalid.
+        assert_eq!(assoc_fn_lookup("Regex", "stringify"), None);
+        // Log.stringify is invalid (Log is namespace-only).
+        assert_eq!(assoc_fn_lookup("Log", "stringify"), None);
+    }
+
+    #[test]
+    fn prelude_toml_assoc_fn_return_types() {
+        // Toml.parse(s) -> Map<String, Unknown>. The value type is
+        // Unknown because TOML values are heterogeneous (scalars /
+        // arrays / sub-tables); the codegen turbofish-es to the
+        // concrete `HashMap<String, toml::Value>` at the Rust level.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Toml, PreludeAssocFn::Parse, &[Type::string()]),
+            Some(Type::map(Type::string(), Type::Unknown))
+        );
+        // Toml.stringify(v) -> String.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Toml,
+                PreludeAssocFn::Stringify,
+                &[Type::map(Type::string(), Type::Unknown)]
+            ),
+            Some(Type::string())
+        );
+        // Toml + non-Toml method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Toml, PreludeAssocFn::Now, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Toml, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Toml, PreludeAssocFn::Debug, &[]),
+            None
+        );
+        // Non-Toml type + Toml method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::DateTime, PreludeAssocFn::Stringify, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Stringify, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Stringify, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn prelude_toml_namespace_only_predicate() {
+        // Both Log and Toml are namespace-only modules.
+        assert!(PreludeType::Log.is_namespace_only());
+        assert!(PreludeType::Toml.is_namespace_only());
+        // The datetime family + Regex are NOT namespace-only.
+        assert!(!PreludeType::DateTime.is_namespace_only());
+        assert!(!PreludeType::Date.is_namespace_only());
+        assert!(!PreludeType::Time.is_namespace_only());
+        assert!(!PreludeType::Duration.is_namespace_only());
+        assert!(!PreludeType::Instant.is_namespace_only());
+        assert!(!PreludeType::Regex.is_namespace_only());
+        // The count of namespace-only modules is exactly 2 (Log + Toml).
+        let namespace_only_count = PreludeType::ALL
+            .iter()
+            .filter(|t| t.is_namespace_only())
+            .count();
+        assert_eq!(namespace_only_count, 2);
     }
 }

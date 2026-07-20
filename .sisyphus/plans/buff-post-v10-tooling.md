@@ -1134,7 +1134,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Regex module wrapping regex crate`
 
-- [ ] **T124e: Toml module** [quick]
+- [x] **T124e: Toml module** [quick]
 
   **What to do**:
   - Add `Toml` module to prelude: `Toml.parse(string) -> Map`, `Toml.stringify(value) -> String`

@@ -1,0 +1,11 @@
+---
+source: crates/buff-lang-codegen-rust/tests/toml_codegen.rs
+expression: src
+---
+fn main() {
+    let m: std::collections::HashMap<String, i64> = toml::from_str::<
+        std::collections::HashMap<String, toml::Value>,
+    >("name = \"buff\"\n")
+        .unwrap_or_default();
+    toml::to_string(&m).unwrap_or_default();
+}

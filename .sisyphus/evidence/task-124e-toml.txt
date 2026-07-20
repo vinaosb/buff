@@ -1,0 +1,37 @@
+T124e: Toml module — evidence
+================================
+
+Implemented Toml namespace-only prelude module (Log precedent, buff_type=Void)
+wrapping the `toml` crate.
+
+Files changed:
+- crates/buff-lang-types/src/prelude_types.rs: PreludeType::Toml (namespace-only,
+  buff_type -> Type::Void) + assoc fns parse (-> Map) and stringify (-> String)
+  + registry unit tests.
+- crates/buff-lang-codegen-rust/src/rust_codegen.rs: lowering for Toml.parse /
+  Toml.stringify + program_uses_toml(decls) walker (L7522) + extern_crates
+  insert "toml" (L516-517).
+- crates/buff-lang-codegen-rust/tests/toml_codegen.rs: 13 insta tests.
+- 4 snapshots: parse, parse_ident, stringify, full_program.
+- Cargo.toml: NO change (toml already in root [workspace.dependencies]).
+- infer.rs: UNCHANGED (generic assoc-fn dispatch).
+
+Generated code (snapshot-verified):
+- Toml.parse(s)     -> toml::from_str::<std::collections::HashMap<String, toml::Value>>(s).unwrap_or_default()
+- Toml.stringify(m) -> toml::to_string(&m).unwrap_or_default()
+Both use fallible-ctor + no-panic fallback (mirrors Regex/DateTime pattern).
+
+Codegen-only linking boundary applies (extern_crates recorded; single-file
+`buff run` rustc path does not link toml; cargo-project wiring deferred).
+
+Gate results:
+- cargo test -p buff-lang-codegen-rust --test toml_codegen : test result: ok. 13 passed; 0 failed. EXIT 0
+- cargo clippy --workspace --all-targets -- -D warnings     : Finished. EXIT 0
+- cargo build --workspace                                   : Finished. EXIT 0
+- cargo test --workspace : all suites pass. NOTE: buff-lang-runtime --test
+  cold_start_tests intermittently segfaults (STATUS_ACCESS_VIOLATION
+  0xC0000005) on first run due to a flaky wgpu GPU cold-start path; passes
+  cleanly on isolated retry (18 passed). Unrelated to this change.
+
+Acceptance criteria met: Toml.parse returns Map, Toml.stringify produces TOML,
+round-trip supported by toml crate, available without import.

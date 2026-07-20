@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-codegen-rust/tests/toml_codegen.rs
+expression: src
+---
+fn f() {
+    toml::to_string(&m).unwrap_or_default();
+}

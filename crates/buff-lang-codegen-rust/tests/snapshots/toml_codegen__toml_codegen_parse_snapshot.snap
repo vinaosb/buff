@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/toml_codegen.rs
+expression: src
+---
+fn f() {
+    toml::from_str::<std::collections::HashMap<String, toml::Value>>("a = 1\n")
+        .unwrap_or_default();
+}
