@@ -1831,7 +1831,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(cli): buff add/publish/install for registry integration`
 
-- [ ] **T128: buff deps + buff outdated** [quick]
+- [x] **T128: buff deps + buff outdated** [quick]
 
   **What to do**:
   - `buff deps` — print dependency tree (like `cargo tree`)
@@ -1843,9 +1843,9 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **Must NOT do**: `buff audit` (security) — defer to v2.0 (needs advisory database).
 
   **Acceptance Criteria**:
-  - [ ] `buff deps` prints tree
-  - [ ] `buff outdated` reports newer versions
-  - [ ] `--why` shows dependency chain
+  - [x] `buff deps` prints tree
+  - [x] `buff outdated` reports newer versions
+  - [x] `--why` shows dependency chain
 
   **QA Scenarios**:
   ```

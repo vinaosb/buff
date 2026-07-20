@@ -510,3 +510,8 @@ The task spec said `:type x` prints `Int`; reality is `Int<64>` (Buff's default 
 - 4/5 acceptance items checked (login/add/publish/install — all proven by in-process integration tests).
 - "Consumed package's functions callable" LEFT UNCHECKED: honest gap — CLI compiles one .buff file at a time (README modules note); cross-package/multi-file linking is the same v0.5 codegen-only gap, deferred post-v1.0. Not claimed as done.
 - Registry base URL env: `BUFF_REGISTRY_URL` (default http://127.0.0.1:7878). Live remote deploy remains a USER ACTION.
+
+## T128 (262b845)
+- Treated [quick]-tagged T128 as a full feature (real tree render + registry round-trip tests, 13 integration tests) per orchestrator standard.
+- uff deps renders only the 3 modern dep kinds (rust-deps, git-dependencies, registry-dependencies); legacy [dependencies] section omitted from output per spec scope.
+- uff outdated targets registry-dependencies only (git/rust deps have no registry version concept). uff audit/security deferred to v2.0 as specified.
