@@ -1412,7 +1412,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Process and OS system info modules`
 
-- [ ] **T124m: Networking modules — TCP, UDP, WebSocket** [deep]
+- [x] **T124m: Networking modules — TCP, UDP, WebSocket** [deep]
 
   **What to do**:
   - `TCP`: `TCP.connect(host, port) -> Connection`, `.send(data)`, `.recv() -> Vector<Byte>`, `.close()` — wrap `std::net::TcpStream` (async via tokio)

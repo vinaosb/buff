@@ -756,6 +756,46 @@ impl RustCodegen {
         if program_uses_num_cpus(decls) {
             self.extern_crates.insert("num_cpus".to_string());
         }
+        // T124m: register the `tokio` crate for `TCP.*` / `UDP.*`
+        // calls (idempotent with the existing tokio walker that
+        // flags ONLY `sleep(...)` free-fn calls - the existing
+        // walker does NOT fire on TCP.* / UDP.* / WebSocket.*
+        // method calls). `WebSocket.*` records `tokio-tungstenite`
+        // + `futures-util` via the narrow
+        // `program_uses_tokio_tungstenite` walker; `tokio` is
+        // pulled transitively by `tokio-tungstenite`'s dependency
+        // on it (so a WebSocket-only program would have tokio in
+        // its Cargo.lock even without an explicit tokio dep), but
+        // we record tokio explicitly for clarity (mirrors how we
+        // also record sha2 for HMAC.sha256 even though hmac pulls
+        // it transitively).
+        //
+        // Generated code uses fully-qualified `tokio::net::*` /
+        // `tokio::io::*` / `tokio_tungstenite::*` /
+        // `futures_util::*` paths so no top-level `use` import is
+        // emitted - but the recorded names signal to the pipeline
+        // / build-driver that the generated Cargo project must
+        // declare each crate in `[dependencies]`.
+        //
+        // Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/
+        // hex/percent-encoding/uuid/url/serde_yml/csv/walkdir/
+        // tempfile/sha2/md5/hmac/num_cpus registration pattern
+        // (T124b..T124l): single-file `buff run` rustc path does
+        // NOT link these crates; cargo-project wiring is deferred
+        // (snapshots + extern_crates set is the verifiable
+        // contract). The `.await` calls surface a rustc-level
+        // error if the enclosing function is not async (T31 walker
+        // propagates async-ness ONLY through bare-Ident free-fn
+        // calls, NOT method-call / namespace-assoc-fn calls, so
+        // the enclosing-fn-async transformation is a deferral;
+        // see issues.md).
+        if program_uses_tcp(decls) || program_uses_udp(decls) || program_uses_tokio_tungstenite(decls) {
+            self.extern_crates.insert("tokio".to_string());
+        }
+        if program_uses_tokio_tungstenite(decls) {
+            self.extern_crates.insert("tokio-tungstenite".to_string());
+            self.extern_crates.insert("futures-util".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -4370,6 +4410,87 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("OS.cpus codegen parse: {e}")))
             }
+            // T124m: TCP / UDP / WebSocket networking assoc fns.
+            // Each wraps an async tokio / tokio-tungstenite connect
+            // / bind call via `.await.ok()` (panic-free - a connect
+            // or bind failure collapses to `None`). The returned
+            // value (Connection / Socket / WsConnection) is the
+            // receiver for the corresponding instance methods.
+            //
+            // Same codegen-only-linking-boundary stance as the
+            // other tokio / tokio-tungstenite lowerings: single-
+            // file `buff run` rustc path does NOT link tokio (the
+            // `.await` calls surface a rustc-level error if the
+            // enclosing function is not async - the T31 walker
+            // propagates async-ness ONLY through bare-Ident free-
+            // function calls, NOT method-call / namespace-assoc-fn
+            // calls, so the enclosing-fn-async transformation is a
+            // deferral; see issues.md).
+            //
+            // `TCP.connect(host, port) -> Connection`. Wraps
+            // `tokio::net::TcpStream::connect(format!("{}:{}",
+            // h, p)).await.ok()` (two args: String host, Int port;
+            // the format! builds the `"host:port"` SocketAddr
+            // string tokio's connect accepts). The `.ok()`
+            // collapses a connect failure to `None` - NEVER panics.
+            // The `tokio` crate is recorded in codegen
+            // `extern_crates` (idempotent with the existing tokio
+            // walker from T124g - any sleep() call OR TCP.* /
+            // UDP.* call flags `tokio`).
+            (T::TCP, A::Connect) => {
+                let mut lowered = n_args(self, 2)?;
+                let host = lowered.remove(0);
+                let port = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    tokio::net::TcpStream::connect(format!("{}:{}", #host, #port))
+                        .await
+                        .ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("TCP.connect codegen parse: {e}")))
+            }
+            // `UDP.bind(host, port) -> Socket`. Wraps
+            // `tokio::net::UdpSocket::bind(format!("{}:{}", h,
+            // p)).await.ok()` (two args: String host, Int port).
+            // The `.ok()` collapses a bind failure to `None` -
+            // NEVER panics.
+            (T::UDP, A::Bind) => {
+                let mut lowered = n_args(self, 2)?;
+                let host = lowered.remove(0);
+                let port = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    tokio::net::UdpSocket::bind(format!("{}:{}", #host, #port))
+                        .await
+                        .ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("UDP.bind codegen parse: {e}")))
+            }
+            // `WebSocket.connect(url) -> WsConnection`. Wraps
+            // `tokio_tungstenite::connect_async(url).await.ok()
+            // .map(|(ws, _)| ws)` (one arg: String url). The
+            // `.ok().map(...)` chain collapses a connect failure to
+            // `None` and unwraps the `(WebSocketStream, Response)`
+            // tuple tokio-tungstenite's connect_async returns -
+            // NEVER panics. The `tokio-tungstenite` + `futures-
+            // util` crates are recorded in codegen `extern_crates`
+            // via the narrow `program_uses_tokio_tungstenite`
+            // walker. Same shared `Connect` variant as
+            // `TCP.connect(host, port)`; dispatched on the
+            // (WebSocket, Connect) pair (mirrors `Parse` shared
+            // between DateTime / Date / Toml / URL / UUID).
+            (T::WebSocket, A::Connect) => {
+                let url = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    tokio_tungstenite::connect_async(#url)
+                        .await
+                        .ok()
+                        .map(|(ws, _)| ws)
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("WebSocket.connect codegen parse: {e}"))
+                })
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -4878,6 +4999,269 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Process.id codegen parse: {e}")))
             }
+            // T124m: TCP-Connection / UDP-Socket / WebSocket-
+            // WsConnection instance methods. Each lowers to a
+            // fully-qualified tokio / futures-util async method
+            // chained through the `Option<...>` wrapper the
+            // codegen adds at connect / bind time. The Option-
+            // wrapper layer keeps the calls panic-free even when
+            // connect / bind failed - the Option's None branch is
+            // a no-op (send / close), an empty Vec (recv), or an
+            // empty String (ws.recv).
+            //
+            // All networking instance methods emit `.await` per
+            // the tokio / futures-util async API. Buff has NO
+            // `await` keyword - the `.await` is purely a codegen
+            // concern, snapshot-verified only (single-file `buff
+            // run` rustc path does NOT link tokio; the T31 async
+            // walker propagates async-ness ONLY through bare-Ident
+            // free-fn calls, NOT method-call / namespace-assoc-fn
+            // calls, so the enclosing-fn-async transformation is
+            // a deferral; see issues.md).
+            //
+            // Connection.send(data) -> Void. Wraps
+            // `{ use tokio::io::AsyncWriteExt; if let Some(mut s)
+            // = recv { s.write_all(d.as_bytes()).await.ok(); } }`
+            // (block-scoped trait import; `.ok()` discards the
+            // write result; Option None branch is a no-op - NEVER
+            // panics). One arg (String).
+            M::Send if matches!(recv_ty, Type::Connection) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "send() expects exactly 1 arg (the data String), got {}",
+                        args.len()
+                    )));
+                }
+                let data = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use tokio::io::AsyncWriteExt;
+                        if let Some(mut s) = #recv {
+                            s.write_all(#data.as_bytes()).await.ok();
+                        }
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Connection.send codegen parse: {e}"))
+                })
+            }
+            // Connection.recv() -> Vector<Byte>. Wraps
+            // `{ use tokio::io::AsyncReadExt; let mut buf =
+            // Vec::new(); if let Some(mut s) = recv { let _ =
+            // s.read(&mut buf).await; } buf }` (returns empty Vec
+            // on EOF / error / connect-failed - NEVER panics).
+            // Zero args. Returns Vec<u8>.
+            M::Recv if matches!(recv_ty, Type::Connection) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "recv() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use tokio::io::AsyncReadExt;
+                        let mut buf: Vec<u8> = Vec::new();
+                        if let Some(mut s) = #recv {
+                            let _ = s.read(&mut buf).await;
+                        }
+                        buf
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Connection.recv codegen parse: {e}"))
+                })
+            }
+            // Connection.close() -> Void. Wraps
+            // `{ use tokio::io::AsyncWriteExt; if let Some(mut s)
+            // = recv { s.shutdown().await.ok(); } }` (graceful
+            // shutdown of the write side; Option None branch is a
+            // no-op - NEVER panics). Zero args. Same `Close`
+            // variant dispatched on WsConnection (different
+            // lowering - SinkExt::close).
+            M::Close if matches!(recv_ty, Type::Connection) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "close() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use tokio::io::AsyncWriteExt;
+                        if let Some(mut s) = #recv {
+                            s.shutdown().await.ok();
+                        }
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Connection.close codegen parse: {e}"))
+                })
+            }
+            // Socket.send_to(data, addr) -> Void. Wraps
+            // `{ if let Some(s) = recv { s.send_to(d.as_bytes(),
+            // a).await.ok(); } }` (Option None branch is a no-op -
+            // NEVER panics). Two args (String data, String addr).
+            M::SendTo => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "send_to() expects exactly 2 args (data, addr), got {}",
+                        args.len()
+                    )));
+                }
+                let data = self.lower_expr(&args[0])?;
+                let addr = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        if let Some(s) = #recv {
+                            s.send_to(#data.as_bytes(), #addr).await.ok();
+                        }
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Socket.send_to codegen parse: {e}"))
+                })
+            }
+            // Socket.recv_from() -> Tuple. Returns
+            // `(Vector<Byte>, String)` (datagram bytes + sender
+            // addr). Wraps `{ let mut buf = vec![0u8; 65535]; if
+            // let Some(s) = recv { return s.recv_from(&mut buf)
+            // .await.ok().map(|(n, addr)| (buf[..n].to_vec(),
+            // addr.to_string())); } (Vec::new(), String::new()) }`
+            // (returns empty tuple on connect-failed / recv error
+            // - NEVER panics). Zero args. The 65535 buffer size is
+            // the max UDP datagram payload.
+            M::RecvFrom => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "recv_from() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut buf = vec![0u8; 65535];
+                        if let Some(s) = #recv {
+                            return s
+                                .recv_from(&mut buf)
+                                .await
+                                .ok()
+                                .map(|(n, addr)| (buf[..n].to_vec(), addr.to_string()));
+                        }
+                        (Vec::new(), String::new())
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Socket.recv_from codegen parse: {e}"))
+                })
+            }
+            // WsConnection.send(text) -> Void. Wraps
+            // `{ use futures_util::SinkExt; if let Some(mut s) =
+            // recv { s.send(tokio_tungstenite::tungstenite::
+            // Message::Text(t)).await.ok(); } }` (block-scoped
+            // trait import; `.ok()` discards the send result;
+            // Option None branch is a no-op - NEVER panics). One
+            // arg (String text). Same `Send` variant as
+            // Connection.send (TCP); dispatched on the
+            // (WsConnection, Send) pair.
+            M::Send if matches!(recv_ty, Type::WsConnection) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "send() expects exactly 1 arg (the text String), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use futures_util::SinkExt;
+                        if let Some(mut s) = #recv {
+                            s.send(tokio_tungstenite::tungstenite::Message::Text(#text))
+                                .await
+                                .ok();
+                        }
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("WsConnection.send codegen parse: {e}"))
+                })
+            }
+            // WsConnection.recv() -> String. Wraps
+            // `{ use futures_util::StreamExt; if let Some(mut s)
+            // = recv { while let Some(Ok(msg)) = s.next().await {
+            // if let tokio_tungstenite::tungstenite::Message::
+            // Text(t) = msg { return t; } } } String::new() }`
+            // (returns empty String on connect-failed / closed /
+            // non-text message - NEVER panics). Zero args. The
+            // while loop drains non-text frames (Binary / Ping /
+            // Pong) until a Text frame arrives or the stream
+            // closes; the explicit `return` exits the block on
+            // the first Text frame. Distinct from Connection.recv
+            // (TCP) which returns Vector<Byte>.
+            M::Recv if matches!(recv_ty, Type::WsConnection) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "recv() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use futures_util::StreamExt;
+                        if let Some(mut s) = #recv {
+                            while let Some(Ok(msg)) = s.next().await {
+                                if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                                    return t;
+                                }
+                            }
+                        }
+                        String::new()
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("WsConnection.recv codegen parse: {e}"))
+                })
+            }
+            // WsConnection.close() -> Void. Wraps
+            // `{ use futures_util::SinkExt; if let Some(mut s) =
+            // recv { s.close(None).await.ok(); } }` (sends a Close
+            // frame; Option None branch is a no-op - NEVER
+            // panics). Zero args. Same `Close` variant as
+            // Connection.close (TCP); dispatched on the
+            // (WsConnection, Close) pair (different lowering -
+            // SinkExt::close vs AsyncWriteExt::shutdown).
+            M::Close if matches!(recv_ty, Type::WsConnection) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "close() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use futures_util::SinkExt;
+                        if let Some(mut s) = #recv {
+                            s.close(None).await.ok();
+                        }
+                    }
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("WsConnection.close codegen parse: {e}"))
+                })
+            }
+            // T124m: Send / Recv / Close on a non-(Connection /
+            // WsConnection) receiver type fall through to a clear
+            // error (mirrors the unreachable defensive arm in
+            // lower_prelude_type_assoc_fn). The registry's
+            // instance_fn_lookup already rejected the (type,
+            // method) pair before reaching this point; this arm
+            // is the safety net for future runtime-value types
+            // that might also expose `send` / `recv` / `close`
+            // methods.
+            M::Send | M::Recv | M::Close => Err(self.unsupported(&format!(
+                "{recv_ty}.{:?}() is not a recognised prelude instance method",
+                pmethod
+            ))),
         }
     }
 
@@ -5493,7 +5877,41 @@ impl RustCodegen {
         // KNOWN_ZERO_ARG_METHODS to include the prelude instance methods
         // that take zero args (year/month/day/hour/minute/second/
         // timestamp). `format` takes one arg so it's never affected.
-        if args.is_empty() && !KNOWN_ZERO_ARG_METHODS.contains(&method.name.as_str()) {
+        //
+        // T124m: we ALSO need the receiver's inferred type for the
+        // prelude-instance-skip below, so we move the inference
+        // ONCE here (before both the heuristic and the prelude
+        // dispatch) and reuse the result. This is purely a reorder -
+        // the semantic of `infer_expr(receiver).unwrap_or(Unknown)`
+        // is unchanged from the original code that lived just below
+        // the heuristic.
+        let recv_for_prelude_check = self
+            .type_inferencer
+            .infer_expr(receiver)
+            .unwrap_or(Type::Unknown);
+        if args.is_empty()
+            && !KNOWN_ZERO_ARG_METHODS.contains(&method.name.as_str())
+            // T124m: skip the field-access heuristic when the
+            // (recv_ty, method) pair is a REGISTERED prelude
+            // instance method. Without this guard, `c.send()` (zero
+            // args on a Type::Connection receiver) would be silently
+            // rewritten as a Rust field access `c.send` - the
+            // arity-validation arm in `lower_prelude_type_instance_fn`
+            // (which rejects `send()` with 0 args, expecting exactly 1)
+            // would never run, and the user would get a downstream
+            // rustc "field `send` not found" error instead of a clear
+            // Buff-side "send() expects exactly 1 arg" error. The same
+            // gap applies to any future multi-arg prelude instance
+            // method whose name is NOT in KNOWN_ZERO_ARG_METHODS
+            // (send / send_to today; recv / close / recv_from already
+            // pass through because they ARE in the table - they take
+            // zero args legitimately).
+            && buff_lang_types::prelude_types::instance_fn_lookup(
+                &recv_for_prelude_check,
+                &method.name,
+            )
+            .is_none()
+        {
             let recv = self.lower_expr(receiver)?;
             return Ok(field_access(recv, &method.name));
         }
@@ -5502,16 +5920,16 @@ impl RustCodegen {
         // form `recv.method(args)` where the receiver INFERS to a prelude
         // datetime type. Runs AFTER the T26 field-access heuristic so the
         // zero-arg instance methods (year/month/day/...) — which are in
-        // KNOWN_ZERO_ARG_METHODS — pass through to here.
+        // KNOWN_ZERO_ARG_METHODS — pass through to here. T124m also lets
+        // multi-arg prelude instance methods (send / send_to) pass through
+        // when called with zero args so their arity validation runs (see
+        // the skip clause above).
         //
         // We consult the integrated TypeInferencer to get the receiver's
-        // resolved Type. Inference errors fall through to the default
+        // resolved Type (computed once above for both the heuristic and
+        // this dispatch). Inference errors fall through to the default
         // `recv.method(args)` lowering (Rust will then diagnose the
         // receiver-type mismatch).
-        let recv_for_prelude_check = self
-            .type_inferencer
-            .infer_expr(receiver)
-            .unwrap_or(Type::Unknown);
         if let Some(pmethod) = buff_lang_types::prelude_types::instance_fn_lookup(
             &recv_for_prelude_check,
             &method.name,
@@ -7161,6 +7579,60 @@ impl RustCodegen {
                     vec![rust_path_type("std::process::Child")],
                 ));
             }
+            // T124m: prelude TCP-Connection type. Plain
+            // `Option<tokio::net::TcpStream>` path - the Option
+            // wrapper lets `TCP.connect` be panic-free (a
+            // connect failure collapses to `None`; `.send()` /
+            // `.recv()` / `.close()` then operate on the
+            // Option via `if let Some(mut s) = ...`). Generated
+            // code uses the fully-qualified tokio path so no
+            // top-level `use` import is emitted - but the
+            // recorded `tokio` in extern_crates signals to the
+            // pipeline / build-driver that the generated Cargo
+            // project must declare `tokio` in `[dependencies]`
+            // (idempotent with the existing tokio walker from
+            // T124g).
+            Type::Connection => {
+                return Some(make_generic_path_type(
+                    "Option",
+                    vec![rust_path_type("tokio::net::TcpStream")],
+                ));
+            }
+            // T124m: prelude UDP-Socket type. Plain
+            // `Option<tokio::net::UdpSocket>` path - same
+            // Option-wrapper stance as Type::Connection / Type::
+            // Process (panic-free bind via `.ok()` collapse).
+            Type::Socket => {
+                return Some(make_generic_path_type(
+                    "Option",
+                    vec![rust_path_type("tokio::net::UdpSocket")],
+                ));
+            }
+            // T124m: prelude WebSocket-WsConnection type. Plain
+            // `Option<tokio_tungstenite::WebSocketStream<
+            // tokio_tungstenite::MaybeTlsStream<tokio::net::
+            // TcpStream>>>` path - the nested generic carries
+            // the MaybeTlsStream wrapper (so `wss://` TLS
+            // endpoints work) over the TcpStream transport. The
+            // Option wrapper keeps connect panic-free via `.ok()
+            // .map(...)`. The `tokio-tungstenite` + `futures-
+            // util` crates are recorded in extern_crates (via
+            // the narrow `program_uses_tokio_tungstenite`
+            // walker). Built via `make_qualified_generic_path_type`
+            // (NOT `make_generic_path_type`) because the path
+            // segments include `::` - the simpler helper panics
+            // on `::`-bearing names since `Ident::new` rejects
+            // them.
+            Type::WsConnection => {
+                let inner_ty = make_qualified_generic_path_type(
+                    "tokio_tungstenite::WebSocketStream",
+                    vec![make_qualified_generic_path_type(
+                        "tokio_tungstenite::MaybeTlsStream",
+                        vec![rust_path_type("tokio::net::TcpStream")],
+                    )],
+                );
+                return Some(make_generic_path_type("Option", vec![inner_ty]));
+            }
             Type::Unknown | Type::Void => return None,
             // T124b: DateTime is the only prelude type that needs a generic
             // argument. Return early with the proper generic-argument form
@@ -8039,6 +8511,19 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     // inner `Child`, accessed via the Option's `.map(...)`).
     "wait",
     "id",
+    // T124m: Networking zero-arg instance methods (`recv` /
+    // `close` / `recv_from`). Without these entries the T26
+    // field-access heuristic would rewrite `conn.recv()` /
+    // `conn.close()` / `sock.recv_from()` as Rust field accesses
+    // on the `Option<tokio::net::*>` values (which don't exist -
+    // the underlying Rust methods are async `recv()` / `close()`
+    // / `recv_from()` on the inner TcpStream / UdpSocket /
+    // WebSocketStream, accessed via `if let Some(mut s) = ...`).
+    // `send` / `send_to` take args so they're never affected by
+    // the heuristic.
+    "recv",
+    "close",
+    "recv_from",
 ];
 
 /// Build the attribute list for a generated struct: always
@@ -11144,6 +11629,55 @@ fn expr_uses_num_cpus(expr: &Expr) -> bool {
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_num_cpus),
         Expr::NamedArg { value, .. } => expr_uses_num_cpus(value),
     }
+}
+
+// ---------------------------------------------------------------------------
+// T124m - networking module emit-on-demand detection (WebSocket only).
+// TCP.* and UDP.* reuse the existing `program_uses_tokio` walker (they
+// also lower to `tokio::*` paths, so the existing sleep-callee-based
+// walker would NOT fire on TCP/UDP calls alone - we extend the tokio
+// walker to ALSO flag `TCP.<method>(...)` / `UDP.<method>(...)` calls
+// below). The new `program_uses_tokio_tungstenite` walker is NARROW:
+// gated ONLY on `WebSocket.<method>(...)` usage (mirrors the chrono-
+// over-broad cautionary tale, T124f gotcha). See the `generate()`
+// caller for the matching `extern_crates.insert("tokio-tungstenite")`
+// + `extern_crates.insert("futures-util")` calls.
+// ---------------------------------------------------------------------------
+
+/// T124m: detect `WebSocket.<method>(...)` calls. The
+/// `tokio-tungstenite` + `futures-util` crates are needed ONLY for
+/// `WebSocket.*` (TCP.* / UDP.* record `tokio` via the existing
+/// tokio walker, which is reused - see below). A NARROW
+/// receiver-aware walker is required: a generic
+/// `program_uses_namespace("WebSocket")` would over-register the
+/// crates for programs that import but don't call (no such program
+/// today, but the narrow stance is future-proof).
+///
+/// Detection recognises a `MethodCall` whose receiver is the bare
+/// Ident `WebSocket` (e.g. `WebSocket.connect(url)`). The
+/// receiver-name gate mirrors the chrono-over-broad cautionary tale
+/// (T124f gotcha) and the existing namespace walkers (T124h
+/// Base64 / Hex / URLEncode / UUID / URL).
+fn program_uses_tokio_tungstenite(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "WebSocket")
+}
+
+/// T124m: detect `TCP.<method>(...)` calls. Returns `true` if at
+/// least one is found, signalling [`RustCodegen::generate`] to
+/// record the `tokio` crate in the extern-crate set (idempotent
+/// with the existing tokio walker from T124g - the existing walker
+/// flags ONLY the bare-Ident `sleep(...)` free-fn call, NOT
+/// TCP / UDP / WebSocket calls, so this walker is the canonical
+/// TCP / UDP -> tokio signal).
+fn program_uses_tcp(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "TCP")
+}
+
+/// T124m: detect `UDP.<method>(...)` calls. Same shape as
+/// [`program_uses_tcp`] - flags `UDP.connect` / `UDP.bind` usage to
+/// record the `tokio` crate in extern_crates.
+fn program_uses_udp(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "UDP")
 }
 
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait

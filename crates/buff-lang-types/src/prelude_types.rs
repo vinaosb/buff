@@ -603,6 +603,80 @@ pub enum PreludeType {
     /// minimal "spawn a child, wait for it, get its PID, exit
     /// yourself" subset that every scripting language converges on.
     Process,
+    /// `TCP` - the TCP-client-connection module (T124m).
+    /// Namespace-only (mirrors Log / Toml / Math / OS) - the
+    /// namespace itself is never a runtime value, but the
+    /// associated function `TCP.connect(host, port)` returns the
+    /// runtime-value type [`Type::Connection`] (which wraps
+    /// `Option<tokio::net::TcpStream>` and carries the `.send` /
+    /// `.recv` / `.close` instance methods). Buff surface:
+    /// - `TCP.connect(host: String, port: Int) -> Connection`
+    ///   (the only assoc fn - opens a TCP connection; the codegen
+    ///   emits `tokio::net::TcpStream::connect(format!("{}:{}",
+    ///   h, p)).await.ok()` - panic-free via Option collapse).
+    /// - `connection.send(data: String)` - write bytes (instance
+    ///   method on Type::Connection).
+    /// - `connection.recv() -> Vector<Byte>` - read bytes (instance
+    ///   method on Type::Connection).
+    /// - `connection.close()` - graceful shutdown (instance method
+    ///   on Type::Connection).
+    ///
+    /// This is a NAMESPACE module: `is_namespace_only()` returns
+    /// `true`. `buff_type()` returns [`Type::Void`] (the namespace
+    /// itself has no value representation - only `TCP.connect`'s
+    /// return value does, and that's typed [`Type::Connection`]).
+    /// `TCP.*` records `tokio` in codegen `extern_crates`
+    /// (idempotent with the existing `tokio` walker).
+    TCP,
+    /// `UDP` - the UDP-socket module (T124m). Namespace-only
+    /// (mirrors TCP / Log / Toml / OS). The associated function
+    /// `UDP.bind(host, port)` returns the runtime-value type
+    /// [`Type::Socket`] (which wraps `Option<tokio::net::UdpSocket>`
+    /// and carries the `.send_to` / `.recv_from` instance methods).
+    /// Buff surface:
+    /// - `UDP.bind(host: String, port: Int) -> Socket` (the only
+    ///   assoc fn - binds a UDP socket; the codegen emits
+    ///   `tokio::net::UdpSocket::bind(format!("{}:{}", h, p))
+    ///   .await.ok()` - panic-free via Option collapse).
+    /// - `socket.send_to(data: String, addr: String)` - send a
+    ///   datagram (instance method on Type::Socket).
+    /// - `socket.recv_from() -> Tuple` - receive a datagram
+    ///   (instance method on Type::Socket).
+    ///
+    /// This is a NAMESPACE module: `is_namespace_only()` returns
+    /// `true`. `buff_type()` returns [`Type::Void`]. `UDP.*`
+    /// records `tokio` in codegen `extern_crates` (idempotent
+    /// with the existing `tokio` walker).
+    UDP,
+    /// `WebSocket` - the WebSocket-client-connection module
+    /// (T124m). Namespace-only (mirrors TCP / UDP / Log / Toml /
+    /// OS). The associated function `WebSocket.connect(url)`
+    /// returns the runtime-value type [`Type::WsConnection`]
+    /// (which wraps `Option<tokio_tungstenite::WebSocketStream<
+    /// MaybeTlsStream<TcpStream>>>` and carries the `.send` /
+    /// `.recv` / `.close` instance methods). Buff surface:
+    /// - `WebSocket.connect(url: String) -> WsConnection` (the
+    ///   only assoc fn - opens a WebSocket connection; the codegen
+    ///   emits `tokio_tungstenite::connect_async(url).await.ok()
+    ///   .map(|(ws, _)| ws)` - panic-free via Option collapse).
+    /// - `wsconn.send(text: String)` - send a Text frame (instance
+    ///   method on Type::WsConnection).
+    /// - `wsconn.recv() -> String` - receive next message as text
+    ///   (instance method on Type::WsConnection).
+    /// - `wsconn.close()` - graceful shutdown (instance method on
+    ///   Type::WsConnection).
+    ///
+    /// This is a NAMESPACE module: `is_namespace_only()` returns
+    /// `true`. `buff_type()` returns [`Type::Void`]. `WebSocket.*`
+    /// records `tokio-tungstenite` + `futures-util` in codegen
+    /// `extern_crates` (via the narrow
+    /// `program_uses_tokio_tungstenite` walker; tokio is recorded
+    /// transitively via tokio-tungstenite's dependency on it, but
+    /// the existing `program_uses_tokio` walker does NOT fire on
+    /// WebSocket.* alone since it's gated on the bare-Ident
+    /// `sleep(...)` free-fn call - the new walker covers the
+    /// WebSocket.* paths explicitly).
+    WebSocket,
 }
 
 impl PreludeType {
@@ -681,6 +755,25 @@ impl PreludeType {
         // same type.
         PreludeType::OS,
         PreludeType::Process,
+        // T124m: TCP / UDP / WebSocket - three networking modules.
+        // All three are namespace-only (mirror Log / Toml / OS) - the
+        // namespace itself has no value representation, but each
+        // ships an associated function whose return type is a real
+        // runtime value (Connection / Socket / WsConnection - all
+        // wrap `Option<tokio::*>` and carry instance methods). The
+        // TCP / UDP assoc fns (connect / bind) are dispatched on the
+        // (TCP, Connect) / (UDP, Bind) pair - new variants since no
+        // prior prelude type exposed those verbs. WebSocket.connect
+        // reuses the shared `Connect` variant (new in T124m) shared
+        // with TCP.connect (mirrors `Parse` / `Get` / `Encode` shared-
+        // variant pattern). The 8 instance methods (Connection.send
+        // / recv / close, Socket.send_to / recv_from, WsConnection.
+        // send / recv / close) are dispatched on the receiver type
+        // (mirrors Regex / URL / Path / Process's instance-method-
+        // carrying runtime-value pattern).
+        PreludeType::TCP,
+        PreludeType::UDP,
+        PreludeType::WebSocket,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -824,6 +917,22 @@ impl PreludeType {
             // instance methods, and `std::process::exit(...)` for
             // the side-effecting Process.exit terminal call.
             PreludeType::Process => "Process",
+            // T124m: the TCP / UDP / WebSocket prelude type names.
+            // ALL-CAPS `TCP` / `UDP` mirror the `UUID` / `URL` /
+            // `HMAC` / `OS` convention (canonical acronyms surface
+            // as uppercase Buff module names). `WebSocket` is
+            // PascalCase (mirrors the canonical Rust crate name
+            // `tokio-tungstenite` and the `WebSocket` spelling in
+            // most ecosystems; NOT `Ws` or `WebSockets`). The
+            // codegen splices `tokio::net::TcpStream::connect(...)`
+            // / `tokio::net::UdpSocket::bind(...)` /
+            // `tokio_tungstenite::connect_async(...)` paths for the
+            // assoc fns and `tokio::io::AsyncReadExt` /
+            // `AsyncWriteExt` + `futures_util::SinkExt` /
+            // `StreamExt` trait methods for the instance methods.
+            PreludeType::TCP => "TCP",
+            PreludeType::UDP => "UDP",
+            PreludeType::WebSocket => "WebSocket",
         }
     }
 
@@ -969,6 +1078,16 @@ impl PreludeType {
             // (T124j) as the fourth runtime-value-with-rich-
             // instance-methods type.
             PreludeType::Process => Type::Process,
+            // T124m: namespace-only - TCP / UDP / WebSocket have no
+            // value representation. Mirrors Log / Toml / OS exactly:
+            // the namespace itself is never a value, only its
+            // associated functions (`TCP.connect(h, p)` /
+            // `UDP.bind(h, p)` / `WebSocket.connect(url)`) are
+            // callable, and those return the runtime-value types
+            // (Connection / Socket / WsConnection respectively).
+            PreludeType::TCP => Type::Void,
+            PreludeType::UDP => Type::Void,
+            PreludeType::WebSocket => Type::Void,
         }
     }
 
@@ -996,6 +1115,9 @@ impl PreludeType {
                 | PreludeType::Hash
                 | PreludeType::HMAC
                 | PreludeType::OS
+                | PreludeType::TCP
+                | PreludeType::UDP
+                | PreludeType::WebSocket
         )
     }
 }
@@ -1425,6 +1547,34 @@ pub enum PreludeAssocFn {
     /// ONLY the `cpus` method name - `name` / `arch` / `hostname`
     /// use std only and record NO extern crate). OS-only.
     Cpus,
+    // ---- Networking modules (T124m) -------------------------------
+    // These variants follow the precedent set by `Parse` (shared by
+    // DateTime / Date / Toml / URL / UUID), `Get` (shared by
+    // Args.get / Env.get), `Encode` / `Decode` (shared by Base64 /
+    // Hex / URLEncode), `Sha256` (shared by Hash.sha256 /
+    // HMAC.sha256): a single variant may be valid on MULTIPLE
+    // prelude types, with the (type, method) pair dispatched in
+    // [`assoc_fn_return_type`] + the codegen arm.
+    //
+    /// `TCP.connect(host, port)` - open a TCP client connection to
+    /// the given host:port. Two args (String host, Int port).
+    /// Returns `Connection` (an opaque handle to the tokio
+    /// TcpStream). Wraps `tokio::net::TcpStream::connect(format!(
+    /// "{}:{}", h, p)).await.ok()` (the `.ok()` collapses a
+    /// connect failure to `None` - NEVER panics, matching Buff's
+    /// "no panicking generated code" rule). TCP-only originally;
+    /// shared with `WebSocket.connect(url)` (which is dispatched
+    /// on the (WebSocket, Connect) pair - same name, different
+    /// arg signature + return type, exactly like `parse` shared
+    /// by DateTime / Date / Toml / URL / UUID).
+    Connect,
+    /// `UDP.bind(host, port)` - bind a UDP socket to the given
+    /// host:port. Two args (String host, Int port). Returns
+    /// `Socket` (an opaque handle to the tokio UdpSocket). Wraps
+    /// `tokio::net::UdpSocket::bind(format!("{}:{}", h, p)).await
+    /// .ok()` (the `.ok()` collapses a bind failure to `None` -
+    /// NEVER panics). UDP-only.
+    Bind,
 }
 
 impl PreludeAssocFn {
@@ -1526,6 +1676,14 @@ impl PreludeAssocFn {
         PreludeAssocFn::Arch,
         PreludeAssocFn::Hostname,
         PreludeAssocFn::Cpus,
+        // T124m: Networking assoc fns (2 distinct names): connect
+        // and bind. `Connect` is shared between TCP.connect(host,
+        // port) and WebSocket.connect(url) (mirrors `Parse` being
+        // shared between DateTime / Date / Toml / URL / UUID,
+        // `Encode` shared between Base64 / Hex / URLEncode, etc.).
+        // `Bind` is UDP-only.
+        PreludeAssocFn::Connect,
+        PreludeAssocFn::Bind,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1647,6 +1805,17 @@ impl PreludeAssocFn {
             PreludeAssocFn::Arch => "arch",
             PreludeAssocFn::Hostname => "hostname",
             PreludeAssocFn::Cpus => "cpus",
+            // T124m: Networking assoc fn names. `connect` mirrors
+            // the canonical `std::net::TcpStream::connect` /
+            // `tokio::net::TcpStream::connect` verb. `bind` mirrors
+            // the canonical `std::net::UdpSocket::bind` /
+            // `tokio::net::UdpSocket::bind` verb. Same shared-
+            // variant pattern as `parse` (shared between DateTime /
+            // Date / Toml / URL / UUID) - `connect` is shared
+            // between TCP.connect(host, port) and WebSocket.connect
+            // (url), dispatched on the (type, method) pair.
+            PreludeAssocFn::Connect => "connect",
+            PreludeAssocFn::Bind => "bind",
         }
     }
 }
@@ -2151,10 +2320,40 @@ pub fn assoc_fn_return_type(
         (PreludeType::OS, PreludeAssocFn::Hostname) => Some(Type::string()),
         // `OS.cpus()` -> Int. Wraps `num_cpus::get() as i64`. The
         // `num_cpus` crate is recorded in codegen `extern_crates`
-        // when a program uses `OS.cpus` (the narrow walker flags
+        // when a Buff program uses `OS.cpus` (the narrow walker flags
         // ONLY the `cpus` method name - `name` / `arch` / `hostname`
         // use std only). OS-only.
         (PreludeType::OS, PreludeAssocFn::Cpus) => Some(Type::int_default()),
+        // T124m: TCP module - 1 assoc fn: TCP.connect(host, port)
+        // -> Connection. Wraps `tokio::net::TcpStream::connect
+        // (format!("{}:{}", h, p)).await.ok()` (the `.ok()`
+        // collapses a connect failure to `None` - NEVER panics).
+        // The returned `Connection` value is the receiver for the
+        // `.send()` / `.recv()` / `.close()` instance methods.
+        // `tokio` is recorded in codegen `extern_crates`
+        // (idempotent with the existing tokio walker).
+        (PreludeType::TCP, PreludeAssocFn::Connect) => Some(Type::Connection),
+        // T124m: UDP module - 1 assoc fn: UDP.bind(host, port) ->
+        // Socket. Wraps `tokio::net::UdpSocket::bind(format!("{}:{}",
+        // h, p)).await.ok()` (the `.ok()` collapses a bind failure
+        // to `None` - NEVER panics). The returned `Socket` value is
+        // the receiver for the `.send_to()` / `.recv_from()`
+        // instance methods.
+        (PreludeType::UDP, PreludeAssocFn::Bind) => Some(Type::Socket),
+        // T124m: WebSocket module - 1 assoc fn: WebSocket.connect
+        // (url) -> WsConnection. Wraps `tokio_tungstenite::connect_async
+        // (url).await.ok().map(|(ws, _)| ws)` (the `.ok()` + `.map()`
+        // chain collapses a connect failure to `None` - NEVER
+        // panics). The returned `WsConnection` value is the
+        // receiver for the `.send()` / `.recv()` / `.close()`
+        // instance methods. `tokio-tungstenite` + `futures-util`
+        // are recorded in codegen `extern_crates` (via the narrow
+        // `program_uses_tokio_tungstenite` walker).
+        //
+        // Same shared `Connect` variant as `TCP.connect(host, port)`
+        // (mirrors `Parse` shared between DateTime / Date / Toml /
+        // URL / UUID). Dispatched on the (WebSocket, Connect) pair.
+        (PreludeType::WebSocket, PreludeAssocFn::Connect) => Some(Type::WsConnection),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -2295,6 +2494,47 @@ pub enum PreludeInstanceFn {
     /// process has already exited and been reaped - NEVER panics).
     /// Process-only.
     Id,
+    // ---- Networking instance methods (T124m) ---------------------
+    // These follow the precedent set by `Format` (DateTime / Date /
+    // Time), `Scheme` / `Host` / `Path` / `Query` (URL), `Parent` /
+    // `Extension` / `Basename` / `Exists` (Path), `Wait` / `Id`
+    // (Process): a single variant is dispatched on (Type, method)
+    // pair. Some variants are shared across receiver types
+    // (Connection.send + WsConnection.send share the `Send`
+    // variant; Connection.recv + WsConnection.recv share `Recv`;
+    // Connection.close + WsConnection.close share `Close`) -
+    // mirrors `Format` shared between DateTime / Date / Time.
+    /// `connection.send(data) -> Void` (TCP). One arg (String).
+    /// Wraps `{ use tokio::io::AsyncWriteExt; if let Some(mut s)
+    /// = conn { s.write_all(data.as_bytes()).await.ok(); } }`
+    /// (block-scoped trait import, panic-free via `.ok()`). The
+    /// connect-failed case (None) is a no-op.
+    Send,
+    /// `connection.recv() -> Vector<Byte>` (TCP). Zero args. Wraps
+    /// `{ use tokio::io::AsyncReadExt; let mut buf = Vec::new();
+    /// if let Some(mut s) = conn { let _ = s.read(&mut buf).await; }
+    /// buf }` (returns empty Vec on EOF / error - NEVER panics).
+    /// Distinct from WsConnection.recv which returns String.
+    Recv,
+    /// `connection.close() -> Void` (TCP). Zero args. Wraps
+    /// `{ use tokio::io::AsyncWriteExt; if let Some(mut s) = conn
+    /// { s.shutdown().await.ok(); } }` (panic-free via `.ok()`).
+    /// Same `Close` variant dispatched on WsConnection (different
+    /// lowering - SinkExt::close).
+    Close,
+    /// `socket.send_to(data, addr) -> Void` (UDP). Two args
+    /// (String data, String addr). Wraps `{ if let Some(mut s) =
+    /// sock { s.send_to(data.as_bytes(), addr).await.ok(); } }`
+    /// (panic-free via `.ok()`). UDP-only.
+    SendTo,
+    /// `socket.recv_from() -> Tuple` (UDP). Zero args. Returns
+    /// `(Vector<Byte>, String)` (the datagram bytes + the sender
+    /// addr). Wraps `{ let mut buf = vec![0u8; 65535]; if let
+    /// Some(mut s) = sock { return s.recv_from(&mut buf).await.ok()
+    /// .map(|(n, addr)| (buf[..n].to_vec(), addr.to_string())); }
+    /// (Vec::new(), String::new()) }` (panic-free via `.ok()` +
+    /// tuple fallback). UDP-only.
+    RecvFrom,
 }
 
 impl PreludeInstanceFn {
@@ -2336,6 +2576,21 @@ impl PreludeInstanceFn {
         // type.
         PreludeInstanceFn::Wait,
         PreludeInstanceFn::Id,
+        // T124m: Networking instance methods - 5 distinct names:
+        // send / recv / close / send_to / recv_from. `Send` /
+        // `Recv` / `Close` are each shared between Connection
+        // (TCP) and WsConnection (WebSocket) - same name,
+        // different per-type lowering (mirrors `Format` shared
+        // between DateTime / Date / Time). `SendTo` / `RecvFrom`
+        // are Socket-only (UDP). Mirrors Regex (T124d) / URL
+        // (T124h) / Path (T124j) / Process (T124l) as the fifth
+        // / sixth / seventh runtime-value-with-instance-methods
+        // types.
+        PreludeInstanceFn::Send,
+        PreludeInstanceFn::Recv,
+        PreludeInstanceFn::Close,
+        PreludeInstanceFn::SendTo,
+        PreludeInstanceFn::RecvFrom,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -2394,6 +2649,18 @@ impl PreludeInstanceFn {
             // zero-arg.
             PreludeInstanceFn::Wait => "wait",
             PreludeInstanceFn::Id => "id",
+            // T124m: Networking instance method names mirror the
+            // canonical tokio / futures-util verbs. `send` / `recv`
+            // / `close` are universal (TCP + WebSocket share them);
+            // `send_to` / `recv_from` are UDP's distinct recv-from-
+            // with-sender verbs. Dispatched on the (receiver-type,
+            // method) pair (mirrors `Format` shared between DateTime
+            // / Date / Time).
+            PreludeInstanceFn::Send => "send",
+            PreludeInstanceFn::Recv => "recv",
+            PreludeInstanceFn::Close => "close",
+            PreludeInstanceFn::SendTo => "send_to",
+            PreludeInstanceFn::RecvFrom => "recv_from",
         }
     }
 }
@@ -2528,6 +2795,103 @@ pub fn instance_fn_return_type(
         // the process has already exited and been reaped - NEVER
         // panics).
         (Type::Process, PreludeInstanceFn::Id) => Some(Type::int_default()),
+
+        // T124m: TCP-Connection instance methods. `conn.send(d)` ->
+        // Void; `conn.recv()` -> Vector<Byte>; `conn.close()` ->
+        // Void. Each lowers to a fully-qualified `tokio::io::
+        // AsyncReadExt` / `AsyncWriteExt` trait method chained
+        // through the `Option<TcpStream>` wrapper the codegen adds
+        // at connect time (`TCP.connect` -> `TcpStream::connect()
+        // .ok()`). The Option-wrapper layer keeps the calls
+        // panic-free even when connect failed - the Option's None
+        // branch is a no-op (send / close) or empty Vec (recv).
+        //
+        // `conn.send(d) -> Void`. Wraps
+        // `{ use tokio::io::AsyncWriteExt; if let Some(mut s) =
+        // recv { s.write_all(d.as_bytes()).await.ok(); } }` (the
+        // block scopes the trait import; the `.ok()` discards the
+        // write result; the Option None branch is a no-op - NEVER
+        // panics). One arg (String).
+        (Type::Connection, PreludeInstanceFn::Send) => Some(Type::Void),
+        // `conn.recv() -> Vector<Byte>`. Wraps
+        // `{ use tokio::io::AsyncReadExt; let mut buf = Vec::new();
+        // if let Some(mut s) = recv { let _ = s.read(&mut buf)
+        // .await; } buf }` (returns empty Vec on EOF / error /
+        // connect-failed - NEVER panics). Zero args. Returns
+        // `Vector<Byte>` (Vec<u8> at the codegen level).
+        (Type::Connection, PreludeInstanceFn::Recv) => {
+            Some(Type::vector(Type::byte()))
+        }
+        // `conn.close() -> Void`. Wraps
+        // `{ use tokio::io::AsyncWriteExt; if let Some(mut s) =
+        // recv { s.shutdown().await.ok(); } }` (graceful shutdown
+        // of the write side; the Option None branch is a no-op -
+        // NEVER panics). Zero args. Same `Close` variant dispatched
+        // on WsConnection (different lowering - SinkExt::close).
+        (Type::Connection, PreludeInstanceFn::Close) => Some(Type::Void),
+
+        // T124m: UDP-Socket instance methods. `sock.send_to(d, addr)`
+        // -> Void; `sock.recv_from() -> Tuple`. Each lowers to a
+        // fully-qualified `tokio::net::UdpSocket` async method
+        // chained through the `Option<UdpSocket>` wrapper the
+        // codegen adds at bind time (`UDP.bind` ->
+        // `UdpSocket::bind().ok()`). The Option-wrapper layer
+        // keeps the calls panic-free even when bind failed.
+        //
+        // `sock.send_to(d, addr) -> Void`. Wraps
+        // `{ if let Some(s) = recv { s.send_to(d.as_bytes(), addr)
+        // .await.ok(); } }` (the Option None branch is a no-op -
+        // NEVER panics). Two args (String data, String addr).
+        (Type::Socket, PreludeInstanceFn::SendTo) => Some(Type::Void),
+        // `sock.recv_from() -> Tuple`. Returns
+        // `(Vector<Byte>, String)` (the datagram bytes + the
+        // sender addr). Wraps `{ let mut buf = vec![0u8; 65535];
+        // if let Some(s) = recv { return s.recv_from(&mut buf)
+        // .await.ok().map(|(n, addr)| (buf[..n].to_vec(), addr.
+        // to_string())); } (Vec::new(), String::new()) }`
+        // (returns empty tuple on connect-failed / recv error -
+        // NEVER panics). Zero args. The 65535 buffer size is the
+        // max UDP datagram payload (the spec's bare-minimum cap).
+        (Type::Socket, PreludeInstanceFn::RecvFrom) => Some(Type::tuple(vec![
+            Type::vector(Type::byte()),
+            Type::string(),
+        ])),
+
+        // T124m: WebSocket-WsConnection instance methods.
+        // `ws.send(text)` -> Void; `ws.recv()` -> String;
+        // `ws.close()` -> Void. Each lowers to a fully-qualified
+        // `futures_util::SinkExt` / `StreamExt` trait method
+        // chained through the `Option<WebSocketStream<...>>`
+        // wrapper the codegen adds at connect time.
+        //
+        // `ws.send(text) -> Void`. Wraps
+        // `{ use futures_util::SinkExt; if let Some(mut s) = recv
+        // { s.send(tokio_tungstenite::tungstenite::Message::Text(
+        // text)).await.ok(); } }` (block-scoped trait import; the
+        // `.ok()` discards the send result; the Option None branch
+        // is a no-op - NEVER panics). One arg (String text). Same
+        // `Send` variant as Connection.send (TCP); dispatched on
+        // the (WsConnection, Send) pair.
+        (Type::WsConnection, PreludeInstanceFn::Send) => Some(Type::Void),
+        // `ws.recv() -> String`. Wraps
+        // `{ use futures_util::StreamExt; if let Some(mut s) =
+        // recv { while let Some(Ok(msg)) = s.next().await { if let
+        // tokio_tungstenite::tungstenite::Message::Text(t) = msg
+        // { return t; } } } String::new() }` (returns empty
+        // String on connect-failed / closed / non-text message -
+        // NEVER panics). Zero args. Returns String (NOT Option nor
+        // Vector<Byte> - WebSocket's text-frame surface is the
+        // canonical String form). Distinct from Connection.recv
+        // (TCP) which returns Vector<Byte>.
+        (Type::WsConnection, PreludeInstanceFn::Recv) => Some(Type::string()),
+        // `ws.close() -> Void`. Wraps
+        // `{ use futures_util::SinkExt; if let Some(mut s) = recv
+        // { s.close(None).await.ok(); } }` (sends a Close frame;
+        // the Option None branch is a no-op - NEVER panics). Zero
+        // args. Same `Close` variant as Connection.close (TCP);
+        // dispatched on the (WsConnection, Close) pair (different
+        // lowering - SinkExt::close vs AsyncWriteExt::shutdown).
+        (Type::WsConnection, PreludeInstanceFn::Close) => Some(Type::Void),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
@@ -2821,9 +3185,10 @@ mod tests {
         // (Dir, Tempfile) shipped in T124j + 2 namespace-only crypto
         // modules (Hash, HMAC) shipped in T124k + 1 namespace-only
         // system-introspection module (OS) + 1 runtime-value-with-
-        // methods type (Process) shipped in T124l = 27 total prelude
-        // types.
-        assert_eq!(PreludeType::ALL.len(), 27);
+        // methods type (Process) shipped in T124l + 3 namespace-only
+        // networking modules (TCP, UDP, WebSocket) shipped in T124m
+        // = 30 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 30);
     }
 
     #[test]
@@ -3264,14 +3629,24 @@ mod tests {
         // methods stance). Distinct from the namespace-only OS
         // module it shipped alongside.
         assert!(!PreludeType::Process.is_namespace_only());
+        // T124m: TCP / UDP / WebSocket are also namespace-only
+        // modules (mirror Log / Toml / OS / Process's namespace
+        // counterpart). The runtime-value types they construct
+        // (Connection / Socket / WsConnection) are separate Type
+        // variants (NOT namespace-only themselves - they're real
+        // runtime values, like Regex / URL / Path / Process).
+        assert!(PreludeType::TCP.is_namespace_only());
+        assert!(PreludeType::UDP.is_namespace_only());
+        assert!(PreludeType::WebSocket.is_namespace_only());
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        // T124l: bumped from 17 to 18 (OS namespace-only;
-        // Process is NOT - it's a runtime-value-with-instance-
-        // methods type).
-        assert_eq!(namespace_only_count, 18);
+        // T124m: bumped from 18 to 21 (TCP + UDP + WebSocket
+        // namespace-only; Connection / Socket / WsConnection are
+        // NOT namespace-only themselves - they're runtime-value
+        // types constructed by the assoc fns).
+        assert_eq!(namespace_only_count, 21);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +

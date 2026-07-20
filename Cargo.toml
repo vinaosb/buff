@@ -255,6 +255,28 @@ hmac = "0.12"
 # NOT link num_cpus; cargo-project wiring is deferred). Snapshots +
 # extern_crates set is the verifiable contract.
 num_cpus = "1"
+# T124m: Networking modules (TCP / UDP / WebSocket) wrap tokio's
+# TcpStream + UdpSocket (already pinned via `tokio` at line 14 - the
+# `tokio = { version = "1.40", features = ["full"] }` flag pulls in
+# `tokio::net::*` + `tokio::io::*`) PLUS the `tokio-tungstenite` crate
+# for WebSocket support (the maintained tokio binding for the
+# `tungstenite` WebSocket protocol crate - the de-facto Rust ecosystem
+# default for async WebSockets; API used: `tokio_tungstenite::connect_async
+# (url).await -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Response), Error>` and the
+# `WebSocketStream`'s `SinkExt` / `StreamExt` methods for send / recv /
+# close via the `futures-util` crate). `futures-util` provides the
+# `SinkExt` + `StreamExt` traits the WebSocket send / recv lowerings
+# invoke (block-scoped `use futures_util::SinkExt;` /
+# `use futures_util::StreamExt;` so the trait methods are in scope at
+# the call site without polluting the caller's namespace).
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/percent-
+# encoding/uuid/url/serde_yml/csv/walkdir/tempfile/sha2/md5/hmac/
+# num_cpus codegen-only linking boundary (single-file `buff run` rustc
+# path does NOT link them; cargo-project wiring is deferred). Snapshots
+# + extern_crates set is the verifiable contract.
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }

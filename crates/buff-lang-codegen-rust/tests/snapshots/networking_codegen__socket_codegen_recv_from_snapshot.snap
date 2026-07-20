@@ -1,0 +1,22 @@
+---
+source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+expression: src
+---
+fn f() {
+    let s: Option<tokio::net::UdpSocket> = tokio::net::UdpSocket::bind(
+            format!("{}:{}", "0.0.0.0", 9090),
+        )
+        .await
+        .ok();
+    {
+        let mut buf = vec![0u8; 65535];
+        if let Some(s) = s {
+            return s
+                .recv_from(&mut buf)
+                .await
+                .ok()
+                .map(|(n, addr)| (buf[..n].to_vec(), addr.to_string()));
+        }
+        (Vec::new(), String::new())
+    };
+}

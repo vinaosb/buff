@@ -1,0 +1,25 @@
+﻿T124m: Networking modules - TCP, UDP, WebSocket
+================================================
+Commit: (this commit)
+Date: 2026-07-20
+
+SCOPE
+- TCP: TCP.connect(host,port)->Connection, .send/.recv/.close (tokio::net::TcpStream)
+- UDP: UDP.bind(host,port)->Socket, .send_to/.recv_from (tokio::net::UdpSocket)
+- WebSocket: WebSocket.connect(url)->WsConnection, .send/.recv/.close (tokio-tungstenite)
+
+REGISTRY: prelude count 27 -> 30; namespace-only 18 -> 21.
+NEW RUNTIME-VALUE TYPES (ty.rs): Connection, Socket, WsConnection.
+DEPS ADDED (Cargo.toml [workspace.dependencies]): tokio-tungstenite 0.24, futures-util 0.3.
+CODEGEN: narrow program_uses_tokio_tungstenite walker -> extern_crates; KNOWN_ZERO_ARG_METHODS
+fix so zero-arg instance methods (send/recv/close) dispatch as method calls, not T26 field access.
+
+GATES (MSVC env, host):
+- cargo test -p buff-lang-codegen-rust --test networking_codegen: 36 passed; 0 failed; no .snap.new
+- cargo test -p buff-lang-types: namespace-only 21 / count 30 green (177+21+18+6 etc all ok)
+- cargo clippy --workspace --all-targets --exclude buff-lang-runtime -- -D warnings: EXIT 0
+- cargo test --workspace --exclude buff-lang-runtime: EXIT 0 (all ok)
+
+LIMITATIONS: codegen-only (snapshots verified); single-file buff run rustc does not link
+generated networking crates (e2e-link deferred, noted in issues.md). No TLS (future module),
+no custom protocols, no raw socket options - per plan MUST NOT.

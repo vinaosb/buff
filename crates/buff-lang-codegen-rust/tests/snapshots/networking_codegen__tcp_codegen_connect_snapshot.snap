@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+expression: src
+---
+fn f() {
+    tokio::net::TcpStream::connect(format!("{}:{}", "127.0.0.1", 8080)).await.ok();
+}

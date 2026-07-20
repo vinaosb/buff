@@ -1,0 +1,83 @@
+---
+source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+expression: src
+---
+fn main() {
+    let c: Option<tokio::net::TcpStream> = tokio::net::TcpStream::connect(
+            format!("{}:{}", "127.0.0.1", 8080),
+        )
+        .await
+        .ok();
+    let _send = {
+        use tokio::io::AsyncWriteExt;
+        if let Some(mut s) = c {
+            s.write_all("ping".as_bytes()).await.ok();
+        }
+    };
+    let _recv = {
+        use tokio::io::AsyncReadExt;
+        let mut buf: Vec<u8> = Vec::new();
+        if let Some(mut s) = c.clone() {
+            let _ = s.read(&mut buf).await;
+        }
+        buf
+    };
+    let _close = {
+        use tokio::io::AsyncWriteExt;
+        if let Some(mut s) = c.clone() {
+            s.shutdown().await.ok();
+        }
+    };
+    let s: Option<tokio::net::UdpSocket> = tokio::net::UdpSocket::bind(
+            format!("{}:{}", "0.0.0.0", 9090),
+        )
+        .await
+        .ok();
+    let _send_to = {
+        if let Some(s) = s {
+            s.send_to("datagram".as_bytes(), "127.0.0.1:9999").await.ok();
+        }
+    };
+    let _recv_from = {
+        let mut buf = vec![0u8; 65535];
+        if let Some(s) = s.clone() {
+            return s
+                .recv_from(&mut buf)
+                .await
+                .ok()
+                .map(|(n, addr)| (buf[..n].to_vec(), addr.to_string()));
+        }
+        (Vec::new(), String::new())
+    };
+    let ws: Option<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    > = tokio_tungstenite::connect_async("ws://example.com/socket")
+        .await
+        .ok()
+        .map(|(ws, _)| ws);
+    let _ws_send = {
+        use futures_util::SinkExt;
+        if let Some(mut s) = ws {
+            s.send(tokio_tungstenite::tungstenite::Message::Text("hi")).await.ok();
+        }
+    };
+    let _ws_recv = {
+        use futures_util::StreamExt;
+        if let Some(mut s) = ws.clone() {
+            while let Some(Ok(msg)) = s.next().await {
+                if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                    return t;
+                }
+            }
+        }
+        String::new()
+    };
+    let _ws_close = {
+        use futures_util::SinkExt;
+        if let Some(mut s) = ws.clone() {
+            s.close(None).await.ok();
+        }
+    };
+}

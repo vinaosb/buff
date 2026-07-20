@@ -1,0 +1,20 @@
+---
+source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+expression: src
+---
+fn f() {
+    let ws: Option<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    > = tokio_tungstenite::connect_async("ws://example.com/socket")
+        .await
+        .ok()
+        .map(|(ws, _)| ws);
+    {
+        use futures_util::SinkExt;
+        if let Some(mut s) = ws {
+            s.close(None).await.ok();
+        }
+    };
+}

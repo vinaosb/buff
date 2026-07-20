@@ -265,6 +265,95 @@ pub enum Type {
     /// `Option` via `.map(...).unwrap_or_default()`). See
     /// `decisions.md` for the spawn-failure-handling rationale.
     Process,
+    /// A TCP client connection, mapped to
+    /// `Option<tokio::net::TcpStream>` at codegen time (T124m).
+    /// Constructed via the prelude associated function
+    /// `TCP.connect(host, port)` (two args: a host String + a port
+    /// Int); supports the instance methods `.send(data: String)`
+    /// (write bytes; the codegen emits a block-scoped
+    /// `use tokio::io::AsyncWriteExt;` + `s.write_all(...).await.ok()`,
+    /// panic-free), `.recv() -> Vector<Byte>` (read into a buffer
+    /// via `tokio::io::AsyncReadExt` + return the bytes, panic-free
+    /// on EOF / error via `Vec::new()` fallback), and `.close()`
+    /// (graceful shutdown via `s.shutdown().await.ok()`).
+    ///
+    /// This is **additive** (T124m): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` were extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen),
+    /// `is_prelude_connection` predicate. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Connection` — it's an
+    /// opaque value type that participates in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Process`] (T124l) as a runtime-value-with-
+    /// instance-methods type. The underlying Rust type is
+    /// `Option<tokio::net::TcpStream>` — the codegen emits
+    /// `tokio::net::TcpStream::connect(format!("{}:{}", h, p)).await
+    /// .ok()` so the connect is panic-free (a connect failure
+    /// collapses to `None`; `.send()` / `.recv()` / `.close()` then
+    /// operate on the `Option` via `if let Some(mut s) = ...`). See
+    /// `decisions.md` for the connect-failure-handling rationale.
+    Connection,
+    /// A bound UDP socket, mapped to `Option<tokio::net::UdpSocket>`
+    /// at codegen time (T124m). Constructed via the prelude associated
+    /// function `UDP.bind(host, port)` (two args: a host String + a
+    /// port Int); supports the instance methods `.send_to(data:
+    /// String, addr: String)` (send datagram to addr via
+    /// `s.send_to(bytes, addr).await.ok()`) and `.recv_from() ->
+    /// Tuple` (receive a datagram returning `(data, addr)` via
+    /// `s.recv_from(&mut buf).await.ok().map(|(n, addr)| (buf[..n].
+    /// to_vec(), addr.to_string()))`).
+    ///
+    /// This is **additive** (T124m): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` were extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen),
+    /// `is_prelude_socket` predicate. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Socket` — it's an opaque
+    /// value type that participates in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Connection`] (T124m) as a runtime-value-with-
+    /// instance-methods type. The underlying Rust type is
+    /// `Option<tokio::net::UdpSocket>` — the codegen emits
+    /// `tokio::net::UdpSocket::bind(format!("{}:{}", h, p)).await.ok()`
+    /// so the bind is panic-free (a bind failure collapses to `None`;
+    /// `.send_to()` / `.recv_from()` then operate on the `Option` via
+    /// `if let Some(mut s) = ...`).
+    Socket,
+    /// A WebSocket client connection, mapped to
+    /// `Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite
+    /// ::MaybeTlsStream<tokio::net::TcpStream>>>` at codegen time
+    /// (T124m). Constructed via the prelude associated function
+    /// `WebSocket.connect(url)` (one arg: a URL String); supports the
+    /// instance methods `.send(text: String)` (send a Text frame via
+    /// `ws.send(Message::Text(...)).await.ok()` - block-scoped
+    /// `use futures_util::SinkExt;`), `.recv() -> String` (receive
+    /// the next message as text via `ws.next().await` - block-scoped
+    /// `use futures_util::StreamExt;`), and `.close()` (send a Close
+    /// frame via `ws.close(None).await.ok()`).
+    ///
+    /// This is **additive** (T124m): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` were extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen),
+    /// `is_prelude_ws_connection` predicate. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `WsConnection` — it's an
+    /// opaque value type that participates in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Connection`] / [`Type::Socket`] (T124m) as a
+    /// runtime-value-with-instance-methods type. The underlying Rust
+    /// type is `Option<tokio_tungstenite::WebSocketStream<
+    /// tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>` —
+    /// the codegen emits
+    /// `tokio_tungstenite::connect_async(url).await.ok().map(|(ws, _)| ws)`
+    /// so the connect is panic-free (a connect failure collapses to
+    /// `None`; `.send()` / `.recv()` / `.close()` then operate on the
+    /// `Option` via `if let Some(mut ws) = ...`). See `decisions.md`
+    /// for the WebSocket-failure-handling rationale.
+    WsConnection,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -539,6 +628,62 @@ impl Type {
         matches!(self, Type::Process)
     }
 
+    /// T124m: the TCP-connection type. Maps to
+    /// `Option<tokio::net::TcpStream>` at codegen time. Constructed
+    /// via `TCP.connect(host, port)`; supports `.send(data)`,
+    /// `.recv() -> Vector<Byte>`, `.close()`.
+    pub fn connection() -> Self {
+        Type::Connection
+    }
+
+    /// T124m: Returns `true` if this type is the prelude `Connection`
+    /// runtime value (TCP). Used by the type inferencer + codegen
+    /// to dispatch instance method calls (`conn.send(...)`,
+    /// `conn.recv()`, `conn.close()`) to the
+    /// `tokio::net::TcpStream` lowering. Distinct from
+    /// [`Self::is_prelude_datetime`] / [`Self::is_prelude_regex`] /
+    /// [`Self::is_prelude_url`] / [`Self::is_prelude_path`] /
+    /// [`Self::is_prelude_process`] / [`Self::is_prelude_socket`] /
+    /// [`Self::is_prelude_ws_connection`].
+    pub fn is_prelude_connection(&self) -> bool {
+        matches!(self, Type::Connection)
+    }
+
+    /// T124m: the bound UDP-socket type. Maps to
+    /// `Option<tokio::net::UdpSocket>` at codegen time. Constructed
+    /// via `UDP.bind(host, port)`; supports `.send_to(data, addr)`,
+    /// `.recv_from() -> Tuple`.
+    pub fn socket() -> Self {
+        Type::Socket
+    }
+
+    /// T124m: Returns `true` if this type is the prelude `Socket`
+    /// runtime value (UDP). Used by the type inferencer + codegen
+    /// to dispatch instance method calls (`sock.send_to(...)`,
+    /// `sock.recv_from()`) to the `tokio::net::UdpSocket` lowering.
+    /// Distinct from the other `is_prelude_*` predicates.
+    pub fn is_prelude_socket(&self) -> bool {
+        matches!(self, Type::Socket)
+    }
+
+    /// T124m: the WebSocket-connection type. Maps to
+    /// `Option<tokio_tungstenite::WebSocketStream<...>>` at codegen
+    /// time. Constructed via `WebSocket.connect(url)`; supports
+    /// `.send(text)`, `.recv() -> String`, `.close()`.
+    pub fn ws_connection() -> Self {
+        Type::WsConnection
+    }
+
+    /// T124m: Returns `true` if this type is the prelude
+    /// `WsConnection` runtime value (WebSocket). Used by the type
+    /// inferencer + codegen to dispatch instance method calls
+    /// (`ws.send(...)`, `ws.recv()`, `ws.close()`) to the
+    /// `tokio_tungstenite::WebSocketStream` lowering. Distinct from
+    /// the other `is_prelude_*` predicates.
+    pub fn is_prelude_ws_connection(&self) -> bool {
+        matches!(self, Type::WsConnection)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -646,6 +791,25 @@ impl fmt::Display for Type {
             // mirrors the Buff surface name so diagnostics read
             // naturally.
             Type::Process => f.write_str("Process"),
+            // T124m: prelude TCP-connection type. Opaque value type
+            // whose canonical Rust representation lives in the
+            // codegen crate (`Option<tokio::net::TcpStream>` - the
+            // Option wrapper lets connect be panic-free). The
+            // Display form mirrors the Buff surface name.
+            Type::Connection => f.write_str("Connection"),
+            // T124m: prelude UDP-socket type. Opaque value type
+            // whose canonical Rust representation lives in the
+            // codegen crate (`Option<tokio::net::UdpSocket>` -
+            // the Option wrapper lets bind be panic-free). The
+            // Display form mirrors the Buff surface name.
+            Type::Socket => f.write_str("Socket"),
+            // T124m: prelude WebSocket-connection type. Opaque
+            // value type whose canonical Rust representation lives
+            // in the codegen crate
+            // (`Option<tokio_tungstenite::WebSocketStream<...>>` -
+            // the Option wrapper lets connect be panic-free). The
+            // Display form mirrors the Buff surface name.
+            Type::WsConnection => f.write_str("WsConnection"),
         }
     }
 }
