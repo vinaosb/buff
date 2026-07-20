@@ -519,3 +519,5 @@ The task spec said `:type x` prints `Int`; reality is `Int<64>` (Buff's default 
 ## T129a - zeromq dependency choice
 
 - Chose `zeromq = "0.4"` (resolves 0.4.1), the PURE-RUST ZeroMQ impl (RouterSocket/PubSocket/RepSocket), NOT the C-linked `zmq`/`libzmq` crate. Rationale: this Windows host cannot reliably compile arbitrary C shims (same class of issue that forced hand-rolled lexer/parser and removal of chumsky). Pure-Rust zeromq builds cleanly with no libzmq. Also added `bytes` to workspace deps for ZmqMessage frame construction. Kernel socket I/O is behind a `ZmqTransport` trait so it is swappable + unit-testable via MockTransport.
+
+- T129b (d40a3f7): Jupyter execution engine wires execute_request -> buff_eval::Evaluator::eval_line (persistent session, reused from T125). Text out via iopub stream/execute_result; errors as Jupyter error msg + kernel survives; execution_count increments. buff-repl NOT consumed (avoids rustyline). Live nbconvert acceptance = USER ACTION (no Jupyter on build host).

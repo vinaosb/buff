@@ -1899,7 +1899,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(jupyter): kernel protocol scaffold and kernelspec install`
 
-- [ ] **T129b: Execution engine + state persistence** [deep]
+- [x] **T129b: Execution engine + state persistence** [deep]
 
   **What to do**:
   - Wire `execute_request` to the evaluation engine (reuse T125 REPL evaluator)
@@ -1914,9 +1914,10 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: T129a, T125a/b (evaluation + state core)
 
   **Acceptance Criteria**:
-  - [ ] Cell executes Buff code, text output returned
-  - [ ] Variables persist across cells
-  - [ ] Errors returned as traceback, kernel survives
+  - [x] Cell executes Buff code, text output returned
+  - [x] Variables persist across cells
+  - [x] Errors returned as traceback, kernel survives
+  - Note: verified via MockTransport-driven kernel tests (execute_print_cell_emits_stdout_stream, execute_bare_expression_emits_execute_result, execute_state_persists_across_cells). Live `jupyter nbconvert --execute` acceptance (task-129b-exec-state.html) is a USER ACTION — no Jupyter on build host.
 
   **QA Scenarios**:
   ```
