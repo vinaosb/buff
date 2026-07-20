@@ -216,7 +216,11 @@ fn tcp_codegen_connect_with_literals_uses_tcpstream_connect_ok() {
     //   collapses a connect failure to None - NEVER panics.
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call("TCP", "connect", vec![str_expr("127.0.0.1"), int_expr(8080)]),
+        ns_assoc_call(
+            "TCP",
+            "connect",
+            vec![str_expr("127.0.0.1"), int_expr(8080)],
+        ),
     );
     assert!(
         src.contains("tokio::net::TcpStream::connect("),
@@ -247,7 +251,11 @@ fn tcp_codegen_connect_with_ident_args_splices_through() {
     // TCP.connect(host, port) where both are variables.
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call("TCP", "connect", vec![ident_expr("host"), ident_expr("port")]),
+        ns_assoc_call(
+            "TCP",
+            "connect",
+            vec![ident_expr("host"), ident_expr("port")],
+        ),
     );
     assert!(
         src.contains("tokio::net::TcpStream::connect(format!(\"{}:{}\", host, port))"),
@@ -354,7 +362,11 @@ fn connection_codegen_send_uses_async_write_ext_write_all() {
     //   if let Some(mut s) = c { s.write_all("hello".as_bytes()).await.ok(); } }.
     let src = codegen_stmts_in(
         "f",
-        tcp_body_with_extra(instance_call(ident_expr("c"), "send", vec![str_expr("hello")])),
+        tcp_body_with_extra(instance_call(
+            ident_expr("c"),
+            "send",
+            vec![str_expr("hello")],
+        )),
     );
     assert!(
         src.contains("use tokio::io::AsyncWriteExt"),
@@ -612,7 +624,11 @@ fn wsconnection_codegen_send_uses_sink_ext_send_message_text() {
     //   .await.ok(); } }.
     let src = codegen_stmts_in(
         "f",
-        ws_body_with_extra(instance_call(ident_expr("ws"), "send", vec![str_expr("hi")])),
+        ws_body_with_extra(instance_call(
+            ident_expr("ws"),
+            "send",
+            vec![str_expr("hi")],
+        )),
     );
     assert!(
         src.contains("use futures_util::SinkExt"),
@@ -973,7 +989,11 @@ fn socket_codegen_rejects_send_to_with_one_arg() {
 fn tcp_codegen_connect_snapshot() {
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call("TCP", "connect", vec![str_expr("127.0.0.1"), int_expr(8080)]),
+        ns_assoc_call(
+            "TCP",
+            "connect",
+            vec![str_expr("127.0.0.1"), int_expr(8080)],
+        ),
     );
     insta::assert_snapshot!(src);
 }
@@ -1004,7 +1024,11 @@ fn websocket_codegen_connect_snapshot() {
 fn connection_codegen_send_snapshot() {
     let src = codegen_stmts_in(
         "f",
-        tcp_body_with_extra(instance_call(ident_expr("c"), "send", vec![str_expr("hello")])),
+        tcp_body_with_extra(instance_call(
+            ident_expr("c"),
+            "send",
+            vec![str_expr("hello")],
+        )),
     );
     insta::assert_snapshot!(src);
 }
@@ -1053,7 +1077,11 @@ fn socket_codegen_recv_from_snapshot() {
 fn wsconnection_codegen_send_snapshot() {
     let src = codegen_stmts_in(
         "f",
-        ws_body_with_extra(instance_call(ident_expr("ws"), "send", vec![str_expr("hi")])),
+        ws_body_with_extra(instance_call(
+            ident_expr("ws"),
+            "send",
+            vec![str_expr("hi")],
+        )),
     );
     insta::assert_snapshot!(src);
 }
@@ -1095,7 +1123,10 @@ fn networking_codegen_full_program_snapshot() {
                     vec![str_expr("127.0.0.1"), int_expr(8080)],
                 ),
             ),
-            let_stmt("_send", instance_call(ident_expr("c"), "send", vec![str_expr("ping")])),
+            let_stmt(
+                "_send",
+                instance_call(ident_expr("c"), "send", vec![str_expr("ping")]),
+            ),
             let_stmt("_recv", instance_call(ident_expr("c"), "recv", vec![])),
             let_stmt("_close", instance_call(ident_expr("c"), "close", vec![])),
             // UDP value type + both instance methods.
@@ -1111,7 +1142,10 @@ fn networking_codegen_full_program_snapshot() {
                     vec![str_expr("datagram"), str_expr("127.0.0.1:9999")],
                 ),
             ),
-            let_stmt("_recv_from", instance_call(ident_expr("s"), "recv_from", vec![])),
+            let_stmt(
+                "_recv_from",
+                instance_call(ident_expr("s"), "recv_from", vec![]),
+            ),
             // WebSocket value type + all 3 instance methods.
             let_stmt(
                 "ws",
@@ -1121,9 +1155,15 @@ fn networking_codegen_full_program_snapshot() {
                     vec![str_expr("ws://example.com/socket")],
                 ),
             ),
-            let_stmt("_ws_send", instance_call(ident_expr("ws"), "send", vec![str_expr("hi")])),
+            let_stmt(
+                "_ws_send",
+                instance_call(ident_expr("ws"), "send", vec![str_expr("hi")]),
+            ),
             let_stmt("_ws_recv", instance_call(ident_expr("ws"), "recv", vec![])),
-            let_stmt("_ws_close", instance_call(ident_expr("ws"), "close", vec![])),
+            let_stmt(
+                "_ws_close",
+                instance_call(ident_expr("ws"), "close", vec![]),
+            ),
         ],
     );
     let mut codegen = RustCodegen::new();

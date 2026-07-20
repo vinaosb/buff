@@ -218,7 +218,10 @@ fn args_codegen_get_uses_unwrap_or_default() {
 #[test]
 fn args_codegen_get_ident_arg() {
     // Args.get(my_index_var) - non-literal arg passes through unchanged.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Args", "get", vec![ident_expr("my_index_var")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Args", "get", vec![ident_expr("my_index_var")]),
+    );
     assert!(
         src.contains(".nth(my_index_var)"),
         "expected `.nth(my_index_var)` (ident arg passthrough) in: {src}"
@@ -287,11 +290,7 @@ fn env_codegen_set_var_two_args() {
     // Env.set("KEY", "v") -> std::env::set_var("KEY", "v")
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Env",
-            "set",
-            vec![str_expr("KEY"), str_expr("v")],
-        ),
+        ns_assoc_call("Env", "set", vec![str_expr("KEY"), str_expr("v")]),
     );
     assert!(
         src.contains("std::env::set_var(\"KEY\", \"v\")"),
@@ -351,10 +350,7 @@ fn input_codegen_no_args_trims_trailing_newline() {
     // T124g input() and T99 read_line()). The .to_string() lifts &str
     // to String (Buff hides references from the user).
     let src = codegen_one_expr_in("f", free_call("input", vec![]));
-    assert!(
-        src.contains("read_line"),
-        "expected `read_line` in: {src}"
-    );
+    assert!(src.contains("read_line"), "expected `read_line` in: {src}");
     assert!(
         src.contains(".trim_end()"),
         "expected `.trim_end()` (trailing-newline trim) in: {src}"
@@ -436,11 +432,7 @@ fn input_codegen_rejects_two_args() {
 #[test]
 fn input_codegen_no_extern_crate_registered() {
     // input uses only Rust `std` - NO extern crate should be registered.
-    let main = func_decl(
-        "main",
-        &[],
-        vec![expr_stmt(free_call("input", vec![]))],
-    );
+    let main = func_decl("main", &[], vec![expr_stmt(free_call("input", vec![]))]);
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
     let extern_crates = codegen.extern_crates();
@@ -496,10 +488,7 @@ fn sleep_codegen_duration_millis_arg() {
         src.contains("std::time::Duration::from_millis(500)"),
         "expected `std::time::Duration::from_millis(500)` in: {src}"
     );
-    assert!(
-        src.contains(".await"),
-        "expected `.await` in: {src}"
-    );
+    assert!(src.contains(".await"), "expected `.await` in: {src}");
     must_reparse(&src);
 }
 
@@ -516,10 +505,7 @@ fn sleep_codegen_plain_int_arg_treated_as_seconds() {
         src.contains("tokio::time::sleep(std::time::Duration::from_secs(2))"),
         "expected `tokio::time::sleep(std::time::Duration::from_secs(2))` in: {src}"
     );
-    assert!(
-        src.contains(".await"),
-        "expected `.await` in: {src}"
-    );
+    assert!(src.contains(".await"), "expected `.await` in: {src}");
     must_reparse(&src);
 }
 
@@ -532,10 +518,7 @@ fn sleep_codegen_other_expr_passthrough() {
         src.contains("tokio::time::sleep(my_duration_var)"),
         "expected `tokio::time::sleep(my_duration_var)` (passthrough) in: {src}"
     );
-    assert!(
-        src.contains(".await"),
-        "expected `.await` in: {src}"
-    );
+    assert!(src.contains(".await"), "expected `.await` in: {src}");
     must_reparse(&src);
 }
 
@@ -772,11 +755,12 @@ fn system_codegen_full_program_snapshot() {
         vec![
             let_stmt("args", ns_assoc_call("Args", "list", vec![])),
             let_stmt("first", ns_assoc_call("Args", "get", vec![int_expr(1)])),
-            let_stmt(
-                "home",
-                ns_assoc_call("Env", "get", vec![str_expr("HOME")]),
-            ),
-            expr_stmt(ns_assoc_call("Env", "set", vec![str_expr("DEBUG"), str_expr("1")])),
+            let_stmt("home", ns_assoc_call("Env", "get", vec![str_expr("HOME")])),
+            expr_stmt(ns_assoc_call(
+                "Env",
+                "set",
+                vec![str_expr("DEBUG"), str_expr("1")],
+            )),
             let_stmt(
                 "has_path",
                 ns_assoc_call("Env", "has", vec![str_expr("PATH")]),

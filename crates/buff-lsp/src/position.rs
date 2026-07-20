@@ -65,7 +65,9 @@ impl LineIndex {
                 i += 1;
             }
         }
-        Self { line_starts: starts }
+        Self {
+            line_starts: starts,
+        }
     }
 
     /// Number of lines in the indexed source (1-based count; an empty

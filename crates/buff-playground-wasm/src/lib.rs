@@ -175,7 +175,10 @@ mod tests {
         let v = parse_wire(&out);
         assert_eq!(v["ok"], true);
         let rust = v["rust"].as_str().expect("rust field is a string");
-        assert!(rust.contains("fn "), "expected `fn ` in output, got: {rust}");
+        assert!(
+            rust.contains("fn "),
+            "expected `fn ` in output, got: {rust}"
+        );
         assert!(
             rust.contains("fib"),
             "expected function name `fib` preserved, got: {rust}"

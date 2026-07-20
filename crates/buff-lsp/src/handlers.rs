@@ -258,9 +258,7 @@ fn read_ident(src: &str, byte: usize) -> Option<String> {
 fn read_ident_at_cursor(state: &DocumentState, byte: usize) -> Option<String> {
     let bytes = state.text.as_bytes();
     let mut start = byte.min(bytes.len().saturating_sub(1));
-    while start > 0
-        && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_')
-    {
+    while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
         start -= 1;
     }
     if start < bytes.len() && (bytes[start].is_ascii_alphabetic() || bytes[start] == b'_') {

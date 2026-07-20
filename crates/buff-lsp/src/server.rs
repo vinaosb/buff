@@ -45,8 +45,8 @@ use lsp_types::{
     CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
     GotoDefinitionParams, HoverParams, HoverProviderCapability, InitializeParams, OneOf,
-    PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, Uri,
+    PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, Uri,
 };
 use thiserror::Error;
 
@@ -151,13 +151,8 @@ pub fn run_stdio() -> Result<(), LspError> {
         match connection.receiver.recv_timeout(wait) {
             Ok(msg) => {
                 last_event_time = Instant::now();
-                let should_exit = handle_message(
-                    &msg,
-                    &connection,
-                    &mut server,
-                    &mut source_ids,
-                    &mut dirty,
-                )?;
+                let should_exit =
+                    handle_message(&msg, &connection, &mut server, &mut source_ids, &mut dirty)?;
                 if should_exit {
                     break;
                 }
@@ -233,9 +228,9 @@ fn handle_message(
             let method = notif.method.as_str();
             match method {
                 "textDocument/didOpen" => {
-                    if let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(
-                        notif.params.clone(),
-                    ) {
+                    if let Ok(p) =
+                        serde_json::from_value::<DidOpenTextDocumentParams>(notif.params.clone())
+                    {
                         let uri = p.text_document.uri.clone();
                         let key = uri_key(&uri);
                         let sid = fresh_source_id(source_ids, &key);
@@ -253,9 +248,9 @@ fn handle_message(
                     Ok(false)
                 }
                 "textDocument/didChange" => {
-                    if let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(
-                        notif.params.clone(),
-                    ) {
+                    if let Ok(p) =
+                        serde_json::from_value::<DidChangeTextDocumentParams>(notif.params.clone())
+                    {
                         let uri = p.text_document.uri.clone();
                         let key = uri_key(&uri);
                         let version = p.text_document.version;
@@ -274,9 +269,9 @@ fn handle_message(
                     Ok(false)
                 }
                 "textDocument/didClose" => {
-                    if let Ok(p) = serde_json::from_value::<DidCloseTextDocumentParams>(
-                        notif.params.clone(),
-                    ) {
+                    if let Ok(p) =
+                        serde_json::from_value::<DidCloseTextDocumentParams>(notif.params.clone())
+                    {
                         let uri = p.text_document.uri.clone();
                         let key = uri_key(&uri);
                         server.documents.remove(&key);
@@ -425,9 +420,10 @@ fn fresh_source_id(map: &mut HashMap<UriKey, SourceId>, key: &UriKey) -> SourceI
 pub fn __test_server_with_doc(uri: Uri, src: &str) -> (ServerState, SourceId) {
     let mut state = ServerState::default();
     let sid = SourceId(0);
-    state
-        .documents
-        .insert(uri_key(&uri), DocumentState::new(src.to_string(), sid, None));
+    state.documents.insert(
+        uri_key(&uri),
+        DocumentState::new(src.to_string(), sid, None),
+    );
     (state, sid)
 }
 
@@ -441,20 +437,19 @@ mod tests {
         let (mut state, _) = __test_server_with_doc(uri.clone(), "func a():\n    print(1)\n");
         let key = uri_key(&uri);
         assert!(state.documents.contains_key(&key));
-        state.documents.get_mut(&key).unwrap().update(
-            "func b():\n    print(2)\n".to_string(),
-            Some(2),
-        );
+        state
+            .documents
+            .get_mut(&key)
+            .unwrap()
+            .update("func b():\n    print(2)\n".to_string(), Some(2));
         assert_eq!(state.documents[&key].text, "func b():\n    print(2)\n");
     }
 
     #[test]
     fn dispatch_hover_returns_value_for_open_doc() {
         let uri: Uri = "file:///t.buff".parse().unwrap();
-        let (mut state, _) = __test_server_with_doc(
-            uri.clone(),
-            "func main():\n    let x = 42\n    print(x)\n",
-        );
+        let (mut state, _) =
+            __test_server_with_doc(uri.clone(), "func main():\n    let x = 42\n    print(x)\n");
         let hover_params = serde_json::json!({
             "textDocument": {"uri": uri.as_str()},
             "position": {"line": 1, "character": 8},

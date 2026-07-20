@@ -334,7 +334,12 @@ fn t119_serde_json_pattern_round_trip() {
     let decls = parse(&tokens, sid).expect("parse must succeed");
 
     // Both decls parse correctly.
-    assert_eq!(decls.len(), 2, "expected 2 decls (extern + func), got {}", decls.len());
+    assert_eq!(
+        decls.len(),
+        2,
+        "expected 2 decls (extern + func), got {}",
+        decls.len()
+    );
 
     let mut codegen = RustCodegen::new();
     let file = codegen.generate(&decls).expect("codegen must succeed");

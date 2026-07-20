@@ -1100,7 +1100,10 @@ impl PreludeType {
     pub const fn is_namespace_only(self) -> bool {
         matches!(
             self,
-            PreludeType::Log | PreludeType::Toml | PreludeType::Math | PreludeType::Random
+            PreludeType::Log
+                | PreludeType::Toml
+                | PreludeType::Math
+                | PreludeType::Random
                 | PreludeType::Strings
                 | PreludeType::Args
                 | PreludeType::Env
@@ -1896,8 +1899,7 @@ pub enum PreludeAssocConst {
 
 impl PreludeAssocConst {
     /// All recognised associated-constant names.
-    pub const ALL: &'static [PreludeAssocConst] =
-        &[PreludeAssocConst::Pi, PreludeAssocConst::E];
+    pub const ALL: &'static [PreludeAssocConst] = &[PreludeAssocConst::Pi, PreludeAssocConst::E];
 
     /// The source name of this associated constant (the identifier the user
     /// writes after the dot). Note constant names are UPPERCASE per the
@@ -2819,9 +2821,7 @@ pub fn instance_fn_return_type(
         // .await; } buf }` (returns empty Vec on EOF / error /
         // connect-failed - NEVER panics). Zero args. Returns
         // `Vector<Byte>` (Vec<u8> at the codegen level).
-        (Type::Connection, PreludeInstanceFn::Recv) => {
-            Some(Type::vector(Type::byte()))
-        }
+        (Type::Connection, PreludeInstanceFn::Recv) => Some(Type::vector(Type::byte())),
         // `conn.close() -> Void`. Wraps
         // `{ use tokio::io::AsyncWriteExt; if let Some(mut s) =
         // recv { s.shutdown().await.ok(); } }` (graceful shutdown
@@ -3733,23 +3733,43 @@ mod tests {
         // All Math methods return Float (f64 width).
         let expected = Some(Type::float_default());
         assert_eq!(
-            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Sqrt, &[Type::float_default()]),
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Sqrt,
+                &[Type::float_default()]
+            ),
             expected
         );
         assert_eq!(
-            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Sin, &[Type::float_default()]),
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Sin,
+                &[Type::float_default()]
+            ),
             expected
         );
         assert_eq!(
-            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Cos, &[Type::float_default()]),
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Cos,
+                &[Type::float_default()]
+            ),
             expected
         );
         assert_eq!(
-            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Tan, &[Type::float_default()]),
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Tan,
+                &[Type::float_default()]
+            ),
             expected
         );
         assert_eq!(
-            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Abs, &[Type::float_default()]),
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Abs,
+                &[Type::float_default()]
+            ),
             expected
         );
         assert_eq!(
@@ -4041,7 +4061,11 @@ mod tests {
         );
         // Strings.trim(text) -> String.
         assert_eq!(
-            assoc_fn_return_type(PreludeType::Strings, PreludeAssocFn::Trim, &[Type::string()]),
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::Trim,
+                &[Type::string()]
+            ),
             Some(Type::string())
         );
         // Strings.replace(text, from, to) -> String.

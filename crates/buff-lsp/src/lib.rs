@@ -76,7 +76,7 @@ pub use analysis::{analyze, DocumentAnalysis};
 pub use position::LineIndex;
 pub use server::{run_stdio, ServerState};
 pub use state::DocumentState;
-pub use symbol::{SymbolIndex, SymbolEntry, TypeBindingIndex};
+pub use symbol::{SymbolEntry, SymbolIndex, TypeBindingIndex};
 
 /// Crate version (matches `Cargo.toml`). Used to advertise server version
 /// in the LSP `InitializeResult`.

@@ -161,7 +161,10 @@ fn hash_codegen_sha256_with_literal_uses_sha2_digest() {
     // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
     // (the codegen-only linking boundary means we can't evaluate this
     // at test time, but the codegen shape pins the canonical lowering).
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hash", "sha256", vec![str_expr("hello")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hash", "sha256", vec![str_expr("hello")]),
+    );
     assert!(
         src.contains("use sha2::Digest"),
         "expected `use sha2::Digest` (Digest trait import) in: {src}"
@@ -190,7 +193,10 @@ fn hash_codegen_sha256_with_literal_uses_sha2_digest() {
 fn hash_codegen_sha256_with_ident_arg() {
     // Hash.sha256(data) where `data` is a variable. The arg should
     // splice through as the bare ident.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hash", "sha256", vec![ident_expr("data")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hash", "sha256", vec![ident_expr("data")]),
+    );
     assert!(
         src.contains("sha2::Sha256::digest"),
         "expected `sha2::Sha256::digest(` in: {src}"
@@ -211,7 +217,10 @@ fn hash_codegen_sha512_with_literal_uses_sha2_digest() {
     // Hash.sha512("hello") -> { use sha2::Digest; hex::encode(
     // sha2::Sha512::digest(<arg>.as_bytes())) }. SHA-512 hex digest
     // is 128 chars (vs 64 for SHA-256).
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hash", "sha512", vec![str_expr("hello")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hash", "sha512", vec![str_expr("hello")]),
+    );
     assert!(
         src.contains("use sha2::Digest"),
         "expected `use sha2::Digest` (Digest trait import) in: {src}"
@@ -280,11 +289,7 @@ fn hmac_codegen_sha256_with_literals_uses_hmac_new_from_slice() {
     // mac.finalize().into_bytes()) }).unwrap_or_default() }.
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "HMAC",
-            "sha256",
-            vec![str_expr("secret"), str_expr("data")],
-        ),
+        ns_assoc_call("HMAC", "sha256", vec![str_expr("secret"), str_expr("data")]),
     );
     assert!(
         src.contains("use hmac::Mac"),
@@ -336,11 +341,7 @@ fn hmac_codegen_sha256_with_ident_args_splices_both() {
     // positions (key for new_from_slice, msg for update).
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "HMAC",
-            "sha256",
-            vec![ident_expr("key"), ident_expr("msg")],
-        ),
+        ns_assoc_call("HMAC", "sha256", vec![ident_expr("key"), ident_expr("msg")]),
     );
     assert!(
         src.contains("key.as_bytes()"),
@@ -363,7 +364,11 @@ fn hash_codegen_registers_sha2_for_sha256() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Hash", "sha256", vec![str_expr("hi")]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Hash",
+            "sha256",
+            vec![str_expr("hi")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -398,7 +403,11 @@ fn hash_codegen_registers_sha2_for_sha512() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Hash", "sha512", vec![str_expr("hi")]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Hash",
+            "sha512",
+            vec![str_expr("hi")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -432,7 +441,11 @@ fn hash_codegen_registers_md5_for_md5_only() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Hash", "md5", vec![str_expr("hi")]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Hash",
+            "md5",
+            vec![str_expr("hi")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -654,13 +667,19 @@ fn hmac_codegen_rejects_sha256_with_three_args() {
 
 #[test]
 fn hash_codegen_sha256_snapshot() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hash", "sha256", vec![str_expr("hello")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hash", "sha256", vec![str_expr("hello")]),
+    );
     insta::assert_snapshot!(src);
 }
 
 #[test]
 fn hash_codegen_sha512_snapshot() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hash", "sha512", vec![str_expr("hello")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hash", "sha512", vec![str_expr("hello")]),
+    );
     insta::assert_snapshot!(src);
 }
 
@@ -694,9 +713,18 @@ fn crypto_codegen_full_program_snapshot() {
         &[],
         vec![
             // Hash namespace - all 3 associated fns.
-            let_stmt("sha256hex", ns_assoc_call("Hash", "sha256", vec![str_expr("hello")])),
-            let_stmt("sha512hex", ns_assoc_call("Hash", "sha512", vec![str_expr("hello")])),
-            let_stmt("md5hex", ns_assoc_call("Hash", "md5", vec![str_expr("hello")])),
+            let_stmt(
+                "sha256hex",
+                ns_assoc_call("Hash", "sha256", vec![str_expr("hello")]),
+            ),
+            let_stmt(
+                "sha512hex",
+                ns_assoc_call("Hash", "sha512", vec![str_expr("hello")]),
+            ),
+            let_stmt(
+                "md5hex",
+                ns_assoc_call("Hash", "md5", vec![str_expr("hello")]),
+            ),
             // HMAC namespace - the one associated fn.
             let_stmt(
                 "hmachex",

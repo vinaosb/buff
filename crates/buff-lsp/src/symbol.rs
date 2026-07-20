@@ -156,13 +156,7 @@ impl SymbolIndex {
     }
 
     /// Record a local binding (function param, `let`, etc.).
-    pub fn add_local(
-        &mut self,
-        name: &Ident,
-        kind: LocalKind,
-        def_span: Span,
-        func_span: Span,
-    ) {
+    pub fn add_local(&mut self, name: &Ident, kind: LocalKind, def_span: Span, func_span: Span) {
         self.locals.insert(
             def_span.start,
             SymbolEntry {
@@ -222,7 +216,9 @@ impl SymbolIndex {
         for l in self.locals.values() {
             let kind = match l.kind {
                 LocalKind::Param => CompletionItemKind::Field,
-                LocalKind::Let | LocalKind::Loop | LocalKind::GuardLet => CompletionItemKind::Variable,
+                LocalKind::Let | LocalKind::Loop | LocalKind::GuardLet => {
+                    CompletionItemKind::Variable
+                }
             };
             // Only one candidate per name (later definitions win — this
             // matches how most language servers handle shadowing in v1.x).
@@ -289,10 +285,7 @@ impl TypeBindingIndex {
     /// multi-byte identifier (we record at the START byte).
     pub fn lookup_covering(&self, byte: usize) -> Option<&Type> {
         // BTreeMap::range: keys in (..=byte).
-        self.bindings
-            .range(..=byte)
-            .next_back()
-            .map(|(_, v)| v)
+        self.bindings.range(..=byte).next_back().map(|(_, v)| v)
     }
 }
 
@@ -423,8 +416,18 @@ mod tests {
             !f.params.is_empty(),
             "fixture should have params — parse state: {decls:?}"
         );
-        idx.add_local(&f.params[0].name, LocalKind::Param, f.params[0].span, f.span);
-        idx.add_local(&f.params[1].name, LocalKind::Param, f.params[1].span, f.span);
+        idx.add_local(
+            &f.params[0].name,
+            LocalKind::Param,
+            f.params[0].span,
+            f.span,
+        );
+        idx.add_local(
+            &f.params[1].name,
+            LocalKind::Param,
+            f.params[1].span,
+            f.span,
+        );
 
         let cands = idx.completions();
         let labels: Vec<&str> = cands.iter().map(|c| c.label.as_str()).collect();

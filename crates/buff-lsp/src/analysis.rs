@@ -59,7 +59,14 @@ impl DocumentAnalysis {
     /// error + a downstream type error pointing at the same token); we
     /// collapse exact `(start, end, severity, message)` dupes.
     fn dedup_diagnostics(mut diags: Vec<Diagnostic>) -> Vec<Diagnostic> {
-        diags.sort_by_key(|d| (d.span.start, d.span.end, format!("{:?}", d.severity), d.message.clone()));
+        diags.sort_by_key(|d| {
+            (
+                d.span.start,
+                d.span.end,
+                format!("{:?}", d.severity),
+                d.message.clone(),
+            )
+        });
         diags.dedup_by(|a, b| {
             a.span.start == b.span.start
                 && a.span.end == b.span.end
@@ -237,9 +244,7 @@ fn record_expr_types_in_stmt(stmt: &Stmt, infer: &TypeInferencer, types: &mut Ty
                 record_expr_types_in_stmt(s, infer, types);
             }
         }
-        Stmt::ForLet {
-            value, body, ..
-        } => {
+        Stmt::ForLet { value, body, .. } => {
             record_expr_types(value, infer, types);
             for s in &body.stmts {
                 record_expr_types_in_stmt(s, infer, types);
@@ -285,7 +290,10 @@ fn record_expr_types(expr: &Expr, infer: &TypeInferencer, types: &mut TypeBindin
         }
         Expr::UnaryOp { operand, .. } => record_expr_types(operand, infer, types),
         Expr::IfExpr {
-            cond, then_block, else_block, ..
+            cond,
+            then_block,
+            else_block,
+            ..
         } => {
             record_expr_types(cond, infer, types);
             for s in &then_block.stmts {
@@ -303,9 +311,7 @@ fn record_expr_types(expr: &Expr, infer: &TypeInferencer, types: &mut TypeBindin
                 record_expr_types(a, infer, types);
             }
         }
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             record_expr_types(receiver, infer, types);
             for a in args {
                 record_expr_types(a, infer, types);
@@ -321,7 +327,9 @@ fn record_expr_types(expr: &Expr, infer: &TypeInferencer, types: &mut TypeBindin
                 record_expr_types(v, infer, types);
             }
         }
-        Expr::MatchExpr { scrutinee, arms, .. } => {
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
             record_expr_types(scrutinee, infer, types);
             for arm in arms {
                 for s in &arm.body.stmts {
@@ -453,7 +461,11 @@ mod tests {
     fn analyze_clean_program_has_no_diagnostics() {
         let src = "func main():\n    print(\"hello\")\n";
         let a = analyze(src, SourceId(0));
-        assert!(a.diagnostics.is_empty(), "got diagnostics: {:?}", a.diagnostics);
+        assert!(
+            a.diagnostics.is_empty(),
+            "got diagnostics: {:?}",
+            a.diagnostics
+        );
         assert_eq!(a.decls.len(), 1);
     }
 

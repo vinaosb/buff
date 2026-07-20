@@ -157,7 +157,10 @@ fn must_reparse(src: &str) {
 
 #[test]
 fn yaml_codegen_parse_string_literal() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Yaml", "parse", vec![str_expr("a: 1\n")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Yaml", "parse", vec![str_expr("a: 1\n")]),
+    );
     assert!(
         src.contains("serde_yml::from_str"),
         "expected `serde_yml::from_str` in: {src}"
@@ -242,7 +245,10 @@ fn yaml_codegen_stringify_string_literal_arg() {
     // Yaml.stringify("foo") - string literals are valid Serialize values
     // (str impls Serialize via serde_yml). The generated code borrows via
     // `&"foo"`.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Yaml", "stringify", vec![str_expr("foo")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Yaml", "stringify", vec![str_expr("foo")]),
+    );
     assert!(
         src.contains("serde_yml::to_string"),
         "expected `serde_yml::to_string` in: {src}"
@@ -556,14 +562,20 @@ fn csv_codegen_rejects_stringify_with_wrong_arity() {
 #[test]
 fn yaml_codegen_parse_snapshot() {
     // Snapshot the canonical Yaml.parse lowering with a string literal.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Yaml", "parse", vec![str_expr("a: 1\n")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Yaml", "parse", vec![str_expr("a: 1\n")]),
+    );
     insta::assert_snapshot!(src);
 }
 
 #[test]
 fn yaml_codegen_stringify_snapshot() {
     // Snapshot the canonical Yaml.stringify lowering with an ident arg.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Yaml", "stringify", vec![ident_expr("m")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Yaml", "stringify", vec![ident_expr("m")]),
+    );
     insta::assert_snapshot!(src);
 }
 
@@ -598,7 +610,10 @@ fn format_codegen_full_program_snapshot() {
         "main",
         &[],
         vec![
-            let_stmt("m", ns_assoc_call("Yaml", "parse", vec![str_expr("name: buff\n")])),
+            let_stmt(
+                "m",
+                ns_assoc_call("Yaml", "parse", vec![str_expr("name: buff\n")]),
+            ),
             expr_stmt(ns_assoc_call("Yaml", "stringify", vec![ident_expr("m")])),
             let_stmt(
                 "rows",

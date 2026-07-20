@@ -171,7 +171,10 @@ fn log_codegen_single_named_field() {
         "f",
         log_call(
             "info",
-            vec![str_expr("user logged in"), named_expr("user_id", int_expr(42))],
+            vec![
+                str_expr("user logged in"),
+                named_expr("user_id", int_expr(42)),
+            ],
         ),
     );
     // tracing macro syntax: fields first, message LAST.
@@ -246,10 +249,7 @@ fn log_codegen_string_field_value() {
         "f",
         log_call(
             "warn",
-            vec![
-                str_expr("auth"),
-                named_expr("ip", str_expr("10.0.0.1")),
-            ],
+            vec![str_expr("auth"), named_expr("ip", str_expr("10.0.0.1"))],
         ),
     );
     // String field values splice as string literals.
@@ -266,7 +266,11 @@ fn log_codegen_string_field_value() {
 
 #[test]
 fn log_codegen_records_tracing_extern_crates() {
-    let main = func_decl("main", &[], vec![expr_stmt(log_call("info", vec![str_expr("hi")]))]);
+    let main = func_decl(
+        "main",
+        &[],
+        vec![expr_stmt(log_call("info", vec![str_expr("hi")]))],
+    );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
     let extern_crates = codegen.extern_crates();
@@ -310,7 +314,11 @@ fn log_codegen_no_tracing_extern_crate_when_log_unused() {
 
 #[test]
 fn log_codegen_emits_subscriber_init_in_main() {
-    let main = func_decl("main", &[], vec![expr_stmt(log_call("info", vec![str_expr("hi")]))]);
+    let main = func_decl(
+        "main",
+        &[],
+        vec![expr_stmt(log_call("info", vec![str_expr("hi")]))],
+    );
     let src = generate_rust(&[main]).expect("codegen must succeed");
     // The init uses try_init() (NOT init() — must not panic on duplicate).
     assert!(
@@ -343,8 +351,16 @@ fn log_codegen_emits_subscriber_init_in_main() {
 fn log_codegen_subscriber_init_only_in_main_not_helpers() {
     // A helper function `helper` that calls Log.info — the init should
     // NOT be emitted inside `helper` (only `main` is the install site).
-    let helper = func_decl("helper", &[], vec![expr_stmt(log_call("info", vec![str_expr("from helper")]))]);
-    let main = func_decl("main", &[], vec![expr_stmt(log_call("info", vec![str_expr("from main")]))]);
+    let helper = func_decl(
+        "helper",
+        &[],
+        vec![expr_stmt(log_call("info", vec![str_expr("from helper")]))],
+    );
+    let main = func_decl(
+        "main",
+        &[],
+        vec![expr_stmt(log_call("info", vec![str_expr("from main")]))],
+    );
     let src = generate_rust(&[helper, main]).expect("codegen must succeed");
     // The init block uses BUFF_LOG env var once per install. Counting
     // `try_init()` is wrong (it appears TWICE per init — once per
@@ -423,10 +439,7 @@ fn log_codegen_rejects_empty_args() {
 fn log_codegen_rejects_positional_arg_after_message() {
     // Log.info("msg", 42) — positional arg after the message is not allowed.
     let result = std::panic::catch_unwind(|| {
-        let _ = codegen_one_expr_in(
-            "f",
-            log_call("info", vec![str_expr("msg"), int_expr(42)]),
-        );
+        let _ = codegen_one_expr_in("f", log_call("info", vec![str_expr("msg"), int_expr(42)]));
     });
     assert!(
         result.is_err(),
@@ -470,7 +483,10 @@ fn log_codegen_full_main_snapshot_with_subscriber_init() {
         "main",
         &[],
         vec![
-            expr_stmt(log_call("info", vec![str_expr("hello"), named_expr("count", int_expr(42))])),
+            expr_stmt(log_call(
+                "info",
+                vec![str_expr("hello"), named_expr("count", int_expr(42))],
+            )),
             expr_stmt(log_call("error", vec![str_expr("oops")])),
         ],
     );

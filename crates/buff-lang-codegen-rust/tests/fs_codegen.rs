@@ -244,10 +244,7 @@ fn path_codegen_join_via_ident_args() {
         src.contains("std::path::PathBuf::from(a)"),
         "expected `std::path::PathBuf::from(a)` in: {src}"
     );
-    assert!(
-        src.contains(".join(b)"),
-        "expected `.join(b)` in: {src}"
-    );
+    assert!(src.contains(".join(b)"), "expected `.join(b)` in: {src}");
     must_reparse(&src);
 }
 
@@ -400,7 +397,10 @@ fn dir_codegen_list_uses_read_dir_unwrap_or_default() {
 #[test]
 fn dir_codegen_create_uses_create_dir_all_with_ok() {
     // Dir.create(p) -> std::fs::create_dir_all(p).ok().
-    let src = codegen_one_expr_in("f", ns_assoc_call("Dir", "create", vec![str_expr("/tmp/a")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Dir", "create", vec![str_expr("/tmp/a")]),
+    );
     assert!(
         src.contains("std::fs::create_dir_all("),
         "expected `std::fs::create_dir_all(` (mkdir -p semantics) in: {src}"
@@ -421,7 +421,10 @@ fn dir_codegen_create_uses_create_dir_all_with_ok() {
 #[test]
 fn dir_codegen_remove_uses_remove_dir_all_with_ok() {
     // Dir.remove(p) -> std::fs::remove_dir_all(p).ok().
-    let src = codegen_one_expr_in("f", ns_assoc_call("Dir", "remove", vec![str_expr("/tmp/a")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Dir", "remove", vec![str_expr("/tmp/a")]),
+    );
     assert!(
         src.contains("std::fs::remove_dir_all("),
         "expected `std::fs::remove_dir_all(` (recursive remove) in: {src}"
@@ -545,7 +548,11 @@ fn dir_codegen_does_not_register_walkdir_for_list_only() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Dir", "list", vec![str_expr("/tmp")]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Dir",
+            "list",
+            vec![str_expr("/tmp")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -568,7 +575,11 @@ fn dir_codegen_registers_walkdir_for_walk() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Dir", "walk", vec![str_expr("/tmp")]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Dir",
+            "walk",
+            vec![str_expr("/tmp")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -746,7 +757,10 @@ fn dir_codegen_rejects_walk_with_wrong_arity() {
 fn tempfile_codegen_rejects_create_with_args() {
     // Tempfile.create(extra) with args - should error.
     let result = std::panic::catch_unwind(|| {
-        let _ = codegen_one_expr_in("f", ns_assoc_call("Tempfile", "create", vec![str_expr("x")]));
+        let _ = codegen_one_expr_in(
+            "f",
+            ns_assoc_call("Tempfile", "create", vec![str_expr("x")]),
+        );
     });
     assert!(
         result.is_err(),
@@ -836,13 +850,19 @@ fn dir_codegen_list_snapshot() {
 
 #[test]
 fn dir_codegen_create_snapshot() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Dir", "create", vec![str_expr("/tmp/a")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Dir", "create", vec![str_expr("/tmp/a")]),
+    );
     insta::assert_snapshot!(src);
 }
 
 #[test]
 fn dir_codegen_remove_snapshot() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Dir", "remove", vec![str_expr("/tmp/a")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Dir", "remove", vec![str_expr("/tmp/a")]),
+    );
     insta::assert_snapshot!(src);
 }
 
@@ -888,10 +908,16 @@ fn fs_codegen_full_program_snapshot() {
             let_stmt("base", instance_call(ident_expr("p"), "basename", vec![])),
             let_stmt("exists", instance_call(ident_expr("p"), "exists", vec![])),
             // Dir namespace - all 4 associated fns.
-            let_stmt("entries", ns_assoc_call("Dir", "list", vec![str_expr("/tmp")])),
+            let_stmt(
+                "entries",
+                ns_assoc_call("Dir", "list", vec![str_expr("/tmp")]),
+            ),
             expr_stmt(ns_assoc_call("Dir", "create", vec![str_expr("/tmp/a")])),
             expr_stmt(ns_assoc_call("Dir", "remove", vec![str_expr("/tmp/a")])),
-            let_stmt("walked", ns_assoc_call("Dir", "walk", vec![str_expr("/tmp")])),
+            let_stmt(
+                "walked",
+                ns_assoc_call("Dir", "walk", vec![str_expr("/tmp")]),
+            ),
             // Tempfile namespace - both associated fns.
             let_stmt("tmp", ns_assoc_call("Tempfile", "create", vec![])),
             let_stmt("tmpdir", ns_assoc_call("Tempfile", "dir", vec![])),

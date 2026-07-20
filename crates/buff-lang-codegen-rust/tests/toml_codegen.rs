@@ -234,7 +234,10 @@ fn toml_codegen_registers_toml_extern_crate() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(toml_assoc_call("parse", vec![str_expr("a = 1\n")]))],
+        vec![expr_stmt(toml_assoc_call(
+            "parse",
+            vec![str_expr("a = 1\n")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -253,7 +256,10 @@ fn toml_codegen_registers_toml_via_stringify() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(toml_assoc_call("stringify", vec![ident_expr("m")]))],
+        vec![expr_stmt(toml_assoc_call(
+            "stringify",
+            vec![ident_expr("m")],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -351,7 +357,10 @@ fn toml_codegen_full_program_snapshot() {
         "main",
         &[],
         vec![
-            let_stmt("m", toml_assoc_call("parse", vec![str_expr("name = \"buff\"\n")])),
+            let_stmt(
+                "m",
+                toml_assoc_call("parse", vec![str_expr("name = \"buff\"\n")]),
+            ),
             expr_stmt(toml_assoc_call("stringify", vec![ident_expr("m")])),
         ],
     );

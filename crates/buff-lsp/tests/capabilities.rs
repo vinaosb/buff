@@ -9,10 +9,10 @@
 //! paths are only used when a real file is needed (which is rare here —
 //! the handlers take `&DocumentState` directly).
 
+use buff_lang_error::SourceId;
 use buff_lsp::handlers;
 use buff_lsp::position::LineIndex;
 use buff_lsp::DocumentState;
-use buff_lang_error::SourceId;
 use lsp_types::{
     CompletionResponse, DiagnosticSeverity, DocumentSymbol, GotoDefinitionResponse, HoverContents,
     Position,
@@ -48,7 +48,8 @@ fn nth_occurrence_position(state: &DocumentState, needle: &str, n: usize) -> Pos
 fn diagnostics_clean_program_has_no_diagnostics() {
     // A well-formed Buff program yields zero diagnostics (T117 AC: a valid
     // program produces none).
-    let src = "func greet(name: String):\n    print(\"hi\")\n\nfunc main():\n    greet(\"world\")\n";
+    let src =
+        "func greet(name: String):\n    print(\"hi\")\n\nfunc main():\n    greet(\"world\")\n";
     let st = open(src);
     let diags = handlers::diagnostics(&st);
     assert!(
@@ -90,7 +91,9 @@ fn diagnostics_parse_error_emits_error() {
     let st = open(src);
     let diags = handlers::diagnostics(&st);
     assert!(
-        diags.iter().any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        diags
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
         "expected at least one parse-error diagnostic, got: {diags:?}"
     );
 }
@@ -102,7 +105,9 @@ fn diagnostics_lex_error_emits_error() {
     let st = open(src);
     let diags = handlers::diagnostics(&st);
     assert!(
-        diags.iter().any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        diags
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
         "expected at least one lex-error diagnostic, got: {diags:?}"
     );
 }
@@ -140,7 +145,10 @@ fn hover_on_reference_returns_inferred_type() {
         HoverContents::Markup(m) => m.value,
         _ => panic!("expected markup contents"),
     };
-    assert!(s.contains("Int"), "expected hover to mention type, got: {s}");
+    assert!(
+        s.contains("Int"),
+        "expected hover to mention type, got: {s}"
+    );
 }
 
 #[test]
@@ -308,7 +316,10 @@ fn formatting_routes_through_buff_fmt_and_returns_edits() {
     assert_eq!(edits.len(), 1, "expected one full-document TextEdit");
     let new_text = &edits[0].new_text;
     // Canonical form: no trailing whitespace, ends with newline.
-    assert!(!new_text.contains("   \n"), "no trailing whitespace expected");
+    assert!(
+        !new_text.contains("   \n"),
+        "no trailing whitespace expected"
+    );
     assert!(new_text.ends_with('\n'), "trailing newline expected");
 }
 
@@ -404,7 +415,10 @@ fn document_state_reanalyze_picks_up_changes() {
     let mut st = open("func main():\n    print(1)\n");
     assert!(handlers::diagnostics(&st).is_empty());
     // Update to a source with a type error.
-    st.update("func main():\n    let x: Int = \"oops\"\n".to_string(), Some(2));
+    st.update(
+        "func main():\n    let x: Int = \"oops\"\n".to_string(),
+        Some(2),
+    );
     let diags = handlers::diagnostics(&st);
     assert!(
         diags

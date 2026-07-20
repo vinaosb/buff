@@ -247,10 +247,7 @@ fn math_codegen_sin_cos_tan_abs_floor_ceil_round() {
         ("ceil", ()),
         ("round", ()),
     ] {
-        let src = codegen_one_expr_in(
-            "f",
-            ns_assoc_call("Math", method, vec![ident_expr("x")]),
-        );
+        let src = codegen_one_expr_in("f", ns_assoc_call("Math", method, vec![ident_expr("x")]));
         assert!(
             src.contains(&format!("(x as f64).{method}()")),
             "expected `(x as f64).{method}()` in: {src}"
@@ -301,11 +298,7 @@ fn math_codegen_no_extern_crate_registered() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call(
-            "Math",
-            "sqrt",
-            vec![int_expr(16)],
-        ))],
+        vec![expr_stmt(ns_assoc_call("Math", "sqrt", vec![int_expr(16)]))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -627,11 +620,7 @@ fn strings_codegen_split_collects_to_vec_string() {
     //   text.split(sep).map(|s| s.to_string()).collect::<Vec<String>>()
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Strings",
-            "split",
-            vec![str_expr("a,b,c"), str_expr(",")],
-        ),
+        ns_assoc_call("Strings", "split", vec![str_expr("a,b,c"), str_expr(",")]),
     );
     assert!(
         src.contains(".split(\",\")"),
@@ -672,11 +661,7 @@ fn strings_codegen_join_borrows_sep() {
     // The sep is borrowed via `&` to satisfy `&str` bound.
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Strings",
-            "join",
-            vec![ident_expr("vec"), str_expr(",")],
-        ),
+        ns_assoc_call("Strings", "join", vec![ident_expr("vec"), str_expr(",")]),
     );
     assert!(
         src.contains("vec.join(&"),
@@ -692,7 +677,10 @@ fn strings_codegen_join_borrows_sep() {
 #[test]
 fn strings_codegen_trim_chains_to_string() {
     // Strings.trim(text) -> text.trim().to_string()
-    let src = codegen_one_expr_in("f", ns_assoc_call("Strings", "trim", vec![str_expr("  hi  ")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Strings", "trim", vec![str_expr("  hi  ")]),
+    );
     assert!(
         src.contains(".trim().to_string()"),
         "expected `.trim().to_string()` in: {src}"
@@ -948,11 +936,7 @@ fn sort_by_codegen_snapshot() {
 fn strings_codegen_split_snapshot() {
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Strings",
-            "split",
-            vec![str_expr("a,b,c"), str_expr(",")],
-        ),
+        ns_assoc_call("Strings", "split", vec![str_expr("a,b,c"), str_expr(",")]),
     );
     insta::assert_snapshot!(src);
 }
@@ -961,11 +945,7 @@ fn strings_codegen_split_snapshot() {
 fn strings_codegen_join_snapshot() {
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Strings",
-            "join",
-            vec![ident_expr("vec"), str_expr(",")],
-        ),
+        ns_assoc_call("Strings", "join", vec![ident_expr("vec"), str_expr(",")]),
     );
     insta::assert_snapshot!(src);
 }

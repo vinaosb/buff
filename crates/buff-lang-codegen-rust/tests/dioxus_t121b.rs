@@ -29,9 +29,9 @@
 use proc_macro2::TokenStream;
 use quote::{quote, TokenStreamExt};
 use syn::{
-    punctuated::Punctuated, Attribute, AttrStyle, Block, Expr, ExprMacro, FnArg, Ident,
-    Item, ItemFn, Macro, MacroDelimiter, PatType, PathArguments, PathSegment, ReturnType,
-    Signature, Stmt, Token, Type, Visibility,
+    punctuated::Punctuated, AttrStyle, Attribute, Block, Expr, ExprMacro, FnArg, Ident, Item,
+    ItemFn, Macro, MacroDelimiter, PatType, PathArguments, PathSegment, ReturnType, Signature,
+    Stmt, Token, Type, Visibility,
 };
 
 // ---------------------------------------------------------------------------
@@ -266,8 +266,9 @@ fn t121b_generated_source_re_parses() {
     // `syn::File`. This proves the macro tokens survive round-trip
     // (the proc-macro will see exactly what we constructed).
     let src = generate_counter_main_rs();
-    syn::parse_str::<syn::File>(&src)
-        .unwrap_or_else(|e| panic!("prettyplease output must re-parse as syn::File: {e}\n--- src ---\n{src}"));
+    syn::parse_str::<syn::File>(&src).unwrap_or_else(|e| {
+        panic!("prettyplease output must re-parse as syn::File: {e}\n--- src ---\n{src}")
+    });
 }
 
 #[test]
@@ -332,7 +333,10 @@ fn t121b_writes_main_rs_to_spike_dir() {
     assert_eq!(on_disk, src, "disk content must match in-memory source");
     assert!(on_disk.contains("rsx!"));
     assert!(on_disk.contains("#[component]"));
-    eprintln!("[T121b] wrote generated counter main.rs to {}", path.display());
+    eprintln!(
+        "[T121b] wrote generated counter main.rs to {}",
+        path.display()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -365,10 +369,7 @@ fn t121b_writes_broken_variant_for_error_mapping_assessment() {
                     paren_token: Default::default(),
                     inputs: Punctuated::<FnArg, Token![,]>::new(),
                     variadic: None,
-                    output: ReturnType::Type(
-                        Default::default(),
-                        Box::new(element_return_type()),
-                    ),
+                    output: ReturnType::Type(Default::default(), Box::new(element_return_type())),
                 },
                 block: Box::new({
                     // Body uses a bogus attribute `not_a_real_attr_xyz` to
@@ -397,10 +398,8 @@ fn t121b_writes_broken_variant_for_error_mapping_assessment() {
     };
     let src = buff_lang_codegen_rust::format(&file);
     let path = spike_dir().join("src").join("broken.rs");
-    std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")))
-        .ok();
-    std::fs::write(&path, &src)
-        .unwrap_or_else(|e| panic!("could not write broken.rs: {e}"));
+    std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new("."))).ok();
+    std::fs::write(&path, &src).unwrap_or_else(|e| panic!("could not write broken.rs: {e}"));
     eprintln!("[T121b] wrote broken variant to {}", path.display());
 }
 

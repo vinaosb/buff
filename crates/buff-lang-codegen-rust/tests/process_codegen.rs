@@ -1,4 +1,4 @@
-﻿//! T124l integration tests - Process + OS prelude modules codegen.
+//! T124l integration tests - Process + OS prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the two T124l system
 //! modules:
@@ -201,11 +201,7 @@ fn process_codegen_spawn_with_literals_uses_command_spawn_ok() {
     // generated code" rule.
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Process",
-            "spawn",
-            vec![str_expr("ls"), empty_args_expr()],
-        ),
+        ns_assoc_call("Process", "spawn", vec![str_expr("ls"), empty_args_expr()]),
     );
     assert!(
         src.contains("std::process::Command::new("),
@@ -278,11 +274,7 @@ fn process_body_with_extra(extra: Expr) -> Vec<Stmt> {
     vec![
         let_stmt(
             "p",
-            ns_assoc_call(
-                "Process",
-                "spawn",
-                vec![str_expr("ls"), empty_args_expr()],
-            ),
+            ns_assoc_call("Process", "spawn", vec![str_expr("ls"), empty_args_expr()]),
         ),
         expr_stmt(extra),
     ]
@@ -558,11 +550,7 @@ fn process_codegen_registers_no_extern_crate() {
         vec![
             let_stmt(
                 "p",
-                ns_assoc_call(
-                    "Process",
-                    "spawn",
-                    vec![str_expr("ls"), empty_args_expr()],
-                ),
+                ns_assoc_call("Process", "spawn", vec![str_expr("ls"), empty_args_expr()]),
             ),
             expr_stmt(instance_call(ident_expr("p"), "wait", vec![])),
             expr_stmt(instance_call(ident_expr("p"), "id", vec![])),
@@ -708,11 +696,7 @@ fn os_codegen_rejects_cpus_with_args() {
 fn process_codegen_spawn_snapshot() {
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call(
-            "Process",
-            "spawn",
-            vec![str_expr("ls"), empty_args_expr()],
-        ),
+        ns_assoc_call("Process", "spawn", vec![str_expr("ls"), empty_args_expr()]),
     );
     insta::assert_snapshot!(src);
 }
@@ -779,11 +763,7 @@ fn process_codegen_full_program_snapshot() {
             // side-effecting Process.exit call.
             let_stmt(
                 "p",
-                ns_assoc_call(
-                    "Process",
-                    "spawn",
-                    vec![str_expr("ls"), empty_args_expr()],
-                ),
+                ns_assoc_call("Process", "spawn", vec![str_expr("ls"), empty_args_expr()]),
             ),
             let_stmt("exit_code", instance_call(ident_expr("p"), "wait", vec![])),
             let_stmt("pid", instance_call(ident_expr("p"), "id", vec![])),

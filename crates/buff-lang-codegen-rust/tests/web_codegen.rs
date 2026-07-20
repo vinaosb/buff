@@ -205,7 +205,10 @@ fn base64_codegen_decode_unwrap_or_default() {
     // Base64.decode(s) -> base64::Engine::decode(&STANDARD, s).unwrap_or_default().
     // Acceptance criterion: NEVER panics on invalid input (empty Vec
     // fallback), matching Buff's "no panicking generated code" rule.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Base64", "decode", vec![str_expr("aGVsbG8=")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Base64", "decode", vec![str_expr("aGVsbG8=")]),
+    );
     assert!(
         src.contains("base64::Engine::decode("),
         "expected `base64::Engine::decode(` (UFCS form) in: {src}"
@@ -241,7 +244,11 @@ fn base64_codegen_registers_base64_extern_crate() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Base64", "encode", vec![bytes_expr()]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Base64",
+            "encode",
+            vec![bytes_expr()],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -271,7 +278,10 @@ fn hex_codegen_encode_calls_hex_encode() {
 #[test]
 fn hex_codegen_decode_unwrap_or_default() {
     // Hex.decode(s) -> hex::decode(s).unwrap_or_default().
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hex", "decode", vec![str_expr("deadbeef")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hex", "decode", vec![str_expr("deadbeef")]),
+    );
     assert!(
         src.contains("hex::decode("),
         "expected `hex::decode(` in: {src}"
@@ -292,7 +302,11 @@ fn hex_codegen_registers_hex_extern_crate() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Hex", "encode", vec![bytes_expr()]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Hex",
+            "encode",
+            vec![bytes_expr()],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -312,7 +326,10 @@ fn hex_codegen_registers_hex_extern_crate() {
 fn urlencode_codegen_encode_uses_utf8_percent_encode() {
     // URLEncode.encode(s) ->
     //   percent_encoding::utf8_percent_encode(s, NON_ALPHANUMERIC).to_string().
-    let src = codegen_one_expr_in("f", ns_assoc_call("URLEncode", "encode", vec![str_expr("foo bar?")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("URLEncode", "encode", vec![str_expr("foo bar?")]),
+    );
     assert!(
         src.contains("percent_encoding::utf8_percent_encode("),
         "expected `percent_encoding::utf8_percent_encode(` in: {src}"
@@ -332,7 +349,10 @@ fn urlencode_codegen_encode_uses_utf8_percent_encode() {
 fn urlencode_codegen_decode_uses_percent_decode_str_lossy() {
     // URLEncode.decode(s) ->
     //   percent_encoding::percent_decode_str(s).decode_utf8_lossy().into_owned().
-    let src = codegen_one_expr_in("f", ns_assoc_call("URLEncode", "decode", vec![str_expr("foo%20bar")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("URLEncode", "decode", vec![str_expr("foo%20bar")]),
+    );
     assert!(
         src.contains("percent_encoding::percent_decode_str("),
         "expected `percent_encoding::percent_decode_str(` in: {src}"
@@ -408,7 +428,11 @@ fn uuid_codegen_parse_returns_bool() {
     // UUID.parse(s) -> uuid::Uuid::parse_str(s).is_ok().
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call("UUID", "parse", vec![str_expr("550e8400-e29b-41d4-a716-446655440000")]),
+        ns_assoc_call(
+            "UUID",
+            "parse",
+            vec![str_expr("550e8400-e29b-41d4-a716-446655440000")],
+        ),
     );
     assert!(
         src.contains("uuid::Uuid::parse_str("),
@@ -502,7 +526,10 @@ fn url_codegen_scheme_accessor() {
     // url.scheme -> recv.scheme().to_string().
     let src = codegen_stmts_in(
         "f",
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "scheme", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "scheme", vec![]),
+        ),
     );
     assert!(
         src.contains(".scheme()"),
@@ -523,7 +550,10 @@ fn url_codegen_host_accessor_unwrap_or_default() {
     // returns None.
     let src = codegen_stmts_in(
         "f",
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "host", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "host", vec![]),
+        ),
     );
     assert!(
         src.contains(".host_str()"),
@@ -545,7 +575,10 @@ fn url_codegen_path_accessor() {
     // url.path -> recv.path().to_string().
     let src = codegen_stmts_in(
         "f",
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "path", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "path", vec![]),
+        ),
     );
     assert!(
         src.contains(".path()"),
@@ -599,7 +632,10 @@ fn url_codegen_registers_url_extern_crate_via_instance_accessor() {
     let main = func_decl(
         "main",
         &[],
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "scheme", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "scheme", vec![]),
+        ),
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -673,7 +709,10 @@ fn base64_codegen_encode_snapshot() {
 
 #[test]
 fn base64_codegen_decode_snapshot() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Base64", "decode", vec![str_expr("aGVsbG8=")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Base64", "decode", vec![str_expr("aGVsbG8=")]),
+    );
     insta::assert_snapshot!(src);
 }
 
@@ -685,21 +724,28 @@ fn hex_codegen_encode_snapshot() {
 
 #[test]
 fn hex_codegen_decode_snapshot() {
-    let src = codegen_one_expr_in("f", ns_assoc_call("Hex", "decode", vec![str_expr("deadbeef")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Hex", "decode", vec![str_expr("deadbeef")]),
+    );
     insta::assert_snapshot!(src);
 }
 
 #[test]
 fn urlencode_codegen_encode_snapshot() {
-    let src =
-        codegen_one_expr_in("f", ns_assoc_call("URLEncode", "encode", vec![str_expr("foo bar?")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("URLEncode", "encode", vec![str_expr("foo bar?")]),
+    );
     insta::assert_snapshot!(src);
 }
 
 #[test]
 fn urlencode_codegen_decode_snapshot() {
-    let src =
-        codegen_one_expr_in("f", ns_assoc_call("URLEncode", "decode", vec![str_expr("foo%20bar")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("URLEncode", "decode", vec![str_expr("foo%20bar")]),
+    );
     insta::assert_snapshot!(src);
 }
 
@@ -719,7 +765,11 @@ fn uuid_codegen_v7_snapshot() {
 fn uuid_codegen_parse_snapshot() {
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call("UUID", "parse", vec![str_expr("550e8400-e29b-41d4-a716-446655440000")]),
+        ns_assoc_call(
+            "UUID",
+            "parse",
+            vec![str_expr("550e8400-e29b-41d4-a716-446655440000")],
+        ),
     );
     insta::assert_snapshot!(src);
 }
@@ -737,7 +787,10 @@ fn url_codegen_parse_snapshot() {
 fn url_codegen_scheme_snapshot() {
     let src = codegen_stmts_in(
         "f",
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "scheme", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "scheme", vec![]),
+        ),
     );
     insta::assert_snapshot!(src);
 }
@@ -746,7 +799,10 @@ fn url_codegen_scheme_snapshot() {
 fn url_codegen_host_snapshot() {
     let src = codegen_stmts_in(
         "f",
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "host", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "host", vec![]),
+        ),
     );
     insta::assert_snapshot!(src);
 }
@@ -755,7 +811,10 @@ fn url_codegen_host_snapshot() {
 fn url_codegen_path_snapshot() {
     let src = codegen_stmts_in(
         "f",
-        url_body_with_extra("https://a.com/b", instance_call(ident_expr("u"), "path", vec![])),
+        url_body_with_extra(
+            "https://a.com/b",
+            instance_call(ident_expr("u"), "path", vec![]),
+        ),
     );
     insta::assert_snapshot!(src);
 }
@@ -788,7 +847,10 @@ fn web_codegen_full_program_snapshot() {
                 ns_assoc_call("Base64", "decode", vec![str_expr("aGVsbG8=")]),
             ),
             let_stmt("h", ns_assoc_call("Hex", "encode", vec![bytes_expr()])),
-            let_stmt("raw", ns_assoc_call("Hex", "decode", vec![str_expr("deadbeef")])),
+            let_stmt(
+                "raw",
+                ns_assoc_call("Hex", "decode", vec![str_expr("deadbeef")]),
+            ),
             let_stmt(
                 "enc",
                 ns_assoc_call("URLEncode", "encode", vec![str_expr("foo bar?")]),
