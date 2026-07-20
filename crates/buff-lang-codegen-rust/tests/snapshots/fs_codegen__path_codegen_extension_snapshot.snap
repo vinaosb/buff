@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+expression: src
+---
+fn f() {
+    let p: std::path::PathBuf = std::path::PathBuf::from("a").join("b");
+    p.extension().map(|e| e.to_string());
+}

@@ -210,6 +210,30 @@ pub enum Type {
     /// Math/Random/Strings/Args/Env — those have no value
     /// representation).
     Url,
+    /// A filesystem path, mapped to `std::path::PathBuf` at codegen
+    /// time (T124j). Constructed via the prelude associated function
+    /// `Path.join(a, b, ...)` (variadic - 2+ args, chained); supports
+    /// instance methods `.parent() -> Option<Path>`,
+    /// `.extension() -> Option<String>`, `.basename() -> String`,
+    /// `.exists() -> Bool`. Replaces the deferred v1.0 T61 File I/O
+    /// task.
+    ///
+    /// This is **additive** (T124j): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive
+    /// `match`es on `Type` were extended with an arm for the new
+    /// variant: `Display`, `buff_type_to_syn` (codegen),
+    /// `is_prelude_path` predicate. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Path` — it's an opaque
+    /// value type that participates in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Url`] (T124h) and [`Type::Regex`] (T124d) as
+    /// the third runtime-value-with-rich-instance-methods type
+    /// (Regex has 4 instance methods, URL has 4, Path has 4). The
+    /// underlying Rust type is `std::path::PathBuf` (NOT `&Path` -
+    /// Buff surfaces owned values; `.parent()` lifts the `&Path`
+    /// result to `PathBuf` via `.to_path_buf()`).
+    Path,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -436,6 +460,29 @@ impl Type {
         matches!(self, Type::Url)
     }
 
+    /// T124j: the filesystem-path type. Maps to `std::path::PathBuf`
+    /// at codegen time. Constructed via `Path.join(a, b, ...)`
+    /// (variadic - chained PathBuf joins); supports instance methods
+    /// `.parent()`, `.extension()`, `.basename()`, `.exists()`.
+    pub fn path() -> Self {
+        Type::Path
+    }
+
+    /// T124j: Returns `true` if this type is the prelude `Path`
+    /// runtime value. Used by the type inferencer + codegen to
+    /// dispatch instance method calls (`path.parent()`,
+    /// `path.extension()`, `path.basename()`, `path.exists()`) to
+    /// the `std::path::PathBuf` lowering. Distinct from
+    /// [`Self::is_prelude_datetime`] (Path is not a chrono type),
+    /// from [`Self::is_prelude_regex`] (Path is not a regex), and
+    /// from [`Self::is_prelude_url`] (Path is not a URL). Used by
+    /// the chrono over-broad-walker cautionary tale (T124f gotcha)
+    /// — `buff_type().is_prelude_path()` is the narrow round-trip
+    /// check for the Path type only.
+    pub fn is_prelude_path(&self) -> bool {
+        matches!(self, Type::Path)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -531,6 +578,11 @@ impl fmt::Display for Type {
             // (`url::Url`). The Display form mirrors the Buff surface
             // name so diagnostics read naturally.
             Type::Url => f.write_str("URL"),
+            // T124j: prelude filesystem-path type. Opaque value type
+            // whose canonical Rust representation lives in the codegen
+            // crate (`std::path::PathBuf`). The Display form mirrors
+            // the Buff surface name so diagnostics read naturally.
+            Type::Path => f.write_str("Path"),
         }
     }
 }

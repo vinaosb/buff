@@ -151,6 +151,40 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # deferred). Snapshots + extern_crates set is the verifiable contract.
 serde_yml = "0.0.12"
 csv = "1"
+# T124j: Filesystem modules (Path / Dir / Tempfile) wrap two mature
+# Rust crates + std::path / std::fs. Each codegen-lowered call uses
+# fully-qualified paths so generated code requires no `use` import -
+# but the recorded name in `extern_crates` signals to the pipeline /
+# build-driver that the generated Cargo project must declare each
+# crate in `[dependencies]`.
+#
+# - `walkdir` 2.x: the burntsushi/walkdir crate. Used by `Dir.walk(p)`
+#   which lowers to `walkdir::WalkDir::new(p).into_iter()
+#   .filter_map(|e| e.ok()).map(|e| e.path().to_path_buf())
+#   .collect::<Vec<std::path::PathBuf>>()`. We pin to the 2.x major
+#   (the long-standing API surface - `WalkDir::new(p).into_iter()` is
+#   stable since 2.0).
+# - `tempfile` 3.x: the stebalian/tempfile crate. Used by
+#   `Tempfile.create()` which lowers to `tempfile::NamedTempFile::new()
+#   .map(|f| f.into_temp_path().keep().unwrap_or_default())
+#   .unwrap_or_default()` (panic-free - empty PathBuf on failure).
+#   `Tempfile.dir()` uses `std::env::temp_dir()` (NO extern crate -
+#   `tempfile::env::temp_dir()` is a re-export of the std fn, so we
+#   splice the std path directly).
+#
+# NOTE: `Path` (value type) + `Dir.list/create/remove` + `Path.exists`
+# wrap `std::path::Path`/`PathBuf` + `std::fs::read_dir`/
+# `create_dir_all`/`remove_dir_all`/`Path::exists`. std-only - NO
+# extern crate recorded for those (mirrors the Math/Strings/Args/Env
+# stance from T124f/T124g).
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/percent-
+# encoding/uuid/url/serde_yml/csv codegen-only linking boundary
+# (single-file `buff run` rustc path does NOT link them; cargo-project
+# wiring is deferred). Snapshots + extern_crates set is the verifiable
+# contract.
+walkdir = "2"
+tempfile = "3"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }

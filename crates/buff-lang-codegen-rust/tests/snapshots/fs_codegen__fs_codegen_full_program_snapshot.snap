@@ -1,0 +1,35 @@
+---
+source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+expression: src
+---
+fn main() {
+    let p: std::path::PathBuf = std::path::PathBuf::from("a").join("b").join("c.txt");
+    let parent = p.parent().map(|p| p.to_path_buf());
+    let ext = p.clone().extension().map(|e| e.to_string());
+    let base = p
+        .clone()
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let exists = p.clone().exists();
+    let entries: Vec<String> = std::fs::read_dir("/tmp")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    std::fs::create_dir_all("/tmp/a").ok();
+    std::fs::remove_dir_all("/tmp/a").ok();
+    let walked: Vec<std::path::PathBuf> = walkdir::WalkDir::new("/tmp")
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect::<Vec<std::path::PathBuf>>();
+    let tmp: std::path::PathBuf = tempfile::NamedTempFile::new()
+        .map(|f| f.into_temp_path().keep().unwrap_or_default())
+        .unwrap_or_default();
+    let tmpdir: std::path::PathBuf = std::env::temp_dir();
+}

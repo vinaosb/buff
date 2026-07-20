@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+expression: src
+---
+fn f() {
+    std::env::temp_dir();
+}

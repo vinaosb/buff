@@ -1,0 +1,14 @@
+---
+source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+expression: src
+---
+fn f() {
+    std::fs::read_dir("/tmp")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+}

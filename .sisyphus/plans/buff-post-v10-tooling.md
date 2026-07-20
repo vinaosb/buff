@@ -1309,7 +1309,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): YAML and CSV data format modules`
 
-- [ ] **T124j: Filesystem modules — Path, Dir, Tempfile** [unspecified-high]
+- [x] **T124j: Filesystem modules — Path, Dir, Tempfile** [unspecified-high]
 
   **What to do**:
   - `Path`: `Path.join(a, b)`, `.parent() -> Option<Path>`, `.extension() -> Option<String>`, `.basename() -> String`, `.exists() -> Bool` — wrap `std::path::Path`

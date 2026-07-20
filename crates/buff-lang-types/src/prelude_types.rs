@@ -361,6 +361,100 @@ pub enum PreludeType {
     /// (parse + stringify). The `csv` crate is recorded in codegen
     /// `extern_crates` when a Buff program uses `Csv`.
     Csv,
+    /// `Path` - the filesystem-path runtime value type (T124j).
+    /// Wraps `std::path::PathBuf` (the owned, mutable path type -
+    /// Buff surfaces owned values; `&Path` is hidden from users).
+    /// Constructed via the associated function `Path.join(a, b, ...)`
+    /// (variadic - 2+ args; lowers to a chained
+    /// `std::path::PathBuf::from(a).join(b).join(c)...`). Supports
+    /// four instance methods:
+    /// - `.parent()` - the parent directory. Returns `Option<Path>`
+    ///   (None when the path has no parent - e.g. `/` or a bare
+    ///   filename; NEVER panics). Wraps `recv.parent()
+    ///   .map(|p| p.to_path_buf())`.
+    /// - `.extension()` - the file extension (without the leading
+    ///   `.`). Returns `Option<String>` (None when there's no
+    ///   extension). Wraps `recv.extension().map(|e|
+    ///   e.to_string())`.
+    /// - `.basename()` - the trailing filename component. Returns
+    ///   `String` (empty String when the path terminates in `..`
+    ///   or `/` - NEVER panics). Wraps `recv.file_name()
+    ///   .and_then(|n| n.to_str()).unwrap_or_default().to_string()`.
+    /// - `.exists()` - test whether the path exists on disk.
+    ///   Returns `Bool`. Wraps `recv.exists()`.
+    ///
+    /// This is the THIRD v1.4 prelude-type variant that is BOTH a
+    /// real runtime value AND carries rich instance methods (after
+    /// `Regex` T124d and `URL` T124h). `buff_type()` returns
+    /// [`Type::Path`] (a real value type, NOT [`Type::Void`] like
+    /// the namespace-only modules); `is_namespace_only()` returns
+    /// `false`. NO extern crate is recorded for Path itself
+    /// (`std::path` is in std) - but Path's instance-method
+    /// accessors lower to `std::path::PathBuf::parent` /
+    /// `extension` / `file_name` / `exists`, all std.
+    /// Distinct from the namespace-only [`Self::Dir`] and
+    /// [`Self::Tempfile`] modules (which it shipped alongside).
+    Path,
+    /// `Dir` - the directory-operations namespace (T124j). Wraps
+    /// `std::fs::read_dir` / `create_dir_all` / `remove_dir_all` +
+    /// the `walkdir` Rust crate (burntsushi/walkdir) for
+    /// `Dir.walk`. Like [`Self::Log`] / [`Self::Toml`], `Dir` is
+    /// **never a runtime value** - it's a NAMESPACE exposing four
+    /// associated functions:
+    /// - `Dir.list(path)` - list immediate directory entries. Wraps
+    ///   `std::fs::read_dir(p).filter_map(|e| e.ok()).map(|e|
+    ///   e.file_name().to_string_lossy().into_owned())
+    ///   .collect::<Vec<String>>()` (skip inaccessible entries -
+    ///   NEVER panics; returns `Vector<String>` of entry names,
+    ///   NOT paths).
+    /// - `Dir.create(path)` - create the directory (and any missing
+    ///   parents - mirrors `mkdir -p`). Wraps
+    ///   `std::fs::create_dir_all(p).ok()` (panic-free - discards
+    ///   errors via `.ok()`; returns `Void`).
+    /// - `Dir.remove(path)` - remove the directory and all its
+    ///   contents recursively. Wraps
+    ///   `std::fs::remove_dir_all(p).ok()` (panic-free - `.ok()`
+    ///   discards errors; returns `Void`).
+    /// - `Dir.walk(path)` - recursively walk the directory tree.
+    ///   Wraps `walkdir::WalkDir::new(p).into_iter()
+    ///   .filter_map(|e| e.ok()).map(|e| e.path().to_path_buf())
+    ///   .collect::<Vec<std::path::PathBuf>>()` (skip inaccessible
+    ///   entries - NEVER panics; returns `Vector<Path>` of all
+    ///   paths found during the traversal, depth-first).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `walkdir` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Dir.walk`;
+    /// `Dir.list` / `Dir.create` / `Dir.remove` use only std
+    /// (`std::fs::*`) and record NO extern crate.
+    Dir,
+    /// `Tempfile` - the temporary-file namespace (T124j). Wraps
+    /// the `tempfile` Rust crate (stebalian/tempfile) +
+    /// `std::env::temp_dir`. Like [`Self::Log`] / [`Self::Toml`] /
+    /// [`Self::Dir`], `Tempfile` is **never a runtime value** -
+    /// it's a NAMESPACE exposing two associated functions:
+    /// - `Tempfile.create()` - create a new empty temporary file
+    ///   in the OS-default temp directory. Returns `Path` (the
+    ///   kept file path - the underlying `NamedTempFile` is
+    ///   dropped after the path is persisted via `into_temp_path()
+    ///   .keep()`). Wraps `tempfile::NamedTempFile::new()
+    ///   .map(|f| f.into_temp_path().keep().unwrap_or_default())
+    ///   .unwrap_or_default()` (panic-free - empty PathBuf on
+    ///   failure - NEVER panics).
+    /// - `Tempfile.dir()` - the OS-default temp directory path.
+    ///   Returns `Path`. Wraps `std::env::temp_dir()` (the
+    ///   `tempfile::env::temp_dir()` is a re-export of the std
+    ///   fn; we splice the std path directly so NO extern crate
+    ///   is needed for this call alone).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `tempfile` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Tempfile.create`
+    /// (the `into_temp_path().keep()` chain is a `tempfile`-crate
+    /// API); `Tempfile.dir` records `tempfile` too for symmetry
+    /// (a program using `Tempfile.dir` likely uses `Tempfile.create`
+    /// too, but the narrow walker flags either call).
+    Tempfile,
 }
 
 impl PreludeType {
@@ -408,6 +502,18 @@ impl PreludeType {
         // Vector<Vector<String>> for Csv). NO runtime value type.
         PreludeType::Yaml,
         PreludeType::Csv,
+        // T124j: Path / Dir / Tempfile - three filesystem modules.
+        // Path is the third runtime-value-with-rich-instance-methods
+        // type (after Regex T124d + URL T124h) - it's a `PathBuf`
+        // value with `.parent()` / `.extension()` / `.basename()` /
+        // `.exists()` instance methods. Dir + Tempfile are
+        // namespace-only modules (mirror Log / Toml / Math / Random /
+        // Strings / Args / Env / Base64 / Hex / URLEncode / UUID /
+        // Yaml / Csv): `Dir.list` / `Dir.create` / `Dir.remove` /
+        // `Dir.walk` + `Tempfile.create` / `Tempfile.dir`.
+        PreludeType::Path,
+        PreludeType::Dir,
+        PreludeType::Tempfile,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -496,6 +602,28 @@ impl PreludeType {
             // `csv::ReaderBuilder` / `csv::Writer` paths without
             // rewriting.
             PreludeType::Csv => "Csv",
+            // T124j: the Path prelude type name. Mirrors Rust's
+            // `std::path::Path` surface so the codegen can splice
+            // `std::path::PathBuf::from(...).join(...)` paths
+            // without rewriting. Note: the underlying Rust type is
+            // `PathBuf` (NOT `Path`) - Buff surfaces owned values;
+            // the case mapping happens in codegen's `buff_type_to_syn`
+            // arm.
+            PreludeType::Path => "Path",
+            // T124j: the Dir prelude type name. Buff-flavored
+            // shortening of `Directory` (clearer than `Fs` or
+            // `Directory`; matches the canonical scripting-lang
+            // convention). The codegen splices `std::fs::read_dir` /
+            // `create_dir_all` / `remove_dir_all` (std - no extern
+            // crate needed for those) and `walkdir::WalkDir::new(p)`
+            // for `Dir.walk`.
+            PreludeType::Dir => "Dir",
+            // T124j: the Tempfile prelude type name. Mirrors the
+            // Rust crate name (`tempfile`) so the codegen can splice
+            // `tempfile::NamedTempFile::new()` paths without
+            // rewriting. `Tempfile.dir` uses `std::env::temp_dir()`
+            // (std-only, NO extern crate needed for that call alone).
+            PreludeType::Tempfile => "Tempfile",
         }
     }
 
@@ -591,6 +719,26 @@ impl PreludeType {
             // String>> instead of a heterogeneous Map), but the
             // namespace-only stance is identical.
             PreludeType::Csv => Type::Void,
+            // T124j: Path IS a runtime value - returns the opaque
+            // filesystem-path type (mapped to `std::path::PathBuf`
+            // at codegen time). Distinct from the namespace-only
+            // Dir / Tempfile modules (which return Void). Mirrors
+            // Regex (T124d) and URL (T124h) as the third runtime-
+            // value-with-rich-instance-methods type.
+            PreludeType::Path => Type::Path,
+            // T124j: namespace-only - Dir has no value
+            // representation. Mirrors Log / Toml / Yaml / Csv
+            // exactly: the namespace itself is never a value, only
+            // its associated functions (`Dir.list` / `Dir.create` /
+            // `Dir.remove` / `Dir.walk`) are callable. Same surface
+            // as the other namespace-only modules.
+            PreludeType::Dir => Type::Void,
+            // T124j: namespace-only - Tempfile has no value
+            // representation. Mirrors Log / Toml / Yaml / Csv /
+            // Dir: the namespace itself is never a value, only its
+            // associated functions (`Tempfile.create` /
+            // `Tempfile.dir`) are callable.
+            PreludeType::Tempfile => Type::Void,
         }
     }
 
@@ -613,6 +761,8 @@ impl PreludeType {
                 | PreludeType::UUID
                 | PreludeType::Yaml
                 | PreludeType::Csv
+                | PreludeType::Dir
+                | PreludeType::Tempfile
         )
     }
 }
@@ -883,6 +1033,62 @@ pub enum PreludeAssocFn {
     /// algorithm (v4 is random; v7 is timestamp-prefixed for sort
     /// stability) but identical surface type (both return String).
     V7,
+    // ---- Filesystem modules (T124j) ---------------------------------
+    // These variants follow the precedent set by `Parse` (shared by
+    // DateTime / Date / Toml / URL / UUID), `Get` (shared by
+    // Args.get / Env.get), `Encode` / `Decode` (shared by Base64 /
+    // Hex / URLEncode), `List` (shared by Args.list / Dir.list),
+    // and `Join` (shared by Strings.join / Path.join): a single
+    // variant may be valid on MULTIPLE prelude types, with the
+    // (type, method) pair dispatched in [`assoc_fn_return_type`] +
+    // the codegen arm.
+    //
+    /// `Dir.create(path)` / `Tempfile.create()` - create a directory
+    /// or a temporary file. Wraps:
+    /// - On `Dir`: `std::fs::create_dir_all(p).ok()` (creates the
+    ///   directory and any missing parents - mirrors `mkdir -p`;
+    ///   returns `Void`, discards errors via `.ok()` - NEVER
+    ///   panics).
+    /// - On `Tempfile`: `tempfile::NamedTempFile::new()
+    ///   .map(|f| f.into_temp_path().keep().unwrap_or_default())
+    ///   .unwrap_or_default()` (creates a new empty temp file in
+    ///   the OS-default temp directory; returns `Path` - the kept
+    ///   file path - empty PathBuf on failure - NEVER panics).
+    ///
+    /// The shared variant mirrors `Parse` (DateTime.parse /
+    /// Date.parse / Toml.parse / URL.parse / UUID.parse),
+    /// `Get` (Args.get / Env.get), `Encode` / `Decode` (Base64 /
+    /// Hex / URLEncode), `List` (Args.list / Dir.list), and `Join`
+    /// (Strings.join / Path.join). Dispatch on the (type, method)
+    /// pair is exhaustive in [`assoc_fn_return_type`].
+    Create,
+    /// `Dir.remove(path)` - remove the directory and all its
+    /// contents recursively. One arg (the path). Returns `Void`.
+    /// Wraps `std::fs::remove_dir_all(p).ok()` (panic-free -
+    /// discards errors via `.ok()`; mirrors the Dir.create
+    /// panic-free stance). Dir-only (no other prelude type has a
+    /// `remove` method).
+    Remove,
+    /// `Dir.walk(path)` - recursively walk the directory tree.
+    /// One arg (the path). Returns `Vector<Path>` (a Vec<PathBuf>
+    /// of every path found during the traversal - depth-first).
+    /// Wraps `walkdir::WalkDir::new(p).into_iter()
+    /// .filter_map(|e| e.ok()).map(|e| e.path().to_path_buf())
+    /// .collect::<Vec<std::path::PathBuf>>()` (skip inaccessible
+    /// entries via `.filter_map(|e| e.ok())` - NEVER panics,
+    /// mirroring the Csv.parse panic-free stance from T124i). The
+    /// `walkdir` crate is recorded in codegen `extern_crates` when
+    /// a Buff program uses `Dir.walk`. Dir-only.
+    Walk,
+    /// `Tempfile.dir()` - the OS-default temp directory path. Zero
+    /// args. Returns `Path` (the temp directory as a `PathBuf`).
+    /// Wraps `std::env::temp_dir()` (the `tempfile::env::temp_dir`
+    /// is a re-export of the std fn; we splice the std path
+    /// directly so this call alone needs NO extern crate). The
+    /// `tempfile` crate is still recorded in codegen
+    /// `extern_crates` for symmetry (any Tempfile.* call flags the
+    /// crate). Tempfile-only.
+    Dir,
 }
 
 impl PreludeAssocFn {
@@ -951,6 +1157,17 @@ impl PreludeAssocFn {
         PreludeAssocFn::Decode,
         PreludeAssocFn::V4,
         PreludeAssocFn::V7,
+        // T124j: Filesystem modules assoc fns (4 distinct names):
+        // create/remove/walk/dir. `Create` is shared between
+        // Dir.create and Tempfile.create (mirrors `Parse` being
+        // shared). `Remove` / `Walk` are Dir-only; `Dir` is
+        // Tempfile-only. Note: Path.join reuses the existing `Join`
+        // variant (also used by Strings.join) and Dir.list reuses
+        // the existing `List` variant (also used by Args.list).
+        PreludeAssocFn::Create,
+        PreludeAssocFn::Remove,
+        PreludeAssocFn::Walk,
+        PreludeAssocFn::Dir,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1035,6 +1252,17 @@ impl PreludeAssocFn {
             PreludeAssocFn::Decode => "decode",
             PreludeAssocFn::V4 => "v4",
             PreludeAssocFn::V7 => "v7",
+            // T124j: Filesystem modules assoc fn names. `create`
+            // mirrors the canonical "create" verb (shared by
+            // Dir.create / Tempfile.create - same name, different
+            // per-type semantics, exactly like `parse` shared by
+            // DateTime / Date / Toml / URL / UUID). `remove` /
+            // `walk` are Dir-only canonical fs verbs. `dir` is
+            // Tempfile-only (short for "directory").
+            PreludeAssocFn::Create => "create",
+            PreludeAssocFn::Remove => "remove",
+            PreludeAssocFn::Walk => "walk",
+            PreludeAssocFn::Dir => "dir",
         }
     }
 }
@@ -1406,6 +1634,63 @@ pub fn assoc_fn_return_type(
         // converts the buffer to String (lossy/empty on failure -
         // NEVER panics, mirroring the Toml / Yaml stringify stance).
         (PreludeType::Csv, PreludeAssocFn::Stringify) => Some(Type::string()),
+        // T124j: Path module - `Path.join(a, b, ...)` returns a
+        // `Path` value (the chained join of all args). The codegen
+        // emits `std::path::PathBuf::from(a).join(b).join(c)...` for
+        // any number of args >= 1 (a single-arg `Path.join(a)`
+        // returns a PathBuf of `a` itself, the no-op join). The arg
+        // types are typically String or Path; the return type is
+        // always `Path` (PathBuf at the codegen level).
+        //
+        // Same shared `Join` variant as Strings.join (T124f). The
+        // (Path, Join) pair is dispatched on the receiver type.
+        (PreludeType::Path, PreludeAssocFn::Join) => Some(Type::Path),
+        // T124j: Dir module.
+        // `Dir.list(path)` -> Vector<String>. Wraps
+        // `std::fs::read_dir(p).filter_map(|e| e.ok()).map(|e|
+        // e.file_name().to_string_lossy().into_owned())
+        // .collect::<Vec<String>>()` (skip inaccessible entries -
+        // NEVER panics). Returns entry NAMES (NOT paths) - the
+        // surface mirrors the typical shell `ls` / Python
+        // `os.listdir` semantics. Same shared `List` variant as
+        // Args.list (T124g); dispatched on the (Dir, List) pair.
+        (PreludeType::Dir, PreludeAssocFn::List) => Some(Type::vector(Type::string())),
+        // `Dir.create(path)` -> Void. Wraps
+        // `std::fs::create_dir_all(p).ok()` (creates the directory
+        // and any missing parents - mirrors `mkdir -p`; discards
+        // errors via `.ok()` - NEVER panics). Returns Void.
+        (PreludeType::Dir, PreludeAssocFn::Create) => Some(Type::Void),
+        // `Dir.remove(path)` -> Void. Wraps
+        // `std::fs::remove_dir_all(p).ok()` (removes the directory
+        // tree recursively; discards errors via `.ok()` - NEVER
+        // panics, mirroring the Dir.create stance).
+        (PreludeType::Dir, PreludeAssocFn::Remove) => Some(Type::Void),
+        // `Dir.walk(path)` -> Vector<Path>. Wraps
+        // `walkdir::WalkDir::new(p).into_iter().filter_map(|e| e.ok())
+        // .map(|e| e.path().to_path_buf())
+        // .collect::<Vec<std::path::PathBuf>>()` (skip inaccessible
+        // entries via `.filter_map(|e| e.ok())` - NEVER panics,
+        // mirroring the Csv.parse panic-free stance). The walkdir
+        // crate is recorded in codegen `extern_crates` when a Buff
+        // program uses `Dir.walk`.
+        (PreludeType::Dir, PreludeAssocFn::Walk) => Some(Type::vector(Type::Path)),
+        // T124j: Tempfile module.
+        // `Tempfile.create()` -> Path. Wraps
+        // `tempfile::NamedTempFile::new().map(|f|
+        // f.into_temp_path().keep().unwrap_or_default())
+        // .unwrap_or_default()` (panic-free - empty PathBuf on
+        // failure - NEVER panics). The `into_temp_path().keep()`
+        // chain persists the temp file's path beyond the
+        // NamedTempFile's drop (the file becomes a regular file
+        // the user can write/read/delete like any other).
+        (PreludeType::Tempfile, PreludeAssocFn::Create) => Some(Type::Path),
+        // `Tempfile.dir()` -> Path. Wraps `std::env::temp_dir()`
+        // (the `tempfile::env::temp_dir()` is a re-export of the
+        // std fn; we splice the std path directly so NO extern
+        // crate is needed for this call alone - but the narrow
+        // walker records `tempfile` for symmetry with
+        // Tempfile.create).
+        (PreludeType::Tempfile, PreludeAssocFn::Dir) => Some(Type::Path),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -1501,6 +1786,34 @@ pub enum PreludeInstanceFn {
     /// key.to_string()).map(|(_, v)| v.into_owned())` (linear scan;
     /// deterministic - first match wins).
     Query,
+    // ---- Path instance methods (T124j) ------------------------------
+    /// `path.parent()` - the parent directory of a Path value. Zero
+    /// args. Returns `Option<Path>` (None when the path has no
+    /// parent - e.g. `/` or a bare filename - NEVER panics). Wraps
+    /// `std::path::Path::parent().map(|p| p.to_path_buf())` (the
+    /// `.to_path_buf()` lifts `&Path` to owned `PathBuf` - Buff
+    /// hides references from users).
+    Parent,
+    /// `path.extension()` - the file extension of a Path value
+    /// (without the leading `.`). Zero args. Returns
+    /// `Option<String>` (None when there's no extension - NEVER
+    /// panics). Wraps `std::path::Path::extension().map(|e|
+    /// e.to_string())`.
+    Extension,
+    /// `path.basename()` - the trailing filename component of a
+    /// Path value. Zero args. Returns `String` (empty String when
+    /// the path terminates in `..` or `/` - NEVER panics). Wraps
+    /// `std::path::Path::file_name().and_then(|n| n.to_str())
+    /// .unwrap_or_default().to_string()` (the `.and_then(|n|
+    /// n.to_str())` handles non-UTF-8 filenames lossy-ly - they
+    /// become None and fall through to the empty String default).
+    Basename,
+    /// `path.exists()` - test whether a Path value refers to an
+    /// existing path on disk. Zero args. Returns `Bool`. Wraps
+    /// `std::path::Path::exists()` (the underlying std method is
+    /// infallible - returns `false` on permission errors, never
+    /// panics).
+    Exists,
 }
 
 impl PreludeInstanceFn {
@@ -1527,6 +1840,14 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Host,
         PreludeInstanceFn::Path,
         PreludeInstanceFn::Query,
+        // T124j: Path instance methods — Parent / Extension / Basename /
+        // Exists. All zero-arg accessors mirroring the URL accessor
+        // pattern (T124h). Mirrors Regex (T124d) / URL (T124h) as the
+        // third runtime-value-with-rich-instance-methods type.
+        PreludeInstanceFn::Parent,
+        PreludeInstanceFn::Extension,
+        PreludeInstanceFn::Basename,
+        PreludeInstanceFn::Exists,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -1566,6 +1887,18 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Host => "host",
             PreludeInstanceFn::Path => "path",
             PreludeInstanceFn::Query => "query",
+            // T124j: Path instance method names mirror Rust's
+            // `std::path::Path` method names where they exist
+            // (`parent` / `extension` / `exists` map 1:1 to the std
+            // methods). `basename` is a Buff-flavored name (clearer
+            // than Rust's `file_name` - basename is the canonical
+            // POSIX / Python / Node term); codegen rewrites it to
+            // `recv.file_name().and_then(|n| n.to_str())
+            // .unwrap_or_default().to_string()`.
+            PreludeInstanceFn::Parent => "parent",
+            PreludeInstanceFn::Extension => "extension",
+            PreludeInstanceFn::Basename => "basename",
+            PreludeInstanceFn::Exists => "exists",
         }
     }
 }
@@ -1656,6 +1989,28 @@ pub fn instance_fn_return_type(
         // absent - NEVER panics.
         (Type::Url, PreludeInstanceFn::Query) => Some(Type::option(Type::string())),
 
+        // T124j: Path instance methods. `path.parent()` ->
+        // Option<Path>; `path.extension()` -> Option<String>;
+        // `path.basename()` -> String; `path.exists()` -> Bool.
+        // Each lowers to a fully-qualified `std::path::Path` method
+        // (Buff hides references from users; the underlying Rust
+        // accessors return `Option<&Path>` / `Option<&OsStr>` /
+        // `Option<&OsStr>` / `bool`).
+        //
+        // `path.parent()` -> Option<Path>. Wraps `recv.parent()
+        // .map(|p| p.to_path_buf())` (the `.to_path_buf()` lifts
+        // `&Path` to owned `PathBuf` - Buff surfaces owned values).
+        (Type::Path, PreludeInstanceFn::Parent) => Some(Type::option(Type::Path)),
+        // `path.extension()` -> Option<String>. Wraps
+        // `recv.extension().map(|e| e.to_string())`.
+        (Type::Path, PreludeInstanceFn::Extension) => Some(Type::option(Type::string())),
+        // `path.basename()` -> String. Wraps `recv.file_name()
+        // .and_then(|n| n.to_str()).unwrap_or_default().to_string()`
+        // (lossy on non-UTF-8 filenames - NEVER panics).
+        (Type::Path, PreludeInstanceFn::Basename) => Some(Type::string()),
+        // `path.exists()` -> Bool. Wraps `recv.exists()`.
+        (Type::Path, PreludeInstanceFn::Exists) => Some(Type::bool()),
+
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
         _ => None,
@@ -1691,7 +2046,18 @@ mod tests {
             // so it skips the `is_prelude_datetime` check (its
             // `buff_type()` returns `Type::Url`, which round-trips
             // through `is_prelude_url()` instead).
-            if !t.is_namespace_only() && t != PreludeType::Regex && t != PreludeType::URL {
+            //
+            // T124j: `Path` is the third runtime-value-with-methods
+            // type after Regex (T124d) + URL (T124h). Like Regex +
+            // URL it's NOT a datetime, so it skips the
+            // `is_prelude_datetime` check (its `buff_type()` returns
+            // `Type::Path`, which round-trips through
+            // `is_prelude_path()` instead).
+            if !t.is_namespace_only()
+                && t != PreludeType::Regex
+                && t != PreludeType::URL
+                && t != PreludeType::Path
+            {
                 assert!(t.buff_type().is_prelude_datetime());
             }
         }
@@ -1924,9 +2290,10 @@ mod tests {
         // modules (Args, Env) shipped in T124g + 4 namespace-only web
         // modules (Base64, Hex, URLEncode, UUID) + 1 runtime-value-
         // with-methods type (URL) shipped in T124h + 2 namespace-only
-        // data-format modules (Yaml, Csv) shipped in T124i = 20 total
-        // prelude types.
-        assert_eq!(PreludeType::ALL.len(), 20);
+        // data-format modules (Yaml, Csv) shipped in T124i + 1 runtime-
+        // value-with-methods type (Path) + 2 namespace-only modules
+        // (Dir, Tempfile) shipped in T124j = 23 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 23);
     }
 
     #[test]
@@ -1988,6 +2355,29 @@ mod tests {
         assert!(!PreludeType::Log.buff_type().is_prelude_url());
         assert!(!PreludeType::Base64.buff_type().is_prelude_url());
         assert!(!PreludeType::UUID.buff_type().is_prelude_url());
+        // T124j: Path type + predicate. Path is NOT a datetime family
+        // member, NOT a Regex, and NOT a URL - its dedicated
+        // `is_prelude_path` predicate captures the filesystem-path
+        // runtime-value case.
+        assert!(Type::path().is_prelude_path());
+        assert!(!Type::path().is_prelude_datetime());
+        assert!(!Type::path().is_prelude_regex());
+        assert!(!Type::path().is_prelude_url());
+        assert!(!Type::DateTime.is_prelude_path());
+        assert!(!Type::Regex.is_prelude_path());
+        assert!(!Type::Url.is_prelude_path());
+        assert!(!Type::string().is_prelude_path());
+        // Cross-check via the prelude-type registry: `Path.buff_type()`
+        // round-trips through `is_prelude_path` (the only prelude type
+        // for which it does). The namespace-only Dir / Tempfile modules
+        // do NOT round-trip (their `buff_type()` returns `Type::Void`).
+        assert!(PreludeType::Path.buff_type().is_prelude_path());
+        assert!(!PreludeType::DateTime.buff_type().is_prelude_path());
+        assert!(!PreludeType::Regex.buff_type().is_prelude_path());
+        assert!(!PreludeType::URL.buff_type().is_prelude_path());
+        assert!(!PreludeType::Log.buff_type().is_prelude_path());
+        assert!(!PreludeType::Dir.buff_type().is_prelude_path());
+        assert!(!PreludeType::Tempfile.buff_type().is_prelude_path());
     }
 
     #[test]
@@ -2002,6 +2392,8 @@ mod tests {
         // T124h: URL Display mirrors the Buff surface name (all-caps,
         // matches the `URL.parse(...)` user-facing spelling).
         assert_eq!(Type::Url.to_string(), "URL");
+        // T124j: Path Display mirrors the Buff surface name.
+        assert_eq!(Type::Path.to_string(), "Path");
     }
 
     // T124d: Regex module — `Regex.compile(p)` assoc-fn lookups + return type.
@@ -2277,11 +2669,26 @@ mod tests {
         // (Log + Toml + Math + Random + Strings + Args + Env + Base64 +
         // Hex + URLEncode + UUID + Yaml + Csv). URL is NOT in this count
         // (it's a runtime value type, not a namespace module).
+        // T124j: Dir + Tempfile are also namespace-only modules
+        // (mirror Yaml / Csv / Log / ...). Path is NOT in this
+        // count (it's a runtime-value-with-instance-methods type,
+        // mirrors Regex T124d + URL T124h). The count is now
+        // exactly 15 (Log + Toml + Math + Random + Strings + Args +
+        // Env + Base64 + Hex + URLEncode + UUID + Yaml + Csv + Dir
+        // + Tempfile).
+        assert!(PreludeType::Dir.is_namespace_only());
+        assert!(PreludeType::Tempfile.is_namespace_only());
+        // T124j: Path is NOT namespace-only - it's a real runtime
+        // value type (mirrors Regex T124d + URL T124h's runtime-
+        // value-with-rich-instance-methods stance). Distinct from
+        // the namespace-only Dir / Tempfile modules it shipped
+        // alongside.
+        assert!(!PreludeType::Path.is_namespace_only());
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        assert_eq!(namespace_only_count, 13);
+        assert_eq!(namespace_only_count, 15);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +
@@ -2897,6 +3304,337 @@ mod tests {
         // is invalid (Stringify is shared by Toml/Yaml/Csv only).
         assert_eq!(
             assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Stringify, &[]),
+            None
+        );
+    }
+
+    // T124j: Path module - `Path.join(a, b, ...)` assoc-fn lookup +
+    // return type + the four instance methods. Mirrors the URL
+    // runtime-value-with-methods precedent (T124h) - Path is the
+    // third such type (after Regex T124d + URL T124h).
+    #[test]
+    fn prelude_path_assoc_fn_lookup_valid_pairs() {
+        // `Path.join` reuses the registry's shared `Join` variant
+        // (also used by Strings.join from T124f). Same name,
+        // different per-type semantics dispatched on the (Path,
+        // Join) pair.
+        assert_eq!(
+            assoc_fn_lookup("Path", "join"),
+            Some((PreludeType::Path, PreludeAssocFn::Join))
+        );
+        // `Path` is recognised as a prelude type.
+        assert!(is_prelude_type("Path"));
+        // `Path.buff_type()` is `Path` (a real runtime value, NOT
+        // Void - mirrors Regex / URL).
+        assert_eq!(PreludeType::Path.buff_type(), Type::Path);
+        // `Path.is_namespace_only()` is false (it IS a runtime value).
+        assert!(!PreludeType::Path.is_namespace_only());
+        // The other prelude types are NOT Path (round-trip via
+        // buff_type).
+        assert!(!PreludeType::DateTime.buff_type().is_prelude_path());
+        assert!(!PreludeType::Regex.buff_type().is_prelude_path());
+        assert!(!PreludeType::URL.buff_type().is_prelude_path());
+        assert!(PreludeType::Path.buff_type().is_prelude_path());
+    }
+
+    #[test]
+    fn prelude_path_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Path.now is invalid (now belongs to DateTime/Instant).
+        assert_eq!(assoc_fn_lookup("Path", "now"), None);
+        // Path.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("Path", "compile"), None);
+        // Path.parse is invalid (Path has join, not parse).
+        assert_eq!(assoc_fn_lookup("Path", "parse"), None);
+        // Path.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Path", "unknown"), None);
+        // Path.list is invalid (list belongs to Args/Dir).
+        assert_eq!(assoc_fn_lookup("Path", "list"), None);
+        // DateTime.join is invalid (join belongs to Strings/Path).
+        assert_eq!(assoc_fn_lookup("DateTime", "join"), None);
+        // Strings.join IS valid (reuses Join) - confirms Path.join
+        // is also valid via the same overload-by-type pattern.
+        assert_eq!(
+            assoc_fn_lookup("Strings", "join"),
+            Some((PreludeType::Strings, PreludeAssocFn::Join))
+        );
+    }
+
+    #[test]
+    fn prelude_path_assoc_fn_return_type() {
+        // Path.join(a, b, ...) -> Path.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Path,
+                PreludeAssocFn::Join,
+                &[Type::string(), Type::string()]
+            ),
+            Some(Type::Path)
+        );
+        // Single-arg join is also valid (returns PathBuf of the arg).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Path, PreludeAssocFn::Join, &[Type::string()]),
+            Some(Type::Path)
+        );
+        // Path + non-Path method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Path, PreludeAssocFn::Now, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Path, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        // Non-Path type + Path method: a hypothetical `(Strings, Join)`
+        // pair is valid (Strings reuses Join), but (Log, Join) is
+        // invalid (Log is namespace-only with debug/info/...).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Join, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn prelude_path_instance_fn_lookup_valid_pairs() {
+        // All four Path instance methods resolve via the registry
+        // when the receiver is `Type::Path`.
+        assert_eq!(
+            instance_fn_lookup(&Type::Path, "parent"),
+            Some(PreludeInstanceFn::Parent)
+        );
+        assert_eq!(
+            instance_fn_lookup(&Type::Path, "extension"),
+            Some(PreludeInstanceFn::Extension)
+        );
+        assert_eq!(
+            instance_fn_lookup(&Type::Path, "basename"),
+            Some(PreludeInstanceFn::Basename)
+        );
+        assert_eq!(
+            instance_fn_lookup(&Type::Path, "exists"),
+            Some(PreludeInstanceFn::Exists)
+        );
+    }
+
+    #[test]
+    fn prelude_path_instance_fn_lookup_rejects_invalid_pairs() {
+        // Path.format is invalid (format belongs to DateTime/Date/Time).
+        assert_eq!(instance_fn_lookup(&Type::Path, "format"), None);
+        // Path.year is invalid.
+        assert_eq!(instance_fn_lookup(&Type::Path, "year"), None);
+        // Path.unknown is invalid.
+        assert_eq!(instance_fn_lookup(&Type::Path, "unknown"), None);
+        // Path.parent is invalid when the receiver is NOT Path.
+        assert_eq!(instance_fn_lookup(&Type::DateTime, "parent"), None);
+        assert_eq!(instance_fn_lookup(&Type::String, "exists"), None);
+    }
+
+    #[test]
+    fn prelude_path_instance_fn_return_types() {
+        // path.parent() -> Option<Path>.
+        assert_eq!(
+            instance_fn_return_type(&Type::Path, PreludeInstanceFn::Parent, &[]),
+            Some(Type::option(Type::Path))
+        );
+        // path.extension() -> Option<String>.
+        assert_eq!(
+            instance_fn_return_type(&Type::Path, PreludeInstanceFn::Extension, &[]),
+            Some(Type::option(Type::string()))
+        );
+        // path.basename() -> String.
+        assert_eq!(
+            instance_fn_return_type(&Type::Path, PreludeInstanceFn::Basename, &[]),
+            Some(Type::string())
+        );
+        // path.exists() -> Bool.
+        assert_eq!(
+            instance_fn_return_type(&Type::Path, PreludeInstanceFn::Exists, &[]),
+            Some(Type::bool())
+        );
+        // Non-Path receiver + Path method is invalid.
+        assert_eq!(
+            instance_fn_return_type(&Type::DateTime, PreludeInstanceFn::Parent, &[]),
+            None
+        );
+        // Path receiver + non-Path method is invalid.
+        assert_eq!(
+            instance_fn_return_type(&Type::Path, PreludeInstanceFn::Format, &[Type::string()]),
+            None
+        );
+    }
+
+    // T124j: Dir module - `Dir.list/create/remove/walk` assoc-fn
+    // lookups + return types. Mirrors the Yaml / Csv namespace-only
+    // precedent (T124i) but for filesystem operations.
+    #[test]
+    fn prelude_dir_assoc_fn_lookup_valid_pairs() {
+        // `Dir.list` reuses the registry's shared `List` variant
+        // (also used by Args.list from T124g).
+        assert_eq!(
+            assoc_fn_lookup("Dir", "list"),
+            Some((PreludeType::Dir, PreludeAssocFn::List))
+        );
+        // `Dir.create` is the new shared Create variant (shared
+        // with Tempfile.create).
+        assert_eq!(
+            assoc_fn_lookup("Dir", "create"),
+            Some((PreludeType::Dir, PreludeAssocFn::Create))
+        );
+        // `Dir.remove` is the new Dir-only Remove variant.
+        assert_eq!(
+            assoc_fn_lookup("Dir", "remove"),
+            Some((PreludeType::Dir, PreludeAssocFn::Remove))
+        );
+        // `Dir.walk` is the new Dir-only Walk variant.
+        assert_eq!(
+            assoc_fn_lookup("Dir", "walk"),
+            Some((PreludeType::Dir, PreludeAssocFn::Walk))
+        );
+        // `Dir` is recognised as a prelude type.
+        assert!(is_prelude_type("Dir"));
+        // `Dir.buff_type()` is `Void` (no runtime value - namespace-only
+        // like Log / Toml / Yaml / Csv).
+        assert_eq!(PreludeType::Dir.buff_type(), Type::Void);
+        // `Dir.is_namespace_only()` is true.
+        assert!(PreludeType::Dir.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_dir_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Dir.now is invalid (now belongs to DateTime/Instant).
+        assert_eq!(assoc_fn_lookup("Dir", "now"), None);
+        // Dir.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("Dir", "compile"), None);
+        // Dir.parse is invalid (Dir has list/create/remove/walk, not parse).
+        assert_eq!(assoc_fn_lookup("Dir", "parse"), None);
+        // Dir.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Dir", "unknown"), None);
+        // Dir.join is invalid (join belongs to Strings/Path).
+        assert_eq!(assoc_fn_lookup("Dir", "join"), None);
+        // Dir.encode is invalid (encode belongs to Base64/Hex/URLEncode).
+        assert_eq!(assoc_fn_lookup("Dir", "encode"), None);
+        // DateTime.walk is invalid (walk belongs to Dir).
+        assert_eq!(assoc_fn_lookup("DateTime", "walk"), None);
+        // Regex.remove is invalid (remove belongs to Dir).
+        assert_eq!(assoc_fn_lookup("Regex", "remove"), None);
+    }
+
+    #[test]
+    fn prelude_dir_assoc_fn_return_types() {
+        // Dir.list(path) -> Vector<String>.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Dir, PreludeAssocFn::List, &[Type::Path]),
+            Some(Type::vector(Type::string()))
+        );
+        // Dir.create(path) -> Void.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Dir, PreludeAssocFn::Create, &[Type::Path]),
+            Some(Type::Void)
+        );
+        // Dir.remove(path) -> Void.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Dir, PreludeAssocFn::Remove, &[Type::Path]),
+            Some(Type::Void)
+        );
+        // Dir.walk(path) -> Vector<Path>.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Dir, PreludeAssocFn::Walk, &[Type::Path]),
+            Some(Type::vector(Type::Path))
+        );
+        // Dir + non-Dir method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Dir, PreludeAssocFn::Now, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Dir, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        // Non-Dir type + Dir method is invalid (the (Type, List) pair
+        // is shared by Args/Dir but (DateTime, Walk) is invalid).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::DateTime, PreludeAssocFn::Walk, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Remove, &[]),
+            None
+        );
+    }
+
+    // T124j: Tempfile module - `Tempfile.create/dir` assoc-fn
+    // lookups + return types. Mirrors the Dir namespace-only precedent.
+    #[test]
+    fn prelude_tempfile_assoc_fn_lookup_valid_pairs() {
+        // `Tempfile.create` reuses the new shared Create variant
+        // (also used by Dir.create).
+        assert_eq!(
+            assoc_fn_lookup("Tempfile", "create"),
+            Some((PreludeType::Tempfile, PreludeAssocFn::Create))
+        );
+        // `Tempfile.dir` is the new Tempfile-only Dir variant.
+        assert_eq!(
+            assoc_fn_lookup("Tempfile", "dir"),
+            Some((PreludeType::Tempfile, PreludeAssocFn::Dir))
+        );
+        // `Tempfile` is recognised as a prelude type.
+        assert!(is_prelude_type("Tempfile"));
+        // `Tempfile.buff_type()` is `Void` (no runtime value -
+        // namespace-only like Dir / Log / Toml / Yaml / Csv).
+        assert_eq!(PreludeType::Tempfile.buff_type(), Type::Void);
+        // `Tempfile.is_namespace_only()` is true.
+        assert!(PreludeType::Tempfile.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_tempfile_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Tempfile.now is invalid (now belongs to DateTime/Instant).
+        assert_eq!(assoc_fn_lookup("Tempfile", "now"), None);
+        // Tempfile.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("Tempfile", "compile"), None);
+        // Tempfile.parse is invalid (Tempfile has create/dir, not parse).
+        assert_eq!(assoc_fn_lookup("Tempfile", "parse"), None);
+        // Tempfile.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Tempfile", "unknown"), None);
+        // Tempfile.list is invalid (list belongs to Args/Dir).
+        assert_eq!(assoc_fn_lookup("Tempfile", "list"), None);
+        // Tempfile.walk is invalid (walk belongs to Dir).
+        assert_eq!(assoc_fn_lookup("Tempfile", "walk"), None);
+        // DateTime.dir is invalid (dir belongs to Tempfile).
+        assert_eq!(assoc_fn_lookup("DateTime", "dir"), None);
+        // Dir.dir is invalid (Dir has list/create/remove/walk, not dir).
+        assert_eq!(assoc_fn_lookup("Dir", "dir"), None);
+    }
+
+    #[test]
+    fn prelude_tempfile_assoc_fn_return_types() {
+        // Tempfile.create() -> Path.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Tempfile, PreludeAssocFn::Create, &[]),
+            Some(Type::Path)
+        );
+        // Tempfile.dir() -> Path.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Tempfile, PreludeAssocFn::Dir, &[]),
+            Some(Type::Path)
+        );
+        // Tempfile + non-Tempfile method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Tempfile, PreludeAssocFn::Now, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Tempfile, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        // Non-Tempfile type + Tempfile method: (Dir, Create) is valid
+        // (Dir reuses Create), but (Regex, Dir) is invalid (Dir method
+        // is Tempfile-only).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Dir, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Dir, &[]),
             None
         );
     }

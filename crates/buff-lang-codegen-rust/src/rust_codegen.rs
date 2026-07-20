@@ -638,6 +638,37 @@ impl RustCodegen {
         if program_uses_csv(decls) {
             self.extern_crates.insert("csv".to_string());
         }
+        // T124j: register the `walkdir` + `tempfile` crates as external
+        // dependencies when the program references the corresponding
+        // prelude modules (`Dir.walk(p)` / `Tempfile.create()` /
+        // `Tempfile.dir()`). Generated code uses fully-qualified
+        // `walkdir::WalkDir::new(...)` and `tempfile::NamedTempFile::new()`
+        // paths so no `use` import is emitted - but the recorded name
+        // signals to the pipeline / build-driver that the generated
+        // Cargo project must declare each crate in `[dependencies]`.
+        //
+        // NOTE: `Path` (value type) + `Dir.list/create/remove` +
+        // `Path.exists` wrap `std::path::Path`/`PathBuf` + `std::fs::*`
+        // (std-only - NO extern crate needed for those, mirroring the
+        // Math/Strings/Args/Env stance from T124f/T124g). `Tempfile.dir`
+        // uses `std::env::temp_dir()` (also std-only), but the narrow
+        // walker still records `tempfile` for symmetry (any Tempfile.*
+        // call flags the crate).
+        //
+        // Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/
+        // percent-encoding/uuid/url/serde_yml/csv registration pattern
+        // (T124b/T124c/T124d/T124e/T124f/T124g/T124h/T124i): single-
+        // file `buff run` rustc path does NOT link these crates; the
+        // codegen-only linking boundary is the accepted acceptance
+        // criterion for v1.4 prelude modules. Cargo-project wiring is
+        // deferred (snapshots + extern_crates set is the verifiable
+        // contract).
+        if program_uses_walkdir(decls) {
+            self.extern_crates.insert("walkdir".to_string());
+        }
+        if program_uses_tempfile(decls) {
+            self.extern_crates.insert("tempfile".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -3828,6 +3859,190 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Csv.stringify codegen parse: {e}")))
             }
+            // T124j: Path module - 1 assoc fn (join) wrapping
+            // `std::path::PathBuf` (std-only - NO extern crate
+            // needed). Path is a runtime-value type (NOT namespace-
+            // only like Dir/Tempfile) - `Path.join(a, b, ...)`
+            // returns a `Path` value carrying the four instance
+            // methods `.parent()` / `.extension()` / `.basename()` /
+            // `.exists()`.
+            //
+            // `Path.join(a, b, ...)` -> Path. Wraps a chained
+            // `std::path::PathBuf::from(a).join(b).join(c)...` for
+            // any number of args >= 1. A single-arg `Path.join(a)`
+            // returns `PathBuf::from(a)` (the no-op join). The
+            // `PathBuf::from` constructor accepts any `AsRef<Path>`
+            // - String / &str / PathBuf values all satisfy the bound
+            // via Rust's std blanket impls.
+            //
+            // The arg sequence is lowered once and chained into a
+            // single expression tree via folding (the first arg
+            // becomes the PathBuf root, each subsequent arg becomes
+            // a `.join(...)` call wrapping the accumulator). This
+            // shape is required because quote! can't splice a Vec
+            // into a chain of method calls without an explicit
+            // fold (the `#(#args).*` repetition would emit them as
+            // a flat sequence, not a nested call chain).
+            //
+            // Same shared `Join` variant as Strings.join (T124f).
+            (T::Path, A::Join) => {
+                if args.is_empty() {
+                    return Err(self.unsupported(
+                        "Path.join() expects at least 1 arg (the path head), got 0",
+                    ));
+                }
+                // Lower each arg once (avoids re-evaluating side
+                // effects). The first arg becomes the PathBuf root;
+                // each subsequent arg becomes a `.join(...)` call.
+                let lowered: Vec<SynExpr> = args
+                    .iter()
+                    .map(|a| self.lower_expr(a))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut iter = lowered.into_iter();
+                let head = iter.next().expect("non-empty (checked above)");
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::path::PathBuf::from(#head)
+                };
+                let mut acc = syn::parse2::<SynExpr>(tokens).map_err(|e| {
+                    self.unsupported(&format!("Path.join head codegen parse: {e}"))
+                })?;
+                for next in iter {
+                    acc = method_call_one_arg(acc, "join", next);
+                }
+                Ok(acc)
+            }
+            // T124j: Dir module - 4 assoc fns (list/create/remove/walk)
+            // wrapping `std::fs::*` (std-only - NO extern crate needed
+            // for list/create/remove) and the `walkdir` Rust crate (for
+            // walk - the walkdir crate is recorded in `extern_crates`).
+            // Dir is namespace-only (mirrors Log/Toml/Yaml/Csv) - every
+            // call returns a value, NEVER a Dir value type.
+            //
+            // `Dir.list(path)` -> Vector<String>. Wraps
+            // `std::fs::read_dir(p).filter_map(|e| e.ok()).map(|e|
+            // e.file_name().to_string_lossy().into_owned())
+            // .collect::<Vec<String>>()`. Skips inaccessible entries
+            // via `.filter_map(|e| e.ok())` - NEVER panics (mirrors
+            // the Csv.parse panic-free stance from T124i). Returns
+            // entry NAMES (NOT paths) - the surface mirrors shell
+            // `ls` / Python `os.listdir`.
+            //
+            // Same shared `List` variant as Args.list (T124g).
+            (T::Dir, A::List) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::fs::read_dir(#arg)
+                        .map(|entries| {
+                            entries
+                                .filter_map(|e| e.ok())
+                                .map(|e| e.file_name().to_string_lossy().into_owned())
+                                .collect::<Vec<String>>()
+                        })
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Dir.list codegen parse: {e}")))
+            }
+            // `Dir.create(path)` -> Void. Wraps
+            // `std::fs::create_dir_all(p).ok()` (creates the
+            // directory + any missing parents - mirrors `mkdir -p`;
+            // discards errors via `.ok()` - NEVER panics). Same
+            // shared `Create` variant as Tempfile.create.
+            (T::Dir, A::Create) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::fs::create_dir_all(#arg).ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Dir.create codegen parse: {e}")))
+            }
+            // `Dir.remove(path)` -> Void. Wraps
+            // `std::fs::remove_dir_all(p).ok()` (removes the
+            // directory tree recursively; discards errors via
+            // `.ok()` - NEVER panics, mirroring the Dir.create
+            // stance).
+            (T::Dir, A::Remove) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::fs::remove_dir_all(#arg).ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Dir.remove codegen parse: {e}")))
+            }
+            // `Dir.walk(path)` -> Vector<Path>. Wraps
+            // `walkdir::WalkDir::new(p).into_iter().filter_map(|e|
+            // e.ok()).map(|e| e.path().to_path_buf())
+            // .collect::<Vec<std::path::PathBuf>>()`. Skips
+            // inaccessible entries via `.filter_map(|e| e.ok())` -
+            // NEVER panics (mirrors the Csv.parse panic-free stance
+            // from T124i). The walkdir crate is recorded in
+            // `extern_crates` when a Buff program uses Dir.walk.
+            (T::Dir, A::Walk) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    walkdir::WalkDir::new(#arg)
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.path().to_path_buf())
+                        .collect::<Vec<std::path::PathBuf>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Dir.walk codegen parse: {e}")))
+            }
+            // T124j: Tempfile module - 2 assoc fns (create/dir)
+            // wrapping the `tempfile` Rust crate + `std::env::temp_dir`.
+            // Tempfile is namespace-only (mirrors Log/Toml/Yaml/Csv/
+            // Dir). The `tempfile` crate is recorded in `extern_crates`
+            // when a Buff program uses Tempfile.create/dir.
+            //
+            // `Tempfile.create()` -> Path. Wraps
+            // `tempfile::NamedTempFile::new().map(|f|
+            // f.into_temp_path().keep().unwrap_or_default())
+            // .unwrap_or_default()`. The `into_temp_path().keep()`
+            // chain persists the temp file's path beyond the
+            // NamedTempFile's drop (the file becomes a regular file
+            // the user can write/read/delete like any other). Both
+            // inner `.unwrap_or_default()` calls handle the
+            // potential PathPersistError / io::Error paths -
+            // panic-free (empty PathBuf on failure - NEVER panics,
+            // mirrors the Regex.compile / URL.parse infallible-ctor
+            // stance from T124d/T124h).
+            //
+            // Same shared `Create` variant as Dir.create.
+            (T::Tempfile, A::Create) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "Tempfile.create() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    tempfile::NamedTempFile::new()
+                        .map(|f| f.into_temp_path().keep().unwrap_or_default())
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tempfile.create codegen parse: {e}")))
+            }
+            // `Tempfile.dir()` -> Path. Wraps `std::env::temp_dir()`
+            // (the `tempfile::env::temp_dir()` is a re-export of the
+            // std fn; we splice the std path directly so NO extern
+            // crate is needed for this call alone - but the narrow
+            // walker records `tempfile` for symmetry with
+            // Tempfile.create).
+            (T::Tempfile, A::Dir) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "Tempfile.dir() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::temp_dir()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tempfile.dir codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -4195,6 +4410,88 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("URL.query codegen parse: {e}")))
+            }
+            // T124j: Path instance methods. Each lowers to a
+            // fully-qualified `std::path::Path` method (Buff hides
+            // references from users; the underlying Rust accessors
+            // return `Option<&Path>` / `Option<&OsStr>` / `Option<&OsStr>`
+            // / `bool`).
+            //
+            // `path.parent()` -> Option<Path>. Wraps
+            // `recv.parent().map(|p| p.to_path_buf())`. The
+            // `.to_path_buf()` lifts `&Path` to owned `PathBuf`
+            // (Buff surfaces owned values). Zero args. Returns None
+            // when the path has no parent (e.g. `/` or a bare
+            // filename) - NEVER panics.
+            M::Parent => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "parent() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.parent().map(|p| p.to_path_buf())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Path.parent codegen parse: {e}")))
+            }
+            // `path.extension()` -> Option<String>. Wraps
+            // `recv.extension().map(|e| e.to_string())`. The
+            // `.to_string()` lifts `&OsStr` to owned `String` (may
+            // panic if the OsStr is non-UTF-8 - but std's
+            // `OsStr::to_string` (via Display) is lossy-panic-free,
+            // it returns the replacement char for non-UTF-8 bytes,
+            // matching Buff's "no panicking generated code" rule).
+            // Zero args. Returns None when there's no extension.
+            M::Extension => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "extension() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.extension().map(|e| e.to_string())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Path.extension codegen parse: {e}")))
+            }
+            // `path.basename()` -> String. Wraps `recv.file_name()
+            // .and_then(|n| n.to_str()).unwrap_or_default().to_string()`.
+            // The `.and_then(|n| n.to_str())` handles non-UTF-8
+            // filenames lossy-ly (returns None - which falls through
+            // to the empty String default - rather than panicking).
+            // Zero args. Empty String when the path terminates in
+            // `..` or `/` (file_name returns None for those).
+            M::Basename => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "basename() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Path.basename codegen parse: {e}")))
+            }
+            // `path.exists()` -> Bool. Wraps `recv.exists()` (the
+            // underlying std method is infallible - returns `false`
+            // on permission errors, never panics). Zero args.
+            M::Exists => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "exists() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                Ok(method_call_no_args(recv, "exists"))
             }
         }
     }
@@ -6446,6 +6743,17 @@ impl RustCodegen {
             // `url::Url` (capital U, lowercase rl - the canonical Rust
             // spelling).
             Type::Url => "url::Url",
+            // T124j: prelude Path type. Plain `std::path::PathBuf`
+            // path - no generic argument needed. Generated code uses
+            // the fully-qualified std path so no `use` import is
+            // emitted AND no extern crate is recorded (std-only,
+            // mirrors the Math/Strings/Args/Env stance from T124f/
+            // T124g). Note: the underlying Rust type is `PathBuf`
+            // (the owned, mutable path type) - Buff surfaces owned
+            // values; `&Path` is hidden from users. Buff surface is
+            // `Path` (capitalised per the DateTime / Regex / URL
+            // convention); the case mapping happens here.
+            Type::Path => "std::path::PathBuf",
             Type::Unknown | Type::Void => return None,
             // T124b: DateTime is the only prelude type that needs a generic
             // argument. Return early with the proper generic-argument form
@@ -7306,6 +7614,16 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     "scheme",
     "host",
     "path",
+    // T124j: Path zero-arg instance methods (`parent` / `extension`
+    // / `basename` / `exists`). Without these entries the T26
+    // field-access heuristic would rewrite `path.parent()` as a
+    // Rust field access on the `std::path::PathBuf` value (which
+    // doesn't exist - the underlying Rust methods are `.parent()` /
+    // `.extension()` / `.file_name()` / `.exists()`).
+    "parent",
+    "extension",
+    "basename",
+    "exists",
 ];
 
 /// Build the attribute list for a generated struct: always
@@ -9629,6 +9947,193 @@ fn program_uses_serde_yml(decls: &[Decl]) -> bool {
 /// NOT every method-name match.
 fn program_uses_csv(decls: &[Decl]) -> bool {
     program_uses_namespace(decls, "Csv")
+}
+
+// ---------------------------------------------------------------------------
+// T124j - filesystem module emit-on-demand detection (walkdir + tempfile
+// extern crates). Two narrow walkers flag the specific receiver names
+// (`Dir.walk` triggers walkdir; `Tempfile.create` / `Tempfile.dir`
+// trigger tempfile). They reuse the generic `program_uses_namespace`
+// helper introduced in T124h. The chrono over-broad-walker gotcha
+// (T124f) is the cautionary tale: each walker stays minimal so it
+// doesn't over-trigger on unrelated code.
+//
+// NOTE: `Dir.list` / `Dir.create` / `Dir.remove` use std::fs::*
+// (std-only - NO extern crate needed, mirroring the Math/Strings/
+// Args/Env stance from T124f/T124g). `Path` (value type) and its
+// instance methods (parent/extension/basename/exists) use
+// std::path::* (also std-only). `Tempfile.dir` uses std::env::temp_dir
+// (std-only), but the narrow walker records `tempfile` for symmetry
+// (any Tempfile.* call flags the crate).
+// ---------------------------------------------------------------------------
+
+/// T124j: detect `Dir.walk(...)` calls. The `walkdir` crate is
+/// needed ONLY for `Dir.walk` (Dir.list/create/remove use std::fs - no
+/// extern crate). A NARROW method-aware walker is required here: a
+/// generic `program_uses_namespace("Dir")` would over-register walkdir
+/// for programs using only Dir.list/create/remove (those compile
+/// without walkdir in [dependencies]).
+///
+/// Detection recognises a `MethodCall` whose receiver is the bare Ident
+/// `Dir` AND whose method name is exactly `walk`. The receiver-name
+/// gate mirrors the chrono-over-broad cautionary tale (T124f gotcha):
+/// flags ONLY the specific (Dir, walk) combination, NOT every
+/// `Dir.<anything>()` call.
+fn program_uses_walkdir(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_dir_walk(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_walkdir`]: scan a block for
+/// `Dir.walk(...)` calls.
+fn block_uses_dir_walk(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_dir_walk)
+}
+
+/// Check a single statement (and its nested expressions) for
+/// `Dir.walk(...)` usage. Mirrors the `stmt_uses_namespace` shape
+/// exactly with the additional `walk` method-name gate.
+fn stmt_uses_dir_walk(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_dir_walk(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_dir_walk(target) || expr_uses_dir_walk(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => {
+            expr_uses_dir_walk(iter) || block_uses_dir_walk(body)
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_dir_walk(cond) || block_uses_dir_walk(body)
+        }
+        Stmt::ForLet { value, body, .. } => {
+            expr_uses_dir_walk(value) || block_uses_dir_walk(body)
+        }
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_dir_walk(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_dir_walk(e),
+            }) || block_uses_dir_walk(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_dir_walk(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `Dir.walk(...)` call.
+/// Same conservative bare-Ident-receiver + method-name strategy.
+fn expr_uses_dir_walk(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } => {
+            // Match `Dir.walk(...)` exactly: bare Ident `Dir` receiver
+            // AND method name `walk`. Other Dir methods (list/create/
+            // remove) do NOT trigger walkdir registration (they use
+            // std::fs::* - no extern crate needed).
+            if method.name == "walk" {
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if id.name == "Dir" {
+                        return true;
+                    }
+                }
+            }
+            expr_uses_dir_walk(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => {
+            expr_uses_dir_walk(lhs) || expr_uses_dir_walk(rhs)
+        }
+        Expr::UnaryOp { operand, .. } => expr_uses_dir_walk(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_dir_walk(callee) || args.iter().any(expr_uses_dir_walk)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_dir_walk(cond)
+                || block_uses_dir_walk(then_block)
+                || else_block.as_ref().is_some_and(block_uses_dir_walk)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_dir_walk(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_dir_walk),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_dir_walk(base) || indices.iter().any(expr_uses_dir_walk)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_dir_walk(k) || expr_uses_dir_walk(v)),
+        Expr::Lambda { body, .. } => block_uses_dir_walk(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_dir_walk(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_dir_walk(scrutinee)
+                || arms.iter().any(|arm| block_uses_dir_walk(&arm.body))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_dir_walk(inner),
+        Expr::Try { expr, .. } => expr_uses_dir_walk(expr),
+        Expr::Spawn { task, .. } => expr_uses_dir_walk(task),
+        Expr::Range { start, end, .. } => {
+            expr_uses_dir_walk(start) || expr_uses_dir_walk(end)
+        }
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_dir_walk(value)
+                || block_uses_dir_walk(then_block)
+                || else_block.as_ref().is_some_and(block_uses_dir_walk)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_dir_walk),
+        Expr::NamedArg { value, .. } => expr_uses_dir_walk(value),
+    }
+}
+
+/// T124j: detect `Tempfile.create()` / `Tempfile.dir()` calls. The
+/// `tempfile` crate is needed for `Tempfile.create` (the
+/// `NamedTempFile::new()` API). `Tempfile.dir` uses std::env::temp_dir
+/// (std-only) but the narrow walker records `tempfile` for symmetry -
+/// a program using `Tempfile.dir` likely uses `Tempfile.create` too,
+/// and over-registration is benign (rustc never errors on unused
+/// dependencies when cargo registers them).
+///
+/// Detection recognises the `Tempfile` namespace as the receiver of a
+/// method call (`Tempfile.create()`, `Tempfile.dir()`). The method
+/// name is NOT matched here - `Tempfile` is a reserved prelude
+/// namespace, so any `Tempfile.<anything>()` triggers `tempfile`
+/// registration. Codegen will surface a clear error if `<anything>`
+/// is not one of create/dir.
+///
+/// Mirrors the serde_yml / csv walker pattern (T124i); reuses the
+/// generic `program_uses_namespace` helper so Tempfile's walker is a
+/// one-liner. The walker is NARROW (per the T124f gotcha): flags ONLY
+/// the bare-Ident receiver name `Tempfile`, NOT every prelude-type
+/// Ident, NOT every method-name match.
+fn program_uses_tempfile(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "Tempfile")
 }
 
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait

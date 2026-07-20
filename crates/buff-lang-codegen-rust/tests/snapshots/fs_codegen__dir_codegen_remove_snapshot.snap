@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+expression: src
+---
+fn f() {
+    std::fs::remove_dir_all("/tmp/a").ok();
+}

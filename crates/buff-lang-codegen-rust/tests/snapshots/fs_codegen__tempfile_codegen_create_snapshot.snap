@@ -1,0 +1,9 @@
+---
+source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+expression: src
+---
+fn f() {
+    tempfile::NamedTempFile::new()
+        .map(|f| f.into_temp_path().keep().unwrap_or_default())
+        .unwrap_or_default();
+}
