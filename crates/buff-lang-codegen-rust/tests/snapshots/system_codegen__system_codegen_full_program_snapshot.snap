@@ -1,0 +1,26 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 792
+expression: src
+---
+fn main() {
+    let args: Vec<String> = std::env::args().collect::<Vec<String>>();
+    let first: String = std::env::args().nth(1).unwrap_or_default();
+    let home: Option<String> = std::env::var("HOME").ok();
+    std::env::set_var("DEBUG", "1");
+    let has_path: bool = std::env::var("PATH").is_ok();
+    let name: String = {
+        print!("Name: ");
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        let mut __buff_prelude_line = String::new();
+        std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+        __buff_prelude_line.trim_end().to_string()
+    };
+    let line: String = {
+        let mut __buff_prelude_line = String::new();
+        std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+        __buff_prelude_line.trim_end().to_string()
+    };
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+}

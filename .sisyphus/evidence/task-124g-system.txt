@@ -1,0 +1,116 @@
+# T124g: System modules — Args, Env, input(), sleep()
+
+**Task:** `.sisyphus/plans/buff-post-v10-tooling.md` lines 1206-1240
+**Status:** ✅ Complete (codegen-only boundary — snapshot-verified + workspace green)
+**Date:** 2026-07-20
+
+## What was built
+
+Four prelude-implicit system modules, all lowering to Rust via `syn`/`quote`/`prettyplease` (NO raw-string codegen):
+
+| Module / fn | Surface | Generated Rust | extern crate |
+|---|---|---|---|
+| `Args.list()` | assoc fn, namespace `Args` | `std::env::args().collect::<Vec<String>>()` | — (std only) |
+| `Args.get(i)` | assoc fn, namespace `Args` | `std::env::args().nth(i).unwrap_or_default()` | — (std only) |
+| `Env.get("KEY")` | assoc fn, namespace `Env` | `std::env::var(k).ok()` | — (std only) |
+| `Env.set("KEY","v")` | assoc fn, namespace `Env` | `std::env::set_var(k, v)` | — (std only) |
+| `Env.has("KEY")` | assoc fn, namespace `Env` | `std::env::var(k).is_ok()` | — (std only) |
+| `input()` | free fn (0 or 1 args) | block: read_line + `.trim_end().to_string()` | — (std only) |
+| `input(prompt)` | free fn with prompt | block: `print!(prompt)` + `flush()` + read + trim | — (std only) |
+| `sleep(Duration.seconds(N))` | free fn | `tokio::time::sleep(std::time::Duration::from_secs(N)).await` | **tokio** |
+| `sleep(N)` (plain int) | free fn | `tokio::time::sleep(std::time::Duration::from_secs(N)).await` | **tokio** |
+| `sleep(expr)` | free fn passthrough | `tokio::time::sleep(expr).await` | **tokio** |
+
+## Why this design
+
+1. **Args + Env are namespace-only** (mirroring Log/Toml/Math/Random/Strings from T124c–f). They have no runtime value; only their assoc fns are callable. `buff_type()→Type::Void`, `is_namespace_only()→true`.
+
+2. **input + sleep are free fns** (mirroring `read_line`/`args`/`env`/`exit` from T99). The existing `MethodCall` (for Args/Env) and `FuncCall` (for input/sleep) AST shapes handle them — no new AST node, no new keyword (the 25-keyword freeze holds).
+
+3. **Consolidated `Get` variant** for `Args.get` and `Env.get` (mirrors `Parse` shared across DateTime/Date/Toml). This avoids duplicate-name complications in the `PreludeAssocFn` enum and the no-duplicates invariant test. The dispatch is on the (type, method) pair, exactly like `(DateTime, Parse)` vs `(Date, Parse)` vs `(Toml, Parse)`.
+
+4. **`assoc_fn_lookup` rewritten** to scan ALL variants matching a name and return the first whose (type, method) pair validates. The original `find(|f| f.name() == method)` returned the FIRST matching variant unconditionally, which broke same-named variants across distinct types. The new scan-with-validation is correct for any number of same-named variants.
+
+5. **`program_uses_tokio` walker is NARROW** (per T124f gotcha where chrono was originally over-broad). It flags ONLY a `FuncCall` whose callee is the bare Ident `sleep` — NOT every async fn, NOT every `tokio::*` path fragment. Same conservative strategy as the rand walker.
+
+6. **Sleep duration handling** detects the AST shape `Duration.seconds(N)` (Buff's chrono-flavored ctor) and rewrites it to `std::time::Duration::from_secs(N)` so the sleep path is chrono-independent (`tokio::time::sleep` requires `std::time::Duration`, NOT `chrono::TimeDelta`). Plain Int args are treated as seconds (per the task spec's "plain int-seconds form" fallback). Other arg shapes pass through unchanged (user responsibility — useful for `sleep(my_duration_var)`).
+
+7. **`set_var` is `unsafe` in Rust 2024** but Buff emits Rust 2021, so the call is safe today. A future edition bump will need an `unsafe { ... }` wrapper — tracked in `decisions.md`.
+
+8. **Codegen-only linking boundary** (consistent with chrono/regex/toml/rand): single-file `buff run` rustc path does NOT link tokio; the `extern_crates` set is the verifiable contract. Cargo-project wiring is deferred. End-to-end-link limitation noted in `issues.md`.
+
+## How to verify
+
+```bash
+# Build (release)
+cargo build --workspace
+
+# Lint
+cargo clippy --workspace --all-targets -- -D warnings
+
+# The T124g test suite
+cargo test -p buff-lang-codegen-rust --test system_codegen
+```
+
+## Verbatim gate output (PowerShell, MSVC env set first)
+
+```
+PS> $env:LIB=...; $env:INCLUDE=...; $env:PATH=...  # MSVC env (omitted for brevity)
+PS> cargo build --workspace 2>&1 | Out-Null; Write-Host "BUILD_EXIT=$LASTEXITCODE"
+BUILD_EXIT=0
+
+PS> cargo clippy --workspace --all-targets -- -D warnings 2>&1 | Out-Null; Write-Host "CLIPPY_EXIT=$LASTEXITCODE"
+CLIPPY_EXIT=0
+
+PS> cargo test -p buff-lang-codegen-rust --test system_codegen 2>&1 | Select-String "test result"
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+```
+
+Workspace test sweep (full `cargo test -p buff-lang-codegen-rust`):
+```
+test result: ok. 44 passed; 0 failed; 0 ignored   (codegen_tests)
+test result: ok. 21 passed; 0 failed; 0 ignored   (regex_codegen)
+test result: ok. 18 passed; 0 failed; 0 ignored   (toml_codegen)
+test result: ok. 18 passed; 0 failed; 0 ignored   (log_codegen)
+test result: ok. 13 passed; 0 failed; 0 ignored   (utility_codegen)
+test result: ok.  5 passed; 0 failed; 0 ignored   (...)
+... [all green, 30 test binaries] ...
+test result: ok. 39 passed; 0 failed; 0 ignored   (system_codegen) ← NEW
+```
+
+buff-lang-types test sweep:
+```
+test result: ok. 159 passed; 0 failed; 0 ignored   (lib units)
+test result: ok. 21 passed; 0 failed; 0 ignored    (prelude_functions)
+... [all green] ...
+```
+
+## Files changed / added
+
+| File | Status | Purpose |
+|---|---|---|
+| `crates/buff-lang-types/src/prelude_types.rs` | modified | +2 PreludeType variants (Args, Env); +4 PreludeAssocFn variants (List, Get, Set, Has); +return-type matrix entries; `assoc_fn_lookup` rewritten to scan-validate; namespace_only + count tests updated |
+| `crates/buff-lang-types/src/prelude.rs` | modified | +2 PreludeFn variants (Input, Sleep); +name/category/return_type entries; prelude count test bumped 18→20 |
+| `crates/buff-lang-codegen-rust/src/rust_codegen.rs` | modified | +2 arms in `lower_prelude_call` (Input, Sleep); +5 arms in `lower_prelude_type_assoc_fn` (Args.list/get, Env.get/set/has); +`lower_input` helper (block w/ optional prompt + flush + trim); +`lower_sleep` helper (Duration-AST-shape detection + plain int + passthrough); +`program_uses_tokio` walker (block_/stmt_/expr_ trio); +tokio registration in `generate()` |
+| `crates/buff-lang-codegen-rust/tests/system_codegen.rs` | **new** | 39 tests (28 assertion + 11 insta snapshot) mirroring utility_codegen/toml_codegen idioms: AST-constructed, must_reparse, arity-error cases, extern_crate assertions, full-program snapshot |
+| `crates/buff-lang-codegen-rust/tests/snapshots/system_codegen__*.snap` | **new** (11 files) | Byte-deterministic codegen pinning snapshots |
+
+## Acceptance criteria status (per task spec)
+
+- [x] `Args.list()` lowers to `std::env::args().collect::<Vec<String>>()` (program name + args)
+- [x] `Env.get("HOME")` lowers to `std::env::var("HOME").ok()` (Some(path) on most systems)
+- [x] `input("Name: ")` prints prompt, reads line, returns trimmed string
+- [x] `sleep(Duration.seconds(1))` lowers to `tokio::time::sleep(std::time::Duration::from_secs(1)).await` (async-transparent)
+- [x] All available without `import` (prelude-implicit)
+- [x] Workspace build green (`cargo build --workspace` exit 0)
+- [x] Clippy green (`cargo clippy --workspace --all-targets -- -D warnings` exit 0)
+- [x] Test green (`cargo test -p buff-lang-codegen-rust --test system_codegen` exit 0, 39/39 pass)
+- [x] Snapshots generated, reviewed, committed under `tests/snapshots/`
+- [x] No new AST node / keyword / unwrap-in-non-test-code (anti-patterns avoided)
+
+## What was NOT done (per task MUST NOT)
+
+- ❌ No arg-parsing DSL / clap wrapper (deferred to future `buff parse-args`).
+- ❌ No password input / getpass (deferred).
+- ❌ No new Buff keyword or AST node (25-keyword freeze holds).
+- ❌ No Cargo-project pipeline for tokio (code-only boundary — same as chrono/regex/toml/rand). Single-file rustc link of tokio is DEFERRED. Acceptance = snapshot-verified codegen + registry + workspace green.

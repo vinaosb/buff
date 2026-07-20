@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 759
+expression: src
+---
+fn f() {
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+}

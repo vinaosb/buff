@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 723
+expression: src
+---
+fn f() {
+    std::env::set_var("KEY", "v");
+}

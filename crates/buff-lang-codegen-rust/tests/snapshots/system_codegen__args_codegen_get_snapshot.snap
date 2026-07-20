@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 708
+expression: src
+---
+fn f() {
+    std::env::args().nth(1).unwrap_or_default();
+}

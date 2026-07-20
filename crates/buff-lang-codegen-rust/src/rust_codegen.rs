@@ -541,6 +541,38 @@ impl RustCodegen {
         if program_uses_rand(decls) {
             self.extern_crates.insert("rand".to_string());
         }
+        // T124g: register the `tokio` crate as an external dependency when
+        // the program references the prelude `sleep(duration)` free fn.
+        // Generated code lowers `sleep(d)` to
+        // `tokio::time::sleep(<d>).await`, so any program using `sleep`
+        // transitively depends on the `tokio` crate being in
+        // `[dependencies]` (and on the enclosing fn being async —
+        // `#[tokio::main]` is auto-stamped when `main` propagates to
+        // async via the T31 walker; sleep() calls in non-async fns are a
+        // rustc-level error, surfaced as a normal Rust diagnostic).
+        //
+        // NOTE: tokio is ALREADY used by the v1.0 async lowering
+        // (`tokio::spawn`, `tokio::runtime::Runtime`, `#[tokio::main]`)
+        // but the async pass does NOT register the crate in
+        // `extern_crates` — single-file `buff run` rustc path never
+        // linked tokio either, mirroring the chrono/tracing/regex/toml
+        // codegen-only boundary. The walker here is the FIRST time
+        // `tokio` enters `extern_crates`; the existing async codegen
+        // paths don't need to start recording it because their generated
+        // `tokio::*` paths compile iff tokio is in the (deferred)
+        // Cargo project's `[dependencies]`, which is exactly what this
+        // walker signals.
+        //
+        // Walker scope: NARROW (per the T124f gotcha that chrono was
+        // originally over-broad). It flags ONLY a `FuncCall` whose
+        // callee is the bare Ident `sleep` — NOT every async fn, NOT
+        // every `tokio::*` path fragment in the lowering (the lowering
+        // is a codegen-private concern; the walker is a USER-INTENT
+        // detector). Same shape as the rand walker flagging
+        // `Random.<method>(...)`.
+        if program_uses_tokio(decls) {
+            self.extern_crates.insert("tokio".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -2686,6 +2718,12 @@ impl RustCodegen {
             PreludeFn::Print => self.lower_print(args),
             PreludeFn::Println => self.lower_print(args),
             PreludeFn::ReadLine => Ok(self.lower_read_line()),
+            // T124g: input() / input(prompt) - read one line from stdin
+            // (optionally printing a prompt first). The prompt is print!
+            // (no newline) so the user's input appears on the same line.
+            // Trailing newline from read_line is trimmed. Wraps
+            // std::io::stdin + std::io::Write::flush (for the prompt).
+            PreludeFn::Input => self.lower_input(args),
 
             // ----- System / environment (T99) ---------------------------
             // args() → std::env::args().collect::<Vec<String>>()
@@ -2727,6 +2765,32 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("exit() codegen parse: {e}")))
             }
+            // T124g: sleep(duration) - async-transparent sleep. Lowers to
+            // `tokio::time::sleep(<duration>).await`. The `.await` is
+            // unconditional (Buff has no `await` keyword - the codegen
+            // inserts it). The enclosing fn MUST be async; the T31
+            // propagation walker doesn't YET know about `sleep` (a
+            // future task can teach it), so for now the user must
+            // declare an async fn that calls sleep (or call sleep from
+            // main, which is auto-stamped `#[tokio::main]` when
+            // propagated). The codegen boundary is the established
+            // "codegen-only linking" pattern (single-file rustc link of
+            // tokio is deferred - same as chrono/regex/toml/rand).
+            //
+            // Duration arg: the canonical Buff form is
+            // `sleep(Duration.seconds(N))` which would lower to
+            // `tokio::time::sleep(chrono::TimeDelta::seconds(N)).await` -
+            // BUT chrono::TimeDelta is NOT a std::time::Duration (which
+            // tokio::time::sleep requires). To keep the surface
+            // ergonomic AND the generated code self-contained, we
+            // detect the `Duration.<unit>(N)` AST shape and lower it
+            // directly to `std::time::Duration::from_<unit>(N)` (no
+            // chrono dependency in the sleep path). Plain Int args are
+            // treated as seconds (`from_secs`). Other arg shapes pass
+            // through unchanged (user responsibility - useful for
+            // `std::time::Duration::from_millis(100)` directly if the
+            // user constructs it).
+            PreludeFn::Sleep => self.lower_sleep(args),
             // T35: assert_eq(a, b) → assert_eq!(a, b)
             // The Rust `assert_eq!` macro panics when the two args are not
             // equal, which is exactly Buff's semantics. Used inside `@test`
@@ -3236,6 +3300,97 @@ impl RustCodegen {
                 syn::parse2(tokens).map_err(|e| {
                     self.unsupported(&format!("Strings.to_lowercase codegen parse: {e}"))
                 })
+            }
+            // T124g: Args module - 2 assoc fns wrapping Rust's
+            // `std::env::args` iterator. Args uses only Rust `std` (NO
+            // extern crate needed).
+            //
+            // `Args.list()` -> `std::env::args().collect::<Vec<String>>()`.
+            // Zero args. The turbofish `::<Vec<String>>` pins the
+            // concrete return type so the generated Rust is fully typed
+            // without a let-binding annotation (mirrors the Strings.split
+            // turbofish pattern from T124f).
+            (T::Args, A::List) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::args().collect::<Vec<String>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Args.list codegen parse: {e}")))
+            }
+            // `Args.get(i)` -> `std::env::args().nth(i).unwrap_or_default()`.
+            // One Int arg. The `.unwrap_or_default()` yields the empty
+            // String on out-of-bounds (NEVER panics - matching Buff's
+            // "no panicking generated code" rule, mirroring the
+            // Toml.parse / Regex.compile unwrap_or-panic-free pattern).
+            (T::Args, A::Get) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::args().nth(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Args.get codegen parse: {e}")))
+            }
+            // T124g: Env module - 3 assoc fns wrapping Rust's
+            // `std::env::var` / `set_var`. Env uses only Rust `std` (NO
+            // extern crate needed).
+            //
+            // `Env.get("KEY")` -> `std::env::var(k).ok()`. One String
+            // arg. Returns Option<String> (None when unset OR invalid
+            // UTF-8 - both folded into None). Same `Get` variant as
+            // Args.get but dispatched on (Env, Get); the codegen here
+            // differs from (Args, Get) because the semantics differ
+            // (var lookup vs positional arg). Mirrors the (DateTime,
+            // Parse) / (Date, Parse) / (Toml, Parse) overload-by-type
+            // pattern.
+            //
+            // String literals lower to `&'static str` already (no
+            // borrow needed); non-literal String args get an `&` via
+            // `coerce_str_arg_to_ref` so Rust's Deref coercion turns
+            // `&String` into `&str` (the type `std::env::var` takes).
+            (T::Env, A::Get) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::var(#arg).ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Env.get codegen parse: {e}")))
+            }
+            // `Env.set("KEY", "value")` -> `std::env::set_var(k, v)`.
+            // Two String args. Returns Void. NOTE: `std::env::set_var`
+            // is `unsafe` in Rust 2024 edition; Buff emits 2021 so the
+            // call is safe today. A future edition bump will need an
+            // `unsafe { ... }` wrapper here (tracked in
+            // `.sisyphus/notepads/buff-post-v10-tooling/decisions.md`).
+            //
+            // Both args are borrowed via `&` so Rust's Deref coercion
+            // turns `&String` into `&str` (the type `set_var` takes).
+            // The result is wrapped in a block `{ std::env::set_var(k,
+            // v); }` so the expression yields `()` (the call itself
+            // returns `()` so the block is technically redundant, but
+            // uniform with other Void-returning prelude calls avoids
+            // special-case handling in expression-statement position).
+            (T::Env, A::Set) => {
+                let lowered = n_args(self, 2)?;
+                let k = coerce_str_arg_to_ref(lowered[0].clone(), &args[0]);
+                let v = coerce_str_arg_to_ref(lowered[1].clone(), &args[1]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::set_var(#k, #v)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Env.set codegen parse: {e}")))
+            }
+            // `Env.has("KEY")` -> `std::env::var(k).is_ok()`. One String
+            // arg. Returns Bool. Same borrow coercion as Env.get.
+            (T::Env, A::Has) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::var(#arg).is_ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Env.has codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
@@ -3815,6 +3970,194 @@ impl RustCodegen {
                 })
             }
         }
+    }
+
+    /// T124g: lower `input()` / `input(prompt)` → a block expression
+    /// that reads one line of stdin, optionally after printing a prompt.
+    ///
+    /// Emits (conceptually):
+    /// ```text
+    /// // input() - no prompt:
+    /// {
+    ///     let mut __buff_prelude_line = String::new();
+    ///     std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+    ///     __buff_prelude_line.trim_end().to_string()
+    /// }
+    ///
+    /// // input(prompt) - print prompt first, flush, then read:
+    /// {
+    ///     print!(<prompt>);
+    ///     use std::io::Write;
+    ///     std::io::stdout().flush().ok();
+    ///     let mut __buff_prelude_line = String::new();
+    ///     std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+    ///     __buff_prelude_line.trim_end().to_string()
+    /// }
+    /// ```
+    ///
+    /// Differences from `read_line()` (T99):
+    /// - `input()` trims the trailing newline (`read_line()` does not).
+    ///   This matches user expectations: `input()` returns the typed
+    ///   text, not "text\n".
+    /// - `input(prompt)` prints the prompt with `print!` (no newline)
+    ///   and flushes stdout BEFORE reading. Without the flush, the
+    ///   prompt may stay buffered in stdout's pipe until after the
+    ///   read_line returns (interactive pipelines deadlock). The
+    ///   `use std::io::Write;` brings the `flush` method into scope
+    ///   for the block (the trait import is block-local so it doesn't
+    ///   pollute the user's module).
+    ///
+    /// Arity: 0 or 1 args. 1 arg MUST be a String (the prompt). Any
+    /// other arity surfaces as a codegen error.
+    ///
+    /// `.ok()` on read_line / flush elides I/O errors (Buff's
+    /// panic-free generated-code stance — same as `read_line()`).
+    fn lower_input(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        // Arity check: 0 or 1 args.
+        if args.len() > 1 {
+            return Err(self.unsupported(&format!(
+                "input() expects 0 or 1 arg (the prompt), got {}",
+                args.len()
+            )));
+        }
+        let tokens: proc_macro2::TokenStream = match args.first() {
+            // input() - no prompt. The trim_end handles both "\n" and
+            // "\r\n" line endings (Rust's str::trim_end matches any
+            // trailing whitespace char, but for newline-only trimming
+            // it's the right tool: \n, \r, and Unicode line ends alike).
+            None => quote::quote! {{
+                let mut __buff_prelude_line = String::new();
+                std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+                __buff_prelude_line.trim_end().to_string()
+            }},
+            // input(prompt) - print prompt, flush stdout, then read.
+            // The prompt is spliced via #prompt (quote!'s interpolation
+            // handles any expression shape - String literal, ident,
+            // interpolation result, ...).
+            Some(prompt_expr) => {
+                let prompt = self.lower_expr(prompt_expr)?;
+                quote::quote! {{
+                    print!(#prompt);
+                    use std::io::Write;
+                    std::io::stdout().flush().ok();
+                    let mut __buff_prelude_line = String::new();
+                    std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+                    __buff_prelude_line.trim_end().to_string()
+                }}
+            }
+        };
+        syn::parse2(tokens)
+            .map_err(|e| self.unsupported(&format!("input() codegen parse: {e}")))
+    }
+
+    /// T124g: lower `sleep(duration)` →
+    /// `tokio::time::sleep(<duration>).await`. The `.await` is
+    /// unconditional (Buff has no `await` keyword — the codegen inserts
+    /// it transparently). The enclosing fn MUST be async (declared or
+    /// propagated via the T31 walker); a sleep in a sync fn surfaces as
+    /// a rustc diagnostic (`.await outside async`), not a Buff codegen
+    /// error — matching the established "we generate the lowering; the
+    /// borrow checker / rustc handles downstream errors" pattern.
+    ///
+    /// Duration arg shapes (canonical first, fallback last):
+    /// - `sleep(Duration.seconds(N))` →
+    ///   `tokio::time::sleep(std::time::Duration::from_secs(N)).await`.
+    ///   Same for `.millis(M)`, `.micros(U)`, `.nanos(N)`. The
+    ///   `Duration.<unit>(N)` AST shape is detected and rewritten to
+    ///   `std::time::Duration::from_<unit>(N)` so the generated Rust
+    ///   uses `std::time::Duration` (which `tokio::time::sleep` takes)
+    ///   rather than `chrono::TimeDelta` (which T124b's Duration.seconds
+    ///   would normally produce). This keeps the sleep path
+    ///   chrono-independent (chrono's TimeDelta doesn't impl
+    ///   `Into<std::time::Duration>` without an explicit conversion).
+    /// - `sleep(N)` (plain Int literal) → treated as seconds:
+    ///   `tokio::time::sleep(std::time::Duration::from_secs(N)).await`.
+    /// - `sleep(other_expr)` → passthrough:
+    ///   `tokio::time::sleep(other_expr).await`. The user is
+    ///   responsible for passing a `std::time::Duration` value —
+    ///   useful for `sleep(my_duration_var)` when the user constructs
+    ///   the Duration themselves.
+    ///
+    /// Built via `quote!` + parse2 so the `.await` suffix slots cleanly
+    /// onto the call (building the `Await` node by hand is awkward).
+    fn lower_sleep(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+        if args.len() != 1 {
+            return Err(self.unsupported(&format!(
+                "sleep() expects exactly 1 arg (the duration), got {}",
+                args.len()
+            )));
+        }
+        let arg_expr = &args[0];
+        // Detect `Duration.<unit>(N)` AST shape. Buff's parser produces
+        // this as a MethodCall { receiver: Ident("Duration"),
+        // method: Ident(<unit>), args: [N] }. The supported units are
+        // the same as std::time::Duration::from_<unit> constructors:
+        // secs / millis / micros / nanos. The T124b Duration assoc fns
+        // are days / hours / minutes / seconds / millis — but for the
+        // sleep path we only honour the std::time subset (a sleep
+        // measured in days makes no sense; if a user really wants
+        // that, they can pass `Duration.seconds(N * 86400)` or the
+        // plain-int form).
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            args: inner,
+            ..
+        } = arg_expr
+        {
+            if let Expr::Ident(recv_id, _) = receiver.as_ref() {
+                if recv_id.name == "Duration" && inner.len() == 1 {
+                    let unit = method.name.as_str();
+                    // Map Buff's chrono-style names (seconds / millis)
+                    // to std::time::Duration's constructor names (secs /
+                    // millis). The mapping is intentionally narrow —
+                    // only the constructors std::time::Duration
+                    // actually exposes.
+                    let std_unit = match unit {
+                        "seconds" | "secs" => Some("secs"),
+                        "millis" => Some("millis"),
+                        "micros" => Some("micros"),
+                        "nanos" => Some("nanos"),
+                        _ => None,
+                    };
+                    if let Some(std_unit) = std_unit {
+                        let n = self.lower_expr(&inner[0])?;
+                        // Build the `std::time::Duration::from_<unit>`
+                        // path. `quote!` doesn't support token-paste
+                        // (`##`), so we splice the unit into the method
+                        // name via `format_ident!` and emit a single
+                        // Ident token. The result is
+                        // `tokio::time::sleep(std::time::Duration::from_secs(N)).await`
+                        // (or from_millis / from_micros / from_nanos).
+                        let ctor_name =
+                            proc_macro2::Ident::new(&format!("from_{std_unit}"), proc_macro2::Span::call_site());
+                        let tokens: proc_macro2::TokenStream = quote::quote! {
+                            tokio::time::sleep(
+                                std::time::Duration::#ctor_name(#n)
+                            ).await
+                        };
+                        return syn::parse2(tokens).map_err(|e| {
+                            self.unsupported(&format!("sleep(Duration.{unit}(_)) codegen parse: {e}"))
+                        });
+                    }
+                }
+            }
+        }
+        // Plain Int literal: treat as seconds.
+        if let Expr::Literal(Literal::Int(_), _) = arg_expr {
+            let n = self.lower_expr(arg_expr)?;
+            let tokens: proc_macro2::TokenStream = quote::quote! {
+                tokio::time::sleep(std::time::Duration::from_secs(#n)).await
+            };
+            return syn::parse2(tokens)
+                .map_err(|e| self.unsupported(&format!("sleep(<int>) codegen parse: {e}")));
+        }
+        // Passthrough: user-supplied duration expression.
+        let arg = self.lower_expr(arg_expr)?;
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            tokio::time::sleep(#arg).await
+        };
+        syn::parse2(tokens).map_err(|e| self.unsupported(&format!("sleep(<expr>) codegen parse: {e}")))
     }
 
     /// Lower exactly one argument, returning an error if the arg count is wrong.
@@ -8219,6 +8562,149 @@ fn expr_uses_rand(expr: &Expr) -> bool {
         }
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_rand),
         Expr::NamedArg { value, .. } => expr_uses_rand(value),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T124g - tokio emit-on-demand detection (sleep() free fn).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `sleep(...)` free-fn call
+/// (T124g). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to record `"tokio"` in the extern-crate
+/// set so the pipeline knows the generated Cargo project depends on
+/// the `tokio` crate.
+///
+/// Detection recognises a `FuncCall` whose callee is the bare Ident
+/// `sleep` (the prelude free fn introduced in T124g). The lowering
+/// emits `tokio::time::sleep(<duration>).await` so any program using
+/// `sleep` transitively requires tokio in `[dependencies]` (and the
+/// enclosing fn MUST be async — async-propagation is the user's
+/// responsibility today; future task can teach the T31 walker to flag
+/// sleep-calling fns as async automatically).
+///
+/// Walker scope: NARROW. Flags ONLY `sleep(...)` calls — NOT every
+/// async fn, NOT every `tokio::*` path fragment. The T124f gotcha
+/// (chrono walker was originally over-broad, flagging namespace
+/// modules) is the cautionary tale; this walker stays minimal so it
+/// doesn't over-trigger on unrelated code. Same conservative
+/// receiver-name-only strategy as the rand walker (T124f): a
+/// hypothetical user-defined variable named `sleep` would trigger a
+/// false positive, but since `sleep` is a reserved prelude name the
+/// user can't legitimately bind to it.
+///
+/// Note: the existing v1.0 async lowering (`tokio::spawn`,
+/// `tokio::runtime::Runtime`, `#[tokio::main]`) does NOT register
+/// tokio in extern_crates — that path is single-file-rustc-only
+/// (code-gen-only boundary, same as chrono/regex/toml/rand). This
+/// walker is the FIRST time `tokio` enters extern_crates; the
+/// existing async codegen paths don't need updating because their
+/// `tokio::*` paths compile iff tokio is in the (deferred) Cargo
+/// project's `[dependencies]`, which is exactly what this walker
+/// signals.
+fn program_uses_tokio(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_tokio(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_tokio`]: scan a block's statements.
+fn block_uses_tokio(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_tokio)
+}
+
+/// Check a single statement (and its nested expressions) for `sleep(...)`
+/// usage. Mirrors the `stmt_uses_rand` shape exactly.
+fn stmt_uses_tokio(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_tokio(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_tokio(target) || expr_uses_tokio(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_tokio(iter) || block_uses_tokio(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_tokio(cond) || block_uses_tokio(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_tokio(value) || block_uses_tokio(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_tokio(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_tokio(e),
+            }) || block_uses_tokio(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_tokio(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `sleep(...)` free-fn call.
+/// Same conservative bare-Ident-callee strategy as `expr_uses_rand`.
+fn expr_uses_tokio(expr: &Expr) -> bool {
+    match expr {
+        Expr::FuncCall { callee, args, .. } => {
+            if let Expr::Ident(id, _) = callee.as_ref() {
+                if id.name == "sleep" {
+                    return true;
+                }
+            }
+            expr_uses_tokio(callee) || args.iter().any(expr_uses_tokio)
+        }
+        Expr::MethodCall { receiver, .. } => expr_uses_tokio(receiver),
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_tokio(lhs) || expr_uses_tokio(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_tokio(operand),
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_tokio(cond)
+                || block_uses_tokio(then_block)
+                || else_block.as_ref().is_some_and(block_uses_tokio)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_tokio(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_tokio),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_tokio(base) || indices.iter().any(expr_uses_tokio)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_tokio(k) || expr_uses_tokio(v)),
+        Expr::Lambda { body, .. } => block_uses_tokio(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_tokio(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_tokio(scrutinee) || arms.iter().any(|arm| block_uses_tokio(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_tokio(inner),
+        Expr::Try { expr, .. } => expr_uses_tokio(expr),
+        Expr::Spawn { task, .. } => expr_uses_tokio(task),
+        Expr::Range { start, end, .. } => expr_uses_tokio(start) || expr_uses_tokio(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_tokio(value)
+                || block_uses_tokio(then_block)
+                || else_block.as_ref().is_some_and(block_uses_tokio)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_tokio),
+        Expr::NamedArg { value, .. } => expr_uses_tokio(value),
     }
 }
 

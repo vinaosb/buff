@@ -251,3 +251,33 @@ false-positive chrono registration. Narrowed to
 `prelude_type_lookup(...).buff_type().is_prelude_datetime()`
 (flags only DateTime/Date/Time/Duration/Instant). Caught by the
 `math_codegen_no_extern_crate_registered` test.
+
+## 2026-07-20 T124g (Args/Env/input/sleep)
+
+### 1. Args.Get and Env.Get share ONE PreludeAssocFn variant (Get)
+
+Mirroring the existing Parse precedent (DateTime.parse / Date.parse / Toml.parse all share PreludeAssocFn::Parse), the new Get variant is shared between Args.get and Env.get. Initially considered two distinct variants (ArgsGet, EnvGet) but that broke the existing prelude_assoc_fn_no_duplicates invariant test (duplicate name "get") AND required rewriting ssoc_fn_lookup to scan-validate instead of find-validate-once. Consolidation into one variant preserves the no-duplicates invariant AND keeps the lookup logic simpler. Dispatch on the (type, method) pair handles the semantic difference (Args.get→String vs Env.get→Option<String>).
+
+### 2. ssoc_fn_lookup rewritten to scan-validate
+
+Original: ind(|f| f.name() == method)? then validate-once. With two same-named variants this returns the FIRST (ArgsGet) and fails validation on (Env, ArgsGet) → lookup returns None → Env.get would not be recognised. New: iterate all variants matching the name, return first whose (type, method) pair validates. Single source of truth = ssoc_fn_return_type matrix.
+
+### 3. program_uses_tokio walker is NARROW (only flags sleep(...))
+
+Per T124f gotcha: the chrono walker was originally over-broad (flagged namespace modules). The new tokio walker flags ONLY FuncCall { callee: Ident("sleep") } — NOT every async fn, NOT every 	okio::* path fragment in the lowering. The lowering is a codegen-private concern; the walker is a USER-INTENT detector. Same conservative strategy as the rand walker flagging Random.<method>(...).
+
+### 4. 	okio enters extern_crates for the FIRST time
+
+The v1.0 async lowering (	okio::spawn, 	okio::runtime::Runtime, #[tokio::main]) does NOT register tokio in extern_crates — single-file uff run rustc path never linked tokio either (mirrors chrono/regex/toml/rand codegen-only boundary). T124g is the FIRST time 	okio enters extern_crates; the existing async codegen paths don't need updating because their 	okio::* paths compile iff tokio is in the (deferred) Cargo project's [dependencies], which is exactly what this walker signals.
+
+### 5. Duration.seconds(N) AST-shape detection in lower_sleep
+
+	okio::time::sleep requires std::time::Duration — NOT chrono::TimeDelta (which T124b's Duration.seconds would normally produce; TimeDelta doesn't impl Into<std::time::Duration> without explicit conversion). To keep the sleep path chrono-independent AND the surface ergonomic, the codegen detects the MethodCall { receiver: Ident("Duration"), method: Ident(<unit>), args: [N] } AST shape and rewrites it to std::time::Duration::from_<unit>(N) directly. Plain Int args are treated as seconds (per spec's "plain int-seconds form" fallback). Other arg shapes pass through unchanged.
+
+### 6. quote! doesn't support ## token paste
+
+Initial attempt used quote! { std::time::Duration::from_##std_unit(#n) } which failed with "prefix rom_ is unknown". Fixed by building the method name via proc_macro2::Ident::new(&format!("from_{std_unit}"), Span::call_site()) and splicing via #ctor_name.
+
+### 7. set_var is unsafe in Rust 2024
+
+Buff emits Rust 2021 edition, so std::env::set_var(k, v) is safe today. The lowering is a bare call. A future edition bump will need an unsafe { ... } wrapper — flagged here, tracked for the post-v1.4 edition-migration task.

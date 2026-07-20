@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 702
+expression: src
+---
+fn f() {
+    std::env::args().collect::<Vec<String>>();
+}

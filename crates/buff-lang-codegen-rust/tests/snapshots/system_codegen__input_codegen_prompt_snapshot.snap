@@ -1,0 +1,15 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 741
+expression: src
+---
+fn f() {
+    {
+        print!("Name: ");
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        let mut __buff_prelude_line = String::new();
+        std::io::stdin().read_line(&mut __buff_prelude_line).ok();
+        __buff_prelude_line.trim_end().to_string()
+    };
+}

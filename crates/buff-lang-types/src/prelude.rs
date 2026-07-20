@@ -113,6 +113,17 @@ pub enum PreludeFn {
     Env,
     /// `exit(code)` — terminate the process with the given exit code.
     Exit,
+    // --- System I/O / async (T124g) -------------------------------------
+    /// `input()` / `input(prompt)` — read one line from stdin (optionally
+    /// printing a prompt first). Returns `String` (trimmed of trailing
+    /// newline). Wraps `std::io::stdin().read_line(...)`.
+    Input,
+    /// `sleep(duration)` — async-transparent sleep. Lowers to
+    /// `tokio::time::sleep(<duration>).await` (records `tokio` in
+    /// codegen `extern_crates`). Buff has no `await` keyword — the
+    /// `.await` is inserted by codegen and propagates async-ness up
+    /// the call graph. Returns `Void`.
+    Sleep,
     // --- Testing (T35) -------------------------------------------------
     /// `assert_eq(a, b)` — assert two values are equal (panics otherwise).
     /// Maps to Rust's `assert_eq!` macro. Only meaningful inside `@test`
@@ -146,6 +157,9 @@ impl PreludeFn {
         PreludeFn::Args,
         PreludeFn::Env,
         PreludeFn::Exit,
+        // T124g: System I/O / async.
+        PreludeFn::Input,
+        PreludeFn::Sleep,
         // Testing
         PreludeFn::AssertEq,
     ];
@@ -172,6 +186,9 @@ impl PreludeFn {
             PreludeFn::Args => "args",
             PreludeFn::Env => "env",
             PreludeFn::Exit => "exit",
+            // T124g: System I/O / async free fns.
+            PreludeFn::Input => "input",
+            PreludeFn::Sleep => "sleep",
             PreludeFn::AssertEq => "assert_eq",
         }
     }
@@ -192,6 +209,11 @@ impl PreludeFn {
             }
             PreludeFn::Print | PreludeFn::Println | PreludeFn::ReadLine => PreludeCategory::Io,
             PreludeFn::Args | PreludeFn::Env | PreludeFn::Exit => PreludeCategory::System,
+            // T124g: input() is Io (reads stdin); sleep() is System
+            // (async-transparent runtime facility, mirrors exit()'s
+            // process-level System category).
+            PreludeFn::Input => PreludeCategory::Io,
+            PreludeFn::Sleep => PreludeCategory::System,
             PreludeFn::AssertEq => PreludeCategory::Test,
         }
     }
@@ -301,6 +323,17 @@ pub fn return_type(fn_: PreludeFn, arg_tys: &[Type]) -> Type {
         PreludeFn::Env => Type::option(Type::string()),
         // exit(code) -> Void (never returns)
         PreludeFn::Exit => Type::Void,
+
+        // --- System I/O / async (T124g) --------------------------------
+        // input() / input(prompt) -> String (the trimmed line). The
+        // optional prompt arg is a String literal printed before reading;
+        // it has no effect on the return type.
+        PreludeFn::Input => Type::string(),
+        // sleep(duration) -> Void. Async-transparent (lowers to
+        // `tokio::time::sleep(...).await`); the surrounding fn MUST be
+        // async (declared or propagated). Returns no value (the Buff
+        // surface treats it as a side-effect-only call).
+        PreludeFn::Sleep => Type::Void,
 
         // --- Testing (T35) ---------------------------------------------
         // assert_eq(a, b) -> Void (panics on mismatch, returns () on success)
@@ -468,12 +501,13 @@ mod tests {
     #[test]
     fn prelude_all_count_and_no_duplicates() {
         // 15 prelude functions today (8 math + 4 convert + 3 io) + 3 env
-        // (args, env, exit) = 18.
+        // (args, env, exit) = 18 + 2 system-io/async (input, sleep) = 20.
         let all_names: Vec<&str> = PreludeFn::ALL.iter().map(|f| f.name()).collect();
         let unique: std::collections::HashSet<&str> = all_names.iter().copied().collect();
         assert_eq!(all_names.len(), unique.len(), "duplicate prelude names");
-        // Sanity: at least the eight math + four convert + three io + three env.
-        assert!(PreludeFn::ALL.len() >= 18);
+        // Sanity: at least the eight math + four convert + three io + three env
+        // + two system-io/async.
+        assert!(PreludeFn::ALL.len() >= 20);
         // Width helpers exist on IntWidth/FloatWidth.
         assert_eq!(IntWidth::W8.bits(), 8);
         assert_eq!(FloatWidth::W32.bits(), 32);

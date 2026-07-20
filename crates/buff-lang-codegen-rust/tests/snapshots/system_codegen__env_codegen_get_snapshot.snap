@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/system_codegen.rs
+assertion_line: 714
+expression: src
+---
+fn f() {
+    std::env::var("HOME").ok();
+}

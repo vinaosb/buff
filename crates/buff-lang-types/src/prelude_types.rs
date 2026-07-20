@@ -166,6 +166,45 @@ pub enum PreludeType {
     /// [`Type::Void`]; `is_namespace_only()` returns `true`. Strings
     /// uses only Rust `std` (NO extern crate needed).
     Strings,
+    /// `Args` - the command-line arguments namespace (T124g). Wraps
+    /// Rust's `std::env::args` iterator. Like [`Self::Log`] /
+    /// [`Self::Toml`], `Args` is **never a runtime value** - it's a
+    /// NAMESPACE exposing two associated functions:
+    /// - `Args.list()` - collect program name + args into a
+    ///   `Vector<String>`. Lowers to
+    ///   `std::env::args().collect::<Vec<String>>()`.
+    /// - `Args.get(index)` - get the arg at `index` (0 = program
+    ///   name). Lowers to
+    ///   `std::env::args().nth(i).unwrap_or_default()` (empty String
+    ///   on out-of-bounds - NEVER panics, matching Buff's "no
+    ///   panicking generated code" rule).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. Args uses only Rust `std` (NO extern crate).
+    /// This is the third std-only namespace module after Math/Strings
+    /// (T124f) and the established precedent for future system-
+    /// introspection namespaces.
+    Args,
+    /// `Env` - the environment-variables namespace (T124g). Wraps
+    /// Rust's `std::env::var` / `set_var`. Like [`Self::Log`] /
+    /// [`Self::Toml`], `Env` is **never a runtime value** - it's a
+    /// NAMESPACE exposing three associated functions:
+    /// - `Env.get("KEY")` - look up an env var. Lowers to
+    ///   `std::env::var(k).ok()` (returns `Option<String>` - None
+    ///   when unset OR invalid UTF-8; both are folded into None so
+    ///   the surface stays panic-free).
+    /// - `Env.set("KEY", "value")` - set an env var. Lowers to
+    ///   `std::env::set_var(k, v)` (returns Void). NOTE: `set_var` is
+    ///   `unsafe` in Rust 2024 edition; Buff emits the 2021 edition
+    ///   so the call is safe today. A future edition bump will need
+    ///   an `unsafe { ... }` wrapper here (tracked in
+    ///   `decisions.md`).
+    /// - `Env.has("KEY")` - test whether an env var is set. Lowers
+    ///   to `std::env::var(k).is_ok()` (returns Bool).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. Env uses only Rust `std` (NO extern crate).
+    Env,
 }
 
 impl PreludeType {
@@ -188,6 +227,13 @@ impl PreludeType {
         PreludeType::Math,
         PreludeType::Random,
         PreludeType::Strings,
+        // T124g: Args / Env - two namespace-only system modules
+        // (both wrap Rust `std::env`). Both mirror Log's namespace-only
+        // shape. The free fns `input()` and `sleep()` (also T124g) live
+        // in the free-function prelude ([`crate::prelude::PreludeFn`]),
+        // NOT here.
+        PreludeType::Args,
+        PreludeType::Env,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -219,6 +265,16 @@ impl PreludeType {
             // Rust's `str` / `String` methods (`text.split(sep)...`,
             // `vec.join(sep)`, etc.) for the eight associated functions.
             PreludeType::Strings => "Strings",
+            // T124g: the Args prelude type name. The codegen splices
+            // `std::env::args().collect::<Vec<String>>()` /
+            // `std::env::args().nth(i).unwrap_or_default()` for the two
+            // associated functions.
+            PreludeType::Args => "Args",
+            // T124g: the Env prelude type name. The codegen splices
+            // `std::env::var(k).ok()` / `std::env::set_var(k, v)` /
+            // `std::env::var(k).is_ok()` for the three associated
+            // functions.
+            PreludeType::Env => "Env",
         }
     }
 
@@ -263,6 +319,17 @@ impl PreludeType {
             // never a value, only its associated functions
             // (`Strings.split(t, s)`, ...) are callable.
             PreludeType::Strings => Type::Void,
+            // T124g: namespace-only - Args has no value representation.
+            // Mirrors Log / Toml / Math / Random / Strings: the
+            // namespace itself is never a value, only its associated
+            // functions (`Args.list()`, `Args.get(i)`) are callable.
+            PreludeType::Args => Type::Void,
+            // T124g: namespace-only - Env has no value representation.
+            // Mirrors Log / Toml / Math / Random / Strings / Args: the
+            // namespace itself is never a value, only its associated
+            // functions (`Env.get(k)`, `Env.set(k, v)`, `Env.has(k)`)
+            // are callable.
+            PreludeType::Env => Type::Void,
         }
     }
 
@@ -277,6 +344,8 @@ impl PreludeType {
             self,
             PreludeType::Log | PreludeType::Toml | PreludeType::Math | PreludeType::Random
                 | PreludeType::Strings
+                | PreludeType::Args
+                | PreludeType::Env
         )
     }
 }
@@ -452,6 +521,43 @@ pub enum PreludeAssocFn {
     /// `Strings.to_lowercase(text)` - lowercase the text. One arg.
     /// Returns String. Wraps `text.to_lowercase().to_string()`.
     ToLowercase,
+    // ---- Args / Env (T124g) -------------------------------------------
+    // These variants follow the precedent set by `Parse` (shared by
+    // DateTime / Date / Toml): a single variant may be valid on MULTIPLE
+    // prelude types, with the (type, method) pair dispatched in
+    // [`assoc_fn_return_type`] + the codegen arm. Below, `Get` is shared
+    // between `Args.get(i)` (returns String) and `Env.get(k)` (returns
+    // Option<String>) - same name, different per-type semantics, exactly
+    // like `parse(text)` returns DateTime vs Date vs Map<String, Unknown>
+    // depending on the receiver type.
+    //
+    // `Args.list()` - collect program name + args into a
+    // `Vector<String>`. Zero args. Returns `Vector<String>`. Wraps
+    // `std::env::args().collect::<Vec<String>>()`.
+    List,
+    /// `Args.get(i)` / `Env.get("KEY")` - positional or named lookup.
+    /// - On `Args`: one Int arg, returns `String` (the i-th arg, or
+    //    empty String on out-of-bounds - NEVER panics). Wraps
+    //    `std::env::args().nth(i).unwrap_or_default()`.
+    /// - On `Env`: one String arg (the var name), returns
+    ///   `Option<String>` (None when unset or invalid UTF-8). Wraps
+    ///   `std::env::var(k).ok()`.
+    ///
+    /// The shared variant mirrors `Parse` (DateTime.parse(s) /
+    /// Date.parse(s) / Toml.parse(s) all use `PreludeAssocFn::Parse`).
+    /// Dispatch on the (type, method) pair is exhaustive in
+    /// [`assoc_fn_return_type`].
+    Get,
+    /// `Env.set("KEY", "value")` - set an env var. Two args
+    /// (String, String). Returns `Void`. Wraps
+    /// `std::env::set_var(k, v)`. NOTE: Rust 2024 edition marks
+    /// `set_var` as `unsafe`; Buff emits 2021 so the call is safe
+    /// today. A future edition bump will need an `unsafe { ... }`
+    /// wrapper (tracked in `decisions.md`).
+    Set,
+    /// `Env.has("KEY")` - test whether an env var is set. One arg
+    /// (String). Returns `Bool`. Wraps `std::env::var(k).is_ok()`.
+    Has,
 }
 
 impl PreludeAssocFn {
@@ -504,6 +610,13 @@ impl PreludeAssocFn {
         PreludeAssocFn::StartsWith,
         PreludeAssocFn::ToUppercase,
         PreludeAssocFn::ToLowercase,
+        // T124g: Args / Env assoc fns (4 distinct names): list/get/set/has.
+        // `Get` is shared between Args.get and Env.get (mirrors `Parse`
+        // being shared between DateTime / Date / Toml).
+        PreludeAssocFn::List,
+        PreludeAssocFn::Get,
+        PreludeAssocFn::Set,
+        PreludeAssocFn::Has,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -568,6 +681,15 @@ impl PreludeAssocFn {
             PreludeAssocFn::StartsWith => "starts_with",
             PreludeAssocFn::ToUppercase => "to_uppercase",
             PreludeAssocFn::ToLowercase => "to_lowercase",
+            // T124g: Args / Env assoc fn names mirror Rust's `std::env`
+            // surface intent. `list` is a Buff-flavored name (clearer
+            // than `args_collect`); `get` matches Buff's universal
+            // accessor verb (mirrors Map.get / Vector.get); `set` /
+            // `has` are the canonical env/map-style mutate + test verbs.
+            PreludeAssocFn::List => "list",
+            PreludeAssocFn::Get => "get",
+            PreludeAssocFn::Set => "set",
+            PreludeAssocFn::Has => "has",
         }
     }
 }
@@ -578,14 +700,28 @@ impl PreludeAssocFn {
 /// (e.g. `DateTime.days(7)` is invalid — `days` belongs to `Duration`).
 /// This is the function the type inferencer + codegen consult to decide
 /// whether a `Type.method(args)` AST node is a prelude call.
+///
+/// T124g: when multiple assoc-fn variants share a name (e.g. `Args.get`
+/// and `Env.get` are distinct variants both spelled `get`), the lookup
+/// iterates ALL variants matching the method name and returns the first
+/// whose `(type, method)` pair validates. Earlier versions returned the
+/// first matching variant unconditionally and validated once — that
+/// broke `Env.get(...)` because `ArgsGet` appears first in `ALL` and
+/// `(Env, ArgsGet)` is not a valid pair. The new scan-with-validation
+/// is correct for any number of same-named variants across distinct
+/// types (the validation matrix in [`assoc_fn_return_type`] is the
+/// single source of truth for which `(type, method)` pairs are legal).
 pub fn assoc_fn_lookup(type_name: &str, method: &str) -> Option<(PreludeType, PreludeAssocFn)> {
     let t = prelude_type_lookup(type_name)?;
-    let m = PreludeAssocFn::ALL
-        .iter()
-        .copied()
-        .find(|f| f.name() == method)?;
-    // Validate the (type, method) pair is a recognised combination.
-    assoc_fn_return_type(t, m, &[]).map(|_| (t, m))
+    // Scan ALL assoc-fn variants whose name matches, returning the first
+    // whose (type, method) pair validates. Mirrors the same-named-variant
+    // disambiguation strategy already used in `assoc_const_lookup`.
+    for m in PreludeAssocFn::ALL.iter().copied() {
+        if m.name() == method && assoc_fn_return_type(t, m, &[]).is_some() {
+            return Some((t, m));
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -807,6 +943,32 @@ pub fn assoc_fn_return_type(
         (PreludeType::Strings, PreludeAssocFn::ToUppercase) => Some(Type::string()),
         // `Strings.to_lowercase(text)` -> String.
         (PreludeType::Strings, PreludeAssocFn::ToLowercase) => Some(Type::string()),
+        // T124g: Args module.
+        // `Args.list()` -> Vector<String>. Wraps
+        // `std::env::args().collect::<Vec<String>>()`. Returns every
+        // command-line argument (program name at index 0, user args
+        // from index 1 onwards).
+        (PreludeType::Args, PreludeAssocFn::List) => Some(Type::vector(Type::string())),
+        // `Args.get(i)` -> String. Wraps
+        // `std::env::args().nth(i).unwrap_or_default()` (empty String
+        // on out-of-bounds - NEVER panics).
+        (PreludeType::Args, PreludeAssocFn::Get) => Some(Type::string()),
+        // T124g: Env module.
+        // `Env.get("KEY")` -> Option<String>. Wraps
+        // `std::env::var(k).ok()`. None when the var is unset OR holds
+        // invalid UTF-8 (both folded into None so the surface stays
+        // panic-free and uniform). Same `Get` variant as Args.get but
+        // dispatched on the (Env, Get) pair - mirrors the (DateTime,
+        // Parse) / (Date, Parse) / (Toml, Parse) overload-by-type
+        // pattern.
+        (PreludeType::Env, PreludeAssocFn::Get) => Some(Type::option(Type::string())),
+        // `Env.set("KEY", "value")` -> Void. Wraps
+        // `std::env::set_var(k, v)`. NOTE: `set_var` is `unsafe` in
+        // Rust 2024; Buff emits 2021 so safe today.
+        (PreludeType::Env, PreludeAssocFn::Set) => Some(Type::Void),
+        // `Env.has("KEY")` -> Bool. Wraps
+        // `std::env::var(k).is_ok()`.
+        (PreludeType::Env, PreludeAssocFn::Has) => Some(Type::bool()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -1258,8 +1420,9 @@ mod tests {
         // (Log) shipped in T124c + 1 runtime-value-with-methods type
         // (Regex) shipped in T124d + 1 namespace-only module (Toml)
         // shipped in T124e + 3 namespace-only utility modules (Math,
-        // Random, Strings) shipped in T124f = 11 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 11);
+        // Random, Strings) shipped in T124f + 2 namespace-only system
+        // modules (Args, Env) shipped in T124g = 13 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 13);
     }
 
     #[test]
@@ -1558,13 +1721,18 @@ mod tests {
         assert!(!PreludeType::Duration.is_namespace_only());
         assert!(!PreludeType::Instant.is_namespace_only());
         assert!(!PreludeType::Regex.is_namespace_only());
-        // T124f: The count of namespace-only modules is now exactly 5
-        // (Log + Toml + Math + Random + Strings).
+        // T124g: Args / Env are also namespace-only modules (mirror
+        // Log / Toml / Math / Random / Strings). Both wrap `std::env`
+        // and have NO runtime value representation.
+        assert!(PreludeType::Args.is_namespace_only());
+        assert!(PreludeType::Env.is_namespace_only());
+        // T124g: The count of namespace-only modules is now exactly 7
+        // (Log + Toml + Math + Random + Strings + Args + Env).
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        assert_eq!(namespace_only_count, 5);
+        assert_eq!(namespace_only_count, 7);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +
