@@ -1345,7 +1345,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Path, Dir, and Tempfile filesystem modules`
 
-- [ ] **T124k: Crypto modules — Hash, HMAC** [quick]
+- [x] **T124k: Crypto modules — Hash, HMAC** [quick]
 
   **What to do**:
   - `Hash`: `Hash.sha256(data) -> String` (hex digest), `Hash.sha512(data) -> String`, `Hash.md5(data) -> String` — wrap `sha2` + `md5` crates. Note: MD5 is cryptographically broken — include for checksum compatibility only, document "not for security use."

@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-codegen-rust/tests/crypto_codegen.rs
+expression: src
+---
+fn f() {
+    hex::encode(md5::compute("hello".as_bytes()).0);
+}

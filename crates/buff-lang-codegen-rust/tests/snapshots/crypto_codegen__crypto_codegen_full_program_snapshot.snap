@@ -1,0 +1,24 @@
+---
+source: crates/buff-lang-codegen-rust/tests/crypto_codegen.rs
+expression: src
+---
+fn main() {
+    let sha256hex: String = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest("hello".as_bytes()))
+    };
+    let sha512hex: String = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha512::digest("hello".as_bytes()))
+    };
+    let md5hex: String = hex::encode(md5::compute("hello".as_bytes()).0);
+    let hmachex: String = {
+        use hmac::Mac;
+        hmac::Hmac::<sha2::Sha256>::new_from_slice("secret".as_bytes())
+            .map(|mut mac| {
+                mac.update("message".as_bytes());
+                hex::encode(mac.finalize().into_bytes())
+            })
+            .unwrap_or_default()
+    };
+}

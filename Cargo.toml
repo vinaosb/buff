@@ -185,6 +185,47 @@ csv = "1"
 # contract.
 walkdir = "2"
 tempfile = "3"
+# T124k: Crypto modules (Hash / HMAC) wrap three mature RustCrypto crates.
+# Each codegen-lowered call uses fully-qualified paths so generated code
+# requires no top-level `use` import - but the recorded name in
+# `extern_crates` signals to the pipeline / build-driver that the
+# generated Cargo project must declare each crate in `[dependencies]`.
+#
+# - `sha2` 0.10: the RustCrypto SHA-2 family. API surface used:
+#   `sha2::Sha256::digest(data.as_bytes())` (one-shot digest via the
+#   `Digest` trait - codegen emits a block-scoped `use sha2::Digest;` so
+#   the trait method is in scope at the call site without polluting the
+#   caller's namespace) + `sha2::Sha512::digest(...)` for SHA-512.
+#   Returns a `GenericArray<u8, _>` that `hex::encode` accepts via
+#   `AsRef<[u8]>`. The `sha2` crate is shared between `Hash.sha256` /
+#   `Hash.sha512` (both narrow walkers record it) AND `HMAC.sha256`
+#   (HMAC wraps `hmac::Hmac<sha2::Sha256>`).
+# - `md5` 0.7: the RustCrypto MD5 crate. API surface used:
+#   `md5::compute(data.as_bytes()).0` (returns `md5::Digest`, a tuple
+#   struct wrapping `[u8; 16]`; `.0` accesses the byte array).
+#   MD5 is CRYPTOGRAPHICALLY BROKEN - exposed for checksum compatibility
+#   only (mirrors how md5 is used in the Rust ecosystem today: etags,
+#   content-addressable caches, legacy interop). NEVER use for security.
+# - `hmac` 0.12: the RustCrypto HMAC crate. API surface used:
+#   `hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes())`
+#   (returns `Result<Hmac<Sha256>, MacError>` - codegen `.map(...)`s the
+#   Ok branch and falls back to an empty String via `.unwrap_or_default()`
+#   on Err - NEVER panics) then `mac.update(data.as_bytes())` +
+#   `mac.finalize().into_bytes()` (returns `GenericArray<u8, _>`). The
+#   `update` / `finalize` methods are on the `Mac` trait - codegen emits
+#   a block-scoped `use hmac::Mac;` so the trait methods are in scope.
+#
+# `hex` is already pinned at the workspace level (T124h); T124k reuses
+# that pin for the hex-encode lowering of every Hash / HMAC digest.
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/percent-
+# encoding/uuid/url/serde_yml/csv/walkdir/tempfile codegen-only linking
+# boundary (single-file `buff run` rustc path does NOT link them;
+# cargo-project wiring is deferred). Snapshots + extern_crates set is
+# the verifiable contract.
+sha2 = "0.10"
+md5 = "0.7"
+hmac = "0.12"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }

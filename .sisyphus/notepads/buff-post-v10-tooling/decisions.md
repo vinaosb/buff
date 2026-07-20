@@ -284,3 +284,45 @@ Buff emits Rust 2021 edition, so std::env::set_var(k, v) is safe today. The lowe
 
 ## [2026-07-20 T124h] T124h decisions
 URL.parse fallback: unwrap_or_else(|_| Url::parse('about:blank').unwrap()) keeps the value-type total (no Result surfaced to Buff user yet). url crate reused from existing workspace pin (T117 LSP transitive) - not re-added. Per-crate narrow extern_crates walkers mirror program_uses_tokio/rand; URL walker gated on buff_type().is_prelude_url() (narrow, avoids chrono over-broad bug).
+== T124k (crypto modules: Hash + HMAC) ==
+
+SHAPE DECISIONS:
+- Namespace-only modules mirroring T124i (Yaml/Csv) + T124j (Dir/Tempfile).
+  Both Hash + HMAC have buff_type() -> Type::Void, is_namespace_only() = true.
+  NO new ty.rs variant (all assoc fns return String).
+- PreludeAssocFn::Sha256 is SHARED between Hash.sha256 and HMAC.sha256
+  (mirrors Parse being shared between DateTime/Date/Toml/URL/UUID, Create
+  being shared between Dir/Tempfile, Encode/Decode shared by Base64/Hex/
+  URLEncode). Same algorithm SHA-256, different receiver type; dispatched
+  on the (type, method) pair.
+- Sha512 / Md5 are Hash-only (HMAC surface is SHA-256 only in T124k).
+- HMAC spelled all-caps (mirrors UUID + URL convention; canonical acronym
+  surfaced as PascalCase module name).
+
+CODEGEN SHAPES (verified via accepted insta snapshots):
+- Hash.sha256(d) -> { use sha2::Digest; hex::encode(sha2::Sha256::digest
+  (d.as_bytes())) } - block-scoped use brings Digest trait method into
+  scope (digest is a trait method, NOT inherent on Sha256).
+- Hash.sha512(d) -> identical shape but Sha512.
+- Hash.md5(d) -> hex::encode(md5::compute(d.as_bytes()).0) - NO use needed
+  (md5::compute is a free function; .0 is tuple-struct field access).
+- HMAC.sha256(k, d) -> { use hmac::Mac; hmac::Hmac::<sha2::Sha256>
+  ::new_from_slice(k.as_bytes()).map(|mut mac| { mac.update(d.as_bytes
+  ()); hex::encode(mac.finalize().into_bytes()) }).unwrap_or_default() }
+  - block-scoped use for Mac trait methods; panic-free via .map().
+  unwrap_or_default() (new_from_slice returns Result).
+
+NARROW WALKERS (chrono-over-broad gotcha avoidance):
+- program_uses_sha2 flags ONLY: (Hash, sha256) / (Hash, sha512) / (HMAC,
+  sha256). Method-aware + receiver-aware. NOT a generic Hash-namespace
+  walker (would over-register sha2 for Hash.md5-only programs).
+- program_uses_md5 flags ONLY: (Hash, md5).
+- program_uses_hmac flags ONLY: (HMAC, sha256).
+- HMAC.sha256 also records sha2 (cross-crate coupling handled in
+  generate() caller, NOT the walker - walker stays minimal one-crate).
+- hex recorded alongside every Hash/HMAC call (every digest/MAC lowers
+  to hex::encode).
+
+VERIFICATION: all 4 gates green. cargo build/clippy/test all EXIT=0.
+buff-lang-codegen-rust full test suite green (no regressions).
+

@@ -1,0 +1,17 @@
+﻿T124k Crypto (Hash SHA-256/512, MD5; HMAC-SHA256) - VERIFICATION EVIDENCE
+Date: 2026-07-20  HEAD-parent: 44fcf9c
+GATES:
+- cargo clippy --workspace --all-targets -- -D warnings => EXIT 0 (Finished, 0 warnings)
+- cargo test -p buff-lang-codegen-rust --test crypto_codegen => 22 passed; 0 failed
+- cargo test --workspace --exclude buff-lang-runtime => EXIT 0 (no FAILED, no error[)
+CODEGEN (panic-free, fully-qualified, block-scoped trait imports):
+- Hash.sha256(d) => { use sha2::Digest; hex::encode(sha2::Sha256::digest(d.as_bytes())) }
+- Hash.sha512(d) => sha2::Sha512::digest + hex
+- Hash.md5(d)    => hex::encode(md5::compute(d.as_bytes()).0)
+- HMAC.sha256(k,d) => { use hmac::Mac; Hmac::<sha2::Sha256>::new_from_slice(k).map(|mut mac|{mac.update(d);hex::encode(mac.finalize().into_bytes())}).unwrap_or_default() }  # NEVER panics
+DEPS (root [workspace.dependencies]): sha2 0.10, md5 0.7, hmac 0.12; hex reused (T124h).
+WALKERS (narrow, per-method): program_uses_sha2 (sha256/sha512), program_uses_md5, program_uses_hmac (records hmac + sha2); hex recorded if any. extern_crates BTreeSet.
+Registry: Hash + HMAC namespace-only (no ty.rs variant); count + is_namespace_only tests bumped (workspace green).
+Known-value: Hash.sha256("hello")=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+Codegen-only linking boundary (single-file buff run rustc does NOT link; cargo-project wiring deferred - see issues.md).
+Snapshots: 5 (hash sha256/sha512/md5, hmac sha256, full_program). crypto_codegen.rs 22 tests.

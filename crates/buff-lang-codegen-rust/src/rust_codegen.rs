@@ -669,6 +669,63 @@ impl RustCodegen {
         if program_uses_tempfile(decls) {
             self.extern_crates.insert("tempfile".to_string());
         }
+        // T124k: register the `sha2` + `md5` + `hmac` + `hex` crates
+        // as external dependencies when the program references the
+        // corresponding prelude modules (`Hash.sha256(data)` /
+        // `Hash.sha512(data)` / `Hash.md5(data)` /
+        // `HMAC.sha256(key, data)`). Generated code uses
+        // fully-qualified `sha2::Sha256::digest` / `sha2::Sha512::digest`
+        // / `md5::compute` / `hmac::Hmac::<sha2::Sha256>::...` paths
+        // (plus block-scoped `use sha2::Digest;` / `use hmac::Mac;`
+        // for the trait methods) so no top-level `use` import is
+        // emitted - but the recorded name signals to the pipeline /
+        // build-driver that the generated Cargo project must declare
+        // each crate in `[dependencies]`.
+        //
+        // NOTE: `Hash.sha256` / `Hash.sha512` both record `sha2`
+        // (the SHA-2 family crate ships both digesters);
+        // `Hash.md5` records `md5`; `HMAC.sha256` records `hmac`
+        // + `sha2` (HMAC wraps `hmac::Hmac<sha2::Sha256>` so the
+        // generated path needs both). `hex` is recorded alongside
+        // each (the hex encoding is shared with T124h Hex module's
+        // walker; re-recording is idempotent - extern_crates is a
+        // BTreeSet).
+        //
+        // The narrow walkers (per-method) flag the SPECIFIC method
+        // names - sha256/sha512 -> sha2; md5 -> md5; HMAC.sha256 ->
+        // hmac + sha2. Mirrors the chrono-over-broad gotcha (T124f):
+        // a generic `program_uses_namespace("Hash")` would
+        // over-register (a program using only `Hash.md5` shouldn't
+        // need `sha2`).
+        //
+        // Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/
+        // percent-encoding/uuid/url/serde_yml/csv/walkdir/tempfile
+        // registration pattern (T124b/T124c/T124d/T124e/T124f/T124g/
+        // T124h/T124i/T124j): single-file `buff run` rustc path does
+        // NOT link these crates; the codegen-only linking boundary is
+        // the accepted acceptance criterion for v1.4 prelude modules.
+        // Cargo-project wiring is deferred (snapshots + extern_crates
+        // set is the verifiable contract).
+        if program_uses_sha2(decls) {
+            self.extern_crates.insert("sha2".to_string());
+        }
+        if program_uses_md5(decls) {
+            self.extern_crates.insert("md5".to_string());
+        }
+        if program_uses_hmac(decls) {
+            self.extern_crates.insert("hmac".to_string());
+            // HMAC.sha256 lowers to `hmac::Hmac<sha2::Sha256>` so
+            // the `sha2` crate is needed alongside `hmac`. Record
+            // `sha2` here too (idempotent if the program also uses
+            // Hash.sha256/sha512 - extern_crates is a BTreeSet).
+            self.extern_crates.insert("sha2".to_string());
+        }
+        if program_uses_sha2(decls) || program_uses_md5(decls) || program_uses_hmac(decls) {
+            // Every Hash.* / HMAC.* call emits a `hex::encode(...)`
+            // for the digest / MAC bytes. Record `hex` alongside
+            // (shared with T124h Hex module's walker; idempotent).
+            self.extern_crates.insert("hex".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -4042,6 +4099,130 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Tempfile.dir codegen parse: {e}")))
+            }
+            // T124k: Hash module - 3 assoc fns wrapping the `sha2`
+            // (SHA-256 / SHA-512) + `md5` RustCrypto crates. Hash is
+            // namespace-only (mirrors Log/Toml/Base64/Hex/Yaml/Csv/
+            // Dir/Tempfile). The `sha2` / `md5` crates are recorded
+            // in `extern_crates` when a Buff program uses Hash.*
+            // (the narrow walkers flag the specific method names -
+            // sha256/sha512 -> sha2, md5 -> md5); the `hex` crate is
+            // recorded alongside (shared with T124h Hex module's
+            // walker).
+            //
+            // `Hash.sha256(data)` -> String. Wraps
+            // `{ use sha2::Digest; hex::encode(sha2::Sha256::digest
+            // (<d>.as_bytes())) }`. The block-scoped `use` brings
+            // the `Digest` trait's `digest` method into scope WITHOUT
+            // polluting the caller's namespace (`digest` is a trait
+            // method, NOT an inherent method on `Sha256` - so the
+            // `use` is required for the path-syntax call
+            // `sha2::Sha256::digest(...)` to resolve).
+            //
+            // The arg accepts String OR Vector<Byte> (anything
+            // `AsRef<[u8]>` at the codegen layer); `.as_bytes()`
+            // gives `&[u8]` for both String (str::as_bytes) and
+            // Vec<u8> (slice::as_bytes via [u8] identity). The
+            // returned `GenericArray<u8, U32>` is accepted by
+            // `hex::encode` via its `AsRef<[u8]>` bound.
+            //
+            // Sanity check: `Hash.sha256("hello")` =
+            // `2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824`.
+            (T::Hash, A::Sha256) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use sha2::Digest;
+                        hex::encode(sha2::Sha256::digest(#arg.as_bytes()))
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Hash.sha256 codegen parse: {e}")))
+            }
+            // `Hash.sha512(data)` -> String. Same shape as sha256
+            // but `Sha512`. Returns the 128-char lowercase hex
+            // String. Block-scoped `use sha2::Digest;` for the trait
+            // method (same rationale as sha256).
+            (T::Hash, A::Sha512) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use sha2::Digest;
+                        hex::encode(sha2::Sha512::digest(#arg.as_bytes()))
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Hash.sha512 codegen parse: {e}")))
+            }
+            // `Hash.md5(data)` -> String. Wraps
+            // `hex::encode(md5::compute(<d>.as_bytes()).0)` (the
+            // `.0` accesses the inner `[u8; 16]` of the
+            // `md5::Digest` tuple struct; `hex::encode` accepts it
+            // via `AsRef<[u8]>` on `[u8; N]` arrays). NO `use`
+            // needed - `md5::compute` is a free function (not a
+            // trait method) and `.0` is a public field access (not
+            // a trait method either). Returns the 32-char lowercase
+            // hex String. **MD5 is CRYPTOGRAPHICALLY BROKEN** -
+            // exposed for checksum compatibility only; NEVER use
+            // for security.
+            (T::Hash, A::Md5) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    hex::encode(md5::compute(#arg.as_bytes()).0)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Hash.md5 codegen parse: {e}")))
+            }
+            // T124k: HMAC module - 1 assoc fn wrapping the `hmac` +
+            // `sha2` RustCrypto crates. HMAC is namespace-only
+            // (mirrors Hash / Log / Toml / Base64 / Hex / ...). The
+            // `hmac` + `sha2` crates are recorded in `extern_crates`
+            // when a Buff program uses `HMAC.sha256` (the
+            // `hmac::Hmac<sha2::Sha256>` path needs BOTH); the
+            // `hex` crate is recorded alongside.
+            //
+            // `HMAC.sha256(key, data)` -> String. Wraps
+            // `{ use hmac::Mac; hmac::Hmac::<sha2::Sha256>
+            // ::new_from_slice(<k>.as_bytes()).map(|mut mac| {
+            // mac.update(<d>.as_bytes()); hex::encode(mac.finalize()
+            // .into_bytes()) }).unwrap_or_default() }`. Block-scoped
+            // `use hmac::Mac;` brings the `Mac` trait's `update` /
+            // `finalize` methods into scope (they're trait methods,
+            // NOT inherent on `Hmac`).
+            //
+            // `new_from_slice` returns `Result<Hmac<Sha256>,
+            // MacError>` and accepts ANY key length (HMAC has no
+            // fixed key size); the `.map(...).unwrap_or_default()`
+            // collapses the Err branch to an empty String - NEVER
+            // panics, matching Buff's "no panicking generated code"
+            // rule (mirrors Base64.decode / Hex.decode / Csv.parse's
+            // panic-free stance).
+            //
+            // Both args accept String OR Vector<Byte> (anything
+            // `AsRef<[u8]>`); `.as_bytes()` gives `&[u8]` for both.
+            // The `mac.finalize().into_bytes()` returns a
+            // `GenericArray<u8, U32>` (32 bytes for SHA-256) that
+            // `hex::encode` accepts via `AsRef<[u8]>`.
+            //
+            // Same shared `Sha256` variant as `Hash.sha256`;
+            // dispatched on the (HMAC, Sha256) pair.
+            (T::HMAC, A::Sha256) => {
+                let mut lowered = n_args(self, 2)?;
+                let key = lowered.remove(0);
+                let data = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        use hmac::Mac;
+                        hmac::Hmac::<sha2::Sha256>::new_from_slice(#key.as_bytes())
+                            .map(|mut mac| {
+                                mac.update(#data.as_bytes());
+                                hex::encode(mac.finalize().into_bytes())
+                            })
+                            .unwrap_or_default()
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("HMAC.sha256 codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
@@ -10134,6 +10315,441 @@ fn expr_uses_dir_walk(expr: &Expr) -> bool {
 /// Ident, NOT every method-name match.
 fn program_uses_tempfile(decls: &[Decl]) -> bool {
     program_uses_namespace(decls, "Tempfile")
+}
+
+// ---------------------------------------------------------------------------
+// T124k - crypto module emit-on-demand detection (sha2 + md5 + hmac
+// extern crates). Three NARROW walkers flag the specific (receiver,
+// method) combinations so a program using only `Hash.md5` doesn't
+// pull in `sha2` (and vice versa). They mirror the `program_uses_dir_walk`
+// shape (T124j) - method-aware narrow walkers - rather than the
+// `program_uses_namespace` one-liner (T124h/T124i) which would
+// over-register.
+//
+// `hex` recording is handled in the `generate()` caller (recorded
+// when ANY of sha2/md5/hmac fires, since every Hash.* / HMAC.* call
+// emits a `hex::encode(...)` for the digest / MAC bytes).
+//
+// NOTE: `HMAC.sha256` lowers to `hmac::Hmac<sha2::Sha256>` so the
+// `hmac` walker ALSO records `sha2` (idempotent if the program also
+// uses Hash.sha256/sha512 - extern_crates is a BTreeSet). This is
+// handled in the `generate()` caller, NOT in the walker itself (the
+// walker stays minimal - one crate per walker).
+// ---------------------------------------------------------------------------
+
+/// T124k: detect `Hash.sha256(...)` / `Hash.sha512(...)` /
+/// `HMAC.sha256(...)` calls. The `sha2` crate is needed for any of
+/// these three (SHA-2 family digest for sha256/sha512; `Sha256` as
+/// the inner hasher for HMAC-SHA256). A NARROW method-aware walker
+/// is required: a generic `program_uses_namespace("Hash")` would
+/// over-register sha2 for programs using only `Hash.md5` (which
+/// needs `md5`, NOT `sha2`); symmetrically, the HMAC.sha256 call
+/// lives on a DIFFERENT receiver (`HMAC`, not `Hash`) so a pure
+/// Hash-only walker would miss it.
+///
+/// Detection recognises a `MethodCall` whose receiver is the bare
+/// Ident `Hash` AND whose method name is `sha256` OR `sha512`, OR
+/// whose receiver is the bare Ident `HMAC` AND whose method name is
+/// `sha256`. The receiver-name + method-name gate mirrors the
+/// chrono-over-broad cautionary tale (T124f gotcha): flags ONLY the
+/// specific (receiver, method) combinations that lower to sha2.
+fn program_uses_sha2(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_sha2(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_sha2`]: scan a block for
+/// `Hash.sha256` / `Hash.sha512` / `HMAC.sha256` calls.
+fn block_uses_sha2(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_sha2)
+}
+
+/// Check a single statement (and its nested expressions) for
+/// sha2-triggering usage. Mirrors the `stmt_uses_dir_walk` shape
+/// exactly with the additional method-name + receiver-name gate.
+fn stmt_uses_sha2(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_sha2(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_sha2(target) || expr_uses_sha2(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => {
+            expr_uses_sha2(iter) || block_uses_sha2(body)
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_sha2(cond) || block_uses_sha2(body)
+        }
+        Stmt::ForLet { value, body, .. } => {
+            expr_uses_sha2(value) || block_uses_sha2(body)
+        }
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_sha2(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_sha2(e),
+            }) || block_uses_sha2(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_sha2(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a sha2-triggering call
+/// (`Hash.sha256` / `Hash.sha512` / `HMAC.sha256`). Same conservative
+/// bare-Ident-receiver + method-name strategy as `expr_uses_dir_walk`.
+fn expr_uses_sha2(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } => {
+            // Match the three (receiver, method) pairs that lower to
+            // sha2: (Hash, sha256) / (Hash, sha512) / (HMAC, sha256).
+            if method.name == "sha256" || method.name == "sha512" {
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if (id.name == "Hash" && (method.name == "sha256" || method.name == "sha512"))
+                        || (id.name == "HMAC" && method.name == "sha256")
+                    {
+                        return true;
+                    }
+                }
+            }
+            expr_uses_sha2(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_sha2(lhs) || expr_uses_sha2(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_sha2(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_sha2(callee) || args.iter().any(expr_uses_sha2)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_sha2(cond)
+                || block_uses_sha2(then_block)
+                || else_block.as_ref().is_some_and(block_uses_sha2)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_sha2(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_sha2),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_sha2(base) || indices.iter().any(expr_uses_sha2)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_sha2(k) || expr_uses_sha2(v)),
+        Expr::Lambda { body, .. } => block_uses_sha2(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_sha2(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_sha2(scrutinee)
+                || arms.iter().any(|arm| block_uses_sha2(&arm.body))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_sha2(inner),
+        Expr::Try { expr, .. } => expr_uses_sha2(expr),
+        Expr::Spawn { task, .. } => expr_uses_sha2(task),
+        Expr::Range { start, end, .. } => expr_uses_sha2(start) || expr_uses_sha2(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_sha2(value)
+                || block_uses_sha2(then_block)
+                || else_block.as_ref().is_some_and(block_uses_sha2)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_sha2),
+        Expr::NamedArg { value, .. } => expr_uses_sha2(value),
+    }
+}
+
+/// T124k: detect `Hash.md5(...)` calls. The `md5` crate is needed
+/// ONLY for `Hash.md5` (the SHA-2 methods record `sha2` instead). A
+/// NARROW method-aware walker is required here: a generic
+/// `program_uses_namespace("Hash")` would over-register md5 for
+/// programs using only `Hash.sha256`/`sha512`.
+///
+/// Detection recognises a `MethodCall` whose receiver is the bare
+/// Ident `Hash` AND whose method name is exactly `md5`. The
+/// receiver-name + method-name gate mirrors the chrono-over-broad
+/// cautionary tale (T124f gotcha).
+fn program_uses_md5(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_md5(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_md5`]: scan a block for
+/// `Hash.md5(...)` calls.
+fn block_uses_md5(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_md5)
+}
+
+/// Check a single statement (and its nested expressions) for
+/// `Hash.md5(...)` usage. Mirrors the `stmt_uses_dir_walk` /
+/// `stmt_uses_sha2` shape exactly.
+fn stmt_uses_md5(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_md5(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_md5(target) || expr_uses_md5(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_md5(iter) || block_uses_md5(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_md5(cond) || block_uses_md5(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_md5(value) || block_uses_md5(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_md5(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_md5(e),
+            }) || block_uses_md5(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_md5(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `Hash.md5(...)` call.
+/// Same conservative bare-Ident-receiver + method-name strategy.
+fn expr_uses_md5(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } => {
+            // Match `Hash.md5(...)` exactly: bare Ident `Hash`
+            // receiver AND method name `md5`.
+            if method.name == "md5" {
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if id.name == "Hash" {
+                        return true;
+                    }
+                }
+            }
+            expr_uses_md5(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_md5(lhs) || expr_uses_md5(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_md5(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_md5(callee) || args.iter().any(expr_uses_md5)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_md5(cond)
+                || block_uses_md5(then_block)
+                || else_block.as_ref().is_some_and(block_uses_md5)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_md5(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_md5),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_md5(base) || indices.iter().any(expr_uses_md5)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_md5(k) || expr_uses_md5(v)),
+        Expr::Lambda { body, .. } => block_uses_md5(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_md5(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_md5(scrutinee) || arms.iter().any(|arm| block_uses_md5(&arm.body))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_md5(inner),
+        Expr::Try { expr, .. } => expr_uses_md5(expr),
+        Expr::Spawn { task, .. } => expr_uses_md5(task),
+        Expr::Range { start, end, .. } => expr_uses_md5(start) || expr_uses_md5(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_md5(value)
+                || block_uses_md5(then_block)
+                || else_block.as_ref().is_some_and(block_uses_md5)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_md5),
+        Expr::NamedArg { value, .. } => expr_uses_md5(value),
+    }
+}
+
+/// T124k: detect `HMAC.sha256(...)` calls. The `hmac` crate is needed
+/// ONLY for `HMAC.sha256` (Hash.* records `sha2` / `md5` instead). A
+/// NARROW method-aware walker is required: a generic
+/// `program_uses_namespace("HMAC")` would over-register hmac for
+/// programs using any future HMAC method that doesn't lower to
+/// `hmac::Hmac` (none today, but the narrow stance is future-proof).
+///
+/// Detection recognises a `MethodCall` whose receiver is the bare
+/// Ident `HMAC` AND whose method name is exactly `sha256`. The
+/// receiver-name + method-name gate mirrors the sha2/md5 walkers
+/// (T124k) + the chrono-over-broad cautionary tale (T124f gotcha).
+///
+/// NOTE: the `generate()` caller ALSO records `sha2` when this walker
+/// fires (HMAC.sha256 lowers to `hmac::Hmac<sha2::Sha256>` so the
+/// path needs both crates). That cross-crate coupling is handled in
+/// the caller (not the walker) so the walker stays minimal - one
+/// crate per walker.
+fn program_uses_hmac(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_hmac(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_hmac`]: scan a block for
+/// `HMAC.sha256(...)` calls.
+fn block_uses_hmac(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_hmac)
+}
+
+/// Check a single statement (and its nested expressions) for
+/// `HMAC.sha256(...)` usage. Mirrors the `stmt_uses_sha2` /
+/// `stmt_uses_md5` shape exactly.
+fn stmt_uses_hmac(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_hmac(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_hmac(target) || expr_uses_hmac(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_hmac(iter) || block_uses_hmac(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_hmac(cond) || block_uses_hmac(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_hmac(value) || block_uses_hmac(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_hmac(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_hmac(e),
+            }) || block_uses_hmac(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_hmac(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `HMAC.sha256(...)` call.
+/// Same conservative bare-Ident-receiver + method-name strategy.
+fn expr_uses_hmac(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } => {
+            // Match `HMAC.sha256(...)` exactly: bare Ident `HMAC`
+            // receiver AND method name `sha256`. NOTE: `HMAC` is the
+            // Buff namespace name (all-uppercase); the underlying
+            // Rust crate + type is `hmac::Hmac<...>` (lowercase).
+            if method.name == "sha256" {
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if id.name == "HMAC" {
+                        return true;
+                    }
+                }
+            }
+            expr_uses_hmac(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_hmac(lhs) || expr_uses_hmac(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_hmac(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_hmac(callee) || args.iter().any(expr_uses_hmac)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_hmac(cond)
+                || block_uses_hmac(then_block)
+                || else_block.as_ref().is_some_and(block_uses_hmac)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_hmac(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_hmac),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_hmac(base) || indices.iter().any(expr_uses_hmac)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_hmac(k) || expr_uses_hmac(v)),
+        Expr::Lambda { body, .. } => block_uses_hmac(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_hmac(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_hmac(scrutinee) || arms.iter().any(|arm| block_uses_hmac(&arm.body))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_hmac(inner),
+        Expr::Try { expr, .. } => expr_uses_hmac(expr),
+        Expr::Spawn { task, .. } => expr_uses_hmac(task),
+        Expr::Range { start, end, .. } => expr_uses_hmac(start) || expr_uses_hmac(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_hmac(value)
+                || block_uses_hmac(then_block)
+                || else_block.as_ref().is_some_and(block_uses_hmac)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_hmac),
+        Expr::NamedArg { value, .. } => expr_uses_hmac(value),
+    }
 }
 
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait

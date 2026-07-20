@@ -455,6 +455,74 @@ pub enum PreludeType {
     /// (a program using `Tempfile.dir` likely uses `Tempfile.create`
     /// too, but the narrow walker flags either call).
     Tempfile,
+    /// `Hash` - the cryptographic-hash namespace (T124k). Wraps the
+    /// `sha2` + `md5` RustCrypto crates. Like [`Self::Log`] /
+    /// [`Self::Toml`] / [`Self::Base64`] / [`Self::Hex`] / [`Self::Dir`],
+    /// `Hash` is **never a runtime value** - it's a NAMESPACE exposing
+    /// three associated functions:
+    /// - `Hash.sha256(data)` - SHA-256 hex digest. Wraps
+    ///   `{ use sha2::Digest; hex::encode(sha2::Sha256::digest(d
+    ///   .as_bytes())) }` (the block-scoped `use` brings the
+    ///   `Digest` trait's `digest` method into scope WITHOUT
+    ///   polluting the caller's namespace - `digest` is a trait
+    ///   method, not an inherent method on `Sha256`). Returns the
+    ///   canonical 64-char lowercase hex String.
+    /// - `Hash.sha512(data)` - SHA-512 hex digest. Same shape as
+    ///   `sha256` but `Sha512`. Returns the 128-char lowercase hex
+    ///   String.
+    /// - `Hash.md5(data)` - MD5 hex digest. Wraps
+    ///   `hex::encode(md5::compute(d.as_bytes()).0)` (the `.0`
+    ///   accesses the inner `[u8; 16]` of the `md5::Digest` tuple
+    ///   struct). Returns the 32-char lowercase hex String. **MD5
+    ///   is CRYPTOGRAPHICALLY BROKEN** - exposed for checksum
+    ///   compatibility only (etags, content-addressable caches,
+    ///   legacy interop); NEVER use for security.
+    ///
+    /// Each call accepts String or `Vector<Byte>` (anything
+    /// `AsRef<[u8]>` at the codegen layer) and returns lowercase
+    /// hex. The `sha2` crate is recorded in codegen `extern_crates`
+    /// when a program uses `Hash.sha256` / `Hash.sha512` (and also
+    /// for `HMAC.sha256` since HMAC wraps `Hmac<Sha256>`); the
+    /// `md5` crate is recorded only for `Hash.md5`; the `hex` crate
+    /// is recorded alongside each call (shared with the T124h
+    /// `Hex` module's walker).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. Mirrors Log / Toml / Base64 / Hex / Yaml /
+    /// Csv / Dir / Tempfile exactly (parse-or-digest + return text).
+    Hash,
+    /// `HMAC` - the keyed-hash-MAC namespace (T124k). Wraps the
+    /// `hmac` + `sha2` RustCrypto crates. Like [`Self::Log`] /
+    /// [`Self::Toml`] / [`Self::Hash`], `HMAC` is **never a
+    /// runtime value** - it's a NAMESPACE exposing one associated
+    /// function:
+    /// - `HMAC.sha256(key, data)` - HMAC-SHA256 hex digest.
+    ///   Wraps `{ use hmac::Mac; hmac::Hmac::<sha2::Sha256>
+    ///   ::new_from_slice(k.as_bytes()).map(|mut mac| {
+    ///   mac.update(d.as_bytes()); hex::encode(mac.finalize()
+    ///   .into_bytes()) }).unwrap_or_default() }` (block-scoped
+    ///   `use` brings the `Mac` trait's `update` / `finalize`
+    ///   methods into scope WITHOUT polluting the caller's
+    ///   namespace). `new_from_slice` returns `Result<Hmac<Sha256>,
+    ///   MacError>` and accepts ANY key length (HMAC has no fixed
+    ///   key size); the `.map(...).unwrap_or_default()` collapses
+    ///   the Err branch to an empty String - **NEVER panics**,
+    ///   matching Buff's "no panicking generated code" rule.
+    ///
+    /// Both args accept String or `Vector<Byte>` (anything
+    /// `AsRef<[u8]>` at the codegen layer); the return is the
+    /// 64-char lowercase hex String. The `hmac` + `sha2` crates
+    /// are recorded in codegen `extern_crates` when a program
+    /// uses `HMAC.sha256` (the `hmac::Hmac<sha2::Sha256>` path
+    /// needs both); the `hex` crate is recorded alongside
+    /// (shared walker).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. Mirrors Log / Toml / Hash exactly. The
+    /// all-caps `HMAC` spelling mirrors the `UUID` / `URL`
+    /// convention (the canonical acronym is all-uppercase; Buff
+    /// surfaces it as a PascalCase module name).
+    HMAC,
 }
 
 impl PreludeType {
@@ -514,6 +582,13 @@ impl PreludeType {
         PreludeType::Path,
         PreludeType::Dir,
         PreludeType::Tempfile,
+        // T124k: Hash / HMAC - two crypto namespace modules
+        // wrapping the `sha2` + `md5` + `hmac` RustCrypto crates.
+        // Both mirror Log / Toml / Base64 / Hex / Yaml / Csv / Dir /
+        // Tempfile's namespace-only shape (digest + return text).
+        // NO runtime value type - every call returns String (hex).
+        PreludeType::Hash,
+        PreludeType::HMAC,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -624,6 +699,24 @@ impl PreludeType {
             // rewriting. `Tempfile.dir` uses `std::env::temp_dir()`
             // (std-only, NO extern crate needed for that call alone).
             PreludeType::Tempfile => "Tempfile",
+            // T124k: the Hash prelude type name. Buff-flavored
+            // shortening of `Hasher` / `Digest` (clearer than either;
+            // matches the canonical Python `hashlib` / Node
+            // `crypto.createHash` surface intent). The codegen splices
+            // `sha2::Sha256::digest` / `sha2::Sha512::digest` /
+            // `md5::compute` paths (note: the Rust crate names are
+            // `sha2` + `md5`; Buff's `Hash` namespace maps to BOTH
+            // depending on the method - sha256/sha512 -> sha2,
+            // md5 -> md5).
+            PreludeType::Hash => "Hash",
+            // T124k: the HMAC prelude type name. ALL-CAPS spelling
+            // mirrors the `UUID` / `URL` convention (the canonical
+            // acronym is all-uppercase; Buff surfaces it as a
+            // PascalCase module name). The codegen splices
+            // `hmac::Hmac::<sha2::Sha256>::new_from_slice(...)` paths
+            // (note the Rust crate names: `hmac` + `sha2` - Buff's
+            // `HMAC` namespace lowers to a path that needs BOTH).
+            PreludeType::HMAC => "HMAC",
         }
     }
 
@@ -739,6 +832,20 @@ impl PreludeType {
             // associated functions (`Tempfile.create` /
             // `Tempfile.dir`) are callable.
             PreludeType::Tempfile => Type::Void,
+            // T124k: namespace-only - Hash has no value
+            // representation. Mirrors Log / Toml / Base64 / Hex /
+            // Yaml / Csv / Dir / Tempfile exactly: the namespace
+            // itself is never a value, only its associated functions
+            // (`Hash.sha256` / `Hash.sha512` / `Hash.md5`) are
+            // callable. Every call returns a hex String (the digest).
+            PreludeType::Hash => Type::Void,
+            // T124k: namespace-only - HMAC has no value
+            // representation. Mirrors Hash / Log / Toml / Base64 /
+            // Hex / Yaml / Csv / Dir / Tempfile exactly: the
+            // namespace itself is never a value, only its associated
+            // function (`HMAC.sha256`) is callable. The call returns
+            // a hex String (the MAC).
+            PreludeType::HMAC => Type::Void,
         }
     }
 
@@ -763,6 +870,8 @@ impl PreludeType {
                 | PreludeType::Csv
                 | PreludeType::Dir
                 | PreludeType::Tempfile
+                | PreludeType::Hash
+                | PreludeType::HMAC
         )
     }
 }
@@ -1089,6 +1198,52 @@ pub enum PreludeAssocFn {
     /// `extern_crates` for symmetry (any Tempfile.* call flags the
     /// crate). Tempfile-only.
     Dir,
+    // ---- Crypto modules (T124k) -------------------------------------
+    // These variants follow the precedent set by `Parse` (shared by
+    // DateTime / Date / Toml / URL / UUID), `Get` (shared by
+    // Args.get / Env.get), `Encode` / `Decode` (shared by Base64 /
+    // Hex / URLEncode), `List` (shared by Args.list / Dir.list),
+    // `Join` (shared by Strings.join / Path.join), and `Create`
+    // (shared by Dir.create / Tempfile.create): a single variant
+    // may be valid on MULTIPLE prelude types, with the (type,
+    // method) pair dispatched in [`assoc_fn_return_type`] + the
+    // codegen arm.
+    //
+    /// `Hash.sha256(data)` / `HMAC.sha256(key, data)` - SHA-256 hex
+    /// digest. Wraps:
+    /// - On `Hash`: `{ use sha2::Digest; hex::encode(sha2::Sha256
+    ///   ::digest(d.as_bytes())) }` (one-shot digest of one arg;
+    ///   returns the 64-char lowercase hex String).
+    /// - On `HMAC`: `{ use hmac::Mac; hmac::Hmac::<sha2::Sha256>
+    ///   ::new_from_slice(k.as_bytes()).map(|mut mac| {
+    ///   mac.update(d.as_bytes()); hex::encode(mac.finalize()
+    ///   .into_bytes()) }).unwrap_or_default() }` (keyed MAC of
+    ///   two args - key + data; returns the 64-char lowercase hex
+    ///   String. `new_from_slice` returns `Result` and the `.map()
+    ///   .unwrap_or_default()` collapses Err to empty String -
+    ///   NEVER panics).
+    ///
+    /// The shared variant mirrors `Parse` (DateTime / Date / Toml /
+    /// URL / UUID), `Encode` (Base64 / Hex / URLEncode), `Create`
+    /// (Dir / Tempfile), and the other same-name-different-type
+    /// overloads. Dispatch on the (type, method) pair is exhaustive
+    /// in [`assoc_fn_return_type`].
+    Sha256,
+    /// `Hash.sha512(data)` - SHA-512 hex digest. One arg. Returns
+    /// the 128-char lowercase hex String. Wraps
+    /// `{ use sha2::Digest; hex::encode(sha2::Sha512::digest
+    /// (d.as_bytes())) }` (block-scoped `use` for the `Digest`
+    /// trait method). Hash-only (HMAC surface is SHA-256 only in
+    /// T124k; SHA-512 HMAC may be added in a future task).
+    Sha512,
+    /// `Hash.md5(data)` - MD5 hex digest. One arg. Returns the
+    /// 32-char lowercase hex String. Wraps
+    /// `hex::encode(md5::compute(d.as_bytes()).0)` (the `.0`
+    /// accesses the inner `[u8; 16]` of the `md5::Digest` tuple
+    /// struct). **MD5 is CRYPTOGRAPHICALLY BROKEN** - exposed for
+    /// checksum compatibility only (etags, content-addressable
+    /// caches, legacy interop); NEVER use for security. Hash-only.
+    Md5,
 }
 
 impl PreludeAssocFn {
@@ -1168,6 +1323,15 @@ impl PreludeAssocFn {
         PreludeAssocFn::Remove,
         PreludeAssocFn::Walk,
         PreludeAssocFn::Dir,
+        // T124k: Crypto modules assoc fns (3 distinct names):
+        // sha256/sha512/md5. `Sha256` is shared between Hash.sha256
+        // and HMAC.sha256 (mirrors `Parse` being shared between
+        // DateTime / Date / Toml / URL / UUID, `Create` being shared
+        // between Dir / Tempfile, etc.). `Sha512` / `Md5` are
+        // Hash-only.
+        PreludeAssocFn::Sha256,
+        PreludeAssocFn::Sha512,
+        PreludeAssocFn::Md5,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1263,6 +1427,19 @@ impl PreludeAssocFn {
             PreludeAssocFn::Remove => "remove",
             PreludeAssocFn::Walk => "walk",
             PreludeAssocFn::Dir => "dir",
+            // T124k: Crypto modules assoc fn names. `sha256` is
+            // shared between Hash.sha256 and HMAC.sha256 (same
+            // algorithm, different receiver type - mirrors `parse`
+            // being shared between DateTime / Date / Toml / URL /
+            // UUID). `sha512` / `md5` are Hash-only (HMAC surface
+            // is SHA-256 only in T124k). The names match the
+            // canonical lowercase spelling from Python's hashlib
+            // (`hashlib.sha256(...)`) + Node's crypto
+            // (`crypto.createHash('sha256')`) so the surface is
+            // familiar across ecosystems.
+            PreludeAssocFn::Sha256 => "sha256",
+            PreludeAssocFn::Sha512 => "sha512",
+            PreludeAssocFn::Md5 => "md5",
         }
     }
 }
@@ -1691,6 +1868,42 @@ pub fn assoc_fn_return_type(
         // walker records `tempfile` for symmetry with
         // Tempfile.create).
         (PreludeType::Tempfile, PreludeAssocFn::Dir) => Some(Type::Path),
+        // T124k: Hash module - 3 assoc fns wrapping the `sha2`
+        // (SHA-256 / SHA-512) + `md5` RustCrypto crates. Each
+        // returns a lowercase hex String.
+        //
+        // `Hash.sha256(data)` -> String (64-char hex). Wraps
+        // `{ use sha2::Digest; hex::encode(sha2::Sha256::digest
+        // (d.as_bytes())) }` (block-scoped `use` brings the
+        // `Digest` trait method into scope without polluting the
+        // caller's namespace). The arg accepts String OR
+        // Vector<Byte> (anything `AsRef<[u8]>` at the codegen
+        // layer).
+        (PreludeType::Hash, PreludeAssocFn::Sha256) => Some(Type::string()),
+        // `Hash.sha512(data)` -> String (128-char hex). Same shape
+        // as sha256 but `Sha512`.
+        (PreludeType::Hash, PreludeAssocFn::Sha512) => Some(Type::string()),
+        // `Hash.md5(data)` -> String (32-char hex). Wraps
+        // `hex::encode(md5::compute(d.as_bytes()).0)`. **MD5 is
+        // CRYPTOGRAPHICALLY BROKEN** - exposed for checksum
+        // compatibility only; NEVER use for security.
+        (PreludeType::Hash, PreludeAssocFn::Md5) => Some(Type::string()),
+        // T124k: HMAC module - 1 assoc fn wrapping the `hmac` +
+        // `sha2` RustCrypto crates.
+        //
+        // `HMAC.sha256(key, data)` -> String (64-char hex). Wraps
+        // `{ use hmac::Mac; hmac::Hmac::<sha2::Sha256>
+        // ::new_from_slice(k.as_bytes()).map(|mut mac| {
+        // mac.update(d.as_bytes()); hex::encode(mac.finalize()
+        // .into_bytes()) }).unwrap_or_default() }` (block-scoped
+        // `use` for the `Mac` trait methods). `new_from_slice`
+        // returns `Result<Hmac<Sha256>, MacError>` and accepts ANY
+        // key length (HMAC has no fixed key size); the `.map()
+        // .unwrap_or_default()` collapses Err to empty String -
+        // NEVER panics, matching Buff's "no panicking generated
+        // code" rule. Same shared `Sha256` variant as
+        // `Hash.sha256`; dispatched on the (HMAC, Sha256) pair.
+        (PreludeType::HMAC, PreludeAssocFn::Sha256) => Some(Type::string()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -2292,8 +2505,10 @@ mod tests {
         // with-methods type (URL) shipped in T124h + 2 namespace-only
         // data-format modules (Yaml, Csv) shipped in T124i + 1 runtime-
         // value-with-methods type (Path) + 2 namespace-only modules
-        // (Dir, Tempfile) shipped in T124j = 23 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 23);
+        // (Dir, Tempfile) shipped in T124j + 2 namespace-only crypto
+        // modules (Hash, HMAC) shipped in T124k = 25 total prelude
+        // types.
+        assert_eq!(PreludeType::ALL.len(), 25);
     }
 
     #[test]
@@ -2684,11 +2899,21 @@ mod tests {
         // the namespace-only Dir / Tempfile modules it shipped
         // alongside.
         assert!(!PreludeType::Path.is_namespace_only());
+        // T124k: Hash / HMAC are also namespace-only modules
+        // (mirror Log / Toml / Math / Random / Strings / Args /
+        // Env / Base64 / Hex / URLEncode / UUID / Yaml / Csv /
+        // Dir / Tempfile). Both wrap a Rust crate (sha2 + md5 +
+        // hmac) and have NO runtime value representation (every
+        // call returns a hex String - the digest / MAC).
+        assert!(PreludeType::Hash.is_namespace_only());
+        assert!(PreludeType::HMAC.is_namespace_only());
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        assert_eq!(namespace_only_count, 15);
+        // T124k: bumped from 15 to 17 (Hash + HMAC both
+        // namespace-only).
+        assert_eq!(namespace_only_count, 17);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +
