@@ -1450,7 +1450,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### (continued v1.4) — Git deps + Workspace + Error codes
 
-- [ ] **T122: Git dependency support** [deep]
+- [x] **T122: Git dependency support** [deep]
 
   **What to do**:
   - Implement `buff add git+https://github.com/user/lib.buff` syntax

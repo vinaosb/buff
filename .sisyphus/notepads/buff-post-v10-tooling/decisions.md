@@ -375,3 +375,38 @@ NOT through a shell. This eliminates the shell-injection vector (spec safety
 stance). The args param is a Vector<String> (codegen splices whatever
 expression the user provides; the type-inference layer enforces the surface
 contract).
+
+### T122 — Path-form git deps (not Cargo { git = "..." } form)
+
+generate_cargo_toml emits git-deps as 
+ame = { path = "<checkout>" } pointing at
+~/.buff/git/<sha256(url)[..16]>/. Chosen over Cargo's native { git = "URL" }
+form because:
+1. OFFLINE-FRIENDLY — cargo never re-fetches; the single canonical checkout per URL
+   is shared across all projects.
+2. MATCHES THE "clone to ~/.buff/git" DESIGN — one place to inspect/patch the dep.
+3. INSPECTABLE — users can read/modify the checkout directly; uff update will
+   re-clone on demand in a future task.
+The trade-off: cargo can't auto-update the dep (the path is fixed). For T122 this is
+acceptable; future uff update will re-clone to refresh the checkout in place.
+
+### T122 — GitDependency stores all 3 qualifiers; clone-time precedence is rev > tag > branch
+
+The buff.toml schema stores git, ranch, 	ag, ev independently (matching
+Cargo's schema). At clone time, precedence is: if rev is set, plain clone +
+git checkout <rev>; else if tag is set, --branch <tag> (git accepts tags as
+--branch refs); else if branch is set, --branch <branch>. Stored fields preserve
+user intent regardless of which one was active at clone time.
+
+### T122 — BUFF_HOME env override for test isolation (no new --buff-home CLI flag)
+
+buff_home_dir() reads  first, falls back to  (Windows) or
+C:\Users\vsbb1 (Unix). This lets integration tests isolate the checkout cache to a per-test
+tempdir without mutating process-wide env vars. NO --buff-home CLI flag was added
+(overengineering for v1.0; users get the default ~/.buff behavior).
+
+### T122 — Transitive dep parse is logged, not resolved (v1.6 work)
+
+uff add reads the cloned repo's buff.toml and prints transitive [dependencies]
+to stderr. It does NOT recursively clone them — that's a registry task (v1.6).
+The T122 acceptance gate is "parse + log", not "recursive resolution".

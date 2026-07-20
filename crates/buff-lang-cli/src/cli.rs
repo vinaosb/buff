@@ -21,6 +21,11 @@
 //!   linter (T55). Runs lex + parse + type inference WITHOUT codegen or
 //!   rustc (faster than `buff build`). Type errors → exit 1. Lint warnings
 //!   (e.g. camelCase function names) → exit 0 by default, exit 1 with `-D`.
+//! - `buff add <SPEC> [--branch <X> | --tag <X> | --rev <X>]` — add a git
+//!   dependency to the project's `buff.toml`. `<SPEC>` is `git+<URL>` (e.g.
+//!   `git+https://github.com/user/lib.buff`). The repo is cloned to
+//!   `~/.buff/git/<hash>/` (reused on subsequent adds) and recorded under
+//!   the `[git-dependencies]` section of `buff.toml` (T122).
 //!
 //! Future subcommands (`doc`, `watch`, `lsp`) will be added in later waves.
 
@@ -179,4 +184,45 @@ pub enum Command {
     /// matching the version requirements in `buff.toml`. Equivalent to
     /// `cargo update` in the project root.
     Update,
+
+    /// Add a git dependency to the project's `buff.toml` (T122).
+    ///
+    /// `<SPEC>` is `git+<URL>` (e.g. `git+https://github.com/user/lib.buff`).
+    /// The repo is cloned to `~/.buff/git/<sha256(url)[..16]>/` — re-running
+    /// `buff add` with the same URL reuses the existing checkout without
+    /// re-cloning. Qualifiers mirror Cargo's git-dep flags:
+    ///
+    /// - `--branch <NAME>` — clone the given branch.
+    /// - `--tag <NAME>` — clone the given tag.
+    /// - `--rev <SHA>` — clone then `git checkout <SHA>` to pin a specific
+    ///   commit.
+    ///
+    /// The new entry is recorded under `[git-dependencies]` in `buff.toml`,
+    /// and `generate_cargo_toml` emits a local-path dependency pointing at
+    /// the cloned checkout for offline-friendly builds.
+    Add {
+        /// Git dependency spec: `git+<URL>` (the `git+` prefix is mandatory
+        /// and is stripped before passing `<URL>` to `git clone`). Examples:
+        /// `git+https://github.com/u/lib.buff`,
+        /// `git+https://github.com/u/lib.git`,
+        /// `git+file:///path/to/local/repo`.
+        #[arg(value_name = "SPEC")]
+        spec: String,
+
+        /// Clone the given branch (mutually-exclusive with `--tag`/`--rev`
+        /// in practice; if multiple are set, `--rev` > `--tag` > `--branch`
+        /// precedence applies at clone time).
+        #[arg(long)]
+        branch: Option<String>,
+
+        /// Clone the given tag (passed to `git clone --branch`).
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Clone then `git checkout` the given commit-ish (SHA, short or
+        /// long). Pins the checkout to an immutable ref unlike `--branch`
+        /// /`--tag`.
+        #[arg(long)]
+        rev: Option<String>,
+    },
 }

@@ -19,6 +19,11 @@ thiserror.workspace = true
 tokio.workspace = true
 serde.workspace = true
 toml.workspace = true
+# T122: sha2 used to deterministically hash git-dependency URLs into stable
+# checkout directory names (`~/.buff/git/<sha256(url)[..16]>/`). The same
+# crate is already pinned at the workspace level (T124k Hash/HMAC prelude
+# modules); we reuse the pin to avoid pulling a second version.
+sha2.workspace = true
 buff-lang-ast.workspace = true
 buff-lang-lexer.workspace = true
 buff-lang-parser.workspace = true

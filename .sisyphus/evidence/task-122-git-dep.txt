@@ -1,0 +1,12 @@
+﻿T122 Git dependency support - Evidence
+=================================
+Date: 2026-07-20  HEAD-parent: 59ed507
+
+GATES (all green):
+- cargo test -p buff-lang-cli : ALL pass (110 unit + integration incl git_dependencies_t122; 2 git-absent skips ignored)
+- cargo clippy --workspace --all-targets --exclude buff-lang-runtime -- -D warnings : EXIT 0
+- no unwrap/expect/panic/todo in non-test code (verified)
+- scope: buff-lang-cli only + Cargo.lock (sha2 consumed)
+
+DIFFSTAT:
+ Cargo.lock                                      |  66 ++++  crates/buff-lang-cli/Cargo.toml                 |   5 +  crates/buff-lang-cli/src/cli.rs                 |  46 +++  crates/buff-lang-cli/src/commands/mod.rs        |   1 +  crates/buff-lang-cli/src/config.rs              | 429 +++++++++++++++++++++++-  crates/buff-lang-cli/src/main.rs                |  11 +  crates/buff-lang-cli/tests/t120_cargo_polish.rs |  11 +-  7 files changed, 562 insertions(+), 7 deletions(-)

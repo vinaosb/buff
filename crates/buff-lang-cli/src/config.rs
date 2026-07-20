@@ -51,9 +51,10 @@
 //! deferral list. The acceptance gate is the `config_parsing` test suite.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// Deserialise a TOML scalar (string / int / float / bool) into a `String`.
@@ -117,6 +118,46 @@ pub struct BuffConfig {
     /// — same behaviour as the rest of the manifest).
     #[serde(default, rename = "rust-deps")]
     pub rust_deps: BTreeMap<String, String>,
+    /// `[git-dependencies]` — git-source Buff package dependencies (T122).
+    /// Each entry is `name = { git = "URL", branch/tag/rev = "..." }`,
+    /// mirroring Cargo's git-dep shape. The CLI `buff add git+URL` command
+    /// clones the repo to `~/.buff/git/<sha256(url)[..16]>/` and inserts
+    /// an entry here. Defaults to empty (forward-compat — manifests
+    /// written before T122 still parse).
+    #[serde(default, rename = "git-dependencies")]
+    pub git_dependencies: BTreeMap<String, GitDependency>,
+}
+
+/// A single `[git-dependencies]` entry (T122).
+///
+/// Mirrors Cargo's git-dep shape: a mandatory `git = "URL"` plus optional
+/// `branch` / `tag` / `rev` qualifiers. All fields are serialised so the
+/// entry round-trips through `toml::Value` for the buff.toml upsert path
+/// (see [`commands::add`](crate::commands::add)).
+///
+/// # Determinism
+///
+/// `Serialize` skips `Option::None` fields so the emitted TOML contains
+/// only the qualifiers the user actually set (no `branch = ""` clutter).
+/// Iterating a `BTreeMap<String, GitDependency>` yields entries in
+/// alphabetical-name order, so [`generate_cargo_toml`] output is
+/// byte-deterministic for a given config.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct GitDependency {
+    /// Clone URL (e.g. `https://github.com/user/lib.buff`). The `git+`
+    /// prefix from the CLI spec is stripped before this field is stored.
+    pub git: String,
+    /// Optional branch qualifier (passed to `git clone --branch`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Optional tag qualifier (also passed to `git clone --branch`; git
+    /// accepts tags there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Optional commit-ish (SHA short or long) — applied via
+    /// `git -C <checkout> checkout <rev>` AFTER the initial clone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
 }
 
 /// `[package]` section of `buff.toml`.
@@ -316,6 +357,37 @@ pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
         }
     }
 
+    // [git-dependencies] entries emit as local-path deps pointing at the
+    // cloned checkout (T122). The local-path form is preferred over
+    // Cargo's native `{ git = "..." }` form because:
+    //   - it's offline-friendly (cargo never re-fetches),
+    //   - it matches the "clone to ~/.buff/git" design (one canonical
+    //     checkout per URL, shared across projects),
+    //   - it lets the user inspect / patch the checkout directly.
+    // Path resolution is delegated to [`git_checkout_path`], which is
+    // deterministic (sha256 of the URL). On the rare case the home dir
+    // can't be resolved (env unset), we emit a comment instead of a
+    // malformed dep entry so the build breaks loudly rather than silently.
+    if !cfg.git_dependencies.is_empty() {
+        if cfg.dependencies.is_empty() && cfg.rust_deps.is_empty() {
+            out.push_str("\n[dependencies]\n");
+        }
+        for (name, dep) in &cfg.git_dependencies {
+            match git_checkout_path(&dep.git) {
+                Ok(path) => {
+                    let path_str = path.display().to_string().replace('\\', "/");
+                    out.push_str(&format!("{name} = {{ path = \"{path_str}\" }}\n"));
+                }
+                Err(_) => {
+                    out.push_str(&format!(
+                        "# WARNING: could not resolve git checkout path for `{name}` \
+                         (set USERPROFILE or HOME)\n"
+                    ));
+                }
+            }
+        }
+    }
+
     out
 }
 
@@ -335,6 +407,63 @@ pub fn has_entry_point(dir: &Path) -> bool {
         }
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// T122 — git-dependency checkout path helpers
+// ---------------------------------------------------------------------------
+
+/// Resolve the Buff cache home directory: `<BUFF_HOME>` if set, else
+/// `<USERPROFILE>/.buff` (Windows) or `<HOME>/.buff` (Unix).
+///
+/// The `BUFF_HOME` override lets integration tests isolate the checkout
+/// cache without mutating process-wide env vars. The `USERPROFILE` /
+/// `HOME` fallback covers normal CLI use.
+///
+/// Returns [`ConfigError::Layout`] when no env var is set — the error
+/// variant's message field explains how to fix it.
+pub fn buff_home_dir() -> Result<PathBuf, ConfigError> {
+    if let Ok(custom) = std::env::var("BUFF_HOME") {
+        if !custom.is_empty() {
+            return Ok(PathBuf::from(custom));
+        }
+    }
+    let base = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| {
+            ConfigError::Layout(
+                "could not determine home directory \
+                 (set BUFF_HOME, USERPROFILE, or HOME)"
+                    .to_string(),
+            )
+        })?;
+    Ok(PathBuf::from(base).join(".buff"))
+}
+
+/// Compute the deterministic checkout path for a git URL:
+/// `<buff_home>/git/<sha256(url)[..16]>/`.
+///
+/// Pure variant of [`git_checkout_path`] that takes the home dir
+/// explicitly — used by tests and by `commands::add::run_with_home` so
+/// they don't read env vars. The hash is the first 16 hex chars of
+/// SHA-256(URL) — 64 bits of entropy, plenty to avoid collisions in a
+/// single user's checkout cache.
+pub fn git_checkout_path_for(url: &str, buff_home: &Path) -> PathBuf {
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let digest = hasher.finalize();
+    // 32 bytes -> 64 hex chars; we take the first 16 (64 bits).
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let short = &hex[..16];
+    buff_home.join("git").join(short)
+}
+
+/// Compute the checkout path for a git URL using the env-resolved
+/// [`buff_home_dir`]. Returns [`ConfigError::Layout`] if home can't be
+/// resolved.
+pub fn git_checkout_path(url: &str) -> Result<PathBuf, ConfigError> {
+    let home = buff_home_dir()?;
+    Ok(git_checkout_path_for(url, &home))
 }
 
 /// Render a `[rust-deps]` TOML block from a set of crate names (T119).
@@ -470,7 +599,10 @@ future-flag = "wow"
         let toml = render_rust_deps_toml(&deps);
         // Lines after the header must be in alphabetical order.
         let lines: Vec<&str> = toml.lines().skip(1).collect();
-        assert_eq!(lines, vec!["serde = \"*\"", "tokio = \"*\"", "zlib = \"*\""]);
+        assert_eq!(
+            lines,
+            vec!["serde = \"*\"", "tokio = \"*\"", "zlib = \"*\""]
+        );
     }
 
     #[test]
@@ -484,7 +616,10 @@ serde_json = "*"
 tokio = "1"
 "#;
         let cfg = BuffConfig::parse(toml).expect("[rust-deps] must parse");
-        assert_eq!(cfg.rust_deps.get("serde_json").map(|s| s.as_str()), Some("*"));
+        assert_eq!(
+            cfg.rust_deps.get("serde_json").map(|s| s.as_str()),
+            Some("*")
+        );
         assert_eq!(cfg.rust_deps.get("tokio").map(|s| s.as_str()), Some("1"));
     }
 
@@ -495,6 +630,290 @@ name = "demo"
 version = "0.1.0"
 "#;
         let cfg = BuffConfig::parse(toml).expect("minimal manifest must parse");
-        assert!(cfg.rust_deps.is_empty(), "absent [rust-deps] defaults to empty");
+        assert!(
+            cfg.rust_deps.is_empty(),
+            "absent [rust-deps] defaults to empty"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // T122: `[git-dependencies]` parsing + Cargo.toml emission
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn config_accepts_git_dependencies_section_plain_url() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[git-dependencies]
+lib = { git = "https://github.com/u/lib.buff" }
+"#;
+        let cfg = BuffConfig::parse(toml).expect("[git-dependencies] must parse");
+        let lib = cfg.git_dependencies.get("lib").expect("lib entry present");
+        assert_eq!(lib.git, "https://github.com/u/lib.buff");
+        assert!(lib.branch.is_none());
+        assert!(lib.tag.is_none());
+        assert!(lib.rev.is_none());
+    }
+
+    #[test]
+    fn config_accepts_git_dependencies_with_branch() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[git-dependencies]
+lib = { git = "https://github.com/u/lib.buff", branch = "dev" }
+"#;
+        let cfg = BuffConfig::parse(toml).expect("[git-dependencies] with branch must parse");
+        let lib = cfg.git_dependencies.get("lib").expect("lib entry");
+        assert_eq!(lib.branch.as_deref(), Some("dev"));
+        assert!(lib.tag.is_none());
+        assert!(lib.rev.is_none());
+    }
+
+    #[test]
+    fn config_accepts_git_dependencies_with_tag() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[git-dependencies]
+lib = { git = "https://github.com/u/lib.buff", tag = "v1.0.0" }
+"#;
+        let cfg = BuffConfig::parse(toml).expect("[git-dependencies] with tag must parse");
+        let lib = cfg.git_dependencies.get("lib").expect("lib entry");
+        assert_eq!(lib.tag.as_deref(), Some("v1.0.0"));
+        assert!(lib.branch.is_none());
+        assert!(lib.rev.is_none());
+    }
+
+    #[test]
+    fn config_accepts_git_dependencies_with_rev() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[git-dependencies]
+lib = { git = "https://github.com/u/lib.buff", rev = "abc1234" }
+"#;
+        let cfg = BuffConfig::parse(toml).expect("[git-dependencies] with rev must parse");
+        let lib = cfg.git_dependencies.get("lib").expect("lib entry");
+        assert_eq!(lib.rev.as_deref(), Some("abc1234"));
+        assert!(lib.branch.is_none());
+        assert!(lib.tag.is_none());
+    }
+
+    #[test]
+    fn config_git_dependencies_defaults_empty_when_absent() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+"#;
+        let cfg = BuffConfig::parse(toml).expect("minimal manifest must parse");
+        assert!(
+            cfg.git_dependencies.is_empty(),
+            "absent [git-dependencies] defaults to empty"
+        );
+    }
+
+    #[test]
+    fn config_git_dependencies_multiple_entries_sorted() {
+        // BTreeMap iteration is sorted — determinism contract.
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[git-dependencies]
+zlib = { git = "https://example/z.buff" }
+alpha = { git = "https://example/a.buff" }
+mid = { git = "https://example/m.buff" }
+"#;
+        let cfg = BuffConfig::parse(toml).expect("multiple git deps must parse");
+        let keys: Vec<&str> = cfg.git_dependencies.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["alpha", "mid", "zlib"]);
+    }
+
+    #[test]
+    fn git_dependency_serialize_skips_none_qualifiers() {
+        let dep = GitDependency {
+            git: "https://example/x.buff".to_string(),
+            branch: None,
+            tag: None,
+            rev: None,
+        };
+        let v = toml::Value::try_from(&dep).expect("serialize");
+        let table = v.as_table().expect("serialized as table");
+        assert_eq!(
+            table.get("git").and_then(|v| v.as_str()),
+            Some("https://example/x.buff")
+        );
+        // skip_serializing_if = Option::is_none → qualifiers must be absent
+        // (not present as empty strings).
+        assert!(!table.contains_key("branch"));
+        assert!(!table.contains_key("tag"));
+        assert!(!table.contains_key("rev"));
+    }
+
+    #[test]
+    fn git_dependency_serialize_emits_set_qualifiers() {
+        let dep = GitDependency {
+            git: "https://example/x.buff".to_string(),
+            branch: Some("dev".to_string()),
+            tag: None,
+            rev: Some("deadbeef".to_string()),
+        };
+        let v = toml::Value::try_from(&dep).expect("serialize");
+        let table = v.as_table().expect("serialized as table");
+        assert_eq!(table.get("branch").and_then(|v| v.as_str()), Some("dev"));
+        assert_eq!(table.get("rev").and_then(|v| v.as_str()), Some("deadbeef"));
+        // tag is None → must be absent.
+        assert!(!table.contains_key("tag"));
+    }
+
+    #[test]
+    fn generate_cargo_toml_emits_path_dep_for_git_dependency() {
+        let cfg = BuffConfig {
+            package: PackageSection {
+                name: "demo".to_string(),
+                version: "0.1.0".to_string(),
+                edition: None,
+            },
+            dependencies: BTreeMap::new(),
+            profile: Default::default(),
+            rust_deps: BTreeMap::new(),
+            git_dependencies: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "lib".to_string(),
+                    GitDependency {
+                        git: "https://example/lib.buff".to_string(),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                );
+                m
+            },
+        };
+        let cargo = generate_cargo_toml(&cfg);
+        // Section header present.
+        assert!(cargo.contains("[dependencies]"), "cargo.toml: {cargo}");
+        // Path entry present (forward-slash form regardless of host OS).
+        assert!(
+            cargo.contains("lib = { path ="),
+            "missing path dep entry: {cargo}"
+        );
+        // The path points under `.buff/git/<16-hex-chars>/`.
+        assert!(
+            cargo.contains("/.buff/git/") || cargo.contains("\\.buff\\git\\"),
+            "missing buff/git dir in path: {cargo}"
+        );
+    }
+
+    #[test]
+    fn generate_cargo_toml_emits_multiple_git_deps_in_sorted_order() {
+        let cfg = BuffConfig {
+            package: PackageSection {
+                name: "demo".to_string(),
+                version: "0.1.0".to_string(),
+                edition: None,
+            },
+            dependencies: BTreeMap::new(),
+            profile: Default::default(),
+            rust_deps: BTreeMap::new(),
+            git_dependencies: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "zlib".to_string(),
+                    GitDependency {
+                        git: "https://example/z.buff".to_string(),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                );
+                m.insert(
+                    "alpha".to_string(),
+                    GitDependency {
+                        git: "https://example/a.buff".to_string(),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                );
+                m
+            },
+        };
+        let cargo = generate_cargo_toml(&cfg);
+        let alpha_pos = cargo.find("alpha = { path =").expect("alpha emitted");
+        let zlib_pos = cargo.find("zlib = { path =").expect("zlib emitted");
+        assert!(alpha_pos < zlib_pos, "alpha must precede zlib: {cargo}");
+    }
+
+    #[test]
+    fn generate_cargo_toml_no_git_section_when_empty() {
+        let cfg = BuffConfig {
+            package: PackageSection {
+                name: "demo".to_string(),
+                version: "0.1.0".to_string(),
+                edition: None,
+            },
+            dependencies: BTreeMap::new(),
+            profile: Default::default(),
+            rust_deps: BTreeMap::new(),
+            git_dependencies: BTreeMap::new(),
+        };
+        let cargo = generate_cargo_toml(&cfg);
+        // No [dependencies] section at all when ALL three are empty.
+        assert!(
+            !cargo.contains("[dependencies]"),
+            "unexpected deps section: {cargo}"
+        );
+        // The `[[bin]]` block always emits `path = "src/main.rs"` so we
+        // check for the dependency-path form specifically.
+        assert!(
+            !cargo.contains("= { path ="),
+            "no path dep entries when git deps empty: {cargo}"
+        );
+    }
+
+    #[test]
+    fn git_checkout_path_for_is_deterministic_and_differs_per_url() {
+        let home = PathBuf::from("/tmp/buff-home-fixture");
+        let a1 = git_checkout_path_for("https://example/a.buff", &home);
+        let a2 = git_checkout_path_for("https://example/a.buff", &home);
+        let b = git_checkout_path_for("https://example/b.buff", &home);
+        assert_eq!(a1, a2, "same URL must yield same path");
+        assert_ne!(
+            a1.file_name(),
+            b.file_name(),
+            "different URLs must yield different hash dirs"
+        );
+        // Hash dir is exactly 16 hex chars.
+        let name = a1.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(name.len(), 16, "hash dir name length: {name}");
+        assert!(
+            name.chars().all(|c| c.is_ascii_hexdigit()),
+            "hash dir name must be hex: {name}"
+        );
+    }
+
+    #[test]
+    fn git_checkout_path_for_targets_buff_git_subdir() {
+        let home = PathBuf::from("/tmp/buff-home-fixture");
+        let p = git_checkout_path_for("https://example/x.buff", &home);
+        // Path components: `<home>/git/<16-hex>/`.
+        assert!(
+            p.starts_with(&home),
+            "must start with home: {}",
+            p.display()
+        );
+        assert!(
+            p.starts_with(home.join("git")),
+            "must be under git/: {}",
+            p.display()
+        );
     }
 }

@@ -59,5 +59,16 @@ fn main() -> Result<()> {
         }
         Command::Clean => buff_lang_cli::commands::clean::run(),
         Command::Update => buff_lang_cli::commands::update::run(),
+        Command::Add {
+            spec,
+            branch,
+            tag,
+            rev,
+        } => buff_lang_cli::commands::add::run(
+            &spec,
+            branch.as_deref(),
+            tag.as_deref(),
+            rev.as_deref(),
+        ),
     }
 }

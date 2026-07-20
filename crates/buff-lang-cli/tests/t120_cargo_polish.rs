@@ -22,6 +22,7 @@ fn minimal_cfg(name: &str) -> BuffConfig {
         dependencies: BTreeMap::new(),
         profile: Profiles::default(),
         rust_deps: BTreeMap::new(),
+        git_dependencies: BTreeMap::new(),
     }
 }
 
@@ -52,7 +53,10 @@ fn generate_cargo_toml_has_bin_section() {
 fn generate_cargo_toml_no_deps_when_empty() {
     let cfg = minimal_cfg("no_deps");
     let toml = generate_cargo_toml(&cfg);
-    assert!(!toml.contains("[dependencies]"), "no deps section when empty");
+    assert!(
+        !toml.contains("[dependencies]"),
+        "no deps section when empty"
+    );
 }
 
 #[test]
@@ -84,7 +88,10 @@ fn generate_cargo_toml_includes_rust_deps() {
         ..minimal_cfg("with_rust_deps")
     };
     let toml = generate_cargo_toml(&cfg);
-    assert!(toml.contains("[dependencies]"), "rust-deps create [dependencies]");
+    assert!(
+        toml.contains("[dependencies]"),
+        "rust-deps create [dependencies]"
+    );
     assert!(toml.contains("serde_json = \"*\""));
     assert!(toml.contains("tokio = \"1\""));
 }
