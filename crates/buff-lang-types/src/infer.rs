@@ -13,6 +13,7 @@ use buff_lang_error::{Diagnostic, Span, TypeError};
 
 use crate::env::TypeEnv;
 use crate::prelude;
+use crate::prelude_types;
 use crate::promote::{assignable_to, promote_binary};
 use crate::ty::Type;
 
@@ -128,6 +129,33 @@ impl TypeInferencer {
                 args,
                 ..
             } => {
+                // T124b: prelude-types registry. A `Type.method(args)` call
+                // whose receiver is a bare `Expr::Ident` naming a prelude
+                // type (DateTime, Date, Time, Duration, Instant) is resolved
+                // via the prelude-types table — NO `import` required. This
+                // is the generalisation of the existing `Matrix.new(...)`
+                // special case below, established so future v1.4 stdlib
+                // tasks (Regex, Math, URL, Hash, ...) can extend the
+                // registry without rewriting the inferencer.
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if let Some((ptype, pmethod)) =
+                        prelude_types::assoc_fn_lookup(&id.name, &method.name)
+                    {
+                        let mut arg_tys = Vec::with_capacity(args.len());
+                        for a in args {
+                            arg_tys.push(self.infer_expr(a)?);
+                        }
+                        if let Some(ret) =
+                            prelude_types::assoc_fn_return_type(ptype, pmethod, &arg_tys)
+                        {
+                            return Ok(ret);
+                        }
+                        // Unrecognised (type, method) pair: fall through to
+                        // the default Unknown path so the codegen emits the
+                        // call as a plain method call (and Rust will
+                        // diagnose the typo).
+                    }
+                }
                 // T24: `Matrix.new(rows, cols)` infers as `Matrix<T>` where
                 // the element type is unknown without further evidence (a
                 // type annotation `let m: Matrix<Int> = ...` or a subsequent
@@ -495,6 +523,16 @@ impl TypeInferencer {
             }
             // Arithmetic operators — promote operands.
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                // T124b: prelude-datetime arithmetic. chrono (and std::time)
+                // impl `Add<Duration>` / `Sub<Duration>` on the datetime
+                // family, so `dt + Duration.days(7)` and `dt - dt2` are
+                // legal at the Rust level. The type inferencer must accept
+                // these combinations and produce the right result type
+                // (DateTime + Duration -> DateTime, DateTime - DateTime ->
+                // Duration, etc.).
+                if let Some(dt_result) = datetime_arith_result(op, &lhs_ty, &rhs_ty) {
+                    return Ok(dt_result);
+                }
                 promote_binary(&lhs_ty, &rhs_ty).ok_or_else(|| {
                     TypeError::new(Diagnostic::error(
                         format!("cannot apply operator to {lhs_ty} and {rhs_ty}"),
@@ -796,6 +834,14 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
             "Byte" => Some(Type::byte()),
             "Decimal" => Some(Type::Decimal),
             "Void" => Some(Type::Void),
+            // T124b: prelude-types. Source annotations like
+            // `let dt: DateTime = ...` resolve via the registry so the
+            // null-safety / assignment check can compare prelude types.
+            "DateTime" => Some(Type::DateTime),
+            "Date" => Some(Type::Date),
+            "Time" => Some(Type::Time),
+            "Duration" => Some(Type::Duration),
+            "Instant" => Some(Type::Instant),
             _ => None,
         },
         // T28: dedicated `Option<T>` AST variant.
@@ -863,6 +909,49 @@ fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
 /// String)` is `false` (a plain type mismatch, not a null-safety issue).
 pub(crate) fn is_null_safety_violation(annotated: &Type, value: &Type) -> bool {
     matches!(value, Type::Option(_)) && !matches!(annotated, Type::Option(_))
+}
+
+/// T124b: prelude-datetime arithmetic result-type helper.
+///
+/// chrono (and `std::time::Instant`) impl `Add<Duration>` and `Sub<Duration>`
+/// on the datetime family, and `Sub<Self>` yields a `Duration` for paired
+/// datetimes. This helper captures the legal combinations so the type
+/// inferencer can accept `dt + Duration.days(7)` and `dt1 - dt2` without
+/// falling through to the numeric `promote_binary` path (which would reject
+/// them as non-numeric).
+///
+/// Returns `Some(result_ty)` for legal combinations, `None` otherwise (so
+/// the caller falls through to the default promote/error path).
+fn datetime_arith_result(op: &buff_lang_ast::BinaryOp, lhs: &Type, rhs: &Type) -> Option<Type> {
+    use buff_lang_ast::BinaryOp;
+    match (op, lhs, rhs) {
+        // `<datetime> + Duration -> <datetime>` — chrono `DateTime + TimeDelta`,
+        // `NaiveDate + TimeDelta`, `NaiveTime + TimeDelta`, `Instant + Duration`.
+        (BinaryOp::Add, t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant), Type::Duration) => {
+            Some(t.clone())
+        }
+        (BinaryOp::Add, Type::Duration, t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant)) => {
+            Some(t.clone())
+        }
+        // `<datetime> - Duration -> <datetime>` — chrono `Sub<TimeDelta>`.
+        (BinaryOp::Sub, t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant), Type::Duration) => {
+            Some(t.clone())
+        }
+        // `<datetime> - <same-type datetime> -> Duration` — chrono `Sub<Self>` yields
+        // a `TimeDelta` for paired DateTime / NaiveDate / NaiveTime, and
+        // `std::time::Instant - Instant = std::time::Duration`.
+        (BinaryOp::Sub, Type::DateTime, Type::DateTime)
+        | (BinaryOp::Sub, Type::Date, Type::Date)
+        | (BinaryOp::Sub, Type::Time, Type::Time)
+        | (BinaryOp::Sub, Type::Instant, Type::Instant) => Some(Type::Duration),
+        // `Duration + Duration -> Duration` — chrono TimeDelta + TimeDelta.
+        (BinaryOp::Add, Type::Duration, Type::Duration) => Some(Type::Duration),
+        // `Duration - Duration -> Duration` — chrono TimeDelta - TimeDelta.
+        (BinaryOp::Sub, Type::Duration, Type::Duration) => Some(Type::Duration),
+        // Every other combination falls through to the default path
+        // (numeric promotion or type error).
+        _ => None,
+    }
 }
 
 #[cfg(test)]

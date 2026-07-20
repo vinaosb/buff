@@ -1,0 +1,22 @@
+﻿T124b DateTime module (v1.4 stdlib) - EVIDENCE
+================================================
+Verified by Atlas 2026-07-20T00:51:23.7358184-03:00.
+
+REGISTRY (foundation for all v1.4 stdlib): crates/buff-lang-types/src/prelude_types.rs
+  PreludeType{DateTime,Date,Time,Duration,Instant} + PreludeAssocFn + PreludeInstanceFn
+  + lookup/return-type helpers. Consumed by inferencer + codegen by name (no per-type special-casing).
+
+API: DateTime.now()/.parse(iso); Date.today()/.parse; Duration.days/hours/minutes/seconds/millis;
+  Instant.now(); dt.format('%Y-%m-%d'); component accessors year/month/day/hour/minute/second/timestamp;
+  arithmetic dt+Duration -> dt, dt-dt -> Duration; comparisons.
+
+chrono='0.4' added to root [workspace.dependencies] (justified over 	ime in Cargo.toml comment).
+Codegen records chrono in extern_crates (like tokio) for future cargo-project wiring.
+
+VERIFICATION (MSVC env):
+  cargo clippy -p buff-lang-types -p buff-lang-codegen-rust --all-targets -- -D warnings  => EXIT 0
+  cargo test  -p buff-lang-types -p buff-lang-codegen-rust                                => EXIT 0 (all suites ok)
+  cargo build --workspace                                                                 => EXIT 0
+
+KNOWN BOUNDARY (issues.md): DateTime.parse FixedOffset-vs-Utc mismatch only bites at end-to-end
+  rustc link, which is deferred (codegen-only, 13 ignored e2e tests). Snapshot codegen verified.

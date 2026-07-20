@@ -443,6 +443,23 @@ impl RustCodegen {
         if program_uses_error(decls) {
             items.extend(error_struct_items());
         }
+        // T124b: register the `chrono` crate as an external dependency when
+        // the program references any prelude datetime type
+        // (`DateTime.now()`, `Duration.days(7)`, `dt.format(...)`, ...).
+        // Generated code uses fully-qualified `chrono::...` paths so no
+        // `use chrono;` import is emitted — but the recorded name signals
+        // to the pipeline / build-driver that the generated Cargo project
+        // must declare `chrono` in `[dependencies]`. The set is exposed
+        // via [`Self::extern_crates`].
+        //
+        // This mirrors the existing `extern crate "name"` recording path:
+        // `extern_crates` is the canonical "Rust crates the generated
+        // program depends on" set, and downstream consumers (the future
+        // Cargo-project pipeline, snapshot tests) consult it via
+        // [`Self::extern_crates`] / [`collect_rust_deps`].
+        if program_uses_chrono(decls) {
+            self.extern_crates.insert("chrono".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -2595,6 +2612,211 @@ impl RustCodegen {
         }
     }
 
+    /// T124b: lower a prelude-type associated-function call (`Type.method(args)`)
+    /// to the corresponding chrono / std::time Rust idiom.
+    ///
+    /// Dispatched from [`Self::lower_method_call`] when the receiver is a
+    /// bare Ident naming a prelude type (DateTime, Date, Time, Duration,
+    /// Instant). The method name is matched on the resolved
+    /// `(PreludeType, PreludeAssocFn)` pair rather than raw strings so the
+    /// prelude-types registry is the single source of truth.
+    ///
+    /// # Lowering table
+    ///
+    /// | Buff source                  | Generated Rust                                |
+    /// |------------------------------|-----------------------------------------------|
+    /// | `DateTime.now()`             | `chrono::Utc::now()`                          |
+    /// | `DateTime.parse(s)`          | `chrono::DateTime::parse_from_rfc3339(s).unwrap_or(chrono::Utc::now())` |
+    /// | `Date.today()`               | `chrono::Local::now().date_naive()`           |
+    /// | `Date.parse(s)`              | `chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap_or(chrono::Local::now().date_naive())` |
+    /// | `Instant.now()`              | `std::time::Instant::now()`                   |
+    /// | `Duration.days(n)`           | `chrono::TimeDelta::days(n)`                  |
+    /// | `Duration.hours(n)`          | `chrono::TimeDelta::hours(n)`                 |
+    /// | `Duration.minutes(n)`        | `chrono::TimeDelta::minutes(n)`               |
+    /// | `Duration.seconds(n)`        | `chrono::TimeDelta::seconds(n)`               |
+    /// | `Duration.millis(n)`         | `chrono::TimeDelta::milliseconds(n)`          |
+    ///
+    /// The `parse` lowering uses `unwrap_or(<default>)` rather than `unwrap()`
+    /// so generated user code never panics on a malformed input string —
+    /// matching Buff's "no panicking generated code" stance where practical.
+    /// (The user can still opt into panic-on-error by chaining `??` or
+    /// `match`-ing once Result-shaped prelude values are added.)
+    fn lower_prelude_type_assoc_fn(
+        &mut self,
+        ptype: buff_lang_types::PreludeType,
+        pmethod: buff_lang_types::PreludeAssocFn,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
+        use buff_lang_types::{PreludeAssocFn as A, PreludeType as T};
+        // Lower a single arg, erroring on arity mismatch.
+        let one_arg = |c: &mut Self| -> Result<SynExpr, CodegenError> {
+            if args.len() != 1 {
+                return Err(c.unsupported(&format!(
+                    "{}.{}() expects exactly 1 arg, got {}",
+                    ptype.name(),
+                    pmethod.name(),
+                    args.len()
+                )));
+            }
+            c.lower_expr(&args[0])
+        };
+        // Lower zero args, erroring if any were passed.
+        let no_args = |c: &mut Self| -> Result<(), CodegenError> {
+            if !args.is_empty() {
+                return Err(c.unsupported(&format!(
+                    "{}.{}() takes no arguments, got {}",
+                    ptype.name(),
+                    pmethod.name(),
+                    args.len()
+                )));
+            }
+            Ok(())
+        };
+        match (ptype, pmethod) {
+            // ----- Time constructors ----------------------------------------
+            (T::DateTime, A::Now) => {
+                no_args(self)?;
+                Ok(rust_call_expr("chrono::Utc::now", Vec::new()))
+            }
+            (T::Instant, A::Now) => {
+                no_args(self)?;
+                Ok(rust_call_expr("std::time::Instant::now", Vec::new()))
+            }
+            (T::Date, A::Today) => {
+                no_args(self)?;
+                // chrono::Local::now().date_naive() — the system's local
+                // date "today". `date_naive()` strips the timezone to give
+                // a `NaiveDate`.
+                let inner = rust_call_expr("chrono::Local::now", Vec::new());
+                Ok(method_call_no_args(inner, "date_naive"))
+            }
+            // ----- Parsing --------------------------------------------------
+            (T::DateTime, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                // chrono::DateTime::parse_from_rfc3339(&s).unwrap_or(chrono::Utc::now())
+                let parse_call = rust_call_expr("chrono::DateTime::parse_from_rfc3339", vec![arg]);
+                let fallback = rust_call_expr("chrono::Utc::now", Vec::new());
+                Ok(method_call_one_arg(parse_call, "unwrap_or", fallback))
+            }
+            (T::Date, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                // chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap_or(<today>)
+                let fmt_lit = str_lit_expr("%Y-%m-%d");
+                let parse_call =
+                    rust_call_expr("chrono::NaiveDate::parse_from_str", vec![arg, fmt_lit]);
+                let today_recv = rust_call_expr("chrono::Local::now", Vec::new());
+                let today = method_call_no_args(today_recv, "date_naive");
+                Ok(method_call_one_arg(parse_call, "unwrap_or", today))
+            }
+            // ----- Duration constructors ------------------------------------
+            (T::Duration, A::Days) => {
+                let arg = one_arg(self)?;
+                Ok(rust_call_expr("chrono::TimeDelta::days", vec![arg]))
+            }
+            (T::Duration, A::Hours) => {
+                let arg = one_arg(self)?;
+                Ok(rust_call_expr("chrono::TimeDelta::hours", vec![arg]))
+            }
+            (T::Duration, A::Minutes) => {
+                let arg = one_arg(self)?;
+                Ok(rust_call_expr("chrono::TimeDelta::minutes", vec![arg]))
+            }
+            (T::Duration, A::Seconds) => {
+                let arg = one_arg(self)?;
+                Ok(rust_call_expr("chrono::TimeDelta::seconds", vec![arg]))
+            }
+            (T::Duration, A::Millis) => {
+                let arg = one_arg(self)?;
+                Ok(rust_call_expr("chrono::TimeDelta::milliseconds", vec![arg]))
+            }
+            // Every other combination was already rejected by
+            // `assoc_fn_lookup` in the caller; this arm is unreachable but
+            // required for exhaustiveness.
+            _ => Err(self.unsupported(&format!(
+                "prelude type+method combination {:?}.{:?}",
+                ptype, pmethod
+            ))),
+        }
+    }
+
+    /// T124b: lower a prelude-type instance-method call (`recv.method(args)`)
+    /// to the corresponding chrono / std::time Rust idiom.
+    ///
+    /// Dispatched from [`Self::lower_method_call`] when the receiver's
+    /// inferred type is one of the prelude datetime family AND the method
+    /// name is a recognised instance method on that type.
+    ///
+    /// # Lowering table
+    ///
+    /// | Buff source           | Generated Rust                                  |
+    /// |-----------------------|-------------------------------------------------|
+    /// | `dt.format("%Y-%m-%d")` | `dt.format("%Y-%m-%d").to_string()`           |
+    /// | `dt.year()`           | `dt.year()`  (i32 → promoted to i64 by annotation) |
+    /// | `dt.month()`          | `dt.month()`                                    |
+    /// | `dt.day()`            | `dt.day()`                                      |
+    /// | `dt.hour()`           | `dt.hour()`                                     |
+    /// | `dt.minute()`         | `dt.minute()`                                   |
+    /// | `dt.second()`         | `dt.second()`                                   |
+    /// | `dt.timestamp()`      | `dt.timestamp()`                                |
+    ///
+    /// `format` returns `chrono::DelayedFormat<...>`, which doesn't impl
+    /// `Into<String>` directly — we chain `.to_string()` so the result is
+    /// a real Rust `String` (Display-able via `.to_string()`). The other
+    /// accessors return `i32` / `i64` which Rust coerces implicitly when
+    /// the surrounding context expects `i64`.
+    fn lower_prelude_type_instance_fn(
+        &mut self,
+        recv_ty: &Type,
+        pmethod: buff_lang_types::PreludeInstanceFn,
+        receiver: &Expr,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
+        use buff_lang_types::PreludeInstanceFn as M;
+        let recv = self.lower_expr(receiver)?;
+        // All current instance methods are either 0-arg or 1-arg (format).
+        // We validate arity once here so the dispatch below doesn't repeat
+        // the check.
+        match pmethod {
+            M::Format => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "format() expects exactly 1 arg (the strftime format string), got {}",
+                        args.len()
+                    )));
+                }
+                let fmt = self.lower_expr(&args[0])?;
+                let fmt = coerce_str_arg_to_ref(fmt, &args[0]);
+                // recv.format(fmt).to_string() — the chain returns a String.
+                let format_call = method_call_one_arg(recv, "format", fmt);
+                Ok(method_call_no_args(format_call, "to_string"))
+            }
+            M::Year | M::Month | M::Day | M::Hour | M::Minute | M::Second | M::Timestamp => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "{:?}() takes no arguments, got {}",
+                        pmethod,
+                        args.len()
+                    )));
+                }
+                // The chrono methods have the same names as Buff's surface,
+                // so we just emit recv.method().
+                let method_name = pmethod.name();
+                // Defensive: confirm the receiver type actually supports
+                // this method. This was already checked by
+                // `instance_fn_lookup` in the caller, but we re-check here
+                // so the helper stays self-contained.
+                if buff_lang_types::instance_fn_return_type(recv_ty, pmethod, &[]).is_none() {
+                    return Err(self.unsupported(&format!(
+                        "{recv_ty}.{method_name}() is not a recognised prelude instance method"
+                    )));
+                }
+                Ok(method_call_no_args(recv, method_name))
+            }
+        }
+    }
+
     /// Lower `abs(x)` → `(x).abs()`. Wrapping the receiver in parens
     /// ensures integer literals like `5` lower to `(5).abs()` rather than
     /// the ambiguous `5.abs()` (which Rust parses as a field access on a
@@ -2808,6 +3030,27 @@ impl RustCodegen {
         method: &buff_lang_ast::common::Ident,
         args: &[Expr],
     ) -> Result<SynExpr, CodegenError> {
+        // T124b: prelude-types registry — associated functions. A call of
+        // the form `Type.method(args)` where the receiver is a bare Ident
+        // naming a prelude type (DateTime, Date, Time, Duration, Instant)
+        // is dispatched through the prelude-types table. This MUST run
+        // before the T31 `result()` arm and the T26 zero-arg field-access
+        // heuristic so that `DateTime.now()` (zero args) doesn't get
+        // rewritten as a field access `DateTime.now`.
+        //
+        // This is the GENERAL entry point future v1.4 stdlib tasks extend
+        // — see `crates/buff-lang-types/src/prelude_types.rs` for the
+        // registry and the instructions for adding new types.
+        if let Expr::Ident(id, _) = receiver {
+            if let Some((ptype, pmethod)) =
+                buff_lang_types::prelude_types::assoc_fn_lookup(&id.name, &method.name)
+            {
+                // The chrono / std::time lowering lives in a dedicated
+                // helper so this arm stays a thin dispatch.
+                return self.lower_prelude_type_assoc_fn(ptype, pmethod, args);
+            }
+        }
+
         // T31: `task.result()` → Rust's `task.await`. This is the ONLY
         // `.await` form that originates from a method-call position; it's
         // the suspension-point API on Buff's `Task<T>` (a thin alias for
@@ -2845,9 +3088,45 @@ impl RustCodegen {
         // allow-list is conservative (only names this codegen actually
         // handles + the universal `clone`/`to_string`/etc.); new builtins
         // added later must be added to the list to preserve the heuristic.
+        //
+        // T124b: this heuristic also needs to NOT fire for prelude-type
+        // instance methods (`dt.format(...)`, `dt.year()`, ...). Those
+        // receivers are NEVER a bare `Expr::Ident` naming a prelude TYPE
+        // (handled by the assoc_fn_lookup arm above) — they're values. But
+        // we must consult the registry to decide whether `dt.year()` (zero
+        // args) is a real method call vs. a field access. The dedicated
+        // prelude-instance arm runs AFTER this heuristic, so we extend
+        // KNOWN_ZERO_ARG_METHODS to include the prelude instance methods
+        // that take zero args (year/month/day/hour/minute/second/
+        // timestamp). `format` takes one arg so it's never affected.
         if args.is_empty() && !KNOWN_ZERO_ARG_METHODS.contains(&method.name.as_str()) {
             let recv = self.lower_expr(receiver)?;
             return Ok(field_access(recv, &method.name));
+        }
+
+        // T124b: prelude-types registry — instance methods. A call of the
+        // form `recv.method(args)` where the receiver INFERS to a prelude
+        // datetime type. Runs AFTER the T26 field-access heuristic so the
+        // zero-arg instance methods (year/month/day/...) — which are in
+        // KNOWN_ZERO_ARG_METHODS — pass through to here.
+        //
+        // We consult the integrated TypeInferencer to get the receiver's
+        // resolved Type. Inference errors fall through to the default
+        // `recv.method(args)` lowering (Rust will then diagnose the
+        // receiver-type mismatch).
+        let recv_for_prelude_check = self
+            .type_inferencer
+            .infer_expr(receiver)
+            .unwrap_or(Type::Unknown);
+        if let Some(pmethod) =
+            buff_lang_types::prelude_types::instance_fn_lookup(&recv_for_prelude_check, &method.name)
+        {
+            return self.lower_prelude_type_instance_fn(
+                &recv_for_prelude_check,
+                pmethod,
+                receiver,
+                args,
+            );
         }
 
         // T24: `Matrix.new(rows, cols)` — the builtin Matrix constructor.
@@ -4175,6 +4454,16 @@ impl RustCodegen {
     fn ast_typeref_to_syn(&mut self, ty: &TypeRef) -> Result<SynType, CodegenError> {
         match ty {
             TypeRef::Named { name, .. } => {
+                // T124b: `DateTime` is the only prelude type that takes a
+                // generic argument (`<chrono::Utc>`). Handle it before the
+                // primitive-name table (which returns the bare path string
+                // and would drop the generic).
+                if name.name == "DateTime" {
+                    return Ok(make_generic_path_type(
+                        "chrono::DateTime",
+                        vec![rust_path_type("chrono::Utc")],
+                    ));
+                }
                 // T32: the Buff→Rust primitive-name mapping is now a
                 // single named, configurable table at
                 // [`buff_primitive_to_rust_name`] (covers all 9 primitive
@@ -4368,7 +4657,25 @@ impl RustCodegen {
             // T21: Char → Rust's `char` (a 4-byte Unicode scalar value).
             Type::Char => "char",
             Type::Decimal => "rust_decimal::Decimal",
+            // T124b: prelude datetime family. The plain Rust path mapping
+            // is reused for everything except DateTime (which needs the
+            // generic `<chrono::Utc>` argument — handled by the early
+            // return just below).
+            Type::Date => "chrono::NaiveDate",
+            Type::Time => "chrono::NaiveTime",
+            Type::Duration => "chrono::TimeDelta",
+            Type::Instant => "std::time::Instant",
             Type::Unknown | Type::Void => return None,
+            // T124b: DateTime is the only prelude type that needs a generic
+            // argument. Return early with the proper generic-argument form
+            // so `let dt: DateTime = ...` emits
+            // `let dt: chrono::DateTime<chrono::Utc> = ...`.
+            Type::DateTime => {
+                return Some(make_generic_path_type(
+                    "chrono::DateTime",
+                    vec![rust_path_type("chrono::Utc")],
+                ));
+            }
             // Vector, Matrix, Map, Option, and Result are handled by the
             // early-return match above; this arm is unreachable but required
             // for exhaustiveness.
@@ -4721,9 +5028,34 @@ fn build_record_copy_method(field_name: &str, field_ty: SynType) -> syn::ImplIte
 /// | `Char`    | `char`               |
 /// | `Decimal` | `rust_decimal::Decimal` |
 ///
+/// T124b — prelude datetime family. The Rust names here are the FULLY-
+/// QUALIFIED paths so generated code never needs a `use chrono::...;`
+/// import:
+///
+/// | Buff       | Rust                                     |
+/// |------------|------------------------------------------|
+/// | `DateTime` | `chrono::DateTime<chrono::Utc>`          |
+/// | `Date`     | `chrono::NaiveDate`                      |
+/// | `Time`     | `chrono::NaiveTime`                      |
+/// | `Duration` | `chrono::TimeDelta`                      |
+/// | `Instant`  | `std::time::Instant`                     |
+///
 /// Unknown names (anything not in the table) are returned unchanged so
 /// user-defined types (struct/enum names, generic type parameters like
 /// `T`) keep their spelling — they become Rust path types verbatim.
+///
+/// **Note**: The `chrono::DateTime<chrono::Utc>` return for `DateTime` is
+/// the *plain path spelling* `chrono::DateTime < chrono::Utc >` (without
+/// generics angle brackets in the source representation). When this name is
+/// used to build a `syn::Type` via [`rust_path_type`], the `<chrono::Utc>`
+/// segment is NOT treated as a generic argument — it becomes a literal
+/// path segment, which syn parses as the type-argument-less path. To get
+/// the proper generic form, callers must use
+/// [`Self::buff_prelude_type_to_syn`] (which constructs the type via
+/// `make_generic_path_type`). [`buff_primitive_to_rust_name`] is kept
+/// simple for the cases that don't need generics (everything except
+/// `DateTime`); for `DateTime`, the codegen routes through the dedicated
+/// helper.
 pub fn buff_primitive_to_rust_name(buff_name: &str) -> &str {
     match buff_name {
         "Int" => "i64",
@@ -4735,6 +5067,15 @@ pub fn buff_primitive_to_rust_name(buff_name: &str) -> &str {
         "String" => "String",
         "Char" => "char",
         "Decimal" => "rust_decimal::Decimal",
+        // T124b: prelude datetime family. These map to chrono / std::time
+        // fully-qualified paths so generated code never needs a `use` import.
+        // `DateTime` is special — it needs a generic `<chrono::Utc>` arg;
+        // callers that build a `syn::Type` should consult
+        // `ast_typeref_to_syn` (which constructs the proper generic form).
+        "Date" => "chrono::NaiveDate",
+        "Time" => "chrono::NaiveTime",
+        "Duration" => "chrono::TimeDelta",
+        "Instant" => "std::time::Instant",
         other => other,
     }
 }
@@ -5154,6 +5495,18 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     "cosh",
     "powi",
     "powf",
+    // T124b: prelude-types zero-arg instance methods on the datetime
+    // family (DateTime / Date / Time). Without these entries the T26
+    // field-access heuristic would rewrite `dt.year()` as `dt.year`
+    // (a field access on the chrono value, which doesn't exist).
+    // `format` takes one arg so it's never affected by the heuristic.
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "second",
+    "timestamp",
 ];
 
 /// Build the attribute list for a generated struct: always
@@ -6058,6 +6411,185 @@ fn expr_uses_error(expr: &Expr) -> bool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// T124b — chrono / std::time emit-on-demand detection (prelude-types).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any reference to a prelude
+/// datetime type (T124b). Returns `true` if at least one is found,
+/// signalling [`RustCodegen::generate`] to record `"chrono"` in the
+/// extern-crate set so the pipeline knows the generated Cargo project
+/// depends on `chrono`.
+///
+/// Detection recognises BOTH:
+/// - **Associated-function calls**: `DateTime.now()`, `Duration.days(7)`,
+///   `Instant.now()`, `Date.today()`, etc. (receiver is a bare Ident
+///   naming a prelude type).
+/// - **Instance-method calls**: `dt.format(...)`, `dt.year()`, etc. The
+///   receiver is NOT a bare type name (it's a value), so we conservatively
+///   detect ANY call to the prelude instance-method names — false positives
+///   are tolerable (they just trigger chrono registration, which is a
+///   no-op if the program doesn't actually use chrono).
+///
+/// Source-level type annotations (`let dt: DateTime = ...`) are NOT
+/// detected by this walker; they're handled by the codegen pass directly
+/// via [`buff_lang_types::is_prelude_type`] when the annotation is
+/// resolved. The two paths together cover every realistic chrono use.
+fn program_uses_chrono(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_chrono(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_chrono`]: scan a block's statements.
+fn block_uses_chrono(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_chrono)
+}
+
+/// Check a single statement (and its nested expressions) for chrono usage.
+fn stmt_uses_chrono(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl {
+            value,
+            ty: Some(ty),
+            ..
+        }
+        | Stmt::LetPattern {
+            value,
+            ty: Some(ty),
+            ..
+        } => {
+            // Source-level type annotation names a prelude type
+            // (e.g. `let dt: DateTime = ...`). This counts even if the
+            // value expression doesn't itself mention chrono.
+            type_ref_names_prelude_type(ty) || expr_uses_chrono(value)
+        }
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_chrono(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_chrono(target) || expr_uses_chrono(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_chrono(iter) || block_uses_chrono(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_chrono(cond) || block_uses_chrono(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_chrono(value) || block_uses_chrono(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_chrono(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_chrono(e),
+            }) || block_uses_chrono(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_chrono(expr),
+    }
+}
+
+/// Returns `true` iff `ty` (or any nested inner TypeRef) mentions a prelude
+/// datetime type name. Used by [`stmt_uses_chrono`] to detect source-level
+/// type annotations like `let dt: DateTime = ...`.
+fn type_ref_names_prelude_type(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Named { name, .. } => buff_lang_types::is_prelude_type(&name.name),
+        TypeRef::Option(inner, _) => type_ref_names_prelude_type(inner),
+        TypeRef::Generic { base, args, .. } => {
+            type_ref_names_prelude_type(base)
+                || args.iter().any(type_ref_names_prelude_type)
+        }
+        _ => false,
+    }
+}
+
+/// Recursively scan an expression tree for any prelude-type usage.
+///
+/// Detection is conservative: it triggers on any `Type.<assoc_fn>()`
+/// shape whose receiver is a bare Ident naming a prelude type, OR on any
+/// instance-method call whose method name is a recognised prelude
+/// instance method (the receiver's inferred type is then checked at
+/// codegen time by `lower_method_call`).
+fn expr_uses_chrono(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            // Associated-function call: `DateTime.now()`, `Duration.days(7)`, etc.
+            if let Expr::Ident(id, _) = receiver.as_ref() {
+                if buff_lang_types::is_prelude_type(&id.name) {
+                    return true;
+                }
+            }
+            // Instance-method call: `dt.format(...)`, `dt.year()`, etc.
+            // Conservative on the method NAME — the receiver's type is
+            // resolved at codegen time, so we err on the side of "register
+            // chrono" if the method name matches any prelude instance fn.
+            if buff_lang_types::PreludeInstanceFn::ALL
+                .iter()
+                .any(|f| f.name() == method.name.as_str())
+            {
+                return true;
+            }
+            expr_uses_chrono(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_chrono(lhs) || expr_uses_chrono(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_chrono(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_chrono(callee) || args.iter().any(expr_uses_chrono)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_chrono(cond)
+                || block_uses_chrono(then_block)
+                || else_block.as_ref().is_some_and(block_uses_chrono)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_chrono(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_chrono),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_chrono(base) || indices.iter().any(expr_uses_chrono)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_chrono(k) || expr_uses_chrono(v)),
+        Expr::Lambda { body, .. } => block_uses_chrono(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_chrono(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_chrono(scrutinee) || arms.iter().any(|arm| block_uses_chrono(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_chrono(inner),
+        Expr::Try { expr, .. } => expr_uses_chrono(expr),
+        Expr::Spawn { task, .. } => expr_uses_chrono(task),
+        Expr::Range { start, end, .. } => expr_uses_chrono(start) || expr_uses_chrono(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_chrono(value)
+                || block_uses_chrono(then_block)
+                || else_block.as_ref().is_some_and(block_uses_chrono)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_chrono),
+        Expr::NamedArg { value, .. } => expr_uses_chrono(value),
+    }
+}
+
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait
 /// impls as a `Vec<Item>` (T30).
 ///
@@ -6787,6 +7319,81 @@ fn method_call_one_arg(recv: SynExpr, method: &str, arg: SynExpr) -> SynExpr {
         paren_token: Default::default(),
         args,
     })
+}
+
+/// T124b: build a fully-qualified Rust associated-function call
+/// `<path>(args)` — used for prelude-type constructors like
+/// `chrono::Utc::now()` and `chrono::TimeDelta::days(n)`.
+///
+/// The `qualified_path` is a `::`-separated string (e.g.
+/// `"chrono::Utc::now"`, `"chrono::TimeDelta::days"`). The args slice is
+/// lowered already — this helper just wraps them in a `syn::ExprCall` on
+/// the path expression.
+fn rust_call_expr(qualified_path: &str, args: Vec<SynExpr>) -> SynExpr {
+    let callee = SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: rust_path(qualified_path),
+    });
+    let mut punct: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+    for a in args {
+        punct.push(a);
+    }
+    SynExpr::Call(syn::ExprCall {
+        attrs: Vec::new(),
+        func: Box::new(callee),
+        paren_token: Default::default(),
+        args: punct,
+    })
+}
+
+/// T124b: build a Rust `&'static str` literal expression.
+///
+/// Used by prelude-type parse/format codegen to pass strftime / parse
+/// format strings (`"%Y-%m-%d"`). Built via `syn::LitStr::new` so any
+/// embedded escapes survive correctly.
+fn str_lit_expr(text: &str) -> SynExpr {
+    SynExpr::Lit(syn::ExprLit {
+        attrs: Vec::new(),
+        lit: syn::Lit::Str(syn::LitStr::new(text, ProcSpan::call_site())),
+    })
+}
+
+/// T124b: coerce a string-typed argument expression to `&str` when the
+/// underlying chrono API requires it.
+///
+/// chrono's `DateTime::parse_from_rfc3339`, `NaiveDate::parse_from_str`,
+/// and `DateTime::format` all take `&str`. Buff string literals
+/// (`Expr::Literal(Literal::String(s))`) lower directly to a Rust
+/// `&'static str` literal — so no coercion is needed in that case. For
+/// non-literal arg expressions (idents referencing `String` bindings,
+/// interpolation results, ...) we wrap the lowered expression in a borrow
+/// `&<expr>` so Rust's Deref coercion turns `&String` into `&str`.
+///
+/// Without this, `DateTime.parse(my_string_var)` would emit
+/// `chrono::DateTime::parse_from_rfc3339(my_string_var)` which fails to
+/// compile (expected `&str`, found `String`). The borrow turns it into
+/// `chrono::DateTime::parse_from_rfc3339(&my_string_var)` which works.
+fn coerce_str_arg_to_ref(lowered: SynExpr, orig: &Expr) -> SynExpr {
+    // String literals lower to `&'static str` already — no borrow needed.
+    if matches!(orig, Expr::Literal(Literal::String(_), _)) {
+        return lowered;
+    }
+    // Named-arg wrapper around a string literal — recurse into the value.
+    if let Expr::NamedArg { value, .. } = orig {
+        return coerce_str_arg_to_ref(lowered, value);
+    }
+    // Everything else (idents, interpolation, etc.) — borrow via `&<expr>`.
+    //
+    // `syn::Expr` has no `Ref` variant (references are parsed into the
+    // generic `Expr::Paren`-shaped token-stream slot, not a dedicated
+    // variant). We build `& #lowered` via `syn::parse_quote!` — the same
+    // approach used elsewhere in this file for `#[tokio::main]` and
+    // `#[test]` attribute construction (lines 977/983). The pattern is
+    // well-known to parse successfully (any expression can be borrowed),
+    // so the panic-on-parse-failure caveat of `parse_quote!` does not
+    // apply in practice.
+    syn::parse_quote!( & #lowered )
 }
 
 /// Take a token stream that calls a fully-qualified function with a single

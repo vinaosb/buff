@@ -27,6 +27,12 @@ pub mod modules;
 // can call `buff_lang_types::analyze_ownership(func)` without a long path.
 pub mod ownership;
 pub mod prelude;
+// T124b: prelude-types registry (DateTime, Date, Time, Duration, Instant +
+// their associated functions and instance methods). Re-exported at the
+// crate root so the type inferencer + Rust codegen consume the registry by
+// short path. This is the GENERAL, extensible mechanism every future v1.4
+// stdlib task (Regex, Math, URL, Hash, ...) extends.
+pub mod prelude_types;
 pub mod promote;
 // T48: recursion detection (call-graph cycle detection). Re-exported at
 // the crate root so the codegen pass + T49 hint-driven codegen can call
@@ -79,6 +85,15 @@ pub use ownership::{analyze_func as analyze_ownership, closure_captures, Ownersh
 // type inferencer and downstream crates (codegen, CLI) can call
 // `is_prelude` / `prelude::return_type` without a long path.
 pub use prelude::{category_of, is_prelude, lookup, PreludeCategory, PreludeFn};
+// T124b: prelude-types registry (DateTime / Date / Time / Duration /
+// Instant + their associated fns + instance methods). Re-exported at the
+// crate root so the inferencer + codegen consume the registry by short
+// path. Future v1.4 stdlib tasks (Regex, Math, URL, Hash, ...) extend
+// this registry rather than rewriting the inferencer or codegen.
+pub use prelude_types::{
+    assoc_fn_lookup, assoc_fn_return_type, instance_fn_lookup, instance_fn_return_type,
+    is_prelude_type, prelude_type_lookup, PreludeAssocFn, PreludeInstanceFn, PreludeType,
+};
 // T22: pure range-analysis primitives (flexible-mode Int width inference,
 // auto-width collection helper). Re-exported at crate root for convenience;
 // the module path `range_analysis::` is the canonical location.

@@ -129,6 +129,43 @@ pub enum Type {
     /// in `.sisyphus/notepads/buff-v05-language/learnings.md` for the
     /// resolved-Type ripple template.
     Tuple(Vec<Type>),
+    /// A timezone-aware date+time, mapped to `chrono::DateTime<chrono::Utc>`
+    /// at codegen time (T124b). Constructed via the prelude associated
+    /// function `DateTime.now()` or `DateTime.parse(iso_string)`; supports
+    /// `dt.format("%Y-%m-%d")` instance method, `dt + Duration.days(n)`
+    /// arithmetic, and `dt1 < dt2` comparison.
+    ///
+    /// This is **additive** (T124b): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es on
+    /// `Type` were extended with an arm for the new variants: `Display`,
+    /// `buff_type_to_syn` (codegen), `typeref_to_type` (inferencer +
+    /// exhaustiveness), `buff_primitive_to_rust_name` (primitive name
+    /// mapping), and `ast_typeref_to_syn`. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible` predicates
+    /// all return `false` for the datetime variants — they are opaque
+    /// value types that participate in no numeric promotion.
+    DateTime,
+    /// A calendar date (year, month, day) without time or timezone,
+    /// mapped to `chrono::NaiveDate` at codegen time (T124b). Constructed
+    /// via `Date.today()` or `Date.parse(s)`. Additive — see [`Type::DateTime`].
+    Date,
+    /// A clock time (hour, minute, second, subsecond) without date or
+    /// timezone, mapped to `chrono::NaiveTime` at codegen time (T124b).
+    /// Additive — see [`Type::DateTime`].
+    Time,
+    /// A span of time, mapped to `chrono::TimeDelta` at codegen time
+    /// (T124b). chrono's `Duration` type alias was deprecated in favor of
+    /// `TimeDelta` (chrono 0.4.35+); Buff codegen uses the new name to
+    /// avoid emitting deprecation warnings in user code. Constructed via
+    /// `Duration.days(n)` / `Duration.hours(n)` / `Duration.minutes(n)` /
+    /// `Duration.seconds(n)` / `Duration.millis(n)`. Additive — see
+    /// [`Type::DateTime`].
+    Duration,
+    /// A monotonic instant suitable for measuring elapsed time, mapped to
+    /// `std::time::Instant` at codegen time (T124b). Constructed via
+    /// `Instant.now()`. Distinct from [`Type::DateTime`] (which is
+    /// wall-clock time and uses chrono). Additive — see [`Type::DateTime`].
+    Instant,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -279,6 +316,43 @@ impl Type {
         Type::Tuple(members)
     }
 
+    /// T124b: the timezone-aware datetime type. Maps to
+    /// `chrono::DateTime<chrono::Utc>` at codegen time.
+    pub fn datetime() -> Self {
+        Type::DateTime
+    }
+
+    /// T124b: the calendar-date type. Maps to `chrono::NaiveDate`.
+    pub fn date() -> Self {
+        Type::Date
+    }
+
+    /// T124b: the clock-time type. Maps to `chrono::NaiveTime`.
+    pub fn time() -> Self {
+        Type::Time
+    }
+
+    /// T124b: the time-span type. Maps to `chrono::TimeDelta`.
+    pub fn duration() -> Self {
+        Type::Duration
+    }
+
+    /// T124b: the monotonic-instant type. Maps to `std::time::Instant`.
+    pub fn instant() -> Self {
+        Type::Instant
+    }
+
+    /// T124b: Returns `true` if this type is one of the prelude datetime
+    /// family (`DateTime`, `Date`, `Time`, `Duration`, `Instant`). Used by
+    /// the type inferencer + codegen to dispatch method calls on these
+    /// types to the chrono / std::time lowering.
+    pub fn is_prelude_datetime(&self) -> bool {
+        matches!(
+            self,
+            Type::DateTime | Type::Date | Type::Time | Type::Duration | Type::Instant
+        )
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -355,6 +429,15 @@ impl fmt::Display for Type {
                 }
                 f.write_str(")")
             }
+            // T124b: prelude datetime family. These are opaque value types
+            // whose canonical Rust representation lives in the codegen crate
+            // (chrono / std::time). The Display form mirrors the Buff
+            // surface name so diagnostics read naturally.
+            Type::DateTime => f.write_str("DateTime"),
+            Type::Date => f.write_str("Date"),
+            Type::Time => f.write_str("Time"),
+            Type::Duration => f.write_str("Duration"),
+            Type::Instant => f.write_str("Instant"),
         }
     }
 }
