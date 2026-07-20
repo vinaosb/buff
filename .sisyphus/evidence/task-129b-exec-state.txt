@@ -1,0 +1,323 @@
+================================================================================
+T129b: Execution engine + state persistence — buff-jupyter kernel
+================================================================================
+Task plan:    .sisyphus/plans/buff-post-v10-tooling.md lines 1902-1934
+Built on:     T129a scaffold (commit prior to HEAD b47b357)
+Branch:       master
+Date:         2026-07-20
+
+WHAT THIS TASK DID
+------------------
+Wired the Jupyter `execute_request` handler from a stub ("execution not yet
+implemented (T129b)") to a REAL Buff evaluation engine reusing buff-eval
+(T125). The kernel now owns an `Evaluator` in its session state, so cells
+accumulate `let`-bindings and `func` declarations across `execute_request`
+calls — exactly the same accumulating session the REPL uses. Output is
+emitted via iopub `stream` (stdout/stderr) and `execute_result`
+(text/plain). Errors are surfaced as iopub `error` messages with
+ename/evalue/traceback AND `execute_reply` with status=error — the kernel
+SURVIVES errors and keeps serving subsequent cells.
+
+FILES CHANGED
+-------------
+- crates/buff-jupyter/Cargo.toml
+    Added `buff-eval.workspace = true` to [dependencies] (root workspace
+    already pins it). Added `buff-lang-error.workspace = true` to
+    [dev-dependencies] for Diagnostic fixtures in kernel.rs unit tests.
+    Comment block updated to reflect T129b scope.
+
+- crates/buff-jupyter/src/lib.rs
+    Module docstring rewritten to advertise T129b scope (real execution,
+    state persistence, error survival). Re-export list now includes
+    `ErrorOutput`.
+
+- crates/buff-jupyter/src/messages.rs
+    * `BANNER` updated — advertises "execution enabled (T129b)" instead
+      of "T129a scaffold".
+    * `ExecuteResult::text(count, text)` replaces the T129a `stub`
+      constructor (text-only path; rich display is T129c).
+    * `ExecuteReply::ok(count)` + `ExecuteReply::error(count, ename,
+      evalue, traceback)` replace the T129a `stub_ok` constructor.
+      Added `ename`/`evalue`/`traceback` fields (serde-defaulted so
+      the ok shape round-trips cleanly).
+    * `StreamOutput::stdout(text)` + `StreamOutput::stderr(text)`
+      replace `stub_stdout()`.
+    * NEW: `ErrorOutput` struct for the iopub `error` message content
+      (ename/evalue/traceback triple).
+    * Tests rewritten to assert the new constructors.
+
+- crates/buff-jupyter/src/kernel.rs
+    * `Kernel` struct gains `evaluator: Evaluator` field — persisted
+      across the kernel loop, accumulated across execute_request calls.
+    * NEW: `handle_execute_request(&mut self, parsed)` method — full
+      cell-evaluation pipeline:
+        1. Increment execution_count (kernel-authoritative counter).
+        2. iopub `status busy`.
+        3. Extract `code` from request content (default "" if missing).
+        4. Normalize code to end with `\n` (mirrors buff-repl's
+           handle_action — Buff's offside-rule lexer needs the trailing
+           newline to emit the final Dedent token for multi-line blocks).
+        5. Call `evaluator.eval_line(&code)` (blocking — spawns rustc
+           + the compiled program via std::process::Command).
+        6. Branch on EvalResult:
+           - Diagnostic set OR exit_code != 0 → iopub `error`
+             (ename="Error", evalue=diagnostic.Display,
+             traceback=stderr lines + diagnostic) + execute_reply
+             status=error.
+           - Clean run, value Some(v) → iopub `execute_result` with
+             text/plain (suppressed stream to avoid duplicating the
+             wrapper-print's stdout).
+           - Clean run, value None + stdout non-empty → iopub `stream`
+             (stdout).
+           - Captured stderr non-empty → iopub `stream` (stderr).
+        7. iopub `status idle`.
+        8. shell `execute_reply` (status ok OR error).
+      The kernel NEVER returns Err from this method — even on cell
+      failure the loop continues.
+    * NEW: helper methods `build_execute_reply_ok` /
+      `build_execute_reply_error` / `build_execute_result` /
+      `build_stream_message` / `build_error_message` (replace the
+      T129a stub builders).
+    * NEW: free function `build_error_payload(&EvalResult) ->
+      (String, Vec<String>)` assembles the (evalue, traceback) pair
+      shared by the iopub `error` and the shell `execute_reply` so
+      both shapes agree.
+    * NEW: free function `line_ends_with_blank(s) -> bool` — guards
+      against injecting a duplicate blank separator when stderr
+      already ends with a blank line.
+    * The T129a stub execute handler is GONE.
+    * Existing tests preserved (kernel_info_request, shutdown_request,
+      parse_message variants, verify_message_with_signature_round_trip,
+      now_iso_is_well_formed). The old `kernel_handles_execute_request_stub`
+      is replaced by `kernel_handles_empty_execute_request` (empty
+      content → no-op).
+    * NEW TESTS (in #[cfg(test)] mod, all green):
+        - execute_print_cell_emits_stdout_stream
+        - execute_bare_expression_emits_execute_result
+        - execute_state_persists_across_cells (let x = 42 then print(x))
+        - execute_state_persists_via_func_decls (func decl then call)
+        - execute_error_cell_does_not_kill_kernel (parse error +
+          kernel_info_request)
+        - execute_error_returns_proper_jupyter_error_shape (full
+          ename/evalue/traceback on both iopub + shell)
+        - execution_count_increments_monotonically
+        - build_error_payload_assembles_evalue_and_traceback
+        - build_error_payload_handles_missing_diagnostic
+        - build_error_payload_no_stderr_short_traceback
+        - line_ends_with_blank_detects_trailing_blank_lines
+        - parse_message_extracts_code_from_content
+      Helper additions: `encode_request_with_content`,
+      `content_of`, `msg_type_of`, `iopub_messages`, `run_cells`,
+      `stream_text`, `execute_result_text` — test infrastructure for
+      driving execute_request through the MockTransport and asserting
+      on iopub + shell output.
+
+- crates/buff-jupyter/tests/kernel_info_tests.rs
+    `kernel_info_reply_banner_mentions_t129a_scaffold_status` renamed to
+    `kernel_info_reply_banner_advertises_execution` and asserts the
+    banner now mentions "execution" (NOT "not yet implemented").
+
+BUFF-EVAL / BUFF-REPL API REUSED
+--------------------------------
+The buff-jupyter kernel CONSUMES buff-eval's public API; it does NOT
+reimplement evaluation. The reuse surface:
+
+- `buff_eval::Evaluator::new() -> Evaluator`
+    Construct a fresh evaluator with empty session state. Used in
+    `Kernel::new`.
+- `buff_eval::Evaluator::eval_line(&mut self, line: &str) -> EvalResult`
+    Evaluate one cell's source against the accumulating session state.
+    `let` bindings and `func` declarations persist across calls. This
+    is the persistent-session entry point required by T129b. (The
+    `eval()` method is functionally identical — the split documents
+    intent; we use `eval_line` to mirror buff-repl's terminology.)
+- `buff_eval::EvalResult { value, stdout, stderr, diagnostic, exit_code }`
+    The kernel branches on:
+      * `result.diagnostic.is_some() || result.exit_code != Some(0)` →
+        error path (iopub `error` + execute_reply status=error).
+      * `result.value.is_some()` → bare-expression path (iopub
+        `execute_result`).
+      * Non-empty stdout (with no value) → iopub `stream` (stdout).
+      * Non-empty stderr → iopub `stream` (stderr).
+- The evaluator's pipeline is `tokenize → parse → generate_rust →
+  rustc --edition 2021 -O → spawn-and-capture`. buff-jupyter adds NO
+  new compilation logic.
+
+buff-repl is NOT consumed directly (it would pull in rustyline which
+is unnecessary for the kernel). The kernel mirrors buff-repl's
+trailing-`\n` normalization (from `handle_action::ReplAction::Eval`)
+inline.
+
+NO API GAPS encountered: buff-eval provides exactly the
+persistent-session surface T129b needs (`Evaluator::new` + `eval_line`
++ `EvalResult`).
+
+LOCAL TEST OUTPUT
+-----------------
+Build env: Windows host with MSVC toolchain pinned at
+C:\BuildTools\VC\Tools\MSVC\14.44.35207 (VS2022 Community/Enterprise
+paths are broken on this host). All commands run with the LIB/INCLUDE/
+PATH/CC/CXX env vars set per the task spec.
+
+$ cargo fmt -p buff-jupyter --check
+exit: 0
+
+$ cargo clippy -p buff-jupyter -p buff-lang-cli --all-targets -- -D warnings
+exit: 0
+(ring / rustls / reqwest compile clean — these come in via
+buff-lang-cli's reqwest rustls-tls dep; they are NOT touched by
+buff-jupyter source.)
+
+$ cargo test -p buff-jupyter
+exit: 0
+
+test result: ok. 57 passed; 0 failed (lib — including 12 new
+                                T129b kernel + 3 new messages tests)
+test result: ok. 11 passed; 0 failed (connection_tests.rs)
+test result: ok.  7 passed; 0 failed (hmac_tests.rs)
+test result: ok.  7 passed; 0 failed (kernel_info_tests.rs)
+test result: ok.  9 passed; 0 failed (kernelspec_tests.rs)
+test result: ok.  6 passed; 0 failed (wire_tests.rs)
+TOTAL: 97 tests, 0 failures.
+
+NEW TEST NAMES + WHAT THEY PROVE
+--------------------------------
+kernel::tests::execute_print_cell_emits_stdout_stream
+    A `print("hello-from-buff")` cell emits iopub `stream` (stdout)
+    containing the printed value. Proves text output via iopub stream.
+
+kernel::tests::execute_bare_expression_emits_execute_result
+    A `2 + 3` cell emits iopub `execute_result` with text/plain="5"
+    and execution_count=1. Proves the bare-expression value path.
+
+kernel::tests::execute_state_persists_across_cells
+    Cell 1 `let x = 42`, cell 2 `print(x)`. Cell 2's stdout contains
+    "42" — proves let-bindings persist across execute_request calls.
+
+kernel::tests::execute_state_persists_via_func_decls
+    Cell 1 declares `func double(n: Int) -> Int: return n + n`, cell 2
+    `print(double(21))`. Cell 2 prints "42" — proves func declarations
+    persist across execute_request calls.
+
+kernel::tests::execute_error_cell_does_not_kill_kernel
+    Cell 1 = `func (` (parse error). Cell 2 = kernel_info_request.
+    The kernel responds to BOTH: cell 1 returns execute_reply
+    status=error (with ename/evalue/traceback), cell 2 returns
+    kernel_info_reply. Proves the kernel survives cell errors.
+
+kernel::tests::execute_error_returns_proper_jupyter_error_shape
+    A parse-error cell emits matching ename/evalue/traceback on BOTH
+    the iopub `error` message AND the shell `execute_reply`. Proves
+    front-end-visible consistency.
+
+kernel::tests::execution_count_increments_monotonically
+    Three cells in a row → execution_count 1, 2, 3 (and cell 3 prints
+    the sum from cells 1+2 — proving state across 3 cells).
+
+messages::tests::execute_reply_error_carries_traceback
+    ExecuteReply::error constructor serializes to the Jupyter shape.
+
+messages::tests::execute_result_text_carries_text_plain_mime
+    ExecuteResult::text constructor produces a single text/plain MIME.
+
+messages::tests::error_output_round_trips_serde
+    ErrorOutput serializes/deserializes cleanly.
+
+messages::tests::stream_stdout_and_stderr_constructors_select_correct_channel
+    StreamOutput::stdout/stderr pick the right `name` field.
+
+(plus build_error_payload_* unit tests for the error-payload
+assembly function, and line_ends_with_blank unit test for the
+separator guard.)
+
+KNOWN LIMITATIONS / API-GAP NOTES
+---------------------------------
+1. State pollution on parse-error cells (buff-eval limitation).
+
+   buff-eval's Evaluator accumulates BodyStmt-snippets BEFORE running
+   the composed program. When a cell like `func (` fails to parse,
+   the broken source IS appended to the session's body_stmts_src;
+   subsequent cells fail to compile because the broken source
+   pollutes the composed program.
+
+   This is the SAME behavior as the buff-repl (T125a) — buff-repl's
+   handle_load_command even has explicit handling for the
+   "empty-main artifact" diagnostic this produces. The
+   acceptance criterion "kernel MUST survive errors and keep serving
+   subsequent cells" is MET (the kernel processes subsequent
+   requests and returns replies — possibly error replies if the
+   state is polluted). The stronger guarantee "subsequent VALID
+   cells execute cleanly despite earlier errors" is NOT met due to
+   buff-eval's lack of snapshot/rollback on the Evaluator (the
+   struct's fields are private and it deliberately does NOT derive
+   Clone).
+
+   Workaround for users: restart the kernel via the Jupyter UI
+   (Kernel > Restart) to get a clean Evaluator. Documented in the
+   kernel.rs docstring for `handle_execute_request`.
+
+   NOT FIXED in T129b because fixing it would require either:
+   (a) Modifying buff-eval's source to expose a snapshot/restore API
+       (out of scope — the task forbids touching buff-eval source).
+   (b) Re-implementing the Evaluator's classify logic in buff-jupyter
+       to pre-validate before accumulating (significant duplication).
+   (c) Tracking successful cells in the kernel and re-running them
+       on error (O(N²) rustc spawns — too slow for real notebooks).
+
+   Post-T129c work could add a snapshot/restore API to buff-eval.
+
+2. Blocking evaluation.
+
+   `Evaluator::eval_line` is synchronous (spawns rustc + binary via
+   std::process::Command). The kernel's tokio loop blocks during
+   evaluation — fine for a single front-end, but a concurrent
+   multi-front-end scenario would stall. Concurrent hardening
+   (heartbeat task, multi-front-end) is post-T129c work, flagged in
+   the kernel.rs docstring.
+
+3. No `input_request` / interactive stdin.
+
+   The T129a scaffold does not bind the stdin socket. T129b does not
+   change this — `allow_stdin=true` in execute_request is silently
+   ignored (no Buff `input()` builtin exists in the prelude yet
+   either). Lands in T129c+.
+
+LIVE nbconvert ACCEPTANCE — USER ACTION
+---------------------------------------
+Per the task spec, live `jupyter nbconvert --execute --to html
+test.ipynb` acceptance is a USER ACTION — this Windows build host has
+NO Jupyter installed (no `jupyter`, `ipykernel`, or `nbconvert` on
+PATH). The local MockTransport-driven tests above are the local-
+equivalent coverage. The user should:
+
+1. Install buff kernel: `cargo run -p buff-lang-cli -- jupyter install`
+2. Install jupyterlab/notebook +ipykernel on a host with python.
+3. Run the QA scenario from the plan:
+   - Cell 1: `let x = 42`
+   - Cell 2: `print(x)`
+   - `jupyter nbconvert --execute --to html test.ipynb`
+   - Assert cell 2 output contains "42"
+
+Expected evidence file (per plan): .sisyphus/evidence/task-129b-exec-state.html
+(This remains a USER ACTION — not generated on this build host.)
+
+PANIC-FREE CONTRACT VERIFICATION
+--------------------------------
+Grep over crates/buff-jupyter/src/ for `\b(unwrap|expect|panic!|todo!|unimplemented!)\b`:
+every match lives AFTER a `#[cfg(test)]` line in its respective file.
+Non-test source is panic-free. Specifically:
+
+  - connection.rs:  #[cfg(test)] at line 172; all matches >190.
+  - error.rs:       no matches (only docstring mentions).
+  - hmac.rs:        #[cfg(test)] at line 94;  match at 214.
+  - kernel.rs:      #[cfg(test)] at line 723; all matches >790.
+  - kernelspec.rs:  #[cfg(test)] at line 289; all matches >310.
+  - lib.rs:         no matches (only docstring mention).
+  - messages.rs:    #[cfg(test)] at line 374; all matches >380.
+  - transport.rs:   #[cfg(test)] at line 242; matches >249.
+  - wire.rs:        #[cfg(test)] at line 164; matches >179.
+
+Integration tests in tests/*.rs do use `.expect()` (allowed — they
+are test code).
+
+================================================================================

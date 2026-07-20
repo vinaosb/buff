@@ -1,33 +1,38 @@
-//! `buff-jupyter` — Jupyter kernel protocol scaffold for the Buff
-//! language (task T129a of `buff-post-v10-tooling.md`).
+//! `buff-jupyter` — Jupyter kernel protocol for the Buff language
+//! (tasks T129a + T129b of `buff-post-v10-tooling.md`).
 //!
 //! Implements the Jupyter messaging wire protocol over ZMQ's 5
 //! sockets (shell / iopub / stdin / control / heartbeat), HMAC-SHA256
-//! message signing, and the kernelspec installer consumed by
-//! `buff jupyter install` / `buff jupyter start`.
+//! message signing, the kernelspec installer consumed by
+//! `buff jupyter install` / `buff jupyter start`, and the execution
+//! engine that evaluates Buff cells via the T125 `Evaluator` (reused
+//! as a library).
 //!
-//! # Scope (T129a)
-//!
-//! This crate ships the **protocol scaffold** only:
+//! # Scope (T129a + T129b)
 //!
 //! - **`kernel_info_request` → `kernel_info_reply`** — full handshake
 //!   (advertises protocol_version 5.3, language_info name=buff /
 //!   file_extension=.buff).
-//! - **`execute_request` → STUB `execute_reply`** — returns status ok
-//!   and emits an iopub `execute_result` / `stream` echoing
-//!   `"execution not yet implemented (T129b)"` (real evaluation lands
-//!   in T129b).
+//! - **`execute_request` → `execute_reply` (ok OR error)** — real
+//!   Buff evaluation via [`buff_eval::Evaluator`]. iopub emits
+//!   `status busy` → (`stream` stdout/stderr AND/OR `execute_result`
+//!   with `text/plain` AND/OR `error` with ename/evalue/traceback) →
+//!   `status idle`. State (let-bindings, func declarations) persists
+//!   across cells — the kernel owns the evaluator in its session.
+//!   Errors don't kill the kernel; subsequent cells keep running
+//!   against the same accumulated state.
 //! - **`shutdown_request` → `shutdown_reply`** — clean shutdown.
 //! - **HMAC-SHA256 signing/verification** of the 4 message frames
 //!   (header / parent_header / metadata / content) per the Jupyter
 //!   protocol.
 //!
-//! # Out of scope (T129b / T129c)
+//! # Out of scope (T129c)
 //!
-//! - Real Buff code execution (T129b — wires the T125 evaluator).
-//! - Rich / image display, MIME bundles, `?` / `??` introspection
-//!   (T129c).
-//! - Interactive `input_request` over the stdin socket (T129b).
+//! - Rich / image display, MIME bundles, `?` / `??` introspection,
+//!   widgets (T129c).
+//! - Interactive `input_request` over the stdin socket (T129c+).
+//! - Concurrent heartbeat / multi-front-end execution hardening
+//!   (post-T129c — the evaluator call is blocking).
 //!
 //! # Layering
 //!
@@ -43,6 +48,8 @@
 //!              │ kernel::Kernel<T>                       │
 //!              │  parse_message → verify → dispatch      │
 //!              │  build_*_reply → sign → send            │
+//!              │  ┌─ Evaluator (T125) — session state    │
+//!              │  └─ eval_line(code) → EvalResult        │
 //!              └─────────────┬───────────────────────────┘
 //!                            │ WireMessage
 //!                            ▼
@@ -57,7 +64,9 @@
 //!
 //! The trait abstraction means the pure protocol layer (everything
 //! below `Kernel<T>`) is unit-testable without binding a real ZMQ
-//! socket — see `tests/` for the integration surface.
+//! socket — see `tests/` for the integration surface and the
+//! `#[cfg(test)]` mod in `kernel.rs` for the MockTransport-driven
+//! execution-engine tests.
 //!
 //! # Panic-free contract
 //!
@@ -83,8 +92,8 @@ pub use kernelspec::{
     KernelSpec, KERNEL_DISPLAY_NAME, KERNEL_INTERRUPT_MODE, KERNEL_LANGUAGE, KERNEL_NAME,
 };
 pub use messages::{
-    ExecuteReply, ExecuteResult, HelpLink, KernelInfoReply, LanguageInfo, ShutdownReply,
-    StreamOutput, BANNER, IMPLEMENTATION_NAME, IMPLEMENTATION_VERSION,
+    ErrorOutput, ExecuteReply, ExecuteResult, HelpLink, KernelInfoReply, LanguageInfo,
+    ShutdownReply, StreamOutput, BANNER, IMPLEMENTATION_NAME, IMPLEMENTATION_VERSION,
 };
 pub use transport::{Multipart, ZmqSocketSet, ZmqTransport};
 pub use wire::{MessageHeader, WireMessage, PROTOCOL_VERSION};

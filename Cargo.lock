@@ -294,6 +294,8 @@ dependencies = [
 name = "buff-jupyter"
 version = "1.0.0"
 dependencies = [
+ "buff-eval",
+ "buff-lang-error",
  "bytes",
  "hex",
  "hmac",

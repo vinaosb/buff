@@ -9,11 +9,11 @@ name = "buff_jupyter"
 path = "src/lib.rs"
 
 [dependencies]
-# T129a: Jupyter kernel protocol scaffold. Pure-Rust deps only —
-# NO native C, NO OpenSSL, NO libzmq. The transport layer uses the
-# async pure-Rust `zeromq` crate (workspace pin); the signing layer
-# reuses the existing `hmac` + `sha2` + `hex` workspace pins (T124k
-# Hash/HMAC prelude modules) so version churn stays centralized.
+# T129a/T129b: Jupyter kernel. Pure-Rust deps only — NO native C, NO
+# OpenSSL, NO libzmq. The transport layer uses the async pure-Rust
+# `zeromq` crate (workspace pin); the signing layer reuses the existing
+# `hmac` + `sha2` + `hex` workspace pins (T124k Hash/HMAC prelude
+# modules) so version churn stays centralized.
 #
 # - `tokio` (full): the async runtime backing the kernel message loop +
 #   the zeromq sockets' async recv/send.
@@ -29,6 +29,14 @@ path = "src/lib.rs"
 # - `hmac` + `sha2` + `hex`: HMAC-SHA256 signing / verification of the
 #   4 message frames (header / parent_header / metadata / content) per
 #   the Jupyter messaging protocol.
+# - `buff-eval` (T129b): the evaluation engine reused from T125. The
+#   kernel holds an `Evaluator` in its session state so `let` bindings
+#   and `func` declarations accumulate across `execute_request` cells.
+#   Consumed as a library only — buff-jupyter adds NO new compilation
+#   logic. The evaluator's `eval_line` spawns `rustc` + the compiled
+#   program (blocking) so the kernel loop runs evaluations sequentially
+#   (sufficient for a single front-end; concurrent hardening is
+#   post-T129c work).
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -39,6 +47,7 @@ bytes.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
+buff-eval.workspace = true
 
 [dev-dependencies]
 # T129a: integration tests in `tests/` exercise the pure protocol
@@ -46,5 +55,9 @@ hex.workspace = true
 # generation). No live Jupyter / ZMQ transport needed — the socket
 # layer is exercised only via compilation (the kernel loop typechecks
 # against the trait but is never bound in tests).
+# T129b: `buff-lang-error` is needed by the kernel unit tests in
+# `kernel.rs` `#[cfg(test)]` to construct `Diagnostic` fixtures
+# exercising `build_error_payload` — pure data, no logic dep.
 tokio.workspace = true
 serde_json.workspace = true
+buff-lang-error.workspace = true

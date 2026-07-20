@@ -31,16 +31,24 @@ fn kernel_info_reply_language_info_targets_buff() {
 }
 
 #[test]
-fn kernel_info_reply_banner_mentions_t129a_scaffold_status() {
+fn kernel_info_reply_banner_advertises_execution() {
     let r = KernelInfoReply::buff();
     assert!(!r.banner.is_empty());
     assert_eq!(r.banner, BANNER);
-    // Banner must honestly disclose that execution is NOT yet wired
-    // up — Jupyter consoles print this verbatim on connect, so users
-    // see it before they try `1+1` and see the stub reply.
+    // T129b: the banner must honestly disclose execution status —
+    // Jupyter consoles print this verbatim on connect. The kernel
+    // now runs real Buff cells (text output + state persistence), so
+    // the banner should advertise execution capability (rich display
+    // remains deferred to T129c).
+    let lower = r.banner.to_lowercase();
     assert!(
-        r.banner.to_lowercase().contains("t129a") || r.banner.to_lowercase().contains("scaffold"),
-        "banner must mention scaffold status: {}",
+        lower.contains("execution"),
+        "banner must mention execution status: {}",
+        r.banner
+    );
+    assert!(
+        !lower.contains("not yet implemented"),
+        "banner must NOT claim execution is unimplemented: {}",
         r.banner
     );
 }
