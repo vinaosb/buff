@@ -914,7 +914,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(cli): polish cargo integration with buff.toml manifest`
 
-- [ ] **T121: Side-by-side example library** [writing]
+- [x] **T121: Side-by-side example library** [writing]
 
   **What to do**:
   - Create `examples/rust-vs-buff/` directory
@@ -953,7 +953,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `docs(examples): add 10+ side-by-side Rust-vs-Buff example pairs`
 
-- [ ] **T121b: Dioxus codegen feasibility spike (UI go/no-go gate)** [deep]
+- [x] **T121b: Dioxus codegen feasibility spike (UI go/no-go gate)** [deep]
 
   > **WHY THIS IS IN v1.3, NOT v1.8**: This spike front-loads the biggest technical risk: whether Buff's codegen-rust can emit valid Rust source containing Dioxus macro invocations that compile and render. Proving/disproving this 5 releases early means the web/frontend strategy is de-risked before Phase 2 investment.
   >

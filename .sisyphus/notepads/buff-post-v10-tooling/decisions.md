@@ -41,3 +41,52 @@ Matches the v1.2 *Use Buff* release. The extension is the second task of v1.2 (T
 o targets specified. The bin name matches the package name.
 - DECISION: uff clean and uff update are thin wrappers (no flags). They can be extended later if needed.
 
+
+
+## [T121b] 2026-07-19 — Dioxus codegen feasibility spike: VERDICT PASS
+
+**Task:** T121b (plan L956-1015) — UI go/no-go gate.
+
+**Verdict:** PASS. Buff syn/quote/prettyplease codegen emits valid #​[component] + sx!{} macros that compile to wasm32 AND render+react in headless Chrome.
+
+**Pinned versions:**
+- dioxus umbrella: =0.7.2 (sub-crates resolved to 0.7.9 transitively)
+- wasm-bindgen 0.2.126 (host wasm-bindgen.exe matches)
+- rustc 1.95.0 / target wasm32-unknown-unknown
+
+**Key codegen finding:** prettyplease inserts whitespace INSIDE the rsx!
+TokenStream (onclick : move | _ | count += 1 vs original onclick: move |_| count += 1)
+but does NOT delete/reorder/re-tokenize. dioxus-rsx proc macro accepts
+the massaged form. This is THE central risk retired.
+
+**Browser render:** counter initial = Increment (count: 0); after click =
+Increment (count: 1). Signal→event→reactive DOM update pipeline proven.
+Screenshot: .sisyphus/evidence/task-121b-dioxus-counter.png
+Method: hand-rolled wasm-bindgen --target web + python -m http.server.
+No need for dx/	runk/wasm-pack install — the existing host wasm-bindgen.exe suffices.
+
+**Error-mapping quality:**
+- rustc/dioxus-rsx diagnostics point at exact generated-.rs line:col (verified on broken.rs).
+- Filename translation (.rs→.buff) already exists in buff_lang_cli::error_mapper.
+- GAP: rsx! body is opaque TokenStream; per-token spans point at generated Rust text,
+  not Buff AST nodes. Granularity collapses inside macro bodies.
+- Recommended v1.8 baseline: post-format // buff-line:N markers + line-scan reverse-map.
+  Per-element localization deferred to v1.9+.
+
+**Risk documented:** No language transpiles to Dioxus from non-Rust source —
+no community prior art for transpiler-level error mapping, type-checking rsx tree,
+hot-reload across transpile. PASS removes fundamental feasibility doubt;
+integration ergonomics risk remains for v1.8 T130.
+
+**Workspace integrity:** cargo check --workspace --all-targets exits 0 (verified).
+Zero new workspace deps; only one test file added to buff-lang-codegen-rust.
+Spike crate lives under %TEMP%\opencode\dioxus-spike\ (throwaway, outside buff repo).
+
+**Deliverables:**
+- crates/buff-lang-codegen-rust/tests/dioxus_t121b.rs (7 tests, all pass)
+- .sisyphus/decisions/dioxus-feasibility.md (full decision record)
+- .sisyphus/evidence/task-121b-dioxus-counter.png (post-click screenshot)
+- .sisyphus/evidence/task-121b-decision.txt (short verdict summary)
+
+**Implication for plan:** v1.8 T130 proceeds as planned. UI foundation risk front-loaded and retired 5 releases early.
+
