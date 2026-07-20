@@ -293,3 +293,23 @@ buff-lsp = { path = "crates/buff-lsp" }
 # T129b Jupyter kernel, T138c Bufflings) all resolve to the same in-tree
 # version during the v1.x tooling wave.
 buff-eval = { path = "crates/buff-eval" }
+# T125a: REPL crate (crates/buff-repl). Provides the `buff repl` subcommand's
+# interactive read-eval-print loop, layered on top of `buff-eval` for
+# evaluation and `rustyline` for line editing / history / Ctrl-D/Ctrl-C
+# handling. Mirrors the workspace path-dep pattern so any future consumer
+# (Jupyter kernel, IDE integrations) resolves to the same in-tree version.
+buff-repl = { path = "crates/buff-repl" }
+# T125a: `rustyline` is the readline implementation backing the Buff REPL.
+# We pin to major 15 (released 2024-11-15) — recent stable, ships the
+# `DefaultEditor::new()` API since 13.x, broad ecosystem adoption. We
+# deliberately do NOT chase the latest 18.x because:
+# - 15.x is the long-standing surface most REPL-style tools in the Rust
+#   ecosystem target (mirrors the rand-0.8-vs-0.9 / chrono-0.4 conservative
+#   pin philosophy already in use in this workspace).
+# - The DefaultEditor + readline + add_history_entry API surface we depend
+#   on is identical across 13/14/15/16/17/18 — pinning 15 gives us room to
+#   bump without churn.
+# `derive` / `with-dirs` / `with-file-history` features are NOT enabled —
+# history persistence is T125c territory (we want a fresh in-memory history
+# per session for now).
+rustyline = "15"

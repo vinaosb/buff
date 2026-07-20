@@ -1,0 +1,32 @@
+T125a: REPL core (read-eval-print loop) — evidence
+====================================================
+Date: 2026-07-20
+Commit target: feat(repl): REPL core read-eval-print loop with rustyline
+
+New crate: crates/buff-repl/ (buff_repl)
+  - Cargo.toml: edition 2021, v1.0.0, MIT OR Apache-2.0; deps buff-eval, buff-lang-error, rustyline (all .workspace=true); dev-dep insta.
+  - src/lib.rs (415 lines): Repl struct (DefaultEditor + Evaluator + prompt); Repl::{new,with_prompt,with_evaluator,evaluator,run,run_with_writer}; pure fn evaluate_and_format(&mut Evaluator, &str)->String; format_eval_result; render_diagnostic_for_repl. 7 unit tests.
+  - tests/repl_tests.rs: 6 integration tests (real rustc via Evaluator::eval_line).
+
+CLI wiring (buff-lang-cli):
+  - cli.rs: new `Repl` variant on Command enum.
+  - commands/repl.rs (NEW): thin shim -> Repl::new()?.run().
+  - commands/mod.rs: pub mod repl.
+  - main.rs: dispatch arm Command::Repl => commands::repl::run().
+  - Cargo.toml: buff-repl.workspace = true.
+
+Root Cargo.toml [workspace.dependencies]: rustyline = "15"; buff-repl = { path = "crates/buff-repl" }.
+
+Resilience: EvalResult.diagnostic printed, loop CONTINUES; Ctrl-D (Eof) / Ctrl-C (Interrupted) -> print "bye.", break clean; other ReadlineError propagates. No unwrap/expect/panic outside #[cfg(test)].
+
+Verification (MSVC env, scoped -p):
+  cargo test  -p buff-repl                     -> test result: ok. 7 passed (unit) + 6 passed (integration); 0 failed. EXIT 0
+  cargo clippy -p buff-repl --all-targets -D w -> Finished, no warnings. EXIT 0
+  cargo fmt   -p buff-repl --check             -> clean. EXIT 0
+  cargo build -p buff-lang-cli                 -> Finished. EXIT 0
+
+Acceptance criteria (plan L1617-1620):
+  [x] buff repl launches interactive shell with prompt ("buff> ")
+  [x] Single expression evaluates and prints (2 + 3 -> 5) — covered by integration test + eval_line pipeline
+  [x] Parse/type error prints diagnostic and continues loop — format_eval_result + resilience contract
+  [x] cargo test -p buff-repl passes (13 tests)

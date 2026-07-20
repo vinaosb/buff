@@ -1,4 +1,4 @@
-# decisions � buff-post-v10-tooling
+# decisions � buff-post-v10-tooling
 
 
 ## [T116] 2026-07-19T16:57:57
@@ -450,3 +450,27 @@ Made Command::Test { file: Option<PathBuf> } (was required PathBuf). When file i
 - **Snippet classification** via `parse_expression` (strict, all-tokens-consumed) then `parse`: Empty | BareExpr(is_print flag) | BodyStmt | TopLevelDecl(non-main) | FullProgram(has main). BareExpr wrapped as `print(<expr>)` to surface value, UNLESS it is itself a print/println call (Void return -> would be `print(print())` rustc type error). FullProgram NOT accumulated (user owns main; else duplicate-main error).
 - **State accumulation stored as verbatim source strings** (top_level_src + body_stmts_src), re-parsed each call so codegen always sees a complete program. type_of() is side-effect-free (reads accumulated env, does not mutate).
 - **No CLI dep** for with_exe_extension - reimplemented the one helper to avoid pulling clap/tokio into the eval crate.
+
+
+## [T125a] 2026-07-20T12:00:00-03:00 - REPL core (crates/buff-repl) shipped
+
+**Decision 1: pure `evaluate_and_format` over a `Repl::handle_line` method.**
+The formatting layer is a free function `pub fn evaluate_and_format(ev: &mut Evaluator, input: &str) -> String`, NOT a `&mut self` method on `Repl`. This is the testability keystone: tests construct their own `Evaluator` and call the fn directly — no TTY, no rustyline, no Editor<...> generic args. The `Repl` struct owns the TTY-bound state (DefaultEditor + Evaluator + prompt) and its `run()` method calls the free fn internally. Mirrors how buff-eval exposes pure `classify` + `compose_program_body` so the broader pipeline can be tested without spawning `rustc`.
+
+**Decision 2: rustyline 15, NOT 18.**
+Latest is 18.0.1 (2026-06-24) but the API surface we depend on (`DefaultEditor::new()`, `readline(prompt) -> Result<String, ReadlineError>`, `add_history_entry(line)`, `ReadlineError::{Eof,Interrupted}` variants) is identical across 13.x/14.x/15.x/16.x/17.x/18.x. Pinning 15 (released 2024-11-15, over a year of ecosystem adoption) matches the rand-0.8 / chrono-0.4 conservative-pin philosophy already used in this workspace for codegen-adjacent tooling. `with-file-history` feature is NOT enabled — disk history is explicitly T125c territory.
+
+**Decision 3: REPL renders diagnostics via `Diagnostic::Display`, NOT `Diagnostic::render(&source)`.**
+T124 added a rustc-style renderer that takes raw source text and emits carets. The REPL has no canonical source text — diagnostics from rustc / spawn failures carry `Span::dummy()`, and the user's interactive input doesn't map cleanly to a multi-line source buffer. `Display` emits `[Severity] message` + `note: ...` lines, span-agnostic, which is the right level of detail for a one-line REPL exchange. `buff check` keeps using `render(source)` because it operates on file-based input.
+
+**Decision 4: CLI `commands/repl.rs` is a 10-line shim.**
+The real logic lives in `crates/buff-repl/`. `commands/repl.rs` constructs `Repl::new()` and calls `.run()`, mapping `ReadlineError` to `anyhow::Error` via `e.to_string()`. This follows the existing `commands/clean.rs` / `commands/update.rs` thin-wrapper pattern (cargo-subprocess shims that fit in 30 lines). NO new logic, NO new errors, NO buff-eval direct dep at the CLI layer — `buff-lang-cli` depends on `buff-repl`, which transitively pulls `buff-eval`.
+
+**Decision 5: stdout/stderr/value ordering in `format_eval_result`.**
+Order: stdout (verbatim) → stderr (verbatim, when non-empty) → diagnostic OR `= value` line. The diagnostic is ALWAYS last so the user sees the structured error at the bottom of the output (where their eye lands after a failed run). The `= value` line is suppressed when `value.trim() == stdout.trim()` to avoid duplicating what `print(2+3)` already wrote. The runtime-panic case (partial stdout + stderr + diagnostic) preserves all three for debuggability — matches rustc's behavior of showing partial output before the panic message.
+
+**Decision 6: Ctrl-C prints a leading newline, Ctrl-D does not.**
+On `ReadlineError::Interrupted`, we write `\n` + `bye.` + `\n`. The leading `\n` ensures `bye.` starts on a fresh row (Ctrl-C typically leaves the cursor mid-line after `^C`). On `ReadlineError::Eof` (Ctrl-D), no leading `\n` — Ctrl-D typically leaves the cursor at end-of-line. Both write `bye.` so the user has visual confirmation the session ended cleanly (mirrors `python -i`'s `exit()` confirmation).
+
+**Decision 7: NO `Default` impl on `Repl`.**
+`Default::default()` can't return `Result`. Since `Repl::new()` is fallible (`DefaultEditor::new()` can fail without a TTY), we drop `Default` entirely. Tests that want a `Repl` without a TTY should call `evaluate_and_format(ev, input)` directly — that's the testability contract.

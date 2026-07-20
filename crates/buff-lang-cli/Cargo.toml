@@ -30,6 +30,10 @@ buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-codegen-rust.workspace = true
 buff-lang-error.workspace = true
+# T125a: REPL delegation. `buff repl` is a thin shim that delegates to
+# buff_repl::Repl::run() — all real logic (rustyline + buff-eval) lives
+# in the dedicated crate.
+buff-repl.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

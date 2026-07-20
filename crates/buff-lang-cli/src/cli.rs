@@ -193,6 +193,18 @@ pub enum Command {
     /// `cargo update` in the project root.
     Update,
 
+    /// Launch an interactive read-eval-print loop (T125a).
+    ///
+    /// Type Buff expressions or statements; the REPL evaluates each line
+    /// via the full Buff pipeline (lex → parse → codegen → rustc → run)
+    /// and prints the result. State (let-bindings, func declarations)
+    /// accumulates in-memory for the session. Ctrl-D or Ctrl-C exits.
+    ///
+    /// The REPL adds NO new compilation logic — it consumes `buff-eval`
+    /// (T125-prep) exclusively. Persistence across sessions is deferred
+    /// to T125c.
+    Repl,
+
     /// Add a git dependency to the project's `buff.toml` (T122).
     ///
     /// `<SPEC>` is `git+<URL>` (e.g. `git+https://github.com/user/lib.buff`).
