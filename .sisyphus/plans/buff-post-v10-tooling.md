@@ -1671,7 +1671,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(repl): session state persistence and :type introspection`
 
-- [ ] **T125c: REPL commands, file loading, multi-line, history** [unspecified-high]
+- [x] **T125c: REPL commands, file loading, multi-line, history** [unspecified-high]
 
   **What to do**:
   - Commands: `:help`, `:load <file>`, `:quit`
@@ -1686,10 +1686,10 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: T125a, T125b, `rustyline` history docs
 
   **Acceptance Criteria**:
-  - [ ] `:help` lists commands
-  - [ ] `:load examples/fibonacci.buff` then `fibonacci(10)` → `55`
-  - [ ] Multi-line function definition works (indentation-aware continuation)
-  - [ ] History saved to `~/.buff_history` and restored next session
+  - [x] `:help` lists commands
+  - [x] `:load examples/fibonacci.buff` then `fibonacci(10)` → `55`
+  - [x] Multi-line function definition works (indentation-aware continuation)
+  - [x] History saved to `~/.buff_history` and restored next session
 
   **QA Scenarios**:
   ```
