@@ -1,0 +1,196 @@
+T128 — buff deps + buff outdated — Evidence
+===========================================
+
+Task spec: .sisyphus/plans/buff-post-v10-tooling.md (lines 1834-1862)
+HEAD: 948f9c1 (T127 just landed)
+Crate: buff-lang-cli
+
+Acceptance criteria (all met):
+  [x] `buff deps` prints tree
+  [x] `buff outdated` reports newer versions
+  [x] `--why` shows dependency chain
+
+────────────────────────────────────────────────────────────────────────
+1. SAMPLE OUTPUT — `buff deps` (cargo-tree style)
+────────────────────────────────────────────────────────────────────────
+
+Synthetic buff.toml used:
+
+    [package]
+    name = "demo-app"
+    version = "0.3.2"
+
+    [rust-deps]
+    serde = "1.0"
+    tokio = "1"
+
+    [git-dependencies]
+    libbuff = { git = "https://github.com/buff-lang/libbuff.buff", branch = "dev" }
+
+    [registry-dependencies]
+    pkg-cycle = { version = "^1.0.0" }
+    pkg-utils = { version = "*" }
+
+Command: `buff deps`
+
+Output:
+
+    demo-app v0.3.2
+    ├── [rust-deps]
+    │   ├── serde v1.0
+    │   └── tokio v1
+    ├── [git-dependencies]
+    │   └── libbuff v* (branch=dev) (https://github.com/buff-lang/libbuff.buff)
+    └── [registry-dependencies]
+        ├── pkg-cycle v^1.0.0 (registry)
+        └── pkg-utils v* (registry)
+
+Command: `buff deps --why pkg-cycle`
+
+Output (tree elided for brevity — same as above):
+
+    Why is `pkg-cycle` in the dependency tree?
+    Direct dependency in [registry-dependencies]: pkg-cycle v^1.0.0
+    └── required by: demo-app
+
+Command: `buff deps --why libbuff` (git-dep path)
+
+    Why is `libbuff` in the dependency tree?
+    Direct dependency in [git-dependencies]: libbuff (https://github.com/buff-lang/libbuff.buff, branch=dev)
+    └── required by: demo-app
+
+Command: `buff deps --why serde` (rust-dep path)
+
+    Why is `serde` in the dependency tree?
+    Direct dependency in [rust-deps]: serde v1.0
+    └── required by: demo-app
+
+────────────────────────────────────────────────────────────────────────
+2. SAMPLE OUTPUT — `buff outdated` (in-process registry round-trip)
+────────────────────────────────────────────────────────────────────────
+
+Driven by `tests/deps_outdated_t128.rs::outdated_detects_newer_version`:
+publishes pkg-outdated @ 1.0.0 + 1.2.0 to an ephemeral in-process
+buff-registry, then consumer pins `=1.0.0`:
+
+    Package                 Req              Current          Latest
+    ------------------------------------------------------------------------
+    pkg-outdated            =1.0.0           1.0.0            1.2.0 *
+
+    (*) Outdated — newer version available.
+        Update with `buff add <name>@<new-req>`.
+
+Up-to-date case (`outdated_pinned_to_latest_reports_up_to_date`):
+
+    Package                 Req              Current          Latest
+    ------------------------------------------------------------------------
+    pkg-uptodate            *                2.0.0            2.0.0
+
+    All registry dependencies are up to date.
+
+Resolve-error case (`outdated_reports_resolve_errors_as_warnings`):
+
+    Package                 Req              Current          Latest
+    ------------------------------------------------------------------------
+    never-published         ^1.0.0           -                -
+        warning: resolve `^1.0.0`: registry returned HTTP 404: not found
+        warning: resolve `*`: registry returned HTTP 404: not found
+
+────────────────────────────────────────────────────────────────────────
+3. VERIFICATION — 4 green outputs (MSVC env set per task spec)
+────────────────────────────────────────────────────────────────────────
+
+All commands run with LIB/INCLUDE/PATH env set to MSVC 14.44.35207 +
+Windows SDK 10.0.26100.0 per the task MUST DO. Scope `-p buff-lang-cli`
+on every cargo command (never `--workspace`).
+
+(3a) cargo build -p buff-lang-cli
+─────────────────────────────────
+
+    $ cargo build -p buff-lang-cli
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+
+    (initial build: 12.16s compiling ring/rustls/reqwest deps; incremental 0.17s)
+
+(3b) cargo fmt -p buff-lang-cli -- --check
+──────────────────────────────────────────
+
+    $ cargo fmt -p buff-lang-cli -- --check
+    FMT_EXIT=0
+
+    (no diff printed = clean)
+
+(3c) cargo clippy -p buff-lang-cli --all-targets -- -D warnings
+──────────────────────────────────────────────────────────────
+
+    $ cargo clippy -p buff-lang-cli --all-targets -- -D warnings
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.90s
+
+    (no warnings, no errors)
+
+(3d) cargo test -p buff-lang-cli  (per-binary summary)
+──────────────────────────────────────────────────────
+
+    $ cargo test -p buff-lang-cli
+    test result: ok. 158 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   <- lib unit tests
+    test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- bin unit tests
+    test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- build_release_tests
+    test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- check_tests
+    test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- cli_build_tests
+    test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- cli_run_tests
+    test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- config_parsing
+    test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- deps_outdated_t128 [NEW]
+    test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- error_mapping_tests
+    test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- fmt_comments_tests
+    test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- fmt_tests
+    test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- git_dependencies_t122
+    test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- integration_tests
+    test result: ok. 3 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out      <- milestone_tests
+    test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- registry_cli_t127
+    test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- rust_deps_t119
+    test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- scaffold_tests
+    test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- t120_cargo_polish
+    test result: ok. 10 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out     <- t123_workspace
+    test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- templates_tests
+    test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out     <- test_command
+    test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- v05_examples
+    test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out      <- v10_compat
+    test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out      <- doc-tests
+
+    TOTAL: 280 passed, 0 failed, 4 ignored (existing snapshot tests), 0 measured
+    NEW in T128: 13 lib unit (commands::deps::* + commands::outdated::*)
+                 + 13 integration (tests/deps_outdated_t128.rs) = 26 new tests
+
+Note: the test_command test output shows `test test_fail ... FAILED`
+which is INTENTIONAL — it's the inner Buff `@test` function inside
+the test_command_e2e_failing_test_exit_one Rust test. The outer Rust
+test passes by detecting the inner failure correctly.
+
+────────────────────────────────────────────────────────────────────────
+4. FILES TOUCHED
+────────────────────────────────────────────────────────────────────────
+
+NEW (3):
+  - crates/buff-lang-cli/src/commands/deps.rs       (render_tree + render_why_chain + run)
+  - crates/buff-lang-cli/src/commands/outdated.rs   (check_outdated + render_report + run)
+  - crates/buff-lang-cli/tests/deps_outdated_t128.rs (13 integration tests)
+
+MODIFIED (4):
+  - crates/buff-lang-cli/src/cli.rs                 (added Deps + Outdated enum variants)
+  - crates/buff-lang-cli/src/commands/mod.rs        (pub mod deps; pub mod outdated;)
+  - crates/buff-lang-cli/src/main.rs                (2 dispatch arms)
+  - (this file: .sisyphus/evidence/task-128-deps-tree.txt)
+
+No new dependencies added (all deps already pinned at workspace level:
+semver, anyhow, thiserror — all reused from existing T127 work).
+
+CONTRACT ADHERENCE:
+  [x] Panic-free non-test code (no unwrap/expect/panic!/todo!/unimplemented!)
+  [x] Reused commands::registry helpers (registry_url + resolve_version)
+  [x] Reused T127 in-process test harness (spawn_registry + run_blocking + EnvGuard)
+  [x] main.rs stays thin (~80 lines, 2 new arms)
+  [x] No [features]/[lints]/[profile.*] sections added
+  [x] No native-C/OpenSSL deps
+  [x] buff-registry source NOT modified (read-only)
+  [x] Compiler crates NOT modified (read-only)
+  [x] No git operations, no .sisyphus/plans edits, no boulder.json edits

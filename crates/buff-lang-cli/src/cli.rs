@@ -307,4 +307,39 @@ pub enum Command {
         #[arg(value_name = "NAME")]
         name: String,
     },
+
+    /// Print the project's dependency tree (T128).
+    ///
+    /// Reads `buff.toml` from the current directory and renders every
+    /// declared dependency across all three dependency kinds
+    /// (`[rust-deps]`, `[git-dependencies]`,
+    /// `[registry-dependencies]`) in cargo-tree style: package name,
+    /// version requirement, and source. Mirrors `cargo tree` so the
+    /// output shape is familiar to Rust developers.
+    ///
+    /// Pass `--why <PKG>` to print the chain explaining why `<PKG>`
+    /// is present (which section declares it, what version / source,
+    /// and the root package that requires it). Useful for debugging
+    /// "where did this dependency come from?".
+    Deps {
+        /// Show the chain explaining why `<PKG>` is included.
+        /// Prints the declaring section + version + the root
+        /// package that requires `<PKG>`.
+        #[arg(long, value_name = "PKG")]
+        why: Option<String>,
+    },
+
+    /// Report outdated registry dependencies (T128).
+    ///
+    /// For every entry under `[registry-dependencies]`, queries the
+    /// buff registry (`$BUFF_REGISTRY_URL`, default
+    /// `http://127.0.0.1:7878`) for the latest published version
+    /// and prints any whose pinned version requirement resolves to
+    /// a version older than the registry's absolute latest. Mirrors
+    /// `cargo outdated`.
+    ///
+    /// Entries that fail to resolve (registry unreachable, package
+    /// unknown, semver parse failure) are surfaced as warnings
+    /// rather than aborting the whole report.
+    Outdated,
 }
