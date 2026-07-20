@@ -1,0 +1,32 @@
+[package]
+name = "buff-ui-dioxus"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Thin Rust-level wrapper around Dioxus 0.7 — surfaces component definition, signals/state, and event helpers that T133 will later map Buff syntax onto."
+
+[lib]
+name = "buff_ui_dioxus"
+path = "src/lib.rs"
+
+[dependencies]
+# T130: Dioxus 0.7 umbrella crate (workspace-pinned with caret per the
+# T121b decision record — the dioxus-rsx proc-macro internals are NOT
+# covered by semver, so we re-test on every minor bump rather than
+# floating patch). The umbrella re-exports everything we touch:
+# `prelude::*` (Element / use_signal / rsx! / component),
+# `dioxus::launch` (the wasm + native launch entry point), and the
+# `dioxus::events` namespace (MouseEvent, KeyboardEvent, ...). We do
+# NOT pull `dioxus-web` explicitly because the umbrella handles the
+# web-backend wiring when built with `--target wasm32-unknown-unknown`.
+dioxus.workspace = true
+
+[dev-dependencies]
+# T130: regression test asserts the codegen pattern proven by T121b
+# (syn::Macro + quote!{} TokenStream survives prettyplease whitespace
+# insertion). Mirrors the dev-dep set already used by
+# `crates/buff-lang-codegen-rust/tests/dioxus_t121b.rs`.
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+prettyplease.workspace = true

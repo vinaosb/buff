@@ -438,3 +438,25 @@ bytes = "1"
 # (T129b execution engine, T129c rich display, IDE integrations)
 # resolves to the same in-tree version during the v1.x tooling wave.
 buff-jupyter = { path = "crates/buff-jupyter" }
+# T130: Dioxus 0.7 umbrella crate for the in-tree UI wrapper
+# (`crates/buff-ui-dioxus`). T121b (decision record
+# `.sisyphus/decisions/dioxus-feasibility.md`) proved that Buff's
+# syn/quote/prettyplease codegen stack can emit valid Rust source
+# containing `#[component]` + `rsx!{}` macro invocations that rustc +
+# the dioxus-rsx proc macro expand, that compile to
+# `wasm32-unknown-unknown`, and that render and react in a real
+# headless browser. The T121b spike pinned `=0.7.2` exactly because it
+# was a one-shot throwaway; the decision doc mandates v1.8 use the
+# caret pin `dioxus = "0.7"` at the workspace level and re-test on
+# every minor bump — the dioxus-rsx proc-macro internals are NOT
+# covered by semver guarantees. Cargo resolved the sub-crates
+# (dioxus-core / -hooks / -signals / -html / -web / ...) to 0.7.9
+# transitively during the spike; the umbrella's minor bump range keeps
+# them moving in lockstep.
+dioxus = "0.7"
+# T130: `buff-ui-dioxus` workspace path dep — mirrors the buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter pattern so any
+# future consumer (T133 RSX-for-Buff syntax surface, T138c Bufflings UI
+# tutorial runner) resolves to the same in-tree version during the v1.x
+# tooling wave.
+buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }

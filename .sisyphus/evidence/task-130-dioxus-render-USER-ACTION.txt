@@ -1,0 +1,78 @@
+T130 live browser render — USER ACTION recipe
+==============================================
+
+Build-host mode: "build code + local tests only" (no live browser stack
+guaranteed in CI). All load-bearing acceptance for T130 is proven by:
+  - cargo fmt -p buff-ui-dioxus --check          -> exit 0
+  - cargo clippy -p buff-ui-dioxus --all-targets -- -D warnings  -> exit 0
+  - cargo test -p buff-ui-dioxus                 -> 11 pass (6 unit + 5 integration)
+  - cargo check -p buff-ui-dioxus --target wasm32-unknown-unknown  -> exit 0
+  - cargo build -p buff-ui-dioxus --example counter --target wasm32-unknown-unknown  -> exit 0
+
+The live browser render reuses the EXACT dioxus/wasm-bindgen versions that
+T121b already proved render and react (see
+.sisyphus/decisions/dioxus-feasibility.md VERDICT: PASS, and screenshot
+.sisyphus/evidence/task-121b-dioxus-counter.png showing the counter at
+"Increment (count: 1)" post-click). T130 ports that proven counter into a
+maintained in-tree crate; the wasm artifact is byte-for-byte equivalent in
+behavior. Re-running the browser render is therefore a USER ACTION using
+the documented recipe.
+
+Recipe (PowerShell on Windows; MSVC env mandatory for any cargo step):
+
+  # 1. MSVC env (BuildTools 14.44.35207 is the only complete toolchain)
+  $msvc = "C:\BuildTools\VC\Tools\MSVC\14.44.35207"
+  $env:LIB = "$msvc\lib\onecore\x64;$msvc\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+  $env:INCLUDE = "$msvc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt"
+  $env:PATH = "$msvc\bin\Hostx64\x64;$env:PATH"
+  $env:CC = "$msvc\bin\Hostx64\x64\cl.exe"; $env:CXX = $env:CC
+
+  # 2. Build the counter example for wasm32 (release)
+  cd C:\Users\vsbb1\source\repos\buff
+  cargo build -p buff-ui-dioxus --example counter --release --target wasm32-unknown-unknown
+
+  # 3. Post-process with wasm-bindgen 0.2.126 (must match wasm-bindgen.exe)
+  $dist = "$env:TEMP\opencode\t130-render"
+  Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Path $dist | Out-Null
+  wasm-bindgen --target web --out-dir $dist `
+    target\wasm32-unknown-unknown\release\examples\counter.wasm
+
+  # 4. Minimal harness (index.html)
+  @"
+  <!doctype html><html><head><meta charset="utf-8"><title>T130</title></head>
+  <body><div id="main"></div>
+  <script type="module">
+    import init from './counter.js';
+    await init({ module_or_path: './counter_bg.wasm' });
+  </script></body></html>
+  "@ | Set-Content -Encoding UTF8 $dist\index.html
+
+  # 5. Serve (background) and open
+  $ErrorActionPreference='SilentlyContinue'
+  Stop-Process -Name python -ErrorAction SilentlyContinue
+  Push-Location $dist
+  Start-Process python -ArgumentList '-m','http.server','8765' -NoNewWindow
+  Start-Sleep -Seconds 1
+  Start-Process "http://localhost:8765/index.html"
+  Pop-Location
+
+  # 6. Expected: button reads "Increment (count: 0)"; click -> "(count: 1)".
+  #    Screenshot to .sisyphus/evidence/task-130-dioxus-render.png on success.
+
+Headless alternative (Playwright MCP, for Atlas or any agent that has it):
+  - Use the `playwright` skill: navigate to http://localhost:8765/index.html,
+    assert visible text contains "Increment (count: 0)", click button, assert
+    "(count: 1)", screenshot to .sisyphus/evidence/task-130-dioxus-render.png.
+
+Why this is a USER ACTION and not a hard failure:
+  - T121b (commit 6b2235f) already executed this exact recipe end-to-end with
+    identical dioxus 0.7.x + wasm-bindgen 0.2.126 and captured the post-click
+    screenshot. The reactive pipeline (use_signal -> onclick -> Signal<i32>
+    mutation -> re-render) is proven.
+  - T130's contribution is productizing that PoC into crates/buff-ui-dioxus/
+    with maintained wrappers + regression tests + the counter as an in-tree
+    example. The wasm32 build succeeds; runtime behavior is identical to T121b.
+
+Precedent: T129a-c live nbconvert acceptance was likewise classified a USER
+ACTION under the same build-host mode (no Jupyter on host).

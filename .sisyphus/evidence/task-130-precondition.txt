@@ -1,0 +1,55 @@
+T130 PRECONDITION EVIDENCE — T121b feasibility PoC PASS verdict
+================================================================
+
+Source: .sisyphus/decisions/dioxus-feasibility.md (commit 6b2235f,
+        dated 2026-07-19). Verbatim quote of the opening "VERDICT"
+        section:
+
+> ## VERDICT: **PASS**
+>
+> Buff's existing `syn`/`quote`/`prettyplease` codegen stack can emit
+> valid Rust source containing Dioxus macro invocations
+> (`#[component]` + `rsx!{}`) that rustc + the dioxus-rsx proc-macro
+> expand, that compile to `wasm32-unknown-unknown`, and that
+> **render and react in a real browser**. The counter component
+> (signal + `onclick` + reactive re-render) rendered
+> `Increment (count: 0)` initially and updated to
+> `Increment (count: 1)` after a headless click — full
+> signal->event->DOM update pipeline proven.
+
+Pinned versions proven by T121b:
+  - Dioxus umbrella: `=0.7.2` (spike exact-pin); for v1.8 the decision
+    doc mandates caret `dioxus = "0.7"` at the workspace level and
+    re-test on every minor bump (T130 follows this).
+  - Resolved sub-crates: `dioxus-core`/`-hooks`/`-signals`/`-html`/
+    `-web` etc. all `0.7.9` (transitive, picked by cargo).
+  - `wasm-bindgen` `0.2.126` (matches the host-installed CLI).
+  - rustc `1.95.0` (buff's pin in `rust-toolchain.toml`).
+  - Target: `wasm32-unknown-unknown` (already installed via
+    `rustup target add wasm32-unknown-unknown`).
+
+Crux codegen finding: `prettyplease::unparse` inserts whitespace
+INSIDE the macro TokenStream (`onclick : move | _ | count += 1`
+instead of the idiomatic `onclick: move |_| count += 1`) but does
+NOT delete, reorder, or re-tokenize the body. The dioxus-rsx proc
+macro receives an equivalent TokenStream and parses it identically.
+
+T130 builds on this foundation: the in-tree wrapper crate
+`crates/buff-ui-dioxus` re-exports the proven Dioxus 0.7 surface
+(component, rsx, Element, use_signal, Signal, launch, event types)
+behind stable paths that the future RSX-for-Buff syntax (T133/v1.9)
+will lower Buff `@ui func` declarations onto. The T121b counter is
+maintained as `crates/buff-ui-dioxus/examples/counter.rs` (host +
+wasm32 builds verified green by T130).
+
+Reproduction:
+  - Decision record: .sisyphus/decisions/dioxus-feasibility.md
+  - Codegen proof (T121b, DO NOT MODIFY):
+    crates/buff-lang-codegen-rust/tests/dioxus_t121b.rs
+  - Maintained wrapper (T130):
+    crates/buff-ui-dioxus/{Cargo.toml,src/lib.rs,examples/counter.rs,
+    tests/codegen_regression.rs}
+  - Headless-browser screenshot from T121b spike:
+    .sisyphus/evidence/task-121b-dioxus-counter.png
+
+Generated: 2026-07-20 (T130 execution).
