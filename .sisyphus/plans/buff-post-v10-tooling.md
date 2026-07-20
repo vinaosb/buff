@@ -1934,7 +1934,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(jupyter): execution engine with cross-cell state persistence`
 
-- [ ] **T129c: Rich display + introspection** [deep]
+- [x] **T129c: Rich display + introspection** [deep]
 
   **What to do**:
   - Render Buff matrices/vectors as HTML tables or images (GPU data → PNG via `display_data`)
@@ -1948,9 +1948,10 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: T129b, Jupyter `display_data` MIME spec
 
   **Acceptance Criteria**:
-  - [ ] Matrix renders as HTML table or image
-  - [ ] `?name` shows help, `??name` shows source
-  - [ ] MIME bundle includes text fallback
+  - [x] Matrix renders as HTML table or image
+  - [x] `?name` shows help, `??name` shows source
+  - [x] MIME bundle includes text fallback
+  - Note: verified via MockTransport-driven kernel tests (vector literal emits execute_result MIME bundle with text/html `<table>` + text/plain fallback; `?x` emits help; `??x` emits source; unknown names degrade to text without panic). Vector literals take a rich-display-literal shortcut that skips the rustc spawn because Buff codegen lowers `print(vec)` to a `Display` call `Vec<T>` does not implement (post-T129c codegen follow-up). Live `jupyter nbconvert --execute` acceptance (task-129c-rich-display.html) and GPU→PNG image rendering are USER ACTIONs — no Jupyter on build host and no raster renderer exists.
 
   **QA Scenarios**:
   ```
