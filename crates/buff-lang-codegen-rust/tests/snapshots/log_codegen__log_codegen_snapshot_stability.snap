@@ -1,0 +1,20 @@
+---
+source: crates/buff-lang-codegen-rust/tests/log_codegen.rs
+assertion_line: 448
+expression: src
+---
+fn main() {
+    {
+        let __buff_log_filter = tracing_subscriber::EnvFilter::try_from_env("BUFF_LOG")
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        let _ = if cfg!(debug_assertions) {
+            tracing_subscriber::fmt().with_env_filter(__buff_log_filter).try_init()
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(__buff_log_filter)
+                .json()
+                .try_init()
+        };
+    }
+    tracing::info!(a = 1, b = 2, "msg");
+}

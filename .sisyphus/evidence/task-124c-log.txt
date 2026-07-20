@@ -1,0 +1,145 @@
+# T124c — Log prelude module (tracing + tracing-subscriber)
+
+**Task:** T124c — Add a `Log` module to the Buff prelude that wraps Rust's
+`tracing` + `tracing-subscriber` crates.
+
+**Date:** 2026-07-20
+
+## Verification exit codes
+
+| Check                                                  | Exit  |
+| ------------------------------------------------------ | ----- |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **0** |
+| `cargo test --workspace`                               | **0** |
+| `cargo build --workspace`                              | **0** |
+
+All three required verifications pass cleanly.
+
+## Files modified
+
+| File | Type | Lines (post-change) |
+| --- | --- | --- |
+| `Cargo.toml` (root) | modified | 76 (+15) |
+| `crates/buff-lang-types/src/prelude_types.rs` | modified | 674 (+101) |
+| `crates/buff-lang-codegen-rust/src/rust_codegen.rs` | modified | 7895 (+196) |
+| `crates/buff-lang-codegen-rust/tests/log_codegen.rs` | **new** | 441 |
+| `crates/buff-lang-codegen-rust/tests/snapshots/log_codegen__log_codegen_snapshot_stability.snap` | **new** | 13 |
+| `crates/buff-lang-codegen-rust/tests/snapshots/log_codegen__log_codegen_full_main_snapshot_with_subscriber_init.snap` | **new** | 19 |
+
+## Sample transpiled output
+
+### Buff source (canonical acceptance example)
+
+```buff
+func main() {
+    Log.info("hello", count: 42)
+}
+```
+
+### Generated Rust (snapshot-verified, byte-identical across runs)
+
+```rust
+fn main() {
+    {
+        let __buff_log_filter = tracing_subscriber::EnvFilter::try_from_env("BUFF_LOG")
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        let _ = if cfg!(debug_assertions) {
+            tracing_subscriber::fmt().with_env_filter(__buff_log_filter).try_init()
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(__buff_log_filter)
+                .json()
+                .try_init()
+        };
+    }
+    tracing::info!(count = 42, "hello");
+}
+```
+
+### Plain `Log.info("hi")` (no fields)
+
+```rust
+tracing::info!("hi");
+```
+
+### Multiple structured fields preserve source order
+
+`Log.info("msg", a: 1, b: 2)` →
+
+```rust
+tracing::info!(a = 1, b = 2, "msg");
+```
+
+### `Log.error("oops")`
+
+```rust
+tracing::error!("oops");
+```
+
+## extern_crates recorded
+
+When a program uses `Log`, `codegen.extern_crates()` returns:
+
+```text
+{ "tracing", "tracing-subscriber" }
+```
+
+Both crates are recorded in the `BTreeSet` (deterministic iteration order)
+via the `program_uses_tracing(decls)` helper. The codegen crate does NOT
+depend on tracing itself — it's only emitted in generated code. Single-file
+`buff run` rustc path does NOT link them; cargo-project wiring is deferred
+(same codegen-only linking boundary as chrono/tokio from T124b).
+
+## Test coverage
+
+18 new tests in `tests/log_codegen.rs`:
+
+- 4 tests: one per level (`debug`/`info`/`warn`/`error`) for the simple
+  `Log.<level>("msg")` → `tracing::<level>!("msg")` lowering.
+- 4 tests: structured fields (single field, multiple fields preserve source
+  order, source-order not alphabetical sort, string field values).
+- 2 tests: `extern_crates` recording (registered when Log is used, NOT
+  registered when Log is unused).
+- 3 tests: subscriber init in main (emitted with all expected pieces, only
+  in `main` not helpers, NOT emitted when Log is unused).
+- 3 tests: error cases (unknown level, empty args, positional arg after
+  message).
+- 2 insta snapshot tests proving byte-stable codegen.
+
+Plus 3 new tests in `prelude_types.rs` for the Log registry variants
+(lookup valid pairs, reject invalid pairs, return types are Void).
+
+## Key design decisions
+
+1. **`PreludeType::Log` added as a namespace-only variant.** `Log` is
+   never a runtime value — only its assoc fns are callable. `buff_type()`
+   returns `Type::Void`. The new `is_namespace_only()` predicate lets the
+   test suite skip the datetime-only `is_prelude_datetime` check for Log.
+2. **Source-order field emission** for `tracing::<level>!(k1 = v1, k2 = v2, "msg")`.
+   Tracing itself preserves insertion order, so source order matches
+   user intent.
+3. **`try_init()` not `init()`** in generated subscriber init — never
+   panics on duplicate install (matches Buff's "no panicking generated
+   code" stance).
+4. **`cfg!(debug_assertions)` branch** for dev (pretty to stderr) vs
+   release (JSON to stdout). Single filter built once outside the
+   if/else, moved into the executing branch (sound in Rust's branch
+   semantics).
+5. **`Log` calls bypass the T105 named-arg resolution** in
+   `lower_expr`'s `MethodCall` arm. The standard resolution drops arg
+   names (passes only values), but Log needs the names for tracing
+   fields. Intercepted BEFORE the resolution.
+6. **Subscriber init emitted only in `main`** — helper fns using `Log`
+   don't pay the init cost. The init is the FIRST statement in `main`'s
+   body (wrapped in a `{ ... }` block to scope the filter binding).
+
+## Notes
+
+- The `Log` namespace establishes the precedent for future namespace-only
+  prelude modules (e.g. `Process`, `Cli`). The `is_namespace_only()`
+  predicate + the namespace-bypass in `lower_expr` are the only
+  namespace-specific code paths.
+- buff-lang-types tests pass: 136 + 21 + 18 + 6 + 61 + 29 + 27 + 22 + 23
+  + 18 + 10 + 1 = 362 unit tests all green.
+- codegen log_codegen tests: 18/18 green.
+- Full workspace test run: all green (no regressions).

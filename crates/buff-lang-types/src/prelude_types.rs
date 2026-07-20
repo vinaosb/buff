@@ -78,6 +78,17 @@ pub enum PreludeType {
     /// `Instant` — a monotonic instant for elapsed-time measurement. Wraps
     /// `std::time::Instant`. Distinct from [`Self::DateTime`] (wall-clock).
     Instant,
+    /// `Log` — the structured-logging namespace (T124c). Wraps the
+    /// `tracing` + `tracing-subscriber` Rust crates. Unlike the other
+    /// variants, `Log` is **never a runtime value** — it's a NAMESPACE
+    /// that exposes associated functions `Log.debug(msg, ...)`,
+    /// `Log.info(msg, ...)`, `Log.warn(msg, ...)`, `Log.error(msg, ...)`.
+    /// Each call lowers to the corresponding `tracing::<level>!(...)`
+    /// macro. `buff_type()` returns [`Type::Void`] (Log has no value
+    /// representation); the `is_prelude_datetime` predicate returns
+    /// `false` for it. This is the precedent for future namespace-only
+    /// prelude modules (e.g. `Process`, `Cli`).
+    Log,
 }
 
 impl PreludeType {
@@ -88,6 +99,7 @@ impl PreludeType {
         PreludeType::Time,
         PreludeType::Duration,
         PreludeType::Instant,
+        PreludeType::Log,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -98,10 +110,16 @@ impl PreludeType {
             PreludeType::Time => "Time",
             PreludeType::Duration => "Duration",
             PreludeType::Instant => "Instant",
+            PreludeType::Log => "Log",
         }
     }
 
     /// The resolved Buff [`Type`] variant for this prelude type.
+    ///
+    /// For the datetime family (DateTime/Date/Time/Duration/Instant) this is
+    /// the matching datetime `Type` variant. For namespace-only modules
+    /// like `Log` it returns [`Type::Void`] — the namespace itself is
+    /// never a value, only its associated functions are callable.
     pub const fn buff_type(self) -> Type {
         match self {
             PreludeType::DateTime => Type::DateTime,
@@ -109,7 +127,19 @@ impl PreludeType {
             PreludeType::Time => Type::Time,
             PreludeType::Duration => Type::Duration,
             PreludeType::Instant => Type::Instant,
+            // T124c: namespace-only — Log has no value representation.
+            PreludeType::Log => Type::Void,
         }
+    }
+
+    /// T124c: Returns `true` if this prelude type is a **namespace-only**
+    /// module — one whose name (e.g. `Log`) is never a runtime value but
+    /// merely a container for associated functions. The datetime family
+    /// returns `false` (their values ARE first-class); `Log` returns
+    /// `true`. Used by the prelude-types tests to skip the datetime-only
+    /// `is_prelude_datetime` assertion for namespace modules.
+    pub const fn is_namespace_only(self) -> bool {
+        matches!(self, PreludeType::Log)
     }
 }
 
@@ -167,6 +197,20 @@ pub enum PreludeAssocFn {
     Seconds,
     /// `Duration.millis(n)`. One arg (Int).
     Millis,
+    // ---- Log levels (T124c) ---------------------------------------------
+    /// `Log.debug(msg, ...)`. Wraps `tracing::debug!`. Variadic: first
+    /// positional arg is the message; trailing named args (`k: v`) become
+    /// structured fields. Returns `Void` (Unit).
+    Debug,
+    /// `Log.info(msg, ...)`. Wraps `tracing::info!`. Same shape as
+    /// [`Self::Debug`].
+    Info,
+    /// `Log.warn(msg, ...)`. Wraps `tracing::warn!`. Same shape as
+    /// [`Self::Debug`].
+    Warn,
+    /// `Log.error(msg, ...)`. Wraps `tracing::error!`. Same shape as
+    /// [`Self::Debug`].
+    Error,
 }
 
 impl PreludeAssocFn {
@@ -182,6 +226,11 @@ impl PreludeAssocFn {
         PreludeAssocFn::Minutes,
         PreludeAssocFn::Seconds,
         PreludeAssocFn::Millis,
+        // T124c: Log levels — Debug / Info / Warn / Error.
+        PreludeAssocFn::Debug,
+        PreludeAssocFn::Info,
+        PreludeAssocFn::Warn,
+        PreludeAssocFn::Error,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -195,6 +244,13 @@ impl PreludeAssocFn {
             PreludeAssocFn::Minutes => "minutes",
             PreludeAssocFn::Seconds => "seconds",
             PreludeAssocFn::Millis => "millis",
+            // T124c: lowercase Rust method-name spelling mirrors tracing's
+            // macro names so the codegen can splice `tracing::<name>!(...)`
+            // without rewriting.
+            PreludeAssocFn::Debug => "debug",
+            PreludeAssocFn::Info => "info",
+            PreludeAssocFn::Warn => "warn",
+            PreludeAssocFn::Error => "error",
         }
     }
 }
@@ -240,6 +296,16 @@ pub fn assoc_fn_return_type(
         (PreludeType::Duration, PreludeAssocFn::Minutes) => Some(Type::Duration),
         (PreludeType::Duration, PreludeAssocFn::Seconds) => Some(Type::Duration),
         (PreludeType::Duration, PreludeAssocFn::Millis) => Some(Type::Duration),
+        // T124c: Log module — `Log.<level>(msg, ...)` always returns
+        // `Void` (Unit). The structured fields and tracing macro
+        // invocation are codegen-time concerns; the type inferencer
+        // only needs to know the call is well-formed and produces no
+        // value. Every (Log, <level>) pair is valid; arity is enforced
+        // at codegen time (must have at least the message arg).
+        (PreludeType::Log, PreludeAssocFn::Debug) => Some(Type::Void),
+        (PreludeType::Log, PreludeAssocFn::Info) => Some(Type::Void),
+        (PreludeType::Log, PreludeAssocFn::Warn) => Some(Type::Void),
+        (PreludeType::Log, PreludeAssocFn::Error) => Some(Type::Void),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -376,9 +442,14 @@ mod tests {
         for &t in PreludeType::ALL {
             assert_eq!(prelude_type_lookup(t.name()), Some(t));
             assert!(is_prelude_type(t.name()));
-            // Each type's `buff_type()` round-trips through the
-            // `is_prelude_datetime` predicate.
-            assert!(t.buff_type().is_prelude_datetime());
+            // Each DATETIME-FAMILY type's `buff_type()` round-trips
+            // through the `is_prelude_datetime` predicate. Namespace-only
+            // modules (T124c: `Log`) skip this check — they have no
+            // value representation, so `buff_type()` returns `Void`
+            // (which is correctly NOT a datetime).
+            if !t.is_namespace_only() {
+                assert!(t.buff_type().is_prelude_datetime());
+            }
         }
     }
 
@@ -415,6 +486,77 @@ mod tests {
         assert_eq!(assoc_fn_lookup("MyType", "now"), None);
         // Unknown method.
         assert_eq!(assoc_fn_lookup("DateTime", "unknown"), None);
+    }
+
+    // T124c: Log module — Log.<level>(msg, ...) assoc-fn lookups.
+    #[test]
+    fn prelude_log_assoc_fn_lookup_valid_pairs() {
+        // All four Log levels resolve via the registry.
+        assert_eq!(
+            assoc_fn_lookup("Log", "debug"),
+            Some((PreludeType::Log, PreludeAssocFn::Debug))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Log", "info"),
+            Some((PreludeType::Log, PreludeAssocFn::Info))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Log", "warn"),
+            Some((PreludeType::Log, PreludeAssocFn::Warn))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Log", "error"),
+            Some((PreludeType::Log, PreludeAssocFn::Error))
+        );
+        // `Log` is recognised as a prelude type.
+        assert!(is_prelude_type("Log"));
+        // `Log.buff_type()` is `Void` (no runtime value).
+        assert_eq!(PreludeType::Log.buff_type(), Type::Void);
+        // `Log.is_namespace_only()` is true.
+        assert!(PreludeType::Log.is_namespace_only());
+        // The other prelude types are NOT namespace-only.
+        assert!(!PreludeType::DateTime.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_log_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Log.now is invalid (now is not a Log method).
+        assert_eq!(assoc_fn_lookup("Log", "now"), None);
+        // DateTime.info is invalid (info belongs to Log).
+        assert_eq!(assoc_fn_lookup("DateTime", "info"), None);
+        // Log.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Log", "unknown"), None);
+    }
+
+    #[test]
+    fn prelude_log_assoc_fn_return_types() {
+        // All four Log levels return Void.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Debug, &[]),
+            Some(Type::Void)
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Info, &[]),
+            Some(Type::Void)
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Warn, &[]),
+            Some(Type::Void)
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Error, &[]),
+            Some(Type::Void)
+        );
+        // Log + non-Log method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Now, &[]),
+            None
+        );
+        // Non-Log type + Log method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::DateTime, PreludeAssocFn::Info, &[]),
+            None
+        );
     }
 
     #[test]
@@ -530,8 +672,9 @@ mod tests {
         let names: Vec<&str> = PreludeType::ALL.iter().map(|t| t.name()).collect();
         let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
         assert_eq!(names.len(), unique.len(), "duplicate prelude type names");
-        // 5 datetime-family members shipped in T124b.
-        assert_eq!(PreludeType::ALL.len(), 5);
+        // 5 datetime-family members shipped in T124b + 1 namespace module
+        // (Log) shipped in T124c = 6 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 6);
     }
 
     #[test]

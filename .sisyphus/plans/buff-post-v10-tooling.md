@@ -1026,7 +1026,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 > **WHY**: Buff's pitch is "Go productivity." Go ships a rich stdlib (datetime, regexp, log, encoding in-box). Rust's stdlib is thin — devs hunt for chrono/regex/tracing crates. Buff should absorb the most common dependencies so users get zero-frustrure productivity. Each module wraps a proven Rust crate (leverage mandate). These are prelude-implicit (no `import` needed, like `print` today).
 
-- [ ] **T124b: DateTime module** [deep]
+- [x] **T124b: DateTime module** [deep]
 
   **What to do**:
   - Add `DateTime`, `Date`, `Time`, `Duration`, `Instant` types to Buff prelude
@@ -1062,7 +1062,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): DateTime module wrapping chrono`
 
-- [ ] **T124c: Log module** [unspecified-high]
+- [x] **T124c: Log module** [unspecified-high]
 
   **What to do**:
   - Add `Log` module to prelude: `Log.debug(msg)`, `Log.info(msg)`, `Log.warn(msg)`, `Log.error(msg)`

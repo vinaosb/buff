@@ -460,6 +460,27 @@ impl RustCodegen {
         if program_uses_chrono(decls) {
             self.extern_crates.insert("chrono".to_string());
         }
+        // T124c: register the `tracing` + `tracing-subscriber` crates as
+        // external dependencies when the program references the prelude
+        // `Log` module (`Log.debug/info/warn/error(...)`). Generated code
+        // uses fully-qualified `tracing::...` and
+        // `tracing_subscriber::...` paths so no `use` import is emitted —
+        // but the recorded names signal to the pipeline / build-driver
+        // that the generated Cargo project must declare BOTH crates in
+        // `[dependencies]` (the subscriber init emitted in `main` calls
+        // `tracing_subscriber::fmt()...try_init()`, so a program with any
+        // Log call requires both).
+        //
+        // Mirrors the chrono registration pattern (T124b): single-file
+        // `buff run` rustc path does NOT link these crates; the
+        // codegen-only linking boundary is the accepted acceptance
+        // criterion for v1.4 prelude modules. Cargo-project wiring is
+        // deferred (snapshots + extern_crates set is the verifiable
+        // contract).
+        if program_uses_tracing(decls) {
+            self.extern_crates.insert("tracing".to_string());
+            self.extern_crates.insert("tracing-subscriber".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -944,6 +965,29 @@ impl RustCodegen {
         };
 
         let mut block = self.lower_block(&f.body)?;
+
+        // T124c: emit the tracing-subscriber init at the top of `main`
+        // when the program uses the prelude `Log` module. The init MUST
+        // be the FIRST statement so any subsequent `Log.info(...)` call
+        // is captured by the subscriber (an uninstalled subscriber
+        // silently drops events — `tracing` is a no-op without one).
+        // Mirrors the `#[tokio::main]` attribute injection pattern
+        // (T31): a single program-wide decision made in `generate()`
+        // (recorded in `extern_crates`) drives a per-`main` emission
+        // here. The init is wrapped in a `{ ... }` block so its helper
+        // binding (`__buff_log_filter`) doesn't leak into the user's
+        // `main` body — see [`tracing_subscriber_init_stmt`] for the
+        // design rationale.
+        //
+        // Only emitted for `main` (NOT for arbitrary fns) so a library
+        // function using `Log` doesn't pay the init cost — the calling
+        // binary's `main` is the canonical install site for the global
+        // subscriber.
+        if f.name.name == "main" && self.extern_crates.contains("tracing") {
+            if let Some(init_stmt) = tracing_subscriber_init_stmt() {
+                block.stmts.insert(0, init_stmt);
+            }
+        }
 
         // T100: fall-through tail. Any defers still in the accumulator at
         // this point were NOT drained by an explicit `return` inside the
@@ -2163,6 +2207,41 @@ impl RustCodegen {
                 args,
                 ..
             } => {
+                // T124c: Log module — Log.<level>(msg, key: val, ...).
+                // We MUST intercept BEFORE the T105 named-arg resolution
+                // below, because that resolution drops arg names and
+                // passes only the values positionally to
+                // `lower_method_call`. The Log lowering needs the field
+                // NAMES (to emit `tracing::<level>!(key = val, "msg")`),
+                // so we route Log calls directly to
+                // [`Self::lower_prelude_type_assoc_fn`] with the ORIGINAL
+                // args (NamedArg nodes intact). Other prelude types
+                // (DateTime.now(), Duration.days(n), ...) have no named
+                // args in practice, so they continue through the standard
+                // path below.
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if id.name == "Log" {
+                        if let Some((ptype, pmethod)) =
+                            buff_lang_types::prelude_types::assoc_fn_lookup(
+                                &id.name,
+                                &method.name,
+                            )
+                        {
+                            return self.lower_prelude_type_assoc_fn(ptype, pmethod, args);
+                        }
+                        // `Log.<unknown>(...)` — surface a clear error so
+                        // a typo doesn't silently fall through to user-
+                        // method codegen (which would then fail with a
+                        // confusing "no method `info` on type `Log`"
+                        // rustc diagnostic). The valid Log levels are
+                        // debug / info / warn / error.
+                        return Err(self.unsupported(&format!(
+                            "Log.{}() is not a recognised prelude Log method \
+                             (expected one of: debug, info, warn, error)",
+                            method.name
+                        )));
+                    }
+                }
                 // T105: named-arg resolution for method calls. Method
                 // callee param names are NOT resolved in v0.5 (no
                 // receiver-type analysis), so we fall back to value-
@@ -2673,6 +2752,16 @@ impl RustCodegen {
             Ok(())
         };
         match (ptype, pmethod) {
+            // T124c: Log module — Log.<level>(msg, key: val, ...) lowers
+            // to the corresponding tracing macro. Dispatched to a
+            // dedicated helper because the Log call signature is
+            // variadic (positional msg + named fields) and the lowering
+            // produces a MACRO invocation (not a function call), unlike
+            // every other prelude-type assoc fn. Must run BEFORE the
+            // chrono/std::time arms below — `(Log, _)` is not matched by
+            // any of them, so the early-return is also a correctness
+            // guard.
+            (T::Log, _) => self.lower_log_call(pmethod, args),
             // ----- Time constructors ----------------------------------------
             (T::DateTime, A::Now) => {
                 no_args(self)?;
@@ -2815,6 +2904,126 @@ impl RustCodegen {
                 Ok(method_call_no_args(recv, method_name))
             }
         }
+    }
+
+    /// T124c: lower a prelude `Log` module call (`Log.<level>(msg, ...)`) to
+    /// the corresponding `tracing::<level>!(...)` macro invocation.
+    ///
+    /// Call shape (mirrors `tracing`'s macro surface):
+    ///
+    /// ```text
+    /// Log.info("msg")                       -> tracing::info!("msg")
+    /// Log.info("msg", k1: v1, k2: v2)       -> tracing::info!(k1 = v1, k2 = v2, "msg")
+    /// ```
+    ///
+    /// The first positional arg is the **message** (typically a string
+    /// literal, but any `Display`-able expression works at the Rust level).
+    /// All SUBSEQUENT args MUST be `Expr::NamedArg` (`key: value`) — they
+    /// become the tracing macro's structured fields. Mixed positional-after-
+    /// named args are rejected (tracing's macro syntax requires the message
+    /// literal LAST, after all field assignments).
+    ///
+    /// # Field ordering (determinism)
+    ///
+    /// Fields are emitted in **source order** (the order the user wrote
+    /// them). This is the simplest deterministic choice — `tracing` itself
+    /// preserves insertion order in its event record, and insta snapshots
+    /// prove byte-identical output across runs. The alternative (alphabetical
+    /// sort) would reorder fields away from the user's intent; we keep
+    /// source order.
+    ///
+    /// # Lowering mechanism
+    ///
+    /// The macro is built as a [`syn::ExprMacro`] whose `mac.path` is
+    /// `tracing::<level>` and whose `mac.tokens` carries the comma-separated
+    /// field assignments + the trailing message. Token construction goes
+    /// through `quote!` so NO raw-string Rust is emitted — the single
+    /// string producer remains `prettyplease::unparse`. The resulting
+    /// `ExprMacro` re-parses cleanly because every spliced fragment is
+    /// already a `syn` node (Ident, SynExpr).
+    ///
+    /// # Errors
+    ///
+    /// - Empty arg list → `unsupported` (caller must supply at least the
+    ///   message).
+    /// - Any arg after the first that is NOT an `Expr::NamedArg` →
+    ///   `unsupported` (mixed positional/named is rejected — the message
+    ///   must be the LAST positional and the only one).
+    /// - An unknown `PreludeAssocFn` for `Log` (i.e. not one of
+    ///   Debug/Info/Warn/Error) → `unsupported` (defensive — the registry
+    ///   already rejects the combo at the lookup layer).
+    fn lower_log_call(
+        &mut self,
+        level: buff_lang_types::PreludeAssocFn,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
+        use buff_lang_types::PreludeAssocFn as A;
+        // Resolve the tracing macro name from the level variant.
+        // `PreludeAssocFn::name()` already returns the lowercase Rust
+        // spelling ("debug" / "info" / "warn" / "error"), so we can
+        // splice it directly into `tracing::<name>!`.
+        let level_name = match level {
+            A::Debug | A::Info | A::Warn | A::Error => level.name(),
+            other => {
+                return Err(self.unsupported(&format!(
+                    "Log.{:?}() is not a recognised Log level (expected debug/info/warn/error)",
+                    other
+                )));
+            }
+        };
+        if args.is_empty() {
+            return Err(self.unsupported(&format!(
+                "Log.{level_name}() requires at least the message argument"
+            )));
+        }
+        // First positional arg is the message; the rest must be NamedArgs.
+        let msg_expr = &args[0];
+        for (i, a) in args[1..].iter().enumerate() {
+            if !matches!(a, Expr::NamedArg { .. }) {
+                return Err(self.unsupported(&format!(
+                    "Log.{level_name}(): argument {} (after the message) must be a named field \
+                     (e.g. `key: value`); positional args after the message are not allowed",
+                    i + 2
+                )));
+            }
+        }
+        // Lower the message. For a string literal, this produces a
+        // `SynExpr::Lit(Lit::Str(...))` that quote! splices as the bare
+        // string literal token (so `tracing::info!("msg")` not
+        // `tracing::info!({ "msg" })`).
+        let msg = self.lower_expr(msg_expr)?;
+        // Lower field name + value pairs in SOURCE ORDER (deterministic).
+        // We collect into Vecs so the `#(#names = #values,)*` repetition
+        // in quote! produces a comma-separated list with a trailing comma
+        // after every entry (so the message is unambiguously separated).
+        let mut field_names: Vec<Ident> = Vec::with_capacity(args.len().saturating_sub(1));
+        let mut field_values: Vec<SynExpr> = Vec::with_capacity(field_names.len());
+        for f in &args[1..] {
+            if let Expr::NamedArg { name, value, .. } = f {
+                field_names.push(ast_ident_to_syn(name));
+                field_values.push(self.lower_expr(value)?);
+            }
+        }
+        // Build the macro path: `tracing::info`, `tracing::debug`, ...
+        let macro_path = rust_path(&format!("tracing::{level_name}"));
+        // Build the macro token body. The `#(#names = #values,)*` repetition
+        // emits `k1 = v1, k2 = v2,` (each entry followed by a comma), then
+        // the message splices in last. tracing accepts the trailing comma
+        // after the last field (Rust macro_rules $() sep behavior).
+        let tokens: proc_macro2::TokenStream = if field_names.is_empty() {
+            quote::quote! { #msg }
+        } else {
+            quote::quote! { #(#field_names = #field_values,)* #msg }
+        };
+        Ok(SynExpr::Macro(syn::ExprMacro {
+            attrs: Vec::new(),
+            mac: syn::Macro {
+                path: macro_path,
+                bang_token: Default::default(),
+                delimiter: syn::MacroDelimiter::Paren(Default::default()),
+                tokens,
+            },
+        }))
     }
 
     /// Lower `abs(x)` → `(x).abs()`. Wrapping the receiver in parens
@@ -6588,6 +6797,232 @@ fn expr_uses_chrono(expr: &Expr) -> bool {
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_chrono),
         Expr::NamedArg { value, .. } => expr_uses_chrono(value),
     }
+}
+
+// ---------------------------------------------------------------------------
+// T124c — tracing / tracing-subscriber emit-on-demand detection (Log module).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `Log.<level>(...)` call
+/// (T124c). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to:
+/// 1. record `"tracing"` + `"tracing-subscriber"` in the extern-crate set
+///    so the pipeline knows the generated Cargo project depends on both
+///    crates;
+/// 2. emit a `tracing_subscriber::fmt()...try_init()` statement at the top
+///    of `main` so the program's log output is formatted (pretty in dev,
+///    JSON in release) and level-filtered via the `BUFF_LOG` env var.
+///
+/// Detection recognises the `Log` namespace as the receiver of a method
+/// call (`Log.info(...)`, `Log.error(...)`, ...). The method name is NOT
+/// matched here — `Log` is a reserved prelude namespace, so any
+/// `Log.<anything>()` triggers tracing registration. Codegen will surface
+/// a clear error if `<anything>` is not one of debug/info/warn/error.
+///
+/// Mirrors the chrono detection pattern (T124b); the recursive walker
+/// covers every Stmt / Expr variant that could host a `Log` call.
+fn program_uses_tracing(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_tracing(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_tracing`]: scan a block's statements.
+fn block_uses_tracing(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_tracing)
+}
+
+/// Check a single statement (and its nested expressions) for `Log.*(...)` usage.
+fn stmt_uses_tracing(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_tracing(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_tracing(target) || expr_uses_tracing(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_tracing(iter) || block_uses_tracing(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_tracing(cond) || block_uses_tracing(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_tracing(value) || block_uses_tracing(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_tracing(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_tracing(e),
+            }) || block_uses_tracing(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_tracing(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `Log.<method>(...)` call.
+///
+/// Detection is on the receiver NAME (`Log`) only — the method name is
+/// validated at codegen time. This means a hypothetical user-defined
+/// variable named `Log` whose method is called would trigger a false
+/// positive (registering tracing unnecessarily); but since `Log` is a
+/// reserved prelude namespace, the user can't legitimately bind to that
+/// name anyway (shadowing it is the documented head-gun pattern from
+/// the T124b registry).
+fn expr_uses_tracing(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall { receiver, method, .. } => {
+            if let Expr::Ident(id, _) = receiver.as_ref() {
+                if id.name == "Log" {
+                    return true;
+                }
+            }
+            // Conservatively flag any call whose method name matches a Log
+            // level — same conservative strategy T124b uses for chrono
+            // instance-method detection. The codegen arm will then either
+            // emit a Log lowering or surface a clear error.
+            if matches!(
+                method.name.as_str(),
+                "debug" | "info" | "warn" | "error"
+            ) {
+                // Only flag if the receiver could plausibly be Log (bare
+                // Ident). We already covered `Log` above; other receivers
+                // (values, calls) might be user methods that happen to
+                // share the name — those should NOT trigger tracing
+                // registration. So this branch is a no-op; we leave the
+                // method-name check in place as documentation of the
+                // design decision.
+            }
+            expr_uses_tracing(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_tracing(lhs) || expr_uses_tracing(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_tracing(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_tracing(callee) || args.iter().any(expr_uses_tracing)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_tracing(cond)
+                || block_uses_tracing(then_block)
+                || else_block.as_ref().is_some_and(block_uses_tracing)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_tracing(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_tracing),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_tracing(base) || indices.iter().any(expr_uses_tracing)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_tracing(k) || expr_uses_tracing(v)),
+        Expr::Lambda { body, .. } => block_uses_tracing(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_tracing(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_tracing(scrutinee) || arms.iter().any(|arm| block_uses_tracing(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_tracing(inner),
+        Expr::Try { expr, .. } => expr_uses_tracing(expr),
+        Expr::Spawn { task, .. } => expr_uses_tracing(task),
+        Expr::Range { start, end, .. } => expr_uses_tracing(start) || expr_uses_tracing(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_tracing(value)
+                || block_uses_tracing(then_block)
+                || else_block.as_ref().is_some_and(block_uses_tracing)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_tracing),
+        Expr::NamedArg { value, .. } => expr_uses_tracing(value),
+    }
+}
+
+/// T124c: build the `tracing_subscriber` init statement emitted at the top
+/// of `main` when the program uses the `Log` module.
+///
+/// Emits (conceptually):
+///
+/// ```rust,ignore
+/// {
+///     let __buff_log_filter = tracing_subscriber::EnvFilter::try_from_env("BUFF_LOG")
+///         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+///     let _ = if cfg!(debug_assertions) {
+///         tracing_subscriber::fmt()
+///             .with_env_filter(__buff_log_filter)
+///             .try_init()
+///     } else {
+///         tracing_subscriber::fmt()
+///             .with_env_filter(__buff_log_filter)
+///             .json()
+///             .try_init()
+///     };
+/// }
+/// ```
+///
+/// # Design
+///
+/// - **`BUFF_LOG` env var** drives the level filter (RUST_LOG-style
+///   directives: `BUFF_LOG=debug`, `BUFF_LOG=warn,buff::net=trace`).
+///   Falls back to `"info"` when unset or unparseable via `unwrap_or_else`
+///   (NO panic — matches Buff's "no panicking generated code" stance).
+/// - **dev vs release**: `cfg!(debug_assertions)` is a RUNTIME check in
+///   Rust (`cfg!` macro form, not `#[cfg]` attribute) so the same compiled
+///   binary can be reused. Dev → pretty to stderr (the default
+///   `tracing_subscriber::fmt()` formatter); release → JSON to stdout
+///   (`.json()` layer).
+/// - **`try_init()` not `init()`**: `try_init()` returns `Result` instead
+///   of panicking on duplicate-global-subscriber. We discard the result
+///   with `let _ = ...` — the SECOND init in a test/binary that already
+///   has a subscriber is silently swallowed (Buff's "no panic" rule).
+/// - **Single filter value**: built ONCE outside the `if`/`else`, then
+///   MOVED into whichever branch runs. Rust's branch-evaluation semantics
+///   permit this (only one branch executes at runtime, so the single
+///   move is sound).
+///
+/// # Why a block statement (not bare)?
+///
+/// Wrapping in a `{ ... }` block scopes the `__buff_log_filter` binding
+/// so it doesn't leak into the user's `main` body. The block evaluates
+/// to `()` (the `let _ = ...` discards the `Result`), so it can stand
+/// as a regular statement at the top of `main`'s body.
+///
+/// Built via `quote!` + `syn::parse2` (the standard pattern in this
+/// module — the single string producer remains `prettyplease::unparse`).
+/// On parse failure (unreachable — the template is compile-time-fixed)
+/// we return `None` so the caller silently skips the init (defensive —
+/// never panics in codegen).
+fn tracing_subscriber_init_stmt() -> Option<SynStmt> {
+    let tokens: proc_macro2::TokenStream = quote::quote! {
+        {
+            let __buff_log_filter = tracing_subscriber::EnvFilter::try_from_env("BUFF_LOG")
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+            let _ = if cfg!(debug_assertions) {
+                tracing_subscriber::fmt()
+                    .with_env_filter(__buff_log_filter)
+                    .try_init()
+            } else {
+                tracing_subscriber::fmt()
+                    .with_env_filter(__buff_log_filter)
+                    .json()
+                    .try_init()
+            };
+        }
+    };
+    syn::parse2::<SynStmt>(tokens).ok()
 }
 
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait

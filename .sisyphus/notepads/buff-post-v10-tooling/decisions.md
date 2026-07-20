@@ -90,3 +90,55 @@ Spike crate lives under %TEMP%\opencode\dioxus-spike\ (throwaway, outside buff r
 
 **Implication for plan:** v1.8 T130 proceeds as planned. UI foundation risk front-loaded and retired 5 releases early.
 
+## [T124c] 2026-07-20 01:21:50 -03:00
+
+- **Decision: PreludeType::Log added as a namespace-only variant
+  (NOT a new Type::Log variant).** The Buff Type enum gains NO new
+  variant — Log is never a runtime value, only a namespace for
+  assoc fns (Log.debug/info/warn/error). uff_type() returns
+  Type::Void for Log. The existing is_prelude_datetime() Type
+  predicate is unchanged (Void returns false correctly). This is the
+  precedent for future namespace modules.
+
+- **Decision: source-order field emission for tracing macros.**
+  Log.info("msg", z: 1, a: 2) → 	racing::info!(z = 1, a = 2, "msg").
+  NOT alphabetical sort. Rationale: (a) matches what the user wrote,
+  (b) tracing itself preserves insertion order in event records,
+  (c) simpler implementation (no sort pass).
+
+- **Decision: subscriber init via 	ry_init() (panic-free) over
+  init() (panics on duplicate).** Buff's "no panicking generated
+  code" stance is the deciding factor. The let _ = ... discard
+  swallows the Result.
+
+- **Decision: dev/release split via cfg!(debug_assertions) RUNTIME
+  check (not #[cfg(...)] compile-time).** One binary works in both
+  modes. The runtime check evaluates to a constant 	rue/alse
+  that the optimiser folds away, so there's no perf cost.
+
+- **Decision: subscriber init ONLY in main, not in helpers.** The
+  global subscriber is per-binary, not per-function. Emitting it in
+  helpers would either (a) double-install (panic) or (b) be silently
+  swallowed by 	ry_init(). Restricting to main is the canonical
+  pattern. Library-style Buff programs that use Log but don't define
+  main get no auto-init — they'll have silent events (no subscriber).
+  This is the same trade-off T31 made for #[tokio::main] (only
+  emitted on main).
+
+- **Decision: tracing + tracing-subscriber recorded in extern_crates
+  BTreeSet, NOT linked by single-file rustc path.** Same codegen-only
+  linking boundary as chrono (T124b) and tokio (T31). Acceptance
+  criterion is snapshot-verified codegen + registry wired + workspace
+  green. Cargo-project wiring is deferred (the future Cargo-project
+  pipeline will write <name> = "<version>" lines into generated
+  Cargo.toml).
+
+- **Decision: Log method calls bypass the T105 named-arg resolution
+  in lower_expr's MethodCall arm.** Standard resolution drops arg
+  names (correct for user methods where param order is positional).
+  Log NEEDS the names (each k: v becomes a tracing field k = v).
+  Intercepts Log BEFORE resolution, passes original args (with
+  NamedArg nodes) to lower_prelude_type_assoc_fn. Other prelude
+  types (DateTime, Duration, ...) have no named-arg usage in practice
+  so they continue through the standard path.
+

@@ -26,6 +26,17 @@ unicode-segmentation = "1.12"
 # (notably zoned formatting). See `crates/buff-lang-types/src/prelude_types.rs`
 # for the prelude-type registry that consumes chrono at codegen time.
 chrono = "0.4"
+# T124c: Log module (Log.debug/info/warn/error) wraps the `tracing` crate
+# for structured logging, with `tracing-subscriber` providing the fmt layer
+# (pretty to stderr in dev, JSON to stdout in release) + `EnvFilter` for
+# `BUFF_LOG=debug` style runtime level control. Both crates are recorded
+# in the codegen `extern_crates` BTreeSet when a Buff program uses `Log`,
+# mirroring the chrono/tokio codegen-only linking boundary (single-file
+# `buff run` rustc path does NOT link them; cargo-project wiring is
+# deferred). Feature flags: `env-filter` enables `EnvFilter`; `json`
+# enables the JSON formatter layer.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 thiserror = "1.0"
