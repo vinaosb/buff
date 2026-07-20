@@ -1,0 +1,50 @@
+[package]
+name = "buff-jupyter"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "buff_jupyter"
+path = "src/lib.rs"
+
+[dependencies]
+# T129a: Jupyter kernel protocol scaffold. Pure-Rust deps only —
+# NO native C, NO OpenSSL, NO libzmq. The transport layer uses the
+# async pure-Rust `zeromq` crate (workspace pin); the signing layer
+# reuses the existing `hmac` + `sha2` + `hex` workspace pins (T124k
+# Hash/HMAC prelude modules) so version churn stays centralized.
+#
+# - `tokio` (full): the async runtime backing the kernel message loop +
+#   the zeromq sockets' async recv/send.
+# - `serde` + `serde_json`: connection-file / wire-message / content
+#   structs all (de)serialize via the canonical JSON wire shapes.
+# - `thiserror`: crate-local error enum (`JupyterError`) propagated up
+#   through `anyhow` at the CLI boundary (mirrors buff-registry /
+#   buff-repl / buff-lsp precedent).
+# - `uuid`: `Uuid::new_v4` generates the kernel `session` id on first
+#   boot (Jupyter protocol requires a unique session id per kernel
+#   instance so clients can correlate parent / child messages).
+# - `zeromq`: pure-Rust ZMQ sockets (transport layer only).
+# - `hmac` + `sha2` + `hex`: HMAC-SHA256 signing / verification of the
+#   4 message frames (header / parent_header / metadata / content) per
+#   the Jupyter messaging protocol.
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zeromq.workspace = true
+bytes.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+# T129a: integration tests in `tests/` exercise the pure protocol
+# layer (HMAC, wire serde, connection-file parse, kernelspec
+# generation). No live Jupyter / ZMQ transport needed — the socket
+# layer is exercised only via compilation (the kernel loop typechecks
+# against the trait but is never bound in tests).
+tokio.workspace = true
+serde_json.workspace = true

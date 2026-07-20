@@ -342,4 +342,48 @@ pub enum Command {
     /// unknown, semver parse failure) are surfaced as warnings
     /// rather than aborting the whole report.
     Outdated,
+
+    /// Jupyter kernel management (T129a).
+    ///
+    /// Subcommands:
+    ///
+    /// - `buff jupyter install` — write the kernelspec `kernel.json`
+    ///   into the Jupyter data dir (prefers shelling out to
+    ///   `jupyter kernelspec install`; falls back to a direct write
+    ///   when `jupyter` is not on `PATH`).
+    /// - `buff jupyter start --connection-file <PATH>` — boot the
+    ///   kernel message loop using the connection JSON that Jupyter
+    ///   wrote at launch time. Used internally by Jupyter; users do
+    ///   not invoke this directly.
+    Jupyter {
+        /// The subcommand to run.
+        #[command(subcommand)]
+        cmd: JupyterCmd,
+    },
+}
+
+/// Subcommands of `buff jupyter`.
+#[derive(Subcommand, Debug)]
+pub enum JupyterCmd {
+    /// Write the kernelspec `kernel.json` into the Jupyter data dir
+    /// so `jupyter console --kernel buff` (and JupyterLab / Notebook)
+    /// can discover + launch the Buff kernel.
+    ///
+    /// Prefers shelling out to `jupyter kernelspec install --replace
+    /// --name=buff <tempdir>` when `jupyter` is on `PATH`. Falls back
+    /// to writing directly into `<JUPYTER_DATA_DIR>/kernels/buff/`
+    /// (resolved from `$JUPYTER_DATA_DIR`, `$APPDATA` on Windows,
+    /// `$HOME/Library/Jupyter` on macOS, `~/.local/share/jupyter` on
+    /// Linux).
+    Install,
+
+    /// Boot the kernel message loop. Invoked by Jupyter via the
+    /// `argv` template in `kernel.json` (not directly by users).
+    Start {
+        /// Path to the connection JSON Jupyter wrote for this kernel
+        /// session (passed in via the `{connection_file}` template
+        /// substitution).
+        #[arg(long, value_name = "PATH")]
+        connection_file: PathBuf,
+    },
 }

@@ -411,3 +411,30 @@ buff-registry = { path = "crates/buff-registry" }
 #   compression crate is NOT pulled.
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 tar = "0.4"
+# T129a: Jupyter kernel protocol scaffold (`crates/buff-jupyter`). The
+# pure-Rust `zeromq` crate (async, tokio-based, NO C libzmq) implements
+# the ZMQ wire transport for the 5 Jupyter sockets (shell / iopub /
+# stdin / control / heartbeat). We deliberately use `zeromq` (NOT `zmq`)
+# because `zmq` links C libzmq — which would FAIL on this Windows host
+# that has no C toolchain for such shims (same class of failure that
+# forced hand-rolling the lexer/parser per AGENTS.md). Verified
+# 2026-07-20 to compile cleanly on this build host (zeromq 0.4.1,
+# pure-Rust, no cc-rs / no native deps). Pin rationale: 0.4.x is the
+# long-standing surface (`Socket` / `SocketRecv` / `SocketSend` traits +
+# `RouterSocket` / `PubSocket` / `RepSocket` / `ZmqMessage`); 0.5+ /
+# 0.6.x ship the identical surface but bump MSRV unnecessarily for our
+# pinned 1.95.0 toolchain — mirrors the rand-0.8 / chrono-0.4
+# conservative-pin philosophy already in use across the workspace.
+zeromq = "0.4"
+# T129a: `bytes` is the refcounted byte-buffer crate zeromq uses for
+# its message frames (`ZmqMessage::push_back(Bytes)`). It is already
+# transitively pulled in via zeromq / tokio-util; pinning it at the
+# workspace level lets `crates/buff-jupyter` construct multi-frame
+# ZmqMessages without re-implementing a conversion shim. Pure-Rust,
+# no native deps.
+bytes = "1"
+# T129a: `buff-jupyter` workspace path dep — mirrors the buff-eval /
+# buff-repl / buff-lsp / buff-registry pattern so any future consumer
+# (T129b execution engine, T129c rich display, IDE integrations)
+# resolves to the same in-tree version during the v1.x tooling wave.
+buff-jupyter = { path = "crates/buff-jupyter" }

@@ -11,6 +11,7 @@ pub mod deps;
 pub mod fmt;
 pub mod init;
 pub mod install;
+pub mod jupyter;
 pub mod login;
 pub mod new;
 pub mod outdated;

@@ -60,6 +60,13 @@ buff-lang-error.workspace = true
 # buff_repl::Repl::run() — all real logic (rustyline + buff-eval) lives
 # in the dedicated crate.
 buff-repl.workspace = true
+# T129a: Jupyter kernel delegation. `buff jupyter install` /
+# `buff jupyter start` are thin shims that delegate to
+# buff_jupyter::install() / buff_jupyter::run_kernel() — all real
+# protocol / HMAC / kernelspec logic lives in the dedicated crate.
+# Pure-Rust deps (no libzmq, no OpenSSL) — verified to build on this
+# Windows host.
+buff-jupyter.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

@@ -1,0 +1,298 @@
+T129a: Jupyter kernel protocol scaffold + kernelspec install
+================================================================
+
+Task spec: `.sisyphus/plans/buff-post-v10-tooling.md` lines 1868-1900
+HEAD: ab49b58
+Date: 2026-07-20
+
+SUMMARY
+-------
+T129a ships the Jupyter wire-protocol SCAFFOLD (handshake only, NOT
+real code execution) plus the `buff jupyter install` / `buff jupyter
+start --connection-file <path>` CLI subcommands. Real Buff code
+evaluation inside `execute_request` is T129b. Rich display, MIME
+bundles, and `?`/`??` introspection are T129c.
+
+CRATE
+-----
+`crates/buff-jupyter/` — pure-Rust lib crate (no C deps), edition
+2021, version 1.0.0, license `MIT OR Apache-2.0`. Added to root
+`Cargo.toml` workspace members (glob `crates/*`) + workspace dep
+`buff-jupyter = { path = "crates/buff-jupyter" }`.
+
+LAYERING (lib.rs ASCII art):
+                ┌─────────────────────────────────────────┐
+   ZMQ frames   │ transport::ZmqTransport trait            │
+         ───▶   │  ├─ ZmqSocketSet  (production, this crate)│
+                │  └─ (mock for unit tests)                │
+                └─────────────┬───────────────────────────┘
+                              │ Multipart (Vec<Vec<u8>>)
+                              ▼
+                ┌─────────────────────────────────────────┐
+                │ kernel::Kernel<T>                       │
+                │  parse_message → verify → dispatch      │
+                │  build_*_reply → sign → send            │
+                └─────────────┬───────────────────────────┘
+                              │ WireMessage
+                              ▼
+                ┌─────────────────────────────────────────┐
+                │ wire::WireMessage / MessageHeader       │
+                │ hmac::sign / hmac::verify              │
+                │ messages::{KernelInfoReply, ...}        │
+                │ connection::ConnectionFile              │
+                │ kernelspec::KernelSpec                  │
+                └─────────────────────────────────────────┘
+
+MODULES (`crates/buff-jupyter/src/`)
+-----------------------------------
+- error.rs        — JupyterError enum (thiserror) + From<io::Error>/From<serde_json::Error>
+- connection.rs   — ConnectionFile parse + validate + endpoint builders
+- wire.rs         — MessageHeader + WireMessage + PROTOCOL_VERSION = "5.3"
+- hmac.rs         — sign/verify using hmac::Hmac<sha2::Sha256>, hex-encoded
+- messages.rs     — KernelInfoReply::buff() (proto 5.3, language_info name=buff,
+                    file_extension=.buff), ExecuteReply::stub_ok(),
+                    ExecuteResult::stub(), StreamOutput::stub_stdout(),
+                    ShutdownReply::ok(restart)
+- kernelspec.rs   — KernelSpec::buff(argv) + write_kernel_json + install
+                    (prefers `jupyter kernelspec install`; falls back to
+                    direct write into <data_dir>/kernels/buff/)
+- transport.rs    — ZmqTransport trait + ZmqSocketSet impl using pure-Rust
+                    zeromq 0.4 (RouterSocket × shell/control + PubSocket +
+                    RepSocket for hb; stdin NOT bound in T129a)
+- kernel.rs       — Kernel<T: ZmqTransport> dispatch loop; handlers for
+                    kernel_info_request / execute_request (stub) /
+                    shutdown_request / interrupt_request (ack-only)
+- lib.rs          — module wiring + public API surface +
+                    run_kernel(path) + install()
+
+CLI WIRING (`crates/buff-lang-cli/src/`)
+----------------------------------------
+- cli.rs             — Command::Jupyter { cmd: JupyterCmd } variant +
+                       JupyterCmd::{Install, Start { connection_file }}
+- commands/jupyter.rs — thin shim around buff_jupyter::install() /
+                       buff_jupyter::run_kernel(); constructs a
+                       multi-thread tokio runtime for the kernel loop
+- commands/mod.rs    — `pub mod jupyter;`
+- main.rs            — Command::Jupyter arm dispatching to commands::jupyter::run
+- Cargo.toml         — `buff-jupyter.workspace = true`
+
+DEPENDENCIES (root [workspace.dependencies])
+--------------------------------------------
+NEW:
+- zeromq = "0.4"     (resolved to 0.4.1) — pure-Rust ZMQ transport
+                      for the 5 Jupyter sockets. Verified to build
+                      cleanly on this Windows host with no C deps.
+                      Pin rationale: 0.4.x is the long-standing API
+                      surface (Socket / SocketRecv / SocketSend traits
+                      + RouterSocket / PubSocket / RepSocket /
+                      ZmqMessage); 0.5+/0.6 ship identical surface
+                      but bump MSRV unnecessarily for our pinned
+                      1.95.0 toolchain — mirrors the rand-0.8 /
+                      chrono-0.4 conservative-pin philosophy.
+- bytes = "1"        (resolved to 1.12.1) — refcounted byte-buffer
+                      crate zeromq uses for its frames. Already
+                      transitively pulled via zeromq/tokio-util; pinned
+                      explicitly so buff-jupyter can construct
+                      multi-frame ZmqMessages without a conversion shim.
+- buff-jupyter = { path = "crates/buff-jupyter" } — workspace path dep.
+
+REUSED (already pinned via T124h/T124k/etc.):
+- tokio (full)   — async runtime for the kernel loop + zeromq sockets
+- serde + serde_json — wire-message / connection-file / content DTOs
+- thiserror     — crate-local error enum
+- uuid          — Uuid::new_v4() for kernel session_id + msg_id
+- hmac + sha2   — HMAC-SHA256 signing/verification (T124k)
+- hex           — hex encode of HMAC digests (T124h)
+
+NO C DEPS. NO OPENSSL. NO LIBZMQ.
+
+SAMPLE kernel.json (generated by `buff jupyter install` on this host)
+---------------------------------------------------------------------
+Path: C:\Users\vsbb1\AppData\Roaming\jupyter\kernels\buff\kernel.json
+(argv[0] is the absolute path to the dev-built buff.exe — production
+installs would point at the cargo-installed binary)
+
+{
+  "argv": [
+    "C:\\Users\\vsbb1\\source\\repos\\buff\\target\\debug\\buff.exe",
+    "jupyter",
+    "start",
+    "--connection-file",
+    "{connection_file}"
+  ],
+  "display_name": "Buff",
+  "language": "buff",
+  "interrupt_mode": "signal",
+  "metadata": {}
+}
+
+Required fields verified by tests/kernelspec_tests.rs:
+- argv[0]    = absolute buff exe path
+- argv[1..4] = ["jupyter", "start", "--connection-file"]
+- argv[4]    = "{connection_file}" (Jupyter substitutes this at launch)
+- display_name = "Buff"
+- language     = "buff"
+- interrupt_mode = "signal" (T129a does not honor interrupt_request messages)
+- metadata     = {} (empty bag)
+
+KERNEL_INFO_REPLY CONTENT (canonical Buff shape, verified by tests/kernel_info_tests.rs)
+----------------------------------------------------------------------------------------
+{
+  "protocol_version": "5.3",
+  "implementation": "buff",
+  "implementation_version": "1.0.0",
+  "language_info": {
+    "name": "buff",
+    "version": "1.0.0",
+    "mimetype": "text/x-buff",
+    "file_extension": ".buff",
+    "pygments_lexer": "buff",
+    "codemirror_mode": "buff"
+  },
+  "banner": "Buff kernel — T129a scaffold (handshake only; execution deferred to T129b)",
+  "help_links": []
+}
+
+VERIFICATION OUTPUTS (4 green commands, scope -p buff-jupyter -p buff-lang-cli)
+------------------------------------------------------------------------------
+ENV prefix for every cargo command:
+  $env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+  $env:INCLUDE="C:\BuildTools\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt"
+  $env:PATH = "C:\BuildTools\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64;" + $env:PATH
+
+(1) cargo build -p buff-jupyter -p buff-lang-cli
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.06s
+    build EXIT=0
+
+(2) cargo test -p buff-jupyter -p buff-lang-cli
+    [all test binaries reported `test result: ok. N passed; 0 failed`]
+    buff-jupyter unit + integration tests:
+      - connection unit + tests/connection_tests.rs (11 tests)
+      - wire unit + tests/wire_tests.rs (6 tests)
+      - hmac unit + tests/hmac_tests.rs (13 tests)
+      - messages unit + tests/kernel_info_tests.rs (15 tests)
+      - kernelspec unit + tests/kernelspec_tests.rs (16 tests)
+      - transport unit (3 tests)
+      - kernel unit + tokio::test dispatcher end-to-end (9 tests)
+    buff-lang-cli: all existing + new jupyter shim compiles; cli.rs
+      JupyterCmd parsing covered by clippy.
+    test EXIT=0
+
+(3) cargo clippy -p buff-jupyter -p buff-lang-cli --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.89s
+    clippy EXIT=0
+
+(4) cargo fmt -p buff-jupyter -p buff-lang-cli -- --check
+    (no diff — already formatted)
+    fmt EXIT=0
+
+LIVE `buff jupyter install` run on this build host
+--------------------------------------------------
+PS> cargo run -p buff-lang-cli -- jupyter install
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.90s
+     Running `target\debug\buff.exe jupyter install`
+Installed Buff kernelspec at: C:\Users\vsbb1\AppData\Roaming\jupyter\kernels\buff\kernel.json
+Verify with: jupyter kernelspec list
+install EXIT=0
+
+(jupyter is NOT installed on this build host — the install fell back
+to the direct-write path, which is the documented fallback when
+`jupyter kernelspec install` is unavailable. The kernel.json shape is
+identical to what `jupyter kernelspec install` would have moved into
+place.)
+
+ACCEPTANCE CRITERIA — STATUS
+----------------------------
+Per plan L1882-1885, T129a has 3 acceptance criteria:
+
+  [x] `buff jupyter install` registers kernel
+      ─────────────────────────────────────
+      VERIFIED OFFLINE. `buff jupyter install` was run on this build
+      host and produced a valid kernel.json at
+      C:\Users\vsbb1\AppData\Roaming\jupyter\kernels\buff\kernel.json
+      (the canonical Windows Jupyter data-dir path).
+
+  [ ] `buff jupyter install` appears in `jupyter kernelspec list`
+      ────────────────────────────────────────────────────────────
+      USER ACTION. This build host has NO `jupyter` installed (no
+      `jupyter` / `jupyter-client` / `python` on PATH). Verifying
+      discovery requires the user to install Jupyter on a host that
+      has it, then run:
+        1. `buff jupyter install` (or `cargo run -p buff-lang-cli -- jupyter install`)
+        2. `jupyter kernelspec list`
+        3. Assert output contains "buff"
+
+  [ ] Kernel handshake works (`kernel_info_request` → reply)
+      ───────────────────────────────────────────────────────
+      PARTIALLY VERIFIED. The kernel_info_request → kernel_info_reply
+      path is exercised end-to-end via the in-process mock transport
+      in `crates/buff-jupyter/src/kernel.rs` (test
+      `kernel_handles_kernel_info_request`). The wire-format and
+      HMAC sign/verify logic is exercised by the integration tests
+      under `crates/buff-jupyter/tests/`. LIVE verification against a
+      real jupyter_client connection is a USER ACTION — requires
+      Jupyter installed on the host.
+
+  [ ] `jupyter console --kernel buff` connects without error
+      ──────────────────────────────────────────────────────
+      USER ACTION. Requires Jupyter installed on the host. After
+      running `buff jupyter install`, the user should be able to:
+        1. `jupyter console --kernel buff`
+        2. Type `print("hello")` and see the stub reply:
+           "execution not yet implemented (T129b)"
+        3. Type `exit` to disconnect cleanly.
+
+EXPLICIT OUT-OF-SCOPE (per task spec MUST-NOT-DO list)
+------------------------------------------------------
+- Real Buff code execution — T129b. The execute_request handler in
+  kernel.rs emits an iopub execute_result + stream with placeholder
+  text "execution not yet implemented (T129b)" and an execute_reply
+  with status="ok", execution_count from the request, no payloads.
+- Rich/image display, MIME bundles, `?`/`??` introspection — T129c.
+- The `zmq` crate (C libzmq link). NOT used. The pure-Rust `zeromq`
+  crate is used instead.
+- Native C / OpenSSL deps. NONE added.
+- [features] / [lints] / [profile.*] sections in any Cargo.toml. NONE added.
+- Modifications to compiler crates (buff-lang-ast/lexer/parser/types/
+  codegen-*/runtime), buff-eval, buff-repl, or buff-registry source.
+  NONE made. Only root Cargo.toml + buff-lang-cli were touched.
+- git operations, boulder.json, plan checkboxes, notepads. NONE touched.
+
+FILES CREATED
+-------------
+crates/buff-jupyter/Cargo.toml
+crates/buff-jupyter/src/lib.rs
+crates/buff-jupyter/src/error.rs
+crates/buff-jupyter/src/connection.rs
+crates/buff-jupyter/src/wire.rs
+crates/buff-jupyter/src/hmac.rs
+crates/buff-jupyter/src/messages.rs
+crates/buff-jupyter/src/kernelspec.rs
+crates/buff-jupyter/src/transport.rs
+crates/buff-jupyter/src/kernel.rs
+crates/buff-jupyter/tests/hmac_tests.rs
+crates/buff-jupyter/tests/connection_tests.rs
+crates/buff-jupyter/tests/wire_tests.rs
+crates/buff-jupyter/tests/kernelspec_tests.rs
+crates/buff-jupyter/tests/kernel_info_tests.rs
+.sisyphus/evidence/task-129a-kernel-install.txt  (this file)
+
+FILES MODIFIED
+--------------
+Cargo.toml                                       — added zeromq, bytes,
+                                                   buff-jupyter workspace
+                                                   deps (with rationale
+                                                   comments)
+crates/buff-lang-cli/Cargo.toml                  — buff-jupyter.workspace=true
+crates/buff-lang-cli/src/cli.rs                  — Jupyter variant +
+                                                   JupyterCmd enum
+crates/buff-lang-cli/src/commands/mod.rs         — pub mod jupyter;
+crates/buff-lang-cli/src/commands/jupyter.rs     — dispatch shim
+crates/buff-lang-cli/src/main.rs                 — Command::Jupyter arm
+
+ZEROMQ VERSION USED
+-------------------
+zeromq = "0.4" (workspace pin)
+Resolved to: zeromq v0.4.1 (per cargo tree -p buff-jupyter -i zeromq)
+Pure-Rust. No C libzmq. Verified to compile cleanly on Windows MSVC
+host with no native deps.
