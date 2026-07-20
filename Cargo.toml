@@ -11,7 +11,7 @@ insta = "1.40"
 proptest = "1.5"
 wgpu = "26.0"
 rayon = "1.10"
-tokio = { version = "1.40", features = ["full"] }
+tokio = { version = "1.40", features = ["full", "test-util"] }
 bytemuck = { version = "1.18", features = ["derive"] }
 pollster = "0.4"
 rust_decimal = "1.36"
@@ -364,7 +364,7 @@ dirs = "5"
 # base64-encoded string inside a JSON envelope — pure Rust, no native
 # deps, matches the "no C library, no Docker" hard rule from the T126
 # task spec.
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
 semver = "1"
 # T126: `buff-registry` workspace path dep — mirrors the buff-eval /
@@ -460,3 +460,17 @@ dioxus = "0.7"
 # tutorial runner) resolves to the same in-tree version during the v1.x
 # tooling wave.
 buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }
+# T131: `buff ui dev` cross-platform file watcher. We pin `notify` to
+# major 6 (released 2023 — the long-standing surface). notify 6 ships
+# the stable `RecommendedWatcher` + `Watcher` trait + `EventKind` enum
+# that the dev server consumes; 7.x (2024) and 8.x (2025) ship nearly
+# identical APIs but bump MSRV unnecessarily for our pinned 1.95.0
+# toolchain — mirrors the rand-0.8 / chrono-0.4 / rustyline-15
+# conservative-pin philosophy already in use across the workspace.
+# Pure-Rust on Windows (ReadDirectoryChangesW) + Linux (inotify) + macOS
+# (FSEvents / kqueue), no native C dep, no cc-rs — matches the "no C
+# library, no Docker" hard rule. The 200ms debounce is implemented
+# in-tree via a tokio::time::sleep buffer (see
+# `crates/buff-lang-cli/src/ui_dev/watcher.rs`), so we do NOT pull
+# `notify-debouncer-mini` — keeping the dep surface minimal.
+notify = "6"

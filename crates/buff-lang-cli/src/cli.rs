@@ -360,6 +360,23 @@ pub enum Command {
         #[command(subcommand)]
         cmd: JupyterCmd,
     },
+
+    /// UI dev-server management (T131).
+    ///
+    /// Subcommands:
+    ///
+    /// - `buff ui dev [PATH] [--port <N>]` — boot the dev server that
+    ///   watches `.buff` files in the project, serves static assets +
+    ///   the generated Wasm bundle over HTTP on `localhost:8080`
+    ///   (overridable via `--port`), and live-reloads connected
+    ///   browsers via WebSocket on `.buff` save. LIVE RELOAD (full
+    ///   page refresh) is the v1.8 deliverable; true state-preserving
+    ///   HMR is explicitly v1.9+ work.
+    Ui {
+        /// The subcommand to run.
+        #[command(subcommand)]
+        cmd: UiCmd,
+    },
 }
 
 /// Subcommands of `buff jupyter`.
@@ -385,5 +402,51 @@ pub enum JupyterCmd {
         /// substitution).
         #[arg(long, value_name = "PATH")]
         connection_file: PathBuf,
+    },
+}
+
+/// Subcommands of `buff ui`.
+#[derive(Subcommand, Debug)]
+pub enum UiCmd {
+    /// `buff ui dev [PATH] [--port <N>]` — boot the dev server (T131).
+    ///
+    /// Watches `.buff` files in `<PATH>` (default: current directory)
+    /// for changes, debounces them by 200 ms, and on each change:
+    ///
+    /// 1. Re-runs the Buff front-end (`pipeline::compile_to_rust`) on
+    ///    every changed `.buff` file. If lex/parse/codegen fails, the
+    ///    error is broadcast to connected browsers as a
+    ///    `{type:"error", message:"..."}` WebSocket frame; the browser
+    ///    shows a red banner with the message and a Reconnect button.
+    /// 2. Attempts `cargo build --target wasm32-unknown-unknown` on
+    ///    the project (when a `Cargo.toml` is present) + re-runs
+    ///    `wasm-bindgen --target web` to refresh the served Wasm
+    ///    bundle. Failures are surfaced as the same error-overlay
+    ///    frame; success broadcasts `{type:"reload"}`.
+    /// 3. On `{type:"reload"}` the browser does a full
+    ///    `location.reload()` (LIVE RELOAD). State-preserving HMR is
+    ///    explicitly v1.9+ work.
+    ///
+    /// The HTTP server serves `<PATH>/static/` as static assets, falls
+    /// back to `<PATH>/target/wasm32-unknown-unknown/<profile>/` for
+    /// `.wasm` bundles, and injects a small (<1 KB) client-side
+    /// script into served HTML that opens the WebSocket and handles
+    /// reload / error / disconnect events.
+    ///
+    /// Blocks until Ctrl-C / SIGINT.
+    Dev {
+        /// Project root to serve + watch. Defaults to the current
+        /// directory. Must contain (or be the parent of) the
+        /// `.buff` sources to watch. A `<PATH>/static/` directory
+        /// and/or a `<PATH>/Cargo.toml` are picked up automatically
+        /// when present.
+        #[arg(value_name = "PATH", default_value = ".")]
+        path: PathBuf,
+
+        /// Port to bind the dev server on. Default: 8080. The server
+        /// binds `127.0.0.1:<port>` (loopback only — never exposed to
+        /// the network; matches Vite / cargo-leptos defaults).
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
     },
 }

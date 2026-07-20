@@ -41,3 +41,4 @@ pub mod naming_lint;
 pub mod pipeline;
 pub mod scaffold;
 pub mod test_runner;
+pub mod ui_dev;

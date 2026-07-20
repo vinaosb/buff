@@ -67,6 +67,31 @@ buff-repl.workspace = true
 # Pure-Rust deps (no libzmq, no OpenSSL) — verified to build on this
 # Windows host.
 buff-jupyter.workspace = true
+# T131: `buff ui dev` dev-server dependencies. We pull `axum` 0.8 (the
+# workspace-pinned HTTP framework — re-uses the same version
+# `buff-registry` and the registry CLI integration tests already
+# consume) for HTTP + WebSocket serving. axum 0.8 ships the
+# `axum::extract::ws::WebSocketUpgrade` extractor + `axum::serve`
+# API by default (the `ws` feature is on in the default feature set),
+# so we get WebSocket support for free without a separate
+# `tokio-tungstenite` direct dependency.
+#
+# `notify` is the file watcher. We pin to major 6 (workspace pin) for
+# the reasons documented at the workspace dep declaration. Pure-Rust,
+# no native C dep.
+#
+# `tower` is needed for the `ServiceExt` trait used in the dev-server
+# unit tests (`tower::ServiceExt::oneshot` to drive the `Router`
+# directly without TCP bind, mirroring the registry test pattern).
+# Production code does NOT use tower — only test helpers.
+axum.workspace = true
+notify.workspace = true
+# T131: `futures-util` provides the `SinkExt` + `StreamExt` traits the
+# `/__buff_reload__` WebSocket handler uses to split the connection
+# into sender + receiver halves and pump messages. Already pinned at
+# the workspace level (T124m WebSocket prelude module); reused here
+# without re-pinning.
+futures-util.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
@@ -80,3 +105,7 @@ syn.workspace = true
 # no external services" mandate.
 buff-registry.workspace = true
 axum.workspace = true
+# T131: `buff ui dev` unit tests drive the dev-server `Router<()>`
+# in-process via `tower::ServiceExt::oneshot` — the same pattern the
+# `buff-registry` integration tests use. Pure-Rust, no native C deps.
+tower.workspace = true

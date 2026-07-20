@@ -20,4 +20,5 @@ pub mod registry;
 pub mod repl;
 pub mod run;
 pub mod test;
+pub mod ui_dev;
 pub mod update;

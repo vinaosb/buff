@@ -77,5 +77,6 @@ fn main() -> Result<()> {
         Command::Deps { why } => buff_lang_cli::commands::deps::run(why.as_deref()),
         Command::Outdated => buff_lang_cli::commands::outdated::run(),
         Command::Jupyter { cmd } => buff_lang_cli::commands::jupyter::run(cmd),
+        Command::Ui { cmd } => buff_lang_cli::commands::ui_dev::run(cmd),
     }
 }

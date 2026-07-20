@@ -1,0 +1,61 @@
+T131 — buff ui dev hot-reload server
+=====================================
+
+Task: Add `buff ui dev [PATH] [--port <N>]` subcommand — a Vite/trunk/cargo-leptos-style dev server that watches .buff files, rebuilds Wasm on change (debounced 200ms), and live-reloads connected browsers via WebSocket.
+
+Architecture (chosen by the implementing agent)
+-----------------------------------------------
+- CLI wiring: `cli.rs` gains `Command::Ui { cmd: UiCmd }` variant (L375) + `UiCmd::Dev { path, port }` subcommand (L437, default path = cwd, default port = 8080). Dispatch in `main.rs`: `Command::Ui { cmd } => buff_lang_cli::commands::ui_dev::run(cmd)`. `commands/mod.rs` declares `pub mod ui_dev;`.
+- Server library lives under `crates/buff-lang-cli/src/ui_dev/` (7 files, ~80 KB):
+  - `mod.rs`        — public entry `serve()`, `run()`, rebuild loop orchestration
+  - `broadcaster.rs` — `Broadcaster` multi-subscriber WebSocket fan-out (tokio::sync::broadcast), JSON message envelope `{type:"reload"}` / `{type:"error",message:"..."}`
+  - `builder.rs`     — rebuild pipeline: Buff front-end (`pipeline::compile_to_rust`) + `cargo build --target wasm32-unknown-unknown` + `wasm-bindgen --target web`; `find_freshest_wasm` helper
+  - `watcher.rs`     — `notify` 6.x RecommendedWatcher + 200ms tokio debounce buffer
+  - `http.rs`        — axum 0.8 router: static files from `<path>/static/`, wasm fallback from `<path>/target/wasm32-unknown-unknown/<profile>/`, `/__buff_reload__` WebSocket upgrade, HTML injection of client JS
+  - `client_js.rs`   — <1 KB compile-time `&str` snippet: opens WS, listens for reload/error, calls `location.reload()` on reload, shows red overlay on error + "Reconnect" button, shows "Dev server disconnected" on close
+  - `error.rs`       — thiserror Error enum for dev-server failures
+- `commands/ui_dev.rs` — thin CLI adapter (clap UiCmd -> ui_dev::serve()).
+- HTTP framework: axum 0.8 (workspace dep, `ws` feature enabled). WebSocket via `axum::extract::ws::WebSocketUpgrade` — NO separate tokio-tungstenite direct dep needed.
+- File watcher: notify 6.x (workspace dep, major-version pin; pure-Rust on Win/Linux/macOS, no native C dep, matches the "no C library" hard rule). 200ms debounce implemented in-tree via `tokio::time::sleep` buffer — `notify-debouncer-mini` deliberately NOT pulled (minimal dep surface).
+- futures-util (already workspace-pinned from T124m) provides SinkExt/StreamExt for the WS split.
+- tower (workspace, dev-dep) used in unit tests via `ServiceExt::oneshot` to drive the Router in-process (mirrors buff-registry test pattern) — NO TCP bind in tests.
+- tokio gains `test-util` feature (for `tokio::time::pause` in debounce tests).
+
+Gates (MSVC env: C:\BuildTools 14.44.35207; scoped -p buff-lang-cli, NEVER --workspace)
+------------------------------------------------------------------------------------------
+- `cargo fmt -p buff-lang-cli --check`                    -> exit 0
+- `cargo clippy -p buff-lang-cli --all-targets -- -D warnings` -> exit 0 (Finished in 6.25s)
+- `cargo test -p buff-lang-cli --lib`                     -> 208 passed / 0 failed (up from 158 pre-T129a; +50 tests across v1.7+v1.8)
+- ui_dev-specific tests (~30): broadcaster (8: subscriber delivery, JSON round-trips, multiline escape, zero-subscriber drop), builder (6: find_freshest_wasm variants, mock ok/failed outcomes, BuildOutcome Eq), client_js (4: <1KB invariant, WS connect snippet, HTML injection variants), http (4: static 404, path-traversal rejection, error 500, WS upgrade + push), rebuild_loop (3: reload-on-ok, error-on-failed, skip-empty-batch), serve (1: rejects missing path) — ALL PASS
+
+Live Playwright acceptance — USER ACTION
+-----------------------------------------
+Build-host mode = "build code + local tests only" (no live browser stack in CI). The dev server is fully wired and unit-tested in-process; live browser verification (start server, open localhost:8080, save .buff, observe auto-refresh) is a USER ACTION.
+
+Recipe (PowerShell; MSVC env mandatory):
+
+  $msvc = "C:\BuildTools\VC\Tools\MSVC\14.44.35207"
+  $env:LIB = "$msvc\lib\onecore\x64;$msvc\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+  $env:INCLUDE = "$msvc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt"
+  $env:PATH = "$msvc\bin\Hostx64\x64;$env:PATH"
+  $env:CC = "$msvc\bin\Hostx64\x64\cl.exe"; $env:CXX = $env:CC
+
+  cd C:\Users\vsbb1\source\repos\buff
+  cargo build --release -p buff-lang-cli
+  cargo build -p buff-ui-dioxus --example counter --release --target wasm32-unknown-unknown
+  wasm-bindgen --target web --out-dir examples\counter\dist target\wasm32-unknown-unknown\release\examples\counter.wasm
+
+  # In a project dir with a .buff file + static/index.html:
+  mkdir test-ui-app\static
+  # ... copy counter dist into static/, write a main.buff ...
+  cd test-ui-app
+  ..\target\release\buff.exe ui dev . --port 8080
+
+  # Open http://localhost:8080 in a browser. Edit main.buff. Within ~500ms
+  # the browser should auto-refresh (live reload). Introduce a syntax error
+  # -> red overlay with the error message. Screenshot to
+  # .sisyphus/evidence/task-131-hot-reload.png on success.
+
+Scope note
+----------
+LIVE RELOAD (full page refresh via WebSocket ping) is the v1.8 deliverable. True state-preserving HMR (dioxus-cli-style component hot-swap with state retention) is explicitly v1.9+ work per the plan guardrail and was NOT implemented. Documented in cli.rs doc comments + ui_dev::mod docs.
