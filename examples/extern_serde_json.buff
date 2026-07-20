@@ -1,0 +1,32 @@
+// extern_serde_json.buff - T119 minimal extern/bindgen example.
+//
+// Declares a Rust FFI binding to serde_json via the `extern "C" from
+// "serde_json" func ...` syntax, then calls it. The Buff compiler emits
+// a Rust `extern "C" { fn parse_str(...); }` foreign-mod item, records
+// `serde_json` in `[rust-deps]`, and silently wraps the call site in
+// `unsafe { ... }` (Rust requires it; Buff hides it).
+//
+// ⚠ CODEGEN-ONLY EXAMPLE (like async_demo.buff in v0.5):
+// The Buff CLI's single-file `rustc` pipeline cannot LINK against an
+// external crate without a Cargo project manifest. This file PARSES
+// and LOWERS to valid Rust (verified by tests/v05_examples.rs and the
+// codegen-rust test suite), but `buff run` will fail at the linker
+// step until the CLI gains Cargo-project assembly (post-v1.3). To run
+// this end-to-end today, hand-assemble a Cargo project that includes
+// both the generated `.rs` AND a sibling `externs.rs` providing the
+// actual safe wrapper body, e.g.:
+//
+//     // externs.rs
+//     pub extern "C" fn parse_str(input: String) -> String {
+//         serde_json::from_str::<serde_json::Value>(&input)
+//             .map(|v| v.to_string())
+//             .unwrap_or_else(|e| format!("error: {e}"))
+//     }
+//
+// See docs/extern-guide.md for the full pattern.
+
+extern "C" from "serde_json" func parse_str(input: String) -> String
+
+func main():
+    let parsed = parse_str("payload")
+    print(parsed)

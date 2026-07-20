@@ -49,6 +49,34 @@ pub enum Decl {
     /// so the CLI/pipeline can write them into the generated `Cargo.toml`
     /// when full Cargo-project wiring lands.
     ExternCrateDecl(ExternCrateDecl),
+    /// An `extern "ABI" [from "crate"] func name(params) -> Ret` declaration
+    /// (T119 — minimal extern/bindgen).
+    ///
+    /// Functionally equivalent to the legacy `extern func name(...)`
+    /// (which lowers to [`Decl::FuncDecl`] with `is_extern = true`), but
+    /// carries TWO extra pieces of metadata that the legacy form cannot:
+    ///
+    /// - **`abi`** — the ABI string the user wrote (`"C"`, `"system"`).
+    ///   Codegen emits this verbatim in the `extern "ABI" { ... }`
+    ///   foreign-mod. Only `"C"` is supported in v1.3; other ABIs are a
+    ///   parse error (see `parse_extern_func_decl_with_abi`).
+    /// - **`crate_name`** — the optional `from "serde_json"` annotation
+    ///   that names the Rust crate providing the symbol. When present
+    ///   the codegen records the crate in its `extern_crates` set so the
+    ///   pipeline can write `[rust-deps]` entries into `buff.toml`.
+    ///
+    /// The legacy `extern func name(...) -> Ret` form (no ABI string) is
+    /// kept for backward compatibility with v0.5; new code SHOULD use the
+    /// richer `extern "C" from "serde_json" func name(...) -> Ret` form.
+    ///
+    /// Like the legacy form, ExternFuncDecl has NO body — it is a
+    /// signature-only foreign-function declaration. The codegen lowers
+    /// it to a Rust `extern "ABI" { fn name(...); }` foreign-mod item
+    /// and registers the function name in a per-codegen set consulted at
+    /// call sites (so a Buff call `name(args)` lowers to a Rust
+    /// `unsafe { name(args) }` — Rust requires `unsafe` to call foreign
+    /// functions, but Buff hides that from the user).
+    ExternFuncDecl(ExternFuncDecl),
     /// An `extend TYPE { fn ...; ... }` extension-method block (T75).
     ///
     /// Adds methods to an existing type (primitive or user-defined). The
@@ -95,6 +123,7 @@ impl fmt::Display for Decl {
             Decl::ExportDecl(d) => write!(f, "{d}"),
             Decl::ReexportDecl(d) => write!(f, "{d}"),
             Decl::ExternCrateDecl(d) => write!(f, "{d}"),
+            Decl::ExternFuncDecl(d) => write!(f, "{d}"),
             Decl::ExtendBlock(d) => write!(f, "{d}"),
         }
     }
@@ -534,6 +563,103 @@ pub struct ExternCrateDecl {
 impl fmt::Display for ExternCrateDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ExternCrate({:?})", self.name)
+    }
+}
+
+/// An `extern "ABI" [from "crate"] func name(params) -> Ret` declaration
+/// (T119 — minimal extern/bindgen).
+///
+/// Carries the same foreign-function-declaration semantics as the legacy
+/// `extern func name(...) -> Ret` form (which lowers to [`FuncDecl`] with
+/// `is_extern = true`), but additionally records the explicit ABI string
+/// the user wrote and an optional source-crate annotation.
+///
+/// # Field-by-field
+///
+/// - **`abi`** — the literal ABI string the user wrote (`"C"`, `"system"`).
+///   The parser only accepts `"C"` in v1.3 (per the T119 spec: "use `"C"`
+///   ABI for stability/cross-language compatibility"). Other ABIs are a
+///   parse error. The string is emitted verbatim inside the
+///   `extern "ABI" { ... }` foreign-mod at codegen time.
+/// - **`crate_name`** — the optional source crate (`from "serde_json"`).
+///   When present the codegen records the crate name in its
+///   `extern_crates` set so the pipeline can write `[rust-deps]`
+///   entries into `buff.toml`. When `None` the user did not write a
+///   `from "..."` annotation and no `[rust-deps]` entry is generated
+///   for this declaration (the symbol is assumed to be provided by the
+///   default link path).
+/// - **`name`** — the Buff-side function name. The user calls this in
+///   Buff source (`name(args)`); the codegen emits a Rust foreign-fn
+///   signature with the same name inside `extern "ABI" { ... }`.
+/// - **`params`** / **`return_type`** — the signature. Types go through
+///   the standard Buff→Rust primitive mapping (Int→i64, String→String,
+///   …) via `ast_typeref_to_syn` at codegen time.
+///
+/// # Generics
+///
+/// `ExternFuncDecl` does NOT carry a `generics` field. Generic or
+/// trait-bounded extern declarations are REJECTED at parse time with a
+/// clear error (the T119 spec: "A generic/trait-heavy Rust API is
+/// REJECTED with a clear error (generics unsupported in v1.3)").
+///
+/// # Body
+///
+/// Foreign functions have NO body — they are signature-only declarations.
+/// The actual implementation is provided either by an external library
+/// (linked via the platform's normal FFI mechanism) or by a sibling Rust
+/// source file in the user's project (`externs.rs`) that defines
+/// `pub extern "C" fn name(...) -> ... { ... }` with a real body. The
+/// Buff compiler emits the DECLARATION only; the user supplies the body.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T119 — new Decl variant
+///
+/// `Decl::ExternFuncDecl(ExternFuncDecl)` is **purely additive** (no
+/// existing variant changed). All `match` expressions on [`Decl`] across
+/// the codebase gained a `Decl::ExternFuncDecl { .. }` arm. The codegen
+/// pass emits a `syn::ItemForeignMod` (the same shape as the legacy
+/// `extern func` lowering) and additionally records the crate name (when
+/// present) in `RustCodegen::extern_crates` so the CLI pipeline can
+/// populate `[rust-deps]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternFuncDecl {
+    /// The ABI string the user wrote (`"C"`, `"system"`). The parser
+    /// only accepts `"C"` in v1.3; other ABIs are a parse error.
+    pub abi: String,
+    /// The optional source crate (`from "serde_json"`). `None` when the
+    /// user did not write a `from "..."` annotation.
+    pub crate_name: Option<String>,
+    /// The Buff-side function name. The user calls this in Buff source.
+    pub name: Ident,
+    /// The function parameters (same shape as [`FuncDecl::params`]).
+    pub params: Vec<Param>,
+    /// The optional return type. `None` means the function returns unit.
+    pub return_type: Option<TypeRef>,
+    pub span: Span,
+}
+
+impl fmt::Display for ExternFuncDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Render as `Extern("C" from "serde_json" fn name(params) -> Ret)`
+        // — the same surface syntax the user wrote, modulo whitespace.
+        write!(f, "Extern({:?} ", self.abi)?;
+        if let Some(c) = &self.crate_name {
+            write!(f, "from {:?} ", c)?;
+        }
+        write!(f, "fn {}", self.name)?;
+        f.write_str("(")?;
+        for (i, p) in self.params.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{p}")?;
+        }
+        f.write_str(")")?;
+        if let Some(rt) = &self.return_type {
+            write!(f, " -> {rt}")?;
+        }
+        f.write_str(")")
     }
 }
 

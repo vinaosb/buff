@@ -272,6 +272,15 @@ pub struct RustCodegen {
     /// Ordering::Relaxed)`; the `Expr::Ident` arm consults this to
     /// lower bare reads of `t` to `t.load(Ordering::Relaxed)`.
     current_atomic_set: crate::atomic_analysis::AtomicSet,
+    /// T119: names of `extern` functions declared in this compilation
+    /// unit. Populated by [`Self::generate`] BEFORE the main lowering
+    /// loop so call sites (the `Expr::FuncCall` arm of [`Self::lower_expr`])
+    /// can wrap calls in `unsafe { ... }` — Rust requires an `unsafe`
+    /// block at every foreign-function call site, regardless of ABI.
+    /// Buff hides `unsafe` from the user (the README's "no `unsafe` Rust"
+    /// guarantee), so the codegen inserts the wrapper silently. The set
+    /// is a [`BTreeSet`] for deterministic membership checks.
+    extern_fn_names: BTreeSet<String>,
 }
 
 impl RustCodegen {
@@ -297,6 +306,7 @@ impl RustCodegen {
             func_param_defaults: BTreeMap::new(),
             atomic_promotions: AtomicPromotions::empty(),
             current_atomic_set: crate::atomic_analysis::AtomicSet::new(),
+            extern_fn_names: BTreeSet::new(),
         }
     }
 
@@ -481,6 +491,14 @@ impl RustCodegen {
         // the expansion happens here, positionally. Built BEFORE the main
         // lowering loop so per-function lowering can consult it.
         self.func_param_defaults = collect_func_param_defaults(decls);
+        // T119: collect the names of all declared `extern` functions so
+        // the `Expr::FuncCall` arm of `lower_expr` can wrap calls to them
+        // in `unsafe { ... }`. Both the legacy `extern func name(...)`
+        // (FuncDecl with `is_extern = true`) and the new
+        // `extern "ABI" func name(...)` (ExternFuncDecl) shapes contribute
+        // to this set. Built BEFORE the main lowering loop so per-function
+        // lowering can consult it.
+        self.extern_fn_names = collect_extern_fn_names(decls);
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -588,6 +606,17 @@ impl RustCodegen {
             Decl::ExternCrateDecl(d) => {
                 self.extern_crates.insert(d.name.clone());
                 Ok(Item::Use(self.lower_extern_crate_use(&d.name)))
+            }
+            // T119: `extern "ABI" [from "crate"] func name(...) -> Ret`.
+            // Lowers to a `syn::ItemForeignMod` (same shape as the legacy
+            // `extern func` lowering), AND records the optional source
+            // crate in `extern_crates` so the CLI pipeline can populate
+            // `[rust-deps]` in `buff.toml`.
+            Decl::ExternFuncDecl(d) => {
+                if let Some(c) = &d.crate_name {
+                    self.extern_crates.insert(c.clone());
+                }
+                Ok(Item::ForeignMod(self.lower_extern_func_decl_with_abi(d)?))
             }
             // T75: extend blocks lower to TWO `syn::Item`s (trait + impl),
             // so they cannot be expressed via the single-`Item` return of
@@ -1042,6 +1071,84 @@ impl RustCodegen {
             abi: syn::Abi {
                 extern_token: Default::default(),
                 name: Some(syn::LitStr::new("C", ProcSpan::call_site())),
+            },
+            brace_token: Default::default(),
+            items: vec![syn::ForeignItem::Fn(foreign_fn)],
+        })
+    }
+
+    /// Lower a Buff [`ExternFuncDecl`] (T119) to a Rust
+    /// [`syn::ItemForeignMod`] of the form
+    /// `extern "ABI" { fn name(params) -> Ret; }`.
+    ///
+    /// This is the rich-ABI sibling of [`Self::lower_extern_func_decl`] —
+    /// the difference is that the ABI string is taken from the user's
+    /// declaration (`extern "C"`, `extern "system"`, …) rather than
+    /// hardcoded to `"C"`. In v1.3 only `"C"` is accepted by the parser,
+    /// so in practice the two methods produce byte-identical output today
+    /// — but this method preserves the user's spelling so future ABIs
+    /// (`"system"`, `"stdcall"`, …) can be added by widening the parser
+    /// accept-list without touching codegen.
+    ///
+    /// The optional `crate_name` annotation is recorded by the caller
+    /// ([`Self::lower_decl`]) BEFORE this method runs — by the time we
+    /// get here the crate (if any) is already in [`Self::extern_crates`]
+    /// so this method's only job is the foreign-mod emission.
+    fn lower_extern_func_decl_with_abi(
+        &mut self,
+        d: &buff_lang_ast::ExternFuncDecl,
+    ) -> Result<syn::ItemForeignMod, CodegenError> {
+        // Build the parameter list (same logic as lower_extern_func_decl).
+        let mut inputs: Punctuated<syn::FnArg, syn::Token![,]> = Punctuated::new();
+        for p in &d.params {
+            let ident = ast_ident_to_syn(&p.name);
+            let ty = self.ast_typeref_to_syn(&p.ty)?;
+            inputs.push(syn::FnArg::Typed(PatType {
+                attrs: Vec::new(),
+                pat: Box::new(Pat::Ident(PatIdent {
+                    attrs: Vec::new(),
+                    ident,
+                    by_ref: None,
+                    mutability: None,
+                    subpat: None,
+                })),
+                colon_token: Default::default(),
+                ty: Box::new(ty),
+            }));
+        }
+        let output = match &d.return_type {
+            Some(ty) => {
+                ReturnType::Type(Default::default(), Box::new(self.ast_typeref_to_syn(ty)?))
+            }
+            None => ReturnType::Default,
+        };
+        let foreign_fn = syn::ForeignItemFn {
+            attrs: Vec::new(),
+            vis: Visibility::Inherited,
+            sig: Signature {
+                constness: None,
+                asyncness: None,
+                unsafety: None,
+                abi: None,
+                fn_token: Default::default(),
+                ident: ast_ident_to_syn(&d.name),
+                generics: Default::default(),
+                paren_token: Default::default(),
+                inputs,
+                variadic: None,
+                output,
+            },
+            semi_token: Default::default(),
+        };
+        Ok(syn::ItemForeignMod {
+            attrs: Vec::new(),
+            unsafety: None,
+            abi: syn::Abi {
+                extern_token: Default::default(),
+                // Use the user-written ABI verbatim ("C", "system", …).
+                // The parser has already validated it's in the v1.3
+                // accept-list (only "C").
+                name: Some(syn::LitStr::new(&d.abi, ProcSpan::call_site())),
             },
             brace_token: Default::default(),
             items: vec![syn::ForeignItem::Fn(foreign_fn)],
@@ -1962,6 +2069,17 @@ impl RustCodegen {
                     callee.as_ref(),
                     Expr::Ident(name, _) if self.async_fns.contains(&name.name)
                 );
+                // T119: detect whether this callee is a declared `extern`
+                // function. We consult the AST `callee` BEFORE it's
+                // lowered to a SynExpr so the bare-ident check has access
+                // to the original name. When true, the call below is
+                // wrapped in `unsafe { ... }` (Rust requires an unsafe
+                // block at every foreign-fn call site; Buff hides that
+                // from the user).
+                let callee_is_extern = matches!(
+                    callee.as_ref(),
+                    Expr::Ident(name, _) if self.extern_fn_names.contains(&name.name)
+                );
                 let callee = match callee.as_ref() {
                     Expr::Ident(name, _) => SynExpr::Path(syn::ExprPath {
                         attrs: Vec::new(),
@@ -1980,6 +2098,25 @@ impl RustCodegen {
                     paren_token: Default::default(),
                     args: lowered,
                 });
+
+                // T119: wrap the call in `unsafe { ... }` when the callee
+                // is a declared `extern` function. `syn::ExprUnsafe` has a
+                // single `block` field — we synthesise a one-stmt block
+                // with NO trailing semicolon so the unsafe block evaluates
+                // to the call's return value (the call's result becomes
+                // the value of the wrapping expression).
+                let call = if callee_is_extern {
+                    syn::Expr::Unsafe(syn::ExprUnsafe {
+                        attrs: Vec::new(),
+                        unsafe_token: Default::default(),
+                        block: syn::Block {
+                            brace_token: Default::default(),
+                            stmts: vec![SynStmt::Expr(call, None)],
+                        },
+                    })
+                } else {
+                    call
+                };
 
                 // T31: AUTO-INSERT `.await` at async call sites. Buff has
                 // no `await` keyword; the codegen inserts `.await` when:
@@ -5447,6 +5584,89 @@ fn collect_func_param_defaults(decls: &[Decl]) -> BTreeMap<String, Vec<Option<Ex
                 f.name.name.clone(),
                 f.params.iter().map(|p| p.default_value.clone()).collect(),
             );
+        }
+    }
+    out
+}
+
+/// Collect the names of all `extern` functions declared in this compilation
+/// unit (T119). Both decl shapes contribute:
+/// - `Decl::FuncDecl(f)` where `f.is_extern` (the legacy `extern func
+///   name(...)` form from T32),
+/// - `Decl::ExternFuncDecl(d)` (the new `extern "ABI" [from "..."] func
+///   name(...)` form from T119).
+///
+/// The set is consulted by `lower_expr`'s `Expr::FuncCall` arm: a bare-
+/// ident callee whose name is in this set wraps the call in
+/// `unsafe { ... }` — Rust requires an `unsafe` block at every foreign-
+/// function call site, but Buff hides that from the user (the README's
+/// "no `unsafe` Rust" guarantee).
+///
+/// A [`BTreeSet`] (not [`HashSet`]) for deterministic membership (the
+/// T29 flaky-test lesson — even though we only query by membership today,
+/// consistency with the rest of the codegen-feeding state is easier to
+/// reason about).
+fn collect_extern_fn_names(decls: &[Decl]) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for decl in decls {
+        match decl {
+            Decl::FuncDecl(f) if f.is_extern => {
+                out.insert(f.name.name.clone());
+            }
+            Decl::ExternFuncDecl(d) => {
+                out.insert(d.name.name.clone());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Collect the Rust crate dependencies a Buff program declares via extern
+/// (T119). Walks the declaration list and returns the set of crate names
+/// referenced from:
+///
+/// - `Decl::ExternCrateDecl` (the v0.5 `extern crate "serde"` form), AND
+/// - `Decl::ExternFuncDecl` carrying a `from "crate"` annotation (the
+///   T119 `extern "C" from "serde_json" func ...` form).
+///
+/// The legacy `extern func name(...)` form (T32, no ABI) does NOT carry
+/// a crate annotation and so contributes nothing — the user must pair it
+/// with a separate `extern crate "..."` declaration if they want the
+/// crate recorded.
+///
+/// This is the function the CLI pipeline calls to auto-populate the
+/// `[rust-deps]` section of `buff.toml` (and, transitively, the
+/// `[dependencies]` section of the generated `Cargo.toml` when the
+/// pipeline switches to a Cargo-project model). A [`BTreeSet`] is
+/// returned so iteration order is deterministic across runs (the T29
+/// flaky-test lesson — never rely on [`HashSet`] iteration order for
+/// generated output).
+///
+/// # Example
+///
+/// ```
+/// use buff_lang_codegen_rust::collect_rust_deps;
+/// use buff_lang_ast::Decl;
+///
+/// // An empty program has no Rust deps.
+/// let empty: Vec<Decl> = Vec::new();
+/// let deps = collect_rust_deps(&empty);
+/// assert!(deps.is_empty());
+/// ```
+pub fn collect_rust_deps(decls: &[Decl]) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for decl in decls {
+        match decl {
+            Decl::ExternCrateDecl(d) => {
+                out.insert(d.name.clone());
+            }
+            Decl::ExternFuncDecl(d) => {
+                if let Some(c) = &d.crate_name {
+                    out.insert(c.clone());
+                }
+            }
+            _ => {}
         }
     }
     out

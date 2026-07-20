@@ -60,7 +60,7 @@ pub use race_analysis::{
     analyze_with_exemptions as analyze_parallel_races_with_exemptions, is_assignment_op,
     ParallelMutabilityError, PARALLEL_COMBINATORS,
 };
-pub use rust_codegen::{buff_primitive_to_rust_name, RustCodegen};
+pub use rust_codegen::{buff_primitive_to_rust_name, collect_rust_deps, RustCodegen};
 
 /// Convenience alias for [`format`] so external callers (tests, the CLI)
 /// can refer to it without importing the module. T26 introduced the alias

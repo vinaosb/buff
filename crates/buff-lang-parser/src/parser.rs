@@ -26,7 +26,8 @@ use buff_lang_lexer::TokenKind;
 
 use crate::stmt::{
     parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl,
-    parse_extern_crate_decl, parse_func_decl, parse_import_decl, parse_trait_decl,
+    parse_extern_crate_decl, parse_extern_func_decl_with_abi, parse_func_decl, parse_import_decl,
+    parse_trait_decl,
 };
 use crate::stream::TokenStream;
 
@@ -118,15 +119,19 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
             let exp = parse_export_decl(stream)?;
             Ok(Some(exp))
         }
-        // T32: top-level FFI declarations. Two shapes share the `extern`
-        // keyword:
+        // T32/T119: top-level FFI declarations. Three shapes share the
+        // `extern` keyword:
         //   1. `extern crate "name"` — record a dependency on an external
-        //      Rust crate (→ [`Decl::ExternCrateDecl`]).
+        //      Rust crate (→ [`Decl::ExternCrateDecl`]). (T32)
         //   2. `extern func name(...) -> Ret` — a foreign-function
         //      declaration with NO body (→ [`Decl::FuncDecl`] with
         //      `is_extern = true`; `parse_func_decl` consumes the leading
-        //      `extern` and skips body parsing).
-        // The dispatcher disambiguates by peeking at the second token.
+        //      `extern` and skips body parsing). (T32)
+        //   3. `extern "ABI" [from "crate"] func name(...) -> Ret` — the
+        //      rich-ABI form added in T119. The dispatcher disambiguates
+        //      by peeking at the second token: a `StringStart` means the
+        //      user wrote the new ABI-string form, route to
+        //      [`parse_extern_func_decl_with_abi`]. (T119)
         Some(TokenKind::KwExtern) => {
             if saw_attributes {
                 let span = stream
@@ -143,12 +148,21 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
                     let d = parse_extern_crate_decl(stream)?;
                     Ok(Some(d))
                 }
+                // T119: `extern "ABI" [from "crate"] func ...` — the new
+                // ABI-string form. The ABI literal is the second token
+                // (a `StringStart` from the lexer's interpolation
+                // machinery — every `"..."` is tokenised as
+                // `StringStart, StringPart, StringEnd`).
+                Some(TokenKind::StringStart) => {
+                    let d = parse_extern_func_decl_with_abi(stream)?;
+                    Ok(Some(d))
+                }
                 Some(TokenKind::KwFunc) => {
                     let f = parse_func_decl(stream, attributes)?;
                     Ok(Some(Decl::FuncDecl(f)))
                 }
                 _ => Err(ParseError::new(Diagnostic::error(
-                    "expected `extern crate \"<name>\"` or `extern func ...` after `extern`",
+                    "expected `extern crate \"<name>\"`, `extern \"ABI\" func ...`, or `extern func ...` after `extern`",
                     stream
                         .peek()
                         .map(|t| t.span)

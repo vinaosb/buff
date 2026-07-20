@@ -1,0 +1,17 @@
+// extern_tokio.buff - T119 minimal extern/bindgen example for async.
+//
+// Declares a Rust FFI binding to tokio's sleep API. The Buff compiler
+// emits a Rust `extern "C" { fn sleep_ms(...); }` foreign-mod item,
+// records `tokio` in `[rust-deps]`, and silently wraps the call site
+// in `unsafe { ... }`.
+//
+// ⚠ CODEGEN-ONLY EXAMPLE: linking against `tokio` requires a Cargo
+// project (the v0.5/v1.0 single-file `rustc` pipeline cannot consume
+// external crates). The generated Rust parses and is structurally
+// correct. See docs/extern-guide.md for the manual Cargo-project recipe.
+
+extern "C" from "tokio" func sleep_ms(ms: Int)
+
+func main():
+    sleep_ms(100)
+    print("slept 100ms")

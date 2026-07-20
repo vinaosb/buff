@@ -532,6 +532,26 @@ impl<'a> Formatter<'a> {
                 self.write_indent();
                 let _ = write!(self.buf, "extern crate {:?}", c.name);
             }
+            // T119: `extern "ABI" [from "crate"] func name(...) -> Ret`.
+            // Render the surface syntax the user wrote.
+            Decl::ExternFuncDecl(d) => {
+                self.write_indent();
+                let _ = write!(self.buf, "extern {:?} ", d.abi);
+                if let Some(c) = &d.crate_name {
+                    let _ = write!(self.buf, "from {:?} ", c);
+                }
+                let _ = write!(self.buf, "func {}(", d.name);
+                for (i, p) in d.params.iter().enumerate() {
+                    if i > 0 {
+                        self.raw(", ");
+                    }
+                    let _ = write!(self.buf, "{p}");
+                }
+                self.raw(")");
+                if let Some(rt) = &d.return_type {
+                    let _ = write!(self.buf, " -> {rt}");
+                }
+            }
             Decl::ExtendBlock(ext) => self.write_extend(ext),
         }
     }
@@ -1767,6 +1787,7 @@ fn decl_span(d: &Decl) -> Span {
         Decl::ExportDecl(e) => e.span,
         Decl::ReexportDecl(r) => r.span,
         Decl::ExternCrateDecl(c) => c.span,
+        Decl::ExternFuncDecl(d) => d.span,
         Decl::ExtendBlock(ext) => ext.span,
     }
 }

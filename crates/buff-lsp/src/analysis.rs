@@ -405,6 +405,7 @@ pub fn decl_span(decl: &Decl) -> Span {
         Decl::ExportDecl(e) => e.span,
         Decl::ReexportDecl(r) => r.span,
         Decl::ExternCrateDecl(c) => c.span,
+        Decl::ExternFuncDecl(d) => d.span,
         Decl::ExtendBlock(ext) => ext.span,
     }
 }

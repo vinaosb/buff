@@ -146,7 +146,8 @@ fn lint_decl(decl: &Decl, out: &mut Vec<Diagnostic>) {
         Decl::ImportDecl(_)
         | Decl::ModuleDecl(_)
         | Decl::ReexportDecl(_)
-        | Decl::ExternCrateDecl(_) => {}
+        | Decl::ExternCrateDecl(_)
+        | Decl::ExternFuncDecl(_) => {}
     }
 }
 

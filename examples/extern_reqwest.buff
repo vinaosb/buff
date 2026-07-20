@@ -1,0 +1,18 @@
+// extern_reqwest.buff - T119 minimal extern/bindgen example for HTTP.
+//
+// Declares a Rust FFI binding to reqwest's blocking GET API. The Buff
+// compiler emits a Rust `extern "C" { fn fetch_text(...); }` foreign-mod
+// item, records `reqwest` in `[rust-deps]`, and silently wraps the call
+// site in `unsafe { ... }`.
+//
+// ⚠ CODEGEN-ONLY EXAMPLE: linking against `reqwest` requires a Cargo
+// project (the v0.5/v1.0 single-file `rustc` pipeline cannot consume
+// external crates). The generated Rust parses and is structurally
+// correct. See docs/extern-guide.md for the manual Cargo-project recipe
+// (you provide a sibling `externs.rs` with the safe wrapper body).
+
+extern "C" from "reqwest" func fetch_text(url: String) -> String
+
+func main():
+    let body = fetch_text("https://example.com")
+    print(body)

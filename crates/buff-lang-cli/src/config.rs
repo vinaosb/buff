@@ -109,6 +109,14 @@ pub struct BuffConfig {
     /// `[profile]` — optional profile tables. Defaults to empty.
     #[serde(default)]
     pub profile: Profiles,
+    /// `[rust-deps]` — Rust crate dependencies auto-populated from
+    /// `extern` declarations (T119). Each entry is `name = "version"`
+    /// mirroring `[dependencies]`. Defaults to empty (programs without
+    /// extern declarations have no Rust deps beyond the Buff runtime).
+    /// Unknown keys under `[rust-deps]` are silently ignored (forward-compat
+    /// — same behaviour as the rest of the manifest).
+    #[serde(default, rename = "rust-deps")]
+    pub rust_deps: BTreeMap<String, String>,
 }
 
 /// `[package]` section of `buff.toml`.
@@ -267,6 +275,46 @@ pub fn has_entry_point(dir: &Path) -> bool {
     false
 }
 
+/// Render a `[rust-deps]` TOML block from a set of crate names (T119).
+///
+/// Each name becomes a `<name> = "*"` entry — the wildcard version says
+/// "use the latest compatible version" (the Cargo equivalent of omitting
+/// the version requirement). This is the loosest possible spec and is
+/// appropriate for the auto-populated section: the user can tighten a
+/// specific version later by editing `buff.toml` directly.
+///
+/// The function is deterministic: a [`BTreeSet`] (sorted) iterator
+/// guarantees byte-identical output across runs for the same input set
+/// (the T29 flaky-test lesson — never rely on HashSet iteration order
+/// for codegen output).
+///
+/// Returns an empty `String` when the set is empty — callers can detect
+/// "no extern declarations" via `is_empty()` and skip emitting the
+/// section entirely.
+///
+/// # Example output
+///
+/// For the input `{"serde_json", "tokio"}`, the output is:
+///
+/// ```toml
+/// [rust-deps]
+/// serde_json = "*"
+/// tokio = "*"
+/// ```
+pub fn render_rust_deps_toml(deps: &std::collections::BTreeSet<String>) -> String {
+    if deps.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("[rust-deps]\n");
+    for name in deps {
+        // Use Debug-style quoting on the name? No — TOML keys accept
+        // bare identifiers (incl. `_` and `-`), so emit them verbatim.
+        // The version is always `"*"` for the auto-populated form.
+        out.push_str(&format!("{name} = \"*\"\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     //! Unit smoke tests for the config module. The full acceptance-gate suite
@@ -328,5 +376,63 @@ future-flag = "wow"
         let cfg = BuffConfig::parse(toml).expect("unknown profile key should be tolerated");
         let release = cfg.profile.release.expect("release present");
         assert_eq!(release.opt_level.as_deref(), Some("3"));
+    }
+
+    // -----------------------------------------------------------------------
+    // T119: `[rust-deps]` auto-population helpers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn render_rust_deps_toml_empty_set_yields_empty_string() {
+        let deps = std::collections::BTreeSet::new();
+        assert_eq!(render_rust_deps_toml(&deps), "");
+    }
+
+    #[test]
+    fn render_rust_deps_toml_single_entry() {
+        let mut deps = std::collections::BTreeSet::new();
+        deps.insert("serde_json".to_string());
+        let toml = render_rust_deps_toml(&deps);
+        assert!(toml.contains("[rust-deps]"));
+        assert!(toml.contains("serde_json = \"*\""));
+    }
+
+    #[test]
+    fn render_rust_deps_toml_deterministic_sorted_order() {
+        // BTreeSet iteration is sorted — output must be deterministic
+        // regardless of insertion order (the T29 flaky-test lesson).
+        let mut deps = std::collections::BTreeSet::new();
+        deps.insert("zlib".to_string());
+        deps.insert("serde".to_string());
+        deps.insert("tokio".to_string());
+        let toml = render_rust_deps_toml(&deps);
+        // Lines after the header must be in alphabetical order.
+        let lines: Vec<&str> = toml.lines().skip(1).collect();
+        assert_eq!(lines, vec!["serde = \"*\"", "tokio = \"*\"", "zlib = \"*\""]);
+    }
+
+    #[test]
+    fn config_accepts_rust_deps_section() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-deps]
+serde_json = "*"
+tokio = "1"
+"#;
+        let cfg = BuffConfig::parse(toml).expect("[rust-deps] must parse");
+        assert_eq!(cfg.rust_deps.get("serde_json").map(|s| s.as_str()), Some("*"));
+        assert_eq!(cfg.rust_deps.get("tokio").map(|s| s.as_str()), Some("1"));
+    }
+
+    #[test]
+    fn config_rust_deps_defaults_empty_when_absent() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+"#;
+        let cfg = BuffConfig::parse(toml).expect("minimal manifest must parse");
+        assert!(cfg.rust_deps.is_empty(), "absent [rust-deps] defaults to empty");
     }
 }
