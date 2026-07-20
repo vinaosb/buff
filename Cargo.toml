@@ -226,6 +226,35 @@ tempfile = "3"
 sha2 = "0.10"
 md5 = "0.7"
 hmac = "0.12"
+# T124l: System modules (Process / OS). `Process.*` + `OS.name` /
+# `OS.arch` / `OS.hostname` use ONLY Rust `std` (std::process::Command /
+# Child / exit + std::env::consts::{OS,ARCH} + env-var hostname fallback)
+# - NO extern crate recorded for those (mirrors Math/Strings/Args/Env/
+# Path stance from T124f/T124g/T124j).
+#
+# `OS.cpus()` wraps the `num_cpus` crate (the long-standing Sean
+# McArthur / autoscreenshot num_cpus crate - the de-facto Rust ecosystem
+# default for CPU-count detection since 1.0; API used:
+# `num_cpus::get() -> usize` - the canonical "how many logical CPUs
+# does this machine have?"). Recorded in the codegen `extern_crates`
+# BTreeSet when a Buff program uses `OS.cpus` (the narrow walker flags
+# ONLY the `cpus` method name; `OS.name` / `OS.arch` / `OS.hostname`
+# do NOT record it - they use std only).
+#
+# NOTE: `OS.hostname()` does NOT use a dedicated hostname crate
+# (the spec explicitly forbids adding one). It lowers to
+# `std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME"))
+# .unwrap_or_default()` - the bare-minimum env-var approach covering
+# Windows (COMPUTERNAME) + Unix (HOSTNAME). Empty String when neither
+# env var is set (NEVER panics - matches Buff's "no panicking generated
+# code" rule).
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/percent-
+# encoding/uuid/url/serde_yml/csv/walkdir/tempfile/sha2/md5/hmac
+# codegen-only linking boundary (single-file `buff run` rustc path does
+# NOT link num_cpus; cargo-project wiring is deferred). Snapshots +
+# extern_crates set is the verifiable contract.
+num_cpus = "1"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }

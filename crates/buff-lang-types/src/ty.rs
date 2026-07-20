@@ -234,6 +234,37 @@ pub enum Type {
     /// Buff surfaces owned values; `.parent()` lifts the `&Path`
     /// result to `PathBuf` via `.to_path_buf()`).
     Path,
+    /// A spawned child process, mapped to `std::process::Child` at
+    /// codegen time (T124l). Constructed via the prelude associated
+    /// function `Process.spawn(command, args)` (two args: a command
+    /// String + a `Vector<String>` of args); supports the instance
+    /// methods `.wait() -> Int` (exit code; -1 / fallback when the
+    /// process is already exited or its status lacks a code) and
+    /// `.id() -> Int` (the OS process ID). Distinct from the
+    /// namespace-only [`crate::prelude_types::PreludeType::OS`]
+    /// module (which it shipped alongside): `Process` IS a real
+    /// runtime value (an opaque handle to a spawned child); `OS` is
+    /// pure namespace (no value representation, just associated fns).
+    ///
+    /// This is **additive** (T124l): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive
+    /// `match`es on `Type` were extended with an arm for the new
+    /// variant: `Display`, `buff_type_to_syn` (codegen),
+    /// `is_prelude_process` predicate. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Process` — it's an opaque
+    /// value type that participates in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Path`] (T124j) / [`Type::Url`] (T124h) /
+    /// [`Type::Regex`] (T124d) as the fourth runtime-value-with-
+    /// instance-methods type (Regex/URL/Path have 4 each; Process
+    /// has 2). The underlying Rust type is `Option<std::process::
+    /// Child>` — the codegen emits `Command::new(cmd).args(args)
+    /// .spawn().ok()` so the spawn is panic-free (a spawn failure
+    /// collapses to `None`; `.wait()` / `.id()` then operate on the
+    /// `Option` via `.map(...).unwrap_or_default()`). See
+    /// `decisions.md` for the spawn-failure-handling rationale.
+    Process,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -483,6 +514,31 @@ impl Type {
         matches!(self, Type::Path)
     }
 
+    /// T124l: the spawned-process type. Maps to
+    /// `Option<std::process::Child>` at codegen time (the `Option`
+    /// wrapper lets `Process.spawn` be panic-free — a spawn failure
+    /// collapses to `None`). Constructed via `Process.spawn(cmd,
+    /// args)`; supports instance methods `.wait() -> Int` (exit
+    /// code) and `.id() -> Int` (OS process ID).
+    pub fn process() -> Self {
+        Type::Process
+    }
+
+    /// T124l: Returns `true` if this type is the prelude `Process`
+    /// runtime value. Used by the type inferencer + codegen to
+    /// dispatch instance method calls (`process.wait()`,
+    /// `process.id()`) to the `std::process::Child` lowering.
+    /// Distinct from [`Self::is_prelude_datetime`] (Process is not
+    /// a chrono type), [`Self::is_prelude_regex`] (not a regex),
+    /// [`Self::is_prelude_url`] (not a URL), and
+    /// [`Self::is_prelude_path`] (not a Path). Used by the
+    /// chrono-over-broad-walker cautionary tale (T124f gotcha) -
+    /// `buff_type().is_prelude_process()` is the narrow round-trip
+    /// check for the Process type only.
+    pub fn is_prelude_process(&self) -> bool {
+        matches!(self, Type::Process)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -583,6 +639,13 @@ impl fmt::Display for Type {
             // crate (`std::path::PathBuf`). The Display form mirrors
             // the Buff surface name so diagnostics read naturally.
             Type::Path => f.write_str("Path"),
+            // T124l: prelude spawned-process type. Opaque value type
+            // whose canonical Rust representation lives in the codegen
+            // crate (`Option<std::process::Child>` - the Option
+            // wrapper lets spawn be panic-free). The Display form
+            // mirrors the Buff surface name so diagnostics read
+            // naturally.
+            Type::Process => f.write_str("Process"),
         }
     }
 }

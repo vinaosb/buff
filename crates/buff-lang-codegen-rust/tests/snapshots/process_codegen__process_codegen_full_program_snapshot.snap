@@ -1,0 +1,22 @@
+---
+source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+expression: src
+---
+fn main() {
+    let p: Option<std::process::Child> = std::process::Command::new("ls")
+        .args(vec![])
+        .spawn()
+        .ok();
+    let exit_code = p
+        .map(|mut c| {
+            c.wait().map(|s| s.code().unwrap_or_default()).unwrap_or_default()
+        })
+        .unwrap_or_default();
+    let pid = p.clone().map(|c| c.id() as i64).unwrap_or_default();
+    let osname: String = std::env::consts::OS.to_string();
+    let osarch: String = std::env::consts::ARCH.to_string();
+    let host: String = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default();
+    let ncpus: i64 = num_cpus::get() as i64;
+}

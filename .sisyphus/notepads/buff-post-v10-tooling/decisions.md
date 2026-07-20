@@ -326,3 +326,52 @@ NARROW WALKERS (chrono-over-broad gotcha avoidance):
 VERIFICATION: all 4 gates green. cargo build/clippy/test all EXIT=0.
 buff-lang-codegen-rust full test suite green (no regressions).
 
+
+## T124l (Process / OS prelude modules) - 2026-07-20
+
+### Process value-shape: Option<std::process::Child>
+
+Chose to surface the spawned value as Option<std::process::Child> rather than
+std::process::Child or Result<Process, Error>. Rationale:
+
+- Buff's "no panicking generated code" rule means Process.spawn CANNOT use
+  .expect() / .unwrap() on the fallible Command::spawn() -> io::Result<Child>.
+- The Option wrapper collapses spawn failure to None via .spawn().ok().
+- .wait() / .id() then chain .map(...).unwrap_or_default() through the
+  Option so spawn-failure is observable as default Int (0) without panicking.
+- A future task may surface spawn failure via a Result<Process, Error> if a
+  use case emerges; the Option wrapper is the minimum panic-free shape today.
+
+### buff_type_to_syn for Process: emit the Option wrapper explicitly
+
+Type::Process => Option<std::process::Child> (via make_generic_path_type).
+This makes the generated let p: Option<std::process::Child> = ... annotation
+visible in snapshots, communicating the wrapper shape to readers. Without this,
+let p = ...spawn().ok(); would compile (Rust infers Option) but the surface
+type contract would be invisible.
+
+### Hostname via env vars (NO hostname crate)
+
+OS.hostname() lowers to std::env::var("COMPUTERNAME").or_else(|_|
+std::env::var("HOSTNAME")).unwrap_or_default(). This is the bare-minimum
+approach covering Windows (COMPUTERNAME) + Unix (HOSTNAME). Empty String when
+neither env var is set. NO hostname crate added (spec explicitly forbids it;
+the codegen-only linking boundary limit is observed).
+
+### num_cpus narrow walker (program_uses_num_cpus)
+
+Narrow method-aware walker flags ONLY the (OS, cpus) combination (mirrors
+program_uses_dir_walk from T124j, program_uses_sha2 from T124k). A generic
+program_uses_namespace("OS") would over-register num_cpus for programs using
+only OS.name/arch/hostname (those use std::env::consts + env-var - std-only).
+Process.* uses std::process::* (std-only - NO extern crate recorded, mirrors
+Path / Dir.list / Tempfile.dir stance).
+
+### Process.spawn arg shape: separate command + args (NO shell)
+
+Process.spawn(cmd, args) lowers to Command::new(cmd).args(args).spawn().ok()
+- the command and args are passed SEPARATELY to Command::new + .args,
+NOT through a shell. This eliminates the shell-injection vector (spec safety
+stance). The args param is a Vector<String> (codegen splices whatever
+expression the user provides; the type-inference layer enforces the surface
+contract).

@@ -1,0 +1,11 @@
+---
+source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+expression: src
+---
+fn f() {
+    let p: Option<std::process::Child> = std::process::Command::new("ls")
+        .args(vec![])
+        .spawn()
+        .ok();
+    p.map(|c| c.id() as i64).unwrap_or_default();
+}

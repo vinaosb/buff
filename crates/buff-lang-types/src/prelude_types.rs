@@ -523,6 +523,86 @@ pub enum PreludeType {
     /// convention (the canonical acronym is all-uppercase; Buff
     /// surfaces it as a PascalCase module name).
     HMAC,
+    /// `OS` - the operating-system-introspection namespace
+    /// (T124l). Wraps `std::env::consts::{OS,ARCH}` + the
+    /// `num_cpus` Rust crate. Like [`Self::Log`] / [`Self::Toml`]
+    /// / [`Self::Hash`] / [`Self::HMAC`], `OS` is **never a
+    /// runtime value** - it's a NAMESPACE exposing four
+    /// associated functions:
+    /// - `OS.name()` - the OS name (`"linux"` / `"macos"` /
+    ///   `"windows"`). Zero args. Returns `String`. Wraps
+    ///   `std::env::consts::OS.to_string()` (compile-time const).
+    /// - `OS.arch()` - the CPU architecture (`"x86_64"` /
+    ///   `"aarch64"`). Zero args. Returns `String`. Wraps
+    ///   `std::env::consts::ARCH.to_string()` (compile-time const).
+    /// - `OS.hostname()` - the machine hostname. Zero args.
+    ///   Returns `String` (empty String when neither COMPUTERNAME
+    ///   nor HOSTNAME is set - NEVER panics). Wraps
+    ///   `std::env::var("COMPUTERNAME").or_else(|_|
+    ///   std::env::var("HOSTNAME")).unwrap_or_default()` - the
+    ///   bare-minimum env-var approach covering Windows
+    ///   (COMPUTERNAME) + Unix (HOSTNAME). NO `hostname` crate
+    ///   added (the spec explicitly forbids it).
+    /// - `OS.cpus()` - the number of logical CPUs. Zero args.
+    ///   Returns `Int`. Wraps `num_cpus::get() as i64`. The
+    ///   `num_cpus` crate is recorded in codegen `extern_crates`
+    ///   when a program uses `OS.cpus` (the narrow walker flags
+    ///   ONLY the `cpus` method name - `name`/`arch`/`hostname`
+    ///   use std only and record NO extern crate).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. Mirrors Log / Toml / Args / Env / Hash /
+    /// HMAC exactly (every call returns a value, NEVER an `OS`
+    /// value type). The two-case PascalCase spelling (`OS`) mirrors
+    /// `UUID` / `URL` / `HMAC` (all-uppercase acronyms surfaced as
+    /// PascalCase module names).
+    OS,
+    /// `Process` - the spawned-process runtime value type (T124l).
+    /// Wraps `Option<std::process::Child>` (the `Option` wrapper
+    /// lets `Process.spawn` be panic-free - a spawn failure
+    /// collapses to `None`; `.wait()` / `.id()` then operate on
+    /// the `Option` via `.map(...).unwrap_or_default()`).
+    /// Constructed via the associated function
+    /// `Process.spawn(command, args)` (two args: a command String
+    /// and a `Vector<String>` of args - does NOT shell out; the
+    /// command and args are passed SEPARATELY to
+    /// `std::process::Command::new(cmd).args(args)` so there's NO
+    /// shell-injection vector, matching the spec's safety stance).
+    /// Supports two instance methods:
+    /// - `.wait() -> Int` - block until the process exits, then
+    ///   return the exit code. Zero args. Wraps
+    ///   `recv.map(|mut c| c.wait().map(|s| s.code().unwrap_or_default())
+    ///   .unwrap_or_default()).unwrap_or_default()` (the outer
+    ///   Option handles the spawn-failed case; the middle Result
+    ///   handles wait() failure; the inner Option handles
+    ///   signal-terminated processes that have no exit code - all
+    ///   collapse to `0` via `unwrap_or_default()`, NEVER panics).
+    /// - `.id() -> Int` - the OS process ID. Zero args. Wraps
+    ///   `recv.map(|c| c.id() as i64).unwrap_or_default()` (0
+    ///   when the spawn failed or the process has already exited
+    ///   and been reaped - NEVER panics).
+    ///
+    /// The `Process.exit(code)` associated function (zero return -
+    /// terminates the program immediately via
+    /// `std::process::exit(code as i32)`) is ALSO exposed on this
+    /// type. It is NOT a runtime value constructor - it's a
+    /// side-effecting terminal call (returns Void).
+    ///
+    /// This is the FOURTH v1.4 prelude-type variant that is BOTH
+    /// a real runtime value AND carries instance methods (after
+    /// `Regex` T124d, `URL` T124h, `Path` T124j). `buff_type()`
+    /// returns [`Type::Process`] (a real value type, NOT
+    /// [`Type::Void`] like the namespace-only `OS` module it
+    /// shipped alongside); `is_namespace_only()` returns `false`.
+    /// `Process.*` uses ONLY `std::process` - NO extern crate
+    /// recorded (mirrors the Path/Dir.list/Tempfile.dir std-only
+    /// stance from T124j).
+    ///
+    /// MUST NOT (per spec): signal handling, shell expansion,
+    /// privilege management. The `Process` surface is the
+    /// minimal "spawn a child, wait for it, get its PID, exit
+    /// yourself" subset that every scripting language converges on.
+    Process,
 }
 
 impl PreludeType {
@@ -589,6 +669,18 @@ impl PreludeType {
         // NO runtime value type - every call returns String (hex).
         PreludeType::Hash,
         PreludeType::HMAC,
+        // T124l: OS / Process - two system modules. OS is
+        // namespace-only (mirrors Log / Toml / Hash / HMAC) - 4
+        // assoc fns (name / arch / hostname / cpus). Process is
+        // the fourth runtime-value-with-instance-methods type
+        // (after Regex T124d, URL T124h, Path T124j) - a spawned
+        // child handle wrapping `Option<std::process::Child>` with
+        // `.wait() -> Int` + `.id() -> Int` instance methods; the
+        // ctor `Process.spawn(cmd, args)` and the side-effecting
+        // `Process.exit(code)` (returns Void) are assoc fns on the
+        // same type.
+        PreludeType::OS,
+        PreludeType::Process,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -717,6 +809,21 @@ impl PreludeType {
             // (note the Rust crate names: `hmac` + `sha2` - Buff's
             // `HMAC` namespace lowers to a path that needs BOTH).
             PreludeType::HMAC => "HMAC",
+            // T124l: the OS prelude type name. ALL-CAPS spelling
+            // mirrors the `UUID` / `URL` / `HMAC` convention. The
+            // codegen splices `std::env::consts::OS` /
+            // `std::env::consts::ARCH` (compile-time consts) +
+            // `std::env::var("COMPUTERNAME").or_else(|_|
+            // std::env::var("HOSTNAME")).unwrap_or_default()` for
+            // hostname + `num_cpus::get() as i64` for cpus.
+            PreludeType::OS => "OS",
+            // T124l: the Process prelude type name. PascalCase
+            // (mirrors Regex / Path / URL surface convention). The
+            // codegen splices `std::process::Command::new(...)` for
+            // spawn, `std::process::Child::wait` / `id` for
+            // instance methods, and `std::process::exit(...)` for
+            // the side-effecting Process.exit terminal call.
+            PreludeType::Process => "Process",
         }
     }
 
@@ -846,6 +953,22 @@ impl PreludeType {
             // function (`HMAC.sha256`) is callable. The call returns
             // a hex String (the MAC).
             PreludeType::HMAC => Type::Void,
+            // T124l: namespace-only - OS has no value
+            // representation. Mirrors Log / Toml / Math / Strings
+            // / Args / Env / Hash / HMAC exactly: the namespace
+            // itself is never a value, only its associated fns
+            // (`OS.name` / `OS.arch` / `OS.hostname` / `OS.cpus`)
+            // are callable.
+            PreludeType::OS => Type::Void,
+            // T124l: Process IS a runtime value - returns the
+            // opaque spawned-process type (mapped to
+            // `Option<std::process::Child>` at codegen time - the
+            // Option wrapper lets spawn be panic-free). Distinct
+            // from the namespace-only OS module (which returns
+            // Void). Mirrors Regex (T124d) / URL (T124h) / Path
+            // (T124j) as the fourth runtime-value-with-rich-
+            // instance-methods type.
+            PreludeType::Process => Type::Process,
         }
     }
 
@@ -872,6 +995,7 @@ impl PreludeType {
                 | PreludeType::Tempfile
                 | PreludeType::Hash
                 | PreludeType::HMAC
+                | PreludeType::OS
         )
     }
 }
@@ -1244,6 +1368,63 @@ pub enum PreludeAssocFn {
     /// checksum compatibility only (etags, content-addressable
     /// caches, legacy interop); NEVER use for security. Hash-only.
     Md5,
+    // ---- Process / OS modules (T124l) -----------------------------
+    // These variants follow the precedent set by `Parse` (shared by
+    // DateTime / Date / Toml / URL / UUID), `Get` (shared by
+    // Args.get / Env.get), `Encode` / `Decode` (shared by Base64 /
+    // Hex / URLEncode), `Sha256` (shared by Hash.sha256 /
+    // HMAC.sha256): a single variant may be valid on MULTIPLE
+    // prelude types, with the (type, method) pair dispatched in
+    // [`assoc_fn_return_type`] + the codegen arm.
+    //
+    /// `Process.spawn(command, args)` - spawn a child process.
+    /// Two args (String command, Vector<String> args). Returns
+    /// `Process` (an opaque handle to the spawned child). Wraps
+    /// `std::process::Command::new(cmd).args(args).spawn().ok()`
+    /// (the `.ok()` collapses a spawn failure to `None` - NEVER
+    /// panics, matching Buff's "no panicking generated code" rule).
+    /// The command + args are passed SEPARATELY (NOT through a
+    /// shell) so there's NO shell-injection vector - the spec's
+    /// safety stance. Process-only.
+    Spawn,
+    /// `Process.exit(code)` - terminate the program immediately
+    /// with the given exit code. One arg (Int). Returns `Void`
+    /// (the call never returns - it terminates the program).
+    /// Wraps `std::process::exit(code as i32)`. NOTE: Rust's
+    /// `std::process::exit` does NOT run destructors; the Buff
+    /// surface inherits that behavior (the spec calls this out
+    /// as the "exit yourself" primitive, distinct from
+    /// signal-based shutdown which is explicitly out-of-scope).
+    /// Process-only.
+    Exit,
+    /// `OS.name()` - the OS name (`"linux"` / `"macos"` /
+    /// `"windows"`). Zero args. Returns `String`. Wraps
+    /// `std::env::consts::OS.to_string()` (compile-time const).
+    /// OS-only. Same variant name as a hypothetical future
+    /// `Process.name` (NOT in T124l scope) is dispatched on the
+    /// (type, method) pair - mirrors `Parse` / `Get` / `Encode`
+    /// shared-variant pattern.
+    Name,
+    /// `OS.arch()` - the CPU architecture (`"x86_64"` /
+    /// `"aarch64"`). Zero args. Returns `String`. Wraps
+    /// `std::env::consts::ARCH.to_string()` (compile-time const).
+    /// OS-only.
+    Arch,
+    /// `OS.hostname()` - the machine hostname. Zero args.
+    /// Returns `String` (empty String when neither COMPUTERNAME
+    /// nor HOSTNAME is set - NEVER panics). Wraps
+    /// `std::env::var("COMPUTERNAME").or_else(|_|
+    /// std::env::var("HOSTNAME")).unwrap_or_default()` - the
+    /// bare-minimum env-var approach (NO `hostname` crate added,
+    /// per spec). OS-only.
+    Hostname,
+    /// `OS.cpus()` - the number of logical CPUs. Zero args.
+    /// Returns `Int`. Wraps `num_cpus::get() as i64`. The
+    /// `num_cpus` crate is recorded in codegen `extern_crates`
+    /// when a program uses `OS.cpus` (the narrow walker flags
+    /// ONLY the `cpus` method name - `name` / `arch` / `hostname`
+    /// use std only and record NO extern crate). OS-only.
+    Cpus,
 }
 
 impl PreludeAssocFn {
@@ -1332,6 +1513,19 @@ impl PreludeAssocFn {
         PreludeAssocFn::Sha256,
         PreludeAssocFn::Sha512,
         PreludeAssocFn::Md5,
+        // T124l: Process / OS assoc fns (6 distinct names):
+        // spawn/exit/name/arch/hostname/cpus. `Spawn` + `Exit` are
+        // Process-only; `Name` / `Arch` / `Hostname` / `Cpus` are
+        // OS-only. NO shared variants with prior prelude types in
+        // T124l scope (a future `Process.name` would reuse `Name` -
+        // the (type, method) pair dispatch in `assoc_fn_return_type`
+        // handles the overload, mirroring `Parse` / `Get` / `Encode`).
+        PreludeAssocFn::Spawn,
+        PreludeAssocFn::Exit,
+        PreludeAssocFn::Name,
+        PreludeAssocFn::Arch,
+        PreludeAssocFn::Hostname,
+        PreludeAssocFn::Cpus,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1440,6 +1634,19 @@ impl PreludeAssocFn {
             PreludeAssocFn::Sha256 => "sha256",
             PreludeAssocFn::Sha512 => "sha512",
             PreludeAssocFn::Md5 => "md5",
+            // T124l: Process / OS assoc fn names. `spawn` mirrors
+            // the canonical `std::process::Command::spawn` verb
+            // (the underlying Rust method). `exit` mirrors
+            // `std::process::exit` (the side-effecting terminal
+            // call). `name` / `arch` / `hostname` / `cpus` are
+            // Buff-flavored names (clearer than `consts::OS` /
+            // `consts::ARCH` / `gethostname` / `available_parallelism`).
+            PreludeAssocFn::Spawn => "spawn",
+            PreludeAssocFn::Exit => "exit",
+            PreludeAssocFn::Name => "name",
+            PreludeAssocFn::Arch => "arch",
+            PreludeAssocFn::Hostname => "hostname",
+            PreludeAssocFn::Cpus => "cpus",
         }
     }
 }
@@ -1904,6 +2111,50 @@ pub fn assoc_fn_return_type(
         // code" rule. Same shared `Sha256` variant as
         // `Hash.sha256`; dispatched on the (HMAC, Sha256) pair.
         (PreludeType::HMAC, PreludeAssocFn::Sha256) => Some(Type::string()),
+        // T124l: Process module - 2 assoc fns. `Process.spawn` is
+        // the runtime-value ctor (returns `Process`); `Process.exit`
+        // is a side-effecting terminal call (returns `Void`).
+        //
+        // `Process.spawn(command, args)` -> Process. Wraps
+        // `std::process::Command::new(cmd).args(args).spawn().ok()`
+        // (the `.ok()` collapses a spawn failure to `None` -
+        // NEVER panics). The command + args are passed SEPARATELY
+        // (NOT through a shell) - no shell-injection vector. The
+        // returned `Process` value is the receiver for the `.wait()`
+        // / `.id()` instance methods.
+        (PreludeType::Process, PreludeAssocFn::Spawn) => Some(Type::Process),
+        // `Process.exit(code)` -> Void. Wraps
+        // `std::process::exit(code as i32)`. The call NEVER returns
+        // (it terminates the program immediately). The Buff surface
+        // types it as `Void` so callers don't try to use the result.
+        // NOTE: Rust's `std::process::exit` does NOT run destructors;
+        // the Buff surface inherits that behavior (the spec calls
+        // this out as the "exit yourself" primitive).
+        (PreludeType::Process, PreludeAssocFn::Exit) => Some(Type::Void),
+        // T124l: OS module - 4 assoc fns wrapping std::env::consts +
+        // env-var hostname + num_cpus.
+        //
+        // `OS.name()` -> String. Wraps `std::env::consts::OS
+        // .to_string()` (compile-time const - one of `linux` /
+        // `macos` / `windows` / `freebsd` / ...). OS-only.
+        (PreludeType::OS, PreludeAssocFn::Name) => Some(Type::string()),
+        // `OS.arch()` -> String. Wraps `std::env::consts::ARCH
+        // .to_string()` (compile-time const - one of `x86_64` /
+        // `aarch64` / `x86` / ...). OS-only.
+        (PreludeType::OS, PreludeAssocFn::Arch) => Some(Type::string()),
+        // `OS.hostname()` -> String. Wraps
+        // `std::env::var("COMPUTERNAME").or_else(|_|
+        // std::env::var("HOSTNAME")).unwrap_or_default()` (empty
+        // String when neither env var is set - NEVER panics). The
+        // bare-minimum env-var approach (NO `hostname` crate added,
+        // per spec). OS-only.
+        (PreludeType::OS, PreludeAssocFn::Hostname) => Some(Type::string()),
+        // `OS.cpus()` -> Int. Wraps `num_cpus::get() as i64`. The
+        // `num_cpus` crate is recorded in codegen `extern_crates`
+        // when a program uses `OS.cpus` (the narrow walker flags
+        // ONLY the `cpus` method name - `name` / `arch` / `hostname`
+        // use std only). OS-only.
+        (PreludeType::OS, PreludeAssocFn::Cpus) => Some(Type::int_default()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -2027,6 +2278,23 @@ pub enum PreludeInstanceFn {
     /// infallible - returns `false` on permission errors, never
     /// panics).
     Exists,
+    // ---- Process instance methods (T124l) -------------------------
+    /// `process.wait() -> Int` - block until the spawned process
+    /// exits, then return its exit code. Zero args. Wraps
+    /// `recv.map(|mut c| c.wait().map(|s| s.code().unwrap_or_default())
+    /// .unwrap_or_default()).unwrap_or_default()` (the outer
+    /// Option handles the spawn-failed case; the middle Result
+    /// handles wait() failure; the inner Option handles
+    /// signal-terminated processes that have no exit code - all
+    /// collapse to `0` via `unwrap_or_default()`, NEVER panics).
+    /// Process-only.
+    Wait,
+    /// `process.id() -> Int` - the OS process ID of the spawned
+    /// child. Zero args. Wraps `recv.map(|c| c.id() as i64)
+    /// .unwrap_or_default()` (0 when the spawn failed or the
+    /// process has already exited and been reaped - NEVER panics).
+    /// Process-only.
+    Id,
 }
 
 impl PreludeInstanceFn {
@@ -2061,6 +2329,13 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Extension,
         PreludeInstanceFn::Basename,
         PreludeInstanceFn::Exists,
+        // T124l: Process instance methods — Wait / Id. Both
+        // zero-arg, returning Int (exit code / OS pid).
+        // Mirrors Regex (T124d) / URL (T124h) / Path (T124j) as
+        // the fourth runtime-value-with-rich-instance-methods
+        // type.
+        PreludeInstanceFn::Wait,
+        PreludeInstanceFn::Id,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -2112,6 +2387,13 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Extension => "extension",
             PreludeInstanceFn::Basename => "basename",
             PreludeInstanceFn::Exists => "exists",
+            // T124l: Process instance method names mirror Rust's
+            // `std::process::Child` method names where they exist
+            // (`wait` / `id` map 1:1 to the std methods, modulo
+            // the Option-wrapper layer the codegen adds). Both
+            // zero-arg.
+            PreludeInstanceFn::Wait => "wait",
+            PreludeInstanceFn::Id => "id",
         }
     }
 }
@@ -2224,6 +2506,29 @@ pub fn instance_fn_return_type(
         // `path.exists()` -> Bool. Wraps `recv.exists()`.
         (Type::Path, PreludeInstanceFn::Exists) => Some(Type::bool()),
 
+        // T124l: Process instance methods. `process.wait()` ->
+        // Int (exit code); `process.id()` -> Int (OS pid). Each
+        // lowers to a fully-qualified `std::process::Child`
+        // method chained through the `Option<Child>` wrapper the
+        // codegen adds at spawn time (so the calls are panic-free
+        // even when spawn failed - the Option collapses to a
+        // default Int).
+        //
+        // `process.wait()` -> Int. Wraps
+        // `recv.map(|mut c| c.wait().map(|s| s.code()
+        // .unwrap_or_default()).unwrap_or_default())
+        // .unwrap_or_default()` (the outer Option handles the
+        // spawn-failed case; the middle Result handles wait()
+        // failure; the inner Option handles signal-terminated
+        // processes that have no exit code - all collapse to `0`,
+        // NEVER panics).
+        (Type::Process, PreludeInstanceFn::Wait) => Some(Type::int_default()),
+        // `process.id()` -> Int. Wraps `recv.map(|c| c.id() as
+        // i64).unwrap_or_default()` (0 when the spawn failed or
+        // the process has already exited and been reaped - NEVER
+        // panics).
+        (Type::Process, PreludeInstanceFn::Id) => Some(Type::int_default()),
+
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
         _ => None,
@@ -2266,10 +2571,18 @@ mod tests {
             // `is_prelude_datetime` check (its `buff_type()` returns
             // `Type::Path`, which round-trips through
             // `is_prelude_path()` instead).
+            //
+            // T124l: `Process` is the fourth runtime-value-with-
+            // methods type after Regex (T124d) + URL (T124h) + Path
+            // (T124j). Like Regex + URL + Path it's NOT a datetime,
+            // so it skips the `is_prelude_datetime` check (its
+            // `buff_type()` returns `Type::Process`, which round-
+            // trips through `is_prelude_process()` instead).
             if !t.is_namespace_only()
                 && t != PreludeType::Regex
                 && t != PreludeType::URL
                 && t != PreludeType::Path
+                && t != PreludeType::Process
             {
                 assert!(t.buff_type().is_prelude_datetime());
             }
@@ -2506,9 +2819,11 @@ mod tests {
         // data-format modules (Yaml, Csv) shipped in T124i + 1 runtime-
         // value-with-methods type (Path) + 2 namespace-only modules
         // (Dir, Tempfile) shipped in T124j + 2 namespace-only crypto
-        // modules (Hash, HMAC) shipped in T124k = 25 total prelude
+        // modules (Hash, HMAC) shipped in T124k + 1 namespace-only
+        // system-introspection module (OS) + 1 runtime-value-with-
+        // methods type (Process) shipped in T124l = 27 total prelude
         // types.
-        assert_eq!(PreludeType::ALL.len(), 25);
+        assert_eq!(PreludeType::ALL.len(), 27);
     }
 
     #[test]
@@ -2593,6 +2908,32 @@ mod tests {
         assert!(!PreludeType::Log.buff_type().is_prelude_path());
         assert!(!PreludeType::Dir.buff_type().is_prelude_path());
         assert!(!PreludeType::Tempfile.buff_type().is_prelude_path());
+        // T124l: Process type + predicate. Process is NOT a datetime
+        // family member, NOT a Regex, NOT a URL, and NOT a Path -
+        // its dedicated `is_prelude_process` predicate captures
+        // the spawned-process runtime-value case.
+        assert!(Type::process().is_prelude_process());
+        assert!(!Type::process().is_prelude_datetime());
+        assert!(!Type::process().is_prelude_regex());
+        assert!(!Type::process().is_prelude_url());
+        assert!(!Type::process().is_prelude_path());
+        assert!(!Type::DateTime.is_prelude_process());
+        assert!(!Type::Regex.is_prelude_process());
+        assert!(!Type::Url.is_prelude_process());
+        assert!(!Type::Path.is_prelude_process());
+        assert!(!Type::string().is_prelude_process());
+        // Cross-check via the prelude-type registry: `Process
+        // .buff_type()` round-trips through `is_prelude_process`
+        // (the only prelude type for which it does). The
+        // namespace-only OS module does NOT round-trip (its
+        // `buff_type()` returns `Type::Void`).
+        assert!(PreludeType::Process.buff_type().is_prelude_process());
+        assert!(!PreludeType::DateTime.buff_type().is_prelude_process());
+        assert!(!PreludeType::Regex.buff_type().is_prelude_process());
+        assert!(!PreludeType::URL.buff_type().is_prelude_process());
+        assert!(!PreludeType::Path.buff_type().is_prelude_process());
+        assert!(!PreludeType::Log.buff_type().is_prelude_process());
+        assert!(!PreludeType::OS.buff_type().is_prelude_process());
     }
 
     #[test]
@@ -2609,6 +2950,8 @@ mod tests {
         assert_eq!(Type::Url.to_string(), "URL");
         // T124j: Path Display mirrors the Buff surface name.
         assert_eq!(Type::Path.to_string(), "Path");
+        // T124l: Process Display mirrors the Buff surface name.
+        assert_eq!(Type::Process.to_string(), "Process");
     }
 
     // T124d: Regex module — `Regex.compile(p)` assoc-fn lookups + return type.
@@ -2907,13 +3250,28 @@ mod tests {
         // call returns a hex String - the digest / MAC).
         assert!(PreludeType::Hash.is_namespace_only());
         assert!(PreludeType::HMAC.is_namespace_only());
+        // T124l: OS is also a namespace-only module (mirror
+        // Log / Toml / Math / Random / Strings / Args / Env /
+        // Base64 / Hex / URLEncode / UUID / Yaml / Csv / Dir /
+        // Tempfile / Hash / HMAC). It wraps `std::env::consts`
+        // + env-var hostname + `num_cpus` and has NO runtime
+        // value representation (every call returns a String /
+        // Int - the OS name / arch / hostname / cpu count).
+        assert!(PreludeType::OS.is_namespace_only());
+        // T124l: Process is NOT namespace-only - it's a real
+        // runtime value type (mirrors Regex T124d + URL T124h
+        // + Path T124j's runtime-value-with-rich-instance-
+        // methods stance). Distinct from the namespace-only OS
+        // module it shipped alongside.
+        assert!(!PreludeType::Process.is_namespace_only());
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        // T124k: bumped from 15 to 17 (Hash + HMAC both
-        // namespace-only).
-        assert_eq!(namespace_only_count, 17);
+        // T124l: bumped from 17 to 18 (OS namespace-only;
+        // Process is NOT - it's a runtime-value-with-instance-
+        // methods type).
+        assert_eq!(namespace_only_count, 18);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +

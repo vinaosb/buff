@@ -1,0 +1,9 @@
+---
+source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+expression: src
+---
+fn f() {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default();
+}

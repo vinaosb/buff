@@ -726,6 +726,36 @@ impl RustCodegen {
             // (shared with T124h Hex module's walker; idempotent).
             self.extern_crates.insert("hex".to_string());
         }
+        // T124l: register the `num_cpus` crate as an external
+        // dependency when the program references `OS.cpus()`.
+        // Generated code uses the fully-qualified
+        // `num_cpus::get() as i64` path so no top-level `use`
+        // import is emitted - but the recorded name signals to
+        // the pipeline / build-driver that the generated Cargo
+        // project must declare `num_cpus` in `[dependencies]`.
+        //
+        // NOTE: `OS.name` / `OS.arch` / `OS.hostname` use
+        // `std::env::consts::{OS,ARCH}` + env-var hostname
+        // fallback (std-only - NO extern crate needed, mirrors
+        // the Math/Strings/Args/Env stance from T124f/T124g).
+        // `Process.*` uses `std::process::*` (std-only - NO
+        // extern crate needed, mirrors the Path/Dir.list stance
+        // from T124j). The narrow `program_uses_num_cpus` walker
+        // flags ONLY the `OS.cpus` method name (mirrors the
+        // chrono-over-broad cautionary tale, T124f gotcha: a
+        // generic `program_uses_namespace("OS")` would
+        // over-register num_cpus for programs using only
+        // `OS.name` / `OS.arch` / `OS.hostname`).
+        //
+        // Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/
+        // hex/percent-encoding/uuid/url/serde_yml/csv/walkdir/
+        // tempfile/sha2/md5/hmac registration pattern: single-file
+        // `buff run` rustc path does NOT link num_cpus; cargo-
+        // project wiring is deferred (snapshots + extern_crates
+        // set is the verifiable contract).
+        if program_uses_num_cpus(decls) {
+            self.extern_crates.insert("num_cpus".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -4224,6 +4254,122 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("HMAC.sha256 codegen parse: {e}")))
             }
+            // T124l: Process module - 2 assoc fns wrapping
+            // `std::process::Command` (spawn) + `std::process::exit`
+            // (the side-effecting terminal call). Process is a
+            // runtime-value type (mirrors Regex T124d / URL T124h /
+            // Path T124j). `Process.*` uses ONLY `std::process` - NO
+            // extern crate recorded (mirrors Path/Dir.list stance
+            // from T124j).
+            //
+            // `Process.spawn(command, args)` -> Process. Wraps
+            // `std::process::Command::new(<cmd>).args(<args>).spawn()
+            // .ok()` (the `.ok()` collapses a spawn failure to None
+            // - NEVER panics, matching Buff's "no panicking generated
+            // code" rule). The command + args are passed SEPARATELY
+            // (NOT through a shell) so there's NO shell-injection
+            // vector (the spec's safety stance). The returned value
+            // is `Option<std::process::Child>` - the codegen
+            // instance-method lowerings (.wait / .id) chain `.map()
+            // .unwrap_or_default()` through the Option so spawn-
+            // failure is observable as default Int (0) without
+            // panicking.
+            //
+            // The generated Rust type is `Option<std::process::
+            // Child>`, surfaced in Buff as `Process` (see the
+            // `buff_type_to_syn` arm + the [`Type::Process`] doc).
+            (T::Process, A::Spawn) => {
+                let mut lowered = n_args(self, 2)?;
+                let cmd = lowered.remove(0);
+                let args_expr = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::process::Command::new(#cmd)
+                        .args(#args_expr)
+                        .spawn()
+                        .ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Process.spawn codegen parse: {e}")))
+            }
+            // `Process.exit(code)` -> Void. Wraps
+            // `std::process::exit(<code> as i32)`. The call NEVER
+            // returns (it terminates the program immediately). NOTE:
+            // Rust's `std::process::exit` does NOT run destructors;
+            // the Buff surface inherits that behavior (the spec
+            // calls this out as the "exit yourself" primitive,
+            // distinct from signal-based shutdown which is explicitly
+            // out-of-scope). The `as i32` cast narrows Buff's
+            // default `Int<64>` to the OS's `i32` exit-code width.
+            (T::Process, A::Exit) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::process::exit(#arg as i32)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Process.exit codegen parse: {e}")))
+            }
+            // T124l: OS module - 4 assoc fns wrapping
+            // `std::env::consts::{OS,ARCH}` + env-var hostname +
+            // `num_cpus::get`. OS is namespace-only (mirrors Log /
+            // Toml / Math / Strings / Args / Env / Hash / HMAC).
+            //
+            // `OS.name()` -> String. Wraps
+            // `std::env::consts::OS.to_string()` (compile-time
+            // const - one of `linux` / `macos` / `windows` /
+            // `freebsd` / ...). Zero args.
+            (T::OS, A::Name) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::consts::OS.to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("OS.name codegen parse: {e}")))
+            }
+            // `OS.arch()` -> String. Wraps
+            // `std::env::consts::ARCH.to_string()` (compile-time
+            // const - one of `x86_64` / `aarch64` / `x86` / ...).
+            // Zero args.
+            (T::OS, A::Arch) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::consts::ARCH.to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("OS.arch codegen parse: {e}")))
+            }
+            // `OS.hostname()` -> String. Wraps
+            // `std::env::var("COMPUTERNAME").or_else(|_|
+            // std::env::var("HOSTNAME")).unwrap_or_default()` (empty
+            // String when neither env var is set - NEVER panics).
+            // The bare-minimum env-var approach covering Windows
+            // (COMPUTERNAME) + Unix (HOSTNAME). NO `hostname` crate
+            // added (the spec explicitly forbids it - the codegen-
+            // only linking boundary limit is observed: this call
+            // alone needs NO extern crate). Zero args.
+            (T::OS, A::Hostname) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::env::var("COMPUTERNAME")
+                        .or_else(|_| std::env::var("HOSTNAME"))
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("OS.hostname codegen parse: {e}")))
+            }
+            // `OS.cpus()` -> Int. Wraps `num_cpus::get() as i64`.
+            // The `num_cpus` crate is recorded in codegen
+            // `extern_crates` when a Buff program uses `OS.cpus`
+            // (the narrow `program_uses_num_cpus` walker flags ONLY
+            // the `cpus` method name - `name` / `arch` / `hostname`
+            // use std only and record NO extern crate). Zero args.
+            (T::OS, A::Cpus) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    num_cpus::get() as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("OS.cpus codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -4673,6 +4819,64 @@ impl RustCodegen {
                     )));
                 }
                 Ok(method_call_no_args(recv, "exists"))
+            }
+            // T124l: Process instance methods. Each lowers to a
+            // fully-qualified `std::process::Child` method chained
+            // through the `Option<Child>` wrapper the codegen adds
+            // at spawn time (`Process.spawn` -> `Command::spawn().ok()`).
+            // The Option-wrapper layer keeps the calls panic-free
+            // even when spawn failed - the Option collapses to a
+            // default Int (0) via `.map(...).unwrap_or_default()`.
+            //
+            // `process.wait() -> Int`. Wraps
+            // `recv.map(|mut c| c.wait().map(|s| s.code()
+            // .unwrap_or_default()).unwrap_or_default())
+            // .unwrap_or_default()` (the outer Option handles the
+            // spawn-failed case; the middle Result handles wait()
+            // failure; the inner Option handles signal-terminated
+            // processes that have no exit code - all collapse to
+            // `0` via `unwrap_or_default()`, NEVER panics). Zero
+            // args. The `mut c` binding is required because
+            // `Child::wait` takes `&mut self`.
+            M::Wait => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "wait() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv
+                        .map(|mut c| {
+                            c.wait()
+                                .map(|s| s.code().unwrap_or_default())
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Process.wait codegen parse: {e}")))
+            }
+            // `process.id() -> Int`. Wraps
+            // `recv.map(|c| c.id() as i64).unwrap_or_default()`
+            // (0 when the spawn failed or the process has already
+            // exited and been reaped - NEVER panics). Zero args.
+            // The `as i64` cast widens Rust's `u32` pid to Buff's
+            // default `Int<64>` width.
+            M::Id => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "id() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv
+                        .map(|c| c.id() as i64)
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Process.id codegen parse: {e}")))
             }
         }
     }
@@ -6935,6 +7139,28 @@ impl RustCodegen {
             // `Path` (capitalised per the DateTime / Regex / URL
             // convention); the case mapping happens here.
             Type::Path => "std::path::PathBuf",
+            // T124l: prelude Process type. Plain
+            // `Option<std::process::Child>` path - the Option
+            // wrapper lets `Process.spawn` be panic-free (a spawn
+            // failure collapses to `None`; `.wait()` / `.id()`
+            // chain `.map(...).unwrap_or_default()` through the
+            // Option). Generated code uses the fully-qualified
+            // std path so no `use` import is emitted AND no extern
+            // crate is recorded (std-only - mirrors the Path /
+            // Dir.list / Tempfile.dir stance from T124j). The
+            // generic argument over `Child` is constructed via
+            // `make_generic_path_type` so the emitted Rust type is
+            // `Option<std::process::Child>` (Buff surfaces the
+            // Option wrapper to the user - they observe spawn
+            // failure as a `Process` value whose `.wait()` / `.id()`
+            // return `0`; a future task may surface spawn failure
+            // via a `Result<Process, Error>` if a use case emerges).
+            Type::Process => {
+                return Some(make_generic_path_type(
+                    "Option",
+                    vec![rust_path_type("std::process::Child")],
+                ));
+            }
             Type::Unknown | Type::Void => return None,
             // T124b: DateTime is the only prelude type that needs a generic
             // argument. Return early with the proper generic-argument form
@@ -7805,6 +8031,14 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     "extension",
     "basename",
     "exists",
+    // T124l: Process zero-arg instance methods (`wait` / `id`).
+    // Without these entries the T26 field-access heuristic would
+    // rewrite `process.wait()` as a Rust field access on the
+    // `Option<std::process::Child>` value (which doesn't exist -
+    // the underlying Rust methods are `.wait()` / `.id()` on the
+    // inner `Child`, accessed via the Option's `.map(...)`).
+    "wait",
+    "id",
 ];
 
 /// Build the attribute list for a generated struct: always
@@ -10749,6 +10983,166 @@ fn expr_uses_hmac(expr: &Expr) -> bool {
         }
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_hmac),
         Expr::NamedArg { value, .. } => expr_uses_hmac(value),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T124l - system module emit-on-demand detection (num_cpus extern crate).
+// ONE narrow walker flags the specific (receiver, method) combination
+// (`OS.cpus`) so a program using only `OS.name` / `OS.arch` / `OS.hostname`
+// doesn't pull in `num_cpus` (those calls use std::env::consts + env-var
+// hostname - std-only). It mirrors the `program_uses_dir_walk` shape
+// (T124j) - method-aware narrow walker - rather than the
+// `program_uses_namespace` one-liner (T124h/T124i) which would
+// over-register.
+//
+// NOTE: `Process.*` uses `std::process::*` (std-only - NO extern crate
+// needed, mirrors the Path / Dir.list / Tempfile.dir stance from T124j).
+// No walker is needed for Process - it never records an extern crate.
+// ---------------------------------------------------------------------------
+
+/// T124l: detect `OS.cpus()` calls. The `num_cpus` crate is needed
+/// ONLY for `OS.cpus` (`OS.name` / `OS.arch` use compile-time
+/// `std::env::consts` and `OS.hostname` uses env-var lookup - all
+/// std-only with NO extern crate needed). A NARROW method-aware
+/// walker is required: a generic `program_uses_namespace("OS")`
+/// would over-register num_cpus for programs using only
+/// `OS.name` / `OS.arch` / `OS.hostname` (those compile without
+/// num_cpus in [dependencies]).
+///
+/// Detection recognises a `MethodCall` whose receiver is the bare
+/// Ident `OS` AND whose method name is exactly `cpus`. The
+/// receiver-name + method-name gate mirrors the chrono-over-broad
+/// cautionary tale (T124f gotcha): flags ONLY the specific (OS,
+/// cpus) combination, NOT every `OS.<anything>()` call.
+fn program_uses_num_cpus(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_num_cpus(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_num_cpus`]: scan a block for
+/// `OS.cpus(...)` calls.
+fn block_uses_num_cpus(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_num_cpus)
+}
+
+/// Check a single statement (and its nested expressions) for
+/// `OS.cpus(...)` usage. Mirrors the `stmt_uses_dir_walk` shape
+/// exactly with the `cpus` method-name gate.
+fn stmt_uses_num_cpus(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_num_cpus(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_num_cpus(target) || expr_uses_num_cpus(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => {
+            expr_uses_num_cpus(iter) || block_uses_num_cpus(body)
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_num_cpus(cond) || block_uses_num_cpus(body)
+        }
+        Stmt::ForLet { value, body, .. } => {
+            expr_uses_num_cpus(value) || block_uses_num_cpus(body)
+        }
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_num_cpus(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_num_cpus(e),
+            }) || block_uses_num_cpus(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_num_cpus(expr),
+    }
+}
+
+/// Recursively scan an expression tree for an `OS.cpus(...)` call.
+/// Same conservative bare-Ident-receiver + method-name strategy as
+/// the dir_walk / sha2 / md5 / hmac walkers.
+fn expr_uses_num_cpus(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } => {
+            // Match `OS.cpus(...)` exactly: bare Ident `OS` receiver
+            // AND method name `cpus`. Other OS methods (name / arch /
+            // hostname) do NOT trigger num_cpus registration (they
+            // use std::env::consts / env-var - no extern crate
+            // needed).
+            if method.name == "cpus" {
+                if let Expr::Ident(id, _) = receiver.as_ref() {
+                    if id.name == "OS" {
+                        return true;
+                    }
+                }
+            }
+            expr_uses_num_cpus(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_num_cpus(lhs) || expr_uses_num_cpus(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_num_cpus(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_num_cpus(callee) || args.iter().any(expr_uses_num_cpus)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_num_cpus(cond)
+                || block_uses_num_cpus(then_block)
+                || else_block.as_ref().is_some_and(block_uses_num_cpus)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_num_cpus(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_num_cpus),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_num_cpus(base) || indices.iter().any(expr_uses_num_cpus)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_num_cpus(k) || expr_uses_num_cpus(v)),
+        Expr::Lambda { body, .. } => block_uses_num_cpus(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_num_cpus(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_num_cpus(scrutinee)
+                || arms.iter().any(|arm| block_uses_num_cpus(&arm.body))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_num_cpus(inner),
+        Expr::Try { expr, .. } => expr_uses_num_cpus(expr),
+        Expr::Spawn { task, .. } => expr_uses_num_cpus(task),
+        Expr::Range { start, end, .. } => expr_uses_num_cpus(start) || expr_uses_num_cpus(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_num_cpus(value)
+                || block_uses_num_cpus(then_block)
+                || else_block.as_ref().is_some_and(block_uses_num_cpus)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_num_cpus),
+        Expr::NamedArg { value, .. } => expr_uses_num_cpus(value),
     }
 }
 

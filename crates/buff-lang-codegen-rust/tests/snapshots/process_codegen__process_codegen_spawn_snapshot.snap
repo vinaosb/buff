@@ -1,0 +1,7 @@
+---
+source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+expression: src
+---
+fn f() {
+    std::process::Command::new("ls").args(vec![]).spawn().ok();
+}

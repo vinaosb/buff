@@ -1,0 +1,22 @@
+﻿T124l Process & OS modules - VERIFICATION EVIDENCE
+Date: 2026-07-20  parent HEAD: 3471c18
+GATES:
+- cargo test -p buff-lang-codegen-rust --test process_codegen => 30 passed; 0 failed (EXIT 0)
+- cargo clippy --workspace --all-targets -- -D warnings => EXIT 0 (Finished)
+- cargo test --workspace --exclude buff-lang-runtime => EXIT 0 (no FAILED)
+TYPE: Type::Process runtime-value variant (mirror Type::Path); underlying Rust = Option<std::process::Child>.
+CODEGEN (panic-free, fully-qualified, no top-level use):
+- Process.spawn(cmd,args) => std::process::Command::new(cmd).args(args).spawn().ok()   # Option<Child>, injection-safe (args separate, no shell)
+- process.wait() => p.map(|mut c| c.wait().map(|s| s.code().unwrap_or_default()).unwrap_or_default()).unwrap_or_default()  # 3-layer, NEVER panics
+- process.id()   => p.map(|c| c.id() as i64).unwrap_or_default()   # (.clone() inserted when p already moved by prior wait)
+- Process.exit(code) => std::process::exit(code as i32)
+- OS.name()     => std::env::consts::OS.to_string()
+- OS.arch()     => std::env::consts::ARCH.to_string()
+- OS.hostname() => std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default()   # env-var hostname, no crate
+- OS.cpus()     => num_cpus::get() as i64
+DEPS: num_cpus 1 (root [workspace.dependencies]).
+WALKER: program_uses_num_cpus (narrow, OS.cpus only) -> extern_crates "num_cpus". Process.*/OS.name/arch/hostname = std-only, NO extern crate.
+REGISTRY: OS namespace-only, Process runtime-value; count->27, namespace-only count->18. Both tests bumped (workspace green).
+SNAPSHOTS: 9 (spawn/wait/id/exit/full_program + os name/arch/hostname/cpus). process_codegen.rs 30 tests.
+BUG FOUND+FIXED during review: unbound rgs ident in tests broke inference -> p:Unknown -> instance dispatch fell through to bare p.wait()/p.id() (non-compiling). Fixed by empty-array arg so p binds Type::Process; wait/id arms were correct. See issues.md.
+Codegen-only linking boundary: single-file buff run rustc does NOT link num_cpus; cargo-project wiring deferred.

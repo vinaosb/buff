@@ -1379,7 +1379,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Hash (SHA-256/512, MD5) and HMAC crypto modules`
 
-- [ ] **T124l: Process & OS modules — Process, OS info** [quick]
+- [x] **T124l: Process & OS modules — Process, OS info** [quick]
 
   **What to do**:
   - `Process`: `Process.spawn(command, args) -> Process` (NOTE: wraps `std::process::Command::new(cmd).args(args)` — does NOT shell out; command and args are separate parameters to prevent shell injection). `.wait() -> Int` (exit code), `Process.exit(code)`, `Process.id() -> Int` — wrap `std::process::Command`
