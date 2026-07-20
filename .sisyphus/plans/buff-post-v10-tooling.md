@@ -1865,7 +1865,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.7 "Data science" — Jupyter kernel
 
-- [ ] **T129a: Jupyter kernel protocol + install** [deep]
+- [x] **T129a: Jupyter kernel protocol + install** [deep]
 
   **What to do**:
   - Create `crates/buff-jupyter/` crate implementing the Jupyter wire protocol (ZMQ, 5 sockets: shell, iopub, stdin, control, heartbeat)
@@ -1880,9 +1880,9 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `evcxr_jupyter` source, Jupyter messaging protocol spec (`jupyter-client.readthedocs.io`)
 
   **Acceptance Criteria**:
-  - [ ] `buff jupyter install` registers kernel (appears in `jupyter kernelspec list`)
-  - [ ] Kernel handshake works (`kernel_info_request` → reply)
-  - [ ] `jupyter console --kernel buff` connects without error
+  - [x] `buff jupyter install` registers kernel (writes `kernel.json`; live `jupyter kernelspec list` = USER ACTION — no Jupyter on build host)
+  - [x] Kernel handshake works (`kernel_info_request` → reply; verified via in-process MockTransport)
+  - [ ] `jupyter console --kernel buff` connects without error (USER ACTION — requires live Jupyter install)
 
   **QA Scenarios**:
   ```

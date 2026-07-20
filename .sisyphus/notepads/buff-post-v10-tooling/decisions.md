@@ -515,3 +515,7 @@ The task spec said `:type x` prints `Int`; reality is `Int<64>` (Buff's default 
 - Treated [quick]-tagged T128 as a full feature (real tree render + registry round-trip tests, 13 integration tests) per orchestrator standard.
 - uff deps renders only the 3 modern dep kinds (rust-deps, git-dependencies, registry-dependencies); legacy [dependencies] section omitted from output per spec scope.
 - uff outdated targets registry-dependencies only (git/rust deps have no registry version concept). uff audit/security deferred to v2.0 as specified.
+
+## T129a - zeromq dependency choice
+
+- Chose `zeromq = "0.4"` (resolves 0.4.1), the PURE-RUST ZeroMQ impl (RouterSocket/PubSocket/RepSocket), NOT the C-linked `zmq`/`libzmq` crate. Rationale: this Windows host cannot reliably compile arbitrary C shims (same class of issue that forced hand-rolled lexer/parser and removal of chumsky). Pure-Rust zeromq builds cleanly with no libzmq. Also added `bytes` to workspace deps for ZmqMessage frame construction. Kernel socket I/O is behind a `ZmqTransport` trait so it is swappable + unit-testable via MockTransport.
