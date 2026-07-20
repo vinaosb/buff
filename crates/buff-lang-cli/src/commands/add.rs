@@ -1,11 +1,22 @@
-//! `buff add <SPEC> [--branch <X> | --tag <X> | --rev <X>]` — add a git
-//! dependency to the project's `buff.toml` (T122).
+//! `buff add <SPEC> [--branch <X> | --tag <X> | --rev <X>]` — add a
+//! dependency to the project's `buff.toml` (T122 git, T127 registry).
 //!
-//! `<SPEC>` is `git+<URL>` (e.g. `git+https://github.com/user/lib.buff`).
-//! The `git+` prefix is mandatory — it identifies the dependency kind and
-//! is stripped before the URL is passed to `git clone`.
+//! `<SPEC>` selects the dependency kind:
 //!
-//! ## What `buff add` does
+//! - **`git+<URL>`** (T122): clones the repo to
+//!   `~/.buff/git/<sha256(url)[..16]>/` and records it under
+//!   `[git-dependencies]`. `--branch`/`--tag`/`--rev` qualifiers
+//!   translate to the corresponding git-clone flags. The clone is
+//!   reused on subsequent adds (idempotent).
+//! - **`<name>` or `<name>@<req>`** (T127): resolves `<name>` against
+//!   the buff registry (HTTP `/api/v1/resolve`), fetches its metadata
+//!   (`/api/v1/package`), and records it under
+//!   `[registry-dependencies]` with the resolved requirement. The
+//!   registry URL comes from `$BUFF_REGISTRY_URL` (default
+//!   `http://127.0.0.1:7878`). The `--branch`/`--tag`/`--rev` flags
+//!   are ignored on this path (a warning is logged to stderr).
+//!
+//! ## What `buff add` does (git path)
 //!
 //! 1. **Validate** the spec (`git+` prefix present, URL non-empty).
 //! 2. **Derive the dependency name** from the URL's last path segment,
@@ -22,7 +33,18 @@
 //!    `[git-dependencies]` section via a `toml::Value` round-trip that
 //!    preserves all other sections.
 //!
-//! ## Path strategy
+//! ## What `buff add` does (registry path)
+//!
+//! 1. **Parse the spec** into `(name, optional req)`. If `req` is
+//!    absent it defaults to `*` (any version).
+//! 2. **Resolve** `<name>` against `/api/v1/resolve/<name>?req=<req>`
+//!    to get the highest published version.
+//! 3. **Fetch metadata** via `/api/v1/package/<name>` and log the
+//!    declared dependencies (informational).
+//! 4. **Upsert the entry** in the project's `buff.toml` under the
+//!    `[registry-dependencies]` section.
+//!
+//! ## Path strategy (git)
 //!
 //! The cloned checkout is shared across projects (one canonical copy per
 //! URL). `generate_cargo_toml` emits a local-path dependency entry
@@ -32,9 +54,11 @@
 //!
 //! ## Errors
 //!
-//! - Fails if `git` cannot be invoked (not installed / not in `PATH`).
+//! - Fails if `git` cannot be invoked (not installed / not in `PATH`)
+//!   on the git path.
 //! - Fails if `git clone` or `git checkout` exits non-zero.
-//! - Fails if the project's `buff.toml` is missing or unparseable.
+//! - Fails if the project's `buff.toml` is missing or un-parseable.
+//! - Fails if the registry is unreachable on the registry path.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,27 +66,88 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
-use crate::config::{git_checkout_path_for, BuffConfig, GitDependency};
+use crate::config::{git_checkout_path_for, BuffConfig, GitDependency, RegistryDependency};
 
-/// The mandatory prefix on every `buff add` spec.
+/// The mandatory prefix on every `buff add` git spec.
 const GIT_PREFIX: &str = "git+";
 
 /// Entry point for `buff add <SPEC> [--branch <X> | --tag <X> | --rev <X>]`.
 ///
-/// Resolves the Buff cache home via [`crate::config::buff_home_dir`] then
-/// delegates to [`run_with_home`]. The split lets integration tests drive
-/// the full pipeline against an isolated tempdir without mutating
-/// process-wide env vars.
+/// Detects whether `<SPEC>` is a git spec (`git+<URL>`) or a registry
+/// spec (`<name>` / `<name>@<req>`) and dispatches accordingly. Falls
+/// back to the git path with the existing validation error when the
+/// spec doesn't match either shape.
 pub fn run(spec: &str, branch: Option<&str>, tag: Option<&str>, rev: Option<&str>) -> Result<()> {
-    let home = crate::config::buff_home_dir().map_err(anyhow::Error::msg)?;
-    run_with_home(spec, branch, tag, rev, &home)
+    if is_registry_spec(spec) {
+        if branch.is_some() || tag.is_some() || rev.is_some() {
+            eprintln!(
+                "warning: --branch/--tag/--rev are git-dep qualifiers and \
+                 are ignored on the registry path (`{spec}`)"
+            );
+        }
+        let base_url = crate::commands::registry::registry_url();
+        run_registry(spec, &base_url)
+    } else {
+        let home = crate::config::buff_home_dir().map_err(anyhow::Error::msg)?;
+        run_with_home(spec, branch, tag, rev, &home)
+    }
 }
 
-/// Same as [`run`] but takes the Buff cache home directory explicitly.
+/// Detect whether the spec is a registry dep (`name` / `name@req`) or
+/// a git dep (`git+<URL>`).
+///
+/// A registry spec must satisfy [`is_valid_registry_name`] on the
+/// `<name>` portion (the part before any `@`). Anything else falls
+/// through to the git path (which will reject it with the existing
+/// "spec must start with `git+`" error).
+pub fn is_registry_spec(spec: &str) -> bool {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with(GIT_PREFIX) {
+        return false;
+    }
+    let (name, _req) = split_registry_spec(trimmed);
+    is_valid_registry_name(name)
+}
+
+/// Split `<name>@<req>` into `(name, Some(req))`. Returns `(spec, None)`
+/// when no `@` separator is present.
+pub fn split_registry_spec(spec: &str) -> (&str, Option<&str>) {
+    match spec.find('@') {
+        Some(idx) => {
+            let (name, rest) = spec.split_at(idx);
+            // Skip the '@' itself.
+            let req = &rest[1..];
+            (name, Some(req))
+        }
+        None => (spec, None),
+    }
+}
+
+/// Validate a registry package name locally. Mirrors the charset the
+/// registry itself enforces (see `buff_registry::validate_name`):
+/// ASCII lowercase, digits, hyphen, underscore; no path separators;
+/// no `..` segment.
+pub fn is_valid_registry_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 64 {
+        return false;
+    }
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+/// Same as the git-path-only portion of [`run`], taking the Buff cache
+/// home directory explicitly.
 ///
 /// `buff_home` is the directory under which `git/<hash>/` checkouts are
 /// placed (typically `~/.buff`). Used by integration tests to isolate
-/// the checkout cache to a per-test tempdir.
+/// the checkout cache to a per-test tempdir. The registry path doesn't
+/// need a cache home — see [`run_registry`] for that flow.
 pub fn run_with_home(
     spec: &str,
     branch: Option<&str>,
@@ -121,6 +206,68 @@ pub fn run_with_home(
     upsert_git_dependency(&project_toml, &name, &dep)?;
     eprintln!(
         "Added git dependency `{name}` to `[git-dependencies]` in {}",
+        project_toml.display()
+    );
+    Ok(())
+}
+
+/// Registry-path entry point for `buff add <name>[@<req>]`.
+///
+/// 1. Parse the spec into `(name, req)`, defaulting `req` to `*`.
+/// 2. Resolve via `/api/v1/resolve/<name>?req=<req>`.
+/// 3. Fetch metadata via `/api/v1/package/<name>` (informational).
+/// 4. Upsert the entry in the project's `buff.toml` under
+///    `[registry-dependencies]`.
+pub fn run_registry(spec: &str, base_url: &str) -> Result<()> {
+    let (name, req_opt) = split_registry_spec(spec.trim());
+    let req = req_opt.unwrap_or("*").trim();
+    if !is_valid_registry_name(name) {
+        bail!(
+            "invalid registry package name `{name}` — allowed charset is \
+             [a-z0-9_-], max 64 chars, no path separators or `..`"
+        );
+    }
+    if req.is_empty() {
+        bail!("invalid version requirement in spec `{spec}` — empty after `@`");
+    }
+
+    eprintln!("Resolving registry dependency `{name}` (req = {req}) on {base_url}");
+    let resolved = crate::commands::registry::resolve_version(base_url, name, req)
+        .with_context(|| format!("could not resolve `{name}` (req `{req}`) on {base_url}"))?;
+    eprintln!("Resolved {name} -> {}", resolved.version);
+
+    // Metadata fetch is informational — if it fails, the resolve already
+    // proved the package exists, so we don't bail.
+    match crate::commands::registry::fetch_package_metadata(base_url, name) {
+        Ok(meta) => {
+            let n_versions = meta.versions.len();
+            let total_deps: usize = meta.versions.iter().map(|v| v.deps.len()).sum();
+            eprintln!(
+                "Package `{name}` has {n_versions} published version(s); \
+                 {total_deps} total declared dep edge(s)"
+            );
+        }
+        Err(e) => {
+            eprintln!("warning: could not fetch metadata for `{name}` ({e:#})");
+        }
+    }
+
+    let project_toml = PathBuf::from("buff.toml");
+    if !project_toml.is_file() {
+        bail!(
+            "no `buff.toml` in current directory — run `buff init` first or \
+             change to a Buff project root"
+        );
+    }
+    let dep = RegistryDependency {
+        version: req.to_string(),
+        checksum: None,
+    };
+    upsert_registry_dependency(&project_toml, name, &dep)?;
+    eprintln!(
+        "Added registry dependency `{name}` (req `{req}`, resolved {}) to \
+         `[registry-dependencies]` in {}",
+        resolved.version,
         project_toml.display()
     );
     Ok(())
@@ -250,6 +397,35 @@ pub fn upsert_git_dependency(path: &Path, name: &str, dep: &GitDependency) -> Re
     let entry_value = toml::Value::try_from(dep)
         .with_context(|| format!("failed to serialize git dep {name}"))?;
     git_table.insert(name.to_string(), entry_value);
+    let new_text = toml::to_string_pretty(&root)
+        .with_context(|| format!("failed to serialize {}", path.display()))?;
+    fs::write(path, new_text).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+/// Insert or replace `<name>` in the project's `buff.toml` under the
+/// `[registry-dependencies]` section (T127).
+///
+/// Mirrors [`upsert_git_dependency`]: the whole document is round-tripped
+/// through `toml::Value` so every other section is preserved byte-for-byte
+/// (modulo TOML pretty-printing).
+pub fn upsert_registry_dependency(path: &Path, name: &str, dep: &RegistryDependency) -> Result<()> {
+    let text =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut root: toml::Value = toml::from_str(&text)
+        .with_context(|| format!("failed to parse {} as TOML", path.display()))?;
+    let table = root
+        .as_table_mut()
+        .with_context(|| format!("{} root is not a table", path.display()))?;
+    let reg_deps = table
+        .entry("registry-dependencies".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+    let reg_table = reg_deps
+        .as_table_mut()
+        .with_context(|| "[registry-dependencies] is not a table")?;
+    let entry_value = toml::Value::try_from(dep)
+        .with_context(|| format!("failed to serialize registry dep {name}"))?;
+    reg_table.insert(name.to_string(), entry_value);
     let new_text = toml::to_string_pretty(&root)
         .with_context(|| format!("failed to serialize {}", path.display()))?;
     fs::write(path, new_text).with_context(|| format!("failed to write {}", path.display()))?;
@@ -483,6 +659,186 @@ mod tests {
             cfg.dependencies.get("serde").map(|s| s.as_str()),
             Some("1.0")
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------
+    // T127 — registry-spec detection + upsert
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn is_registry_spec_recognizes_bare_name() {
+        assert!(is_registry_spec("demo"));
+        assert!(is_registry_spec("my-lib"));
+        assert!(is_registry_spec("lib_2"));
+    }
+
+    #[test]
+    fn is_registry_spec_recognizes_name_at_version() {
+        assert!(is_registry_spec("demo@1.0.0"));
+        assert!(is_registry_spec("demo@^1.0.0"));
+        assert!(is_registry_spec("my-lib@*"));
+    }
+
+    #[test]
+    fn is_registry_spec_rejects_git_prefix() {
+        assert!(!is_registry_spec("git+https://example/x.buff"));
+    }
+
+    #[test]
+    fn is_registry_spec_rejects_uppercase_and_path_traversal() {
+        // Uppercase doesn't satisfy validate_name.
+        assert!(!is_registry_spec("Demo"));
+        // Path traversal rejected.
+        assert!(!is_registry_spec("../evil"));
+        assert!(!is_registry_spec("a/b"));
+        // Empty.
+        assert!(!is_registry_spec(""));
+        assert!(!is_registry_spec("   "));
+    }
+
+    #[test]
+    fn split_registry_spec_separates_name_and_req() {
+        assert_eq!(split_registry_spec("demo"), ("demo", None));
+        assert_eq!(split_registry_spec("demo@1.0.0"), ("demo", Some("1.0.0")));
+        assert_eq!(split_registry_spec("demo@^1.0.0"), ("demo", Some("^1.0.0")));
+        // Bare `@` (empty req) still splits — validation happens later.
+        assert_eq!(split_registry_spec("demo@"), ("demo", Some("")));
+    }
+
+    #[test]
+    fn is_valid_registry_name_accepts_canonical_form() {
+        assert!(is_valid_registry_name("foo"));
+        assert!(is_valid_registry_name("foo-bar"));
+        assert!(is_valid_registry_name("foo_bar"));
+        assert!(is_valid_registry_name("foo123"));
+    }
+
+    #[test]
+    fn is_valid_registry_name_rejects_uppercase_traversal_long() {
+        assert!(!is_valid_registry_name("Foo"));
+        assert!(!is_valid_registry_name(""));
+        assert!(!is_valid_registry_name("../evil"));
+        assert!(!is_valid_registry_name("a/b"));
+        assert!(!is_valid_registry_name(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn upsert_registry_dependency_into_minimal_manifest() {
+        let dir = std::env::temp_dir().join(format!(
+            "buff-add-reg-upsert-{}-minimal",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("buff.toml");
+        fs::write(&path, "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n").unwrap();
+
+        let dep = RegistryDependency {
+            version: "^1.0.0".to_string(),
+            checksum: None,
+        };
+        upsert_registry_dependency(&path, "lib", &dep).expect("upsert must succeed");
+
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("registry-dependencies"),
+            "missing registry-dependencies section: {written}"
+        );
+        assert!(written.contains("lib"), "missing dep name: {written}");
+        assert!(written.contains("^1.0.0"), "missing version req: {written}");
+        // Original [package] section must be preserved.
+        assert!(
+            written.contains("[package]"),
+            "missing original section: {written}"
+        );
+        assert!(
+            written.contains("name = \"demo\""),
+            "missing original name: {written}"
+        );
+
+        // Re-parse with BuffConfig to validate schema round-trip.
+        let cfg = BuffConfig::parse(&written).expect("round-trip parse");
+        let lib = cfg
+            .registry_dependencies
+            .get("lib")
+            .expect("lib present in registry_dependencies");
+        assert_eq!(lib.version, "^1.0.0");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_registry_dependency_replaces_existing_entry() {
+        let dir = std::env::temp_dir().join(format!(
+            "buff-add-reg-upsert-{}-replace",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("buff.toml");
+        fs::write(
+            &path,
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\
+             \n[registry-dependencies]\n\
+             lib = { version = \"^1.0.0\" }\n",
+        )
+        .unwrap();
+
+        // Upsert with a NEW version requirement — must replace, not duplicate.
+        let dep = RegistryDependency {
+            version: "^2.0.0".to_string(),
+            checksum: None,
+        };
+        upsert_registry_dependency(&path, "lib", &dep).expect("upsert must succeed");
+
+        let written = fs::read_to_string(&path).unwrap();
+        let cfg = BuffConfig::parse(&written).expect("round-trip parse");
+        assert_eq!(
+            cfg.registry_dependencies.len(),
+            1,
+            "must not duplicate: {written}"
+        );
+        let lib = cfg.registry_dependencies.get("lib").expect("lib present");
+        assert_eq!(lib.version, "^2.0.0", "version must be replaced");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_registry_dependency_preserves_other_dep_sections() {
+        let dir = std::env::temp_dir().join(format!(
+            "buff-add-reg-upsert-{}-preserve",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("buff.toml");
+        fs::write(
+            &path,
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\
+             \n[dependencies]\nserde = \"1.0\"\n\
+             \n[git-dependencies]\n\
+             gitlib = { git = \"https://example/g.buff\" }\n",
+        )
+        .unwrap();
+
+        let dep = RegistryDependency {
+            version: "*".to_string(),
+            checksum: None,
+        };
+        upsert_registry_dependency(&path, "reglib", &dep).expect("upsert");
+
+        let written = fs::read_to_string(&path).unwrap();
+        let cfg = BuffConfig::parse(&written).expect("round-trip parse");
+        // All three dependency sections must coexist.
+        assert_eq!(
+            cfg.dependencies.get("serde").map(|s| s.as_str()),
+            Some("1.0")
+        );
+        assert!(cfg.git_dependencies.contains_key("gitlib"));
+        assert!(cfg.registry_dependencies.contains_key("reglib"));
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

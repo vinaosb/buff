@@ -160,6 +160,7 @@ fn generate_cargo_toml_emits_virtual_workspace_manifest() {
         profile: Default::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        registry_dependencies: BTreeMap::new(),
         workspace: Some(WorkspaceSection {
             members: vec!["pkg-a".to_string(), "pkg-b".to_string()],
             resolver: None,
@@ -194,6 +195,7 @@ fn generate_cargo_toml_workspace_respects_custom_resolver() {
         profile: Default::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        registry_dependencies: BTreeMap::new(),
         workspace: Some(WorkspaceSection {
             members: vec!["only".to_string()],
             resolver: Some("1".to_string()),
@@ -218,6 +220,7 @@ fn generate_cargo_toml_workspace_is_deterministic() {
         profile: Default::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        registry_dependencies: BTreeMap::new(),
         workspace: Some(WorkspaceSection {
             members: vec!["zpkg".to_string(), "apkg".to_string()],
             resolver: None,
@@ -238,6 +241,7 @@ fn generate_cargo_toml_workspace_preserves_member_order() {
         profile: Default::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        registry_dependencies: BTreeMap::new(),
         workspace: Some(WorkspaceSection {
             members: vec!["zeta".to_string(), "alpha".to_string(), "mid".to_string()],
             resolver: None,
@@ -262,6 +266,7 @@ fn generate_cargo_toml_workspace_empty_members_still_emits_header() {
         profile: Default::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        registry_dependencies: BTreeMap::new(),
         workspace: Some(WorkspaceSection {
             members: vec![],
             resolver: None,

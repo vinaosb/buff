@@ -1792,7 +1792,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(registry): minimal Buff package registry server`
 
-- [ ] **T127: buff CLI package commands (publish/install/add)** [unspecified-high]
+- [x] **T127: buff CLI package commands (publish/install/add)** [unspecified-high]
 
   **What to do**:
   - `buff add <name>[@version]` — fetch from registry, update buff.toml, resolve deps
@@ -1808,11 +1808,11 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `crates/buff-lang-cli/src/`, T122 (git deps), T126 (registry API)
 
   **Acceptance Criteria**:
-  - [ ] `buff login` stores credentials
-  - [ ] `buff add <pkg>` fetches and adds to buff.toml
-  - [ ] `buff publish` uploads package to registry
-  - [ ] `buff install <binary>` installs CLI tool
-  - [ ] Consumed package's functions callable
+  - [x] `buff login` stores credentials
+  - [x] `buff add <pkg>` fetches and adds to buff.toml
+  - [x] `buff publish` uploads package to registry
+  - [x] `buff install <binary>` installs CLI tool
+  - [ ] Consumed package's functions callable — DEFERRED: `buff add` records the dep + tarball round-trips, but end-to-end build+run of a consumed package needs multi-file/package linking (CLI compiles one .buff file at a time; same v0.5 codegen-only gap). Post-v1.0 work.
 
   **QA Scenarios**:
   ```

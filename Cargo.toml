@@ -372,3 +372,42 @@ semver = "1"
 # web UI) resolves to the same in-tree version during the v1.6 tooling
 # wave.
 buff-registry = { path = "crates/buff-registry" }
+# T127: HTTP client + tarball builder for `buff` CLI package-management
+# subcommands (`buff login` / `buff add <name>` / `buff publish` /
+# `buff install`). Two new top-level crates, both pure-Rust (no native
+# C deps, no OpenSSL — matches the "no C library, no Docker" hard rule
+# from the T127 task spec):
+#
+# - `reqwest` 0.12: the de-facto Rust HTTP client. We pin to 0.12 (the
+#   current stable major; the long-standing surface since 0.11 —
+#   `reqwest::blocking::Client::post().json()` + `.bearer_auth(token)`
+#   is identical across both). Features:
+#     * `default-features = false` — drop the default-on native-tls
+#       (OpenSSL on Linux, SChannel on Windows, SecureTransport on
+#       macOS) so we do NOT pull a native C TLS stack. The T126
+#       registry uses plain HTTP for v1.6 so technically any TLS would
+#       do, but the spec mandates rustls-tls so the same client can
+#       point at a TLS-fronted registry without a rebuild.
+#     * `rustls-tls` — pure-Rust TLS via rustls + ring (no native dep).
+#       Matches the "no OpenSSL on Windows" mandate from the T127
+#       task spec.
+#     * `json` — `reqwest::blocking::Response::json::<T>()` for
+#       decoding `PublishResponse` / `ResolveResponse` /
+#       `PackageMetadata`.
+#     * `blocking` — `reqwest::blocking::Client` for synchronous CLI
+#       use. The CLI commands are sync (matching the existing
+#       `commands::build`/`run`/`add` pattern); a blocking client
+#       avoids spinning up a tokio runtime inside each command. Tests
+#       that need async (in-process registry on a `tokio::test`)
+#       spawn the server on a separate multi-thread runtime worker.
+# - `tar` 0.4: the burntsushi/tar crate (the long-standing Rust tar
+#   impl, stable since 0.4). API used: `tar::Builder::new(Vec::new())`
+#   + `append_dir_all(prefix, src_dir)` to pack the project's `.buff`
+#   sources into a `Vec<u8>` for the publish endpoint, and
+#   `tar::Archive::new(&bytes[..])` + `unpack(dest)` for install.
+#   Pure-Rust, no native C deps, no compression (we ship the raw tar
+#   bytes — the registry base64-encodes them inside the JSON publish
+#   envelope, so gzip would just add CPU). The `flate2` optional
+#   compression crate is NOT pulled.
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+tar = "0.4"

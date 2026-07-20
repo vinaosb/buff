@@ -18,12 +18,38 @@ anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true
 # T122: sha2 used to deterministically hash git-dependency URLs into stable
 # checkout directory names (`~/.buff/git/<sha256(url)[..16]>/`). The same
 # crate is already pinned at the workspace level (T124k Hash/HMAC prelude
 # modules); we reuse the pin to avoid pulling a second version.
 sha2.workspace = true
+# T127: package-management subcommands talk to the buff-registry HTTP
+# API. `reqwest` (blocking client, rustls-tls) is used by
+# `commands::{login, publish, install}` + the registry path of
+# `commands::add`. `tar` packs the project's `.buff` sources into a
+# `Vec<u8>` for `buff publish` and unpacks downloaded tarballs for
+# `buff install`. Both workspace pins already mandate rustls /
+# pure-Rust (no native C dep), matching the T127 task spec.
+reqwest.workspace = true
+tar.workspace = true
+# T127: `base64` round-trips the tarball bytes inside the JSON publish
+# envelope, mirroring the wire shape `buff-registry` expects
+# (`PublishRequest { tarball_b64: String }`). Already pinned at the
+# workspace level (T124h Web/Base64 prelude module); reused here
+# without re-pinning.
+base64.workspace = true
+# T127: `semver` parses `name@version` specifiers on `buff add <name>`
+# and matches them against the registry's resolve endpoint output.
+# Already pinned at the workspace level (T126 buff-registry); reused
+# here without re-pinning.
+semver.workspace = true
+# T127: `dirs::home_dir()` resolves the user home for the credential
+# store (`~/.buff/credentials`) on `buff login`. Already pinned at the
+# workspace level (T125c REPL history file); reused here without
+# re-pinning.
+dirs.workspace = true
 buff-lang-ast.workspace = true
 buff-lang-lexer.workspace = true
 buff-lang-parser.workspace = true
@@ -38,3 +64,12 @@ buff-repl.workspace = true
 [dev-dependencies]
 insta.workspace = true
 syn.workspace = true
+# T127: integration tests in `tests/registry_cli_t127.rs` drive the
+# `buff-registry` HTTP app IN-PROCESS — they build
+# `buff_registry::app(state)` and serve it on an ephemeral
+# `tokio::net::TcpListener` bound to `127.0.0.1:0` via
+# `axum::serve(listener, app)`, then point the CLI's reqwest client at
+# that address. Pure-Rust, no native C deps, matches the "no Docker,
+# no external services" mandate.
+buff-registry.workspace = true
+axum.workspace = true

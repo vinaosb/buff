@@ -23,6 +23,7 @@ fn minimal_cfg(name: &str) -> BuffConfig {
         profile: Profiles::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        registry_dependencies: BTreeMap::new(),
         workspace: None,
     }
 }

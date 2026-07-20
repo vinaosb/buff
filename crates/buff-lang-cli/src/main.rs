@@ -71,5 +71,8 @@ fn main() -> Result<()> {
             tag.as_deref(),
             rev.as_deref(),
         ),
+        Command::Login { token } => buff_lang_cli::commands::login::run(token.as_deref()),
+        Command::Publish => buff_lang_cli::commands::publish::run(),
+        Command::Install { name } => buff_lang_cli::commands::install::run(&name).map(|_| ()),
     }
 }

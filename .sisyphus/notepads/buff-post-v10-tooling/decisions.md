@@ -505,3 +505,8 @@ The task spec said `:type x` prints `Int`; reality is `Int<64>` (Buff's default 
 ## T126
 - User chose 'build code + local tests only' because the registry needs external infra I cannot provision (Postgres, object storage, paid hosting, GitHub OAuth, live domain). Delivered the axum server + in-memory backend + full local integration tests; deploy/OAuth/live-domain/Postgres/S3/ops-runbook are USER ACTIONS.
 - Did NOT add diesel/postgres (would need libpq on Windows) nor any [features] section (repo hard rule) -- so the in-memory backend is the only shipped Storage impl for now.
+
+## T127 acceptance (2026-07-20)
+- 4/5 acceptance items checked (login/add/publish/install — all proven by in-process integration tests).
+- "Consumed package's functions callable" LEFT UNCHECKED: honest gap — CLI compiles one .buff file at a time (README modules note); cross-package/multi-file linking is the same v0.5 codegen-only gap, deferred post-v1.0. Not claimed as done.
+- Registry base URL env: `BUFF_REGISTRY_URL` (default http://127.0.0.1:7878). Live remote deploy remains a USER ACTION.

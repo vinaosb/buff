@@ -137,6 +137,21 @@ pub struct BuffConfig {
     /// written before T122 still parse).
     #[serde(default, rename = "git-dependencies")]
     pub git_dependencies: BTreeMap<String, GitDependency>,
+    /// `[registry-dependencies]` — registry-source Buff package
+    /// dependencies (T127). Each entry is `name = { version = "req" }`,
+    /// where `version` is a Cargo-style semver requirement (`^1.0.0`,
+    /// `*`, etc.). Populated by `buff add <name>[@version]` after
+    /// resolving against a `buff-registry` HTTP endpoint. Defaults to
+    /// empty (forward-compat — manifests written before T127 still
+    /// parse).
+    ///
+    /// The actual tarball download / unpack / link step into the
+    /// generated Cargo project is deferred (mirrors the v0.5+v1.0
+    /// "cargo-project wiring is deferred" precedent the rest of the
+    /// CLI already follows); for v1.6 the entry is recorded so a
+    /// future `buff build` can resolve it.
+    #[serde(default, rename = "registry-dependencies")]
+    pub registry_dependencies: BTreeMap<String, RegistryDependency>,
     /// `[workspace]` — virtual workspace manifest (T123). When `Some`,
     /// this `buff.toml` is a workspace ROOT that lists member project
     /// subdirectories; the generated `Cargo.toml` emits a matching
@@ -208,6 +223,34 @@ pub struct GitDependency {
     /// `git -C <checkout> checkout <rev>` AFTER the initial clone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+}
+
+/// A single `[registry-dependencies]` entry (T127).
+///
+/// Mirrors the registry-source slice of Cargo's `[dependencies]` table:
+/// a mandatory `version` requirement string. The CLI `buff add
+/// <name>[@req]` command resolves the requirement against a
+/// `buff-registry` HTTP endpoint and inserts an entry here.
+///
+/// # Determinism
+///
+/// `Serialize` skips `Option::None` fields so the emitted TOML contains
+/// only the qualifiers the user actually set (no `checksum = ""`
+/// clutter). Iterating a `BTreeMap<String, RegistryDependency>` yields
+/// entries in alphabetical-name order, so any future `generate_cargo_toml`
+/// extension stays byte-deterministic for a given config.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct RegistryDependency {
+    /// Cargo-style semver requirement resolved by `buff add` (e.g.
+    /// `^1.0.0`, `*`, `=1.2.3`). Stored verbatim from the user-facing
+    /// `name@req` spec, defaulting to `*` when no version is given.
+    pub version: String,
+    /// Optional content hash (sha256 hex) of the resolved tarball, for
+    /// future integrity verification on `buff build`. Currently never
+    /// set by `buff add`; reserved here so adding it later is a pure
+    /// addition (no schema break).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
 }
 
 /// `[package]` section of `buff.toml`.
@@ -492,6 +535,26 @@ pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
                     ));
                 }
             }
+        }
+    }
+
+    // [registry-dependencies] entries (T127) are recorded in buff.toml
+    // but have NO cargo-project wiring yet — the tarball download /
+    // unpack / vendor step is deferred (mirrors the v0.5+v1.0
+    // "cargo-project wiring is deferred" precedent). We emit a
+    // comment-only block so:
+    //   - the user sees the dep is recorded,
+    //   - the build breaks loudly (no silent skipped dep),
+    //   - a future `buff build` extension can replace the comment with
+    //     a real `name = { path = "<vendor>/<name>-<version>" }` entry
+    //     once vendoring lands.
+    if !cfg.registry_dependencies.is_empty() {
+        out.push_str("\n# [registry-dependencies] (T127 — cargo wiring TODO)\n");
+        for (name, dep) in &cfg.registry_dependencies {
+            out.push_str(&format!(
+                "# {name} = \"{}\" (resolve + vendor on next `buff build`)\n",
+                dep.version
+            ));
         }
     }
 
@@ -940,6 +1003,7 @@ mid = { git = "https://example/m.buff" }
                 );
                 m
             },
+            registry_dependencies: BTreeMap::new(),
             workspace: None,
         };
         let cargo = generate_cargo_toml(&cfg);
@@ -990,6 +1054,7 @@ mid = { git = "https://example/m.buff" }
                 );
                 m
             },
+            registry_dependencies: BTreeMap::new(),
             workspace: None,
         };
         let cargo = generate_cargo_toml(&cfg);
@@ -1010,10 +1075,11 @@ mid = { git = "https://example/m.buff" }
             profile: Default::default(),
             rust_deps: BTreeMap::new(),
             git_dependencies: BTreeMap::new(),
+            registry_dependencies: BTreeMap::new(),
             workspace: None,
         };
         let cargo = generate_cargo_toml(&cfg);
-        // No [dependencies] section at all when ALL three are empty.
+        // No [dependencies] section at all when ALL four are empty.
         assert!(
             !cargo.contains("[dependencies]"),
             "unexpected deps section: {cargo}"

@@ -21,11 +21,25 @@
 //!   linter (T55). Runs lex + parse + type inference WITHOUT codegen or
 //!   rustc (faster than `buff build`). Type errors → exit 1. Lint warnings
 //!   (e.g. camelCase function names) → exit 0 by default, exit 1 with `-D`.
-//! - `buff add <SPEC> [--branch <X> | --tag <X> | --rev <X>]` — add a git
-//!   dependency to the project's `buff.toml`. `<SPEC>` is `git+<URL>` (e.g.
-//!   `git+https://github.com/user/lib.buff`). The repo is cloned to
-//!   `~/.buff/git/<hash>/` (reused on subsequent adds) and recorded under
-//!   the `[git-dependencies]` section of `buff.toml` (T122).
+//! - `buff add <SPEC> [--branch <X> | --tag <X> | --rev <X>]` — add a
+//!   dependency to the project's `buff.toml`. `<SPEC>` selects the
+//!   dependency kind:
+//!   - `git+<URL>` (T122) — git-source Buff package dependency. The
+//!     repo is cloned to `~/.buff/git/<hash>/` (reused on subsequent
+//!     adds) and recorded under the `[git-dependencies]` section.
+//!   - `<name>` or `<name>@<req>` (T127) — registry-source Buff
+//!     package dependency. `<name>` is resolved against the buff
+//!     registry (HTTP `/api/v1/resolve`), and recorded under
+//!     `[registry-dependencies]`. Registry URL from
+//!     `$BUFF_REGISTRY_URL` (default `http://127.0.0.1:7878`).
+//! - `buff login [<TOKEN>]` — authenticate with the buff registry;
+//!   store the bearer token in `~/.buff/credentials` (T127).
+//! - `buff publish` — pack the current project's `.buff` source into a
+//!   tarball and upload it to the registry via `POST /api/v1/publish`
+//!   (T127).
+//! - `buff install <NAME>` — install a binary package from the
+//!   registry: resolve latest version, download tarball, unpack into
+//!   `~/.buff/install/<name>/<version>/` (T127).
 //!
 //! Future subcommands (`doc`, `watch`, `lsp`) will be added in later waves.
 
@@ -205,44 +219,92 @@ pub enum Command {
     /// to T125c.
     Repl,
 
-    /// Add a git dependency to the project's `buff.toml` (T122).
+    /// Add a dependency to the project's `buff.toml` (T122 git, T127 registry).
     ///
-    /// `<SPEC>` is `git+<URL>` (e.g. `git+https://github.com/user/lib.buff`).
-    /// The repo is cloned to `~/.buff/git/<sha256(url)[..16]>/` — re-running
-    /// `buff add` with the same URL reuses the existing checkout without
-    /// re-cloning. Qualifiers mirror Cargo's git-dep flags:
+    /// `<SPEC>` selects the dependency kind:
     ///
-    /// - `--branch <NAME>` — clone the given branch.
-    /// - `--tag <NAME>` — clone the given tag.
-    /// - `--rev <SHA>` — clone then `git checkout <SHA>` to pin a specific
-    ///   commit.
-    ///
-    /// The new entry is recorded under `[git-dependencies]` in `buff.toml`,
-    /// and `generate_cargo_toml` emits a local-path dependency pointing at
-    /// the cloned checkout for offline-friendly builds.
+    /// - `git+<URL>` (T122): clones the repo to
+    ///   `~/.buff/git/<sha256(url)[..16]>/` and records it under
+    ///   `[git-dependencies]`. Re-running `buff add` with the same URL
+    ///   reuses the existing checkout without re-cloning. Qualifiers
+    ///   mirror Cargo's git-dep flags:
+    ///   - `--branch <NAME>` — clone the given branch.
+    ///   - `--tag <NAME>` — clone the given tag.
+    ///   - `--rev <SHA>` — clone then `git checkout <SHA>` to pin a
+    ///     specific commit.
+    /// - `<name>` or `<name>@<req>` (T127): resolves `<name>` against
+    ///   the buff registry (`$BUFF_REGISTRY_URL`, default
+    ///   `http://127.0.0.1:7878`), fetches its metadata, and records
+    ///   it under `[registry-dependencies]`. The `--branch`/`--tag`/
+    ///   `--rev` flags are ignored on this path (a warning is logged).
     Add {
-        /// Git dependency spec: `git+<URL>` (the `git+` prefix is mandatory
-        /// and is stripped before passing `<URL>` to `git clone`). Examples:
-        /// `git+https://github.com/u/lib.buff`,
-        /// `git+https://github.com/u/lib.git`,
-        /// `git+file:///path/to/local/repo`.
+        /// Dependency spec. Either `git+<URL>` (git path) or a bare
+        /// `<name>` / `<name>@<req>` (registry path). The kind is
+        /// detected at runtime — see [`commands::add::is_registry_spec`]
+        /// for the exact shape rules.
         #[arg(value_name = "SPEC")]
         spec: String,
 
         /// Clone the given branch (mutually-exclusive with `--tag`/`--rev`
         /// in practice; if multiple are set, `--rev` > `--tag` > `--branch`
-        /// precedence applies at clone time).
+        /// precedence applies at clone time). Git-path only.
         #[arg(long)]
         branch: Option<String>,
 
         /// Clone the given tag (passed to `git clone --branch`).
+        /// Git-path only.
         #[arg(long)]
         tag: Option<String>,
 
-        /// Clone then `git checkout` the given commit-ish (SHA, short or
-        /// long). Pins the checkout to an immutable ref unlike `--branch`
-        /// /`--tag`.
+        /// Clone then `git checkout` the given commit-ish (SHA, short
+        /// or long). Pins the checkout to an immutable ref unlike
+        /// `--branch`/`--tag`. Git-path only.
         #[arg(long)]
         rev: Option<String>,
+    },
+
+    /// Authenticate with the buff registry (T127).
+    ///
+    /// Stores the bearer token in `~/.buff/credentials` (TOML:
+    /// `token = "<value>"`). The token is sent on subsequent
+    /// `buff publish` calls via `Authorization: Bearer <token>`.
+    ///
+    /// When `<TOKEN>` is omitted the CLI reads one line from stdin
+    /// (mirrors the `cargo login` UX). For the v1.6 milestone, the
+    /// registry ships static-token provisioning — a real GitHub OAuth
+    /// flow is deferred (see `buff-registry` crate docs).
+    Login {
+        /// The bearer token to store. If omitted, the CLI reads one
+        /// line from stdin.
+        #[arg(value_name = "TOKEN")]
+        token: Option<String>,
+    },
+
+    /// Pack the current project's `.buff` source into a tarball and
+    /// upload it to the buff registry (T127).
+    ///
+    /// Reads `buff.toml` from the current directory for `[package].name`
+    /// and `[package].version`, walks `src/` recursively into a tarball,
+    /// and POSTs to `/api/v1/publish` with the stored bearer token
+    /// (set via `buff login`).
+    ///
+    /// Per-version tarball signing and `.buffignore` are deferred.
+    Publish,
+
+    /// Install a binary package from the buff registry (T127).
+    ///
+    /// Resolves `<NAME>` against `/api/v1/resolve/<name>?req=*`
+    /// (latest), downloads the tarball via
+    /// `/api/v1/download/<name>/<version>` (anonymous, no auth), and
+    /// unpacks it into `~/.buff/install/<name>/<version>/`.
+    ///
+    /// Building the downloaded source into a native binary is
+    /// deferred (the registry ships raw `.buff` source tarballs, NOT
+    /// pre-built binaries).
+    Install {
+        /// The package name to install (validated against the
+        /// `[a-z0-9_-]` charset the registry enforces).
+        #[arg(value_name = "NAME")]
+        name: String,
     },
 }

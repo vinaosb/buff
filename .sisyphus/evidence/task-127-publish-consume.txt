@@ -1,0 +1,63 @@
+T127 — buff CLI package commands (login / publish / add / install)
+Evidence captured 2026-07-20. Scope: build code + local tests only
+(USER pre-approved). A live remote registry is a USER ACTION; all
+round-trips below run against an IN-PROCESS buff-registry app bound to
+an ephemeral 127.0.0.1:0 TcpListener (see tests/registry_cli_t127.rs).
+
+================================================================
+VERIFICATION (all -p buff-lang-cli, MSVC env, never --workspace)
+================================================================
+
+cargo fmt   -p buff-lang-cli -- --check          -> exit 0 (clean)
+cargo clippy -p buff-lang-cli --all-targets -- -D warnings -> exit 0 (clean)
+cargo test  -p buff-lang-cli                      -> exit 0
+
+Selected test-binary results:
+  lib unittests .................. 135 passed; 0 failed
+  tests/registry_cli_t127.rs .....   7 passed; 0 failed   (T127 e2e)
+  tests/git_dependencies_t122.rs .   4 passed; 0 failed   (git-dep fallback intact)
+  tests/t120_cargo_polish.rs ..... 10 passed; 0 failed   (registry_dependencies field)
+  tests/t123_workspace.rs ........ 10 passed; 2 ignored   (registry_dependencies field)
+  tests/config_parsing.rs ........ 13 passed; 0 failed
+  (all other CLI test binaries: pass)
+
+================================================================
+ACCEPTANCE MAPPING
+================================================================
+[x] `buff login` stores credentials
+      -> registry_cli_t127::login_stores_token — writes token to
+         <BUFF_HOME>/credentials; load-back asserted.
+[x] `buff add <pkg>` fetches and adds to buff.toml
+      -> registry_cli_t127::login_then_publish_then_add_round_trip —
+         resolves pkg via GET /api/v1/resolve, records a
+         [registry-dependencies] entry in buff.toml.
+[x] `buff publish` uploads package to registry
+      -> registry_cli_t127::publish_uploads_tarball — packs src/ into a
+         tar, base64-envelopes it, POST /api/v1/publish (Bearer); a
+         follow-up GET confirms the stored package.
+[x] `buff install <binary>` installs CLI tool
+      -> registry_cli_t127::install_downloads_and_unpacks_tarball —
+         downloads via GET /api/v1/download and unpacks into
+         <BUFF_HOME>/install/<name>/<version>/.
+[ ] Consumed package's functions callable  — DEFERRED (honest gap)
+      -> `buff add` records the dep and the tarball round-trips intact,
+         BUT end-to-end "import + call + build + run" of a consumed
+         package is NOT wired: the CLI compiles ONE .buff file at a time
+         (README "Examples" note; multi-file/module linking is the same
+         v0.5 codegen-only gap). Cross-package linking is post-v1.0 work.
+         Not claimed as done.
+
+================================================================
+FALLBACK
+================================================================
+- Existing T122 git-dependency `buff add git+<url>` flow preserved and
+  still green (git_dependencies_t122.rs: 4 passed). Registry path is an
+  ADDITION gated on spec shape (bare name / name@version vs git+ prefix).
+- Registry base URL from env BUFF_REGISTRY_URL (default http://127.0.0.1:7878).
+
+================================================================
+NON-TEST PANIC-FREEDOM
+================================================================
+- No unwrap/expect/panic!/todo!/unimplemented! outside #[cfg(test)] in
+  commands/{login,publish,install,registry}.rs (grep-verified; all hits
+  are inside test modules).
