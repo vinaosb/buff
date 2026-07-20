@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 884
+expression: src
+---
+fn f() {
+    (2 as f64).powf(10 as f64);
+}

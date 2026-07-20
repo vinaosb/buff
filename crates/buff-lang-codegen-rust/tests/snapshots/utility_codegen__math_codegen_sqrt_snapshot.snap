@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 869
+expression: src
+---
+fn f() {
+    (16 as f64).sqrt();
+}

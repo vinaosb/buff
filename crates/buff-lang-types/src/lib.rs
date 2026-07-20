@@ -90,9 +90,12 @@ pub use prelude::{category_of, is_prelude, lookup, PreludeCategory, PreludeFn};
 // crate root so the inferencer + codegen consume the registry by short
 // path. Future v1.4 stdlib tasks (Regex, Math, URL, Hash, ...) extend
 // this registry rather than rewriting the inferencer or codegen.
+// T124f: associated-CONST registry (`Math.PI` / `Math.E`) added for
+// the Math utility module.
 pub use prelude_types::{
-    assoc_fn_lookup, assoc_fn_return_type, instance_fn_lookup, instance_fn_return_type,
-    is_prelude_type, prelude_type_lookup, PreludeAssocFn, PreludeInstanceFn, PreludeType,
+    assoc_const_lookup, assoc_const_return_type, assoc_fn_lookup, assoc_fn_return_type,
+    instance_fn_lookup, instance_fn_return_type, is_prelude_type, prelude_type_lookup,
+    PreludeAssocConst, PreludeAssocFn, PreludeInstanceFn, PreludeType,
 };
 // T22: pure range-analysis primitives (flexible-mode Int width inference,
 // auto-width collection helper). Re-exported at crate root for convenience;

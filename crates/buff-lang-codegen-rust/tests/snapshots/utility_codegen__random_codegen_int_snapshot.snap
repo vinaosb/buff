@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 893
+expression: src
+---
+fn f() {
+    rand::thread_rng().gen_range(1..=100);
+}

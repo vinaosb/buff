@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 875
+expression: src
+---
+fn f() {
+    std::f64::consts::PI;
+}

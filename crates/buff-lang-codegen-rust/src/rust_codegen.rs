@@ -516,6 +516,31 @@ impl RustCodegen {
         if program_uses_toml(decls) {
             self.extern_crates.insert("toml".to_string());
         }
+        // T124f: register the `rand` crate as an external dependency when
+        // the program references the prelude `Random` namespace module
+        // (`Random.int(lo, hi)`, `Random.float()`, `Random.choice(v)`,
+        // `Random.shuffle(v)`). Generated code uses fully-qualified
+        // `rand::thread_rng()` / `rand::seq::SliceRandom::*` paths so
+        // no `use` import is emitted - but the recorded name signals to
+        // the pipeline / build-driver that the generated Cargo project
+        // must declare `rand` in `[dependencies]`.
+        //
+        // NOTE: `Math` and `Strings` (also T124f) wrap Rust `std` only
+        // (no extern crate needed) - they have NO `program_uses_X`
+        // walker for that reason. `Sort` (`.sort()` / `.sort_by()` on
+        // Buff's existing Vector type) is an instance method that lowers
+        // to Rust's slice `.sort()` / `.sort_by()` (also std-only, no
+        // extern crate).
+        //
+        // Mirrors the chrono/tracing/regex/toml registration pattern
+        // (T124b/T124c/T124d/T124e): single-file `buff run` rustc path
+        // does NOT link this crate; the codegen-only linking boundary
+        // is the accepted acceptance criterion for v1.4 prelude modules.
+        // Cargo-project wiring is deferred (snapshots + extern_crates
+        // set is the verifiable contract).
+        if program_uses_rand(decls) {
+            self.extern_crates.insert("rand".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -2783,6 +2808,22 @@ impl RustCodegen {
             }
             Ok(())
         };
+        // Lower exactly N args, erroring on arity mismatch. Returns the
+        // lowered args as a Vec so multi-arg prelude calls (Math.pow,
+        // Math.min/max, Random.int, Strings.split/join/replace/...)
+        // can destructure them positionally.
+        let n_args = |c: &mut Self, n: usize| -> Result<Vec<SynExpr>, CodegenError> {
+            if args.len() != n {
+                return Err(c.unsupported(&format!(
+                    "{}.{}() expects exactly {} arg(s), got {}",
+                    ptype.name(),
+                    pmethod.name(),
+                    n,
+                    args.len()
+                )));
+            }
+            args.iter().map(|a| c.lower_expr(a)).collect()
+        };
         match (ptype, pmethod) {
             // T124c: Log module — Log.<level>(msg, key: val, ...) lowers
             // to the corresponding tracing macro. Dispatched to a
@@ -2942,6 +2983,260 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Toml.stringify codegen parse: {e}")))
             }
+            // T124f: Math module - all 11 assoc fns wrap Rust's `f64`
+            // methods. The arg is cast to `f64` first (so an Int arg
+            // like `Math.sqrt(16)` works as well as a Float arg like
+            // `Math.sqrt(2.0)`) - this matches the spec's acceptance
+            // criterion `Math.sqrt(16) -> 4.0`. The cast is wrapped in
+            // parens via `cast_to` so compound expressions bind
+            // correctly: `Math.sqrt(a + b)` -> `((a + b) as f64).sqrt()`.
+            //
+            // Math uses only Rust `std` (NO extern crate needed) -
+            // every `f64` method is on the primitive type directly.
+            //
+            // UNARY MATH METHODS (1 arg): sqrt / sin / cos / tan / abs
+            // / floor / ceil / round. Each lowers to `(<arg> as f64).<method>()`.
+            // We use a single shared code path: build the method call
+            // via `quote!` so the cast + method-chain is one
+            // well-formed `syn::Expr`.
+            (T::Math, A::Sqrt) => lower_math_unary(one_arg(self)?, "sqrt"),
+            (T::Math, A::Sin) => lower_math_unary(one_arg(self)?, "sin"),
+            (T::Math, A::Cos) => lower_math_unary(one_arg(self)?, "cos"),
+            (T::Math, A::Tan) => lower_math_unary(one_arg(self)?, "tan"),
+            (T::Math, A::Abs) => lower_math_unary(one_arg(self)?, "abs"),
+            (T::Math, A::Floor) => lower_math_unary(one_arg(self)?, "floor"),
+            (T::Math, A::Ceil) => lower_math_unary(one_arg(self)?, "ceil"),
+            (T::Math, A::Round) => lower_math_unary(one_arg(self)?, "round"),
+            // BINARY MATH METHODS (2 args): pow / min / max.
+            // - `Math.pow(base, exp)` -> `((base as f64).powf(exp as f64))`.
+            //   Both args cast to f64 because `f64::powf` takes `f64`.
+            // - `Math.min(a, b)` / `Math.max(a, b)` -> `(a as f64).min(b as f64)`.
+            //   Both args cast to f64 for symmetry with pow (Rust's
+            //   `f64::min` / `f64::max` take `f64`).
+            (T::Math, A::Pow) => {
+                let args = n_args(self, 2)?;
+                let (base, exp) = (args[0].clone(), args[1].clone());
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#base as f64).powf(#exp as f64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Math.pow codegen parse: {e}")))
+            }
+            (T::Math, A::Min) => lower_math_binary(n_args(self, 2)?, "min"),
+            (T::Math, A::Max) => lower_math_binary(n_args(self, 2)?, "max"),
+            // T124f: Random module - 4 assoc fns wrapping the `rand`
+            // crate (0.8 API). All use `rand::thread_rng()` to obtain
+            // a thread-local RNG (NOT cryptographically secure - the
+            // plan defers CSPRNG to a future Hash/Crypto module).
+            //
+            // `Random.int(min, max)` -> `rand::thread_rng().gen_range(min..=max)`.
+            // The inclusive range `min..=max` matches the spec's
+            // acceptance criterion `Random.int(1, 10)` returns int in
+            // [1, 10] (NOT [1, 11)). `gen_range` is the rand 0.8 API
+            // (rand 0.9 renamed it to `random_range`).
+            (T::Random, A::Int) => {
+                let args = n_args(self, 2)?;
+                let (lo, hi) = (args[0].clone(), args[1].clone());
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    rand::thread_rng().gen_range(#lo..=#hi)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Random.int codegen parse: {e}")))
+            }
+            // `Random.float()` -> `rand::thread_rng().gen::<f64>()`.
+            // Returns f64 in `[0, 1)`. Zero args. Uses `gen::<f64>()`
+            // (rand 0.8 API; rand 0.9 renamed to `random::<f64>()`).
+            (T::Random, A::Float) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    rand::thread_rng().gen::<f64>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Random.float codegen parse: {e}")))
+            }
+            // `Random.choice(vec)` -> `rand::seq::SliceRandom::choose(
+            //   &vec, &mut rand::thread_rng()).cloned()`.
+            //
+            // Returns `Option<T>` (None on empty input - NEVER panics,
+            // matching Buff's "no panicking generated code" rule). The
+            // fully-qualified `SliceRandom::choose` path avoids needing
+            // a `use rand::seq::SliceRandom;` import in the generated
+            // crate. The `.cloned()` lifts `Option<&T>` to `Option<T>`
+            // so the user gets an owned value (Buff hides references).
+            //
+            // Acceptance: `Random.choice([1, 2, 3])` returns `Option<Int>`
+            // (Some(1) / Some(2) / Some(3) at random; never None on a
+            // non-empty input).
+            (T::Random, A::Choice) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    rand::seq::SliceRandom::choose(&#arg, &mut rand::thread_rng()).cloned()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Random.choice codegen parse: {e}")))
+            }
+            // `Random.shuffle(vec)` -> `{ let mut __v = vec;
+            //   rand::seq::SliceRandom::shuffle(&mut __v, &mut
+            //   rand::thread_rng()); __v }`.
+            //
+            // Returns a NEW shuffled Vector (the input is consumed -
+            // the codegen makes a `let mut` binding internally and
+            // returns it; in Buff's move-by-default world this is the
+            // natural ownership transfer). The fully-qualified
+            // `SliceRandom::shuffle` path avoids needing a `use` import.
+            //
+            // Built via `quote!` + parse2 because the block expression
+            // (`{ let mut __v = ...; ...; __v }`) is awkward to build
+            // via direct syn node construction. The result is a single
+            // `syn::Expr::Block` that evaluates to the shuffled Vec.
+            //
+            // NOTE: the local binding name `__v` is deliberately
+            // underscore-prefixed to avoid colliding with user vars in
+            // the surrounding scope (Buff's identifier namespace
+            // convention reserves `__`-prefixed names for codegen-
+            // introduced temporaries - mirrors the `__recv` placeholder
+            // pattern used in `splice_receiver_into_call`).
+            (T::Random, A::Shuffle) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __v = #arg;
+                        rand::seq::SliceRandom::shuffle(&mut __v, &mut rand::thread_rng());
+                        __v
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Random.shuffle codegen parse: {e}")))
+            }
+            // T124f: Strings module - 8 assoc fns wrapping Rust's `str`
+            // / `String` methods as functional module calls. Strings
+            // uses only Rust `std` (NO extern crate needed).
+            //
+            // Each arg of String type is borrowed via
+            // `coerce_str_arg_to_ref` so Rust's Deref coercion turns
+            // `&String` into `&str` (the type `str` methods take).
+            // String literals lower to `&'static str` already (no
+            // borrow needed).
+            //
+            // `Strings.split(text, sep)` ->
+            //   `text.split(sep).map(|s| s.to_string()).collect::<Vec<String>>()`.
+            //
+            // The `.map(|s| s.to_string())` lifts `&str` to `String`
+            // (Buff hides references from users). The turbofish
+            // `::<Vec<String>>` pins the concrete return type so the
+            // generated Rust is fully typed without a let-binding
+            // annotation.
+            (T::Strings, A::Split) => {
+                let lowered = n_args(self, 2)?;
+                let raw_text = lowered[0].clone();
+                let raw_sep = lowered[1].clone();
+                let text = coerce_str_arg_to_ref(raw_text, &args[0]);
+                let sep = coerce_str_arg_to_ref(raw_sep, &args[1]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #text.split(#sep).map(|s| s.to_string()).collect::<Vec<String>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strings.split codegen parse: {e}")))
+            }
+            // `Strings.join(vec, sep)` -> `vec.join(&sep)`.
+            // The sep is borrowed via `&` so both `'static str` and
+            // `String` inputs satisfy `Vec::<String>::join`'s `&str`
+            // bound. The vec itself is taken by value (`Vec::<String>::join`
+            // takes `&self`, so the codegen auto-borrows via
+            // `method_call_one_arg` which produces `vec.join(&sep)`).
+            (T::Strings, A::Join) => {
+                let lowered = n_args(self, 2)?;
+                let vec_e = lowered[0].clone();
+                let sep_e = lowered[1].clone();
+                // Borrow the sep via `&` to satisfy `&str` bound on
+                // `Vec::<String>::join(&self, sep: &str)`. The vec is
+                // method-called directly (auto-borrowed by Rust's
+                // method-call sugar).
+                let sep_borrowed = syn::Expr::Reference(syn::ExprReference {
+                    attrs: Vec::new(),
+                    and_token: Default::default(),
+                    expr: Box::new(sep_e),
+                    mutability: None,
+                });
+                Ok(method_call_one_arg(vec_e, "join", sep_borrowed))
+            }
+            // `Strings.trim(text)` -> `text.trim().to_string()`.
+            // `.trim()` returns `&str`; `.to_string()` lifts to `String`.
+            (T::Strings, A::Trim) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #arg_ref.trim().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strings.trim codegen parse: {e}")))
+            }
+            // `Strings.replace(text, from, to)` -> `text.replace(from, to)`.
+            // Rust's `str::replace` takes `&str, &str` (or a Pattern)
+            // and returns a NEW `String`. We borrow each arg via
+            // `coerce_str_arg_to_ref` so `&String` derefs to `&str`.
+            (T::Strings, A::Replace) => {
+                let lowered = n_args(self, 3)?;
+                let raw_text = lowered[0].clone();
+                let raw_from = lowered[1].clone();
+                let raw_to = lowered[2].clone();
+                let text = coerce_str_arg_to_ref(raw_text, &args[0]);
+                let from = coerce_str_arg_to_ref(raw_from, &args[1]);
+                let to = coerce_str_arg_to_ref(raw_to, &args[2]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #text.replace(#from, #to)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strings.replace codegen parse: {e}")))
+            }
+            // `Strings.contains(text, substr)` -> `text.contains(substr)`.
+            // Returns Bool. The substr arg is borrowed via `&` so both
+            // `'static str` and `String` inputs satisfy `str::contains`'s
+            // Pattern bound (str: Pattern works directly).
+            (T::Strings, A::Contains) => {
+                let lowered = n_args(self, 2)?;
+                let text_ref = coerce_str_arg_to_ref(lowered[0].clone(), &args[0]);
+                let sep_ref = coerce_str_arg_to_ref(lowered[1].clone(), &args[1]);
+                Ok(method_call_one_arg(text_ref, "contains", sep_ref))
+            }
+            // `Strings.starts_with(text, prefix)` -> `text.starts_with(prefix)`.
+            // Same shape as `contains`.
+            (T::Strings, A::StartsWith) => {
+                let lowered = n_args(self, 2)?;
+                let text_ref = coerce_str_arg_to_ref(lowered[0].clone(), &args[0]);
+                let pre_ref = coerce_str_arg_to_ref(lowered[1].clone(), &args[1]);
+                Ok(method_call_one_arg(text_ref, "starts_with", pre_ref))
+            }
+            // `Strings.to_uppercase(text)` -> `text.to_uppercase().to_string()`.
+            // `.to_uppercase()` returns `String` already (Rust's
+            // `str::to_uppercase` -> `String`), so the extra
+            // `.to_string()` is a no-op for type but keeps the
+            // generated code uniform with `trim` (both produce
+            // `String`). Belt-and-suspenders: if a future Rust version
+            // changes `to_uppercase` to return `Cow<str>` or similar,
+            // the explicit `.to_string()` keeps Buff's surface stable.
+            (T::Strings, A::ToUppercase) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #arg_ref.to_uppercase().to_string()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Strings.to_uppercase codegen parse: {e}"))
+                })
+            }
+            // `Strings.to_lowercase(text)` -> `text.to_lowercase().to_string()`.
+            // Same shape as `to_uppercase`.
+            (T::Strings, A::ToLowercase) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #arg_ref.to_lowercase().to_string()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Strings.to_lowercase codegen parse: {e}"))
+                })
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -2950,6 +3245,60 @@ impl RustCodegen {
                 ptype, pmethod
             ))),
         }
+    }
+
+    /// T124f: lower a prelude-type associated-CONSTANT access
+    /// (`Type.NAME`) to the corresponding Rust path.
+    ///
+    /// Dispatched from [`Self::lower_method_call`] when the receiver is
+    /// a bare Ident naming a prelude type with a registered associated
+    /// constant (currently only `Math.PI` / `Math.E`). The lowering is
+    /// a fully-qualified Rust path so generated code requires no `use`
+    /// import (mirrors the chrono / regex / toml fully-qualified-path
+    /// pattern).
+    ///
+    /// # Lowering table
+    ///
+    /// | Buff source  | Generated Rust              |
+    /// |--------------|------------------------------|
+    /// | `Math.PI`    | `std::f64::consts::PI`      |
+    /// | `Math.E`     | `std::f64::consts::E`       |
+    ///
+    /// Both lower to `f64` consts from Rust's `std::f64::consts` module
+    /// - NO extern crate needed (Math uses only Rust `std`).
+    ///
+    /// Built via `rust_call_expr`'s path machinery... wait, that
+    /// produces a `path(args)` CALL. We need a bare PATH (no parens).
+    /// The simplest path is `syn::parse_str` -> `syn::ExprPath` (any
+    /// `::`-separated path string parses cleanly as a path expression).
+    /// That's already the pattern used in [`lower_graphemes_call`] for
+    /// the `unicode_segmentation::UnicodeSegmentation::graphemes` path
+    /// fragment. We reuse it here for consistency.
+    fn lower_prelude_type_assoc_const(
+        &mut self,
+        ptype: buff_lang_types::PreludeType,
+        pconst: buff_lang_types::PreludeAssocConst,
+    ) -> Result<SynExpr, CodegenError> {
+        use buff_lang_types::{PreludeAssocConst as C, PreludeType as T};
+        let path: &str = match (ptype, pconst) {
+            // `Math.PI` / `Math.E` -> `std::f64::consts::PI` / `E`.
+            // Both Rust consts are `f64`; the codegen-lowered path is
+            // fully-qualified so the generated crate needs no `use
+            // std::f64::consts;` import.
+            (T::Math, C::Pi) => "std::f64::consts::PI",
+            (T::Math, C::E) => "std::f64::consts::E",
+            // Every other combination was already rejected by
+            // `assoc_const_lookup` in the caller; this arm is
+            // unreachable but required for exhaustiveness.
+            _ => {
+                return Err(self.unsupported(&format!(
+                    "prelude type+const combination {:?}.{:?}",
+                    ptype, pconst
+                )));
+            }
+        };
+        syn::parse_str::<SynExpr>(path)
+            .map_err(|e| self.unsupported(&format!("Math const codegen parse ({path}): {e}")))
     }
 
     /// T124b: lower a prelude-type instance-method call (`recv.method(args)`)
@@ -3526,6 +3875,28 @@ impl RustCodegen {
             }
         }
 
+        // T124f: prelude-types registry - associated CONSTANTS. A
+        // zero-arg `Type.NAME` access (parser produces MethodCall with
+        // args == []) where the receiver is a bare Ident naming a
+        // prelude type with a registered constant (currently only
+        // `Math.PI` / `Math.E`). This MUST run before the T26
+        // field-access heuristic below (which would rewrite
+        // `Math.PI` as a Rust field access - meaningless because `Math`
+        // is a namespace, not a Rust type with a `PI` field).
+        //
+        // The lowering lives in [`Self::lower_prelude_type_assoc_const`]
+        // (dedicated helper so this arm stays a thin dispatch, mirroring
+        // the assoc-fn dispatch above).
+        if args.is_empty() {
+            if let Expr::Ident(id, _) = receiver {
+                if let Some((ptype, pconst)) =
+                    buff_lang_types::prelude_types::assoc_const_lookup(&id.name, &method.name)
+                {
+                    return self.lower_prelude_type_assoc_const(ptype, pconst);
+                }
+            }
+        }
+
         // T31: `task.result()` → Rust's `task.await`. This is the ONLY
         // `.await` form that originates from a method-call position; it's
         // the suspension-point API on Buff's `Task<T>` (a thin alias for
@@ -3718,6 +4089,54 @@ impl RustCodegen {
             "reduce" if args.len() == 1 => {
                 let f = self.lower_expr(&args[0])?;
                 self.lower_into_iter_reduce(recv, f)?
+            }
+            // T124f: Sort instance methods on Buff's existing Vector type.
+            // Rust's `Vec::<T>::sort()` / `sort_by(cmp)` mutate in-place
+            // and return `()`, but Buff's surface treats them as
+            // functional (returns a NEW sorted Vector). Mirrors the
+            // `.map()` / `.filter()` "return a fresh Vec" stance so
+            // `[3, 1, 2].sort()` evaluates to `[1, 2, 3]` per the
+            // acceptance criterion (rather than requiring a `let mut`
+            // dance the user has to write).
+            //
+            // Built via `quote!` + parse2 as a `{ let mut __v = recv;
+            // __v.sort(); __v }` block (the in-place mutation happens
+            // inside the block, the block evaluates to the owned Vec).
+            // The `__v` name is underscore-prefixed to avoid colliding
+            // with user vars in the surrounding scope (Buff's
+            // identifier convention reserves `__`-prefixed names for
+            // codegen-introduced temporaries - mirrors the
+            // `splice_receiver_into_call` precedent).
+            //
+            // `.sort()` (no args) uses Rust's `Ord` impl on the
+            // element type (so Int vectors sort ascending, String
+            // vectors sort lexicographically, ...).
+            // `.sort_by(cmp)` (1 arg) takes a 2-arg closure returning
+            // `std::cmp::Ordering` (Buff's surface mirrors Rust's
+            // exactly - a future task may add a more ergonomic
+            // comparator-builder API like `Sort.by(field).asc()`).
+            "sort" if args.is_empty() => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __v = #recv;
+                        __v.sort();
+                        __v
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("sort codegen parse: {e}")))?
+            }
+            "sort_by" if args.len() == 1 => {
+                let cmp = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __v = #recv;
+                        __v.sort_by(#cmp);
+                        __v
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("sort_by codegen parse: {e}")))?
             }
             // T25: Map methods. The Buff names map to Rust's standard
             // HashMap methods, except `.contains(k)` → `.contains_key(k)`
@@ -5999,6 +6418,11 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     "minute",
     "second",
     "timestamp",
+    // T124f: Vector zero-arg instance method `sort()`. Without this
+    // entry the T26 field-access heuristic would rewrite `vec.sort()`
+    // as `vec.sort` (a field access on the Vec, which doesn't exist).
+    // `sort_by` takes one arg so it's never affected by the heuristic.
+    "sort",
 ];
 
 /// Build the attribute list for a generated struct: always
@@ -7013,9 +7437,18 @@ fn expr_uses_chrono(expr: &Expr) -> bool {
             receiver, method, ..
         } => {
             // Associated-function call: `DateTime.now()`, `Duration.days(7)`, etc.
+            // T124f: narrow to the datetime FAMILY only (DateTime / Date /
+            // Time / Duration / Instant). The previous `is_prelude_type`
+            // check was too broad - it flagged every prelude-type Ident
+            // receiver, which after T124c/T124d/T124e/T124f includes
+            // Log / Regex / Toml / Math / Random / Strings (none of which
+            // lower to chrono). The `buff_type().is_prelude_datetime()`
+            // round-trip captures exactly the 5 chrono types.
             if let Expr::Ident(id, _) = receiver.as_ref() {
-                if buff_lang_types::is_prelude_type(&id.name) {
-                    return true;
+                if let Some(ptype) = buff_lang_types::prelude_type_lookup(&id.name) {
+                    if ptype.buff_type().is_prelude_datetime() {
+                        return true;
+                    }
                 }
             }
             // Instance-method call: `dt.format(...)`, `dt.year()`, etc.
@@ -7644,6 +8077,148 @@ fn expr_uses_toml(expr: &Expr) -> bool {
         }
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_toml),
         Expr::NamedArg { value, .. } => expr_uses_toml(value),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T124f - rand emit-on-demand detection (Random namespace module).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `Random.<method>(...)`
+/// call (T124f). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to record `"rand"` in the extern-crate
+/// set so the pipeline knows the generated Cargo project depends on
+/// the `rand` crate.
+///
+/// Detection recognises the `Random` namespace as the receiver of a
+/// method call (`Random.int(...)`, `Random.float()`, `Random.choice(v)`,
+/// `Random.shuffle(v)`). The method name is NOT matched here - `Random`
+/// is a reserved prelude namespace, so any `Random.<anything>()`
+/// triggers `rand` registration. Codegen will surface a clear error if
+/// `<anything>` is not one of int/float/choice/shuffle.
+///
+/// Mirrors the chrono/tracing/regex/toml detection patterns
+/// (T124b/T124c/T124d/T124e); the recursive walker covers every Stmt /
+/// Expr variant that could host a Random call. Random has NO instance
+/// methods (only assoc fns on the namespace), so detection is simpler
+/// than Regex: only the bare-ident receiver pattern (`Random.method(...)`)
+/// is flagged.
+///
+/// Note: `Math` and `Strings` also ship in T124f but wrap Rust `std`
+/// only (NO extern crate needed), so they have NO `program_uses_X`
+/// walker - their generated code is fully standalone-rustc-compatible.
+fn program_uses_rand(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_rand(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_rand`]: scan a block's statements.
+fn block_uses_rand(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_rand)
+}
+
+/// Check a single statement (and its nested expressions) for `Random.*(...)`
+/// usage.
+fn stmt_uses_rand(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_rand(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_rand(target) || expr_uses_rand(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_rand(iter) || block_uses_rand(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_rand(cond) || block_uses_rand(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_rand(value) || block_uses_rand(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_rand(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_rand(e),
+            }) || block_uses_rand(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_rand(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a `Random.<method>(...)` call.
+///
+/// Detection is on the receiver NAME (`Random`) only - the method name
+/// is validated at codegen time. This means a hypothetical user-defined
+/// variable named `Random` whose method is called would trigger a false
+/// positive (registering rand unnecessarily); but since `Random` is a
+/// reserved prelude namespace, the user can't legitimately bind to that
+/// name anyway. Same conservative strategy as the tracing/toml walkers
+/// (T124c/T124e).
+fn expr_uses_rand(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall { receiver, .. } => {
+            if let Expr::Ident(id, _) = receiver.as_ref() {
+                if id.name == "Random" {
+                    return true;
+                }
+            }
+            expr_uses_rand(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_rand(lhs) || expr_uses_rand(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_rand(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_rand(callee) || args.iter().any(expr_uses_rand)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_rand(cond)
+                || block_uses_rand(then_block)
+                || else_block.as_ref().is_some_and(block_uses_rand)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_rand(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_rand),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_rand(base) || indices.iter().any(expr_uses_rand)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_rand(k) || expr_uses_rand(v)),
+        Expr::Lambda { body, .. } => block_uses_rand(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_rand(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_rand(scrutinee) || arms.iter().any(|arm| block_uses_rand(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_rand(inner),
+        Expr::Try { expr, .. } => expr_uses_rand(expr),
+        Expr::Spawn { task, .. } => expr_uses_rand(task),
+        Expr::Range { start, end, .. } => expr_uses_rand(start) || expr_uses_rand(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_rand(value)
+                || block_uses_rand(then_block)
+                || else_block.as_ref().is_some_and(block_uses_rand)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_rand),
+        Expr::NamedArg { value, .. } => expr_uses_rand(value),
     }
 }
 
@@ -8451,6 +9026,60 @@ fn coerce_str_arg_to_ref(lowered: SynExpr, orig: &Expr) -> SynExpr {
     // so the panic-on-parse-failure caveat of `parse_quote!` does not
     // apply in practice.
     syn::parse_quote!( & #lowered )
+}
+
+// ---------------------------------------------------------------------------
+// T124f - Math module codegen helpers.
+// ---------------------------------------------------------------------------
+
+/// T124f: lower a unary `Math.<method>(x)` call to `(<arg> as f64).<method>()`.
+///
+/// Wraps the arg in an `as f64` cast so an Int arg like `Math.sqrt(16)`
+/// works as well as a Float arg like `Math.sqrt(2.0)` (matches the
+/// spec acceptance `Math.sqrt(16) -> 4.0`). The cast is built via
+/// `quote!` + parse2 so the resulting `syn::Expr` is a well-formed
+/// `Expr::MethodCall` on a cast subexpression (NOT a string-built
+/// hack - the single string producer remains `prettyplease::unparse`).
+///
+/// Used for: sqrt / sin / cos / tan / abs / floor / ceil / round
+/// (8 unary Math methods - all take one arg and return Float).
+fn lower_math_unary(arg: SynExpr, method: &str) -> Result<SynExpr, CodegenError> {
+    let method_ident = proc_macro2::Ident::new(method, ProcSpan::call_site());
+    let tokens: proc_macro2::TokenStream = quote::quote! {
+        (#arg as f64).#method_ident()
+    };
+    syn::parse2(tokens).map_err(|e| {
+        CodegenError::new(Diagnostic::error(
+            format!("unsupported: Math.{method} codegen parse: {e}"),
+            BuffSpan::dummy(),
+        ))
+    })
+}
+
+/// T124f: lower a binary `Math.<method>(a, b)` call to
+/// `(<a> as f64).<method>(<b> as f64)`.
+///
+/// Both args cast to `f64` because Rust's `f64::min` / `f64::max`
+/// take `f64` (and casting both keeps the lowering uniform with
+/// `Math.pow` which definitely needs both as f64).
+///
+/// Built via `quote!` + parse2 so the resulting `syn::Expr` is a
+/// well-formed `Expr::MethodCall` on cast subexpressions.
+///
+/// Used for: min / max (2 binary Math methods - both take two args
+/// and return Float).
+fn lower_math_binary(args: Vec<SynExpr>, method: &str) -> Result<SynExpr, CodegenError> {
+    let method_ident = proc_macro2::Ident::new(method, ProcSpan::call_site());
+    let (a, b) = (args[0].clone(), args[1].clone());
+    let tokens: proc_macro2::TokenStream = quote::quote! {
+        (#a as f64).#method_ident(#b as f64)
+    };
+    syn::parse2(tokens).map_err(|e| {
+        CodegenError::new(Diagnostic::error(
+            format!("unsupported: Math.{method} codegen parse: {e}"),
+            BuffSpan::dummy(),
+        ))
+    })
 }
 
 /// Take a token stream that calls a fully-qualified function with a single

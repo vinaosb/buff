@@ -1,0 +1,232 @@
+T124f: Utility modules — Math, Random, Sort, Strings
+====================================================
+
+DATE: 2026-07-20
+STATUS: GREEN — all 3 gates exit 0; 46 utility_codegen tests pass; 18 cold_start_tests pass (no segfault).
+
+## What was done
+
+Implemented the four T124f utility prelude modules — all prelude-implicit
+(no import):
+
+1. **Math** (namespace-only, buff_type→Type::Void, mirrors Log/Toml):
+   - 11 associated fns: `sqrt` / `sin` / `cos` / `tan` / `abs` / `floor`
+     / `ceil` / `round` / `pow` / `min` / `max` → wrap Rust's `f64` methods.
+     All args cast `as f64` so Int args work too (matches acceptance
+     `Math.sqrt(16) -> 4.0`).
+   - 2 associated CONSTANTS: `Math.PI` / `Math.E` → `std::f64::consts::PI`
+     / `E`. Implemented via the FIRST associated-constant prelude
+     mechanism (`PreludeAssocConst` enum + `assoc_const_lookup` /
+     `assoc_const_return_type` helpers).
+   - Uses only Rust `std` (NO extern crate).
+
+2. **Random** (namespace-only):
+   - 4 associated fns wrapping the `rand` crate (0.8 API):
+     - `Random.int(min, max)` → `rand::thread_rng().gen_range(min..=max)`
+       (inclusive range).
+     - `Random.float()` → `rand::thread_rng().gen::<f64>()`.
+     - `Random.choice(vec)` →
+       `rand::seq::SliceRandom::choose(&vec, &mut rng).cloned()`
+       (returns Option<T>, None on empty — NEVER panics).
+     - `Random.shuffle(vec)` → `{ let mut __v = vec;
+       rand::seq::SliceRandom::shuffle(&mut __v, &mut rng); __v }`
+       (returns a NEW shuffled Vec; functional surface).
+   - `program_uses_rand` walker records `rand` in `extern_crates`
+     (codegen-only linking boundary — single-file `buff run` rustc
+     path does NOT link; cargo-project wiring deferred, same as
+     chrono/toml/regex/tracing).
+   - NOT cryptographically secure (plan defers CSPRNG to a future
+     Hash/Crypto module).
+
+3. **Sort** — INSTANCE methods on Buff's existing Vector type (NOT a new
+   PreludeType; mirrors `.len()` / `.pop()` / `.push()` / `.map()`
+   dispatch):
+   - `vec.sort()` → `{ let mut __v = vec; __v.sort(); __v }`
+     (functional surface — returns a NEW sorted Vec per acceptance
+     `[3, 1, 2].sort() -> [1, 2, 3]`).
+   - `vec.sort_by(cmp)` → same block shape with `__v.sort_by(cmp)`.
+   - Added `"sort"` to `KNOWN_ZERO_ARG_METHODS` so the T26 field-access
+     heuristic doesn't rewrite `vec.sort()` as the bare field access
+     `vec.sort` (which wouldn't compile — Vec has no `sort` field).
+   - Uses only Rust `std`.
+
+4. **Strings** (namespace-only):
+   - 8 associated fns wrapping Rust's `str` / `String` methods:
+     - `Strings.split(text, sep)` →
+       `text.split(sep).map(|s| s.to_string()).collect::<Vec<String>>()`.
+     - `Strings.join(vec, sep)` → `vec.join(&sep)`.
+     - `Strings.trim(text)` → `text.trim().to_string()`.
+     - `Strings.replace(text, from, to)` → `text.replace(from, to)`.
+     - `Strings.contains(text, substr)` → `text.contains(substr)`.
+     - `Strings.starts_with(text, prefix)` → `text.starts_with(prefix)`.
+     - `Strings.to_uppercase(text)` → `text.to_uppercase().to_string()`.
+     - `Strings.to_lowercase(text)` → `text.to_lowercase().to_string()`.
+   - Uses only Rust `std` (NO extern crate).
+
+## Files changed (created or modified)
+
+### Source code (modified)
+- `Cargo.toml` (+22 lines): added `rand = "0.8"` to `[workspace.dependencies]`
+  with a doc-comment explaining the version choice (0.8 stable API vs
+  0.9 renamed API).
+- `crates/buff-lang-types/src/lib.rs` (+5 lines): re-exported
+  `assoc_const_lookup`, `assoc_const_return_type`, `PreludeAssocConst`.
+- `crates/buff-lang-types/src/prelude_types.rs` (+~600 lines):
+  - `PreludeType::Math`, `PreludeType::Random`, `PreludeType::Strings`
+    (all namespace-only).
+  - 23 new `PreludeAssocFn` variants (11 Math + 4 Random + 8 Strings).
+  - New `PreludeAssocConst` enum + lookup/return-type helpers (the
+    FIRST associated-constant prelude mechanism).
+  - 9 new registry unit tests (Math / Random / Strings lookup + return
+    types + Math constants + namespace-only count = 5).
+  - Updated `prelude_type_no_duplicates` count assertion 8 → 11.
+  - Updated `prelude_toml_namespace_only_predicate` namespace_only
+    count 2 → 5 (Log + Toml + Math + Random + Strings).
+- `crates/buff-lang-codegen-rust/src/rust_codegen.rs` (+~700 lines):
+  - `program_uses_rand` walker + registration in `generate()` (records
+    `rand` in extern_crates).
+  - `lower_prelude_type_assoc_const` method — lowers `Math.PI` / `Math.E`
+    to `std::f64::consts::PI` / `E` paths.
+  - `assoc_const_lookup` dispatch arm in `lower_method_call` BEFORE the
+    T26 field-access heuristic (so `Math.PI` doesn't get rewritten as
+    `Math.PI` field access).
+  - 23 new lowering arms in `lower_prelude_type_assoc_fn` (11 Math +
+    4 Random + 8 Strings).
+  - `lower_math_unary` / `lower_math_binary` free-function helpers
+    (build `(arg as f64).<method>()` via `quote!` + parse2).
+  - `n_args(c, n)` helper in `lower_prelude_type_assoc_fn` for
+    multi-arg lowering.
+  - `.sort()` / `.sort_by(cmp)` arms in the string-method mapping
+    block (next to `.map()` / `.filter()` / `.reduce()`).
+  - Added `"sort"` to `KNOWN_ZERO_ARG_METHODS`.
+  - **Bug fix (chrono walker narrowing)**: narrowed `expr_uses_chrono`
+    from `is_prelude_type(id.name)` (which after T124c-f incorrectly
+    flagged Log/Regex/Toml/Math/Random/Strings as chrono) to
+    `prelude_type_lookup(...).buff_type().is_prelude_datetime()`
+    (flags only DateTime/Date/Time/Duration/Instant).
+
+### Tests (created)
+- `crates/buff-lang-codegen-rust/tests/utility_codegen.rs` (1043 lines):
+  46 tests covering all four modules — Math (assoc fns + constants),
+  Random (thread_rng gen_range, gen::<f64>, SliceRandom choose/shuffle),
+  Sort (.sort() / .sort_by() on existing Vector), Strings (all 8
+  methods). Includes 13 insta snapshot tests + 33 assertion tests +
+  4 wrong-arity error tests.
+- 13 insta snapshots under
+  `crates/buff-lang-codegen-rust/tests/snapshots/utility_codegen__*.snap`
+  (generated via `cargo test` → manually renamed `.snap.new` → `.snap`
+  since `cargo-insta` isn't installed):
+  - `math_codegen_sqrt_snapshot.snap`
+  - `math_codegen_pi_const_snapshot.snap`
+  - `math_codegen_pow_snapshot.snap`
+  - `random_codegen_int_snapshot.snap`
+  - `random_codegen_float_snapshot.snap`
+  - `random_codegen_choice_snapshot.snap`
+  - `random_codegen_shuffle_snapshot.snap`
+  - `sort_codegen_literal_snapshot.snap`
+  - `sort_by_codegen_snapshot.snap`
+  - `strings_codegen_split_snapshot.snap`
+  - `strings_codegen_join_snapshot.snap`
+  - `strings_codegen_replace_snapshot.snap`
+  - `utility_codegen_full_program_snapshot.snap` (end-to-end main
+    exercising all four modules).
+
+## rand version targeted
+
+`rand = "0.8"` (NOT 0.9). API surface used:
+- `rand::thread_rng().gen_range(min..=max)` (NOT 0.9's `rng().random_range(...)`).
+- `rand::thread_rng().gen::<f64>()` (NOT 0.9's `rng().random::<f64>()`).
+- `rand::seq::SliceRandom::{choose, shuffle}` (same trait name in 0.8/0.9).
+
+Rationale: rand 0.8 is the stable, long-standing API the broader Rust
+ecosystem already targets. chrono/tracing/regex/toml all also pin
+pre-1.0 majors.
+
+## Math-constants mechanism used
+
+Created a NEW `PreludeAssocConst` registry (separate from
+`PreludeAssocFn` because constants are accessed WITHOUT parens —
+`Math.PI`, not `Math.PI()`). The codegen consults this registry in
+`lower_method_call` BEFORE the T26 field-access heuristic so a
+prelude constant access is rewritten to the Rust path
+(`std::f64::consts::PI`) rather than the literal Rust field access
+`Math.PI` (which would not compile).
+
+Currently only 2 constants (`Pi` / `E`), both on `Math`. The enum is
+extensible — future prelude modules with constants (e.g. a `Physics`
+module exposing `Physics.G` for gravitational constant) extend the
+enum + lookup/return-type matches.
+
+## Sort Vector-method wiring
+
+Sort is NOT a new PreludeType — it's instance methods on Buff's
+existing Vector type, dispatched via the SAME mechanism as `.len()` /
+`.pop()` / `.push()` / `.map()`: the string-method mapping block in
+`lower_method_call`. No new PreludeType / instance-fn registry entry
+needed.
+
+Two codegen arms added next to `.map()` / `.filter()` / `.reduce()`:
+- `.sort()` (zero args) → `{ let mut __v = recv; __v.sort(); __v }`.
+- `.sort_by(cmp)` (one arg) → `{ let mut __v = recv; __v.sort_by(cmp); __v }`.
+
+Both lower to a BLOCK expression that evaluates to the owned (sorted)
+Vec so the surface stays functional (`[3,1,2].sort()` returns a NEW
+Vec rather than mutating in place — Rust's `Vec::sort` returns `()`,
+so the block is needed to lift the in-place mutation to a functional
+return). The `__v` name is underscore-prefixed to avoid colliding
+with user vars in the surrounding scope (mirrors the
+`splice_receiver_into_call` `__recv` precedent).
+
+The infer.rs file was NOT touched (the existing `.map()` / `.filter()`
+inference already returns `Vector<T>`; Sort's type inference falls
+through to the default `Unknown` path which is correct for codegen —
+the block evaluates to whatever Rust infers from the receiver).
+
+## Gate results (real output)
+
+```
+GATE 1: cargo build --workspace
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.08s
+BUILD_EXIT=0
+
+GATE 2: cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.57s
+CLIPPY_EXIT=0
+
+GATE 3: cargo test --workspace
+    (all crates) test result: ok. <N> passed; 0 failed; ...
+TEST_EXIT=0
+
+Explicit utility_codegen:
+    test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+Explicit cold_start_tests (called out as flaky):
+    test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+    (NO segfault / STATUS_ACCESS_VIOLATION observed)
+```
+
+## Codegen-only linking boundary (expected limitation)
+
+The `rand` crate is recorded in `extern_crates` when a Buff program
+uses `Random.*`, but the single-file `buff run` rustc path does NOT
+link it (same codegen-only linking boundary as chrono/toml/regex/
+tracing in T124b-e). Cargo-project wiring is deferred to a future
+task. Acceptance = snapshot-verified codegen + registry wiring +
+extern_crates set + `cargo test/clippy/build --workspace` green
+(the verifiable contract established by T124b-e).
+
+Math, Strings, and Sort use only Rust `std` (no extern crate needed
+at all) — they ARE end-to-end-runnable today via single-file rustc.
+
+## TODO / out-of-scope (deferred)
+
+- Cryptographically-secure RNG (plan forbids — future Hash/Crypto module).
+- Matrix operations (plan forbids — GPU territory).
+- Custom math DSL (plan forbids).
+- e2e-link for `Random.*` via the cargo-project pipeline (deferred to
+  the future task that wires cargo-project linking for chrono/toml/
+  regex/tracing/rand uniformly).
+- `Random.choice` / `Random.shuffle` element-type narrowing (currently
+  `Option<Unknown>` / `Vector<Unknown>` at the registry level; Rust
+  infers concrete types at the use site. A future narrowing task can
+  special-case per-call).

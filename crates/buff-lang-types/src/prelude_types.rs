@@ -130,6 +130,42 @@ pub enum PreludeType {
     /// established precedent for future namespace-only modules
     /// (`Process`, `Cli`, `Http`, ...).
     Toml,
+    /// `Math` - the floating-point math namespace (T124f). Wraps Rust's
+    /// `std::f64` methods + `std::f64::consts` constants. Like
+    /// [`Self::Log`] / [`Self::Toml`], `Math` is **never a runtime
+    /// value** - it's a NAMESPACE exposing associated functions
+    /// (`Math.sqrt(x)`, `Math.sin(x)`, `Math.pow(b, e)`, ...) AND two
+    /// associated CONSTANTS (`Math.PI`, `Math.E`). The constants use
+    /// the dedicated [`PreludeAssocConst`] registry (the first
+    /// associated-constant prelude mechanism). `buff_type()` returns
+    /// [`Type::Void`]; `is_namespace_only()` returns `true`. Math uses
+    /// only Rust `std` (NO extern crate needed).
+    Math,
+    /// `Random` - the random-number namespace (T124f). Wraps the `rand`
+    /// Rust crate. Like [`Self::Log`] / [`Self::Toml`], `Random` is
+    /// **never a runtime value** - it's a NAMESPACE exposing four
+    /// associated functions: `Random.int(min, max)` (inclusive Int
+    /// range), `Random.float()` (f64 in `[0, 1)`), `Random.choice(vec)`
+    /// (Option<element>), `Random.shuffle(vec)` (returns shuffled Vec).
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. **Not cryptographically secure** - the plan
+    /// forbids CSPRNG here (deferred to a future Hash/Crypto module).
+    /// The `rand` crate is recorded in codegen `extern_crates` when a
+    /// program uses `Random` (codegen-only linking boundary - same as
+    /// chrono/toml/regex/tracing).
+    Random,
+    /// `Strings` - the string-utilities namespace (T124f). Wraps
+    /// Rust's `str` / `String` methods as functional module calls
+    /// (`Strings.split(text, sep)`, `Strings.join(vec, sep)`, ...).
+    /// Like [`Self::Log`] / [`Self::Toml`], `Strings` is **never a
+    /// runtime value** - it's a NAMESPACE exposing eight associated
+    /// functions. Some of these methods exist as instance methods on
+    /// Buff's String type; exposing them as a module enables
+    /// functional-style call chains (e.g.
+    /// `Strings.trim(Strings.uppercase(s))`). `buff_type()` returns
+    /// [`Type::Void`]; `is_namespace_only()` returns `true`. Strings
+    /// uses only Rust `std` (NO extern crate needed).
+    Strings,
 }
 
 impl PreludeType {
@@ -146,6 +182,12 @@ impl PreludeType {
         // T124e: Toml — namespace-only module wrapping the `toml` crate
         // (parse + stringify). Mirrors Log's namespace-only shape.
         PreludeType::Toml,
+        // T124f: Math / Random / Strings - three namespace-only utility
+        // modules (Math + Strings wrap Rust std only; Random wraps the
+        // `rand` crate). All mirror Log's namespace-only shape.
+        PreludeType::Math,
+        PreludeType::Random,
+        PreludeType::Strings,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -165,6 +207,18 @@ impl PreludeType {
             // name so the codegen can splice `toml::from_str` /
             // `toml::to_string` paths without rewriting.
             PreludeType::Toml => "Toml",
+            // T124f: the Math prelude type name. Mirrors Rust's `std::f64`
+            // method surface so the codegen can splice `(x as f64).sqrt()`
+            // etc. without rewriting.
+            PreludeType::Math => "Math",
+            // T124f: the Random prelude type name. The codegen splices
+            // `rand::thread_rng().gen_range(...)` etc. for the four
+            // associated functions.
+            PreludeType::Random => "Random",
+            // T124f: the Strings prelude type name. The codegen splices
+            // Rust's `str` / `String` methods (`text.split(sep)...`,
+            // `vec.join(sep)`, etc.) for the eight associated functions.
+            PreludeType::Strings => "Strings",
         }
     }
 
@@ -194,6 +248,21 @@ impl PreludeType {
             // its associated functions (`Toml.parse` / `Toml.stringify`)
             // are callable.
             PreludeType::Toml => Type::Void,
+            // T124f: namespace-only - Math has no value representation.
+            // Mirrors Log / Toml: the namespace itself is never a value,
+            // only its associated functions (`Math.sqrt(x)`, ...) and
+            // associated constants (`Math.PI`, `Math.E`) are callable.
+            PreludeType::Math => Type::Void,
+            // T124f: namespace-only - Random has no value representation.
+            // Mirrors Log / Toml / Math: the namespace itself is never a
+            // value, only its associated functions (`Random.int(lo, hi)`,
+            // ...) are callable.
+            PreludeType::Random => Type::Void,
+            // T124f: namespace-only - Strings has no value representation.
+            // Mirrors Log / Toml / Math / Random: the namespace itself is
+            // never a value, only its associated functions
+            // (`Strings.split(t, s)`, ...) are callable.
+            PreludeType::Strings => Type::Void,
         }
     }
 
@@ -204,7 +273,11 @@ impl PreludeType {
     /// `true`. Used by the prelude-types tests to skip the datetime-only
     /// `is_prelude_datetime` assertion for namespace modules.
     pub const fn is_namespace_only(self) -> bool {
-        matches!(self, PreludeType::Log | PreludeType::Toml)
+        matches!(
+            self,
+            PreludeType::Log | PreludeType::Toml | PreludeType::Math | PreludeType::Random
+                | PreludeType::Strings
+        )
     }
 }
 
@@ -303,6 +376,82 @@ pub enum PreludeAssocFn {
     /// `Date.parse(s)`). Dispatch on `(PreludeType::Toml, Parse)` is
     /// resolved in [`assoc_fn_return_type`].
     Stringify,
+    // ---- Math (T124f) --------------------------------------------------
+    /// `Math.sqrt(x)` - `f64::sqrt`. One arg. Returns Float.
+    Sqrt,
+    /// `Math.sin(x)` - `f64::sin`. One arg. Returns Float.
+    Sin,
+    /// `Math.cos(x)` - `f64::cos`. One arg. Returns Float.
+    Cos,
+    /// `Math.tan(x)` - `f64::tan`. One arg. Returns Float.
+    Tan,
+    /// `Math.abs(x)` - `f64::abs`. One arg. Returns Float.
+    Abs,
+    /// `Math.floor(x)` - `f64::floor`. One arg. Returns Float.
+    Floor,
+    /// `Math.ceil(x)` - `f64::ceil`. One arg. Returns Float.
+    Ceil,
+    /// `Math.round(x)` - `f64::round`. One arg. Returns Float.
+    Round,
+    /// `Math.pow(base, exp)` - `f64::powf`. Two args. Returns Float.
+    Pow,
+    /// `Math.min(a, b)` - `f64::min`. Two args. Returns Float.
+    Min,
+    /// `Math.max(a, b)` - `f64::max`. Two args. Returns Float.
+    Max,
+    // ---- Random (T124f) ------------------------------------------------
+    /// `Random.int(min, max)` - inclusive integer range. Two args
+    /// (Int, Int). Returns Int. Wraps `rand::thread_rng().gen_range
+    /// (min..=max)`.
+    Int,
+    /// `Random.float()` - `f64` in `[0, 1)`. Zero args. Returns Float.
+    /// Wraps `rand::thread_rng().gen::<f64>()`.
+    Float,
+    /// `Random.choice(vec)` - pick a random element. One arg (Vector).
+    /// Returns `Option<element_type>` (None on empty input - NEVER
+    /// panics, matching Buff's "no panicking generated code" rule).
+    /// Wraps `SliceRandom::choose(&vec, &mut rng).cloned()`.
+    Choice,
+    /// `Random.shuffle(vec)` - return a shuffled copy. One arg (Vector).
+    /// Returns Vector<element_type> (a NEW Vec; the input is NOT
+    /// mutated in the user's surface - the codegen makes a `let mut`
+    /// binding internally). Wraps `SliceRandom::shuffle(&mut vec, &mut
+    /// rng)`.
+    Shuffle,
+    // ---- Strings (T124f) -----------------------------------------------
+    /// `Strings.split(text, sep)` - split text into a `Vector<String>`
+    /// by separator. Two args (String, String). Returns
+    /// `Vector<String>`. Wraps `text.split(sep).map(|s|
+    /// s.to_string()).collect::<Vec<String>>()`.
+    Split,
+    /// `Strings.join(vec, sep)` - join a `Vector<String>` into a single
+    /// String with separator. Two args (`Vector<String>`, String).
+    /// Returns String. Wraps `vec.join(&sep)` (Borrows sep via `&` so
+    /// both `'static str` and `String` inputs satisfy Rust's `&str`
+    /// bound on `Vec::<String>::join`).
+    Join,
+    /// `Strings.trim(text)` - strip leading/trailing whitespace. One
+    /// arg. Returns String. Wraps `text.trim().to_string()`.
+    Trim,
+    /// `Strings.replace(text, from, to)` - replace ALL occurrences of
+    /// `from` in `text` with `to`. Three args (String, String, String).
+    /// Returns String. Wraps `text.replace(from, to)` (Rust's
+    /// `str::replace` already returns a new `String`).
+    Replace,
+    /// `Strings.contains(text, substr)` - test whether `text` contains
+    /// `substr`. Two args (String, String). Returns Bool. Wraps
+    /// `text.contains(substr)`.
+    Contains,
+    /// `Strings.starts_with(text, prefix)` - test whether `text`
+    /// starts with `prefix`. Two args (String, String). Returns Bool.
+    /// Wraps `text.starts_with(prefix)`.
+    StartsWith,
+    /// `Strings.to_uppercase(text)` - uppercase the text. One arg.
+    /// Returns String. Wraps `text.to_uppercase().to_string()`.
+    ToUppercase,
+    /// `Strings.to_lowercase(text)` - lowercase the text. One arg.
+    /// Returns String. Wraps `text.to_lowercase().to_string()`.
+    ToLowercase,
 }
 
 impl PreludeAssocFn {
@@ -327,6 +476,34 @@ impl PreludeAssocFn {
         PreludeAssocFn::Compile,
         // T124e: Toml.stringify (Toml.parse reuses `Parse`).
         PreludeAssocFn::Stringify,
+        // T124f: Math assoc fns (11): sqrt/sin/cos/tan/abs/floor/ceil/
+        // round/pow/min/max.
+        PreludeAssocFn::Sqrt,
+        PreludeAssocFn::Sin,
+        PreludeAssocFn::Cos,
+        PreludeAssocFn::Tan,
+        PreludeAssocFn::Abs,
+        PreludeAssocFn::Floor,
+        PreludeAssocFn::Ceil,
+        PreludeAssocFn::Round,
+        PreludeAssocFn::Pow,
+        PreludeAssocFn::Min,
+        PreludeAssocFn::Max,
+        // T124f: Random assoc fns (4): int/float/choice/shuffle.
+        PreludeAssocFn::Int,
+        PreludeAssocFn::Float,
+        PreludeAssocFn::Choice,
+        PreludeAssocFn::Shuffle,
+        // T124f: Strings assoc fns (8): split/join/trim/replace/contains/
+        // starts_with/to_uppercase/to_lowercase.
+        PreludeAssocFn::Split,
+        PreludeAssocFn::Join,
+        PreludeAssocFn::Trim,
+        PreludeAssocFn::Replace,
+        PreludeAssocFn::Contains,
+        PreludeAssocFn::StartsWith,
+        PreludeAssocFn::ToUppercase,
+        PreludeAssocFn::ToLowercase,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -356,6 +533,41 @@ impl PreludeAssocFn {
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
             PreludeAssocFn::Stringify => "stringify",
+            // T124f: Math - names mirror Rust's `f64` method names so
+            // codegen can splice `(...).<name>(...)` without rewriting.
+            PreludeAssocFn::Sqrt => "sqrt",
+            PreludeAssocFn::Sin => "sin",
+            PreludeAssocFn::Cos => "cos",
+            PreludeAssocFn::Tan => "tan",
+            PreludeAssocFn::Abs => "abs",
+            PreludeAssocFn::Floor => "floor",
+            PreludeAssocFn::Ceil => "ceil",
+            PreludeAssocFn::Round => "round",
+            // `pow` lowers to Rust's `f64::powf` (note the trailing `f`
+            // distinguishing float-power from the integer-power `powi`).
+            PreludeAssocFn::Pow => "pow",
+            PreludeAssocFn::Min => "min",
+            PreludeAssocFn::Max => "max",
+            // T124f: Random - `int`/`float` are Buff-flavored names
+            // (clearer than `gen_range` / `gen`); `choice` / `shuffle`
+            // mirror rand's `SliceRandom` trait method names.
+            PreludeAssocFn::Int => "int",
+            PreludeAssocFn::Float => "float",
+            PreludeAssocFn::Choice => "choice",
+            PreludeAssocFn::Shuffle => "shuffle",
+            // T124f: Strings - names mirror Rust's `str`/`String` method
+            // names so codegen can splice `text.<name>(...)` without
+            // rewriting. The `to_uppercase` / `to_lowercase` spellings
+            // match Rust's `str::to_uppercase` / `to_lowercase` (no
+            // underscore between `to` and the case word).
+            PreludeAssocFn::Split => "split",
+            PreludeAssocFn::Join => "join",
+            PreludeAssocFn::Trim => "trim",
+            PreludeAssocFn::Replace => "replace",
+            PreludeAssocFn::Contains => "contains",
+            PreludeAssocFn::StartsWith => "starts_with",
+            PreludeAssocFn::ToUppercase => "to_uppercase",
+            PreludeAssocFn::ToLowercase => "to_lowercase",
         }
     }
 }
@@ -374,6 +586,103 @@ pub fn assoc_fn_lookup(type_name: &str, method: &str) -> Option<(PreludeType, Pr
         .find(|f| f.name() == method)?;
     // Validate the (type, method) pair is a recognised combination.
     assoc_fn_return_type(t, m, &[]).map(|_| (t, m))
+}
+
+// ---------------------------------------------------------------------------
+// Associated constants: `Type.CONST` (T124f)
+// ---------------------------------------------------------------------------
+
+/// A recognised **associated constant** on a prelude type - the
+/// `Type.CONST` access shape. The receiver is the type name itself (a
+/// bare `Expr::Ident`), and the constant is accessed as a zero-arg
+/// "method call" `Type.NAME` (Buff's parser produces `MethodCall` with
+/// `args == []` for both `obj.field` and `obj.field()`; the codegen
+/// consults this registry to decide whether `Math.PI` is a prelude
+/// constant access vs. a field access on a user struct named `Math`).
+///
+/// # Why a separate registry
+///
+/// The associated-FUNCTION registry ([`PreludeAssocFn`]) dispatches
+/// CALLS (`Type.method(args)`); associated CONSTANTS are accessed
+/// WITHOUT parens (`Math.PI`). The codegen consults this registry in
+/// the `lower_method_call` zero-arg arm BEFORE the T26 field-access
+/// heuristic so a prelude constant access is rewritten to the Rust
+/// path (`std::f64::consts::PI`) rather than the literal Rust field
+/// access `Math.PI` (which would not compile).
+///
+/// # Naming convention
+///
+/// Variants are named after the constant's surface identifier (the
+/// user-facing name). Dispatch on `(PreludeType, PreludeAssocConst)`
+/// pairs is exhaustive in [`assoc_const_return_type`].
+///
+/// # T124f scope
+///
+/// Currently only the Math namespace has associated constants (`PI`,
+/// `E`). Future prelude modules with constants (e.g. a future `Physics`
+/// module exposing `Physics.G` for the gravitational constant) extend
+/// this enum + the lookup/return-type matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PreludeAssocConst {
+    /// `Math.PI` (pi) - the ratio of a circle's circumference to its
+    /// diameter. Returns Float (lowers to `std::f64::consts::PI`).
+    Pi,
+    /// `Math.E` (Euler's number) - the base of the natural logarithm.
+    /// Returns Float (lowers to `std::f64::consts::E`).
+    E,
+}
+
+impl PreludeAssocConst {
+    /// All recognised associated-constant names.
+    pub const ALL: &'static [PreludeAssocConst] =
+        &[PreludeAssocConst::Pi, PreludeAssocConst::E];
+
+    /// The source name of this associated constant (the identifier the user
+    /// writes after the dot). Note constant names are UPPERCASE per the
+    /// Rust / Buff convention for consts.
+    pub const fn name(self) -> &'static str {
+        match self {
+            // `PI` / `E` match Rust's `std::f64::consts::PI` / `E`
+            // exactly so the codegen can splice `std::f64::consts::PI`
+            // without rewriting.
+            PreludeAssocConst::Pi => "PI",
+            PreludeAssocConst::E => "E",
+        }
+    }
+}
+
+/// Look up a prelude associated constant by the (type, name) pair.
+///
+/// Returns `None` when the combination is not a recognised prelude
+/// constant access (e.g. `Math.TAU` is invalid - TAU is not in the
+/// T124f surface; `DateTime.PI` is invalid - PI belongs to Math).
+/// This is the function the type inferencer + codegen consult to
+/// decide whether a `Type.NAME` AST node (zero-arg method call) is a
+/// prelude constant access.
+pub fn assoc_const_lookup(type_name: &str, name: &str) -> Option<(PreludeType, PreludeAssocConst)> {
+    let t = prelude_type_lookup(type_name)?;
+    let c = PreludeAssocConst::ALL
+        .iter()
+        .copied()
+        .find(|c| c.name() == name)?;
+    // Validate the (type, const) pair is a recognised combination.
+    assoc_const_return_type(t, c).map(|_| (t, c))
+}
+
+/// Infer the resolved Buff [`Type`] of a prelude associated constant.
+///
+/// Returns `None` for invalid `(type, const)` combinations. Currently
+/// every associated constant is `Float` (Math.PI / Math.E both lower
+/// to `std::f64::consts::PI` / `E` which are `f64`). Future
+/// associated constants of other types (e.g. `Int`) extend this match.
+pub fn assoc_const_return_type(type_: PreludeType, const_: PreludeAssocConst) -> Option<Type> {
+    match (type_, const_) {
+        // Math.PI / Math.E -> Float (f64).
+        (PreludeType::Math, PreludeAssocConst::Pi) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocConst::E) => Some(Type::float_default()),
+        // Every other (type, const) pair is invalid.
+        _ => None,
+    }
 }
 
 /// Infer the return type of a prelude associated-function call.
@@ -441,6 +750,63 @@ pub fn assoc_fn_return_type(
         // is satisfied for any Map<String, toml::Value> / suitable
         // Serialize-implementing value.
         (PreludeType::Toml, PreludeAssocFn::Stringify) => Some(Type::string()),
+        // T124f: Math module - every Math.<fn> returns Float (the
+        // element type Rust uses for `f64` methods). `min`/`max` also
+        // return Float (we deliberately don't try to preserve Int-ness
+        // - the lowering goes through `f64::min`/`f64::max` regardless
+        // of the arg type, since Rust's `i64::min` would also work but
+        // introducing a polymorphic return-type rule here would
+        // complicate the registry for marginal gain; a future narrowing
+        // task can special-case Int args if needed).
+        (PreludeType::Math, PreludeAssocFn::Sqrt) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Sin) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Cos) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Tan) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Abs) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Floor) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Ceil) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Round) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Pow) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Min) => Some(Type::float_default()),
+        (PreludeType::Math, PreludeAssocFn::Max) => Some(Type::float_default()),
+        // T124f: Random module.
+        // `Random.int(min, max)` -> Int (default width = Int<64>).
+        // Inclusive range - `min..=max` in Rust's `gen_range`.
+        (PreludeType::Random, PreludeAssocFn::Int) => Some(Type::int_default()),
+        // `Random.float()` -> Float (f64 in [0, 1)).
+        (PreludeType::Random, PreludeAssocFn::Float) => Some(Type::float_default()),
+        // `Random.choice(vec)` -> Option<element_type>. The element
+        // type is Unknown at the registry level (the codegen emits a
+        // generic `.cloned()` so the runtime return type is whatever
+        // Rust infers from the input vec - typically `Option<T>` where
+        // `T` is the vec's element type). The Unknown here is the
+        // surface contract; concrete per-call typing is a future
+        // narrowing task (mirrors the Toml.parse Unknown value-type
+        // stance from T124e).
+        (PreludeType::Random, PreludeAssocFn::Choice) => Some(Type::option(Type::Unknown)),
+        // `Random.shuffle(vec)` -> Vector<element_type>. Returns a NEW
+        // shuffled Vector (the input is not mutated in the user's
+        // surface - the codegen makes a `let mut` binding internally
+        // and returns it). Element type Unknown for the same reason as
+        // `choice`.
+        (PreludeType::Random, PreludeAssocFn::Shuffle) => Some(Type::vector(Type::Unknown)),
+        // T124f: Strings module.
+        // `Strings.split(text, sep)` -> Vector<String>.
+        (PreludeType::Strings, PreludeAssocFn::Split) => Some(Type::vector(Type::string())),
+        // `Strings.join(vec, sep)` -> String.
+        (PreludeType::Strings, PreludeAssocFn::Join) => Some(Type::string()),
+        // `Strings.trim(text)` -> String.
+        (PreludeType::Strings, PreludeAssocFn::Trim) => Some(Type::string()),
+        // `Strings.replace(text, from, to)` -> String.
+        (PreludeType::Strings, PreludeAssocFn::Replace) => Some(Type::string()),
+        // `Strings.contains(text, substr)` -> Bool.
+        (PreludeType::Strings, PreludeAssocFn::Contains) => Some(Type::bool()),
+        // `Strings.starts_with(text, prefix)` -> Bool.
+        (PreludeType::Strings, PreludeAssocFn::StartsWith) => Some(Type::bool()),
+        // `Strings.to_uppercase(text)` -> String.
+        (PreludeType::Strings, PreludeAssocFn::ToUppercase) => Some(Type::string()),
+        // `Strings.to_lowercase(text)` -> String.
+        (PreludeType::Strings, PreludeAssocFn::ToLowercase) => Some(Type::string()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -891,8 +1257,9 @@ mod tests {
         // 5 datetime-family members shipped in T124b + 1 namespace module
         // (Log) shipped in T124c + 1 runtime-value-with-methods type
         // (Regex) shipped in T124d + 1 namespace-only module (Toml)
-        // shipped in T124e = 8 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 8);
+        // shipped in T124e + 3 namespace-only utility modules (Math,
+        // Random, Strings) shipped in T124f = 11 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 11);
     }
 
     #[test]
@@ -1180,6 +1547,10 @@ mod tests {
         // Both Log and Toml are namespace-only modules.
         assert!(PreludeType::Log.is_namespace_only());
         assert!(PreludeType::Toml.is_namespace_only());
+        // T124f: Math / Random / Strings are also namespace-only.
+        assert!(PreludeType::Math.is_namespace_only());
+        assert!(PreludeType::Random.is_namespace_only());
+        assert!(PreludeType::Strings.is_namespace_only());
         // The datetime family + Regex are NOT namespace-only.
         assert!(!PreludeType::DateTime.is_namespace_only());
         assert!(!PreludeType::Date.is_namespace_only());
@@ -1187,11 +1558,454 @@ mod tests {
         assert!(!PreludeType::Duration.is_namespace_only());
         assert!(!PreludeType::Instant.is_namespace_only());
         assert!(!PreludeType::Regex.is_namespace_only());
-        // The count of namespace-only modules is exactly 2 (Log + Toml).
+        // T124f: The count of namespace-only modules is now exactly 5
+        // (Log + Toml + Math + Random + Strings).
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        assert_eq!(namespace_only_count, 2);
+        assert_eq!(namespace_only_count, 5);
+    }
+
+    // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +
+    // return types + the associated-constant mechanism for `Math.PI` /
+    // `Math.E`. Mirrors the Log / Toml namespace-only precedent (T124c
+    // / T124e) but with Float return types + the first associated
+    // constants in the registry.
+    #[test]
+    fn prelude_math_assoc_fn_lookup_valid_pairs() {
+        // All 11 Math assoc fns resolve via the registry.
+        assert_eq!(
+            assoc_fn_lookup("Math", "sqrt"),
+            Some((PreludeType::Math, PreludeAssocFn::Sqrt))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "sin"),
+            Some((PreludeType::Math, PreludeAssocFn::Sin))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "cos"),
+            Some((PreludeType::Math, PreludeAssocFn::Cos))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "tan"),
+            Some((PreludeType::Math, PreludeAssocFn::Tan))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "abs"),
+            Some((PreludeType::Math, PreludeAssocFn::Abs))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "floor"),
+            Some((PreludeType::Math, PreludeAssocFn::Floor))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "ceil"),
+            Some((PreludeType::Math, PreludeAssocFn::Ceil))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "round"),
+            Some((PreludeType::Math, PreludeAssocFn::Round))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "pow"),
+            Some((PreludeType::Math, PreludeAssocFn::Pow))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "min"),
+            Some((PreludeType::Math, PreludeAssocFn::Min))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Math", "max"),
+            Some((PreludeType::Math, PreludeAssocFn::Max))
+        );
+        // `Math` is recognised as a prelude type.
+        assert!(is_prelude_type("Math"));
+        // `Math.buff_type()` is `Void` (no runtime value - namespace-only
+        // like Log / Toml).
+        assert_eq!(PreludeType::Math.buff_type(), Type::Void);
+        // `Math.is_namespace_only()` is true.
+        assert!(PreludeType::Math.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_math_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Math.now is invalid (now belongs to DateTime/Instant).
+        assert_eq!(assoc_fn_lookup("Math", "now"), None);
+        // Math.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("Math", "compile"), None);
+        // Math.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Math", "unknown"), None);
+        // Math.debug is invalid (debug belongs to Log).
+        assert_eq!(assoc_fn_lookup("Math", "debug"), None);
+        // Math.parse is invalid (Math has no parse method).
+        assert_eq!(assoc_fn_lookup("Math", "parse"), None);
+        // DateTime.sqrt is invalid (sqrt belongs to Math).
+        assert_eq!(assoc_fn_lookup("DateTime", "sqrt"), None);
+        // Log.sin is invalid (Log is namespace-only).
+        assert_eq!(assoc_fn_lookup("Log", "sin"), None);
+    }
+
+    #[test]
+    fn prelude_math_assoc_fn_return_types() {
+        // All Math methods return Float (f64 width).
+        let expected = Some(Type::float_default());
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Sqrt, &[Type::float_default()]),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Sin, &[Type::float_default()]),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Cos, &[Type::float_default()]),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Tan, &[Type::float_default()]),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Abs, &[Type::float_default()]),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Floor,
+                &[Type::float_default()]
+            ),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Ceil,
+                &[Type::float_default()]
+            ),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Round,
+                &[Type::float_default()]
+            ),
+            expected
+        );
+        // pow takes 2 args, but still returns Float.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Pow,
+                &[Type::float_default(), Type::float_default()]
+            ),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Min,
+                &[Type::float_default(), Type::float_default()]
+            ),
+            expected
+        );
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Math,
+                PreludeAssocFn::Max,
+                &[Type::float_default(), Type::float_default()]
+            ),
+            expected
+        );
+        // Math + non-Math method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Math, PreludeAssocFn::Now, &[]),
+            None
+        );
+        // Non-Math type + Math method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::DateTime, PreludeAssocFn::Sqrt, &[]),
+            None
+        );
+    }
+
+    // T124f: Math associated constants - the FIRST associated-constant
+    // prelude mechanism. `Math.PI` / `Math.E` resolve via the dedicated
+    // `assoc_const_lookup` registry (separate from assoc fns because
+    // the parser produces a zero-arg MethodCall that the codegen must
+    // rewrite to the Rust `std::f64::consts::PI` / `E` path rather
+    // than the literal field access `Math.PI`).
+    #[test]
+    fn prelude_math_assoc_const_lookup_valid_pairs() {
+        assert_eq!(
+            assoc_const_lookup("Math", "PI"),
+            Some((PreludeType::Math, PreludeAssocConst::Pi))
+        );
+        assert_eq!(
+            assoc_const_lookup("Math", "E"),
+            Some((PreludeType::Math, PreludeAssocConst::E))
+        );
+    }
+
+    #[test]
+    fn prelude_math_assoc_const_lookup_rejects_invalid_pairs() {
+        // Math.TAU is invalid (not in the T124f surface).
+        assert_eq!(assoc_const_lookup("Math", "TAU"), None);
+        // Math.PHI is invalid.
+        assert_eq!(assoc_const_lookup("Math", "PHI"), None);
+        // Math.pi (lowercase) is invalid (constants are UPPERCASE).
+        assert_eq!(assoc_const_lookup("Math", "pi"), None);
+        // Math.sqrt is not a constant.
+        assert_eq!(assoc_const_lookup("Math", "sqrt"), None);
+        // DateTime.PI is invalid (PI belongs to Math).
+        assert_eq!(assoc_const_lookup("DateTime", "PI"), None);
+        // Log.PI is invalid (Log is namespace-only with no constants).
+        assert_eq!(assoc_const_lookup("Log", "PI"), None);
+        // Toml.E is invalid.
+        assert_eq!(assoc_const_lookup("Toml", "E"), None);
+    }
+
+    #[test]
+    fn prelude_math_assoc_const_return_types() {
+        // Math.PI / Math.E -> Float (f64).
+        assert_eq!(
+            assoc_const_return_type(PreludeType::Math, PreludeAssocConst::Pi),
+            Some(Type::float_default())
+        );
+        assert_eq!(
+            assoc_const_return_type(PreludeType::Math, PreludeAssocConst::E),
+            Some(Type::float_default())
+        );
+        // Non-Math type + Math const is invalid.
+        assert_eq!(
+            assoc_const_return_type(PreludeType::DateTime, PreludeAssocConst::Pi),
+            None
+        );
+        assert_eq!(
+            assoc_const_return_type(PreludeType::Log, PreludeAssocConst::E),
+            None
+        );
+    }
+
+    #[test]
+    fn prelude_assoc_const_all_and_no_duplicates() {
+        // 2 associated constants: PI + E.
+        assert_eq!(PreludeAssocConst::ALL.len(), 2);
+        let names: Vec<&str> = PreludeAssocConst::ALL.iter().map(|c| c.name()).collect();
+        let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
+        assert_eq!(names.len(), unique.len(), "duplicate assoc-const names");
+        // Names are UPPERCASE per Rust / Buff const convention.
+        assert_eq!(PreludeAssocConst::Pi.name(), "PI");
+        assert_eq!(PreludeAssocConst::E.name(), "E");
+    }
+
+    // T124f: Random module - `Random.<fn>(...)` assoc-fn lookups +
+    // return types. Mirrors the Math / Log namespace-only precedent
+    // but with mixed return types (Int / Float / Option / Vector).
+    #[test]
+    fn prelude_random_assoc_fn_lookup_valid_pairs() {
+        assert_eq!(
+            assoc_fn_lookup("Random", "int"),
+            Some((PreludeType::Random, PreludeAssocFn::Int))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Random", "float"),
+            Some((PreludeType::Random, PreludeAssocFn::Float))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Random", "choice"),
+            Some((PreludeType::Random, PreludeAssocFn::Choice))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Random", "shuffle"),
+            Some((PreludeType::Random, PreludeAssocFn::Shuffle))
+        );
+        // `Random` is recognised as a prelude type.
+        assert!(is_prelude_type("Random"));
+        // `Random.buff_type()` is `Void` (namespace-only).
+        assert_eq!(PreludeType::Random.buff_type(), Type::Void);
+        // `Random.is_namespace_only()` is true.
+        assert!(PreludeType::Random.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_random_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Random.now is invalid.
+        assert_eq!(assoc_fn_lookup("Random", "now"), None);
+        // Random.compile is invalid.
+        assert_eq!(assoc_fn_lookup("Random", "compile"), None);
+        // Random.sqrt is invalid (sqrt belongs to Math).
+        assert_eq!(assoc_fn_lookup("Random", "sqrt"), None);
+        // Math.int is invalid (int belongs to Random).
+        assert_eq!(assoc_fn_lookup("Math", "int"), None);
+    }
+
+    #[test]
+    fn prelude_random_assoc_fn_return_types() {
+        // Random.int(min, max) -> Int<64>.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Random,
+                PreludeAssocFn::Int,
+                &[Type::int_default(), Type::int_default()]
+            ),
+            Some(Type::int_default())
+        );
+        // Random.float() -> Float.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Random, PreludeAssocFn::Float, &[]),
+            Some(Type::float_default())
+        );
+        // Random.choice(vec) -> Option<Unknown> (element type inferred
+        // by Rust at the use site; Unknown at the registry level).
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Random,
+                PreludeAssocFn::Choice,
+                &[Type::vector(Type::Unknown)]
+            ),
+            Some(Type::option(Type::Unknown))
+        );
+        // Random.shuffle(vec) -> Vector<Unknown>.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Random,
+                PreludeAssocFn::Shuffle,
+                &[Type::vector(Type::Unknown)]
+            ),
+            Some(Type::vector(Type::Unknown))
+        );
+    }
+
+    // T124f: Strings module - `Strings.<fn>(...)` assoc-fn lookups +
+    // return types. Mirrors the Math / Log namespace-only precedent.
+    #[test]
+    fn prelude_strings_assoc_fn_lookup_valid_pairs() {
+        assert_eq!(
+            assoc_fn_lookup("Strings", "split"),
+            Some((PreludeType::Strings, PreludeAssocFn::Split))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "join"),
+            Some((PreludeType::Strings, PreludeAssocFn::Join))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "trim"),
+            Some((PreludeType::Strings, PreludeAssocFn::Trim))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "replace"),
+            Some((PreludeType::Strings, PreludeAssocFn::Replace))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "contains"),
+            Some((PreludeType::Strings, PreludeAssocFn::Contains))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "starts_with"),
+            Some((PreludeType::Strings, PreludeAssocFn::StartsWith))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "to_uppercase"),
+            Some((PreludeType::Strings, PreludeAssocFn::ToUppercase))
+        );
+        assert_eq!(
+            assoc_fn_lookup("Strings", "to_lowercase"),
+            Some((PreludeType::Strings, PreludeAssocFn::ToLowercase))
+        );
+        // `Strings` is recognised as a prelude type.
+        assert!(is_prelude_type("Strings"));
+        // `Strings.buff_type()` is `Void` (namespace-only).
+        assert_eq!(PreludeType::Strings.buff_type(), Type::Void);
+        // `Strings.is_namespace_only()` is true.
+        assert!(PreludeType::Strings.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_strings_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Strings.now is invalid.
+        assert_eq!(assoc_fn_lookup("Strings", "now"), None);
+        // Strings.compile is invalid.
+        assert_eq!(assoc_fn_lookup("Strings", "compile"), None);
+        // Strings.sqrt is invalid (sqrt belongs to Math).
+        assert_eq!(assoc_fn_lookup("Strings", "sqrt"), None);
+        // Strings.int is invalid (int belongs to Random).
+        assert_eq!(assoc_fn_lookup("Strings", "int"), None);
+        // Math.split is invalid (split belongs to Strings).
+        assert_eq!(assoc_fn_lookup("Math", "split"), None);
+    }
+
+    #[test]
+    fn prelude_strings_assoc_fn_return_types() {
+        // Strings.split(text, sep) -> Vector<String>.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::Split,
+                &[Type::string(), Type::string()]
+            ),
+            Some(Type::vector(Type::string()))
+        );
+        // Strings.join(vec, sep) -> String.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::Join,
+                &[Type::vector(Type::string()), Type::string()]
+            ),
+            Some(Type::string())
+        );
+        // Strings.trim(text) -> String.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Strings, PreludeAssocFn::Trim, &[Type::string()]),
+            Some(Type::string())
+        );
+        // Strings.replace(text, from, to) -> String.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::Replace,
+                &[Type::string(), Type::string(), Type::string()]
+            ),
+            Some(Type::string())
+        );
+        // Strings.contains(text, substr) -> Bool.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::Contains,
+                &[Type::string(), Type::string()]
+            ),
+            Some(Type::bool())
+        );
+        // Strings.starts_with(text, prefix) -> Bool.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::StartsWith,
+                &[Type::string(), Type::string()]
+            ),
+            Some(Type::bool())
+        );
+        // Strings.to_uppercase(text) -> String.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::ToUppercase,
+                &[Type::string()]
+            ),
+            Some(Type::string())
+        );
+        // Strings.to_lowercase(text) -> String.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Strings,
+                PreludeAssocFn::ToLowercase,
+                &[Type::string()]
+            ),
+            Some(Type::string())
+        );
     }
 }

@@ -198,3 +198,56 @@ Spike crate lives under %TEMP%\opencode\dioxus-spike\ (throwaway, outside buff r
   boundary as chrono (T124b), tracing (T124c), and tokio (T31).
   Acceptance = snapshot-verified codegen + registry wired + workspace
   green. Cargo-project wiring is deferred.
+
+## 2026-07-20 T124f — Math/Random/Sort/Strings utility modules
+
+### Decision: separate `PreludeAssocConst` registry (not reuse `PreludeAssocFn`)
+
+`Math.PI` / `Math.E` are accessed WITHOUT parens (`Math.PI`, not
+`Math.PI()`). The parser produces a zero-arg `MethodCall` for both
+`obj.field` and `obj.field()`. Reusing `PreludeAssocFn` would have
+required special-casing the args.is_empty() path inside the existing
+assoc-fn dispatch — cleaner to have a separate `PreludeAssocConst`
+enum + `assoc_const_lookup` / `assoc_const_return_type` helpers.
+Dispatch in `lower_method_call` BEFORE the T26 field-access heuristic
+so `Math.PI` is rewritten to `std::f64::consts::PI` (NOT the bare
+field access `Math.PI` which wouldn't compile).
+
+### Decision: Sort = instance methods on existing Vector (NOT a new PreludeType)
+
+`vec.sort()` / `vec.sort_by(cmp)` mirror `.len()` / `.pop()` / `.map()`
+dispatch — they live in the string-method mapping block in
+`lower_method_call`, NOT in the prelude-types registry. The codegen
+lowers them to a `{ let mut __v = recv; __v.sort[_by](...); __v }`
+block so the surface stays functional (`[3,1,2].sort() -> [1,2,3]`).
+The `__v` name is `__`-prefixed to avoid colliding with user vars
+(mirrors the `__recv` placeholder precedent).
+
+### Decision: rand 0.8 (NOT 0.9)
+
+rand 0.8 is the long-standing stable API surface the broader Rust
+ecosystem targets. rand 0.9 renamed the API (`rng()` instead of
+`thread_rng()`, `random_range()` instead of `gen_range()`,
+`IndexedRandom` partial split from `SliceRandom`). Pinning 0.8 keeps
+the codegen-lowered calls stable + matches the chrono/toml/regex/
+tracing "pin pre-1.0 major" precedent. API used:
+- `rand::thread_rng().gen_range(min..=max)` (inclusive range).
+- `rand::thread_rng().gen::<f64>()`.
+- `rand::seq::SliceRandom::{choose, shuffle}`.
+
+### Decision: Math/Strings NO extern crate (std-only)
+
+Math wraps `f64` methods + `std::f64::consts`; Strings wraps `str`/
+`String` methods. Both are pure Rust std — no `program_uses_X` walker
+needed, no extern crate registration. Only Random needs the walker
+(wraps the `rand` crate).
+
+### Decision: chrono walker narrowed to datetime family only
+
+Pre-T124f `expr_uses_chrono` flagged ANY `is_prelude_type(id.name)`
+Ident receiver as chrono usage. After T124c-f that list includes
+Log/Regex/Toml/Math/Random/Strings (none lower to chrono), causing
+false-positive chrono registration. Narrowed to
+`prelude_type_lookup(...).buff_type().is_prelude_datetime()`
+(flags only DateTime/Date/Time/Duration/Instant). Caught by the
+`math_codegen_no_extern_crate_registered` test.

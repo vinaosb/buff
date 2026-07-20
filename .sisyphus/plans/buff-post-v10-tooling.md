@@ -1168,7 +1168,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Toml module wrapping toml crate`
 
-- [ ] **T124f: Utility modules — Math, Random, Sort, Strings** [unspecified-high]
+- [x] **T124f: Utility modules — Math, Random, Sort, Strings** [unspecified-high]
 
   **What to do**:
   - `Math`: `Math.sqrt(x)`, `Math.sin/cos/tan(x)`, `Math.PI`, `Math.E`, `Math.abs(x)`, `Math.floor/ceil/round(x)`, `Math.pow(base, exp)`, `Math.min/max(a, b)` — wrap Rust's `std::f64` methods + consts

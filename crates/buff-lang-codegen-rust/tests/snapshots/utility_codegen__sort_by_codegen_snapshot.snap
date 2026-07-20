@@ -1,0 +1,12 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 944
+expression: src
+---
+fn f() {
+    {
+        let mut __v = vec![3, 1, 2];
+        __v.sort_by(|a, b| a);
+        __v
+    };
+}

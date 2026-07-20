@@ -77,6 +77,23 @@ url = "2"
 # Already pulled transitively; pinning at workspace level keeps it explicit
 # so the LSP crate can use synchronous `select!` for debouncing.
 crossbeam-channel = "0.5"
+# T124f: Random module (Random.int / Random.float / Random.choice /
+# Random.shuffle) wraps the `rand` crate. We pin rand 0.8 (NOT 0.9)
+# because rand 0.8 ships the stable, long-standing API surface most of
+# the Rust ecosystem already targets:
+#   - `rand::thread_rng().gen_range(min..=max)` for inclusive integer range
+#   - `rand::thread_rng().gen::<f64>()` for [0, 1) float
+#   - `rand::seq::SliceRandom::{choose, shuffle}` for collection ops
+# rand 0.9 (released 2024) renamed the API (`rng()` instead of
+# `thread_rng()`, `random_range()` instead of `gen_range()`,
+# `IndexedRandom` instead of part of `SliceRandom`) - targeting 0.8
+# keeps the codegen-lowered calls stable across the wider ecosystem
+# (chrono / tracing / regex / toml already pin pre-1.0 majors too).
+# Recorded in the codegen `extern_crates` BTreeSet when a Buff program
+# uses `Random`, mirroring the chrono/toml/regex/tracing codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link it;
+# cargo-project wiring is deferred).
+rand = "0.8"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }

@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 970
+expression: src
+---
+fn f() {
+    vec.join(&",");
+}

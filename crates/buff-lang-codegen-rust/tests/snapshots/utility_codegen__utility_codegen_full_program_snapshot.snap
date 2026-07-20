@@ -1,0 +1,16 @@
+---
+source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
+assertion_line: 1020
+expression: src
+---
+fn main() {
+    let r: f32 = (16 as f64).sqrt();
+    let pi = std::f64::consts::PI;
+    let n: i64 = rand::thread_rng().gen_range(1..=100);
+    let s = {
+        let mut __v = vec![3, 1, 2];
+        __v.sort();
+        __v
+    };
+    "hi".to_uppercase().to_string();
+}
