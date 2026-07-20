@@ -1,0 +1,28 @@
+T126 Evidence — Security (auth, name validation, rate limiting)
+================================================================
+Relevant tests (cargo test -p buff-registry — all pass):
+
+Auth:
+  - publish_without_auth_returns_401       (no Authorization header)
+  - publish_with_unknown_token_returns_401 (Bearer token not registered)
+  - download_works_without_auth_header     (anonymous download allowed)
+
+Package name validation (validate_name):
+  - publish_with_path_traversal_name_returns_400  (name "../evil" rejected)
+  - publish_with_empty_name_returns_400
+  - publish_with_uppercase_name_returns_400       (only [a-z0-9_-] allowed)
+  - publish_with_invalid_version_returns_400      (non-semver version rejected)
+
+Rate limiting (per-token rolling window):
+  - publish_after_rate_limit_returns_429   (budget exhausted → 429)
+
+Append-only:
+  - republish_same_version_returns_400     (no overwriting an existing version)
+
+Result: PASS. Abuse-prevention controls enforced at the HTTP boundary.
+
+DEFERRED — USER ACTIONS (not covered by local tests):
+  - Deploy to VPS/Fly.io/Railway; "Published and accessible at registry.buff-lang.org".
+  - GitHub OAuth for real publish tokens (in-memory test tokens used here).
+  - Postgres (diesel) + S3/MinIO blob storage backends.
+  - Ops runbook: backup/restore procedure (depends on chosen hosting/DB).

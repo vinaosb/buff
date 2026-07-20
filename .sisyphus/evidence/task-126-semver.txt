@@ -1,0 +1,13 @@
+T126 Evidence — Semver resolution
+==================================
+Endpoint: GET /api/v1/resolve/<name>?req=<semver-req>  (uses the `semver` crate).
+
+Relevant tests (cargo test -p buff-registry — all pass):
+  - resolve_returns_highest_compatible_version
+      Publish 1.0.0, 1.1.0, 2.0.0. Resolve "^1.0.0" → 1.1.0 (highest compatible).
+  - resolve_returns_404_when_no_version_matches
+      A requirement with no satisfying published version → 404.
+  - resolve_returns_404_for_unknown_package
+      Resolve against an unknown package → 404.
+
+Result: PASS. VersionReq::matches + max-Version selection returns the correct version.

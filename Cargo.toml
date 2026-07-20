@@ -322,3 +322,53 @@ rustyline = "15"
 # consume is `dirs::home_dir()` — no other API surface is touched, so a
 # future bump to 6.x is a one-line version change with no code change.
 dirs = "5"
+# T126: Minimal Buff package registry HTTP server (`crates/buff-registry`).
+# We pull three new top-level crates — `axum` (the web framework, already
+# the de-facto Rust ecosystem default since 0.5 and the natural successor
+# to the `warp`/`rocket` lineage), `tower` (Service trait utilities, used
+# only via `ServiceExt::oneshot` for in-process integration tests so we
+# do NOT spawn a TCP server per test), and `semver` (the canonical
+# Cargo-compatible semver crate — implements `Version` + `VersionReq` and
+# the exact match rules Cargo uses, which is what the Buff resolver must
+# mirror). Pinning all three at the workspace level mirrors the
+# buff-eval / buff-repl / buff-lsp precedent and lets future consumers
+# (T127 `buff add`/`buff install` CLI, T128 registry web UI) reuse the
+# same versions without churn.
+#
+# - `axum` 0.8: the Tokio-based HTTP framework. API surface used:
+#   `Router::new().route(path, method_router)`, `axum::routing::{get, post}`,
+#   `axum::extract::{State, Path, Query}`, `axum::body::Bytes` extractor
+#   for the publish body, `Json` for response bodies, `IntoResponse` for
+#   the error mapping. The `with_state(state)` pattern lets the library
+#   expose a `pub fn app(state) -> Router` that tests build in-process
+#   via `Router::oneshot` (no TCP port allocation). Pinned to 0.8 (NOT
+#   0.7) because 0.8 introduced the `{param}` path syntax and the
+#   `axum::serve(listener, app)` API — both are the current canonical
+#   surface; 0.7 is in maintenance only.
+# - `tower` 0.5: the `ServiceExt` trait is used in tests ONLY
+#   (`tower::ServiceExt::oneshot` to drive a `Router<()>` directly with
+#   a `Request<Body>`). The `tower` workspace pin keeps the test
+#   dep + any future middleware (tower-http layers like CORS, body
+#   limits, tracing) version-aligned with axum. NOT used in non-test
+#   code today.
+# - `semver` 1.x: the long-standing `semver` crate (the same one Cargo
+#   itself depends on). API surface used: `Version::parse`,
+#   `VersionReq::parse`, `VersionReq::matches`. `Display` for both
+#   produces canonical Cargo-compatible strings, so the resolve
+#   endpoint returns the exact form the CLI will compare against.
+# Stable since 1.0 (years), so the `1` major-only pin is conservative.
+#
+# `base64`, `serde`, `serde_json`, `tokio`, `thiserror` are already
+# pinned at the workspace level (T124h/T124-base/T124c) and reused here
+# without re-pinning. The publish request body carries the tarball as a
+# base64-encoded string inside a JSON envelope — pure Rust, no native
+# deps, matches the "no C library, no Docker" hard rule from the T126
+# task spec.
+axum = "0.8"
+tower = "0.5"
+semver = "1"
+# T126: `buff-registry` workspace path dep — mirrors the buff-eval /
+# buff-repl / buff-lsp pattern so any future consumer (T127 CLI, T128
+# web UI) resolves to the same in-tree version during the v1.6 tooling
+# wave.
+buff-registry = { path = "crates/buff-registry" }

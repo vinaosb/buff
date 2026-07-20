@@ -1,0 +1,12 @@
+T126 Evidence — Dependency cycle rejection
+===========================================
+Cycle detection: DFS over the published dependency graph (latest-published version
+of each package as the edge source), run at publish time.
+
+Relevant tests (cargo test -p buff-registry — all pass):
+  - publish_rejects_dependency_cycle
+      Publish A depending on B, then publish B depending on A → cycle rejected (409).
+  - publish_rejects_self_cycle
+      Publish A depending on A → self-cycle rejected (409).
+
+Result: PASS. Cyclic publishes are rejected; acyclic dep graphs accepted.

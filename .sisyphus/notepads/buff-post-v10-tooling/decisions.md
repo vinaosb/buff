@@ -498,3 +498,10 @@ The task spec said `:type x` prints `Int`; reality is `Int<64>` (Buff's default 
 
 **Decision 7: the dispatcher takes `&mut Evaluator` even though `:type` only needs `&`.**
 `Evaluator::type_of` is `&self` (read-only). But `dispatch_line` is `&mut Evaluator` because the OTHER branch (`evaluate_and_format`) requires `&mut` to accumulate `let`/`func` state. The single dispatcher signature accommodates both paths without caller-side branching. Cost: a `&mut` borrow that's never exercised for the `:type` path. Benefit: ONE call site in `run_with_writer`, uniform behavior between TTY and tests.
+
+## T125c
+- Accepted T125c as-is on disk (57 tests green, clippy/fmt clean, panic-free). :load routes through eval_line accumulation; ~/.buff_history via dirs::home_dir() best-effort; multi-line via blank-line terminator + needs_continuation heuristic. No source change over subagent output -- only re-verified after correcting the smoke-test invocation.
+
+## T126
+- User chose 'build code + local tests only' because the registry needs external infra I cannot provision (Postgres, object storage, paid hosting, GitHub OAuth, live domain). Delivered the axum server + in-memory backend + full local integration tests; deploy/OAuth/live-domain/Postgres/S3/ops-runbook are USER ACTIONS.
+- Did NOT add diesel/postgres (would need libpq on Windows) nor any [features] section (repo hard rule) -- so the in-memory backend is the only shipped Storage impl for now.

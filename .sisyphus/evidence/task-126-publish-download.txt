@@ -1,0 +1,17 @@
+T126 Evidence — Publish + download roundtrip
+=============================================
+Backend: in-memory Storage (pure Rust; Postgres/S3 deferred — USER ACTION).
+Driven in-process via tower::ServiceExt::oneshot on the axum Router.
+
+Relevant tests (cargo test -p buff-registry — all pass):
+  - publish_then_download_returns_same_bytes
+      POST /api/v1/publish (Bearer auth) with a base64 tarball → 201 Created + metadata.
+      GET /api/v1/download/<name>/<version> → identical tarball bytes.
+  - get_package_lists_all_published_versions
+      GET /api/v1/package/<name> → JSON listing every published version.
+  - typed_publish_request_round_trips_through_http
+      PublishRequest { name, version, deps, tarball_b64 } serializes/deserializes over HTTP.
+  - download_works_without_auth_header
+      GET /api/v1/download/... succeeds anonymously (no Authorization header).
+
+Result: PASS. Publish and download work end-to-end against the in-memory backend.
