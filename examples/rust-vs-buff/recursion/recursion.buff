@@ -1,0 +1,22 @@
+// Buff: recursion. Same algorithm, less ceremony.
+// Indentation-based, explicit return types, no semicolons.
+
+func fib(n: Int) -> Int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+func factorial(n: Int) -> Int:
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+func power(base: Int, exp: Int) -> Int:
+    if exp == 0:
+        return 1
+    return base * power(base, exp - 1)
+
+func main():
+    print(fib(10))
+    print(factorial(10))
+    print(power(2, 10))

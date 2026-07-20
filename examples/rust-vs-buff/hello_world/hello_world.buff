@@ -1,0 +1,5 @@
+// Buff: hello world. No semicolons, no macro, no fn keyword.
+// Indentation-based, minimal ceremony.
+
+func main():
+    print("Hello, Buff!")

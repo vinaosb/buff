@@ -1,0 +1,25 @@
+// Buff: closures (lambdas) and .map() combinator.
+// No Fn/FnMut/FnOnce traits, no move keyword, no capture mode concerns.
+
+func main():
+    // Lambda: { x => x * 2 }
+    let doubled = [1, 2, 3, 4, 5].map({ x => x * 2 })
+    print(doubled[0])
+    print(doubled[4])
+
+    // Squared via lambda.
+    let squared = [1, 2, 3, 4, 5].map({ x => x * x })
+    print(squared[2])
+
+    // Chained .map() calls: first double, then add one.
+    let plus_one = [1, 2, 3, 4, 5].map({ x => x * 2 }).map({ y => y + 1 })
+    print(plus_one[0])
+    print(plus_one[4])
+
+    // The closure's parameter can be referenced multiple times (x + x).
+    let echo = [10, 20, 30].map({ x => x + x })
+    print(echo[1])
+
+    // .len() on the vector.
+    let count = [1, 2, 3, 4, 5].len()
+    print(count)

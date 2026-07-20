@@ -1,0 +1,26 @@
+// Buff: enum with match. No TypeName::Variant qualification needed.
+//
+// NOTE: This file shows the INTENDED Buff enum syntax. Enum declarations
+// are codegen-verified (crates/buff-lang-codegen-rust/tests/enum_codegen.rs)
+// but the CLI's single-file parser does NOT yet accept struct/enum/trait
+// declarations at the top level. This is a parser gap.
+// Matching on user-defined enum VALUES is also a codegen gap: variants
+// are emitted unqualified (Red not Color::Red) so they don't resolve.
+//
+// To verify enum codegen, run:
+//   cargo test -p buff-lang-codegen-rust --test enum_codegen
+
+// enum Shape:
+//     Circle(Float)
+//     Rectangle(Float, Float)
+//     Point
+//
+// func describe(s: Shape) -> Int:
+//     match s { Circle(r) => 1, Rectangle(w, h) => 2, Point => 0 }
+
+func main():
+    // Until enum declarations land in the CLI parser, Buff programs
+    // use match on the built-in Option and Result types instead.
+    let mut v = [1, 2, 3]
+    let top = v.pop()
+    match top { Some(x) => print(x), None => print(0) }

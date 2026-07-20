@@ -1,0 +1,24 @@
+// Buff: no borrow checker, no references, no ownership fights.
+// Values are owned by default. The compiler inserts clones automatically.
+
+func main():
+    let v = [1, 2, 3, 4, 5]
+
+    // Use v directly. No &, no lifetime annotations.
+    // The compiler handles cloning behind the scenes.
+    print(v[0])
+    print(v[4])
+
+    // Reuse v after moving it to v2.
+    // In Rust, v would be unusable here. In Buff, it just works.
+    let v2 = v
+    print(v2[0])
+
+    // Vectors can be used freely in multiple places.
+    let mut stack = [10, 20, 30]
+    stack.push(40)
+    print(stack.len())
+    print(stack[3])
+
+    let top = stack.pop()
+    match top { Some(x) => print(x), None => print(0) }

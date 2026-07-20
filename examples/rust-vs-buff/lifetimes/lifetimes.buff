@@ -1,0 +1,34 @@
+// Buff: no lifetimes, no references. Return values, not references.
+//
+// NOTE: This file shows the INTENDED Buff struct syntax. Struct declarations
+// are codegen-verified but the CLI's single-file parser does NOT yet accept
+// struct/enum/trait declarations at the top level. This is a parser gap.
+// The generated Rust for struct decls is valid and re-parses via syn.
+//
+// To verify struct codegen, run:
+//   cargo test -p buff-lang-codegen-rust --test struct_codegen
+
+// struct Article:
+//     title: String
+//     body: String
+//
+// func title_of(a: Article) -> String:
+//     return a.title
+//
+// func longer(a: String, b: String) -> String:
+//     if a.len() > b.len():
+//         return a
+//     return b
+//
+// func main():
+//     let art = Article { title: "Hello Buff", body: "No lifetimes here" }
+//     print(title_of(art))
+//     print(longer("short", "much longer string"))
+
+func main():
+    // Until struct declarations land in the CLI parser, Buff programs
+    // avoid the lifetime problem entirely: no references, no lifetimes,
+    // no borrowed data. Everything is owned.
+    print("no lifetimes in Buff")
+    print("no & references")
+    print("no 'a annotations")

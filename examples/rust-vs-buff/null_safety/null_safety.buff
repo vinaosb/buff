@@ -1,0 +1,30 @@
+// Buff: no null pointers. Absence is Option<T>.
+// Same safety as Rust, cleaner match syntax.
+
+func main():
+    // Match on Option -- the only safe way to handle it.
+    // Option from .pop() on a vector.
+    let mut v = [10, 20, 30]
+    let top = v.pop()
+    match top { Some(x) => print(x), None => print(0) }
+
+    let second = v.pop()
+    match second { Some(x) => print(x), None => print(0) }
+
+    // Popping from empty gives None.
+    let third = v.pop()
+    match third { Some(x) => print(x), None => print(0) }
+
+    let nothing = v.pop()
+    match nothing { Some(x) => print(x), None => print(0) }
+
+    // Working with vectors that produce Option.
+    let mut data = [100, 200]
+    let a = data.pop()
+    match a { Some(x) => print(x), None => print(0) }
+
+    let b = data.pop()
+    match b { Some(x) => print(x), None => print(0) }
+
+    let c = data.pop()
+    match c { Some(x) => print(x), None => print(0) }

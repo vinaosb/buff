@@ -1,0 +1,37 @@
+// Buff: pattern matching with Option and Result.
+// Same expressive power, cleaner syntax, no & needed.
+
+func half(n: Int) -> Result<Int, Error>:
+    if n < 2:
+        return Error("too small")
+    return Ok(n / 2)
+
+func classify(n: Int) -> Int:
+    if n == 0:
+        return 0
+    if n == 1:
+        return 1
+    return 99
+
+func main():
+    // Match on Result -- Ok and Err arms.
+    let good = half(10)
+    match good { Ok(v) => print(v), Err(_) => print(0) }
+
+    let bad = half(1)
+    match bad { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Match on Option from .pop().
+    let mut stack = [10, 20, 30]
+    let top = stack.pop()
+    match top { Some(x) => print(x), None => print(0) }
+
+    // Pop until empty.
+    let _ = stack.pop()
+    let empty = stack.pop()
+    match empty { Some(x) => print(x), None => print(0) }
+
+    // Integer dispatch.
+    print(classify(0))
+    print(classify(1))
+    print(classify(5))

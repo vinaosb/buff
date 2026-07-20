@@ -1,0 +1,21 @@
+// Buff: async without await. The function-coloring problem does not exist.
+// Codegen-only -- async requires tokio (external crate) which the single-file
+// rustc pipeline cannot link. Verified by codegen tests.
+
+async func fetch_data() -> Int:
+    return 42
+
+// Calling an async function auto-propagates async. No async keyword here,
+// no .await needed. The compiler inserts both automatically.
+func pipeline() -> Int:
+    return fetch_data()
+
+func main():
+    let result = pipeline()
+    print(result)
+
+    // Spawn a task and get its result via .result()
+    // No .await keyword anywhere -- .result() is the Buff equivalent.
+    let task = spawn fetch_data()
+    let answer = task.result()
+    print(answer)

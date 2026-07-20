@@ -1,0 +1,21 @@
+// Buff: collections -- Vector and Map.
+// No imports, no type annotations, no .get() for construction.
+
+func main():
+    // Vector<T> -- literal syntax, .push(), .pop(), .len(), indexing.
+    let mut v = [10, 20, 30]
+    v.push(40)
+    print(v.len())
+    print(v[0])
+
+    let top = v.pop()
+    match top { Some(x) => print(x), None => print(0) }
+
+    // .map() transforms a vector.
+    let scaled = [1, 2, 3].map({ x => x * 10 })
+    print(scaled[0])
+    print(scaled[2])
+
+    // Map<K, V> -- literal syntax with {key: value}.
+    let scores = {1: 10, 2: 20, 3: 30}
+    print(scores.len())

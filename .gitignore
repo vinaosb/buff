@@ -4,6 +4,9 @@ target/
 
 # Examples (build artifacts)
 examples/**/*.rs
+# Exception: the rust-vs-buff comparison library ships hand-written .rs (the
+# "painful Rust" half of each side-by-side pair), NOT build output.
+!examples/rust-vs-buff/**/*.rs
 
 # Test fixtures (compile_to_rust writes <name>.rs side artifacts)
 tests/fixtures/**/*.rs

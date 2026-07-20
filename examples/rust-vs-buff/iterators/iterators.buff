@@ -1,0 +1,25 @@
+// Buff: vector operations without iterator boilerplate.
+// .push(), .pop(), .len(), .map(), indexing -- all direct.
+
+func main():
+    let mut v = [10, 20, 30]
+    v.push(40)
+    print(v.len())
+
+    // Index directly -- no usize conversion.
+    print(v[0])
+    print(v[3])
+
+    // .pop() returns Option<Int>.
+    let top = v.pop()
+    match top { Some(x) => print(x), None => print(0) }
+
+    // .map() with lambda transforms the vector.
+    let doubled = [1, 2, 3, 4, 5].map({ x => x * 2 })
+    print(doubled[0])
+    print(doubled[4])
+
+    // Chain .map() calls.
+    let result = [1, 2, 3].map({ x => x * 10 }).map({ y => y + 1 })
+    print(result[0])
+    print(result[2])

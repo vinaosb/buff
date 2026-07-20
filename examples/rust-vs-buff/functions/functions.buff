@@ -1,0 +1,24 @@
+// Buff: functions with typed parameters and return types.
+// Indentation-based blocks, no braces needed for control flow.
+
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+func factorial(n: Int) -> Int:
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+func classify(n: Int) -> Int:
+    if n == 0:
+        return 100
+    if n == 1:
+        return 200
+    return 999
+
+func main():
+    print(add(3, 4))
+    print(factorial(10))
+    print(classify(0))
+    print(classify(1))
+    print(classify(5))

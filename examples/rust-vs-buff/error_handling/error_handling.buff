@@ -1,0 +1,39 @@
+// Buff: error handling with Result, ?, and builtin Error.
+// No Box<dyn Error>, no impl Display, no impl std::error::Error.
+
+func half(n: Int) -> Result<Int, Error>:
+    if n < 2:
+        return Error("too small")
+    return Ok(n / 2)
+
+func double_half(n: Int) -> Result<Int, Error>:
+    // The ? operator propagates errors automatically.
+    let h = half(n)?
+    return Ok(h + 1)
+
+func add_one(n: Int) -> Result<Int, Error>:
+    let h = half(n)?
+    return Ok(h * 2)
+
+func main():
+    // Success path: half(10) = 5, then +1 = 6.
+    let good = double_half(10)
+    match good { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Failure path: half(1) errors, propagated by ?.
+    let bad = double_half(1)
+    match bad { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Direct fallible call.
+    let ok = half(8)
+    match ok { Ok(v) => print(v), Err(_) => print(0) }
+
+    let fail = half(0)
+    match fail { Ok(v) => print(v), Err(_) => print(0) }
+
+    // Chained ? propagation.
+    let works = add_one(10)
+    match works { Ok(v) => print(v), Err(_) => print(0) }
+
+    let fails = add_one(0)
+    match fails { Ok(v) => print(v), Err(_) => print(0) }
