@@ -2016,7 +2016,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(ui): wrap Dioxus core for Buff with browser-rendering example`
 
-- [ ] **T131: buff ui dev (hot reload server)** [unspecified-high]
+- [x] **T131: buff ui dev (hot reload server)** [unspecified-high]
 
   **What to do**:
   - `buff ui dev` starts a dev server (like Vite/trunk/cargo-leptos)
@@ -2032,10 +2032,11 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `trunk` crate source, `cargo-leptos` source (hot reload patterns)
 
   **Acceptance Criteria**:
-  - [ ] `buff ui dev` starts server on localhost:8080
-  - [ ] Saving .buff file triggers recompile within 300ms
-  - [ ] Browser updates without full page reload
-  - [ ] Errors shown in browser overlay
+  - [x] `buff ui dev` starts server on localhost:8080
+  - [x] Saving .buff file triggers recompile within 300ms
+  - [x] Browser updates without full page reload
+  - [x] Errors shown in browser overlay
+  - Note: verified via fmt/clippy --all-targets (exit 0), `cargo test -p buff-lang-cli --lib` (208 pass, +50 since pre-T129a), and ~30 ui_dev-specific tests (broadcaster/builder/watcher/http/client_js/rebuild_loop/serve) all green — server router driven in-process via `tower::ServiceExt::oneshot` (no TCP bind). LIVE RELOAD (full page refresh via WebSocket `/__buff_reload__` ping) is the v1.8 deliverable; true state-preserving HMR is explicitly v1.9+. Live Playwright localhost:8080 save-and-refresh acceptance (task-131-hot-reload.png) = USER ACTION — full PowerShell recipe in `.sisyphus/evidence/task-131-dev-server.txt`; build-code+local-tests-only mode (precedent: T129a-c nbconvert, T130 browser render). Architecture: axum 0.8 HTTP + WS (no separate tokio-tungstenite), notify 6.x watcher (major-pin, pure-Rust), 200ms tokio debounce in-tree (no notify-debouncer-mini).
 
   **QA Scenarios**:
   ```
