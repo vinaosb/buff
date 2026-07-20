@@ -1,0 +1,46 @@
+T124 — Stable error code catalog with online docs site
+========================================================
+HEAD before: bf4a521 (T123 Workspace)
+Verified by: Atlas orchestrator, 2026-07-20
+
+DELIVERABLES
+------------
+1. crates/buff-lang-error/src/code.rs (NEW, 416 lines)
+   - pub enum ErrorCode: 36 variants, derive(Debug,Clone,Copy,PartialEq,Eq,Hash)
+   - Grouped by phase: E10xx lex (14), E11xx parse (9), E12xx type (9), E13xx codegen (3)
+   - Methods: code_str(), title(), explanation(), all()
+   - 4 unit tests (well-formed / unique / sorted-ascending / non-empty)
+
+2. crates/buff-lang-error/src/diagnostic.rs (MOD, backward-compatible)
+   - Added `code: Option<ErrorCode>` field (None at all 3 constructors)
+   - with_code() consuming builder
+   - render() + Display emit `[Sev] error[E1xxx]: msg` when Some; unchanged `[Sev] msg` when None
+
+3. crates/buff-lang-error/src/lib.rs — pub mod code + pub use code::*
+
+4. Attach sites: buff-lang-lexer/src/error.rs, buff-lang-parser/src/{stmt,stream}.rs,
+   buff-lang-types/src/{exhaustiveness,infer,modules,recursion}.rs,
+   buff-lang-codegen-rust/src/rust_codegen.rs
+
+5. docs/errors/ (NEW static site, 37 files, plain HTML + styles.css, house style matching
+   playground/website): index.html (all codes grouped by phase, linked) + 36 per-code pages
+   (E1001.html..E1303.html) with title + full explanation verbatim. No placeholder/TODO text.
+
+6. crates/buff-lang-error/examples/gen_error_docs.rs — committed generator (reads ErrorCode::all()
+   so site never drifts from compiler). Re-run: cargo run -p buff-lang-error --example gen_error_docs
+
+7. crates/buff-lang-error/tests/error_codes.rs (NEW, 6 tests): render/Display WITH code emits
+   error[E1xxx], WITHOUT code byte-identical to pre-T124, note preservation, site index+pages
+   exist for every code with non-stub content (>=800 bytes).
+
+8. .sisyphus/plans/buff-conventions.md — §19 "Error Code Stability" appended (never renumber/reuse/
+   silently remove; append-only at end of phase block; code.rs is source of truth).
+
+VERIFICATION (all green)
+------------------------
+- cargo test -p buff-lang-error -p buff-lang-lexer -p buff-lang-parser -p buff-lang-types -p buff-lang-cli : ALL pass, 0 failed
+- cargo clippy -p buff-lang-error -p buff-lang-parser --all-targets -- -D warnings : EXIT 0
+- cargo fmt --all -- --check : EXIT 0 (fmt applied to parser attach sites)
+- No non-test unwrap/expect/panic in compiler code; no new dep on LEAF crate buff-lang-error
+- HTML placeholder scan (TODO/coming soon/lorem): none found
+- Scope check: only buff-lang-error/lexer/parser/types/codegen-rust + docs/errors/ + conventions + notepads

@@ -174,3 +174,39 @@ buff.lock
 Thumbs.db
 .env
 ```
+
+
+## 19. Error Code Stability
+
+Every user-facing diagnostic the Buff compiler emits MAY carry a stable error code of the form `E1xxx` (see the `ErrorCode` enum in `crates/buff-lang-error/src/code.rs`). When present, the code renders alongside the message — e.g. `[Error] error[E1001]: unexpected character: '@'` — and the static catalog at `docs/errors/` documents each code with a longer explanation and a fix recipe.
+
+### Numbering scheme
+
+Codes are grouped by compiler phase so that reading a code alone tells the user which part of the pipeline produced it:
+
+| Range      | Phase          | Source crate(s)                               |
+|------------|----------------|-----------------------------------------------|
+| `E10xx`    | Lexing         | `buff-lang-lexer`                             |
+| `E11xx`    | Parsing        | `buff-lang-parser`                            |
+| `E12xx`    | Type-checking  | `buff-lang-types`                             |
+| `E13xx`    | Codegen        | `buff-lang-codegen-rust`                      |
+| `E14xx`    | Runtime        | `buff-lang-runtime` (reserved — unused today) |
+
+### Stability guarantee (STRICT, versioned contract)
+
+Once an `E1xxx` code ships in a release, it is **stable across all future releases**. The following rules are NON-NEGOTIABLE and apply the moment a code appears on the static site (`docs/errors/`) or in the public `ErrorCode` enum:
+
+1. **Never renumber.** `E1001` is `E1001` forever. The numeric value is part of the public API and may appear in user documentation, CI lint configs, IDE plugins, RFCs, and search queries. Renumbering a code is a breaking change under §16 (SemVer) and would require a major version bump — and even then, it is forbidden because there is no way to alert every user.
+2. **Never reuse.** A code's meaning never changes. If `E1007` ships as "unterminated regex literal", it stays "unterminated regex literal" forever — even if a future lexer rewrite surfaces that condition under a different message. Reusing a code for a different failure mode is forbidden because users with old documentation or scripts would silently mis-diagnose.
+3. **Never silently remove.** If a code becomes impossible to trigger (e.g. the underlying feature is deleted), the code stays in the `ErrorCode` enum AND on the static site with its existing text unchanged, plus a tombstone note (e.g. "This code is no longer emitted as of v2.0; it is retained for historical lookups."). The variant is never deleted.
+4. **New codes are appended at the end of their phase block.** New lexer errors get the next free `E10xx`, new parser errors get the next free `E11xx`, and so on. Codes within a phase are allocated strictly in ascending order; gaps left by tombstoned codes are NOT back-filled (see rule 3).
+5. **The `ErrorCode` enum is the source of truth.** `code.rs` defines the canonical mapping; the static site at `docs/errors/` is generated from it via `cargo run -p buff-lang-error --example gen_error_docs`. The two must never drift — if a code is in `code.rs`, it MUST have a page on the site (enforced by the `error_catalog_site_pages_exist_for_every_code` test).
+6. **Codes are append-only across releases.** A release MAY add new codes (appended at the end of their phase) and MAY tombstone existing codes (rule 3); a release MAY NOT renumber, reuse, or delete codes.
+
+This policy mirrors `rustc`'s `E0xxx` stability guarantee (see <https://github.com/rust-lang/rust/blob/master/compiler/rustc_error_codes/>). Users can cite a Buff error code in a bug report, a Stack Overflow answer, or a CI lint rule, and trust that the citation stays meaningful across releases.
+
+### When to attach a code
+
+- **Attach a code** at the major user-facing diagnostic construction sites — the named error constructors (`LexerError::unexpected_char`, etc.) and the central helpers (`TokenStream::expect`, the type-checker's operator-mismatch path, the codegen `unsupported` helper). Pragmatic coverage is the bar; not every internal variant needs its own code.
+- **Do NOT invent speculative codes** for failure modes the compiler does not currently emit. The catalog documents actual behaviour, not aspirational behaviour. New codes arrive in the same release that first emits them.
+- **A diagnostic without a code is still valid.** The `Diagnostic::code` field is `Option<ErrorCode>`; ad-hoc / uncategorised diagnostics render without an `E1xxx` tag. The render format is `[Error] message` (no code) or `[Error] error[E1xxx]: message` (with code) — both are public API and byte-stable.

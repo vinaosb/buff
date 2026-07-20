@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>E1007 &mdash; unterminated regex literal</title>
+    <meta name="description" content="E1007: unterminated regex literal &mdash; explanation, example, and fix." />
+    <meta name="color-scheme" content="dark" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<header class="site-header" role="banner">
+    <div class="header-inner">
+        <a class="brand" href="./index.html" aria-label="Buff error codes">
+            <span class="brand-word">BUFF</span>
+            <span class="brand-tag">error code index</span>
+        </a>
+        <a class="nav-btn" href="./index.html">&larr; all codes</a>
+    </div>
+</header>
+
+<main>
+    <a class="back-link" href="./index.html">&larr; back to index</a>
+
+    <header class="code-page-header">
+        <span class="code-page-tag">E1007</span>
+        <h1 class="code-page-title">unterminated regex literal</h1>
+    </header>
+
+    <section class="explanation">
+        <p>A regex literal <code>/.../ </code> was opened but the closing <code>/</code> was not found before end of line or end of input. Regex literals in Buff cannot span lines.</p>
+        <p>Fix: add the closing <code>/</code> on the same line, or break a long pattern into a string + <code>Regex.compile</code> call.</p>
+
+    </section>
+
+    <p class="meta">
+        <strong>Severity:</strong> Error<br />
+        <strong>Phase:</strong> Lexing<br />
+        <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
+        <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
+        for the full policy.
+    </p>
+</main>
+
+<footer class="site-footer">
+    <div class="footer-inner">
+        <span>Buff language. Open source under MIT + Apache-2.0.</span>
+        <a class="footer-link" href="https://github.com/buff-lang/buff" target="_blank" rel="noopener noreferrer">GitHub &#8599;</a>
+    </div>
+</footer>
+
+</body>
+</html>

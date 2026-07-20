@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buff error codes</title>
+    <meta name="description" content="Every Buff compiler error code with a stable identifier, a plain-English explanation, and a fix recipe." />
+    <meta name="color-scheme" content="dark" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<header class="site-header" role="banner">
+    <div class="header-inner">
+        <a class="brand" href="./index.html" aria-label="Buff error codes">
+            <span class="brand-word">BUFF</span>
+            <span class="brand-tag">error code index</span>
+        </a>
+        <a class="nav-btn" href="https://github.com/buff-lang/buff/blob/master/crates/buff-lang-error/src/code.rs" target="_blank" rel="noopener noreferrer">source &#8599;</a>
+    </div>
+</header>
+
+<main>
+    <h1 class="page-title">Error code index</h1>
+    <p class="page-subtitle">
+        Every diagnostic the Buff compiler can emit carries a stable <code>E1xxx</code>
+        code. This index lists every code, grouped by compiler phase. Click a code
+        for its full explanation, an example, and a fix recipe. Codes are stable
+        across releases &mdash; see the
+        <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">conventions doc</a>
+        for the full policy.
+    </p>
+
+    <section class="phase-section">
+        <h2 class="phase-heading">Lexing <span class="phase-range">E1001&ndash;E1014</span></h2>
+        <p class="phase-blurb">Errors from the byte-scanner that turns <code>.buff</code> source text into tokens. Source crate: <code>buff-lang-lexer</code>.</p>
+        <ul class="code-list">
+            <li><a class="code-row" href="E1001.html">
+                <span class="code-tag">E1001</span>
+                <span class="code-title">unexpected character</span>
+            </a></li>
+            <li><a class="code-row" href="E1002.html">
+                <span class="code-tag">E1002</span>
+                <span class="code-title">unterminated string literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1003.html">
+                <span class="code-tag">E1003</span>
+                <span class="code-title">invalid numeric literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1004.html">
+                <span class="code-tag">E1004</span>
+                <span class="code-title">mixed tabs and spaces in indentation</span>
+            </a></li>
+            <li><a class="code-row" href="E1005.html">
+                <span class="code-tag">E1005</span>
+                <span class="code-title">inconsistent indentation level</span>
+            </a></li>
+            <li><a class="code-row" href="E1006.html">
+                <span class="code-tag">E1006</span>
+                <span class="code-title">unterminated block comment</span>
+            </a></li>
+            <li><a class="code-row" href="E1007.html">
+                <span class="code-tag">E1007</span>
+                <span class="code-title">unterminated regex literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1008.html">
+                <span class="code-tag">E1008</span>
+                <span class="code-title">empty regex literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1009.html">
+                <span class="code-tag">E1009</span>
+                <span class="code-title">unterminated char literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1010.html">
+                <span class="code-tag">E1010</span>
+                <span class="code-title">empty char literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1011.html">
+                <span class="code-tag">E1011</span>
+                <span class="code-title">invalid character escape</span>
+            </a></li>
+            <li><a class="code-row" href="E1012.html">
+                <span class="code-tag">E1012</span>
+                <span class="code-title">invalid unicode escape</span>
+            </a></li>
+            <li><a class="code-row" href="E1013.html">
+                <span class="code-tag">E1013</span>
+                <span class="code-title">unexpected closing brace in string literal</span>
+            </a></li>
+            <li><a class="code-row" href="E1014.html">
+                <span class="code-tag">E1014</span>
+                <span class="code-title">unterminated interpolation in string literal</span>
+            </a></li>
+        </ul>
+    </section>
+
+    <section class="phase-section">
+        <h2 class="phase-heading">Parsing <span class="phase-range">E1101&ndash;E1109</span></h2>
+        <p class="phase-blurb">Errors from the recursive-descent + Pratt parser that turns tokens into an AST. Source crate: <code>buff-lang-parser</code>.</p>
+        <ul class="code-list">
+            <li><a class="code-row" href="E1101.html">
+                <span class="code-tag">E1101</span>
+                <span class="code-title">expected a different token</span>
+            </a></li>
+            <li><a class="code-row" href="E1102.html">
+                <span class="code-tag">E1102</span>
+                <span class="code-title">unexpected token in this position</span>
+            </a></li>
+            <li><a class="code-row" href="E1103.html">
+                <span class="code-tag">E1103</span>
+                <span class="code-title">expected newline after `:` for layout block</span>
+            </a></li>
+            <li><a class="code-row" href="E1104.html">
+                <span class="code-tag">E1104</span>
+                <span class="code-title">expected indented block after `:`</span>
+            </a></li>
+            <li><a class="code-row" href="E1105.html">
+                <span class="code-tag">E1105</span>
+                <span class="code-title">function declarations must be top-level</span>
+            </a></li>
+            <li><a class="code-row" href="E1106.html">
+                <span class="code-tag">E1106</span>
+                <span class="code-title">expected an identifier</span>
+            </a></li>
+            <li><a class="code-row" href="E1107.html">
+                <span class="code-tag">E1107</span>
+                <span class="code-title">unterminated delimited list</span>
+            </a></li>
+            <li><a class="code-row" href="E1108.html">
+                <span class="code-tag">E1108</span>
+                <span class="code-title">unsupported ABI in `extern` declaration</span>
+            </a></li>
+            <li><a class="code-row" href="E1109.html">
+                <span class="code-tag">E1109</span>
+                <span class="code-title">generics are not supported on `extern` functions</span>
+            </a></li>
+        </ul>
+    </section>
+
+    <section class="phase-section">
+        <h2 class="phase-heading">Type-checking <span class="phase-range">E1201&ndash;E1209</span></h2>
+        <p class="phase-blurb">Errors from type inference, exhaustiveness, and module resolution. Source crate: <code>buff-lang-types</code>.</p>
+        <ul class="code-list">
+            <li><a class="code-row" href="E1201.html">
+                <span class="code-tag">E1201</span>
+                <span class="code-title">undefined variable</span>
+            </a></li>
+            <li><a class="code-row" href="E1202.html">
+                <span class="code-tag">E1202</span>
+                <span class="code-title">binary operator applied to incompatible types</span>
+            </a></li>
+            <li><a class="code-row" href="E1203.html">
+                <span class="code-tag">E1203</span>
+                <span class="code-title">assignment type mismatch</span>
+            </a></li>
+            <li><a class="code-row" href="E1204.html">
+                <span class="code-tag">E1204</span>
+                <span class="code-title">unary operator applied to invalid operand type</span>
+            </a></li>
+            <li><a class="code-row" href="E1205.html">
+                <span class="code-tag">E1205</span>
+                <span class="code-title">`if` condition must be `Bool`</span>
+            </a></li>
+            <li><a class="code-row" href="E1206.html">
+                <span class="code-tag">E1206</span>
+                <span class="code-title">`if` and `else` branches have different types</span>
+            </a></li>
+            <li><a class="code-row" href="E1207.html">
+                <span class="code-tag">E1207</span>
+                <span class="code-title">non-exhaustive `match`</span>
+            </a></li>
+            <li><a class="code-row" href="E1208.html">
+                <span class="code-tag">E1208</span>
+                <span class="code-title">`@prefer(gpu)` is not allowed on recursive functions</span>
+            </a></li>
+            <li><a class="code-row" href="E1209.html">
+                <span class="code-tag">E1209</span>
+                <span class="code-title">module / import resolution error</span>
+            </a></li>
+        </ul>
+    </section>
+
+    <section class="phase-section">
+        <h2 class="phase-heading">Code generation <span class="phase-range">E1301&ndash;E1303</span></h2>
+        <p class="phase-blurb">Errors (and one warning) emitted while lowering the AST to Rust. Source crate: <code>buff-lang-codegen-rust</code>.</p>
+        <ul class="code-list">
+            <li><a class="code-row" href="E1301.html">
+                <span class="code-tag">E1301</span>
+                <span class="code-title">unsupported language feature in code generation</span>
+            </a></li>
+            <li><a class="code-row" href="E1302.html">
+                <span class="code-tag">E1302</span>
+                <span class="code-title">codegen produced invalid rust (internal compiler error)</span>
+            </a></li>
+            <li><a class="code-row" href="E1303.html">
+                <span class="code-tag">E1303</span>
+                <span class="code-title">`block()` inside an async function can deadlock</span>
+            </a></li>
+        </ul>
+    </section>
+
+</main>
+
+<footer class="site-footer">
+    <div class="footer-inner">
+        <span>Buff language. Open source under MIT + Apache-2.0.</span>
+        <a class="footer-link" href="https://github.com/buff-lang/buff" target="_blank" rel="noopener noreferrer">GitHub &#8599;</a>
+    </div>
+</footer>
+
+</body>
+</html>

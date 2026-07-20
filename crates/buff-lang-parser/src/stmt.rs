@@ -41,7 +41,7 @@ use buff_lang_ast::{
     FuncDecl, GuardCondition, Ident, ImportDecl, MethodSig, Param, Pattern, ReexportDecl, Stmt,
     TraitDecl, TypeRef,
 };
-use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
+use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
 use crate::expr::{parse_expression, parse_pattern};
@@ -173,10 +173,13 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
 
     // Expect Newline right after the colon.
     if !stream.check_raw(&TokenKind::Newline) {
-        return Err(ParseError::new(Diagnostic::error(
-            "expected newline after `:` for layout block",
-            stream.span_here(),
-        )));
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "expected newline after `:` for layout block",
+                stream.span_here(),
+            )
+            .with_code(ErrorCode::ExpectedLayoutNewline),
+        ));
     }
     stream.advance_raw(); // consume Newline
 
@@ -186,10 +189,10 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
     while stream.consume_newline() {}
 
     if !stream.consume_indent() {
-        return Err(ParseError::new(Diagnostic::error(
-            "expected indented block after `:`",
-            stream.span_here(),
-        )));
+        return Err(ParseError::new(
+            Diagnostic::error("expected indented block after `:`", stream.span_here())
+                .with_code(ErrorCode::ExpectedIndentedBlock),
+        ));
     }
 
     // Parse statements until we hit a Dedent or run out of tokens.
@@ -2501,7 +2504,8 @@ fn expect_abi_string(stream: &mut TokenStream<'_>) -> Result<(String, usize), Pa
 /// Returns [`ParseError`] if the next token is not a `StringStart`, if
 /// the `StringPart` is missing, if interpolation appears, or if the
 /// closing `StringEnd` is missing.
-fn expect_crate_name_string(stream: &mut TokenStream<'_>) -> Result<(String, usize), ParseError> {    let start_tok = stream.advance().ok_or_else(|| {
+fn expect_crate_name_string(stream: &mut TokenStream<'_>) -> Result<(String, usize), ParseError> {
+    let start_tok = stream.advance().ok_or_else(|| {
         ParseError::new(Diagnostic::error(
             "expected crate-name string after `extern crate`, found end of input",
             stream.eof_span(),

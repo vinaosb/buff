@@ -90,7 +90,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use buff_lang_ast::{Decl, FuncDecl};
-use buff_lang_error::{Diagnostic, Span, TypeError};
+use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 
 use crate::async_analysis::{build_call_graph as build_async_call_graph, CallGraph};
 
@@ -309,13 +309,16 @@ fn check_prefer_gpu_on_recursive(
         }
     }
     if let Some(name) = offenders.iter().next() {
-        return Err(TypeError::new(Diagnostic::error(
-            format!(
-                "cannot @prefer(gpu) on recursive function `{name}`: \
-                 recursion is not GPU-dispatchable"
-            ),
-            Span::dummy(),
-        )));
+        return Err(TypeError::new(
+            Diagnostic::error(
+                format!(
+                    "cannot @prefer(gpu) on recursive function `{name}`: \
+                     recursion is not GPU-dispatchable"
+                ),
+                Span::dummy(),
+            )
+            .with_code(ErrorCode::PreferGpuOnRecursiveFunction),
+        ));
     }
     Ok(())
 }

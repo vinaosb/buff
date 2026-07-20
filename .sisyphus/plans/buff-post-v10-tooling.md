@@ -1522,7 +1522,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(cli): workspace support via cargo passthrough`
 
-- [ ] **T124: Error code catalog** [quick]
+- [x] **T124: Error code catalog** [quick]
 
   **What to do**:
   - Assign stable codes to each Buff error (E1001, E1002, ... like Rust's E0XXX)

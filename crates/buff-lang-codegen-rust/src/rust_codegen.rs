@@ -81,7 +81,7 @@ use buff_lang_ast::{
     Block, Decl, EnumDecl as AstEnumDecl, Expr, FuncDecl, InterpPart, Literal, MatchArm, Pattern,
     Stmt, StructDecl as AstStructDecl, TypeRef,
 };
-use buff_lang_error::{CodegenError, Diagnostic, Span as BuffSpan};
+use buff_lang_error::{CodegenError, Diagnostic, ErrorCode, Span as BuffSpan};
 use buff_lang_types::{prelude::PreludeFn, FloatWidth, IntWidth, Type, TypeInferencer};
 
 use crate::atomic_analysis::AtomicPromotions;
@@ -789,7 +789,10 @@ impl RustCodegen {
         // calls, NOT method-call / namespace-assoc-fn calls, so
         // the enclosing-fn-async transformation is a deferral;
         // see issues.md).
-        if program_uses_tcp(decls) || program_uses_udp(decls) || program_uses_tokio_tungstenite(decls) {
+        if program_uses_tcp(decls)
+            || program_uses_udp(decls)
+            || program_uses_tokio_tungstenite(decls)
+        {
             self.extern_crates.insert("tokio".to_string());
         }
         if program_uses_tokio_tungstenite(decls) {
@@ -3705,9 +3708,8 @@ impl RustCodegen {
                         percent_encoding::NON_ALPHANUMERIC,
                     ).to_string()
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("URLEncode.encode codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("URLEncode.encode codegen parse: {e}")))
             }
             // `URLEncode.decode(s)` -> String. Wraps
             // `percent_encoding::percent_decode_str(s).decode_utf8_lossy()
@@ -3725,9 +3727,8 @@ impl RustCodegen {
                         .decode_utf8_lossy()
                         .into_owned()
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("URLEncode.decode codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("URLEncode.decode codegen parse: {e}")))
             }
             // T124h: UUID module - 3 assoc fns wrapping the `uuid` Rust
             // crate. Surface return types are String / String / Bool
@@ -4014,9 +4015,8 @@ impl RustCodegen {
             // Same shared `Join` variant as Strings.join (T124f).
             (T::Path, A::Join) => {
                 if args.is_empty() {
-                    return Err(self.unsupported(
-                        "Path.join() expects at least 1 arg (the path head), got 0",
-                    ));
+                    return Err(self
+                        .unsupported("Path.join() expects at least 1 arg (the path head), got 0"));
                 }
                 // Lower each arg once (avoids re-evaluating side
                 // effects). The first arg becomes the PathBuf root;
@@ -4030,9 +4030,8 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     std::path::PathBuf::from(#head)
                 };
-                let mut acc = syn::parse2::<SynExpr>(tokens).map_err(|e| {
-                    self.unsupported(&format!("Path.join head codegen parse: {e}"))
-                })?;
+                let mut acc = syn::parse2::<SynExpr>(tokens)
+                    .map_err(|e| self.unsupported(&format!("Path.join head codegen parse: {e}")))?;
                 for next in iter {
                     acc = method_call_one_arg(acc, "join", next);
                 }
@@ -4487,9 +4486,8 @@ impl RustCodegen {
                         .ok()
                         .map(|(ws, _)| ws)
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("WebSocket.connect codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("WebSocket.connect codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
@@ -4779,10 +4777,9 @@ impl RustCodegen {
             // references from users). Zero args.
             M::Scheme => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "scheme takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("scheme takes no arguments, got {}", args.len()))
+                    );
                 }
                 let scheme_call = method_call_no_args(recv, "scheme");
                 Ok(method_call_no_args(scheme_call, "to_string"))
@@ -4796,10 +4793,9 @@ impl RustCodegen {
             // owned `String`.
             M::Host => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "host takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("host takes no arguments, got {}", args.len()))
+                    );
                 }
                 let host_call = method_call_no_args(recv, "host_str");
                 let default = method_call_no_args(host_call, "unwrap_or_default");
@@ -4809,10 +4805,9 @@ impl RustCodegen {
             // The `.to_string()` lifts `&str` to `String`.
             M::Path => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "path takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("path takes no arguments, got {}", args.len()))
+                    );
                 }
                 let path_call = method_call_no_args(recv, "path");
                 Ok(method_call_no_args(path_call, "to_string"))
@@ -4873,10 +4868,8 @@ impl RustCodegen {
             // filename) - NEVER panics.
             M::Parent => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "parent() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(self
+                        .unsupported(&format!("parent() takes no arguments, got {}", args.len())));
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     #recv.parent().map(|p| p.to_path_buf())
@@ -4934,10 +4927,8 @@ impl RustCodegen {
             // on permission errors, never panics). Zero args.
             M::Exists => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "exists() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(self
+                        .unsupported(&format!("exists() takes no arguments, got {}", args.len())));
                 }
                 Ok(method_call_no_args(recv, "exists"))
             }
@@ -4961,10 +4952,9 @@ impl RustCodegen {
             // `Child::wait` takes `&mut self`.
             M::Wait => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "wait() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("wait() takes no arguments, got {}", args.len()))
+                    );
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     #recv
@@ -4986,10 +4976,9 @@ impl RustCodegen {
             // default `Int<64>` width.
             M::Id => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "id() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("id() takes no arguments, got {}", args.len()))
+                    );
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     #recv
@@ -5041,9 +5030,8 @@ impl RustCodegen {
                         }
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("Connection.send codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Connection.send codegen parse: {e}")))
             }
             // Connection.recv() -> Vector<Byte>. Wraps
             // `{ use tokio::io::AsyncReadExt; let mut buf =
@@ -5053,10 +5041,9 @@ impl RustCodegen {
             // Zero args. Returns Vec<u8>.
             M::Recv if matches!(recv_ty, Type::Connection) => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "recv() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("recv() takes no arguments, got {}", args.len()))
+                    );
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     {
@@ -5068,9 +5055,8 @@ impl RustCodegen {
                         buf
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("Connection.recv codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Connection.recv codegen parse: {e}")))
             }
             // Connection.close() -> Void. Wraps
             // `{ use tokio::io::AsyncWriteExt; if let Some(mut s)
@@ -5081,10 +5067,8 @@ impl RustCodegen {
             // lowering - SinkExt::close).
             M::Close if matches!(recv_ty, Type::Connection) => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "close() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(self
+                        .unsupported(&format!("close() takes no arguments, got {}", args.len())));
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     {
@@ -5094,9 +5078,8 @@ impl RustCodegen {
                         }
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("Connection.close codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Connection.close codegen parse: {e}")))
             }
             // Socket.send_to(data, addr) -> Void. Wraps
             // `{ if let Some(s) = recv { s.send_to(d.as_bytes(),
@@ -5118,9 +5101,8 @@ impl RustCodegen {
                         }
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("Socket.send_to codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Socket.send_to codegen parse: {e}")))
             }
             // Socket.recv_from() -> Tuple. Returns
             // `(Vector<Byte>, String)` (datagram bytes + sender
@@ -5151,9 +5133,8 @@ impl RustCodegen {
                         (Vec::new(), String::new())
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("Socket.recv_from codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Socket.recv_from codegen parse: {e}")))
             }
             // WsConnection.send(text) -> Void. Wraps
             // `{ use futures_util::SinkExt; if let Some(mut s) =
@@ -5182,9 +5163,8 @@ impl RustCodegen {
                         }
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("WsConnection.send codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("WsConnection.send codegen parse: {e}")))
             }
             // WsConnection.recv() -> String. Wraps
             // `{ use futures_util::StreamExt; if let Some(mut s)
@@ -5200,10 +5180,9 @@ impl RustCodegen {
             // (TCP) which returns Vector<Byte>.
             M::Recv if matches!(recv_ty, Type::WsConnection) => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "recv() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(
+                        self.unsupported(&format!("recv() takes no arguments, got {}", args.len()))
+                    );
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     {
@@ -5218,9 +5197,8 @@ impl RustCodegen {
                         String::new()
                     }
                 };
-                syn::parse2(tokens).map_err(|e| {
-                    self.unsupported(&format!("WsConnection.recv codegen parse: {e}"))
-                })
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("WsConnection.recv codegen parse: {e}")))
             }
             // WsConnection.close() -> Void. Wraps
             // `{ use futures_util::SinkExt; if let Some(mut s) =
@@ -5232,10 +5210,8 @@ impl RustCodegen {
             // SinkExt::close vs AsyncWriteExt::shutdown).
             M::Close if matches!(recv_ty, Type::WsConnection) => {
                 if !args.is_empty() {
-                    return Err(self.unsupported(&format!(
-                        "close() takes no arguments, got {}",
-                        args.len()
-                    )));
+                    return Err(self
+                        .unsupported(&format!("close() takes no arguments, got {}", args.len())));
                 }
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     {
@@ -5635,8 +5611,7 @@ impl RustCodegen {
                 }}
             }
         };
-        syn::parse2(tokens)
-            .map_err(|e| self.unsupported(&format!("input() codegen parse: {e}")))
+        syn::parse2(tokens).map_err(|e| self.unsupported(&format!("input() codegen parse: {e}")))
     }
 
     /// T124g: lower `sleep(duration)` →
@@ -5718,15 +5693,19 @@ impl RustCodegen {
                         // Ident token. The result is
                         // `tokio::time::sleep(std::time::Duration::from_secs(N)).await`
                         // (or from_millis / from_micros / from_nanos).
-                        let ctor_name =
-                            proc_macro2::Ident::new(&format!("from_{std_unit}"), proc_macro2::Span::call_site());
+                        let ctor_name = proc_macro2::Ident::new(
+                            &format!("from_{std_unit}"),
+                            proc_macro2::Span::call_site(),
+                        );
                         let tokens: proc_macro2::TokenStream = quote::quote! {
                             tokio::time::sleep(
                                 std::time::Duration::#ctor_name(#n)
                             ).await
                         };
                         return syn::parse2(tokens).map_err(|e| {
-                            self.unsupported(&format!("sleep(Duration.{unit}(_)) codegen parse: {e}"))
+                            self.unsupported(&format!(
+                                "sleep(Duration.{unit}(_)) codegen parse: {e}"
+                            ))
                         });
                     }
                 }
@@ -5746,7 +5725,8 @@ impl RustCodegen {
         let tokens: proc_macro2::TokenStream = quote::quote! {
             tokio::time::sleep(#arg).await
         };
-        syn::parse2(tokens).map_err(|e| self.unsupported(&format!("sleep(<expr>) codegen parse: {e}")))
+        syn::parse2(tokens)
+            .map_err(|e| self.unsupported(&format!("sleep(<expr>) codegen parse: {e}")))
     }
 
     /// Lower exactly one argument, returning an error if the arg count is wrong.
@@ -6957,6 +6937,7 @@ impl RustCodegen {
                     "`block()` inside an async function can deadlock the runtime",
                     span,
                 )
+                .with_code(ErrorCode::AsyncBlockDeadlock)
                 .with_note(
                     "block_on parks the current worker thread, preventing any future \
                      scheduled on the same worker from running. Consider returning the \
@@ -7659,10 +7640,10 @@ impl RustCodegen {
     }
 
     fn unsupported(&self, what: &str) -> CodegenError {
-        CodegenError::new(Diagnostic::error(
-            format!("unsupported: {what}"),
-            BuffSpan::dummy(),
-        ))
+        CodegenError::new(
+            Diagnostic::error(format!("unsupported: {what}"), BuffSpan::dummy())
+                .with_code(ErrorCode::UnsupportedCodegen),
+        )
     }
 }
 
@@ -10077,9 +10058,7 @@ fn stmt_uses_toml(stmt: &Stmt) -> bool {
         | Stmt::LetPattern { value, .. }
         | Stmt::ExprStmt(value, _)
         | Stmt::Return(Some(value), _) => expr_uses_toml(value),
-        Stmt::Assignment { target, value, .. } => {
-            expr_uses_toml(target) || expr_uses_toml(value)
-        }
+        Stmt::Assignment { target, value, .. } => expr_uses_toml(target) || expr_uses_toml(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_toml(iter) || block_uses_toml(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_toml(cond) || block_uses_toml(body),
@@ -10108,7 +10087,9 @@ fn stmt_uses_toml(stmt: &Stmt) -> bool {
 /// name anyway. Same conservative strategy as the tracing walker (T124c).
 fn expr_uses_toml(expr: &Expr) -> bool {
     match expr {
-        Expr::MethodCall { receiver, method, .. } => {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
             if let Expr::Ident(id, _) = receiver.as_ref() {
                 if id.name == "Toml" {
                     return true;
@@ -10232,9 +10213,7 @@ fn stmt_uses_rand(stmt: &Stmt) -> bool {
         | Stmt::LetPattern { value, .. }
         | Stmt::ExprStmt(value, _)
         | Stmt::Return(Some(value), _) => expr_uses_rand(value),
-        Stmt::Assignment { target, value, .. } => {
-            expr_uses_rand(target) || expr_uses_rand(value)
-        }
+        Stmt::Assignment { target, value, .. } => expr_uses_rand(target) || expr_uses_rand(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_rand(iter) || block_uses_rand(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_rand(cond) || block_uses_rand(body),
@@ -10384,9 +10363,7 @@ fn stmt_uses_tokio(stmt: &Stmt) -> bool {
         | Stmt::LetPattern { value, .. }
         | Stmt::ExprStmt(value, _)
         | Stmt::Return(Some(value), _) => expr_uses_tokio(value),
-        Stmt::Assignment { target, value, .. } => {
-            expr_uses_tokio(target) || expr_uses_tokio(value)
-        }
+        Stmt::Assignment { target, value, .. } => expr_uses_tokio(target) || expr_uses_tokio(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_tokio(iter) || block_uses_tokio(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_tokio(cond) || block_uses_tokio(body),
@@ -10505,7 +10482,10 @@ fn program_uses_namespace(decls: &[Decl], namespace: &str) -> bool {
 
 /// Recursive helper for [`program_uses_namespace`]: scan a block's statements.
 fn block_uses_namespace(block: &Block, namespace: &str) -> bool {
-    block.stmts.iter().any(|s| stmt_uses_namespace(s, namespace))
+    block
+        .stmts
+        .iter()
+        .any(|s| stmt_uses_namespace(s, namespace))
 }
 
 /// Check a single statement (and its nested expressions) for
@@ -10521,15 +10501,15 @@ fn stmt_uses_namespace(stmt: &Stmt, namespace: &str) -> bool {
             expr_uses_namespace(target, namespace) || expr_uses_namespace(value, namespace)
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
-        Stmt::ForIn {
-            iter, body, ..
-        } => expr_uses_namespace(iter, namespace) || block_uses_namespace(body, namespace),
-        Stmt::ForWhile {
-            cond, body, ..
-        } => expr_uses_namespace(cond, namespace) || block_uses_namespace(body, namespace),
-        Stmt::ForLet {
-            value, body, ..
-        } => expr_uses_namespace(value, namespace) || block_uses_namespace(body, namespace),
+        Stmt::ForIn { iter, body, .. } => {
+            expr_uses_namespace(iter, namespace) || block_uses_namespace(body, namespace)
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_namespace(cond, namespace) || block_uses_namespace(body, namespace)
+        }
+        Stmt::ForLet { value, body, .. } => {
+            expr_uses_namespace(value, namespace) || block_uses_namespace(body, namespace)
+        }
         Stmt::Guard {
             conditions,
             else_block,
@@ -10576,14 +10556,14 @@ fn expr_uses_namespace(expr: &Expr, namespace: &str) -> bool {
         } => {
             expr_uses_namespace(cond, namespace)
                 || block_uses_namespace(then_block, namespace)
-                || else_block.as_ref().is_some_and(|b| block_uses_namespace(b, namespace))
+                || else_block
+                    .as_ref()
+                    .is_some_and(|b| block_uses_namespace(b, namespace))
         }
-        Expr::StringInterp { parts, .. } => {
-            parts.iter().any(|p| match p {
-                InterpPart::Expr(e) => expr_uses_namespace(e, namespace),
-                InterpPart::Literal(_) => false,
-            })
-        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_namespace(e, namespace),
+            InterpPart::Literal(_) => false,
+        }),
         Expr::ArrayLit { elements, .. } => {
             elements.iter().any(|e| expr_uses_namespace(e, namespace))
         }
@@ -10595,14 +10575,16 @@ fn expr_uses_namespace(expr: &Expr, namespace: &str) -> bool {
             .iter()
             .any(|(k, v)| expr_uses_namespace(k, namespace) || expr_uses_namespace(v, namespace)),
         Expr::Lambda { body, .. } => block_uses_namespace(body, namespace),
-        Expr::StructInit { fields, .. } => {
-            fields.iter().any(|(_, v)| expr_uses_namespace(v, namespace))
-        }
+        Expr::StructInit { fields, .. } => fields
+            .iter()
+            .any(|(_, v)| expr_uses_namespace(v, namespace)),
         Expr::MatchExpr {
             scrutinee, arms, ..
         } => {
             expr_uses_namespace(scrutinee, namespace)
-                || arms.iter().any(|arm| block_uses_namespace(&arm.body, namespace))
+                || arms
+                    .iter()
+                    .any(|arm| block_uses_namespace(&arm.body, namespace))
         }
         Expr::SuspendExpr { inner, .. } => expr_uses_namespace(inner, namespace),
         Expr::Try { expr, .. } => expr_uses_namespace(expr, namespace),
@@ -10618,11 +10600,11 @@ fn expr_uses_namespace(expr: &Expr, namespace: &str) -> bool {
         } => {
             expr_uses_namespace(value, namespace)
                 || block_uses_namespace(then_block, namespace)
-                || else_block.as_ref().is_some_and(|b| block_uses_namespace(b, namespace))
+                || else_block
+                    .as_ref()
+                    .is_some_and(|b| block_uses_namespace(b, namespace))
         }
-        Expr::TupleLit(members, _) => {
-            members.iter().any(|m| expr_uses_namespace(m, namespace))
-        }
+        Expr::TupleLit(members, _) => members.iter().any(|m| expr_uses_namespace(m, namespace)),
         Expr::NamedArg { value, .. } => expr_uses_namespace(value, namespace),
     }
 }
@@ -10732,10 +10714,7 @@ fn expr_uses_url_instance(expr: &Expr) -> bool {
             // Rust types - the over-registration is benign (the crate
             // is recorded but unused; rustc never errors on unused
             // dependencies when cargo registers them).
-            if matches!(
-                method.name.as_str(),
-                "scheme" | "host" | "path" | "query"
-            ) {
+            if matches!(method.name.as_str(), "scheme" | "host" | "path" | "query") {
                 return true;
             }
             expr_uses_url_instance(receiver)
@@ -10909,15 +10888,9 @@ fn stmt_uses_dir_walk(stmt: &Stmt) -> bool {
             expr_uses_dir_walk(target) || expr_uses_dir_walk(value)
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
-        Stmt::ForIn { iter, body, .. } => {
-            expr_uses_dir_walk(iter) || block_uses_dir_walk(body)
-        }
-        Stmt::ForWhile { cond, body, .. } => {
-            expr_uses_dir_walk(cond) || block_uses_dir_walk(body)
-        }
-        Stmt::ForLet { value, body, .. } => {
-            expr_uses_dir_walk(value) || block_uses_dir_walk(body)
-        }
+        Stmt::ForIn { iter, body, .. } => expr_uses_dir_walk(iter) || block_uses_dir_walk(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_dir_walk(cond) || block_uses_dir_walk(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_dir_walk(value) || block_uses_dir_walk(body),
         Stmt::Guard {
             conditions,
             else_block,
@@ -10937,9 +10910,7 @@ fn stmt_uses_dir_walk(stmt: &Stmt) -> bool {
 fn expr_uses_dir_walk(expr: &Expr) -> bool {
     match expr {
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } => {
             // Match `Dir.walk(...)` exactly: bare Ident `Dir` receiver
             // AND method name `walk`. Other Dir methods (list/create/
@@ -10955,9 +10926,7 @@ fn expr_uses_dir_walk(expr: &Expr) -> bool {
             expr_uses_dir_walk(receiver)
         }
         Expr::Literal(_, _) | Expr::Ident(_, _) => false,
-        Expr::BinaryOp { lhs, rhs, .. } => {
-            expr_uses_dir_walk(lhs) || expr_uses_dir_walk(rhs)
-        }
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_dir_walk(lhs) || expr_uses_dir_walk(rhs),
         Expr::UnaryOp { operand, .. } => expr_uses_dir_walk(operand),
         Expr::FuncCall { callee, args, .. } => {
             expr_uses_dir_walk(callee) || args.iter().any(expr_uses_dir_walk)
@@ -10987,16 +10956,11 @@ fn expr_uses_dir_walk(expr: &Expr) -> bool {
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_dir_walk(v)),
         Expr::MatchExpr {
             scrutinee, arms, ..
-        } => {
-            expr_uses_dir_walk(scrutinee)
-                || arms.iter().any(|arm| block_uses_dir_walk(&arm.body))
-        }
+        } => expr_uses_dir_walk(scrutinee) || arms.iter().any(|arm| block_uses_dir_walk(&arm.body)),
         Expr::SuspendExpr { inner, .. } => expr_uses_dir_walk(inner),
         Expr::Try { expr, .. } => expr_uses_dir_walk(expr),
         Expr::Spawn { task, .. } => expr_uses_dir_walk(task),
-        Expr::Range { start, end, .. } => {
-            expr_uses_dir_walk(start) || expr_uses_dir_walk(end)
-        }
+        Expr::Range { start, end, .. } => expr_uses_dir_walk(start) || expr_uses_dir_walk(end),
         Expr::IfLet {
             value,
             then_block,
@@ -11098,19 +11062,11 @@ fn stmt_uses_sha2(stmt: &Stmt) -> bool {
         | Stmt::LetPattern { value, .. }
         | Stmt::ExprStmt(value, _)
         | Stmt::Return(Some(value), _) => expr_uses_sha2(value),
-        Stmt::Assignment { target, value, .. } => {
-            expr_uses_sha2(target) || expr_uses_sha2(value)
-        }
+        Stmt::Assignment { target, value, .. } => expr_uses_sha2(target) || expr_uses_sha2(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
-        Stmt::ForIn { iter, body, .. } => {
-            expr_uses_sha2(iter) || block_uses_sha2(body)
-        }
-        Stmt::ForWhile { cond, body, .. } => {
-            expr_uses_sha2(cond) || block_uses_sha2(body)
-        }
-        Stmt::ForLet { value, body, .. } => {
-            expr_uses_sha2(value) || block_uses_sha2(body)
-        }
+        Stmt::ForIn { iter, body, .. } => expr_uses_sha2(iter) || block_uses_sha2(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_sha2(cond) || block_uses_sha2(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_sha2(value) || block_uses_sha2(body),
         Stmt::Guard {
             conditions,
             else_block,
@@ -11131,9 +11087,7 @@ fn stmt_uses_sha2(stmt: &Stmt) -> bool {
 fn expr_uses_sha2(expr: &Expr) -> bool {
     match expr {
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } => {
             // Match the three (receiver, method) pairs that lower to
             // sha2: (Hash, sha256) / (Hash, sha512) / (HMAC, sha256).
@@ -11179,10 +11133,7 @@ fn expr_uses_sha2(expr: &Expr) -> bool {
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_sha2(v)),
         Expr::MatchExpr {
             scrutinee, arms, ..
-        } => {
-            expr_uses_sha2(scrutinee)
-                || arms.iter().any(|arm| block_uses_sha2(&arm.body))
-        }
+        } => expr_uses_sha2(scrutinee) || arms.iter().any(|arm| block_uses_sha2(&arm.body)),
         Expr::SuspendExpr { inner, .. } => expr_uses_sha2(inner),
         Expr::Try { expr, .. } => expr_uses_sha2(expr),
         Expr::Spawn { task, .. } => expr_uses_sha2(task),
@@ -11238,9 +11189,7 @@ fn stmt_uses_md5(stmt: &Stmt) -> bool {
         | Stmt::LetPattern { value, .. }
         | Stmt::ExprStmt(value, _)
         | Stmt::Return(Some(value), _) => expr_uses_md5(value),
-        Stmt::Assignment { target, value, .. } => {
-            expr_uses_md5(target) || expr_uses_md5(value)
-        }
+        Stmt::Assignment { target, value, .. } => expr_uses_md5(target) || expr_uses_md5(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_md5(iter) || block_uses_md5(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_md5(cond) || block_uses_md5(body),
@@ -11264,9 +11213,7 @@ fn stmt_uses_md5(stmt: &Stmt) -> bool {
 fn expr_uses_md5(expr: &Expr) -> bool {
     match expr {
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } => {
             // Match `Hash.md5(...)` exactly: bare Ident `Hash`
             // receiver AND method name `md5`.
@@ -11310,9 +11257,7 @@ fn expr_uses_md5(expr: &Expr) -> bool {
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_md5(v)),
         Expr::MatchExpr {
             scrutinee, arms, ..
-        } => {
-            expr_uses_md5(scrutinee) || arms.iter().any(|arm| block_uses_md5(&arm.body))
-        }
+        } => expr_uses_md5(scrutinee) || arms.iter().any(|arm| block_uses_md5(&arm.body)),
         Expr::SuspendExpr { inner, .. } => expr_uses_md5(inner),
         Expr::Try { expr, .. } => expr_uses_md5(expr),
         Expr::Spawn { task, .. } => expr_uses_md5(task),
@@ -11375,9 +11320,7 @@ fn stmt_uses_hmac(stmt: &Stmt) -> bool {
         | Stmt::LetPattern { value, .. }
         | Stmt::ExprStmt(value, _)
         | Stmt::Return(Some(value), _) => expr_uses_hmac(value),
-        Stmt::Assignment { target, value, .. } => {
-            expr_uses_hmac(target) || expr_uses_hmac(value)
-        }
+        Stmt::Assignment { target, value, .. } => expr_uses_hmac(target) || expr_uses_hmac(value),
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_hmac(iter) || block_uses_hmac(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_hmac(cond) || block_uses_hmac(body),
@@ -11401,9 +11344,7 @@ fn stmt_uses_hmac(stmt: &Stmt) -> bool {
 fn expr_uses_hmac(expr: &Expr) -> bool {
     match expr {
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } => {
             // Match `HMAC.sha256(...)` exactly: bare Ident `HMAC`
             // receiver AND method name `sha256`. NOTE: `HMAC` is the
@@ -11449,9 +11390,7 @@ fn expr_uses_hmac(expr: &Expr) -> bool {
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_hmac(v)),
         Expr::MatchExpr {
             scrutinee, arms, ..
-        } => {
-            expr_uses_hmac(scrutinee) || arms.iter().any(|arm| block_uses_hmac(&arm.body))
-        }
+        } => expr_uses_hmac(scrutinee) || arms.iter().any(|arm| block_uses_hmac(&arm.body)),
         Expr::SuspendExpr { inner, .. } => expr_uses_hmac(inner),
         Expr::Try { expr, .. } => expr_uses_hmac(expr),
         Expr::Spawn { task, .. } => expr_uses_hmac(task),
@@ -11530,15 +11469,9 @@ fn stmt_uses_num_cpus(stmt: &Stmt) -> bool {
             expr_uses_num_cpus(target) || expr_uses_num_cpus(value)
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
-        Stmt::ForIn { iter, body, .. } => {
-            expr_uses_num_cpus(iter) || block_uses_num_cpus(body)
-        }
-        Stmt::ForWhile { cond, body, .. } => {
-            expr_uses_num_cpus(cond) || block_uses_num_cpus(body)
-        }
-        Stmt::ForLet { value, body, .. } => {
-            expr_uses_num_cpus(value) || block_uses_num_cpus(body)
-        }
+        Stmt::ForIn { iter, body, .. } => expr_uses_num_cpus(iter) || block_uses_num_cpus(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_num_cpus(cond) || block_uses_num_cpus(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_num_cpus(value) || block_uses_num_cpus(body),
         Stmt::Guard {
             conditions,
             else_block,
@@ -11559,9 +11492,7 @@ fn stmt_uses_num_cpus(stmt: &Stmt) -> bool {
 fn expr_uses_num_cpus(expr: &Expr) -> bool {
     match expr {
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } => {
             // Match `OS.cpus(...)` exactly: bare Ident `OS` receiver
             // AND method name `cpus`. Other OS methods (name / arch /
@@ -11608,10 +11539,7 @@ fn expr_uses_num_cpus(expr: &Expr) -> bool {
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_num_cpus(v)),
         Expr::MatchExpr {
             scrutinee, arms, ..
-        } => {
-            expr_uses_num_cpus(scrutinee)
-                || arms.iter().any(|arm| block_uses_num_cpus(&arm.body))
-        }
+        } => expr_uses_num_cpus(scrutinee) || arms.iter().any(|arm| block_uses_num_cpus(&arm.body)),
         Expr::SuspendExpr { inner, .. } => expr_uses_num_cpus(inner),
         Expr::Try { expr, .. } => expr_uses_num_cpus(expr),
         Expr::Spawn { task, .. } => expr_uses_num_cpus(task),
@@ -12507,10 +12435,13 @@ fn lower_math_unary(arg: SynExpr, method: &str) -> Result<SynExpr, CodegenError>
         (#arg as f64).#method_ident()
     };
     syn::parse2(tokens).map_err(|e| {
-        CodegenError::new(Diagnostic::error(
-            format!("unsupported: Math.{method} codegen parse: {e}"),
-            BuffSpan::dummy(),
-        ))
+        CodegenError::new(
+            Diagnostic::error(
+                format!("unsupported: Math.{method} codegen parse: {e}"),
+                BuffSpan::dummy(),
+            )
+            .with_code(ErrorCode::CodegenParseError),
+        )
     })
 }
 
@@ -12533,10 +12464,13 @@ fn lower_math_binary(args: Vec<SynExpr>, method: &str) -> Result<SynExpr, Codege
         (#a as f64).#method_ident(#b as f64)
     };
     syn::parse2(tokens).map_err(|e| {
-        CodegenError::new(Diagnostic::error(
-            format!("unsupported: Math.{method} codegen parse: {e}"),
-            BuffSpan::dummy(),
-        ))
+        CodegenError::new(
+            Diagnostic::error(
+                format!("unsupported: Math.{method} codegen parse: {e}"),
+                BuffSpan::dummy(),
+            )
+            .with_code(ErrorCode::CodegenParseError),
+        )
     })
 }
 

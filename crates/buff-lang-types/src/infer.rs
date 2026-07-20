@@ -9,7 +9,7 @@
 //! recursion detection.
 
 use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, Stmt, TypeRef, UnaryOp};
-use buff_lang_error::{Diagnostic, Span, TypeError};
+use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 
 use crate::env::TypeEnv;
 use crate::prelude;
@@ -475,10 +475,10 @@ impl TypeInferencer {
 
     fn lookup_ident(&self, name: &Ident, span: Span) -> Result<Type, TypeError> {
         self.env.lookup(&name.name).cloned().ok_or_else(|| {
-            TypeError::new(Diagnostic::error(
-                format!("undefined variable: {}", name.name),
-                span,
-            ))
+            TypeError::new(
+                Diagnostic::error(format!("undefined variable: {}", name.name), span)
+                    .with_code(ErrorCode::UndefinedVariable),
+            )
         })
     }
 
@@ -505,19 +505,22 @@ impl TypeInferencer {
                 if lhs_ty == rhs_ty || promote_binary(&lhs_ty, &rhs_ty).is_some() {
                     Ok(Type::Bool)
                 } else {
-                    Err(TypeError::new(Diagnostic::error(
-                        format!("cannot compare {lhs_ty} with {rhs_ty}"),
-                        span,
-                    )))
+                    Err(TypeError::new(
+                        Diagnostic::error(format!("cannot compare {lhs_ty} with {rhs_ty}"), span)
+                            .with_code(ErrorCode::BinaryOpTypeMismatch),
+                    ))
                 }
             }
             // Logical operators require Bool on both sides.
             BinaryOp::And | BinaryOp::Or => {
                 if lhs_ty != Type::Bool || rhs_ty != Type::Bool {
-                    return Err(TypeError::new(Diagnostic::error(
-                        format!("logical operators require Bool, found {lhs_ty} and {rhs_ty}"),
-                        span,
-                    )));
+                    return Err(TypeError::new(
+                        Diagnostic::error(
+                            format!("logical operators require Bool, found {lhs_ty} and {rhs_ty}"),
+                            span,
+                        )
+                        .with_code(ErrorCode::BinaryOpTypeMismatch),
+                    ));
                 }
                 Ok(Type::Bool)
             }
@@ -534,10 +537,13 @@ impl TypeInferencer {
                     return Ok(dt_result);
                 }
                 promote_binary(&lhs_ty, &rhs_ty).ok_or_else(|| {
-                    TypeError::new(Diagnostic::error(
-                        format!("cannot apply operator to {lhs_ty} and {rhs_ty}"),
-                        span,
-                    ))
+                    TypeError::new(
+                        Diagnostic::error(
+                            format!("cannot apply operator to {lhs_ty} and {rhs_ty}"),
+                            span,
+                        )
+                        .with_code(ErrorCode::BinaryOpTypeMismatch),
+                    )
                 })
             }
             // Bitwise / shift operators — integers only.
@@ -547,16 +553,24 @@ impl TypeInferencer {
             | BinaryOp::Shl
             | BinaryOp::Shr => {
                 if !lhs_ty.is_integer_like() || !rhs_ty.is_integer_like() {
-                    return Err(TypeError::new(Diagnostic::error(
-                        format!("bitwise operators require integers, found {lhs_ty} and {rhs_ty}"),
-                        span,
-                    )));
+                    return Err(TypeError::new(
+                        Diagnostic::error(
+                            format!(
+                                "bitwise operators require integers, found {lhs_ty} and {rhs_ty}"
+                            ),
+                            span,
+                        )
+                        .with_code(ErrorCode::BinaryOpTypeMismatch),
+                    ));
                 }
                 promote_binary(&lhs_ty, &rhs_ty).ok_or_else(|| {
-                    TypeError::new(Diagnostic::error(
-                        format!("cannot apply bitwise operator to {lhs_ty} and {rhs_ty}"),
-                        span,
-                    ))
+                    TypeError::new(
+                        Diagnostic::error(
+                            format!("cannot apply bitwise operator to {lhs_ty} and {rhs_ty}"),
+                            span,
+                        )
+                        .with_code(ErrorCode::BinaryOpTypeMismatch),
+                    )
                 })
             }
             // Plain assignment — result type is the lhs.
@@ -570,10 +584,10 @@ impl TypeInferencer {
                 if promote_binary(&lhs_ty, &rhs_ty).is_some() {
                     Ok(lhs_ty)
                 } else {
-                    Err(TypeError::new(Diagnostic::error(
-                        format!("cannot assign {rhs_ty} to {lhs_ty}"),
-                        span,
-                    )))
+                    Err(TypeError::new(
+                        Diagnostic::error(format!("cannot assign {rhs_ty} to {lhs_ty}"), span)
+                            .with_code(ErrorCode::AssignTypeMismatch),
+                    ))
                 }
             }
             // T101: null coalescing `??` — result type is the RHS type
@@ -591,30 +605,39 @@ impl TypeInferencer {
                 if operand_ty.is_numeric() {
                     Ok(operand_ty)
                 } else {
-                    Err(TypeError::new(Diagnostic::error(
-                        format!("unary - requires a numeric type, found {operand_ty}"),
-                        span,
-                    )))
+                    Err(TypeError::new(
+                        Diagnostic::error(
+                            format!("unary - requires a numeric type, found {operand_ty}"),
+                            span,
+                        )
+                        .with_code(ErrorCode::InvalidUnaryOperand),
+                    ))
                 }
             }
             UnaryOp::Not => {
                 if operand_ty == Type::Bool {
                     Ok(Type::Bool)
                 } else {
-                    Err(TypeError::new(Diagnostic::error(
-                        format!("unary ! requires Bool, found {operand_ty}"),
-                        span,
-                    )))
+                    Err(TypeError::new(
+                        Diagnostic::error(
+                            format!("unary ! requires Bool, found {operand_ty}"),
+                            span,
+                        )
+                        .with_code(ErrorCode::InvalidUnaryOperand),
+                    ))
                 }
             }
             UnaryOp::BitNot => {
                 if operand_ty.is_integer_like() {
                     Ok(operand_ty)
                 } else {
-                    Err(TypeError::new(Diagnostic::error(
-                        format!("unary ~ requires an integer, found {operand_ty}"),
-                        span,
-                    )))
+                    Err(TypeError::new(
+                        Diagnostic::error(
+                            format!("unary ~ requires an integer, found {operand_ty}"),
+                            span,
+                        )
+                        .with_code(ErrorCode::InvalidUnaryOperand),
+                    ))
                 }
             }
         }
@@ -629,19 +652,22 @@ impl TypeInferencer {
     ) -> Result<Type, TypeError> {
         let cond_ty = self.infer_expr(cond)?;
         if cond_ty != Type::Bool {
-            return Err(TypeError::new(Diagnostic::error(
-                format!("if condition must be Bool, found {cond_ty}"),
-                span,
-            )));
+            return Err(TypeError::new(
+                Diagnostic::error(format!("if condition must be Bool, found {cond_ty}"), span)
+                    .with_code(ErrorCode::IfConditionMustBeBool),
+            ));
         }
         let then_ty = self.infer_block_tail(then_block)?;
         if let Some(else_b) = else_block {
             let else_ty = self.infer_block_tail(else_b)?;
             if then_ty != else_ty {
-                return Err(TypeError::new(Diagnostic::error(
-                    format!("if/else branches have different types: {then_ty} vs {else_ty}"),
-                    span,
-                )));
+                return Err(TypeError::new(
+                    Diagnostic::error(
+                        format!("if/else branches have different types: {then_ty} vs {else_ty}"),
+                        span,
+                    )
+                    .with_code(ErrorCode::IfBranchTypeMismatch),
+                ));
             }
             Ok(then_ty)
         } else {
@@ -691,7 +717,10 @@ impl TypeInferencer {
                             } else {
                                 format!("expected {annotated_ty}, found {value_ty}")
                             };
-                            return Err(TypeError::new(Diagnostic::error(msg, *span)));
+                            return Err(TypeError::new(
+                                Diagnostic::error(msg, *span)
+                                    .with_code(ErrorCode::AssignTypeMismatch),
+                            ));
                         }
                         self.env.insert(&name.name, annotated_ty.clone());
                         return Ok(annotated_ty);
@@ -927,16 +956,22 @@ fn datetime_arith_result(op: &buff_lang_ast::BinaryOp, lhs: &Type, rhs: &Type) -
     match (op, lhs, rhs) {
         // `<datetime> + Duration -> <datetime>` — chrono `DateTime + TimeDelta`,
         // `NaiveDate + TimeDelta`, `NaiveTime + TimeDelta`, `Instant + Duration`.
-        (BinaryOp::Add, t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant), Type::Duration) => {
-            Some(t.clone())
-        }
-        (BinaryOp::Add, Type::Duration, t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant)) => {
-            Some(t.clone())
-        }
+        (
+            BinaryOp::Add,
+            t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant),
+            Type::Duration,
+        ) => Some(t.clone()),
+        (
+            BinaryOp::Add,
+            Type::Duration,
+            t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant),
+        ) => Some(t.clone()),
         // `<datetime> - Duration -> <datetime>` — chrono `Sub<TimeDelta>`.
-        (BinaryOp::Sub, t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant), Type::Duration) => {
-            Some(t.clone())
-        }
+        (
+            BinaryOp::Sub,
+            t @ (Type::DateTime | Type::Date | Type::Time | Type::Instant),
+            Type::Duration,
+        ) => Some(t.clone()),
         // `<datetime> - <same-type datetime> -> Duration` — chrono `Sub<Self>` yields
         // a `TimeDelta` for paired DateTime / NaiveDate / NaiveTime, and
         // `std::time::Instant - Instant = std::time::Duration`.

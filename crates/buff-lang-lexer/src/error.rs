@@ -1,9 +1,11 @@
 //! Lexer error types.
 //!
 //! Wraps [`buff_lang_error::LexError`] with convenience constructors for common
-//! lexer failure modes.
+//! lexer failure modes. Each named constructor attaches a stable
+//! [`ErrorCode`](buff_lang_error::ErrorCode) (T124) so the user sees
+//! e.g. `[Error] error[E1001]: unexpected character: '@'`.
 
-use buff_lang_error::{Diagnostic, LexError as BuffLexError, Severity, Span};
+use buff_lang_error::{Diagnostic, ErrorCode, LexError as BuffLexError, Severity, Span};
 
 /// A lexer error. Wraps the `buff-lang-error` [`LexError`](buff_lang_error::LexError)
 /// which carries a [`Diagnostic`].
@@ -14,6 +16,11 @@ pub struct LexerError {
 
 impl LexerError {
     /// Create a new lexer error with the given message and source span.
+    ///
+    /// Prefer the named constructors below (`unexpected_char`, etc.) where
+    /// possible — they attach a stable [`ErrorCode`] automatically. This
+    /// generic constructor leaves `code` as `None`, so the diagnostic
+    /// renders without an `E1xxx` tag.
     pub fn new(message: impl Into<String>, span: Span) -> Self {
         Self {
             inner: BuffLexError::new(Diagnostic {
@@ -21,28 +28,48 @@ impl LexerError {
                 message: message.into(),
                 span,
                 notes: Vec::new(),
+                code: None,
             }),
         }
     }
 
     /// An unexpected character was encountered.
     pub fn unexpected_char(ch: char, span: Span) -> Self {
-        Self::new(format!("unexpected character: {:?}", ch), span)
+        Self::coded(
+            ErrorCode::UnexpectedChar,
+            format!("unexpected character: {:?}", ch),
+            span,
+        )
     }
 
     /// An unterminated string literal.
     pub fn unterminated_string(span: Span) -> Self {
-        Self::new("unterminated string literal", span)
+        Self::coded(
+            ErrorCode::UnterminatedString,
+            "unterminated string literal",
+            span,
+        )
     }
 
     /// An invalid numeric literal.
     pub fn invalid_number(span: Span) -> Self {
-        Self::new("invalid numeric literal", span)
+        Self::coded(ErrorCode::InvalidNumber, "invalid numeric literal", span)
     }
 
     /// Mixed tabs and spaces in indentation.
     pub fn mixed_tabs_spaces(span: Span) -> Self {
-        Self::new("mixed tabs and spaces in indentation", span)
+        Self::coded(
+            ErrorCode::MixedTabsSpaces,
+            "mixed tabs and spaces in indentation",
+            span,
+        )
+    }
+
+    /// Build a lexer error that carries a stable [`ErrorCode`].
+    fn coded(code: ErrorCode, message: impl Into<String>, span: Span) -> Self {
+        Self {
+            inner: BuffLexError::new(Diagnostic::error(message, span).with_code(code)),
+        }
     }
 }
 

@@ -8,7 +8,7 @@
 //! so the parser logic stays clean. Callers that care about layout should
 //! construct the stream from a pre-filtered token slice.
 
-use buff_lang_error::{Diagnostic, ParseError, SourceId, Span};
+use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
 /// A read-only cursor over a slice of tokens.
@@ -142,31 +142,37 @@ impl<'a> TokenStream<'a> {
                 // layout-skip). advance() will return the same token.
                 Ok(self.advance().expect("peek guaranteed a token"))
             } else {
-                Err(ParseError::new(Diagnostic::error(
-                    format!("expected `{expected_kind}`, found `{}`", tok.kind),
-                    tok.span,
-                )))
+                Err(ParseError::new(
+                    Diagnostic::error(
+                        format!("expected `{expected_kind}`, found `{}`", tok.kind),
+                        tok.span,
+                    )
+                    .with_code(ErrorCode::ExpectedToken),
+                ))
             }
         } else {
-            Err(ParseError::new(Diagnostic::error(
-                format!("expected `{expected_kind}`, found end of input"),
-                self.eof_span(),
-            )))
+            Err(ParseError::new(
+                Diagnostic::error(
+                    format!("expected `{expected_kind}`, found end of input"),
+                    self.eof_span(),
+                )
+                .with_code(ErrorCode::ExpectedToken),
+            ))
         }
     }
 
     /// Build an "unexpected token" error pointing at the current position.
     pub fn unexpected(&self, what: impl core::fmt::Display) -> ParseError {
         if let Some(tok) = self.peek() {
-            ParseError::new(Diagnostic::error(
-                format!("unexpected `{}`: {what}", tok.kind),
-                tok.span,
-            ))
+            ParseError::new(
+                Diagnostic::error(format!("unexpected `{}`: {what}", tok.kind), tok.span)
+                    .with_code(ErrorCode::UnexpectedToken),
+            )
         } else {
-            ParseError::new(Diagnostic::error(
-                format!("unexpected end of input: {what}"),
-                self.eof_span(),
-            ))
+            ParseError::new(
+                Diagnostic::error(format!("unexpected end of input: {what}"), self.eof_span())
+                    .with_code(ErrorCode::UnexpectedToken),
+            )
         }
     }
 

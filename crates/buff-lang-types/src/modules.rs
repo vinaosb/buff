@@ -46,7 +46,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use buff_lang_ast::{Decl, ImportDecl, ReexportDecl};
-use buff_lang_error::{Diagnostic, Span, TypeError};
+use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 
 /// A parsed module: its canonical file path, top-level decls, computed
 /// exports set, declared imports, and declared re-exports.
@@ -183,16 +183,19 @@ pub fn resolve_path(importing: &Path, spec: &str) -> Result<PathBuf, TypeError> 
     // Reserved std-library namespace.
     let normalized = spec.trim();
     if normalized.is_empty() {
-        return Err(TypeError::new(Diagnostic::error(
-            "import path is empty",
-            Span::dummy(),
-        )));
+        return Err(TypeError::new(
+            Diagnostic::error("import path is empty", Span::dummy())
+                .with_code(ErrorCode::ModuleError),
+        ));
     }
     if normalized == "std" || normalized.starts_with("std/") || normalized.starts_with("std\\") {
-        return Err(TypeError::new(Diagnostic::error(
-            format!("standard-library import `{normalized}` is not yet supported in v0.5"),
-            Span::dummy(),
-        )));
+        return Err(TypeError::new(
+            Diagnostic::error(
+                format!("standard-library import `{normalized}` is not yet supported in v0.5"),
+                Span::dummy(),
+            )
+            .with_code(ErrorCode::ModuleError),
+        ));
     }
 
     // Anchor the spec relative to the importing file's directory.
@@ -337,10 +340,10 @@ fn process_module(path: &Path, ctx: &mut BuildCtx<'_>) -> Result<PathBuf, TypeEr
             .chain(std::iter::once(path.display().to_string()))
             .collect::<Vec<_>>()
             .join(" -> ");
-        return Err(TypeError::new(Diagnostic::error(
-            format!("circular import detected: {chain}"),
-            Span::dummy(),
-        )));
+        return Err(TypeError::new(
+            Diagnostic::error(format!("circular import detected: {chain}"), Span::dummy())
+                .with_code(ErrorCode::ModuleError),
+        ));
     }
     // Already done — nothing to do.
     if ctx.visited.contains(path) {
@@ -349,10 +352,10 @@ fn process_module(path: &Path, ctx: &mut BuildCtx<'_>) -> Result<PathBuf, TypeEr
 
     // Load.
     let src = ctx.loader.load(path).ok_or_else(|| {
-        TypeError::new(Diagnostic::error(
-            format!("file not found: {}", path.display()),
-            Span::dummy(),
-        ))
+        TypeError::new(
+            Diagnostic::error(format!("file not found: {}", path.display()), Span::dummy())
+                .with_code(ErrorCode::ModuleError),
+        )
     })?;
 
     // Parse via upstream lexer + parser. We use SourceId(0) for every
@@ -360,24 +363,30 @@ fn process_module(path: &Path, ctx: &mut BuildCtx<'_>) -> Result<PathBuf, TypeEr
     // CLI's source-map layer will thread real SourceIds in a later wave).
     let source_id = buff_lang_error::SourceId(0);
     let tokens = buff_lang_lexer::tokenize(&src, source_id).map_err(|e| {
-        TypeError::new(Diagnostic::error(
-            format!(
-                "lex error in {}: {}",
-                path.display(),
-                e.inner.diagnostic.message
-            ),
-            Span::dummy(),
-        ))
+        TypeError::new(
+            Diagnostic::error(
+                format!(
+                    "lex error in {}: {}",
+                    path.display(),
+                    e.inner.diagnostic.message
+                ),
+                Span::dummy(),
+            )
+            .with_code(ErrorCode::ModuleError),
+        )
     })?;
     let decls = buff_lang_parser::parse(&tokens, source_id).map_err(|e| {
-        TypeError::new(Diagnostic::error(
-            format!(
-                "parse error in {}: {}",
-                path.display(),
-                e.diagnostic.message
-            ),
-            Span::dummy(),
-        ))
+        TypeError::new(
+            Diagnostic::error(
+                format!(
+                    "parse error in {}: {}",
+                    path.display(),
+                    e.diagnostic.message
+                ),
+                Span::dummy(),
+            )
+            .with_code(ErrorCode::ModuleError),
+        )
     })?;
 
     // Categorize decls into imports / reexports / regular (with exports).
@@ -510,10 +519,13 @@ fn resolve_reexports(ctx: &mut BuildCtx<'_>) -> Result<(), TypeError> {
                 // Named re-export: each name must be in target's exports.
                 for n in &r.names {
                     if !target_exports.contains(&n.name) {
-                        return Err(TypeError::new(Diagnostic::error(
-                            format!("`{}` is not exported from `{}`", n.name, target.display()),
-                            Span::dummy(),
-                        )));
+                        return Err(TypeError::new(
+                            Diagnostic::error(
+                                format!("`{}` is not exported from `{}`", n.name, target.display()),
+                                Span::dummy(),
+                            )
+                            .with_code(ErrorCode::ModuleError),
+                        ));
                     }
                 }
                 // Already inserted into this module's exports during the
@@ -542,20 +554,26 @@ fn check_visibility(ctx: &BuildCtx<'_>) -> Result<(), TypeError> {
             let Some(target_mod) = ctx.modules.get(&target) else {
                 // Shouldn't happen — process_module recurses into all
                 // imports — but defend against a missing entry.
-                return Err(TypeError::new(Diagnostic::error(
-                    format!(
-                        "import target `{}` not in graph (internal error)",
-                        target.display()
-                    ),
-                    Span::dummy(),
-                )));
+                return Err(TypeError::new(
+                    Diagnostic::error(
+                        format!(
+                            "import target `{}` not in graph (internal error)",
+                            target.display()
+                        ),
+                        Span::dummy(),
+                    )
+                    .with_code(ErrorCode::ModuleError),
+                ));
             };
             for n in &imp.imports {
                 if !target_mod.exports.contains(&n.name) {
-                    return Err(TypeError::new(Diagnostic::error(
-                        format!("`{}` is not exported from `{}`", n.name, target.display()),
-                        Span::dummy(),
-                    )));
+                    return Err(TypeError::new(
+                        Diagnostic::error(
+                            format!("`{}` is not exported from `{}`", n.name, target.display()),
+                            Span::dummy(),
+                        )
+                        .with_code(ErrorCode::ModuleError),
+                    ));
                 }
             }
         }

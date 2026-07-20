@@ -60,7 +60,7 @@
 use std::collections::HashMap;
 
 use buff_lang_ast::{Decl, EnumDecl, Expr, MatchArm, Pattern, Stmt};
-use buff_lang_error::{Diagnostic, TypeError};
+use buff_lang_error::{Diagnostic, ErrorCode, TypeError};
 
 use crate::TypeInferencer;
 
@@ -454,10 +454,13 @@ pub fn check_match_expr(
     // Find the first missing variant (in declaration order from the enum).
     let missing = variants.iter().find(|v| !covered.contains(&v.as_str()));
     if let Some(missing_name) = missing {
-        return Err(TypeError::new(Diagnostic::error(
-            format!("non-exhaustive match: missing {missing_name}"),
-            scrutinee.span(),
-        )));
+        return Err(TypeError::new(
+            Diagnostic::error(
+                format!("non-exhaustive match: missing {missing_name}"),
+                scrutinee.span(),
+            )
+            .with_code(ErrorCode::NonExhaustiveMatch),
+        ));
     }
     Ok(())
 }

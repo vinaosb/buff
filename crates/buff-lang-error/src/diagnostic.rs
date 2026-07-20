@@ -14,6 +14,7 @@
 //! deterministic "Did you mean `print`?" note. Determinism: ties in
 //! Levenshtein distance are broken **alphabetically** (no HashMap order).
 
+use crate::code::ErrorCode;
 use crate::span::Span;
 
 /// The severity of a diagnostic message.
@@ -24,13 +25,23 @@ pub enum Severity {
     Info,
 }
 
-/// A diagnostic message with severity, message text, source span, and notes.
+/// A diagnostic message with severity, message text, source span, notes, and
+/// an optional stable [`ErrorCode`] (T124).
+///
+/// The `code` field is [`Option`]al and defaults to `None` at every
+/// existing construction site, so adding it does not change any existing
+/// diagnostic output. Use [`Diagnostic::with_code`] to attach a code, and
+/// [`Diagnostic::render`] / [`Diagnostic::fmt`] will then emit it as
+/// `error[E1xxx]: <message>` (rustc-style).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: Severity,
     pub message: String,
     pub span: Span,
     pub notes: Vec<String>,
+    /// Optional stable error code (e.g. `E1001`). `None` for diagnostics
+    /// that do not yet have a code, or for ad-hoc / uncategorised messages.
+    pub code: Option<ErrorCode>,
 }
 
 impl Diagnostic {
@@ -41,6 +52,7 @@ impl Diagnostic {
             message: message.into(),
             span,
             notes: Vec::new(),
+            code: None,
         }
     }
 
@@ -51,6 +63,7 @@ impl Diagnostic {
             message: message.into(),
             span,
             notes: Vec::new(),
+            code: None,
         }
     }
 
@@ -61,6 +74,7 @@ impl Diagnostic {
             message: message.into(),
             span,
             notes: Vec::new(),
+            code: None,
         }
     }
 
@@ -69,11 +83,31 @@ impl Diagnostic {
         self.notes.push(note.into());
         self
     }
+
+    /// Attach a stable [`ErrorCode`] to this diagnostic.
+    ///
+    /// Mirrors [`Diagnostic::with_note`] as a consuming builder. When `code`
+    /// is `Some`, [`render`](Self::render) and [`Display`](impl std::fmt::Display)
+    /// emit the code as `error[E1xxx]: <message>` immediately after the
+    /// severity tag.
+    pub fn with_code(mut self, code: ErrorCode) -> Self {
+        self.code = Some(code);
+        self
+    }
 }
 
 impl std::fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:?}] {}", self.severity, self.message)?;
+        match self.code {
+            Some(code) => write!(
+                f,
+                "[{:?}] error[{}]: {}",
+                self.severity,
+                code.code_str(),
+                self.message
+            )?,
+            None => write!(f, "[{:?}] {}", self.severity, self.message)?,
+        }
         if !self.notes.is_empty() {
             for note in &self.notes {
                 write!(f, "\n  note: {}", note)?;
@@ -113,7 +147,15 @@ impl Diagnostic {
     /// of source) render only the header + notes, without any caret line.
     pub fn render(&self, source: &str) -> String {
         let mut out = String::new();
-        out.push_str(&format!("[{:?}] {}\n", self.severity, self.message));
+        match self.code {
+            Some(code) => out.push_str(&format!(
+                "[{:?}] error[{}]: {}\n",
+                self.severity,
+                code.code_str(),
+                self.message
+            )),
+            None => out.push_str(&format!("[{:?}] {}\n", self.severity, self.message)),
+        }
         if let Some(rendered_line) = render_span_in_source(&self.span, source) {
             out.push_str(&rendered_line);
         }
