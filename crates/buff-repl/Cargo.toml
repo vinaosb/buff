@@ -8,6 +8,8 @@ license = "MIT OR Apache-2.0"
 buff-eval.workspace = true
 buff-lang-error.workspace = true
 rustyline.workspace = true
+# T125c: resolve ~/.buff_history for REPL history persistence.
+dirs.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

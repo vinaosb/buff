@@ -313,3 +313,12 @@ buff-repl = { path = "crates/buff-repl" }
 # history persistence is T125c territory (we want a fresh in-memory history
 # per session for now).
 rustyline = "15"
+# T125c: `dirs` resolves the user's home directory for the REPL history
+# file (`~/.buff_history`). We pin to major 5 (released 2022) — the
+# long-standing surface most of the Rust ecosystem targets. dirs 6.0.0
+# (2025) ships the identical `home_dir() -> Option<PathBuf>` API but is
+# newer than necessary; pinning 5 mirrors the rand-0.8 / chrono-0.4
+# conservative-pin philosophy already in use. The single function we
+# consume is `dirs::home_dir()` — no other API surface is touched, so a
+# future bump to 6.x is a one-line version change with no code change.
+dirs = "5"

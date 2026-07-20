@@ -22,6 +22,12 @@
 //!   8. Shadowing: `let x = 1` then `let x = 99` → 99  — [`shadowing_uses_newest_binding`]
 //!   9. `:type` with no arg → usage hint, no panic     — covered in `src/lib.rs` unit tests
 //!
+//! - T125c §2 EXPECTED OUTCOME:
+//!  10. `:load examples/fibonacci.buff` then `fib(10)` — [`load_fibonacci_then_call_fib`]
+//!      → `55` (note: file defines `fib`, NOT `fibonacci`)
+//!  11. `:load` with missing file → diagnostic         — covered in `src/lib.rs` unit tests
+//!  12. `:load` with no path → usage hint              — covered in `src/lib.rs` unit tests
+//!
 //! All tests are independent (each builds a fresh [`Evaluator`]).
 //!
 //! NOTE: rustc is invoked per happy-path test (a couple of seconds each on
@@ -283,5 +289,95 @@ fn type_command_after_shadow_reflects_current_binding() {
     assert!(
         !out.contains("Int"),
         "shadowed Int binding should not leak into :type output, got: {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T125c acceptance bullet 10: `:load examples/fibonacci.buff` then call fib.
+// ---------------------------------------------------------------------------
+//
+// NOTE: examples/fibonacci.buff defines `func fib` (NOT `fibonacci` — the
+// task spec example uses the wrong name; reality wins). The file's main
+// is `func main(): print(fib(10))` — `:load` SKIPS main and accumulates
+// only `func fib`. After loading, the user can call `fib(10)` directly.
+//
+// This test spawns rustc twice (once for the :load accumulation, once for
+// the fib(10) call), so it's the slowest test in the suite (~2-3s).
+//
+// Tests run with cwd = `crates/buff-repl/` (the crate root). The example
+// lives at the WORKSPACE root (`../../examples/fibonacci.buff`). We
+// resolve via `CARGO_MANIFEST_DIR` so the path works regardless of where
+// `cargo test` is invoked from.
+
+/// Absolute path to `examples/fibonacci.buff` at the workspace root.
+fn fibonacci_example_path() -> String {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    // manifest_dir = .../crates/buff-repl. Workspace root is two levels up.
+    format!("{manifest_dir}/../../examples/fibonacci.buff")
+}
+
+#[test]
+fn load_fibonacci_then_call_fib() {
+    let mut ev = Evaluator::new();
+    let path = fibonacci_example_path();
+
+    // Load the file.
+    let load_out = dispatch_line(&mut ev, &format!(":load {path}"));
+    assert!(
+        load_out.contains("1 decl(s) loaded"),
+        "expected exactly 1 decl (fib) loaded, got: {load_out:?}"
+    );
+    assert!(
+        load_out.contains("1 main(s) skipped"),
+        "expected main to be skipped, got: {load_out:?}"
+    );
+
+    // Now `fib` should be callable in the session. fib(10) = 55.
+    let call_out = dispatch_line(&mut ev, "fib(10)");
+    assert!(
+        call_out.contains("55"),
+        "expected `55` from fib(10) after :load, got: {call_out:?}"
+    );
+    assert!(
+        !call_out.contains("[Error]"),
+        "fib(10) should not produce a diagnostic after :load, got: {call_out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T125c: `:load` accumulates state — verify via evaluation, not :type.
+// ---------------------------------------------------------------------------
+//
+// NOTE: `Evaluator::type_of` consults ONLY `body_stmts_src`, NOT
+// `top_level_src`. Func decls loaded via `:load` accumulate into
+// `top_level_src`, so they are CALLABLE in subsequent eval_line calls
+// (proven by `load_fibonacci_then_call_fib`) but NOT VISIBLE to the
+// pure-inferencer `type_of` path. This is a documented buff-eval
+// limitation (T125-prep) — fixing it would require modifying buff-eval,
+// which the task forbids. The test below verifies the workaround: the
+// loaded func IS callable, even though `:type fib(10)` returns Unknown.
+
+#[test]
+fn load_accumulates_into_session_state() {
+    let mut ev = Evaluator::new();
+    let path = fibonacci_example_path();
+    let _ = dispatch_line(&mut ev, &format!(":load {path}"));
+
+    // The loaded `fib` IS callable — the composed eval program
+    // includes top_level_src. fib(10) = 55 proves the func
+    // accumulated correctly.
+    let call_out = dispatch_line(&mut ev, "fib(10)");
+    assert!(
+        call_out.contains("55"),
+        "loaded fib should be callable, got: {call_out:?}"
+    );
+
+    // ... but `:type fib(10)` returns Unknown because type_of does
+    // NOT consult top_level_src. Documenting this buff-eval
+    // limitation so a future fix surfaces clearly.
+    let type_out = dispatch_line(&mut ev, ":type fib(10)");
+    assert!(
+        type_out.contains("Unknown") || type_out.contains("cannot infer"),
+        "expected Unknown/cannot-infer for loaded func (buff-eval type_of limitation), got: {type_out:?}"
     );
 }

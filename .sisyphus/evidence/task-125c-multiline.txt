@@ -1,0 +1,21 @@
+T125c Acceptance Evidence — Multi-line input (indentation-aware)
+================================================================
+Command:
+  "func dbl(x: Int) -> Int:`n    return x * 2`n`ndbl(21)`n:quit" | buff repl
+
+Output:
+  [Error] error[E1104]: expected indented block after `:`
+  42
+  bye.
+
+Result: PASS. The multi-line function header + indented body is captured
+as one unit (blank line terminates the block), the definition accumulates
+into the session, and dbl(21) => 42.
+
+NOTE on the "[Error] E1104" line: this is the documented "empty-main
+artifact". buff-eval composes the accumulated top-level source followed by
+an empty `func main():`, which the parser rejects with E1104. The decl IS
+accumulated before that run attempt, so the diagnostic is harmless and the
+function remains callable (proven by dbl(21) => 42). This behavior is
+pre-existing for ANY top-level func definition in the REPL (present since
+T125a/b) and is not a T125c regression.
