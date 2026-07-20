@@ -1559,7 +1559,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.5 "Scripting" — REPL
 
-- [ ] **T125-prep: Extract shared `buff-eval` evaluation core** [deep]
+- [x] **T125-prep: Extract shared `buff-eval` evaluation core** [deep]
 
   > **WHY THIS IS FIRST**: T129b (v1.7 Jupyter) and T138a (v1.11 Bufflings) both "reuse the REPL evaluator." Without a shared crate, they'd have to refactor buff-repl internals (scope creep into a "done" release). This task extracts the evaluation engine into a reusable crate BEFORE any consumer depends on it.
 
@@ -1580,11 +1580,11 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `crates/buff-lang-lexer/src/lexer.rs:39 tokenize()`, `crates/buff-lang-parser/src/parser.rs:31 parse()`, `crates/buff-lang-types/src/infer.rs:20 TypeInferencer`
 
   **Acceptance Criteria**:
-  - [ ] `crates/buff-eval/` crate exists with clean public API
-  - [ ] `eval("2 + 3")` returns `5`
-  - [ ] `eval_line("let x = 42")` then `eval_line("x + 8")` returns `50` (state persists)
-  - [ ] `type_of("x")` returns `Int` (after above)
-  - [ ] `cargo test -p buff-eval` passes
+  - [x] `crates/buff-eval/` crate exists with clean public API
+  - [x] `eval("2 + 3")` returns `5`
+  - [x] `eval_line("let x = 42")` then `eval_line("x + 8")` returns `50` (state persists)
+  - [x] `type_of("x")` returns `Int` (after above)
+  - [x] `cargo test -p buff-eval` passes
 
   **QA Scenarios**:
   ```
