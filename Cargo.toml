@@ -287,3 +287,9 @@ buff-lang-runtime = { path = "crates/buff-lang-runtime" }
 buff-lang-error = { path = "crates/buff-lang-error" }
 buff-lang-cli = { path = "crates/buff-lang-cli" }
 buff-lsp = { path = "crates/buff-lsp" }
+# T125-prep: thin evaluation engine crate. Reuses the existing
+# lexer/parser/types/codegen-rust primitives; adds NO new compilation logic.
+# The path dep is mirrored at the workspace level so consumers (T125a REPL,
+# T129b Jupyter kernel, T138c Bufflings) all resolve to the same in-tree
+# version during the v1.x tooling wave.
+buff-eval = { path = "crates/buff-eval" }

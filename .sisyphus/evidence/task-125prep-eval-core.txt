@@ -1,0 +1,17 @@
+﻿T125-prep: buff-eval shared evaluation core
+Verified: 2026-07-20T12:11:42.2614515-03:00
+HEAD before commit: 264ff35
+
+cargo test -p buff-eval  : 8 unit + 7 integration = 15 passed, 0 failed
+  integration: eval_expression, eval_line_accumulates_state, type_of_uses_accumulated_env,
+               print_output_is_captured, print_output_is_captured_multiline,
+               error_returns_diagnostic, full_qa_scenario_smoke
+cargo clippy -p buff-eval --all-targets -- -D warnings : EXIT 0
+cargo fmt -p buff-eval --check : EXIT 0
+
+Acceptance:
+  eval("2 + 3") -> 5                                  [eval_expression]
+  eval_line("let x = 42"); eval_line("x + 8") -> 50   [eval_line_accumulates_state]
+  type_of("x") -> Int                                 [type_of_uses_accumulated_env]
+  print captured into EvalResult.stdout               [print_output_is_captured]
+Files: crates/buff-eval/{Cargo.toml,src/lib.rs,tests/eval_tests.rs}; root Cargo.toml + Cargo.lock
