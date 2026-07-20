@@ -1,0 +1,14 @@
+---
+source: crates/buff-lang-codegen-rust/tests/format_codegen.rs
+assertion_line: 587
+expression: src
+---
+fn f() {
+    {
+        let mut __wtr = csv::Writer::from_writer(Vec::<u8>::new());
+        for __row in &rows {
+            __wtr.write_record(__row.clone()).ok();
+        }
+        String::from_utf8(__wtr.into_inner().unwrap_or_default()).unwrap_or_default()
+    };
+}

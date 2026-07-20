@@ -1,0 +1,17 @@
+---
+source: crates/buff-lang-codegen-rust/tests/format_codegen.rs
+assertion_line: 577
+expression: src
+---
+fn f() {
+    {
+        let mut __rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader("a,b\n1,2\n".as_bytes());
+        __rdr
+            .records()
+            .filter_map(|r| r.ok())
+            .map(|r| r.iter().map(|f| f.to_string()).collect::<Vec<String>>())
+            .collect::<Vec<Vec<String>>>()
+    };
+}

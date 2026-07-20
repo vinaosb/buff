@@ -1277,7 +1277,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): URL, Base64, Hex, URLEncode, UUID web utility modules`
 
-- [ ] **T124i: Data format modules — YAML, CSV** [quick]
+- [x] **T124i: Data format modules — YAML, CSV** [quick]
 
   **What to do**:
   - `Yaml`: `Yaml.parse(string) -> Map`, `Yaml.stringify(value) -> String` — wrap `serde_yml` crate (NOT `serde_yaml` which is deprecated)

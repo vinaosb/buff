@@ -1,0 +1,32 @@
+T124i: Data format modules — YAML, CSV
+=======================================
+Date: 2026-07-20   Verified by: Atlas orchestrator (subagent finished 19m, no timeout)
+
+DEPS ADDED (root Cargo.toml [workspace.dependencies]):
+  serde_yml = "0.0.12"   (maintained fork; serde_yaml is deprecated/archived — NOT used)
+  csv = "1"
+
+FILES CHANGED:
+  Cargo.toml                                        +28
+  crates/buff-lang-types/src/prelude_types.rs       +326 (Yaml + Csv namespace-only PreludeType + AssocFn; count/is_namespace_only tests bumped)
+  crates/buff-lang-codegen-rust/src/rust_codegen.rs +266 (yaml/csv lowering + narrow program_uses_serde_yml/program_uses_csv walkers)
+  crates/buff-lang-codegen-rust/tests/format_codegen.rs  NEW (21 tests)
+  crates/buff-lang-codegen-rust/tests/snapshots/format_codegen__*.snap  NEW (5 snapshots)
+
+CODEGEN LOWERINGS (snapshot-verified, idiomatic Rust):
+  Yaml.parse(s)      -> serde_yml::from_str::<std::collections::HashMap<String, serde_yml::Value>>(s).unwrap_or_default()
+  Yaml.stringify(m)  -> serde_yml::to_string(&m).unwrap_or_default()
+  Csv.parse(s)       -> { let mut __rdr = csv::ReaderBuilder::new().has_headers(false).from_reader(s.as_bytes());
+                          __rdr.records().filter_map(|r| r.ok()).map(|r| r.iter().map(|f| f.to_string()).collect::<Vec<String>>()).collect::<Vec<Vec<String>>>() }
+  Csv.stringify(rows)-> { let mut __wtr = csv::Writer::from_writer(Vec::<u8>::new());
+                          for __row in &rows { __wtr.write_record(__row.clone()).ok(); }
+                          String::from_utf8(__wtr.into_inner().unwrap_or_default()).unwrap_or_default() }
+
+QA SCENARIO (plan L1299-1307): let y = Yaml.parse("a: 1\nb: 2"); print(y["a"]) transpiles to valid serde_yml::from_str HashMap parse.
+Codegen-only linking boundary applies (single-file `buff run` rustc does NOT link serde_yml/csv; cargo-project wiring deferred — same boundary as chrono/regex/toml/rand/tokio/base64/hex/uuid/url). Contract = snapshots + extern_crates.
+
+GATES (MSVC env, Windows):
+  cargo clippy --workspace --all-targets -- -D warnings         => EXIT 0
+  cargo test -p buff-lang-codegen-rust --test format_codegen     => test result: ok. 21 passed; 0 failed
+  cargo test --workspace --exclude buff-lang-runtime             => EXIT 0 (all crates green; runtime unaffected by T124i, was green at T124h)
+  (full `cargo test --workspace` timed out at 900s on wgpu cold_start GPU hang — known flaky, unrelated to T124i which touches only types+codegen)

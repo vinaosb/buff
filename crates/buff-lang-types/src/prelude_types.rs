@@ -311,6 +311,56 @@ pub enum PreludeType {
     /// convention). The underlying Rust type is `url::Url` (capital
     /// U, lowercase rl).
     URL,
+    /// `Yaml` - the YAML serialization namespace (T124i). Wraps the
+    /// `serde_yml` Rust crate (the maintained fork of the
+    /// deprecated/archived `serde_yaml` - do NOT use `serde_yaml`).
+    /// Like [`Self::Toml`], `Yaml` is **never a runtime value** -
+    /// it's a NAMESPACE exposing two associated functions:
+    /// - `Yaml.parse(string)` - parse a YAML document into a Buff
+    ///   `Map` (heterogeneous values); lowers to
+    ///   `serde_yml::from_str::<std::collections::HashMap<String,
+    ///   serde_yml::Value>>(s).unwrap_or_default()` (empty Map on
+    ///   parse failure - NEVER panics, mirroring the Toml.parse
+    ///   panic-free stance from T124e).
+    /// - `Yaml.stringify(value)` - serialize a Map/value back to YAML
+    ///   text; lowers to `serde_yml::to_string(&v).unwrap_or_default()`
+    ///   (empty String on serialization failure - NEVER panics).
+    ///
+    /// `buff_type()` returns [`Type::Void`] (Yaml has no value
+    /// representation, exactly like Toml); `is_namespace_only()`
+    /// returns `true`. Mirrors the Toml namespace-only shape exactly
+    /// (the YAML/TOML surface is structurally identical: parse +
+    /// stringify a heterogeneous Map). The `serde_yml` crate is
+    /// recorded in codegen `extern_crates` when a Buff program uses
+    /// `Yaml`.
+    Yaml,
+    /// `Csv` - the CSV serialization namespace (T124i). Wraps the
+    /// `csv` Rust crate (burntsushi/rust-csv). Like [`Self::Yaml`] /
+    /// [`Self::Toml`], `Csv` is **never a runtime value** - it's a
+    /// NAMESPACE exposing two associated functions:
+    /// - `Csv.parse(string)` - parse a CSV document into a
+    ///   `Vector<Vector<String>>` (uniform rows, NO header
+    ///   special-casing per the spec - every row including the
+    ///   header is surfaced as a `Vector<String>`). Lowers to
+    ///   `csv::ReaderBuilder::new().has_headers(false)
+    ///   .from_reader(s.as_bytes()).records()
+    ///   .filter_map(|r| r.ok()).map(|r| r.iter().map(|f|
+    ///   f.to_string()).collect::<Vec<String>>()).collect::<Vec<
+    ///   Vec<String>>>()` (skip malformed rows via `.filter_map
+    ///   (|r| r.ok())` - NEVER panics, mirroring the Toml.parse
+    ///   panic-free stance).
+    /// - `Csv.stringify(rows)` - serialize a
+    ///   `Vector<Vector<String>>` to CSV text; lowers to a block
+    ///   expression that builds a `csv::Writer` over `Vec<u8>`,
+    ///   writes each row via `write_record`, and converts the
+    ///   buffer to String (lossy/empty on failure - NEVER panics).
+    ///
+    /// `buff_type()` returns [`Type::Void`] (Csv has no value
+    /// representation, exactly like Yaml/Toml); `is_namespace_only()`
+    /// returns `true`. Mirrors the Toml namespace-only shape exactly
+    /// (parse + stringify). The `csv` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Csv`.
+    Csv,
 }
 
 impl PreludeType {
@@ -351,6 +401,13 @@ impl PreludeType {
         PreludeType::URLEncode,
         PreludeType::UUID,
         PreludeType::URL,
+        // T124i: Yaml / Csv - two data-format namespace modules
+        // wrapping the `serde_yml` and `csv` Rust crates. Both mirror
+        // Log / Toml's namespace-only shape exactly (parse + stringify
+        // a heterogeneous Map for Yaml; parse + stringify a uniform
+        // Vector<Vector<String>> for Csv). NO runtime value type.
+        PreludeType::Yaml,
+        PreludeType::Csv,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -425,6 +482,20 @@ impl PreludeType {
             // `url::Url` (capital U, lowercase rl - case mapping
             // happens in codegen's `buff_type_to_syn` arm).
             PreludeType::URL => "URL",
+            // T124i: the Yaml prelude type name. Buff-flavored
+            // shortening of YAML (the acronym is all-caps but Buff's
+            // convention is PascalCase for module names: `Yaml` reads
+            // naturally alongside `Toml`, `Csv`, `Json` future). The
+            // codegen splices `serde_yml::from_str` / `serde_yml::to_string`
+            // paths (note the Rust crate name is `serde_yml`, NOT
+            // `yaml` - the lowering maps Buff's `Yaml` namespace to
+            // the `serde_yml` Rust crate paths directly).
+            PreludeType::Yaml => "Yaml",
+            // T124i: the Csv prelude type name. Mirrors the Rust
+            // crate name (`csv`) so the codegen can splice
+            // `csv::ReaderBuilder` / `csv::Writer` paths without
+            // rewriting.
+            PreludeType::Csv => "Csv",
         }
     }
 
@@ -506,6 +577,20 @@ impl PreludeType {
             // as the second runtime-value-with-rich-instance-methods
             // type.
             PreludeType::URL => Type::Url,
+            // T124i: namespace-only - Yaml has no value representation.
+            // Mirrors Toml exactly: the namespace itself is never a
+            // value, only its associated functions (`Yaml.parse` /
+            // `Yaml.stringify`) are callable. Same surface as Toml
+            // (parse + stringify a heterogeneous Map).
+            PreludeType::Yaml => Type::Void,
+            // T124i: namespace-only - Csv has no value representation.
+            // Mirrors Yaml / Toml: the namespace itself is never a
+            // value, only its associated functions (`Csv.parse` /
+            // `Csv.stringify`) are callable. Csv's surface differs
+            // slightly (parse + stringify a uniform Vector<Vector<
+            // String>> instead of a heterogeneous Map), but the
+            // namespace-only stance is identical.
+            PreludeType::Csv => Type::Void,
         }
     }
 
@@ -526,6 +611,8 @@ impl PreludeType {
                 | PreludeType::Hex
                 | PreludeType::URLEncode
                 | PreludeType::UUID
+                | PreludeType::Yaml
+                | PreludeType::Csv
         )
     }
 }
@@ -1276,6 +1363,49 @@ pub fn assoc_fn_return_type(
         // stance from T124d). Same shared `Parse` variant as
         // DateTime.parse / Date.parse / Toml.parse / UUID.parse.
         (PreludeType::URL, PreludeAssocFn::Parse) => Some(Type::Url),
+        // T124i: Yaml module - mirrors the Toml module (T124e) exactly.
+        // `Yaml.parse(s)` returns a Buff `Map` whose keys are String
+        // (YAML mapping keys at the top level are heterogeneous in
+        // general but the codegen turbofish pins to `HashMap<String,
+        // serde_yml::Value>` so the surface Map contract is String-
+        // keyed, matching Toml.parse). The value type is Unknown
+        // (YAML values are heterogeneous: scalars / arrays / sub-
+        // mappings; representing them all as a single Buff type would
+        // require a `YamlValue` variant we deliberately don't add to
+        // keep the surface minimal - parse + stringify, no schema,
+        // mirroring the Toml Unknown-value-type stance). The codegen
+        // emits the concrete `HashMap<String, serde_yml::Value>` via
+        // turbofish so the generated Rust is fully typed.
+        (PreludeType::Yaml, PreludeAssocFn::Parse) => {
+            Some(Type::map(Type::string(), Type::Unknown))
+        }
+        // T124i: Yaml module - `Yaml.stringify(v)` returns a YAML-
+        // formatted String. Mirrors Toml.stringify exactly (the
+        // `serde_yml::to_string` API is structurally identical to
+        // `toml::to_string` - both take `&impl Serialize` and return
+        // `Result<String, _>`). The codegen borrows the arg via `&v`
+        // so Rust's serde-Serialize bound is satisfied.
+        (PreludeType::Yaml, PreludeAssocFn::Stringify) => Some(Type::string()),
+        // T124i: Csv module - differs from Yaml / Toml in the surface
+        // type but mirrors the parse + stringify shape. `Csv.parse(s)`
+        // returns a `Vector<Vector<String>>` (uniform rows, NO header
+        // special-casing - every row including the header is a
+        // `Vector<String>`). The codegen builds a `csv::ReaderBuilder`
+        // with `.has_headers(false)` so the header row is NOT consumed
+        // by the reader (CSV surfaces as uniform rows per the spec).
+        // The outer Vector is the rows; the inner Vector is the cells
+        // of each row (String per cell - CSV has no inherent type
+        // information, every cell is text).
+        (PreludeType::Csv, PreludeAssocFn::Parse) => {
+            Some(Type::vector(Type::vector(Type::string())))
+        }
+        // T124i: Csv module - `Csv.stringify(rows)` returns a CSV-
+        // formatted String. The arg is a `Vector<Vector<String>>`
+        // (rows of cells). The codegen builds a `csv::Writer` over
+        // `Vec<u8>` and writes each row via `write_record`, then
+        // converts the buffer to String (lossy/empty on failure -
+        // NEVER panics, mirroring the Toml / Yaml stringify stance).
+        (PreludeType::Csv, PreludeAssocFn::Stringify) => Some(Type::string()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -1793,9 +1923,10 @@ mod tests {
         // Random, Strings) shipped in T124f + 2 namespace-only system
         // modules (Args, Env) shipped in T124g + 4 namespace-only web
         // modules (Base64, Hex, URLEncode, UUID) + 1 runtime-value-
-        // with-methods type (URL) shipped in T124h = 18 total prelude
-        // types.
-        assert_eq!(PreludeType::ALL.len(), 18);
+        // with-methods type (URL) shipped in T124h + 2 namespace-only
+        // data-format modules (Yaml, Csv) shipped in T124i = 20 total
+        // prelude types.
+        assert_eq!(PreludeType::ALL.len(), 20);
     }
 
     #[test]
@@ -2136,15 +2267,21 @@ mod tests {
         // stance from T124d). Distinct from the namespace-only Base64 /
         // Hex / URLEncode / UUID modules it shipped alongside.
         assert!(!PreludeType::URL.is_namespace_only());
-        // T124h: The count of namespace-only modules is now exactly 11
+        // T124i: Yaml / Csv are also namespace-only modules (mirror
+        // Log / Toml / Math / Random / Strings / Args / Env / Base64 /
+        // Hex / URLEncode / UUID). Both wrap a Rust crate (serde_yml
+        // / csv) and have NO runtime value representation.
+        assert!(PreludeType::Yaml.is_namespace_only());
+        assert!(PreludeType::Csv.is_namespace_only());
+        // T124i: The count of namespace-only modules is now exactly 13
         // (Log + Toml + Math + Random + Strings + Args + Env + Base64 +
-        // Hex + URLEncode + UUID). URL is NOT in this count (it's a
-        // runtime value type, not a namespace module).
+        // Hex + URLEncode + UUID + Yaml + Csv). URL is NOT in this count
+        // (it's a runtime value type, not a namespace module).
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        assert_eq!(namespace_only_count, 11);
+        assert_eq!(namespace_only_count, 13);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +
@@ -2586,6 +2723,181 @@ mod tests {
                 &[Type::string()]
             ),
             Some(Type::string())
+        );
+    }
+
+    // T124i: Yaml module - `Yaml.parse(s)` / `Yaml.stringify(v)` assoc-fn
+    // lookups + return types. Mirrors the Toml namespace-only precedent
+    // (T124e) but for the `serde_yml` Rust crate (the maintained fork
+    // of the deprecated `serde_yaml`).
+    #[test]
+    fn prelude_yaml_assoc_fn_lookup_valid_pairs() {
+        // `Yaml.parse` reuses the registry's shared `Parse` variant
+        // (also used by DateTime.parse / Date.parse / Toml.parse /
+        // URL.parse / UUID.parse).
+        assert_eq!(
+            assoc_fn_lookup("Yaml", "parse"),
+            Some((PreludeType::Yaml, PreludeAssocFn::Parse))
+        );
+        // `Yaml.stringify` reuses the registry's shared `Stringify`
+        // variant (also used by Toml.stringify).
+        assert_eq!(
+            assoc_fn_lookup("Yaml", "stringify"),
+            Some((PreludeType::Yaml, PreludeAssocFn::Stringify))
+        );
+        // `Yaml` is recognised as a prelude type.
+        assert!(is_prelude_type("Yaml"));
+        // `Yaml.buff_type()` is `Void` (no runtime value - namespace-only
+        // like Toml / Log).
+        assert_eq!(PreludeType::Yaml.buff_type(), Type::Void);
+        // `Yaml.is_namespace_only()` is true.
+        assert!(PreludeType::Yaml.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_yaml_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Yaml.now is invalid (now belongs to DateTime/Instant).
+        assert_eq!(assoc_fn_lookup("Yaml", "now"), None);
+        // Yaml.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("Yaml", "compile"), None);
+        // Yaml.debug is invalid (debug belongs to Log).
+        assert_eq!(assoc_fn_lookup("Yaml", "debug"), None);
+        // Yaml.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Yaml", "unknown"), None);
+        // DateTime.stringify is invalid (stringify belongs to Toml/Yaml/Csv).
+        assert_eq!(assoc_fn_lookup("DateTime", "stringify"), None);
+        // Regex.stringify is invalid.
+        assert_eq!(assoc_fn_lookup("Regex", "stringify"), None);
+        // Log.stringify is invalid (Log is namespace-only with debug/info/...).
+        assert_eq!(assoc_fn_lookup("Log", "stringify"), None);
+    }
+
+    #[test]
+    fn prelude_yaml_assoc_fn_return_types() {
+        // Yaml.parse(s) -> Map<String, Unknown>. The value type is
+        // Unknown because YAML values are heterogeneous (scalars /
+        // arrays / sub-mappings); the codegen turbofish-es to the
+        // concrete `HashMap<String, serde_yml::Value>` at the Rust
+        // level. Mirrors Toml.parse exactly.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Yaml, PreludeAssocFn::Parse, &[Type::string()]),
+            Some(Type::map(Type::string(), Type::Unknown))
+        );
+        // Yaml.stringify(v) -> String.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Yaml,
+                PreludeAssocFn::Stringify,
+                &[Type::map(Type::string(), Type::Unknown)]
+            ),
+            Some(Type::string())
+        );
+        // Yaml + non-Yaml method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Yaml, PreludeAssocFn::Now, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Yaml, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Yaml, PreludeAssocFn::Debug, &[]),
+            None
+        );
+        // Non-Yaml type + Yaml method is invalid (the (Type, Parse)
+        // pair is validated by the registry matrix; Yaml lowers via
+        // (Yaml, Parse), Toml via (Toml, Parse), but (Regex, Stringify)
+        // is invalid - Stringify is shared by Toml/Yaml/Csv ONLY).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Stringify, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Stringify, &[]),
+            None
+        );
+    }
+
+    // T124i: Csv module - `Csv.parse(s)` / `Csv.stringify(rows)` assoc-fn
+    // lookups + return types. Mirrors the Yaml / Toml namespace-only
+    // precedent but with `Vector<Vector<String>>` instead of Map.
+    #[test]
+    fn prelude_csv_assoc_fn_lookup_valid_pairs() {
+        // `Csv.parse` reuses the registry's shared `Parse` variant.
+        assert_eq!(
+            assoc_fn_lookup("Csv", "parse"),
+            Some((PreludeType::Csv, PreludeAssocFn::Parse))
+        );
+        // `Csv.stringify` reuses the registry's shared `Stringify` variant.
+        assert_eq!(
+            assoc_fn_lookup("Csv", "stringify"),
+            Some((PreludeType::Csv, PreludeAssocFn::Stringify))
+        );
+        // `Csv` is recognised as a prelude type.
+        assert!(is_prelude_type("Csv"));
+        // `Csv.buff_type()` is `Void` (no runtime value - namespace-only).
+        assert_eq!(PreludeType::Csv.buff_type(), Type::Void);
+        // `Csv.is_namespace_only()` is true.
+        assert!(PreludeType::Csv.is_namespace_only());
+    }
+
+    #[test]
+    fn prelude_csv_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Csv.now is invalid.
+        assert_eq!(assoc_fn_lookup("Csv", "now"), None);
+        // Csv.compile is invalid.
+        assert_eq!(assoc_fn_lookup("Csv", "compile"), None);
+        // Csv.debug is invalid.
+        assert_eq!(assoc_fn_lookup("Csv", "debug"), None);
+        // Csv.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Csv", "unknown"), None);
+        // Csv.split is invalid (split belongs to Strings).
+        assert_eq!(assoc_fn_lookup("Csv", "split"), None);
+        // Yaml now/compile invalid (mirror Yaml rejects).
+        assert_eq!(assoc_fn_lookup("Yaml", "now"), None);
+    }
+
+    #[test]
+    fn prelude_csv_assoc_fn_return_types() {
+        // Csv.parse(s) -> Vector<Vector<String>>. Uniform rows (NO
+        // header special-casing per the spec - every row including
+        // the header is a Vector<String>). Cells are String (CSV has
+        // no inherent type information, every cell is text).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Csv, PreludeAssocFn::Parse, &[Type::string()]),
+            Some(Type::vector(Type::vector(Type::string())))
+        );
+        // Csv.stringify(rows) -> String. The arg is a
+        // Vector<Vector<String>>; the codegen builds a csv::Writer
+        // and serializes.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Csv,
+                PreludeAssocFn::Stringify,
+                &[Type::vector(Type::vector(Type::string()))]
+            ),
+            Some(Type::string())
+        );
+        // Csv + non-Csv method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Csv, PreludeAssocFn::Now, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Csv, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Csv, PreludeAssocFn::Debug, &[]),
+            None
+        );
+        // Non-Csv type + Csv method: a hypothetical `(Toml, Parse)`
+        // pair is valid (Toml reuses Parse), but (Regex, Stringify)
+        // is invalid (Stringify is shared by Toml/Yaml/Csv only).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Stringify, &[]),
+            None
         );
     }
 }

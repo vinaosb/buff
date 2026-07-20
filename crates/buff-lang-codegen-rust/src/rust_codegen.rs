@@ -609,6 +609,35 @@ impl RustCodegen {
         if program_uses_url(decls) {
             self.extern_crates.insert("url".to_string());
         }
+        // T124i: register the `serde_yml` and `csv` crates as external
+        // dependencies when the program references the corresponding
+        // prelude modules (`Yaml.parse(s)` / `Yaml.stringify(v)` /
+        // `Csv.parse(s)` / `Csv.stringify(rows)`). Generated code uses
+        // fully-qualified `serde_yml::from_str` / `serde_yml::to_string`
+        // and `csv::ReaderBuilder::...` / `csv::Writer::from_writer`
+        // paths so no `use` import is emitted - but the recorded name
+        // signals to the pipeline / build-driver that the generated
+        // Cargo project must declare each crate in `[dependencies]`.
+        //
+        // NOTE: `serde_yml` is the maintained fork of the
+        // deprecated/archived `serde_yaml` crate (do NOT use
+        // serde_yaml). The crate name is recorded as `serde_yml` (with
+        // underscore) matching the path segments emitted by codegen.
+        //
+        // Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/
+        // percent-encoding/uuid/url registration pattern
+        // (T124b/T124c/T124d/T124e/T124f/T124g/T124h): single-file
+        // `buff run` rustc path does NOT link these crates; the
+        // codegen-only linking boundary is the accepted acceptance
+        // criterion for v1.4 prelude modules. Cargo-project wiring is
+        // deferred (snapshots + extern_crates set is the verifiable
+        // contract).
+        if program_uses_serde_yml(decls) {
+            self.extern_crates.insert("serde_yml".to_string());
+        }
+        if program_uses_csv(decls) {
+            self.extern_crates.insert("csv".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -3612,6 +3641,192 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("URL.parse codegen parse: {e}")))
+            }
+            // T124i: Yaml.parse(s) -> Map<String, Unknown>. Mirrors the
+            // Toml.parse codegen arm (T124e) line-for-line, swapping
+            // `toml::` paths for `serde_yml::` paths. The maintained
+            // fork `serde_yml` is API-compatible with the deprecated
+            // `serde_yaml` (`from_str::<T>(s) -> Result<T, Error>` and
+            // `to_string(&v) -> Result<String, Error>`).
+            //
+            // The turbofish pins the concrete return type
+            // `HashMap<String, serde_yml::Value>` so the generated Rust
+            // is fully typed without requiring a let-binding annotation.
+            // Buff's inferred surface return type is the looser
+            // `Map<String, Unknown>` (the Unknown value type reflects
+            // YAML's heterogeneous value space, mirroring the
+            // Toml.parse Unknown-value stance from T124e).
+            //
+            // The turbofish path CANNOT be built via `rust_call_expr`
+            // (which splits on `::` and creates Idents - the
+            // `<std::collections::...>` turbofish arg is not a path
+            // segment). Built via `quote!` exactly like Toml.parse.
+            //
+            // String literals lower to `&'static str` already; non-
+            // literal String args get an `&` via `coerce_str_arg_to_ref`
+            // so Rust's Deref coercion turns `&String` into `&str`
+            // (the type `serde_yml::from_str` requires).
+            //
+            // `.unwrap_or_default()` (HashMap impls Default) is the
+            // panic-free fallback: a parse failure yields an empty
+            // Map, NEVER a panic (mirrors Toml.parse / Regex.compile).
+            (T::Yaml, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    serde_yml::from_str::<std::collections::HashMap<String, serde_yml::Value>>(#arg)
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Yaml.parse codegen parse: {e}")))
+            }
+            // T124i: Yaml.stringify(v) -> String. Mirrors the
+            // Toml.stringify codegen arm (T124e) line-for-line,
+            // swapping `toml::to_string` for `serde_yml::to_string`.
+            // Both APIs are structurally identical: take `&impl
+            // Serialize`, return `Result<String, _>`. The arg is
+            // borrowed via `&v` so Rust's serde-Serialize bound is
+            // satisfied for any Map<String, ?> / Serialize-implementing
+            // value.
+            //
+            // `.unwrap_or_default()` (String impls Default) is the
+            // panic-free fallback: a serialization failure yields the
+            // empty String, NEVER a panic.
+            //
+            // Built via `quote!` directly so the `& #arg` borrow is a
+            // real syn::ExprRef (not a path-segment hack).
+            (T::Yaml, A::Stringify) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    serde_yml::to_string(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Yaml.stringify codegen parse: {e}")))
+            }
+            // T124i: Csv.parse(s) -> Vector<Vector<String>>. Differs
+            // from Yaml/Toml in surface type (uniform rows of Strings
+            // vs heterogeneous Map) so the codegen is bespoke rather
+            // than a 1:1 mirror. Wraps the `csv` crate's
+            // `ReaderBuilder` + `records()` iterator.
+            //
+            // The generated block expression:
+            //   {
+            //     let mut __rdr = csv::ReaderBuilder::new()
+            //         .has_headers(false)
+            //         .from_reader(s.as_bytes());
+            //     __rdr.records()
+            //         .filter_map(|r| r.ok())
+            //         .map(|r| r.iter().map(|f| f.to_string()).collect::<Vec<String>>())
+            //         .collect::<Vec<Vec<String>>>()
+            //   }
+            //
+            // Key design choices (mirror the Yaml/Toml panic-free
+            // stance from T124e):
+            // - `.has_headers(false)`: per spec, Csv.parse surfaces
+            //   EVERY row uniformly (including the header row). CSV
+            //   has no inherent type information - the header is just
+            //   the first row of Strings. Disabling header handling
+            //   means the reader doesn't consume the first row.
+            // - `.filter_map(|r| r.ok())`: malformed rows are SKIPPED
+            //   (not surfaced as panics or errors). Matches the
+            //   "no panicking generated code" Buff rule. A CSV with
+            //   a malformed row yields the well-formed rows before
+            //   the bad one.
+            // - `.map(|r| r.iter().map(|f| f.to_string()).collect::<
+            //   Vec<String>>())`: each `csv::StringRecord` becomes a
+            //   `Vec<String>` (Buff surfaces every cell as text -
+            //   there is no CSV typing).
+            // - The final `.collect::<Vec<Vec<String>>>()` pins the
+            //   turbofish to Buff's `Vector<Vector<String>>` surface
+            //   type so the generated Rust is fully typed.
+            // - The whole block is wrapped in `{ ... }` so it
+            //   evaluates to the collected Vec (a single syn::Expr::Block).
+            // - The `__rdr` local binding name is `__`-prefixed to
+            //   avoid colliding with user vars (mirrors the
+            //   `__recv` / `__v` codegen-temporary convention from
+            //   T124f Random.shuffle / splice_receiver_into_call).
+            //
+            // The arg is borrowed via `&` for `as_bytes()` so
+            // non-literal String args get a `&String.as_bytes()` (via
+            // Deref coercion) rather than `String.as_bytes()` (which
+            // would be a no-op borrow on owned). String literals lower
+            // to `&'static str` already.
+            (T::Csv, A::Parse) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __rdr = csv::ReaderBuilder::new()
+                            .has_headers(false)
+                            .from_reader(#arg.as_bytes());
+                        __rdr.records()
+                            .filter_map(|r| r.ok())
+                            .map(|r| r.iter().map(|f| f.to_string()).collect::<Vec<String>>())
+                            .collect::<Vec<Vec<String>>>()
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Csv.parse codegen parse: {e}")))
+            }
+            // T124i: Csv.stringify(rows) -> String. Wraps the `csv`
+            // crate's `Writer` over an in-memory `Vec<u8>` buffer.
+            // The generated block expression:
+            //   {
+            //     let mut __wtr = csv::Writer::from_writer(Vec::<u8>::new());
+            //     for __row in &rows {
+            //         __wtr.write_record(__row.clone()).ok();
+            //     }
+            //     String::from_utf8(__wtr.into_inner().unwrap_or_default())
+            //         .unwrap_or_default()
+            //   }
+            //
+            // Key design choices (mirror the Yaml/Toml panic-free
+            // stance):
+            // - `csv::Writer::from_writer(Vec::<u8>::new())`: write
+            //   to an in-memory buffer (no file I/O). The turbofish
+            //   `Vec::<u8>::new()` pins the writer's type parameter
+            //   so Rust's inference doesn't need a let-binding
+            //   annotation.
+            // - `for __row in &rows`: iterate by reference so the
+            //   input `Vec<Vec<String>>` is NOT consumed (Buff's
+            //   move-by-default model would otherwise move the arg;
+            //   borrowing lets the caller keep using the rows Vec).
+            // - `__wtr.write_record(__row.clone()).ok();`: write
+            //   each row. The `.clone()` lifts `&Vec<String>` to
+            //   `Vec<String>` (write_record takes an owned iterator
+            //   item via AsRef<[u8]> - the clone is the cheapest
+            //   way to satisfy the bound without bespoke iterator
+            //   plumbing). `.ok()` discards the Result - a single
+            //   row write failure is NOT surfaced as a panic
+            //   (matches the "no panicking generated code" rule);
+            //   the row is simply omitted from the output.
+            // - `__wtr.into_inner().unwrap_or_default()`: extract
+            //   the underlying `Vec<u8>` writer. `into_inner` is
+            //   fallible (`Result<W, csv::Error>`) only if a previous
+            //   write was buffered and panicked; in practice it
+            //   succeeds. `.unwrap_or_default()` yields an empty
+            //   Vec<u8> on the (extremely unlikely) failure path -
+            //   NEVER a panic.
+            // - `String::from_utf8(...).unwrap_or_default()`: lift
+            //   the byte buffer to String. Invalid UTF-8 yields the
+            //   empty String (lossy - NEVER panics, mirrors the
+            //   URLEncode.decode lossy stance from T124h).
+            // - `__wtr` / `__row` are `__`-prefixed to avoid colliding
+            //   with user vars (mirrors the `__recv` / `__v` / `__rdr`
+            //   codegen-temporary convention).
+            (T::Csv, A::Stringify) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __wtr = csv::Writer::from_writer(Vec::<u8>::new());
+                        for __row in &#arg {
+                            __wtr.write_record(__row.clone()).ok();
+                        }
+                        String::from_utf8(__wtr.into_inner().unwrap_or_default())
+                            .unwrap_or_default()
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Csv.stringify codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
@@ -9363,6 +9578,57 @@ fn expr_uses_url_instance(expr: &Expr) -> bool {
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_url_instance),
         Expr::NamedArg { value, .. } => expr_uses_url_instance(value),
     }
+}
+
+// ---------------------------------------------------------------------------
+// T124i - serde_yml + csv emit-on-demand detection (Yaml / Csv namespace
+// modules).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `Yaml.<method>(...)` call
+/// (T124i). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to record `"serde_yml"` in the extern-crate
+/// set so the pipeline knows the generated Cargo project depends on the
+/// `serde_yml` crate (the maintained fork of the deprecated
+/// `serde_yaml`).
+///
+/// Detection recognises the `Yaml` namespace as the receiver of a method
+/// call (`Yaml.parse(s)`, `Yaml.stringify(v)`). The method name is NOT
+/// matched here - `Yaml` is a reserved prelude namespace, so any
+/// `Yaml.<anything>()` triggers `serde_yml` registration. Codegen will
+/// surface a clear error if `<anything>` is not one of parse/stringify.
+///
+/// Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/percent-
+/// encoding/uuid/url detection patterns
+/// (T124b/T124c/T124d/T124e/T124f/T124g/T124h); reuses the generic
+/// `program_uses_namespace` helper (introduced in T124h for the five
+/// web modules) so Yaml's walker is a one-liner. The walker is NARROW
+/// (per the T124f gotcha that chrono was originally over-broad): it
+/// flags ONLY the bare-Ident receiver name `Yaml`, NOT every prelude-
+/// type Ident, NOT every method-name match.
+fn program_uses_serde_yml(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "Yaml")
+}
+
+/// Walk the declaration list looking for any `Csv.<method>(...)` call
+/// (T124i). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to record `"csv"` in the extern-crate set
+/// so the pipeline knows the generated Cargo project depends on the
+/// `csv` crate (burntsushi/rust-csv).
+///
+/// Detection recognises the `Csv` namespace as the receiver of a method
+/// call (`Csv.parse(s)`, `Csv.stringify(rows)`). The method name is NOT
+/// matched here - `Csv` is a reserved prelude namespace, so any
+/// `Csv.<anything>()` triggers `csv` registration. Codegen will surface
+/// a clear error if `<anything>` is not one of parse/stringify.
+///
+/// Mirrors the `program_uses_serde_yml` walker (T124i twin); reuses the
+/// generic `program_uses_namespace` helper so Csv's walker is also a
+/// one-liner. The walker is NARROW (per the T124f gotcha): flags ONLY
+/// the bare-Ident receiver name `Csv`, NOT every prelude-type Ident,
+/// NOT every method-name match.
+fn program_uses_csv(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "Csv")
 }
 
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait

@@ -1,0 +1,9 @@
+---
+source: crates/buff-lang-codegen-rust/tests/format_codegen.rs
+assertion_line: 560
+expression: src
+---
+fn f() {
+    serde_yml::from_str::<std::collections::HashMap<String, serde_yml::Value>>("a: 1\n")
+        .unwrap_or_default();
+}

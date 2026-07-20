@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/format_codegen.rs
+assertion_line: 567
+expression: src
+---
+fn f() {
+    serde_yml::to_string(&m).unwrap_or_default();
+}

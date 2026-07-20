@@ -123,6 +123,34 @@ base64 = "0.22"
 hex = "0.4"
 percent-encoding = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
+# T124i: Data-format modules (Yaml / Csv) wrap two mature Rust crates.
+# Each codegen-lowered call uses fully-qualified paths so generated code
+# requires no `use` import - but the recorded name in `extern_crates`
+# signals to the pipeline / build-driver that the generated Cargo project
+# must declare each crate in `[dependencies]`.
+#
+# - `serde_yml` 0.0.12: the maintained fork of the deprecated/archived
+#   `serde_yaml` crate (which is NO LONGER MAINTAINED as of 2024). Same
+#   API surface: `serde_yml::from_str::<T>(s) -> Result<T, Error>` and
+#   `serde_yml::to_string(&v) -> Result<String, Error>` + the dynamic
+#   `serde_yml::Value` enum. We pin to 0.0.x because serde_yml has not
+#   cut a 1.0 yet (the API has been stable since 0.0.9 but the version
+#   remains pre-1.0). Mirrors the rand 0.8 + chrono 0.4 "pin pre-1.0
+#   major" precedent (NOT the latest major).
+#
+# - `csv` 1.x: the long-standing burntsushi/rust-csv crate. API used:
+#   `csv::ReaderBuilder::new().has_headers(false).from_reader(...)` to
+#   parse CSV text into `Vec<Vec<String>>` (uniform rows, NO header
+#   special-casing per the spec); `csv::Writer::from_writer(Vec::new())`
+#   + `write_record` + `into_inner()` to serialize. Stable since 1.0
+#   (years), so the `1` major-only pin is the conservative choice.
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/percent-
+# encoding/uuid/url codegen-only linking boundary (single-file `buff
+# run` rustc path does NOT link them; cargo-project wiring is
+# deferred). Snapshots + extern_crates set is the verifiable contract.
+serde_yml = "0.0.12"
+csv = "1"
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }
