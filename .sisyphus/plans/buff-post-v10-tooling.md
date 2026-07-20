@@ -1635,7 +1635,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(repl): REPL core read-eval-print loop with rustyline`
 
-- [ ] **T125b: Session state + type introspection** [unspecified-high]
+- [x] **T125b: Session state + type introspection** [unspecified-high]
 
   **What to do**:
   - Maintain session environment: `let` bindings persist across inputs
@@ -1650,9 +1650,9 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: T125a, `crates/buff-lang-types/src/infer.rs:20 TypeInferencer` (env accumulation)
 
   **Acceptance Criteria**:
-  - [ ] `let x = 42` then `x + 8` → `50` (state persists)
-  - [ ] `:type x` → `Int`
-  - [ ] Redefining a variable shadows correctly
+  - [x] `let x = 42` then `x + 8` → `50` (state persists)
+  - [x] `:type x` → `Int`
+  - [x] Redefining a variable shadows correctly
 
   **QA Scenarios**:
   ```
