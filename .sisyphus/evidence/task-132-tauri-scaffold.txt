@@ -1,0 +1,113 @@
+T132 — Tauri 2.0 Desktop Scaffold (`buff ui new --desktop` / `buff ui build --desktop`)
+=======================================================================================
+
+Date: 2026-07-20
+Commit: (working tree, no commit — per task spec)
+Branch: master
+
+## Gate Outputs
+
+### cargo fmt -p buff-lang-cli --check
+PASS (no output, exit 0)
+
+### cargo clippy -p buff-lang-cli --all-targets -- -D warnings
+PASS (no warnings, exit 0)
+
+### cargo test -p buff-lang-cli --lib
+PASS — 217 tests passed, 0 failed, 0 ignored
+(All existing tests + 11 new tests for T132 pass cleanly)
+
+## Files Changed / Created
+
+### Modified (4 files in crates/buff-lang-cli/src/):
+1. `cli.rs` — Extended `UiCmd` enum with two new variants:
+   - `New { name: String, desktop: bool }` — `buff ui new --desktop <NAME>`
+   - `Build { desktop: bool, path: PathBuf }` — `buff ui build --desktop [PATH]`
+2. `commands/mod.rs` — Added `pub mod ui_build;` and `pub mod ui_new;`
+3. `commands/ui_dev.rs` — Updated `run()` dispatch to handle all three `UiCmd`
+   variants (Dev, New, Build). Added `run_new()` and `run_build()` helper fns.
+
+### Created (2 new command modules in crates/buff-lang-cli/src/commands/):
+4. `commands/ui_new.rs` — Scaffolder for `buff ui new --desktop <NAME>`.
+   Embeds 9 template files via `include_str!`, substitutes `{name}` placeholder,
+   validates project name, refuses to overwrite existing directories.
+   Includes 6 unit tests covering file paths, name substitution, JSON validity,
+   main.rs/lib.rs content, and index.html structure.
+5. `commands/ui_build.rs` — Build runner for `buff ui build --desktop [PATH]`.
+   Detects `cargo-tauri` CLI availability, shells out to `cargo tauri build`.
+   Includes 3 unit tests (CLI detection, missing CLI error, nonexistent path).
+
+### Created (9 template files in crates/buff-lang-cli/templates/desktop/):
+6. `buff.toml` — Project manifest with `[package]` + `[ui]` sections
+7. `.gitignore` — Ignores target/, buff.lock, *.rs, node_modules/
+8. `src/main.buff` — Buff UI entry point (Dioxus counter with `@ui` attribute)
+9. `src-tauri/Cargo.toml` — Tauri 2.0 Rust project deps (tauri 2, tauri-plugin-shell)
+10. `src-tauri/tauri.conf.json` — Tauri 2.0 config (window 1024x768, frontendDist: ../static)
+11. `src-tauri/build.rs` — `tauri_build::build()` build script
+12. `src-tauri/src/main.rs` — Tauri entry point (calls `{name}_desktop_lib::run()`)
+13. `src-tauri/src/lib.rs` — Tauri app builder with IPC `greet` command example
+14. `static/index.html` — HTML shell that loads the Wasm bundle (bundle.js)
+
+## Scaffold Structure
+
+When a user runs `buff ui new --desktop my_app`, the following tree is created:
+
+```
+my_app/
+├── buff.toml              # [package] name = "my_app", [ui] frontend = "dioxus", desktop = true
+├── .gitignore
+├── src/
+│   └── main.buff          # @ui func main(): signal(0), button with onclick, render(...)
+├── src-tauri/
+│   ├── Cargo.toml          # tauri 2, tauri-plugin-shell 2, serde, serde_json
+│   ├── tauri.conf.json     # productName: my_app, window 1024x768, frontendDist: ../static
+│   ├── build.rs            # tauri_build::build()
+│   └── src/
+│       ├── main.rs         # fn main() { my_app_desktop_lib::run() }
+│       └── lib.rs          # tauri::Builder with greet IPC command
+└── static/
+    └── index.html          # HTML shell loading bundle.js
+```
+
+The scaffolded Buff source (`src/main.buff`) mirrors the T130 Dioxus counter
+example: `signal(0)`, `onclick: move |_| count.set(count() + 1)`,
+`"Increment (count: {count()})"`. The `@ui` attribute marks it as the UI entry
+point for the compiler.
+
+## Native-Build USER ACTION Recipe
+
+The `buff ui build --desktop` subcommand detects whether `cargo-tauri` is
+installed. If missing, it prints:
+
+```
+Tauri CLI is required to build desktop apps.
+Install it with: cargo install tauri-cli
+```
+
+and exits with code 1. To produce a native desktop binary, the user must:
+
+1. Install the Tauri CLI: `cargo install tauri-cli`
+2. Install platform prerequisites (WebView2 on Windows, WebKitGTK on Linux,
+   WebKit on macOS — see https://v2.tauri.app/start/prerequisites/)
+3. cd into the scaffolded project: `cd my_app`
+4. Build the Wasm frontend: `buff ui build --desktop`
+5. Build the native binary: `cargo tauri build` (or `npx tauri build`)
+
+The output binary is placed in `src-tauri/target/release/` by default.
+
+## Design Decisions
+
+- **No tauri runtime dep on buff-lang-cli**: Only the scaffold template's
+  Cargo.toml references `tauri = "2"`. buff-lang-cli itself has zero tauri
+  dependency (avoids pulling proton SDK / WebView2 SDK).
+- **include_str! over rust-embed**: Matches the existing `scaffold.rs` pattern
+  (plain string templates, no TPL engine dep). Templates live in
+  `templates/desktop/` alongside the source.
+- **UiCmd extension over new Command variant**: Follows the T131 pattern —
+  `buff ui` is the parent subcommand, and `new`/`build` are its children.
+- **`--desktop` flag**: Explicit flag (not a positional) so future targets
+  (mobile, web) can be added as `--mobile` / `--web` without breaking the
+  CLI shape. The flag is validated — omitting it prints a clear error.
+- **Tauri 2.0 config format**: Uses the `tauri.conf.json` v2 schema
+  (`app.windows[]`, `build.frontendDist`, `build.beforeDevCommand`).
+  The `identifier` field uses the `com.buff-lang.{name}` convention.

@@ -408,6 +408,53 @@ pub enum JupyterCmd {
 /// Subcommands of `buff ui`.
 #[derive(Subcommand, Debug)]
 pub enum UiCmd {
+    /// `buff ui new --desktop <NAME>` — scaffold a new Tauri 2.0 desktop app
+    /// project in a fresh `<NAME>/` directory (T132).
+    ///
+    /// Produces a runnable Tauri project with a Buff-Wasm-Dioxus frontend
+    /// (the T130 counter example). The scaffolded project includes:
+    ///
+    /// - `buff.toml` — project manifest with `[ui]` section.
+    /// - `src/main.buff` — Buff UI entry point.
+    /// - `src-tauri/` — Tauri 2.0 Rust project (Cargo.toml, tauri.conf.json,
+    ///   build.rs, src/main.rs, src/lib.rs).
+    /// - `static/index.html` — HTML shell that loads the Wasm bundle.
+    ///
+    /// Requires the Tauri CLI (`cargo install tauri-cli`) to build the native
+    /// binary. The Wasm frontend is built via `buff ui build --desktop`.
+    New {
+        /// Name of the desktop app project (must be a valid Buff identifier).
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Scaffold a Tauri 2.0 desktop app (the only supported target
+        /// for `buff ui new` in v1.8).
+        #[arg(long)]
+        desktop: bool,
+    },
+
+    /// `buff ui build --desktop [PATH]` — build a Tauri 2.0 desktop app
+    /// native binary (T132).
+    ///
+    /// Detects whether `cargo-tauri` is installed. If missing, prints a
+    /// helpful install instruction and exits non-zero. If present, shells
+    /// out to `cargo tauri build` in the project directory.
+    ///
+    /// The Wasm frontend must already be built (or the Tauri `beforeBuildCommand`
+    /// in `tauri.conf.json` will handle it). The output binary is placed in
+    /// `src-tauri/target/release/` by default.
+    Build {
+        /// Build a Tauri 2.0 desktop app (the only supported target
+        /// for `buff ui build` in v1.8).
+        #[arg(long)]
+        desktop: bool,
+
+        /// Project root directory containing the `src-tauri/` subdirectory.
+        /// Defaults to the current directory.
+        #[arg(value_name = "PATH", default_value = ".")]
+        path: PathBuf,
+    },
+
     /// `buff ui dev [PATH] [--port <N>]` — boot the dev server (T131).
     ///
     /// Watches `.buff` files in `<PATH>` (default: current directory)
