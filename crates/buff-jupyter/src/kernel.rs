@@ -17,11 +17,19 @@
 //! | `execute_request`      | `execute_reply` (ok OR error)      | iopub busy → stream/execute_result/error → idle              |
 //! | `interrupt_request`    | `interrupt_reply` (ack only)       | — (cancellation lands in T129c+)                             |
 //!
+//! T129c handlers (rich display + introspection):
+//!
+//! | prefix            | iopub emit                                              | Notes                                                            |
+//! |-------------------|---------------------------------------------------------|------------------------------------------------------------------|
+//! | `?name`           | `execute_result` text/plain  (`"name: Type"`)           | `Evaluator::type_of` — no `rustc` spawn                          |
+//! | `??name`          | `execute_result` text/plain  (`"name: Type\n= value"`)  | type + value (best-available definition text)                    |
+//! | `[...]` (literal) | `execute_result` text/html + text/plain                 | Vector/Matrix detected via `type_of`; rendered as `<table>`      |
+//!
 //! All other `msg_type`s are logged + dropped (no reply emitted — the
 //! client times out on its side).
 //!
 //! Heartbeat (`hb`) is handled by a separate task that echoes every
-//! received frame (ZMQ REP semantics). stdin is NOT bound in T129a/b
+//! received frame (ZMQ REP semantics). stdin is NOT bound in T129a/b/c
 //! (no `input_request` handling — the kernel ignores `allow_stdin=true`).
 //!
 //! # Execution engine (T129b)
@@ -47,6 +55,34 @@
 //!   `status=error`. The kernel SURVIVES the error — the next cell
 //!   runs against the same accumulated state.
 //!
+//! # Rich display (T129c)
+//!
+//! When a bare-expression cell's resolved type is `Vector<T>` or
+//! `Matrix<T>` (detected via [`Evaluator::type_of`]), the kernel emits
+//! an `execute_result` carrying a MIME bundle with BOTH `text/html`
+//! (an HTML `<table>` rendering) and `text/plain` (the source literal
+//! as a fallback). Today's Buff codegen lowers `print(vec)` to
+//! Rust's `println!("{}", vec)` — which fails to compile because
+//! `Vec<T>` doesn't implement `Display`. T129c works around this by
+//! detecting Vector/Matrix LITERALS (`[...]` syntax) at the kernel
+//! layer and rendering from source — no `rustc` spawn needed for the
+//! pure-literal case. Non-literal Vector/Matrix expressions fall
+//! through to the normal compile-and-run path (which may surface a
+//! `Display` error today; future codegen work in buff-lang-codegen-rust
+//! would close that gap).
+//!
+//! # Introspection magics (T129c)
+//!
+//! `?name` and `??name` are detected at the start of the cell BEFORE
+//! normal evaluation. `?name` is the "help" path: it queries
+//! [`Evaluator::type_of`] for the name's resolved type and surfaces it
+//! as `"<name>: <Type>"`. `??name` is the "source" path: it
+//! additionally evaluates the name to capture its current value and
+//! surfaces `"<name>: <Type>\n= <value>"` (best-available definition
+//! text — extracting the original source line is post-T129c work
+//! because the evaluator's accumulated source is private). Both emit
+//! a single `execute_result` with `text/plain`.
+//!
 //! The evaluator call is blocking (`rustc` + binary spawn via
 //! `std::process::Command`). The kernel loop runs evaluations
 //! sequentially (sufficient for a single front-end; concurrent
@@ -56,7 +92,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use buff_eval::{EvalResult, Evaluator};
+use buff_eval::{EvalResult, Evaluator, ResolvedType};
 
 use crate::connection::ConnectionFile;
 use crate::error::{JupyterError, JupyterResult};
@@ -227,21 +263,33 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
         Ok(())
     }
 
-    /// T129b: handle an `execute_request` end-to-end.
+    /// T129b/T129c: handle an `execute_request` end-to-end.
     ///
     /// Sequence:
     /// 1. Increment `execution_count`.
     /// 2. iopub `status` busy.
     /// 3. Extract `code` from request content.
-    /// 4. Evaluate via `Evaluator::eval_line` (blocking — spawns
-    ///    rustc + the compiled program).
-    /// 5. Emit iopub outputs based on [`EvalResult`]:
+    /// 4. T129c: detect `?name` / `??name` introspection magic. If
+    ///    matched, emit a single `execute_result` text/plain with the
+    ///    name's type (and value for `??`) — skip normal evaluation.
+    /// 5. T129c: detect Vector/Matrix literal (`[...]`-shaped
+    ///    bare expression whose resolved type is `Vector<_>` /
+    ///    `Matrix<_>`). If matched, emit `execute_result` with
+    ///    `text/html` + `text/plain` MIME bundle — skip normal
+    ///    evaluation (Buff's `print(vec)` fails to compile today
+    ///    because `Vec<T>` lacks `Display`; rendering from source
+    ///    avoids spawning `rustc` for a known-broken path).
+    /// 6. Otherwise: evaluate via `Evaluator::eval_line` (blocking —
+    ///    spawns rustc + the compiled program). On success with a
+    ///    Vector/Matrix value, emit a MIME bundle (text/html +
+    ///    text/plain) using the captured value. Emit iopub outputs
+    ///    based on [`EvalResult`]:
     ///    - On diagnostic: iopub `error` (ename/evalue/traceback).
     ///    - Else: iopub `stream` (stdout if value is None, stderr
     ///      always when non-empty) and `execute_result` if value
     ///      is Some.
-    /// 6. iopub `status` idle.
-    /// 7. shell `execute_reply` (status ok OR error).
+    /// 7. iopub `status` idle.
+    /// 8. shell `execute_reply` (status ok OR error).
     ///
     /// The kernel NEVER returns an error from this method — even when
     /// the cell surfaces a diagnostic, the reply carries the error
@@ -277,48 +325,93 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
             code.push('\n');
         }
 
-        // Evaluate (blocking). The evaluator accumulates `let` /
-        // `func` state across calls so subsequent cells see the
-        // session's accumulated bindings.
-        let result = self.evaluator.eval_line(&code);
+        // T129c: pre-compute the resolved type of the trimmed code.
+        // Used for both introspection (skip), rich-display detection
+        // (Vector/Matrix), and is cheap (type inference only — no
+        // rustc spawn).
+        let expr_src = code.trim();
+        let pre_type = self.evaluator.type_of(expr_src);
 
-        // Build + emit iopub outputs. Branch on diagnostic presence
-        // first (error path) so the success path can short-circuit
-        // to the simpler stream/execute_result shape.
-        let reply = if result.diagnostic.is_some() || result.exit_code != Some(0) {
-            // Error path. Build the error payload ONCE so the iopub
-            // `error` and the shell `execute_reply` carry the same
-            // ename/evalue/traceback triple (front-ends may render
-            // either first; the shapes must agree).
-            let (evalue, traceback) = build_error_payload(&result);
-            let err_msg = self.build_error_message(parsed, &evalue, traceback.clone())?;
-            self.send_iopub(&err_msg).await?;
-            self.build_execute_reply_error(parsed, execution_count, &evalue, traceback)?
-        } else {
-            // Success path. Emit stream messages for any captured
-            // stdout/stderr, then execute_result if there's a value.
-            //
-            // Duplication rule: when the evaluator returns a value
-            // (bare-expression cell), the spawned program's stdout
-            // already contains that value (the wrapper `print(expr)`
-            // wrote it). We suppress the stdout stream in that case so
-            // the notebook doesn't render the value twice (once as
-            // stdout, once as Out[N]).
-            if result.value.is_none() && !result.stdout.is_empty() {
-                let stream =
-                    self.build_stream_message(parsed, StreamOutput::stdout(&result.stdout))?;
-                self.send_iopub(&stream).await?;
-            }
-            if !result.stderr.is_empty() {
-                let stream =
-                    self.build_stream_message(parsed, StreamOutput::stderr(&result.stderr))?;
-                self.send_iopub(&stream).await?;
-            }
-            if let Some(value) = &result.value {
-                let exec_result = self.build_execute_result(parsed, execution_count, value)?;
-                self.send_iopub(&exec_result).await?;
-            }
+        // Branch order: introspection magic → Vector/Matrix literal
+        // rich display → normal eval. Each branch builds the reply
+        // WireMessage (and emits its own iopub outputs) so the
+        // trailing idle + send_wire can be shared.
+        let reply = if let Some(intro) = parse_introspection(&code) {
+            // T129c: `?name` / `??name`. Build a single execute_result
+            // text/plain carrying the name's type (and value for ??).
+            let text = self.handle_introspection(intro);
+            let exec_result = self.build_execute_result(parsed, execution_count, &text)?;
+            self.send_iopub(&exec_result).await?;
             self.build_execute_reply_ok(parsed, execution_count)?
+        } else if is_rich_display_literal(pre_type.as_ref(), expr_src) {
+            // T129c: Vector/Matrix literal — render from source as an
+            // HTML table + plain-text fallback. Skip normal eval (the
+            // codegen's `print(vec)` fails to compile today because
+            // Vec<T> lacks Display; rendering from source is the
+            // workaround that doesn't waste a rustc spawn).
+            let html = format_rich_html(expr_src);
+            let exec_result =
+                self.build_rich_execute_result(parsed, execution_count, &html, expr_src)?;
+            self.send_iopub(&exec_result).await?;
+            self.build_execute_reply_ok(parsed, execution_count)?
+        } else {
+            // Normal T129b evaluation path.
+            //
+            // Evaluate (blocking). The evaluator accumulates `let` /
+            // `func` state across calls so subsequent cells see the
+            // session's accumulated bindings.
+            let result = self.evaluator.eval_line(&code);
+
+            // Build + emit iopub outputs. Branch on diagnostic presence
+            // first (error path) so the success path can short-circuit
+            // to the simpler stream/execute_result shape.
+            if result.diagnostic.is_some() || result.exit_code != Some(0) {
+                // Error path. Build the error payload ONCE so the iopub
+                // `error` and the shell `execute_reply` carry the same
+                // ename/evalue/traceback triple (front-ends may render
+                // either first; the shapes must agree).
+                let (evalue, traceback) = build_error_payload(&result);
+                let err_msg = self.build_error_message(parsed, &evalue, traceback.clone())?;
+                self.send_iopub(&err_msg).await?;
+                self.build_execute_reply_error(parsed, execution_count, &evalue, traceback)?
+            } else {
+                // Success path. Emit stream messages for any captured
+                // stdout/stderr, then execute_result if there's a value.
+                //
+                // Duplication rule: when the evaluator returns a value
+                // (bare-expression cell), the spawned program's stdout
+                // already contains that value (the wrapper `print(expr)`
+                // wrote it). We suppress the stdout stream in that case so
+                // the notebook doesn't render the value twice (once as
+                // stdout, once as Out[N]).
+                if result.value.is_none() && !result.stdout.is_empty() {
+                    let stream =
+                        self.build_stream_message(parsed, StreamOutput::stdout(&result.stdout))?;
+                    self.send_iopub(&stream).await?;
+                }
+                if !result.stderr.is_empty() {
+                    let stream =
+                        self.build_stream_message(parsed, StreamOutput::stderr(&result.stderr))?;
+                    self.send_iopub(&stream).await?;
+                }
+                if let Some(value) = &result.value {
+                    // T129c: if the captured value's resolved type is
+                    // Vector/Matrix, emit a text/html + text/plain
+                    // MIME bundle (HTML <table>) instead of plain text.
+                    let exec_result = if let Some(ref t) = pre_type {
+                        if is_matrix_or_vector(t) {
+                            let html = format_rich_html(value);
+                            self.build_rich_execute_result(parsed, execution_count, &html, value)?
+                        } else {
+                            self.build_execute_result(parsed, execution_count, value)?
+                        }
+                    } else {
+                        self.build_execute_result(parsed, execution_count, value)?
+                    };
+                    self.send_iopub(&exec_result).await?;
+                }
+                self.build_execute_reply_ok(parsed, execution_count)?
+            }
         };
 
         // iopub: status idle.
@@ -329,6 +422,44 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
         self.send_wire(&reply).await?;
 
         Ok(())
+    }
+
+    /// T129c: resolve an introspection query (`?name` / `??name`) to
+    /// the display text emitted as `execute_result` text/plain.
+    ///
+    /// - `?name` → `"<name>: <Type>"` (or `"<name>: <unknown>"` if the
+    ///   name is unbound / type inference fails). Uses only
+    ///   [`Evaluator::type_of`] — NO `rustc` spawn.
+    /// - `??name` → `"<name>: <Type>\n= <value>"` (best-available
+    ///   definition text). Calls [`Evaluator::eval_line`] on the bare
+    ///   name to capture its current value via the standard
+    ///   compile-and-run path. The original source line is NOT
+    ///   surfaced because [`Evaluator`]'s accumulated source is
+    ///   private; surfacing the source is post-T129c work.
+    ///
+    /// Both branches return without panicking on missing types /
+    /// values — front-ends always see a well-formed `execute_result`.
+    fn handle_introspection(&mut self, intro: Introspection) -> String {
+        match intro {
+            Introspection::Help(name) => match self.evaluator.type_of(&name) {
+                Some(ty) => format!("{name}: {ty}"),
+                None => format!("{name}: <unknown>"),
+            },
+            Introspection::Source(name) => {
+                // ?? is the "source" path. Best-available definition:
+                // type signature + current value. BareExpr evaluation
+                // does NOT accumulate state, so this query has no side
+                // effects on subsequent cells.
+                let ty = self.evaluator.type_of(&name);
+                let val = self.evaluator.eval_line(&name).value;
+                match (ty, val) {
+                    (Some(t), Some(v)) => format!("{name}: {t}\n= {v}"),
+                    (Some(t), None) => format!("{name}: {t}"),
+                    (None, Some(v)) => format!("{name}\n= {v}"),
+                    (None, None) => format!("{name}: <unknown>"),
+                }
+            }
+        }
     }
 
     /// Parse a raw multipart ZMQ message into a [`WireMessage`].
@@ -478,6 +609,31 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
         value: &str,
     ) -> JupyterResult<WireMessage> {
         let content = serde_json::to_value(ExecuteResult::text(execution_count, value))?;
+        Ok(WireMessage::new_reply(
+            "execute_result",
+            parent,
+            content,
+            &now_iso(),
+            &self.fresh_msg_id(),
+        ))
+    }
+
+    /// T129c: build an iopub `execute_result` WireMessage carrying a
+    /// rich-display MIME bundle — both `text/html` and `text/plain`.
+    ///
+    /// Used for Vector/Matrix values where the HTML representation is
+    /// an `<table>` and the plain-text fallback is the source literal
+    /// (e.g. `[1, 2, 3]`). Mirrors [`build_execute_result`] in shape
+    /// — only the content payload differs.
+    fn build_rich_execute_result(
+        &self,
+        parent: &WireMessage,
+        execution_count: u64,
+        html: &str,
+        plain: &str,
+    ) -> JupyterResult<WireMessage> {
+        let content =
+            serde_json::to_value(ExecuteResult::html_with_plain(execution_count, html, plain))?;
         Ok(WireMessage::new_reply(
             "execute_result",
             parent,
@@ -682,6 +838,268 @@ fn build_error_payload(result: &EvalResult) -> (String, Vec<String>) {
 /// block and the diagnostic line.
 fn line_ends_with_blank(s: &str) -> bool {
     s.ends_with("\n\n") || s == "\n"
+}
+
+// ---------------------------------------------------------------------------
+// T129c: introspection + rich-display helpers (free functions).
+//
+// These are kept module-private and free-standing so they can be unit-
+// tested in isolation (see the `tests` mod below) and so the dispatch
+// logic in `handle_execute_request` reads as a short branch table
+// rather than a tangle of inline closures.
+// ---------------------------------------------------------------------------
+
+/// A parsed `?name` / `??name` introspection query.
+///
+/// Produced by [`parse_introspection`] when a cell's trimmed source
+/// matches the magic prefix shape. Consumed by
+/// [`Kernel::handle_introspection`] to build the `execute_result`
+/// text/plain payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Introspection {
+    /// `?name` — surface type info / help for the name.
+    Help(String),
+    /// `??name` — surface source / best-available definition for the name.
+    Source(String),
+}
+
+/// Detect a `?name` / `??name` introspection magic at the start of a
+/// cell.
+///
+/// Returns `Some(Introspection)` when the trimmed cell is EXACTLY
+/// `?name` or `??name` (single name, no other code). Multi-line cells
+/// and cells with trailing content (`?x + 1`) return `None` — the
+/// introspection magic is a strict cell-level prefix, not a mid-cell
+/// operator. The check is performed BEFORE normal evaluation in
+/// [`Kernel::handle_execute_request`] so the query doesn't spawn
+/// `rustc` unnecessarily.
+///
+/// `??` is checked BEFORE `?` (longer prefix wins) so `??x` is
+/// classified as [`Introspection::Source`] and not
+/// [`Introspection::Help`] of name `"?x"`.
+fn parse_introspection(code: &str) -> Option<Introspection> {
+    let trimmed = code.trim();
+    // `??name` — source / definition query.
+    if let Some(rest) = trimmed.strip_prefix("??") {
+        let name = rest.trim();
+        if is_valid_buff_ident(name) {
+            return Some(Introspection::Source(name.to_string()));
+        }
+        return None;
+    }
+    // `?name` — help / type query.
+    if let Some(rest) = trimmed.strip_prefix('?') {
+        let name = rest.trim();
+        if is_valid_buff_ident(name) {
+            return Some(Introspection::Help(name.to_string()));
+        }
+        return None;
+    }
+    None
+}
+
+/// `true` if `s` is a valid Buff identifier: starts with an
+/// alphabetic char or `_`, followed by zero or more alphanumeric / `_`
+/// chars. Unicode alphabetic chars are accepted (Buff's lexer accepts
+/// them per `examples/ola.buff`'s PT-BR naming convention).
+fn is_valid_buff_ident(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let mut chars = s.chars();
+    let first = chars.next().expect("non-empty");
+    if !first.is_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// `true` if `ty` is `Vector<_>` or `Matrix<_>` — the rich-display
+/// eligible collection types.
+fn is_matrix_or_vector(ty: &ResolvedType) -> bool {
+    matches!(ty, ResolvedType::Vector(_) | ResolvedType::Matrix(_))
+}
+
+/// `true` when the cell should take the T129c rich-display-literal
+/// shortcut: the resolved type is `Vector<_>` / `Matrix<_>` AND the
+/// source expression is a `[...]`-shaped literal.
+///
+/// The literal-shape check (rather than accepting any Vector/Matrix
+/// expression) is the conservative path: it ensures we render only
+/// values whose source form is also their canonical plain-text
+/// representation (e.g. `[1, 2, 3]`). Non-literal expressions (e.g.
+/// `[1, 2, 3].map({ x => x * 2 })`) fall through to the normal
+/// compile-and-run path, which may surface a `Vec<T>: Display` rustc
+/// error today — that's a codegen gap documented as post-T129c work.
+fn is_rich_display_literal(ty: Option<&ResolvedType>, expr_src: &str) -> bool {
+    let Some(t) = ty else { return false };
+    if !is_matrix_or_vector(t) {
+        return false;
+    }
+    is_collection_literal(expr_src)
+}
+
+/// `true` if `src` looks like a Buff collection literal — non-empty,
+/// starts with `[`, ends with `]`. Used by [`is_rich_display_literal`]
+/// as the cheap syntactic check that the expression is a literal
+/// (rather than a computed expression whose type happens to be
+/// Vector/Matrix).
+fn is_collection_literal(src: &str) -> bool {
+    let s = src.trim();
+    s.len() >= 2 && s.starts_with('[') && s.ends_with(']')
+}
+
+/// Format a value's source form (e.g. `[1, 2, 3]` or `[[1, 2], [3, 4]]`)
+/// as an HTML `<table>` for rich display.
+///
+/// Handles both 1-D (`Vector<T>`) and 2-D (`Matrix<T>`) shapes:
+/// - 1-D vectors render as a single row of `<td>` cells.
+/// - 2-D matrices render as one `<tr>` per row, with `<td>` cells in
+///   each row.
+///
+/// Cell text is HTML-escaped via [`html_escape`] so numeric/string
+/// content with `<`, `>`, `&`, `"`, `'` is rendered safely.
+fn format_rich_html(value: &str) -> String {
+    let rows = parse_rich_rows(value);
+    let mut html = String::from("<table>");
+    for row in &rows {
+        html.push_str("<tr>");
+        for cell in row {
+            html.push_str("<td>");
+            html.push_str(&html_escape(cell));
+            html.push_str("</td>");
+        }
+        html.push_str("</tr>");
+    }
+    html.push_str("</table>");
+    html
+}
+
+/// Parse a value's source form into rows of cells.
+///
+/// - For 1-D shapes (`[1, 2, 3]`), returns a single row of `["1", "2", "3"]`.
+/// - For 2-D shapes (`[[1, 2], [3, 4]]`), returns two rows.
+/// - For non-`[...]`-wrapped values, returns a single row with one cell
+///   holding the entire value (graceful fallback — the cell text is
+///   still HTML-escaped and visible in the output).
+fn parse_rich_rows(value: &str) -> Vec<Vec<String>> {
+    let v = value.trim();
+    // Strip ONE level of outer brackets.
+    let inner = match v.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        Some(s) => s,
+        None => return vec![vec![v.to_string()]],
+    };
+    // 2-D detection: inner string contains a `[` (start of a nested
+    // row). Otherwise treat as 1-D.
+    if inner.contains('[') {
+        parse_nested_rows(inner)
+    } else {
+        vec![split_top_level_commas(inner)]
+    }
+}
+
+/// Parse the inner content of a 2-D literal (e.g. `"[1, 2], [3, 4]"`)
+/// into one row of cells per nested `[...]` block.
+///
+/// Walks the string tracking bracket depth. When depth returns to 0
+/// after a closing `]`, the slice between the matching `[` and `]`
+/// is split on top-level commas into a row. Non-bracketed content
+/// between rows (whitespace, stray commas) is ignored.
+fn parse_nested_rows(s: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut depth = 0i32;
+    let mut current_start = None;
+    for (i, c) in s.char_indices() {
+        match c {
+            '[' => {
+                if depth == 0 {
+                    current_start = Some(i + c.len_utf8());
+                }
+                depth += 1;
+            }
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(start) = current_start {
+                        let row_str = &s[start..i];
+                        rows.push(split_top_level_commas(row_str));
+                    }
+                    current_start = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    if rows.is_empty() {
+        // Defensive: if the input looked 2-D-ish but didn't yield any
+        // complete rows (malformed input), fall back to a single row
+        // of the raw content so the test still gets a `<table>`.
+        rows.push(split_top_level_commas(s));
+    }
+    rows
+}
+
+/// Split `s` on TOP-LEVEL commas (commas at bracket depth 0). Used by
+/// [`parse_rich_rows`] and [`parse_nested_rows`] to break a row into
+/// cells. Comma separators inside nested `[...]` / `{...}` / `(...)`
+/// are preserved within their cell.
+fn split_top_level_commas(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut current = String::new();
+    for c in s.chars() {
+        match c {
+            '[' | '{' | '(' => {
+                depth += 1;
+                current.push(c);
+            }
+            ']' | '}' | ')' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                let cell = current.trim().to_string();
+                if !cell.is_empty() {
+                    out.push(cell);
+                }
+                current.clear();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    let cell = current.trim().to_string();
+    if !cell.is_empty() {
+        out.push(cell);
+    }
+    if out.is_empty() {
+        // Guarantee at least one cell so the resulting `<td>` is
+        // always non-empty (matches Jupyter's expectation that
+        // `execute_result` MIME bodies be non-empty strings).
+        out.push(String::new());
+    }
+    out
+}
+
+/// HTML-escape `s` for safe injection into a `text/html` MIME body.
+///
+/// Escapes the five XML special chars: `&`, `<`, `>`, `"`, `'`. The
+/// order (`&` first) prevents double-escaping the entities introduced
+/// by later replacements.
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Return the current UTC timestamp as ISO-8601 with microsecond
@@ -1084,6 +1502,21 @@ mod tests {
         None
     }
 
+    /// T129c: pull the FULL data map (MIME bundle) of the first
+    /// `execute_result` in the list. Returns `None` if there is no
+    /// execute_result, or if its `data` field is missing / not an
+    /// object (which would be a kernel bug).
+    fn execute_result_mime_bundle(
+        msgs: &[(String, serde_json::Value)],
+    ) -> Option<serde_json::Map<String, serde_json::Value>> {
+        for (ty, content) in msgs {
+            if ty == "execute_result" {
+                return content["data"].as_object().cloned();
+            }
+        }
+        None
+    }
+
     #[tokio::test]
     async fn execute_print_cell_emits_stdout_stream() {
         let cells = run_cells(&["print(\"hello-from-buff\")"]).await;
@@ -1314,6 +1747,394 @@ mod tests {
             stream.contains('3'),
             "expected cell 3 stdout to contain 3: {stream:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // T129c: rich-display + introspection tests.
+    //
+    // MockTransport-driven (no live Jupyter). The first test verifies
+    // the MIME-bundle shape for a Vector literal — both `text/html`
+    // (an HTML `<table>`) AND `text/plain` (the source literal) must
+    // be present. The latter two verify the `?name` and `??name`
+    // introspection magics — they emit a single `execute_result`
+    // text/plain carrying the name's type (and value for `??`).
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn vector_literal_emits_mime_bundle_with_html_and_plain() {
+        // A bare Vector literal `[1, 2, 3]` has type `Vector<Int<8>>`
+        // (smallest width that fits all three). The kernel detects the
+        // Vector/Matrix type via `type_of` and emits a MIME bundle
+        // with BOTH `text/html` (an HTML `<table>` rendering) AND a
+        // `text/plain` fallback (the source literal). The plain-text
+        // fallback is MANDATORY — front-ends without HTML rendering
+        // (terminals, nbconvert text exporters) must still see a
+        // meaningful rendering.
+        //
+        // NOTE: the kernel takes the rich-display-literal shortcut
+        // (skipping `rustc`) because Buff's codegen lowers
+        // `print(vec)` to `println!("{}", vec)` which fails to compile
+        // (Vec<T>: Display is not implemented). Rendering from source
+        // sidesteps that gap.
+        let cells = run_cells(&["[1, 2, 3]"]).await;
+        assert_eq!(cells.len(), 1);
+        let (iopub, reply) = &cells[0];
+        assert_eq!(reply["status"], "ok");
+        let bundle =
+            execute_result_mime_bundle(iopub).expect("vector literal must emit execute_result");
+
+        // BOTH text/html and text/plain MUST be present.
+        let html = bundle
+            .get("text/html")
+            .and_then(serde_json::Value::as_str)
+            .expect("text/html representation must be present in the bundle");
+        let plain = bundle
+            .get("text/plain")
+            .and_then(serde_json::Value::as_str)
+            .expect("text/plain fallback must be present in the bundle");
+
+        // HTML must be a `<table>` (the canonical rich rendering).
+        assert!(
+            html.contains("<table>") && html.contains("</table>"),
+            "text/html must be an HTML table, got: {html}"
+        );
+        assert!(
+            html.contains("<td>1</td>")
+                && html.contains("<td>2</td>")
+                && html.contains("<td>3</td>"),
+            "text/html table must contain cells 1, 2, 3 — got: {html}"
+        );
+
+        // Plain-text fallback must be the source literal (so terminal
+        // front-ends still see the value).
+        assert!(
+            plain.contains("[1,") && plain.contains("2,") && plain.contains("3"),
+            "text/plain fallback must contain the source literal, got: {plain}"
+        );
+    }
+
+    #[tokio::test]
+    async fn introspection_single_question_mark_yields_type_help() {
+        // Cell 1 binds `x` to an integer. Cell 2 `?x` triggers the
+        // introspection magic: the kernel queries `type_of(x)` and
+        // emits a single `execute_result` text/plain with the help
+        // text `"x: Int<...>"`. No `rustc` spawn (type inference
+        // only) so this cell is fast.
+        let cells = run_cells(&["let x = 42", "?x"]).await;
+        assert_eq!(cells.len(), 2);
+
+        // Cell 2 is the introspection cell.
+        let (iopub2, reply2) = &cells[1];
+        assert_eq!(reply2["status"], "ok");
+        let text =
+            execute_result_text(iopub2).expect("?x must emit an execute_result with text/plain");
+        // Help text format: "name: Type". Type for 42 is some Int
+        // width — don't over-constrain the exact width.
+        assert!(
+            text.starts_with("x:"),
+            "introspection text must start with the name + colon, got: {text}"
+        );
+        assert!(
+            text.contains("Int"),
+            "introspection text must mention the resolved type, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn introspection_double_question_mark_yields_value_text() {
+        // Cell 1 binds `x` to 42. Cell 2 `??x` triggers the source
+        // introspection: the kernel queries type + evaluates the name
+        // to capture its current value, emitting `execute_result`
+        // text/plain with `"x: <Type>\n= <value>"` (best-available
+        // definition text — extracting the original source line is
+        // post-T129c work).
+        //
+        // This test DOES spawn rustc (to evaluate `x` and capture
+        // stdout) — same per-cell cost as the T129b execution tests.
+        let cells = run_cells(&["let x = 42", "??x"]).await;
+        assert_eq!(cells.len(), 2);
+
+        let (iopub2, reply2) = &cells[1];
+        assert_eq!(reply2["status"], "ok");
+        let text =
+            execute_result_text(iopub2).expect("??x must emit an execute_result with text/plain");
+        // Must contain the name, the type, and the value.
+        assert!(
+            text.contains('x'),
+            "??x text must contain the name, got: {text}"
+        );
+        assert!(
+            text.contains("Int"),
+            "??x text must mention the resolved type, got: {text}"
+        );
+        assert!(
+            text.contains("42"),
+            "??x text must contain the captured value 42, got: {text}"
+        );
+        assert!(
+            text.contains('='),
+            "??x text must use '=' to separate type and value (best-available definition), got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn introspection_unknown_name_yields_unknown_marker() {
+        // `?undefined_name` must not crash the kernel — surface a
+        // well-formed "<name>: <unknown>" execute_result. Proves the
+        // magic is panic-free when type inference fails.
+        let cells = run_cells(&["?undefined_name"]).await;
+        assert_eq!(cells.len(), 1);
+        let (iopub, reply) = &cells[0];
+        assert_eq!(
+            reply["status"], "ok",
+            "kernel must survive unknown-name query"
+        );
+        let text =
+            execute_result_text(iopub).expect("unknown-name query must still emit execute_result");
+        assert!(
+            text.contains("undefined_name") && text.contains("<unknown>"),
+            "unknown-name query must mention both name and <unknown>: {text}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // T129c: pure unit tests for the helper free functions. These do
+    // NOT spawn rustc — they exercise the parser/formatter in
+    // isolation so regressions in the HTML rendering or introspection
+    // parser surface instantly (without the ~3s rustc cost per case).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_introspection_classifies_question_mark_prefixes() {
+        // `?name` → Help.
+        assert_eq!(
+            parse_introspection("?x"),
+            Some(Introspection::Help("x".to_string()))
+        );
+        // `? name` (with whitespace) → Help, name trimmed.
+        assert_eq!(
+            parse_introspection("?  x"),
+            Some(Introspection::Help("x".to_string()))
+        );
+        // `??name` → Source.
+        assert_eq!(
+            parse_introspection("??x"),
+            Some(Introspection::Source("x".to_string()))
+        );
+        // `?? name` → Source, trimmed.
+        assert_eq!(
+            parse_introspection("??  x"),
+            Some(Introspection::Source("x".to_string()))
+        );
+        // Trailing newline (kernel normalizes input) → still matches.
+        assert_eq!(
+            parse_introspection("?x\n"),
+            Some(Introspection::Help("x".to_string()))
+        );
+        // Leading/trailing whitespace stripped.
+        assert_eq!(
+            parse_introspection("  ?x  \n"),
+            Some(Introspection::Help("x".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_introspection_rejects_non_magic_cells() {
+        // No `?` prefix → None.
+        assert_eq!(parse_introspection("let x = 1"), None);
+        assert_eq!(parse_introspection("print(x)"), None);
+        assert_eq!(parse_introspection("x + 1"), None);
+        // Empty cell → None.
+        assert_eq!(parse_introspection(""), None);
+        assert_eq!(parse_introspection("   "), None);
+        // `?` alone (no name) → None.
+        assert_eq!(parse_introspection("?"), None);
+        assert_eq!(parse_introspection("??"), None);
+        // `?` followed by non-identifier (`?123abc`) → None (starts
+        // with a digit).
+        assert_eq!(parse_introspection("?123abc"), None);
+        // `?` followed by expression (`?x.y`) → None (`.` is not a
+        // valid identifier char).
+        assert_eq!(parse_introspection("?x.y"), None);
+    }
+
+    #[test]
+    fn parse_introspection_handles_underscore_and_unicode_names() {
+        // Leading underscore — common convention for "unused" vars.
+        assert_eq!(
+            parse_introspection("?_unused"),
+            Some(Introspection::Help("_unused".to_string()))
+        );
+        // All underscores — odd but valid identifier.
+        assert_eq!(
+            parse_introspection("??___"),
+            Some(Introspection::Source("___".to_string()))
+        );
+        // Unicode alphabetic (Buff accepts PT-BR identifier naming).
+        assert_eq!(
+            parse_introspection("?coração"),
+            Some(Introspection::Help("coração".to_string()))
+        );
+    }
+
+    #[test]
+    fn is_valid_buff_ident_rules() {
+        assert!(is_valid_buff_ident("x"));
+        assert!(is_valid_buff_ident("_x"));
+        assert!(is_valid_buff_ident("_"));
+        assert!(is_valid_buff_ident("x_1"));
+        assert!(is_valid_buff_ident("Coração"));
+        // Invalid:
+        assert!(!is_valid_buff_ident(""));
+        assert!(!is_valid_buff_ident("1x")); // leading digit
+        assert!(!is_valid_buff_ident("x.y")); // dot
+        assert!(!is_valid_buff_ident("x y")); // space
+        assert!(!is_valid_buff_ident("(x)")); // parens
+    }
+
+    #[test]
+    fn is_collection_literal_bracket_shape() {
+        // 1-D vector literals.
+        assert!(is_collection_literal("[1, 2, 3]"));
+        assert!(is_collection_literal("[]"));
+        assert!(is_collection_literal("  [1, 2]  "));
+        // 2-D matrix literals.
+        assert!(is_collection_literal("[[1, 2], [3, 4]]"));
+        // Non-literals.
+        assert!(!is_collection_literal("42"));
+        assert!(!is_collection_literal("x"));
+        assert!(!is_collection_literal("[1, 2].map(...)")); // ends with )
+        assert!(!is_collection_literal("(1, 2)")); // tuple parens
+    }
+
+    #[test]
+    fn is_matrix_or_vector_predicate() {
+        use buff_eval::ResolvedType;
+        // Vector / Matrix variants of any element type → true.
+        assert!(is_matrix_or_vector(&ResolvedType::vector(
+            ResolvedType::int_default()
+        )));
+        assert!(is_matrix_or_vector(&ResolvedType::matrix(
+            ResolvedType::int_default()
+        )));
+        // Primitives and other collections → false.
+        assert!(!is_matrix_or_vector(&ResolvedType::int_default()));
+        assert!(!is_matrix_or_vector(&ResolvedType::string()));
+        assert!(!is_matrix_or_vector(&ResolvedType::option(
+            ResolvedType::int_default()
+        )));
+        assert!(!is_matrix_or_vector(&ResolvedType::map(
+            ResolvedType::string(),
+            ResolvedType::int_default()
+        )));
+    }
+
+    #[test]
+    fn format_rich_html_renders_vector_as_single_row() {
+        // 1-D vector: one row, cells split by commas.
+        let html = format_rich_html("[1, 2, 3]");
+        assert!(html.contains("<table>"));
+        assert!(html.contains("</table>"));
+        assert!(html.contains("<tr>"));
+        assert!(html.contains("</tr>"));
+        assert!(html.contains("<td>1</td>"));
+        assert!(html.contains("<td>2</td>"));
+        assert!(html.contains("<td>3</td>"));
+        // Single row only for a 1-D vector.
+        let row_count = html.matches("<tr>").count();
+        assert_eq!(row_count, 1, "1-D vector renders as one row: {html}");
+    }
+
+    #[test]
+    fn format_rich_html_renders_matrix_as_multiple_rows() {
+        // 2-D matrix: nested brackets become multiple rows.
+        let html = format_rich_html("[[1, 2], [3, 4]]");
+        assert!(html.contains("<table>"));
+        // Two rows.
+        let row_count = html.matches("<tr>").count();
+        assert_eq!(row_count, 2, "matrix renders as multiple rows: {html}");
+        // Each cell appears.
+        for v in ["1", "2", "3", "4"] {
+            let cell = format!("<td>{v}</td>");
+            assert!(
+                html.contains(&cell),
+                "matrix HTML must contain cell {cell}: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_rich_html_escapes_special_chars() {
+        // The string `"<a>"` would break the HTML if not escaped.
+        // We rely on cell content being HTML-escaped.
+        let html = format_rich_html("[<, >, &]");
+        assert!(
+            html.contains("&lt;") && html.contains("&gt;") && html.contains("&amp;"),
+            "special chars must be HTML-escaped: {html}"
+        );
+        // And the raw chars must NOT appear inside <td> (that would
+        // break the HTML structure).
+        assert!(
+            !html.contains("<td><</td>") && !html.contains("<td>></td>"),
+            "unescaped < or > in <td> would break HTML: {html}"
+        );
+    }
+
+    #[test]
+    fn html_escape_replaces_all_xml_special_chars() {
+        assert_eq!(html_escape("plain"), "plain");
+        assert_eq!(html_escape("a & b"), "a &amp; b");
+        assert_eq!(html_escape("<tag>"), "&lt;tag&gt;");
+        assert_eq!(html_escape("\"quote\""), "&quot;quote&quot;");
+        assert_eq!(html_escape("it's"), "it&#x27;s");
+        // Order matters: `&` first so it doesn't double-escape the
+        // entities introduced by later replacements.
+        assert_eq!(html_escape("<&>"), "&lt;&amp;&gt;");
+    }
+
+    #[test]
+    fn parse_rich_rows_handles_1d_2d_and_fallback() {
+        // 1-D vector.
+        let rows = parse_rich_rows("[1, 2, 3]");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0],
+            vec!["1".to_string(), "2".to_string(), "3".to_string()]
+        );
+
+        // 2-D matrix.
+        let rows = parse_rich_rows("[[1, 2], [3, 4]]");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(rows[1], vec!["3".to_string(), "4".to_string()]);
+
+        // Empty vector.
+        let rows = parse_rich_rows("[]");
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].iter().filter(|c| !c.is_empty()).count() == 0 || rows[0].len() == 1);
+
+        // Non-bracketed fallback (shouldn't happen for true literals
+        // but defensive).
+        let rows = parse_rich_rows("42");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0], vec!["42".to_string()]);
+    }
+
+    #[test]
+    fn split_top_level_commas_respects_nesting() {
+        // Simple split.
+        let v = split_top_level_commas("1, 2, 3");
+        assert_eq!(v, vec!["1".to_string(), "2".to_string(), "3".to_string()]);
+
+        // Nested commas inside () stay within their cell.
+        let v = split_top_level_commas("(1, 2), 3");
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0], "(1, 2)");
+        assert_eq!(v[1], "3");
+
+        // Empty input → one empty cell (defensive).
+        let v = split_top_level_commas("");
+        assert_eq!(v.len(), 1);
     }
 
     #[test]

@@ -1,6 +1,6 @@
-//! Jupyter message `content` payloads for the message types T129a/T129b
+//! Jupyter message `content` payloads for the message types T129a/T129b/T129c
 //! handles: `kernel_info_reply`, `execute_reply`, `execute_result`,
-//! `stream`, `error`, `shutdown_reply`.
+//! `display_data`, `stream`, `error`, `shutdown_reply`.
 //!
 //! Each struct serializes to the exact JSON shape Jupyter clients
 //! expect (verified against the canonical
@@ -23,10 +23,10 @@ pub const IMPLEMENTATION_VERSION: &str = "1.0.0";
 /// Human-readable banner printed by Jupyter consoles on connect.
 ///
 /// T129b advertises real evaluation (reused from the T125 REPL
-/// evaluator) so the banner no longer flags this as a scaffold. Rich
-/// display (images / HTML) remains deferred to T129c.
-pub const BANNER: &str = "Buff kernel — execution enabled (T129b: text output + \
-                          cross-cell state; rich display is T129c)";
+/// evaluator). T129c adds rich display (HTML tables for matrices /
+/// vectors) and `?` / `??` introspection magics.
+pub const BANNER: &str = "Buff kernel — execution + rich display (T129c: HTML tables for \
+                          matrices/vectors, ?/?? introspection)";
 
 /// The `language_info` field of a `kernel_info_reply`.
 ///
@@ -213,9 +213,11 @@ impl ExecuteReply {
 /// the rich display of the cell's return value (if any).
 ///
 /// T129b emits a single `text/plain` MIME bundle carrying the
-/// evaluated value's `Display` form. Rich display (HTML, images,
-/// etc.) arrives in T129c; this constructor is the text-only path
-/// that always works.
+/// evaluated value's `Display` form. T129c adds the rich-display path:
+/// matrix / vector values are surfaced as a `text/html` `<table>` PLUS
+/// a `text/plain` fallback (the canonical Jupyter MIME-bundle shape
+/// — every rich representation must be paired with a plain-text
+/// fallback so terminal / nbconvert-text exporters don't break).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecuteResult {
     /// The 1-based cell counter (echoed from the request).
@@ -223,11 +225,11 @@ pub struct ExecuteResult {
     /// MIME-bundle map. Each key is a MIME type, each value is the
     /// string representation under that type.
     pub data: serde_json::Map<String, Value>,
-    /// Metadata map (e.g. image dimensions). Empty for T129a/b.
+    /// Metadata map (e.g. image dimensions). Empty for T129a/b/c.
     #[serde(default)]
     pub metadata: serde_json::Map<String, Value>,
     /// Transient map (e.g. `display_id` for `display_data` updates).
-    /// Empty for T129a/b.
+    /// Empty for T129a/b/c.
     #[serde(default)]
     pub transient: serde_json::Map<String, Value>,
 }
@@ -243,6 +245,99 @@ impl ExecuteResult {
         data.insert("text/plain".to_string(), Value::String(text.into()));
         Self {
             execution_count,
+            data,
+            metadata: serde_json::Map::new(),
+            transient: serde_json::Map::new(),
+        }
+    }
+
+    /// Build an `execute_result` carrying an arbitrary MIME bundle.
+    ///
+    /// Each entry is a `(MIME type, body)` pair. The caller is
+    /// responsible for including a `text/plain` fallback — Jupyter
+    /// fronts-ends REQUIRE a plain-text representation alongside any
+    /// rich representation (HTML / PNG / JSON) so terminal exporters
+    /// and screen readers don't break. Prefer
+    /// [`ExecuteResult::html_with_plain`] for the common
+    /// HTML-plus-plain-text case (it cannot forget the fallback).
+    #[must_use]
+    pub fn mime_bundle(
+        execution_count: u64,
+        entries: Vec<(impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        let mut data = serde_json::Map::new();
+        for (mime, body) in entries {
+            data.insert(mime.into(), Value::String(body.into()));
+        }
+        Self {
+            execution_count,
+            data,
+            metadata: serde_json::Map::new(),
+            transient: serde_json::Map::new(),
+        }
+    }
+
+    /// Build an `execute_result` carrying BOTH a `text/html` body and
+    /// a `text/plain` fallback. Used by T129c's rich-display path for
+    /// matrix / vector values: the HTML renders as a `<table>` in
+    /// JupyterLab / Notebook; the plain text is the value's source
+    /// form (e.g. `[1, 2, 3]`) so terminal / text-only front-ends still
+    /// see a meaningful rendering.
+    ///
+    /// The order of insertion (html first, plain second) matches
+    /// ipykernel's convention — Jupyter clients render the FIRST
+    /// representation they support in the bundle's iteration order,
+    /// and HTML is preferred over plain text when both are available.
+    #[must_use]
+    pub fn html_with_plain(
+        execution_count: u64,
+        html: impl Into<String>,
+        plain: impl Into<String>,
+    ) -> Self {
+        Self::mime_bundle(
+            execution_count,
+            vec![("text/html", html.into()), ("text/plain", plain.into())],
+        )
+    }
+}
+
+/// `display_data` content — emitted on the IOPUB socket to render a
+/// rich-display MIME bundle WITHOUT a cell counter (i.e. not
+/// associated with the cell's `Out[N]` line). Used by `display(...)`
+/// calls inside a cell (multiple displays per execution).
+///
+/// T129c defines the struct so the kernel can emit `display_data` for
+/// future use cases (e.g. explicit `display(matrix)` calls). The
+/// current kernel emits `execute_result` for the trailing bare-expr
+/// value (which carries `execution_count`); `display_data` is reserved
+/// for the multi-display-per-cell scenario that arrives with
+/// interactive `display(...)` prelude support (post-T129c).
+///
+/// The shape mirrors [`ExecuteResult`] minus `execution_count` — the
+/// Jupyter messaging spec mandates identical `data` / `metadata` /
+/// `transient` keys on both messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayData {
+    /// MIME-bundle map. Same shape as [`ExecuteResult::data`].
+    pub data: serde_json::Map<String, Value>,
+    /// Metadata map (e.g. image dimensions). Empty by default.
+    #[serde(default)]
+    pub metadata: serde_json::Map<String, Value>,
+    /// Transient map (e.g. `display_id` for `display_data` updates).
+    #[serde(default)]
+    pub transient: serde_json::Map<String, Value>,
+}
+
+impl DisplayData {
+    /// Build a `display_data` carrying both `text/html` and
+    /// `text/plain` (mirroring [`ExecuteResult::html_with_plain`]
+    /// minus the `execution_count`).
+    #[must_use]
+    pub fn html_with_plain(html: impl Into<String>, plain: impl Into<String>) -> Self {
+        let mut data = serde_json::Map::new();
+        data.insert("text/html".to_string(), Value::String(html.into()));
+        data.insert("text/plain".to_string(), Value::String(plain.into()));
+        Self {
             data,
             metadata: serde_json::Map::new(),
             transient: serde_json::Map::new(),
@@ -467,6 +562,65 @@ mod tests {
         assert_eq!(plain, "42");
         assert!(r.metadata.is_empty());
         assert!(r.transient.is_empty());
+    }
+
+    #[test]
+    fn execute_result_html_with_plain_carries_both_mimes() {
+        // T129c: matrix / vector rich display must always pair an
+        // HTML representation with a text/plain fallback so terminal
+        // / screen-reader / text-only nbconvert exporters still see
+        // a meaningful rendering.
+        let r = ExecuteResult::html_with_plain(7, "<table></table>", "[1, 2, 3]");
+        assert_eq!(r.execution_count, 7);
+        let html = r
+            .data
+            .get("text/html")
+            .and_then(Value::as_str)
+            .expect("text/html must be present");
+        let plain = r
+            .data
+            .get("text/plain")
+            .and_then(Value::as_str)
+            .expect("text/plain fallback must be present");
+        assert_eq!(html, "<table></table>");
+        assert_eq!(plain, "[1, 2, 3]");
+    }
+
+    #[test]
+    fn execute_result_mime_bundle_round_trips_serde() {
+        let r = ExecuteResult::mime_bundle(
+            9,
+            vec![
+                ("text/html", "<table><tr><td>1</td></tr></table>"),
+                ("text/plain", "[1]"),
+            ],
+        );
+        let json = serde_json::to_string(&r).expect("serialize");
+        let r2: ExecuteResult = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(r, r2);
+        assert_eq!(r2.data.len(), 2);
+    }
+
+    #[test]
+    fn display_data_html_with_plain_shape() {
+        // T129c: display_data has the SAME shape as execute_result
+        // MINUS execution_count. Verify the constructor produces the
+        // expected keys.
+        let d = DisplayData::html_with_plain("<table></table>", "[1, 2]");
+        let v: Value = serde_json::to_value(&d).expect("to_value");
+        let obj = v.as_object().expect("object");
+        // Required keys per Jupyter messaging spec.
+        assert!(obj.contains_key("data"));
+        assert!(obj.contains_key("metadata"));
+        assert!(obj.contains_key("transient"));
+        // execution_count MUST be absent (display_data has none).
+        assert!(
+            !obj.contains_key("execution_count"),
+            "display_data must not carry execution_count"
+        );
+        let data = obj["data"].as_object().expect("data object");
+        assert!(data.contains_key("text/html"));
+        assert!(data.contains_key("text/plain"));
     }
 
     #[test]

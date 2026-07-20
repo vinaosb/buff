@@ -1,0 +1,233 @@
+TASK T129c — Rich display (MIME bundle) + introspection for buff-jupyter
+========================================================================
+Date: 2026-07-20
+Branch: master (builds on T129b HEAD 499e50c)
+Toolchain: rustc 1.95.0 (rust-toolchain.toml pin), MSVC 14.44.35207
+
+SUMMARY
+-------
+Added rich display + introspection to the Buff Jupyter kernel:
+
+1. Vector / Matrix literals now render as a Jupyter MIME bundle:
+   `execute_result` content.data = {
+       "text/html":  "<table>...</table>",
+       "text/plain": "[1, 2, 3]"   // mandatory fallback
+   }
+   Both MIME types are ALWAYS emitted together (HTML never travels
+   alone — terminal / screen-reader / text-only nbconvert exporters
+   must still see a meaningful rendering).
+
+2. `?name` magic: surfaces resolved type info as execute_result
+   text/plain. Format: `"name: <Type>"`. Uses only
+   `Evaluator::type_of` — no rustc spawn.
+
+3. `??name` magic: surfaces best-available definition text
+   (type + current value) as execute_result text/plain.
+   Format: `"name: <Type>\n= <value>"`. Calls `eval_line(name)`
+   to capture the value via the standard compile-and-run path.
+
+4. New `DisplayData` struct added to messages.rs (for future
+   `display_data` msg-type support; the current kernel emits
+   `execute_result` for trailing bare-expr values, which is the
+   spec-accepted deliverable).
+
+5. New `ExecuteResult::mime_bundle` + `ExecuteResult::html_with_plain`
+   constructors (and matching `DisplayData::html_with_plain`).
+
+IMPLEMENTATION NOTES
+--------------------
+- Vector/Matrix detection uses `Evaluator::type_of(trimmed_code)`
+  → `Option<ResolvedType>`. When the resolved type is `Vector<_>` or
+  `Matrix<_>` AND the source is a `[...]`-shaped literal, the kernel
+  takes the "rich-display-literal shortcut" — it renders the HTML
+  table FROM SOURCE and SKIPS the rustc spawn entirely. This works
+  around Buff's codegen gap: `print(vec)` lowers to Rust's
+  `println!("{}", vec)` which fails to compile today because
+  `Vec<T>` doesn't impl `Display`. The workaround avoids wasting a
+  rustc spawn on a known-broken path; the codegen fix is tracked as
+  post-T129c work in buff-lang-codegen-rust.
+
+- Non-literal Vector/Matrix expressions (e.g. `[1,2,3].map(...)`)
+  fall through to the normal compile-and-run path. If they yield a
+  value, the kernel renders it as a MIME bundle from the captured
+  stdout. If they fail (Display gap), the kernel surfaces the error
+  normally — no rich rendering, no surprise.
+
+- HTML table formatter (`format_rich_html`) handles both 1-D
+  (Vector) and 2-D (Matrix) shapes:
+    * 1-D `[1, 2, 3]`           → single row of 3 <td> cells.
+    * 2-D `[[1, 2], [3, 4]]`    → 2 rows, 2 cells each.
+  Cells are HTML-escaped (`&`, `<`, `>`, `"`, `'`) so numeric and
+  string content renders safely.
+
+- Introspection parser (`parse_introspection`) checks `??` BEFORE
+  `?` (longer-prefix-first) so `??x` classifies as Source (not
+  Help-of-"?x"). The name is validated as a Buff identifier
+  (alphabetic / `_` start; alphanumeric / `_` tail; Unicode
+  alphabetic chars accepted — Buff's PT-BR naming convention).
+
+- `??name` evaluates the name via `eval_line` — this DOES spawn
+  rustc (~3s). BareExpr evaluation does NOT accumulate state, so the
+  query has no side effects on subsequent cells.
+
+LIMITATIONS (documented, accepted for T129c)
+--------------------------------------------
+- `??name` does NOT surface the original source line of the binding
+  because `Evaluator`'s accumulated `body_stmts_src` /
+  `top_level_src` are private. Best-available definition text is
+  type + current value. Extracting source requires enhancing
+  buff-eval's public API (post-T129c follow-up).
+
+- Image/PNG rendering for GPU matrices is OUT OF SCOPE — the
+  runtime does not currently expose raster bytes. HTML `<table>`
+  rendering is the accepted deliverable for matrices.
+
+- ipywidgets, kernel-timeout handling, and interactive input_request
+  over the stdin socket are out of scope (post-T129c).
+
+FILES CHANGED
+-------------
+- crates/buff-jupyter/src/messages.rs
+    * Updated BANNER to advertise T129c capabilities.
+    * Added `ExecuteResult::mime_bundle(execution_count, entries)`.
+    * Added `ExecuteResult::html_with_plain(execution_count, html, plain)`.
+    * Added new `DisplayData` struct (mirror of ExecuteResult minus
+      execution_count) + `DisplayData::html_with_plain` constructor.
+    * Added 3 unit tests covering the new constructors.
+
+- crates/buff-jupyter/src/lib.rs
+    * Re-exported `DisplayData` from the crate root.
+    * Updated module-level docs (Scope + Out-of-scope sections) to
+      reflect T129c capabilities.
+
+- crates/buff-jupyter/src/kernel.rs
+    * Updated module-level docs (added T129c handlers table +
+      Rich-display + Introspection-magics sections).
+    * Imported `ResolvedType` from buff-eval.
+    * Added `Introspection` enum (Help / Source) + free helpers:
+        - parse_introspection(code) → Option<Introspection>
+        - is_valid_buff_ident(s) → bool
+        - is_matrix_or_vector(ty) → bool
+        - is_rich_display_literal(ty, src) → bool
+        - is_collection_literal(src) → bool
+        - format_rich_html(value) → String (HTML <table>)
+        - parse_rich_rows(value) → Vec<Vec<String>>
+        - parse_nested_rows(s) → Vec<Vec<String>>
+        - split_top_level_commas(s) → Vec<String>
+        - html_escape(s) → String
+    * Added `Kernel::handle_introspection(intro)` method.
+    * Added `Kernel::build_rich_execute_result(...)` method.
+    * Modified `Kernel::handle_execute_request(...)`:
+        - Branch 1 (new): introspection magic → execute_result text.
+        - Branch 2 (new): Vector/Matrix literal → execute_result
+          MIME bundle (text/html + text/plain), skip rustc spawn.
+        - Branch 3 (existing, modified): normal eval path; on
+          success with a Vector/Matrix value, emit MIME bundle
+          from captured value.
+    * Added `execute_result_mime_bundle(msgs)` test helper.
+    * Added 16 new tests (4 MockTransport-driven, 12 pure unit):
+        MockTransport-driven:
+          * vector_literal_emits_mime_bundle_with_html_and_plain
+          * introspection_single_question_mark_yields_type_help
+          * introspection_double_question_mark_yields_value_text
+          * introspection_unknown_name_yields_unknown_marker
+        Pure unit (helper-function coverage):
+          * parse_introspection_classifies_question_mark_prefixes
+          * parse_introspection_rejects_non_magic_cells
+          * parse_introspection_handles_underscore_and_unicode_names
+          * is_valid_buff_ident_rules
+          * is_collection_literal_bracket_shape
+          * is_matrix_or_vector_predicate
+          * format_rich_html_renders_vector_as_single_row
+          * format_rich_html_renders_matrix_as_multiple_rows
+          * format_rich_html_escapes_special_chars
+          * html_escape_replaces_all_xml_special_chars
+          * parse_rich_rows_handles_1d_2d_and_fallback
+          * split_top_level_commas_respects_nesting
+
+NO CHANGES to compiler crates (buff-lang-*), buff-eval, buff-repl,
+buff-registry source. NO changes to Cargo.toml (no new deps needed
+— `ResolvedType` was already transitively available via buff-eval's
+existing public re-export `pub use buff_lang_types::Type as ResolvedType`).
+
+GATES (all PASS, MSVC env MANDATORY)
+------------------------------------
+MSVC env (set in same PowerShell invocation before cargo):
+  $msvc="C:\BuildTools\VC\Tools\MSVC\14.44.35207"
+  $env:LIB="$msvc\lib\onecore\x64;$msvc\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+  $env:INCLUDE="$msvc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt"
+  $env:PATH="$msvc\bin\Hostx64\x64;$env:PATH"
+  $env:CC="$msvc\bin\Hostx64\x64\cl.exe"
+  $env:CXX=$env:CC
+
+(1) cargo fmt -p buff-jupyter --check
+    Result: exit 0 (no diff). PASS.
+
+(2) cargo clippy -p buff-jupyter -p buff-lang-cli --all-targets -- -D warnings
+    Result: exit 0. Finished `dev` profile [unoptimized + debuginfo]
+    target(s) in 5.88s. PASS.
+
+(3) cargo test -p buff-jupyter
+    Result: exit 0. ALL TESTS PASS.
+      - src/lib.rs unittests:       76 passed (was 57 pre-T129c; +19 new)
+      - tests/connection_tests.rs:  11 passed
+      - tests/hmac_tests.rs:         7 passed
+      - tests/kernel_info_tests.rs:  7 passed
+      - tests/kernelspec_tests.rs:   9 passed
+      - tests/wire_tests.rs:         6 passed
+      - doc-tests:                   0 passed
+    TOTAL: 116 tests, 0 failures.
+    PASS.
+
+The 19 NEW T129c tests verified individually:
+  [MockTransport-driven]
+  - kernel::tests::vector_literal_emits_mime_bundle_with_html_and_plain ... ok
+  - kernel::tests::introspection_single_question_mark_yields_type_help ... ok
+  - kernel::tests::introspection_double_question_mark_yields_value_text ... ok
+  - kernel::tests::introspection_unknown_name_yields_unknown_marker ... ok
+  [pure unit — helper coverage]
+  - kernel::tests::parse_introspection_classifies_question_mark_prefixes ... ok
+  - kernel::tests::parse_introspection_rejects_non_magic_cells ... ok
+  - kernel::tests::parse_introspection_handles_underscore_and_unicode_names ... ok
+  - kernel::tests::is_valid_buff_ident_rules ... ok
+  - kernel::tests::is_collection_literal_bracket_shape ... ok
+  - kernel::tests::is_matrix_or_vector_predicate ... ok
+  - kernel::tests::format_rich_html_renders_vector_as_single_row ... ok
+  - kernel::tests::format_rich_html_renders_matrix_as_multiple_rows ... ok
+  - kernel::tests::format_rich_html_escapes_special_chars ... ok
+  - kernel::tests::html_escape_replaces_all_xml_special_chars ... ok
+  - kernel::tests::parse_rich_rows_handles_1d_2d_and_fallback ... ok
+  - kernel::tests::split_top_level_commas_respects_nesting ... ok
+  [messages.rs constructors]
+  - messages::tests::execute_result_html_with_plain_carries_both_mimes ... ok
+  - messages::tests::execute_result_mime_bundle_round_trips_serde ... ok
+  - messages::tests::display_data_html_with_plain_shape ... ok
+
+The three task-mandated test scenarios are PROVEN by the
+MockTransport-driven tests:
+  (a) matrix/vector value emits a MIME bundle containing BOTH
+      text/html and text/plain:
+      → vector_literal_emits_mime_bundle_with_html_and_plain
+        asserts BOTH keys present, html contains <table>+<td> cells,
+        plain contains the source literal.
+  (b) `?name` yields help text:
+      → introspection_single_question_mark_yields_type_help
+        asserts text starts with "x:" and contains "Int".
+  (c) `??name` yields source text:
+      → introspection_double_question_mark_yields_value_text
+        asserts text contains "x", "Int", "42", and "=" separator.
+
+POWERSHELL NOISE NOTE
+---------------------
+PowerShell wraps cargo's stderr in red "NativeCommandError" /
+"NativeCommandError: ArgumentOutOfRangeException" text and prefixes
+lines with "cargo :". It also emits "warning: LF will be replaced by
+CRLF" lines on file write. These are NOISE — judged success by
+"Finished `dev` profile" / "test result: ok" / $LASTEXITCODE=0 only.
+All three gates report exit 0.
+
+EVIDENCE STAGING
+----------------
+This file is gitignored (lives under .sisyphus/evidence/, which is
+in .gitignore). NOT force-added — staging left to the orchestrator
+per task MUST NOT #5.
