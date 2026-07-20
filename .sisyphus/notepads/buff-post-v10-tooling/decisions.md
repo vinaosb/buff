@@ -142,3 +142,59 @@ Spike crate lives under %TEMP%\opencode\dioxus-spike\ (throwaway, outside buff r
   types (DateTime, Duration, ...) have no named-arg usage in practice
   so they continue through the standard path.
 
+- **Decision (T124d): Regex instance methods via the existing
+  prelude-types registry — NO infer.rs edit needed.** The T124b
+  registry consult in infer.rs Expr::MethodCall arm already
+  routes Type.method(args) through ssoc_fn_lookup AND
+  ecv.method(args) (when recv is a typed value) through
+  instance_fn_lookup generically. Adding Regex to the registry
+  was sufficient — no infer.rs edit. This validates the registry
+  extensibility claim from T124b ("future v1.4 stdlib tasks extend
+  without rewriting the inferencer"). The instance-method dispatch
+  works because the codegen consults its own TypeInferencer to get
+  the receiver's resolved Type, then matches against the registry.
+
+- **Decision (T124d): egex::Regex::new(...).unwrap_or_else(|_|
+  regex::Regex::new(r"a^").unwrap()) for Regex.compile.** T124b's
+  DateTime.parse used unwrap_or(chrono::Utc::now()) — the fallback
+  was an infallible function call. The regex crate has NO infallible
+  constructor (Regex::new is the only path and returns Result). The
+  codegen generates an inner .unwrap() on the provably-valid
+  literal "a^" (an 'a' followed by start-of-string anchor —
+  syntactically valid, semantically never matches anything). This is
+  the established Rust idiom for infallible fallback from a fallible
+  ctor when no const-fn constructor exists (regex has no
+  Regex::empty() or const constructor; chrono's Utc::now() is
+  the equivalent trusted call in the T124b precedent).
+
+- **Decision (T124d): egex.captures lowering uses a BLOCK
+  expression with let __buff_caps = ...; to bind the captures
+  result ONCE.** The block evaluates to the populated HashMap.
+  Binding the result avoids re-evaluating the receiver (which may
+  have side effects) and avoids moving the receiver into the first
+  .captures() call (allowing subsequent .name(...) lookups).
+  Numbered groups iterate via caps.iter().enumerate() (index
+  order); named groups via ecv.capture_names().flatten() (source
+  order). Both are deterministic at runtime — the iteration order
+  of the resulting HashMap is NOT deterministic, but that's a Rust
+  HashMap property (lookups by key still work). Keyed as "0" for
+  full match, "1"/"2"/... for numbered groups, source names for
+  named groups. The block is built via quote! + syn::parse2 so
+  the single string producer remains prettyplease.
+
+- **Decision (T124d): separate Type::is_prelude_regex() predicate
+  instead of extending is_prelude_datetime().** T124b's predicate
+  covers only the chrono family (DateTime/Date/Time/Duration/
+  Instant). Regex is a runtime value but NOT a datetime, so a
+  separate predicate captures the runtime-value-but-not-datetime
+  case. Future runtime-value types (Url, Hasher, Connection, ...)
+  should each get their own predicate — the alternative (a single
+  is_prelude_value_type() predicate covering all) would lose the
+  granularity the codegen dispatch needs (each type lowers to a
+  DIFFERENT Rust crate path).
+
+- **Decision (T124d): regex crate recorded in extern_crates BTreeSet,
+  NOT linked by single-file rustc path.** Same codegen-only linking
+  boundary as chrono (T124b), tracing (T124c), and tokio (T31).
+  Acceptance = snapshot-verified codegen + registry wired + workspace
+  green. Cargo-project wiring is deferred.

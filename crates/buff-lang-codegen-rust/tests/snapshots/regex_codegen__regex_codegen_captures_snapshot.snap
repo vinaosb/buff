@@ -1,0 +1,28 @@
+---
+source: crates/buff-lang-codegen-rust/tests/regex_codegen.rs
+assertion_line: 555
+expression: src
+---
+fn f() {
+    let r: regex::Regex = regex::Regex::new("(?P<word>\\w+)(\\d)")
+        .unwrap_or_else(|_| regex::Regex::new("a^").unwrap());
+    {
+        let __buff_caps = r.captures("hello1");
+        let mut __buff_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        if let Some(__buff_c) = __buff_caps {
+            for (__buff_i, __buff_opt) in __buff_c.iter().enumerate() {
+                if let Some(__buff_m) = __buff_opt {
+                    __buff_map
+                        .insert(__buff_i.to_string(), __buff_m.as_str().to_string());
+                }
+            }
+            for __buff_name in r.capture_names().flatten() {
+                if let Some(__buff_m) = __buff_c.name(__buff_name) {
+                    __buff_map
+                        .insert(__buff_name.to_string(), __buff_m.as_str().to_string());
+                }
+            }
+        }
+        __buff_map
+    };
+}

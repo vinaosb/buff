@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/regex_codegen.rs
+assertion_line: 501
+expression: src
+---
+fn f() {
+    regex::Regex::new("\\d+").unwrap_or_else(|_| regex::Regex::new("a^").unwrap());
+}

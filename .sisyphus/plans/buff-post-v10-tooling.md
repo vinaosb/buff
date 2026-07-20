@@ -1098,7 +1098,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Log module wrapping tracing`
 
-- [ ] **T124d: Regex module** [unspecified-high]
+- [x] **T124d: Regex module** [unspecified-high]
 
   **What to do**:
   - Add `Regex` type to prelude: `Regex.compile(pattern)`, `regex.match(text)`, `regex.find(text)`, `regex.replace(text, replacement)`

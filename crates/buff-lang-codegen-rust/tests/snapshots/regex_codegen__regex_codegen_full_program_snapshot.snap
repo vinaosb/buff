@@ -1,0 +1,31 @@
+---
+source: crates/buff-lang-codegen-rust/tests/regex_codegen.rs
+assertion_line: 580
+expression: src
+---
+fn main() {
+    let r: regex::Regex = regex::Regex::new("\\d")
+        .unwrap_or_else(|_| regex::Regex::new("a^").unwrap());
+    if r.is_match("abc") { Some("abc".to_string()) } else { None };
+    r.clone().find("a1b2").map(|m| m.as_str().to_string());
+    r.clone().replace_all("a1b2", "X").to_string();
+    {
+        let __buff_caps = r.clone().captures("a1");
+        let mut __buff_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        if let Some(__buff_c) = __buff_caps {
+            for (__buff_i, __buff_opt) in __buff_c.iter().enumerate() {
+                if let Some(__buff_m) = __buff_opt {
+                    __buff_map
+                        .insert(__buff_i.to_string(), __buff_m.as_str().to_string());
+                }
+            }
+            for __buff_name in r.clone().capture_names().flatten() {
+                if let Some(__buff_m) = __buff_c.name(__buff_name) {
+                    __buff_map
+                        .insert(__buff_name.to_string(), __buff_m.as_str().to_string());
+                }
+            }
+        }
+        __buff_map
+    };
+}

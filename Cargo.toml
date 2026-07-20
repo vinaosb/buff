@@ -37,6 +37,18 @@ chrono = "0.4"
 # enables the JSON formatter layer.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# T124d: Regex module (Regex.compile + regex.match/find/replace/captures)
+# wraps the mature `regex` crate. We use `regex` over `fancy-regex` or
+# `pcre2` because the upstream `regex` crate ships a linear-time
+# guarantees engine (no catastrophic backtracking), is the de-facto
+# Rust ecosystem default, and exposes a stable surface since 1.0 — every
+# method we lower to (`is_match`, `find`, `replace_all`, `captures`,
+# `capture_locations`, named-group iteration via `iter()` over
+# `captures.iter()`) has been stable for years. Recorded in the codegen
+# `extern_crates` BTreeSet when a Buff program uses `Regex`, mirroring
+# the chrono/tracing codegen-only linking boundary (single-file `buff
+# run` rustc path does NOT link it; cargo-project wiring is deferred).
+regex = "1"
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 thiserror = "1.0"

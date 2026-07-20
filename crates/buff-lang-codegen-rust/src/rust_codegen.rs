@@ -481,6 +481,24 @@ impl RustCodegen {
             self.extern_crates.insert("tracing".to_string());
             self.extern_crates.insert("tracing-subscriber".to_string());
         }
+        // T124d: register the `regex` crate as an external dependency when
+        // the program references the prelude `Regex` module
+        // (`Regex.compile(p)`, `regex.match(...)`, `regex.find(...)`,
+        // `regex.replace(...)`, `regex.captures(...)`). Generated code
+        // uses fully-qualified `regex::Regex::...` paths so no `use` import
+        // is emitted — but the recorded name signals to the pipeline /
+        // build-driver that the generated Cargo project must declare
+        // `regex` in `[dependencies]`.
+        //
+        // Mirrors the chrono/tracing registration pattern (T124b/T124c):
+        // single-file `buff run` rustc path does NOT link this crate;
+        // the codegen-only linking boundary is the accepted acceptance
+        // criterion for v1.4 prelude modules. Cargo-project wiring is
+        // deferred (snapshots + extern_crates set is the verifiable
+        // contract).
+        if program_uses_regex(decls) {
+            self.extern_crates.insert("regex".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -2222,10 +2240,7 @@ impl RustCodegen {
                 if let Expr::Ident(id, _) = receiver.as_ref() {
                     if id.name == "Log" {
                         if let Some((ptype, pmethod)) =
-                            buff_lang_types::prelude_types::assoc_fn_lookup(
-                                &id.name,
-                                &method.name,
-                            )
+                            buff_lang_types::prelude_types::assoc_fn_lookup(&id.name, &method.name)
                         {
                             return self.lower_prelude_type_assoc_fn(ptype, pmethod, args);
                         }
@@ -2820,6 +2835,34 @@ impl RustCodegen {
                 let arg = one_arg(self)?;
                 Ok(rust_call_expr("chrono::TimeDelta::milliseconds", vec![arg]))
             }
+            // T124d: Regex.compile(pattern) -> Regex. Mirrors the
+            // DateTime.parse "unwrap_or(<default>)" pattern (T124b):
+            // `regex::Regex::new` is fallible (`Result<Regex, Error>`),
+            // but Buff's prelude-type ctor surface is infallible (no
+            // Result return). An invalid pattern yields a never-matching
+            // fallback regex `r"a^"` (provably valid syntax: an `a`
+            // followed by start-of-string anchor — syntactically valid,
+            // semantically never matches anything). The inner `.unwrap()`
+            // on this known-valid literal is the established Rust idiom
+            // for infallible fallback from a fallible ctor when no
+            // const-fn constructor exists (regex has no `Regex::empty()`
+            // or const constructor; chrono's `Utc::now()` is the
+            // equivalent trusted call in the T124b precedent).
+            (T::Regex, A::Compile) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                // regex::Regex::new(pattern).unwrap_or_else(|_| regex::Regex::new(r"a^").unwrap())
+                let new_call = rust_call_expr("regex::Regex::new", vec![arg]);
+                let fallback = rust_call_expr("regex::Regex::new", vec![str_lit_expr(r"a^")]);
+                // Build `.unwrap_or_else(|_| <fallback>.unwrap())` via
+                // quote! + parse2 (the closure arg is awkward to build
+                // directly via syn::ExprMethodCall).
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #new_call.unwrap_or_else(|_| #fallback.unwrap())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Regex.compile codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -2902,6 +2945,150 @@ impl RustCodegen {
                     )));
                 }
                 Ok(method_call_no_args(recv, method_name))
+            }
+            // T124d: Regex instance methods.
+            //
+            // `regex.match(text)` -> Option<String>. Wraps the bool
+            // result of `regex::Regex::is_match` into an Option that
+            // carries the original text on match (so it composes with
+            // Buff's Option-handling surface identically to `find`).
+            M::Match => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "match() expects exactly 1 arg (the text to search), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let text_ref = coerce_str_arg_to_ref(text.clone(), &args[0]);
+                // if recv.is_match(text) { Some(text.to_string()) } else { None }
+                // Built via quote! so the if/else shape is a real syn::ExprIf.
+                let is_match_call = method_call_one_arg(recv, "is_match", text_ref);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    if #is_match_call {
+                        Some(#text.to_string())
+                    } else {
+                        None
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Regex.match codegen parse: {e}")))
+            }
+            // `regex.find(text)` -> Option<String>. Lowers to
+            // `recv.find(text).map(|m| m.as_str().to_string())`.
+            M::Find => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "find() expects exactly 1 arg (the text to search), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let text_ref = coerce_str_arg_to_ref(text, &args[0]);
+                let find_call = method_call_one_arg(recv, "find", text_ref);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #find_call.map(|m| m.as_str().to_string())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Regex.find codegen parse: {e}")))
+            }
+            // `regex.replace(text, repl)` -> String. Lowers to
+            // `recv.replace_all(text, repl).to_string()`.
+            // `replace_all` (not `replace`) gives the "replace ALL
+            // matches" semantics the task spec requires:
+            // `regex.replace("a1b2","\\d","X") == "aXbX"`.
+            M::Replace => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "replace() expects exactly 2 args (text, replacement), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let repl = self.lower_expr(&args[1])?;
+                let text_ref = coerce_str_arg_to_ref(text, &args[0]);
+                let repl_ref = coerce_str_arg_to_ref(repl, &args[1]);
+                // recv.replace_all(text, repl).to_string()
+                let mut call_args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+                call_args.push(text_ref);
+                call_args.push(repl_ref);
+                let replace_call = SynExpr::MethodCall(syn::ExprMethodCall {
+                    attrs: Vec::new(),
+                    receiver: Box::new(recv),
+                    dot_token: Default::default(),
+                    method: Ident::new("replace_all", ProcSpan::call_site()),
+                    turbofish: None,
+                    paren_token: Default::default(),
+                    args: call_args,
+                });
+                Ok(method_call_no_args(replace_call, "to_string"))
+            }
+            // `regex.captures(text)` -> Map<String, String>. Lowers to a
+            // block expression that:
+            //   1. Calls `recv.captures(text)` (returns Option<Captures>).
+            //   2. Builds a `std::collections::HashMap<String, String>`.
+            //   3. Iterates `caps.iter()` in INDEX order (numbered
+            //      groups: "0" = full match, "1" = first group, ...).
+            //   4. Iterates `recv.capture_names().flatten()` for NAMED
+            //      groups (source-declaration order).
+            //   5. Returns the populated map (or empty map on no match).
+            //
+            // DETERMINISTIC codegen: the generated Rust source is the
+            // same for every Buff source with the same shape (the
+            // closure + iteration structure is fixed; only the receiver
+            // and text args vary). Runtime iteration order of the
+            // resulting HashMap is NOT deterministic — but that's a
+            // Rust HashMap property, not a codegen concern (lookups by
+            // key still work regardless of iteration order). The
+            // group-index iteration order IS deterministic at runtime,
+            // so populating from numbered-first then named preserves
+            // source-declaration order if the user dumps the map.
+            M::Captures => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "captures() expects exactly 1 arg (the text to search), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let text_ref = coerce_str_arg_to_ref(text.clone(), &args[0]);
+                // Bind the captures result so we can iterate it twice
+                // (once for numbered, once for named). Use an explicit
+                // `let __buff_caps = recv.captures(text);` to avoid
+                // re-evaluating the receiver (which may have side effects).
+                let caps_call = method_call_one_arg(recv.clone(), "captures", text_ref);
+                // `recv.capture_names()` is needed for named-group
+                // iteration. We call it on the receiver, NOT on a
+                // borrow — `capture_names` takes `&self` so this works.
+                let capture_names_call = method_call_no_args(recv, "capture_names");
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let __buff_caps = #caps_call;
+                        let mut __buff_map: std::collections::HashMap<String, String> =
+                            std::collections::HashMap::new();
+                        if let Some(__buff_c) = __buff_caps {
+                            for (__buff_i, __buff_opt) in __buff_c.iter().enumerate() {
+                                if let Some(__buff_m) = __buff_opt {
+                                    __buff_map.insert(
+                                        __buff_i.to_string(),
+                                        __buff_m.as_str().to_string(),
+                                    );
+                                }
+                            }
+                            for __buff_name in #capture_names_call.flatten() {
+                                if let Some(__buff_m) = __buff_c.name(__buff_name) {
+                                    __buff_map.insert(
+                                        __buff_name.to_string(),
+                                        __buff_m.as_str().to_string(),
+                                    );
+                                }
+                            }
+                        }
+                        __buff_map
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Regex.captures codegen parse: {e}")))
             }
         }
     }
@@ -3327,9 +3514,10 @@ impl RustCodegen {
             .type_inferencer
             .infer_expr(receiver)
             .unwrap_or(Type::Unknown);
-        if let Some(pmethod) =
-            buff_lang_types::prelude_types::instance_fn_lookup(&recv_for_prelude_check, &method.name)
-        {
+        if let Some(pmethod) = buff_lang_types::prelude_types::instance_fn_lookup(
+            &recv_for_prelude_check,
+            &method.name,
+        ) {
             return self.lower_prelude_type_instance_fn(
                 &recv_for_prelude_check,
                 pmethod,
@@ -4673,6 +4861,14 @@ impl RustCodegen {
                         vec![rust_path_type("chrono::Utc")],
                     ));
                 }
+                // T124d: `Regex` source-level annotation lowers to the
+                // fully-qualified `regex::Regex` path. No generic arg
+                // (unlike DateTime). Handled before the primitive-name
+                // table so the table stays the bare primitive-name mapping
+                // (Int/Bool/...) without leaking the regex path.
+                if name.name == "Regex" {
+                    return Ok(rust_path_type("regex::Regex"));
+                }
                 // T32: the Buff→Rust primitive-name mapping is now a
                 // single named, configurable table at
                 // [`buff_primitive_to_rust_name`] (covers all 9 primitive
@@ -4874,6 +5070,10 @@ impl RustCodegen {
             Type::Time => "chrono::NaiveTime",
             Type::Duration => "chrono::TimeDelta",
             Type::Instant => "std::time::Instant",
+            // T124d: prelude Regex type. Plain `regex::Regex` path — no
+            // generic argument needed (unlike DateTime). Generated code
+            // uses the fully-qualified path so no `use` import is emitted.
+            Type::Regex => "regex::Regex",
             Type::Unknown | Type::Void => return None,
             // T124b: DateTime is the only prelude type that needs a generic
             // argument. Return early with the proper generic-argument form
@@ -5285,6 +5485,10 @@ pub fn buff_primitive_to_rust_name(buff_name: &str) -> &str {
         "Time" => "chrono::NaiveTime",
         "Duration" => "chrono::TimeDelta",
         "Instant" => "std::time::Instant",
+        // T124d: Regex prelude type. Plain `regex::Regex` path; no generic
+        // argument. Generated code uses the fully-qualified path so no
+        // `use` import is needed (mirrors the chrono family pattern).
+        "Regex" => "regex::Regex",
         other => other,
     }
 }
@@ -6711,8 +6915,7 @@ fn type_ref_names_prelude_type(ty: &TypeRef) -> bool {
         TypeRef::Named { name, .. } => buff_lang_types::is_prelude_type(&name.name),
         TypeRef::Option(inner, _) => type_ref_names_prelude_type(inner),
         TypeRef::Generic { base, args, .. } => {
-            type_ref_names_prelude_type(base)
-                || args.iter().any(type_ref_names_prelude_type)
+            type_ref_names_prelude_type(base) || args.iter().any(type_ref_names_prelude_type)
         }
         _ => false,
     }
@@ -6876,7 +7079,9 @@ fn stmt_uses_tracing(stmt: &Stmt) -> bool {
 /// the T124b registry).
 fn expr_uses_tracing(expr: &Expr) -> bool {
     match expr {
-        Expr::MethodCall { receiver, method, .. } => {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
             if let Expr::Ident(id, _) = receiver.as_ref() {
                 if id.name == "Log" {
                     return true;
@@ -6886,10 +7091,7 @@ fn expr_uses_tracing(expr: &Expr) -> bool {
             // level — same conservative strategy T124b uses for chrono
             // instance-method detection. The codegen arm will then either
             // emit a Log lowering or surface a clear error.
-            if matches!(
-                method.name.as_str(),
-                "debug" | "info" | "warn" | "error"
-            ) {
+            if matches!(method.name.as_str(), "debug" | "info" | "warn" | "error") {
                 // Only flag if the receiver could plausibly be Log (bare
                 // Ident). We already covered `Log` above; other receivers
                 // (values, calls) might be user methods that happen to
@@ -7023,6 +7225,198 @@ fn tracing_subscriber_init_stmt() -> Option<SynStmt> {
         }
     };
     syn::parse2::<SynStmt>(tokens).ok()
+}
+
+// ---------------------------------------------------------------------------
+// T124d — regex emit-on-demand detection (Regex module).
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any Regex usage (T124d):
+/// `Regex.compile(...)`, `regex.match(...)`, `regex.find(...)`,
+/// `regex.replace(...)`, `regex.captures(...)`. Returns `true` if at
+/// least one is found, signalling [`RustCodegen::generate`] to record
+/// `"regex"` in the extern-crate set so the pipeline knows the generated
+/// Cargo project depends on the `regex` crate.
+///
+/// Detection recognises TWO shapes:
+/// 1. **Associated function**: `Regex.compile(p)` — receiver is a bare
+///    `Expr::Ident` naming the `Regex` prelude type.
+/// 2. **Instance method**: `recv.match(...)` / `recv.find(...)` /
+///    `recv.replace(...)` / `recv.captures(...)` — receiver is a value
+///    whose inferred type is `Regex`. We can't do full type inference
+///    at walker time (the integrated TypeInferencer lives in codegen),
+///    so we conservatively flag ANY call whose method name matches one
+///    of the four Regex instance methods. This mirrors the chrono
+///    detection strategy (T124b): a false positive (e.g. a user type
+///    with a `.find(...)` method) registers `regex` unnecessarily —
+///    a no-op at the Cargo level (an unused dep). False negatives are
+///    impossible because the assoc-fn shape (`Regex.compile`) is the
+///    ONLY way to construct a Regex value at the surface.
+///
+/// Source-level type annotations like `let r: Regex = ...` also count
+/// (mirroring the chrono walker), so a program that binds a Regex
+/// without immediately calling it still registers the dep.
+///
+/// Mirrors the chrono (T124b) + tracing (T124c) detection patterns;
+/// the recursive walker covers every Stmt / Expr variant that could
+/// host a Regex call.
+fn program_uses_regex(decls: &[Decl]) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_regex(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_regex`]: scan a block's statements.
+fn block_uses_regex(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_regex)
+}
+
+/// Check a single statement (and its nested expressions) for Regex usage.
+fn stmt_uses_regex(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl {
+            value,
+            ty: Some(ty),
+            ..
+        }
+        | Stmt::LetPattern {
+            value,
+            ty: Some(ty),
+            ..
+        } => {
+            // Source-level type annotation names `Regex` (e.g.
+            // `let r: Regex = ...`). This counts even if the value
+            // expression doesn't itself mention regex.
+            type_ref_names_regex(ty) || expr_uses_regex(value)
+        }
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_regex(value),
+        Stmt::Assignment { target, value, .. } => expr_uses_regex(target) || expr_uses_regex(value),
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => expr_uses_regex(iter) || block_uses_regex(body),
+        Stmt::ForWhile { cond, body, .. } => expr_uses_regex(cond) || block_uses_regex(body),
+        Stmt::ForLet { value, body, .. } => expr_uses_regex(value) || block_uses_regex(body),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_regex(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_regex(e),
+            }) || block_uses_regex(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_regex(expr),
+    }
+}
+
+/// Returns `true` iff `ty` (or any nested inner TypeRef) mentions `Regex`.
+/// Used by [`stmt_uses_regex`] to detect source-level type annotations
+/// like `let r: Regex = ...`.
+fn type_ref_names_regex(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Named { name, .. } => name.name == "Regex",
+        TypeRef::Option(inner, _) => type_ref_names_regex(inner),
+        TypeRef::Generic { base, args, .. } => {
+            type_ref_names_regex(base) || args.iter().any(type_ref_names_regex)
+        }
+        _ => false,
+    }
+}
+
+/// Recursively scan an expression tree for any Regex usage.
+///
+/// Detection is conservative: it triggers on:
+/// - Any `Regex.<method>(...)` call (where `Regex` is the bare-ident
+///   receiver — flags the assoc-fn `Regex.compile(p)` shape).
+/// - Any `<recv>.<method>(...)` call whose method name matches one of
+///   the four Regex instance methods (`match`/`find`/`replace`/`captures`).
+fn expr_uses_regex(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            // Associated-function call: `Regex.compile(p)`.
+            if let Expr::Ident(id, _) = receiver.as_ref() {
+                if id.name == "Regex" {
+                    return true;
+                }
+            }
+            // Instance-method call: `recv.match(...)`, `recv.find(...)`,
+            // `recv.replace(...)`, `recv.captures(...)`. Conservative
+            // on the method NAME — the receiver's type is resolved at
+            // codegen time, so we err on the side of "register regex"
+            // if the method name matches any Regex instance fn.
+            // NOTE: `match` is a Buff keyword and won't parse from
+            // source today (parser allows only `TokenKind::Ident(_)` in
+            // method position), but AST-constructed test cases can
+            // still produce an `Ident("match")`. We include it for
+            // completeness so the walker stays in sync with the
+            // registry's `PreludeInstanceFn::ALL`.
+            if matches!(
+                method.name.as_str(),
+                "match" | "find" | "replace" | "captures"
+            ) {
+                return true;
+            }
+            expr_uses_regex(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => expr_uses_regex(lhs) || expr_uses_regex(rhs),
+        Expr::UnaryOp { operand, .. } => expr_uses_regex(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_regex(callee) || args.iter().any(expr_uses_regex)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_regex(cond)
+                || block_uses_regex(then_block)
+                || else_block.as_ref().is_some_and(block_uses_regex)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_regex(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_regex),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_regex(base) || indices.iter().any(expr_uses_regex)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_regex(k) || expr_uses_regex(v)),
+        Expr::Lambda { body, .. } => block_uses_regex(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_regex(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => expr_uses_regex(scrutinee) || arms.iter().any(|arm| block_uses_regex(&arm.body)),
+        Expr::SuspendExpr { inner, .. } => expr_uses_regex(inner),
+        Expr::Try { expr, .. } => expr_uses_regex(expr),
+        Expr::Spawn { task, .. } => expr_uses_regex(task),
+        Expr::Range { start, end, .. } => expr_uses_regex(start) || expr_uses_regex(end),
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_regex(value)
+                || block_uses_regex(then_block)
+                || else_block.as_ref().is_some_and(block_uses_regex)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_regex),
+        Expr::NamedArg { value, .. } => expr_uses_regex(value),
+    }
 }
 
 /// Build the builtin `Error` struct + its `new` impl + `Display` + Error trait

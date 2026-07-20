@@ -166,6 +166,29 @@ pub enum Type {
     /// `Instant.now()`. Distinct from [`Type::DateTime`] (which is
     /// wall-clock time and uses chrono). Additive — see [`Type::DateTime`].
     Instant,
+    /// A compiled regular expression, mapped to `regex::Regex` at codegen
+    /// time (T124d). Constructed via the prelude associated function
+    /// `Regex.compile(pattern)`; supports `regex.match(text)` /
+    /// `regex.find(text)` / `regex.replace(text, repl)` /
+    /// `regex.captures(text)` instance methods.
+    ///
+    /// This is **additive** (T124d): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es on
+    /// `Type` were extended with an arm for the new variant: `Display`,
+    /// `buff_type_to_syn` (codegen), `typeref_to_type` (inferencer +
+    /// exhaustiveness), `buff_primitive_to_rust_name` (primitive name
+    /// mapping), and `ast_typeref_to_syn`. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible` predicates
+    /// all return `false` for `Regex` — it's an opaque value type that
+    /// participates in no numeric promotion.
+    ///
+    /// This is the FIRST v1.4 prelude-type variant that is BOTH a real
+    /// runtime value (like DateTime) AND supports INSTANCE methods
+    /// (`recv.method(args)` shape — DateTime only had `format` +
+    /// accessors; Log was namespace-only with associated functions).
+    /// Future instance-method-carrying runtime types (e.g. Url, Hasher)
+    /// follow this pattern.
+    Regex,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -353,6 +376,25 @@ impl Type {
         )
     }
 
+    /// T124d: the compiled-regex type. Maps to `regex::Regex` at codegen
+    /// time. Constructed via `Regex.compile(pattern)`; supports
+    /// `regex.match(text)`, `regex.find(text)`,
+    /// `regex.replace(text, repl)`, `regex.captures(text)`.
+    pub fn regex() -> Self {
+        Type::Regex
+    }
+
+    /// T124d: Returns `true` if this type is the prelude `Regex` runtime
+    /// value. Used by the type inferencer + codegen to dispatch instance
+    /// method calls (`regex.match(...)`, `regex.find(...)`, ...) to the
+    /// `regex::Regex` lowering. Distinct from [`Self::is_prelude_datetime`]
+    /// (Regex is not a datetime family member) and from the namespace-only
+    /// check ([`crate::prelude_types::PreludeType::is_namespace_only`]) —
+    /// `Regex` IS a runtime value (an opaque compiled-pattern handle).
+    pub fn is_prelude_regex(&self) -> bool {
+        matches!(self, Type::Regex)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -438,6 +480,11 @@ impl fmt::Display for Type {
             Type::Time => f.write_str("Time"),
             Type::Duration => f.write_str("Duration"),
             Type::Instant => f.write_str("Instant"),
+            // T124d: prelude compiled-regex type. Opaque value type whose
+            // canonical Rust representation lives in the codegen crate
+            // (`regex::Regex`). The Display form mirrors the Buff surface
+            // name so diagnostics read naturally.
+            Type::Regex => f.write_str("Regex"),
         }
     }
 }

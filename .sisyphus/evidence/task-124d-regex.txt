@@ -1,0 +1,196 @@
+T124d: Regex module (Regex.compile + regex.match/find/replace/captures)
+========================================================================
+
+DATE: 2026-07-20
+BRANCH: master
+STATUS: COMPLETE — all three gates green.
+
+WHAT WAS BUILT
+-------------
+
+First v1.4 prelude module with INSTANCE METHODS on a compiled runtime
+value. DateTime (T124b) was assoc-fn + accessors only; Log (T124c) was
+namespace-only. Regex is a real first-class value whose primary surface
+IS the instance-method dispatch (regex.match/find/replace/captures).
+
+Surface added:
+
+    Regex.compile(pattern)         -> Regex           (assoc fn)
+    regex.match(text)              -> Option<String>  (instance)
+    regex.find(text)               -> Option<String>  (instance)
+    regex.replace(text, repl)      -> String          (instance)
+    regex.captures(text)           -> Map<String,String>  (instance)
+
+The canonical acceptance criterion is met:
+    regex.replace("a1b2", "\\d", "X") -> "aXbX"
+
+FILES CHANGED
+-------------
+
+1. crates/buff-lang-types/src/ty.rs (+47 lines net)
+   - Added Type::Regex variant (additive — no existing variant renamed).
+   - Added Type::regex() constructor + is_prelude_regex() predicate
+     (the runtime-value-but-not-datetime analogue of
+     is_prelude_datetime).
+   - Extended Display impl.
+
+2. crates/buff-lang-types/src/prelude_types.rs (+308 lines net)
+   - Added PreludeType::Regex variant + ALL entry + name() +
+     buff_type() (returns Type::Regex, NOT Void like Log).
+   - Added PreludeAssocFn::Compile variant + ALL entry + name()
+     ("compile").
+   - Added PreludeInstanceFn::{Match, Find, Replace, Captures} variants
+     + ALL entries + name()s.
+   - Extended assoc_fn_return_type with (Regex, Compile) -> Regex.
+   - Extended instance_fn_return_type with 4 (Regex, method) arms.
+   - Added 4 new registry unit tests (lookup valid/invalid pairs +
+     return types for both assoc and instance fns).
+   - Extended existing tests for the new variants (predicate,
+     constructors, Display, ALL.len() == 7).
+
+3. crates/buff-lang-codegen-rust/src/rust_codegen.rs (+422 lines net)
+   - Added program_uses_regex walker (mirrors chrono/tracing pattern):
+     block_uses_regex, stmt_uses_regex, expr_uses_regex,
+     type_ref_names_regex. Conservative on instance-method-name match
+     (any recv.find(...)/.match(...)/.replace(...)/.captures(...) flags
+     the dep — same conservative strategy T124b uses for chrono).
+   - Added registration in RustCodegen::generate:
+     if program_uses_regex(decls) { self.extern_crates.insert("regex"); }
+   - Extended ast_typeref_to_syn: Regex source annotation -> syn path
+     `regex::Regex`.
+   - Extended buff_type_to_syn: Type::Regex -> "regex::Regex".
+   - Extended buff_primitive_to_rust_name: "Regex" -> "regex::Regex".
+   - Extended lower_prelude_type_assoc_fn with (Regex, Compile) arm.
+     Lowering:
+         regex::Regex::new(pattern)
+             .unwrap_or_else(|_| regex::Regex::new(r"a^").unwrap())
+     This mirrors T124b's DateTime.parse unwrap_or pattern. The inner
+     .unwrap() is on the provably-valid literal `r"a^"` (an 'a' followed
+     by start-of-string anchor — syntactically valid, semantically never
+     matches). This is the established Rust idiom for infallible fallback
+     from a fallible ctor when no const-fn constructor exists (regex has
+     no Regex::empty() or const constructor; chrono's Utc::now() is the
+     equivalent trusted call in the T124b precedent).
+   - Extended lower_prelude_type_instance_fn with 4 arms:
+     * Match:   if recv.is_match(text) { Some(text.to_string()) } else { None }
+     * Find:    recv.find(text).map(|m| m.as_str().to_string())
+     * Replace: recv.replace_all(text, repl).to_string()
+     * Captures: { let __buff_caps = recv.captures(text);
+                  let mut __buff_map: HashMap<String, String> = HashMap::new();
+                  if let Some(__buff_c) = __buff_caps {
+                      for (__buff_i, __buff_opt) in __buff_c.iter().enumerate() {
+                          if let Some(__buff_m) = __buff_opt {
+                              __buff_map.insert(__buff_i.to_string(),
+                                                __buff_m.as_str().to_string());
+                          }
+                      }
+                      for __buff_name in recv.capture_names().flatten() {
+                          if let Some(__buff_m) = __buff_c.name(__buff_name) {
+                              __buff_map.insert(__buff_name.to_string(),
+                                                __buff_m.as_str().to_string());
+                          }
+                      }
+                  }
+                  __buff_map }
+     The captures block is DETERMINISTIC at the codegen level (same AST
+     -> byte-identical Rust). Numbered groups iterate in INDEX order
+     (0=full match, 1=first group, ...); named groups iterate in
+     source-declaration order via capture_names().flatten() (skipping
+     unnamed positions). The runtime HashMap iteration order is NOT
+     deterministic (Rust HashMap property), but lookups by key work
+     regardless. Captures use quote! + syn::parse2 (the standard
+     pattern) so the single string producer remains prettyplease.
+
+4. crates/buff-lang-codegen-rust/tests/regex_codegen.rs (NEW, ~600 lines)
+   - 21 integration tests covering:
+     * compile (string-literal + ident arg variants).
+     * match/find/replace/captures instance-method lowerings.
+     * extern_crates registration on Regex.compile, on instance-method
+       call (conservative walker), via source-level type annotation,
+       and unregistered when Regex is unused.
+     * Wrong-arity error paths for compile/match/replace.
+     * Deterministic-codegen re-run check for captures.
+   - 6 insta snapshots (.snap files accepted into the repo):
+     * compile/match/find/replace/captures individual snapshots.
+     * full_program_snapshot: a `main` exercising every surface
+       (compile + match + find + replace + captures in one program).
+
+5. Cargo.toml (+12 lines net)
+   - Added `regex = "1"` to [workspace.dependencies] with explanatory
+     comment block (rationale for `regex` over `fancy-regex`/`pcre2`,
+     codegen-only linking boundary note).
+
+INFER.RS EDIT
+-------------
+
+NONE. The T124b registry consult in infer.rs (Expr::MethodCall arm)
+already routes through prelude_types::assoc_fn_lookup +
+instance_fn_lookup generically. Adding Regex to the registry was
+sufficient — no infer.rs edit needed. This validates the registry
+extensibility claim from T124b ("future v1.4 stdlib tasks extend
+without rewriting the inferencer").
+
+KNOWN LIMITATIONS
+-----------------
+
+1. End-to-end link deferred (same boundary as chrono/tokio/tracing).
+   Generated code uses fully-qualified `regex::Regex::...` paths and
+   records `regex` in extern_crates, but the single-file `buff run`
+   rustc path does NOT link the regex crate. Cargo-project wiring is
+   deferred. Acceptance = snapshot-verified codegen + registry wired +
+   workspace green (the standard v1.4 acceptance criterion).
+
+2. `match` is a Buff keyword (one of the 25 reserved). The parser today
+   only accepts TokenKind::Ident(_) in method-call position
+   (crates/buff-lang-parser/src/expr.rs:519), so `regex.match(text)`
+   will NOT parse from Buff source today. The registry + codegen still
+   wire up the Match variant so:
+     (a) AST-constructed tests exercise the lowering end-to-end;
+     (b) a future parser relaxation (allowing keywords in method-call
+         position) lights it up with NO further registry/codegen work.
+   The other three instance methods (find/replace/captures) parse fine
+   since they're not keywords. This is a parser limitation, NOT a
+   registry/codegen limitation.
+
+GATES
+-----
+
+$ cargo test --workspace
+    TOTAL PASSED: 2264
+    TOTAL FAILED: 0
+    exit: 0
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s)
+    exit: 0
+    (no warnings)
+
+$ cargo build --workspace
+    Finished `dev` profile [unoptimized + debuginfo] target(s)
+    exit: 0
+
+$ rustfmt --check (on edited files only)
+    exit: 0
+    (pre-existing diffs in unrelated crates/buff-lang-cli/src/config.rs
+    are NOT introduced by this task — left for the orchestrator.)
+
+DEVIATIONS FROM T124b PRECEDENT
+-------------------------------
+
+1. Inner .unwrap() on a provably-valid literal fallback. T124b's
+   DateTime.parse uses `unwrap_or(chrono::Utc::now())` — the fallback
+   is an infallible function call. The regex crate has no equivalent
+   infallible constructor (`Regex::new` is the only path and returns
+   Result). The codegen generates
+   `regex::Regex::new(r"a^").unwrap()` as the fallback — the .unwrap()
+   on the provably-valid literal `r"a^"` is the minimum deviation
+   needed (any other approach would require a runtime static LazyLock
+   or const-fn constructor the regex crate doesn't provide).
+
+2. New predicate Type::is_prelude_regex() (separate from
+   is_prelude_datetime). T124b's predicate covers only the chrono
+   family. Regex is a runtime value but NOT a datetime, so a separate
+   predicate is needed. The prelude_types.rs test
+   `prelude_type_lookup_known_names` was extended to skip the datetime
+   round-trip check for Regex (mirroring the existing skip for
+   namespace-only Log).

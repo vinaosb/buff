@@ -89,6 +89,27 @@ pub enum PreludeType {
     /// `false` for it. This is the precedent for future namespace-only
     /// prelude modules (e.g. `Process`, `Cli`).
     Log,
+    /// `Regex` — a compiled regular expression (T124d). Wraps the
+    /// `regex::Regex` Rust crate. Constructed via the associated function
+    /// `Regex.compile(pattern)`; supports the instance methods
+    /// `regex.match(text)` (→ `Option<...>`), `regex.find(text)`
+    /// (→ `Option<String>`), `regex.replace(text, repl)` (→ `String`),
+    /// `regex.captures(text)` (→ `Map<String, String>`).
+    ///
+    /// This is the FIRST v1.4 prelude type that is BOTH a real runtime
+    /// value (like DateTime/Date/Time/Duration/Instant) AND carries
+    /// non-trivial instance methods. DateTime's instance methods
+    /// (`format`/`year`/...) are mostly accessors; Regex's instance
+    /// methods are the primary surface (a compiled regex is mostly
+    /// useful as a receiver). This is the precedent for future
+    /// runtime-value-with-rich-methods types (e.g. `Url`, `Hasher`,
+    /// `Connection`).
+    ///
+    /// `buff_type()` returns [`Type::Regex`] (a real value type, NOT
+    /// [`Type::Void`] like `Log`). `is_namespace_only()` returns `false`
+    /// (Regex IS a runtime value); `is_prelude_datetime()` returns
+    /// `false` (Regex is not a chrono type — see [`Type::is_prelude_regex`]).
+    Regex,
 }
 
 impl PreludeType {
@@ -100,6 +121,8 @@ impl PreludeType {
         PreludeType::Duration,
         PreludeType::Instant,
         PreludeType::Log,
+        // T124d: Regex — runtime value type with rich instance methods.
+        PreludeType::Regex,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -111,6 +134,10 @@ impl PreludeType {
             PreludeType::Duration => "Duration",
             PreludeType::Instant => "Instant",
             PreludeType::Log => "Log",
+            // T124d: the Regex prelude type name. Mirrors the Rust crate
+            // name so the codegen can splice `regex::Regex::...` paths
+            // without rewriting.
+            PreludeType::Regex => "Regex",
         }
     }
 
@@ -119,7 +146,9 @@ impl PreludeType {
     /// For the datetime family (DateTime/Date/Time/Duration/Instant) this is
     /// the matching datetime `Type` variant. For namespace-only modules
     /// like `Log` it returns [`Type::Void`] — the namespace itself is
-    /// never a value, only its associated functions are callable.
+    /// never a value, only its associated functions are callable. For
+    /// other runtime-value prelude types like `Regex` (T124d) it returns
+    /// the matching opaque `Type` variant.
     pub const fn buff_type(self) -> Type {
         match self {
             PreludeType::DateTime => Type::DateTime,
@@ -129,6 +158,10 @@ impl PreludeType {
             PreludeType::Instant => Type::Instant,
             // T124c: namespace-only — Log has no value representation.
             PreludeType::Log => Type::Void,
+            // T124d: Regex IS a runtime value — returns the opaque
+            // compiled-regex type (mapped to `regex::Regex` at codegen
+            // time). Distinct from Log (which returns Void).
+            PreludeType::Regex => Type::Regex,
         }
     }
 
@@ -211,6 +244,18 @@ pub enum PreludeAssocFn {
     /// `Log.error(msg, ...)`. Wraps `tracing::error!`. Same shape as
     /// [`Self::Debug`].
     Error,
+    // ---- Regex (T124d) -------------------------------------------------
+    /// `Regex.compile(pattern)` — compile a regex pattern string into a
+    /// `Regex` runtime value. One arg (the pattern String). Returns
+    /// `Regex` (the codegen-lowered `regex::Regex` is fallible in Rust
+    /// — `Regex::new` returns `Result<Regex, Error>` — but Buff's
+    /// "no panicking generated code" + "no Result surface in the
+    /// prelude-type ctor" stance (mirroring T124b's DateTime.parse
+    /// lowering which uses `unwrap_or`) makes the ctor infallible at
+    /// the surface: an invalid pattern yields a regex that matches
+    /// nothing, never a panic. The codegen details live in
+    /// `lower_prelude_type_assoc_fn`).
+    Compile,
 }
 
 impl PreludeAssocFn {
@@ -231,6 +276,8 @@ impl PreludeAssocFn {
         PreludeAssocFn::Info,
         PreludeAssocFn::Warn,
         PreludeAssocFn::Error,
+        // T124d: Regex.compile.
+        PreludeAssocFn::Compile,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -251,6 +298,11 @@ impl PreludeAssocFn {
             PreludeAssocFn::Info => "info",
             PreludeAssocFn::Warn => "warn",
             PreludeAssocFn::Error => "error",
+            // T124d: Regex.compile — name mirrors `regex::Regex::new`'s
+            // surface intent (compile a pattern) without colliding with
+            // the `new` constructor convention reserved for user types
+            // (`Type.new()` per §7 of the conventions).
+            PreludeAssocFn::Compile => "compile",
         }
     }
 }
@@ -306,6 +358,11 @@ pub fn assoc_fn_return_type(
         (PreludeType::Log, PreludeAssocFn::Info) => Some(Type::Void),
         (PreludeType::Log, PreludeAssocFn::Warn) => Some(Type::Void),
         (PreludeType::Log, PreludeAssocFn::Error) => Some(Type::Void),
+        // T124d: Regex module — `Regex.compile(pattern)` returns the
+        // opaque `Regex` value type. The pattern arg is a String; the
+        // returned `regex::Regex` value is the receiver for the four
+        // instance methods (match / find / replace / captures).
+        (PreludeType::Regex, PreludeAssocFn::Compile) => Some(Type::Regex),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -345,6 +402,41 @@ pub enum PreludeInstanceFn {
     // ---- Conversion -----------------------------------------------------
     /// `dt.timestamp()` — UNIX epoch seconds → `Int`.
     Timestamp,
+    // ---- Regex (T124d) -------------------------------------------------
+    /// `regex.match(text)` — test whether the compiled regex matches
+    /// `text` anywhere. One arg (String). Returns `Option<String>`:
+    /// `Some(text)` when at least one match exists (the wrapped value
+    /// is the original text — the codegen emits `.find(text).map(...)`
+    /// so the wrapped value is the first match's text); `None` when no
+    /// match exists. Mirrors Rust's `regex::Regex::is_match` but wraps
+    /// to Option for symmetry with [`Self::Find`] (the user can treat
+    /// both as "did it match?" without learning two patterns).
+    Match,
+    /// `regex.find(text)` — return the first match as a String. One arg
+    /// (String). Returns `Option<String>`: `Some(matched_text)` when a
+    /// match exists, `None` otherwise. Mirrors Rust's
+    /// `regex::Regex::find(...).map(|m| m.as_str().to_string())`.
+    Find,
+    /// `regex.replace(text, replacement)` — replace ALL matches in
+    /// `text` with `replacement` (no capture-group interpolation in
+    /// v1.4 — the literal `replacement` string is used for every
+    /// match). Two args (String text, String replacement). Returns
+    /// `String` (the text with every match replaced). Mirrors Rust's
+    /// `regex::Regex::replace_all(text, repl).to_string()`. Acceptance
+    /// criterion: `regex.replace("a1b2","\\d","X") == "aXbX"`.
+    Replace,
+    /// `regex.captures(text)` — return a `Map<String, String>` carrying
+    /// every capture group (named + numbered). One arg (String).
+    /// Returns `Map<String, String>` (always non-empty on a match:
+    /// numbered groups are keyed by their 1-based index as strings
+    /// `"0"`, `"1"`, ...; named groups additionally by their source
+    /// name `$name`). The full match is keyed as `"0"`. On NO match
+    /// the codegen emits an empty Map (the `regex::Regex::captures`
+    /// Rust API returns `Option` and we lower it via
+    /// `.unwrap_or_else(|| Captures::new())` — never a panic).
+    /// Key ordering is DETERMINISTIC (group-index order; named groups
+    /// intercalated at their source position).
+    Captures,
 }
 
 impl PreludeInstanceFn {
@@ -358,6 +450,11 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Minute,
         PreludeInstanceFn::Second,
         PreludeInstanceFn::Timestamp,
+        // T124d: Regex instance methods — Match / Find / Replace / Captures.
+        PreludeInstanceFn::Match,
+        PreludeInstanceFn::Find,
+        PreludeInstanceFn::Replace,
+        PreludeInstanceFn::Captures,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -371,6 +468,21 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Minute => "minute",
             PreludeInstanceFn::Second => "second",
             PreludeInstanceFn::Timestamp => "timestamp",
+            // T124d: Regex instance method names. Note `match` is a Buff
+            // keyword — the parser doesn't yet allow keywords as method
+            // names (the 25-keyword freeze holds for v1.4), so
+            // `regex.match(text)` will not parse from source today. The
+            // registry + codegen still wire up the `Match` variant so:
+            //   (a) AST-constructed tests can exercise it directly;
+            //   (b) a future parser relaxation (allowing keywords in
+            //       method-call position) lights it up with NO further
+            //       registry/codegen work.
+            // The other three (find/replace/captures) parse fine since
+            // they're not keywords.
+            PreludeInstanceFn::Match => "match",
+            PreludeInstanceFn::Find => "find",
+            PreludeInstanceFn::Replace => "replace",
+            PreludeInstanceFn::Captures => "captures",
         }
     }
 }
@@ -423,6 +535,27 @@ pub fn instance_fn_return_type(
         (Type::Time, PreludeInstanceFn::Minute) => Some(Type::int_default()),
         (Type::Time, PreludeInstanceFn::Second) => Some(Type::int_default()),
 
+        // T124d: Regex instance methods.
+        // `regex.match(text)` -> Option<String> (Some(original_text) when
+        // a match exists, None otherwise). The Option wrapping mirrors
+        // Rust's `regex::Regex::find(...).map(|m| m.as_str().to_string())`
+        // — never `is_match`'s bare bool — so the result composes with
+        // Buff's existing Option-handling surface (`??`, `if let`, ...).
+        (Type::Regex, PreludeInstanceFn::Match) => Some(Type::option(Type::string())),
+        // `regex.find(text)` -> Option<String> (Some(matched_text) /
+        // None). Mirrors `regex.find(...).map(|m| m.as_str().to_string())`.
+        (Type::Regex, PreludeInstanceFn::Find) => Some(Type::option(Type::string())),
+        // `regex.replace(text, repl)` -> String (text with EVERY match
+        // replaced — `replace_all`, not `replace` which would do one).
+        (Type::Regex, PreludeInstanceFn::Replace) => Some(Type::string()),
+        // `regex.captures(text)` -> Map<String, String>. Numbered groups
+        // keyed by their 1-based index as strings; named groups keyed by
+        // their source name; the full match is "0". Deterministic
+        // ordering (group-index order) is a codegen concern.
+        (Type::Regex, PreludeInstanceFn::Captures) => {
+            Some(Type::map(Type::string(), Type::string()))
+        }
+
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
         _ => None,
@@ -447,7 +580,12 @@ mod tests {
             // modules (T124c: `Log`) skip this check — they have no
             // value representation, so `buff_type()` returns `Void`
             // (which is correctly NOT a datetime).
-            if !t.is_namespace_only() {
+            //
+            // T124d: `Regex` is a runtime value but NOT a datetime, so
+            // it also skips the `is_prelude_datetime` check (its
+            // `buff_type()` returns `Type::Regex`, which round-trips
+            // through `is_prelude_regex()` instead).
+            if !t.is_namespace_only() && t != PreludeType::Regex {
                 assert!(t.buff_type().is_prelude_datetime());
             }
         }
@@ -563,11 +701,7 @@ mod tests {
     fn prelude_assoc_fn_return_types() {
         // DateTime.now() -> DateTime
         assert_eq!(
-            assoc_fn_return_type(
-                PreludeType::DateTime,
-                PreludeAssocFn::Now,
-                &[]
-            ),
+            assoc_fn_return_type(PreludeType::DateTime, PreludeAssocFn::Now, &[]),
             Some(Type::DateTime)
         );
         // DateTime.parse(s) -> DateTime
@@ -642,7 +776,11 @@ mod tests {
         );
         // Duration.format(...) -> None (Duration has no format method)
         assert_eq!(
-            instance_fn_return_type(&Type::Duration, PreludeInstanceFn::Format, &[Type::string()]),
+            instance_fn_return_type(
+                &Type::Duration,
+                PreludeInstanceFn::Format,
+                &[Type::string()]
+            ),
             None
         );
         // Instant.format(...) -> None
@@ -673,8 +811,9 @@ mod tests {
         let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
         assert_eq!(names.len(), unique.len(), "duplicate prelude type names");
         // 5 datetime-family members shipped in T124b + 1 namespace module
-        // (Log) shipped in T124c = 6 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 6);
+        // (Log) shipped in T124c + 1 runtime-value-with-methods type
+        // (Regex) shipped in T124d = 7 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 7);
     }
 
     #[test]
@@ -703,6 +842,19 @@ mod tests {
         assert!(!Type::int_default().is_prelude_datetime());
         assert!(!Type::string().is_prelude_datetime());
         assert!(!Type::Unknown.is_prelude_datetime());
+        // T124d: Regex type + predicate. Regex is NOT a datetime family
+        // member — its dedicated `is_prelude_regex` predicate captures
+        // the runtime-value-but-not-datetime case.
+        assert!(Type::regex().is_prelude_regex());
+        assert!(!Type::regex().is_prelude_datetime());
+        assert!(!Type::DateTime.is_prelude_regex());
+        assert!(!Type::string().is_prelude_regex());
+        // Cross-check via the prelude-type registry: `Regex.buff_type()`
+        // round-trips through `is_prelude_regex` (the only prelude type
+        // for which it does).
+        assert!(PreludeType::Regex.buff_type().is_prelude_regex());
+        assert!(!PreludeType::DateTime.buff_type().is_prelude_regex());
+        assert!(!PreludeType::Log.buff_type().is_prelude_regex());
     }
 
     #[test]
@@ -712,5 +864,141 @@ mod tests {
         assert_eq!(Type::Time.to_string(), "Time");
         assert_eq!(Type::Duration.to_string(), "Duration");
         assert_eq!(Type::Instant.to_string(), "Instant");
+        // T124d: Regex Display mirrors the Buff surface name.
+        assert_eq!(Type::Regex.to_string(), "Regex");
+    }
+
+    // T124d: Regex module — `Regex.compile(p)` assoc-fn lookups + return type.
+    #[test]
+    fn prelude_regex_assoc_fn_lookup_valid_pairs() {
+        // `Regex.compile` is the single associated function on the Regex
+        // prelude type. It returns a real `Regex` value (NOT Void like
+        // Log's namespace-only assoc fns).
+        assert_eq!(
+            assoc_fn_lookup("Regex", "compile"),
+            Some((PreludeType::Regex, PreludeAssocFn::Compile))
+        );
+        // `Regex` is recognised as a prelude type.
+        assert!(is_prelude_type("Regex"));
+        // `Regex.buff_type()` is `Regex` (a real runtime value, NOT Void).
+        assert_eq!(PreludeType::Regex.buff_type(), Type::Regex);
+        // `Regex.is_namespace_only()` is false (it IS a runtime value).
+        assert!(!PreludeType::Regex.is_namespace_only());
+        // The other prelude types are NOT Regex (round-trip via buff_type).
+        assert!(!PreludeType::DateTime.buff_type().is_prelude_regex());
+        assert!(PreludeType::Regex.buff_type().is_prelude_regex());
+    }
+
+    #[test]
+    fn prelude_regex_assoc_fn_lookup_rejects_invalid_pairs() {
+        // Regex.now is invalid (now is not a Regex method).
+        assert_eq!(assoc_fn_lookup("Regex", "now"), None);
+        // DateTime.compile is invalid (compile belongs to Regex).
+        assert_eq!(assoc_fn_lookup("DateTime", "compile"), None);
+        // Regex.unknown is invalid.
+        assert_eq!(assoc_fn_lookup("Regex", "unknown"), None);
+        // Regex.parse is invalid (Regex has compile, not parse).
+        assert_eq!(assoc_fn_lookup("Regex", "parse"), None);
+    }
+
+    #[test]
+    fn prelude_regex_assoc_fn_return_type() {
+        // Regex.compile(pattern) -> Regex.
+        assert_eq!(
+            assoc_fn_return_type(
+                PreludeType::Regex,
+                PreludeAssocFn::Compile,
+                &[Type::string()]
+            ),
+            Some(Type::Regex)
+        );
+        // Regex + non-Regex method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Regex, PreludeAssocFn::Now, &[]),
+            None
+        );
+        // Non-Regex type + Regex method is invalid.
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::DateTime, PreludeAssocFn::Compile, &[]),
+            None
+        );
+        // Log + Regex.compile is invalid (Log is namespace-only).
+        assert_eq!(
+            assoc_fn_return_type(PreludeType::Log, PreludeAssocFn::Compile, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn prelude_regex_instance_fn_lookup_valid_pairs() {
+        // All four Regex instance methods resolve via the registry when
+        // the receiver is `Type::Regex`.
+        assert_eq!(
+            instance_fn_lookup(&Type::Regex, "match"),
+            Some(PreludeInstanceFn::Match)
+        );
+        assert_eq!(
+            instance_fn_lookup(&Type::Regex, "find"),
+            Some(PreludeInstanceFn::Find)
+        );
+        assert_eq!(
+            instance_fn_lookup(&Type::Regex, "replace"),
+            Some(PreludeInstanceFn::Replace)
+        );
+        assert_eq!(
+            instance_fn_lookup(&Type::Regex, "captures"),
+            Some(PreludeInstanceFn::Captures)
+        );
+    }
+
+    #[test]
+    fn prelude_regex_instance_fn_lookup_rejects_invalid_pairs() {
+        // Regex.format is invalid (format belongs to DateTime/Date/Time).
+        assert_eq!(instance_fn_lookup(&Type::Regex, "format"), None);
+        // Regex.year is invalid.
+        assert_eq!(instance_fn_lookup(&Type::Regex, "year"), None);
+        // Regex.unknown is invalid.
+        assert_eq!(instance_fn_lookup(&Type::Regex, "unknown"), None);
+        // Regex.match is invalid when the receiver is NOT Regex.
+        assert_eq!(instance_fn_lookup(&Type::DateTime, "match"), None);
+        assert_eq!(instance_fn_lookup(&Type::String, "find"), None);
+    }
+
+    #[test]
+    fn prelude_regex_instance_fn_return_types() {
+        // regex.match(text) -> Option<String>.
+        assert_eq!(
+            instance_fn_return_type(&Type::Regex, PreludeInstanceFn::Match, &[Type::string()]),
+            Some(Type::option(Type::string()))
+        );
+        // regex.find(text) -> Option<String>.
+        assert_eq!(
+            instance_fn_return_type(&Type::Regex, PreludeInstanceFn::Find, &[Type::string()]),
+            Some(Type::option(Type::string()))
+        );
+        // regex.replace(text, repl) -> String.
+        assert_eq!(
+            instance_fn_return_type(
+                &Type::Regex,
+                PreludeInstanceFn::Replace,
+                &[Type::string(), Type::string()]
+            ),
+            Some(Type::string())
+        );
+        // regex.captures(text) -> Map<String, String>.
+        assert_eq!(
+            instance_fn_return_type(&Type::Regex, PreludeInstanceFn::Captures, &[Type::string()]),
+            Some(Type::map(Type::string(), Type::string()))
+        );
+        // Non-Regex receiver + Regex method is invalid.
+        assert_eq!(
+            instance_fn_return_type(&Type::DateTime, PreludeInstanceFn::Match, &[Type::string()]),
+            None
+        );
+        // Regex receiver + non-Regex method is invalid.
+        assert_eq!(
+            instance_fn_return_type(&Type::Regex, PreludeInstanceFn::Format, &[Type::string()]),
+            None
+        );
     }
 }

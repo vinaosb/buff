@@ -1,0 +1,10 @@
+---
+source: crates/buff-lang-codegen-rust/tests/regex_codegen.rs
+assertion_line: 513
+expression: src
+---
+fn f() {
+    let r: regex::Regex = regex::Regex::new("\\d+")
+        .unwrap_or_else(|_| regex::Regex::new("a^").unwrap());
+    if r.is_match("abc123") { Some("abc123".to_string()) } else { None };
+}
