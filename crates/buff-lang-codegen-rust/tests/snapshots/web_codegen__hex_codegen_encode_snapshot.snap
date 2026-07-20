@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 691
+expression: src
+---
+fn f() {
+    hex::encode(vec![72, 105]);
+}

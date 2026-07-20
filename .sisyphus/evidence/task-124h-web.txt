@@ -1,0 +1,46 @@
+T124h: Web modules — URL, Base64, Hex, URLEncode, UUID
+=======================================================
+Commit: (this change)  Date: 2026-07-20
+Verified by: Atlas orchestrator (subagent poll-timed-out; disk-verified)
+
+DEPS ADDED (root Cargo.toml [workspace.dependencies]):
+  base64 = "0.22"
+  hex = "0.4"
+  percent-encoding = "2"
+  uuid = { version = "1", features = ["v4", "v7"] }
+  url = reused (already pinned at workspace level via T117 LSP)
+
+FILES CHANGED:
+  Cargo.toml                                        +29
+  crates/buff-lang-types/src/ty.rs                  +46  (new additive Type::Url value variant + url()/is_prelude_url())
+  crates/buff-lang-types/src/prelude_types.rs       +430 (Base64/Hex/URLEncode/UUID namespaces + URL value type + instance fns; count/is_namespace_only tests bumped)
+  crates/buff-lang-codegen-rust/src/rust_codegen.rs +657 (lower_method_call name dispatch + narrow per-crate extern_crates walkers)
+  crates/buff-lang-codegen-rust/tests/web_codegen.rs  NEW (39 tests)
+  crates/buff-lang-codegen-rust/tests/snapshots/web_codegen__*.snap  NEW (15 snapshots)
+
+CODEGEN LOWERINGS (snapshot-verified, idiomatic Rust):
+  Base64.encode(bytes) -> base64::Engine::encode(&base64::engine::general_purpose::STANDARD, <bytes>)
+  Base64.decode(s)     -> base64::Engine::decode(&...STANDARD, <s>).unwrap_or_default()   (Vec<u8>)
+  Hex.encode(bytes)    -> hex::encode(<bytes>)
+  Hex.decode(s)        -> hex::decode(<s>).unwrap_or_default()
+  URLEncode.encode(s)  -> percent_encoding::utf8_percent_encode(<s>, percent_encoding::NON_ALPHANUMERIC).to_string()
+  URLEncode.decode(s)  -> percent_encoding::percent_decode_str(<s>).decode_utf8_lossy().into_owned()
+  UUID.v4()            -> uuid::Uuid::new_v4().to_string()
+  UUID.v7()            -> uuid::Uuid::now_v7().to_string()
+  UUID.parse(s)        -> uuid::Uuid::parse_str(<s>).is_ok()
+  URL.parse(s)         -> url::Url::parse(<s>).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap())  [Type::Url value]
+  url.scheme           -> u.scheme().to_string()
+  url.host             -> u.host_str().unwrap_or_default().to_string()
+  url.path             -> u.path().to_string()
+  url.query(key)       -> { let __buff_key = key.to_string(); u.query_pairs().find(|(k,_)| *k==__buff_key).map(|(_,v)| v.into_owned()) }  (Option<String>)
+
+QA SCENARIO (plan L1266-1275 — URL parsing) transpiles to valid Rust:
+  Buff: let u = URL.parse("https://example.com/path?key=val"); print(u.host); print(u.query("key"))
+  -> u.host_str().unwrap_or_default().to_string() == "example.com"; query_pairs lookup for "key" -> Some("val")
+  (codegen-only linking boundary: single-file `buff run` rustc does NOT link url/base64/hex/percent-encoding/uuid;
+   cargo-project wiring deferred — same boundary as chrono/tracing/regex/toml/rand/tokio. Contract = snapshots + extern_crates.)
+
+GATES (MSVC env, Windows):
+  cargo clippy --workspace --all-targets -- -D warnings   => EXIT 0
+  cargo test -p buff-lang-codegen-rust --test web_codegen  => test result: ok. 39 passed; 0 failed
+  cargo test --workspace                                    => EXIT 0 (no FAILED, no errors; test_command_e2e_fail panic line is an intentional fixture)

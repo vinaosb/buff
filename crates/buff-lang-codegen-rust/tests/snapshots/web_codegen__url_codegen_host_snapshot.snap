@@ -1,0 +1,10 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 759
+expression: src
+---
+fn f() {
+    let u: url::Url = url::Url::parse("https://a.com/b")
+        .unwrap_or_else(|_| url::Url::parse("about:blank").unwrap());
+    u.host_str().unwrap_or_default().to_string();
+}

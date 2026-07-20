@@ -94,6 +94,35 @@ crossbeam-channel = "0.5"
 # linking boundary (single-file `buff run` rustc path does NOT link it;
 # cargo-project wiring is deferred).
 rand = "0.8"
+# T124h: Web modules (Base64 / Hex / URLEncode / UUID / URL) wrap four
+# mature Rust crates. Each codegen-lowered call uses fully-qualified
+# paths so generated code requires no `use` import - but the recorded
+# name in `extern_crates` signals to the pipeline / build-driver that
+# the generated Cargo project must declare each crate in
+# `[dependencies]`.
+#
+# - `base64` 0.22: STANDARD engine via the `Engine` trait. Codegen uses
+#   UFCS (`base64::Engine::encode(&STANDARD, ...)`) so the trait need
+#   not be imported into generated code.
+# - `hex` 0.4: free functions `hex::encode` / `hex::decode` (no trait
+#   import needed).
+# - `percent-encoding` 2.x: `utf8_percent_encode` / `percent_decode_str`
+#   + the pre-defined `NON_ALPHANUMERIC` AsciiSet.
+# - `uuid` 1.x: `Uuid::new_v4` / `Uuid::now_v7` / `Uuid::parse_str`.
+#   Features `v4` + `v7` enable the constructors; `rng-getrandom` (the
+#   default RNG backend) is enabled implicitly by `v4` / `v7`.
+#
+# `url` is already pinned at the workspace level (T117 LSP server uses
+# it transitively via lsp-types); T124h reuses that pin.
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio codegen-only linking
+# boundary (single-file `buff run` rustc path does NOT link them;
+# cargo-project wiring is deferred). Snapshots + extern_crates set is
+# the verifiable contract.
+base64 = "0.22"
+hex = "0.4"
+percent-encoding = "2"
+uuid = { version = "1", features = ["v4", "v7"] }
 buff-lang-ast = { path = "crates/buff-lang-ast" }
 buff-lang-lexer = { path = "crates/buff-lang-lexer" }
 buff-lang-parser = { path = "crates/buff-lang-parser" }

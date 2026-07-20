@@ -573,6 +573,42 @@ impl RustCodegen {
         if program_uses_tokio(decls) {
             self.extern_crates.insert("tokio".to_string());
         }
+        // T124h: register the FIVE web-module extern crates (Base64 /
+        // Hex / URLEncode / UUID / URL) when the program references the
+        // corresponding prelude modules. Each walker is NARROW - it
+        // flags ONLY the specific receiver name (`Base64` / `Hex` /
+        // `URLEncode` / `UUID` / `URL`), mirroring the rand / tokio
+        // walker pattern (T124f / T124g). The chrono over-broad-walker
+        // gotcha (T124f) is the cautionary tale: each walker stays
+        // minimal so it doesn't over-trigger on unrelated code.
+        //
+        // Generated code uses fully-qualified paths so no `use` import
+        // is emitted - but the recorded name signals to the pipeline /
+        // build-driver that the generated Cargo project must declare
+        // each crate in `[dependencies]`.
+        //
+        // Mirrors the chrono/tracing/regex/toml/rand/tokio registration
+        // pattern (T124b/T124c/T124d/T124e/T124f/T124g): single-file
+        // `buff run` rustc path does NOT link these crates; the
+        // codegen-only linking boundary is the accepted acceptance
+        // criterion for v1.4 prelude modules. Cargo-project wiring is
+        // deferred (snapshots + extern_crates set is the verifiable
+        // contract).
+        if program_uses_base64(decls) {
+            self.extern_crates.insert("base64".to_string());
+        }
+        if program_uses_hex(decls) {
+            self.extern_crates.insert("hex".to_string());
+        }
+        if program_uses_percent_encoding(decls) {
+            self.extern_crates.insert("percent-encoding".to_string());
+        }
+        if program_uses_uuid(decls) {
+            self.extern_crates.insert("uuid".to_string());
+        }
+        if program_uses_url(decls) {
+            self.extern_crates.insert("url".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -3392,6 +3428,191 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Env.has codegen parse: {e}")))
             }
+            // T124h: Base64 module - 2 assoc fns wrapping the `base64`
+            // Rust crate (STANDARD engine via the `Engine` trait).
+            //
+            // `Base64.encode(bytes)` -> String. Wraps
+            // `base64::Engine::encode(&base64::engine::general_purpose::STANDARD,
+            // bytes)` (UFCS form so the `Engine` trait need not be in
+            // scope at the call site - generated code requires NO `use
+            // base64::Engine as _;` import). The arg is the byte source
+            // (Vector<Byte> / &[u8] / anything `AsRef<[u8]>`).
+            (T::Base64, A::Encode) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        #arg,
+                    )
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Base64.encode codegen parse: {e}")))
+            }
+            // `Base64.decode(s)` -> Vector<Byte>. Wraps
+            // `base64::Engine::decode(&general_purpose::STANDARD, s)
+            // .unwrap_or_default()` (empty Vec on decode failure - NEVER
+            // panics, matching Buff's "no panicking generated code" rule).
+            // UFCS form so the `Engine` trait need not be in scope.
+            //
+            // The arg is borrowed via `&` so Rust's Deref coercion turns
+            // `&String` into `&[u8]` (via `String`'s `AsRef<[u8]>` impl)
+            // - the type `Engine::decode`'s generic bound accepts.
+            (T::Base64, A::Decode) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD,
+                        #arg_ref,
+                    ).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Base64.decode codegen parse: {e}")))
+            }
+            // T124h: Hex module - 2 assoc fns wrapping the `hex` Rust
+            // crate (free functions, no trait import needed).
+            //
+            // `Hex.encode(bytes)` -> String. Wraps `hex::encode(bytes)`.
+            // The arg is the byte source (`AsRef<[u8]>`).
+            (T::Hex, A::Encode) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    hex::encode(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Hex.encode codegen parse: {e}")))
+            }
+            // `Hex.decode(s)` -> Vector<Byte>. Wraps
+            // `hex::decode(s).unwrap_or_default()` (empty Vec on decode
+            // failure - NEVER panics). The arg is borrowed via `&` so
+            // Rust's Deref coercion turns `&String` into `&str` (the
+            // type `hex::decode` accepts via `AsRef<[u8]>` on `&str`).
+            (T::Hex, A::Decode) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    hex::decode(#arg_ref).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Hex.decode codegen parse: {e}")))
+            }
+            // T124h: URLEncode module - 2 assoc fns wrapping the
+            // `percent-encoding` Rust crate.
+            //
+            // `URLEncode.encode(s)` -> String. Wraps
+            // `percent_encoding::utf8_percent_encode(s,
+            // percent_encoding::NON_ALPHANUMERIC).to_string()`. The
+            // `NON_ALPHANUMERIC` AsciiSet encodes everything that's not
+            // an ASCII letter or digit (the canonical "encode special
+            // characters" choice for safe URL embedding).
+            //
+            // The arg is borrowed via `&` so Rust's Deref coercion turns
+            // `&String` into `&str` (the type `utf8_percent_encode`
+            // takes).
+            (T::URLEncode, A::Encode) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    percent_encoding::utf8_percent_encode(
+                        #arg_ref,
+                        percent_encoding::NON_ALPHANUMERIC,
+                    ).to_string()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("URLEncode.encode codegen parse: {e}"))
+                })
+            }
+            // `URLEncode.decode(s)` -> String. Wraps
+            // `percent_encoding::percent_decode_str(s).decode_utf8_lossy()
+            // .into_owned()`. Invalid UTF-8 sequences become U+FFFD
+            // REPLACEMENT CHARACTER (lossy decode - NEVER panics).
+            //
+            // The arg is borrowed via `&` so Rust's Deref coercion turns
+            // `&String` into `&str` (the type `percent_decode_str`
+            // takes).
+            (T::URLEncode, A::Decode) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    percent_encoding::percent_decode_str(#arg_ref)
+                        .decode_utf8_lossy()
+                        .into_owned()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("URLEncode.decode codegen parse: {e}"))
+                })
+            }
+            // T124h: UUID module - 3 assoc fns wrapping the `uuid` Rust
+            // crate. Surface return types are String / String / Bool
+            // (NOT a `Uuid` value type) - Buff surfaces UUIDs as their
+            // canonical hyphen-separated String form.
+            //
+            // `UUID.v4()` -> String. Wraps
+            // `uuid::Uuid::new_v4().to_string()` (requires the `v4`
+            // feature on the `uuid` crate, configured at the workspace
+            // level).
+            (T::UUID, A::V4) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    uuid::Uuid::new_v4().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("UUID.v4 codegen parse: {e}")))
+            }
+            // `UUID.v7()` -> String. Wraps
+            // `uuid::Uuid::now_v7().to_string()` (requires the `v7`
+            // feature on the `uuid` crate). Distinct from v4 in
+            // generation algorithm (v7 is timestamp-prefixed for sort
+            // stability) but identical surface type.
+            (T::UUID, A::V7) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    uuid::Uuid::now_v7().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("UUID.v7 codegen parse: {e}")))
+            }
+            // `UUID.parse(s)` -> Bool. Wraps
+            // `uuid::Uuid::parse_str(s).is_ok()` (validation only).
+            // Reuses the shared `Parse` variant (5th overload for Parse,
+            // after DateTime / Date / Toml / URL). The arg is borrowed
+            // via `&` so Rust's Deref coercion turns `&String` into
+            // `&str` (the type `Uuid::parse_str` takes).
+            (T::UUID, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    uuid::Uuid::parse_str(#arg_ref).is_ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("UUID.parse codegen parse: {e}")))
+            }
+            // T124h: URL module - 1 assoc fn (parse) wrapping the `url`
+            // Rust crate. URL is a runtime-value type (NOT namespace-
+            // only like Base64/Hex/URLEncode/UUID) - `URL.parse(s)`
+            // returns a `URL` value carrying the four instance
+            // accessors `.scheme` / `.host` / `.path` / `.query(key)`.
+            //
+            // `URL.parse(s)` -> URL. Wraps
+            // `url::Url::parse(s).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap())`.
+            // The `about:blank` fallback is always parseable (it's a
+            // reserved URL scheme per RFC 3986), so the inner `.unwrap()`
+            // is infallible at runtime (matches Regex.compile's `r"a^"`
+            // fallback stance from T124d). NEVER panics on malformed
+            // input - falls back to a benign placeholder URL.
+            //
+            // The arg is borrowed via `&` so Rust's Deref coercion turns
+            // `&String` into `&str` (the type `Url::parse` takes).
+            (T::URL, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg_ref = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    url::Url::parse(#arg_ref)
+                        .unwrap_or_else(|_| url::Url::parse("about:blank").unwrap())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("URL.parse codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -3672,6 +3893,93 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Regex.captures codegen parse: {e}")))
+            }
+            // T124h: URL instance accessors.
+            //
+            // `url.scheme` -> String. Wraps `url::Url::scheme().to_string()`.
+            // The `.to_string()` lifts `&str` to `String` (Buff hides
+            // references from users). Zero args.
+            M::Scheme => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "scheme takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let scheme_call = method_call_no_args(recv, "scheme");
+                Ok(method_call_no_args(scheme_call, "to_string"))
+            }
+            // `url.host` -> String (empty when the URL has no host - NEVER
+            // panics). Wraps
+            // `url::Url::host_str().unwrap_or_default().to_string()`.
+            // `host_str()` returns `Option<&str>` (None when the URL has
+            // no host - e.g. `mailto:` URLs); `.unwrap_or_default()`
+            // yields `&str` (the `""` when None); `.to_string()` lifts to
+            // owned `String`.
+            M::Host => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "host takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let host_call = method_call_no_args(recv, "host_str");
+                let default = method_call_no_args(host_call, "unwrap_or_default");
+                Ok(method_call_no_args(default, "to_string"))
+            }
+            // `url.path` -> String. Wraps `url::Url::path().to_string()`.
+            // The `.to_string()` lifts `&str` to `String`.
+            M::Path => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "path takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let path_call = method_call_no_args(recv, "path");
+                Ok(method_call_no_args(path_call, "to_string"))
+            }
+            // `url.query(key)` -> Option<String>. Wraps a block:
+            // ```
+            // {
+            //     let __buff_key = (key).to_string();
+            //     recv.query_pairs()
+            //         .find(|(k, _)| *k == __buff_key)
+            //         .map(|(_, v)| v.into_owned())
+            // }
+            // ```
+            // The `to_string()` on the key normalises both `&str`
+            // literals and `String` idents to owned `String` so the
+            // closure's `*k == __buff_key` comparison (where `*k:
+            // Cow<str>` and `__buff_key: String`) type-checks via
+            // `impl PartialEq<String> for Cow<'_, str>`. `.into_owned()`
+            // lifts the matched `Cow<str>` value to owned `String`.
+            // Returns `None` when the key is absent (find returns None) -
+            // NEVER panics.
+            //
+            // The block-bind is required because `key` may have side
+            // effects (function call) or move semantics (variable) that
+            // would otherwise be re-evaluated on every closure call.
+            // Binding once to `__buff_key` makes the lookup O(1) in
+            // key-construction cost.
+            M::Query => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "query(key) expects exactly 1 arg (the key), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let __buff_key = (#key).to_string();
+                        #recv.query_pairs()
+                            .find(|(k, _)| *k == __buff_key)
+                            .map(|(_, v)| v.into_owned())
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("URL.query codegen parse: {e}")))
             }
         }
     }
@@ -5915,6 +6223,14 @@ impl RustCodegen {
             // generic argument needed (unlike DateTime). Generated code
             // uses the fully-qualified path so no `use` import is emitted.
             Type::Regex => "regex::Regex",
+            // T124h: prelude URL type. Plain `url::Url` path - no
+            // generic argument needed. Generated code uses the fully-
+            // qualified path so no `use` import is emitted. Note the
+            // case mapping: Buff surface is `URL` (all-caps per the
+            // DateTime / Regex convention); the underlying Rust type is
+            // `url::Url` (capital U, lowercase rl - the canonical Rust
+            // spelling).
+            Type::Url => "url::Url",
             Type::Unknown | Type::Void => return None,
             // T124b: DateTime is the only prelude type that needs a generic
             // argument. Return early with the proper generic-argument form
@@ -6766,6 +7082,15 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     // as `vec.sort` (a field access on the Vec, which doesn't exist).
     // `sort_by` takes one arg so it's never affected by the heuristic.
     "sort",
+    // T124h: URL zero-arg instance accessors (`scheme` / `host` /
+    // `path`). Without these entries the T26 field-access heuristic
+    // would rewrite `url.scheme` as a Rust field access on the
+    // `url::Url` value (which doesn't exist - the underlying Rust
+    // methods are `.scheme()` / `.host_str()` / `.path()`).
+    // `query` takes one arg so it's never affected by the heuristic.
+    "scheme",
+    "host",
+    "path",
 ];
 
 /// Build the attribute list for a generated struct: always
@@ -8705,6 +9030,338 @@ fn expr_uses_tokio(expr: &Expr) -> bool {
         }
         Expr::TupleLit(members, _) => members.iter().any(expr_uses_tokio),
         Expr::NamedArg { value, .. } => expr_uses_tokio(value),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T124h - web module emit-on-demand detection (Base64 / Hex / URLEncode /
+// UUID / URL modules). All five share the same detection shape: a
+// `MethodCall` whose receiver is a bare Ident naming the prelude
+// namespace (`Base64.encode(...)`, `UUID.v4()`, `URL.parse(...)`, ...).
+// They differ ONLY in the namespace name, so the recursion is shared
+// via `expr_uses_namespace` (takes the namespace name as a parameter).
+// The five top-level walkers are thin wrappers.
+//
+// Walker scope: NARROW (per the T124f gotcha that chrono was originally
+// over-broad). Each walker flags ONLY its specific receiver name - NOT
+// every prelude-type Ident, NOT every method-name match. Same conservative
+// receiver-name-only strategy as the rand / tokio walkers (T124f / T124g):
+// a hypothetical user-defined variable named `Base64` / `Hex` / etc.
+// would trigger a false positive, but since these are reserved prelude
+// namespaces the user can't legitimately bind to them.
+// ---------------------------------------------------------------------------
+
+/// Walk the declaration list looking for any `<namespace>.<method>(...)`
+/// call (T124h). Returns `true` if at least one is found, signalling
+/// [`RustCodegen::generate`] to record the corresponding Rust crate in
+/// the extern-crate set.
+///
+/// Shared by all 5 web-module walkers. The `namespace` parameter is the
+/// bare Ident name the walker matches against MethodCall receivers
+/// (e.g. `"Base64"`, `"Hex"`, `"URLEncode"`, `"UUID"`, `"URL"`).
+fn program_uses_namespace(decls: &[Decl], namespace: &str) -> bool {
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_namespace(&f.body, namespace) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_namespace`]: scan a block's statements.
+fn block_uses_namespace(block: &Block, namespace: &str) -> bool {
+    block.stmts.iter().any(|s| stmt_uses_namespace(s, namespace))
+}
+
+/// Check a single statement (and its nested expressions) for
+/// `<namespace>.<method>(...)` usage. Mirrors the `stmt_uses_rand` /
+/// `stmt_uses_tokio` shape exactly.
+fn stmt_uses_namespace(stmt: &Stmt, namespace: &str) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_namespace(value, namespace),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_namespace(target, namespace) || expr_uses_namespace(value, namespace)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn {
+            iter, body, ..
+        } => expr_uses_namespace(iter, namespace) || block_uses_namespace(body, namespace),
+        Stmt::ForWhile {
+            cond, body, ..
+        } => expr_uses_namespace(cond, namespace) || block_uses_namespace(body, namespace),
+        Stmt::ForLet {
+            value, body, ..
+        } => expr_uses_namespace(value, namespace) || block_uses_namespace(body, namespace),
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => {
+                    expr_uses_namespace(value, namespace)
+                }
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_namespace(e, namespace),
+            }) || block_uses_namespace(else_block, namespace)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_namespace(expr, namespace),
+    }
+}
+
+/// Recursively scan an expression tree for a `<namespace>.<method>(...)`
+/// call. Same conservative bare-Ident-receiver strategy as
+/// `expr_uses_rand` / `expr_uses_tokio`.
+fn expr_uses_namespace(expr: &Expr, namespace: &str) -> bool {
+    match expr {
+        Expr::MethodCall { receiver, .. } => {
+            if let Expr::Ident(id, _) = receiver.as_ref() {
+                if id.name == namespace {
+                    return true;
+                }
+            }
+            expr_uses_namespace(receiver, namespace)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => {
+            expr_uses_namespace(lhs, namespace) || expr_uses_namespace(rhs, namespace)
+        }
+        Expr::UnaryOp { operand, .. } => expr_uses_namespace(operand, namespace),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_namespace(callee, namespace)
+                || args.iter().any(|a| expr_uses_namespace(a, namespace))
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_namespace(cond, namespace)
+                || block_uses_namespace(then_block, namespace)
+                || else_block.as_ref().is_some_and(|b| block_uses_namespace(b, namespace))
+        }
+        Expr::StringInterp { parts, .. } => {
+            parts.iter().any(|p| match p {
+                InterpPart::Expr(e) => expr_uses_namespace(e, namespace),
+                InterpPart::Literal(_) => false,
+            })
+        }
+        Expr::ArrayLit { elements, .. } => {
+            elements.iter().any(|e| expr_uses_namespace(e, namespace))
+        }
+        Expr::Index { base, indices, .. } => {
+            expr_uses_namespace(base, namespace)
+                || indices.iter().any(|i| expr_uses_namespace(i, namespace))
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_namespace(k, namespace) || expr_uses_namespace(v, namespace)),
+        Expr::Lambda { body, .. } => block_uses_namespace(body, namespace),
+        Expr::StructInit { fields, .. } => {
+            fields.iter().any(|(_, v)| expr_uses_namespace(v, namespace))
+        }
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_namespace(scrutinee, namespace)
+                || arms.iter().any(|arm| block_uses_namespace(&arm.body, namespace))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_namespace(inner, namespace),
+        Expr::Try { expr, .. } => expr_uses_namespace(expr, namespace),
+        Expr::Spawn { task, .. } => expr_uses_namespace(task, namespace),
+        Expr::Range { start, end, .. } => {
+            expr_uses_namespace(start, namespace) || expr_uses_namespace(end, namespace)
+        }
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_namespace(value, namespace)
+                || block_uses_namespace(then_block, namespace)
+                || else_block.as_ref().is_some_and(|b| block_uses_namespace(b, namespace))
+        }
+        Expr::TupleLit(members, _) => {
+            members.iter().any(|m| expr_uses_namespace(m, namespace))
+        }
+        Expr::NamedArg { value, .. } => expr_uses_namespace(value, namespace),
+    }
+}
+
+/// T124h: detect `Base64.encode(...)` / `Base64.decode(...)` calls.
+fn program_uses_base64(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "Base64")
+}
+
+/// T124h: detect `Hex.encode(...)` / `Hex.decode(...)` calls.
+fn program_uses_hex(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "Hex")
+}
+
+/// T124h: detect `URLEncode.encode(...)` / `URLEncode.decode(...)` calls.
+/// The crate name is `percent-encoding` (with hyphen) - distinct from
+/// the Buff namespace name `URLEncode` (no hyphen).
+fn program_uses_percent_encoding(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "URLEncode")
+}
+
+/// T124h: detect `UUID.v4()` / `UUID.v7()` / `UUID.parse(...)` calls.
+fn program_uses_uuid(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "UUID")
+}
+
+/// T124h: detect `URL.parse(...)` calls AND `url.scheme` / `url.host` /
+/// `url.path` / `url.query(k)` instance method calls. The instance
+/// methods require `url` too, so any program with a URL value's
+/// accessor call needs the crate.
+///
+/// The instance-method detection uses the conservative method-name
+/// strategy from `expr_uses_chrono` (T124b): flag any MethodCall whose
+/// method name matches a URL instance method, regardless of receiver.
+/// This is slightly broader than the namespace-only walkers above but
+/// still narrow (only 4 specific method names: scheme/host/path/query).
+/// False positives (user methods sharing these names) would
+/// over-register `url` but never cause a missing-dependency rustc
+/// failure (the registered crate just goes unused).
+fn program_uses_url(decls: &[Decl]) -> bool {
+    // The namespace assoc-fn path: `URL.parse(s)` (bare Ident receiver).
+    if program_uses_namespace(decls, "URL") {
+        return true;
+    }
+    // The instance-method path: scan for any MethodCall whose method
+    // name is a URL accessor (scheme/host/path/query). The receiver's
+    // inferred type is checked at codegen time; we err on the side of
+    // registering `url` if the name matches.
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            if block_uses_url_instance(&f.body) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive helper for [`program_uses_url`]: scan a block for URL
+/// instance-method calls (scheme/host/path/query).
+fn block_uses_url_instance(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_url_instance)
+}
+
+/// Check a single statement for URL instance-method calls.
+fn stmt_uses_url_instance(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::LetDecl { value, .. }
+        | Stmt::LetPattern { value, .. }
+        | Stmt::ExprStmt(value, _)
+        | Stmt::Return(Some(value), _) => expr_uses_url_instance(value),
+        Stmt::Assignment { target, value, .. } => {
+            expr_uses_url_instance(target) || expr_uses_url_instance(value)
+        }
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
+        Stmt::ForIn { iter, body, .. } => {
+            expr_uses_url_instance(iter) || block_uses_url_instance(body)
+        }
+        Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_url_instance(cond) || block_uses_url_instance(body)
+        }
+        Stmt::ForLet { value, body, .. } => {
+            expr_uses_url_instance(value) || block_uses_url_instance(body)
+        }
+        Stmt::Guard {
+            conditions,
+            else_block,
+            ..
+        } => {
+            conditions.iter().any(|c| match c {
+                buff_lang_ast::GuardCondition::Let { value, .. } => expr_uses_url_instance(value),
+                buff_lang_ast::GuardCondition::Bool(e) => expr_uses_url_instance(e),
+            }) || block_uses_url_instance(else_block)
+        }
+        Stmt::Defer { expr, .. } => expr_uses_url_instance(expr),
+    }
+}
+
+/// Recursively scan an expression tree for a URL instance-method call.
+fn expr_uses_url_instance(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
+            // URL instance method names: scheme/host/path/query. The
+            // `path` name is shared with `std::path::Path` and other
+            // Rust types - the over-registration is benign (the crate
+            // is recorded but unused; rustc never errors on unused
+            // dependencies when cargo registers them).
+            if matches!(
+                method.name.as_str(),
+                "scheme" | "host" | "path" | "query"
+            ) {
+                return true;
+            }
+            expr_uses_url_instance(receiver)
+        }
+        Expr::Literal(_, _) | Expr::Ident(_, _) => false,
+        Expr::BinaryOp { lhs, rhs, .. } => {
+            expr_uses_url_instance(lhs) || expr_uses_url_instance(rhs)
+        }
+        Expr::UnaryOp { operand, .. } => expr_uses_url_instance(operand),
+        Expr::FuncCall { callee, args, .. } => {
+            expr_uses_url_instance(callee) || args.iter().any(expr_uses_url_instance)
+        }
+        Expr::IfExpr {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_url_instance(cond)
+                || block_uses_url_instance(then_block)
+                || else_block.as_ref().is_some_and(block_uses_url_instance)
+        }
+        Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
+            InterpPart::Expr(e) => expr_uses_url_instance(e),
+            InterpPart::Literal(_) => false,
+        }),
+        Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_url_instance),
+        Expr::Index { base, indices, .. } => {
+            expr_uses_url_instance(base) || indices.iter().any(expr_uses_url_instance)
+        }
+        Expr::MapLit { entries, .. } => entries
+            .iter()
+            .any(|(k, v)| expr_uses_url_instance(k) || expr_uses_url_instance(v)),
+        Expr::Lambda { body, .. } => block_uses_url_instance(body),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, v)| expr_uses_url_instance(v)),
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            expr_uses_url_instance(scrutinee)
+                || arms.iter().any(|arm| block_uses_url_instance(&arm.body))
+        }
+        Expr::SuspendExpr { inner, .. } => expr_uses_url_instance(inner),
+        Expr::Try { expr, .. } => expr_uses_url_instance(expr),
+        Expr::Spawn { task, .. } => expr_uses_url_instance(task),
+        Expr::Range { start, end, .. } => {
+            expr_uses_url_instance(start) || expr_uses_url_instance(end)
+        }
+        Expr::IfLet {
+            value,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_url_instance(value)
+                || block_uses_url_instance(then_block)
+                || else_block.as_ref().is_some_and(block_uses_url_instance)
+        }
+        Expr::TupleLit(members, _) => members.iter().any(expr_uses_url_instance),
+        Expr::NamedArg { value, .. } => expr_uses_url_instance(value),
     }
 }
 

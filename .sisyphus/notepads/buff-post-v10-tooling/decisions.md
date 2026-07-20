@@ -281,3 +281,6 @@ Initial attempt used quote! { std::time::Duration::from_##std_unit(#n) } which f
 ### 7. set_var is unsafe in Rust 2024
 
 Buff emits Rust 2021 edition, so std::env::set_var(k, v) is safe today. The lowering is a bare call. A future edition bump will need an unsafe { ... } wrapper — flagged here, tracked for the post-v1.4 edition-migration task.
+
+## [2026-07-20 T124h] T124h decisions
+URL.parse fallback: unwrap_or_else(|_| Url::parse('about:blank').unwrap()) keeps the value-type total (no Result surfaced to Buff user yet). url crate reused from existing workspace pin (T117 LSP transitive) - not re-added. Per-crate narrow extern_crates walkers mirror program_uses_tokio/rand; URL walker gated on buff_type().is_prelude_url() (narrow, avoids chrono over-broad bug).

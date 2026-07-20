@@ -189,6 +189,27 @@ pub enum Type {
     /// Future instance-method-carrying runtime types (e.g. Url, Hasher)
     /// follow this pattern.
     Regex,
+    /// A parsed URL value, mapped to `url::Url` at codegen time (T124h).
+    /// Constructed via the prelude associated function `URL.parse(s)`;
+    /// supports instance accessors `.scheme`, `.host`, `.path` (each
+    /// returning a `String`) and `.query(key) -> Option<String>`.
+    ///
+    /// This is **additive** (T124h): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` were extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_url`
+    /// predicate. The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return
+    /// `false` for `Url` — it's an opaque value type that participates
+    /// in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Regex`] (T124d) as the second runtime-value
+    /// prelude type with rich instance methods (Regex has 4, URL has 4).
+    /// Distinct from [`Type::DateTime`] et al (which have accessor
+    /// methods only) and from the namespace-only modules (Log/Toml/
+    /// Math/Random/Strings/Args/Env — those have no value
+    /// representation).
+    Url,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -384,6 +405,13 @@ impl Type {
         Type::Regex
     }
 
+    /// T124h: the parsed-URL type. Maps to `url::Url` at codegen time.
+    /// Constructed via `URL.parse(s)`; supports `.scheme` / `.host` /
+    /// `.path` accessors and `.query(key) -> Option<String>`.
+    pub fn url() -> Self {
+        Type::Url
+    }
+
     /// T124d: Returns `true` if this type is the prelude `Regex` runtime
     /// value. Used by the type inferencer + codegen to dispatch instance
     /// method calls (`regex.match(...)`, `regex.find(...)`, ...) to the
@@ -393,6 +421,19 @@ impl Type {
     /// `Regex` IS a runtime value (an opaque compiled-pattern handle).
     pub fn is_prelude_regex(&self) -> bool {
         matches!(self, Type::Regex)
+    }
+
+    /// T124h: Returns `true` if this type is the prelude `URL` runtime
+    /// value. Used by the type inferencer + codegen to dispatch instance
+    /// method calls (`url.scheme`, `url.host`, `url.path`,
+    /// `url.query(k)`) to the `url::Url` lowering. Distinct from
+    /// [`Self::is_prelude_datetime`] (URL is not a chrono type) and
+    /// from [`Self::is_prelude_regex`] (URL is a different runtime
+    /// value type). Used by the chrono over-broad-walker cautionary
+    /// tale (T124f gotcha) — `buff_type().is_prelude_url()` is the
+    /// narrow round-trip check for the URL type only.
+    pub fn is_prelude_url(&self) -> bool {
+        matches!(self, Type::Url)
     }
 
     /// Returns `true` if this type **must** run on the CPU (never GPU).
@@ -485,6 +526,11 @@ impl fmt::Display for Type {
             // (`regex::Regex`). The Display form mirrors the Buff surface
             // name so diagnostics read naturally.
             Type::Regex => f.write_str("Regex"),
+            // T124h: prelude parsed-URL type. Opaque value type whose
+            // canonical Rust representation lives in the codegen crate
+            // (`url::Url`). The Display form mirrors the Buff surface
+            // name so diagnostics read naturally.
+            Type::Url => f.write_str("URL"),
         }
     }
 }

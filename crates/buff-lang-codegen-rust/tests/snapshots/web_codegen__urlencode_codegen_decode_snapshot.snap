@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 711
+expression: src
+---
+fn f() {
+    percent_encoding::percent_decode_str("foo%20bar").decode_utf8_lossy().into_owned();
+}

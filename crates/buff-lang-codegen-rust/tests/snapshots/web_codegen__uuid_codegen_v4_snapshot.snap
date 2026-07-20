@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 717
+expression: src
+---
+fn f() {
+    uuid::Uuid::new_v4().to_string();
+}

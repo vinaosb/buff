@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 679
+expression: src
+---
+fn f() {
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, vec![72, 105]);
+}

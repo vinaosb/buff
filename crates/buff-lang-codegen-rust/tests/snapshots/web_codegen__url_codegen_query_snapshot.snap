@@ -1,0 +1,13 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 780
+expression: src
+---
+fn f() {
+    let u: url::Url = url::Url::parse("https://a.com/b?q=1")
+        .unwrap_or_else(|_| url::Url::parse("about:blank").unwrap());
+    {
+        let __buff_key = ("q").to_string();
+        u.query_pairs().find(|(k, _)| *k == __buff_key).map(|(_, v)| v.into_owned())
+    };
+}

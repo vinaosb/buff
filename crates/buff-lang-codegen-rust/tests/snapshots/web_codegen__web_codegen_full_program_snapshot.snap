@@ -1,0 +1,42 @@
+---
+source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
+assertion_line: 834
+expression: src
+---
+fn main() {
+    let b64: String = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        vec![72, 105],
+    );
+    let bytes: Vec<u8> = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            "aGVsbG8=",
+        )
+        .unwrap_or_default();
+    let h: String = hex::encode(vec![72, 105]);
+    let raw: Vec<u8> = hex::decode("deadbeef").unwrap_or_default();
+    let enc: String = percent_encoding::utf8_percent_encode(
+            "foo bar?",
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string();
+    let dec: String = percent_encoding::percent_decode_str("foo%20bar")
+        .decode_utf8_lossy()
+        .into_owned();
+    let id4: String = uuid::Uuid::new_v4().to_string();
+    let id7: String = uuid::Uuid::now_v7().to_string();
+    let valid: bool = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000")
+        .is_ok();
+    let u: url::Url = url::Url::parse("https://a.com/b?q=1")
+        .unwrap_or_else(|_| url::Url::parse("about:blank").unwrap());
+    let s = u.scheme().to_string();
+    let host = u.clone().host_str().unwrap_or_default().to_string();
+    let p = u.clone().path().to_string();
+    let q = {
+        let __buff_key = ("q").to_string();
+        u.clone()
+            .query_pairs()
+            .find(|(k, _)| *k == __buff_key)
+            .map(|(_, v)| v.into_owned())
+    };
+}

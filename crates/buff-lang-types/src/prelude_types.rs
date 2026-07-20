@@ -187,8 +187,8 @@ pub enum PreludeType {
     Args,
     /// `Env` - the environment-variables namespace (T124g). Wraps
     /// Rust's `std::env::var` / `set_var`. Like [`Self::Log`] /
-    /// [`Self::Toml`], `Env` is **never a runtime value** - it's a
-    /// NAMESPACE exposing three associated functions:
+    /// [`Self::Toml`], `Env` is **never a runtime value** - it's
+    /// a NAMESPACE exposing three associated functions:
     /// - `Env.get("KEY")` - look up an env var. Lowers to
     ///   `std::env::var(k).ok()` (returns `Option<String>` - None
     ///   when unset OR invalid UTF-8; both are folded into None so
@@ -205,6 +205,112 @@ pub enum PreludeType {
     /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
     /// returns `true`. Env uses only Rust `std` (NO extern crate).
     Env,
+    /// `Base64` - the base64 codec namespace (T124h). Wraps the
+    /// `base64` Rust crate. Like [`Self::Log`] / [`Self::Toml`] /
+    /// [`Self::Random`], `Base64` is **never a runtime value** -
+    /// it's a NAMESPACE exposing two associated functions:
+    /// - `Base64.encode(bytes)` - encode a `Vector<Byte>` to a
+    ///   base64 `String`. Wraps
+    ///   `base64::Engine::encode(&general_purpose::STANDARD, bytes)`
+    ///   (UFCS form so the `Engine` trait need not be in scope at
+    ///   the call site).
+    /// - `Base64.decode(string)` - decode a base64 `String` to a
+    ///   `Vector<Byte>`. Wraps
+    ///   `base64::Engine::decode(&general_purpose::STANDARD, s)
+    ///   .unwrap_or_default()` (empty Vec on decode failure - NEVER
+    ///   panics, matching Buff's "no panicking generated code" rule).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `base64` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Base64`.
+    Base64,
+    /// `Hex` - the hex codec namespace (T124h). Wraps the `hex`
+    /// Rust crate. Like [`Self::Base64`], `Hex` is **never a runtime
+    /// value** - it's a NAMESPACE exposing two associated functions:
+    /// - `Hex.encode(bytes)` - encode a `Vector<Byte>` to a
+    ///   lowercase hex `String`. Wraps `hex::encode(bytes)`.
+    /// - `Hex.decode(string)` - decode a hex `String` to a
+    ///   `Vector<Byte>`. Wraps `hex::decode(s).unwrap_or_default()`
+    ///   (empty Vec on decode failure - NEVER panics).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `hex` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Hex`.
+    Hex,
+    /// `URLEncode` - the URL percent-encoding namespace (T124h).
+    /// Wraps the `percent-encoding` Rust crate. Like [`Self::Base64`]
+    /// / [`Self::Hex`], `URLEncode` is **never a runtime value** -
+    /// it's a NAMESPACE exposing two associated functions:
+    /// - `URLEncode.encode(string)` - percent-encode a String for
+    ///   safe URL embedding. Wraps
+    ///   `percent_encoding::utf8_percent_encode(s,
+    ///   percent_encoding::NON_ALPHANUMERIC).to_string()`. The
+    ///   `NON_ALPHANUMERIC` AsciiSet encodes everything that's not
+    ///   an ASCII letter or digit (the canonical "encode special
+    ///   characters" choice).
+    /// - `URLEncode.decode(string)` - percent-DECODE a String.
+    ///   Wraps `percent_encoding::percent_decode_str(s)
+    ///   .decode_utf8_lossy().into_owned()`. Invalid UTF-8 sequences
+    ///   become U+FFFD REPLACEMENT CHARACTER (lossy decode - NEVER
+    ///   panics, matching Buff's "no panicking generated code" rule).
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `percent-encoding` crate is recorded in
+    /// codegen `extern_crates` when a Buff program uses `URLEncode`.
+    URLEncode,
+    /// `UUID` - the UUID generator namespace (T124h). Wraps the
+    /// `uuid` Rust crate. Like [`Self::Base64`] / [`Self::Hex`] /
+    /// [`Self::URLEncode`], `UUID` is **never a runtime value** -
+    /// it's a NAMESPACE exposing three associated functions:
+    /// - `UUID.v4()` - generate a random v4 UUID. Wraps
+    ///   `uuid::Uuid::new_v4().to_string()`.
+    /// - `UUID.v7()` - generate a time-ordered v7 UUID. Wraps
+    ///   `uuid::Uuid::now_v7().to_string()`.
+    /// - `UUID.parse(string)` - validate whether a String is a
+    ///   well-formed UUID. Wraps `uuid::Uuid::parse_str(s).is_ok()`
+    ///   (returns Bool). Reuses the shared [`PreludeAssocFn::Parse`]
+    ///   variant (5th overload for `Parse`, after DateTime / Date /
+    ///   Toml / URL).
+    ///
+    /// All three return String/Bool surface types (NOT a `Uuid`
+    /// value type) - Buff surfaces UUIDs as their canonical hyphen-
+    /// separated String form, mirroring how most scripting languages
+    /// surface them. A future task may add a `UUID` value type if
+    /// instance methods become necessary.
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `uuid` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `UUID`.
+    UUID,
+    /// `URL` - the parsed-URL runtime value type (T124h). Wraps the
+    /// `url` Rust crate. Constructed via the associated function
+    /// `URL.parse(s)` (returns a `URL` value, NEVER panics - falls
+    /// back to `url::Url::parse("about:blank").unwrap()` on parse
+    /// failure, mirroring the Regex.compile infallible-ctor stance
+    /// from T124d). Supports four instance methods:
+    /// - `.scheme` - the URL scheme (`"https"`, `"file"`, ...).
+    ///   Returns String.
+    /// - `.host` - the URL host (`"example.com"`, ...). Returns
+    ///   String (empty when absent - NEVER panics).
+    /// - `.path` - the URL path (`"/index.html"`, ...). Returns
+    ///   String.
+    /// - `.query(key)` - look up a query parameter by key. Returns
+    ///   `Option<String>` (None when the key is absent).
+    ///
+    /// This is the SECOND v1.4 prelude-type variant that is BOTH a
+    /// real runtime value AND carries rich instance methods (after
+    /// `Regex` in T124d). `buff_type()` returns [`Type::Url`] (a
+    /// real value type, NOT [`Type::Void`] like `Base64` / `Hex` /
+    /// `URLEncode` / `UUID`); `is_namespace_only()` returns `false`.
+    /// The `url` crate is recorded in codegen `extern_crates` when a
+    /// Buff program uses `URL`.
+    ///
+    /// Note the case: `URL` (all uppercase) is the prelude
+    /// namespace / type name (mirrors Rust's `Url` but in
+    /// Buff-flavored uppercase per the `DateTime` / `Regex`
+    /// convention). The underlying Rust type is `url::Url` (capital
+    /// U, lowercase rl).
+    URL,
 }
 
 impl PreludeType {
@@ -234,6 +340,17 @@ impl PreludeType {
         // NOT here.
         PreludeType::Args,
         PreludeType::Env,
+        // T124h: Base64 / Hex / URLEncode / UUID / URL - five web
+        // modules. Four namespaces (Base64 / Hex / URLEncode / UUID)
+        // mirror Log / Toml / Math / Random's namespace-only shape.
+        // URL is the second runtime-value-with-rich-instance-methods
+        // type (after Regex T124d) - it's a parsed URL value with
+        // `.scheme` / `.host` / `.path` / `.query(key)` accessors.
+        PreludeType::Base64,
+        PreludeType::Hex,
+        PreludeType::URLEncode,
+        PreludeType::UUID,
+        PreludeType::URL,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -275,6 +392,39 @@ impl PreludeType {
             // `std::env::var(k).is_ok()` for the three associated
             // functions.
             PreludeType::Env => "Env",
+            // T124h: the Base64 prelude type name. The codegen splices
+            // `base64::Engine::encode(&base64::engine::general_purpose::STANDARD,
+            // bytes)` (UFCS form so the Engine trait need not be in
+            // scope at the call site) and the symmetric `decode` for
+            // `Base64.decode(s) -> Vec<u8>` (with `.unwrap_or_default()`
+            // for the panic-free fallback).
+            PreludeType::Base64 => "Base64",
+            // T124h: the Hex prelude type name. Mirrors the Rust crate
+            // name so codegen can splice `hex::encode(bytes)` /
+            // `hex::decode(s).unwrap_or_default()` paths without
+            // rewriting.
+            PreludeType::Hex => "Hex",
+            // T124h: the URLEncode prelude type name. Buff-flavored
+            // name (clearer than `PercentEncoding`); codegen splices
+            // `percent_encoding::utf8_percent_encode(s,
+            // percent_encoding::NON_ALPHANUMERIC).to_string()` and
+            // `percent_encoding::percent_decode_str(s)
+            // .decode_utf8_lossy().into_owned()`.
+            PreludeType::URLEncode => "URLEncode",
+            // T124h: the UUID prelude type name. The codegen splices
+            // `uuid::Uuid::new_v4().to_string()` /
+            // `uuid::Uuid::now_v7().to_string()` /
+            // `uuid::Uuid::parse_str(s).is_ok()` for the three
+            // associated functions. Surface return types are String /
+            // String / Bool (NOT a Uuid value type) - Buff surfaces
+            // UUIDs as their canonical String form.
+            PreludeType::UUID => "UUID",
+            // T124h: the URL prelude type name. ALL-CAPS spelling
+            // mirrors the DateTime / Regex convention (the user
+            // sees `URL.parse("...")`); the underlying Rust type is
+            // `url::Url` (capital U, lowercase rl - case mapping
+            // happens in codegen's `buff_type_to_syn` arm).
+            PreludeType::URL => "URL",
         }
     }
 
@@ -330,6 +480,32 @@ impl PreludeType {
             // functions (`Env.get(k)`, `Env.set(k, v)`, `Env.has(k)`)
             // are callable.
             PreludeType::Env => Type::Void,
+            // T124h: namespace-only - Base64 has no value representation.
+            // Mirrors Log / Toml / Math / Random / Strings / Args / Env:
+            // the namespace itself is never a value, only its associated
+            // functions (`Base64.encode(bytes)`, `Base64.decode(s)`)
+            // are callable.
+            PreludeType::Base64 => Type::Void,
+            // T124h: namespace-only - Hex has no value representation.
+            // Mirrors Base64 / Log / Toml / Math / Random / Strings /
+            // Args / Env.
+            PreludeType::Hex => Type::Void,
+            // T124h: namespace-only - URLEncode has no value
+            // representation. Mirrors Base64 / Hex / Log / Toml / Math /
+            // Random / Strings / Args / Env.
+            PreludeType::URLEncode => Type::Void,
+            // T124h: namespace-only - UUID has no value representation
+            // (UUIDs surface as their canonical String form, NOT as a
+            // Uuid value type). Mirrors Base64 / Hex / URLEncode / Log
+            // / Toml / Math / Random / Strings / Args / Env.
+            PreludeType::UUID => Type::Void,
+            // T124h: URL IS a runtime value - returns the opaque
+            // parsed-URL type (mapped to `url::Url` at codegen time).
+            // Distinct from the namespace-only Base64 / Hex / URLEncode
+            // / UUID modules (which return Void). Mirrors Regex (T124d)
+            // as the second runtime-value-with-rich-instance-methods
+            // type.
+            PreludeType::URL => Type::Url,
         }
     }
 
@@ -346,6 +522,10 @@ impl PreludeType {
                 | PreludeType::Strings
                 | PreludeType::Args
                 | PreludeType::Env
+                | PreludeType::Base64
+                | PreludeType::Hex
+                | PreludeType::URLEncode
+                | PreludeType::UUID
         )
     }
 }
@@ -558,6 +738,64 @@ pub enum PreludeAssocFn {
     /// `Env.has("KEY")` - test whether an env var is set. One arg
     /// (String). Returns `Bool`. Wraps `std::env::var(k).is_ok()`.
     Has,
+    // ---- Web modules (T124h) ------------------------------------------
+    // These variants follow the precedent set by `Parse` (shared by
+    // DateTime / Date / Toml / URL / UUID) and `Get` (shared by
+    // Args.get / Env.get): a single variant may be valid on MULTIPLE
+    // prelude types, with the (type, method) pair dispatched in
+    // [`assoc_fn_return_type`] + the codegen arm. Below:
+    // - `Encode` is shared between `Base64.encode(bytes)` /
+    //   `Hex.encode(bytes)` / `URLEncode.encode(string)` (different
+    //   arg + return types per receiver, dispatched on the pair).
+    // - `Decode` is shared symmetrically.
+    // - `V4` / `V7` are UUID-only.
+    //
+    /// `Base64.encode(bytes)` / `Hex.encode(bytes)` /
+    /// `URLEncode.encode(string)` - encode a value to its text
+    /// representation. Wraps:
+    /// - On `Base64`: `base64::Engine::encode(&general_purpose::STANDARD,
+    ///   bytes)` (returns `String`, takes `Vector<Byte>`).
+    /// - On `Hex`: `hex::encode(bytes)` (returns `String`, takes
+    ///   `Vector<Byte>`).
+    /// - On `URLEncode`:
+    ///   `percent_encoding::utf8_percent_encode(s,
+    ///   percent_encoding::NON_ALPHANUMERIC).to_string()` (returns
+    ///   `String`, takes `String`).
+    ///
+    /// The shared variant mirrors `Parse` (which is shared between
+    /// DateTime / Date / Toml / URL / UUID). Dispatch on the (type,
+    /// method) pair is exhaustive in [`assoc_fn_return_type`].
+    Encode,
+    /// `Base64.decode(string)` / `Hex.decode(string)` /
+    /// `URLEncode.decode(string)` - decode a text representation
+    /// back to bytes / String. Wraps:
+    /// - On `Base64`:
+    ///   `base64::Engine::decode(&general_purpose::STANDARD, s)
+    ///   .unwrap_or_default()` (returns `Vector<Byte>`, empty Vec on
+    ///   decode failure - NEVER panics).
+    /// - On `Hex`: `hex::decode(s).unwrap_or_default()` (returns
+    ///   `Vector<Byte>`, empty Vec on failure - NEVER panics).
+    /// - On `URLEncode`:
+    ///   `percent_encoding::percent_decode_str(s)
+    ///   .decode_utf8_lossy().into_owned()` (returns `String`;
+    ///   invalid UTF-8 sequences become U+FFFD REPLACEMENT CHARACTER
+    ///   - lossy decode, NEVER panics).
+    ///
+    /// The shared variant mirrors `Encode` and the `Parse` precedent.
+    Decode,
+    /// `UUID.v4()` - generate a random v4 UUID. Zero args. Returns
+    /// `String` (the canonical hyphen-separated form). Wraps
+    /// `uuid::Uuid::new_v4().to_string()`. Requires the `v4`
+    /// feature on the `uuid` crate (configured at the workspace
+    /// `[workspace.dependencies]` level).
+    V4,
+    /// `UUID.v7()` - generate a time-ordered v7 UUID (Unix-timestamp-
+    /// prefixed, sortable). Zero args. Returns `String`. Wraps
+    /// `uuid::Uuid::now_v7().to_string()`. Requires the `v7` feature
+    /// on the `uuid` crate. Distinct from [`Self::V4`] in generation
+    /// algorithm (v4 is random; v7 is timestamp-prefixed for sort
+    /// stability) but identical surface type (both return String).
+    V7,
 }
 
 impl PreludeAssocFn {
@@ -617,6 +855,15 @@ impl PreludeAssocFn {
         PreludeAssocFn::Get,
         PreludeAssocFn::Set,
         PreludeAssocFn::Has,
+        // T124h: Web modules assoc fns (4 distinct names):
+        // encode/decode/v4/v7. `Encode` and `Decode` are each shared
+        // between Base64 / Hex / URLEncode (mirrors `Parse` being
+        // shared between DateTime / Date / Toml / URL / UUID).
+        // `V4` / `V7` are UUID-only.
+        PreludeAssocFn::Encode,
+        PreludeAssocFn::Decode,
+        PreludeAssocFn::V4,
+        PreludeAssocFn::V7,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -690,6 +937,17 @@ impl PreludeAssocFn {
             PreludeAssocFn::Get => "get",
             PreludeAssocFn::Set => "set",
             PreludeAssocFn::Has => "has",
+            // T124h: Web modules assoc fn names. `encode` / `decode`
+            // are the canonical codec verbs (mirrors the `serde::Serialize`
+            // / `Deserialize` derive CRATE names + the `hex::encode` /
+            // `base64::Engine::encode` Rust API surface). `v4` / `v7`
+            // mirror the `uuid::Uuid::new_v4` / `now_v7` constructor
+            // names (Buff-flavored: drops the `new_` prefix since the
+            // namespace `UUID` already carries the type intent).
+            PreludeAssocFn::Encode => "encode",
+            PreludeAssocFn::Decode => "decode",
+            PreludeAssocFn::V4 => "v4",
+            PreludeAssocFn::V7 => "v7",
         }
     }
 }
@@ -969,6 +1227,55 @@ pub fn assoc_fn_return_type(
         // `Env.has("KEY")` -> Bool. Wraps
         // `std::env::var(k).is_ok()`.
         (PreludeType::Env, PreludeAssocFn::Has) => Some(Type::bool()),
+        // T124h: Base64 module.
+        // `Base64.encode(bytes)` -> String. Wraps
+        // `base64::Engine::encode(&general_purpose::STANDARD, bytes)`
+        // (UFCS form so the Engine trait need not be in scope at the
+        // call site). Returns the canonical base64 String form.
+        (PreludeType::Base64, PreludeAssocFn::Encode) => Some(Type::string()),
+        // `Base64.decode(s)` -> Vector<Byte>. Wraps
+        // `base64::Engine::decode(&general_purpose::STANDARD, s)
+        // .unwrap_or_default()` (empty Vec on decode failure - NEVER
+        // panics, mirroring Regex.compile / Toml.parse / DateTime.parse's
+        // panic-free stance).
+        (PreludeType::Base64, PreludeAssocFn::Decode) => Some(Type::vector(Type::byte())),
+        // T124h: Hex module.
+        // `Hex.encode(bytes)` -> String. Wraps `hex::encode(bytes)`
+        // (lowercase hex String).
+        (PreludeType::Hex, PreludeAssocFn::Encode) => Some(Type::string()),
+        // `Hex.decode(s)` -> Vector<Byte>. Wraps
+        // `hex::decode(s).unwrap_or_default()` (empty Vec on failure -
+        // NEVER panics).
+        (PreludeType::Hex, PreludeAssocFn::Decode) => Some(Type::vector(Type::byte())),
+        // T124h: URLEncode module.
+        // `URLEncode.encode(s)` -> String. Wraps
+        // `percent_encoding::utf8_percent_encode(s,
+        // percent_encoding::NON_ALPHANUMERIC).to_string()`.
+        (PreludeType::URLEncode, PreludeAssocFn::Encode) => Some(Type::string()),
+        // `URLEncode.decode(s)` -> String. Wraps
+        // `percent_encoding::percent_decode_str(s).decode_utf8_lossy()
+        // .into_owned()` (invalid UTF-8 -> U+FFFD replacement char;
+        // lossy decode, NEVER panics).
+        (PreludeType::URLEncode, PreludeAssocFn::Decode) => Some(Type::string()),
+        // T124h: UUID module.
+        // `UUID.v4()` -> String. Wraps `uuid::Uuid::new_v4().to_string()`.
+        (PreludeType::UUID, PreludeAssocFn::V4) => Some(Type::string()),
+        // `UUID.v7()` -> String. Wraps `uuid::Uuid::now_v7().to_string()`.
+        (PreludeType::UUID, PreludeAssocFn::V7) => Some(Type::string()),
+        // `UUID.parse(s)` -> Bool. Wraps `uuid::Uuid::parse_str(s).is_ok()`
+        // (validation only - returns Bool rather than a typed Uuid value,
+        // since UUID surfaces as String in T124h). Same shared `Parse`
+        // variant as DateTime.parse / Date.parse / Toml.parse / URL.parse.
+        (PreludeType::UUID, PreludeAssocFn::Parse) => Some(Type::bool()),
+        // T124h: URL module.
+        // `URL.parse(s)` -> URL. Wraps
+        // `url::Url::parse(s).unwrap_or_else(|_| url::Url::parse("about:blank")
+        // .unwrap())` - the `about:blank` fallback is always parseable
+        // (it's a reserved URL scheme), so the inner `.unwrap()` is
+        // infallible at runtime (matches Regex.compile's `r"a^"` fallback
+        // stance from T124d). Same shared `Parse` variant as
+        // DateTime.parse / Date.parse / Toml.parse / UUID.parse.
+        (PreludeType::URL, PreludeAssocFn::Parse) => Some(Type::Url),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -1040,9 +1347,30 @@ pub enum PreludeInstanceFn {
     /// the codegen emits an empty Map (the `regex::Regex::captures`
     /// Rust API returns `Option` and we lower it via
     /// `.unwrap_or_else(|| Captures::new())` — never a panic).
-    /// Key ordering is DETERMINISTIC (group-index order; named groups
+    ///         Key ordering is DETERMINISTIC (group-index order; named groups
     /// intercalated at their source position).
     Captures,
+    // ---- URL accessors (T124h) ---------------------------------------
+    /// `url.scheme` - the URL scheme (`"https"`, `"file"`, ...). Zero
+    /// args. Returns `String`. Wraps `url::Url::scheme().to_string()`
+    /// (the `.to_string()` lifts `&str` to `String` - Buff hides
+    /// references from users).
+    Scheme,
+    /// `url.host` - the URL host (`"example.com"`, ...). Zero args.
+    /// Returns `String` (empty String when the URL has no host -
+    /// NEVER panics). Wraps
+    /// `url::Url::host_str().unwrap_or_default().to_string()`.
+    Host,
+    /// `url.path` - the URL path (`"/index.html"`, ...). Zero args.
+    /// Returns `String`. Wraps `url::Url::path().to_string()`.
+    Path,
+    /// `url.query(key)` - look up a query parameter by key. One arg
+    /// (String). Returns `Option<String>` (None when the key is
+    /// absent - NEVER panics). Wraps
+    /// `url::Url::query_pairs().find(|(k, _)| *k ==
+    /// key.to_string()).map(|(_, v)| v.into_owned())` (linear scan;
+    /// deterministic - first match wins).
+    Query,
 }
 
 impl PreludeInstanceFn {
@@ -1061,6 +1389,14 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Find,
         PreludeInstanceFn::Replace,
         PreludeInstanceFn::Captures,
+        // T124h: URL instance accessors — Scheme / Host / Path / Query.
+        // Zero-arg accessors (scheme/host/path) and one-arg query lookup.
+        // Mirrors Regex's instance-method-carrying runtime-value
+        // pattern (T124d) as the second such type.
+        PreludeInstanceFn::Scheme,
+        PreludeInstanceFn::Host,
+        PreludeInstanceFn::Path,
+        PreludeInstanceFn::Query,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -1089,6 +1425,17 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Find => "find",
             PreludeInstanceFn::Replace => "replace",
             PreludeInstanceFn::Captures => "captures",
+            // T124h: URL instance method names mirror the `url::Url`
+            // accessor names so the codegen can splice
+            // `recv.scheme().to_string()` etc. without rewriting.
+            // `scheme` / `host` / `path` are zero-arg field-style
+            // accessors (added to `KNOWN_ZERO_ARG_METHODS` so the T26
+            // field-access heuristic doesn't rewrite them as field
+            // accesses). `query` takes one arg (the key).
+            PreludeInstanceFn::Scheme => "scheme",
+            PreludeInstanceFn::Host => "host",
+            PreludeInstanceFn::Path => "path",
+            PreludeInstanceFn::Query => "query",
         }
     }
 }
@@ -1162,6 +1509,23 @@ pub fn instance_fn_return_type(
             Some(Type::map(Type::string(), Type::string()))
         }
 
+        // T124h: URL instance accessors. `url.scheme` / `url.host` /
+        // `url.path` each return String; `url.query(key)` returns
+        // Option<String>. Each lowers to a fully-qualified `url::Url`
+        // method chained with `.to_string()` (Buff hides references from
+        // users; the underlying Rust accessors return `&str`).
+        //
+        // `url.scheme` -> String.
+        (Type::Url, PreludeInstanceFn::Scheme) => Some(Type::string()),
+        // `url.host` -> String (empty when the URL has no host - NEVER
+        // panics, matches Buff's "no panicking generated code" stance).
+        (Type::Url, PreludeInstanceFn::Host) => Some(Type::string()),
+        // `url.path` -> String.
+        (Type::Url, PreludeInstanceFn::Path) => Some(Type::string()),
+        // `url.query(key)` -> Option<String>. None when the key is
+        // absent - NEVER panics.
+        (Type::Url, PreludeInstanceFn::Query) => Some(Type::option(Type::string())),
+
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
         _ => None,
@@ -1191,7 +1555,13 @@ mod tests {
             // it also skips the `is_prelude_datetime` check (its
             // `buff_type()` returns `Type::Regex`, which round-trips
             // through `is_prelude_regex()` instead).
-            if !t.is_namespace_only() && t != PreludeType::Regex {
+            //
+            // T124h: `URL` is the second runtime-value-with-methods
+            // type after Regex (T124d). Like Regex it's NOT a datetime,
+            // so it skips the `is_prelude_datetime` check (its
+            // `buff_type()` returns `Type::Url`, which round-trips
+            // through `is_prelude_url()` instead).
+            if !t.is_namespace_only() && t != PreludeType::Regex && t != PreludeType::URL {
                 assert!(t.buff_type().is_prelude_datetime());
             }
         }
@@ -1421,8 +1791,11 @@ mod tests {
         // (Regex) shipped in T124d + 1 namespace-only module (Toml)
         // shipped in T124e + 3 namespace-only utility modules (Math,
         // Random, Strings) shipped in T124f + 2 namespace-only system
-        // modules (Args, Env) shipped in T124g = 13 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 13);
+        // modules (Args, Env) shipped in T124g + 4 namespace-only web
+        // modules (Base64, Hex, URLEncode, UUID) + 1 runtime-value-
+        // with-methods type (URL) shipped in T124h = 18 total prelude
+        // types.
+        assert_eq!(PreludeType::ALL.len(), 18);
     }
 
     #[test]
@@ -1464,6 +1837,26 @@ mod tests {
         assert!(PreludeType::Regex.buff_type().is_prelude_regex());
         assert!(!PreludeType::DateTime.buff_type().is_prelude_regex());
         assert!(!PreludeType::Log.buff_type().is_prelude_regex());
+        // T124h: URL type + predicate. URL is NOT a datetime family
+        // member and NOT a Regex - its dedicated `is_prelude_url`
+        // predicate captures the parsed-URL runtime-value case.
+        assert!(Type::url().is_prelude_url());
+        assert!(!Type::url().is_prelude_datetime());
+        assert!(!Type::url().is_prelude_regex());
+        assert!(!Type::DateTime.is_prelude_url());
+        assert!(!Type::Regex.is_prelude_url());
+        assert!(!Type::string().is_prelude_url());
+        // Cross-check via the prelude-type registry: `URL.buff_type()`
+        // round-trips through `is_prelude_url` (the only prelude type
+        // for which it does). The namespace-only web modules (Base64 /
+        // Hex / URLEncode / UUID) do NOT round-trip (their `buff_type()`
+        // returns `Type::Void`).
+        assert!(PreludeType::URL.buff_type().is_prelude_url());
+        assert!(!PreludeType::DateTime.buff_type().is_prelude_url());
+        assert!(!PreludeType::Regex.buff_type().is_prelude_url());
+        assert!(!PreludeType::Log.buff_type().is_prelude_url());
+        assert!(!PreludeType::Base64.buff_type().is_prelude_url());
+        assert!(!PreludeType::UUID.buff_type().is_prelude_url());
     }
 
     #[test]
@@ -1475,6 +1868,9 @@ mod tests {
         assert_eq!(Type::Instant.to_string(), "Instant");
         // T124d: Regex Display mirrors the Buff surface name.
         assert_eq!(Type::Regex.to_string(), "Regex");
+        // T124h: URL Display mirrors the Buff surface name (all-caps,
+        // matches the `URL.parse(...)` user-facing spelling).
+        assert_eq!(Type::Url.to_string(), "URL");
     }
 
     // T124d: Regex module — `Regex.compile(p)` assoc-fn lookups + return type.
@@ -1726,13 +2122,29 @@ mod tests {
         // and have NO runtime value representation.
         assert!(PreludeType::Args.is_namespace_only());
         assert!(PreludeType::Env.is_namespace_only());
-        // T124g: The count of namespace-only modules is now exactly 7
-        // (Log + Toml + Math + Random + Strings + Args + Env).
+        // T124h: Base64 / Hex / URLEncode / UUID are also namespace-only
+        // modules (mirror Log / Toml / Math / Random / Strings / Args /
+        // Env). All four wrap a Rust crate (base64 / hex /
+        // percent-encoding / uuid) and have NO runtime value
+        // representation (UUIDs surface as their canonical String form).
+        assert!(PreludeType::Base64.is_namespace_only());
+        assert!(PreludeType::Hex.is_namespace_only());
+        assert!(PreludeType::URLEncode.is_namespace_only());
+        assert!(PreludeType::UUID.is_namespace_only());
+        // T124h: URL is NOT namespace-only - it's a real runtime value
+        // type (mirrors Regex's runtime-value-with-rich-instance-methods
+        // stance from T124d). Distinct from the namespace-only Base64 /
+        // Hex / URLEncode / UUID modules it shipped alongside.
+        assert!(!PreludeType::URL.is_namespace_only());
+        // T124h: The count of namespace-only modules is now exactly 11
+        // (Log + Toml + Math + Random + Strings + Args + Env + Base64 +
+        // Hex + URLEncode + UUID). URL is NOT in this count (it's a
+        // runtime value type, not a namespace module).
         let namespace_only_count = PreludeType::ALL
             .iter()
             .filter(|t| t.is_namespace_only())
             .count();
-        assert_eq!(namespace_only_count, 7);
+        assert_eq!(namespace_only_count, 11);
     }
 
     // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +

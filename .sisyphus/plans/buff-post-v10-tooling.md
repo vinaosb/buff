@@ -1203,7 +1203,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Math, Random, and Sort utility modules`
 
-- [ ] **T124g: System modules — Args, Env, input(), sleep()** [unspecified-high]
+- [x] **T124g: System modules — Args, Env, input(), sleep()** [unspecified-high]
 
   **What to do**:
   - `Args`: `Args.list() -> Vector<String>` (command-line arguments), `Args.get(index) -> String` — wrap `std::env::args`
@@ -1239,7 +1239,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(stdlib): Args, Env, input(), and sleep() system modules`
 
-- [ ] **T124h: Web modules — URL, Base64, Hex, URLEncode, UUID** [unspecified-high]
+- [x] **T124h: Web modules — URL, Base64, Hex, URLEncode, UUID** [unspecified-high]
 
   **What to do**:
   - `URL`: `URL.parse("https://a.com/b?q=1") -> URL`, `.scheme`, `.host`, `.path`, `.query(key) -> Option<String>` — wrap `url` crate
