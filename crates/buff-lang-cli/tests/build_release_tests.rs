@@ -171,7 +171,7 @@ fn build_release_flag_parses_true_when_passed_build_release() {
             output: _,
             release,
         } => {
-            assert_eq!(file, PathBuf::from("foo.buff"));
+            assert_eq!(file, Some(PathBuf::from("foo.buff")));
             assert!(release, "--release must parse to `true`");
         }
         other => panic!("expected Build, got {other:?}"),
@@ -273,7 +273,7 @@ fn build_command_with_release_false_compiles_in_debug_build_release() {
         p
     };
 
-    let result = buff_lang_cli::commands::build::run(&file, None, false);
+    let result = buff_lang_cli::commands::build::run(Some(&file), None, false);
     result.expect("debug-mode build (release=false) must succeed");
     assert!(exe.exists(), "debug build must produce an executable");
 

@@ -796,7 +796,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.3 "Rust interop" — extern/bindgen + Cargo polish + Examples
 
-- [ ] **T119: Minimal extern/bindgen (call Rust crates from Buff)** [deep]
+- [x] **T119: Minimal extern/bindgen (call Rust crates from Buff)** [deep]
 
   **What to do**:
   - Make Buff's existing `extern` keyword functional for declaring Rust functions
@@ -869,7 +869,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(bindgen): minimal extern for calling Rust crates from Buff`
 
-- [ ] **T120: Cargo polish + buff.toml manifest** [quick]
+- [x] **T120: Cargo polish + buff.toml manifest** [quick]
 
   **What to do**:
   - Ensure `buff build` cleanly shells out to `cargo build` with correct flags

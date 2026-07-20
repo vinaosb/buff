@@ -198,7 +198,7 @@ fn test_build_command_creates_executable_end_to_end() {
     let file = write_fixture("build_e2e.buff", src);
     let rs_path = file.with_extension("rs");
 
-    let result = commands::build::run(&file, None, false);
+    let result = commands::build::run(Some(&file), None, false);
 
     let exe = {
         let mut p = file.with_extension("");
@@ -229,7 +229,7 @@ fn test_build_command_with_explicit_output_path() {
     let rs_path = file.with_extension("rs");
 
     let explicit_out = temp_root().join("custom_exe_name");
-    let result = commands::build::run(&file, Some(&explicit_out), false);
+    let result = commands::build::run(Some(&file), Some(&explicit_out), false);
 
     // rustc appends the platform exe extension.
     let actual_out = {

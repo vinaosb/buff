@@ -43,14 +43,22 @@ pub struct Cli {
 /// The set of subcommands supported by `buff`.
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Compile a `.buff` file into a native executable.
+    /// Compile a `.buff` file or project into a native executable.
+    ///
+    /// When invoked with a `.buff` file, compiles that single file directly
+    /// via the Buff pipeline → rustc (v0.1 behavior).
+    ///
+    /// When invoked without a file (in a project with `buff.toml`), generates
+    /// `Cargo.toml` from the manifest and shells out to `cargo build` (T120).
     Build {
-        /// Input `.buff` source file.
+        /// Input `.buff` source file (optional — omit to build the project
+        /// in the current directory via `cargo build`).
         #[arg(value_name = "FILE")]
-        file: PathBuf,
+        file: Option<PathBuf>,
 
         /// Output executable path (default: `./<file-stem>` with the
-        /// platform-appropriate executable extension).
+        /// platform-appropriate executable extension). Only used when
+        /// compiling a single `.buff` file.
         #[arg(short, long)]
         output: Option<PathBuf>,
 
@@ -158,4 +166,17 @@ pub enum Command {
         #[arg(short = 'D', long = "deny-warnings")]
         deny_warnings: bool,
     },
+
+    /// Remove the `target/` build directory (wraps `cargo clean`).
+    ///
+    /// Deletes all build artifacts. Equivalent to `cargo clean` in the
+    /// project root. No effect on source files.
+    Clean,
+
+    /// Update all dependencies (wraps `cargo update`).
+    ///
+    /// Regenerates `Cargo.lock` with the latest compatible versions
+    /// matching the version requirements in `buff.toml`. Equivalent to
+    /// `cargo update` in the project root.
+    Update,
 }

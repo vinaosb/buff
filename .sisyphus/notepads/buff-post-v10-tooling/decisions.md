@@ -35,3 +35,9 @@ A proper icons/buff.png requires design work (a 32x32 + 16x16, light + dark vari
 
 **Decision 8: Version 1.2.0**.
 Matches the v1.2 *Use Buff* release. The extension is the second task of v1.2 (T118, after T117 buff-lsp); when v1.2 ships, this version aligns with the workspace crate versions post-bump.
+## [T120] 2026-07-19
+- DECISION: uff build project mode transpiles .buff→.rs before cargo build (not after). This ensures the .rs files exist when cargo reads the manifest.
+- DECISION: generate_cargo_toml always emits [[bin]] section. Without it, cargo build fails with 
+o targets specified. The bin name matches the package name.
+- DECISION: uff clean and uff update are thin wrappers (no flags). They can be extended later if needed.
+

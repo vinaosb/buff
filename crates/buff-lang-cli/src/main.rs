@@ -17,7 +17,7 @@ fn main() -> Result<()> {
             file,
             output,
             release,
-        } => buff_lang_cli::commands::build::run(&file, output.as_deref(), release),
+        } => buff_lang_cli::commands::build::run(file.as_deref(), output.as_deref(), release),
         Command::Run {
             file,
             args,
@@ -57,5 +57,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Clean => buff_lang_cli::commands::clean::run(),
+        Command::Update => buff_lang_cli::commands::update::run(),
     }
 }

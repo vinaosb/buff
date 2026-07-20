@@ -257,6 +257,68 @@ pub fn validate_project_layout(dir: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Generate a complete `Cargo.toml` string from a `BuffConfig` manifest.
+///
+/// The output is deterministic (sorted keys, stable formatting) so that
+/// running this function twice on the same config yields byte-identical
+/// output (idempotency guarantee).
+///
+/// The generated `Cargo.toml` includes:
+/// - `[package]` section with name, version, edition = "2021"
+/// - `[[bin]]` section pointing to `src/main.rs` (the transpiled entry point)
+/// - `[dependencies]` section from `BuffConfig::dependencies`
+/// - `[dependencies]` entries from `BuffConfig::rust_deps` (T119/T120)
+///
+/// # Idempotency
+///
+/// `generate_cargo_toml(cfg) == generate_cargo_toml(cfg)` for any `cfg`.
+/// The function uses sorted iteration and a fixed format string — no
+/// HashMap iteration, no environment-dependent output.
+pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
+    let mut out = String::new();
+
+    // [package]
+    out.push_str("[package]\n");
+    out.push_str(&format!("name = \"{}\"\n", cfg.package.name));
+    out.push_str(&format!("version = \"{}\"\n", cfg.package.version));
+    out.push_str("edition = \"2021\"\n");
+
+    // Optional edition override from buff.toml
+    if let Some(ed) = &cfg.package.edition {
+        // Map Buff edition to Rust edition. For now all Buff editions map to
+        // Rust 2021 (the pinned workspace edition).
+        out.push_str(&format!("# buff edition: {ed}\n"));
+    }
+
+    // [[bin]] — the transpiled entry point
+    out.push_str("\n[[bin]]\n");
+    out.push_str(&format!("name = \"{}\"\n", cfg.package.name));
+    out.push_str("path = \"src/main.rs\"\n");
+
+    // [dependencies] — sorted by key (BTreeMap guarantees this)
+    if !cfg.dependencies.is_empty() {
+        out.push_str("\n[dependencies]\n");
+        for (name, version) in &cfg.dependencies {
+            out.push_str(&format!("{name} = \"{version}\"\n"));
+        }
+    }
+
+    // [rust-deps] entries go into [dependencies] in the generated Cargo.toml
+    // (they are Rust crate dependencies, not Buff package deps).
+    if !cfg.rust_deps.is_empty() {
+        // If [dependencies] section already exists, entries are appended.
+        // If not, we need to start the section.
+        if cfg.dependencies.is_empty() {
+            out.push_str("\n[dependencies]\n");
+        }
+        for (name, version) in &cfg.rust_deps {
+            out.push_str(&format!("{name} = \"{version}\"\n"));
+        }
+    }
+
+    out
+}
+
 /// Returns `true` if `dir/src/` contains at least one `.buff` file.
 ///
 /// Convenience helper for commands that want to verify an entry point exists

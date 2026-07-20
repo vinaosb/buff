@@ -1,36 +1,36 @@
-//! `buff build` — compile a `.buff` file into a native executable.
+//! `buff build` — compile a `.buff` file or project into a native executable.
 //!
-//! Pipeline: [`pipeline::compile_to_rust`] → [`pipeline::compile_rust_to_exe`].
-//! The intermediate `.rs` file is left on disk alongside the source so users
-//! can inspect the transpiled Rust (this is a documented v0.1 behavior —
-//! `buff run` is the variant that cleans up).
+//! Two modes:
 //!
-//! T56: the `--release` flag selects [`pipeline::BuildMode::Release`] —
-//! maximum optimization with `-C lto=fat -C opt-level=3 -C codegen-units=1`.
-//! Default (`--release` omitted) preserves the v0.1 fast-debug profile.
+//! 1. **Single-file mode** (v0.1 behavior): `buff build <FILE> [--release]`
+//!    compiles a single `.buff` file via the Buff pipeline → rustc.
+//!
+//! 2. **Project mode** (T120): `buff build [--release]` (no file argument)
+//!    looks for `buff.toml` in the current directory, generates `Cargo.toml`,
+//!    and shells out to `cargo build` / `cargo build --release`.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
+use crate::config::{self, BuffConfig};
 use crate::pipeline;
 
-/// Entry point for `buff build <FILE> [--output <PATH>] [--release]`.
+/// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]`.
 ///
-/// - Compiles `file` to Rust source (writes `<file>.rs`).
-/// - Invokes `rustc` to produce an executable at `output` (or
-///   `<file-stem>` with the platform exe extension if `--output` was omitted).
-/// - When `release` is `true`, invokes rustc with release-grade optimization
-///   (LTO + opt-level 3 + single codegen unit) via [`pipeline::BuildMode`].
-/// - Prints a short confirmation to stderr on success (including the build
-///   mode, so users can tell at a glance whether they got a debug or release
-///   binary).
-///
-/// # Errors
-///
-/// Propagates any pipeline error (file-not-found, lex/parse/codegen failure,
-/// rustc invocation failure) with rich context.
-pub fn run(file: &Path, output: Option<&Path>, release: bool) -> Result<()> {
+/// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior).
+/// When `file` is `None`, builds the project in the current directory via
+/// `cargo build` (T120 project-level build).
+pub fn run(file: Option<&Path>, output: Option<&Path>, release: bool) -> Result<()> {
+    match file {
+        Some(f) => build_single_file(f, output, release),
+        None => build_project(release),
+    }
+}
+
+/// Build a single `.buff` file via the Buff pipeline → rustc (v0.1 behavior).
+fn build_single_file(file: &Path, output: Option<&Path>, release: bool) -> Result<()> {
     let compile_out = pipeline::compile_to_rust(file)?;
 
     let stem_output: PathBuf = match output {
@@ -45,6 +45,66 @@ pub fn run(file: &Path, output: Option<&Path>, release: bool) -> Result<()> {
     eprintln!("Built {} ({})", exe_path.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());
     eprintln!("  rust:   {}", compile_out.rust_file_path.display());
+    Ok(())
+}
+
+/// Build the project in the current directory via `cargo build` (T120).
+///
+/// 1. Reads `buff.toml` from the current directory.
+/// 2. Generates `Cargo.toml` from the manifest.
+/// 3. Transpiles all `.buff` files in `src/` to `.rs` files.
+/// 4. Invokes `cargo build` (or `cargo build --release`).
+fn build_project(release: bool) -> Result<()> {
+    let cwd = std::env::current_dir().context("failed to read current directory")?;
+
+    // Read buff.toml
+    let manifest_path = cwd.join("buff.toml");
+    let cfg = BuffConfig::load_from_file(&manifest_path)
+        .with_context(|| format!("failed to load `{}`", manifest_path.display()))?;
+
+    // Generate Cargo.toml
+    let cargo_toml = config::generate_cargo_toml(&cfg);
+    let cargo_path = cwd.join("Cargo.toml");
+    std::fs::write(&cargo_path, &cargo_toml)
+        .with_context(|| format!("failed to write `{}`", cargo_path.display()))?;
+
+    // Transpile all .buff files in src/ to .rs
+    let src_dir = cwd.join("src");
+    if src_dir.is_dir() {
+        for entry in std::fs::read_dir(&src_dir)
+            .with_context(|| format!("failed to read `{}`", src_dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "buff") {
+                pipeline::compile_to_rust(&path)?;
+            }
+        }
+    }
+
+    // Invoke cargo build
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build");
+    if release {
+        cmd.arg("--release");
+    }
+
+    let result = cmd
+        .output()
+        .context("failed to invoke `cargo` — is it installed and on your PATH?")?;
+
+    // Forward cargo's stderr (progress / warnings).
+    if !result.stderr.is_empty() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        eprint!("{stderr}");
+    }
+
+    if !result.status.success() {
+        anyhow::bail!("cargo build exited with status {}", result.status);
+    }
+
+    let mode_str = if release { "release" } else { "debug" };
+    eprintln!("Built project `{}` ({mode_str})", cfg.package.name);
     Ok(())
 }
 
