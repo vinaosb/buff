@@ -1718,7 +1718,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.6 "Package registry" — Minimal registry + CLI
 
-- [ ] **T126: Minimal Buff registry server** [deep]
+- [x] **T126: Minimal Buff registry server** [deep]
 
   **What to do**:
   - Build registry server (axum + diesel + postgres + S3/MinIO storage)
@@ -1735,16 +1735,16 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `axum`/`diesel`/`semver` crate docs. crates.io API as pattern reference. Key research finding: Cargo's resolver is NOT reusable as a library — use `semver` crate directly and build a simpler Pubgrub-based resolver.
 
   **Acceptance Criteria**:
-  - [ ] Publish endpoint accepts .buff tarball
-  - [ ] Download endpoint serves tarball
-  - [ ] Semver resolution returns correct version for requirements
-  - [ ] Auth required for publish, anonymous download
-  - [ ] Dependency cycle detection (reject A→B→A)
-  - [ ] Published and accessible at registry.buff-lang.org (or similar)
-  - [ ] Rate limiting on publish endpoint (prevent abuse)
-  - [ ] Package name validation (reject `../`, profanity, squatting patterns)
-  - [ ] Anonymous download, auth required for publish
-  - [ ] Ops runbook: backup/restore procedure documented
+  - [x] Publish endpoint accepts .buff tarball
+  - [x] Download endpoint serves tarball
+  - [x] Semver resolution returns correct version for requirements
+  - [x] Auth required for publish, anonymous download
+  - [x] Dependency cycle detection (reject A→B→A)
+  - [ ] Published and accessible at registry.buff-lang.org (or similar) — USER ACTION (deploy + domain)
+  - [x] Rate limiting on publish endpoint (prevent abuse)
+  - [x] Package name validation (reject `../`, profanity, squatting patterns)
+  - [x] Anonymous download, auth required for publish
+  - [ ] Ops runbook: backup/restore procedure documented — USER ACTION (depends on chosen hosting/DB)
 
   **QA Scenarios**:
   ```
