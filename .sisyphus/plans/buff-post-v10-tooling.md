@@ -1599,7 +1599,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(eval): extract shared buff-eval crate for REPL/Jupyter/Bufflings`
 
-- [ ] **T125a: REPL core (read-eval-print loop)** [unspecified-high]
+- [x] **T125a: REPL core (read-eval-print loop)** [unspecified-high]
 
   **What to do**:
   - Create `crates/buff-repl/` crate + `buff repl` CLI command
@@ -1614,10 +1614,10 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
   **References**: `rustyline` crate, `crates/buff-lang-lexer/src/lexer.rs:39`, `crates/buff-lang-parser/src/parser.rs:31`, `crates/buff-lang-types/src/infer.rs:20`
 
   **Acceptance Criteria**:
-  - [ ] `buff repl` launches interactive shell with prompt
-  - [ ] Single expression evaluates and prints (e.g. `2 + 3` → `5`)
-  - [ ] Parse/type error prints diagnostic and continues loop
-  - [ ] `cargo test -p buff-repl` passes
+  - [x] `buff repl` launches interactive shell with prompt
+  - [x] Single expression evaluates and prints (e.g. `2 + 3` → `5`)
+  - [x] Parse/type error prints diagnostic and continues loop
+  - [x] `cargo test -p buff-repl` passes
 
   **QA Scenarios**:
   ```
