@@ -127,14 +127,22 @@ pub enum Command {
     /// Initialize a Buff project in the current directory.
     Init,
 
-    /// Discover and run `@test` functions in a `.buff` file (T35).
+    /// Discover and run `@test` functions in a `.buff` file (T35), OR
+    /// run all tests in a project / workspace via `cargo test` (T123).
+    ///
+    /// When `<FILE>` is provided, discovers `@test` functions via the Buff
+    /// test runner. When omitted, reads `buff.toml` from the current
+    /// directory and shells out to `cargo test` (workspace mode fans out
+    /// to all members automatically).
     Test {
-        /// Input `.buff` source file containing `@test` functions.
+        /// Input `.buff` source file containing `@test` functions. Omit
+        /// to run `cargo test` at the project / workspace root (T123).
         #[arg(value_name = "FILE")]
-        file: PathBuf,
+        file: Option<PathBuf>,
 
         /// Only run tests whose name matches this glob pattern (e.g.
-        /// `test_*`). When omitted, all `@test` functions run.
+        /// `test_*`). When omitted, all `@test` functions run. Only
+        /// meaningful in single-file mode (ignored by `cargo test`).
         #[arg(long)]
         pattern: Option<String>,
     },

@@ -410,3 +410,26 @@ tempdir without mutating process-wide env vars. NO --buff-home CLI flag was adde
 uff add reads the cloned repo's buff.toml and prints transitive [dependencies]
 to stderr. It does NOT recursively clone them — that's a registry task (v1.6).
 The T122 acceptance gate is "parse + log", not "recursive resolution".
+
+
+### T123 - Workspace as cargo passthrough (NOT reinvented)
+
+The Buff CLI does NOT implement workspace dependency-dedup, shared-target/, or member-fan-out. It emits a virtual [workspace] Cargo.toml and lets cargo do ALL of that. The Buff-specific work is:
+1. Parse [workspace] from buff.toml (Buff's schema).
+2. Emit the matching [workspace] block in the generated Cargo.toml (Buff's codegen).
+3. Transpile each member's .buff files to .rs (cargo doesn't know about .buff).
+4. Shell out to cargo build / cargo test at the workspace root (cargo fans out).
+
+Anything else (dep resolution, target/ sharing, build ordering) is cargo's job. Reinventing any of it would be a violation of the passthrough principle.
+
+### T123 - BuffConfig::package is Option<PackageSection> (mutually-exclusive with workspace)
+
+Cargo virtual manifests have NO [package] section. To represent this in Buff's schema, BuffConfig::package was made Optional. Mutually-exclusive with the new workspace: Option<WorkspaceSection> field. parse() enforces "exactly one of package/workspace is Some" via post-deserialize cross-field validation (serde can't easily do cross-field rules). The validation returns ConfigError::Layout (not Parse) because the failure is structural, not syntactic.
+
+### T123 - Workspace resolver defaults to "2" at emission time
+
+Cargo's resolver = "2" is the modern default (since Rust 1.51). WorkspaceSection.resolver is Option<String> in the schema (user can override to "1"). generate_workspace_cargo_toml uses ws.resolver.as_deref().unwrap_or("2") so absent resolver still emits a valid virtual manifest. We do NOT inherit the resolver from the parent workspace's Cargo.toml because buff.toml is the single source of truth for Buff projects.
+
+### T123 - uff test (no file) -> cargo test at root (project OR workspace)
+
+Made Command::Test { file: Option<PathBuf> } (was required PathBuf). When file is None, commands::test::run_project() emits Cargo.toml (idempotent) and invokes cargo test at the cwd. Buff does NOT loop members at the cargo level — cargo fans out itself. This mirrors how Build already handled project mode since T120.

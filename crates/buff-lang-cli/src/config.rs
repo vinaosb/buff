@@ -100,10 +100,21 @@ fn scalar_value_to_string(value: &toml::Value) -> String {
 /// Fields are kept `pub` because the CLI commands that consume a config (e.g.
 /// `buff build`, `buff run`) read them directly — there is no invariant to
 /// guard that would justify getter methods for v0.5.
+///
+/// # Virtual workspace manifests (T123)
+///
+/// Exactly one of [`BuffConfig::package`] / [`BuffConfig::workspace`] must
+/// be `Some` after parsing. A *regular* Buff project has `[package]` and
+/// no `[workspace]`. A *virtual workspace* manifest has `[workspace]` with
+/// `members = [...]` and no `[package]` — mirroring Cargo's virtual
+/// manifest rule. [`BuffConfig::parse`] enforces this invariant after
+/// deserialisation.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct BuffConfig {
-    /// `[package]` — the only required top-level table.
-    pub package: PackageSection,
+    /// `[package]` — required for single-package projects, MUST be `None`
+    /// on a virtual workspace manifest (T123). Made `Option` so a single
+    /// `BuffConfig` type can represent both shapes.
+    pub package: Option<PackageSection>,
     /// `[dependencies]` — name → version-req string. Defaults to empty.
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
@@ -126,6 +137,45 @@ pub struct BuffConfig {
     /// written before T122 still parse).
     #[serde(default, rename = "git-dependencies")]
     pub git_dependencies: BTreeMap<String, GitDependency>,
+    /// `[workspace]` — virtual workspace manifest (T123). When `Some`,
+    /// this `buff.toml` is a workspace ROOT that lists member project
+    /// subdirectories; the generated `Cargo.toml` emits a matching
+    /// `[workspace]` virtual manifest (no `[package]`). When `None`,
+    /// the manifest is a regular single-package project.
+    ///
+    /// Mutually-exclusive with [`BuffConfig::package`] — see the type-level
+    /// doc. [`BuffConfig::parse`] enforces the invariant.
+    #[serde(default)]
+    pub workspace: Option<WorkspaceSection>,
+}
+
+/// `[workspace]` section of a virtual `buff.toml` (T123).
+///
+/// Mirrors Cargo's `[workspace]` table: a list of member subdirectories
+/// plus an optional `resolver` version. The Buff CLI is a strict
+/// passthrough — it does not invent its own workspace semantics, it
+/// simply emits a virtual `Cargo.toml` and lets `cargo build` / `cargo
+/// test` fan out to all members.
+///
+/// # Determinism
+///
+/// [`WorkspaceSection::members`] is a `Vec<String>` (NOT a `BTreeSet`)
+/// because member ORDER is user-meaningful — cargo resolves duplicate
+/// dependency versions across members in workspace order, and the user
+/// may want a specific member to win ties. We preserve declared order.
+/// [`generate_cargo_toml`] output is still idempotent for a given input.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+pub struct WorkspaceSection {
+    /// Member project subdirectories (e.g. `["crates/core", "crates/utils"]`).
+    /// Paths are relative to the workspace root (where `buff.toml` lives).
+    /// Order is preserved as-declared — see the type-level doc.
+    #[serde(default)]
+    pub members: Vec<String>,
+    /// Workspace resolver version (`"1"` or `"2"`). When `None` at emit
+    /// time, [`generate_cargo_toml`] defaults to `"2"` (the modern
+    /// resolver; this matches Cargo's recommendation for edition 2021+).
+    #[serde(default)]
+    pub resolver: Option<String>,
 }
 
 /// A single `[git-dependencies]` entry (T122).
@@ -247,8 +297,31 @@ impl BuffConfig {
     /// Returns [`ConfigError::Parse`] on any syntax or schema error — never
     /// panics. The caller is expected to surface the error through the CLI's
     /// normal error mapper.
+    ///
+    /// # Post-parse invariant (T123)
+    ///
+    /// Exactly one of `[package]` / `[workspace]` must be present:
+    ///
+    /// - Regular project → `[package]` present, `[workspace]` absent.
+    /// - Virtual workspace → `[workspace]` present, `[package]` absent.
+    ///
+    /// Both absent or both present returns [`ConfigError::Layout`] — the
+    /// caller surfaces it as a user-facing diagnostic.
     pub fn parse(toml_text: &str) -> Result<Self, ConfigError> {
-        Ok(toml::from_str(toml_text)?)
+        let cfg: Self = toml::from_str(toml_text)?;
+        match (&cfg.package, &cfg.workspace) {
+            (Some(_), None) | (None, Some(_)) => Ok(cfg),
+            (None, None) => Err(ConfigError::Layout(
+                "buff.toml has neither [package] nor [workspace] \
+                 — a regular project needs [package], a workspace root needs [workspace]"
+                    .to_string(),
+            )),
+            (Some(_), Some(_)) => Err(ConfigError::Layout(
+                "buff.toml is ambiguous: contains both [package] and [workspace] \
+                 — a virtual workspace manifest must omit [package]"
+                    .to_string(),
+            )),
+        }
     }
 
     /// Load and parse a `buff.toml` file from disk.
@@ -258,6 +331,16 @@ impl BuffConfig {
     pub fn load_from_file(path: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path)?;
         Self::parse(&text)
+    }
+
+    /// `true` when this config is a virtual workspace manifest (T123).
+    ///
+    /// Convenience accessor — equivalent to `self.workspace.is_some()`.
+    /// Used by `buff build` / `buff test` to switch into workspace mode
+    /// (emit virtual `Cargo.toml`, transpile each member, shell out to
+    /// cargo at the workspace root).
+    pub fn is_workspace(&self) -> bool {
+        self.workspace.is_some()
     }
 }
 
@@ -304,28 +387,52 @@ pub fn validate_project_layout(dir: &Path) -> Result<(), ConfigError> {
 /// running this function twice on the same config yields byte-identical
 /// output (idempotency guarantee).
 ///
-/// The generated `Cargo.toml` includes:
-/// - `[package]` section with name, version, edition = "2021"
-/// - `[[bin]]` section pointing to `src/main.rs` (the transpiled entry point)
-/// - `[dependencies]` section from `BuffConfig::dependencies`
-/// - `[dependencies]` entries from `BuffConfig::rust_deps` (T119/T120)
+/// # Two emission modes
+///
+/// - **Single-package mode** (default, v0.1 behaviour): `cfg.workspace`
+///   is `None`, `cfg.package` is `Some`. Emits a regular `Cargo.toml`
+///   with `[package]` + `[[bin]]` + `[dependencies]`.
+/// - **Virtual workspace mode** (T123): `cfg.workspace` is `Some`,
+///   `cfg.package` is `None`. Emits a Cargo virtual manifest with
+///   `[workspace]` + `members` + `resolver = "2"` and NO `[package]`.
+///   `cargo build` / `cargo test` invoked at this root fans out to all
+///   members automatically (the whole point of passthrough — Buff does
+///   NOT reinvent workspace dep-dedup or shared-`target/`).
 ///
 /// # Idempotency
 ///
 /// `generate_cargo_toml(cfg) == generate_cargo_toml(cfg)` for any `cfg`.
 /// The function uses sorted iteration and a fixed format string — no
-/// HashMap iteration, no environment-dependent output.
+/// HashMap iteration, no environment-dependent output. Member order in
+/// workspace mode is preserved as-declared (see [`WorkspaceSection`]
+/// doc for why order matters).
 pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
+    // Workspace virtual manifest mode (T123).
+    if let Some(ws) = &cfg.workspace {
+        return generate_workspace_cargo_toml(ws);
+    }
+
+    // Single-package mode (v0.1 behaviour).
+    // Defensive: parse() guarantees package is Some when workspace is None,
+    // but we never panic — fall through to an empty-comment Cargo.toml so
+    // any future edge case surfaces as a build error rather than a crash.
+    let package = match &cfg.package {
+        Some(p) => p,
+        None => {
+            return "# ERROR: buff.toml has neither [package] nor [workspace]\n".to_string();
+        }
+    };
+
     let mut out = String::new();
 
     // [package]
     out.push_str("[package]\n");
-    out.push_str(&format!("name = \"{}\"\n", cfg.package.name));
-    out.push_str(&format!("version = \"{}\"\n", cfg.package.version));
+    out.push_str(&format!("name = \"{}\"\n", package.name));
+    out.push_str(&format!("version = \"{}\"\n", package.version));
     out.push_str("edition = \"2021\"\n");
 
     // Optional edition override from buff.toml
-    if let Some(ed) = &cfg.package.edition {
+    if let Some(ed) = &package.edition {
         // Map Buff edition to Rust edition. For now all Buff editions map to
         // Rust 2021 (the pinned workspace edition).
         out.push_str(&format!("# buff edition: {ed}\n"));
@@ -333,7 +440,7 @@ pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
 
     // [[bin]] — the transpiled entry point
     out.push_str("\n[[bin]]\n");
-    out.push_str(&format!("name = \"{}\"\n", cfg.package.name));
+    out.push_str(&format!("name = \"{}\"\n", package.name));
     out.push_str("path = \"src/main.rs\"\n");
 
     // [dependencies] — sorted by key (BTreeMap guarantees this)
@@ -388,6 +495,43 @@ pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
         }
     }
 
+    out
+}
+
+/// Emit a Cargo virtual workspace manifest from a [`WorkspaceSection`] (T123).
+///
+/// Produces:
+///
+/// ```toml
+/// [workspace]
+/// resolver = "2"
+///
+/// members = [
+///     "pkg-a",
+///     "pkg-b",
+/// ]
+/// ```
+///
+/// - `resolver` defaults to `"2"` (the modern resolver; recommended for
+///   edition 2021+) when the user left it unset in `buff.toml`.
+/// - `members` preserves declared order (see [`WorkspaceSection`] doc).
+/// - Empty `members` emits `members = []` on a single line (degenerate
+///   but syntactically valid; guards against a panic-on-empty regression).
+fn generate_workspace_cargo_toml(ws: &WorkspaceSection) -> String {
+    let mut out = String::new();
+    out.push_str("[workspace]\n");
+    let resolver = ws.resolver.as_deref().unwrap_or("2");
+    out.push_str(&format!("resolver = \"{resolver}\"\n"));
+
+    if ws.members.is_empty() {
+        out.push_str("members = []\n");
+    } else {
+        out.push_str("\nmembers = [\n");
+        for member in &ws.members {
+            out.push_str(&format!("    \"{member}\",\n"));
+        }
+        out.push_str("]\n");
+    }
     out
 }
 
@@ -775,11 +919,11 @@ mid = { git = "https://example/m.buff" }
     #[test]
     fn generate_cargo_toml_emits_path_dep_for_git_dependency() {
         let cfg = BuffConfig {
-            package: PackageSection {
+            package: Some(PackageSection {
                 name: "demo".to_string(),
                 version: "0.1.0".to_string(),
                 edition: None,
-            },
+            }),
             dependencies: BTreeMap::new(),
             profile: Default::default(),
             rust_deps: BTreeMap::new(),
@@ -796,6 +940,7 @@ mid = { git = "https://example/m.buff" }
                 );
                 m
             },
+            workspace: None,
         };
         let cargo = generate_cargo_toml(&cfg);
         // Section header present.
@@ -815,11 +960,11 @@ mid = { git = "https://example/m.buff" }
     #[test]
     fn generate_cargo_toml_emits_multiple_git_deps_in_sorted_order() {
         let cfg = BuffConfig {
-            package: PackageSection {
+            package: Some(PackageSection {
                 name: "demo".to_string(),
                 version: "0.1.0".to_string(),
                 edition: None,
-            },
+            }),
             dependencies: BTreeMap::new(),
             profile: Default::default(),
             rust_deps: BTreeMap::new(),
@@ -845,6 +990,7 @@ mid = { git = "https://example/m.buff" }
                 );
                 m
             },
+            workspace: None,
         };
         let cargo = generate_cargo_toml(&cfg);
         let alpha_pos = cargo.find("alpha = { path =").expect("alpha emitted");
@@ -855,15 +1001,16 @@ mid = { git = "https://example/m.buff" }
     #[test]
     fn generate_cargo_toml_no_git_section_when_empty() {
         let cfg = BuffConfig {
-            package: PackageSection {
+            package: Some(PackageSection {
                 name: "demo".to_string(),
                 version: "0.1.0".to_string(),
                 edition: None,
-            },
+            }),
             dependencies: BTreeMap::new(),
             profile: Default::default(),
             rust_deps: BTreeMap::new(),
             git_dependencies: BTreeMap::new(),
+            workspace: None,
         };
         let cargo = generate_cargo_toml(&cfg);
         // No [dependencies] section at all when ALL three are empty.

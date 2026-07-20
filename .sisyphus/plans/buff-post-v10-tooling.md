@@ -1487,7 +1487,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(cli): git-based dependency support`
 
-- [ ] **T123: Workspace support** [unspecified-high]
+- [x] **T123: Workspace support** [unspecified-high]
 
   **What to do**:
   - Support `[workspace]` section in root buff.toml

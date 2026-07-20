@@ -36,7 +36,7 @@ fn main() -> Result<()> {
         }
         Command::Init => buff_lang_cli::commands::init::run(),
         Command::Test { file, pattern } => {
-            buff_lang_cli::commands::test::run(&file, pattern.as_deref())
+            buff_lang_cli::commands::test::run(file.as_deref(), pattern.as_deref())
         }
         Command::Fmt { file, check } => {
             use buff_lang_cli::commands::fmt::FmtOutcome;

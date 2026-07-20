@@ -1,0 +1,15 @@
+﻿T123 Workspace support - Evidence
+===============================
+Date: 2026-07-20  parent HEAD: 694c983
+
+GATES (all green):
+- cargo test -p buff-lang-cli : 327 passed, 0 failed, 5 ignored (3 pre-existing + 2 T123 cargo-shellout integration)
+- T123 integration (--ignored): 2 passed (2-member workspace build + cargo test fan-out)
+- cargo clippy --workspace --all-targets --exclude buff-lang-runtime -- -D warnings : EXIT 0
+- cargo fmt -p buff-lang-cli --check : EXIT 0
+- no unwrap/expect/panic/todo in non-test code (build.rs uses .context()? not .expect())
+
+DESIGN: cargo-workspace passthrough. BuffConfig.package made Optional (virtual manifests have no [package]); new workspace: Option<WorkspaceSection> (members: Vec<String>); parse-time exactly-one-of(package,workspace) validation; generate_workspace_cargo_toml emits [workspace]+members+resolver=2. buff build/test at ws root shell out to cargo (fan-out free). Test.file made Optional (omit=>project/ws mode).
+
+DIFFSTAT:
+ crates/buff-lang-cli/src/cli.rs                    |  16 +-  crates/buff-lang-cli/src/commands/add.rs           |   2 +-  crates/buff-lang-cli/src/commands/build.rs         | 103 +++++++++++-  crates/buff-lang-cli/src/commands/test.rs          | 110 ++++++++++--  crates/buff-lang-cli/src/config.rs                 | 185 ++++++++++++++++++---  crates/buff-lang-cli/src/main.rs                   |   2 +-  crates/buff-lang-cli/tests/config_parsing.rs       |  25 ++-  .../buff-lang-cli/tests/git_dependencies_t122.rs   |   8 +-  crates/buff-lang-cli/tests/t120_cargo_polish.rs    |   5 +-  9 files changed, 400 insertions(+), 56 deletions(-)

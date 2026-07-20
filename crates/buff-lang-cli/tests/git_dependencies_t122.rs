@@ -281,7 +281,13 @@ fn add_reads_transitive_deps_from_cloned_buff_toml() {
     let checkout = git_checkout_path_for(stripped, &home);
     let transitive = commands::add::read_transitive_deps(&checkout).expect("transitive parse");
     let cfg = transitive.expect("cloned buff.toml must parse");
-    assert_eq!(cfg.package.name, "libbuff");
+    assert_eq!(
+        cfg.package
+            .as_ref()
+            .expect("package present in cloned buff.toml")
+            .name,
+        "libbuff"
+    );
     assert_eq!(
         cfg.dependencies.get("serde").map(|s| s.as_str()),
         Some("1.0")

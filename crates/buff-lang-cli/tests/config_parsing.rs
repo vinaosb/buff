@@ -57,10 +57,11 @@ lto = true
 #[test]
 fn config_parsing_basic() {
     let cfg = BuffConfig::parse(SAMPLE_TOML).expect("sample toml should parse");
-    assert_eq!(cfg.package.name, "my_app");
-    assert_eq!(cfg.package.version, "0.2.1");
+    let package = cfg.package.as_ref().expect("package present");
+    assert_eq!(package.name, "my_app");
+    assert_eq!(package.version, "0.2.1");
     // Edition is optional in the struct; SAMPLE_TOML sets "0.1".
-    assert_eq!(cfg.package.edition.as_deref(), Some("0.1"));
+    assert_eq!(package.edition.as_deref(), Some("0.1"));
     // Empty deps map when not provided — here we DID provide, so non-empty.
     assert!(
         !cfg.dependencies.is_empty(),
@@ -107,7 +108,7 @@ name = "tiny"
 version = "0.1.0"
 "#;
     let cfg = BuffConfig::parse(minimal).expect("minimal manifest should parse");
-    assert_eq!(cfg.package.name, "tiny");
+    assert_eq!(cfg.package.as_ref().expect("package present").name, "tiny");
     assert!(cfg.dependencies.is_empty(), "no deps => empty map");
     assert!(
         cfg.profile.release.is_none(),
@@ -121,14 +122,19 @@ version = "0.1.0"
 
 #[test]
 fn config_parsing_missing_package_errors() {
-    // No [package] section at all — required field missing.
+    // No [package] section AND no [workspace] section — the post-parse
+    // invariant (T123) requires exactly one of the two. Pre-T123 this
+    // surfaced as a Parse error (missing required field); post-T123 it
+    // also surfaces as a Layout error from the cross-field validation.
+    // Either variant is acceptable — the spirit of the test is "this
+    // manifest is invalid and parse rejects it without panicking".
     let bad = r#"[dependencies]
 foo = "1"
 "#;
     let err = BuffConfig::parse(bad).expect_err("missing [package] should fail");
     assert!(
-        matches!(err, ConfigError::Parse(_)),
-        "expected Parse error, got {err:?}"
+        matches!(err, ConfigError::Parse(_) | ConfigError::Layout(_)),
+        "expected Parse or Layout error, got {err:?}"
     );
 }
 
@@ -177,8 +183,9 @@ fn config_parsing_load_from_file() {
     let path = dir.join("buff.toml");
     fs::write(&path, SAMPLE_TOML).expect("write fixture");
     let cfg = BuffConfig::load_from_file(&path).expect("file load should succeed");
-    assert_eq!(cfg.package.name, "my_app");
-    assert_eq!(cfg.package.version, "0.2.1");
+    let package = cfg.package.as_ref().expect("package present");
+    assert_eq!(package.name, "my_app");
+    assert_eq!(package.version, "0.2.1");
     cleanup(&dir);
 }
 

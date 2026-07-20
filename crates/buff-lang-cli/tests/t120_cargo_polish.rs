@@ -14,15 +14,16 @@ use buff_lang_cli::config::{generate_cargo_toml, BuffConfig, PackageSection, Pro
 /// Helper: build a minimal BuffConfig for testing.
 fn minimal_cfg(name: &str) -> BuffConfig {
     BuffConfig {
-        package: PackageSection {
+        package: Some(PackageSection {
             name: name.to_string(),
             version: "0.1.0".to_string(),
             edition: Some("0.1".to_string()),
-        },
+        }),
         dependencies: BTreeMap::new(),
         profile: Profiles::default(),
         rust_deps: BTreeMap::new(),
         git_dependencies: BTreeMap::new(),
+        workspace: None,
     }
 }
 

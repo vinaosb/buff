@@ -478,7 +478,7 @@ mod tests {
         let cfg = read_transitive_deps(&dir)
             .expect("must parse")
             .expect("must be some");
-        assert_eq!(cfg.package.name, "lib");
+        assert_eq!(cfg.package.as_ref().expect("package present").name, "lib");
         assert_eq!(
             cfg.dependencies.get("serde").map(|s| s.as_str()),
             Some("1.0")
