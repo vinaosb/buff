@@ -13,6 +13,12 @@ buff-image/
 │   ├── lib.rs            # Image + PixelFormat + ImageFormat (main surface, ~430 LOC)
 │   ├── color.rs          # Color (RGBA u8) + Rec.601 luma (~100 LOC)
 │   └── error.rs          # ImageError enum (~70 LOC)
+├── examples/
+│   ├── image_load_filter.rs   # filter pipeline: grayscale + resize + save
+│   ├── image_pixels.rs        # pixel-level access: get_pixel / set_pixel
+│   └── image/
+│       ├── image_load_filter.buff  # Buff-side forward-decl (matches .rs)
+│       └── image_pixels.buff        # Buff-side forward-decl (matches .rs)
 └── tests/
     └── core.rs           # 18 unit tests + 5 insta snapshots (~270 LOC)
 ```
@@ -27,13 +33,13 @@ Total: ~870 LOC (well under the 2500 LOC T9 cap).
 | Add a new Color constructor | `src/color.rs` |
 | Add a new error variant | `src/error.rs` + `From` impl if it wraps an underlying error |
 | Register a new ImageFormat | `src/lib.rs::ImageFormat::{from_image_format, to_image_format, from_extension}` |
-| Wire a Buff-side method to codegen | `crates/buff-lang-types/src/prelude_types.rs` (PreludeInstanceFn) + `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_prelude_type_assoc_fn` |
+| Wire a Buff-side method to codegen | `crates/buff-lang-types/src/prelude_types.rs` (PreludeInstanceFn + `instance_fn_return_type`) + `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_prelude_type_instance_fn` |
 
-## PUBLIC API (23 functions, ≤25 cap)
+## PUBLIC API (22 functions, ≤25 cap)
 
-### `Image` (14 functions)
-- Constructors: `from_path`, `from_bytes`, `new`, `from_dynamic`, `into_dynamic`
-- Accessors: `width`, `height`, `format`, `codec`, `as_dynamic`
+### `Image` (13 functions)
+- Constructors: `from_path`, `from_bytes`, `new`, `from_dynamic`
+- Accessors: `width`, `height`, `format` (returns `PixelFormat`)
 - Pixel ops: `get_pixel`, `set_pixel`
 - I/O: `save`
 - Filters: `grayscale`, `invert`, `resize`, `crop`, `blur`
@@ -41,7 +47,7 @@ Total: ~870 LOC (well under the 2500 LOC T9 cap).
 ### `Color` (9 functions)
 - Constructors: `rgb`, `rgba`, `black`, `white`, `gray`
 - Accessors: `r`, `g`, `b`, `a`
-- Math: `luma` (Rec. 601)
+- Math: `luma` (Rec. 601) — pub(crate), surfaced via `img.grayscale()`
 
 ## CONVENTIONS
 
@@ -50,14 +56,15 @@ Total: ~870 LOC (well under the 2500 LOC T9 cap).
 - **FFI safety**: every public entry point follows the 6 hard rules from `crates/buff-lang-ffi-guide/GUIDE.md`. See the compliance table in `src/lib.rs` module doc.
 - **Panic-free**: no `unwrap` / `expect` / `panic!` in non-test code. Bounds-checked pixel access returns `Result<_, ImageError>`.
 - **catch_unwind boundary**: `from_path` / `from_bytes` / `save` wrap their bodies in `catch_unwind` per FFI guide R6 (a panic in the codec becomes `Err(ImageError::Panic)` instead of process abort).
+- **pub(crate) surface discipline**: `as_dynamic` / `into_dynamic` / `to_image_format` / `PixelFormat::channels` / `Color::luma` are all `pub(crate)` — internal helpers used by codegen integration tests but NOT part of the stable Buff-visible 25-fn cap.
 
 ## RELATIONSHIP TO OTHER CRATES
 
 | Crate | Relationship |
 |---|---|
 | `image` | Upstream codec provider. `buff-image` is a safe wrapper; never re-exports `image::*` types directly. |
-| `buff-lang-types` | `prelude_types.rs` registers `PreludeType::Image` + `PreludeAssocFn::{FromPath, FromBytes}`. `ty.rs` has the `Type::Image` variant + `is_prelude_image()` predicate. |
-| `buff-lang-codegen-rust` | `rust_codegen.rs::buff_type_to_syn` has the `Type::Image => "buff_image::Image"` arm. Lowering for the 10 instance methods is a follow-up coordinated sibling task. |
+| `buff-lang-types` | `prelude_types.rs` registers `PreludeType::Image` + `PreludeAssocFn::{FromPath, FromBytes}` + 11 `PreludeInstanceFn` variants (Width / Height / PixelFormat / GetPixel / SetPixel / Save / Grayscale / Invert / Resize / Crop / Blur). `ty.rs` has the `Type::Image` variant + `is_prelude_image()` predicate. |
+| `buff-lang-codegen-rust` | `rust_codegen.rs::buff_type_to_syn` has the `Type::Image => "buff_image::Image"` arm (line ~8034). `lower_prelude_type_assoc_fn` has the `(Image, FromPath)` / `(Image, FromBytes)` arms. `lower_prelude_type_instance_fn` has all 11 instance-method arms. `program_uses_namespace("Image")` records `buff-image` + `image` in `extern_crates`. |
 | `buff-lang-ffi-guide` | Defines the 6 hard rules every public function in this crate follows. |
 
 ## NOTES
@@ -65,3 +72,5 @@ Total: ~870 LOC (well under the 2500 LOC T9 cap).
 - **MSVC host blocker**: `cargo test -p buff-image` fails on this Windows host with `LINK : fatal error LNK1104: cannot open file 'msvcrt.lib'` — pre-existing VS 18 Insiders + missing Windows SDK UCRT headers issue (same family that blocks `cargo check --workspace` here). CI runs on a 3-OS matrix (ubuntu/windows/macos) and does NOT have this issue. The crate's library `cargo check -p buff-image --lib` and `cargo clippy -p buff-image --all-targets -- -D warnings` both pass clean.
 - **PNG output is RGBA8**: `Image::save` re-encodes the internal `DynamicImage` to whatever format the file extension implies. The internal buffer is always RGBA8 (after normalization); PNG/JPEG/etc. downsample as needed.
 - **Resize filter is Lanczos3**: the highest-quality filter `image` ships. Slower than Triangle/Nearest but visually correct for both upscale and downscale. A future task may add a quality knob.
+- **Image impls Default** as a 1x1 transparent pixel (added in the T9 finish commit so the codegen lowering can use `unwrap_or_default()` panic-free on `Result<Image, ImageError>` returning methods — matches the DataFrame precedent).
+- **`format` rename**: Buff's datetime-family `Format` variant (strftime, returns String) is shared between DateTime / Date / Time. Image's pixel-format accessor (returns `PixelFormat` enum) has distinct semantics, so on the Buff surface it's renamed `pixel_format` and the codegen lowers it to `recv.format()`. The internal Rust method stays `format()` to match the `image` crate's surface.

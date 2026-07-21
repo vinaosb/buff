@@ -488,6 +488,16 @@ impl fmt::Display for AudioBuffer {
     }
 }
 
+impl Default for AudioBuffer {
+    fn default() -> Self {
+        AudioBuffer {
+            samples: Vec::new(),
+            sample_rate: 44_100,
+            channels: 1,
+        }
+    }
+}
+
 /// Compact statistics snapshot used by tests + snapshots (NOT the
 /// `Display` impl — `Display` for `AudioBuffer` itself is one-line).
 #[derive(Debug, Clone, PartialEq)]

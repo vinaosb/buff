@@ -408,6 +408,12 @@ impl PartialEq for Image {
 
 impl Eq for Image {}
 
+impl Default for Image {
+    fn default() -> Self {
+        Image::from_dynamic(image::DynamicImage::new_rgba8(1, 1))
+    }
+}
+
 impl std::fmt::Display for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

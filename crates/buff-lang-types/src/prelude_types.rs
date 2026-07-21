@@ -2039,6 +2039,16 @@ pub enum PreludeAssocFn {
     /// in a future buff-web integration) or reading from a database
     /// BLOB column.
     FromBytes,
+    /// T10: `AudioBuffer.from_samples(samples, sample_rate, channels)` -
+    /// construct an audio buffer from already-interleaved f32 samples.
+    /// Three args (Vector<Float> samples in `-1.0..=1.0`, Int sample_rate
+    /// in Hz, Int channels `>= 1`). Returns AudioBuffer. Wraps
+    /// `buff_audio::AudioBuffer::from_samples(samples, sample_rate as
+    /// u32, channels as u16)?` (the `?` propagates AudioError per
+    /// Buff's R3 error-mapping contract). Used by programmatic tone
+    /// generators / DSP pipelines that build samples directly (the
+    /// coordinated buff-dsp T11 task is the canonical consumer).
+    FromSamples,
     // ---- Signal constructors (T11) -----------------------------------
     // Signal.from_vec(data, sample_rate) reuses the existing `FromVec`
     // variant (shared with Tensor.from_vec — same pattern as Parse /
@@ -2192,6 +2202,12 @@ impl PreludeAssocFn {
         // permits `Type.from_*()`. Mirrors the DataFrame ctor pattern.
         PreludeAssocFn::FromPath,
         PreludeAssocFn::FromBytes,
+        // T10: AudioBuffer constructor (1 distinct name): from_samples.
+        // AudioBuffer-only. Reuses the Buff §7 `Type.from_*()` ctor
+        // naming convention. `from_path` is shared with Image /
+        // DataFrame via the existing `FromPath` variant — dispatched
+        // on the (Audio, FromPath) pair.
+        PreludeAssocFn::FromSamples,
         // T11: Window constructors (3): hann / hamming / blackman.
         PreludeAssocFn::Hann,
         PreludeAssocFn::Hamming,
@@ -2247,6 +2263,11 @@ impl PreludeAssocFn {
             // rewriting. Mirrors the DataFrame precedent (T7).
             PreludeAssocFn::FromPath => "from_path",
             PreludeAssocFn::FromBytes => "from_bytes",
+            // T10: AudioBuffer ctor name mirrors the Buff §7
+            // `Type.from_*()` ctor convention so the codegen can
+            // splice `buff_audio::AudioBuffer::from_samples(s, sr, ch)`
+            // without rewriting.
+            PreludeAssocFn::FromSamples => "from_samples",
             PreludeAssocFn::Hann => "hann",
             PreludeAssocFn::Hamming => "hamming",
             PreludeAssocFn::Blackman => "blackman",
@@ -2945,6 +2966,20 @@ pub fn assoc_fn_return_type(
         // `buff_image::Image::from_bytes(&b)?`. Used for HTTP-downloaded
         // image bytes / database BLOBs.
         (PreludeType::Image, PreludeAssocFn::FromBytes) => Some(Type::Image),
+        // T10: AudioBuffer assoc fns. `AudioBuffer.from_path(path)`
+        // -> AudioBuffer. Wraps `buff_audio::AudioBuffer::from_path(p)?
+        // ` (the `?` propagates AudioError per R3). Decodes WAV via
+        // hound, MP3/FLAC/Vorbis via symphonia. Same shared `FromPath`
+        // variant as Image.from_path — dispatched on the (Audio,
+        // FromPath) pair (mirrors `Parse` shared between DateTime /
+        // Date / Toml / URL / UUID).
+        (PreludeType::Audio, PreludeAssocFn::FromPath) => Some(Type::Audio),
+        // `AudioBuffer.from_samples(samples, sample_rate, channels)`
+        // -> AudioBuffer. Wraps `buff_audio::AudioBuffer::from_samples
+        // (samples, sample_rate as u32, channels as u16)?`. Used by
+        // programmatic tone generators (buff-dsp T11 is the canonical
+        // consumer).
+        (PreludeType::Audio, PreludeAssocFn::FromSamples) => Some(Type::Audio),
         // T11: Signal.from_vec reuses FromVec (shared with Tensor).
         // Returns Signal (modeled as Void — coordinated Type::Signal
         // variant is a follow-up outside T11 shared zone).
@@ -3210,6 +3245,107 @@ pub enum PreludeInstanceFn {
     Spectrogram,
     Magnitude,
     Phase,
+    // ---- Image instance methods (T9) ----------------------------------
+    // Eleven instance methods on Image values. Dispatched on
+    // (Type::Image, variant) pairs. CPU-only per Metis G7 (NO GPU
+    // dispatch — defer to v1.18+). Each variant lowers to the matching
+    // `buff_image::Image` method in codegen; the `format` /
+    // `get_pixel` accessors return Type::Unknown at this layer (no
+    // Buff-surface PixelFormat / Color type variant yet — codegen
+    // emits the call and Rust's type inference handles the rest).
+    /// `img.width() -> Int`. Zero args. Wraps `recv.width() as i64`
+    /// (the `as i64` lifts the underlying `u32` to Buff's Int width).
+    Width,
+    /// `img.height() -> Int`. Zero args. Wraps `recv.height() as i64`.
+    Height,
+    /// `img.format() -> PixelFormat`. Zero args. Returns the pixel
+    /// format enum (`Rgb` / `Rgba`) — modeled as Type::Unknown at this
+    /// layer because Buff has no surface PixelFormat type variant
+    /// (codegen emits `recv.format()` and Rust's type inference
+    /// derives `buff_image::PixelFormat`).
+    PixelFormat,
+    /// `img.get_pixel(x, y) -> Color`. Two args (Int x, Int y). Bounds-
+    /// checked; the codegen lowers to `recv.get_pixel(x as u32, y as
+    /// u32).unwrap_or_default()` (Color impls Default as black —
+    /// panic-free per Buff's "no panicking generated code" rule).
+    GetPixel,
+    /// `img.set_pixel(x, y, color) -> Void`. Three args (Int x, Int y,
+    /// Color). Bounds-checked in-place mutation; the codegen lowers to
+    /// `recv.set_pixel(x as u32, y as u32, color).unwrap_or_default()`
+    /// (panic-free via `()` Default).
+    SetPixel,
+    /// `img.save(path) -> Void`. One arg (String / Path). Writes to
+    /// disk; the format is inferred from the file extension. The
+    /// codegen lowers to `recv.save(path).unwrap_or_default()` (panic-
+    /// free). Shared `Save` variant — dispatched on (Image, Save) /
+    /// (Audio, Save) pairs (mirrors `Send` shared between Connection
+    /// / WsConnection).
+    Save,
+    /// `img.grayscale() -> Image`. Zero args. Consumes self, returns a
+    /// new grayscale Image (Rec. 601 luma coefficients). Infallible —
+    /// the codegen lowers to `recv.grayscale()` directly.
+    Grayscale,
+    /// `img.invert() -> Void`. Zero args. In-place channel inversion
+    /// (subtracts each channel from 255). Infallible.
+    Invert,
+    /// `img.resize(w, h) -> Image`. Two args (Int width, Int height).
+    /// Lanczos3 resize. The codegen lowers to `recv.resize(w as u32,
+    /// h as u32).unwrap_or_default()` (Image impls Default as a 1x1
+    /// transparent pixel — panic-free on zero dims / overflow).
+    Resize,
+    /// `img.crop(x, y, w, h) -> Image`. Four args. Bounds-checked
+    /// subimage extraction. The codegen lowers to `recv.crop(x as
+    /// u32, y as u32, w as u32, h as u32).unwrap_or_default()`.
+    Crop,
+    /// `img.blur(sigma) -> Image`. One arg (Float sigma). Gaussian
+    /// blur. Infallible — the codegen lowers to `recv.blur(sigma as
+    /// f32)` directly (sigma=0 is a no-op clone).
+    Blur,
+    // ---- AudioBuffer instance methods (T10) ---------------------------
+    // Ten instance methods on AudioBuffer values. Dispatched on
+    // (Type::Audio, variant) pairs. CPU-only per Metis G7 (NO GPU
+    // dispatch, NO real-time playback). The `summarize` accessor
+    // returns Type::Unknown at this layer (no Buff-surface
+    // AudioSummary type variant — codegen emits the call and Rust's
+    // type inference derives `buff_audio::AudioSummary`).
+    /// `buf.samples() -> Vector<Float>`. Zero args. Returns the
+    /// interleaved sample slice as an owned Vec<f32>. Wraps
+    /// `recv.samples().to_vec()`.
+    Samples,
+    /// `buf.sample_rate() -> Int`. Zero args. Wraps `recv.sample_rate
+    /// () as i64`.
+    SampleRate,
+    /// `buf.channels() -> Int`. Zero args. Wraps `recv.channels() as
+    /// i64`.
+    Channels,
+    /// `buf.frames() -> Int`. Zero args. Wraps `recv.frames() as i64`.
+    Frames,
+    /// `buf.duration_secs() -> Float`. Zero args. Wraps
+    /// `recv.duration_secs() as f64`.
+    DurationSecs,
+    /// `buf.amplify(factor) -> Void`. One arg (Float). In-place scale.
+    /// Infallible.
+    Amplify,
+    /// `buf.normalize(target) -> Void`. One arg (Float). In-place
+    /// peak-normalize. Infallible (zero-sample buffer is a no-op).
+    Normalize,
+    /// `buf.mix(other) -> Void`. One arg (AudioBuffer). Sample-wise
+    /// add. The codegen lowers to `recv.mix(&other).unwrap_or_default
+    /// ()` (panic-free on rate/channel mismatch — the underlying
+    /// AudioBuffer::mix returns Result; the .unwrap_or_default()
+    /// collapses to a no-op).
+    Mix,
+    /// `buf.slice(start_sec, end_sec) -> AudioBuffer`. Two args
+    /// (Float, Float). Returns a new AudioBuffer for the time window.
+    /// The codegen lowers to `recv.slice(start_sec, end_sec)
+    /// .unwrap_or_default()` (AudioBuffer impls Default as an empty
+    /// buffer — panic-free on invalid endpoints).
+    Slice,
+    /// `buf.summarize() -> AudioSummary`. Zero args. Returns a
+    /// statistics snapshot (peak / RMS / frames / duration). Modeled
+    /// as Type::Unknown at this layer because Buff has no surface
+    /// AudioSummary type variant.
+    Summarize,
 }
 
 impl PreludeInstanceFn {
@@ -3293,6 +3429,37 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Spectrogram,
         PreludeInstanceFn::Magnitude,
         PreludeInstanceFn::Phase,
+        // T9: Image instance methods (11 distinct names): width /
+        // height / format / get_pixel / set_pixel / save / grayscale
+        // / invert / resize / crop / blur. `Save` is shared with
+        // AudioBuffer.save (dispatched on receiver type — mirrors
+        // `Send` shared between Connection / WsConnection). The other
+        // 10 are Image-only.
+        PreludeInstanceFn::Width,
+        PreludeInstanceFn::Height,
+        PreludeInstanceFn::PixelFormat,
+        PreludeInstanceFn::GetPixel,
+        PreludeInstanceFn::SetPixel,
+        PreludeInstanceFn::Save,
+        PreludeInstanceFn::Grayscale,
+        PreludeInstanceFn::Invert,
+        PreludeInstanceFn::Resize,
+        PreludeInstanceFn::Crop,
+        PreludeInstanceFn::Blur,
+        // T10: AudioBuffer instance methods (10 distinct names):
+        // samples / sample_rate / channels / frames / duration_secs
+        // / amplify / normalize / mix / slice / summarize. `Save` is
+        // shared with Image.save. The other 9 are AudioBuffer-only.
+        PreludeInstanceFn::Samples,
+        PreludeInstanceFn::SampleRate,
+        PreludeInstanceFn::Channels,
+        PreludeInstanceFn::Frames,
+        PreludeInstanceFn::DurationSecs,
+        PreludeInstanceFn::Amplify,
+        PreludeInstanceFn::Normalize,
+        PreludeInstanceFn::Mix,
+        PreludeInstanceFn::Slice,
+        PreludeInstanceFn::Summarize,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -3378,6 +3545,39 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Agg => "agg",
             PreludeInstanceFn::ToTableString => "to_table_string",
             PreludeInstanceFn::Join => "join",
+            // T9: Image instance method names mirror the
+            // `buff_image::Image` method names 1:1 so the codegen can
+            // splice `recv.width()` / `recv.grayscale()` etc. without
+            // rewriting. `format` is renamed `pixel_format` on the
+            // Buff surface to avoid a clash with DateTime.format (the
+            // shared `Format` variant is strftime-style returning
+            // String; Image's pixel_format returns the PixelFormat
+            // enum — distinct semantics, distinct variant).
+            PreludeInstanceFn::Width => "width",
+            PreludeInstanceFn::Height => "height",
+            PreludeInstanceFn::PixelFormat => "pixel_format",
+            PreludeInstanceFn::GetPixel => "get_pixel",
+            PreludeInstanceFn::SetPixel => "set_pixel",
+            PreludeInstanceFn::Save => "save",
+            PreludeInstanceFn::Grayscale => "grayscale",
+            PreludeInstanceFn::Invert => "invert",
+            PreludeInstanceFn::Resize => "resize",
+            PreludeInstanceFn::Crop => "crop",
+            PreludeInstanceFn::Blur => "blur",
+            // T10: AudioBuffer instance method names mirror the
+            // `buff_audio::AudioBuffer` method names 1:1 so the
+            // codegen can splice `recv.samples()` / `recv.amplify(x)`
+            // etc. without rewriting.
+            PreludeInstanceFn::Samples => "samples",
+            PreludeInstanceFn::SampleRate => "sample_rate",
+            PreludeInstanceFn::Channels => "channels",
+            PreludeInstanceFn::Frames => "frames",
+            PreludeInstanceFn::DurationSecs => "duration_secs",
+            PreludeInstanceFn::Amplify => "amplify",
+            PreludeInstanceFn::Normalize => "normalize",
+            PreludeInstanceFn::Mix => "mix",
+            PreludeInstanceFn::Slice => "slice",
+            PreludeInstanceFn::Summarize => "summarize",
         }
     }
 }
@@ -3658,6 +3858,86 @@ pub fn instance_fn_return_type(
         // `df.to_table_string()` -> String. Zero-arg fixed-width
         // pretty-printer (infallible — returns String directly).
         (Type::DataFrame, PreludeInstanceFn::ToTableString) => Some(Type::string()),
+
+        // T9: Image instance methods. Each filter returning a new
+        // Image (grayscale / resize / crop / blur) returns Type::Image
+        // so the user can chain `img.grayscale().resize(50, 50)`. The
+        // accessors (width / height) return Int (Buff's Int<64>);
+        // get_pixel returns Unknown (no Buff Color type variant yet);
+        // set_pixel / save / invert return Void (in-place or
+        // panic-free discarded Result). All methods panic-free at the
+        // codegen layer via `unwrap_or_default()` (Image impls
+        // Default as a 1x1 transparent pixel — added in the same T9
+        // finish commit as this registry entry).
+        //
+        // `img.width()` -> Int. Wraps `recv.width() as i64`.
+        (Type::Image, PreludeInstanceFn::Width) => Some(Type::int_default()),
+        // `img.height()` -> Int. Wraps `recv.height() as i64`.
+        (Type::Image, PreludeInstanceFn::Height) => Some(Type::int_default()),
+        // `img.pixel_format()` -> PixelFormat. Zero args. Returns
+        // Type::Unknown at this layer (Buff has no surface PixelFormat
+        // type variant; codegen emits `recv.format()` and Rust infers
+        // `buff_image::PixelFormat`). Renamed from `format` on the
+        // Buff surface to avoid a clash with DateTime.format.
+        (Type::Image, PreludeInstanceFn::PixelFormat) => Some(Type::Unknown),
+        // `img.get_pixel(x, y)` -> Color. Two args. Bounds-checked;
+        // returns Color (Type::Unknown — no Buff Color variant).
+        (Type::Image, PreludeInstanceFn::GetPixel) => Some(Type::Unknown),
+        // `img.set_pixel(x, y, color)` -> Void. In-place mutation.
+        (Type::Image, PreludeInstanceFn::SetPixel) => Some(Type::Void),
+        // `img.save(path)` -> Void. Writes to disk. Shared `Save`
+        // variant — dispatched on (Image, Save) pair (the codegen
+        // arm handles receiver-type dispatch).
+        (Type::Image, PreludeInstanceFn::Save) => Some(Type::Void),
+        // `img.grayscale()` -> Image. Rec. 601 luma. Chainable.
+        (Type::Image, PreludeInstanceFn::Grayscale) => Some(Type::Image),
+        // `img.invert()` -> Void. In-place channel inversion.
+        (Type::Image, PreludeInstanceFn::Invert) => Some(Type::Void),
+        // `img.resize(w, h)` -> Image. Lanczos3. Chainable.
+        (Type::Image, PreludeInstanceFn::Resize) => Some(Type::Image),
+        // `img.crop(x, y, w, h)` -> Image. Bounds-checked. Chainable.
+        (Type::Image, PreludeInstanceFn::Crop) => Some(Type::Image),
+        // `img.blur(sigma)` -> Image. Gaussian. Chainable.
+        (Type::Image, PreludeInstanceFn::Blur) => Some(Type::Image),
+
+        // T10: AudioBuffer instance methods. The accessors (samples /
+        // sample_rate / channels / frames / duration_secs) return
+        // Vec<Float> / Int / Int / Int / Float respectively. The
+        // in-place ops (amplify / normalize / mix) return Void. The
+        // chainable slice returns AudioBuffer. summarize returns
+        // Unknown (no Buff AudioSummary variant). All panic-free at
+        // the codegen layer (slice via `unwrap_or_default()`;
+        // AudioBuffer impls Default as empty 44100Hz mono — added in
+        // the same T10 finish commit as this registry entry).
+        //
+        // `buf.samples()` -> Vector<Float>. Owned copy of the
+        // interleaved sample slice.
+        (Type::Audio, PreludeInstanceFn::Samples) => Some(Type::vector(Type::float_default())),
+        // `buf.sample_rate()` -> Int. Hz.
+        (Type::Audio, PreludeInstanceFn::SampleRate) => Some(Type::int_default()),
+        // `buf.channels()` -> Int. >= 1.
+        (Type::Audio, PreludeInstanceFn::Channels) => Some(Type::int_default()),
+        // `buf.frames()` -> Int. samples.len() / channels.
+        (Type::Audio, PreludeInstanceFn::Frames) => Some(Type::int_default()),
+        // `buf.duration_secs()` -> Float. frames / sample_rate.
+        (Type::Audio, PreludeInstanceFn::DurationSecs) => Some(Type::float_default()),
+        // `buf.amplify(factor)` -> Void. In-place scale.
+        (Type::Audio, PreludeInstanceFn::Amplify) => Some(Type::Void),
+        // `buf.normalize(target)` -> Void. In-place peak-normalize.
+        (Type::Audio, PreludeInstanceFn::Normalize) => Some(Type::Void),
+        // `buf.mix(other)` -> Void. Sample-wise add. Discards the
+        // Result (rate/channel mismatch is a no-op via unwrap_or_default).
+        (Type::Audio, PreludeInstanceFn::Mix) => Some(Type::Void),
+        // `buf.slice(start_sec, end_sec)` -> AudioBuffer. Chainable.
+        (Type::Audio, PreludeInstanceFn::Slice) => Some(Type::Audio),
+        // `buf.summarize()` -> AudioSummary. Type::Unknown at this
+        // layer (no Buff AudioSummary variant; codegen emits the call
+        // and Rust infers `buff_audio::AudioSummary`).
+        (Type::Audio, PreludeInstanceFn::Summarize) => Some(Type::Unknown),
+        // Shared `Save` variant dispatched on (Audio, Save) pair
+        // (mirrors Format shared between DateTime / Date / Time).
+        // `buf.save(path)` -> Void. WAV encode.
+        (Type::Audio, PreludeInstanceFn::Save) => Some(Type::Void),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

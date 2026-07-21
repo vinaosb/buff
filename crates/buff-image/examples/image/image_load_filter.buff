@@ -1,0 +1,25 @@
+# T9 .buff example: load PNG, grayscale, resize, save (FORWARD-DECL).
+#
+# Requires the coordinated Type::Image codegen lowering arm (this task,
+# T9 finish). The prelude registry entry `PreludeType::Image` +
+# instance-method arms were added in the same T9 finish commit as this
+# example. See crates/buff-image/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+
+from "image" import Image
+
+func main():
+    input_path = System.args().get(1).or(default: "input.png")
+    output_path = System.args().get(2).or(default: "output.png")
+
+    img = Image.from_path(path: input_path)
+    print("loaded: ${img.width()}x${img.height()}")
+
+    gray = img.grayscale()
+    print("after grayscale: ${gray.width()}x${gray.height()}")
+
+    small = gray.resize(w: 200, h: 200)
+    print("after resize: ${small.width()}x${small.height()}")
+
+    small.save(path: output_path)
+    print("saved to ${output_path}")

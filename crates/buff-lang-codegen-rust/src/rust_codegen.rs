@@ -814,6 +814,29 @@ impl RustCodegen {
             self.extern_crates.insert("buff-lang-runtime".to_string());
             self.extern_crates.insert("tokio".to_string());
         }
+        // T9: register `buff-image` when the program references the
+        // prelude `Image` module (`Image.from_path(...)` etc.). The
+        // generated code uses fully-qualified `buff_image::Image::*`
+        // paths so no top-level `use` import is emitted — but the
+        // recorded name signals to the pipeline / build-driver that
+        // the generated Cargo project must declare `buff-image` in
+        // `[dependencies]`. Also records `image` transitively (the
+        // wrapper crate wraps `image::DynamicImage`). Mirrors the
+        // Channel / chrono / regex / toml registration pattern.
+        if program_uses_namespace(decls, "Image") {
+            self.extern_crates.insert("buff-image".to_string());
+            self.extern_crates.insert("image".to_string());
+        }
+        // T10: register `buff-audio` when the program references the
+        // prelude `AudioBuffer` module (`AudioBuffer.from_path(...)`
+        // etc.). Also records `hound` + `symphonia` transitively (the
+        // wrapper crate wraps both for WAV / MP3 / FLAC / Vorbis
+        // decode + WAV encode). Mirrors the T9 Image pattern.
+        if program_uses_namespace(decls, "AudioBuffer") {
+            self.extern_crates.insert("buff-audio".to_string());
+            self.extern_crates.insert("hound".to_string());
+            self.extern_crates.insert("symphonia".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -4617,6 +4640,74 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("DataFrame.from_json codegen parse: {e}")))
             }
+            // T9: Image.from_path(path) -> Image. Wraps
+            // `buff_image::Image::from_path(arg).unwrap_or_default()`
+            // (panic-free on file-not-found / decode failure / codec
+            // panic — Image impls Default as a 1x1 transparent pixel,
+            // matching Buff's "no panicking generated code" rule).
+            // Records `buff-image` + `image` in extern_crates via the
+            // `program_uses_namespace("Image")` walker.
+            (T::Image, A::FromPath) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_image::Image::from_path(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.from_path codegen parse: {e}")))
+            }
+            // T9: Image.from_bytes(bytes) -> Image. Same shape as
+            // FromPath — panic-free via `unwrap_or_default()`. The
+            // arg is a `Vector<Byte>` on the Buff surface (Vec<u8>
+            // after codegen lowering); the codegen passes it by ref
+            // to `buff_image::Image::from_bytes(&bytes)`.
+            (T::Image, A::FromBytes) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_image::Image::from_bytes(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.from_bytes codegen parse: {e}")))
+            }
+            // T10: AudioBuffer.from_path(path) -> AudioBuffer. Wraps
+            // `buff_audio::AudioBuffer::from_path(arg)
+            // .unwrap_or_default()` (panic-free on file-not-found /
+            // decode failure / codec panic — AudioBuffer impls Default
+            // as an empty 44100Hz mono buffer, matching Buff's "no
+            // panicking generated code" rule). Records `buff-audio` +
+            // `hound` + `symphonia` in extern_crates via the
+            // `program_uses_namespace("AudioBuffer")` walker.
+            (T::Audio, A::FromPath) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audio::AudioBuffer::from_path(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.from_path codegen parse: {e}")))
+            }
+            // T10: AudioBuffer.from_samples(samples, sample_rate,
+            // channels) -> AudioBuffer. Three args (Vec<f32>, u32,
+            // u16). The Buff surface passes (Vector<Float>, Int,
+            // Int); codegen casts Int -> u32 / u16 at the call site
+            // (mirrors the i64 -> usize cast in Channel.new).
+            // Panic-free via `unwrap_or_default()` (AudioBuffer
+            // impls Default — invalid params collapse to empty).
+            (T::Audio, A::FromSamples) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "from_samples() expects exactly 3 args (samples, sample_rate, channels), got {}",
+                        args.len()
+                    )));
+                }
+                let samples = self.lower_expr(&args[0])?;
+                let sample_rate = self.lower_expr(&args[1])?;
+                let channels = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audio::AudioBuffer::from_samples(#samples, #sample_rate as u32, #channels as u16)
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.from_samples codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -5616,6 +5707,428 @@ impl RustCodegen {
             // to the existing method-resolution path.
             M::Len => Err(self.unsupported(&format!(
                 "{recv_ty}.len() is not a recognised prelude instance method",
+            ))),
+            // T9: Image instance methods. Each filter returning a new
+            // Image (grayscale / resize / crop / blur) lowers to
+            // `buff_image::Image::<method>` and is panic-free via
+            // `unwrap_or_default()` (Image impls Default as a 1x1
+            // transparent pixel — added in the same T9 finish commit
+            // as this codegen arm). The codegen records `buff-image`
+            // + `image` in extern_crates via the
+            // `program_uses_namespace("Image")` walker.
+            //
+            // `img.width()` -> Int. Zero args. Wraps `recv.width() as
+            // i64` (the `as i64` lifts u32 to Buff's Int width).
+            M::Width if matches!(recv_ty, Type::Image) => {
+                if !args.is_empty() {
+                    return Err(self
+                        .unsupported(&format!("width() takes no arguments, got {}", args.len())));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.width() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.width codegen parse: {e}")))
+            }
+            // `img.height()` -> Int. Zero args. Wraps `recv.height()
+            // as i64`.
+            M::Height if matches!(recv_ty, Type::Image) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "height() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.height() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.height codegen parse: {e}")))
+            }
+            // `img.pixel_format()` -> PixelFormat. Zero args. Wraps
+            // `recv.format()` (renamed on the Buff surface to avoid a
+            // clash with DateTime.format — distinct variant, distinct
+            // semantics). Returns Type::Unknown at the type-checker
+            // layer; codegen emits the bare call and Rust infers
+            // `buff_image::PixelFormat`.
+            M::PixelFormat if matches!(recv_ty, Type::Image) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "pixel_format() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.format()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.pixel_format codegen parse: {e}")))
+            }
+            // `img.get_pixel(x, y)` -> Color. Two args. Bounds-
+            // checked; the codegen lowers to `recv.get_pixel(x as u32,
+            // y as u32).unwrap_or_default()` (Color impls Default as
+            // black — panic-free on out-of-bounds coords).
+            M::GetPixel if matches!(recv_ty, Type::Image) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "get_pixel() expects exactly 2 args (x, y), got {}",
+                        args.len()
+                    )));
+                }
+                let x = self.lower_expr(&args[0])?;
+                let y = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.get_pixel(#x as u32, #y as u32).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.get_pixel codegen parse: {e}")))
+            }
+            // `img.set_pixel(x, y, color)` -> Void. Three args. In-
+            // place mutation. Panic-free via `unwrap_or_default()` (()
+            // impls Default — out-of-bounds coords are a no-op).
+            M::SetPixel if matches!(recv_ty, Type::Image) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "set_pixel() expects exactly 3 args (x, y, color), got {}",
+                        args.len()
+                    )));
+                }
+                let x = self.lower_expr(&args[0])?;
+                let y = self.lower_expr(&args[1])?;
+                let color = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.set_pixel(#x as u32, #y as u32, #color).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.set_pixel codegen parse: {e}")))
+            }
+            // `img.grayscale()` -> Image. Zero args. Consumes self,
+            // returns a new Image. Infallible (no `unwrap_or_default`
+            // wrap needed — `grayscale` returns Image directly).
+            M::Grayscale if matches!(recv_ty, Type::Image) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "grayscale() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.grayscale()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.grayscale codegen parse: {e}")))
+            }
+            // `img.invert()` -> Void. Zero args. In-place channel
+            // inversion. Infallible.
+            M::Invert if matches!(recv_ty, Type::Image) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "invert() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.invert()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.invert codegen parse: {e}")))
+            }
+            // `img.resize(w, h)` -> Image. Two args (Int w, Int h).
+            // Lanczos3 resize. Panic-free via `unwrap_or_default()`
+            // (Image impls Default — invalid dims collapse to 1x1).
+            M::Resize if matches!(recv_ty, Type::Image) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "resize() expects exactly 2 args (w, h), got {}",
+                        args.len()
+                    )));
+                }
+                let w = self.lower_expr(&args[0])?;
+                let h = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.resize(#w as u32, #h as u32).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.resize codegen parse: {e}")))
+            }
+            // `img.crop(x, y, w, h)` -> Image. Four args. Bounds-
+            // checked. Panic-free via `unwrap_or_default()`.
+            M::Crop if matches!(recv_ty, Type::Image) => {
+                if args.len() != 4 {
+                    return Err(self.unsupported(&format!(
+                        "crop() expects exactly 4 args (x, y, w, h), got {}",
+                        args.len()
+                    )));
+                }
+                let x = self.lower_expr(&args[0])?;
+                let y = self.lower_expr(&args[1])?;
+                let w = self.lower_expr(&args[2])?;
+                let h = self.lower_expr(&args[3])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.crop(#x as u32, #y as u32, #w as u32, #h as u32).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.crop codegen parse: {e}")))
+            }
+            // `img.blur(sigma)` -> Image. One arg (Float). Gaussian
+            // blur. Infallible (returns Image directly).
+            M::Blur if matches!(recv_ty, Type::Image) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "blur() expects exactly 1 arg (sigma), got {}",
+                        args.len()
+                    )));
+                }
+                let sigma = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.blur(#sigma as f32)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.blur codegen parse: {e}")))
+            }
+            // T10: AudioBuffer instance methods. Each method lowers
+            // to `buff_audio::AudioBuffer::<method>`. The codegen
+            // records `buff-audio` + `hound` + `symphonia` in
+            // extern_crates via the `program_uses_namespace
+            // ("AudioBuffer")` walker. All methods panic-free at the
+            // codegen layer (slice via `unwrap_or_default()`;
+            // AudioBuffer impls Default — added in the same T10
+            // finish commit as this codegen arm).
+            //
+            // `buf.samples()` -> Vector<Float>. Zero args. Wraps
+            // `recv.samples().to_vec()` (the `.to_vec()` lifts `&[f32]`
+            // to `Vec<f32>` — Buff surfaces owned values).
+            M::Samples if matches!(recv_ty, Type::Audio) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "samples() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.samples().to_vec()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.samples codegen parse: {e}")))
+            }
+            // `buf.sample_rate()` -> Int. Zero args. Wraps
+            // `recv.sample_rate() as i64`.
+            M::SampleRate if matches!(recv_ty, Type::Audio) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "sample_rate() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.sample_rate() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.sample_rate codegen parse: {e}")))
+            }
+            // `buf.channels()` -> Int. Zero args. Wraps
+            // `recv.channels() as i64`.
+            M::Channels if matches!(recv_ty, Type::Audio) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "channels() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.channels() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.channels codegen parse: {e}")))
+            }
+            // `buf.frames()` -> Int. Zero args. Wraps `recv.frames()
+            // as i64`.
+            M::Frames if matches!(recv_ty, Type::Audio) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "frames() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.frames() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.frames codegen parse: {e}")))
+            }
+            // `buf.duration_secs()` -> Float. Zero args. Wraps
+            // `recv.duration_secs()` (already f64).
+            M::DurationSecs if matches!(recv_ty, Type::Audio) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "duration_secs() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.duration_secs()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.duration_secs codegen parse: {e}")))
+            }
+            // `buf.amplify(factor)` -> Void. One arg (Float). In-place
+            // scale. Infallible.
+            M::Amplify if matches!(recv_ty, Type::Audio) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "amplify() expects exactly 1 arg (factor), got {}",
+                        args.len()
+                    )));
+                }
+                let factor = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.amplify(#factor as f32)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.amplify codegen parse: {e}")))
+            }
+            // `buf.normalize(target)` -> Void. One arg (Float). In-
+            // place peak-normalize. Infallible (zero-sample buffer is
+            // a no-op).
+            M::Normalize if matches!(recv_ty, Type::Audio) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "normalize() expects exactly 1 arg (target), got {}",
+                        args.len()
+                    )));
+                }
+                let target = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.normalize(#target as f32)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.normalize codegen parse: {e}")))
+            }
+            // `buf.mix(other)` -> Void. One arg (AudioBuffer). Sample-
+            // wise add. Panic-free via `unwrap_or_default()` (rate /
+            // channel mismatch is a no-op).
+            M::Mix if matches!(recv_ty, Type::Audio) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "mix() expects exactly 1 arg (other AudioBuffer), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.mix(&#other).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.mix codegen parse: {e}")))
+            }
+            // `buf.slice(start_sec, end_sec)` -> AudioBuffer. Two args
+            // (Float, Float). Returns a new AudioBuffer for the time
+            // window. Panic-free via `unwrap_or_default()`
+            // (AudioBuffer impls Default — invalid endpoints collapse
+            // to empty 44100Hz mono).
+            M::Slice if matches!(recv_ty, Type::Audio) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "slice() expects exactly 2 args (start_sec, end_sec), got {}",
+                        args.len()
+                    )));
+                }
+                let start = self.lower_expr(&args[0])?;
+                let end = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.slice(#start as f64, #end as f64).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.slice codegen parse: {e}")))
+            }
+            // `buf.summarize()` -> AudioSummary. Zero args. Returns a
+            // statistics snapshot. Infallible (returns AudioSummary
+            // directly — no `unwrap_or_default()` needed). The return
+            // type is Type::Unknown at the type-checker layer; codegen
+            // emits the bare call and Rust infers
+            // `buff_audio::AudioSummary`.
+            M::Summarize if matches!(recv_ty, Type::Audio) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "summarize() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.summarize()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.summarize codegen parse: {e}")))
+            }
+            // `Save` is shared between Image.save (above) and
+            // AudioBuffer.save (below) — dispatched on receiver type
+            // (mirrors `Send` shared between Connection / WsConnection
+            // and `Format` shared between DateTime / Date / Time).
+            //
+            // `img.save(path)` -> Void. One arg (String / Path).
+            // Writes to disk. Panic-free via `unwrap_or_default()` (()
+            // impls Default — I/O failure is a no-op).
+            M::Save if matches!(recv_ty, Type::Image) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "save() expects exactly 1 arg (path), got {}",
+                        args.len()
+                    )));
+                }
+                let path = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.save(#path).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Image.save codegen parse: {e}")))
+            }
+            // `buf.save(path)` -> Void. One arg (String / Path). WAV
+            // encode. Panic-free via `unwrap_or_default()`.
+            M::Save if matches!(recv_ty, Type::Audio) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "save() expects exactly 1 arg (path), got {}",
+                        args.len()
+                    )));
+                }
+                let path = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.save(#path).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AudioBuffer.save codegen parse: {e}")))
+            }
+            // Non-Image / Non-Audio receiver with an Image-only /
+            // Audio-only method (Width / Height / PixelFormat /
+            // GetPixel / SetPixel / Grayscale / Invert / Resize /
+            // Crop / Blur / Samples / SampleRate / Channels / Frames
+            // / DurationSecs / Amplify / Normalize / Mix / Slice /
+            // Summarize / Save) falls through to a clear error
+            // (mirrors the Select / Filter / Sort / Head / GroupBy /
+            // Agg / ToTableString safety net above).
+            M::Width
+            | M::Height
+            | M::PixelFormat
+            | M::GetPixel
+            | M::SetPixel
+            | M::Grayscale
+            | M::Invert
+            | M::Resize
+            | M::Crop
+            | M::Blur
+            | M::Samples
+            | M::SampleRate
+            | M::Channels
+            | M::Frames
+            | M::DurationSecs
+            | M::Amplify
+            | M::Normalize
+            | M::Mix
+            | M::Slice
+            | M::Summarize
+            | M::Save => Err(self.unsupported(&format!(
+                "{recv_ty}.{:?}() is not a recognised prelude instance method",
+                pmethod
             ))),
         }
     }
@@ -8931,6 +9444,36 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     // `agg`) all take args so they're never affected by the heuristic;
     // `len` is already covered above as a universal collection method.
     "to_table_string",
+    // T9: Image zero-arg instance methods (`width` / `height` /
+    // `pixel_format` / `grayscale` / `invert`). Without these entries
+    // the T26 field-access heuristic would rewrite `img.width()` as
+    // `img.width` (a field access on the `buff_image::Image` value,
+    // which doesn't exist - the underlying Rust methods are `.width()`
+    // / `.height()` / `.format()` / `.grayscale()` / `.invert()` on
+    // the inner `image::DynamicImage`). `get_pixel` / `set_pixel` /
+    // `save` / `resize` / `crop` / `blur` all take args so they're
+    // never affected by the heuristic.
+    "width",
+    "height",
+    "pixel_format",
+    "grayscale",
+    "invert",
+    // T10: AudioBuffer zero-arg instance methods (`samples` /
+    // `sample_rate` / `channels` / `frames` / `duration_secs` /
+    // `summarize`). Without these entries the T26 field-access
+    // heuristic would rewrite `buf.samples()` as `buf.samples` (a
+    // field access on the `buff_audio::AudioBuffer` value, which
+    // doesn't exist - the underlying Rust methods are `.samples()` /
+    // `.sample_rate()` / `.channels()` / `.frames()` /
+    // `.duration_secs()` / `.summarize()`). `save` / `amplify` /
+    // `normalize` / `mix` / `slice` all take args so they're never
+    // affected by the heuristic.
+    "samples",
+    "sample_rate",
+    "channels",
+    "frames",
+    "duration_secs",
+    "summarize",
 ];
 
 /// Build the attribute list for a generated struct: always
