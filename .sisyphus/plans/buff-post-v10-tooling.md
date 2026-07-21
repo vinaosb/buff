@@ -2249,7 +2249,8 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.10 "Production hardening" — Debugger + Coverage
 
-- [ ] **T136: Debugger (DAP)** [deep]
+- [x] **T136: Debugger (DAP)** [deep]
+  - **Shipped at `9a14b2a`** (with cleanup assist from bg_21d3b159 + 3 manual Atlas fixes). NEW `crates/buff-dap/` (8 files, ~90KB) implements DAP translation proxy: editor ↔ buff-dap ↔ backend (lldb-dap/codelldb/vscode-lldb). Intercepts `setBreakpoints` (buff→rust via SourceMap reverse) + `stackTrace` (rust→buff via SourceMap forward); all else passes through. `buff debug` CLI subcommand + `.vscode/buff-debug.launch.json` template. GAP: codegen doesn't expose SourceMap to CLI (identity stopgap, same as T137). Live backend debug = USER ACTION. buff-dap 22 tests + CLI lib 286 (+5 debug). Process note: T136 deep agent stalled near completion (48min+); Atlas recovered via targeted cleanup delegation + 3 manual fixes (FromStr re-export, from_name rename, items_after_test_module allow).
 
   **What to do**:
   - Create `crates/buff-dap/` crate implementing Debug Adapter Protocol
@@ -2333,7 +2334,8 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.11 "Education" — Bufflings
 
-- [ ] **T138a: bufflings CLI + exercise runner** [writing]
+- [x] **T138a: bufflings CLI + exercise runner** [writing]
+  - **Shipped at `36d91d3`**. NEW `crates/bufflings/` (9 files) implements Rustlings-style exercise runner. 7 subcommands (list/start/verify/verify --all/progress/watch/hint). 5 seed exercises across 4 topics (T138b writes the full 25). Zero new external deps (reuses workspace). Shells out to `buff` subprocess (no source dep on buff-lang-cli). 33 tests (19 unit + 14 integration). Strong git-prohibition guard WORKED — no unauthorized commits.
 
   **What to do**:
   - Create `bufflings` CLI (clone Rustlings UX): `list`, `start <ex>`, `verify <ex>`, `progress`, `watch`
