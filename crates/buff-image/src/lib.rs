@@ -60,7 +60,7 @@ pub enum PixelFormat {
 }
 
 impl PixelFormat {
-    pub const fn channels(self) -> usize {
+    pub(crate) const fn channels(self) -> usize {
         match self {
             PixelFormat::Rgb => 3,
             PixelFormat::Rgba => 4,
@@ -102,7 +102,8 @@ impl ImageFormat {
     /// Convert to the underlying `image::ImageFormat` for save.
     /// Returns `None` for [`ImageFormat::Unknown`] (cannot save an
     /// unknown format — caller must pick a concrete format).
-    pub fn to_image_format(self) -> Option<image::ImageFormat> {
+    /// pub(crate) — not part of the stable Buff-visible surface.
+    pub(crate) fn to_image_format(self) -> Option<image::ImageFormat> {
         match self {
             ImageFormat::Png => Some(image::ImageFormat::Png),
             ImageFormat::Jpeg => Some(image::ImageFormat::Jpeg),
@@ -218,17 +219,17 @@ impl Image {
         Image { inner }
     }
 
-    /// Borrow the underlying `image::DynamicImage`. Lets codegen lower
-    /// `Image` operations that have no Buff-surface wrapper yet to
-    /// `img.as_dynamic().<method>()` rather than re-implementing the
-    /// entire `image` API.
-    pub fn as_dynamic(&self) -> &image::DynamicImage {
+    /// Borrow the underlying `image::DynamicImage`. pub(crate) — used
+    /// internally by codegen integration; not part of the stable
+    /// Buff-visible surface (T9 caps public API at 25 fns).
+    pub(crate) fn as_dynamic(&self) -> &image::DynamicImage {
         &self.inner
     }
 
     /// Consume self and return the underlying `image::DynamicImage`.
-    /// Inverse of [`Image::from_dynamic`].
-    pub fn into_dynamic(self) -> image::DynamicImage {
+    /// Inverse of [`Image::from_dynamic`]. pub(crate) — round-trip
+    /// helper for codegen tests; not Buff-visible.
+    pub(crate) fn into_dynamic(self) -> image::DynamicImage {
         self.inner
     }
 
@@ -250,14 +251,6 @@ impl Image {
             image::DynamicImage::ImageRgb8(_) => PixelFormat::Rgb,
             _ => PixelFormat::Rgba,
         }
-    }
-
-    /// Detect the on-disk codec format of a previously-loaded image.
-    /// Returns [`ImageFormat::Unknown`] when the format cannot be
-    /// inferred from the in-memory buffer (the codec info is dropped
-    /// after `image::open`).
-    pub fn codec(&self) -> ImageFormat {
-        ImageFormat::Unknown
     }
 
     /// Read a single pixel at (x, y). Bounds-checked.

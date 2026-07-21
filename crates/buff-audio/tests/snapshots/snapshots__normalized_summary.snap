@@ -1,0 +1,6 @@
+---
+source: crates/buff-audio/tests/snapshots.rs
+expression: format!("{}", buf.summarize())
+snapshot_kind: text
+---
+AudioSummary(1ch, 8000 Hz, 1.000s, peak=1.0000, rms=0.7071)

@@ -1,0 +1,6 @@
+---
+source: crates/buff-audio/tests/snapshots.rs
+expression: format!("{}", buf)
+snapshot_kind: text
+---
+AudioBuffer(1ch, 100 Hz, 0.040s, 4 frames)
