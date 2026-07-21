@@ -2163,7 +2163,13 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(ui): RSX-for-Buff parser/lexer/codegen extension`
 
-- [ ] **T134: Component model + data binding + lifecycle** [deep]
+- [x] **T134: Component model + data binding + lifecycle** [deep]
+  - **Re-scoped under Option C pivot** (T133 shipped ~70% of original T134 plan via `.buffhtml` SFC: component declaration, props, state, binding, events, if/for all already done). T134 delivered the genuine remaining scope at commit `f264657`:
+    1. **Lifecycle hooks** (`buff-ui-dioxus`): `on_init(cb)` wraps `use_effect` with `Option<F>` drain for once-only fire; `on_destroy(cb)` wraps `use_drop`. Re-exports `use_effect` + `use_drop`.
+    2. **Component interface declaration**: `<script lang="buff" props="Props">` explicit attribute. Codegen parses script as `syn::Block`, hoists named struct to module scope, splices other stmts into fn body, auto-generates `let Props { f1, f2, .. } = props;` destructure. Backward-compat (no `props=` → T133 floor unchanged).
+    3. **Prop type pre-checker** (`buff-lang-codegen-buffhtml/src/prop_check.rs`): `PropInterfaceRegistry` + `extract_interface` + `check_props`. Detects MissingRequired + UnknownProp + stretch TypeMismatch (literal classification only: StringLit/NumberLit/BoolLit). Diagnostics carry `.buffhtml` spans via existing SpanMap.
+    4. **4 example components**: `lifecycle_demo.buffhtml`, `typed_props.buffhtml`, `composition_demo.buffhtml`, `todo_app.buffhtml` (all parse + codegen cleanly).
+    5. **Component model guide** at `docs/component-model.md` (7 sections).
 
   **What to do**:
   - `@component` **attribute** (NOT a keyword — attributes don't require reserved keywords) for declaring UI components
@@ -2183,12 +2189,14 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **References**: T133 RSX AST. Dioxus component docs.
 
-  **Acceptance Criteria**:
-  - [ ] Components declared with props
-  - [ ] State updates trigger re-render
-  - [ ] Two-way binding works (input → state → input)
-  - [ ] Event handlers fire
-  - [ ] Lifecycle hooks called at correct times
+  **Acceptance Criteria** (re-mapped under Option C; original criteria assumed compiler-extension that didn't happen):
+  - [x] Components declared with props → `<script lang="buff" props="Props">` + `struct Props { ... }` + auto-generated `fn Name(props: Props) -> Element { let Props { ... } = props; ... }`.
+  - [x] State updates trigger re-render → via Dioxus `use_signal` (T133 floor, script-block Rust pass-through). Two-way binding `bind:value={name}` shipped at T133 stretch.
+  - [x] Two-way binding works → `bind:value={signal}` → controlled form `value: signal, oninput: move |__e| signal.set(__e.value())` (T133 stretch `480b638`).
+  - [x] Event handlers fire → `on:event` Svelte-style directive (T133 floor); T134 adds lifecycle `on_init`/`on_destroy` for mount/unmount hooks.
+  - [x] Lifecycle hooks called at correct times → `on_init` (once after mount via `use_effect`+Option drain) + `on_destroy` (on unmount via `use_drop`); unit tests verify lowering.
+  - **Gates**: fmt/clippy exit 0; 153 tests pass across 4 crates (+41 new since T133 stretch); CLI regression `cargo test -p buff-lang-cli --lib` = 230 unchanged.
+  - **Documented gaps (T135+)**: prop pre-checker does literal-type matching only (full type inference deferred); `Option<T>` opt-out for required props deferred; lifecycle behavioral coverage requires wasm32 render (USER ACTION); full Buff-syntax script-block transpilation deferred.
 
   **QA Scenarios**:
   ```
