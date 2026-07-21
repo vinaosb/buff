@@ -1,0 +1,51 @@
+[package]
+name = "buffup"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = "Version manager for the Buff language — install and switch between Buff releases"
+repository = "https://github.com/buff-lang/buff"
+
+[[bin]]
+name = "buffup"
+path = "src/main.rs"
+
+[lib]
+name = "buffup"
+path = "src/lib.rs"
+
+[dependencies]
+# T139: Stack mirrors buff-registry / buff-lang-cli conventions.
+# - `clap` derives the CLI shape; `serde`/`serde_json` parse the
+#   GitHub Releases API JSON envelope; `semver` validates user-provided
+#   version strings (rejects `1.0`, accepts `1.0.0`).
+# - `dirs` resolves `~/.buff/` cross-platform (BUFFUP_HOME env var
+#   override in `paths.rs` for hermetic tests).
+# - `reqwest` is the HTTP client (rustls-tls, no native-tls — matches
+#   the T127 "no OpenSSL on Windows" mandate); async via tokio runtime.
+# - `tokio` is the async runtime (`#[tokio::main]` in `main.rs`).
+# - `tar` + `flate2` decompress the gzip tarball from GitHub Releases
+#   (`GzDecoder` wrapping `tar::Archive::unpack`).
+# - `thiserror` derives `BuffupError`; `anyhow` is used in `main.rs`
+#   for the top-level error -> exit-code mapping only.
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+dirs.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tar.workspace = true
+flate2.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+# T139: hermetic test stack. `tempfile` for per-test BUFFUP_HOME
+# isolation; `insta` for `--help` snapshot; `httpmock` for the
+# GitHub Releases API + tarball mock server (NO real network).
+tempfile.workspace = true
+insta.workspace = true
+httpmock.workspace = true
+tokio.workspace = true

@@ -1,0 +1,19 @@
+---
+source: crates/buffup/tests/cli.rs
+assertion_line: 45
+expression: err.to_string()
+---
+Buff version manager — install and switch between Buff releases
+
+Usage: buffup <COMMAND>
+
+Commands:
+  install  Download and install a Buff version from GitHub Releases
+  default  Set the active version by pointing `~/.buff/bin/buff` at the named installed version's binary
+  list     List installed versions; the active one is marked with `*`
+  update   Self-update buffup (NOT YET IMPLEMENTED — prints guidance)
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version

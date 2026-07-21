@@ -1,0 +1,6 @@
+---
+source: crates/buffup/tests/cli.rs
+assertion_line: 51
+expression: err.to_string()
+---
+buffup 1.0.0

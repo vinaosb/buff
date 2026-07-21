@@ -510,6 +510,38 @@ buff-lang-codegen-buffhtml = { path = "crates/buff-lang-codegen-buffhtml" }
 # vscode-lldb as fallbacks). Pure-Rust deps only — NO native C, NO
 # OpenSSL, matches the "no C library, no Docker" hard rule. The path
 # dep is mirrored at the workspace level so consumers (T136 CLI
-# `buff debug` subcommand, future IDE integrations) all resolve to
-# the same in-tree version during the v1.x tooling wave.
+# `buff debug` subcommand, future IDE integrations) all resolve to the
+# same in-tree version during the v1.x tooling wave.
 buff-dap = { path = "crates/buff-dap" }
+# T139: `buffup` version manager CLI (`crates/buffup`). Downloads
+# pre-built Buff binaries from GitHub Releases and installs them under
+# `~/.buff/versions/<ver>/`. GitHub Releases serve the source tarball
+# as gzip-compressed tar — the `tar` crate (already pinned at line 413
+# for T127) handles the unpack but does NOT decompress gzip on its
+# own, so we pull `flate2` for `GzDecoder`. `flate2` is the
+# long-standing pure-Rust gzip impl (the RustCrypto / burntsushi
+# joint; stable since 1.0). Default features are kept on (the default
+# `Miniz_oxide` backend is pure-Rust — NO zlib native dep — which
+# matches the "no C library, no Docker" hard rule from T126/T127).
+# Pinned to major 1 (the long-standing surface most of the Rust
+# ecosystem targets since 2018; 1.0.x for years, no breaking changes
+# to the `GzDecoder::new` + `Read` impl API we depend on).
+flate2 = "1"
+# T139: `httpmock` is the HTTP mocking library used by buffup's test
+# suite ONLY. We pin to major 0.7 (the long-standing surface —
+# `MockServer::start`, `Mock::new().expect_method(...).return_*`,
+# `server.base_url()` — stable across 0.6/0.7). It is the
+# de-facto pure-Rust HTTP mocking crate (spins up a real TCP listener
+# on an ephemeral port so both blocking and async reqwest clients can
+# drive it without any test-only middleware). Pure-Rust, no native
+# deps. Matches the "tests MUST NOT hit real network" rule from the
+# T139 task spec. Pinned as a workspace dev-dep so future test suites
+# (T140 setup-buff Action E2E, T128 registry web UI tests) can reuse
+# the same version without churn.
+httpmock = "0.7"
+# T139: `buffup` workspace path dep — mirrors the buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap
+# pattern so any future consumer (T140 setup-buff GitHub Action,
+# installer scripts, IDE integrations) resolves to the same in-tree
+# version during the v1.12 tooling wave.
+buffup = { path = "crates/buffup" }

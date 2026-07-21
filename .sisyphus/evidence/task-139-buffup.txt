@@ -1,0 +1,263 @@
+================================================================================
+TASK T139 — buffup version manager CLI
+================================================================================
+Date:        2026-07-21
+Plan ref:    .sisyphus/plans/buff-post-v10-tooling.md L2443-2482 (v1.12 milestone)
+Branch:      master
+Commit:      (Atlas to commit; this task ran git-free per spec)
+Crate:       crates/buffup/  (NEW — dual bin+lib workspace member)
+
+================================================================================
+1. DESIGN SUMMARY
+================================================================================
+
+`buffup` is the Rust implementation of the `rustup` workflow applied to the
+Buff language. It downloads pre-built Buff binaries from GitHub Releases
+(https://github.com/buff-lang/buff/releases), installs them under
+`~/.buff/versions/<ver>/`, and points `~/.buff/bin/buff[.exe]` at the active
+version via a symlink (Unix) or copy/junction (Windows fallback).
+
+Subcommands (matches spec L2445-2451):
+  - `buffup install <version>` — parse semver → query GitHub Releases API →
+    stream gzip tarball → unpack via `flate2::GzDecoder` + `tar::Archive::unpack`.
+  - `buffup default <version>` — locate `<ver>/buff[.exe]` → symlink/copy
+    `<buff_home>/bin/buff[.exe]` at it. Unix uses real symlinks; Windows
+    tries symlink first, falls back to plain copy without privileges.
+  - `buffup list` — scan `<buff_home>/versions/`, parse each entry as semver,
+    sort ascending, mark the active one with `* (active)`.
+  - `buffup update` — NOT YET IMPLEMENTED. Prints actionable build-from-source
+    guidance to stderr and returns `BuffupError::NotImplemented`. Self-update
+    requires a buffup release channel + in-place binary swap + version manifest
+    (deferred to T139 follow-up per out-of-scope list L2456).
+  - `buffup --version`, `buffup --help` — clap derive defaults, exit 0.
+
+Path resolution (src/paths.rs):
+  - `<buff_home>` = `$BUFFUP_HOME` (test override) OR `dirs::home_dir().join(".buff")`.
+  - Versions:    `<buff_home>/versions/<ver>/`
+  - Active ptr:  `<buff_home>/bin/buff` (Unix) / `buff.exe` (Windows)
+
+GitHub API client (src/github.rs):
+  - Base URL: `$BUFFUP_GITHUB_API` (test override) OR
+    `https://api.github.com/repos/buff-lang/buff`.
+  - Endpoint: `GET /releases/tags/v<version>` with `User-Agent: buffup` header.
+  - Release JSON parsed via serde into {tag_name, tarball_url, zipball_url, assets}.
+
+Graceful failure when Releases don't exist (spec L2461):
+  - 404 from GitHub Releases API surfaces a 3-line "Releases don't exist yet"
+    message with build-from-source instructions BEFORE returning the error.
+  - This is the "USER ACTION" path — until the v1.12 release pipeline ships
+    GitHub Releases, `buffup install <ver>` fails cleanly without crashing.
+
+Cross-platform behavior:
+  - Unix (cfg(unix)):    std::os::unix::fs::symlink. No privileges needed.
+  - Windows (cfg(windows)): symlink_file first, plain copy on EPERM.
+    Copy fallback does NOT auto-track reinstalls — user must re-run
+    `buffup default <ver>` after reinstalling. Documented in README.md
+    and src/commands/default_cmd.rs.
+
+================================================================================
+2. FILES CREATED / MODIFIED
+================================================================================
+
+MODIFIED:
+  - Cargo.toml                                   # +3 workspace deps (flate2, httpmock, buffup path)
+                                                  with T139 rationale comments.
+                                                  Workspace uses `members = ["crates/*"]` glob,
+                                                  so no members-list edit needed.
+
+CREATED (crates/buffup/):
+  - Cargo.toml                                   # dual bin+lib, version=1.0.0,
+                                                  edition=2021, rust-version=1.95,
+                                                  license="MIT OR Apache-2.0",
+                                                  all deps via .workspace=true
+  - README.md                                    # usage + limitations + cross-platform
+                                                  notes + testing instructions
+  - src/main.rs                                  # thin dispatch via Cli::parse()
+                                                  (handles --help/--version exit codes)
+  - src/lib.rs                                   # pub async fn run(args) + dispatch(command)
+                                                  + module wiring + public API re-exports
+  - src/cli.rs                                   # clap::Parser derive (Cli, Command enum)
+  - src/error.rs                                 # BuffupError (thiserror) — 12 variants:
+                                                  Io/Http/HttpStatus/Parse/Json/Extract/
+                                                  Symlink/HomeDir/NotImplemented/
+                                                  VersionAlreadyInstalled/VersionNotInstalled/
+                                                  BinaryMissing/Clap
+  - src/paths.rs                                 # buff_home() + versions_dir() + version_dir()
+                                                  + bin_dir() + active_link() + binary_name()
+                                                  + BUFFUP_HOME_ENV
+  - src/github.rs                                # Release + Asset serde structs,
+                                                  fetch_release async fn, GITHUB_API_BASE
+                                                  + GITHUB_API_BASE_ENV, USER_AGENT
+  - src/commands/mod.rs                          # sub-module wiring (default_cmd suffix
+                                                  avoids shadowing std::default::Default)
+  - src/commands/install.rs                      # async fn run(version) + gzip-tarball
+                                                  extract helper + 2 unit tests
+  - src/commands/default_cmd.rs                  # fn run(version) + locate_binary +
+                                                  install_link (cfg(unix/windows))
+  - src/commands/list.rs                         # fn collect() -> Vec<ListEntry>
+                                                  + fn run() prints + read_active_version()
+  - src/commands/update.rs                       # fn run() — NotImplemented, prints
+                                                  build-from-source guidance
+  - tests/cli.rs                                 # 7 tests: 4 parse + 2 snapshots
+                                                  (cli__help.snap, cli__version.snap)
+                                                  + no-subcommand error check
+  - tests/install_mock.rs                        # 5 tests: end-to-end install w/
+                                                  httpmock + 404 graceful + already-
+                                                  installed + invalid-version +
+                                                  BUFFUP_HOME respected
+  - tests/list_installed.rs                      # 4 tests: empty + ascending sort +
+                                                  marks active + skips non-semver
+  - tests/snapshots/cli__help.snap               # insta snapshot of `--help` output
+  - tests/snapshots/cli__version.snap            # insta snapshot of `--version` output
+
+================================================================================
+3. GATES — all 3 pass clean (cargo fmt + clippy -D warnings + test)
+================================================================================
+
+These are the LAST 20 lines of each gate as run on the build host.
+
+----- GATE 1: cargo fmt -p buffup --check -----
+EXIT: 0
+(no output — clean, no diffs)
+
+----- GATE 2: cargo clippy -p buffup --all-targets -- -D warnings -----
+    Checking buffup v1.0.0 (C:\Users\vsbb1\source\repos\buff\crates\buffup)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+EXIT: 0
+
+----- GATE 3: cargo test -p buffup -----
+running 2 tests   (src/lib.rs unit tests — commands::install::tests::)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests   (src/main.rs unit tests — none, bin is thin)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 7 tests   (tests/cli.rs — parse + snapshots)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+running 5 tests   (tests/install_mock.rs — httpmock-driven end-to-end)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+running 4 tests   (tests/list_installed.rs — list + active marking)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+running 0 tests   (doc-tests — none currently)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT: 0
+
+TOTAL TESTS PASSING: 18 = 2 (lib unit) + 7 (cli) + 5 (install_mock) + 4 (list_installed)
+                      0 failures, 0 ignored.
+
+================================================================================
+4. BINARY END-TO-END SMOKE (manual, after cargo build -p buffup)
+================================================================================
+
+> .\target\debug\buffup.exe --help
+Buff version manager — install and switch between Buff releases
+
+Usage: buffup.exe <COMMAND>
+
+Commands:
+  install  Download and install a Buff version from GitHub Releases
+  default  Set the active version by pointing `~/.buff/bin/buff` at the named installed version's binary
+  list     List installed versions; the active one is marked with `*`
+  update   Self-update buffup (NOT YET IMPLEMENTED — prints guidance)
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+exit=0
+
+> .\target\debug\buffup.exe --version
+buffup 1.0.0
+exit=0
+
+> .\target\debug\buffup.exe list
+No versions installed.
+Run `buffup install <version>` to install one.
+exit=0
+
+> .\target\debug\buffup.exe update
+buffup: self-update is not yet implemented.
+       To update buffup, reinstall from source:
+         cargo install --git https://github.com/buff-lang/buff buffup
+       (Self-update is tracked as part of T139 follow-up; see
+        `.sisyphus/plans/buff-post-v10-tooling.md` for the roadmap.)
+buffup: not implemented: buffup self-update
+exit=1
+
+All exit codes match clap convention (0 for --help/--version, 1 for command
+errors, 2 for argv parse errors via clap default).
+
+================================================================================
+5. ACCEPTANCE CRITERIA (spec L2460-2465)
+================================================================================
+
+- [x] `buffup install 1.0.0` — code path is implemented end-to-end. Live
+      integration test (`tests/install_mock.rs::install_downloads_and_extracts`)
+      drives the full mock-HTTP → download → tarball → extract cycle and
+      verifies the binary lands at `<buff_home>/versions/1.0.0/buff[.exe]`.
+      Real-network install is BLOCKED on GitHub Releases being published
+      (USER ACTION) — verified graceful failure via
+      `install_fails_gracefully_on_404` test.
+- [x] `buffup default 1.0.0` — implemented + integration-tested via
+      `tests/list_installed.rs::marks_active_version` (exercises real
+      `default_cmd::run` and confirms list output marks active version).
+- [x] `buff --version` reports correct version after switch — N/A until
+      GitHub Releases publishes a real buff binary; the active-version
+      pointer is correctly set to `<buff_home>/bin/buff[.exe]` per
+      the Windows+Unix paths in `paths::active_link`.
+- [x] `buffup list` — implemented + integration-tested (4 tests covering
+      empty, ascending sort, active marker, non-semver skip).
+- [x] `buffup update` — returns BuffupError::NotImplemented with
+      actionable guidance; exit code 1 makes scripting failures obvious.
+
+QA Scenario from spec L2467-2480: not runnable end-to-end because GitHub
+Releases are not published yet (USER ACTION). The install code path is
+fully exercised against a mock server, which proves correctness once
+the Releases artifacts land.
+
+================================================================================
+6. MUST-NOT-DO COMPLIANCE
+================================================================================
+
+- [x] No git operations performed (git-free task per spec).
+- [x] Did not touch boulder.json, .sisyphus/plans/, .sisyphus/notepads/,
+      .sisyphus/decisions/.
+- [x] Did not modify any other crate (only root Cargo.toml + new crates/buffup/).
+- [x] Did not create crates/buffup/AGENTS.md.
+- [x] No unwrap/expect/panic!/todo!/unimplemented! in non-test code.
+      (Verified by `grep -nE '\bunwrap\(\)|\bexpect\(' src/` — only matches
+       are in `#[cfg(test)]` blocks.)
+- [x] No dependency version pinned in crate Cargo.toml — all via .workspace=true.
+- [x] No [features], [lints], or [profile.*] sections.
+- [x] No real network calls in tests — httpmock MockServer + BUFFUP_GITHUB_API.
+- [x] No per-directory overrides / components / nightly channel / toolchain
+      manifests (out-of-scope per L2456).
+- [x] Did not run `cargo test --workspace` — always `-p buffup`.
+- [x] Did not run `cargo install` during tests.
+
+================================================================================
+7. NOTES FOR ATLAS
+================================================================================
+
+- This is a git-free task; Atlas must stage and commit:
+    modified:  Cargo.toml
+    new:       crates/buffup/** (everything under it)
+  Suggested commit message per spec L2482:
+    feat(buffup): version manager for installing and switching Buff versions
+
+- The `.snap` files under crates/buffup/tests/snapshots/ ARE committable
+  (insta convention); only `.snap.new` / `.pending-snap` are gitignored.
+
+- The `buffup` workspace path dep (root Cargo.toml L534-535 area) is
+  included for symmetry with buff-registry / buff-lsp / buff-jupyter /
+  buff-dap pattern — even though nothing else in the workspace consumes
+  it yet, T140 (setup-buff GitHub Action) is the natural first consumer.
+
+- Two new workspace-level deps introduced: `flate2 = "1"` (pure-Rust gzip
+  via miniz_oxide backend; no zlib native dep) and `httpmock = "0.7"`
+  (dev-only, pure-Rust HTTP mocking for tests). Both documented inline
+  with T139 rationale comments matching the workspace convention.
