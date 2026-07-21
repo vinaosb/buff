@@ -1,0 +1,42 @@
+{
+  // docker-bake.hjson — Buildx bake configuration for Buff Docker images.
+  //
+  // Build both images in parallel:
+  //   docker buildx bake -f docker/docker-bake.hjson
+  //
+  // With explicit version tag:
+  //   VERSION=1.2.0 docker buildx bake -f docker/docker-bake.hjson
+  //
+  // Multi-platform (requires a builder that supports linux/arm64):
+  //   docker buildx bake -f docker/docker-bake.hjson --set *.platform=linux/amd64,linux/arm64
+
+  group {
+    default {
+      targets = ["builder", "slim"]
+    }
+  }
+
+  target "builder" {
+    dockerfile = "docker/builder.Dockerfile"
+    tags = [
+      "buff:builder",
+      "buff:${VERSION}-builder",
+      "buff:latest-builder",
+    ]
+    platforms = ["linux/amd64", "linux/arm64"]
+    cache-from = ["type=gha"]
+    cache-to = ["type=gha,mode=max"]
+  }
+
+  target "slim" {
+    dockerfile = "docker/slim.Dockerfile"
+    tags = [
+      "buff:slim",
+      "buff:${VERSION}-slim",
+      "buff:latest-slim",
+    ]
+    platforms = ["linux/amd64", "linux/arm64"]
+    cache-from = ["type=gha"]
+    cache-to = ["type=gha,mode=max"]
+  }
+}

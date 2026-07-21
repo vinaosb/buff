@@ -1,0 +1,19 @@
+Task: T141 — Docker builder image definition
+File: docker/builder.Dockerfile
+Date: 2026-07-21
+
+Design summary:
+- Two-stage Dockerfile: build stage uses rust:1.95.0-slim-bookworm, final stage uses debian:bookworm-slim.
+- Build stage: installs build-essential, git, ca-certificates; copies entire repo; runs `cargo build --release -p buff-lang-cli` then `cargo install --path crates/buff-lang-cli --locked --root /usr/local`.
+- Final stage: copies /usr/local/bin/buff from builder; installs ca-certificates; creates non-root `buff` user (UID 1000); WORKDIR /app; ENTRYPOINT ["buff"].
+- Expected size: ~2.5GB (includes Rust toolchain + build deps).
+- Multi-arch: linux/amd64, linux/arm64 (via docker-bake.hjson).
+
+Gate validation:
+- [ ] Image builds successfully: `docker build -f docker/builder.Dockerfile -t buff:builder .`
+- [ ] `docker run --rm buff:builder --help` prints CLI help.
+- [ ] `docker run --rm -v $(pwd):/app buff:builder buff build src/main.buff` compiles a .buff project.
+- [ ] Non-root user: `docker run --rm buff:builder whoami` → "buff".
+- [ ] Multi-arch: `docker buildx build --platform linux/amd64,linux/arm64 -f docker/builder.Dockerfile .` succeeds.
+
+Note: Docker is NOT available in the authoring environment. Build/push is a USER ACTION.

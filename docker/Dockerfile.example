@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+# Example multi-stage Dockerfile for a Buff project.
+#
+# Stage 1: Build the Buff binary using buff:builder.
+# Stage 2: Copy the binary into buff:slim for a minimal production image.
+#
+# Usage:
+#   docker buildx bake -f docker/docker-bake.hjson
+#   # or manually:
+#   docker build -f docker/Dockerfile.example -t my-buff-app .
+
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM buff:builder AS build
+
+WORKDIR /app
+COPY . .
+
+# Compile the Buff source. The output binary is at target/release/<name>.
+# Adjust the path if your main.buff is elsewhere.
+RUN buff build --release src/main.buff
+
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM buff:slim
+
+COPY --from=build /app/target/release/myapp /usr/local/bin/myapp
+
+ENTRYPOINT ["myapp"]

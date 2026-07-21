@@ -1,0 +1,20 @@
+Task: T141 — Docker slim runtime image definition
+File: docker/slim.Dockerfile
+Date: 2026-07-21
+
+Design summary:
+- Single-stage Dockerfile based on debian:bookworm-slim.
+- Installs only ca-certificates (libc6 is already in base image).
+- Creates non-root `buff` user (UID 1000) with home directory.
+- No ENTRYPOINT — this is a base image; users add their own binary + entrypoint.
+- Expected size: ~90MB (debian:bookworm-slim ~80MB + ca-certificates ~10MB).
+- Multi-arch: linux/amd64, linux/arm64 (via docker-bake.hjson).
+
+Gate validation:
+- [ ] Image builds successfully: `docker build -f docker/slim.Dockerfile -t buff:slim .`
+- [ ] `docker run --rm buff:slim whoami` → "buff".
+- [ ] `docker run --rm buff:slim ls /app` succeeds (WORKDIR exists).
+- [ ] Size check: `docker images buff:slim` shows ~90MB.
+- [ ] Multi-arch: `docker buildx build --platform linux/amd64,linux/arm64 -f docker/slim.Dockerfile .` succeeds.
+
+Note: Docker is NOT available in the authoring environment. Build/push is a USER ACTION.
