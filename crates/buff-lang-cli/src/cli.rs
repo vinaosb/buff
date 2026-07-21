@@ -173,6 +173,27 @@ pub enum Command {
         name: String,
     },
 
+    /// `buff doc` — emit placeholder per-crate HTML API docs (T0-E3).
+    ///
+    /// Walks `src/` for `.buff` files and emits `docs/<package>/index.html`
+    /// per crate, plus a top-level `docs/index.html` linking them.
+    /// **Rendering is scaffold-only in v1.13** — full Rustdoc-quality
+    /// rendering arrives in v1.18+.
+    Doc,
+
+    /// `buff release <patch|minor|major>` — bump version, update
+    /// CHANGELOG, tag git (T0-I3 scaffold).
+    ///
+    /// Verifies clean working tree, bumps the version in `buff.toml`,
+    /// prepends a section to `CHANGELOG.md`, stages both files, and
+    /// creates a git tag `v<X.Y.Z>`. **Does NOT invoke `buff publish`
+    /// in v1.13** — registry integration arrives with v1.14.
+    Release {
+        /// Bump level: `patch`, `minor`, or `major`.
+        #[arg(value_name = "LEVEL")]
+        level: String,
+    },
+
     /// Initialize a Buff project in the current directory.
     Init,
 

@@ -44,6 +44,16 @@ fn main() -> Result<()> {
             buff_lang_cli::commands::new::run(&name, kind)
         }
         Command::Init => buff_lang_cli::commands::init::run(),
+        Command::Doc => buff_lang_cli::commands::doc::run(std::path::Path::new(".")),
+        Command::Release { level } => {
+            let lvl = buff_lang_cli::commands::release::BumpLevel::from_str(&level)
+                .ok_or_else(|| {
+                    anyhow::Error::msg(format!(
+                        "unknown release level `{level}` (valid: patch, minor, major)"
+                    ))
+                })?;
+            buff_lang_cli::commands::release::run(lvl, std::path::Path::new("."))
+        }
         Command::Gen { kind, name } => {
             let k = buff_lang_cli::commands::gen::kind_from_str(&kind)
                 .ok_or_else(|| {
