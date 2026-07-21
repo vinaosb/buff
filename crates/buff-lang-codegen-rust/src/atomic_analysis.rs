@@ -331,6 +331,7 @@ fn collect_stmt_mutations(stmt: &Stmt, name: &str, out: &mut Vec<BinaryOp>) {
             collect_top_level_mutations(else_block, name, out);
         }
         Stmt::Defer { expr, .. } => collect_expr_mutations(expr, name, out),
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 
@@ -509,6 +510,7 @@ fn walk_stmt_for_integer_lets(stmt: &Stmt, out: &mut AtomicSet) {
             walk_block_for_integer_lets(else_block, out);
         }
         Stmt::Defer { expr, .. } => walk_expr_for_integer_lets(expr, out),
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 
@@ -676,6 +678,7 @@ fn collect_stmt_accumulating_parallel(stmt: &Stmt, out: &mut Vec<(Vec<Param>, Bl
             collect_accumulating_parallel_closures(else_block, out);
         }
         Stmt::Defer { expr, .. } => collect_expr_accumulating_parallel(expr, out),
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 

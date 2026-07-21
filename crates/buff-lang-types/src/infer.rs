@@ -804,6 +804,12 @@ impl TypeInferencer {
                 let _ = self.infer_expr(expr)?;
                 Ok(Type::Void)
             }
+            Stmt::ComptimeBlock { body, .. } => {
+                for s in &body.stmts {
+                    let _ = self.infer_stmt(s)?;
+                }
+                Ok(Type::Void)
+            }
         }
     }
 }

@@ -365,6 +365,7 @@ fn walk_stmt_for_parallel_calls<F>(
         Stmt::Defer { expr, .. } => {
             walk_expr_for_parallel_calls(expr, func_name, is_exempt, errors)
         }
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 
@@ -653,6 +654,7 @@ fn walk_stmt_for_captured_mutations<F>(
         Stmt::Defer { expr, .. } => {
             walk_expr_for_captured_mutations(expr, captures, func_name, is_exempt, errors);
         }
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 

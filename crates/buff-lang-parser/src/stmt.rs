@@ -98,6 +98,7 @@ pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError>
         Some(TokenKind::KwFor) => parse_for(stream),
         Some(TokenKind::KwGuard) => parse_guard(stream),
         Some(TokenKind::KwDefer) => parse_defer(stream),
+        Some(TokenKind::Ident(s)) if s == "comptime" => parse_comptime_block(stream),
         _ => parse_assignment_or_expr_stmt(stream),
     }
 }
@@ -569,9 +570,14 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
     let source_id = stream.source_id();
     let mut params = Vec::new();
     if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
-        return Ok(params); // empty list
+        return Ok(params);
     }
     loop {
+        let is_comptime =
+            matches!(stream.peek_kind(), Some(TokenKind::Ident(s)) if s == "comptime");
+        if is_comptime {
+            stream.advance();
+        }
         let name_tok = stream.advance().ok_or_else(|| {
             ParseError::new(Diagnostic::error(
                 "expected parameter name, found end of input",
@@ -614,6 +620,7 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
             name,
             ty,
             default_value,
+            is_comptime,
             span: Span::new(start, end, source_id),
         });
         match stream.peek_kind() {
@@ -970,6 +977,20 @@ fn parse_defer(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     let end = expr.span().end;
     let span = Span::new(start, end, source_id);
     Ok(Stmt::Defer { expr, span })
+}
+
+fn parse_comptime_block(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    let source_id = stream.source_id();
+    let ct_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected `comptime`, found end of input",
+            stream.eof_span(),
+        ))
+    })?;
+    let start = ct_tok.span.start;
+    let body = parse_block(stream)?;
+    let span = Span::new(start, body.span.end, source_id);
+    Ok(Stmt::ComptimeBlock { body, span })
 }
 
 /// Either an assignment (`x = ...`, `x += ...`) or a bare expression
@@ -2926,7 +2947,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
         | Stmt::LetPattern { span, .. }
         | Stmt::ForLet { span, .. }
         | Stmt::Guard { span, .. }
-        | Stmt::Defer { span, .. } => span.end,
+        | Stmt::Defer { span, .. }
+        | Stmt::ComptimeBlock { span, .. } => span.end,
     }
 }
 

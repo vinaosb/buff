@@ -232,6 +232,7 @@ fn walk_stmt(
             walk_block(else_block, in_parallel_closure, user_structs, found);
         }
         Stmt::Defer { expr, .. } => walk_expr(expr, in_parallel_closure, user_structs, found),
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 

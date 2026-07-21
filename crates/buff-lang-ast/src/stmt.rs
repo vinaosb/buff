@@ -125,6 +125,15 @@ pub enum Stmt {
     /// This is **additive** (T100): no existing variant was renamed,
     /// reordered, or had its payload altered.
     Defer { expr: Expr, span: Span },
+    /// T53: a comptime-evaluated block: `comptime { body }`.
+    ///
+    /// The body is evaluated at compile time by the comptime interpreter
+    /// (T53 in-flight). The result substitutes into the surrounding code.
+    /// Carries a single [`Block`] (the comptime body) + span.
+    ///
+    /// This is **additive** (T53): no existing variant was renamed,
+    /// reordered, or had its payload altered.
+    ComptimeBlock { body: Block, span: Span },
 }
 
 /// A single condition inside a [`Stmt::Guard`] (T73).
@@ -217,6 +226,7 @@ impl fmt::Display for Stmt {
                 write!(f, " else {else_block})")
             }
             Stmt::Defer { expr, .. } => write!(f, "Defer({expr})"),
+            Stmt::ComptimeBlock { body, .. } => write!(f, "Comptime({body})"),
         }
     }
 }

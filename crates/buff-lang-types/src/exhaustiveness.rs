@@ -204,6 +204,12 @@ fn check_stmt(
             check_expr(value, registry, inferencer)
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => Ok(()),
+        Stmt::ComptimeBlock { body, .. } => {
+            for s in &body.stmts {
+                check_stmt(s, registry, inferencer)?;
+            }
+            Ok(())
+        }
         Stmt::ForIn { iter, body, .. } => {
             check_expr(iter, registry, inferencer)?;
             for s in &body.stmts {

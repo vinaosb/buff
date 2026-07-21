@@ -677,6 +677,42 @@ pub enum PreludeType {
     /// `sleep(...)` free-fn call - the new walker covers the
     /// WebSocket.* paths explicitly).
     WebSocket,
+    /// `Channel` - the MPSC channel factory namespace (T2 v1.13
+    /// wave 1). Namespace-only (mirrors Log / Toml / TCP / UDP /
+    /// WebSocket): the namespace itself is never a runtime value,
+    /// but the associated function `Channel.new(buf_size)` returns
+    /// a tuple of the runtime-value types `Sender<T>` and
+    /// `Receiver<T>` (both wrapping `tokio::sync::mpsc::Sender` /
+    /// `Receiver` via `buff_lang_runtime`). Buff surface:
+    /// - `Channel.new(buf_size: Int) -> (Sender<T>, Receiver<T>)`
+    ///   (the only assoc fn - constructs a bounded MPSC channel pair;
+    ///   the codegen emits `buff_lang_runtime::Channel::new(buf_size)`
+    ///   which wraps `tokio::sync::mpsc::channel(buf_size)`). NO
+    ///   turbofish at the call site - Rust's type inference derives
+    ///   `T` from subsequent `sender.send(value)` / `receiver.recv()`
+    ///   usage.
+    ///
+    /// Instance methods on the runtime-value types:
+    /// - `sender.send(value: T)` - instance method on Type::Sender
+    ///   (NOT on `Channel`). Returns Void in MVP (the Result is
+    ///   collapsed to Option via `.ok()` and discarded, mirroring
+    ///   Connection.send from T124m). Async via auto-await.
+    /// - `receiver.recv()` - instance method on Type::Receiver.
+    ///   Returns Option<T>. Async via auto-await.
+    /// - `receiver.close()` - instance method on Type::Receiver.
+    ///   Returns Void. Sync (NOT async).
+    ///
+    /// This is a NAMESPACE module: `is_namespace_only()` returns
+    /// `true`. `buff_type()` returns [`Type::Void`] (the namespace
+    /// itself has no value representation - only `Channel.new`'s
+    /// return value does, and that's typed a `(Sender, Receiver)`
+    /// tuple). `Channel.*` records `buff-lang-runtime` + `tokio`
+    /// in codegen `extern_crates` (via the narrow
+    /// `program_uses_namespace("Channel")` walker).
+    ///
+    /// Single-consumer MPSC ONLY for MVP (broadcast channels are
+    /// deferred to v1.18+ per the T2 spec's REDUCED SCOPE).
+    Channel,
 }
 
 impl PreludeType {
@@ -774,6 +810,10 @@ impl PreludeType {
         PreludeType::TCP,
         PreludeType::UDP,
         PreludeType::WebSocket,
+        // T2 v1.13 wave 1: Channel - MPSC channel factory namespace.
+        // Returns (Sender<T>, Receiver<T>) tuple from Channel.new.
+        // Instance methods on Sender / Receiver runtime-value types.
+        PreludeType::Channel,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -933,6 +973,11 @@ impl PreludeType {
             PreludeType::TCP => "TCP",
             PreludeType::UDP => "UDP",
             PreludeType::WebSocket => "WebSocket",
+            // T2: the Channel prelude type name. PascalCase mirrors
+            // Regex / Path / Process convention. The codegen splices
+            // `buff_lang_runtime::Channel::new(buf_size)` for the
+            // assoc fn.
+            PreludeType::Channel => "Channel",
         }
     }
 
@@ -1088,6 +1133,12 @@ impl PreludeType {
             PreludeType::TCP => Type::Void,
             PreludeType::UDP => Type::Void,
             PreludeType::WebSocket => Type::Void,
+            // T2: namespace-only - Channel has no value representation.
+            // The associated function `Channel.new(buf_size)` returns
+            // a `(Sender<T>, Receiver<T>)` tuple of runtime-value
+            // types (the value type IS first-class; the namespace is
+            // not).
+            PreludeType::Channel => Type::Void,
         }
     }
 
@@ -1121,6 +1172,7 @@ impl PreludeType {
                 | PreludeType::TCP
                 | PreludeType::UDP
                 | PreludeType::WebSocket
+                | PreludeType::Channel
         )
     }
 }
@@ -1578,6 +1630,16 @@ pub enum PreludeAssocFn {
     /// .ok()` (the `.ok()` collapses a bind failure to `None` -
     /// NEVER panics). UDP-only.
     Bind,
+    /// `Channel.new(buf_size)` - construct a bounded MPSC channel
+    /// pair. One arg (Int buf_size). Returns `(Sender<T>,
+    /// Receiver<T>)` tuple. Wraps
+    /// `buff_lang_runtime::Channel::new(buf_size)` which internally
+    /// calls `tokio::sync::mpsc::channel(buf_size)` (the runtime
+    /// hides tokio behind the abstraction per Metis G6). Channel-only.
+    /// The T parameter is implicit (Type-level we return a tuple
+    /// of opaque Sender/Receiver; Rust infers T from subsequent
+    /// `sender.send(value)` / `receiver.recv()` usage).
+    New,
 }
 
 impl PreludeAssocFn {
@@ -1687,6 +1749,9 @@ impl PreludeAssocFn {
         // `Bind` is UDP-only.
         PreludeAssocFn::Connect,
         PreludeAssocFn::Bind,
+        // T2: Channel.new - constructs a bounded MPSC channel pair.
+        // Channel-only. Returns (Sender<T>, Receiver<T>) tuple.
+        PreludeAssocFn::New,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1712,6 +1777,9 @@ impl PreludeAssocFn {
             // the `new` constructor convention reserved for user types
             // (`Type.new()` per §7 of the conventions).
             PreludeAssocFn::Compile => "compile",
+            // T2 stub: Channel.new — placeholder name; T2 owns the full
+            // associated-function surface for the Channel prelude type.
+            PreludeAssocFn::New => "new",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -2356,6 +2424,16 @@ pub fn assoc_fn_return_type(
         // (mirrors `Parse` shared between DateTime / Date / Toml /
         // URL / UUID). Dispatched on the (WebSocket, Connect) pair.
         (PreludeType::WebSocket, PreludeAssocFn::Connect) => Some(Type::WsConnection),
+        // T2: Channel.new(buf_size) -> (Sender, Receiver). Returns a
+        // tuple of opaque runtime-value types. The element type T is
+        // implicit at this layer (Type-level we don't carry generic
+        // params on prelude types); Rust's type inference derives T
+        // from subsequent `sender.send(value)` / `receiver.recv()`
+        // usage at the codegen level.
+        (PreludeType::Channel, PreludeAssocFn::New) => Some(Type::tuple(vec![
+            Type::Sender,
+            Type::Receiver,
+        ])),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -2892,6 +2970,17 @@ pub fn instance_fn_return_type(
         // dispatched on the (WsConnection, Close) pair (different
         // lowering - SinkExt::close vs AsyncWriteExt::shutdown).
         (Type::WsConnection, PreludeInstanceFn::Close) => Some(Type::Void),
+
+        // T2: Channel-Sender / Channel-Receiver instance methods.
+        // `sender.send(value)` -> Void (MVP - the Result<(), Error>
+        // spec API is collapsed via .ok() and discarded, mirroring
+        // Connection.send from T124m; v1.18+ may surface the Result).
+        // `receiver.recv()` -> Option<T> (the element type T is
+        // Unknown at this layer; codegen lets Rust infer it).
+        // `receiver.close()` -> Void (sync, NOT async).
+        (Type::Sender, PreludeInstanceFn::Send) => Some(Type::Void),
+        (Type::Receiver, PreludeInstanceFn::Recv) => Some(Type::option(Type::Unknown)),
+        (Type::Receiver, PreludeInstanceFn::Close) => Some(Type::Void),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

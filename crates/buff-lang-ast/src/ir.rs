@@ -730,6 +730,23 @@ impl AstLowerer {
                 self.wire_dependencies(node_id, &[], &uses);
                 node_id
             }
+            Stmt::ComptimeBlock { body, span } => {
+                let mut uses = Vec::new();
+                for s in &body.stmts {
+                    collect_stmt_uses(s, &mut uses);
+                }
+                let node_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                    id: NodeId(0),
+                    source_expr: None,
+                    source_stmt: Some(stmt.clone()),
+                    defs: Vec::new(),
+                    uses: uses.clone(),
+                    span: *span,
+                    description: format!("Comptime({{ {} stmts }})", body.stmts.len()),
+                }));
+                self.wire_dependencies(node_id, &[], &uses);
+                node_id
+            }
         }
     }
 
@@ -1039,6 +1056,11 @@ fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
         }
         // T100: `defer EXPR` — the deferred expression reads outer names.
         Stmt::Defer { expr, .. } => collect_uses(expr, out),
+        Stmt::ComptimeBlock { body, .. } => {
+            for s in &body.stmts {
+                collect_stmt_uses(s, out);
+            }
+        }
     }
 }
 

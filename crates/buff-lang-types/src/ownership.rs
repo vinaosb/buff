@@ -297,6 +297,7 @@ fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         // T100: `defer EXPR` — the deferred expression may bind nested
         // names (e.g. inside a closure); introduces no bindings itself.
         Stmt::Defer { expr, .. } => collect_bound_names_in_expr(expr, out),
+        Stmt::ComptimeBlock { body, .. } => collect_bound_names_in_block(body, out),
     }
 }
 
@@ -492,6 +493,7 @@ fn classify_stmt(stmt: &Stmt, copy_vars: &mut BTreeSet<String>, locals: &mut BTr
         | Stmt::Continue(_) => {}
         // T100: `defer EXPR` — introduces no bindings; no Copy classification.
         Stmt::Defer { .. } => {}
+        Stmt::ComptimeBlock { .. } => {}
     }
 }
 
@@ -598,6 +600,7 @@ fn collect_spawn_free_vars_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         }
         // T100: `defer EXPR` — the deferred expression may read outer names.
         Stmt::Defer { expr, .. } => collect_spawn_free_vars_in_expr(expr, out),
+        Stmt::ComptimeBlock { body, .. } => collect_spawn_free_vars_in_stmts(&body.stmts, out),
     }
 }
 
@@ -885,6 +888,7 @@ fn collect_free_vars_in_block(block: &Block, out: &mut BTreeSet<String>) {
             }
             // T100: `defer EXPR` — the deferred expression may read outer names.
             Stmt::Defer { expr, .. } => collect_free_vars_in_expr(expr, out),
+            Stmt::ComptimeBlock { body, .. } => collect_free_vars_in_block(body, out),
         }
     }
 }
@@ -954,6 +958,10 @@ fn collect_assignment_targets_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
         // T100: `defer EXPR` — the deferred expression may contain nested
         // assignment targets.
         Stmt::Defer { expr, .. } => collect_assignment_targets_in_expr(expr, out),
+        // T53: comptime block — recurse into body for assignment targets.
+        Stmt::ComptimeBlock { body, .. } => {
+            collect_assignment_targets_in_stmts(&body.stmts, out);
+        }
     }
 }
 

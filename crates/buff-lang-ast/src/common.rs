@@ -84,15 +84,28 @@ impl fmt::Display for Block {
 pub struct Param {
     pub name: Ident,
     pub ty: TypeRef,
-    /// T106: optional default value expression (`name: Type = expr`). When
-    /// present and the caller omits this parameter, the codegen fills the
-    /// default into the call site positionally.
     pub default_value: Option<Expr>,
+    pub is_comptime: bool,
     pub span: Span,
+}
+
+impl Param {
+    pub fn plain(name: impl Into<String>, ty: TypeRef, span: Span) -> Self {
+        Self {
+            name: Ident::new(name, span),
+            ty,
+            default_value: None,
+            is_comptime: false,
+            span,
+        }
+    }
 }
 
 impl fmt::Display for Param {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_comptime {
+            f.write_str("comptime ")?;
+        }
         write!(f, "{}: {}", self.name, self.ty)?;
         if let Some(dv) = &self.default_value {
             write!(f, " = {dv}")?;

@@ -799,6 +799,21 @@ impl RustCodegen {
             self.extern_crates.insert("tokio-tungstenite".to_string());
             self.extern_crates.insert("futures-util".to_string());
         }
+        // T2: register `buff-lang-runtime` (the in-tree runtime
+        // abstraction crate) when the program references the
+        // prelude `Channel` module (`Channel.new(...)`). Generated
+        // code uses fully-qualified `buff_lang_runtime::Channel::new`
+        // + `Sender` + `Receiver` paths so no top-level `use` import
+        // is emitted - but the recorded name signals to the pipeline
+        // / build-driver that the generated Cargo project must
+        // declare `buff-lang-runtime` in `[dependencies]`. Also
+        // records `tokio` transitively (the runtime crate wraps
+        // `tokio::sync::mpsc` per Metis G6). Mirrors the chrono /
+        // regex / toml / etc. registration pattern.
+        if program_uses_namespace(decls, "Channel") {
+            self.extern_crates.insert("buff-lang-runtime".to_string());
+            self.extern_crates.insert("tokio".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -2321,6 +2336,19 @@ impl RustCodegen {
             Stmt::Defer { expr, .. } => {
                 let e = self.lower_expr(expr)?;
                 Ok(SynStmt::Expr(e, Some(Default::default())))
+            }
+            // T53: `comptime { body }` — lower the body as an inline
+            // block. Surgical stub; T53 will replace this with the
+            // comptime interpreter that evaluates the block at compile
+            // time and substitutes the result.
+            Stmt::ComptimeBlock { body, .. } => {
+                let syn_block = self.lower_block(body)?;
+                let expr_block = syn::ExprBlock {
+                    attrs: Vec::new(),
+                    label: None,
+                    block: syn_block,
+                };
+                Ok(SynStmt::Expr(SynExpr::Block(expr_block), None))
             }
         }
     }
@@ -4533,6 +4561,36 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("WebSocket.connect codegen parse: {e}")))
             }
+            // T2: Channel.new(buf_size) -> (Sender<T>, Receiver<T>).
+            // Wraps `buff_lang_runtime::Channel::new(buf_size)` which
+            // internally calls `tokio::sync::mpsc::channel(buf_size)`
+            // and returns the `(Sender<T>, Receiver<T>)` tuple directly.
+            // The runtime hides tokio behind the abstraction per Metis G6.
+            // NO turbofish at the call site - Rust's type inference
+            // derives T from subsequent `sender.send(value)` /
+            // `receiver.recv()` usage (the user never writes the
+            // turbofish in Buff source; Buff does not expose explicit
+            // generic-type-argument syntax on method calls).
+            //
+            // One arg (Int buf_size). The codegen does NOT cast the
+            // arg to usize (Rust's type inference derives usize from
+            // the `tokio::sync::mpsc::channel(buffer: usize)` signature;
+            // an untyped Int literal in Buff lowers to `i64`, which
+            // Rust's `Into<usize>` would not satisfy without a cast).
+            // For the literal case the user typically writes a small
+            // positive integer (`Channel.new(10)`, `Channel.new(100)`)
+            // which `i64` -> `usize` infers cleanly on most hosts. If
+            // a user passes a negative or huge value, Rust surfaces a
+            // normal overflow diagnostic at compile time (we do NOT
+            // silently coerce).
+            (T::Channel, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_lang_runtime::Channel::new(#arg as usize)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Channel.new codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -5268,6 +5326,62 @@ impl RustCodegen {
                 syn::parse2(tokens).map_err(|e| {
                     self.unsupported(&format!("WsConnection.close codegen parse: {e}"))
                 })
+            }
+            // T2: Channel-Sender.send(value) -> Void. Wraps
+            // `runtime_sender.send(value).await.ok()` (the .ok()
+            // discards the Result<(), RuntimeError>; the user-facing
+            // surface is Void in MVP - v1.18+ may surface the
+            // Result). One arg (the value to send). Auto-await per
+            // T31 - the codegen emits .await at the call site.
+            M::Send if matches!(recv_ty, Type::Sender) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "send() expects exactly 1 arg (the value to send), got {}",
+                        args.len()
+                    )));
+                }
+                let value = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        #recv.send(#value).await.ok();
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Sender.send codegen parse: {e}")))
+            }
+            // T2: Channel-Receiver.recv() -> Option<T>. Wraps
+            // `runtime_receiver.recv().await` (returns Option<T>:
+            // Some(value) when a value arrives; None when all senders
+            // were dropped - the canonical channel-closed semantic).
+            // Zero args. Auto-await per T31.
+            M::Recv if matches!(recv_ty, Type::Receiver) => {
+                if !args.is_empty() {
+                    return Err(
+                        self.unsupported(&format!("recv() takes no arguments, got {}", args.len()))
+                    );
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.recv().await
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Receiver.recv codegen parse: {e}")))
+            }
+            // T2: Channel-Receiver.close() -> Void. Wraps
+            // `runtime_receiver.close()` (sync - NOT async; returns
+            // immediately after marking the receiver closed). Zero
+            // args. Idempotent (mirrors tokio mpsc::Receiver::close).
+            M::Close if matches!(recv_ty, Type::Receiver) => {
+                if !args.is_empty() {
+                    return Err(self
+                        .unsupported(&format!("close() takes no arguments, got {}", args.len())));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        #recv.close();
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Receiver.close codegen parse: {e}")))
             }
             // T124m: Send / Recv / Close on a non-(Connection /
             // WsConnection) receiver type fall through to a clear
@@ -7679,6 +7793,17 @@ impl RustCodegen {
             | Type::Result(_, _)
             | Type::Union(_)
             | Type::Tuple(_) => return None,
+            // T2: channel sender / receiver. Opaque runtime-value types
+            // mapped to `buff_lang_runtime::Sender<T>` /
+            // `buff_lang_runtime::Receiver<T>`. The element type T is
+            // implicit (Type-level we don't carry it); codegen emits
+            // an opaque path WITHOUT a turbofish so Rust's type
+            // inference derives T from subsequent `sender.send(value)`
+            // / `receiver.recv()` usage. If a user annotates a let
+            // binding with an explicit Sender/Receiver type, codegen
+            // returns None and lets Rust infer the type from the
+            // initializer (mirroring Unknown / Void behavior).
+            Type::Sender | Type::Receiver => return None,
         };
         Some(rust_path_type(rust_name))
     }
@@ -9170,6 +9295,7 @@ fn stmt_uses_matrix(stmt: &Stmt) -> bool {
         }
         // T100: `defer EXPR` — the deferred expression may use Matrix.
         Stmt::Defer { expr, .. } => expr_uses_matrix(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_matrix(body),
     }
 }
 
@@ -9381,6 +9507,7 @@ fn stmt_uses_error(stmt: &Stmt) -> bool {
         }
         // T100: `defer EXPR` — the deferred expression may use Error.
         Stmt::Defer { expr, .. } => expr_uses_error(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_error(body),
     }
 }
 
@@ -9533,6 +9660,7 @@ fn stmt_uses_chrono(stmt: &Stmt) -> bool {
             }) || block_uses_chrono(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_chrono(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_chrono(body),
     }
 }
 
@@ -9703,6 +9831,7 @@ fn stmt_uses_tracing(stmt: &Stmt) -> bool {
             }) || block_uses_tracing(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_tracing(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_tracing(body),
     }
 }
 
@@ -9952,6 +10081,7 @@ fn stmt_uses_regex(stmt: &Stmt) -> bool {
             }) || block_uses_regex(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_regex(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_regex(body),
     }
 }
 
@@ -10118,6 +10248,7 @@ fn stmt_uses_toml(stmt: &Stmt) -> bool {
             }) || block_uses_toml(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_toml(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_toml(body),
     }
 }
 
@@ -10273,6 +10404,7 @@ fn stmt_uses_rand(stmt: &Stmt) -> bool {
             }) || block_uses_rand(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_rand(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_rand(body),
     }
 }
 
@@ -10423,6 +10555,7 @@ fn stmt_uses_tokio(stmt: &Stmt) -> bool {
             }) || block_uses_tokio(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_tokio(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_tokio(body),
     }
 }
 
@@ -10567,6 +10700,7 @@ fn stmt_uses_namespace(stmt: &Stmt, namespace: &str) -> bool {
             }) || block_uses_namespace(else_block, namespace)
         }
         Stmt::Defer { expr, .. } => expr_uses_namespace(expr, namespace),
+        Stmt::ComptimeBlock { body, .. } => block_uses_namespace(body, namespace),
     }
 }
 
@@ -10744,6 +10878,7 @@ fn stmt_uses_url_instance(stmt: &Stmt) -> bool {
             }) || block_uses_url_instance(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_url_instance(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_url_instance(body),
     }
 }
 
@@ -10946,6 +11081,7 @@ fn stmt_uses_dir_walk(stmt: &Stmt) -> bool {
             }) || block_uses_dir_walk(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_dir_walk(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_dir_walk(body),
     }
 }
 
@@ -11122,6 +11258,8 @@ fn stmt_uses_sha2(stmt: &Stmt) -> bool {
             }) || block_uses_sha2(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_sha2(expr),
+        // T53: comptime block — recurse into body for sha2 detection.
+        Stmt::ComptimeBlock { body, .. } => block_uses_sha2(body),
     }
 }
 
@@ -11249,6 +11387,8 @@ fn stmt_uses_md5(stmt: &Stmt) -> bool {
             }) || block_uses_md5(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_md5(expr),
+        // T53: comptime block — recurse into body for md5 detection.
+        Stmt::ComptimeBlock { body, .. } => block_uses_md5(body),
     }
 }
 
@@ -11380,6 +11520,7 @@ fn stmt_uses_hmac(stmt: &Stmt) -> bool {
             }) || block_uses_hmac(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_hmac(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_hmac(body),
     }
 }
 
@@ -11527,6 +11668,7 @@ fn stmt_uses_num_cpus(stmt: &Stmt) -> bool {
             }) || block_uses_num_cpus(else_block)
         }
         Stmt::Defer { expr, .. } => expr_uses_num_cpus(expr),
+        Stmt::ComptimeBlock { body, .. } => block_uses_num_cpus(body),
     }
 }
 

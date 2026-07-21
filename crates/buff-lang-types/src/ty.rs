@@ -354,6 +354,19 @@ pub enum Type {
     /// `Option` via `if let Some(mut ws) = ...`). See `decisions.md`
     /// for the WebSocket-failure-handling rationale.
     WsConnection,
+    /// T2 (v1.13 wave 1): the sending half of a Buff MPSC channel.
+    /// Constructed via `Channel.new(buf_size)` (returns a tuple
+    /// `(Sender<T>, Receiver<T>)`); carries the instance method
+    /// `.send(value: T)` (async via auto-await). Maps to
+    /// `buff_lang_runtime::Sender<T>` at codegen time.
+    Sender,
+    /// T2 (v1.13 wave 1): the receiving half of a Buff MPSC channel.
+    /// Constructed via `Channel.new(buf_size)` (returns a tuple
+    /// `(Sender<T>, Receiver<T>)`); carries the instance methods
+    /// `.recv() -> Option<T>` (async via auto-await) and `.close()`
+    /// (sync). Maps to `buff_lang_runtime::Receiver<T>` at codegen
+    /// time. Single-consumer MPSC ONLY for the MVP.
+    Receiver,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -684,6 +697,33 @@ impl Type {
         matches!(self, Type::WsConnection)
     }
 
+    /// T2: the channel-sender type. Maps to
+    /// `buff_lang_runtime::Sender<T>` at codegen time.
+    pub fn sender() -> Self {
+        Type::Sender
+    }
+
+    /// T2: Returns `true` if this type is the prelude `Sender` runtime
+    /// value (channel sender). Used to dispatch `sender.send(...)` to
+    /// the `buff_lang_runtime::Sender` lowering.
+    pub fn is_prelude_sender(&self) -> bool {
+        matches!(self, Type::Sender)
+    }
+
+    /// T2: the channel-receiver type. Maps to
+    /// `buff_lang_runtime::Receiver<T>` at codegen time.
+    pub fn receiver() -> Self {
+        Type::Receiver
+    }
+
+    /// T2: Returns `true` if this type is the prelude `Receiver`
+    /// runtime value (channel receiver). Used to dispatch
+    /// `receiver.recv()` / `receiver.close()` to the
+    /// `buff_lang_runtime::Receiver` lowering.
+    pub fn is_prelude_receiver(&self) -> bool {
+        matches!(self, Type::Receiver)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -810,6 +850,12 @@ impl fmt::Display for Type {
             // the Option wrapper lets connect be panic-free). The
             // Display form mirrors the Buff surface name.
             Type::WsConnection => f.write_str("WsConnection"),
+            // T2: channel sender / receiver. Opaque runtime-value
+            // types mapped to `buff_lang_runtime::Sender<T>` /
+            // `buff_lang_runtime::Receiver<T>`. Display mirrors the
+            // Buff surface name.
+            Type::Sender => f.write_str("Sender"),
+            Type::Receiver => f.write_str("Receiver"),
         }
     }
 }

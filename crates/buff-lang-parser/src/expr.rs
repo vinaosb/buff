@@ -642,6 +642,7 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                         span: qd.span,
                     },
                     default_value: None,
+                    is_comptime: false,
                     span: qd.span,
                 };
                 let lambda = Expr::Lambda {
@@ -1244,6 +1245,7 @@ fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                 span: ptok.span,
             },
             default_value: None,
+            is_comptime: false,
             span: ptok.span,
         });
         if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
