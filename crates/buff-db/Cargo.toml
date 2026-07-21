@@ -1,0 +1,33 @@
+[package]
+name = "buff-db"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Database access MVP for Buff. \
+Connection pool + query builder via extern sqlx. \
+SQLite + PostgreSQL drivers (pure-Rust, no native-tls).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "database", "sqlx", "sqlite", "postgres"]
+categories = ["database"]
+
+[lib]
+name = "buff_db"
+path = "src/lib.rs"
+
+[dependencies]
+# T18 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# sqlx 0.8 with `runtime-tokio-rustls` (NOT native-tls — workspace hard
+# rule) + `sqlite` + `postgres` + `any` features. API surface used:
+# `sqlx::any::AnyPool`, `sqlx::query`, `sqlx::Row`, `sqlx::Executor`.
+# Pure-Rust: no libpq, no cc-rs, no Docker (matches T126/T127 hard rule).
+sqlx.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+tokio.workspace = true

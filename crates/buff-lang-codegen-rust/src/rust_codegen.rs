@@ -837,6 +837,18 @@ impl RustCodegen {
             self.extern_crates.insert("hound".to_string());
             self.extern_crates.insert("symphonia".to_string());
         }
+        // T17: register `buff-web` when the program references the
+        // prelude `Web` module (`Web.new()` / `Web.bind(addr)` /
+        // `web.get(...)` / etc.). Also records `axum` + `tokio` +
+        // `serde_json` transitively (the wrapper crate wraps all
+        // three for the HTTP server runtime + JSON codec). Mirrors
+        // the T9 Image / T10 AudioBuffer pattern.
+        if program_uses_namespace(decls, "Web") {
+            self.extern_crates.insert("buff-web".to_string());
+            self.extern_crates.insert("axum".to_string());
+            self.extern_crates.insert("tokio".to_string());
+            self.extern_crates.insert("serde_json".to_string());
+        }
         // T20: register `buff-reactive` when the program references
         // any of the three reactive namespaces (`ReactiveSignal` /
         // `ReactiveComputed` / `ReactiveEffect`). Generated code uses
@@ -891,6 +903,20 @@ impl RustCodegen {
         {
             self.extern_crates.insert("buff-fuzz".to_string());
             self.extern_crates.insert("proptest".to_string());
+        }
+        // T18: register `buff-db` when the program references the
+        // prelude `Database` module (`Database.connect(url)` etc.).
+        // Also records `sqlx` + `tokio` transitively (the wrapper
+        // crate wraps sqlx::any::AnyPool which needs a tokio runtime
+        // via the `runtime-tokio-rustls` feature — NOT native-tls,
+        // per workspace hard rule from AGENTS.md "Pure-Rust
+        // preference"). Mirrors the T9 Image / T10 Audio / T26
+        // Audit pattern. NO `diesel`, NO `libpq`, NO native-tls —
+        // T18 task spec mandates sqlx-only.
+        if program_uses_namespace(decls, "Database") {
+            self.extern_crates.insert("buff-db".to_string());
+            self.extern_crates.insert("sqlx".to_string());
+            self.extern_crates.insert("tokio".to_string());
         }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
@@ -4968,6 +4994,75 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("ReactiveEffect.new codegen parse: {e}")))
+            }
+            // T18: Database.connect(url) -> Pool (forward-declared as
+            // `Type::Unknown` in prelude_types.rs; the buff-db crate's
+            // `Pool` type IS the runtime value). Wraps
+            // `buff_db::Pool::connect(&url).await?` (the `?` propagates
+            // `DbError` per Buff's R3 error-mapping contract — the
+            // Buff user's surrounding fn must return
+            // `Result<T, buff_db::DbError>` so the `?` splices
+            // cleanly; the Buff `?` operator is the standard error-
+            // propagation idiom, mirroring `regex::Regex::new(p)?`
+            // from T124d and `buff_image::Image::from_path(p)?` from
+            // T9). The `.await` is auto-inserted by the T31 async-
+            // propagation pass when the surrounding fn is async
+            // (Buff has no `await` keyword). Records `buff-db` +
+            // `sqlx` + `tokio` in extern_crates via the narrow
+            // `program_uses_namespace("Database")` walker. Same
+            // shared `Connect` variant as `TCP.connect(host, port)`
+            // / `WebSocket.connect(url)`; dispatched on the
+            // (Database, Connect) pair (mirrors `Parse` shared
+            // between DateTime / Date / Toml / URL / UUID).
+            //
+            // One arg (String url — e.g. `"sqlite::memory:"` or
+            // `"postgres://user:pass@host/db"`). The codegen does NOT
+            // cast the arg — it passes the owned `String` directly to
+            // `Pool::connect(url: &str)` (Rust's deref coercion lifts
+            // `String` to `&str` automatically). The returned `Pool`
+            // value is the receiver for the deferred `.query()` /
+            // `.execute()` / `.begin()` instance methods (a sibling
+            // task adds `Type::Pool` + instance-method lowering arms).
+            (T::Database, A::Connect) => {
+                let url = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_db::Pool::connect(&#url).await?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Database.connect codegen parse: {e}")))
+            }
+            // T17: Web.new() -> Web. Zero args. Wraps
+            // `buff_web::Web::new()` (infallible - returns an empty
+            // Web with no routes / no middleware / no bind addr).
+            // Records `buff-web` + `axum` + `tokio` + `serde_json` in
+            // extern_crates via the `program_uses_namespace("Web")`
+            // walker. Dispatch on (PreludeType::Web, New) - mirrors
+            // the (Channel, New) precedent (Channel.new also returns
+            // a runtime value via a zero-arg ctor).
+            (T::Web, A::New) => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_web::Web::new()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Web.new codegen parse: {e}")))
+            }
+            // T17: Web.bind(addr) -> Web. One arg (String). Wraps
+            // `buff_web::Web::bind(addr)` (infallible - returns an
+            // empty Web with the bind addr preset; the user adds
+            // routes via web.get / web.post / ... and starts serving
+            // via web.run()).
+            //
+            // Same shared `Bind` variant as `UDP.bind(host, port)`
+            // (T124m) - dispatched on (Web, Bind) pair (mirrors
+            // `Parse` shared between DateTime / Date / Toml / URL /
+            // UUID, `Connect` shared between TCP / WebSocket).
+            (T::Web, A::Bind) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_web::Web::bind(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Web.bind codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but

@@ -2326,7 +2326,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 18. `buff-db` — Database Access (wraps sqlx)
+- [x] 18. `buff-db` — Database Access (wraps sqlx)
 
   **What to do**:
   - Create `crates/buff-db/`.
