@@ -2213,7 +2213,8 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(ui): component model with state, binding, events, lifecycle`
 
-- [ ] **T135: SSR + mobile (stretch)** [unspecified-high]
+- [x] **T135: SSR + mobile (stretch)** [unspecified-high]
+  - **Shipped at `6f2f0b1`** under build-code+local-tests-only mode. SSR portion local-buildable; hydration + mobile documented as USER ACTION recipes.
 
   **What to do**:
   - SSR: render Buff UI to HTML string on server (Node/Deno + Buff-Wasm)
@@ -2225,11 +2226,12 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **References**: T132 Tauri scaffolding. Tauri 2.0 mobile docs.
 
-  **Acceptance Criteria**:
-  - [ ] SSR produces valid HTML
-  - [ ] Hydration attaches without losing state
-  - [ ] iOS build produces .app
-  - [ ] Android build produces .apk
+  **Acceptance Criteria** (split local vs USER ACTION per build mode):
+  - [x] SSR produces valid HTML → `buff-ui-dioxus::render_to_string(root)` via `VirtualDom::new + rebuild_in_place + dioxus_ssr::render`; `buff ssr <file.buffhtml>` CLI subcommand compiles driver + runs + captures HTML. 11 new tests (2 real-render host-runtime + 5 inline CLI + 6 integration).
+  - [ ] Hydration attaches without losing state → **USER ACTION** (recipe at `.sisyphus/evidence/task-135-hydration-USER-ACTION.txt`, 7 sections: Dioxus 0.7 `hydrate()` pattern, server+client layout, PowerShell recipe, span-mismatch handling, state reconciliation).
+  - [ ] iOS build produces .app → **USER ACTION** (recipe at `.sisyphus/evidence/task-135-mobile-USER-ACTION.txt`, 8 sections: Tauri 2.0 mobile, `buff ui new --mobile`, Xcode + signing, critical note that wasm path NOT used on mobile).
+  - [ ] Android build produces .apk → **USER ACTION** (same mobile recipe).
+  - **Gates**: fmt/clippy exit 0; buff-ui-dioxus 13 tests (+2 SSR); buff-lang-cli 235 lib (+5 ssr) + 6 ssr_t135 integration; all 25 CLI test binaries pass (0 regressions).
 
   **QA Scenarios**:
   ```
