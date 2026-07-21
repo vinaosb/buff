@@ -1,0 +1,17 @@
+// Buff T53 example — compile-time fibonacci.
+// Run: `buff run examples/comptime_fib.buff`
+//
+// The `comptime` block computes fib(10) during compilation. The codegen
+// emits the result as a Rust `const`, so the runtime cost is zero — the
+// generated binary literally has `55i64` baked in.
+
+func fib(n: Int) -> Int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+comptime:
+    let answer = fib(10)
+
+func main():
+    print(answer)

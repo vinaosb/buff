@@ -1,0 +1,14 @@
+// Buff T53 example — type-driven code generation.
+// Run: `buff run examples/comptime_type_driven.buff`
+//
+// The `comptime` block computes a stride value from the element size.
+// This is a tiny version of the metaprogramming pattern that drives
+// SIMD-width selection in compute frameworks (T54 buff-simd).
+
+comptime:
+    let element_size = 8
+    let simd_lanes = 4
+    let stride = element_size * simd_lanes
+
+func main():
+    print(stride)

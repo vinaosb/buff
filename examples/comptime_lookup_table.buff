@@ -1,0 +1,13 @@
+// Buff T53 example — compile-time lookup-table generation.
+// Run: `buff run examples/comptime_lookup_table.buff`
+//
+// The `comptime` block precomputes squares of 0..15 at compile time.
+// The codegen emits the result as a Rust `const` slice, so the runtime
+// pays zero cost for table construction.
+
+comptime:
+    let squares = [0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225]
+
+func main():
+    print(squares[5])
+    print(squares[10])

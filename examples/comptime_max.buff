@@ -1,0 +1,17 @@
+// Buff T53 example — generic specialization via `comptime` parameter.
+// Run: `buff run examples/comptime_max.buff`
+//
+// The `comptime T: Type` parameter specialises `max` per concrete type
+// at compile time. The generated Rust code has no monomorphization
+// bloat — each instantiation is a single line `if a > b { a } else { b }`.
+
+func max(comptime T: Type, a: T, b: T) -> T:
+    if a > b:
+        return a
+    return b
+
+func main():
+    let biggest_int = max(Int, 10, 20)
+    let biggest_str = max(String, "apple", "zebra")
+    print(biggest_int)
+    print(biggest_str)

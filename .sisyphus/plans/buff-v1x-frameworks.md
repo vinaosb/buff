@@ -3472,7 +3472,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > Features inspired by analysis of Zig, Mojo, V/Go, and Swift. Language-level enhancements that make Buff faster (compile + runtime) and more ergonomic.
 
-- [ ] 53. `comptime` — Compile-Time Code Execution (Zig-inspired)
+- [x] 53. `comptime` — Compile-Time Code Execution (Zig-inspired)
 
   **What to do**: Add Zig-style `comptime` blocks and function parameters. `comptime { ... }` runs at compile time, producing values or generating code. `fn foo(comptime T: Type, x: T)` runs specialized per type. Use cases: lookup table generation, config validation, type-driven codegen, generic specialization without monomorphization bloat.
   - **Why comptime INSTEAD of just macros**: Simpler mental model (it's just code that runs early), same language (no separate macro syntax), better error messages (no macro expansion confusion), composable (comptime fns call other comptime fns). Investigated alongside T3 macro spike (both kept in parallel per user decision).

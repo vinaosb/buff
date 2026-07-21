@@ -1,0 +1,18 @@
+// Buff T53 example — compile-time config validation.
+// Run: `buff run examples/comptime_config.buff`
+//
+// The `comptime` block validates a hard-coded config (no I/O — that
+// would be E1211). If validation fails, the program does not compile;
+// the user sees a Buff-source-mapped diagnostic with E1210.
+
+comptime:
+    let max_connections = 100
+    let timeout_seconds = 30
+    if max_connections < 1:
+        return 1
+    if timeout_seconds < 0:
+        return 2
+
+func main():
+    print(max_connections)
+    print(timeout_seconds)
