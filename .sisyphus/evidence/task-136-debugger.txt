@@ -1,0 +1,350 @@
+T136 — Debugger DAP (Debug Adapter Protocol)
+=============================================
+Status: SHIPPED (v1.10 "Production hardening", second task after T137 Coverage).
+Date: 2026-07-21.
+Build host: Windows (MSVC 14.44.35207 + rustc 1.95.0).
+
+DELIVERABLE SUMMARY
+-------------------
+
+New crate `crates/buff-dap/` (version 1.0.0) implementing a DAP
+translation proxy that bridges an editor (VSCode via the
+CodeLLDB / lldb-dap adapter type) to a Rust-capable backend
+debugger (lldb-dap preferred — ships with llvm; codelldb /
+vscode-lldb as fallbacks). Plus `buff debug` CLI subcommand.
+
+Files created:
+  crates/buff-dap/Cargo.toml              (workspace member, v1.0.0)
+  crates/buff-dap/src/lib.rs              (module wiring + re-exports)
+  crates/buff-dap/src/error.rs            (DapError enum, thiserror)
+  crates/buff-dap/src/protocol.rs         (DAP JSON-RPC framing + types)
+  crates/buff-dap/src/translation.rs      (setBreakpoints + stackTrace translation, PURE)
+  crates/buff-dap/src/backend.rs          (lldb-dap / codelldb / vscode-lldb detection + spawn)
+  crates/buff-dap/src/server.rs           (stdio main loop + lifecycle + proxy)
+  crates/buff-dap/tests/translation.rs    (integration tests for translation layer)
+
+Files modified:
+  Cargo.toml                              (workspace.members glob picks up buff-dap automatically;
+                                           added buff-dap to [workspace.dependencies])
+  crates/buff-lang-cli/Cargo.toml         (added buff-dap workspace dep for `buff debug`)
+  crates/buff-lang-cli/src/cli.rs         (added Command::Debug variant)
+  crates/buff-lang-cli/src/commands/mod.rs (added `pub mod debug;`)
+  crates/buff-lang-cli/src/commands/debug.rs (NEW — thin shim around buff_dap::run_session)
+  crates/buff-lang-cli/src/main.rs        (added dispatch arm for Command::Debug)
+
+Files created (VSCode integration):
+  .vscode/buff-debug.launch.json          (VSCode launch config template showing
+                                           `buff debug` as the debugServerPath)
+
+Files created (this evidence):
+  .sisyphus/evidence/task-136-debugger.txt           (THIS FILE)
+  .sisyphus/evidence/task-136-debugger-USER-ACTION.txt (PowerShell install recipe)
+
+
+ARCHITECTURE
+------------
+
+The DAP server is a TRANSLATION PROXY (not a debugger itself):
+
+    Editor (VSCode)         buff-dap                  Backend (lldb-dap)
+       │                       │                            │
+       │── initialize ────────▶│                            │
+       │                       │── initialize ─────────────▶│
+       │                       │◀── initialize response ────│
+       │◀── initialize resp ───│                            │
+       │◀── initialized event ─│                            │
+       │                       │                            │
+       │── setBreakpoints ─────▶│ (TRANSLATE buff→rust)     │
+       │   (buff file/lines)    │── setBreakpoints ─────────▶│
+       │                       │   (rust file/lines)         │
+       │                       │◀────── resp ────────────────│
+       │◀────── resp ──────────│                             │
+       │                       │                            │
+       │── stackTrace ─────────▶│                            │
+       │                       │── stackTrace ──────────────▶│
+       │                       │◀────── resp ────────────────│
+       │                       │   (rust frames)             │
+       │◀────── resp ──────────│ (TRANSLATE rust→buff)       │
+       │   (buff frames!)      │                             │
+       │                       │                            │
+       │── continue/next/... ──▶│────────── passthrough ────▶│
+       │── disconnect ─────────▶│────────── passthrough ────▶│
+       │◀── terminated event ──│                             │
+
+Only two request types are intercepted:
+  1. setBreakpoints — translate buff_line → rust_line, then forward.
+  2. stackTrace — translate rust frames → buff frames on response.
+
+All other requests (initialize / launch / continue / next / stepIn /
+stepOut / pause / disconnect / scopes / variables / evaluate /
+configurationDone / ...) pass through verbatim.
+
+
+TRANSLATION LAYER (load-bearing)
+--------------------------------
+
+The translation layer is PURE Rust with NO I/O — fully unit-testable.
+Located in `crates/buff-dap/src/translation.rs`.
+
+T60 SourceMap API surface consumed (READ-ONLY — buff-lang-error is
+NOT modified, per scope rules):
+
+  - SourceMap::add_source(id, path, content)
+  - SourceMap::lookup(id, offset) -> Option<(line, col)>
+  - SourceMap::add_mapping(buff_span, rust_line)
+  - SourceMap::lookup_buff(rust_line) -> Option<Span>   (FORWARD, exact + closest-below)
+  - SourceMap::lookup_rust(buff_span) -> Option<usize>  (REVERSE, exact span match)
+  - SourceMap::is_line_map_empty() -> bool
+
+Two translation directions:
+
+1. setBreakpoints direction (buff → rust):
+   `translate_breakpoints_buff_to_rust(breakpoints, source_map, id, source)`
+   For each requested buff_line, scan candidate rust_lines in
+   [1..=10_000], call lookup_buff(rust_line), match the returned
+   span's start offset against the requested buff_line's byte
+   offset (via compute_line_starts). Returns TranslatedBreakpoint
+   { buff_line, rust_line, translated }.
+   Falls back to identity (rust_line = buff_line) when:
+     - source map is empty
+     - no exact span match found within scan limit
+   O(N) per breakpoint but breakpoints are rare (once per session).
+
+2. stackTrace direction (rust → buff):
+   `translate_stack_frame_rust_to_buff(rust_line, source_map, id, file)`
+   Uses T60's lookup_buff(rust_line) directly. Returns
+   TranslatedStackFrame { rust_line, buff_file, buff_line, buff_col,
+   translated }.
+   Identity fallback only when source map is EMPTY for the source.
+
+NOTE on T60 closest-below semantics:
+   lookup_buff has a documented fallback — when the exact rust_line
+   is not in the map, it returns the closest span AT OR BELOW
+   rust_line. This mirrors how rustc panic locations point at the
+   START of the failing statement. So for rust_line=999 with a
+   mapping at line 1, lookup_buff(999) returns the span for line 1
+   (translated=true, buff_line=1). The translation layer preserves
+   this T60 semantic — it does NOT second-guess closest-below.
+
+
+DAP PROTOCOL IMPLEMENTATION
+---------------------------
+
+Decision: HAND-ROLLED (not the `dap` crate from crates.io).
+
+Rationale:
+  1. DAP is JSON-RPC, structurally identical to LSP. buff-lsp
+     already consumes lsp-server + lsp-types (small stdio scaffold
+     + thin type set). Hand-rolling DAP mirrors that pattern.
+  2. Avoids introducing a new workspace dependency and the risk
+     of pulling something incompatible with the Windows MSVC
+     toolchain (same cc-rs transitive failure class that killed
+     chumsky / logos per AGENTS.md).
+  3. The translation layer (the load-bearing part) is pure Rust
+     with NO dep needs; the protocol types are secondary.
+  4. DAP is small + well-documented; the spec at
+     https://microsoft.github.io/debug-adapter-protocol/specification
+     covers the lifecycle + every request type we need.
+
+Protocol surface implemented (in `src/protocol.rs`):
+  - Message envelope (seq / type / command / event / request_seq /
+    success / message / body) — opaque body via serde_json::Value.
+  - encode(message) -> Vec<u8>  (Content-Length: N\r\n\r\n{json})
+  - decode(buf) -> (Message, bytes_consumed)
+  - has_complete_message(buf) -> bool
+  - MessageKind enum (Request / Response / Event)
+  - 12 unit tests for roundtrip / framing edge cases.
+
+The protocol layer does NOT model specific request types (initialize
+arguments, setBreakpoints arguments, stackTrace response body, etc.)
+as Rust structs — they're carried as serde_json::Value bodies. The
+server.rs translation helpers reach into the JSON via serde_json
+path access. This trades type safety for forward-compatibility
+(future DAP versions adding fields don't break us).
+
+
+BACKEND CHOICE
+--------------
+
+Three backends supported, in preference order:
+
+  1. lldb-dap (preferred) — ships with llvm. Available via system
+     package manager on all platforms. Upstream:
+     https://github.com/llvm/llvm-project/tree/main/lldb/tools/lldb-dap
+     The reference Rust-capable DAP backend.
+
+  2. codelldb — VSCode extension that bundles its own lldb.
+     Standalone binary installable via cargo install or extracted
+     from the .vsix. Provides both the binary AND the "lldb"
+     adapter type for VSCode.
+
+  3. vscode-lldb — CodeLLDB extension adapter. Same family as
+     codelldb.
+
+Detection (in `src/backend.rs`):
+  - detect_backend() probes each backend's `--version` (stdio piped
+    to null, silent on failure). Returns the first one that exits
+    cleanly.
+  - detect_specific(backend) probes a single backend (used when
+    --backend <name> is set).
+  - When none is installed, prints an install hint + returns
+    DapError::NoBackend (CLI surfaces as a non-zero exit).
+
+Spawn (in `src/backend.rs::spawn`):
+  - stdio::piped() on stdin / stdout (the DAP transport channels).
+  - stderr inherited (backend diagnostics surface to the user —
+    mirrors buff-registry / buff-jupyter child logging).
+  - lldb-dap is stdio-only (no args needed).
+  - codelldb / vscode-lldb accept --port for multi-mode; for stdio
+    mode (which is what VSCode uses by default), no args needed.
+
+
+SERVER LIFECYCLE
+----------------
+
+run_session(config) in `src/server.rs`:
+
+  1. spawn(config.backend) — launch the backend subprocess.
+  2. Spawn a backend-reader thread:
+       - Owns backend.stdout.
+       - Reads DAP messages, applies stackTrace translation on
+         responses (rust frames → buff frames), writes encoded
+         bytes to std::io::stdout() (fresh Send handle per call;
+         StdoutLock<'_> is not Send).
+       - On backend stdout EOF: returns Ok (clean shutdown).
+  3. Main loop:
+       - Read editor stdin.
+       - Decode complete DAP messages.
+       - Apply setBreakpoints translation (buff→rust) when applicable.
+       - Forward to backend.stdin.
+       - On stdin EOF (editor disconnect): break.
+  4. Shutdown:
+       - Set shutdown flag (signals backend-reader to drain + exit).
+       - drop(backend.stdin) — close our stdin to the backend.
+       - Wait for backend to exit (child.wait()).
+       - Join backend-reader thread.
+       - Return BackendExited error if backend exited non-zero.
+
+Threading model: std::thread (NO tokio dependency). The DAP server
+is sync — matches the lifecycle of an editor debug session (long-
+running but not throughput-sensitive). Crossbeam-channel was
+considered for error-passing but avoided (buff-dap has NO extra
+deps beyond serde/serde_json/thiserror/buff-lang-error).
+
+
+LIMITATIONS (GAPS)
+------------------
+
+GAP-1: Source-map identity fallback (SAME GAP AS T137 COVERAGE)
+  The Buff compiler does NOT yet emit source-map markers into the
+  generated .rs file. The CLI's `buff debug` command populates the
+  SourceMap with the IDENTITY mapping (rust_line == buff_line) as
+  the v1.10 stopgap. Real source-map wiring requires codegen changes
+  (deferred — buff-lang-codegen-rust is out of scope per task MUST
+  NOT rules). Same gap as T137 Coverage (see
+  .sisyphus/evidence/task-137-coverage.txt GAP-1).
+  Mitigation: the translation layer is fully implemented + unit-
+  tested with synthetic SourceMaps; the CLI fallback is the v1.10
+  deliverable. When codegen emits real source-map markers in a
+  future task, the SAME buff-dap crate will pick them up with no
+  code changes (T60 API is the contract).
+
+GAP-2: scopes / variables / evaluate pass through (Rust terms)
+  Locals work in Rust terms (post-codegen names may differ from
+  the user's .buff names). Buff-level variable name translation
+  is future work — see `crates/buff-dap/src/translation.rs` module
+  docs. The backend reports variables with their Rust names (e.g.
+  `__buff_x` instead of `x`); the editor renders them as-is.
+  Future: a reverse name-translation layer that maps codegen
+  variable names back to user-declared .buff names.
+
+GAP-3: GPU shader debugging out of scope
+  WGSL shaders run on the GPU; they have no DAP representation.
+  Buff GPU functions (@prefer(gpu)) compile to WGSL via
+  buff-lang-codegen-wgsl, dispatched at runtime via wgpu. There is
+  no debugger protocol for GPU shader source — this is a
+  fundamental limitation (not just Buff; affects all GPU compute).
+  Documented in `crates/buff-dap/src/lib.rs` LIMITATIONS section.
+
+GAP-4: Multi-file .buff projects
+  T60 SourceMap is single-file (one .buff → one .rs at a time).
+  Multi-file support requires codegen changes (deferred; same
+  GAP class as T137 coverage).
+
+GAP-5: Watch expressions / hot reload / reverse debugging
+  Explicitly deferred to v2.0 per the v1.x frameworks roadmap
+  (.sisyphus/plans/buff-v1x-frameworks.md). The v1.10 deliverable
+  is the translation proxy + lifecycle handshake + CLI subcommand.
+
+
+GATES PASSED
+------------
+
+All gates scoped to buff-dap + buff-lang-cli (NOT --workspace —
+wgpu segfaults/hangs per AGENTS.md):
+
+  cargo fmt -p buff-dap -p buff-lang-cli --check         # exit 0
+  cargo clippy -p buff-dap -p buff-lang-cli --all-targets -- -D warnings  # exit 0
+  cargo test -p buff-dap                                  # 46 tests pass
+  cargo test -p buff-lang-cli --lib                       # 281+ tests pass
+
+Existing buff-lang-cli tests continue to pass (no regressions).
+
+
+CONVENTIONS COMPLIANCE
+----------------------
+
+- buff-dap version 1.0.0 (new tooling crate — matches
+  buff-jupyter / buff-registry / buff-lsp 1.x pattern).
+- buff-lang-cli version UNCHANGED at 1.2.0 (DO NOT BUMP per
+  task MUST NOT rules — subcommand additions are non-breaking).
+- Edition 2021, license MIT OR Apache-2.0.
+- Derive Debug, Clone, PartialEq (+ Eq where used) — workspace
+  derive-defaults rule.
+- thiserror::Error derive on DapError.
+- NO [features] / [lints] / [profile] sections in Cargo.toml.
+- NO unwrap / expect / panic! / todo! / unimplemented! in
+  non-test code.
+- Workspace path dep (buff-lang-error.workspace = true) — NOT
+  version-pinned in crate Cargo.toml.
+- Hand-rolled protocol (NOT a new crate dep) — mirrors project
+  "hand-rolled lexer/parser" philosophy.
+- buff-dap has dual-bin pattern? NO — it's lib-only. The CLI
+  (buff-lang-cli) provides the binary entry point via the
+  `buff debug` subcommand dispatch.
+- Tests: integration tests in tests/ + inline #[cfg(test)].
+- Source-map consumed READ-ONLY (buff-lang-error not modified).
+
+
+WHAT WAS NOT DONE (per MUST NOT rules)
+--------------------------------------
+
+- Did NOT modify buff-lang-error (T60 source map is consumed as-is).
+- Did NOT modify any compiler crates (ast/lexer/parser/types/
+  codegen-rust/codegen-wgsl/runtime/error/ast-rsx/buffhtml-parser/
+  codegen-buffhtml).
+- Did NOT modify buff-eval / buff-repl / buff-jupyter /
+  buff-ui-dioxus / buff-registry / buff-lsp / buff-tree-sitter.
+- Did NOT touch boulder.json / plan files / notepads.
+- Did NOT create per-crate AGENTS.md (stayed in scope).
+- Did NOT implement GPU shader debugging (out of scope, GAP-3).
+- Did NOT implement watch expressions / hot reload / reverse
+  debugging (v2.0 per plan).
+- Did NOT install or invoke lldb-dap / codelldb live — that is a
+  USER ACTION documented in
+  .sisyphus/evidence/task-136-debugger-USER-ACTION.txt.
+- Did NOT run any git mutation command (Atlas orchestrator commits
+  ALL work per task spec).
+
+
+NEXT STEPS (post-v1.10)
+-----------------------
+
+- Wire source-map marker emission in buff-lang-codegen-rust
+  (closes GAP-1 — benefits both T136 debugger and T137 coverage).
+- Variable name reverse translation (closes GAP-2 — `__buff_x` → `x`
+  in editor variables view).
+- Multi-file project support (closes GAP-4).
+- v2.0 watch expressions + hot reload while debugging.
+
+— end —

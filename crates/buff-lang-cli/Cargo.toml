@@ -114,6 +114,13 @@ notify.workspace = true
 # the workspace level (T124m WebSocket prelude module); reused here
 # without re-pinning.
 futures-util.workspace = true
+# T136: `buff debug` DAP translation proxy. The subcommand is a thin
+# shim that delegates to buff_dap::run_session — all real protocol /
+# translation / backend-spawn logic lives in the dedicated crate.
+# Mirrors the buff-repl / buff-jupyter workspace path-dep pattern.
+# Pure-Rust deps (serde + serde_json + thiserror + buff-lang-error) —
+# verified to build on this Windows host (no native C dep).
+buff-dap.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

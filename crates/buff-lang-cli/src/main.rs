@@ -96,5 +96,10 @@ fn main() -> Result<()> {
             output.as_deref(),
             release,
         ),
+        Command::Debug {
+            file,
+            backend,
+            source_map,
+        } => buff_lang_cli::commands::debug::run(&file, backend.as_deref(), source_map.as_deref()),
     }
 }

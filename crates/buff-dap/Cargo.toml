@@ -1,0 +1,45 @@
+[package]
+name = "buff-dap"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "buff_dap"
+path = "src/lib.rs"
+
+[dependencies]
+# T136: Debug Adapter Protocol server. Wraps the T60 SourceMap
+# (buff_span ↔ rust_line translation) into a DAP translation proxy
+# sitting between an editor (VSCode via CodeLLDB/lldb-dap adapter
+# type) and a Rust-capable backend debugger (lldb-dap preferred —
+# ships with llvm; codelldb / vscode-lldb as fallbacks).
+#
+# Pure-Rust deps only — NO native C, NO OpenSSL, matches the
+# "no C library, no Docker" hard rule from the T136 task spec.
+#
+# - `serde` + `serde_json`: DAP wire messages (request / response /
+#   event) are JSON; the base protocol framing is `Content-Length:
+#   N\r\n\r\n{json}` (same shape as LSP).
+# - `thiserror`: crate-local error enum (`DapError`) propagated up
+#   through `anyhow` at the CLI boundary (mirrors buff-jupyter /
+#   buff-repl / buff-lsp precedent).
+# - `buff-lang-error`: T60 SourceMap. The translation layer is a
+#   pure consumer of its public API (`lookup_buff` / `lookup_rust` /
+#   `lookup` / `add_source` / `add_mapping`) — NO mutation of the
+#   crate itself, and the source-map wiring is provided by the CLI
+#   at launch time (single-file identity mapping is the v1.10
+#   stopgap until codegen emits real source-map markers — same GAP
+#   as T137 coverage).
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+buff-lang-error.workspace = true
+
+[dev-dependencies]
+# T136: translation-layer unit tests build a synthetic `SourceMap`
+# via `buff_lang_error::{SourceMap, SourceId, Span}` and assert the
+# setBreakpoints (buff_line → rust_line) + stackTrace (rust_line →
+# buff_line + buff_col) translations match expected values. Pure
+# data — no logic dep beyond what's already pulled in above.
+buff-lang-error.workspace = true

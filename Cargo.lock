@@ -287,6 +287,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-dap"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-error",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-eval"
 version = "1.0.0"
 dependencies = [
@@ -352,6 +362,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "buff-dap",
  "buff-jupyter",
  "buff-lang-ast",
  "buff-lang-ast-rsx",
@@ -554,6 +565,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "bufflings"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs",
+ "notify",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

@@ -1,0 +1,100 @@
+{
+    // T136: VSCode launch configuration template for `buff debug`.
+    //
+    // Copy this file into `.vscode/launch.json` in your Buff project
+    // (or merge with an existing one). VSCode's debugger uses the
+    // "type" field to select a debug adapter; "cppdbg" is the
+    // built-in adapter type that works with lldb-dap / codelldb
+    // backends, while "lldb" is the CodeLLDB extension's adapter.
+    //
+    // Two configurations are provided:
+    //
+    // 1. "Buff (lldb-dap)" — uses the `buff debug` adapter as a
+    //    debugServerExtension. VSCode spawns `buff debug` which
+    //    itself spawns lldb-dap / codelldb / vscode-lldb. This is
+    //    the recommended path — Buff's source-map translation runs
+    //    between VSCode and the backend.
+    //
+    // 2. "Buff (CodeLLDB direct)" — for debugging when lldb-dap is
+    //    not installed but CodeLLDB is. Set this up via the CodeLLDB
+    //    extension's "lldb" adapter type pointing at the generated
+    //    .rs file (no Buff source-map translation; you'll see Rust
+    //    frames in the editor). Used as a fallback / comparison
+    //    baseline.
+    //
+    // Prerequisites (USER ACTION):
+    //
+    // 1. `cargo install --path crates/buff-lang-cli` — installs the
+    //    `buff` binary so VSCode can find it on PATH.
+    // 2. `cargo install cargo-llvm-cov` is NOT required for
+    //    debugging — that's coverage (T137).
+    // 3. Install ONE backend debugger:
+    //    - lldb-dap (preferred): ships with llvm. Install via your
+    //      system package manager (`llvm` on Homebrew, `llvm-tools`
+    //      on apt, or download from
+    //      https://github.com/llvm/llvm-project/releases).
+    //    - CodeLLDB (VSCode extension): install from the marketplace
+    //      (https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb).
+    //      Provides the `codelldb` binary + the "lldb" adapter type.
+    //    - vscode-lldb: same family as CodeLLDB.
+    //
+    // See .sisyphus/evidence/task-136-debugger-USER-ACTION.txt for
+    // the full PowerShell install + first-run walkthrough.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Buff (lldb-dap)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/buff_program",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "miDebuggerPath": "lldb-mi",
+            // Tell VSCode to spawn `buff debug` as the DAP adapter.
+            // VSCode pipes the DAP JSON-RPC stream over stdio.
+            "debugServerPath": "buff",
+            "debugServerArgs": "debug ${file} --backend lldb-dap",
+            "serverStarted": "",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for buff values",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "Buff (CodeLLDB direct)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/buff_program",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false,
+            // Source file to display when stepping. CodeLLDB uses
+            // rustc debuginfo to map the binary → .rs file (no Buff
+            // source-map translation in this configuration).
+            "sourceLanguages": [
+                "rust"
+            ]
+        },
+        {
+            // Attach-to-running-process configuration (for
+            // debugging a buff program that's already been launched
+            // outside VSCode). Useful for debugging services.
+            "name": "Buff (attach)",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/target/debug/buff_program",
+            "processId": "${command:pickProcess}",
+            "MIMode": "lldb",
+            "miDebuggerPath": "lldb-mi",
+            "debugServerPath": "buff",
+            "debugServerArgs": "debug ${file} --backend lldb-dap"
+        }
+    ]
+}

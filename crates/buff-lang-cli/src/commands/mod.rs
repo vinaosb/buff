@@ -8,6 +8,7 @@ pub mod build;
 pub mod check;
 pub mod clean;
 pub mod coverage;
+pub mod debug;
 pub mod deps;
 pub mod fmt;
 pub mod init;

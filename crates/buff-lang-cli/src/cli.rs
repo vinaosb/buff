@@ -478,6 +478,61 @@ pub enum Command {
         #[arg(long)]
         release: bool,
     },
+
+    /// `buff debug <FILE> [--backend <lldb-dap|codelldb|vscode-lldb>]
+    /// [--source-map <PATH>] [--release]` — Debug Adapter Protocol
+    /// server (T136).
+    ///
+    /// Launches the `buff-dap` translation proxy that bridges an
+    /// editor (VSCode via CodeLLDB / lldb-dap adapter type) to a
+    /// Rust-capable backend debugger. The proxy intercepts two DAP
+    /// request types and applies Buff's T60 [`SourceMap`]
+    /// translation:
+    ///
+    /// - `setBreakpoints` — translates `.buff` line → generated `.rs`
+    ///   line before forwarding to the backend.
+    /// - `stackTrace` — translates `.rs` frames → `.buff` frames for
+    ///   the editor to render.
+    ///
+    /// All other DAP requests pass through verbatim. The lifecycle
+    /// handshake (initialize / launch / continue / disconnect) is
+    /// proxied unchanged.
+    ///
+    /// # Backend selection
+    ///
+    /// When `--backend <NAME>` is omitted, the server auto-detects
+    /// the best installed backend in preference order: `lldb-dap`
+    /// (preferred, ships with llvm) → `codelldb` → `vscode-lldb`.
+    /// When none is found, prints an install hint + exits non-zero
+    /// (USER ACTION — see
+    /// `.sisyphus/evidence/task-136-debugger-USER-ACTION.txt`).
+    ///
+    /// # Build-host limitation
+    ///
+    /// The translation layer + protocol surface are fully
+    /// local-buildable and unit-tested. The actual lldb-dap /
+    /// codelldb invocation requires the backend to be installed on
+    /// the host — see the USER-ACTION recipe for the install + run
+    /// walkthrough.
+    Debug {
+        /// Input `.buff` source file to debug.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Backend debugger to spawn. Auto-detected when omitted.
+        /// One of: `lldb-dap`, `codelldb`, `vscode-lldb`.
+        #[arg(long, value_name = "NAME")]
+        backend: Option<String>,
+
+        /// Explicit source-map JSON file path. When omitted, the
+        /// CLI re-runs the front-end pipeline to regenerate the
+        /// `.rs` file alongside the `.buff` and uses the identity
+        /// mapping (rust_line == buff_line) — the v1.10 stopgap
+        /// until codegen emits real source-map markers (see
+        /// `task-136-debugger.txt` GAP-1).
+        #[arg(long, value_name = "PATH")]
+        source_map: Option<PathBuf>,
+    },
 }
 
 /// Subcommands of `buff jupyter`.

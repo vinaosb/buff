@@ -1,0 +1,273 @@
+T136 — Debugger DAP USER ACTION Recipe
+======================================
+This file documents how to INSTALL a backend debugger and actually
+DEBUG a Buff program in VSCode. The build-host deliverable ships
+the translation layer + lifecycle + CLI; this recipe closes the
+loop by installing lldb-dap and walking through a first session.
+
+PREREQUISITES
+-------------
+
+1. Rust toolchain (1.95.0 pinned via rust-toolchain.toml).
+2. Buff CLI installed:
+       cargo install --path crates/buff-lang-cli --locked --force
+3. PowerShell 5.1+ (Windows) or bash (Linux/macOS).
+4. VSCode (or VSCode Insiders) with the C/C++ extension installed
+   (the built-in "cppdbg" adapter type) OR the CodeLLDB extension
+   (the "lldb" adapter type).
+
+
+STEP 1 — INSTALL A BACKEND DEBUGGER
+-----------------------------------
+
+Option A: lldb-dap (PREFERRED — ships with llvm)
+
+  Windows (PowerShell, via chocolatey or winget or scoop):
+      # Option 1: chocolatey (llvm package includes lldb-dap)
+      choco install llvm -y
+      # Refresh PATH
+      $env:PATH = "C:\Program Files\LLVM\bin;$env:PATH"
+
+      # Option 2: scoop
+      scoop install llvm
+
+      # Option 3: download the official Windows installer from
+      # https://github.com/llvm/llvm-project/releases
+      # Look for the latest LLVM release and run the .exe.
+
+      # Verify:
+      lldb-dap --version
+      # Expected: prints "lldb-dap" version + llvm commit hash.
+
+  Linux (apt / dnf / pacman):
+      # Ubuntu / Debian:
+      sudo apt install lldb
+      # Fedora / RHEL:
+      sudo dnf install lldb
+      # Arch:
+      sudo pacman -S lldb
+
+      # Verify:
+      lldb-dap --version
+
+  macOS (Homebrew):
+      brew install llvm
+      # Add to PATH (Homebrew installs to /opt/homebrew/opt/llvm/bin
+      # on Apple Silicon, /usr/local/opt/llvm/bin on Intel):
+      echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc
+      source ~/.zshrc
+
+      # Verify:
+      lldb-dap --version
+
+Option B: CodeLLDB (VSCode extension)
+
+  1. Open VSCode.
+  2. Go to the Extensions tab (Ctrl+Shift+X / Cmd+Shift+X).
+  3. Search for "CodeLLDB" (publisher: vadimcn).
+  4. Click Install.
+  5. The extension bundles a `codelldb` binary; the `buff debug`
+     command will auto-detect it (via PATH lookup).
+
+  Alternative: install the standalone codelldb binary:
+      cargo install codelldb
+
+Option C: vscode-lldb (CodeLLDB extension's adapter type)
+
+  Same as Option B — once CodeLLDB is installed, the "lldb" adapter
+  type is registered with VSCode and the buff-debug.launch.json
+  template's "Buff (CodeLLDB direct)" configuration works.
+
+
+STEP 2 — BUILD THE BUFF PROGRAM WITH DEBUG INFO
+-----------------------------------------------
+
+Buff generates Rust source and shells out to rustc. rustc's default
+debug profile includes line-tables-only debuginfo (sufficient for
+lldb-dap to map binary → .rs file).
+
+  cd C:\Users\vsbb1\source\repos\buff
+  buff build examples/fibonacci.buff
+  # Output: examples/fibonacci.exe (Windows) / examples/fibonacci (Unix)
+
+The generated intermediate Rust source sits at:
+  examples/fibonacci.rs
+
+Verify debuginfo is present:
+  # Windows:
+  dumpbin /headers examples\fibonacci.exe | findstr "Debug"
+  # Linux / macOS:
+  objdump --section-headers examples/fibonacci | grep debug
+  # Expected: at least ".debug_info", ".debug_line" sections present.
+
+
+STEP 3 — CONFIGURE VSCODE
+-------------------------
+
+Method A: Use the shipped template (RECOMMENDED)
+
+  1. Copy .vscode/buff-debug.launch.json to .vscode/launch.json
+     (or merge its "configurations" array into your existing one).
+     If .vscode/ does not exist, create it.
+
+  2. Open your Buff project in VSCode:
+      code C:\Users\vsbb1\source\repos\buff
+
+  3. Open a .buff file (e.g. examples/fibonacci.buff).
+
+  4. Set a breakpoint: click in the gutter next to a line of Buff
+     code (e.g. the line with `print(...)` in fibonacci.buff).
+
+  5. Press F5 (or Run > Start Debugging).
+     VSCode shows a dropdown — pick "Buff (lldb-dap)".
+
+  6. VSCode spawns `buff debug examples/fibonacci.buff` which in
+     turn spawns lldb-dap as a subprocess. The Buff DAP server
+     translates breakpoint locations (buff_line → rust_line) before
+     forwarding to the backend, and translates stack frames
+     (rust_line → buff_line) on the way back.
+
+Method B: Manual launch.json (no template)
+
+  Create .vscode/launch.json with:
+
+  {
+      "version": "0.2.0",
+      "configurations": [
+          {
+              "name": "Buff (lldb-dap)",
+              "type": "cppdbg",
+              "request": "launch",
+              "program": "${workspaceFolder}/examples/fibonacci.exe",
+              "args": [],
+              "cwd": "${workspaceFolder}",
+              "MIMode": "lldb",
+              "debugServerPath": "buff",
+              "debugServerArgs": "debug ${file} --backend lldb-dap"
+          }
+      ]
+  }
+
+
+STEP 4 — DEBUG SESSION WALKTHROUGH
+----------------------------------
+
+1. With a .buff file open + a breakpoint set + F5 pressed:
+
+2. The Buff DAP server boots:
+   - "Using backend: lldb-dap" (printed to the debug console).
+   - initialize / initialized handshake completes.
+   - Backend launches the .exe.
+
+3. Breakpoint hits:
+   - VSCode pauses execution at the breakpoint.
+   - The editor highlights the .buff line (not the .rs line — this
+     is the translation layer working).
+   - The Call Stack panel shows frames in .buff coordinates.
+
+4. Step controls:
+   - F10 (Step Over) — steps to the next .buff line (via the
+     .rs line mapping).
+   - F11 (Step Into) — steps into a Buff function call.
+   - Shift+F11 (Step Out).
+   - F5 (Continue).
+
+5. Variables view:
+   - Shows Rust-level locals (post-codegen names). Buff-level
+     name translation is GAP-2 (post-v1.10 work) — variable names
+     may appear as `__buff_x` rather than `x`.
+
+6. Watch expressions:
+   - Limited to Rust expressions (e.g. `x` works; `Vector.len(x)`
+     does NOT — Buff prelude calls are codegen-lowered). GAP.
+
+7. End session:
+   - Click the Stop button or press Shift+F5.
+   - VSCode sends a disconnect DAP request.
+   - buff-dap forwards to backend, waits for exit, returns.
+
+
+STEP 5 — TROUBLESHOOTING
+------------------------
+
+Symptom: "no DAP backend debugger found on PATH"
+  Cause: lldb-dap / codelldb / vscode-lldb not installed.
+  Fix: Run STEP 1 (install lldb-dap).
+
+Symptom: Breakpoint set in .buff file doesn't hit
+  Cause 1: The .buff line doesn't have a corresponding rust_line
+           (codegen sometimes folds statements). Try setting the
+           breakpoint one line above or below.
+  Cause 2: Source-map identity fallback is in effect (GAP-1).
+           Until codegen emits real source-map markers, the
+           translation uses rust_line == buff_line — which works
+           only when the .rs file has a 1:1 line correspondence
+           with the .buff file. For simple programs this holds;
+           for codegen-heavy constructs (structs, async, GPU) it
+           may not.
+
+Symptom: "unknown backend `gdb`"
+  Cause: --backend only accepts lldb-dap / codelldb / vscode-lldb.
+  Fix: Use --backend lldb-dap (or omit for auto-detect).
+
+Symptom: VSCode shows .rs file instead of .buff file when paused
+  Cause: stackTrace translation didn't fire — usually because the
+         backend reported a frame whose rust_line is not in the
+         source map (closest-below fallback returns SOME span, but
+         if the source map is empty, identity fallback passes the
+         raw rust location through).
+  Fix: Verify the source map is populated. With v1.10's identity
+       fallback this should always translate; if you see raw .rs
+       frames, file a bug at https://github.com/buff-lang/buff.
+
+Symptom: lldb-dap fails to start with "lldb-dap: command not found"
+  Cause: lldb-dap not on PATH after install.
+  Fix (Windows): refresh PATH or restart VSCode after install.
+  Fix (macOS): ensure /opt/homebrew/opt/llvm/bin is on PATH.
+  Fix (Linux): ensure lldb-dap is symlinked (some distros ship it
+              as lldb-dap-NN where NN is the llvm version —
+              symlink it: sudo ln -s /usr/bin/lldb-dap-15 /usr/bin/lldb-dap).
+
+Symptom: Backend exits immediately with non-zero status
+  Cause: usually a path or permission issue.
+  Debug: run `buff debug examples/fibonacci.buff` directly in a
+         terminal (not via VSCode) to see the backend's stderr.
+         buff-dap inherits the backend's stderr so diagnostics
+         surface in the terminal.
+
+
+VERIFICATION (post-install smoke test)
+--------------------------------------
+
+Run these commands end-to-end to verify the install:
+
+  # 1. Backend is on PATH:
+  lldb-dap --version
+  # Expected: version string.
+
+  # 2. Buff CLI is installed:
+  buff --version
+  # Expected: "buff 1.2.0" or similar.
+
+  # 3. Debug subcommand recognizes the backend:
+  buff debug examples/ola.buff --backend lldb-dap
+  # Expected: boots the DAP server (waits for editor connection
+  # on stdin). Press Ctrl+C to abort (it blocks indefinitely).
+
+  # 4. End-to-end in VSCode:
+  # Open examples/ola.buff in VSCode, set a breakpoint on the
+  # print(...) line, press F5 with "Buff (lldb-dap)" config.
+  # Expected: breakpoint hits, call stack shows ola.buff frames.
+
+
+REFERENCES
+----------
+
+- DAP spec: https://microsoft.github.io/debug-adapter-protocol/specification
+- lldb-dap upstream: https://github.com/llvm/llvm-project/tree/main/lldb/tools/lldb-dap
+- CodeLLDB extension: https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb
+- Buff DAP architecture: .sisyphus/evidence/task-136-debugger.txt
+- Buff launch.json template: .vscode/buff-debug.launch.json
+- T60 source map (consumed): crates/buff-lang-error/src/source_map.rs
+
+— end —

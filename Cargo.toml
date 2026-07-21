@@ -502,3 +502,14 @@ notify = "6"
 buff-lang-ast-rsx = { path = "crates/buff-lang-ast-rsx" }
 buff-lang-buffhtml-parser = { path = "crates/buff-lang-buffhtml-parser" }
 buff-lang-codegen-buffhtml = { path = "crates/buff-lang-codegen-buffhtml" }
+# T136: Debug Adapter Protocol translation proxy (`crates/buff-dap`).
+# The DAP server wraps the T60 SourceMap (buff_span ↔ rust_line
+# translation) into a translation proxy sitting between an editor
+# (VSCode via CodeLLDB / lldb-dap adapter type) and a Rust-capable
+# backend debugger (lldb-dap preferred — ships with llvm; codelldb /
+# vscode-lldb as fallbacks). Pure-Rust deps only — NO native C, NO
+# OpenSSL, matches the "no C library, no Docker" hard rule. The path
+# dep is mirrored at the workspace level so consumers (T136 CLI
+# `buff debug` subcommand, future IDE integrations) all resolve to
+# the same in-tree version during the v1.x tooling wave.
+buff-dap = { path = "crates/buff-dap" }
