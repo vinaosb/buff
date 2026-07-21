@@ -1355,7 +1355,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 7. `buff-dataframe` — Columnar DataFrames + Lazy Execution
+- [x] 7. `buff-dataframe` — Columnar DataFrames + Lazy Execution
 
   **What to do**:
   - Create `crates/buff-dataframe/` with Cargo.toml (workspace deps, edition 2021, MIT OR Apache-2.0, version 2.0.0).

@@ -875,8 +875,8 @@ pub enum PreludeType {
     /// T12 (v1.13 frameworks wave 2): the `Entity` opaque id type
     /// returned by `world.spawn(...)`. Maps to `buff_ecs::Entity` at
     /// codegen time (a transparent newtype over `hecs::Entity`, which
-    /// is a `(u32 id, u32 generation)` pair — Copy + Eq + Hash + Send
-    /// + Sync + 'static). Users compare entities by value, store them
+    /// is a `(u32 id, u32 generation)` pair — Copy, Eq, Hash, Send,
+    /// Sync, 'static). Users compare entities by value, store them
     /// in collections, and pass them back to the world's mutating
     /// methods (`insert`, `remove`, `despawn`).
     ///
@@ -2357,10 +2357,8 @@ impl PreludeAssocFn {
             // (url), dispatched on the (type, method) pair.
             PreludeAssocFn::Connect => "connect",
             PreludeAssocFn::Bind => "bind",
-            // T11: buff-dsp window-function names mirror the canonical
-            // DSP literature spelling (Hann / Hamming / Blackman —
-            // proper nouns, lowercase method names). The codegen splices
-            // `buff_dsp::windows::<name>(n)` paths without rewriting.
+            // T11: buff-dsp window functions. Names mirror the canonical
+            // DSP literature spelling (lowercase method names).
             PreludeAssocFn::Hann => "hann",
             PreludeAssocFn::Hamming => "hamming",
             PreludeAssocFn::Blackman => "blackman",
@@ -3190,6 +3188,28 @@ pub enum PreludeInstanceFn {
     /// DataFrame). Wraps `buff_dataframe::DataFrame::agg(recv, col,
     /// op).unwrap_or_default()`.
     Agg,
+    /// `df.to_table_string() -> String`. Zero args. Returns the
+    /// fixed-width pretty-printed table (header row + separator +
+    /// data rows). Wraps `buff_dataframe::DataFrame::to_table_string
+    /// (recv)` (infallible — no `unwrap_or_default()` needed). Used
+    /// by `print(df)` and any time the user wants a readable snapshot
+    /// of the frame's current contents.
+    ToTableString,
+    // ---- Signal instance methods (T11) --------------------------------
+    // Nine instance methods on Signal values. Dispatched on
+    // (Type::Void, variant) — Signal models as Void for MVP (the
+    // coordinated Type::Signal variant is a follow-up outside T11
+    // shared zone). CPU-only per Metis G7 (NO GPU, NO real-time
+    // streaming).
+    Fft,
+    Ifft,
+    Lowpass,
+    Highpass,
+    Bandpass,
+    ApplyWindow,
+    Spectrogram,
+    Magnitude,
+    Phase,
 }
 
 impl PreludeInstanceFn {
@@ -3260,6 +3280,19 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Len,
         PreludeInstanceFn::GroupBy,
         PreludeInstanceFn::Agg,
+        PreludeInstanceFn::ToTableString,
+        // T11: Signal instance methods (9): fft / ifft / lowpass /
+        // highpass / bandpass / apply_window / spectrogram /
+        // magnitude / phase.
+        PreludeInstanceFn::Fft,
+        PreludeInstanceFn::Ifft,
+        PreludeInstanceFn::Lowpass,
+        PreludeInstanceFn::Highpass,
+        PreludeInstanceFn::Bandpass,
+        PreludeInstanceFn::ApplyWindow,
+        PreludeInstanceFn::Spectrogram,
+        PreludeInstanceFn::Magnitude,
+        PreludeInstanceFn::Phase,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -3343,6 +3376,7 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Len => "len",
             PreludeInstanceFn::GroupBy => "group_by",
             PreludeInstanceFn::Agg => "agg",
+            PreludeInstanceFn::ToTableString => "to_table_string",
             PreludeInstanceFn::Join => "join",
         }
     }
@@ -3621,6 +3655,9 @@ pub fn instance_fn_return_type(
         // `df.agg(col, op)` -> DataFrame. Per-group aggregation (or
         // single-row aggregate if df is not a grouped DataFrame).
         (Type::DataFrame, PreludeInstanceFn::Agg) => Some(Type::DataFrame),
+        // `df.to_table_string()` -> String. Zero-arg fixed-width
+        // pretty-printer (infallible — returns String directly).
+        (Type::DataFrame, PreludeInstanceFn::ToTableString) => Some(Type::string()),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

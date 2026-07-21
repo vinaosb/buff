@@ -1,0 +1,16 @@
+# T7 example: load JSON-lines, select, sort, head, pretty-print.
+# The matching dataframe_json.rs mirrors this pipeline using the
+# direct `buff_dataframe::DataFrame` Rust API.
+import DataFrame
+
+func main()
+    let df = DataFrame.from_json("examples/dataframe/rows.jsonl")
+    print("Loaded rows: " + df.len())
+
+    let projected = df.select(["name", "score"])
+    print("Projected columns:")
+    print(projected.to_table_string())
+
+    let ranked = projected.sort("score").head(5)
+    print("Top 5 by score:")
+    print(ranked.to_table_string())

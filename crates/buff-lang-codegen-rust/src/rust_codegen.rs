@@ -4591,6 +4591,32 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Channel.new codegen parse: {e}")))
             }
+            // T7: DataFrame.from_csv(path) -> DataFrame. Wraps
+            // `buff_dataframe::DataFrame::from_csv(path)
+            // .unwrap_or_default()` (panic-free on file-not-found /
+            // parse failure — DataFrame impls Default as the empty
+            // frame, matching Buff's "no panicking generated code"
+            // rule). Records `buff-dataframe` in extern_crates via
+            // the narrow `program_uses_namespace("DataFrame")` walker.
+            (T::DataFrame, A::FromCsv) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_dataframe::DataFrame::from_csv(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.from_csv codegen parse: {e}")))
+            }
+            // T7: DataFrame.from_json(path) -> DataFrame. Same shape
+            // as FromCsv — panic-free via `unwrap_or_default()`.
+            // Reads JSON-lines (one JSON object per line).
+            (T::DataFrame, A::FromJson) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_dataframe::DataFrame::from_json(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.from_json codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -5395,6 +5421,201 @@ impl RustCodegen {
             M::Send | M::Recv | M::Close => Err(self.unsupported(&format!(
                 "{recv_ty}.{:?}() is not a recognised prelude instance method",
                 pmethod
+            ))),
+            // T7: DataFrame instance methods. Each chainable method
+            // returns `buff_dataframe::DataFrame` so the user can
+            // chain `df.select(cols).filter(pred).head(10)`. The
+            // codegen records `buff-dataframe` in extern_crates via
+            // the narrow `program_uses_namespace("DataFrame")` walker
+            // (matches the buff-image / buff-audio precedent). All
+            // DataFrame methods panic-free at the codegen layer via
+            // `unwrap_or_default()` (DataFrame impls Default as the
+            // empty frame).
+            //
+            // `df.select(cols)` -> DataFrame. One arg (Vector<String>
+            // of column names). The codegen splat-converts the Vec
+            // to a `&[&str]` slice via `.iter().map(|s| s.as_str())
+            // .collect::<Vec<&str>>()` so the buff_dataframe API
+            // takes the slice directly.
+            M::Select if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "select() expects exactly 1 arg (Vector<String> of column names), got {}",
+                        args.len()
+                    )));
+                }
+                let cols = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let __cols: Vec<String> = #cols;
+                        let __slice: Vec<&str> = __cols.iter().map(|s| s.as_str()).collect();
+                        #recv.select(&__slice).unwrap_or_default()
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.select codegen parse: {e}")))
+            }
+            // `df.filter(predicate)` -> DataFrame. One arg (a lambda
+            // `|row| -> Bool`). The codegen passes the user closure
+            // directly to `buff_dataframe::DataFrame::filter`, which
+            // expects `Fn(&RowView<'_>) -> bool`. The user closure's
+            // param is a RowView — Buff's codegen surfaces RowView as
+            // an opaque value (the user writes `row.get_int("age")`
+            // etc.; the codegen passes &RowView by reference).
+            M::Filter if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "filter() expects exactly 1 arg (a closure predicate), got {}",
+                        args.len()
+                    )));
+                }
+                let pred = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.filter(|__row| (#pred)(__row)).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.filter codegen parse: {e}")))
+            }
+            // `df.sort(col)` -> DataFrame. One arg (String column
+            // name). Ascending lexicographic sort by the column's
+            // cells.
+            M::Sort if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "sort() expects exactly 1 arg (the column name), got {}",
+                        args.len()
+                    )));
+                }
+                let col = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.sort(#col.as_str()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.sort codegen parse: {e}")))
+            }
+            // `df.head(n)` -> DataFrame. One arg (Int). First n rows.
+            M::Head if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "head() expects exactly 1 arg (the row count), got {}",
+                        args.len()
+                    )));
+                }
+                let n = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.head((#n).max(0) as usize)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.head codegen parse: {e}")))
+            }
+            // `df.len()` -> Int. Zero args. Row count.
+            M::Len if matches!(recv_ty, Type::DataFrame) => {
+                if !args.is_empty() {
+                    return Err(self
+                        .unsupported(&format!("len() takes no arguments, got {}", args.len())));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.len() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.len codegen parse: {e}")))
+            }
+            // `df.join(other, on)` -> DataFrame. Two args (DataFrame
+            // other, String on-column). Inner equi-join.
+            M::Join if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "join() expects exactly 2 args (other DataFrame, on-column), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let on = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.join(&#other, #on.as_str()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.join codegen parse: {e}")))
+            }
+            // `df.group_by(col)` -> DataFrame. One arg (String column
+            // name). Returns a DataFrame (the GroupBy intermediate is
+            // collapsed into a DataFrame via `into_inner()` so
+            // subsequent `.agg(...)` calls dispatch on the DataFrame
+            // receiver — a true GroupBy intermediate type would
+            // require a second Type variant + display arm + codegen
+            // path; deferred to v1.18+).
+            M::GroupBy if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "group_by() expects exactly 1 arg (the column name), got {}",
+                        args.len()
+                    )));
+                }
+                let col = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.group_by(#col.as_str())
+                        .map(|__gb| __gb.into_df())
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.group_by codegen parse: {e}")))
+            }
+            // `df.agg(col, op)` -> DataFrame. Two args (String column
+            // name, String aggregation op — "sum"/"mean"/"min"/"max"/
+            // "count"). Returns a per-group aggregate DataFrame.
+            M::Agg if matches!(recv_ty, Type::DataFrame) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "agg() expects exactly 2 args (column name, op string), got {}",
+                        args.len()
+                    )));
+                }
+                let col = self.lower_expr(&args[0])?;
+                let op = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let __col: String = #col;
+                        let __op_str: String = #op;
+                        let __op = buff_dataframe::AggOp::parse(__op_str.as_str())
+                            .unwrap_or(buff_dataframe::AggOp::Count);
+                        #recv.agg(__col.as_str(), __op)
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.agg codegen parse: {e}")))
+            }
+            // `df.to_table_string()` -> String. Zero args. Fixed-width
+            // pretty-printer. Infallible (no `unwrap_or_default()` wrap
+            // needed — `to_table_string` returns String directly).
+            M::ToTableString if matches!(recv_ty, Type::DataFrame) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_table_string() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.to_table_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("DataFrame.to_table_string codegen parse: {e}")))
+            }
+            // Non-DataFrame receiver with a DataFrame-only method
+            // (Select/Filter/Sort/Head/GroupBy/Agg/ToTableString) falls
+            // through to a clear error (mirrors the Send/Recv/Close
+            // safety net).
+            M::Select | M::Filter | M::Sort | M::Head | M::GroupBy | M::Agg | M::ToTableString => {
+                Err(self.unsupported(&format!(
+                    "{recv_ty}.{:?}() is not a recognised prelude instance method",
+                    pmethod
+                )))
+            }
+            // `Len` is shared between DataFrame.len (above) and
+            // future Vector.len / Map.len / Series.len — dispatched
+            // on receiver type. Non-DataFrame receivers fall through
+            // to the existing method-resolution path.
+            M::Len => Err(self.unsupported(&format!(
+                "{recv_ty}.len() is not a recognised prelude instance method",
             ))),
         }
     }
@@ -7804,6 +8025,32 @@ impl RustCodegen {
             // returns None and lets Rust infer the type from the
             // initializer (mirroring Unknown / Void behavior).
             Type::Sender | Type::Receiver => return None,
+            // T9: image. Opaque runtime-value type mapped to
+            // `buff_image::Image`. No generic parameter, no turbofish
+            // needed. If a user annotates a let binding with an
+            // explicit Image type, codegen emits the concrete path;
+            // otherwise Rust infers the type from the initializer
+            // (mirroring Regex / Path / Process behavior).
+            Type::Image => "buff_image::Image",
+            // T10: audio. Opaque runtime-value type mapped to
+            // `buff_audio::AudioBuffer`. No generic parameter, no
+            // turbofish needed. Mirrors the T9 Image precedent: if a
+            // user annotates a let binding with an explicit
+            // AudioBuffer type, codegen emits the concrete path;
+            // otherwise Rust infers the type from the initializer
+            // (AudioBuffer.from_path / AudioBuffer.from_samples).
+            Type::Audio => "buff_audio::AudioBuffer",
+            // T7: columnar DataFrame. Opaque runtime-value type mapped
+            // to `buff_dataframe::DataFrame`. No generic parameter, no
+            // turbofish needed. Mirrors the T9 Image / T10 Audio
+            // precedent: if a user annotates a let binding with an
+            // explicit DataFrame type, codegen emits the concrete path;
+            // otherwise Rust infers the type from the initializer
+            // (DataFrame.from_csv / DataFrame.from_json). The
+            // `buff-dataframe` crate is recorded in `extern_crates`
+            // when a Buff program uses `DataFrame.*` (via the narrow
+            // `program_uses_namespace("DataFrame")` walker).
+            Type::DataFrame => "buff_dataframe::DataFrame",
         };
         Some(rust_path_type(rust_name))
     }
@@ -8674,6 +8921,16 @@ const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     "recv",
     "close",
     "recv_from",
+    // T7: DataFrame zero-arg instance method `to_table_string()`.
+    // Without this entry the T26 field-access heuristic would rewrite
+    // `df.to_table_string()` as `df.to_table_string` (a Rust field
+    // access on the `buff_dataframe::DataFrame` value, which doesn't
+    // exist - the underlying Rust method is `.to_table_string()`
+    // returning a fixed-width formatted String). The other DataFrame
+    // methods (`select`/`filter`/`sort`/`head`/`join`/`group_by`/
+    // `agg`) all take args so they're never affected by the heuristic;
+    // `len` is already covered above as a universal collection method.
+    "to_table_string",
 ];
 
 /// Build the attribute list for a generated struct: always

@@ -1,0 +1,31 @@
+[package]
+name = "buff-dataframe"
+version = "2.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Columnar DataFrame MVP for Buff: schema-aware storage, CSV/JSON load, relational ops (CPU-only)"
+
+[lib]
+name = "buff_dataframe"
+path = "src/lib.rs"
+
+[dependencies]
+# T7: buff-dataframe MVP. Two pure-Rust crates cover the extern surface:
+# - `csv` is already pinned at the workspace level (T124i Csv module). We
+#   reuse it for the CSV reader / writer. API used: `csv::ReaderBuilder`
+#   + `has_headers(false)` so the header row is preserved in the record
+#   stream (matches the CSV module stance), `StringRecord::iter()` for
+#   cell-by-cell reads, and `Reader::deserialize` is NOT used (we parse
+#   cell-by-cell so the column-kind inference runs uniformly).
+# - `serde_json` is already pinned at the workspace level. We use it for
+#   the JSON-lines reader (`from_str::<serde_json::Value>` per line) +
+#   a heterogeneous-rows fallback path. Pure-Rust, no native deps.
+#
+# Matches the "no C library, no Docker" hard rule from T126/T127 and the
+# CPU-only stance from Metis G7 (no GPU dispatch in this crate).
+csv.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

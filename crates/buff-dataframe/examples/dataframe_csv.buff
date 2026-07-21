@@ -1,0 +1,17 @@
+# T7 example: load CSV, filter, group_by + agg, pretty-print.
+# The matching dataframe_csv.rs mirrors this pipeline using the
+# direct `buff_dataframe::DataFrame` Rust API.
+import DataFrame
+
+func main()
+    let df = DataFrame.from_csv("examples/dataframe/sample.csv")
+    print("Loaded rows: " + df.len())
+
+    let london = df.filter(row => row.get_string("city") == "London")
+    print("London rows:")
+    print(london.to_table_string())
+
+    let by_city = df.group_by("city")
+    let mean_age = by_city.agg("age", "mean")
+    print("Mean age by city:")
+    print(mean_age.to_table_string())
