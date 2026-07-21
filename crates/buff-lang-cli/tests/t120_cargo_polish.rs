@@ -18,6 +18,7 @@ fn minimal_cfg(name: &str) -> BuffConfig {
             name: name.to_string(),
             version: "0.1.0".to_string(),
             edition: Some("0.1".to_string()),
+            stability: None,
         }),
         dependencies: BTreeMap::new(),
         profile: Profiles::default(),
@@ -25,6 +26,9 @@ fn minimal_cfg(name: &str) -> BuffConfig {
         git_dependencies: BTreeMap::new(),
         registry_dependencies: BTreeMap::new(),
         workspace: None,
+        features: Default::default(),
+        lints: Default::default(),
+        prelude: Default::default(),
     }
 }
 

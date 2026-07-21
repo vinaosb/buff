@@ -164,7 +164,12 @@ fn generate_cargo_toml_emits_virtual_workspace_manifest() {
         workspace: Some(WorkspaceSection {
             members: vec!["pkg-a".to_string(), "pkg-b".to_string()],
             resolver: None,
+            dependencies: BTreeMap::new(),
+            extern_crates: BTreeMap::new(),
         }),
+        features: Default::default(),
+        lints: Default::default(),
+        prelude: Default::default(),
     };
     let cargo = generate_cargo_toml(&cfg);
     // Virtual manifest: NO [package] section.
@@ -199,7 +204,12 @@ fn generate_cargo_toml_workspace_respects_custom_resolver() {
         workspace: Some(WorkspaceSection {
             members: vec!["only".to_string()],
             resolver: Some("1".to_string()),
+            dependencies: BTreeMap::new(),
+            extern_crates: BTreeMap::new(),
         }),
+        features: Default::default(),
+        lints: Default::default(),
+        prelude: Default::default(),
     };
     let cargo = generate_cargo_toml(&cfg);
     assert!(
@@ -224,7 +234,12 @@ fn generate_cargo_toml_workspace_is_deterministic() {
         workspace: Some(WorkspaceSection {
             members: vec!["zpkg".to_string(), "apkg".to_string()],
             resolver: None,
+            dependencies: BTreeMap::new(),
+            extern_crates: BTreeMap::new(),
         }),
+        features: Default::default(),
+        lints: Default::default(),
+        prelude: Default::default(),
     };
     let a = generate_cargo_toml(&mk());
     let b = generate_cargo_toml(&mk());
@@ -245,7 +260,12 @@ fn generate_cargo_toml_workspace_preserves_member_order() {
         workspace: Some(WorkspaceSection {
             members: vec!["zeta".to_string(), "alpha".to_string(), "mid".to_string()],
             resolver: None,
+            dependencies: BTreeMap::new(),
+            extern_crates: BTreeMap::new(),
         }),
+        features: Default::default(),
+        lints: Default::default(),
+        prelude: Default::default(),
     };
     let cargo = generate_cargo_toml(&cfg);
     let zeta_pos = cargo.find("\"zeta\"").expect("zeta emitted");
@@ -270,7 +290,12 @@ fn generate_cargo_toml_workspace_empty_members_still_emits_header() {
         workspace: Some(WorkspaceSection {
             members: vec![],
             resolver: None,
+            dependencies: BTreeMap::new(),
+            extern_crates: BTreeMap::new(),
         }),
+        features: Default::default(),
+        lints: Default::default(),
+        prelude: Default::default(),
     };
     let cargo = generate_cargo_toml(&cfg);
     assert!(cargo.contains("[workspace]"));

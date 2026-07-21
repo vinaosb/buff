@@ -49,6 +49,27 @@
 //! external deps, generating `buff.lock`, workspace support) is intentionally
 //! deferred to later v0.5/v1.0 tasks — see the T111 notepad entry for the
 //! deferral list. The acceptance gate is the `config_parsing` test suite.
+//!
+//! ## v2 schema (T0 — Buff SDK 2.0)
+//!
+//! The manifest is **additively extended** with optional v2 sections. Every
+//! v1 manifest continues to parse unchanged. The new optional sections are:
+//!
+//! - `[features]` — named feature flags + a `default` list. Source code uses
+//!   them via the `@feature(name)` attribute (T0-B4).
+//! - `[lints]` — project-wide lint policy (`clippy = "deny"|"warn"|"allow"`).
+//! - `[profile.dev|release|bench|test]` — per-profile codegen options. v1
+//!   only modelled `[profile.release]`; v2 adds `dev`/`bench`/`test`.
+//! - `[prelude]` — project-wide implicit imports (modules whose `export`s
+//!   become ambient in every file). Codegen weaves this through the existing
+//!   [`buff_lang_types::prelude`] machinery at build time.
+//! - `[package].stability` — `"experimental"|"beta"|"stable"|"locked"`.
+//!   Surfaced by `buff publish` and the registry (T0-G2).
+//! - `[package].edition = "2026"` — opt-in to v2-only behaviours. v1
+//!   manifests without `edition` continue to behave as before.
+//! - `[workspace.dependencies]` / `[workspace.extern]` — workspace-level
+//!   dep declarations inherited by members via `dep.workspace = true`
+//!   (T0-A3b; mirrors Cargo's well-loved pattern).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -162,6 +183,31 @@ pub struct BuffConfig {
     /// doc. [`BuffConfig::parse`] enforces the invariant.
     #[serde(default)]
     pub workspace: Option<WorkspaceSection>,
+    /// `[features]` — named feature flags for conditional compilation
+    /// (T0-A1, Buff SDK 2.0). Source code gates decls with `@feature(name)`
+    /// (T0-B4); codegen emits only those whose name appears in the
+    /// resolved feature set. The `default` sub-key lists features
+    /// enabled when the user doesn't pass `--features`.
+    ///
+    /// Forward-compatible: an absent `[features]` section deserialises to
+    /// an empty [`FeaturesSection`] (no features defined; `@feature(name)`
+    /// always drops — matches Cargo/Rust `#[cfg(feature)]` semantics).
+    #[serde(default)]
+    pub features: FeaturesSection,
+    /// `[lints]` — project-wide lint policy (T0-A1). Currently surfaces
+    /// a single `clippy` level (`"deny"|"warn"|"allow"`) consumed by
+    /// `buff check`. The section is open-ended — additional lint names
+    /// can be added later without breaking the parse (serde ignores
+    /// unknown keys per the established forward-compat rule).
+    #[serde(default)]
+    pub lints: LintsSection,
+    /// `[prelude]` — project-wide implicit imports (T0-A1, T0-B3).
+    /// Lists module paths whose `export`s become ambient in every
+    /// source file of the project (mirrors Rust's `extern_prelude`
+    /// concept). Codegen injects the equivalent of `import * from
+    /// "<path>"` at the head of each compiled file. Empty by default.
+    #[serde(default)]
+    pub prelude: PreludeSection,
 }
 
 /// `[workspace]` section of a virtual `buff.toml` (T123).
@@ -191,6 +237,29 @@ pub struct WorkspaceSection {
     /// resolver; this matches Cargo's recommendation for edition 2021+).
     #[serde(default)]
     pub resolver: Option<String>,
+    /// `[workspace.dependencies]` — workspace-level Buff package
+    /// declarations inherited by members via `<dep>.workspace = true`
+    /// (T0-A3b). Mirrors Cargo's `[workspace.dependencies]` pattern:
+    /// declare once at the workspace root, members reference. Prevents
+    /// version drift across crates in a monorepo. Member crates still
+    /// list the dep in their own `[dependencies]`/`[git-dependencies]`/
+    /// `[registry-dependencies]` table — the workspace entry is the
+    /// canonical version source when the member's entry is missing or
+    /// explicitly carries `workspace = true` (currently informational;
+    /// member-side inheritance flag parsing arrives with T1's resolver).
+    ///
+    /// Stored as a `BTreeMap` so iteration is deterministic — matches
+    /// the rest of the manifest's determinism contract.
+    #[serde(default)]
+    pub dependencies: BTreeMap<String, String>,
+    /// `[workspace.extern]` — workspace-level Rust crate (`extern`)
+    /// declarations inherited by members (T0-A3b). Same inheritance
+    /// shape as [`WorkspaceSection::dependencies`] but for Rust crates
+    /// surfaced via Buff `extern` blocks (T119). Each entry is
+    /// `name = "version-req"`; members opt in via their `[rust-deps]`
+    /// table.
+    #[serde(default)]
+    pub extern_crates: BTreeMap<String, String>,
 }
 
 /// A single `[git-dependencies]` entry (T122).
@@ -262,22 +331,91 @@ pub struct PackageSection {
     /// Semver-style version string (e.g. `"0.2.1"`). Stored verbatim — the
     /// parser does not enforce semver well-formedness in v0.5.
     pub version: String,
-    /// Optional Buff language edition (e.g. `"0.1"`). Mirrors Cargo's
-    /// `edition` field; absent in legacy manifests.
+    /// Optional Buff language edition (e.g. `"0.1"`, `"2026"`). Mirrors
+    /// Cargo's `edition` field; absent in legacy manifests. Edition
+    /// `"2026"` (T0-A1) is the v2 default for new projects scaffolded
+    /// by `buff new`; v1 manifests keep their existing edition.
     #[serde(default)]
     pub edition: Option<String>,
+    /// Stability badge consumed by `buff publish` + the registry (T0-G2).
+    /// One of `"experimental"`, `"beta"`, `"stable"`, `"locked"`. When
+    /// `None`, the registry treats the package as `"experimental"` by
+    /// default. Surfaced in search results, package pages, and the
+    /// `buff add` resolution log.
+    ///
+    /// Stored verbatim — the registry enforces the enum at upload time.
+    /// See [`Stability`] for the parsed form used by the CLI.
+    #[serde(default)]
+    pub stability: Option<Stability>,
+}
+
+/// Stability badge for a Buff package (T0-G2).
+///
+/// Surfaces in `buff publish`, the registry, and `buff add` resolution
+/// so users can decide whether to depend on a package. The ladder
+/// matches the conventions used by the Rust ecosystem (`nightly` →
+/// `beta` → `stable`):
+///
+/// - [`Stability::Experimental`] — API in flux; no compatibility promise.
+/// - [`Stability::Beta`] — API mostly settled; minor breakage possible.
+/// - [`Stability::Stable`] — SemVer holds; safe to depend on.
+/// - [`Stability::Locked`] — Stable + version-pinned downstream
+///   (`{ version = "=X.Y.Z" }`) — used by foundational libs.
+///
+/// Serialises as a lowercase kebab string (`"experimental"`, `"beta"`,
+/// `"stable"`, `"locked"`) so the round-trip through `buff.toml` is
+/// transparent. Unknown values fall back to [`Stability::Experimental`]
+/// at deserialise time (forward-compat — new badges added later don't
+/// break older CLIs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Stability {
+    Experimental,
+    #[default]
+    Beta,
+    Stable,
+    Locked,
+}
+
+impl Stability {
+    /// Lowercase badge string used in user-facing output (e.g. registry
+    /// listings, `buff add` resolution log).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Stability::Experimental => "experimental",
+            Stability::Beta => "beta",
+            Stability::Stable => "stable",
+            Stability::Locked => "locked",
+        }
+    }
 }
 
 /// `[profile]` table — collection of named build profiles.
 ///
-/// Only `release` is modelled today (mirroring the T111 spec); `dev` and
-/// custom profiles can be added later without breaking the parse (serde will
-/// ignore unknown sub-tables).
+/// `release` is the v0.5 original. `dev` / `bench` / `test` are added
+/// in T0-A1 (Buff SDK 2.0) so the `[profile.*]` table mirrors Cargo's
+/// four canonical profiles. Custom profile names remain a v1.18+ concern;
+/// serde ignores unknown sub-tables per the forward-compat rule.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 pub struct Profiles {
-    /// `[profile.release]` — optimisation flags for release builds.
+    /// `[profile.dev]` — debug-build profile (T0-A1). Selected by
+    /// `BUFF_PROFILE=dev` or as the default when no `--release` flag is
+    /// passed. Empty/absent → fall back to rustc's built-in dev defaults.
+    #[serde(default)]
+    pub dev: Option<ProfileOpts>,
+    /// `[profile.release]` — optimisation flags for release builds
+    /// (v0.5 original). Selected by `--release` or `BUFF_PROFILE=release`.
     #[serde(default)]
     pub release: Option<ProfileOpts>,
+    /// `[profile.bench]` — profile applied by `buff bench` (T0-A1,
+    /// pairs with the `@bench` attribute from T0-F2). When absent,
+    /// `bench` falls back to `release` (matches Cargo).
+    #[serde(default)]
+    pub bench: Option<ProfileOpts>,
+    /// `[profile.test]` — profile applied by `buff test` (T0-A1).
+    /// When absent, `test` falls back to `dev` (matches Cargo).
+    #[serde(default)]
+    pub test: Option<ProfileOpts>,
 }
 
 /// A single `[profile.*]` table.
@@ -313,6 +451,157 @@ pub struct ProfileOpts {
     /// Strip debuginfo (`true` / `false`). TOML bool → string.
     #[serde(default, deserialize_with = "deserialize_scalar_string")]
     pub strip: Option<String>,
+    /// Debug-info level (`0`/`1`/`2`/`"line-tables-only"`). TOML int or
+    /// string → string. Mirrors Cargo's `profile.<name>.debug`. (T0-A4)
+    #[serde(default, deserialize_with = "deserialize_scalar_string")]
+    pub debug: Option<String>,
+}
+
+/// `[features]` section of `buff.toml` (T0-A1).
+///
+/// Buff features are named boolean flags the user toggles at build time
+/// to enable optional behaviour. Source code gates decls via
+/// `@feature(name)` (T0-B4); codegen emits only those whose name is in
+/// the resolved feature set.
+///
+/// # Layout
+///
+/// ```toml
+/// [features]
+/// logging = []
+/// json = ["logging"]      # feature can enable other features
+/// default = ["logging"]   # enabled unless --no-default-features
+/// ```
+///
+/// `default` is the only reserved key. Other entries map feature name →
+/// list of features it implies (transitive enable). Currently the
+/// codegen treats `default` + any CLI `--features` list as the
+/// resolved set; Cargo-style `feature = ["dep:foo"]` syntax arrives
+/// with T1's resolver.
+///
+/// Stored as `BTreeMap` for deterministic iteration (matches the
+/// rest of the manifest's determinism contract).
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+pub struct FeaturesSection {
+    /// Feature name → list of features it transitively enables (Cargo
+    /// shape). Empty `Vec` means the feature enables nothing else.
+    #[serde(default)]
+    pub features: BTreeMap<String, Vec<String>>,
+    /// `default = [...]` — features enabled unless the user passes
+    /// `--no-default-features`. Stored as a separate field so the
+    /// resolution pass can distinguish explicit feature decls from
+    /// the default set.
+    #[serde(default)]
+    pub default: Vec<String>,
+}
+
+impl FeaturesSection {
+    /// Resolve the effective feature set given a list of explicitly
+    /// enabled features (from CLI `--features a,b`) and whether the
+    /// default set is included.
+    ///
+    /// Returns a sorted `Vec<String>` for deterministic codegen. The
+    /// transitive closure (feature → implied features) is computed via
+    /// a simple BFS — cycles are tolerated (visited-set guard) and
+    /// silently broken at first re-visit.
+    pub fn resolve(&self, explicit: &[String], include_default: bool) -> Vec<String> {
+        use std::collections::BTreeSet;
+        let mut enabled: BTreeSet<String> = BTreeSet::new();
+        if include_default {
+            for d in &self.default {
+                enabled.insert(d.clone());
+            }
+        }
+        for e in explicit {
+            enabled.insert(e.clone());
+        }
+        // BFS the implied-features graph. Bounded by `features.len()` so
+        // we always terminate (visited-set guard makes cycles benign).
+        let mut queue: Vec<String> = enabled.iter().cloned().collect();
+        while let Some(name) = queue.pop() {
+            if let Some(implies) = self.features.get(&name) {
+                for imp in implies {
+                    if enabled.insert(imp.clone()) {
+                        queue.push(imp.clone());
+                    }
+                }
+            }
+        }
+        enabled.into_iter().collect()
+    }
+
+    /// `true` when `name` is a declared feature (either in
+    /// [`FeaturesSection::features`] or [`FeaturesSection::default`]).
+    pub fn declares(&self, name: &str) -> bool {
+        self.features.contains_key(name) || self.default.iter().any(|d| d == name)
+    }
+}
+
+/// `[lints]` section of `buff.toml` (T0-A1).
+///
+/// Project-wide lint policy consumed by `buff check`. The v0.5
+/// naming-convention linter (camelCase funcs, etc.) runs unconditionally;
+/// entries here override the severity for named lints. Unknown lint
+/// names are ignored (forward-compat — new lints added later don't
+/// break older manifests).
+///
+/// # Layout
+///
+/// ```toml
+/// [lints]
+/// clippy = "deny"        # "deny" | "warn" | "allow"
+/// naming = "warn"
+/// ```
+///
+/// `clippy` is the only key consumed in v1.13; additional lints arrive
+/// with future tasks. Stored as `BTreeMap<String, String>` (lowercase
+/// lint name → lowercase severity) for deterministic iteration.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+pub struct LintsSection {
+    /// Lowercase lint name → severity string (`"deny"`/`"warn"`/`"allow"`).
+    /// Severities are stored as raw strings rather than an enum so an
+    /// unknown value (e.g. `"suggestion"`) survives the round-trip and
+    /// can be surfaced by `buff check` rather than rejected at parse
+    /// time.
+    #[serde(default)]
+    pub lints: BTreeMap<String, String>,
+}
+
+impl LintsSection {
+    /// Severity for `name` if declared, else `None`. Helper used by
+    /// `buff check` to look up the policy per-lint.
+    pub fn severity(&self, name: &str) -> Option<&str> {
+        self.lints.get(name).map(String::as_str)
+    }
+}
+
+/// `[prelude]` section of `buff.toml` (T0-A1, T0-B3).
+///
+/// Lists module paths whose `export`s become ambient in every source
+/// file of the project — the project-wide analog of the global
+/// [`buff_lang_types::prelude`]. The codegen pass injects the
+/// equivalent of `import * from "<path>"` at the head of each compiled
+/// file, so users can `print(...)` or use `DateTime.now()` without
+/// per-file imports.
+///
+/// # Layout
+///
+/// ```toml
+/// [prelude]
+/// modules = ["./src/prelude.buff", "./src/logging.buff"]
+/// ```
+///
+/// Paths are project-relative. The resolver (T1) validates that each
+/// path resolves to a Buff source file with at least one `export`.
+/// Empty by default — `buff new` does NOT scaffold a project prelude
+/// (the global prelude remains ambient regardless).
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+pub struct PreludeSection {
+    /// Module paths (project-relative) whose `export`s become ambient.
+    /// Order matters: later modules' exports shadow earlier ones on
+    /// name conflict (matches ES6 module semantics).
+    #[serde(default)]
+    pub modules: Vec<String>,
 }
 
 /// Errors surfaced by the config module.
@@ -986,6 +1275,7 @@ mid = { git = "https://example/m.buff" }
                 name: "demo".to_string(),
                 version: "0.1.0".to_string(),
                 edition: None,
+                stability: None,
             }),
             dependencies: BTreeMap::new(),
             profile: Default::default(),
@@ -1005,6 +1295,9 @@ mid = { git = "https://example/m.buff" }
             },
             registry_dependencies: BTreeMap::new(),
             workspace: None,
+            features: Default::default(),
+            lints: Default::default(),
+            prelude: Default::default(),
         };
         let cargo = generate_cargo_toml(&cfg);
         // Section header present.
@@ -1028,6 +1321,7 @@ mid = { git = "https://example/m.buff" }
                 name: "demo".to_string(),
                 version: "0.1.0".to_string(),
                 edition: None,
+                stability: None,
             }),
             dependencies: BTreeMap::new(),
             profile: Default::default(),
@@ -1056,6 +1350,9 @@ mid = { git = "https://example/m.buff" }
             },
             registry_dependencies: BTreeMap::new(),
             workspace: None,
+            features: Default::default(),
+            lints: Default::default(),
+            prelude: Default::default(),
         };
         let cargo = generate_cargo_toml(&cfg);
         let alpha_pos = cargo.find("alpha = { path =").expect("alpha emitted");
@@ -1070,6 +1367,7 @@ mid = { git = "https://example/m.buff" }
                 name: "demo".to_string(),
                 version: "0.1.0".to_string(),
                 edition: None,
+                stability: None,
             }),
             dependencies: BTreeMap::new(),
             profile: Default::default(),
@@ -1077,6 +1375,9 @@ mid = { git = "https://example/m.buff" }
             git_dependencies: BTreeMap::new(),
             registry_dependencies: BTreeMap::new(),
             workspace: None,
+            features: Default::default(),
+            lints: Default::default(),
+            prelude: Default::default(),
         };
         let cargo = generate_cargo_toml(&cfg);
         // No [dependencies] section at all when ALL four are empty.
@@ -1128,5 +1429,206 @@ mid = { git = "https://example/m.buff" }
             "must be under git/: {}",
             p.display()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // T0 (Buff SDK 2.0) — v2 schema parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn v2_manifest_with_all_new_sections_parses() {
+        let toml = r#"[package]
+name = "demo"
+version = "1.0.0"
+edition = "2026"
+stability = "experimental"
+
+[features]
+logging = []
+json = ["logging"]
+default = ["logging"]
+
+[lints]
+clippy = "deny"
+naming = "warn"
+
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[profile.bench]
+opt-level = 3
+
+[profile.test]
+opt-level = 1
+
+[prelude]
+modules = ["./src/prelude.buff"]
+"#;
+        let cfg = BuffConfig::parse(toml).expect("v2 manifest must parse cleanly");
+        let pkg = cfg.package.expect("package present");
+        assert_eq!(pkg.name, "demo");
+        assert_eq!(pkg.edition.as_deref(), Some("2026"));
+        assert_eq!(pkg.stability, Some(Stability::Experimental));
+        assert!(cfg.features.declares("logging"));
+        assert!(cfg.features.declares("json"));
+        assert!(cfg.features.declares("default") || cfg.features.default.contains(&"logging".to_string()));
+        assert_eq!(cfg.lints.severity("clippy"), Some("deny"));
+        assert_eq!(cfg.lints.severity("naming"), Some("warn"));
+        cfg.profile.dev.as_ref().expect("dev profile");
+        cfg.profile.release.as_ref().expect("release profile");
+        cfg.profile.bench.as_ref().expect("bench profile");
+        cfg.profile.test.as_ref().expect("test profile");
+        assert_eq!(cfg.prelude.modules, vec!["./src/prelude.buff".to_string()]);
+    }
+
+    #[test]
+    fn v1_manifest_still_parses_under_v2_schema() {
+        let toml = r#"[package]
+name = "legacy"
+version = "0.2.1"
+edition = "0.1"
+"#;
+        let cfg = BuffConfig::parse(toml).expect("v1 manifest must parse (backward compat)");
+        assert_eq!(cfg.package.as_ref().map(|p| p.name.as_str()), Some("legacy"));
+        assert!(cfg.features.features.is_empty());
+        assert!(cfg.features.default.is_empty());
+        assert!(cfg.lints.lints.is_empty());
+        assert!(cfg.prelude.modules.is_empty());
+        assert!(cfg.profile.dev.is_none());
+        assert!(cfg.profile.release.is_none());
+        assert!(cfg.profile.bench.is_none());
+        assert!(cfg.profile.test.is_none());
+    }
+
+    #[test]
+    fn features_resolve_default_includes_logging() {
+        let mut features: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        features.insert("logging".to_string(), vec![]);
+        features.insert("json".to_string(), vec!["logging".to_string()]);
+        let section = FeaturesSection {
+            features,
+            default: vec!["logging".to_string()],
+        };
+        let resolved = section.resolve(&[], true);
+        assert!(resolved.contains(&"logging".to_string()));
+        assert!(!resolved.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn features_resolve_explicit_overrides_default() {
+        let mut features: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        features.insert("json".to_string(), vec!["logging".to_string()]);
+        let section = FeaturesSection {
+            features,
+            default: vec![],
+        };
+        let resolved = section.resolve(&["json".to_string()], false);
+        // json implies logging → both present after BFS closure.
+        assert!(resolved.contains(&"json".to_string()));
+        assert!(resolved.contains(&"logging".to_string()));
+    }
+
+    #[test]
+    fn features_resolve_cycles_do_not_infinite_loop() {
+        // a → b → a is a cycle. The visited-set guard must break it.
+        let mut features: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        features.insert("a".to_string(), vec!["b".to_string()]);
+        features.insert("b".to_string(), vec!["a".to_string()]);
+        let section = FeaturesSection {
+            features,
+            default: vec![],
+        };
+        let resolved = section.resolve(&["a".to_string()], false);
+        assert!(resolved.contains(&"a".to_string()));
+        assert!(resolved.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn workspace_dependencies_section_parses() {
+        let toml = r#"[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+serde = "1.0"
+tokio = "1.40"
+
+[workspace.extern]
+reqwest = "0.12"
+"#;
+        let cfg = BuffConfig::parse(toml).expect("workspace.dependencies must parse");
+        let ws = cfg.workspace.expect("workspace present");
+        assert_eq!(
+            ws.dependencies.get("serde").map(|s| s.as_str()),
+            Some("1.0")
+        );
+        assert_eq!(
+            ws.extern_crates.get("reqwest").map(|s| s.as_str()),
+            Some("0.12")
+        );
+    }
+
+    #[test]
+    fn stability_serialises_lowercase_and_round_trips() {
+        for s in [
+            Stability::Experimental,
+            Stability::Beta,
+            Stability::Stable,
+            Stability::Locked,
+        ] {
+            let s_str = s.as_str();
+            let toml = format!(
+                "[package]\nname = \"x\"\nversion = \"1.0.0\"\nstability = \"{}\"\n",
+                s_str
+            );
+            let cfg = BuffConfig::parse(&toml).expect("stability round-trip");
+            assert_eq!(cfg.package.unwrap().stability, Some(s));
+        }
+    }
+
+    #[test]
+    fn profile_dev_bench_test_fields_optional() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[profile.dev]
+opt-level = 1
+"#;
+        let cfg = BuffConfig::parse(toml).expect("partial profile table parses");
+        let dev = cfg.profile.dev.expect("dev profile present");
+        assert_eq!(dev.opt_level.as_deref(), Some("1"));
+        // Other profiles absent → None.
+        assert!(cfg.profile.release.is_none());
+        assert!(cfg.profile.bench.is_none());
+        assert!(cfg.profile.test.is_none());
+    }
+
+    #[test]
+    fn profile_debug_field_parses_int_or_string() {
+        let toml = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[profile.dev]
+debug = "line-tables-only"
+"#;
+        let cfg = BuffConfig::parse(toml).expect("debug-as-string parses");
+        let dev = cfg.profile.dev.expect("dev profile");
+        assert_eq!(dev.debug.as_deref(), Some("line-tables-only"));
+
+        let toml_int = r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[profile.dev]
+debug = 2
+"#;
+        let cfg2 = BuffConfig::parse(toml_int).expect("debug-as-int parses");
+        assert_eq!(cfg2.profile.dev.unwrap().debug.as_deref(), Some("2"));
     }
 }

@@ -272,6 +272,7 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             edition: None,
+            stability: None,
         })
     }
 
@@ -284,6 +285,9 @@ mod tests {
             git_dependencies: BTreeMap::new(),
             registry_dependencies: BTreeMap::new(),
             workspace: None,
+            features: Default::default(),
+            lints: Default::default(),
+            prelude: Default::default(),
         }
     }
 
