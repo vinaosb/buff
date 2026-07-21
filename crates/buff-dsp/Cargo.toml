@@ -1,0 +1,19 @@
+[package]
+name = "buff-dsp"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Buff signal-processing MVP: FFT, filters, windows via extern rustfft/realfft/apodization (CPU-only)"
+
+[lib]
+name = "buff_dsp"
+path = "src/lib.rs"
+
+[dependencies]
+rustfft.workspace = true
+realfft.workspace = true
+apodize.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true

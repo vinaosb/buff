@@ -1724,7 +1724,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 11. `buff-dsp` — Signal Processing: FFT, Filters, Windows (CPU-only MVP)
+- [x] 11. `buff-dsp` — Signal Processing: FFT, Filters, Windows (CPU-only MVP)
 
   **What to do**:
   - Create `crates/buff-dsp/`.

@@ -713,6 +713,188 @@ pub enum PreludeType {
     /// Single-consumer MPSC ONLY for MVP (broadcast channels are
     /// deferred to v1.18+ per the T2 spec's REDUCED SCOPE).
     Channel,
+    /// `Tensor` - the N-dimensional array namespace (T8).
+    /// EXPERIMENTAL badge per T8 spec. Pure-Rust `buff-tensor` crate
+    /// (CPU-only via rayon per T6 decision
+    /// `.sisyphus/decisions/wgsl-extensibility-v1x.md`). f32 / rank ≤
+    /// 4 for MVP — f64/i64 + rank > 4 deferred to v1.18+. GPU
+    /// dispatch for elementwise ops is a v1.18+ enhancement; matmul +
+    /// reduce GPU paths are ~1500 LOC / ~15 days and explicitly
+    /// deferred per T6.
+    ///
+    /// Assoc fns: `Tensor.zeros(shape)`, `Tensor.ones(shape)`,
+    /// `Tensor.from_vec(data, shape)`, `Tensor.filled(shape, value)`.
+    /// Each returns `Type::Unknown` for MVP (the coordinated
+    /// `Type::Tensor` variant + codegen lowering arm is a follow-up
+    /// task outside the T8 shared zone — sibling Wave 2 coordination
+    /// concern). This forward-declaration lets `buff check` validate
+    /// the syntax today; `buff run` integration lands with the
+    /// coordinated sibling task.
+    Tensor,
+    /// T9: `Image` — a 2D raster image with 8-bit RGBA pixel data.
+    /// Wraps `buff_image::Image` (a safe wrapper around the `image`
+    /// crate's `DynamicImage`). Constructed via the associated
+    /// functions `Image.from_path(path)` (load from disk) /
+    /// `Image.from_bytes(bytes)` (decode an in-memory buffer);
+    /// supports 10 instance methods: `img.width()`, `img.height()`,
+    /// `img.get_pixel(x,y)`, `img.set_pixel(x,y,color)`,
+    /// `img.save(path)`, `img.grayscale()`, `img.invert()`,
+    /// `img.resize(w,h)`, `img.crop(x,y,w,h)`, `img.blur(sigma)`.
+    ///
+    /// This is the FIFTH runtime-value-with-rich-instance-methods
+    /// type (after Regex T124d / URL T124h / Path T124j / Process
+    /// T124l). `buff_type()` returns [`Type::Image`] (a real value
+    /// type); `is_namespace_only()` returns `false`. The `image`
+    /// crate is recorded in codegen `extern_crates` when a Buff
+    /// program uses `Image` (mirrors the chrono / regex / tracing
+    /// codegen-only linking boundary). CPU-only per Metis G7 lock
+    /// (NO GPU dispatch — defer to v1.18+).
+    Image,
+    /// `Signal` - the time-domain signal-processing namespace (T11).
+    /// EXPERIMENTAL badge per T11 spec. Wraps the in-tree pure-Rust
+    /// `buff-dsp` crate (CPU-only via `rustfft` + `realfft` +
+    /// `apodize`; per Metis G7 NO GPU). `Signal.from_vec(data,
+    /// sample_rate)` ctor + instance methods `s.fft()` /
+    /// `s.ifft(spectrum)` / `s.lowpass(cutoff_hz)` /
+    /// `s.highpass(cutoff_hz)` / `s.bandpass(low_hz, high_hz)` /
+    /// `s.apply_window(window)` / `s.spectrogram(window_size)` /
+    /// `s.magnitude()` / `s.phase()`. NO real-time streaming (Signal
+    /// is `Vec`-backed, not Stream-backed — deferred to v1.18+ per
+    /// the T11 spec). NO adaptive filters (LMS, RLS — deferred to
+    /// v1.18+). Records `buff_dsp` + `rustfft` + `realfft` +
+    /// `apodize` in codegen `extern_crates` when a Buff program uses
+    /// `Signal.*` (mirrors the chrono / regex / tracing codegen-only
+    /// linking boundary). Mirrors the namespace-only shape (the
+    /// namespace itself has no value representation; only the
+    /// `Signal.from_vec` return value does, typed `Signal`). FFI-safe:
+    /// the wrapper complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers, owned
+    /// Vec at the boundary, infallible surface, Send + 'static, no
+    /// lifetimes, every body catch_unwind-wrapped).
+    Signal,
+    /// `Window` - the precomputed window-function namespace (T11).
+    /// EXPERIMENTAL badge per T11 spec. Wraps `apodize` (the pure-Rust
+    /// window crate) behind `buff_dsp::Window`. Three assoc fns:
+    /// `Window.hann(n)` / `Window.hamming(n)` /
+    /// `Window.blackman(n)` — each returns an opaque `Window` value
+    /// passed to `Signal.apply_window(window)`. Mirrors `Signal`'s
+    /// namespace-only shape. Pure-Rust, no native deps.
+    Window,
+    /// `Spectrum` - the FFT-frequency-spectrum runtime-value type
+    /// (T11). EXPERIMENTAL badge per T11 spec. Returned by
+    /// `Signal.fft()` / `Signal.spectrogram(window_size)`. Instance
+    /// methods: `spec.len()` / `spec.is_empty()` / `spec.freqs()` /
+    /// `spec.magnitudes()` / `spec.phases()`. Mirrors `Regex` / `URL`
+    /// / `Path` / `Process`'s runtime-value-with-rich-instance-methods
+    /// shape. Carries `Vec<Complex>` + sample_rate — hermitian half
+    /// (`N/2 + 1` bins) of a length-N real input.
+    Spectrum,
+    /// `DataFrame` - the columnar-DataFrame runtime-value type (T7).
+    /// Wraps the in-tree `buff-dataframe` crate
+    /// (`buff_dataframe::DataFrame`). Constructed via the associated
+    /// functions `DataFrame.from_csv(path)` /
+    /// `DataFrame.from_json(path)`; supports the instance methods
+    /// `df.select(cols)` / `df.filter(pred)` / `df.sort(col)` /
+    /// `df.head(n)` / `df.len()` / `df.join(other, on)` /
+    /// `df.group_by(col)` (returns a DataFrame whose `.agg(col, op)`
+    /// chains per-group aggregation) / `df.agg(col, op)` /
+    /// `df.to_table_string()`. Mirrors `Regex` / `URL` / `Path` /
+    /// `Process` / `Image`'s runtime-value-with-rich-instance-methods
+    /// shape. Carries a `BTreeMap<String, Series>` + an ordered
+    /// `Vec<String>` of column names (the schema).
+    ///
+    /// `buff_type()` returns [`Type::DataFrame`] (a real value type,
+    /// NOT [`Type::Void`] like `Log`). `is_namespace_only()` returns
+    /// `false` (DataFrame IS a runtime value). EXPERIMENTAL badge per
+    /// T7 spec — surface may evolve before v1.18 stabilisation.
+    DataFrame,
+    /// T10 (v1.13 frameworks): the AudioBuffer runtime-value type.
+    /// Maps to `buff_audio::AudioBuffer` at codegen time. Constructed
+    /// via `AudioBuffer.from_path(path)` (decode WAV/MP3/FLAC/Vorbis)
+    /// or `AudioBuffer.from_samples(samples, sample_rate, channels)`.
+    /// Carries the instance methods `.samples() -> Vector<Float>`,
+    /// `.sample_rate() -> Int`, `.channels() -> Int`,
+    /// `.duration_secs() -> Float`, `.save(path) -> Void`,
+    /// `.amplify(factor: Float) -> Void`, `.normalize(target: Float)
+    /// -> Void`, `.mix(other: AudioBuffer) -> Void`, `.slice(start_sec:
+    /// Float, end_sec: Float) -> AudioBuffer`.
+    ///
+    /// `buff_type()` returns [`Type::Audio`] (a real value type, NOT
+    /// [`Type::Void`] like `Log`). `is_namespace_only()` returns
+    /// `false`. EXPERIMENTAL badge per T10 spec — surface may evolve
+    /// before v1.18 stabilisation (real-time playback deferred).
+    ///
+    /// Out of scope for the T10 MVP per Metis G7 (CPU-only, NO GPU
+    /// dispatch) and the task spec's "must NOT implement" list:
+    /// - Real-time playback (deferred to v1.18+).
+    /// - Synthesis (sine/square/noise generators — those go in
+    ///   buff-dsp T11).
+    /// - Encoding to non-WAV formats (FLAC/MP3 encoding is heavy).
+    Audio,
+    /// T12 (v1.13 frameworks wave 2): the `World` Entity-Component-
+    /// System namespace. Wraps the in-tree `buff-ecs` crate
+    /// (`buff_ecs::World`) backed by the pure-Rust `hecs` 0.10 crate
+    /// (preferred over `bevy_ecs` for the smaller surface + single-
+    /// crate dep + no bevy_utils/tasks/reflect baggage — full
+    /// rationale in `Cargo.toml` workspace.dependencies entry).
+    ///
+    /// Buff surface:
+    /// - `World.new() -> World` — empty world ctor (assoc fn).
+    /// - `world.spawn(component) -> Entity` — entity with 1 component.
+    /// - `world.spawn_two(a, b) -> Entity` — entity with 2 components.
+    /// - `world.insert(entity, component) -> Void` — add/overwrite.
+    /// - `world.remove(entity, ComponentType) -> Option<T>` — drop+return.
+    /// - `world.query<ComponentTypes...>() -> Vector<(Entity, T)>` — owned.
+    /// - `world.add_system(system_fn) -> Void` — register sequential system.
+    /// - `world.tick() -> Void` — run all systems once.
+    /// - `world.insert_resource(value) -> Void` — typed global resource.
+    /// - `world.get_resource<T>() -> Option<T>` — borrow resource.
+    ///
+    /// `buff_type()` returns [`Type::World`] (the coordinated variant
+    /// in `ty.rs` line 462, added by the parallel T12 ty.rs sibling
+    /// task). `is_namespace_only()` returns `false` (World IS a runtime
+    /// value, like Regex / Image / DataFrame).
+    ///
+    /// EXPERIMENTAL badge per T12 spec — the surface may evolve
+    /// before v1.18 stabilisation (parallel system scheduling,
+    /// change detection, and events are explicitly deferred). NO
+    /// rendering pipeline (T16 buff-game uses existing WGSL). NO
+    /// asset loading (T16). NO parallel system scheduling
+    /// (sequential `tick()` for MVP). NO change detection / events.
+    ///
+    /// Records `buff_ecs` + `hecs` in codegen `extern_crates` when a
+    /// Buff program uses `World.*` (mirrors the chrono / regex /
+    /// tracing codegen-only linking boundary). FFI-safe: the wrapper
+    /// complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers —
+    /// Entity is a transparent `(u32, u32)` newtype; Rust owns the
+    /// hecs::World heap; fallible ops return Result<T, EcsError>;
+    /// Send + 'static on every public type; no lifetimes — queries
+    /// return owned Vec; every public body catch_unwind-wrapped).
+    World,
+    /// T12 (v1.13 frameworks wave 2): the `Entity` opaque id type
+    /// returned by `world.spawn(...)`. Maps to `buff_ecs::Entity` at
+    /// codegen time (a transparent newtype over `hecs::Entity`, which
+    /// is a `(u32 id, u32 generation)` pair — Copy + Eq + Hash + Send
+    /// + Sync + 'static). Users compare entities by value, store them
+    /// in collections, and pass them back to `world.insert` /
+    /// `world.remove` / `world.despawn`.
+    ///
+    /// Buff surface:
+    /// - `entity.id() -> Int` — the stable slot id (read-only accessor).
+    /// - `entity.to_bits() -> Int` — packed `(id, generation)` u64
+    ///   for serialization (round-trips via `Entity.from_bits(bits)`).
+    ///
+    /// `buff_type()` returns [`Type::Entity`] (the coordinated variant
+    /// in `ty.rs` line 477, added by the parallel T12 ty.rs sibling
+    /// task). `is_namespace_only()` returns `false` (Entity IS a
+    /// runtime value, like Regex / Image / DataFrame).
+    ///
+    /// EXPERIMENTAL badge per T12 spec. NO raw pointers (FFI guide
+    /// R1) — Entity is a value-type id, not a pointer into Rust's
+    /// heap. The `hecs::Entity` it wraps is `pub(crate)` — never
+    /// exposed across the FFI boundary.
+    Entity,
 }
 
 impl PreludeType {
@@ -814,6 +996,67 @@ impl PreludeType {
         // Returns (Sender<T>, Receiver<T>) tuple from Channel.new.
         // Instance methods on Sender / Receiver runtime-value types.
         PreludeType::Channel,
+        // T8 v1.13 wave 2: Tensor - N-dimensional array namespace.
+        // Pure-Rust `buff-tensor` crate (CPU-only via rayon per T6
+        // decision `.sisyphus/decisions/wgsl-extensibility-v1x.md`).
+        // EXPERIMENTAL badge per T8 spec line 1477 ("Register with
+        // experimental badge"). The assoc fns `Tensor.zeros`,
+        // `Tensor.ones`, `Tensor.from_vec`, `Tensor.filled` construct
+        // runtime `buff_tensor::Tensor` values. The MVP is f32-only
+        // (rank <= 4) — f64/i64 + rank > 4 deferred to v1.18+.
+        // Codegen lowering for these assoc fns is a follow-up task
+        // (it needs a coordinated `Type::Tensor` variant in
+        // `crates/buff-lang-types/src/ty.rs` which is OUTSIDE the
+        // T8 shared zone per the v1x-frameworks sibling-task rules).
+        // The assoc fns return `Type::Unknown` here as a forward-
+        // declaration contract — the codegen + `Type::Tensor` variant
+        // is added in a coordinated sibling task that doesn't conflict
+        // with the parallel Wave 2 tasks (T7/T9/T10/T11/T12/T25).
+        PreludeType::Tensor,
+        // T9: Image — runtime-value type with rich instance methods.
+        // Mirrors Regex/URL/Path/Process. Codegen lowering lives in
+        // the buff-image crate (`buff_image::Image::*`); the codegen
+        // arm + PreludeAssocFn/InstanceFn entries are added in this
+        // same commit (T9 owns the full Image surface, unlike T8
+        // which forward-declares Tensor only).
+        PreludeType::Image,
+        // T11: Signal / Window / Spectrum - three signal-processing
+        // types wrapping the in-tree `buff-dsp` crate. Signal + Window
+        // are namespace-only modules (mirror Log / Toml / Math /
+        // Random); Spectrum is the sixth runtime-value-with-instance-
+        // methods type (after Regex / URL / Path / Process / Image).
+        // All three are CPU-only per Metis G7 lock (NO GPU dispatch).
+        PreludeType::Signal,
+        PreludeType::Window,
+        PreludeType::Spectrum,
+        // T7: DataFrame — columnar-DataFrame runtime-value type with
+        // rich instance methods (8th such type after Regex/URL/Path/
+        // Process/TCP-Connection/UDP-Socket/WebSocket-WsConnection/
+        // Image/Spectrum). Mirrors the same pattern:
+        // `DataFrame.from_csv` / `DataFrame.from_json` are the assoc-
+        // fn ctors (Buff §7 permits the `Type.from_*()` ctor form);
+        // `df.select(cols)` / `df.filter(pred)` / `df.sort(col)` /
+        // `df.head(n)` / `df.len()` / `df.join(other, on)` /
+        // `df.group_by(col)` / `df.agg(col, op)` are instance methods
+        // dispatched on the DataFrame receiver. Codegen lowering lives
+        // in the buff-dataframe crate (`buff_dataframe::DataFrame::*`).
+        // EXPERIMENTAL badge per T7 spec line 1373 ("Register with
+        // experimental badge"). CPU-only per Metis G7.
+        PreludeType::DataFrame,
+        // T12 (v1.13 wave 2): World + Entity - the ECS foundation
+        // types wrapping the in-tree `buff-ecs` crate (`buff_ecs::World`
+        // + `buff_ecs::Entity`) backed by `hecs` 0.10. Both forward-
+        // declare via `Type::Unknown` (mirrors the T8 Tensor precedent)
+        // — the coordinated `Type::World` / `Type::Entity` variants in
+        // `ty.rs` + codegen lowering arms are sibling tasks OUTSIDE
+        // the T12 shared zone. `World` is namespace-only-shaped (the
+        // ctor `World.new()` returns the runtime value); `Entity` is
+        // the runtime-value id returned by `world.spawn(...)`.
+        // EXPERIMENTAL badge per T12 spec. Foundational for T16
+        // buff-game. NO rendering / NO asset loading / NO parallel
+        // scheduling / NO change detection — all explicitly deferred.
+        PreludeType::World,
+        PreludeType::Entity,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -978,6 +1221,38 @@ impl PreludeType {
             // `buff_lang_runtime::Channel::new(buf_size)` for the
             // assoc fn.
             PreludeType::Channel => "Channel",
+            // T8: Tensor - canonical name matching the user-facing
+            // `Tensor.zeros(...)` surface. Mirrors the Regex / Path /
+            // URL PascalCase convention. The underlying Rust type is
+            // `buff_tensor::Tensor` (= `buff_tensor::TensorCore<f32>`
+            // — the alias is the canonical MVP surface).
+            PreludeType::Tensor => "Tensor",
+            // T11: Signal / Window / Spectrum - canonical PascalCase
+            // names matching the user-facing `Signal.from_vec(...)` /
+            // `Window.hann(n)` / `spec.magnitudes()` surface. The
+            // underlying Rust types are `buff_dsp::Signal` /
+            // `buff_dsp::Window` / `buff_dsp::Spectrum`.
+            PreludeType::Signal => "Signal",
+            PreludeType::Window => "Window",
+            PreludeType::Spectrum => "Spectrum",
+            PreludeType::DataFrame => "DataFrame",
+            // T9: Image - canonical name matching the user-facing
+            // `Image.from_path(...)` / `Image.from_bytes(...)` surface.
+            // The underlying Rust type is `buff_image::Image`.
+            PreludeType::Image => "Image",
+            // T10: AudioBuffer - canonical PascalCase name matching the
+            // user-facing `AudioBuffer.from_path(...)` /
+            // `AudioBuffer.from_samples(...)` surface. The underlying
+            // Rust type is `buff_audio::AudioBuffer`.
+            PreludeType::Audio => "AudioBuffer",
+            // T12: World + Entity - canonical names matching the
+            // user-facing `World.new()` / `world.spawn(...)` /
+            // `entity.id()` surface. Mirrors the PascalCase convention.
+            // The underlying Rust types are `buff_ecs::World` +
+            // `buff_ecs::Entity` (the latter a transparent newtype over
+            // `hecs::Entity`).
+            PreludeType::World => "World",
+            PreludeType::Entity => "Entity",
         }
     }
 
@@ -1139,6 +1414,49 @@ impl PreludeType {
             // types (the value type IS first-class; the namespace is
             // not).
             PreludeType::Channel => Type::Void,
+            // T8: namespace-only - Tensor has no value representation
+            // at the Buff Type level for MVP. The associated functions
+            // (`Tensor.zeros` / `Tensor.from_vec` / etc.) return
+            // `Type::Unknown` (forward-declaration contract — the
+            // coordinated `Type::Tensor` variant is added in a
+            // follow-up task outside the T8 shared zone). Mirrors the
+            // Log / Toml / OS / Channel namespace-only stance: the
+            // namespace itself is never a value, only its assoc fns
+            // are callable.
+            PreludeType::Tensor => Type::Void,
+            // T11: Signal / Window are namespace-only modules (their
+            // buff_type is Void — only the ctor return values are
+            // typed). Spectrum is a runtime-value type carrying the
+            // FFT bins — but since the T11 MVP keeps Type::Void for
+            // forward-declared variants (mirrors T8's Tensor stance),
+            // we return Void here and let the codegen layer splice the
+            // real `buff_dsp::Spectrum` paths. A coordinated `Type::
+            // Spectrum` variant is a follow-up task outside the T11
+            // shared zone.
+            PreludeType::Signal => Type::Void,
+            PreludeType::Window => Type::Void,
+            PreludeType::Spectrum => Type::Void,
+            // T7: DataFrame IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::DataFrame`] variant; the
+            // codegen layer maps it to `buff_dataframe::DataFrame`.
+            PreludeType::DataFrame => Type::DataFrame,
+            // T9: Image IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Image`] variant; the codegen
+            // layer maps it to `buff_image::Image`.
+            PreludeType::Image => Type::Image,
+            // T10: AudioBuffer IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Audio`] variant; the codegen
+            // layer maps it to `buff_audio::AudioBuffer`.
+            PreludeType::Audio => Type::Audio,
+            // T12: World + Entity map to the coordinated [`Type::World`]
+            // / [`Type::Entity`] variants in `ty.rs` (added by the
+            // coordinated sibling task — see `ty.rs` lines 462 + 477).
+            // Both ARE runtime values (NOT namespace-only): World is
+            // constructed via `World.new()`; Entity is the return value
+            // of `world.spawn(...)`. The codegen layer maps them to
+            // `buff_ecs::World` / `buff_ecs::Entity`.
+            PreludeType::World => Type::World,
+            PreludeType::Entity => Type::Entity,
         }
     }
 
@@ -1173,6 +1491,10 @@ impl PreludeType {
                 | PreludeType::UDP
                 | PreludeType::WebSocket
                 | PreludeType::Channel
+                | PreludeType::Tensor
+                | PreludeType::Signal
+                | PreludeType::Window
+                | PreludeType::Spectrum
         )
     }
 }
@@ -1633,13 +1955,77 @@ pub enum PreludeAssocFn {
     /// `Channel.new(buf_size)` - construct a bounded MPSC channel
     /// pair. One arg (Int buf_size). Returns `(Sender<T>,
     /// Receiver<T>)` tuple. Wraps
-    /// `buff_lang_runtime::Channel::new(buf_size)` which internally
-    /// calls `tokio::sync::mpsc::channel(buf_size)` (the runtime
-    /// hides tokio behind the abstraction per Metis G6). Channel-only.
-    /// The T parameter is implicit (Type-level we return a tuple
-    /// of opaque Sender/Receiver; Rust infers T from subsequent
-    /// `sender.send(value)` / `receiver.recv()` usage).
+     /// `buff_lang_runtime::Channel::new(buf_size)` which internally
+     /// calls `tokio::sync::mpsc::channel(buf_size)` (the runtime
+     /// hides tokio behind the abstraction per Metis G6). Channel-only.
+     /// The T parameter is implicit (Type-level we return a tuple
+     /// of opaque Sender/Receiver; Rust infers T from subsequent
+     /// `sender.send(value)` / `receiver.recv()` usage).
     New,
+    // ---- Tensor constructors (T8) ------------------------------------
+    // Each variant lowers to the matching `buff_tensor::Tensor`
+    // constructor in codegen. Returns `Type::Unknown` at the Buff
+    // Type level for MVP (forward-declaration contract — the
+    // coordinated `Type::Tensor` variant is a follow-up task outside
+    // the T8 shared zone).
+    /// `Tensor.zeros(shape)` - construct a zero-filled tensor.
+    /// One arg (Vector<Int>). Returns Tensor (modeled as Unknown).
+    Zeros,
+    /// `Tensor.ones(shape)` - construct a one-filled tensor. One arg
+    /// (Vector<Int>). Returns Tensor (modeled as Unknown).
+    Ones,
+    /// `Tensor.from_vec(data, shape)` - wrap a flat Vector<Float> +
+    /// shape into a tensor. Two args. Returns Tensor (Unknown).
+    FromVec,
+    /// `Tensor.filled(shape, value)` - construct a constant-filled
+    /// tensor. Two args (Vector<Int>, Float). Returns Tensor (Unknown).
+    Filled,
+    // ---- DataFrame constructors (T7) ---------------------------------
+    // Each variant lowers to the matching `buff_dataframe::DataFrame`
+    // constructor in codegen. Returns `Type::DataFrame` (a real
+    // runtime-value variant — added in the same T7 commit, unlike
+    // T8's forward-declaration-only Tensor). Buff §7 ctor convention
+    // permits `Type.from_*()` (this surface), forbids `Type.create()`
+    // / `Type.build()` / `new Type()`.
+    /// `DataFrame.from_csv(path)` - load a CSV file into a DataFrame.
+    /// One arg (String / Path). Returns DataFrame. Wraps
+    /// `buff_dataframe::DataFrame::from_csv(path).unwrap_or_default()`
+    /// (panic-free on file-not-found / parse failure - returns an
+    /// empty DataFrame, matching Buff's "no panicking generated code"
+    /// rule). Schema-aware: column kinds (Int/Float/String/Bool) are
+    /// inferred at load time by the in-tree `buff-dataframe` crate.
+    /// CPU-only per Metis G7.
+    FromCsv,
+    /// `DataFrame.from_json(path)` - load a JSON-lines file (one JSON
+    /// object per line) into a DataFrame. One arg (String / Path).
+    /// Returns DataFrame. Wraps
+    /// `buff_dataframe::DataFrame::from_json(path).unwrap_or_default()`
+    /// (panic-free on file-not-found / parse failure - returns an
+    /// empty DataFrame). Column kinds inferred from the JSON Value
+    /// tags (Bool/Number{i64}/Number{f64}/String). CPU-only.
+    FromJson,
+    // ---- Image constructors (T9) -----------------------------------
+    // Each variant lowers to the matching `buff_image::Image`
+    // constructor in codegen. Returns `Type::Image` (a real
+    // runtime-value variant — added in the same T9 commit). Buff §7
+    // ctor convention permits `Type.from_*()` (this surface), forbids
+    // `Type.create()` / `Type.build()` / `new Type()`. CPU-only per
+    // Metis G7 lock.
+    /// `Image.from_path(path)` - load an image from disk. One arg
+    /// (String / Path). Returns Image. Format is auto-detected from
+    /// the file contents. Wraps `buff_image::Image::from_path(p)?`
+    /// (the `?` propagates ImageError per Buff's R3 error-mapping
+    /// contract; `from_path` is also wrapped in `catch_unwind`
+    /// internally per FFI guide R6).
+    FromPath,
+    /// `Image.from_bytes(bytes)` - decode an in-memory image buffer.
+    /// One arg (Vector<Byte>). Returns Image. Format is auto-detected
+    /// from the buffer contents. Wraps
+    /// `buff_image::Image::from_bytes(&b)?`. Used for downloading
+    /// images over HTTP (the bytes come from `reqwest::get().bytes()`
+    /// in a future buff-web integration) or reading from a database
+    /// BLOB column.
+    FromBytes,
 }
 
 impl PreludeAssocFn {
@@ -1752,6 +2138,32 @@ impl PreludeAssocFn {
         // T2: Channel.new - constructs a bounded MPSC channel pair.
         // Channel-only. Returns (Sender<T>, Receiver<T>) tuple.
         PreludeAssocFn::New,
+        // T8: Tensor constructor assoc fns (4 distinct names):
+        // zeros / ones / from_vec / filled. All Tensor-only. Each
+        // returns a runtime `buff_tensor::Tensor` value (modeled as
+        // `Type::Unknown` at the Buff Type level until the
+        // coordinated `Type::Tensor` variant lands — see T8 task
+        // spec + the T8 shared-zone constraint). The 4 fns cover:
+        // - Tensor.zeros(shape) -> zero-filled tensor of given shape
+        // - Tensor.ones(shape) -> one-filled
+        // - Tensor.from_vec(data, shape) -> wrap a flat Vec + shape
+        // - Tensor.filled(shape, value) -> constant-filled
+        PreludeAssocFn::Zeros,
+        PreludeAssocFn::Ones,
+        PreludeAssocFn::FromVec,
+        PreludeAssocFn::Filled,
+        // T7: DataFrame assoc fns (2 distinct names): from_csv / from_json.
+        // Both DataFrame-only (no shared variants with prior prelude
+        // types in T7 scope). Buff §7 ctor naming convention permits
+        // the `Type.from_*()` form; the codegen dispatches on the
+        // (DataFrame, FromCsv) / (DataFrame, FromJson) pair.
+        PreludeAssocFn::FromCsv,
+        PreludeAssocFn::FromJson,
+        // T9: Image constructors (2 distinct names): from_path /
+        // from_bytes. Image-only. Buff §7 ctor naming convention
+        // permits `Type.from_*()`. Mirrors the DataFrame ctor pattern.
+        PreludeAssocFn::FromPath,
+        PreludeAssocFn::FromBytes,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1780,6 +2192,29 @@ impl PreludeAssocFn {
             // T2 stub: Channel.new — placeholder name; T2 owns the full
             // associated-function surface for the Channel prelude type.
             PreludeAssocFn::New => "new",
+            // T8: Tensor constructor names. Mirror the Rust
+            // `buff_tensor::Tensor` method names so codegen can splice
+            // `buff_tensor::Tensor::<f32>::zeros(shape)?` /
+            // `::ones` / `::from_vec` / `::filled` paths without
+            // rewriting.
+            PreludeAssocFn::Zeros => "zeros",
+            PreludeAssocFn::Ones => "ones",
+            PreludeAssocFn::FromVec => "from_vec",
+            PreludeAssocFn::Filled => "filled",
+            // T7: DataFrame ctor names mirror the Buff §7 `Type.from_*()`
+            // ctor convention so the codegen can splice
+            // `buff_dataframe::DataFrame::from_csv(path)` /
+            // `buff_dataframe::DataFrame::from_json(path)` paths
+            // without rewriting.
+            PreludeAssocFn::FromCsv => "from_csv",
+            PreludeAssocFn::FromJson => "from_json",
+            // T9: Image ctor names mirror the Buff §7 `Type.from_*()`
+            // ctor convention so the codegen can splice
+            // `buff_image::Image::from_path(p)` /
+            // `buff_image::Image::from_bytes(b)` paths without
+            // rewriting. Mirrors the DataFrame precedent (T7).
+            PreludeAssocFn::FromPath => "from_path",
+            PreludeAssocFn::FromBytes => "from_bytes",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -2434,6 +2869,42 @@ pub fn assoc_fn_return_type(
             Type::Sender,
             Type::Receiver,
         ])),
+        // T8: Tensor constructor assoc fns. Each returns the opaque
+        // Tensor value type. For MVP we surface `Type::Unknown`
+        // because the coordinated `Type::Tensor` variant lives in
+        // `ty.rs` which is OUTSIDE the T8 shared zone (sibling-task
+        // coordination concern). The codegen lowering + the
+        // `Type::Tensor` variant are added in a follow-up task. This
+        // forward-declaration lets `buff check` validate
+        // `Tensor.zeros([3, 4])` syntax today (parses + resolves +
+        // return-type-checks as Unknown); `buff run` codegen
+        // integration ships when the coordinated sibling task lands.
+        //
+        // The 4 fns cover the spec-mandated constructors (T8 spec
+        // line 1469: zeros / from_vec; plus ones + filled as
+        // natural symmetric siblings matching buff_tensor's Rust
+        // surface).
+        (PreludeType::Tensor, PreludeAssocFn::Zeros) => Some(Type::Unknown),
+        (PreludeType::Tensor, PreludeAssocFn::Ones) => Some(Type::Unknown),
+        (PreludeType::Tensor, PreludeAssocFn::FromVec) => Some(Type::Unknown),
+        (PreludeType::Tensor, PreludeAssocFn::Filled) => Some(Type::Unknown),
+        // T7: DataFrame assoc fns return the runtime-value DataFrame
+        // type (NOT Unknown, unlike T8 Tensor which forward-declares
+        // only). Both ctors are panic-free at the codegen layer:
+        // `buff_dataframe::DataFrame::from_csv(path)
+        // .unwrap_or_default()` collapses file-not-found / parse
+        // failure to an empty DataFrame (matches Buff's "no
+        // panicking generated code" rule).
+        (PreludeType::DataFrame, PreludeAssocFn::FromCsv) => Some(Type::DataFrame),
+        (PreludeType::DataFrame, PreludeAssocFn::FromJson) => Some(Type::DataFrame),
+        // T9: Image assoc fns. `Image.from_path(path)` -> Image.
+        // Wraps `buff_image::Image::from_path(p)?` (the `?`
+        // propagates ImageError per Buff's R3 error-mapping contract).
+        (PreludeType::Image, PreludeAssocFn::FromPath) => Some(Type::Image),
+        // `Image.from_bytes(bytes)` -> Image. Wraps
+        // `buff_image::Image::from_bytes(&b)?`. Used for HTTP-downloaded
+        // image bytes / database BLOBs.
+        (PreludeType::Image, PreludeAssocFn::FromBytes) => Some(Type::Image),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -2615,6 +3086,60 @@ pub enum PreludeInstanceFn {
     /// (Vec::new(), String::new()) }` (panic-free via `.ok()` +
     /// tuple fallback). UDP-only.
     RecvFrom,
+    // ---- DataFrame instance methods (T7) -----------------------------
+    // Each variant lowers to the matching `buff_dataframe::DataFrame`
+    // method in codegen. Dispatched on the (Type::DataFrame, method)
+    // pair. The methods return Type::DataFrame (chainable) or
+    // Type::int_default() / Type::string() for terminal accessors.
+    /// `df.select(cols) -> DataFrame`. One arg (Vector<String>).
+    /// Projection: returns a new DataFrame with only the named
+    /// columns. Wraps `buff_dataframe::DataFrame::select(recv,
+    /// &cols).unwrap_or_default()` (panic-free via
+    /// `Result::unwrap_or_default` - DataFrame impls Default as the
+    /// empty frame).
+    Select,
+    /// `df.filter(predicate) -> DataFrame`. One arg (closure
+    /// `|RowView| -> Bool`). Returns a new DataFrame keeping only
+    /// rows where the predicate returns true. Wraps
+    /// `buff_dataframe::DataFrame::filter(recv, |row| <closure
+    /// body>).unwrap_or_default()`.
+    Filter,
+    /// `df.sort(col) -> DataFrame`. One arg (String column name).
+    /// Ascending lexicographic sort by the given column's cells.
+    /// Wraps `buff_dataframe::DataFrame::sort(recv, col)
+    /// .unwrap_or_default()`.
+    Sort,
+    /// `df.head(n) -> DataFrame`. One arg (Int). Returns a new
+    /// DataFrame with the first `n` rows (clamped to df.len()).
+    /// Wraps `buff_dataframe::DataFrame::head(recv, n.max(0) as
+    /// usize)`.
+    Head,
+    /// `df.len() -> Int`. Zero args. Returns the row count.
+    /// Wraps `buff_dataframe::DataFrame::len(recv) as i64`.
+    /// Same shared `Len` variant as `Series.len` / `Vector.len` /
+    /// `Map.len` (mirrors `Format` shared between DateTime/Date/Time
+    /// — dispatched on receiver type).
+    Len,
+    /// `df.join(other, on) -> DataFrame`. Two args (DataFrame other,
+    /// String on-column). Inner equi-join. Wraps
+    /// `buff_dataframe::DataFrame::join(recv, other, on)
+    /// .unwrap_or_default()`.
+    Join,
+    /// `df.group_by(col) -> DataFrame`. One arg (String column name).
+    /// Returns a new DataFrame carrying the per-group aggregation
+    /// state. Followed by `.agg(col, op)` to materialise. Wraps
+    /// `buff_dataframe::DataFrame::group_by(recv, col)
+    /// .map(|gb| gb.into_inner()).unwrap_or_default()` (the
+    /// `into_inner` re-exposes the GroupBy's parent so subsequent
+    /// `.agg` calls are dispatched on a DataFrame receiver).
+    GroupBy,
+    /// `df.agg(col, op) -> DataFrame`. Two args (String column name,
+    /// String aggregation op — one of "sum"/"mean"/"min"/"max"/
+    /// "count"). Returns a new DataFrame with the aggregated values
+    /// per group (or a single-row aggregate if `df` is not a grouped
+    /// DataFrame). Wraps `buff_dataframe::DataFrame::agg(recv, col,
+    /// op).unwrap_or_default()`.
+    Agg,
 }
 
 impl PreludeInstanceFn {
@@ -2671,6 +3196,20 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Close,
         PreludeInstanceFn::SendTo,
         PreludeInstanceFn::RecvFrom,
+        // T7: DataFrame instance methods (7 distinct names):
+        // select / filter / sort / head / len / join / group_by / agg.
+        // `Join` is shared with Strings.join + Path.join (existing
+        // variant - re-used here, dispatched on the (DataFrame, Join)
+        // pair). `Len` is shared with the future Series.len /
+        // Vector.len / Map.len (new variant here, dispatched on
+        // receiver type). The other 5 are DataFrame-only.
+        PreludeInstanceFn::Select,
+        PreludeInstanceFn::Filter,
+        PreludeInstanceFn::Sort,
+        PreludeInstanceFn::Head,
+        PreludeInstanceFn::Len,
+        PreludeInstanceFn::GroupBy,
+        PreludeInstanceFn::Agg,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -2741,6 +3280,20 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Close => "close",
             PreludeInstanceFn::SendTo => "send_to",
             PreludeInstanceFn::RecvFrom => "recv_from",
+            // T7: DataFrame instance method names mirror the
+            // buff_dataframe crate's method names 1:1 so the
+            // codegen can splice `recv.select(...)` / `recv.head(n)`
+            // / `recv.group_by(col)` etc. without rewriting.
+            // `len` is the shared `Len` variant (also dispatched on
+            // Vector / Map / Series receivers in future tasks).
+            PreludeInstanceFn::Select => "select",
+            PreludeInstanceFn::Filter => "filter",
+            PreludeInstanceFn::Sort => "sort",
+            PreludeInstanceFn::Head => "head",
+            PreludeInstanceFn::Len => "len",
+            PreludeInstanceFn::GroupBy => "group_by",
+            PreludeInstanceFn::Agg => "agg",
+            PreludeInstanceFn::Join => "join",
         }
     }
 }
@@ -2981,6 +3534,43 @@ pub fn instance_fn_return_type(
         (Type::Sender, PreludeInstanceFn::Send) => Some(Type::Void),
         (Type::Receiver, PreludeInstanceFn::Recv) => Some(Type::option(Type::Unknown)),
         (Type::Receiver, PreludeInstanceFn::Close) => Some(Type::Void),
+
+        // T7: DataFrame instance methods. Each chainable method
+        // returns Type::DataFrame so the user can write
+        // `df.select(cols).filter(pred).head(10)` (fluent chain). The
+        // `len` accessor returns Int (the row count); `agg` returns
+        // DataFrame (one row per group, with key + aggregated value
+        // columns). All methods panic-free at the codegen layer via
+        // `.unwrap_or_default()` (DataFrame impls Default).
+        //
+        // `df.select(cols)` -> DataFrame. Projection (returns a new
+        // DataFrame with only the named columns).
+        (Type::DataFrame, PreludeInstanceFn::Select) => Some(Type::DataFrame),
+        // `df.filter(pred)` -> DataFrame. Boolean-mask filter.
+        (Type::DataFrame, PreludeInstanceFn::Filter) => Some(Type::DataFrame),
+        // `df.sort(col)` -> DataFrame. Ascending lexicographic sort.
+        (Type::DataFrame, PreludeInstanceFn::Sort) => Some(Type::DataFrame),
+        // `df.head(n)` -> DataFrame. First n rows (clamped).
+        (Type::DataFrame, PreludeInstanceFn::Head) => Some(Type::DataFrame),
+        // `df.len()` -> Int. Row count. Shared `Len` variant
+        // (mirrors `Format` shared between DateTime/Date/Time —
+        // dispatched on receiver type).
+        (Type::DataFrame, PreludeInstanceFn::Len) => Some(Type::int_default()),
+        // `df.join(other, on)` -> DataFrame. Inner equi-join.
+        // `Join` is shared with Strings.join + Path.join (existing
+        // variant - re-used here, dispatched on DataFrame receiver).
+        (Type::DataFrame, PreludeInstanceFn::Join) => Some(Type::DataFrame),
+        // `df.group_by(col)` -> DataFrame. GroupBy state. The codegen
+        // lowers this to `buff_dataframe::DataFrame::group_by(recv,
+        // col).map(GroupBy::into_inner).unwrap_or_default()` so the
+        // DataFrame receiver type is preserved for subsequent .agg()
+        // chaining (a true GroupBy intermediate type would require a
+        // second Type variant + display arm + codegen path; deferred
+        // to v1.18+).
+        (Type::DataFrame, PreludeInstanceFn::GroupBy) => Some(Type::DataFrame),
+        // `df.agg(col, op)` -> DataFrame. Per-group aggregation (or
+        // single-row aggregate if df is not a grouped DataFrame).
+        (Type::DataFrame, PreludeInstanceFn::Agg) => Some(Type::DataFrame),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

@@ -551,3 +551,248 @@ httpmock = "0.7"
 # installer scripts, IDE integrations) resolves to the same in-tree
 # version during the v1.12 tooling wave.
 buffup = { path = "crates/buffup" }
+# T12: `buff-ecs` workspace path dep — Entity-Component-System
+# foundation for buff-game (T16). Mirrors the buff-eval / buff-repl /
+# buff-lsp / buff-registry / buff-jupyter / buff-dap / buffup pattern
+# so any future consumer (T16 buff-game, T17+ framework wrappers,
+# future editor integrations) resolves to the same in-tree version
+# during the v1.13 frameworks wave.
+buff-ecs = { path = "crates/buff-ecs" }
+# T12: Entity-Component-System backing implementation for `buff-ecs`.
+# We pin `hecs` to major 0.10 (the long-standing surface since 2022 —
+# every method we lower through codegen: `World::new`, `spawn`,
+# `insert_one`, `remove_one`, `get`, `get_mut`, `query`, `query_mut`,
+# `despawn`, `len`, `clear`, `reserve_entity` — has been stable for
+# years). We prefer `hecs` over `bevy_ecs` because:
+#
+# - Smaller surface: `hecs::World` + `Entity` + `QueryBorrow` cover
+#   100% of the MVP scope (no scheduling, no change detection, no
+#   plugins, no reflection). `bevy_ecs` pulls in bevy_utils + bevy_tasks
+#   + bevy_reflect and expects to live inside a Bevy app; that is far
+#   more than Buff's language-level ECS surface needs.
+# - Stable, narrowly-scoped API: every method we lower through codegen
+#   has been stable in `hecs` for years; we will not be chasing
+#   upstream API churn during the v1.13 frameworks wave.
+# - Pure-Rust: no native deps, no cc-rs, no OpenSSL — matches the
+#   "no C library, no Docker" hard rule from the T12 task spec and
+#   the wider workspace stance that killed chumsky/logos/zmq.
+# - Single-crate dependency: `hecs` is one crate; `bevy_ecs` pulls
+#   10+ sibling bevy_* crates transitively (logging, platform, async,
+#   reflect).
+#
+# All FFI-safety rules from `crates/buff-lang-ffi-guide/GUIDE.md`
+# apply: the `buff-ecs` wrapper exposes only `Entity` (a transparent
+# `(u32, u32)` id newtype — no raw pointers), `World`, `System`,
+# `SystemFn`, `EcsError`, and the `Component` marker trait (blanket-
+# impl over `hecs::Component + Clone + Debug`). Every public entry
+# point wraps its body in `std::panic::catch_unwind` per Rule R6.
+#
+# Mirrors the chrono/tracing/regex/tokio/base64/hex/etc. codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# hecs; cargo-project wiring is deferred). Snapshots + extern_crates
+# set is the verifiable contract.
+hecs = "0.10"
+# T8: `buff-tensor` workspace path dep — N-dim array framework (rank
+# <= 4, f32 only for MVP). CPU-only via rayon per T6 decision
+# (`.sisyphus/decisions/wgsl-extensibility-v1x.md`); GPU dispatch for
+# elementwise ops is a v1.18+ enhancement (~50 LOC + dispatch wrapper
+# around the existing WGSL pipeline). Matmul + reduce GPU paths are
+# ~1500 LOC / ~15 days and explicitly deferred. Mirrors the
+# buff-eval / buff-repl / buff-lsp / buff-registry / buff-jupyter /
+# buff-dap / buffup pattern so any future consumer (T13 buff-science,
+# T15 buff-ml, IDE integrations) resolves to the same in-tree version
+# during the v1.x frameworks wave.
+buff-tensor = { path = "crates/buff-tensor" }
+# T8 (buff-tensor): the canonical Rust N-dimensional array crate.
+# Recorded at the workspace level so the T8 reference-comparison tests
+# (deferred to a follow-up — the MVP ships pure-Rust with no extern)
+# and T15 (buff-ml, future autodiff) can pull it without re-pinning.
+# We pin to the `0.16` major.minor (the long-standing surface most of
+# the Rust ecosystem targets since 2024 - `ArrayBase::<S, Ix2>::dot`
+# for BLAS-backed matmul, `Array0::sum` for reductions, `s!` macro for
+# slicing). NOT used by buff-tensor's MVP (the MVP is pure-Rust +
+# rayon); recorded here so:
+# (a) T13 (buff-science) can use `ndarray::Array2::dot` for its
+#     matmul lowering without re-pinning.
+# (b) T15 (buff-ml) can use `ndarray` as its CPU backend for the
+#     Micrograd-style tape autodiff.
+# (c) T18+ GPU acceleration can pull `ndarray` BLAS variants.
+# Pure-Rust by default; the `blas` feature is NOT enabled at the
+# workspace level (matching the conservative "no native deps unless
+# required" stance). Mirrors the chrono/tokio/regex codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# ndarray; cargo-project wiring is deferred).
+ndarray = { version = "0.16", default-features = false }
+# T9 (buff-image) and T11 (buff-dsp) workspace deps (image, rustfft,
+# realfft, apodize) are added by those sibling tasks downstream in
+# this file — T8 does NOT duplicate them here.
+# T8 (buff-tensor): the canonical Rust N-dimensional array crate.
+# Recorded at the workspace level so the T8 reference-comparison tests
+# (deferred to a follow-up — the MVP ships pure-Rust with no extern)
+# and T15 (buff-ml, future autodiff) can pull it without re-pinning.
+# We pin to the `0.16` major.minor (the long-standing surface most of
+# the Rust ecosystem targets since 2024 - `ArrayBase::<S, Ix2>::dot`
+# for BLAS-backed matmul, `Array0::sum` for reductions, `s!` macro for
+# slicing). NOT used by buff-tensor's MVP (the MVP is pure-Rust +
+# rayon); recorded here so:
+# (a) T13 (buff-science) can use `ndarray::Array2::dot` for its
+#     matmul lowering without re-pinning.
+# (b) T15 (buff-ml) can use `ndarray` as its CPU backend for the
+#     Micrograd-style tape autodiff.
+# (c) T18+ GPU acceleration can pull `ndarray` BLAS variants.
+# Pure-Rust by default; the `blas` feature is NOT enabled at the
+# workspace level (matching the conservative "no native deps unless
+# required" stance). Mirrors the chrono/tokio/regex codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# ndarray; cargo-project wiring is deferred).
+# T9: `buff-image` MVP — image codecs + pixel ops (CPU-only). The
+# crate wraps the `image` crate (the de-facto Rust ecosystem umbrella
+# for image codecs, maintained by the image-rs org). Pure-Rust for
+# every T9-allowed format:
+#   - PNG  (pure-Rust `png` crate — no libpng)
+#   - JPEG (pure-Rust `jpeg-decoder` crate — no libjpeg-turbo)
+#   - GIF  (pure-Rust `gif` crate — no libgif)
+#   - BMP  (in-tree pure-Rust impl inside image-rs)
+#   - WebP (pure-Rust `image-webp` crate — no libwebp)
+# Matches the "no C library, no Docker" hard rule from AGENTS.md
+# (same family of cc-rs avoidance that pushed hand-rolled lexer/parser
+# per the project's "Windows host with no MSVC" constraint). The T9
+# spec explicitly forbids exotic formats (DICOM, RAW, AVIF, TGA,
+# FARBFELD, DDS) — we do NOT enable any of image's optional features
+# for those (the default features are exactly the 5 we surface).
+#
+# API surface used (all stable since 0.25):
+# - `image::open(path) -> Result<DynamicImage, ImageError>` for
+#   `Image.from_path(path)`.
+# - `image::load_from_memory(bytes) -> Result<DynamicImage, ImageError>`
+#   for `Image.from_bytes(bytes)`.
+# - `DynamicImage::{width, height, get_pixel, put_pixel, to_luma8,
+#   invert, resize, crop_imm, blur, save}` for the 12 instance
+#   methods the T9 surface mandates.
+# - `image::ImageFormat::{Png, Jpeg, Gif, Bmp, WebP}` for the
+#   `ImageFormat` enum (exotic variants filtered to Unknown).
+#
+# Pinned to major 0.25 (released 2024 — the long-standing surface
+# most of the Rust ecosystem targets). 0.25 finalized the
+# `ImageReader` builder API and the `DynamicImage` method surface
+# we depend on; pre-0.25 had a slightly different `crop` API that
+# would require source rewriting. Mirrors the conservative-pin
+# philosophy already in use across the workspace (chrono 0.4, rand
+# 0.8, axum 0.8, rustyline 15, notify 6).
+#
+# The crate is recorded in the codegen `extern_crates` BTreeSet
+# when a Buff program uses `Image` (mirrors the chrono / regex /
+# tracing / base64 / sha2 codegen-only linking boundary: the
+# single-file `buff run` rustc path does NOT link it; cargo-project
+# wiring is deferred per the existing precedent).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+# T9: `buff-image` workspace path dep — mirrors the buffup / buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap pattern
+# so any future consumer (T135 image-rendered `.buffhtml` assets, T138c
+# Bufflings image-processing exercises, IDE integrations) resolves to
+# the same in-tree version during the v1.13 frameworks wave.
+buff-image = { path = "crates/buff-image" }
+# T10: `buff-audio` AudioBuffer MVP wraps three pure-Rust audio crates.
+# All three are 100% pure-Rust (no cc-rs, no native C deps, no
+# assembler shims) — matches the "no C library, no Docker" hard rule
+# from T126/T127. Verified to compile cleanly on the Windows MSVC
+# host (the vcruntime.h host issue that blocks cc-rs-based crates
+#
+# - `hound` 3.x: the canonical pure-Rust WAV reader/writer
+#   (ruuda/hound — the long-standing WAV impl; stable API since
+#   3.0). API surface used: `hound::WavReader::open(path)` /
+#   `WavReader::new(reader)` + `.spec()` (sample_rate / channels /
+#   bits_per_sample / sample_format) + `.samples::<i16>()` iterator
+#   for read; `hound::WavWriter::create(path, spec)` +
+#   `.write_sample(f32_value)` for write. We pin to major 3 (NOT 4.x
+#   which does not exist yet — 3.x is the stable surface).
+#
+# - `symphonia` 0.6: pure-Rust audio decoder for MP3, FLAC, Vorbis,
+#   WAV, and more. Used by `buff-audio` for non-WAV codec loading
+#   (`AudioBuffer.from_path` falls back from hound-WAV to symphonia
+#   when the file is not a WAV). API surface used:
+#   `symphonia::default::get_probe()` + `get_codecs()` +
+#   `MediaSourceStream::new(file, default)` + `probe.probe(
+#   &hint, mss, &fmt_opts, &meta_opts)` -> `Box<dyn FormatReader>` +
+#   `format_reader.next_packet()` -> `decoder.decode(&packet)` ->
+#   `AudioBufferRef` (planar) -> per-variant interleave + normalize
+#   to f32 (-1.0..1.0). Feature flags `mp3`, `flac`, `wav`, `vorbis`,
+#   `pcm` (the cargo features map to the codec sub-crates); `aac` /
+#   `opus` / `isomp4` are NOT enabled (extra build surface, no MVP
+#   need). Pinned to 0.6 (current stable; 0.5 is maintenance-only
+#   now that 0.6 has shipped the identical surface + bug fixes).
+#
+# - `symphonia-bundle-flac` etc. are pulled in transitively by the
+#   cargo features on the umbrella `symphonia` crate — we depend
+#   ONLY on the umbrella, never the sub-crates directly.
+#
+# NOTE: The T10 task spec lists `rodio` as the primary candidate.
+# We deliberately use `symphonia` instead because `rodio` pulls in
+# `cpal` for audio output, and `cpal` requires native C deps via
+# cc-rs on Linux (alsa-sys) and macOS (coreaudio-sys). That breaks
+# the "no C library, no Docker" hard rule AND fails on this Windows
+# MSVC vcruntime.h host. `symphonia` is the canonical pure-Rust
+# decoder-only crate (no playback), which is exactly what T10 needs
+# (the spec explicitly forbids real-time playback — defer to v1.18+).
+# The spec also lists `symphonia` as an alternative ("rodio OR
+# symphonia") — we pick symphonia for those reasons. Commit body
+# documents the deviation.
+#
+# Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/
+# percent-encoding/uuid/url/serde_yml/csv/walkdir/tempfile/sha2/
+# md5/hmac/num_cpus/tokio-tungstenite/futures-util/zeromq/bytes/
+# notify/axum/tower/semver/reqwest/tar/flate2 codegen-only linking
+# boundary (single-file `buff run` rustc path does NOT link them;
+# cargo-project wiring is deferred). Snapshots + extern_crates set
+# is the verifiable contract.
+hound = "3"
+symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "vorbis", "pcm"] }
+# T10: `buff-audio` workspace path dep — mirrors the buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
+# buffup pattern so any future consumer (T11 buff-dsp, T12 buff-video,
+# the codegen `extern_crates` registration) resolves to the same
+# in-tree version during the v1.13 frameworks wave.
+buff-audio = { path = "crates/buff-audio" }
+# T11: `buff-dsp` signal-processing MVP (FFT, filters, windows).
+# Three pure-Rust crates cover the extern surface per the T4 FFI
+# guide (no raw pointers, owned `Vec<T>` at the boundary):
+# - `rustfft` is the de-facto pure-Rust FFT (mixed-radix; no C/FFI
+#   deps; stable API since 6.0; used by `realfft` under the hood).
+#   Pinned to major 6 (the long-standing surface — `FftPlanner::new`,
+#   `planner.fft(len, direction)` — that the rest of the Rust DSP
+#   ecosystem targets). We extern to `rustfft::Fft` via a safe
+#   `buff_dsp::externs::dsp_fft` wrapper.
+# - `realfft` wraps `rustfft` with a real-to-complex hermitian
+#   surface (`RealFftPlanner`, `R2CPlan`, `C2RPlan`) so a Buff
+#   `Signal<Float>` of length N lowers to a length-N/2+1 complex
+#   spectrum without paying for the redundant conjugate bins. Pinned
+#   to major 3 (stable surface since 2022). Used by `Signal.fft()`
+#   and `Signal.ifft()` for the `f64` fast path.
+# - `apodize` is the window-function crate (Hann, Hamming,
+#   Blackman, Nuttall, triangular). Pure-Rust, no native deps.
+#   Provides `hanning_iter(n)` / `hamming_iter(n)` / `blackman_iter(n)`
+#   — stable iterators since 1.0.0. We pin to major 1 (the long-
+#   standing surface — iterators yield f64 window coefficients — that
+#   the codegen `Window::hann(n).collect()` arm relies on).
+# All four are pure-Rust, no cc-rs, no native deps — matches the
+# "no C library, no Docker" hard rule from T126/T127.
+rustfft = "6.2"
+realfft = "3.4"
+apodize = "1.0"
+# T11: `buff-dsp` workspace path dep — mirrors the buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
+# buffup pattern so any future consumer (T11 codegen-lowered
+# `Signal.*` / `Window.*` calls, the future T139 bufflings DSP
+# tutorial) resolves to the same in-tree version during the v1.13
+# frameworks wave.
+buff-dsp = { path = "crates/buff-dsp" }
+# T7: `buff-dataframe` — Columnar DataFrames + CSV/JSON load + ops.
+# Workspace path dep mirrors the buff-dsp / buff-mock / buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
+# buffup pattern so any future consumer (codegen-lowered
+# `DataFrame.*` / `df.*` calls, the future flagship data-pipeline
+# example, IDE hover/completion) resolves to the same in-tree
+# version during the v1.13 frameworks wave. Records `buff-dataframe`
+# (NOT `buff_lang_dataframe` — the framework-crate naming convention
+# drops the `-lang` infix per AGENTS.md).
+buff-dataframe = { path = "crates/buff-dataframe" }

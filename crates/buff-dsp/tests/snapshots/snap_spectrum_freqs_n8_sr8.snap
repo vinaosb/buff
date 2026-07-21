@@ -1,0 +1,10 @@
+---
+source: crates/buff-dsp/tests/snapshots.rs
+expression: format_f64_slice(&freqs)
+snapshot_kind: text
+---
+  0.000000
+  1.000000
+  2.000000
+  3.000000
+  4.000000
