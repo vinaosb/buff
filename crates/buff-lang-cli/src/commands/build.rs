@@ -4,10 +4,18 @@
 //!
 //! 1. **Single-file mode** (v0.1 behavior): `buff build <FILE> [--release]`
 //!    compiles a single `.buff` file via the Buff pipeline → rustc.
+//!    The `--target` flag is IGNORED in this mode (single-file rustc
+//!    does not cross-compile).
 //!
-//! 2. **Project mode** (T120): `buff build [--release]` (no file argument)
-//!    looks for `buff.toml` in the current directory, generates `Cargo.toml`,
-//!    and shells out to `cargo build` / `cargo build --release`.
+//! 2. **Project mode** (T120 / T1 multi-file linking): `buff build
+//!    [--release] [--target <TRIPLE>]` (no file argument) looks for
+//!    `buff.toml` in the current directory, generates `Cargo.toml`,
+//!    and shells out to `cargo build`. T1 wires this through
+//!    [`project_pipeline::compile_project_to_cargo`] which walks every
+//!    transitively-imported module, builds a module graph (cycle
+//!    detection + visibility check), and flattens everything into a
+//!    single Rust source. `--target list` prints the Buff-supported
+//!    target set and exits without building.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,16 +24,40 @@ use anyhow::{Context, Result};
 
 use crate::config::{self, BuffConfig};
 use crate::pipeline;
+use crate::project_pipeline::{
+    self, cargo_build_project, compile_project_to_cargo, CargoMode, TARGET_LIST_KEYWORD,
+};
 
-/// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]`.
+/// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]
+/// [--target <TRIPLE>]`.
 ///
-/// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior).
+/// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior;
+/// the `--target` flag is ignored in this mode).
 /// When `file` is `None`, builds the project in the current directory via
-/// `cargo build` (T120 project-level build).
-pub fn run(file: Option<&Path>, output: Option<&Path>, release: bool) -> Result<()> {
+/// `cargo build` (T120 project-level build). The `--target <TRIPLE>` flag
+/// is forwarded to cargo; `--target list` prints the supported-target list
+/// and exits without building.
+pub fn run(
+    file: Option<&Path>,
+    output: Option<&Path>,
+    release: bool,
+    target: Option<&str>,
+) -> Result<()> {
     match file {
-        Some(f) => build_single_file(f, output, release),
-        None => build_project(release),
+        Some(f) => {
+            if let Some(t) = target {
+                if t == TARGET_LIST_KEYWORD {
+                    println!("{}", project_pipeline::target_list_str());
+                    return Ok(());
+                }
+                eprintln!(
+                    "warning: --target {t} is ignored in single-file mode \
+                     (use project mode by omitting the FILE argument to cross-compile)"
+                );
+            }
+            build_single_file(f, output, release)
+        }
+        None => build_project(release, target),
     }
 }
 
@@ -74,84 +106,97 @@ fn build_single_file(file: &Path, output: Option<&Path>, release: bool) -> Resul
 
 /// Build the project in the current directory via `cargo build` (T120).
 ///
-/// 1. Reads `buff.toml` from the current directory.
-/// 2. Detects workspace mode (T123): if `[workspace]` is present,
-///    delegates to [`build_workspace`] (emit virtual `Cargo.toml`,
-///    transpile each member, `cargo build` at workspace root — cargo
-///    fans out to members automatically).
-/// 3. Otherwise: generates `Cargo.toml` from the manifest, transpiles
-///    all `.buff` files in `src/`, invokes `cargo build`.
-fn build_project(release: bool) -> Result<()> {
+/// T1: now uses [`compile_project_to_cargo`] for multi-file linking
+/// (cycle detection + cross-file type inference + Cargo project
+/// emission). The Cargo project is emitted at
+/// `<cwd>/buff_target_project/` and cargo is invoked there with the
+/// appropriate flags.
+fn build_project(release: bool, target: Option<&str>) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
 
-    // Read buff.toml
-    let manifest_path = cwd.join("buff.toml");
-    let cfg = BuffConfig::load_from_file(&manifest_path)
-        .with_context(|| format!("failed to load `{}`", manifest_path.display()))?;
-
-    // Workspace mode (T123) — emit virtual Cargo.toml + transpile each member.
-    if cfg.is_workspace() {
-        return build_workspace(&cwd, &cfg, release);
+    // --target list short-circuits BEFORE doing any project work so the
+    // user can run it outside a project dir too.
+    if target == Some(TARGET_LIST_KEYWORD) {
+        println!("{}", project_pipeline::target_list_str());
+        return Ok(());
     }
 
-    // Single-package project mode (T120).
-    let package = cfg
-        .package
-        .as_ref()
-        .context("buff.toml has no [package] section (and no [workspace] — invalid manifest)")?;
+    // Read buff.toml (optional for project mode — compile_project_to_cargo
+    // emits a minimal Cargo.toml when no buff.toml is found).
+    let manifest_path = cwd.join("buff.toml");
+    let cfg: Option<BuffConfig> = match BuffConfig::load_from_file(&manifest_path) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            eprintln!(
+                "warning: could not load `{}` ({e}); \
+                 emitting minimal Cargo.toml without manifest metadata",
+                manifest_path.display()
+            );
+            None
+        }
+    };
 
-    // Generate Cargo.toml
-    let cargo_toml = config::generate_cargo_toml(&cfg);
-    let cargo_path = cwd.join("Cargo.toml");
-    std::fs::write(&cargo_path, &cargo_toml)
-        .with_context(|| format!("failed to write `{}`", cargo_path.display()))?;
-
-    // Transpile all source files in src/. T133: discover BOTH .buff and
-    // .buffhtml files (the floor-grammar MUST-ship list, decision record
-    // rsx-syntax-feasibility.md §6, requires `buff build` to recognise
-    // .buffhtml alongside .buff in src/).
-    let src_dir = cwd.join("src");
-    if src_dir.is_dir() {
-        for entry in std::fs::read_dir(&src_dir)
-            .with_context(|| format!("failed to read `{}`", src_dir.display()))?
-        {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "buff") {
-                pipeline::compile_to_rust(&path)?;
-            } else if path
-                .extension()
-                .is_some_and(|ext| ext == pipeline::BUFFHTML_EXT)
-            {
-                pipeline::compile_buffhtml_to_rust(&path)?;
-            }
+    // Workspace mode (T123) — delegate to build_workspace.
+    if let Some(c) = &cfg {
+        if c.is_workspace() {
+            return build_workspace(&cwd, c, release);
         }
     }
 
-    // Invoke cargo build
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build");
-    if release {
-        cmd.arg("--release");
-    }
+    // Single-package project mode (T1 multi-file linking).
+    let entry = find_project_entry(&cwd)?;
+    let project_dir = cwd.join("buff_target_project");
+    let compile_out = compile_project_to_cargo(&entry, Some(&project_dir), cfg.as_ref())?;
+    let build_mode = pipeline::BuildMode::from_release_flag(release);
 
-    let result = cmd
-        .output()
-        .context("failed to invoke `cargo` — is it installed and on your PATH?")?;
-
-    // Forward cargo's stderr (progress / warnings).
-    if !result.stderr.is_empty() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        eprint!("{stderr}");
-    }
-
-    if !result.status.success() {
-        anyhow::bail!("cargo build exited with status {}", result.status);
-    }
+    cargo_build_project(
+        &compile_out.project_dir,
+        CargoMode::Build,
+        build_mode,
+        target,
+    )?;
 
     let mode_str = if release { "release" } else { "debug" };
-    eprintln!("Built project `{}` ({mode_str})", package.name);
+    let target_str = target
+        .map(|t| format!(" --target {t}"))
+        .unwrap_or_default();
+    eprintln!(
+        "Built project ({mode_str}{target_str}) — output in {}",
+        compile_out.project_dir.display()
+    );
     Ok(())
+}
+
+/// Locate the project entry-point `.buff` file. Prefers `src/main.buff`;
+/// falls back to the first `.buff` file in `src/` (sorted).
+fn find_project_entry(cwd: &Path) -> Result<PathBuf> {
+    let src_dir = cwd.join("src");
+    let canonical = src_dir.join("main.buff");
+    if canonical.is_file() {
+        return Ok(canonical);
+    }
+    if !src_dir.is_dir() {
+        bail!(
+            "no `src/` directory in `{}` (use `buff new <NAME>` to scaffold a project)",
+            cwd.display()
+        );
+    }
+    let mut buff_files: Vec<PathBuf> = std::fs::read_dir(&src_dir)
+        .with_context(|| format!("failed to read `{}`", src_dir.display()))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "buff"))
+        .collect();
+    buff_files.sort();
+    let first = buff_files
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("no `.buff` files in `{}`", src_dir.display()))?;
+    eprintln!(
+        "warning: no `src/main.buff`; using `{}` as the entry point",
+        first.display()
+    );
+    Ok(first)
 }
 
 /// Build a workspace by shelling out to `cargo build` at the workspace root

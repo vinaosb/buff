@@ -33,6 +33,10 @@ pub mod prelude;
 // short path. This is the GENERAL, extensible mechanism every future v1.4
 // stdlib task (Regex, Math, URL, Hash, ...) extends.
 pub mod prelude_types;
+// T1: project-level parse entry point + span-aware error formatting.
+pub mod project;
+// T1: cross-file symbol resolution table.
+pub mod cross_file;
 pub mod promote;
 // T48: recursion detection (call-graph cycle detection). Re-exported at
 // the crate root so the codegen pass + T49 hint-driven codegen can call
@@ -67,6 +71,12 @@ pub use infer::TypeInferencer;
 pub use modules::{
     build_graph, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph, ModuleLoader,
 };
+// T1: project-level parse entry point + span-aware error type.
+pub use project::{
+    parse_project, parse_project_with_loader, ParsedProject, ProjectError,
+};
+// T1: cross-file symbol resolution table.
+pub use cross_file::{CrossFileSymbolTable, SymbolKind, SymbolSignature};
 pub use promote::{assignable_to, promote_binary};
 // T48: recursion detection (call-graph cycle detection). Re-exported at
 // crate root for the codegen pass + T49 hint-driven codegen so callers can

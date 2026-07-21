@@ -40,6 +40,8 @@ pub mod error_mapper;
 pub mod fmt;
 pub mod naming_lint;
 pub mod pipeline;
+// T1: multi-file project compilation pipeline (parse_project + cargo).
+pub mod project_pipeline;
 pub mod scaffold;
 pub mod test_runner;
 pub mod ui_dev;

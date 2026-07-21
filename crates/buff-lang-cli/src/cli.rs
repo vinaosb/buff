@@ -87,6 +87,13 @@ pub enum Command {
         /// fast-debug profile used since v0.1.
         #[arg(long)]
         release: bool,
+
+        /// T1: cross-compile for `<TRIPLE>` (e.g.
+        /// `x86_64-unknown-linux-gnu`, `wasm32-wasi`). Forwards to
+        /// cargo's `--target` flag. Pass `list` to print the
+        /// Buff-supported target set and exit (no build performed).
+        #[arg(long, value_name = "TRIPLE")]
+        target: Option<String>,
     },
 
     /// Compile a `.buff` file and immediately execute it.

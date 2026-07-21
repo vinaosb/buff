@@ -17,7 +17,13 @@ fn main() -> Result<()> {
             file,
             output,
             release,
-        } => buff_lang_cli::commands::build::run(file.as_deref(), output.as_deref(), release),
+            target,
+        } => buff_lang_cli::commands::build::run(
+            file.as_deref(),
+            output.as_deref(),
+            release,
+            target.as_deref(),
+        ),
         Command::Run {
             file,
             args,
