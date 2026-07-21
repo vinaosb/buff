@@ -1,0 +1,72 @@
+[package]
+name = "buff-ecs"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Buff Entity-Component-System MVP: World, spawn, query, systems via extern hecs (sequential tick)"
+
+[lib]
+name = "buff_ecs"
+path = "src/lib.rs"
+
+[dependencies]
+# T12: Entity-Component-System foundation for buff-game (T16). Wraps the
+# mature `hecs` crate (the long-standing Rust archetypal ECS — API stable
+# since 0.1; we pin to 0.10 which is the current long-standing surface
+# since 2022). We prefer `hecs` over `bevy_ecs` because:
+#
+# - Smaller surface: `hecs::World` + `Entity` + `QueryBorrow` cover 100% of
+#   the MVP scope (no scheduling, no change detection, no plugins, no
+#   reflection). bevy_ecs pulls in bevy_utils + bevy_tasks + bevy_reflect
+#   and expects to live inside a Bevy app; that is far more than Buff's
+#   language-level ECS surface needs.
+# - Stable, narrowly-scoped API: every method we lower through codegen
+#   (`World::new`, `spawn`, `insert`, `remove`, `query`, `despawn`) has
+#   been stable in hecs for years; we will not be chasing upstream API
+#   churn during the v1.13 frameworks wave.
+# - Pure-Rust: no native deps, no cc-rs, no OpenSSL — matches the
+#   "no C library, no Docker" hard rule from the T12 task spec and the
+#   wider workspace stance that killed chumsky/logos/zmq.
+# - Single-crate dependency: `hecs` is one crate; bevy_ecs transitively
+#   pulls 10+ sibling bevy_* crates (logging, platform, async, reflect).
+#
+# The `hecs` API surface used:
+# - `hecs::World::new()` + `world.spawn(bundle)` + `world.reserve_entity()`
+# - `world.insert_one(entity, component)` + `world.remove_one::<T>(entity)`
+# - `world.get::<T>(entity)` + `world.get_mut::<T>(entity)`
+# - `world.query::<&T>()` + `world.query_iter()` (single + tuple forms)
+# - `world.despawn(entity)` + `world.len()` + `world.clear()`
+#
+# All FFI-safety rules from `crates/buff-lang-ffi-guide/GUIDE.md` apply:
+# - R1 no raw pointers in public signatures (Entity is a transparent
+#   newtype over a `(u32, u32)` id pair — no pointers).
+# - R2 Rust owns the `hecs::World` heap; Buff holds `Entity` ids by value.
+# - R3 fallible `hecs::*` Results collapse to `Option` (None on missing
+#   entity / component) — never a panic.
+# - R4 `World` is `Send + Sync` (hecs::World is internally synchronized);
+#   safe to capture in spawn closures.
+# - R5 no lifetimes in Buff-visible types (collect-style queries return
+#   owned `Vec<(Entity, T)>` where `T: Clone`; closure-style iteration
+#   scopes the borrow to the closure body).
+# - R6 every public entry point wraps its body in
+#   `std::panic::catch_unwind(AssertUnwindSafe(...))` and converts a
+#   caught panic into a benign fallback (None / empty Vec / no-op).
+#
+# Mirrors the chrono/tracing/regex/tokio/base64/hex/etc. codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link hecs;
+# cargo-project wiring is deferred). Snapshots + extern_crates set is the
+# verifiable contract.
+hecs = "0.10"
+# T12: `thiserror` for the `EcsError` enum (ComponentMissing /
+# EntityMissing / SystemFailed). Mirrors buff-jupyter / buff-repl /
+# buff-lsp / buff-dap precedent: small, focused error enum propagated up
+# through `anyhow` at the CLI boundary.
+thiserror.workspace = true
+
+[dev-dependencies]
+# T12: snapshot tests for the World public-API contract (spawn, query,
+# system tick, resources). insta is the workspace-wide snapshot tool
+# (already pinned at the workspace level since v0.1). Each snapshot is a
+# byte-exact assertion that the spawn/query/tick cycle produces the
+# expected entity/component layout.
+insta.workspace = true

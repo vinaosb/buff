@@ -367,6 +367,114 @@ pub enum Type {
     /// (sync). Maps to `buff_lang_runtime::Receiver<T>` at codegen
     /// time. Single-consumer MPSC ONLY for the MVP.
     Receiver,
+    /// T9: a 2D raster image (8-bit RGBA pixel data), mapped to
+    /// `buff_image::Image` at codegen time. Constructed via
+    /// `Image.from_path(path)` (load from disk) or `Image.from_bytes
+    /// (bytes)` (decode an in-memory buffer); supports the instance
+    /// methods `.width()`, `.height()`, `.get_pixel(x,y)`,
+    /// `.set_pixel(x,y,color)`, `.save(path)`, `.grayscale()`,
+    /// `.invert()`, `.resize(w,h)`, `.crop(x,y,w,h)`, `.blur(sigma)`.
+    ///
+    /// This is **additive** (T9): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` will be extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_image`
+    /// predicate. The `is_numeric` / `is_float_like` / `is_integer_like`
+    /// / `is_gpu_eligible` predicates all return `false` for `Image`.
+    ///
+    /// Mirrors [`Type::Regex`] (T124d) / [`Type::Url`] (T124h) /
+    /// [`Type::Path`] (T124j) / [`Type::Process`] (T124l) as the
+    /// fifth runtime-value-with-rich-instance-methods type. The
+    /// underlying Rust type is `buff_image::Image` (a struct wrapping
+    /// `image::DynamicImage`) — the codegen emits
+    /// `buff_image::Image::from_path(p)?` / `buff_image::Image::from
+    /// _bytes(b)?` for the constructors and `recv.width()` /
+    /// `recv.height()` / `recv.get_pixel(x,y)?` / `recv.set_pixel
+    /// (x,y,c)?` / `recv.save(p)?` / `recv.grayscale()` /
+    /// `recv.invert()` / `recv.resize(w,h)?` / `recv.crop(x,y,w,h)?`
+    /// / `recv.blur(sigma)` for the 10 instance methods. Pure-Rust,
+    /// CPU-only per Metis G7 lock (NO GPU dispatch).
+    Image,
+    /// T7 (v1.13 frameworks): the columnar-DataFrame runtime-value
+    /// type. Maps to `buff_dataframe::DataFrame` at codegen time.
+    /// Constructed via `DataFrame.from_csv(path)` /
+    /// `DataFrame.from_json(path)`; carries the instance methods
+    /// `.select(cols)`, `.filter(pred)`, `.sort(col)`, `.head(n)`,
+    /// `.len()`, `.join(other, on)`, `.group_by(col)` (returns a
+    /// DataFrame whose `.agg(col, op)` chains per-group aggregation),
+    /// `.to_table_string()`. CPU-only per Metis G7 — no GPU dispatch.
+    DataFrame,
+    /// T10 (v1.13 frameworks): the runtime-value AudioBuffer type.
+    /// Maps to `buff_audio::AudioBuffer` at codegen time. Constructed
+    /// via `AudioBuffer.from_path(path)` (decode WAV/MP3/FLAC/Vorbis)
+    /// or `AudioBuffer.from_samples(samples, sample_rate, channels)`;
+    /// carries the instance methods `.samples()`, `.sample_rate()`,
+    /// `.channels()`, `.duration_secs()`, `.save(path)`, `.amplify
+    /// (factor)`, `.normalize(target)`, `.mix(other)`, `.slice(start,
+    /// end)`.
+    ///
+    /// This is **additive** (T10): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` will be extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_audio`
+    /// predicate. The `is_numeric` / `is_float_like` / `is_integer_like`
+    /// / `is_gpu_eligible` predicates all return `false` for `Audio`.
+    ///
+    /// Mirrors [`Type::Regex`] (T124d) / [`Type::Url`] (T124h) /
+    /// [`Type::Path`] (T124j) / [`Type::Process`] (T124l) / [`Type::Image`]
+    /// (T9) as a runtime-value-with-rich-instance-methods type. The
+    /// underlying Rust type is `buff_audio::AudioBuffer` (a struct
+    /// wrapping interleaved `Vec<f32>` + sample_rate + channels) — the
+    /// codegen emits `buff_audio::AudioBuffer::from_path(p)?` /
+    /// `buff_audio::AudioBuffer::from_samples(s, sr, ch)?` for the
+    /// constructors and the eight instance methods lowering to
+    /// `recv.samples()` / `recv.sample_rate()` / `recv.channels()` /
+    /// `recv.duration_secs()` / `recv.save(p)?` / `recv.amplify(f)` /
+    /// `recv.normalize(t)` / `recv.mix(&o)?` / `recv.slice(s, e)?`.
+    /// Pure-Rust, CPU-only per Metis G7 lock (NO GPU dispatch). The
+    /// MVP forbids real-time playback (deferred to v1.18+) and
+    /// synthesis (that's buff-dsp T11).
+    Audio,
+    /// T12: the Buff `World` runtime-value type — an
+    /// Entity-Component-System store mapped to `buff_ecs::World` at
+    /// codegen time. Constructed via the prelude associated function
+    /// `World.new()` (no args; returns an empty `World`); carries
+    /// many instance methods (`world.spawn(component) -> Entity`,
+    /// `world.spawn_two(a, b) -> Entity`, `world.insert(entity,
+    /// component)`, `world.remove::<T>(entity)`, `world.query::<T>()
+    /// -> Vector<Tuple>`, `world.for_each_mut(closure)`,
+    /// `world.for_each_pair_mut(closure)`, `world.add_system(system)`,
+    /// `world.tick()`, `world.insert_resource(value)`,
+    /// `world.get_resource::<T>()`, ...).
+    ///
+    /// This is **additive** (T12): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `World` — it's an opaque
+    /// value type that participates in no numeric promotion.
+    ///
+    /// Mirrors [`Type::Regex`] (T124d) / [`Type::Path`] (T124j) /
+    /// [`Type::Process`] (T124l) / [`Type::Image`] (T9) as a
+    /// runtime-value-with-rich-instance-methods type. The underlying
+    /// Rust type is `buff_ecs::World` — the codegen emits
+    /// `buff_ecs::World::new()` for the ctor and dispatches the
+    /// instance methods to `World::*` paths.
+    World,
+    /// T12: an opaque ECS entity id, mapped to `buff_ecs::Entity` at
+    /// codegen time. Constructed as the return value of
+    /// `world.spawn(component)` / `world.spawn_two(a, b)`; carries
+    /// the instance method `.id() -> Int`. Copy + Eq + Hash so Buff
+    /// users can store entities in collections and compare them by
+    /// value.
+    ///
+    /// This is **additive** (T12): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Entity`. Underlying Rust
+    /// type `buff_ecs::Entity` is a transparent newtype over
+    /// `hecs::Entity` (`(u32, u32)` id+generation pair) — no raw
+    /// pointers, no lifetimes, `Copy + Send + Sync + 'static`.
+    Entity,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -724,6 +832,90 @@ impl Type {
         matches!(self, Type::Receiver)
     }
 
+    /// T9: the raster-image type. Maps to `buff_image::Image` at
+    /// codegen time. Constructed via `Image.from_path(p)` /
+    /// `Image.from_bytes(b)`; supports 10 instance methods
+    /// (`width`, `height`, `get_pixel`, `set_pixel`, `save`,
+    /// `grayscale`, `invert`, `resize`, `crop`, `blur`). CPU-only
+    /// per Metis G7 lock.
+    pub fn image() -> Self {
+        Type::Image
+    }
+
+    /// T9: Returns `true` if this type is the prelude `Image` runtime
+    /// value. Used to dispatch instance method calls
+    /// (`img.width()`, `img.height()`, `img.get_pixel(x,y)`, ...,
+    /// `img.blur(sigma)`) to the `buff_image::Image` lowering.
+    pub fn is_prelude_image(&self) -> bool {
+        matches!(self, Type::Image)
+    }
+
+    /// T7: the columnar-DataFrame runtime-value type. Maps to
+    /// `buff_dataframe::DataFrame` at codegen time. Constructed via
+    /// `DataFrame.from_csv(path)` / `DataFrame.from_json(path)`;
+    /// supports `df.select(cols)` / `df.filter(pred)` / `df.sort(col)`
+    /// / `df.head(n)` / `df.len()` / `df.join(other, on)` /
+    /// `df.group_by(col)` / `df.agg(col, op)`. CPU-only per Metis G7.
+    pub fn dataframe() -> Self {
+        Type::DataFrame
+    }
+
+    /// T7: Returns `true` if this type is the prelude `DataFrame`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`df.select(...)`, `df.filter(...)`, `df.sort(...)`, ...,
+    /// `df.group_by(...)`) to the `buff_dataframe::DataFrame`
+    /// lowering.
+    pub fn is_prelude_dataframe(&self) -> bool {
+        matches!(self, Type::DataFrame)
+    }
+
+    /// T10: the runtime-value `AudioBuffer` type. Maps to
+    /// `buff_audio::AudioBuffer` at codegen time. Constructed via
+    /// `AudioBuffer.from_path(p)` / `AudioBuffer.from_samples(s, sr,
+    /// ch)`; supports 9 instance methods (`samples`, `sample_rate`,
+    /// `channels`, `duration_secs`, `save`, `amplify`, `normalize`,
+    /// `mix`, `slice`). CPU-only per Metis G7 lock.
+    pub fn audio() -> Self {
+        Type::Audio
+    }
+
+    /// T10: Returns `true` if this type is the prelude `AudioBuffer`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`buf.samples()`, `buf.sample_rate()`, `buf.channels()`, ...,
+    /// `buf.slice()`) to the `buff_audio::AudioBuffer` lowering.
+    pub fn is_prelude_audio(&self) -> bool {
+        matches!(self, Type::Audio)
+    }
+
+    /// T12: the ECS `World` type. Maps to `buff_ecs::World` at
+    /// codegen time.
+    pub fn world() -> Self {
+        Type::World
+    }
+
+    /// T12: Returns `true` if this type is the prelude `World`
+    /// runtime value (ECS world). Used to dispatch instance method
+    /// calls (`world.spawn(...)`, `world.tick()`, ...,
+    /// `world.insert_resource(...)`) to the `buff_ecs::World`
+    /// lowering.
+    pub fn is_prelude_world(&self) -> bool {
+        matches!(self, Type::World)
+    }
+
+    /// T12: the ECS `Entity` type (opaque id). Maps to
+    /// `buff_ecs::Entity` at codegen time.
+    pub fn entity() -> Self {
+        Type::Entity
+    }
+
+    /// T12: Returns `true` if this type is the prelude `Entity`
+    /// runtime value (ECS entity id). Used to dispatch instance
+    /// method calls (`entity.id()`) to the `buff_ecs::Entity`
+    /// lowering.
+    pub fn is_prelude_entity(&self) -> bool {
+        matches!(self, Type::Entity)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -856,6 +1048,19 @@ impl fmt::Display for Type {
             // Buff surface name.
             Type::Sender => f.write_str("Sender"),
             Type::Receiver => f.write_str("Receiver"),
+            // T9: image. Opaque runtime-value type mapped to
+            // `buff_image::Image`. Display mirrors the Buff surface
+            // name (`Image`).
+            Type::Image => f.write_str("Image"),
+            Type::DataFrame => f.write_str("DataFrame"),
+            Type::Audio => f.write_str("AudioBuffer"),
+            // T12: prelude ECS types. Opaque value types whose
+            // canonical Rust representations live in the `buff-ecs`
+            // crate (`buff_ecs::World` / `buff_ecs::Entity`). The
+            // Display form mirrors the Buff surface name so
+            // diagnostics read naturally.
+            Type::World => f.write_str("World"),
+            Type::Entity => f.write_str("Entity"),
         }
     }
 }

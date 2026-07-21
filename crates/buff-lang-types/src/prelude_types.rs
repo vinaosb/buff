@@ -877,8 +877,8 @@ pub enum PreludeType {
     /// codegen time (a transparent newtype over `hecs::Entity`, which
     /// is a `(u32 id, u32 generation)` pair — Copy + Eq + Hash + Send
     /// + Sync + 'static). Users compare entities by value, store them
-    /// in collections, and pass them back to `world.insert` /
-    /// `world.remove` / `world.despawn`.
+    /// in collections, and pass them back to `world.insert`,
+    /// `world.remove`, or `world.despawn`.
     ///
     /// Buff surface:
     /// - `entity.id() -> Int` — the stable slot id (read-only accessor).
@@ -1057,6 +1057,19 @@ impl PreludeType {
         // scheduling / NO change detection — all explicitly deferred.
         PreludeType::World,
         PreludeType::Entity,
+        // T10 (v1.13 wave 2): AudioBuffer - the runtime-value audio
+        // type wrapping the in-tree `buff-audio` crate
+        // (`buff_audio::AudioBuffer`) backed by `hound` (WAV) +
+        // `symphonia` (MP3/FLAC/Vorbis). Constructed via `AudioBuffer.
+        // from_path(p)` (decode) or `AudioBuffer.from_samples(s, sr,
+        // ch)` (programmatic). Nine instance methods: `samples` /
+        // `sample_rate` / `channels` / `duration_secs` / `save` /
+        // `amplify` / `normalize` / `mix` / `slice`. Codegen lowering
+        // lives in the buff-audio crate (`buff_audio::AudioBuffer::*`).
+        // EXPERIMENTAL badge per T10 spec. CPU-only per Metis G7.
+        // Real-time playback deferred to v1.18+; synthesis deferred
+        // to buff-dsp T11.
+        PreludeType::Audio,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -3866,8 +3879,14 @@ mod tests {
         // system-introspection module (OS) + 1 runtime-value-with-
         // methods type (Process) shipped in T124l + 3 namespace-only
         // networking modules (TCP, UDP, WebSocket) shipped in T124m
-        // = 30 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 30);
+        // + 1 namespace-only module (Channel) shipped in T2 + 1
+        // forward-declaration-only namespace (Tensor) + 1 runtime-
+        // value-with-methods type (Image) shipped in T9 + 2
+        // namespace-only modules (Signal, Window) + 1 runtime-value-
+        // with-methods type (Spectrum) shipped in T11 + 1 runtime-
+        // value-with-methods type (DataFrame) shipped in T7
+        // = 36 total prelude types.
+        assert_eq!(PreludeType::ALL.len(), 36);
     }
 
     #[test]
