@@ -1177,7 +1177,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 4. FFI Safety Guide + Conventions Document
+- [x] 4. FFI Safety Guide + Conventions Document
 
   **What to do**:
   - Write `crates/buff-lang-ffi-guide/` as a documentation-only crate (or `docs/ffi-guide.md` — pick one consistent with existing convention; verify `crates/` is preferred location per AGENTS.md).

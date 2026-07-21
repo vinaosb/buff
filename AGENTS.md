@@ -228,3 +228,4 @@ cd editors/vscode && npm run build
 - **`ui_dev/` module in CLI** is BOTH a module root AND the `buff ui dev` handler (T131). `commands/ui_dev.rs` is a thin dispatch wrapper.
 - **WGSL binding contract** between `buff-lang-codegen-wgsl` and `buff-lang-runtime`: stable layout `@group(0) @binding(0)` input storage (read), `@group(0) @binding(1)` output storage (read_write). Workgroup size 64 default. Both crates MUST stay in sync.
 - **See per-crate `AGENTS.md`** in every `crates/buff-{lang-*,lsp,eval,repl,jupyter,registry,playground-wasm,ui-dioxus}/` and `tests/AGENTS.md` + `tree-sitter-buff/AGENTS.md` + `editors/vscode/AGENTS.md` for detailed file-level guidance.
+- **FFI Safety Guide**: `crates/buff-lang-ffi-guide/GUIDE.md` defines 6 hard rules for all `extern` wrapper crates. Wave 4 wrappers (T17-T21) and community bindings must comply.
