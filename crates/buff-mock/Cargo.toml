@@ -1,0 +1,67 @@
+[package]
+name = "buff-mock"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Mocking framework for the Buff language — expect/verify/spy on any trait"
+
+[lib]
+name = "buff_mock"
+path = "src/lib.rs"
+
+[dependencies]
+# T25: Mocking framework for testing. Provides the runtime
+# infrastructure (Mock<T> generic, ExpectationBuilder, Spy, MockState)
+# plus a codegen-time helper (`lower_mock_for_trait`) that expands a
+# Buff `TraitDecl` AST into the corresponding mock struct + trait impl
+# as `syn::Item`s. The codegen helper is consumed by
+# `buff-lang-codegen-rust` in a future @mock-attribute integration
+# (the MVP ships as a standalone runtime library usable directly from
+# Rust tests — consistent with the T3 macro spike DEFER outcome, which
+# recommends runtime workarounds over procedural macros).
+#
+# - `thiserror`: crate-local error enum (`MockError`) propagated up
+#   through `anyhow` at the test boundary. Mirrors buff-dap / buff-eval
+#   precedent.
+# - `buff-lang-ast`: TraitDecl / MethodSig / Param / TypeRef access in
+#   the `lowering` module (codegen helper). The crate is otherwise
+#   pure-Rust and does NOT need the parser/types/codegen crates —
+#   keeping the dependency footprint minimal so T22 (API compat spike)
+#   and T23 (flagship tests) can pull this in without a heavy graph.
+# - `syn` / `quote` / `proc-macro2`: the `lowering` module emits
+#   `syn::Item` directly (no raw strings — project hard rule). The
+#   output is consumed by `buff-lang-codegen-rust` or by tests that
+#   pretty-print the generated mock for inspection.
+thiserror.workspace = true
+buff-lang-ast.workspace = true
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+
+[dev-dependencies]
+# T25: tests assert (a) runtime behavior (expect/verify/spy on a
+# sample trait) and (b) codegen-output shape (lower_mock_for_trait
+# produces a struct + impl pair whose prettyplease-formatted source
+# contains the expected method signatures). `insta` snapshots pin the
+# generated source so future changes to the lowering logic surface
+# clearly during review. `prettyplease` is the same formatter used by
+# buff-lang-codegen-rust — keeping output byte-comparable.
+insta.workspace = true
+prettyplease.workspace = true
+
+# T25: examples live under `examples/mock/` (a subdirectory). Cargo's
+# default example discovery does NOT recurse into subdirs, so each
+# example is declared explicitly via a `[[example]]` table. Mirrors
+# the `examples/<topic>/` layout used in buff-lang-runtime / buff-cli
+# for grouping related demo programs.
+[[example]]
+name = "hello_mock"
+path = "examples/mock/hello_mock.rs"
+
+[[example]]
+name = "verify_interaction"
+path = "examples/mock/verify_interaction.rs"
+
+[[example]]
+name = "spy_on_calls"
+path = "examples/mock/spy_on_calls.rs"

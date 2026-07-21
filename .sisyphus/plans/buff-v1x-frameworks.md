@@ -777,7 +777,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 25. `buff-mock` — Mocking Framework for Testing
+- [x] 25. `buff-mock` — Mocking Framework for Testing
 
   **What to do** *(added post-comparative-analysis — every major language has one)*:
   - Create `crates/buff-mock/`.
