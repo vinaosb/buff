@@ -1098,7 +1098,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 3. Macro System Spike (Timeboxed Decision)
+- [x] 3. Macro System Spike (Timeboxed Decision)
 
   **What to do**:
   - Conduct a 5-day timeboxed investigation to DECIDE whether Buff needs a macro system in v1.13-v1.17, or if frameworks can ship without one.
@@ -1275,7 +1275,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 6. WGSL Extensibility Assessment (Decision Document)
+- [x] 6. WGSL Extensibility Assessment (Decision Document)
 
   **What to do**:
   - Assess whether existing `crates/buff-lang-codegen-wgsl/` can be extended to support tensor operations needed by `buff-tensor` (T8), `buff-science` (T13), and `buff-ml` (T15).
