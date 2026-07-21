@@ -474,3 +474,21 @@ buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }
 # `crates/buff-lang-cli/src/ui_dev/watcher.rs`), so we do NOT pull
 # `notify-debouncer-mini` — keeping the dep surface minimal.
 notify = "6"
+# T133: RSX-for-Buff Option C (`.buffhtml` SFC). Two new core crates ship the
+# floor grammar (decision record `rsx-syntax-feasibility.md` §6):
+# - `buff-lang-ast-rsx`: pure-data AST for the `.buffhtml` SFC. Separate from
+#   `buff-lang-ast` to avoid churning the existing lexer/parser/types/
+#   codegen-rust dependency tree (decision record §4 AST row: "MINOR — add
+#   RsxTemplateFile top-level node in a new sibling crate").
+# - `buff-lang-buffhtml-parser`: hand-rolled 3-mode lexer + recursive-descent.
+#   Calls Buff's existing expression parser for `{...}` contents (T134+; for
+#   T133 the raw expression source is stored verbatim and emitted into the
+#   `rsx!{}` TokenStream by the codegen crate).
+# - `buff-lang-codegen-buffhtml`: lowers template AST → `rsx!{}` TokenStream
+#   via syn/quote/prettyplease, reusing the T121b-proven emission pattern
+#   (`crates/buff-lang-codegen-rust/tests/dioxus_t121b.rs`). Implements the
+#   post-format span side-table per spike recommendation (evidence at
+#   `.sisyphus/evidence/task-133-span-mapping-spike.txt`).
+buff-lang-ast-rsx = { path = "crates/buff-lang-ast-rsx" }
+buff-lang-buffhtml-parser = { path = "crates/buff-lang-buffhtml-parser" }
+buff-lang-codegen-buffhtml = { path = "crates/buff-lang-codegen-buffhtml" }

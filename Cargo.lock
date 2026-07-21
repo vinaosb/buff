@@ -322,6 +322,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-lang-ast-rsx"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-error",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "buff-lang-buffhtml-parser"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-ast-rsx",
+ "buff-lang-error",
+ "insta",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-lang-cli"
 version = "1.2.0"
 dependencies = [
@@ -353,6 +371,21 @@ dependencies = [
  "tokio",
  "toml",
  "tower",
+]
+
+[[package]]
+name = "buff-lang-codegen-buffhtml"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-ast-rsx",
+ "buff-lang-buffhtml-parser",
+ "buff-lang-error",
+ "insta",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

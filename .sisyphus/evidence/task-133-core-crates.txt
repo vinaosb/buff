@@ -1,0 +1,342 @@
+================================================================================
+T133 — CORE CRATES: buff-lang-ast-rsx + buff-lang-buffhtml-parser + buff-lang-codegen-buffhtml
+================================================================================
+
+**Task ID:**      task-133-core-crates
+**Date:**         2026-07-21
+**Author:**       Sisyphus-Junior (build executor)
+**Time-box:**     ~30 minutes consumed of 25-minute budget (slight overrun —
+                  vertical slice + floor-grammar coverage both shipped).
+**Decision ref:** `.sisyphus/decisions/rsx-syntax-feasibility.md` §3 (14 grammar
+                  examples) + §4 (compiler impact) + §6 (scope floor).
+**Spike ref:**    `.sisyphus/evidence/task-133-span-mapping-spike.txt` VERDICT
+                  PASS — recommended post-format text-region reverse-mapping
+                  implemented in `buff-lang-codegen-buffhtml/src/span_map.rs`.
+**T121b ref:**    `crates/buff-lang-codegen-rust/tests/dioxus_t121b.rs` —
+                  syn::Macro + quote! + prettyplease emission pattern reused
+                  verbatim in `buff-lang-codegen-buffhtml/src/lib.rs`.
+
+================================================================================
+VERDICT: PASS — three new workspace members at v1.0.0, all scoped gates green.
+================================================================================
+
+Acceptance criteria from the task brief:
+
+  | Criterion                                                  | Status   |
+  |------------------------------------------------------------|----------|
+  | 3 new crates (ast-rsx + parser + codegen) at v1.0.0        | DONE     |
+  | Registered in root `Cargo.toml` workspace.dependencies     | DONE     |
+  | `crates/*` glob auto-includes new crates                  | VERIFIED |
+  | Floor grammar (decision §6 MUST-ship): 14 examples         | ALL PASS |
+  | Deferred constructs (named slots, keyed each, spread, ...) | TODO     |
+  | T121b-proven codegen emission pattern re-used              | DONE     |
+  | Post-format span side-table per spike strategy             | DONE     |
+  | Unit tests per floor-grammar construct                     | 81 tests |
+  | e2e counter.buffhtml snippet → rsx!{} shape assertion      | DONE     |
+  | Span-map lookup test                                       | DONE     |
+  | buff-lang-* source unmodified                             | DONE     |
+  | dioxus_t121b.rs unmodified (read-only reference)          | DONE     |
+  | Scoped gates (fmt / clippy / test) pass                    | DONE     |
+  | No commit, no boulder.json, no plan/checkbox edits         | DONE     |
+
+================================================================================
+FILES CREATED
+================================================================================
+
+  crates/buff-lang-ast-rsx/
+    Cargo.toml                   (12 lines)  v1.0.0 / MIT OR Apache-2.0
+    src/lib.rs                   (~250 lines) RsxTemplateFile + RsxNode variants
+
+  crates/buff-lang-buffhtml-parser/
+    Cargo.toml                   (14 lines)  v1.0.0
+    src/lib.rs                   (~24 lines) module wiring + re-exports
+    src/error.rs                 (~50 lines) BuffHtmlParseError (thiserror)
+    src/lexer.rs                 (~900 lines) 3-mode scanner + tests
+    src/parser.rs                (~620 lines) recursive-descent + tests
+
+  crates/buff-lang-codegen-buffhtml/
+    Cargo.toml                   (18 lines)  v1.0.0
+    src/lib.rs                   (~600 lines) RsxTemplateFile → syn::File
+                                             + T121b-pattern rsx!{} emission
+    src/error.rs                 (~10 lines) BuffHtmlCodegenError
+    src/span_map.rs              (~210 lines) post-format side-table + tests
+    tests/codegen_tests.rs       (~340 lines) 25 integration tests
+
+================================================================================
+FILES MODIFIED
+================================================================================
+
+  Cargo.toml                    +14 lines: 3 path deps added under
+                                            buff-ui-dioxus / notify, with
+                                            decision-record + spike references
+                                            explaining each crate's role.
+
+================================================================================
+FLOOR-GRAMMAR COVERAGE MATRIX
+================================================================================
+
+Decision record §3 example → test name → status:
+
+  | §3 Example                              | Test                                  | Status |
+  |-----------------------------------------|---------------------------------------|--------|
+  | Counter (script + markup)               | counter_complete_e2e_shape            | PASS   |
+  | Props (named: `<Greeting name: ... />`) | named_prop_form / named_prop_lowered  | PASS   |
+  | Events (`on:click`)                     | on_event_handler_emits_on_event_name  | PASS   |
+  | Events w/ modifiers (`on:submit_prevent`)| on_event_with_modifier_emits_base    | PASS   |
+  | Lists (`{#each items as item}`)         | each_block_emits_iter_map_collect     | PASS   |
+  | Lists w/ index (`as item, i`)           | each_block_with_index_emits_enumerate | PASS   |
+  | Conditionals (`{#if}/{:else if}/{:else}`)| if_block_with_else_if_branches       | PASS   |
+  | Fragments (`<> ... </>`)                | fragment_emits_fragment_keyword       | PASS   |
+  | Interpolation (`{user.name}`)           | interpolation_emits_expr_verbatim     | PASS   |
+  | Component composition (`<Layout>...`)   | component_invocation_emits_pascal     | PASS   |
+  | Default `<slot />`                      | slot_emits_children_identifier        | PASS   |
+  | Static class concat (interp in attr)    | expression_attr_emits_expr_verbatim   | PASS   |
+  | HTML comment (`<!-- ... -->`)           | (lexed + parser smoke)                | PASS   |
+  | Buff directive comment (`{# ... #}`)    | (lexed + parser smoke)                | PASS   |
+
+DEFERRED per §6 (NOT implemented; parser rejects with TODO):
+
+  | Construct                                  | Why deferred                |
+  |--------------------------------------------|-----------------------------|
+  | Named slots (`<slot name="x" />`)          | T134+ stretch               |
+  | Keyed each (`{#each xs as x (x.id)}`)      | T134+ stretch               |
+  | Spread props (`{...rest}`)                 | T134+ stretch               |
+  | Two-way binding (`bind={...}`)             | T134+                       |
+  | Await blocks (`{#await ...}`)              | T134+                       |
+  | `{@html}`                                  | T134+ (escape-hatch)        |
+
+Each deferred construct is documented in `crates/buff-lang-ast-rsx/src/lib.rs`
+top-level docs + the relevant lex/parse match arm.
+
+================================================================================
+GATE OUTPUTS (scoped — never --workspace, wgpu segfaults/hangs)
+================================================================================
+
+MSVC env: C:\BuildTools\VC\Tools\MSVC\14.44.35207 (one PowerShell invocation).
+
+--- Gate 1: fmt -----------------------------------------------------------
+
+  $ cargo fmt -p buff-lang-ast-rsx \
+              -p buff-lang-buffhtml-parser \
+              -p buff-lang-codegen-buffhtml --check
+  (no output — exit 0)
+
+--- Gate 2: clippy --all-targets -- -D warnings ---------------------------
+
+  $ cargo clippy -p buff-lang-ast-rsx \
+                 -p buff-lang-buffhtml-parser \
+                 -p buff-lang-codegen-buffhtml --all-targets -- -D warnings
+      Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.59s
+  (exit 0, no warnings, no errors)
+
+--- Gate 3: cargo test -p buff-lang-ast-rsx -------------------------------
+
+      Finished test [unoptimized + debuginfo] target(s) in 0.02s
+       Running unittests src/lib.rs
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured
+
+--- Gate 4: cargo test -p buff-lang-buffhtml-parser -----------------------
+
+      Finished test [unoptimized + debuginfo] target(s) in 0.03s
+       Running unittests src/lib.rs (lexer.rs + parser.rs + error.rs)
+  test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured
+
+  Breakdown: 24 lexer tests (3-mode scanner + brace matching + span tracking)
+             + 23 parser tests (every floor-grammar construct)
+             + 2 error tests
+
+--- Gate 5: cargo test -p buff-lang-codegen-buffhtml ----------------------
+
+      Finished test [unoptimized + debuginfo] target(s) in 0.04s
+       Running unittests src/lib.rs
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured
+
+       Running tests/codegen_tests.rs
+  test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured
+
+  Breakdown: 4 span_map tests + 1 codegen-error test (lib unit)
+             + 25 integration tests covering every floor-grammar construct,
+               the canonical counter e2e shape, span-map lookup, and the
+               re-parse-as-syn::File symmetry check.
+
+================================================================================
+AST SHAPE — what was chosen + why
+================================================================================
+
+A new SIBLING crate (`crates/buff-lang-ast-rsx/`) ships the AST node
+hierarchy. This was the preferred option per the task spec (mirrors the
+decision record §4 "MINOR — add RsxTemplateFile in a new sibling crate"
+rationale): the existing `buff-lang-ast` crate is depended on by
+lexer/parser/types/codegen-rust and any change there would ripple. The new
+crate is depended on ONLY by `buff-lang-buffhtml-parser` and
+`buff-lang-codegen-buffhtml` — zero churn for existing compiler code.
+
+The node hierarchy:
+
+  RsxTemplateFile
+  ├── script: Option<ScriptBlock>   (top-level <script lang="buff"> block)
+  ├── root: Vec<RsxNode>            (body fragment — Svelte-style)
+  └── span: Span
+
+  RsxNode (enum, one per floor-grammar construct):
+  ├── Element(RsxElement)           (HTML element OR child component, flagged)
+  ├── Fragment(RsxFragment)         (<> ... </>)
+  ├── Text(RsxText)                 (raw text run)
+  ├── Interp(RsxInterp)             ({expr} — expr stored as RAW source text)
+  ├── If(RsxIf)                     ({#if}/{:else if}/{:else}{/if})
+  ├── Each(RsxEach)                 ({#each iterable as binding}{/each})
+  ├── Slot(RsxSlot)                 (<slot />)
+  ├── Comment(RsxComment)           (HTML + Buff directive comments unified)
+  └── Script(ScriptBlock)           (only legal at file top level)
+
+Key design decisions:
+
+  1. RsxInterp stores RAW SOURCE TEXT, not a parsed `buff_lang_ast::Expr`.
+     Rationale: T133's job is to PROVE the codegen pipeline works end-to-end
+     (decision record §6 MUST-ship). Delegating `{...}` contents to Buff's
+     existing expression parser is part of T121b's "MAY" stretch list (it
+     requires figuring out how to splice a `buff_lang_ast::Expr` into a Rust
+     `quote!{}` TokenStream — non-trivial, and the codegen today emits the
+     raw expression source verbatim, which is what T121b does anyway). T134
+     will tighten this to use `buff_lang_ast::Expr` for type checking.
+
+  2. RsxElement carries `is_component: bool` (uppercase first char). Codegen
+     branches on this: components emit `Counter { ... }` (Dioxus component
+     invocation), host elements emit `div { ... }` (Dioxus HTML tag).
+
+  3. RsxAttribute is an enum of 5 variants (Literal / Expression / Event /
+     NamedProp / Boolean) so each form gets first-class lowering without
+     type-heuristic dispatch in codegen.
+
+  4. Every node carries `span: Span` (re-exported from `buff_lang_error` for
+     consistency with the existing AST crate). No spanless nodes.
+
+  5. Deferred constructs are NOT in the enum — the parser emits a
+     `BuffHtmlParseError` with a "deferred to T134+" message at lex/parse
+     time, rather than silently dropping them.
+
+================================================================================
+SPAN-MAPPING IMPLEMENTATION APPROACH
+================================================================================
+
+The recommended strategy from the spike (evidence file §"RECOMMENDED
+SPAN-MAPPING STRATEGY") is **post-format text-region reverse mapping**:
+
+  1. AST enrichment (parser): every expression-bearing node carries a
+     `Span` from the lexer (byte offsets + SourceId). DONE — `RsxInterp.span`,
+     `RsxAttributeKind::Expression.expr_span`, `Event.handler_span`,
+     `NamedProp.value_span`, etc.
+
+  2. Codegen emission (lib.rs): while lowering each construct, the codegen
+     calls `SpanMapBuilder::add_anchor(anchor_text, buffhtml_span)` to record
+     a tuple of `(stable_substring, source_position)`. `anchor_text` is
+     typically the first identifier of the expression (e.g. `count` for
+     `{count}`), chosen because prettyplease never modifies identifier
+     characters. DONE.
+
+  3. Post-format scan (span_map.rs `SpanMapBuilder::finalize`): after
+     `prettyplease::unparse(&file)` produces the formatted `.rs` text, the
+     builder walks the text line-by-line, finds each anchor's
+     `(line, col)` via substring search, and assembles a sorted
+     `Vec<(RsLineCol, BuffHtmlSpan)>` — the `SpanMap`. DONE.
+
+  4. Diagnostic remapping (SpanMap::map_span): given a rustc diagnostic
+     `(rs_line, rs_col)` (1-based, matching rustc output), binary-search the
+     sorted anchor table for the largest `(RsLineCol ≤ query)` and return
+     the originating `.buffhtml` span. DONE — `pub fn map_span(line, col)
+     -> Option<Span>`.
+
+The CLI's error_mapper (`crates/buff-lang-cli/src/error_mapper.rs`) is the
+downstream consumer — it will translate rustc's `--> generated.rs:LINE:COL`
+into `--> Counter.buffhtml:mapped_line:mapped_col` using `SpanMap::map_span`.
+That CLI wiring is a separate T133 sub-task (per task brief MUST NOT #4:
+"Do NOT attempt to wire into `buff build`/`buff run`/`buff check`").
+
+The spike's "degradation path" (filename translation + TODO marker) is the
+documented fallback if a particular anchor can't be located in the post-format
+text — see `SpanMapBuilder::finalize` method doc.
+
+Granularity matches the spike's table:
+
+  | Construct                | Anchored?      | map_span resolution   |
+  |--------------------------|----------------|-----------------------|
+  | `{expr}` interpolation   | YES (per-expr) | exact token           |
+  | `attr={expr}`            | YES            | exact token           |
+  | `on:event={closure}`     | YES (handler)  | exact token           |
+  | `<Component />` tag name | YES (tag)      | block-level fallback  |
+  | `{#each items as item}`  | YES (iter)     | iterable-expression   |
+  | Generated boilerplate    | NO             | block-level fallback  |
+
+Test coverage (`span_map.rs` unit tests + `codegen_tests.rs`
+`span_map_map_span_returns_buffhtml_position`):
+  - empty builder → empty map
+  - multiple anchors → nearest-preceding binary search works
+  - missing anchor text silently dropped (graceful degradation)
+  - whitespace-only anchor ignored (no false positives)
+  - out-of-order anchors sorted ascending (dedupe by RsLineCol)
+
+================================================================================
+OPEN QUESTIONS / KNOWN LIMITATIONS
+================================================================================
+
+1. Script block is preserved as `const __BUFF_SCRIPT_SOURCE: &str` — the
+   generated file is a valid `syn::File`, but downstream code does NOT yet
+   invoke `buff-lang-lexer` + `buff-lang-parser` to extract the component
+   logic. That wiring is the CLI integration step (T133 sub-task per task
+   brief MUST NOT #4).
+
+2. `{expr}` interpolation stores RAW source text. This means a Buff
+   expression like `user.name.upper()` is emitted verbatim into the
+   `rsx!{}` TokenStream where Rust will parse it as a Rust expression. Most
+   overlapping syntax works (identifiers, method calls, arithmetic). Divergent
+   syntax (e.g. Buff's `?.` null-conditional, `|>` pipeline) will fail at
+   Rust compile time with a span the side-table can map back. T134 will
+   lower through `buff_lang_ast::Expr` for type-checked codegen.
+
+3. Event modifiers (`on:submit_prevent`) are PARSED and the modifiers list is
+   captured in `RsxAttributeKind::Event.modifiers`, but T133 codegen does NOT
+   yet wire them (no `.prevent_default()` call in the generated closure). The
+   `on_submit` attribute name is emitted with the BASE event name only.
+   Documented as TODO at the `lower_attr` Event arm.
+
+4. `{#each}`'s `{:else}` branch is captured in the AST but NOT lowered — T133
+   codegen emits the iterator alone. Documented as TODO at `lower_each`.
+
+5. `<slot />` always lowers to `{ children }` — it assumes the parent
+   component declares `children: ReadOnlyChildren`. If the user's script block
+   doesn't bind `children`, rustc emits E0425 that the side-table maps to the
+   slot's span.
+
+6. Span-map lookup is bounded by anchor *textual* presence in the formatted
+   `.rs` output. If two interpolations use the same identifier (e.g.
+   `{count}` and `{count + 1}` both anchored on `count`), only the first
+   occurrence in `.rs` text is anchored. Mitigation: future work can anchor
+   on longer token sequences (e.g. `count + 1` for the second one) or use
+   sentinel-comment markers (T134+).
+
+================================================================================
+ACCEPTANCE CRITERIA CHECK
+================================================================================
+
+  | Criterion (from task brief)                                            | Status |
+  |------------------------------------------------------------------------|--------|
+  | 3 new crates (ast-rsx + parser + codegen) at v1.0.0                    | DONE   |
+  | Workspace.members glob includes them                                   | DONE   |
+  | Workspace.dependencies path-deps added                                 | DONE   |
+  | Floor grammar (decision §6 MUST-ship) supported                        | DONE   |
+  | Deferred constructs documented as TODO                                 | DONE   |
+  | T121b-proven codegen emission reused verbatim                          | DONE   |
+  | Post-format span side-table per spike recommendation                   | DONE   |
+  | map_span(rs_line, rs_col) -> Option<Span> public API                   | DONE   |
+  | Unit tests for each floor-grammar construct                            | DONE   |
+  | e2e counter.buffhtml → rsx!{} shape assertion                          | DONE   |
+  | span-map lookup test                                                   | DONE   |
+  | Local gates pass (fmt + clippy + test, scoped -p <crate>)              | DONE   |
+  | buff-lang-* source unmodified                                          | DONE   |
+  | dioxus_t121b.rs unmodified                                             | DONE   |
+  | Evidence file written                                                  | DONE   |
+  | No commit / no boulder.json / no plan edits                            | DONE   |
+
+================================================================================
+END OF EVIDENCE
+================================================================================
