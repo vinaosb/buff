@@ -1343,13 +1343,20 @@ impl RustCodegen {
         for attr in &f.attributes {
             match attr.name.name.as_str() {
                 "test" => attrs.push(syn::parse_quote!(#[test])),
+                // T0-B4: `@feature(name)` is consumed by the pre-filter
+                // pass ([`filter_by_features`]) BEFORE lowering. By the
+                // time we reach here, the fn is enabled — strip the
+                // attribute (no Rust equivalent needed; Cargo handles
+                // feature gating at the dep-resolution layer, not via
+                // per-fn attributes).
+                "feature" => continue,
                 // Unknown attribute — surface as a codegen error so the
                 // user knows it was not applied (rather than silently
                 // dropping it). Future tasks can add recognised attributes
                 // (e.g. `@inline` → `#[inline]`) here.
                 other => {
                     return Err(self.unsupported(&format!(
-                        "unrecognised attribute `@{other}` (only `@test` is supported in v0.5)"
+                        "unrecognised attribute `@{other}` (only `@test`, `@feature` are supported)"
                     )));
                 }
             }

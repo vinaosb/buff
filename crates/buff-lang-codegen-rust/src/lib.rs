@@ -84,6 +84,78 @@ pub fn generate_rust(
     Ok(format(&file))
 }
 
+/// T0-B4: lower a slice of Buff declarations to formatted Rust source,
+/// gated by the resolved feature set.
+///
+/// Decls carrying `@feature(name)` are emitted only when `name` appears
+/// in `features`. Decls without `@feature` are always emitted. Mirrors
+/// Rust's `#[cfg(feature = "...")]` + Go build tags.
+///
+/// Equivalent to pre-filtering `decls` via [`filter_by_features`] then
+/// delegating to [`generate_rust`]. The CLI resolves features from
+/// `buff.toml [features].default` + the `--features` CLI flag, then
+/// calls this entry point.
+///
+/// When `features` is empty, all `@feature(name)` decls are dropped —
+/// this matches Cargo's `--no-default-features` behaviour. To get the
+/// "everything on" behaviour (useful for `buff check` that just wants
+/// to type-check all source), pass the full feature list.
+pub fn generate_rust_with_features(
+    decls: &[buff_lang_ast::Decl],
+    features: &[String],
+) -> Result<String, buff_lang_error::CodegenError> {
+    let filtered = filter_by_features(decls, features);
+    generate_rust(&filtered)
+}
+
+/// T0-B4: filter a slice of declarations by `@feature(name)` gating.
+///
+/// Returns a new `Vec<Decl>` containing only:
+/// - Decls without any `@feature(...)` attribute (always emitted).
+/// - Decls whose `@feature(name)` has `name` in `features`.
+///
+/// Applied to top-level `Decl`s only (the parser does not currently
+/// allow `@feature` on nested items; that's a v1.18+ concern).
+///
+/// Public so `buff check` can re-use the filter to type-check only
+/// the active code paths (mirrors Rust's `cargo check --features ...`).
+pub fn filter_by_features(
+    decls: &[buff_lang_ast::Decl],
+    features: &[String],
+) -> Vec<buff_lang_ast::Decl> {
+    decls
+        .iter()
+        .filter(|decl| decl_feature_satisfied(decl, features))
+        .cloned()
+        .collect()
+}
+
+/// `true` when `decl` carries no `@feature(...)` attribute OR carries
+/// `@feature(name)` with `name` in `features`.
+fn decl_feature_satisfied(decl: &buff_lang_ast::Decl, features: &[String]) -> bool {
+    let attrs = match decl {
+        buff_lang_ast::Decl::FuncDecl(f) => &f.attributes,
+        // Only FuncDecls carry attributes today (T35). When structs/enums
+        // gain attribute support, extend this match.
+        _ => return true,
+    };
+    for attr in attrs {
+        if attr.name.name == "feature" {
+            // @feature(name) — first arg is the feature name. If the
+            // attribute has zero args, treat as a parse error and drop
+            // (defensive — parser should have rejected this earlier).
+            if let Some(name) = attr.args.first() {
+                if !features.iter().any(|f| f == name) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Generate a **test harness** Rust source for `buff test` (T35).
 ///
 /// Produces a self-contained Rust file that, when compiled with `rustc`
