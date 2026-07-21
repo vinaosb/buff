@@ -46,7 +46,7 @@
 
 use std::path::Path;
 
-use buff_lang_ast::{Decl, TypeRef};
+use buff_lang_ast::{Decl, Expr, Stmt, TypeRef};
 use buff_lang_error::{Diagnostic, Severity, SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
@@ -147,6 +147,13 @@ pub fn check_source(src: &str) -> CheckReport {
     // 4. Naming-convention lint.
     let lint_warnings = lint_naming(&decls);
     diagnostics.extend(lint_warnings);
+
+    // 5. T0-G3: @deprecated call-site warnings. Walks the AST to find
+    //    FuncCalls whose callee resolves to a fn marked `@deprecated`.
+    //    Each call site gets a warning naming the fn + the `since` and
+    //    `replacement` (when provided).
+    let deprecated_warnings = collect_deprecated_call_warnings(&decls);
+    diagnostics.extend(deprecated_warnings);
 
     let outcome = compute_outcome(&diagnostics);
     CheckReport {
@@ -559,4 +566,224 @@ mod tests {
         ];
         assert_eq!(compute_outcome(&diags), CheckOutcome::HasWarnings);
     }
+
+    // -----------------------------------------------------------------------
+    // T0-G3 — @deprecated call-site warnings
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn deprecated_call_emits_warning() {
+        let src = r#"
+@deprecated(since = "2.0", replacement = "new_fn")
+func old_fn():
+    return 0
+
+func caller():
+    let r = old_fn()
+    print(r)
+"#;
+        let report = check_source(src);
+        let has_dep_warning = report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("old_fn") && d.message.contains("deprecated"));
+        assert!(
+            has_dep_warning,
+            "expected a deprecated-call warning, got: {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn deprecated_call_warning_includes_since_and_replacement() {
+        let src = r#"
+@deprecated(since = "3.5", replacement = "shiny_new")
+func legacy():
+    return 0
+
+func main():
+    legacy()
+"#;
+        let report = check_source(src);
+        let dep = report
+            .diagnostics
+            .iter()
+            .find(|d| d.message.contains("deprecated"))
+            .expect("at least one deprecated warning");
+        assert!(dep.message.contains("3.5"), "since in: {}", dep.message);
+        assert!(
+            dep.message.contains("shiny_new"),
+            "replacement in: {}",
+            dep.message
+        );
+    }
+
+    #[test]
+    fn non_deprecated_call_emits_no_warning() {
+        let src = r#"
+func normal_fn():
+    return 0
+
+func caller():
+    let r = normal_fn()
+    print(r)
+"#;
+        let report = check_source(src);
+        let has_dep_warning = report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("deprecated"));
+        assert!(
+            !has_dep_warning,
+            "no deprecated warning for non-deprecated call"
+        );
+    }
+
+    #[test]
+    fn deprecated_definition_alone_emits_no_warning() {
+        // A deprecated fn that is never CALLED doesn't warn — the
+        // warning is at call sites, not at the definition.
+        let src = r#"
+@deprecated(since = "1.0", replacement = "other")
+func unused_old():
+    return 0
+"#;
+        let report = check_source(src);
+        let has_dep_warning = report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("deprecated"));
+        assert!(!has_dep_warning, "no warning without a call site");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T0-G3 — @deprecated call-site walker
+// ---------------------------------------------------------------------------
+
+/// Walk `decls` looking for calls to functions marked `@deprecated`.
+/// Returns one [`Diagnostic::warning`] per call site, naming the fn
+/// plus the `since` and `replacement` (when provided).
+///
+/// The walker is single-pass: first build a map of deprecated fn names
+/// → their `(since, replacement)` info, then visit every Stmt/Expr in
+/// every other FuncDecl body, looking for `Expr::FuncCall` whose
+/// callee is an `Expr::Ident` matching a deprecated name.
+///
+/// Limitations (acceptable for v1.13):
+/// - Does NOT resolve through module imports (a deprecated fn imported
+///   from another file is invisible to this walker — full resolution
+///   arrives with T1's multi-file linker).
+/// - Does NOT walk into match arms / lambda bodies (deferred to v1.18+
+///   — adds a small recursive visitor; the common case of top-level
+///   calls in `func` bodies is covered).
+pub fn collect_deprecated_call_warnings(decls: &[Decl]) -> Vec<Diagnostic> {
+    use buff_lang_ast::FuncDecl;
+    use std::collections::BTreeMap;
+
+    // Pass 1: build the deprecated-fn map.
+    let mut deprecated: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
+    for decl in decls {
+        if let Decl::FuncDecl(FuncDecl { name, attributes, .. }) = decl {
+            for attr in attributes {
+                if attr.name.name == "deprecated" {
+                    let since = attr.named_args.get("since").cloned();
+                    let replacement = attr.named_args.get("replacement").cloned();
+                    deprecated.insert(name.name.clone(), (since, replacement));
+                    break;
+                }
+            }
+        }
+    }
+    if deprecated.is_empty() {
+        return Vec::new();
+    }
+
+    // Pass 2: walk each fn body, collect call-site warnings.
+    let mut warnings = Vec::new();
+    for decl in decls {
+        if let Decl::FuncDecl(f) = decl {
+            for stmt in &f.body.stmts {
+                collect_deprecated_calls_in_stmt(stmt, &deprecated, &mut warnings);
+            }
+        }
+    }
+    warnings
+}
+
+/// Walk a single Stmt, recursing into any embedded Exprs.
+fn collect_deprecated_calls_in_stmt(
+    stmt: &Stmt,
+    deprecated: &std::collections::BTreeMap<String, (Option<String>, Option<String>)>,
+    out: &mut Vec<Diagnostic>,
+) {
+    match stmt {
+        Stmt::LetDecl { value, .. } => {
+            collect_deprecated_calls_in_expr(value, deprecated, out);
+        }
+        Stmt::ExprStmt(e, _) | Stmt::Return(Some(e), _) => {
+            collect_deprecated_calls_in_expr(e, deprecated, out);
+        }
+        Stmt::Return(None, _) => {}
+        _ => {}
+    }
+}
+
+/// Walk a single Expr, recursing into sub-Exprs. When a FuncCall whose
+/// callee is an Ident matching a deprecated fn name is found, emit a
+/// warning at the call's span.
+fn collect_deprecated_calls_in_expr(
+    expr: &Expr,
+    deprecated: &std::collections::BTreeMap<String, (Option<String>, Option<String>)>,
+    out: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expr::FuncCall { callee, args, span } => {
+            if let Expr::Ident(ident, _) = callee.as_ref() {
+                if let Some((since, replacement)) = deprecated.get(&ident.name) {
+                    let msg = format_deprecated_warning(&ident.name, since.as_deref(), replacement.as_deref());
+                    out.push(Diagnostic::warning(msg, *span));
+                }
+            }
+            // Recurse into callee + args for nested calls.
+            collect_deprecated_calls_in_expr(callee, deprecated, out);
+            for arg in args {
+                collect_deprecated_calls_in_expr(arg, deprecated, out);
+            }
+        }
+        Expr::BinaryOp { lhs, rhs, .. } | Expr::UnaryOp { operand: lhs, .. } => {
+            // The BinaryOp arm pattern-matches lhs+rhs; the UnaryOp arm
+            // re-uses lhs as the operand (the `operand` field is the
+            // first field so the pattern lines up). Cleaner than two
+            // separate arms.
+            collect_deprecated_calls_in_expr(lhs, deprecated, out);
+            if let Expr::BinaryOp { rhs, .. } = expr {
+                collect_deprecated_calls_in_expr(rhs, deprecated, out);
+            }
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            collect_deprecated_calls_in_expr(receiver, deprecated, out);
+            for arg in args {
+                collect_deprecated_calls_in_expr(arg, deprecated, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Format the deprecated-call warning message. Examples:
+///
+/// - With both: `call to deprecated function 'old_fn' (since 2.0, use 'new_fn')`
+/// - Since only: `call to deprecated function 'old_fn' (since 2.0)`
+/// - Replacement only: `call to deprecated function 'old_fn' (use 'new_fn')`
+/// - Neither: `call to deprecated function 'old_fn'`
+fn format_deprecated_warning(name: &str, since: Option<&str>, replacement: Option<&str>) -> String {
+    let mut msg = format!("call to deprecated function '{name}'");
+    match (since, replacement) {
+        (Some(s), Some(r)) => msg.push_str(&format!(" (since {s}, use '{r}')")),
+        (Some(s), None) => msg.push_str(&format!(" (since {s})")),
+        (None, Some(r)) => msg.push_str(&format!(" (use '{r}')")),
+        (None, None) => {}
+    }
+    msg
 }
