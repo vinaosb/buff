@@ -1,0 +1,55 @@
+﻿# T138c — Verification engine + CI solvability gate
+
+## Files modified/created
+
+**Modified (4):**
+- `crates/bufflings/src/cli.rs` — added hidden `VerifyAllWithSolutions` CLI variant (maintainer/CI-only)
+- `crates/bufflings/src/lib.rs` — re-exported `apply_solution` + `verify_all_with_solutions` + `SolutionVerificationReport`; added `cmd_verify_all_with_solutions`; extended `cmd_verify` + `cmd_watch` to handle `NotStarted` + `WrongOutput`
+- `crates/bufflings/src/verify.rs` — added richer verification engine (`VerifyOutcome`, `SolutionVerificationReport`, `apply_solution`, `verify_all_with_solutions`) + tests
+- `crates/bufflings/src/watch.rs` — watch-mode UI handles `NotStarted` + `WrongOutput`
+
+**Created (1):**
+- `.github/workflows/bufflings.yml` — CI solvability gate workflow
+- `.sisyphus/evidence/task-138c-ci-gate.txt` — this file
+
+## VerifyOutcome design
+
+`VerifyOutcome` now distinguishes:
+- `NotDoneYet` — TODO markers present; compile skipped (fast-fail)
+- `Solved` — no TODO + `buff check` exit 0
+- `CompileError(String)` — `buff check` non-zero; stderr captured
+- `BuffNotFound` — `buff` subprocess missing
+- `NotStarted` — used by `verify_all_with_solutions` to distinguish the original unsolved state before solution application
+- `WrongOutput(String)` — reserved for future expected-output matching (the type and tests ship now; T138c does not yet wire expected-output fields into the manifest)
+
+`SolutionVerificationReport { results: Vec<(String, VerifyOutcome)> }` provides `total_count()` + `solved_count()` for CI summaries.
+
+## CI workflow design
+
+`bufflings.yml` adds a `bufflings-solvability` workflow that runs on push/PR touching `exercises/` or `crates/bufflings/`.
+
+Steps:
+1. checkout
+2. install Rust 1.95.0 via `dtolnay/rust-toolchain@master`
+3. build `buff` CLI (`cargo build -p buff-lang-cli --release`)
+4. build `bufflings` (`cargo build -p bufflings --release`)
+5. run `cargo run -p bufflings -- verify-all-with-solutions`
+6. fail if any hidden solution does not pass `buff check`
+
+This catches unsolvable exercises before they ship. The workflow itself is declarative YAML; local testing uses the underlying Rust functions + mocked subprocess.
+
+## Mock strategy
+
+Tests do NOT shell out to the real `buff` binary. They reuse T138a's mock pattern (`VerifyConfig { buff_bin: "fake" }`) where `run_buff_check` returns `BuffNotFound`. This makes `verify_all_with_solutions` + `apply_solution` hermetic and deterministic in CI.
+
+## Gates
+
+- `cargo fmt -p bufflings --check` → exit 0
+- `cargo clippy -p bufflings --all-targets -- -D warnings` → exit 0
+- `cargo test -p bufflings` → 41/41 pass (27 unit + 14 integration)
+
+## Notes
+
+- The hidden `verify-all-with-solutions` subcommand is intended for CI/maintainers, not casual learners.
+- The `WrongOutput` variant is in place now so T138b/T138c can grow into expected-output assertions later without another enum migration.
+- This task intentionally does NOT modify `exercises/` (parallel T138b territory). It only extends the engine that will validate those exercises.

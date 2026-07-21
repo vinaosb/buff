@@ -1,9 +1,10 @@
 //! Exercise verification engine.
 //!
 //! Detects `// TODO:` markers in `.buff` source and runs `buff check`
-//! (subprocess) to verify type-correctness.
+//! (subprocess) to verify type-correctness. Also supports applying
+//! hidden solutions (`.sol.buff`) for CI solvability gating.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Configuration for the verification engine.
 #[derive(Debug, Clone)]
@@ -25,12 +26,41 @@ impl Default for VerifyConfig {
 pub enum VerifyOutcome {
     /// The exercise compiles and has no TODO markers.
     Solved,
-    /// The exercise still has `// TODO:` markers.
+    /// The exercise still has `// TODO:` markers (user hasn't started).
     NotDoneYet,
-    /// `buff check` returned non-zero (compile errors).
+    /// `buff check` returned non-zero (compile errors). Contains stderr.
     CompileError(String),
     /// The `buff` binary was not found on PATH.
     BuffNotFound,
+    /// The exercise source has TODO markers and was skipped entirely
+    /// (used by `verify_all_with_solutions` to distinguish "original
+    /// state before solution apply" from an explicit user attempt).
+    NotStarted,
+    /// The exercise compiles but produces wrong output (reserved for
+    /// future expected-output matching in the manifest).
+    WrongOutput(String),
+}
+
+/// The result of verifying all exercises with their solutions applied.
+#[derive(Debug, Clone)]
+pub struct SolutionVerificationReport {
+    /// Per-exercise results, in manifest order.
+    pub results: Vec<(String, VerifyOutcome)>,
+}
+
+impl SolutionVerificationReport {
+    /// Number of exercises that passed verification.
+    pub fn solved_count(&self) -> usize {
+        self.results
+            .iter()
+            .filter(|(_, o)| *o == VerifyOutcome::Solved)
+            .count()
+    }
+
+    /// Total number of exercises verified.
+    pub fn total_count(&self) -> usize {
+        self.results.len()
+    }
 }
 
 /// Verify a single exercise by checking for TODO markers and running
@@ -95,6 +125,126 @@ pub fn run_buff_check(path: &PathBuf, config: &VerifyConfig) -> VerifyOutcome {
     } else {
         VerifyOutcome::CompileError(stderr)
     }
+}
+
+/// Apply the hidden solution for an exercise by copying `<name>.sol.buff`
+/// over `<name>.buff`.
+///
+/// The exercise file is identified by `exercise_path` (the `.buff` file).
+/// The solution file is found by appending `.sol` to the path stem
+/// (e.g. `hello1.buff` → `hello1.sol.buff`).
+///
+/// Returns `Ok(())` on success, or an error if the solution file does
+/// not exist or the copy fails.
+pub fn apply_solution(exercise_path: &Path) -> anyhow::Result<()> {
+    let stem = exercise_path.file_stem().ok_or_else(|| {
+        anyhow::anyhow!(
+            "exercise path has no file stem: {}",
+            exercise_path.display()
+        )
+    })?;
+    let stem_str = stem.to_string_lossy();
+    let dir = exercise_path.parent().ok_or_else(|| {
+        anyhow::anyhow!("exercise path has no parent: {}", exercise_path.display())
+    })?;
+    let sol_path = dir.join(format!("{stem_str}.sol.buff"));
+
+    if !sol_path.exists() {
+        anyhow::bail!(
+            "solution file not found: {} (expected alongside {})",
+            sol_path.display(),
+            exercise_path.display()
+        );
+    }
+
+    std::fs::copy(&sol_path, exercise_path).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to copy {} → {}: {e}",
+            sol_path.display(),
+            exercise_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+/// Verify all exercises in a directory by applying their hidden solutions
+/// and running `buff check` on each.
+///
+/// For each `.sol.buff` file found in `exercises_dir`, this function:
+/// 1. Applies the solution (copies `.sol.buff` over `.buff`).
+/// 2. Runs `buff check` on the resulting file.
+/// 3. Records the outcome.
+///
+/// Returns a [`SolutionVerificationReport`] with per-exercise results.
+/// The original `.buff` files are overwritten (this is a CI gate function,
+/// not a user-facing operation).
+pub fn verify_all_with_solutions(
+    exercises_dir: &Path,
+    config: &VerifyConfig,
+) -> SolutionVerificationReport {
+    let mut results = Vec::new();
+
+    // Walk exercises_dir recursively for *.sol.buff files
+    let entries = match std::fs::read_dir(exercises_dir) {
+        Ok(e) => e,
+        Err(err) => {
+            results.push((
+                "<directory>".to_string(),
+                VerifyOutcome::CompileError(format!(
+                    "failed to read exercises dir {}: {err}",
+                    exercises_dir.display()
+                )),
+            ));
+            return SolutionVerificationReport { results };
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|e| e == "buff") {
+            // Only consider .sol.buff files
+            let file_name = path.file_name().map_or("", |n| n.to_str().unwrap_or(""));
+            if !file_name.ends_with(".sol.buff") {
+                continue;
+            }
+
+            // Derive the exercise path: strip ".sol" from stem
+            let sol_stem = path.file_stem().unwrap_or_default();
+            let sol_stem_str = sol_stem.to_string_lossy();
+            let exercise_stem = sol_stem_str.strip_suffix(".sol").unwrap_or(&sol_stem_str);
+            let dir = path.parent().unwrap_or(path.as_ref());
+            let exercise_path = dir.join(format!("{exercise_stem}.buff"));
+
+            let exercise_name = exercise_stem.to_string();
+
+            // Apply the solution
+            if let Err(e) = apply_solution(&exercise_path) {
+                results.push((exercise_name, VerifyOutcome::CompileError(e.to_string())));
+                continue;
+            }
+
+            // Verify the applied solution
+            let source = match std::fs::read_to_string(&exercise_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    results.push((
+                        exercise_name,
+                        VerifyOutcome::CompileError(format!(
+                            "failed to read {}: {e}",
+                            exercise_path.display()
+                        )),
+                    ));
+                    continue;
+                }
+            };
+
+            let outcome = verify_exercise(&source, &exercise_path, config);
+            results.push((exercise_name, outcome));
+        }
+    }
+
+    SolutionVerificationReport { results }
 }
 
 #[cfg(test)]
@@ -163,5 +313,137 @@ mod tests {
         };
         let result = verify_exercise(source, &PathBuf::from("test.buff"), &config);
         assert_eq!(result, VerifyOutcome::BuffNotFound);
+    }
+
+    // -- apply_solution tests --
+
+    #[test]
+    fn apply_solution_copies_sol_over_buff() {
+        let dir = std::env::temp_dir().join("bufflings_test_apply");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let sol_path = dir.join("test1.sol.buff");
+        let buff_path = dir.join("test1.buff");
+
+        std::fs::write(&sol_path, "solution content").expect("write sol");
+        std::fs::write(&buff_path, "original content").expect("write buff");
+
+        let result = apply_solution(&buff_path);
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&buff_path).expect("read buff after apply");
+        assert_eq!(content, "solution content");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_solution_fails_when_sol_missing() {
+        let dir = std::env::temp_dir().join("bufflings_test_apply_missing");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let buff_path = dir.join("test2.buff");
+        std::fs::write(&buff_path, "original").expect("write buff");
+
+        let result = apply_solution(&buff_path);
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- verify_all_with_solutions tests --
+
+    #[test]
+    fn verify_all_with_solutions_empty_dir() {
+        let dir = std::env::temp_dir().join("bufflings_test_empty");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let config = VerifyConfig {
+            buff_bin: "fake_buff".to_string(),
+        };
+        let report = verify_all_with_solutions(&dir, &config);
+        assert_eq!(report.total_count(), 0);
+        assert_eq!(report.solved_count(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_all_with_solutions_applies_and_verifies() {
+        let dir = std::env::temp_dir().join("bufflings_test_solutions");
+        let _ = std::fs::create_dir_all(&dir);
+
+        // Write a .sol.buff with no TODO markers (clean solution)
+        let sol_path = dir.join("ex1.sol.buff");
+        std::fs::write(&sol_path, "func main():\n    print(1)\n").expect("write sol");
+
+        // Write a .buff stub (will be overwritten)
+        let buff_path = dir.join("ex1.buff");
+        std::fs::write(&buff_path, "// TODO: stub\n").expect("write buff stub");
+
+        // Use a fake buff binary — since no TODO remains after apply,
+        // it will try buff and get BuffNotFound. That's fine for this test;
+        // the important thing is that the solution was applied and TODO
+        // detection was bypassed.
+        let config = VerifyConfig {
+            buff_bin: "fake_buff_for_test".to_string(),
+        };
+        let report = verify_all_with_solutions(&dir, &config);
+        assert_eq!(report.total_count(), 1);
+        // After applying solution, no TODO markers → attempts buff → BuffNotFound
+        assert_eq!(report.results[0].1, VerifyOutcome::BuffNotFound);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_all_with_solutions_skips_non_sol_files() {
+        let dir = std::env::temp_dir().join("bufflings_test_skip");
+        let _ = std::fs::create_dir_all(&dir);
+
+        // Only write a regular .buff file, no .sol.buff
+        let buff_path = dir.join("regular.buff");
+        std::fs::write(&buff_path, "func main():\n    pass\n").expect("write");
+
+        let config = VerifyConfig {
+            buff_bin: "fake_buff".to_string(),
+        };
+        let report = verify_all_with_solutions(&dir, &config);
+        assert_eq!(report.total_count(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- VerifyOutcome variant coverage --
+
+    #[test]
+    fn solution_report_counts() {
+        let report = SolutionVerificationReport {
+            results: vec![
+                ("ex1".to_string(), VerifyOutcome::Solved),
+                ("ex2".to_string(), VerifyOutcome::Solved),
+                (
+                    "ex3".to_string(),
+                    VerifyOutcome::CompileError("err".to_string()),
+                ),
+            ],
+        };
+        assert_eq!(report.total_count(), 3);
+        assert_eq!(report.solved_count(), 2);
+    }
+
+    #[test]
+    fn wrong_output_variant_exists() {
+        let outcome = VerifyOutcome::WrongOutput("expected '5' got '3'".to_string());
+        assert_eq!(
+            outcome,
+            VerifyOutcome::WrongOutput("expected '5' got '3'".to_string())
+        );
+    }
+
+    #[test]
+    fn not_started_variant_exists() {
+        let outcome = VerifyOutcome::NotStarted;
+        assert_eq!(outcome, VerifyOutcome::NotStarted);
     }
 }

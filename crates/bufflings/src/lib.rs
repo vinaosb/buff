@@ -33,8 +33,9 @@ pub use cli::{Cli, Command};
 pub use exercise::load_manifest;
 pub use exercise::{ExerciseEntry, ExerciseManifest, TopicGroup};
 pub use progress::ProgressStore;
+pub use verify::{apply_solution, verify_all_with_solutions};
 pub use verify::{contains_todo, run_buff_check, verify_exercise};
-pub use verify::{VerifyConfig, VerifyOutcome};
+pub use verify::{SolutionVerificationReport, VerifyConfig, VerifyOutcome};
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -54,6 +55,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Progress => cmd_progress(&manifest, &progress),
         Command::Watch => cmd_watch(&manifest, &mut progress, &exercises_dir),
         Command::Hint { name } => cmd_hint(&manifest, &name),
+        Command::VerifyAllWithSolutions => cmd_verify_all_with_solutions(&manifest, &exercises_dir),
     }
 }
 
@@ -170,6 +172,15 @@ fn cmd_verify(
                 println!("  `buff` CLI not found. Install it to verify exercises.");
                 any_failed = true;
             }
+            VerifyOutcome::NotStarted => {
+                println!("[NOT STARTED] {}", entry.name);
+                any_failed = true;
+            }
+            VerifyOutcome::WrongOutput(msg) => {
+                println!("[WRONG OUTPUT] {}", entry.name);
+                println!("  {msg}");
+                any_failed = true;
+            }
         }
     }
 
@@ -206,6 +217,55 @@ fn cmd_watch(
         .enable_all()
         .build()?;
     rt.block_on(async { watch::run_watch(manifest, progress, exercises_dir).await })
+}
+
+fn cmd_verify_all_with_solutions(
+    _manifest: &ExerciseManifest,
+    exercises_dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    let config = VerifyConfig::default();
+    let report = verify::verify_all_with_solutions(exercises_dir, &config);
+
+    let solved = report.solved_count();
+    let total = report.total_count();
+    println!("Solvability gate: {solved}/{total} solutions pass buff check");
+
+    let mut any_failed = false;
+    for (name, outcome) in &report.results {
+        match outcome {
+            VerifyOutcome::Solved => {
+                println!("  [OK] {name}");
+            }
+            VerifyOutcome::CompileError(msg) => {
+                println!("  [FAIL] {name}");
+                for line in msg.lines().take(10) {
+                    println!("    {line}");
+                }
+                any_failed = true;
+            }
+            VerifyOutcome::BuffNotFound => {
+                println!("  [SKIP] {name} (buff binary not found)");
+                any_failed = true;
+            }
+            VerifyOutcome::NotDoneYet => {
+                println!("  [FAIL] {name} (still contains TODO after solution apply)");
+                any_failed = true;
+            }
+            VerifyOutcome::NotStarted => {
+                println!("  [FAIL] {name} (not started)");
+                any_failed = true;
+            }
+            VerifyOutcome::WrongOutput(msg) => {
+                println!("  [FAIL] {name} (wrong output: {msg})");
+                any_failed = true;
+            }
+        }
+    }
+
+    if any_failed {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 fn cmd_hint(manifest: &ExerciseManifest, name: &str) -> anyhow::Result<()> {

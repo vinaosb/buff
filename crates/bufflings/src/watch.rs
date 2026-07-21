@@ -88,6 +88,13 @@ pub async fn run_watch(
                     println!("[SKIP] {}", entry.name);
                     println!("  `buff` CLI not found. Install it to verify exercises.");
                 }
+                verify::VerifyOutcome::NotStarted => {
+                    println!("\x1B[33m[NOT STARTED]\x1B[0m {}", entry.name);
+                }
+                verify::VerifyOutcome::WrongOutput(msg) => {
+                    println!("\x1B[31m[WRONG OUTPUT]\x1B[0m {}", entry.name);
+                    println!("  {msg}");
+                }
             }
         }
     }

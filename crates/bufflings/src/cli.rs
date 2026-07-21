@@ -51,4 +51,9 @@ pub enum Command {
         /// The exercise name.
         name: String,
     },
+
+    /// Apply all hidden solutions and verify every exercise compiles.
+    /// Intended for CI / maintainers, not casual users.
+    #[command(hide = true)]
+    VerifyAllWithSolutions,
 }
