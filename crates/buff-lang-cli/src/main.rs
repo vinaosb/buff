@@ -44,6 +44,16 @@ fn main() -> Result<()> {
             buff_lang_cli::commands::new::run(&name, kind)
         }
         Command::Init => buff_lang_cli::commands::init::run(),
+        Command::Gen { kind, name } => {
+            let k = buff_lang_cli::commands::gen::kind_from_str(&kind)
+                .ok_or_else(|| {
+                    anyhow::Error::msg(format!(
+                        "unknown generator kind `{kind}` \
+                         (valid: module, test, example)"
+                    ))
+                })?;
+            buff_lang_cli::commands::gen::run(k, &name)
+        }
         Command::Test { file, pattern } => {
             buff_lang_cli::commands::test::run(file.as_deref(), pattern.as_deref())
         }

@@ -147,6 +147,32 @@ pub enum Command {
         template: Option<String>,
     },
 
+    /// `buff gen <kind> <name>` — generate boilerplate files (T0-C2).
+    ///
+    /// Three generators reduce the manual steps of starting a new
+    /// module / test / example:
+    ///
+    /// - `buff gen module <name>` — creates `src/modules/<name>.buff`
+    ///   (with `export func placeholder()`) plus
+    ///   `tests/unit/test_<name>.buff` (with a `@test` stub that imports
+    ///   the new module).
+    /// - `buff gen test <name>` — creates `tests/unit/<name>.buff` with
+    ///   a single `@test` stub fn.
+    /// - `buff gen example <name>` — creates `examples/<name>.buff` with
+    ///   a `func main():` stub.
+    ///
+    /// Refuses to clobber existing files. Parent directories are created
+    /// on demand.
+    Gen {
+        /// Generator kind: `module`, `test`, or `example`.
+        #[arg(value_name = "KIND")]
+        kind: String,
+
+        /// Name of the artifact (must be a valid Buff identifier).
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
     /// Initialize a Buff project in the current directory.
     Init,
 

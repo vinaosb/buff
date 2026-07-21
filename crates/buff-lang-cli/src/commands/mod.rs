@@ -11,6 +11,7 @@ pub mod coverage;
 pub mod debug;
 pub mod deps;
 pub mod fmt;
+pub mod gen;
 pub mod init;
 pub mod install;
 pub mod jupyter;
