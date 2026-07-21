@@ -2103,7 +2103,8 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 >
 > **Recommendation**: Resolve syntax via a design spike BEFORE T133. This is the load-bearing decision.
 
-- [ ] **T133: RSX-for-Buff parser/lexer extension** [ultrabrain]
+- [x] **T133: RSX-for-Buff parser/lexer extension** [ultrabrain]
+  - **PIVOTED to Option C (.buffhtml SFC) per decision record `e1a5e74`** — the original "parser/lexer extension" approach (Options A/B) was rejected by the Oracle design spike (`.sisyphus/decisions/rsx-syntax-feasibility.md`) because it would have required rewriting Buff's hand-rolled lexer/parser. Option C confines all UI syntax to a NEW file format (`.buffhtml`, Svelte/Vue-style SFC) with its own grammar — ZERO changes to buff-lang-{lexer,parser,ast,codegen-rust}. This is the one documented v1.9 language-change exception, scoped to additive file-format work only.
 
   **What to do**:
   - Extend lexer to recognize markup tokens (`<`, `>`, `/`, attributes)
@@ -2120,13 +2121,25 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **References**: `crates/buff-lang-lexer/`, `crates/buff-lang-parser/`, `crates/buff-lang-ast/`, `crates/buff-lang-codegen-rust/`. Dioxus RSX macro source.
 
-  **Acceptance Criteria**:
-  - [ ] RSX syntax parses without breaking existing Buff code
-  - [ ] RSX AST nodes added, snapshot tests stable
-  - [ ] Codegen produces correct Dioxus calls
-  - [ ] tree-sitter highlights RSX
-  - [ ] LSP provides diagnostics in RSX blocks
-  - [ ] v1.0 fixture program compiles unchanged (backward compat)
+  **Acceptance Criteria** (re-mapped under Option C pivot; original criteria assumed compiler changes that did NOT happen):
+  - [x] RSX syntax parses without breaking existing Buff code → `.buffhtml` parser (buff-lang-buffhtml-parser, 49 tests green) parses floor grammar; existing `.buff` path UNTOUCHED (zero compiler churn — backward compat by construction).
+  - [x] RSX AST nodes added, snapshot tests stable → `RsxTemplateFile` + 9 RsxNode variants in NEW sibling crate `buff-lang-ast-rsx` (2 tests); no change to existing `buff-lang-ast` variants.
+  - [x] Codegen produces correct Dioxus calls → `buff-lang-codegen-buffhtml` emits `rsx!{}` TokenStream via T121b-proven syn/quote/prettyplease path (30 tests); CLI `pipeline::compile_buffhtml_to_rust` + `inline_script_block` wire end-to-end.
+  - [ ] tree-sitter highlights RSX → **DEFERRED to T134+** per decision record §6. v1.9 ships TextMate grammar only (`editors/vscode/syntaxes/buffhtml.tmLanguage.json`, covers floor grammar).
+  - [ ] LSP provides diagnostics in RSX blocks → **DEFERRED to T134+** per decision record §6. v1.9 ships no `.buffhtml` language server; rustc diagnostics surface via `error_mapper::translate_buffhtml_rustc_errors` (filename + SpanMap-aware line:col reverse-mapping, VERDICT PASS spike `52e59aa`).
+  - [x] v1.0 fixture program compiles unchanged (backward compat) → GUARANTEED by Option C architecture (zero compiler changes; `.buff` pipeline untouched). `cargo test -p buff-lang-cli --lib` 230 pass, no regressions.
+  - **Floor shipped per decision record §6** (commits `52e59aa` week-1 setup + `1d879f3` core crates + `dad8578` CLI integration):
+    - `.buffhtml` file format spec (frozen floor grammar: elements, attributes, `{}` interpolation, `on:event` handlers, `{#each}`/`{:else}`/`{/each}`, `{#if}`/`{:else if}`/`{:else}`/`{/if}`, fragments `<>...</>`, component composition, default `<slot />`, comments).
+    - `crates/buff-lang-buffhtml-parser/` (3-mode lexer + recursive-descent).
+    - `crates/buff-lang-codegen-buffhtml/` (template AST → `rsx!{}` via T121b path + post-format span side-table per spike).
+    - `crates/buff-lang-ast-rsx/` (pure-data AST, sibling crate).
+    - `buff build` / `buff run` / `buff check` recognize `.buffhtml` in `src/` (sibling path, NOT replacement).
+    - TextMate grammar for `.buffhtml` (basic highlighting; no LSP).
+    - 2 example apps: `examples/counter.buffhtml` + `examples/todo_list.buffhtml`.
+    - e2e wasm32 render recipe at `.sisyphus/evidence/task-133-e2e-render-USER-ACTION.txt` (USER ACTION; build-code+local-tests-only mode).
+  - **Live browser render + screenshot (task-133-rsx-render.png) = USER ACTION** — full PowerShell recipe in evidence; T121b/T130 precedent proves the reactive pipeline with identical dioxus 0.7.x + wasm-bindgen 0.2.126.
+  - **Deferred to T134+** (per decision record §6): named slots, keyed each, spread props, two-way binding, await blocks, `{@html}`, full `.buffhtml` LSP, tree-sitter grammar, VSCode extension beyond TextMate, prop type pre-checker, cross-file LSP features, full Buff-syntax script-block transpilation (`component`/`state`/`fn` shorthand — T133 ships Rust-in-script-block pass-through).
+  - **Known parser limitation** (documented in `task-133-cli-integration.txt`): parser rejects ANY `(` inside `{#each}` directive body (treats as keyed-each `(key)` form). Examples use plain Vec bindings instead of `.read()` method calls. Fix in T134.
 
   **QA Scenarios**:
   ```
