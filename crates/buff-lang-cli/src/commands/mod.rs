@@ -19,6 +19,7 @@ pub mod publish;
 pub mod registry;
 pub mod repl;
 pub mod run;
+pub mod ssr;
 pub mod test;
 pub mod ui_build;
 pub mod ui_dev;

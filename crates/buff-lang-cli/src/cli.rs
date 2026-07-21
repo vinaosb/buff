@@ -377,6 +377,45 @@ pub enum Command {
         #[command(subcommand)]
         cmd: UiCmd,
     },
+
+    /// `buff ssr <FILE>` — Server-Side Render a `.buffhtml` Single-File
+    /// Component to HTML on stdout (T135).
+    ///
+    /// Parses + codegens the `.buffhtml` via the existing T133 path
+    /// (`pipeline::compile_buffhtml_to_rust`), wraps the generated
+    /// component fn in an SSR driver `fn main()` that calls
+    /// `buff_ui_dioxus::render_to_string(ComponentFn)`, compiles via
+    /// `rustc` (host target — no `wasm32-unknown-unknown`), runs the
+    /// binary, and forwards the rendered HTML to stdout (or
+    /// `--output <file>` when provided).
+    ///
+    /// **Event handlers are ignored during SSR** (no user to click);
+    /// only the initial state of any `use_signal` is rendered. To
+    /// re-attach interactivity in the browser, ship the same component
+    /// compiled to wasm32 + call `dioxus::launch` against the SSR
+    /// output (hydration recipe at
+    /// `.sisyphus/evidence/task-135-hydration-USER-ACTION.txt`).
+    ///
+    /// Mobile (iOS/Android) is documented as a USER ACTION recipe at
+    /// `.sisyphus/evidence/task-135-mobile-USER-ACTION.txt`.
+    Ssr {
+        /// Input `.buffhtml` Single-File Component source file.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Output HTML path (default: stdout). When provided, the
+        /// rendered HTML is written to `<OUTPUT>` (overwriting if it
+        /// exists) instead of being printed to stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Build the SSR driver binary with release optimizations
+        /// (`-C opt-level=3 -C lto=fat -C codegen-units=1`). Off by
+        /// default — debug compiles are faster, which usually matters
+        /// more for SSR's tight edit-render loop than runtime speed.
+        #[arg(long)]
+        release: bool,
+    },
 }
 
 /// Subcommands of `buff jupyter`.

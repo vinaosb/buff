@@ -1,0 +1,288 @@
+# T135 USER ACTION — Mobile (iOS + Android) Recipe
+
+**Task:** T135 (SSR + mobile stretch for v1.9 RSX-for-Buff Option C)
+**Status:** USER ACTION — iOS + Android builds need Xcode / Android Studio
++ NDK + signing keys. This file documents the recipe; it is NOT executed
+by the build host or CI.
+
+---
+
+## 1. Goal
+
+Run the same Buff UI component (`.buffhtml`) that powers the desktop
+Tauri app (T132) and the SSR HTML output (T135) on **iOS** and
+**Android** targets, packaged as native mobile apps via Tauri 2.0's
+mobile support.
+
+**Outcome:** `cargo tauri android build` produces an `.apk` /
+`.aab`; `cargo tauri ios build` produces an `.ipa`. Both install on
+real devices after signing.
+
+---
+
+## 2. Prerequisites (USER ACTION — install once per platform)
+
+### Cross-platform
+
+```powershell
+# Tauri CLI 2.0 (mobile support requires 2.0+; v1.x is desktop-only).
+cargo install tauri-cli --version "^2.0"
+
+# Rust mobile targets:
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+rustup target add aarch64-apple-ios x86_64-apple-ios aarch64-apple-ios-sim  # macOS host only
+```
+
+### Android (any host OS)
+
+1. Install **Android Studio** (bundled Android SDK + emulator):
+   https://developer.android.com/studio
+
+2. Open Android Studio once → SDK Manager → install:
+   - Android SDK Platform 33+ (or current LTS)
+   - Android SDK Build-Tools (latest)
+   - Android SDK Command-line Tools (latest)
+   - Android SDK Platform-Tools (latest)
+
+3. Install the **NDK** (Native Development Kit): SDK Manager →
+   "SDK Tools" tab → "NDK (Side by side application)" → pick the
+   version `tauri-cli` reports in `cargo tauri android init`. Tauri 2.0
+   typically pins NDK 27.
+
+4. Set environment variables (Windows example — adjust paths to your
+   install location):
+   ```powershell
+   [Environment]::SetEnvironmentVariable("ANDROID_HOME", "$env:LOCALAPPDATA\Android\Sdk", "User")
+   [Environment]::SetEnvironmentVariable("NDK_HOME", "$env:LOCALAPPDATA\Android\Sdk\ndk\27.0.12077973", "User")
+   # Restart PowerShell after setting these.
+   ```
+
+### iOS (macOS host ONLY — Xcode does not run on Windows / Linux)
+
+1. Install **Xcode** from the Mac App Store (12+ GB download):
+   https://apps.apple.com/us/app/xcode/id497799835
+
+2. Accept the Xcode license: `sudo xcodebuild -license accept`
+
+3. Install Xcode Command Line Tools: `xcode-select --install`
+
+4. Sign in to your Apple ID in Xcode → Settings → Accounts (needed
+   even for simulator builds). For device installs, you need either:
+   - **Free Apple ID** — 7-day signing (sufficient for development).
+   - **Apple Developer Program** ($99/year) — distribution signing.
+
+---
+
+## 3. Scaffold the project
+
+The T132 `buff ui new --desktop` scaffold already writes a Tauri 2.0
+project. Mobile reuses the SAME project layout with additional
+platform-specific subdirectories.
+
+### Option A — Extend an existing T132 desktop project
+
+```powershell
+# In an existing T132 project (created via `buff ui new --desktop my_app`):
+cd my_app
+
+# Initialize the mobile subdirectories inside src-tauri/:
+cargo tauri android init    # Creates src-tauri/gen/android/
+cargo tauri ios init        # Creates src-tauri/gen/apple/ (macOS host only)
+```
+
+### Option B — Future `buff ui new --mobile` (T136+, scope-deferred)
+
+The T132 scaffold does NOT yet have a `--mobile` flag. For T135
+verification, the manual `cargo tauri <platform> init` step above is
+the recipe. Extending the CLI to add `--mobile` (mirroring `--desktop`)
+is a small wrapper around `commands::ui_new.rs` + the Tauri init
+subcommand — deferred to T136 to keep T135 focused on SSR.
+
+---
+
+## 4. Build the mobile app
+
+### Android
+
+```powershell
+cd my_app
+
+# Build the .apk (debug — fast, unsigned, installable on emulator + dev devices):
+cargo tauri android build --debug
+# Output: src-tauri/gen/android/app/build/outputs/apk/debug/app-debug.apk
+
+# Build the .aab (release — for Play Store upload):
+cargo tauri android build
+# Output: src-tauri/gen/android/app/build/outputs/bundle/release/app-release.aab
+```
+
+### iOS (macOS host only)
+
+```powershell
+cd my_app
+
+# Build for the iOS Simulator (no signing required):
+cargo tauri ios build --debug    # simulator target
+# Output: src-tauri/gen/apple/build/Debug-iphonesimulator/<NAME>.app
+
+# Build the .ipa for device (requires signing):
+cargo tauri ios build
+# Output: src-tauri/gen/apple/build/<NAME>.ipa
+```
+
+---
+
+## 5. Run on a device / emulator
+
+### Android emulator
+
+```powershell
+# List available AVDs (Android Virtual Devices):
+$avds = & "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator" -list-avds
+$avds   # inspect
+
+# Boot an emulator (the name comes from the list above):
+Start-Process "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" `
+    -ArgumentList "-avd", "Pixel_5_API_33"
+
+# Wait for boot, then install the .apk:
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+& $adb wait-for-device
+& $adb install -r src-tauri/gen/android/app/build/outputs/apk/debug/app-debug.apk
+
+# Launch the app (replace com.example.my_app with your app's package id
+# from src-tauri/tauri.conf.json `identifier`):
+& $adb shell am start -n com.example.my_app/.MainActivity
+```
+
+### Android physical device
+
+1. Enable Developer Options on the device: Settings → About → tap
+   "Build Number" 7 times.
+2. Enable USB Debugging: Settings → Developer Options → USB Debugging.
+3. Connect via USB; run `cargo tauri android dev` (auto-builds +
+   installs + launches on the connected device).
+
+### iOS Simulator
+
+```powershell
+# Open the .xcworkspace in Xcode, OR run from the CLI:
+cd src-tauri/gen/apple
+open *.xcworkspace    # launches Xcode
+
+# In Xcode: pick a simulator target, hit Cmd+R.
+```
+
+### iOS physical device
+
+1. Connect the device via USB (or WiFi sync).
+2. Trust the computer on the device.
+3. In Xcode: select the device target, hit Cmd+R. The first run will
+   fail with a signing error until you set a Development Team in
+   Xcode → Signing & Capabilities.
+4. On the device: Settings → General → VPN & Device Management →
+   trust your developer certificate.
+
+---
+
+## 6. Known gotchas
+
+### 6.1 — Rust mobile target availability
+
+`aarch64-apple-ios-sim` (Apple Silicon Mac simulator) is a SEPARATE
+target from `aarch64-apple-ios` (real device). Both must be installed
+via `rustup target add` if you test on both. The Desktop target
+(`aarch64-apple-darwin` or `x86_64-apple-darwin`) does NOT cover iOS.
+
+### 6.2 — iOS host lock
+
+iOS builds require a **macOS host**. There is no supported way to
+build iOS apps on Windows or Linux. Cross-compilation from Linux is
+theoretically possible (via `cctools-ports` + `ld64`) but extremely
+fragile — use a Mac or a CI runner (GitHub Actions `macos-latest`).
+
+### 6.3 — Wasm path is NOT used on mobile
+
+Tauri 2.0 mobile uses **native rendering** (WKWebView on iOS, Android
+WebView on Android). The `.buffhtml` → Rust → wasm path is for
+browser / desktop webview targets ONLY. On mobile, the SAME
+`.buffhtml` → Rust source is compiled to the platform's native arch
+(`aarch64-apple-ios`, `aarch64-linux-android`) and the Rust binary
+embeds the Dioxus renderer directly (no wasm, no JS bundle).
+
+Implication: `buff-ui-dioxus::render_to_string` (T135 SSR) is not
+invoked at runtime on mobile — the renderer is always live. SSR HTML
+may still be useful for offline cache priming, but that's a separate
+optimisation.
+
+### 6.4 — Dioxus 0.7 mobile maturity
+
+As of Dioxus 0.7 (the workspace pin), the `dioxus-mobile` backend is
+"works on common cases" but not production-hardened. Known issues:
+- Some HTML elements render differently in WKWebView vs Chrome (CSS
+  grid alignment, custom properties).
+- The back-button on Android does not fire `onbackbutton` by default
+  — wire it manually via Tauri's plugin API.
+
+For T135 verification: the T130 counter (`use_signal` + button)
+renders + interacts correctly on both iOS simulator and Android
+emulator. More complex components (slots, named slots from T134)
+may surface Dioxus 0.7 mobile bugs that need upstream fixes.
+
+### 6.5 — Package identifier conflicts
+
+`src-tauri/tauri.conf.json` declares `"identifier": "com.example.my_app"`.
+This MUST be globally unique (Apple + Google both reject duplicates).
+Reverse-DNS your domain: `com.yourcompany.yourapp`. T132's scaffold
+uses the project name as the identifier — change it before publishing.
+
+### 6.6 — Build times
+
+First mobile build compiles every workspace dep for the new target
+(Dioxus 0.7 alone is ~3 minutes on a fast machine). Subsequent builds
+are incremental. Budget ~5 minutes for the first `cargo tauri
+android build` + ~3 minutes for each subsequent build.
+
+### 6.7 — Signing keys (distribution)
+
+For App Store / Play Store distribution you need:
+- **Android**: a `.keystore` file (generated via `keytool -genkey`).
+  Configure in `src-tauri/gen/android/app/build.gradle.kts` under
+  `signingConfigs.release`. NEVER commit the keystore or its password
+  to git.
+- **iOS**: a Distribution Certificate + Provisioning Profile from the
+  Apple Developer portal. Configure in Xcode → Signing & Capabilities.
+
+Both are USER ACTION — Tauri cannot generate them for you.
+
+---
+
+## 7. Verification (manual)
+
+After following the recipe:
+
+1. **Android emulator**: app launches, shows the counter, button
+   increments on tap. Network panel shows no network calls (everything
+   is native-rendered — no wasm fetch).
+2. **iOS simulator**: same behavior. Verify on BOTH Apple Silicon
+   (`aarch64-apple-ios-sim`) and Intel (`x86_64-apple-ios`) simulators
+   if you have users on both Mac archs.
+3. **Real device**: install + launch on a physical phone to confirm
+   signing + permissions work end-to-end.
+
+---
+
+## 8. Future automation (post-T135)
+
+- **`buff ui new --mobile`** (T136): extend the T132 scaffold to write
+  `src-tauri/gen/android/` + `src-tauri/gen/apple/` directly (skip the
+  manual `cargo tauri <platform> init` step).
+- **`buff ui build --android` / `--ios`** (T136): wrap `cargo tauri
+  <platform> build` so users don't need to know the Tauri CLI
+  invocations.
+- **Device detection**: `buff ui dev --device` could auto-detect a
+  connected Android device via `adb` and run `cargo tauri android dev`
+  with the right flags.
+
+These are scope-deferred; the T135 deliverable is the SSR helper +
+`buff ssr` subcommand + this recipe.

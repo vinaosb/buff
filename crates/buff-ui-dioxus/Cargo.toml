@@ -20,6 +20,12 @@ path = "src/lib.rs"
 # NOT pull `dioxus-web` explicitly because the umbrella handles the
 # web-backend wiring when built with `--target wasm32-unknown-unknown`.
 dioxus.workspace = true
+# T135: Dioxus 0.7 Server-Side Rendering crate. Powers the
+# `render_to_string` helper at `src/lib.rs::render_to_string`.
+# Workspace-pinned alongside `dioxus` so the versions stay aligned
+# (the dioxus-rsx + VirtualDom internals are NOT covered by semver).
+# Pure-Rust, no native deps, no feature flags required.
+dioxus-ssr.workspace = true
 
 [dev-dependencies]
 # T130: regression test asserts the codegen pattern proven by T121b

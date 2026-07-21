@@ -311,6 +311,102 @@ where
     });
 }
 
+// ---------------------------------------------------------------------------
+// (3c) Server-side rendering surface — T135.
+// ---------------------------------------------------------------------------
+
+/// Re-export of `dioxus::prelude::VirtualDom` — the reactive root that
+/// drives both client and server rendering.
+///
+/// T135's [`render_to_string`] constructs a `VirtualDom` from a component
+/// fn pointer, runs [`VirtualDom::rebuild_in_place`] to materialise the
+/// initial render, then hands the dom to `dioxus_ssr::render`. Exposed
+/// at the wrapper surface so the `buff ssr` CLI subcommand (and any
+/// user-authored Rust code) can drive the dom manually for advanced SSR
+/// patterns (e.g. streaming, suspense boundaries).
+#[doc(inline)]
+pub use dioxus::prelude::VirtualDom;
+
+/// Re-export of the `dioxus-ssr` crate.
+///
+/// Mirrors the [`dioxus`] umbrella re-export: gives T133+ generated code +
+/// the `buff ssr` CLI a single import path that survives `dioxus-ssr`
+/// minor bumps. The one function [`render_to_string`] calls into is
+/// [`dioxus_ssr::render`] — exposed here so advanced users can reach
+/// [`dioxus_ssr::Renderer`] (configurable HTML output: pretty-printing,
+/// extra indentation, custom element renderers) without adding a second
+/// dependency.
+#[doc(inline)]
+pub use dioxus_ssr;
+
+/// `render_to_string(root)` — render a Dioxus component to an HTML string
+/// on the host (no browser, no wasm).
+///
+/// T135 lowers `buff ssr <file.buffhtml>` onto this helper. The pipeline:
+///
+/// 1. Parse + codegen the `.buffhtml` file via the existing T133 path
+///    (`pipeline::compile_buffhtml_to_rust`) → `syn::File` with a
+///    `#[component] fn Counter() -> Element { ... }` item.
+/// 2. Splice in an SSR driver `fn main()` that calls
+///    `buff_ui_dioxus::render_to_string(Counter)` and prints the result.
+/// 3. Compile via `rustc` (host target — no `wasm32-unknown-unknown`).
+/// 4. Run the binary; capture stdout; that is the rendered HTML.
+///
+/// This helper is the *minimal* host-side surface: it constructs a
+/// [`VirtualDom`], runs [`VirtualDom::rebuild_in_place`] to materialise
+/// the initial render tree (including any `use_signal` / `use_memo`
+/// initial values), and hands the dom to [`dioxus_ssr::render`].
+///
+/// # Event handlers
+///
+/// `onclick` / `oninput` / ... handlers are **ignored** during SSR — they
+/// do not fire (there is no user to click) and do not appear in the
+/// output HTML. The initial state of any `use_signal` is rendered as it
+/// would appear on first mount. For the T130/T133 counter, this means
+/// `Increment (count: 0)` (initial value `0`).
+///
+/// # Hydration
+///
+/// To re-attach interactivity in the browser, ship the same component
+/// compiled to `wasm32-unknown-unknown` and call `dioxus::launch` (or
+/// the lower-level `dioxus-web::hydrate`) against the SSR-rendered DOM.
+/// See `.sisyphus/evidence/task-135-hydration-USER-ACTION.txt` for the
+/// full hydration recipe (browser build + HTML shell + hydration entry).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use buff_ui_dioxus::*;
+///
+/// #[component]
+/// fn App() -> Element {
+///     rsx! { div { "Hello, SSR!" } }
+/// }
+///
+/// fn main() {
+///     let html = render_to_string(App);
+///     assert!(html.contains("Hello, SSR!"));
+///     println!("{html}");
+/// }
+/// ```
+///
+/// # Panics
+///
+/// Internally constructs a `VirtualDom` and runs `rebuild_in_place`. If
+/// the component body itself panics during initial render (e.g. calls
+/// `use_signal(|| panic!("boom"))`), the panic propagates through
+/// `rebuild_in_place` and out of this function. Normal Dioxus components
+/// (`use_signal(|| 0)`, `use_effect`, `rsx!{}` bodies) do not panic on
+/// the initial render path.
+pub fn render_to_string(root: fn() -> Element) -> String {
+    let mut vdom = VirtualDom::new(root);
+    // Materialise the initial render tree. `rebuild_in_place` runs every
+    // effect + memo once so signals settle at their initial values; the
+    // resulting `VirtualDom` is then safe to hand to `dioxus_ssr::render`.
+    vdom.rebuild_in_place();
+    dioxus_ssr::render(&vdom)
+}
+
 /// `on_destroy(callback)` — run a closure **once** when the component
 /// unmounts. Lowers onto Dioxus 0.7's [`use_drop`] (the canonical
 /// scope-cleanup hook — Dioxus attaches a `Drop`-implementing guard to
@@ -371,6 +467,12 @@ pub use dioxus::launch;
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `rsx!` macro expansion needs the dioxus-internal crate aliases
+    // (`dioxus_signals`, `dioxus_elements`, ...) in scope — mirroring
+    // the dual `use` line in `examples/counter.rs` (without it the
+    // macro expansion fails with `use of unresolved module or
+    // unlinked crate dioxus_signals`).
+    use dioxus::prelude::*;
 
     /// Smoke check: every public symbol listed in the lib.rs
     /// re-export block RESOLVES from inside the crate. This catches
@@ -391,6 +493,10 @@ mod tests {
         let _ = on_init::<fn()>;
         let _ = on_destroy::<fn()>;
 
+        // T135 SSR helper — referenced as a path value so a future
+        // rename / signature change fails this test at COMPILE time.
+        let _ = render_to_string as fn(fn() -> Element) -> String;
+
         // Type-level symbols — referenced via position in a phantom
         // tuple. `_` binding is fine here; we just need them in the
         // AST so a missing re-export fails compilation.
@@ -400,5 +506,82 @@ mod tests {
         _phantom::<MouseEvent>();
         _phantom::<KeyboardEvent>();
         _phantom::<FormEvent>();
+    }
+
+    /// T135 vertical-slice: render a trivial static component to HTML
+    /// via `render_to_string`. Asserts the dioxus-ssr integration works
+    /// end-to-end on the host (no wasm, no browser) AND that the
+    /// rendered HTML contains the literal text the component's rsx! body
+    /// produces.
+    ///
+    /// This is the *only* host-side runtime behavioral test in this
+    /// crate — every other test asserts codegen / re-export shape
+    /// because `use_signal` / `use_effect` / `on_init` / `on_destroy`
+    /// panic outside a Dioxus scope. SSR's `VirtualDom::new` +
+    /// `rebuild_in_place` constructs an internal scope, so the hooks
+    /// resolve normally.
+    #[test]
+    fn t135_render_to_string_emits_static_html() {
+        // Local component — defines a fn item that matches the
+        // `fn() -> Element` signature `VirtualDom::new` expects. We do
+        // NOT use the `#[component]` attribute here because (a) it is
+        // not needed for SSR (`VirtualDom::new` accepts a plain fn
+        // pointer) and (b) the attribute macro expands differently
+        // under `#[cfg(test)]` and would add compilation surface
+        // without exercising any additional SSR behavior. The body is
+        // the simplest thing that proves end-to-end rendering works.
+        fn static_component() -> Element {
+            rsx! {
+                div { "Hello, SSR!" }
+            }
+        }
+
+        let html = render_to_string(static_component);
+        assert!(
+            html.contains("Hello, SSR!"),
+            "expected rendered HTML to contain the literal `Hello, SSR!`, got: {html}"
+        );
+        assert!(
+            html.contains("<div"),
+            "expected rendered HTML to contain a `<div` open tag, got: {html}"
+        );
+    }
+
+    /// T135 vertical-slice part 2: render the canonical counter
+    /// pattern (`use_signal(|| 0)` + `onclick` handler + interpolation)
+    /// via SSR. The event handler is **ignored** during SSR (no user to
+    /// click) but the initial signal value IS rendered. This is the
+    /// shape `buff ssr <file.buffhtml>` produces against
+    /// `examples/counter.buffhtml`.
+    ///
+    /// Asserts:
+    /// 1. The initial count `0` appears in the output (signal resolved).
+    /// 2. The button label renders verbatim (text content survives).
+    /// 3. The HTML is non-empty (the VirtualDom was built + rebuilt).
+    #[test]
+    fn t135_render_counter_pattern_to_html() {
+        fn counter_component() -> Element {
+            let mut count = use_signal(|| 0);
+            rsx! {
+                button {
+                    onclick: move |_| count += 1,
+                    "Increment (count: {count})"
+                }
+            }
+        }
+
+        let html = render_to_string(counter_component);
+        assert!(
+            !html.is_empty(),
+            "rendered HTML should be non-empty; got empty string"
+        );
+        assert!(
+            html.contains("Increment"),
+            "expected button label to survive SSR; got: {html}"
+        );
+        assert!(
+            html.contains("count: 0"),
+            "expected initial signal value (0) in SSR output; got: {html}"
+        );
     }
 }

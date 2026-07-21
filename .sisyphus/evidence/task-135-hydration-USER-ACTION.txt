@@ -1,0 +1,250 @@
+# T135 USER ACTION — Hydration Recipe (SSR HTML + client wasm)
+
+**Task:** T135 (SSR + mobile stretch for v1.9 RSX-for-Buff Option C)
+**Status:** USER ACTION — full hydration e2e requires a browser + a working
+`cargo build --target wasm32-unknown-unknown` + `wasm-bindgen` toolchain.
+This file documents the recipe; it is NOT executed by the build host or CI.
+
+---
+
+## 1. Goal
+
+Combine `buff ssr <file.buffhtml>` HTML output (server-side rendered, **T135**)
+with a client-side `wasm32` build of the same component to produce a fully
+interactive page that hydrates without losing the server-rendered DOM.
+
+**Outcome:** the user sees the initial HTML instantly (rendered by
+`buff-ui-dioxus::render_to_string` on the host), then Dioxus's reactive
+runtime "wakes up" the same DOM tree once the wasm bundle downloads —
+no flash of unstyled content, no duplicate mount.
+
+---
+
+## 2. Prerequisites (USER ACTION — install once)
+
+```powershell
+# 1. Rust wasm32 target (the toolchain pin from rust-toolchain.toml
+#    installs the rest automatically):
+rustup target add wasm32-unknown-unknown
+
+# 2. wasm-bindgen-cli — the version MUST match the workspace-pinned
+#    `wasm-bindgen` version exactly (see `Cargo.toml` L64). The
+#    mismatched-version failure mode is a cryptic runtime deserialise
+#    error; pinning is mandatory.
+cargo install wasm-bindgen-cli --version 0.2.100  # adjust to match Cargo.lock
+
+# 3. A static file server (any will do; `simple-http-server` is pure-Rust):
+cargo install simple-http-server
+
+# 4. A modern browser (Chrome / Firefox / Edge / Safari).
+```
+
+---
+
+## 3. File layout
+
+```text
+my_app/
+├── src/
+│   └── counter.buffhtml          # The Buff component (T133 SFC)
+├── dist/
+│   ├── index.html                # HTML shell — embeds the SSR HTML
+│   ├── counter.wasm              # wasm32 build (hydrates the SSR DOM)
+│   └── counter.js                # wasm-bindgen JS glue
+└── buff.toml
+```
+
+---
+
+## 4. Recipe (PowerShell — run from the repo root)
+
+### Step 1 — Build the SSR HTML
+
+```powershell
+# Render the component to HTML on the host (no browser needed).
+# Writes the rendered HTML to dist/index.html (the HTML shell will
+# splice this into a larger page in step 3).
+cargo run -p buff-lang-cli -- ssr examples/counter.buffhtml --output dist/ssr_fragment.html
+
+# Inspect: should contain `<button>Increment (count: 0)</button>` or
+# similar — the initial render with the signal's initial value (0).
+Get-Content dist/ssr_fragment.html
+```
+
+### Step 2 — Build the client wasm bundle
+
+```powershell
+# Compile the .buffhtml → Rust, then build for wasm32-unknown-unknown.
+# The Buff CLI's `buff build` path does NOT yet emit a Cargo project,
+# so for the hydration recipe we build a small hand-written Cargo
+# project that includes the codegen output + a dioxus::launch(App)
+# entry point. See step 5 below for the full Cargo project shape.
+
+# Conceptual shape (not yet a one-liner — the wiring lands in T136/T137):
+cargo build --release --target wasm32-unknown-unknown -p my_app_frontend
+
+# Post-process with wasm-bindgen so the .wasm file is callable from JS:
+$wbver = "0.2.100"  # MUST match Cargo.lock
+wasm-bindgen --target web --out-dir dist --out-name counter `
+    target/wasm32-unknown-unknown/release/my_app_frontend.wasm
+```
+
+### Step 3 — Splice the SSR HTML into an HTML shell
+
+```powershell
+# Read the SSR fragment and embed it inside the page's <main> element.
+$ssr = Get-Content dist/ssr_fragment.html -Raw
+$shell = @"
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Buff SSR + Hydration</title>
+  </head>
+  <body>
+    <div id="main">
+      $ssr
+    </div>
+    <script type="module">
+      import init from "./counter.js";
+      // Dioxus 0.7's hydrate() call (NOT launch()) reuses the existing
+      // DOM tree instead of replacing it. The mount point (#main) MUST
+      // already contain the server-rendered nodes for hydration to work.
+      init().then(() => {
+        // Once wasm is loaded, dioxus-web's hydrate() walks the existing
+        // DOM and attaches event listeners + the reactive runtime to it.
+        console.log("Buff component hydrated.");
+      });
+    </script>
+  </body>
+</html>
+"@
+$shell | Set-Content dist/index.html
+```
+
+### Step 4 — Serve + open the browser
+
+```powershell
+# Start a static file server on http://localhost:8000.
+simple-http-server --ip 127.0.0.1 --port 8000 --nocache dist
+
+# Open the page in your default browser.
+Start-Process "http://localhost:8000/"
+```
+
+### Step 5 — Cargo project shape for the wasm frontend
+
+This is the gap that T136/T137 will close (auto-generate from `.buffhtml`).
+For T135 manual verification, create a Cargo project alongside the
+`.buffhtml`:
+
+```toml
+# my_app_frontend/Cargo.toml
+[package]
+name = "my_app_frontend"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+buff-ui-dioxus = { path = "../../crates/buff-ui-dioxus" }
+```
+
+```rust
+// my_app_frontend/src/lib.rs
+use buff_ui_dioxus::dioxus::prelude::*;
+use buff_ui_dioxus::*;
+
+#[component]
+fn Counter() -> Element {
+    let mut count = use_signal(|| 0);
+    rsx! {
+        button {
+            onclick: move |_| count += 1,
+            "Increment (count: {count})"
+        }
+    }
+}
+
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn hydrate() {
+    // Dioxus 0.7 hydration entry point. The function name `hydrate` is
+    // the conventional contract: wasm-bindgen exports it as
+    // `wasm_bindgen(hydrate)`, and the JS glue calls it after the
+    // initial DOM is in place. Contrast with `launch(App)` which
+    // REPLACES the DOM (the wrong choice for SSR hydration).
+    let cfg = dioxus::Config::default();
+    dioxus::LaunchBuilder::hydrated().launch(Counter);
+}
+```
+
+The JS shell in step 3 then calls `import init, { hydrate } from "./counter.js";`
+and invokes `hydrate()` after `await init()`.
+
+---
+
+## 5. Known gotchas
+
+1. **Span mapping mismatch (T121b carryover).** If the SSR HTML and the
+   wasm-rendered HTML differ in any way (whitespace, attribute order,
+   text node boundaries), Dioxus's hydration falls back to a full
+   re-render — defeating the SSR speedup. The T121b `Location` API +
+   T133 `SpanMap` side-table mitigate this; verify by inspecting the
+   browser console for hydration warnings.
+
+2. **Event handlers are SSR-inert.** `onclick: move |_| count += 1`
+   is **ignored** during SSR (`buff-ui-dioxus::render_to_string` skips
+   event-handler registration — there is no user to click). The handler
+   IS attached during client-side hydration. This is by design: the
+   button label "Increment (count: 0)" renders identically server-side
+   and client-side; only the click behavior is wasm-only.
+
+3. **Deterministic rendering.** Components that read `Random.int(...)`
+   or call `Date.now()` during initial render will produce DIFFERENT HTML
+   on the server vs the client, breaking hydration. Use
+   `use_signal(|| compute_once())` so the random value is computed
+   exactly once and stored — the signal propagates deterministically
+   across the SSR/hydrate boundary.
+
+4. **wasm-bindgen version pinning.** The `wasm-bindgen-cli` version MUST
+   match the `wasm-bindgen` workspace pin (Cargo.toml L64). A mismatched
+   version produces "deserialise error" at runtime — install the
+   matching version with `cargo install wasm-bindgen-cli --version $(...)`.
+
+5. **Mount point id.** Dioxus-web defaults to mounting at `<div
+   id="main">`. The SSR HTML output does NOT wrap itself in a `<div
+   id="main">` wrapper — the HTML shell (step 3) must provide it.
+
+---
+
+## 6. Verification (manual)
+
+After following the recipe, in the browser:
+
+1. The page renders instantly with `Increment (count: 0)` visible.
+2. Open DevTools → Network → confirm the .wasm file loads after the
+   initial HTML paint (no white screen while wasm downloads).
+3. Click the button — the label updates to `Increment (count: 1)`,
+   `Increment (count: 2)`, ... proving the event handler is wired.
+4. DevTools → Console should show "Buff component hydrated." with no
+   warnings.
+
+If step 4 shows "Hydration mismatch" warnings, see §5 gotcha #1 + #3.
+
+---
+
+## 7. Future automation (post-T135)
+
+The manual Cargo-project shape in §5 step 5 is what `buff ui new --desktop`
+(T132) already scaffolds for desktop apps. Future work (T136/T137):
+
+- Extend `buff ui new` to scaffold a `--ssr` variant that pre-wires
+  the hydration shell + a Cargo project layout.
+- Add `buff ui build --hydrate` that runs steps 1-3 automatically.
+- Integrate with `buff ui dev` (T131) so the dev server picks up
+  hydration automatically on `.buffhtml` save.
+
+These are scope-deferred; the T135 deliverable is the SSR helper +
+`buff ssr` subcommand + this recipe.

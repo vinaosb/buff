@@ -454,6 +454,16 @@ buff-jupyter = { path = "crates/buff-jupyter" }
 # transitively during the spike; the umbrella's minor bump range keeps
 # them moving in lockstep.
 dioxus = "0.7"
+# T135: Dioxus 0.7 Server-Side Rendering crate. Pinned at the workspace
+# level alongside the `dioxus` umbrella so the SSR version tracks the
+# dioxus-core / dioxus-signals minor bump in lockstep (the dioxus-rsx +
+# VirtualDom internals are NOT covered by semver guarantees — same
+# rationale as the umbrella pin at line 441). The crate exposes the
+# canonical `dioxus_ssr::render(&VirtualDom) -> String` convenience used
+# by `buff-ui-dioxus::render_to_string` (T135) and the `buff ssr` CLI
+# subcommand. No feature flags required — pure-Rust, no native deps,
+# matches the "no C library, no Docker" hard rule.
+dioxus-ssr = "0.7"
 # T130: `buff-ui-dioxus` workspace path dep — mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter pattern so any
 # future consumer (T133 RSX-for-Buff syntax surface, T138c Bufflings UI

@@ -64,6 +64,12 @@ buff-lang-error.workspace = true
 buff-lang-ast-rsx.workspace = true
 buff-lang-buffhtml-parser.workspace = true
 buff-lang-codegen-buffhtml.workspace = true
+# T135: `buff ssr <file.buffhtml>` wraps the codegen-buffhtml output with
+# an SSR driver `fn main()` that calls `buff_ui_dioxus::render_to_string`.
+# The dep brings in the wrapper crate's SSR helper surface (render_to_string
+# + VirtualDom + dioxus_ssr) AND the dioxus umbrella + dioxus-ssr transitively
+# (already workspace-pinned at the workspace level alongside `dioxus`).
+buff-ui-dioxus.workspace = true
 # T133: `syn` + `prettyplease` are needed by `pipeline::inline_script_block`
 # to transform the codegen-buffhtml `const __BUFF_SCRIPT_SOURCE: &str` holder
 # into actual Rust statements inside the generated component fn body (the

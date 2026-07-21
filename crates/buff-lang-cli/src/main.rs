@@ -78,5 +78,10 @@ fn main() -> Result<()> {
         Command::Outdated => buff_lang_cli::commands::outdated::run(),
         Command::Jupyter { cmd } => buff_lang_cli::commands::jupyter::run(cmd),
         Command::Ui { cmd } => buff_lang_cli::commands::ui_dev::run(cmd),
+        Command::Ssr {
+            file,
+            output,
+            release,
+        } => buff_lang_cli::commands::ssr::run(&file, output.as_deref(), release),
     }
 }

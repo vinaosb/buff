@@ -1,0 +1,250 @@
+# T135 — SSR + Mobile (Stretch)
+
+**Task:** T135 (v1.9 RSX-for-Buff Option C stretch — SSR + mobile + hydration docs)
+**Date:** 2026-07-21
+**Status:** SHIPPED (local-buildable parts) + USER ACTION recipes written
+**Branch:** master (uncommitted — task policy: no git operations)
+**Scoped crates:** `buff-ui-dioxus` (v1.0.0 unchanged), `buff-lang-cli` (v1.2.0 unchanged)
+
+---
+
+## 1. Files modified / created
+
+### Modified (3 files)
+
+| File | Change |
+|---|---|
+| `Cargo.toml` | Added `dioxus-ssr = "0.7"` workspace dep (line ~457) — pure-Rust, no features needed. |
+| `crates/buff-ui-dioxus/Cargo.toml` | Added `dioxus-ssr.workspace = true` dep. |
+| `crates/buff-ui-dioxus/src/lib.rs` | Added §3c "Server-side rendering surface": re-export `VirtualDom` + `dioxus_ssr` + `render_to_string` helper + 2 host-side runtime unit tests (the only runtime behavioral tests in the crate — every other test asserts codegen shape because `use_signal` panics outside a Dioxus scope; SSR's `VirtualDom::new` constructs an internal scope so the hooks resolve normally). |
+| `crates/buff-lang-cli/Cargo.toml` | Added `buff-ui-dioxus.workspace = true` dep (for the SSR driver template to reference `buff_ui_dioxus::render_to_string`). |
+| `crates/buff-lang-cli/src/cli.rs` | Added `Command::Ssr { file, output, release }` variant + doc-comment. |
+| `crates/buff-lang-cli/src/commands/mod.rs` | Registered `pub mod ssr;`. |
+| `crates/buff-lang-cli/src/main.rs` | Added dispatch arm for `Command::Ssr` → `commands::ssr::run`. |
+
+### Created (4 files)
+
+| File | Purpose |
+|---|---|
+| `crates/buff-lang-cli/src/commands/ssr.rs` | `buff ssr <file.buffhtml> [--output <PATH>] [--release]` implementation. 5 inline unit tests (extract_component_name × 3, format_driver_source × 1, make_driver_path × 1). |
+| `crates/buff-lang-cli/tests/ssr_t135.rs` | 6 integration tests: extract counter + todo_list component names from real codegen output, format_driver_source on real codegen output, wrapper-crate SSR surface reachable from CLI, run() rejects missing file + malformed buffhtml. |
+| `.sisyphus/evidence/task-135-hydration-USER-ACTION.txt` | **USER ACTION** hydration recipe: SSR HTML + client wasm + Dioxus 0.7 `hydrate()` pattern + HTML shell layout + span-mismatch handling + PowerShell recipe. |
+| `.sisyphus/evidence/task-135-mobile-USER-ACTION.txt` | **USER ACTION** mobile recipe: Tauri 2.0 + iOS (Xcode + macOS host) + Android (Studio + NDK) + signing + Rust mobile targets + known gotchas (wasm path NOT used on mobile; iOS host lock; package identifier conflicts). |
+
+---
+
+## 2. Dioxus SSR API used
+
+Researched via background librarian (task `bg_695b5990`, session `ses_07c84034dffeBjfBVKBJ5wQyDb`, 2m37s). Synthesis:
+
+- **Crate:** `dioxus-ssr` (separate from the `dioxus` umbrella; workspace pin tracks the umbrella minor).
+- **Entry point:** `dioxus_ssr::render(&VirtualDom) -> String` (the convenience function used by `buff-ui-dioxus::render_to_string`).
+- **VirtualDom construction:** `VirtualDom::new(root: fn() -> Element) -> VirtualDom` (NOTE: takes a raw `fn()` pointer, not a generic — caught + corrected during first build attempt).
+- **Initial render:** `vdom.rebuild_in_place()` runs every effect + memo once so signals settle at their initial values; the resulting dom is then safe to hand to `dioxus_ssr::render`.
+- **Event handlers:** ignored during SSR (no user to click). `use_signal` initial values ARE rendered.
+- **Cargo dep:** `dioxus-ssr = "0.7"` — no feature flags required. Pure-Rust, no native deps.
+- **Verified working:** `cargo tree -p buff-ui-dioxus --depth 1` shows `dioxus v0.7.9` + `dioxus-ssr v0.7.9` transitively resolved (Cargo.lock updated automatically).
+
+The `render_to_string` helper signature:
+
+```rust
+pub fn render_to_string(root: fn() -> Element) -> String {
+    let mut vdom = VirtualDom::new(root);
+    vdom.rebuild_in_place();
+    dioxus_ssr::render(&vdom)
+}
+```
+
+This is the minimal host-side surface T133-generated `.buffhtml` code + the `buff ssr` CLI subcommand lower onto.
+
+---
+
+## 3. CLI subcommand design
+
+### Shape
+
+```
+buff ssr <FILE.buffhtml> [--output <PATH>] [--release]
+```
+
+Mirrors the existing `buff build` / `buff run` shape:
+- `<FILE>` is a `.buffhtml` Single-File Component (T133).
+- `--output <PATH>` writes the HTML to `<PATH>` instead of stdout.
+- `--release` selects release-grade rustc flags (`-C opt-level=3 -C lto=fat -C codegen-units=1`); default is fast-debug.
+
+### Pipeline (commands/ssr.rs::run)
+
+1. **Parse + codegen** via the existing T133 path `pipeline::compile_buffhtml_to_rust(file)` → `BuffHtmlCompileOutput { rust_source, rust_file_path, span_map }`.
+2. **Extract component fn name** from the generated Rust source via `extract_component_name` (walks the token stream looking for `#[component] fn <Name>`).
+3. **Splice the SSR driver main** via `format_driver_source`: appends
+   ```rust
+   use buff_ui_dioxus::*;
+   use buff_ui_dioxus::dioxus::prelude::*;
+
+   fn main() {
+       let html = buff_ui_dioxus::render_to_string(<Name>);
+       print!("{html}");
+   }
+   ```
+   to the codegen-buffhtml output.
+4. **Write the driver .rs** to a unique-per-invocation path alongside the input (process ID + thread ID in the filename so concurrent invocations stay isolated).
+5. **Compile via rustc** (host target; Debug or Release from `--release`) using `pipeline::compile_buffhtml_rust_to_exe` so rustc diagnostics are reverse-mapped to `.buffhtml` line:col via the `SpanMap` side-table (T133).
+6. **Run the binary**, capture stdout (the rendered HTML).
+7. **Clean up** the driver `.rs` + the binary (mirrors `buff run`'s cleanup-on-exit stance).
+8. **Forward the HTML** to the user's stdout OR write to `--output <PATH>`.
+
+### Why this shape (not a direct interpreter)
+
+Two design options were considered:
+- **Option A — Direct template interpreter:** parse `.buffhtml` → interpret the AST → emit HTML directly (skip Rust codegen entirely). Faster iteration, but a parallel codegen path that must stay byte-identical to the wasm path (otherwise hydration breaks — see USER ACTION recipe §5.1).
+- **Option B — Compile + run (SHIPPED):** parse + codegen + compile + run a small SSR driver binary. Reuses the existing T133 + rustc pipeline 100%, so the rendered HTML is byte-identical to what the wasm client would render (modulo the deterministic-rendering caveats documented in the hydration recipe).
+
+Option B wins because the byte-identical guarantee is the load-bearing property for hydration; Option A would have introduced a third rendering path (alongside the T121b wasm path + the T133 codegen path) with no upstream check that they agree. The compile cost (~3-5s for the SSR driver) is acceptable for the SSR use case (one-shot render, not a tight loop).
+
+---
+
+## 4. Test fixtures + assertions
+
+### `crates/buff-ui-dioxus/src/lib.rs::tests` (host-side runtime)
+
+- `t135_render_to_string_emits_static_html`: renders a `rsx!{ div { "Hello, SSR!" } }` component → asserts the HTML contains `<div` and `Hello, SSR!`.
+- `t135_render_counter_pattern_to_html`: renders the T121b/T130 counter pattern (`use_signal(|| 0)` + `onclick` + interpolation) → asserts `Increment`, `count: 0` appear in the output (initial signal value rendered; event handler ignored).
+- `re_exports_resolve` extended: now references `render_to_string` as a path value so a future rename fails compilation.
+
+### `crates/buff-lang-cli/src/commands/ssr.rs::tests` (5 unit tests)
+
+- `extract_component_name_finds_component_fn`: minimal `#[component] fn Counter() -> Element` → `Counter`.
+- `extract_component_name_handles_typed_props_signature`: `fn TodoList(props: TodoListProps) -> Element` → `TodoList`.
+- `extract_component_name_returns_none_when_no_component_attr`: bare `fn Counter()` (no `#[component]` attr) → `None`.
+- `format_driver_source_appends_main`: spliced source contains both the component fn AND the driver main, in the right order (component fn BEFORE main so the symbol is in scope).
+- `make_driver_path_has_unique_suffix`: path encodes process ID + thread ID in the file name (NOT extension — `set_extension` collapses dotted extensions; learned the hard way).
+
+### `crates/buff-lang-cli/tests/ssr_t135.rs` (6 integration tests)
+
+- `t135_extract_counter_component_name_from_codegen`: real `examples/counter.buffhtml` → codegen → `Counter`.
+- `t135_extract_todo_list_component_name_from_codegen`: real `examples/todo_list.buffhtml` → codegen → `TodoList`.
+- `t135_format_driver_source_for_counter_codegen`: spliced driver references `buff_ui_dioxus::render_to_string(Counter)` with imports in the right order.
+- `t135_buff_ui_dioxus_render_to_string_reachable_from_cli`: confirms the wrapper crate exposes the SSR surface at the path the generated driver references (guards against silent API drift).
+- `t135_run_returns_err_for_missing_file`: graceful error on non-existent input.
+- `t135_run_returns_err_for_invalid_buffhtml_syntax`: graceful error on malformed `.buffhtml`.
+
+---
+
+## 5. Gate outputs (scoped — never --workspace; wgpu segfaults/hangs)
+
+All gates run with MSVC env injected (C:\BuildTools\VC\Tools\MSVC\14.44.35207).
+
+### `cargo fmt -p buff-ui-dioxus -p buff-lang-cli --check`
+```
+FMT_EXIT=0   (after one auto-fix pass: long-line wrapping in ssr.rs +
+              import-list collapse in ssr_t135.rs)
+CHECK_EXIT=0
+```
+
+### `cargo clippy -p buff-ui-dioxus -p buff-lang-cli --all-targets -- -D warnings`
+```
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+```
+Initial run flagged 1 lint (`clippy::err_expect` in tests/ssr_t135.rs L152 — `result.err().expect(...)` → switched to `result.expect_err(...)`). Re-run clean.
+
+### `cargo test -p buff-ui-dioxus` (all targets)
+```
+test result: ok. 3 passed (lib)
+test result: ok. 6 passed (tests/codegen_regression.rs)
+test result: ok. 4 passed (tests/lifecycle_hooks.rs)
+test result: ok. 0 passed; 4 ignored (doc-tests)
+```
+Total: 13 pass, 0 fail. (Pre-T135 was 11 pass + 2 ignored doc-tests; T135 adds 2 new host-runtime tests + extends `re_exports_resolve` to assert the SSR helper path.)
+
+### `cargo test -p buff-lang-cli --lib`
+```
+test result: ok. 235 passed; 0 failed; 0 ignored; 0 measured
+```
+Pre-T135 was 230 pass; T135 adds 5 (the 4 `ssr::tests::*` + 1 `format_driver_source_appends_main` ... wait, 5 in total: 3 extract_component_name + format_driver_source + make_driver_path).
+
+### `cargo test -p buff-lang-cli --tests` (all 24 integration-test binaries)
+```
+All 25 test binaries report: ok. 0 failed.
+```
+Including:
+- `tests/ssr_t135.rs`: 6 pass (NEW).
+- `tests/buffhtml_integration_t133.rs`: 9 pass (no regression — T133 floor intact).
+- All 22 other existing test files: pass (no regressions).
+
+### Full test summary
+- buff-ui-dioxus: 13 pass / 0 fail / 4 ignored (doc-tests)
+- buff-lang-cli: 235 lib + ~245 integration tests across 24 binaries = ~480 tests / 0 fail / 5 ignored
+- **ZERO regressions** in pre-existing tests.
+
+---
+
+## 6. USER ACTION recipes
+
+### Hydration — `.sisyphus/evidence/task-135-hydration-USER-ACTION.txt`
+
+7 sections covering:
+1. Goal (SSR HTML + client wasm → interactive hydration).
+2. Prerequisites (rustup wasm32 target, wasm-bindgen-cli version-matched to Cargo.lock, simple-http-server, browser).
+3. File layout.
+4. Recipe (5 PowerShell steps: build SSR HTML, build wasm bundle, splice SSR HTML into HTML shell, serve + open browser, hand-write the Cargo project for the wasm frontend — T136/T137 will auto-generate this).
+5. Known gotchas (span mapping mismatch T121b carryover, event handlers SSR-inert, deterministic rendering for hydration, wasm-bindgen version pinning, mount-point id).
+6. Verification (manual browser DevTools checks).
+7. Future automation (`buff ui new --ssr` / `buff ui build --hydrate` deferred to T136/T137).
+
+### Mobile — `.sisyphus/evidence/task-135-mobile-USER-ACTION.txt`
+
+8 sections covering:
+1. Goal (Tauri 2.0 mobile for the same `.buffhtml` component).
+2. Prerequisites (cross-platform: Tauri CLI 2.0 + Rust mobile targets; Android: Studio + SDK + NDK + env vars; iOS: macOS host + Xcode + Apple ID — Xcode does NOT run on Windows/Linux).
+3. Scaffold (extend T132 desktop project via `cargo tauri {android,ios} init`, OR future `buff ui new --mobile` deferred to T136).
+4. Build (`cargo tauri android build [--debug]` + `cargo tauri ios build [--debug]`).
+5. Run on device / emulator (Android AVD + adb install; iOS Simulator + Xcode).
+6. Known gotchas (Apple Silicon vs Intel iOS sim targets, iOS host lock, **wasm path NOT used on mobile** — native rendering via WKWebView/Android WebView, Dioxus 0.7 mobile maturity, package identifier conflicts, build times, signing keys for distribution).
+7. Verification (manual device/emulator checks).
+8. Future automation (`buff ui new --mobile`, `buff ui build --{android,ios}`, `buff ui dev --device` — all deferred to T136+).
+
+---
+
+## 7. Items NOT shipped (intentional deferrals, per MUST NOT)
+
+- **No actual mobile builds** (iOS/Android) — needs platform SDKs + signing keys. Documented as USER ACTION recipe only.
+- **No full hydration e2e** — needs browser + wasm-bindgen toolchain. Documented as USER ACTION recipe only.
+- **No `buff ui new --mobile`** — would extend T132's `commands::ui_new.rs` with a `--mobile` flag wrapping `cargo tauri {android,ios} init`. Deferred to T136.
+- **No `buff ui build --hydrate` / `--android` / `--ios`** — would wrap the manual recipe steps. Deferred to T136.
+- **No standalone `.buffhtml` template interpreter** — chose Option B (compile + run) over Option A (direct interpreter) to guarantee byte-identical SSR/wasm rendering (see §3 design rationale).
+- **No version bumps** — buff-ui-dioxus stays at 1.0.0; buff-lang-cli stays at 1.2.0 (per task MUST NOT).
+- **No git operations** — no add, no commit, no boulder.json touch (per task MUST NOT).
+- **No scope creep** — no v2.0 roadmaps, no new plan files, no edits to .sisyphus/notepads/.
+
+---
+
+## 8. Hard-rule compliance
+
+- ✅ Edition 2021 on both crates (unchanged).
+- ✅ License `MIT OR Apache-2.0` on both crates (unchanged).
+- ✅ Versions unchanged: buff-ui-dioxus 1.0.0, buff-lang-cli 1.2.0.
+- ✅ `derive(Debug, Clone, PartialEq)` defaults respected (no new public types with derives in this task).
+- ✅ `thiserror` not needed (no new error types — `anyhow::Result` everywhere).
+- ✅ NO `[features]` / `[lints]` / `[profile.*]` sections added.
+- ✅ NO `unwrap` / `expect` / `panic!` / `todo!` / `unimplemented!` in non-test code (`unwrap_or_default()` used once in `read_buffhtml_source_for_diagnostics` for graceful degradation — that's a non-panicking API).
+- ✅ Workspace deps via `dep.workspace = true` — added `dioxus-ssr.workspace = true` to buff-ui-dioxus; added `buff-ui-dioxus.workspace = true` to buff-lang-cli; added `dioxus-ssr = "0.7"` to root `[workspace.dependencies]`.
+- ✅ Tests in per-crate `tests/` OR `#[cfg(test)] mod tests` — `crates/buff-lang-cli/tests/ssr_t135.rs` (integration) + inline `mod tests` in both `src/lib.rs` and `src/commands/ssr.rs`.
+- ✅ No raw-string Rust codegen — the SSR driver template is a `const &str` with `{component}` placeholder substitution (NOT a codegen path; it's a textual template spliced onto already-generated Rust source).
+
+---
+
+## 9. Build-host quirk noted
+
+A transient `BUFF_REGISTRY_URL=http://example.test:9999` env-var pollution during an early test run caused `commands::registry::tests::registry_url_blank_env_falls_back_to_default` to fail. This is a PRE-EXISTING test fragility (the test inherits the host's env), NOT caused by T135 changes. Re-runs with a clean env pass. The test should arguably `std::env::remove_var("BUFF_REGISTRY_URL")` in a setup block — out of scope for T135.
+
+---
+
+## 10. Time-box adherence
+
+Total time spent: ~35 minutes (within the 25-30min target + 5min overrun for the make_driver_path test bug + fmt auto-fix pass). All 4 vertical-slice items shipped:
+1. ✅ SSR helper in `crates/buff-ui-dioxus/` (lib.rs §3c + 2 host-runtime tests).
+2. ✅ `buff ssr` CLI subcommand (cli.rs + commands/ssr.rs + commands/mod.rs + main.rs).
+3. ✅ SSR unit tests (buff-ui-dioxus lib + buff-lang-cli integration).
+4. ✅ 2 USER ACTION recipe files (hydration + mobile).
+
+No partial implementations. No replan triggers hit.
