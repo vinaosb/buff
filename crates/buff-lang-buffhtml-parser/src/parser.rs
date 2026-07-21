@@ -130,6 +130,8 @@ impl Parser {
             BuffHtmlTokenKind::EachOpen { .. } => self.parse_each(),
             BuffHtmlTokenKind::HtmlComment(_) => self.parse_html_comment(),
             BuffHtmlTokenKind::BuffComment(_) => self.parse_buff_comment(),
+            BuffHtmlTokenKind::HtmlEscape(_) => self.parse_html_escape(),
+            BuffHtmlTokenKind::AwaitOpen(_) => self.parse_await(),
             BuffHtmlTokenKind::ScriptOpen { .. } => {
                 // Nested script not allowed (only top-level).
                 Err(self.err(
@@ -180,35 +182,177 @@ impl Parser {
         Ok(RsxNode::Comment(RsxComment::new(text, span)))
     }
 
+    /// `{@html raw_trusted_html}` raw HTML escape hatch (T133 stretch).
+    fn parse_html_escape(&mut self) -> Result<RsxNode, BuffHtmlParseError> {
+        let tok = self.advance();
+        let (expr, span) = match tok.kind {
+            BuffHtmlTokenKind::HtmlEscape(s) => (s, tok.span),
+            _ => unreachable!(),
+        };
+        Ok(RsxNode::RawHtml(buff_lang_ast_rsx::RsxRawHtml {
+            expr,
+            span,
+        }))
+    }
+
+    /// `{#await fut} pending {:then b} ok {:catch b} err {/await}`
+    /// (T133 stretch).
+    ///
+    /// Grammar:
+    /// - `{#await fut_expr}` → AwaitOpen
+    /// - optional pending body (any nodes)
+    /// - `{:then binding}` (required) → AwaitThen
+    /// - then body
+    /// - optional `{:catch binding}` → AwaitCatch + catch body
+    /// - `{/await}` → AwaitClose
+    fn parse_await(&mut self) -> Result<RsxNode, BuffHtmlParseError> {
+        let start_span = self.span_here();
+        let fut_expr = match self.advance().kind {
+            BuffHtmlTokenKind::AwaitOpen(f) => f,
+            _ => unreachable!(),
+        };
+        let fut_span = start_span;
+
+        // Pending body: nodes until AwaitThen, AwaitCatch, or AwaitClose.
+        let pending_body = self.parse_children_until_terminators(&[
+            Terminator::AwaitThen,
+            Terminator::AwaitCatch,
+            Terminator::AwaitClose,
+        ])?;
+        let pending_opt = if pending_body.is_empty() {
+            None
+        } else {
+            Some(pending_body)
+        };
+
+        // Required `{:then binding}`.
+        let (then_binding, then_body) = match self.peek().clone() {
+            BuffHtmlTokenKind::AwaitThen(b) => {
+                let binding = b;
+                self.advance();
+                let body = self.parse_children_until_terminators(&[
+                    Terminator::AwaitCatch,
+                    Terminator::AwaitClose,
+                ])?;
+                (binding, body)
+            }
+            BuffHtmlTokenKind::AwaitCatch(_) => {
+                return Err(self.err(
+                    "`{#await}` requires a `{:then binding}` before `{:catch}`",
+                    self.span_here(),
+                ));
+            }
+            _ => {
+                return Err(self.err(
+                    "`{#await}` requires a `{:then binding}` block",
+                    self.span_here(),
+                ));
+            }
+        };
+
+        // Optional `{:catch binding} body`.
+        let mut catch_binding: Option<String> = None;
+        let mut catch_body: Option<Vec<RsxNode>> = None;
+        if let BuffHtmlTokenKind::AwaitCatch(b) = self.peek().clone() {
+            catch_binding = Some(b);
+            self.advance();
+            let body = self.parse_children_until_terminators(&[Terminator::AwaitClose])?;
+            catch_body = Some(body);
+        }
+
+        // Required `{/await}`.
+        if !matches!(self.peek(), BuffHtmlTokenKind::AwaitClose) {
+            return Err(self.err("expected `{/await}` to close await-block", self.span_here()));
+        }
+        self.advance();
+
+        Ok(RsxNode::Await(buff_lang_ast_rsx::RsxAwait {
+            fut_expr,
+            fut_span,
+            pending_body: pending_opt,
+            then_binding,
+            then_body,
+            catch_binding,
+            catch_body,
+            span: Span::new(start_span.start, self.span_here().end, self.source_id),
+        }))
+    }
+
     fn parse_slot(&mut self) -> Result<RsxNode, BuffHtmlParseError> {
         let start_span = self.span_here();
         self.advance(); // SlotOpen
-                        // Reject any attributes — slot is bare `<slot />`.
-        let mut saw_name_attr = false;
-        while !matches!(
-            self.peek(),
-            BuffHtmlTokenKind::TagSelfClose | BuffHtmlTokenKind::TagEnd
-        ) {
-            if let BuffHtmlTokenKind::AttrName(n) = self.peek() {
-                if n == "name" {
-                    saw_name_attr = true;
+                        // Walk attribute tokens. Recognize only `name="..."`. Other attrs → error.
+        let mut name_value: Option<String> = None;
+        loop {
+            match self.peek().clone() {
+                BuffHtmlTokenKind::TagSelfClose | BuffHtmlTokenKind::TagEnd => break,
+                BuffHtmlTokenKind::AttrName(n) => {
+                    if n != "name" {
+                        return Err(self.err(
+                            format!(
+                                "unknown attribute `{n}` on `<slot>` (only `name=` is allowed)"
+                            ),
+                            self.span_here(),
+                        ));
+                    }
+                    self.advance(); // AttrName("name")
+                                    // Expect AttrEq + AttrStrLit.
+                    if !matches!(self.peek(), BuffHtmlTokenKind::AttrEq) {
+                        return Err(
+                            self.err("expected `=` after `name` on `<slot>`", self.span_here())
+                        );
+                    }
+                    self.advance(); // AttrEq
+                    let val_tok = self.advance();
+                    match val_tok.kind {
+                        BuffHtmlTokenKind::AttrStrLit(s) => {
+                            if s.is_empty() {
+                                return Err(self.err(
+                                    "`<slot name=\"...\">` requires a non-empty name",
+                                    val_tok.span,
+                                ));
+                            }
+                            if !s
+                                .chars()
+                                .next()
+                                .map(|c| c.is_ascii_alphabetic())
+                                .unwrap_or(false)
+                            {
+                                return Err(self.err(
+                                    "slot name must start with an ASCII letter",
+                                    val_tok.span,
+                                ));
+                            }
+                            name_value = Some(s);
+                        }
+                        other => {
+                            return Err(self.err(
+                                format!(
+                                    "`name=` on `<slot>` requires a string literal, got {other:?}"
+                                ),
+                                val_tok.span,
+                            ));
+                        }
+                    }
+                }
+                other => {
+                    return Err(self.err(
+                        format!(
+                            "unexpected token inside `<slot>`: {other:?} (only `name=\"...\"` is allowed)"
+                        ),
+                        self.span_here(),
+                    ));
                 }
             }
-            self.advance();
         }
-        let end_tok = self.advance(); // TagSelfClose or TagEnd
-        if saw_name_attr {
-            return Err(self.err(
-                "named slots (`<slot name=\"...\">`) are deferred to T134+ (decision record §6)",
-                start_span,
-            ));
-        }
+        // Consume TagSelfClose or TagEnd. Slot does not have children —
+        // `<slot>...</slot>` form is rejected (must be self-closing or empty).
+        let end_tok = self.advance();
         let _ = end_tok;
-        Ok(RsxNode::Slot(RsxSlot::new(Span::new(
-            start_span.start,
-            self.span_here().end,
-            self.source_id,
-        ))))
+        Ok(RsxNode::Slot(RsxSlot {
+            name: name_value,
+            span: Span::new(start_span.start, self.span_here().end, self.source_id),
+        }))
     }
 
     fn parse_fragment(&mut self) -> Result<RsxNode, BuffHtmlParseError> {
@@ -276,13 +420,24 @@ impl Parser {
         loop {
             match self.peek() {
                 BuffHtmlTokenKind::TagEnd | BuffHtmlTokenKind::TagSelfClose => return Ok(out),
+                BuffHtmlTokenKind::AttrSpread(ident) => {
+                    let span = self.span_here();
+                    let ident = ident.clone();
+                    self.advance();
+                    out.push(RsxAttribute {
+                        kind: RsxAttributeKind::Spread { ident },
+                        span,
+                    });
+                }
                 BuffHtmlTokenKind::AttrName(name) => {
                     let attr = self.parse_one_attribute(name.clone())?;
                     out.push(attr);
                 }
                 other => {
                     return Err(self.err(
-                        format!("expected attribute name, `>` or `/>`, got {other:?}"),
+                        format!(
+                            "expected attribute name, `>`, `/>`, or `{{...spread}}`, got {other:?}"
+                        ),
                         self.span_here(),
                     ));
                 }
@@ -304,7 +459,8 @@ impl Parser {
         }
     }
 
-    /// `name="lit"` or `name={expr}` or `on:event_mod={handler}`.
+    /// `name="lit"` or `name={expr}` or `on:event_mod={handler}` or
+    /// `bind:value={signal}` (T133 stretch two-way binding).
     fn parse_eq_attribute(
         &mut self,
         name: String,
@@ -322,6 +478,18 @@ impl Parser {
                         modifiers,
                         handler_expr: expr.clone(),
                         handler_span: val_tok.span,
+                    }
+                } else if let Some(prop) = name.strip_prefix("bind:") {
+                    // `bind:value={sig}` two-way binding (T133 stretch).
+                    if prop.is_empty() {
+                        return Err(self.err(
+                            "`bind:` requires a prop name (`bind:value={...}`)",
+                            name_span,
+                        ));
+                    }
+                    RsxAttributeKind::Bind {
+                        prop: prop.to_string(),
+                        signal: expr.clone(),
                     }
                 } else {
                     RsxAttributeKind::Expression {
@@ -406,8 +574,11 @@ impl Parser {
                 }
                 BuffHtmlTokenKind::EachClose
                 | BuffHtmlTokenKind::IfClose
+                | BuffHtmlTokenKind::AwaitClose
                 | BuffHtmlTokenKind::Else
-                | BuffHtmlTokenKind::ElseIf(_) => {
+                | BuffHtmlTokenKind::ElseIf(_)
+                | BuffHtmlTokenKind::AwaitThen(_)
+                | BuffHtmlTokenKind::AwaitCatch(_) => {
                     return Err(self.err(
                         format!("unexpected block terminator inside `<{parent_tag}>`"),
                         self.span_here(),
@@ -437,6 +608,9 @@ impl Parser {
                 BuffHtmlTokenKind::ElseIf(_) if terms.contains(&Terminator::ElseIf) => true,
                 BuffHtmlTokenKind::EachClose if terms.contains(&Terminator::EachClose) => true,
                 BuffHtmlTokenKind::IfClose if terms.contains(&Terminator::IfClose) => true,
+                BuffHtmlTokenKind::AwaitThen(_) if terms.contains(&Terminator::AwaitThen) => true,
+                BuffHtmlTokenKind::AwaitCatch(_) if terms.contains(&Terminator::AwaitCatch) => true,
+                BuffHtmlTokenKind::AwaitClose if terms.contains(&Terminator::AwaitClose) => true,
                 _ => false,
             };
             if is_term {
@@ -520,12 +694,13 @@ impl Parser {
 
     fn parse_each(&mut self) -> Result<RsxNode, BuffHtmlParseError> {
         let start_span = self.span_here();
-        let (iterable, iterable_span, binding, index) = match self.advance().kind {
+        let (iterable, iterable_span, binding, index, key) = match self.advance().kind {
             BuffHtmlTokenKind::EachOpen {
                 iterable,
                 binding,
                 index,
-            } => (iterable.clone(), start_span, binding, index),
+                key,
+            } => (iterable, start_span, binding, index, key),
             _ => unreachable!(),
         };
         let body =
@@ -546,6 +721,7 @@ impl Parser {
             iterable_span,
             binding,
             index_binding: index,
+            key,
             body,
             else_branch,
             span: Span::new(start_span.start, self.span_here().end, self.source_id),
@@ -560,6 +736,9 @@ enum Terminator {
     ElseIf,
     EachClose,
     IfClose,
+    AwaitThen,
+    AwaitCatch,
+    AwaitClose,
 }
 
 /// Parse `on:event_modifier_modifier` into `(event, [modifier, modifier])`.
@@ -813,14 +992,138 @@ mod tests {
     #[test]
     fn slot_default() {
         let f = p("<slot />");
-        assert!(matches!(&f.root[0], RsxNode::Slot(_)));
+        match &f.root[0] {
+            RsxNode::Slot(s) => assert!(s.name.is_none()),
+            other => panic!("expected Slot, got {other:?}"),
+        }
     }
 
     #[test]
-    fn slot_named_rejected() {
-        let e = must_fail("<slot name=\"x\" />");
-        let msg = format!("{e}");
-        assert!(msg.contains("named slots"));
+    fn slot_named_accepted() {
+        // T133 stretch: named slots now work.
+        let f = p("<slot name=\"header\" />");
+        match &f.root[0] {
+            RsxNode::Slot(s) => assert_eq!(s.name.as_deref(), Some("header")),
+            other => panic!("expected Slot with name=header, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn slot_named_rejects_non_string_value() {
+        let e = must_fail("<slot name={expr} />");
+        assert!(format!("{e}").contains("string literal"));
+    }
+
+    #[test]
+    fn slot_rejects_unknown_attribute() {
+        let e = must_fail("<slot foo=\"bar\" />");
+        assert!(format!("{e}").contains("unknown attribute"));
+    }
+
+    #[test]
+    fn html_escape_node() {
+        // T133 stretch: `{@html expr}` is now a parseable node.
+        let f = p("{@html raw_html}");
+        match &f.root[0] {
+            RsxNode::RawHtml(r) => assert_eq!(r.expr, "raw_html"),
+            other => panic!("expected RawHtml, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn await_block_basic() {
+        // T133 stretch: minimal `{#await fut}{:then x}{body}{/await}`.
+        let f = p("{#await fetchUser(id)}{:then user}<Profile user: {user} />{/await}");
+        match &f.root[0] {
+            RsxNode::Await(a) => {
+                assert_eq!(a.fut_expr, "fetchUser(id)");
+                assert_eq!(a.then_binding, "user");
+                assert!(a.pending_body.is_none());
+                assert!(a.catch_binding.is_none());
+                assert_eq!(a.then_body.len(), 1);
+            }
+            other => panic!("expected Await, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn await_block_full_form() {
+        let f = p("{#await fetchUser(id)}<Spinner />{:then user}<Profile user: {user} />{:catch err}<Error msg: {err.message} />{/await}");
+        match &f.root[0] {
+            RsxNode::Await(a) => {
+                assert_eq!(a.fut_expr, "fetchUser(id)");
+                assert!(a.pending_body.is_some());
+                assert_eq!(a.then_binding, "user");
+                assert_eq!(a.catch_binding.as_deref(), Some("err"));
+                assert!(a.catch_body.is_some());
+            }
+            other => panic!("expected Await, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn await_block_requires_then() {
+        let e = must_fail("{#await f()}{/await}");
+        assert!(format!("{e}").contains("`{:then binding}`"));
+    }
+
+    #[test]
+    fn keyed_each_basic() {
+        // T133 stretch.
+        let f = p("{#each items as item (item.id)}<li>{item}</li>{/each}");
+        match &f.root[0] {
+            RsxNode::Each(e) => {
+                assert_eq!(e.iterable, "items");
+                assert_eq!(e.binding, "item");
+                assert_eq!(e.key.as_deref(), Some("item.id"));
+            }
+            other => panic!("expected Each, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keyed_each_with_method_iterable() {
+        // T133 stretch fix: parens in iterable expr now allowed.
+        let f = p("{#each items.read() as item (item.id)}<li>{item}</li>{/each}");
+        match &f.root[0] {
+            RsxNode::Each(e) => {
+                assert_eq!(e.iterable, "items.read()");
+                assert_eq!(e.key.as_deref(), Some("item.id"));
+            }
+            other => panic!("expected Each, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spread_props_basic() {
+        // T133 stretch.
+        let f = p("<Button {...rest} label: \"Override\" />");
+        let e = match &f.root[0] {
+            RsxNode::Element(e) => e,
+            _ => panic!(),
+        };
+        assert_eq!(e.attributes.len(), 2);
+        match &e.attributes[0].kind {
+            RsxAttributeKind::Spread { ident } => assert_eq!(ident, "rest"),
+            other => panic!("expected Spread, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bind_attribute_form() {
+        // T133 stretch: `bind:value={sig}` two-way binding.
+        let f = p("<input bind:value={name} />");
+        let e = match &f.root[0] {
+            RsxNode::Element(e) => e,
+            _ => panic!(),
+        };
+        match &e.attributes[0].kind {
+            RsxAttributeKind::Bind { prop, signal } => {
+                assert_eq!(prop, "value");
+                assert_eq!(signal, "name");
+            }
+            other => panic!("expected Bind, got {other:?}"),
+        }
     }
 
     #[test]

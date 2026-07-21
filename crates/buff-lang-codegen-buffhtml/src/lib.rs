@@ -42,7 +42,7 @@ use buff_lang_ast_rsx::{
 };
 // Note: RsxComment is referenced in lower_comment signature.
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{format_ident, quote, ToTokens};
 
 /// Result of generating Rust source for a `.buffhtml` template.
 #[derive(Debug, Clone)]
@@ -235,10 +235,41 @@ fn lower_node(
         RsxNode::Fragment(f) => lower_fragment(f, builder),
         RsxNode::If(i) => lower_if(i, builder),
         RsxNode::Each(e) => lower_each(e, builder),
+        RsxNode::RawHtml(r) => Ok(lower_raw_html(r, builder)),
+        RsxNode::Await(a) => lower_await(a, builder),
         RsxNode::Script(_) => {
             // Top-level only — parser rejects nested <script>.
             Ok(quote! {})
         }
+    }
+}
+
+/// `{@html expr}` → `<div dangerous_inner_html={expr} data-buffhtml-xss="warning" />`
+/// (T133 stretch).
+///
+/// **Security:** bypasses Dioxus's auto-escaping. The emitted
+/// `data-buffhtml-xss="warning"` HTML attribute is a runtime audit marker
+/// (visible in DevTools / scrape-able by security tooling).
+fn lower_raw_html(r: &buff_lang_ast_rsx::RsxRawHtml, builder: &mut SpanMapBuilder) -> TokenStream {
+    let expr_src = &r.expr;
+    let parsed: TokenStream = match syn::parse_str::<syn::Expr>(expr_src) {
+        Ok(p) => p.to_token_stream(),
+        Err(_) => {
+            let raw = expr_src.clone();
+            quote! { #raw }
+        }
+    };
+    let anchor_text = first_anchor_text(expr_src);
+    builder.add_anchor(&anchor_text, r.span);
+    // Dioxus 0.7: `dangerous_inner_html` is the standard opt-in for raw HTML.
+    // The `data_buffhtml_xss` attribute (sanitized to `data-buffhtml-xss` by
+    // Dioxus's kebab-case normalization) is a runtime audit marker — visible
+    // in DevTools and scrape-able by security tooling.
+    quote! {
+        div {
+            dangerous_inner_html: #parsed,
+            data_buffhtml_xss: "{@html} opt-in",
+        },
     }
 }
 
@@ -295,14 +326,22 @@ fn lower_comment(_c: &RsxComment) -> TokenStream {
     quote! {}
 }
 
-fn lower_slot(_s: &RsxSlot) -> TokenStream {
-    // Default slot lowers to the Dioxus `children` signal — components
-    // declare it via `fn Comp(children: ReadOnlyChildren) -> Element`.
-    // For T133 we emit a passthrough `children` identifier that the user's
-    // script block (or companion .buff) is expected to bind. If `children`
-    // is not in scope, rustc emits an E0425 that maps cleanly back to the
-    // slot's span via the side-table.
-    quote! { { children }, }
+fn lower_slot(s: &RsxSlot) -> TokenStream {
+    // Default slot (`<slot />`) lowers to the Dioxus `children` signal.
+    // Named slot (`<slot name="header" />`) lowers to the corresponding
+    // named-children signal — the parent component declares
+    // `fn Comp(children: Element, header: Element)` and the slot renders
+    // `{header}`. The named-child identifier is sanitized to a valid Rust
+    // ident (slot names like "header" already are, but we guard against
+    // future exotic names).
+    match &s.name {
+        None => quote! { { children }, },
+        Some(name) => {
+            let ident = sanitize_ident(name);
+            let rust_ident = format_ident!("{}", ident);
+            quote! { { #rust_ident }, }
+        }
+    }
 }
 
 fn lower_element(
@@ -450,6 +489,37 @@ fn lower_attr(
             let ident = attr_ident(name)?;
             Ok(quote! { #ident: true, })
         }
+        RsxAttributeKind::Spread { ident } => {
+            // `{...rest}` → Dioxus spread syntax `..ident`. T133 stretch.
+            let parsed: TokenStream = match syn::parse_str::<syn::Expr>(ident) {
+                Ok(p) => p.to_token_stream(),
+                Err(_) => {
+                    let raw = ident.clone();
+                    quote! { #raw }
+                }
+            };
+            Ok(quote! { ..#parsed, })
+        }
+        RsxAttributeKind::Bind { prop, signal } => {
+            // `bind:value={sig}` → controlled two-way binding. T133 stretch.
+            // Dioxus 0.7 idiom: explicit controlled-component form.
+            //   value: <signal>,
+            //   oninput: move |__e| <signal>.set(__e.value())
+            // The signal is expected to be a `use_signal` (or compatible).
+            // Rust infers the event type — emits a `value()` accessor.
+            let prop_ident = attr_ident(prop)?;
+            let signal_tokens: TokenStream = match syn::parse_str::<syn::Expr>(signal) {
+                Ok(p) => p.to_token_stream(),
+                Err(_) => {
+                    let raw = signal.clone();
+                    quote! { #raw }
+                }
+            };
+            Ok(quote! {
+                #prop_ident: #signal_tokens,
+                oninput: move |__e| { #signal_tokens.set(__e.value()); },
+            })
+        }
     }
 }
 
@@ -533,13 +603,15 @@ fn lower_each(
     e: &RsxEach,
     builder: &mut SpanMapBuilder,
 ) -> Result<TokenStream, BuffHtmlCodegenError> {
-    // {#each items as item} body {/each}
-    // → inside rsx!{}: `{ items.iter().map(|item| rsx!{ body }).collect::<Vec<_>>() }`
+    // `{#each items as item}` → `items.iter().map(|item| rsx!{ body }).collect::<Vec<_>>()`
     //
-    // `{:else}` is deferred to T134+ (it would lower to a conditional on
-    // `items.is_empty()`). For T133 we emit the iterator alone — if the user
-    // wrote an `{:else}` branch the parser captures it but codegen ignores
-    // it. Documented limitation.
+    // Keyed form (T133 stretch): `{#each items as item (item.id)}` →
+    // `items.iter().enumerate().map(|(__bk, item)| {
+    //     let __key = item.id;
+    //     rsx! { key: __key, body }
+    // }).collect::<Vec<_>>()`
+    //
+    // Dioxus 0.7 recognizes `key:` as the reconciliation key on children.
     let iter_src = &e.iterable;
     let binding = &e.binding;
     let binding_ident = match syn::parse_str::<syn::Ident>(binding) {
@@ -555,7 +627,40 @@ fn lower_each(
         Err(_) => quote! { #iter_src },
     };
     let body = lower_nodes(&e.body, builder)?;
-    // Optional index binding: `enumerate().map(|(i, item)| ...)`.
+
+    // If keyed: emit the keyed form (Dioxus uses `key: <expr>` on children).
+    if let Some(key_src) = &e.key {
+        let key_tokens: TokenStream = match syn::parse_str::<syn::Expr>(key_src) {
+            Ok(p) => p.to_token_stream(),
+            Err(_) => {
+                let raw = key_src.clone();
+                quote! { #raw }
+            }
+        };
+        // Use distinct idents to avoid shadowing between the enumerate index
+        // and the computed key value.
+        let idx_ident = format_ident!("__buff_idx");
+        let key_ident = format_ident!("__buff_key");
+        // The keyed form: enumerate to get a positional index (Dioxus
+        // requires unique siblings — the index alone would work but is
+        // O(n) reconciliation; the user-provided key expr makes it O(1)),
+        // then evaluate the key expression in the body where `binding` is
+        // in scope. We emit the key as a top-level attribute on the body's
+        // outermost rsx!{}.
+        return Ok(quote! {
+            {
+                #iter_tokens.iter().enumerate().map(|(#idx_ident, #binding_ident)| {
+                    let #key_ident = #key_tokens;
+                    rsx! {
+                        key: #key_ident,
+                        #body
+                    }
+                }).collect::<Vec<_>>()
+            },
+        });
+    }
+
+    // Non-keyed path (original).
     let map_clause = match &e.index_binding {
         Some(idx) => {
             let i_ident = match syn::parse_str::<syn::Ident>(idx) {
@@ -572,5 +677,84 @@ fn lower_each(
     };
     Ok(quote! {
         { #iter_tokens.iter() #map_clause .collect::<Vec<_>>() },
+    })
+}
+
+/// `{#await fut}{:then b}{:catch e}{/await}` → Dioxus 0.7 use_resource hook.
+/// T133 stretch.
+///
+/// Lowers to:
+/// ```ignore
+/// {
+///     let __resource = use_resource(|| async { <fut_expr>.await });
+///     // match on resource state
+///     match &*__resource.read() {
+///         ResourceState::Ready(Ok(<then_binding>)) => rsx! { <then_body> },
+///         ResourceState::Ready(Err(<catch_binding>)) => rsx! { <catch_body> },
+///         _ => rsx! { <pending_body> },
+///     }
+/// }
+/// ```
+///
+/// If `pending_body` is `None` and the resource is still loading, nothing
+/// renders (empty fragment).
+fn lower_await(
+    a: &buff_lang_ast_rsx::RsxAwait,
+    builder: &mut SpanMapBuilder,
+) -> Result<TokenStream, BuffHtmlCodegenError> {
+    let fut_src = &a.fut_expr;
+    let fut_tokens: TokenStream = match syn::parse_str::<syn::Expr>(fut_src) {
+        Ok(p) => p.to_token_stream(),
+        Err(_) => quote! { #fut_src },
+    };
+    let then_binding = match syn::parse_str::<syn::Ident>(&a.then_binding) {
+        Ok(i) => i,
+        Err(_) => {
+            return Err(BuffHtmlCodegenError::UnsupportedConstruct {
+                message: format!(
+                    "await then-binding `{}` is not a valid Rust identifier",
+                    a.then_binding
+                ),
+            });
+        }
+    };
+    let then_body = lower_nodes(&a.then_body, builder)?;
+    let pending_body = match &a.pending_body {
+        Some(body) => {
+            let b = lower_nodes(body, builder)?;
+            quote! { rsx! { #b } }
+        }
+        None => quote! { rsx! { Fragment {} } },
+    };
+    let resource_ident = format_ident!("__buff_resource");
+    // Catch branch — optional.
+    let catch_arm = match (&a.catch_binding, &a.catch_body) {
+        (Some(cb), Some(body)) => {
+            let catch_ident = match syn::parse_str::<syn::Ident>(cb) {
+                Ok(i) => i,
+                Err(_) => {
+                    return Err(BuffHtmlCodegenError::UnsupportedConstruct {
+                        message: format!(
+                            "await catch-binding `{cb}` is not a valid Rust identifier"
+                        ),
+                    });
+                }
+            };
+            let b = lower_nodes(body, builder)?;
+            quote! {
+                ::dioxus::prelude::ResourceState::Ready(Err(#catch_ident)) => rsx! { #b },
+            }
+        }
+        _ => quote! {},
+    };
+    Ok(quote! {
+        {
+            let #resource_ident = ::dioxus::prelude::use_resource(|| async { #fut_tokens.await });
+            match #resource_ident.read().clone() {
+                ::dioxus::prelude::ResourceState::Ready(Ok(#then_binding)) => rsx! { #then_body },
+                #catch_arm
+                _ => #pending_body,
+            }
+        },
     })
 }

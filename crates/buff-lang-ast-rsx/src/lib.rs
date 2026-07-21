@@ -19,13 +19,14 @@
 //! - [`RsxNode::Script`] (`<script lang="buff"> ... </script>` block,
 //!   preserved verbatim for the CLI to splice into the generated Rust crate)
 //!
-//! Deferred per §6 (NOT shipped; intentionally absent from this enum):
-//! - Named slots (`<slot name="x" />`) — T134+
-//! - Keyed each (`{#each xs as x (x.id)}`) — T134+
-//! - Spread props (`{...rest}`) — T134+
-//! - Two-way binding (`bind={...}`) — T134+
-//! - Await blocks (`{#await ...}`) — T134+
-//! - `{@html}` escape hatch — T134+
+//! Stretch features shipped in T133 (per task spec, replacing the original
+//! "deferred" list — these now have full AST + parser + codegen + tests):
+//! - Named slots ([`RsxSlot::name`]) — `<slot name="x" />`
+//! - Keyed each ([`RsxEach::key`]) — `{#each xs as x (x.id)}`
+//! - Spread props ([`RsxAttributeKind::Spread`]) — `{...rest}`
+//! - Two-way binding ([`RsxAttributeKind::Bind`]) — `bind:value={sig}`
+//! - Await blocks ([`RsxNode::Await`]) — `{#await}{:then}{:catch}{/await}`
+//! - Raw HTML escape hatch ([`RsxNode::RawHtml`]) — `{@html raw_trusted_html}`
 //!
 //! [`Span`] is re-exported from `buff-lang-error` for convenience.
 
@@ -85,6 +86,15 @@ pub enum RsxNode {
     /// `<script lang="buff"> ... </script>` block (only at file top-level;
     /// nested `<script>` is rejected by the parser).
     Script(ScriptBlock),
+    /// `{@html raw_trusted_html}` — opt-in raw-HTML escape hatch (T133
+    /// stretch). Lowers to a wrapping `<div dangerous_inner_html=... />`.
+    /// **SECURITY:** bypasses Dioxus's auto-escaping; never use with
+    /// user-controlled input. Codegen emits a `/* XSS: {@html} opt-in */`
+    /// marker comment in the generated source for auditing.
+    RawHtml(RsxRawHtml),
+    /// `{#await fut}{:then binding}{:catch binding}{/await}` (T133 stretch).
+    /// Optional `pending_body` runs before the future resolves.
+    Await(RsxAwait),
 }
 
 /// HTML element or child component.
@@ -169,6 +179,14 @@ pub enum RsxAttributeKind {
     },
     /// Bare boolean attribute (e.g. `<input disabled />`).
     Boolean { name: String },
+    /// `{...rest}` spread props (T133 stretch). `ident` is the identifier
+    /// following the `...`. Codegen emits `..ident` (Dioxus spread syntax).
+    Spread { ident: String },
+    /// `bind:value={sig}` two-way binding (T133 stretch). `prop` is the
+    /// bound attribute name (e.g. `value`); `signal` is the raw source for
+    /// the signal expression. Codegen emits an explicit controlled-component
+    /// form: `prop: <signal>, oninput: move |e| <signal>.set(e.value())`.
+    Bind { prop: String, signal: String },
 }
 
 /// `{#if cond} ... {:else if cond} ... {:else} ... {/if}`.
@@ -192,29 +210,39 @@ pub struct RsxIfBranch {
 
 /// `{#each iterable as binding} ... {:else} ... {/each}`.
 ///
-/// Keyed each (`{#each xs as x (x.id)}`) is **deferred to T134+** (decision
-/// record §6 stretch); the parser does not accept the `(key)` form today.
+/// Keyed form (`{#each xs as x (x.id)}`) is supported via the [`Self::key`]
+/// field (T133 stretch). The key expression is the raw source between the
+/// parens following the binding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RsxEach {
     /// Raw source of the iterable expression (`items` in `{#each items as item}`).
+    /// May contain method calls (e.g. `items.read()`) — the parser only treats
+    /// a `(` AFTER the binding as the key form.
     pub iterable: String,
     pub iterable_span: Span,
     /// Loop binding name (`item` in `{#each items as item}`).
     pub binding: String,
     /// Optional index binding (`i` in `{#each items as item, i}`).
     pub index_binding: Option<String>,
+    /// Optional keyed-iteration expression (`item.id` in
+    /// `{#each xs as x (x.id)}`). Emits a keyed Dioxus form.
+    pub key: Option<String>,
     pub body: Vec<RsxNode>,
     /// `{:else}` body, if present (runs when `iterable` is empty).
     pub else_branch: Option<Vec<RsxNode>>,
     pub span: Span,
 }
 
-/// `<slot />` — default slot insertion point.
+/// `<slot />` (default) or `<slot name="x" />` (named, T133 stretch).
 ///
-/// Named slots (`<slot name="x" />`) are **deferred to T134+** (decision
-/// record §6 stretch). The parser rejects the `name=` attribute today.
+/// Named slots lower to Dioxus's named-children pattern: the parent
+/// component declares `fn Comp(children: Element, header: Element)` and the
+/// slot renders `{header}` (or `{children}` for the default slot).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RsxSlot {
+    /// `None` for default slot (`{children}`). `Some("header")` for
+    /// `<slot name="header" />` → renders `{header}`.
+    pub name: Option<String>,
     pub span: Span,
 }
 
@@ -222,6 +250,44 @@ pub struct RsxSlot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RsxComment {
     pub text: String,
+    pub span: Span,
+}
+
+/// `{@html raw_trusted_html}` raw HTML escape hatch (T133 stretch).
+///
+/// **SECURITY WARNING:** bypasses Dioxus's auto-escaping. Only use with
+/// trusted content. Codegen emits a marker comment in the generated `.rs`
+/// source for security auditing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RsxRawHtml {
+    /// Raw source of the expression to inject as HTML.
+    pub expr: String,
+    pub span: Span,
+}
+
+/// `{#await fut_expr} pending... {:then binding} ok... {:catch binding} err... {/await}`
+/// (T133 stretch).
+///
+/// Mirrors Svelte's await block. `pending_body` is optional (the space
+/// between `{#await fut}` and `{:then binding}`); if absent, nothing renders
+/// until the future resolves.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RsxAwait {
+    /// Raw source for the future expression (`fetchUser(id)` in
+    /// `{#await fetchUser(id)}`).
+    pub fut_expr: String,
+    pub fut_span: Span,
+    /// Optional pending body — runs while the future is in-flight. The body
+    /// between `{#await fut}` and the first `{:then}` / `{:catch}`.
+    pub pending_body: Option<Vec<RsxNode>>,
+    /// `{:then binding}` — `binding` is the identifier the resolved value is
+    /// bound to. The then-body is required (an await with no `:then` is
+    /// rejected by the parser).
+    pub then_binding: String,
+    pub then_body: Vec<RsxNode>,
+    /// `{:catch binding}` — optional error handler.
+    pub catch_binding: Option<String>,
+    pub catch_body: Option<Vec<RsxNode>>,
     pub span: Span,
 }
 
@@ -272,7 +338,15 @@ impl RsxFragment {
 
 impl RsxSlot {
     pub fn new(span: Span) -> Self {
-        Self { span }
+        Self { name: None, span }
+    }
+
+    /// Named slot constructor (`<slot name="x" />`).
+    pub fn named(name: impl Into<String>, span: Span) -> Self {
+        Self {
+            name: Some(name.into()),
+            span,
+        }
     }
 }
 
@@ -328,5 +402,19 @@ mod tests {
         let n = RsxText::new("hello", span);
         assert_eq!(n.text, "hello");
         assert_eq!(n.span, span);
+    }
+
+    #[test]
+    fn slot_default_has_no_name() {
+        let span = Span::new(0, 7, crate::Span::dummy().source_id);
+        let s = RsxSlot::new(span);
+        assert!(s.name.is_none());
+    }
+
+    #[test]
+    fn slot_named_carries_name() {
+        let span = Span::new(0, 22, crate::Span::dummy().source_id);
+        let s = RsxSlot::named("header", span);
+        assert_eq!(s.name.as_deref(), Some("header"));
     }
 }

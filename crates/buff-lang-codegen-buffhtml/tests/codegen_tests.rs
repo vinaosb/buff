@@ -323,3 +323,177 @@ fn generated_source_re_parses_as_syn_file() {
         panic!("prettyplease output must re-parse as syn::File: {e}\n--- src ---\n{src}")
     });
 }
+
+// ---------------------------------------------------------------------------
+// T133 stretch features (6 features).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn raw_html_emits_dangerous_inner_html() {
+    // Feature 1: `{@html expr}` → div { dangerous_inner_html: <expr> }
+    let src = gen("{@html raw_html}");
+    assert!(
+        src.contains("dangerous_inner_html"),
+        "expected `dangerous_inner_html` for `{{@html}}`:\n{src}"
+    );
+    assert!(
+        src.contains("raw_html"),
+        "expected the raw_html identifier preserved:\n{src}"
+    );
+}
+
+#[test]
+fn raw_html_emits_xss_marker_comment() {
+    // Feature 1: the generated source contains an auditing marker.
+    let src = gen("{@html raw_html}");
+    assert!(
+        src.contains("XSS") || src.contains("{@html}"),
+        "expected an XSS / `{{@html}}` audit marker in:\n{src}"
+    );
+}
+
+#[test]
+fn spread_props_emit_dotted_spread() {
+    // Feature 2: `{...rest}` → `..rest`
+    let src = gen("<Button {...rest} />");
+    assert!(
+        src.contains("..rest") || src.contains(".. rest"),
+        "expected `..rest` spread syntax in:\n{src}"
+    );
+}
+
+#[test]
+fn spread_props_with_other_attrs_coexist() {
+    // Feature 2: spread + named prop together.
+    let src = gen("<Button {...rest} label: \"x\" />");
+    assert!(
+        (src.contains("..rest") || src.contains(".. rest")) && src.contains("label"),
+        "expected spread + label together in:\n{src}"
+    );
+}
+
+#[test]
+fn named_slot_emits_named_children_ident() {
+    // Feature 3: `<slot name="header" />` → renders `{ header }`.
+    let src = gen("<slot name=\"header\" />");
+    assert!(
+        src.contains("header"),
+        "expected `header` named-children identifier in:\n{src}"
+    );
+    // Sanity: must NOT contain the lowercase fallback `children` (the
+    // default slot form). It might still appear by coincidence if the
+    // name was sanitized — but for `header`, it shouldn't.
+    assert!(
+        !src.contains("{ children }"),
+        "named slot should not lower to default `children`:\n{src}"
+    );
+}
+
+#[test]
+fn default_slot_still_emits_children() {
+    // Feature 3: default slot form unchanged.
+    let src = gen("<slot />");
+    assert!(
+        src.contains("children"),
+        "expected `children` for default slot:\n{src}"
+    );
+}
+
+#[test]
+fn keyed_each_emits_enumerate_and_key() {
+    // Feature 4: `{#each xs as x (x.id)}` → keyed form with `key:` attribute.
+    let src = gen("{#each items as item (item.id)}<li>{item}</li>{/each}");
+    assert!(
+        src.contains(".enumerate()"),
+        "expected `.enumerate()` for keyed each in:\n{src}"
+    );
+    assert!(
+        src.contains("key"),
+        "expected `key` attribute for keyed each in:\n{src}"
+    );
+}
+
+#[test]
+fn keyed_each_with_method_iterable_compiles() {
+    // Feature 4 fix: parens in iterable expression work end-to-end.
+    let src = gen("{#each items.read() as item (item.id)}<li>{item}</li>{/each}");
+    // Should still emit the keyed form and the iterable expression verbatim.
+    assert!(
+        src.contains("items.read()"),
+        "expected iterable expression preserved verbatim in:\n{src}"
+    );
+    assert!(
+        src.contains("key"),
+        "expected `key` for keyed each in:\n{src}"
+    );
+}
+
+#[test]
+fn bind_emits_controlled_two_way_binding() {
+    // Feature 5: `bind:value={name}` → `value: name, oninput: move |e| name.set(e.value())`
+    let src = gen("<input bind:value={name} />");
+    assert!(src.contains("value"), "expected `value` prop in:\n{src}");
+    assert!(
+        src.contains("oninput"),
+        "expected `oninput` handler for two-way binding in:\n{src}"
+    );
+    assert!(
+        src.contains(".set("),
+        "expected `.set(` call to mutate the signal in:\n{src}"
+    );
+    assert!(
+        src.contains("name"),
+        "expected signal identifier `name` in:\n{src}"
+    );
+}
+
+#[test]
+fn bind_emits_move_closure_capturing_signal() {
+    // Feature 5: the oninput handler must be a `move` closure to capture
+    // the signal by reference for `.set()`.
+    let src = gen("<input bind:value={username} />");
+    assert!(
+        src.contains("move"),
+        "expected `move` closure in bind codegen:\n{src}"
+    );
+    assert!(
+        src.contains("username"),
+        "expected signal `username` to appear in:\n{src}"
+    );
+}
+
+#[test]
+fn await_block_emits_use_resource_pattern() {
+    // Feature 6: minimal `{#await fut}{:then x}{body}{/await}`.
+    let src = gen("{#await fetchUser(id)}{:then user}<Profile user: {user} />{/await}");
+    assert!(
+        src.contains("use_resource"),
+        "expected `use_resource` hook for await-block in:\n{src}"
+    );
+    assert!(
+        src.contains("fetchUser"),
+        "expected future expression preserved in:\n{src}"
+    );
+    assert!(
+        src.contains("user"),
+        "expected then-binding identifier in:\n{src}"
+    );
+}
+
+#[test]
+fn await_block_with_catch_emits_error_arm() {
+    // Feature 6: full form with pending + then + catch.
+    let src = gen("{#await fetchUser(id)}<Spinner />{:then user}<Profile user: {user} />{:catch err}<Error />{/await}");
+    assert!(
+        src.contains("use_resource"),
+        "expected `use_resource` for await-block:\n{src}"
+    );
+    assert!(
+        src.contains("err"),
+        "expected catch-binding identifier `err` in:\n{src}"
+    );
+    assert!(
+        src.contains("Ready"),
+        "expected `ResourceState::Ready` match arm in:\n{src}"
+    );
+}

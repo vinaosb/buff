@@ -51,11 +51,14 @@ pub enum BuffHtmlTokenKind {
     /// `{expr}` interpolation. `expr` is the raw source between the braces
     /// (trimmed of one leading / trailing space for ergonomics).
     Interp(String),
-    /// `{#each iterable as binding}` or `{#each iterable as binding, index}`.
+    /// `{#each iterable as binding}` or `{#each iterable as binding, index}`
+    /// or `{#each iterable as binding (key)}` (T133 stretch keyed form).
     EachOpen {
         iterable: String,
         binding: String,
         index: Option<String>,
+        /// Optional keyed-iteration expression. T133 stretch.
+        key: Option<String>,
     },
     /// `{/each}`.
     EachClose,
@@ -74,8 +77,24 @@ pub enum BuffHtmlTokenKind {
     /// directive (EachOpen / IfOpen); a `{#` followed by anything else (or
     /// terminated by `#}`) is a BuffComment.
     BuffComment(String),
+    /// `{@html expr}` raw HTML escape hatch (T133 stretch). `expr` is the
+    /// raw source after `@html` (trimmed). Lowers to `dangerous_inner_html`.
+    HtmlEscape(String),
+    /// `{#await fut_expr}` (T133 stretch). `fut_expr` is the raw source after
+    /// `#await` (trimmed).
+    AwaitOpen(String),
+    /// `{:then binding}` (T133 stretch).
+    AwaitThen(String),
+    /// `{:catch binding}` (T133 stretch).
+    AwaitCatch(String),
+    /// `{/await}` (T133 stretch).
+    AwaitClose,
+    /// `{...ident}` spread-props marker (T133 stretch). `ident` is the bare
+    /// identifier following the `...`. The lexer captures this in attribute
+    /// position (after an open tag, before `>` / `/>`).
+    AttrSpread(String),
     /// `<slot` opening — emitted so the parser can build [`RsxSlot`] and
-    /// reject `name=` attributes (deferred per decision record §6).
+    /// optionally accept `name=` attributes (T133 stretch).
     SlotOpen,
     /// `<script ...>` opening. The lexer then emits [`Self::ScriptText`] for
     /// the raw body and [`Self::ScriptClose`] for `</script>`.
@@ -466,9 +485,65 @@ impl<'src> LexerState<'src> {
                         self.span(self.pos, self.pos + 1),
                     ));
                 }
+                b'{' => {
+                    // Spread props: `{...ident}` (T133 stretch). The only
+                    // valid `{` in attribute position is the spread form.
+                    self.scan_spread_attr()?;
+                }
                 _ => self.scan_one_attribute()?,
             }
         }
+    }
+
+    /// `{...ident}` spread props (T133 stretch).
+    fn scan_spread_attr(&mut self) -> Result<(), BuffHtmlParseError> {
+        let start = self.pos;
+        debug_assert_eq!(self.bytes[self.pos], b'{');
+        self.pos += 1; // consume `{`
+                       // Require `...` next.
+        if self.pos + 2 >= self.bytes.len()
+            || self.bytes[self.pos] != b'.'
+            || self.bytes[self.pos + 1] != b'.'
+            || self.bytes[self.pos + 2] != b'.'
+        {
+            return Err(BuffHtmlParseError::lex(
+                "expected `...ident` for spread props",
+                self.span(start, self.pos),
+            ));
+        }
+        self.pos += 3; // consume `...`
+        self.skip_ws();
+        // Read the identifier (allow dotted paths: `rest.sub`).
+        let ident_start = self.pos;
+        while self.pos < self.bytes.len() {
+            let b = self.bytes[self.pos];
+            if b.is_ascii_alphanumeric() || b == b'_' || b == b'.' {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        let ident = self.src[ident_start..self.pos].to_string();
+        if ident.is_empty() {
+            return Err(BuffHtmlParseError::lex(
+                "expected identifier after `...` in spread props",
+                self.span(start, self.pos),
+            ));
+        }
+        self.skip_ws();
+        // Expect closing `}`.
+        if self.pos >= self.bytes.len() || self.bytes[self.pos] != b'}' {
+            return Err(BuffHtmlParseError::lex(
+                "expected `}` to close `{...ident}` spread",
+                self.span(start, self.pos),
+            ));
+        }
+        self.pos += 1; // consume `}`
+        self.tokens.push(BuffHtmlToken::new(
+            BuffHtmlTokenKind::AttrSpread(ident),
+            self.span(start, self.pos),
+        ));
+        Ok(())
     }
 
     /// Scan a single attribute: `name`, `name="lit"`, `name={expr}`,
@@ -670,6 +745,7 @@ impl<'src> LexerState<'src> {
                 match kw {
                     "each" => self.scan_each_open(brace_start),
                     "if" => self.scan_if_open(brace_start),
+                    "await" => self.scan_await_open(brace_start),
                     _ => {
                         // BuffComment `{# ... #}`.
                         self.scan_buff_comment(brace_start)
@@ -678,12 +754,77 @@ impl<'src> LexerState<'src> {
             }
             b':' => self.scan_else_directive(brace_start),
             b'/' => self.scan_block_close(brace_start),
-            b'@' => Err(BuffHtmlParseError::lex(
-                "`{@html}` is deferred to T134+ (decision record §6)",
-                self.span(brace_start, brace_start + 1),
-            )),
+            b'@' => self.scan_at_directive(brace_start),
             _ => self.scan_interp(brace_start),
         }
+    }
+
+    /// `{@html expr}` raw HTML escape hatch (T133 stretch).
+    fn scan_at_directive(&mut self, brace_start: usize) -> Result<(), BuffHtmlParseError> {
+        let close = find_matching_brace(self.bytes, brace_start + 1).ok_or_else(|| {
+            BuffHtmlParseError::lex(
+                "unterminated `{@...}` (missing `}`)",
+                self.span(brace_start, self.bytes.len()),
+            )
+        })?;
+        let body = self.src[brace_start + 1..close].trim();
+        let rest = body.strip_prefix('@').map(str::trim).ok_or_else(|| {
+            BuffHtmlParseError::lex(
+                "malformed `{@...}` directive",
+                self.span(brace_start, close + 1),
+            )
+        })?;
+        let expr = rest.strip_prefix("html").map(str::trim).ok_or_else(|| {
+            BuffHtmlParseError::lex(
+                "unknown `{@...}` directive (only `{@html}` is supported)",
+                self.span(brace_start, close + 1),
+            )
+        })?;
+        if expr.is_empty() {
+            return Err(BuffHtmlParseError::lex(
+                "`{@html}` requires an expression (`{@html raw_html}`)",
+                self.span(brace_start, close + 1),
+            ));
+        }
+        self.pos = close + 1;
+        self.tokens.push(BuffHtmlToken::new(
+            BuffHtmlTokenKind::HtmlEscape(expr.to_string()),
+            self.span(brace_start, self.pos),
+        ));
+        Ok(())
+    }
+
+    /// `{#await fut_expr}` (T133 stretch).
+    fn scan_await_open(&mut self, brace_start: usize) -> Result<(), BuffHtmlParseError> {
+        let close = find_matching_brace(self.bytes, brace_start + 1).ok_or_else(|| {
+            BuffHtmlParseError::lex(
+                "unterminated `{#await ...` (missing `}`)",
+                self.span(brace_start, self.bytes.len()),
+            )
+        })?;
+        let body = self.src[brace_start + 1..close].trim();
+        let fut = body
+            .strip_prefix("#await")
+            .map(str::trim)
+            .ok_or_else(|| {
+                BuffHtmlParseError::lex(
+                    "malformed `{#await}` directive",
+                    self.span(brace_start, close + 1),
+                )
+            })?
+            .to_string();
+        if fut.is_empty() {
+            return Err(BuffHtmlParseError::lex(
+                "`{#await}` requires a future expression",
+                self.span(brace_start, close + 1),
+            ));
+        }
+        self.pos = close + 1;
+        self.tokens.push(BuffHtmlToken::new(
+            BuffHtmlTokenKind::AwaitOpen(fut),
+            self.span(brace_start, self.pos),
+        ));
+        Ok(())
     }
 
     /// `{expr}` interpolation.
@@ -708,7 +849,12 @@ impl<'src> LexerState<'src> {
         Ok(())
     }
 
-    /// `{#each iterable as binding}` or `{#each iterable as binding, index}`.
+    /// `{#each iterable as binding}`, `{#each iterable as binding, index}`,
+    /// or `{#each iterable as binding (key)}` (T133 stretch).
+    ///
+    /// The `(` for the key form is recognized ONLY after the `binding` part
+    /// is parsed — `(` inside the `iterable` expression (e.g. `items.read()`)
+    /// is allowed.
     fn scan_each_open(&mut self, brace_start: usize) -> Result<(), BuffHtmlParseError> {
         // Move past `{#each` keyword.
         let close = find_matching_brace(self.bytes, brace_start + 1).ok_or_else(|| {
@@ -725,15 +871,10 @@ impl<'src> LexerState<'src> {
                 self.span(brace_start, close + 1),
             )
         })?;
-        // rest = "iterable as binding" or "iterable as binding, index".
-        // Reject keyed form `iterable as binding (key)` (T134+).
-        if rest.contains('(') {
-            return Err(BuffHtmlParseError::lex(
-                "keyed each (`(key)`) is deferred to T134+ (decision record §6)",
-                self.span(brace_start, close + 1),
-            ));
-        }
-        let (iterable, binding_part) = match rest.split_once(" as ") {
+        // Split on the FIRST ` as ` to separate iterable from binding-part.
+        // The iterable may contain `(` (e.g. method calls) — only the ` as `
+        // keyword marks the boundary.
+        let (iterable, binding_part) = match find_each_as_boundary(rest) {
             None => {
                 return Err(BuffHtmlParseError::lex(
                     "`{#each}` requires `as` binding (`{#each items as item}`)",
@@ -743,13 +884,32 @@ impl<'src> LexerState<'src> {
             Some(pair) => pair,
         };
         let iterable = iterable.trim().to_string();
-        let (binding, index) = parse_binding_and_index(binding_part.trim());
+        // Now parse binding_part = "binding", "binding, index",
+        // "binding (key)", or "binding, index (key)".
+        let (binding, index, key) = parse_binding_index_key(binding_part.trim());
+        // Validate all three are non-empty (binding is required; index / key
+        // are optional but must be non-empty when present).
+        if binding.is_empty() {
+            return Err(BuffHtmlParseError::lex(
+                "`{#each as <binding>` — binding name is required",
+                self.span(brace_start, close + 1),
+            ));
+        }
+        if let Some(k) = &key {
+            if k.is_empty() {
+                return Err(BuffHtmlParseError::lex(
+                    "keyed each requires a key expression inside `(...)`",
+                    self.span(brace_start, close + 1),
+                ));
+            }
+        }
         self.pos = close + 1; // consume through `}`
         self.tokens.push(BuffHtmlToken::new(
             BuffHtmlTokenKind::EachOpen {
                 iterable,
                 binding,
                 index,
+                key,
             },
             self.span(brace_start, self.pos),
         ));
@@ -783,11 +943,12 @@ impl<'src> LexerState<'src> {
         Ok(())
     }
 
-    /// `{:else if cond}` or `{:else}`.
+    /// `{:else if cond}`, `{:else}`, `{:then binding}`, `{:catch binding}`
+    /// (the latter two for T133 stretch await blocks).
     fn scan_else_directive(&mut self, brace_start: usize) -> Result<(), BuffHtmlParseError> {
         let close = find_matching_brace(self.bytes, brace_start + 1).ok_or_else(|| {
             BuffHtmlParseError::lex(
-                "unterminated `{:else ...` (missing `}`)",
+                "unterminated `{:...}` (missing `}`)",
                 self.span(brace_start, self.bytes.len()),
             )
         })?;
@@ -806,12 +967,33 @@ impl<'src> LexerState<'src> {
             ));
             return Ok(());
         }
+        // Await sub-directives (T133 stretch).
+        if let Some(binding) = rest.strip_prefix("then").map(str::trim) {
+            if !binding.is_empty() {
+                self.pos = close + 1;
+                self.tokens.push(BuffHtmlToken::new(
+                    BuffHtmlTokenKind::AwaitThen(binding.to_string()),
+                    self.span(brace_start, self.pos),
+                ));
+                return Ok(());
+            }
+        }
+        if let Some(binding) = rest.strip_prefix("catch").map(str::trim) {
+            if !binding.is_empty() {
+                self.pos = close + 1;
+                self.tokens.push(BuffHtmlToken::new(
+                    BuffHtmlTokenKind::AwaitCatch(binding.to_string()),
+                    self.span(brace_start, self.pos),
+                ));
+                return Ok(());
+            }
+        }
         let cond = rest
             .strip_prefix("else if")
             .map(str::trim)
             .ok_or_else(|| {
                 BuffHtmlParseError::lex(
-                    "expected `{:else}` or `{:else if cond}`",
+                    "expected `{:else}`, `{:else if cond}`, `{:then b}`, or `{:catch b}`",
                     self.span(brace_start, close + 1),
                 )
             })?
@@ -824,7 +1006,7 @@ impl<'src> LexerState<'src> {
         Ok(())
     }
 
-    /// `{/each}` or `{/if}`.
+    /// `{/each}`, `{/if}`, or `{/await}`.
     fn scan_block_close(&mut self, brace_start: usize) -> Result<(), BuffHtmlParseError> {
         let close = find_matching_brace(self.bytes, brace_start + 1).ok_or_else(|| {
             BuffHtmlParseError::lex(
@@ -843,6 +1025,7 @@ impl<'src> LexerState<'src> {
         let kind = match kw {
             "each" => BuffHtmlTokenKind::EachClose,
             "if" => BuffHtmlTokenKind::IfClose,
+            "await" => BuffHtmlTokenKind::AwaitClose,
             other => {
                 return Err(BuffHtmlParseError::lex(
                     format!("unknown block close `{{/{other}}}`"),
@@ -969,13 +1152,99 @@ impl<'src> LexerState<'src> {
     }
 }
 
-/// Parse `binding` or `binding, index` from the post-`as` part of an each directive.
-fn parse_binding_and_index(s: &str) -> (String, Option<String>) {
-    if let Some((b, i)) = s.split_once(',') {
-        (b.trim().to_string(), Some(i.trim().to_string()))
-    } else {
-        (s.trim().to_string(), None)
+/// Parse `binding`, `binding, index`, `binding (key)`, or
+/// `binding, index (key)` from the post-`as` part of an each directive.
+/// Returns `(binding, Option<index>, Option<key>)`.
+///
+/// The `(...)` for the key is matched with proper paren-depth so a key
+/// expression like `(item.id)` (no inner parens) or `(f(x))` works.
+fn parse_binding_index_key(s: &str) -> (String, Option<String>, Option<String>) {
+    // Look for the first `(` — anything after the binding part that opens
+    // a paren is the key.
+    let paren_pos = s.find('(');
+    let (binding_part, key) = match paren_pos {
+        None => (s, None),
+        Some(pos) => {
+            let before = &s[..pos];
+            let from = pos + 1;
+            // Find matching close paren starting at `from`.
+            let mut depth = 1usize;
+            let mut i = from;
+            let bytes = s.as_bytes();
+            while i < s.len() {
+                match bytes[i] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let key_src = if i < s.len() { &s[from..i] } else { &s[from..] };
+            (before, Some(key_src.trim().to_string()))
+        }
+    };
+    let (binding, index) = match binding_part.split_once(',') {
+        None => (binding_part.trim().to_string(), None),
+        Some((b, i)) => (b.trim().to_string(), Some(i.trim().to_string())),
+    };
+    (binding, index, key)
+}
+
+/// Find the position of the FIRST top-level ` as ` keyword in an each
+/// directive body. Returns `Some((iterable, binding_part))` split at that
+/// boundary, or `None` if no ` as ` is present at the top level.
+///
+/// The boundary is matched as a standalone word — ` as ` surrounded by
+/// whitespace, NOT inside parens / strings / brackets. This lets iterables
+/// like `items.read()` (which has no `as`) work, and also `xs.iter().filter(|x| x.as_foo())`
+/// (which has `as_foo`, not ` as `).
+fn find_each_as_boundary(rest: &str) -> Option<(&str, &str)> {
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    while i + 3 < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'(' => paren_depth += 1,
+            b')' => paren_depth -= 1,
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth -= 1,
+            b'"' | b'\'' => {
+                // Skip string literal.
+                let quote = b;
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            _ => {
+                // Look for ` as ` at top level (depth 0). The strict
+                // whitespace on both sides of `as` disambiguates from
+                // `as_foo` / `class` / etc. — no extra look-ahead needed.
+                if paren_depth == 0
+                    && bracket_depth == 0
+                    && b == b' '
+                    && bytes.get(i + 1) == Some(&b'a')
+                    && bytes.get(i + 2) == Some(&b's')
+                    && bytes.get(i + 3) == Some(&b' ')
+                {
+                    return Some((&rest[..i], &rest[i + 4..]));
+                }
+            }
+        }
+        i += 1;
     }
+    None
 }
 
 /// Find the matching `}` for the `{` at `start - 1`. Respects nested braces
@@ -1093,10 +1362,12 @@ mod tests {
                 iterable,
                 binding,
                 index,
+                key,
             } => {
                 assert_eq!(iterable, "items");
                 assert_eq!(binding, "item");
                 assert_eq!(*index, None);
+                assert_eq!(*key, None);
             }
             other => panic!("expected EachOpen, got {other:?}"),
         }
@@ -1110,19 +1381,67 @@ mod tests {
                 iterable,
                 binding,
                 index,
+                key,
             } => {
                 assert_eq!(iterable, "items");
                 assert_eq!(binding, "item");
                 assert_eq!(*index, Some("i".to_string()));
+                assert_eq!(*key, None);
             }
             other => panic!("expected EachOpen, got {other:?}"),
         }
     }
 
     #[test]
-    fn each_open_rejects_keyed_form() {
-        let r = tokenize("{#each xs as x (x.id)}", SourceId(0));
-        assert!(r.is_err());
+    fn each_open_with_key() {
+        // T133 stretch: keyed form.
+        let k = t("{#each xs as x (x.id)}");
+        match &k[0] {
+            BuffHtmlTokenKind::EachOpen {
+                iterable,
+                binding,
+                index,
+                key,
+            } => {
+                assert_eq!(iterable, "xs");
+                assert_eq!(binding, "x");
+                assert_eq!(*index, None);
+                assert_eq!(*key, Some("x.id".to_string()));
+            }
+            other => panic!("expected EachOpen with key, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn each_open_allows_parens_in_iterable() {
+        // T133 stretch fix: `(` inside iterable expression is no longer
+        // rejected. Only `(` AFTER the binding is the key form.
+        let k = t("{#each items.read() as item}");
+        match &k[0] {
+            BuffHtmlTokenKind::EachOpen {
+                iterable,
+                binding,
+                index: _,
+                key,
+            } => {
+                assert_eq!(iterable, "items.read()");
+                assert_eq!(binding, "item");
+                assert_eq!(*key, None);
+            }
+            other => panic!("expected EachOpen, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn each_open_with_iterable_method_and_key() {
+        let k = t("{#each xs.read() as x (x.id)}");
+        match &k[0] {
+            BuffHtmlTokenKind::EachOpen { iterable, key, .. } => {
+                assert_eq!(iterable, "xs.read()");
+                assert_eq!(*key, Some("x.id".to_string()));
+            }
+            other => panic!("expected EachOpen, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1188,9 +1507,50 @@ mod tests {
     }
 
     #[test]
-    fn html_at_html_deferred_errors() {
-        let r = tokenize("{@html x}", SourceId(0));
+    fn html_escape_emits_token() {
+        // T133 stretch: `{@html expr}` is now supported.
+        let k = t("{@html raw_html}");
+        match &k[0] {
+            BuffHtmlTokenKind::HtmlEscape(e) => assert_eq!(e, "raw_html"),
+            other => panic!("expected HtmlEscape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn html_escape_rejects_missing_expr() {
+        let r = tokenize("{@html}", SourceId(0));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn html_escape_rejects_unknown_directive() {
+        let r = tokenize("{@css x}", SourceId(0));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn spread_attr_emits_token() {
+        // T133 stretch: `{...rest}` is supported.
+        let k = t("<div {...rest} />");
+        let mut found_spread = false;
+        for tok in &k {
+            if let BuffHtmlTokenKind::AttrSpread(ident) = tok {
+                assert_eq!(ident, "rest");
+                found_spread = true;
+            }
+        }
+        assert!(found_spread, "expected AttrSpread token, got {k:?}");
+    }
+
+    #[test]
+    fn await_directives_tokenize() {
+        // T133 stretch.
+        let k = t("{#await f()}{:then x}{:catch e}{/await}");
+        let kinds: Vec<&BuffHtmlTokenKind> = k.iter().collect();
+        assert!(matches!(kinds[0], BuffHtmlTokenKind::AwaitOpen(f) if f == "f()"));
+        assert!(matches!(kinds[1], BuffHtmlTokenKind::AwaitThen(b) if b == "x"));
+        assert!(matches!(kinds[2], BuffHtmlTokenKind::AwaitCatch(b) if b == "e"));
+        assert!(matches!(kinds[3], BuffHtmlTokenKind::AwaitClose));
     }
 
     #[test]
