@@ -2837,7 +2837,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 26. `buff-audit` Security Scanning + Code Signing
+- [x] 26. `buff-audit` Security Scanning + Code Signing
 
   **What to do** *(added post-comparative-analysis — security baseline for any production ecosystem)*:
   - Create `crates/buff-audit/` crate.

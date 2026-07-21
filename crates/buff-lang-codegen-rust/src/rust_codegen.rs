@@ -837,6 +837,26 @@ impl RustCodegen {
             self.extern_crates.insert("hound".to_string());
             self.extern_crates.insert("symphonia".to_string());
         }
+        // T26: register `buff-audit` when the program references the
+        // prelude `Audit` OR `Signature` modules (`Audit.scan(...)`
+        // / `Signature.sign(...)` etc.). Also records
+        // `ed25519-dalek` + `sha2` + `hex` + `rand` transitively
+        // (the wrapper crate wraps all four: ed25519-dalek for
+        // Ed25519 sign/verify, sha2 for the deferred manifest-hash
+        // path, hex for sig/key encode/decode, rand for the OS
+        // CSPRNG consumed by `Signature.keypair()`). Mirrors the
+        // T9 Image / T10 Audio / T124k Hash+HMAC pattern. NO `ring`,
+        // NO native-tls, NO cc-rs - ed25519-dalek is the canonical
+        // pure-Rust Ed25519.
+        if program_uses_namespace(decls, "Audit")
+            || program_uses_namespace(decls, "Signature")
+        {
+            self.extern_crates.insert("buff-audit".to_string());
+            self.extern_crates.insert("ed25519-dalek".to_string());
+            self.extern_crates.insert("sha2".to_string());
+            self.extern_crates.insert("hex".to_string());
+            self.extern_crates.insert("rand".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -4707,6 +4727,87 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("AudioBuffer.from_samples codegen parse: {e}")))
+            }
+            // T26: Audit.scan(path) -> Vector<String>. One arg (String
+            // / Path). Wraps `buff_audit::scan(&arg)
+            // .unwrap_or_default()` (panic-free on io / advisory-DB
+            // failure - empty Vec, matching Buff's "no panicking
+            // generated code" rule). Records `buff-audit` +
+            // `ed25519-dalek` + `sha2` + `hex` + `rand` in
+            // extern_crates via the narrow
+            // `program_uses_namespace("Audit")` walker.
+            (T::Audit, A::Scan) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audit::scan(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Audit.scan codegen parse: {e}")))
+            }
+            // T26: Audit.list() -> Vector<String>. Zero args. Wraps
+            // `buff_audit::known_advisories()` (infallible - returns
+            // the static `advisory_db::ALL` ID list). Records the
+            // same extern_crates set as Audit.scan. Reuses the
+            // existing T124g `List` variant (shared between Args.list
+            // / Env.list / Audit.list - same shared-variant pattern
+            // as Parse / Get / Encode).
+            (T::Audit, A::List) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audit::known_advisories()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Audit.list codegen parse: {e}")))
+            }
+            // T26: Signature.sign(data, secret_hex) -> String. Two
+            // args (Vector<Byte>, String). Wraps `buff_audit::sign
+            // (&data, &secret_hex).unwrap_or_default()` (panic-free
+            // on bad-key / bad-hex - empty String). The `&#data` is
+            // `&Vec<u8>` which Rust auto-derefs to `&[u8]` at the
+            // call site. Records the same extern_crates set as
+            // Audit.* via the `program_uses_namespace("Signature")`
+            // walker.
+            (T::Signature, A::Sign) => {
+                let mut lowered = n_args(self, 2)?;
+                let data = lowered.remove(0);
+                let secret_hex = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audit::sign(&#data, &#secret_hex).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Signature.sign codegen parse: {e}")))
+            }
+            // T26: Signature.verify(data, sig_hex, public_hex) ->
+            // Bool. Three args. Wraps `buff_audit::verify(...).unwrap_
+            // or(false)` (the unwrap_or(false) is the contract: bad
+            // signature, bad key, OR bad hex all collapse to false -
+            // NEVER panics, NEVER errors. The T26 task spec mandates
+            // the bool return so a future `buff add --no-verify`
+            // bypass layers cleanly).
+            (T::Signature, A::Verify) => {
+                let mut lowered = n_args(self, 3)?;
+                let data = lowered.remove(0);
+                let sig_hex = lowered.remove(0);
+                let public_hex = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audit::verify(&#data, &#sig_hex, &#public_hex).unwrap_or(false)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Signature.verify codegen parse: {e}")))
+            }
+            // T26: Signature.keypair() -> (String, String). Zero
+            // args. Wraps `buff_audit::keypair()
+            // .unwrap_or_default()` (the unwrap_or_default collapses
+            // a Panic error to two empty Strings - NEVER panics).
+            // Used by `buff publish --sign` to mint a fresh signing
+            // identity per package release.
+            (T::Signature, A::Keypair) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_audit::keypair().unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Signature.keypair codegen parse: {e}")))
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but

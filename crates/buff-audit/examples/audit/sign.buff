@@ -1,0 +1,27 @@
+// T26 example: Buff-side forward-decl matching `examples/sign.rs`.
+//
+// Demonstrates the Buff syntax for the `Signature.*` prelude surface.
+// The Rust-side `examples/sign.rs` runs the equivalent pipeline via
+// `buff_audit::{keypair, sign, verify}` directly; this file is the
+// documentation of what the Buff code WILL look like once the
+// codegen-lowered path lands end-to-end.
+
+func main() {
+    // Signature.keypair() -> (public_hex: String, secret_hex: String)
+    let (public_key, secret_key) = Signature.keypair()
+    print("public_key = " + public_key)
+    print("secret_key = " + secret_key)
+
+    // Signature.sign(data: Vector<Byte>, secret_hex: String) -> String
+    let payload = "hello, audit"
+    let sig = Signature.sign(payload.to_bytes(), secret_key)
+    print("signature = " + sig)
+
+    // Signature.verify(data: Vector<Byte>, sig: String, public_hex: String) -> Bool
+    let ok = Signature.verify(payload.to_bytes(), sig, public_key)
+    print("verify original = " + ok.to_string())
+
+    let tampered = "TAMPERED"
+    let bad = Signature.verify(tampered.to_bytes(), sig, public_key)
+    print("verify tampered = " + bad.to_string())
+}

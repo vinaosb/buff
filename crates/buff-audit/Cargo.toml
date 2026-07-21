@@ -1,0 +1,36 @@
+[package]
+name = "buff-audit"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Security scanner + code signing for Buff. \
+Pure-Rust MVP (no `ring`, no native-tls). \
+Wraps `ed25519-dalek` for detached signatures + a \
+statically-seeded advisory database for CVE scanning.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "security", "audit", "signing", "ed25519"]
+categories = ["cryptography", "development-tools"]
+
+[lib]
+name = "buff_audit"
+path = "src/lib.rs"
+
+[dependencies]
+# T26 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# API surface used:
+# - ed25519_dalek::SigningKey::generate(&mut OsRng) — CSPRNG keypair.
+# - signing_key.sign(data).to_bytes() — 64-byte detached signature.
+# - VerifyingKey::from_bytes(&pk) — parse a 32-byte public key.
+# - verifying_key.verify_strict(data, &sig) — strict Ed25519 verify.
+ed25519-dalek.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rand.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -950,6 +950,92 @@ pub enum PreludeType {
     /// rule from T126/T127 and the "Windows host with no MSVC"
     /// constraint that pushed hand-rolled lexer/parser).
     Signature,
+    /// T20 (v1.13 frameworks wave 3): the `ReactiveSignal` namespace —
+    /// the Solid.js / Vue-inspired callback-based reactive primitive.
+    /// Wraps the in-tree pure-Rust `buff-reactive` crate
+    /// (`buff_reactive::Signal<T>`). One assoc fn:
+    /// - `ReactiveSignal.new(value) -> Signal<T>` — mutable reactive
+    ///   cell; the codegen emits `buff_reactive::Signal::new(value)`
+    ///   and Rust infers `T` from the value.
+    ///
+    /// `ReactiveSignal` is a NAMESPACE (mirrors Channel / Audit /
+    /// Signature). `buff_type()` returns [`Type::Void`];
+    /// `is_namespace_only()` returns `true`. The return value of
+    /// `ReactiveSignal.new(...)` is typed [`Type::Unknown`] — the
+    /// coordinated `Type::ReactiveSignal` variant in `ty.rs` is a
+    /// follow-up sibling task OUTSIDE the T20 shared zone (mirrors
+    /// the T8 Tensor / T11 Signal-DSP forward-declaration precedent).
+    ///
+    /// Records `buff-reactive` in codegen `extern_crates` when a Buff
+    /// program uses `ReactiveSignal.*`. EXPERIMENTAL badge per T20
+    /// spec — single-threaded `Rc<RefCell>` MVP only;
+    /// multi-threaded signals + `Stream<T>` integration are deferred
+    /// to v1.18+.
+    ReactiveSignal,
+    /// T20: the `ReactiveComputed` namespace — lazy derived value
+    /// primitive. Wraps `buff_reactive::Computed<T>`. One assoc fn:
+    /// - `ReactiveComputed.new(fn) -> Computed<T>` — derives from
+    ///   signals, recomputes lazily, caches. The codegen emits
+    ///   `buff_reactive::Computed::new(fn)`.
+    ///
+    /// Mirrors [`PreludeType::ReactiveSignal`] exactly: namespace-
+    /// only, returns [`Type::Unknown`] (forward-declaration),
+    /// instance method `c.get()` dispatches on the shared
+    /// `(Type::Unknown, Get)` arm.
+    ReactiveComputed,
+    /// T20: the `ReactiveEffect` namespace — side-effectful callback
+    /// primitive. Wraps `buff_reactive::Effect`. One assoc fn:
+    /// - `ReactiveEffect.new(fn) -> Effect` — runs `fn` immediately
+    ///   and re-runs when dependencies change. The codegen emits
+    ///   `buff_reactive::Effect::new(fn)`.
+    ///
+    /// Mirrors [`PreludeType::ReactiveSignal`] exactly: namespace-
+    /// only, returns [`Type::Unknown`] (forward-declaration),
+    /// instance method `e.run()` dispatches on the
+    /// `(Type::Unknown, Run)` arm.
+    ReactiveEffect,
+    /// T17 (v1.15 frameworks wave 3): the `Web` runtime-value type —
+    /// a production HTTP web framework wrapping axum 0.8 + tokio +
+    /// serde_json via a safe FFI boundary per the T4 FFI guide.
+    /// Constructed via the prelude associated functions
+    /// `Web.new()` (empty server) or `Web.bind(addr)` (empty server
+    /// with a preset bind address); carries 8 instance methods:
+    /// `web.get(path, handler)` / `web.post(path, handler)` /
+    /// `web.put(path, handler)` / `web.delete(path, handler)` /
+    /// `web.patch(path, handler)` / `web.middleware(mw)` /
+    /// `web.listen(port: N)` / `web.run()`. Built-in middleware
+    /// (Logger / Cors / JsonParser) is deferred to v1.18+; the MVP
+    /// ships the MiddlewareFn type signature + the registration API
+    /// only.
+    ///
+    /// This is the latest runtime-value-with-rich-instance-methods
+    /// type (after Regex / URL / Path / Process / Image / DataFrame /
+    /// Audio / World). `buff_type()` returns [`Type::Unknown`] for
+    /// MVP — the coordinated [`Type::Web`] variant in `ty.rs` is a
+    /// follow-up sibling task OUTSIDE the T17 shared zone (mirrors
+    /// the T8 Tensor / T11 Signal / T12-Tensor forward-declaration
+    /// precedent). `is_namespace_only()` returns `false` (Web IS a
+    /// runtime value, like Regex / Image / World). The codegen
+    /// lowering for the assoc fns `Web.new` / `Web.bind` is shipped
+    /// in this T17 commit (dispatch on PreludeType, NOT Type, so no
+    /// Type::Web variant needed); the instance-method lowering
+    /// (`web.get` / `web.listen` / etc.) is deferred to the
+    /// coordinated sibling task that adds [`Type::Web`].
+    ///
+    /// Records `buff-web` + `axum` + `tokio` + `serde_json` in
+    /// codegen `extern_crates` when a Buff program uses `Web.*`
+    /// (mirrors the chrono / regex / tracing codegen-only linking
+    /// boundary). EXPERIMENTAL badge per T17 spec — surface may
+    /// evolve before v1.18 stabilisation (path-param extraction,
+    /// built-in middleware, exotic HTTP verbs are explicitly
+    /// deferred). FFI-safe: the wrapper complies with all 6 rules
+    /// from `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers,
+    /// owned Request / Response at the boundary, infallible surface
+    /// for route registration + fallible listen / run returning
+    /// `Result<T, WebError>`, Send + Sync via Arc<dyn Fn ... + Send
+    /// + Sync>, no lifetimes, every public body catch_unwind-wrapped
+    /// per FFI guide R6).
+    Web,
 }
 
 impl PreludeType {
@@ -1321,6 +1407,22 @@ impl PreludeType {
             // `hecs::Entity`).
             PreludeType::World => "World",
             PreludeType::Entity => "Entity",
+            // T26: Audit / Signature — canonical PascalCase names
+            // matching the user-facing `Audit.scan(...)` /
+            // `Signature.sign(...)` surface.
+            PreludeType::Audit => "Audit",
+            PreludeType::Signature => "Signature",
+            // T20: ReactiveSignal / ReactiveComputed / ReactiveEffect —
+            // canonical PascalCase names matching the user-facing
+            // `ReactiveSignal.new(...)` / `ReactiveComputed.new(...)`
+            // / `ReactiveEffect.new(...)` surface. The codegen
+            // splices `buff_reactive::Signal::new` /
+            // `buff_reactive::Computed::new` / `buff_reactive::Effect::new`
+            // paths directly. The `Reactive` prefix avoids clashing
+            // with the existing T11 DSP `Signal` namespace.
+            PreludeType::ReactiveSignal => "ReactiveSignal",
+            PreludeType::ReactiveComputed => "ReactiveComputed",
+            PreludeType::ReactiveEffect => "ReactiveEffect",
         }
     }
 
@@ -1525,6 +1627,20 @@ impl PreludeType {
             // `buff_ecs::World` / `buff_ecs::Entity`.
             PreludeType::World => Type::World,
             PreludeType::Entity => Type::Entity,
+            // T26: Audit / Signature are namespace-only modules
+            // (mirror Log / Toml / Hash / HMAC / OS). The namespace
+            // itself has no value representation; only its associated
+            // functions are callable.
+            PreludeType::Audit => Type::Void,
+            PreludeType::Signature => Type::Void,
+            // T20: ReactiveSignal / ReactiveComputed / ReactiveEffect
+            // are namespace-only modules. Their assoc fn returns are
+            // typed at the call site (Type::Unknown forward-declaration
+            // in assoc_fn_return_type). Mirrors Channel / Audit /
+            // Signature exactly.
+            PreludeType::ReactiveSignal => Type::Void,
+            PreludeType::ReactiveComputed => Type::Void,
+            PreludeType::ReactiveEffect => Type::Void,
         }
     }
 
@@ -1563,6 +1679,11 @@ impl PreludeType {
                 | PreludeType::Signal
                 | PreludeType::Window
                 | PreludeType::Spectrum
+                | PreludeType::Audit
+                | PreludeType::Signature
+                | PreludeType::ReactiveSignal
+                | PreludeType::ReactiveComputed
+                | PreludeType::ReactiveEffect
         )
     }
 }

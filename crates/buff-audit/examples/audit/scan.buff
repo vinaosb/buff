@@ -1,0 +1,20 @@
+// T26 example: Buff-side forward-decl matching `examples/scan.rs`.
+//
+// Demonstrates the Buff syntax for the `Audit.*` prelude surface.
+// The Rust-side `examples/scan.rs` runs the equivalent pipeline via
+// `buff_audit::{scan, scan_with_detail}` directly; this file is the
+// documentation of what the Buff code WILL look like once the
+// codegen-lowered path lands end-to-end.
+
+func main() {
+    // Audit.scan(path: String) -> Vector<String>
+    let hits = Audit.scan(".")
+    print("scan found " + hits.len().to_string() + " advisories")
+    for id in hits {
+        print("  - " + id)
+    }
+
+    // Audit.list() -> Vector<String> (the full static DB)
+    let known = Audit.list()
+    print("known advisories in DB: " + known.len().to_string())
+}
