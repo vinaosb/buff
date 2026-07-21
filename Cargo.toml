@@ -1124,6 +1124,19 @@ buff-cache = { path = "crates/buff-cache" }
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-config = { path = "crates/buff-config" }
+# T32: `buff-cli` workspace path dep — CLI framework for USER Buff
+# programs (clap-equivalent). Mirrors the buff-config / buff-template
+# / buff-image pattern so any future consumer (codegen-lowered
+# `App.new()` / `app.flag(...)` / `app.parse(...)` calls, IDE
+# hover/completion) resolves to the same in-tree version during the
+# v1.16 frameworks wave. Records `buff-cli` (NOT `buff_lang_cli` —
+# the framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md). NOTE: `buff-cli` is BOTH this new framework crate AND
+# the existing `crates/buff-lang-cli/` (the compiler binary). The
+# framework crate is `crates/buff-cli/`; the compiler binary stays
+# `crates/buff-lang-cli/`. Both consume the same upstream `clap`
+# workspace pin; this crate exposes clap to USER `.buff` programs.
+buff-cli = { path = "crates/buff-cli" }
 # T33: `buff-http-client` workspace path dep — idiomatic HTTP client
 # wrapping the `reqwest` crate (already pinned at the workspace level
 # for T127). Mirrors the buff-image / buff-audio / buff-dsp /

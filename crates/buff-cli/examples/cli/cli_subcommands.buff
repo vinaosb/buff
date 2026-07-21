@@ -1,0 +1,29 @@
+# T32 example: subcommands (greet + count).
+#
+# The actual Rust implementation lives in `cli_subcommands.rs`. The
+# Buff code below shows the same program with two nested
+# subcommands. Until the prelude+codegen wiring ships, this is a
+# forward declaration only.
+
+func main():
+    let app = App.new("multi").about("Subcommand demo")
+
+    let greet = app.command("greet", about: "Say hello to NAME")
+    greet.option("name", short: "n", description: "Who to greet")
+
+    let count = app.command("count", about: "Count to N")
+    count.arg("n", description: "How high to count")
+
+    let parsed = app.parse(Args.all())
+    match parsed.subcommand():
+        Some("greet"):
+            let sub = parsed.subcommand_args()
+            let name = sub.option("name").or(default: "world")
+            print("Hello, {name}!")
+        Some("count"):
+            let sub = parsed.subcommand_args()
+            let n = sub.arg("n").parse_int(or: 3)
+            for i in range(1, n + 1):
+                print(i)
+        _:
+            print("unknown subcommand; try: multi --help")

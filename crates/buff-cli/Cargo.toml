@@ -1,0 +1,40 @@
+[package]
+name = "buff-cli"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+CLI framework for user Buff programs (clap-equivalent). \
+Wraps the mature `clap` crate with a Buff-idiomatic builder API: \
+App + ParsedArgs. Auto-generated help, subcommand nesting, flags, \
+options, positional args. Note: clap already powers the `buff` \
+compiler CLI (`crates/buff-lang-cli/`); this crate exposes clap to \
+USER programs.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "cli", "clap", "argument-parser", "framework"]
+categories = ["command-line-interface", "development-tools"]
+
+[lib]
+name = "buff_cli"
+path = "src/lib.rs"
+
+[dependencies]
+# T32 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# clap 4.5: the canonical Rust CLI argument parser. Pure-Rust, no
+# native deps, no cc-rs — matches the "no C library, no Docker" hard
+# rule. API surface used: clap::Command::{new, about, version, arg,
+# subcommand, try_get_matches_from, render_help}, clap::Arg::{new,
+# long, short, help, action, num_args}, clap::ArgAction::{Set,
+# SetTrue}, clap::ArgMatches::{subcommand, get_flag, get_one}. The
+# `derive` feature stays on because the workspace already enables it
+# (T0 buff-lang-cli uses derive); we use the BUILDER API here for the
+# Buff-visible surface (Buff cannot use proc-macros across the FFI
+# boundary — only safe builder calls).
+clap.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -1,0 +1,21 @@
+# T32 example: minimal hello-world CLI (Buff-side forward declaration).
+#
+# The actual Rust implementation lives in `cli_hello.rs` next to this
+# file. The Buff code below shows how the same program would look
+# once buff-cli is wired into the prelude + codegen layer. Until that
+# wiring ships (follow-up coordinated commit), this is a forward
+# declaration only — `buff run` cannot yet execute it.
+
+func main():
+    let app = App.new("hello")
+        .version("0.1.0")
+        .about("Says hello to a name")
+        .option("name", short: "n", description: "Name to greet")
+        .arg("greeting", description: "Optional greeting override")
+
+    let parsed = app.parse(Args.all())
+    match parsed.option("name"):
+        Some(name):
+            print("Hello, {name}!")
+        None:
+            print("Hello, world!")

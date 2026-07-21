@@ -3275,7 +3275,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: In-memory LRU works. TTL evicts correctly. Redis path verified with mock. 3 examples + 10 tests.
   - **Commit**: `feat(buff-cache): MVP in-memory LRU + Redis backend`
 
-- [ ] 32. `buff-cli` — CLI Framework for User Programs
+- [x] 32. `buff-cli` — CLI Framework for User Programs
 
   **What to do**: Wrap Rust `clap` crate with Buff-idiomatic API. Note: clap already powers the `buff` compiler CLI; this task exposes clap to USER programs. Provide `App.new(name)`, `app.command(name, handler)`, `app.flag(name, short, description)`, `app.parse(args) -> ParsedArgs`. Auto-generated help. Subcommand nesting. Cross-language prevalence: 6/6 (Click/Commander/Cobra/clap/Picocli/System.CommandLine).
   - **LOC budget**: ≤2000, ≤20 fns. **External deps**: `clap` (already in workspace).

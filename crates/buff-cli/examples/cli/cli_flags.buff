@@ -1,0 +1,24 @@
+# T32 example: flags + options + positionals.
+#
+# The actual Rust implementation lives in `cli_flags.rs`. The Buff
+# code below mirrors an ls-style CLI. Until the prelude+codegen
+# wiring ships, this is a forward declaration only.
+
+func main():
+    let app = App.new("ls-like")
+        .about("Demo: flags + options + positionals")
+        .flag("all", short: "a", description: "show hidden")
+        .flag("long", short: "l", description: "long format")
+        .option("sort", short: "s", description: "sort by: name|size|time")
+        .arg("path", description: "directory to list")
+
+    let parsed = app.parse(Args.all())
+    let show_all = parsed.flag("all")
+    let long = parsed.flag("long")
+    let sort = parsed.option("sort").or(default: "name")
+    let path = parsed.arg("path").or(default: ".")
+
+    print("listing {path}")
+    print("  show all: {show_all}")
+    print("  long:     {long}")
+    print("  sort by:  {sort}")
