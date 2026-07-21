@@ -895,6 +895,61 @@ pub enum PreludeType {
     /// heap. The `hecs::Entity` it wraps is `pub(crate)` — never
     /// exposed across the FFI boundary.
     Entity,
+    /// T26: `Audit` — the security-scanning namespace (v1.13 frameworks
+    /// wave 3). Wraps the in-tree pure-Rust `buff-audit` crate
+    /// (`buff_audit::scan` / `buff_audit::scan_with_detail` /
+    /// `buff_audit::known_advisories`). Two assoc fns:
+    /// - `Audit.scan(path)` -> `Vector<String>` — the advisory IDs that
+    ///   fired against the project's `buff.lock` / `Cargo.lock` /
+    ///   `buff.toml` (priority chain `MANIFEST_PATHS`). Returns an
+    ///   empty `Vector<String>` if no manifest is found OR no advisory
+    ///   matches.
+    /// - `Audit.list()` -> `Vector<String>` — every advisory ID in the
+    ///   statically-seeded DB (regardless of whether the project
+    ///   triggers it). Useful for `buff audit list` tooling.
+    ///
+    /// `Audit` is **never a runtime value** — it's a NAMESPACE exposing
+    /// only associated functions (mirrors Log / Toml / Hash / HMAC / OS
+    /// exactly). `buff_type()` returns [`Type::Void`];
+    /// `is_namespace_only()` returns `true`. The `buff-audit` crate is
+    /// recorded in codegen `extern_crates` when a Buff program uses
+    /// `Audit.*` (mirrors the chrono / regex / sha2 codegen-only
+    /// linking boundary).
+    ///
+    /// FFI-safe: the wrapper complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers, owned
+    /// `Vec<String>` at the boundary, `catch_unwind` on every entry
+    /// point, Send + 'static, no lifetimes). CPU-only per Metis G7
+    /// lock (NO GPU dispatch — auditing is inherently sequential I/O).
+    Audit,
+    /// T26: `Signature` — the Ed25519 code-signing namespace (v1.13
+    /// frameworks wave 3). Wraps the in-tree pure-Rust `buff-audit`
+    /// crate (`buff_audit::keypair` / `buff_audit::sign` /
+    /// `buff_audit::verify`). Three assoc fns:
+    /// - `Signature.keypair()` -> `(String, String)` — fresh CSPRNG
+    ///   Ed25519 keypair. Returns `(public_hex, secret_hex)`, each
+    ///   64-char lowercase hex.
+    /// - `Signature.sign(data, secret_hex)` -> `String` — detached
+    ///   64-byte signature (128-char hex). Deterministic per RFC 8032.
+    /// - `Signature.verify(data, sig_hex, public_hex)` -> `Bool` —
+    ///   strict Ed25519 verify. Returns `false` on bad signature
+    ///   (NEVER panics, NEVER errors — the T26 task spec mandates the
+    ///   bool return so a future `buff add --no-verify` bypass layers
+    ///   cleanly).
+    ///
+    /// `Signature` is **never a runtime value** — it's a NAMESPACE
+    /// exposing only associated functions (mirrors Log / Toml / Hash /
+    /// HMAC / OS / Audit exactly). `buff_type()` returns [`Type::Void`];
+    /// `is_namespace_only()` returns `true`. The `buff-audit` +
+    /// `ed25519-dalek` + `hex` + `rand` crates are recorded in codegen
+    /// `extern_crates` when a Buff program uses `Signature.*`.
+    ///
+    /// NO `ring`, NO native-tls, NO cc-rs — the T26 task spec
+    /// explicitly forbids all three. ed25519-dalek 2.0 is the canonical
+    /// pure-Rust Ed25519 (matches the "no C library, no Docker" hard
+    /// rule from T126/T127 and the "Windows host with no MSVC"
+    /// constraint that pushed hand-rolled lexer/parser).
+    Signature,
 }
 
 impl PreludeType {

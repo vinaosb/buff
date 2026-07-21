@@ -1,0 +1,33 @@
+[package]
+name = "buff-observe"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Structured observability for Buff. \
+Wraps tracing + opentelemetry for spans, \
+metrics, and OTLP export. Pure-Rust MVP.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "observability", "tracing", "opentelemetry", "metrics"]
+categories = ["development-tools::debugging"]
+
+[lib]
+name = "buff_observe"
+path = "src/lib.rs"
+
+[dependencies]
+# T21 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# tracing 0.1: spans + structured fields. Already pinned at workspace level.
+# tracing-subscriber 0.3: fmt layer for console output.
+# opentelemetry 0.27: OTel SDK for OTLP export.
+# opentelemetry-otlp 0.27: OTLP gRPC exporter (pure-Rust via tonic + prost).
+tracing.workspace = true
+tracing-subscriber.workspace = true
+opentelemetry.workspace = true
+opentelemetry-otlp.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
