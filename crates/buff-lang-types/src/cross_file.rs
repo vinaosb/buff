@@ -265,8 +265,9 @@ mod tests {
         ]);
         let project = parse_project_with_loader(&p("/main.buff"), &loader).expect("parses");
         let table = CrossFileSymbolTable::from_project(&project);
+        let importer = p("/main.buff");
         let visible: Vec<&str> = table
-            .all_visible_in(&p("/main.buff"), &project)
+            .all_visible_in(&importer, &project)
             .iter()
             .map(|s| s.name.as_str())
             .collect();
@@ -287,8 +288,9 @@ mod tests {
         ]);
         let project = parse_project_with_loader(&p("/main.buff"), &loader).expect("parses");
         let table = CrossFileSymbolTable::from_project(&project);
+        let importer = p("/main.buff");
         let visible: Vec<&str> = table
-            .all_visible_in(&p("/main.buff"), &project)
+            .all_visible_in(&importer, &project)
             .iter()
             .map(|s| s.name.as_str())
             .collect();

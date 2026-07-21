@@ -769,6 +769,7 @@ mod tests {
         f.attributes = vec![Attribute {
             name: Ident::new("prefer", dummy()),
             args: vec!["gpu".to_string(), "force".to_string()],
+            named_args: std::collections::BTreeMap::new(),
             span: dummy(),
         }];
         assert!(!has_prefer_gpu_attr(&f));
