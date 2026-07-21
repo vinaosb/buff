@@ -29,8 +29,12 @@ explicitly out of scope (deferred to v1.18+); synthesis is delegated to
 | [`AudioError`] | thiserror-derived error type (Io / Decode / Encode / InvalidParam). |
 | [`AudioSummary`] | Plain-statistics snapshot for tests + snapshots. |
 
-Plus 12 `extern "C"` entry points (`buff_audio_*`) for the Buff `extern`
-lowering — every one wrapped in `catch_unwind` per FFI guide R6.
+The v1.13 wave-2 MVP wrapper is **safe-Rust-only** — no `extern "C"`
+surface. The Buff codegen layer lowers `AudioBuffer.*` calls directly
+to the safe `buff_audio::AudioBuffer::*` Rust API (no FFI indirection,
+no per-process handle table). A production C-ABI surface is deferred
+to v1.15+ Wave 3 wrappers per the FFI guide's two-tier MVP-vs-production
+distinction.
 
 ## FFI safety
 
@@ -41,7 +45,11 @@ Every public function follows the six hard rules in
 - **R3** errors mapped to `AudioError` (thiserror + Display).
 - **R4** `AudioBuffer` is `Send + 'static` (owned `Vec<f32>` + two `Copy` fields).
 - **R5** no public lifetimes in signatures.
-- **R6** `catch_unwind` wraps every `extern "C"` body.
+- **R6** `catch_unwind` wraps the I/O boundary (`from_path` / `save`)
+  so a panic inside the codec library becomes a structured
+  `AudioError::{Decode, Encode}` instead of process abort. There is no
+  `extern "C"` surface in this crate — the catch_unwind is defensive
+  against codec panics, not an FFI requirement.
 
 ## Out of scope (deferred)
 
