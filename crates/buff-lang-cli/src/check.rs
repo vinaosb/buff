@@ -163,11 +163,22 @@ pub fn check_source(src: &str) -> CheckReport {
 /// [`Diagnostic::render`] (rustc-style with caret) and the outcome is
 /// returned for the caller to translate into an exit code.
 ///
+/// **T133:** Dispatches on file extension. `.buffhtml` files are checked
+/// via [`check_buffhtml_source`] (parse + codegen; rustc-level errors are
+/// surfaced via `buff build` not `buff check` — type-inference-on-codegen
+/// is integrated inside `buff_lang_codegen_buffhtml::generate`).
+///
 /// # Errors
 ///
 /// Returns `Err` only when the file cannot be read. Compile diagnostics
 /// are NOT errors here — they become the returned [`CheckReport`].
 pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
+    let is_buffhtml = file
+        .extension()
+        .is_some_and(|e| e == crate::pipeline::BUFFHTML_EXT);
+    if is_buffhtml {
+        return run_check_buffhtml_file(file);
+    }
     let src = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to read `{}`: {e}", file.display()))?;
     let report = check_source(&src);
@@ -186,6 +197,71 @@ pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
         eprintln!("{}: no issues found", file.display());
     }
     Ok(report)
+}
+
+/// T133: run the `.buffhtml` check pipeline on a file.
+///
+/// `buff check` on a `.buffhtml` runs parse + codegen WITHOUT invoking
+/// rustc. Errors are reported with `.buffhtml` line:col via the parser's
+/// span tracking (rustc-level errors inside `rsx!{}` are surfaced via
+/// `buff build` + the post-format [`SpanMap`]; they are NOT in scope for
+/// `buff check`'s fast-feedback loop).
+///
+/// The check is fail-soft: a parse error short-circuits codegen (there's
+/// no AST to lower); a codegen error reports the construct name. Both
+/// surface as [`Severity::Error`] → [`CheckOutcome::HasErrors`].
+fn run_check_buffhtml_file(file: &Path) -> anyhow::Result<CheckReport> {
+    let src = std::fs::read_to_string(file)
+        .map_err(|e| anyhow::anyhow!("failed to read `{}`: {e}", file.display()))?;
+    let report = check_buffhtml_source(&src, file);
+    let source_file = SourceFile::new(file.to_path_buf(), src);
+    for d in &report.diagnostics {
+        let rendered = render_diagnostic(d, &source_file);
+        match d.severity {
+            Severity::Error => eprint!("{rendered}"),
+            Severity::Warning | Severity::Info => eprint!("{rendered}"),
+        }
+    }
+    if matches!(report.outcome, CheckOutcome::Clean) {
+        eprintln!("{}: no issues found", file.display());
+    }
+    Ok(report)
+}
+
+/// T133: run the check pipeline on a `.buffhtml` source string.
+///
+/// Returns a [`CheckReport`] populated from the `.buffhtml` parser +
+/// codegen. The script-block contents are NOT type-checked at this layer
+/// (T133 floor: Rust-in-script-block pass-through — type-checking them
+/// would require running rustc on the spliced `.rs`, which is `buff
+/// build`'s job).
+pub fn check_buffhtml_source(src: &str, file: &Path) -> CheckReport {
+    let source_id = SourceId(0);
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let component_name = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Component");
+
+    match buff_lang_buffhtml_parser::parse(src, source_id) {
+        Ok(template) => {
+            if let Err(e) = buff_lang_codegen_buffhtml::generate(&template, component_name) {
+                diagnostics.push(Diagnostic::error(
+                    format!("buffhtml codegen: {e}"),
+                    buff_lang_error::Span::dummy(),
+                ));
+            }
+        }
+        Err(e) => {
+            diagnostics.push(Diagnostic::error(format!("buffhtml {e}"), e.span()));
+        }
+    }
+
+    let outcome = compute_outcome(&diagnostics);
+    CheckReport {
+        diagnostics,
+        outcome,
+    }
 }
 
 // ---------------------------------------------------------------------------

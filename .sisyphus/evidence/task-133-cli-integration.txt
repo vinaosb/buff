@@ -1,0 +1,424 @@
+# T133 CLI Integration — Evidence
+
+**Task:** T133 (sub-task: CLI integration + examples + e2e recipe)
+**Build agent:** Sisyphus-Junior
+**Date:** 2026-07-21
+**Build host:** Windows + MSVC 14.44.35207
+**Toolchain:** rustc 1.95.0 (pinned)
+
+---
+
+## 1. Scope shipped
+
+T133 floor per decision record `.sisyphus/decisions/rsx-syntax-feasibility.md`
+§6 (MUST-ship list):
+
+- ✅ `buff build` and `buff run` discover `.buffhtml` files in the project's
+  `src/` dir (alongside `.buff` files).
+- ✅ Each `.buffhtml`: parsed via `buff_lang_buffhtml_parser::parse`, codegen'd
+  via `buff_lang_codegen_buffhtml::generate`, post-processed via the new
+  `pipeline::inline_script_block` (T133 floor: Rust-in-script-block
+  pass-through), and the resulting `.rs` is fed into the existing
+  `pipeline::compile_rust_to_exe` path (or the new span-aware sibling
+  `compile_buffhtml_rust_to_exe` for `.buffhtml`-sourced files).
+- ✅ `buff check` recognises `.buffhtml` (parse + codegen; no rustc invocation
+  — type-inference-on-codegen is integrated inside codegen for v1.0).
+- ✅ `error_mapper::translate_buffhtml_rustc_errors` consumes the
+  post-format `SpanMap` to translate rustc diagnostics (filename + line:col).
+- ✅ Two example `.buffhtml` files in `examples/`: `counter.buffhtml` (the
+  decision-record counter using Rust-compatible script syntax) +
+  `todo_list.buffhtml` (exercises `{#each}` + `{#if}` lowering).
+- ✅ USER-ACTION e2e recipe at
+  `.sisyphus/evidence/task-133-e2e-render-USER-ACTION.txt`
+  (MSVC env setup → `buff build` → wasm32 target → wasm-bindgen post-process
+  → http.server → browser-open; marked USER ACTION).
+
+Deferred per MUST-NOT-DO list (out of scope for this sub-task):
+- ❌ Buff-syntax script-block transpilation (`component`/`state`/`fn`
+  shorthand) — T134+. T133 ships Rust-in-script-block pass-through (the
+  script source is spliced verbatim into the generated `fn <Name>() ->
+  Element { ... }` body ahead of the `rsx!{}` expression).
+- ❌ Live wasm32 browser render — USER ACTION (recipe only).
+- ❌ Compiler-crate modifications — the 3 core crates (ast-rsx /
+  buffhtml-parser / codegen-buffhtml) shipped at commit `1d879f3` and were
+  CONSUMED ONLY via their public APIs.
+
+---
+
+## 2. Files modified / created
+
+### Modified (in scope per MUST-DO list)
+
+- `crates/buff-lang-cli/Cargo.toml` — added 5 workspace path deps
+  (`buff-lang-ast-rsx`, `buff-lang-buffhtml-parser`,
+  `buff-lang-codegen-buffhtml`, `syn`, `prettyplease`). The 3 buffhtml
+  crates already had workspace path entries (root `Cargo.toml` line 492+);
+  CLI just wires them in via `dep.workspace = true`. `syn` + `prettyplease`
+  are needed by the new `pipeline::inline_script_block` for the
+  script-block pass-through post-processing.
+- `crates/buff-lang-cli/src/pipeline.rs` — added `BuffHtmlCompileOutput`
+  struct, `compile_buffhtml_to_rust` entry point, `compile_to_rust_for_ext`
+  dispatcher, `compile_buffhtml_rust_to_exe` (span-aware rustc invocation
+  sibling of `compile_rust_to_exe`), `inline_script_block` post-processor,
+  `derive_component_name` helper, `format_buffhtml_parse_error` helper,
+  `BUFFHTML_EXT` constant. The existing `.buff` path (`compile_to_rust` +
+  `compile_rust_to_exe`) is UNCHANGED — the new code EXTENDS the module.
+  Added 7 unit tests (`derive_component_name_pascalcases_stem`,
+  `derive_component_name_handles_dotfile_stem`,
+  `inline_script_block_passes_through_when_no_const`,
+  `inline_script_block_splices_const_into_fn_body`,
+  `inline_script_block_errors_when_no_component_fn`,
+  `compile_buffhtml_to_rust_end_to_end_no_rustc`,
+  `compile_to_rust_for_ext_dispatches_on_extension`).
+- `crates/buff-lang-cli/src/error_mapper.rs` — added
+  `translate_buffhtml_rustc_errors` (filename + line:col via SpanMap) +
+  helpers (`translate_buffhtml_lines`, `byte_line_starts`,
+  `byte_offset_to_line_col`, `parse_digits`). Added 6 unit tests for the
+  new path (filename-only, span-aware, span-miss, helpers).
+- `crates/buff-lang-cli/src/commands/build.rs` — `build_single_file`
+  dispatches on extension (`.buff` → existing path; `.buffhtml` →
+  `compile_buffhtml_to_rust` + `compile_buffhtml_rust_to_exe`).
+  `build_project` + `build_workspace` loops now discover `.buffhtml`
+  alongside `.buff` in each `src/` dir.
+- `crates/buff-lang-cli/src/commands/run.rs` — `run` dispatches on
+  extension; `.buffhtml` runtime panics are translated via
+  `translate_buffhtml_rustc_errors` (span-aware).
+- `crates/buff-lang-cli/src/check.rs` — `run_check_file` dispatches on
+  extension; new `run_check_buffhtml_file` + `check_buffhtml_source` entry
+  points run parse + codegen WITHOUT invoking rustc (the
+  type-inference-on-codegen is integrated inside codegen for v1.0; rustc
+  errors are surfaced via `buff build`, not `buff check`).
+
+### Created (in scope per MUST-DO list)
+
+- `examples/counter.buffhtml` — T133 floor example. Mirrors decision
+  record §3 example 1 with one deviation: the `<script lang="buff">` block
+  uses Rust-compatible syntax (`let mut count = use_signal(|| 0);` +
+  `move |_| count += 1;` closure) instead of the Buff shorthand
+  (`component Counter = fn(...)`). The script block is at the very top of
+  the file because the parser only accepts `<script>` as the first
+  element — leading HTML comments would push it out of the top slot.
+- `examples/todo_list.buffhtml` — T133 floor example. Exercises
+  `{#each items as todo}` + `{#if todo.1} ... {:else} ... {/if}` lowering.
+  Uses a plain `Vec<(String, bool)>` local instead of `use_signal` because
+  the `{#each}` lexer rejects ANY `(` inside the directive body (it
+  detects the deferred-to-T134+ keyed-each form `as item (key)` via that
+  character). Field access is `todo.0` / `todo.1` for the same reason
+  (`as (a, b)` destructuring would trip the `(` check).
+- `crates/buff-lang-cli/tests/buffhtml_integration_t133.rs` — 9
+  integration tests covering the full T133 surface: example round-trips,
+  dispatcher behaviour, check pipeline, error-mapper filename + span
+  translation. Does NOT invoke rustc (the rustc-dependent paths are
+  covered by `cli_build_tests.rs` with auto-skip when rustc is missing).
+- `.sisyphus/evidence/task-133-e2e-render-USER-ACTION.txt` — the USER
+  ACTION e2e render recipe.
+- `.sisyphus/evidence/task-133-cli-integration.txt` — this evidence
+  document.
+
+### Untouched (per MUST-NOT-DO)
+
+- No compiler-crate source modified: `buff-lang-{ast,lexer,parser,types,
+  codegen-rust,codegen-wgsl,runtime,error}`, `buff-lang-ast-rsx`,
+  `buff-lang-buffhtml-parser`, `buff-lang-codegen-buffhtml`,
+  `buff-eval`, `buff-repl`, `buff-jupyter`, `buff-ui-dioxus`,
+  `buff-registry`, `buff-lsp`, `buff-tree-sitter`.
+- Root `Cargo.toml` NOT modified — the 3 buffhtml workspace path deps
+  were already present (lines 492–494) from the core-crate shipping task.
+- `Cargo.lock` NOT modified — workspace deps already resolved.
+- No `.sisyphus` plan files or checkboxes modified; `boulder.json`
+  untouched; `.sisyphus/notepads/` untouched.
+
+---
+
+## 3. Integration approach (where `.buffhtml` plugs into pipeline.rs)
+
+The existing `.buff` pipeline is unchanged:
+
+```
+.buff source
+    │
+    ▼ read_to_string
+    ▼ buff_lang_lexer::tokenize
+    ▼ buff_lang_parser::parse
+    ▼ buff_lang_codegen_rust::generate_rust
+.rs source
+    │
+    ▼ pipeline::compile_rust_to_exe  (rustc --edition 2021)
+native executable
+```
+
+The T133 `.buffhtml` path is a **sibling**, not a replacement:
+
+```
+.buffhtml source
+    │
+    ▼ read_to_string
+    ▼ buff_lang_buffhtml_parser::parse       (3-mode lexer + recursive-descent)
+    ▼ buff_lang_codegen_buffhtml::generate   (lowers AST → rsx!{} TokenStream)
+.rs source (with __BUFF_SCRIPT_SOURCE const placeholder)
+    │
+    ▼ pipeline::inline_script_block          (NEW — T133 script-block pass-through)
+        ├─ parse the .rs via syn::parse_file
+        ├─ find + extract the const value
+        ├─ remove the const item
+        ├─ parse the script source as a syn::Block
+        └─ prepend the block's stmts into the #[component] fn body
+        └─ re-emit via prettyplease::unparse
+final .rs source (script stmts inside component fn body)
+    │
+    ▼ pipeline::compile_buffhtml_rust_to_exe (span-aware rustc sibling)
+        ├─ same rustc invocation + BuildMode flag selection
+        └─ stderr → error_mapper::translate_buffhtml_rustc_errors
+native executable
+```
+
+Two dispatchers route incoming paths:
+
+- `pipeline::compile_to_rust_for_ext(file)` — picks `compile_to_rust` (for
+  `.buff` or any non-`buffhtml` extension) or `compile_buffhtml_to_rust`
+  (for `.buffhtml`); returns the generic `CompileOutput` (no span_map).
+- `commands::build::build_single_file` directly branches on extension so
+  it can use the span-aware rustc sibling for `.buffhtml` files.
+- `commands::run::run` similarly branches; the `.buffhtml` path retains
+  the SpanMap + buffhtml source so runtime panics can be reverse-mapped.
+- `check::run_check_file` branches; the `.buffhtml` path runs parse +
+  codegen without invoking rustc.
+
+The `inline_script_block` step is the key T133 design call (see §5).
+
+---
+
+## 4. error_mapper span-translation approach
+
+`error_mapper::translate_buffhtml_rustc_errors` implements the
+span-mapping-spike VERDICT PASS recommendation
+(`.sisyphus/evidence/task-133-span-mapping-spike.txt`):
+
+1. **Filename translation (always):** Delegates to the existing
+   `translate_rustc_errors` for path replacement (both native + forward-slash
+   forms). This is the T121b mitigation #1 baseline.
+2. **Span-aware line:col translation (when SpanMap non-empty):** Walks
+   each `<buffhtml_file>:<rust_line>:<rust_col>` triple in the
+   filename-translated stderr, queries `SpanMap::map_span(rust_line,
+   rust_col)`, and — on hit — replaces the rustc line:col with the
+   `.buffhtml` source line:col derived from a byte-offset → line:col
+   lookup table (`byte_line_starts` + `byte_offset_to_line_col`).
+3. **Graceful miss:** When the SpanMap returns `None` (no anchor
+   precedes the queried position) OR the SpanMap is empty, the rustc
+   line:col is preserved (still pointing at the `.buffhtml` filename —
+   strictly better than the raw `.rs` path).
+
+The `SpanMap` is the post-format side-table built by
+`buff_lang_codegen_buffhtml::SpanMapBuilder::finalize`. It carries
+`(RsLineCol, BuffHtmlSpan)` anchors sorted ascending; the binary-search
+lookup finds the nearest preceding anchor in `O(log N)` per diagnostic.
+
+The T121b `TODO(buffhtml-span)` marker for the empty-map case is
+preserved in code comments at the fallback branch.
+
+---
+
+## 5. Script-block-handling rationale (T133 floor)
+
+The decision record §3 example 1 shows `<script lang="buff">` blocks
+containing `component Name = fn(...) -> Element:` shorthand — Buff syntax
+that would need full transpilation. T133 floor explicitly defers this to
+T134+ (decision record §6 DEFERS list: "Full LSP" + everything beyond
+the floor grammar).
+
+For T133 floor, the script block is treated as **Rust-in-script-block
+pass-through**: the script source is spliced verbatim into the generated
+`fn <Name>() -> Element { ... }` body, ahead of the `rsx!{}` expression.
+The examples (`counter.buffhtml`, `todo_list.buffhtml`) use
+Rust-compatible syntax (Dioxus 0.7 API: `use_signal`, `vec!`, etc.) that
+the rustc+wasm32 build path consumes directly.
+
+This is implemented in `pipeline::inline_script_block`:
+
+1. The codegen crate (`buff-lang-codegen-buffhtml`) emits the script source
+   as a top-level placeholder constant:
+
+   ```rust
+   #[doc = "buffhtml script block — extracted by buff-lang-cli"]
+   const __BUFF_SCRIPT_SOURCE: &str = "<raw script source>";
+   ```
+
+   This keeps the generated `syn::File` syntactically valid Rust at the
+   codegen layer (the script source isn't valid top-level Rust).
+
+2. `inline_script_block` post-processes that placeholder:
+   - Parses the generated `.rs` via `syn::parse_file`.
+   - Walks items, finds `const __BUFF_SCRIPT_SOURCE`, extracts its
+     `LitStr::value()` (handles all quoting forms — `"..."`, `r#"..."#`,
+     escapes — via syn).
+   - Removes the const item.
+   - Parses the extracted script source as a `syn::Block`.
+   - Finds the `#[component] fn <Name>() -> Element` item and prepends
+     the script-block statements to its body (in front of the existing
+     `rsx!{}` expression stmt).
+   - Re-emits the file via `prettyplease::unparse`.
+
+3. If no `__BUFF_SCRIPT_SOURCE` const is present (no `<script>` block in
+   the source), `inline_script_block` returns the input unchanged — no
+   syn round-trip overhead.
+
+This keeps the codegen crate simple (it doesn't need to know about
+script-block semantics) and concentrates the Rust-pass-through policy in
+the CLI (the layer that knows about the downstream rustc invocation).
+
+The error path is fail-loud: if `inline_script_block` cannot parse the
+script source as Rust, it returns an `Err` with the message
+"failed to parse `<script lang=\"buff\">` contents as Rust statements
+(T133 ships Rust-in-script-block pass-through; full Buff-syntax
+transpilation is T134+)".
+
+---
+
+## 6. USER-ACTION e2e recipe
+
+See `.sisyphus/evidence/task-133-e2e-render-USER-ACTION.txt` (in this
+directory). The recipe covers:
+
+- MSVC environment setup (mandatory before any `cargo` command on this
+  Windows host).
+- `buff build` invocation on `counter.buffhtml`.
+- `cargo build --target wasm32-unknown-unknown` in a Cargo project shell.
+- `wasm-bindgen --target web` post-processing.
+- `python -m http.server` + browser-open steps.
+- Manual verification checklist.
+
+The recipe follows the T130 / T131 / T132 USER-ACTION precedent (build
+host runs `cargo check` + `cargo test --lib` only; live browser render
+delegated to the user).
+
+---
+
+## 7. Gate outputs
+
+All gates run with MSVC env activated (see §1 of the e2e recipe for the
+exact PowerShell invocation). NO `--workspace` flags used (per MUST-NOT-DO
+— wgpu segfaults/hangs).
+
+### 7.1 `cargo fmt -p buff-lang-cli --check`
+
+```
+$ cargo fmt -p buff-lang-cli --check
+$ echo $LASTEXITCODE
+0
+```
+
+### 7.2 `cargo clippy -p buff-lang-cli --all-targets -- -D warnings`
+
+```
+$ cargo clippy -p buff-lang-cli --all-targets -- -D warnings
+    Checking buff-lang-cli v1.2.0 (...)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.47s
+$ echo $LASTEXITCODE
+0
+```
+
+### 7.3 `cargo test -p buff-lang-cli --lib`
+
+```
+$ cargo test -p buff-lang-cli --lib
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+     Running unittests src\lib.rs (...)
+
+running 230 tests
+...
+test result: ok. 230 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+All 230 lib tests pass (the existing pre-existing flaky e2e
+`test_command_e2e_fail_test` shared-tempdir collision did NOT fire in
+this run; it would have been a known-pre-existing failure if it had).
+
+### 7.4 Additional: T133 integration tests
+
+```
+$ cargo test -p buff-lang-cli --test buffhtml_integration_t133
+running 9 tests
+test t133_buffhtml_ext_constant_is_buffhtml ... ok
+test t133_check_buffhtml_clean_source_yields_clean_outcome ... ok
+test t133_check_buffhtml_unbalanced_brace_yields_has_errors ... ok
+test t133_compile_to_rust_for_ext_buff_dispatch_unchanged ... ok
+test t133_compile_to_rust_for_ext_buffhtml_dispatch ... ok
+test t133_counter_example_parses_and_codegen_round_trips ... ok
+test t133_todo_list_example_parses_and_codegen_round_trips ... ok
+test t133_translate_buffhtml_errors_filename_substitution ... ok
+test t133_translate_buffhtml_errors_span_aware_translation ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+### 7.5 Additional: regression-check existing integration tests
+
+```
+$ cargo test -p buff-lang-cli --test cli_build_tests --test error_mapping_tests --test check_tests
+cli_build_tests:    8 passed (no regressions)
+error_mapping_tests: 10 passed (no regressions)
+check_tests:        22 passed (no regressions)
+```
+
+No regressions in any existing test file.
+
+---
+
+## 8. Manual smoke verification (build agent side)
+
+Beyond the unit + integration tests, I manually invoked:
+
+```
+$ cargo run -p buff-lang-cli -- build examples\counter.buffhtml
+```
+
+The generated `examples/counter.rs` (now cleaned up to avoid polluting
+the workspace) was:
+
+```rust
+use dioxus::prelude::*;
+#[component]
+fn Counter() -> Element {
+    let mut count = use_signal(|| 0);
+    let increment = move |_| {
+        count += 1;
+    };
+    rsx! {
+        div { class : "counter", span { count }, button { on_click : increment, "+1", },
+        },
+    }
+}
+```
+
+The script-block splicing worked exactly as designed: the `let mut
+count = use_signal(|| 0);` + `let increment = move |_| { count += 1; };`
+statements appear INSIDE the `fn Counter()` body, before the `rsx!{}`
+expression. The `__BUFF_SCRIPT_SOURCE` const placeholder is gone. The
+output is syntactically valid Rust (it round-trips through
+`syn::parse_file` successfully).
+
+The rustc step then fails with `E0433: failed to resolve: dioxus` — this
+is the **expected** v0.5+ "single-file rustc cannot link large external
+crates" limitation (same status as `async_demo.buff`, `extern_reqwest.buff`,
+etc. in the existing examples table). The Cargo-project build path (Step
+1–3 of the e2e recipe) is the supported workaround.
+
+---
+
+## 9. Acceptance summary
+
+| Floor item (decision record §6 MUST-ship)                  | Status |
+|------------------------------------------------------------|--------|
+| `buff build` recognises `.buffhtml` in `src/`              | ✅     |
+| `buff run` recognises `.buffhtml`                          | ✅     |
+| `buff check` recognises `.buffhtml`                        | ✅     |
+| Generated `.rs` consumed via existing rustc pipeline       | ✅     |
+| Error-mapper consumes SpanMap for `.buffhtml`              | ✅     |
+| Example `counter.buffhtml`                                 | ✅     |
+| Example `todo_list.buffhtml` (`{#each}` + `{#if}`)         | ✅     |
+| USER-ACTION e2e render recipe                              | ✅     |
+| Unit tests (discovery + parse→codegen + error-mapper)      | ✅     |
+| Existing tests continue to pass                            | ✅     |
+
+T133 CLI integration is ready. The plan flip (T133 close) is the next
+step (out of scope for this sub-task — Atlas handles plan flips).

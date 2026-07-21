@@ -1,0 +1,29 @@
+<script lang="buff">
+    // T133 floor: Rust-in-script-block pass-through. These statements are
+    // spliced verbatim into `fn Counter() -> Element { ... }` before the
+    // rsx!{} expression. Dioxus 0.7 API: `use_signal` for state.
+    //
+    // Counter.buffhtml — T133 v1.9 RSX-for-Buff Option C floor example.
+    //
+    // Mirrors the decision record
+    // (.sisyphus/decisions/rsx-syntax-feasibility.md §3 example 1) with one
+    // deviation: the script block uses Rust-compatible syntax (NOT the
+    // Buff-syntax `component Counter = fn(...)` shorthand). The T133 floor
+    // ships "Rust-in-script-block pass-through" — the script source is
+    // spliced verbatim into the generated `fn Counter() -> Element { ... }`
+    // body, ahead of the `rsx!{}` expression. Full Buff-syntax script-block
+    // transpilation is T134+.
+    //
+    // The generated Rust matches the T121b/T130 counter pattern
+    // (use_signal + on_click handler).
+    let mut count = use_signal(|| 0);
+    let increment = move |_| {
+        count += 1;
+    };
+</script>
+
+<div class="counter">
+    <span>{count}</span>
+    <button on:click={increment}>+1</button>
+</div>
+

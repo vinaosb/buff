@@ -1,0 +1,49 @@
+<script lang="buff">
+    // TodoList.buffhtml — T133 v1.9 RSX-for-Buff Option C floor example.
+    //
+    // Exercises the floor grammar's `{#each}` + `{#if}` constructs
+    // (decision record rsx-syntax-feasibility.md §3 "Lists" + "Conditionals").
+    //
+    // T133 floor: Rust-in-script-block pass-through (see counter.buffhtml
+    // for the rationale). The script block uses Rust syntax directly.
+    //
+    // The `{#each}` lexer (crates/buff-lang-buffhtml-parser/src/lexer.rs)
+    // rejects any `(` inside the directive body — that's how it detects
+    // the deferred-to-T134+ keyed-each form `as item (key)`. So we
+    // pre-bind the iterable to a plain local (no method-call parens) and
+    // reference it bare: `{#each items as todo}`. Field access via
+    // `todo.0` / `todo.1` (tuple destructuring in the binding position
+    // `as (a, b)` would also trip the `(` check).
+    let items: Vec<(String, bool)> = vec![
+        ("Learn Buff".to_string(), false),
+        ("Write .buffhtml".to_string(), false),
+        ("Ship v1.9".to_string(), true),
+    ];
+
+    // Computed value rendered in the header.
+    let remaining: usize = items.iter().filter(|t| !t.1).count();
+</script>
+
+<div class="todo-list">
+    <h2>Todo List ({remaining} remaining)</h2>
+
+    <ul>
+        {#each items as todo}
+            <li>
+                {#if todo.1}
+                    <span class="done">{todo.0}</span>
+                {:else}
+                    <span>{todo.0}</span>
+                {/if}
+            </li>
+        {/each}
+    </ul>
+
+    {#if remaining == 0}
+        <p>All done!</p>
+    {:else}
+        <p>You still have work to do.</p>
+    {/if}
+</div>
+
+

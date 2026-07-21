@@ -56,6 +56,22 @@ buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-codegen-rust.workspace = true
 buff-lang-error.workspace = true
+# T133: `.buffhtml` SFC integration. The 3 core crates (ast-rsx, parser,
+# codegen-buffhtml) shipped at commit 1d879f3 with the floor grammar
+# (decision record `rsx-syntax-feasibility.md` §6). These deps wire them
+# into the CLI's compile pipeline — see `pipeline::compile_buffhtml_to_rust`
+# + `error_mapper::translate_buffhtml_rustc_errors`.
+buff-lang-ast-rsx.workspace = true
+buff-lang-buffhtml-parser.workspace = true
+buff-lang-codegen-buffhtml.workspace = true
+# T133: `syn` + `prettyplease` are needed by `pipeline::inline_script_block`
+# to transform the codegen-buffhtml `const __BUFF_SCRIPT_SOURCE: &str` holder
+# into actual Rust statements inside the generated component fn body (the
+# T133 floor "Rust-in-script-block pass-through" — see decision record §6
+# MUST-ship list). Both already pinned at the workspace level; reused here
+# without re-pinning.
+syn.workspace = true
+prettyplease.workspace = true
 # T125a: REPL delegation. `buff repl` is a thin shim that delegates to
 # buff_repl::Repl::run() — all real logic (rustyline + buff-eval) lives
 # in the dedicated crate.

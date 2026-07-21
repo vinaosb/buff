@@ -1,0 +1,262 @@
+# T133 v1.9 RSX-for-Buff Option C — End-to-End Browser Render Recipe
+
+**STATUS:** USER ACTION (build-host mode: "build code + local tests only")
+**Task:** T133 (CLI integration sub-task)
+**Author:** Sisyphus-Junior (build agent)
+**Date:** 2026-07-21
+
+---
+
+## ⚠️ USER ACTION
+
+This document is a **recipe** — the build host does NOT execute these steps
+live. The build-agent verifies only:
+
+- `.buffhtml` → `.rs` parse + codegen round-trips on the shipped examples
+  (`examples/counter.buffhtml`, `examples/todo_list.buffhtml`).
+- The generated `.rs` is syntactically valid Rust (parses via
+  `syn::parse_file`).
+- `buff build` / `buff run` / `buff check` dispatch correctly on `.buffhtml`
+  extensions (unit + integration tests pass).
+
+The browser render itself is **delegated to the user** following the same
+precedent as T130 (`task-130-dioxus-render-USER-ACTION.txt`), T131
+(`task-131-dev-server.txt`), and T132 (`task-132-tauri-scaffold.txt`):
+"build code + local tests only" — live wasm32 render is a USER ACTION.
+
+---
+
+## Prerequisites
+
+1. **MSVC toolchain (Windows)** — required for any `cargo` invocation that
+   links native code (transitive via wgpu / dioxus):
+
+   ```powershell
+   $msvc = "C:\BuildTools\VC\Tools\MSVC\14.44.35207"
+   $env:LIB      = "$msvc\lib\onecore\x64;$msvc\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+   $env:INCLUDE  = "$msvc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt"
+   $env:PATH     = "$msvc\bin\Hostx64\x64;$env:PATH"
+   $env:CC       = "$msvc\bin\Hostx64\x64\cl.exe"
+   $env:CXX      = $env:CC
+   ```
+
+2. **Rust 1.95.0** (pinned in `rust-toolchain.toml`).
+
+3. **`wasm32-unknown-unknown` target** installed:
+
+   ```powershell
+   rustup target add wasm32-unknown-unknown
+   ```
+
+4. **`wasm-bindgen-cli`** installed at the SAME version as the workspace
+   `wasm-bindgen` crate (`wasm-bindgen = "0.2"` per `Cargo.toml`):
+
+   ```powershell
+   # Determine the exact resolved version:
+   cargo tree -p buff-lang-cli | Select-String "wasm-bindgen"
+   # Install at that exact version (replace X.Y.Z accordingly):
+   cargo install wasm-bindgen-cli --version X.Y.Z
+   ```
+
+5. **Buff CLI built:**
+
+   ```powershell
+   cargo build --release -p buff-lang-cli
+   # The buff binary is at target/release/buff.exe
+   ```
+
+---
+
+## Recipe (counter.buffhtml → wasm32 → browser render)
+
+### Step 1 — Set up a Cargo project shell
+
+`buff build` on a single `.buffhtml` invokes `rustc` directly, which cannot
+link `dioxus` (a large external crate). Browser-renderable Wasm requires a
+Cargo project. Create a minimal one:
+
+```powershell
+# Create project skeleton
+mkdir buffhtml-counter-app
+cd buffhtml-counter-app
+cargo init --lib --name buffhtml_counter_app
+```
+
+Edit `Cargo.toml`:
+
+```toml
+[package]
+name = "buffhtml_counter_app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+```
+
+Copy the example `.buffhtml` into `src/`:
+
+```powershell
+Copy-Item ..\buff\examples\counter.buffhtml .\src\counter.buffhtml
+```
+
+### Step 2 — Transpile `.buffhtml` → `.rs`
+
+```powershell
+# From the buff checkout, invoke the CLI on the project's src/ dir:
+..\buff\target\release\buff.exe build .\src\counter.buffhtml
+# Produces .\src\counter.rs alongside the .buffhtml source.
+```
+
+Inspect `.\src\counter.rs` — it should look like:
+
+```rust
+use dioxus::prelude::*;
+#[component]
+fn Counter() -> Element {
+    let mut count = use_signal(|| 0);
+    let increment = move |_| {
+        count += 1;
+    };
+    rsx! {
+        div { class : "counter", span { count }, button { on_click : increment, "+1", },
+        },
+    }
+}
+```
+
+Wire it into the crate via `src/lib.rs`:
+
+```rust
+mod counter;
+
+use dioxus::prelude::*;
+
+fn main() {
+    dioxus::LaunchBuilder::new()
+        .launch(counter::Counter);
+}
+```
+
+### Step 3 — Build for wasm32
+
+```powershell
+cargo build --target wasm32-unknown-unknown --release
+```
+
+Output: `target/wasm32-unknown-unknown/release/buffhtml_counter_app.wasm`.
+
+### Step 4 — Run `wasm-bindgen` post-processing
+
+```powershell
+wasm-bindgen --target web --out-dir static `
+    target\wasm32-unknown-unknown\release\buffhtml_counter_app.wasm
+```
+
+Output: `static/buffhtml_counter_app.js` + `static/buffhtml_counter_app_bg.wasm`.
+
+### Step 5 — Author a tiny HTML shell
+
+Create `static/index.html`:
+
+```html
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Buff .buffhtml Counter</title></head>
+<body>
+<div id="main"></div>
+<script type="module">
+    import init from "./buffhtml_counter_app.js";
+    init();
+</script>
+</body>
+</html>
+```
+
+### Step 6 — Serve over HTTP + open in browser
+
+```powershell
+# Python 3 stdlib http.server is the lowest-friction option:
+python -m http.server --directory static 8080
+```
+
+Open <http://localhost:8080/> in any modern browser. The counter renders
+with a `+1` button. Clicking increments the displayed value.
+
+### Step 7 — Verify (manual)
+
+- [ ] Page loads without console errors.
+- [ ] Counter shows `0` initially.
+- [ ] Clicking `+1` increments by 1 each click.
+- [ ] Browser devtools → Network tab shows `buffhtml_counter_app_bg.wasm`
+      loading successfully.
+
+---
+
+## Alternative: `todo_list.buffhtml`
+
+Repeat Steps 1–7 with `examples/todo_list.buffhtml` to exercise
+`{#each items as todo}` + `{#if cond} ... {:else} ... {/if}`. Expected
+output: a static 3-item todo list (no reactivity since the script block
+declares a plain `Vec`, not a `use_signal`).
+
+---
+
+## Why USER ACTION?
+
+The build host runs `cargo check` / `cargo test --lib` only. Live wasm32
+rendering requires:
+
+1. **Network egress** to fetch `dioxus`/`wgpu` transitive deps on first
+   build (host is airgapped for hermetic gates).
+2. **Browser process** — there's no headless-browser harness on the build
+   host (T121b spike used a throwaway headless shell; T133 keeps the gate
+   surface minimal).
+3. **Time budget** — the full wasm-bindgen + http.server + browser-open
+   cycle takes 2–5 minutes per example; doing it in CI would multiply the
+   gate wall-time without catching bugs the lib-test suite doesn't already
+   catch.
+
+The lib-test suite (`crates/buff-lang-cli/tests/buffhtml_integration_t133.rs`)
+asserts the entire codegen path end-to-end (parse → codegen → script-block
+splice → `.rs` write) without invoking rustc. That's the build-host
+contract; the rest is up to the user.
+
+---
+
+## Precedent
+
+- **T130** `.sisyphus/evidence/task-130-dioxus-render-USER-ACTION.txt` —
+  same pattern for the T121b Dioxus counter spike.
+- **T131** `.sisyphus/evidence/task-131-dev-server.txt` — `buff ui dev`
+  Live Reload (no headless browser; USER ACTION for actual browser open).
+- **T132** `.sisyphus/evidence/task-132-tauri-scaffold.txt` — Tauri
+  desktop scaffold (USER ACTION to actually build + run the native binary).
+
+---
+
+## Acceptance (build-agent side, already verified)
+
+- ✅ `examples/counter.buffhtml` parses via `buff_lang_buffhtml_parser::parse`.
+- ✅ Codegens via `buff_lang_codegen_buffhtml::generate` without error.
+- ✅ Script-block statements (`let mut count = use_signal(|| 0);`) splice
+  verbatim into the `fn Counter() -> Element { ... }` body ahead of the
+  `rsx!{}` expression.
+- ✅ `examples/todo_list.buffhtml` round-trips through the same pipeline,
+  exercising `{#each}` + `{#if}` lowering.
+- ✅ Generated `.rs` parses via `syn::parse_file` (the script-block
+  splicing step requires it).
+- ✅ `buff build` / `buff run` / `buff check` all dispatch on the
+  `.buffhtml` extension (unit + integration tests).
+- ✅ Error-mapper translates rustc diagnostics `.rs` → `.buffhtml`
+  filename AND reverse-maps line:col via the post-format SpanMap.
+
+USER ACTION items (NOT verified by build agent):
+- ⏸ Actual wasm32 build succeeds in a clean Cargo project.
+- ⏸ Browser renders the counter / todo list without errors.
+- ⏸ `+1` button increments the displayed count.
+
+See the recipe above for the manual reproduction steps.

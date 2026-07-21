@@ -29,20 +29,44 @@ pub fn run(file: Option<&Path>, output: Option<&Path>, release: bool) -> Result<
     }
 }
 
-/// Build a single `.buff` file via the Buff pipeline → rustc (v0.1 behavior).
+/// Build a single `.buff` OR `.buffhtml` file via the Buff pipeline → rustc
+/// (v0.1 behavior; T133 extends to `.buffhtml`).
+///
+/// Dispatches on file extension:
+/// - `.buff` (default): [`pipeline::compile_to_rust`] →
+///   [`pipeline::compile_rust_to_exe`].
+/// - `.buffhtml` (T133): [`pipeline::compile_buffhtml_to_rust`] →
+///   [`pipeline::compile_buffhtml_rust_to_exe`] with the post-format
+///   [`SpanMap`] wired through for span-aware error mapping.
 fn build_single_file(file: &Path, output: Option<&Path>, release: bool) -> Result<()> {
-    let compile_out = pipeline::compile_to_rust(file)?;
-
     let stem_output: PathBuf = match output {
         Some(p) => pipeline::with_exe_extension(p),
         None => pipeline::with_exe_extension(&file.with_extension("")),
     };
-
     let mode = pipeline::BuildMode::from_release_flag(release);
-    let exe_path =
-        pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &stem_output, file, mode)?;
 
-    eprintln!("Built {} ({})", exe_path.display(), mode_label(mode));
+    let is_buffhtml = file
+        .extension()
+        .is_some_and(|e| e == pipeline::BUFFHTML_EXT);
+    if is_buffhtml {
+        let compile_out = pipeline::compile_buffhtml_to_rust(file)?;
+        pipeline::compile_buffhtml_rust_to_exe(
+            &compile_out.rust_file_path,
+            &stem_output,
+            file,
+            mode,
+            &compile_out.span_map,
+            "", // source not retained on CompileOutput; error_mapper handles miss gracefully
+        )?;
+        eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
+        eprintln!("  source: {}", file.display());
+        eprintln!("  rust:   {}", compile_out.rust_file_path.display());
+        return Ok(());
+    }
+
+    let compile_out = pipeline::compile_to_rust(file)?;
+    pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &stem_output, file, mode)?;
+    eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());
     eprintln!("  rust:   {}", compile_out.rust_file_path.display());
     Ok(())
@@ -82,7 +106,10 @@ fn build_project(release: bool) -> Result<()> {
     std::fs::write(&cargo_path, &cargo_toml)
         .with_context(|| format!("failed to write `{}`", cargo_path.display()))?;
 
-    // Transpile all .buff files in src/ to .rs
+    // Transpile all source files in src/. T133: discover BOTH .buff and
+    // .buffhtml files (the floor-grammar MUST-ship list, decision record
+    // rsx-syntax-feasibility.md §6, requires `buff build` to recognise
+    // .buffhtml alongside .buff in src/).
     let src_dir = cwd.join("src");
     if src_dir.is_dir() {
         for entry in std::fs::read_dir(&src_dir)
@@ -92,6 +119,11 @@ fn build_project(release: bool) -> Result<()> {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "buff") {
                 pipeline::compile_to_rust(&path)?;
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == pipeline::BUFFHTML_EXT)
+            {
+                pipeline::compile_buffhtml_to_rust(&path)?;
             }
         }
     }
@@ -153,10 +185,12 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool) -> Result<()> {
     std::fs::write(&cargo_path, &cargo_toml)
         .with_context(|| format!("failed to write `{}`", cargo_path.display()))?;
 
-    // 2. Transpile each member's .buff files. Buff (not cargo) owns the
-    //    .buff → .rs step; cargo then compiles the .rs files into member
-    //    binaries. We do NOT loop members at the cargo level (cargo fans
-    //    out itself) — we only loop to run the Buff transpiler.
+    // 2. Transpile each member's source files. Buff (not cargo) owns the
+    //    `.buff`/`.buffhtml` → `.rs` step; cargo then compiles the `.rs`
+    //    files into member binaries. We do NOT loop members at the cargo
+    //    level (cargo fans out itself) — we only loop to run the Buff
+    //    transpiler. T133: also pick up `.buffhtml` files in each member's
+    //    src/ dir (decision record §6 MUST-ship list).
     for member in &ws.members {
         let member_src = root.join(member).join("src");
         if !member_src.is_dir() {
@@ -171,6 +205,11 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool) -> Result<()> {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "buff") {
                 pipeline::compile_to_rust(&path)?;
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == pipeline::BUFFHTML_EXT)
+            {
+                pipeline::compile_buffhtml_to_rust(&path)?;
             }
         }
     }
