@@ -1,0 +1,41 @@
+[package]
+name = "buff-tensor"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = """\
+N-dimensional array (rank <= 4) for Buff. \
+Pure-Rust MVP (CPU-only via rayon). \
+GPU dispatch deferred to v1.18+ per T6 decision \
+(.sisyphus/decisions/wgsl-extensibility-v1x.md).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "tensor", "ndarray", "numeric", "gpu"]
+categories = ["data-structures", "science"]
+
+[lib]
+name = "buff_tensor"
+path = "src/lib.rs"
+
+[dependencies]
+# T8: rayon for CPU-parallel elementwise / reduce ops. Reuses the same
+# workspace pin already in use by buff-lang-runtime (T38-T50). The MVP
+# strategy per T6 is "CPU-only via rayon" - GPU dispatch for elementwise
+# tensor ops is feasible as a v1.18+ enhancement (~50 LOC + dispatch
+# wrapper around the existing WGSL pipeline); matmul + reduce GPU paths
+# are estimated at ~1500 LOC / ~15 days and explicitly deferred.
+rayon.workspace = true
+# T8: thiserror for the TensorError enum. Mirrors the workspace-wide
+# error pattern (buff-lang-error / buff-lang-runtime / buff-eval all
+# derive thiserror::Error for their error enums).
+thiserror.workspace = true
+
+[dev-dependencies]
+# T8: insta for snapshot tests of shape/stride computation + numerical
+# results. Mirrors the project-wide snapshot workflow
+# (cargo insta accept / review).
+insta.workspace = true
+# T8: proptest for numeric stability tests (elementwise, matmul, reduce).
+# Required per T8 spec: "math-heavy -> proptest required for numeric ops".
+# Mirrors the proptest usage in buff-lang-types / buff-lang-parser.
+proptest.workspace = true

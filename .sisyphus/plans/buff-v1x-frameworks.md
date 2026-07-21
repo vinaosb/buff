@@ -1461,7 +1461,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 8. `buff-tensor` — N-dim Arrays + GPU Dispatch
+- [x] 8. `buff-tensor` — N-dim Arrays + GPU Dispatch
 
   **What to do**:
   - Create `crates/buff-tensor/` with standard Cargo.toml.
@@ -1645,7 +1645,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 10. `buff-audio` — Audio Codecs + Sample Ops (CPU-only MVP)
+- [x] 10. `buff-audio` — Audio Codecs + Sample Ops (CPU-only MVP)
 
   **What to do**:
   - Create `crates/buff-audio/`.
@@ -1803,7 +1803,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 12. `buff-ecs` — Entity-Component-System Architecture
+- [x] 12. `buff-ecs` — Entity-Component-System Architecture
 
   **What to do**:
   - Create `crates/buff-ecs/`.

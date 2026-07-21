@@ -1,0 +1,27 @@
+// T8 example: matmul.buff - 2D matrix multiplication.
+//
+// Demonstrates the EXPERIMENTAL Tensor matmul surface:
+//   - Tensor.from_vec(data, shape) wraps a flat Vector + shape
+//   - a.matmul(b) returns the matrix product a * b
+//
+// Per T8 spec line 1531-1538 acceptance scenario.
+//
+// Computation shown in the source:
+//   a = [[1, 2], [3, 4]]
+//   b = [[5, 6], [7, 8]]
+//   c = a.matmul(b) = [[1*5+2*7, 1*6+2*8],
+//                      [3*5+4*7, 3*6+4*8]]
+//                   = [[19, 22], [43, 50]]
+//
+// MVP scope:
+//   - 2D only (N-D batched matmul deferred to v1.18+)
+//   - CPU-only via rayon (BLAS-optimized GPU matmul deferred per T6)
+
+func main():
+    let a = Tensor.from_vec([1.0, 2.0, 3.0, 4.0], [2, 2])
+    let b = Tensor.from_vec([5.0, 6.0, 7.0, 8.0], [2, 2])
+    let c = a.matmul(b)
+    print("a =", a.shape())
+    print("b =", b.shape())
+    print("c = a.matmul(b) =", c.shape())
+    print("c values:", c.values())
