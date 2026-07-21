@@ -1,0 +1,25 @@
+# T10 .buff example: mix two buffers (FORWARD-DECL).
+#
+# Requires the coordinated Type::Audio codegen lowering arm (sibling task).
+# Today `buff check` validates the syntax; `buff run` integration lands
+# when the coordinated sibling task does. See crates/buff-audio/AGENTS.md.
+
+from "audio" import AudioBuffer
+
+func tone(freq: Float, amp: Float, sample_rate: Int) -> AudioBuffer:
+    samples = Vector.fill(size: sample_rate, fn: { i =>
+        let t = i.to_float() / sample_rate.to_float()
+        (t * freq * 2.0 * Math.PI).sin() * amp
+    })
+    return AudioBuffer.from_samples(samples: samples, sample_rate: sample_rate, channels: 1)
+
+func main():
+    sr = 44100
+    a = tone(freq: 220.0, amp: 0.5, sample_rate: sr)
+    b = tone(freq: 330.0, amp: 0.3, sample_rate: sr)
+
+    print("A: ${a.summarize()}")
+    print("B: ${b.summarize()}")
+
+    a.mix(other: b)
+    print("A+B: ${a.summarize()}")

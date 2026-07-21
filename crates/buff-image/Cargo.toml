@@ -1,0 +1,32 @@
+[package]
+name = "buff-image"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Image codecs + pixel ops for Buff. \
+Pure-Rust MVP (CPU-only per Metis G7 lock). \
+Wraps the mature `image` crate for PNG/JPEG/GIF/BMP/WebP \
+codecs via a safe FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "image", "codec", "png", "jpeg"]
+categories = ["multimedia::images", "graphics"]
+
+[lib]
+name = "buff_image"
+path = "src/lib.rs"
+
+[dependencies]
+# T9 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# image 0.25: PNG/JPEG/GIF/BMP/WebP all pure-Rust — matches "no C
+# library" rule. API surface used: image::open / load_from_memory +
+# DynamicImage::{width,height,get_pixel,put_pixel,to_luma8,invert,
+# resize,crop,blur,save}.
+image.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -1562,7 +1562,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 9. `buff-image` — Image Codecs + Pixel Ops (CPU-only MVP)
+- [x] 9. `buff-image` — Image Codecs + Pixel Ops (CPU-only MVP)
 
   **What to do**:
   - Create `crates/buff-image/` with standard Cargo.toml.

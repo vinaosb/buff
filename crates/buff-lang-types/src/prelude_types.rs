@@ -877,8 +877,8 @@ pub enum PreludeType {
     /// codegen time (a transparent newtype over `hecs::Entity`, which
     /// is a `(u32 id, u32 generation)` pair — Copy + Eq + Hash + Send
     /// + Sync + 'static). Users compare entities by value, store them
-    /// in collections, and pass them back to `world.insert`,
-    /// `world.remove`, or `world.despawn`.
+    /// in collections, and pass them back to the world's mutating
+    /// methods (`insert`, `remove`, `despawn`).
     ///
     /// Buff surface:
     /// - `entity.id() -> Int` — the stable slot id (read-only accessor).
@@ -2039,6 +2039,21 @@ pub enum PreludeAssocFn {
     /// in a future buff-web integration) or reading from a database
     /// BLOB column.
     FromBytes,
+    // ---- Signal constructors (T11) -----------------------------------
+    // Signal.from_vec(data, sample_rate) reuses the existing `FromVec`
+    // variant (shared with Tensor.from_vec — same pattern as Parse /
+    // Get / Encode being shared across types). No new variant needed.
+    // ---- Window constructors (T11) -----------------------------------
+    /// `Window.hann(n)` - Hann window of length n. One arg (Int).
+    /// Returns Window (opaque `buff_dsp::Window`). Wraps
+    /// `buff_dsp::Window::hann(n)`.
+    Hann,
+    /// `Window.hamming(n)` - Hamming window of length n. One arg (Int).
+    /// Returns Window. Wraps `buff_dsp::Window::hamming(n)`.
+    Hamming,
+    /// `Window.blackman(n)` - Blackman window of length n. One arg (Int).
+    /// Returns Window. Wraps `buff_dsp::Window::blackman(n)`.
+    Blackman,
 }
 
 impl PreludeAssocFn {
@@ -2177,6 +2192,10 @@ impl PreludeAssocFn {
         // permits `Type.from_*()`. Mirrors the DataFrame ctor pattern.
         PreludeAssocFn::FromPath,
         PreludeAssocFn::FromBytes,
+        // T11: Window constructors (3): hann / hamming / blackman.
+        PreludeAssocFn::Hann,
+        PreludeAssocFn::Hamming,
+        PreludeAssocFn::Blackman,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -2228,6 +2247,9 @@ impl PreludeAssocFn {
             // rewriting. Mirrors the DataFrame precedent (T7).
             PreludeAssocFn::FromPath => "from_path",
             PreludeAssocFn::FromBytes => "from_bytes",
+            PreludeAssocFn::Hann => "hann",
+            PreludeAssocFn::Hamming => "hamming",
+            PreludeAssocFn::Blackman => "blackman",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -2335,6 +2357,13 @@ impl PreludeAssocFn {
             // (url), dispatched on the (type, method) pair.
             PreludeAssocFn::Connect => "connect",
             PreludeAssocFn::Bind => "bind",
+            // T11: buff-dsp window-function names mirror the canonical
+            // DSP literature spelling (Hann / Hamming / Blackman —
+            // proper nouns, lowercase method names). The codegen splices
+            // `buff_dsp::windows::<name>(n)` paths without rewriting.
+            PreludeAssocFn::Hann => "hann",
+            PreludeAssocFn::Hamming => "hamming",
+            PreludeAssocFn::Blackman => "blackman",
         }
     }
 }
@@ -2918,6 +2947,14 @@ pub fn assoc_fn_return_type(
         // `buff_image::Image::from_bytes(&b)?`. Used for HTTP-downloaded
         // image bytes / database BLOBs.
         (PreludeType::Image, PreludeAssocFn::FromBytes) => Some(Type::Image),
+        // T11: Signal.from_vec reuses FromVec (shared with Tensor).
+        // Returns Signal (modeled as Void — coordinated Type::Signal
+        // variant is a follow-up outside T11 shared zone).
+        (PreludeType::Signal, PreludeAssocFn::FromVec) => Some(Type::Void),
+        // T11: Window constructors return Window (modeled as Void).
+        (PreludeType::Window, PreludeAssocFn::Hann) => Some(Type::Void),
+        (PreludeType::Window, PreludeAssocFn::Hamming) => Some(Type::Void),
+        (PreludeType::Window, PreludeAssocFn::Blackman) => Some(Type::Void),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.

@@ -1,0 +1,41 @@
+[package]
+name = "buff-audio"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+AudioBuffer + sample ops for the Buff language. \
+Pure-Rust MVP wrapping hound (WAV) + symphonia (MP3/FLAC/Vorbis). \
+CPU-only per Metis G7 lock; no real-time playback (v1.18+); \
+no synthesis (that's buff-dsp T11).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "audio", "codec", "wav", "mp3"]
+categories = ["multimedia::audio"]
+
+[lib]
+name = "buff_audio"
+path = "src/lib.rs"
+
+[dependencies]
+# T10: hound for WAV decode + encode. The canonical pure-Rust WAV
+# reader/writer (ruuda/hound — stable API since 3.0). Pure-Rust, no
+# native deps — matches the "no C library, no Docker" hard rule.
+hound.workspace = true
+# T10: symphonia for MP3 / FLAC / Vorbis decode. Pure-Rust audio
+# decoder; features mp3/flac/wav/vorbis/pcm enable the codec sub-crates
+# (aac/opus/isomp4 NOT enabled — extra build surface, no MVP need).
+# We use symphonia (NOT rodio) because rodio pulls cpal which needs
+# native C deps via cc-rs on Linux (alsa-sys) and macOS (coreaudio-sys)
+# — breaks the "no C library" rule AND fails on the Windows MSVC host.
+symphonia.workspace = true
+# T10: thiserror for AudioError. Mirrors the workspace-wide error
+# pattern (buff-image::ImageError, buff-tensor::TensorError).
+thiserror.workspace = true
+
+[dev-dependencies]
+# T10: tempfile for scratch WAV files in round-trip integration tests.
+tempfile.workspace = true
+# T10: insta for snapshot tests of AudioSummary output + decode results.
+insta.workspace = true

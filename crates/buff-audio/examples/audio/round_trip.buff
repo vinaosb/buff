@@ -1,0 +1,20 @@
+# T10 .buff example: load → amplify → save round-trip (FORWARD-DECL).
+#
+# Requires the coordinated Type::Audio codegen lowering arm (sibling task).
+# Today `buff check` validates the syntax; `buff run` integration lands
+# when the coordinated sibling task does. See crates/buff-audio/AGENTS.md.
+
+from "audio" import AudioBuffer
+
+func main():
+    input_path = System.args().get(1).or(default: "input.wav")
+    output_path = System.args().get(2).or(default: "amplified.wav")
+
+    buf = AudioBuffer.from_path(path: input_path)
+    print("loaded: ${buf.summarize()}")
+
+    buf.amplify(factor: 2.0)
+    print("after amplify x2: ${buf.summarize()}")
+
+    buf.save(path: output_path)
+    print("saved to ${output_path}")
