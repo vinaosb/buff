@@ -1,0 +1,307 @@
+T137 — Coverage tooling — evidence file
+=======================================
+Generated: 2026-07-21
+Branch: master (post-v1.9, v1.10 "Production hardening" in progress)
+Crate: buff-lang-cli (version 1.2.0 — UNCHANGED per task spec)
+
+PURPOSE
+-------
+Ship `buff coverage` subcommand that wraps `cargo llvm-cov` (preferred)
+or `cargo-tarpaulin` (fallback), captures Rust-level line coverage
+data, and maps it back to .buff source lines via the T60 SourceMap
+bidirectional line map. The mapping module + report generation are
+local-buildable; actual llvm-cov invocation is USER ACTION when not
+installed.
+
+================================================================================
+ITEM 1: T60 SOURCE-MAP VERIFICATION (GATE — passed)
+================================================================================
+
+File: crates/buff-lang-error/src/source_map.rs (UNCHANGED — read-only)
+API surface used:
+
+  - SourceMap::new() -> SourceMap
+  - SourceMap::add_source(id: SourceId, path: PathBuf, content: String)
+  - SourceMap::add_mapping(buff_span: Span, rust_line: usize)
+  - SourceMap::lookup_buff(rust_line: usize) -> Option<Span>
+  - SourceMap::lookup(id: SourceId, offset: ByteOffset) -> Option<(usize, usize)>
+      (returns 1-based (line, col) on hit)
+  - SourceMap::lookup_rust(buff_span: Span) -> Option<usize>
+  - SourceMap::is_line_map_empty() -> bool
+
+Mapping chain (rust → buff):
+
+  rust_line (usize)
+      │
+      ▼  SourceMap::lookup_buff
+  Buff Span { start: ByteOffset, end: ByteOffset, source_id: SourceId }
+      │
+      ├─  SourceMap::lookup(span.source_id, span.start)
+      │     │
+      │     ▼  (binary search in SourceFile::line_starts)
+      │  (buff_line, buff_col)  // 1-based
+      │
+      └─  paths side-table lookup (source_id → .buff file PathBuf)
+            │
+            ▼
+         buff_file PathBuf
+
+VERIFICATION RESULT: T60 SHIPPED + API SUFFICIENT. The mapping module
+is built on the public T60 API only — no buff-lang-error source changes
+required (and none made).
+
+KNOWN LIMITATION: SourceMap stores Buff ↔ Rust mappings as
+`HashMap<usize, Span>` (single rust_line → single Span). Buff's CLI
+compiles one .buff translation unit at a time, so all generated Rust
+lines map back into one .buff file. Multi-file / workspace coverage
+is GAP-2 (below).
+
+================================================================================
+ITEM 2: CHOSEN COVERAGE TOOL
+================================================================================
+
+PREFERRED:  cargo-llvm-cov
+  - Native JSON + LCOV + HTML emitter.
+  - Cross-platform (Windows + macOS + Linux).
+  - Faster than tarpaulin on incremental runs.
+  - Install: `cargo install cargo-llvm-cov`.
+  - Needs `llvm-tools-preview` rustup component (USER ACTION).
+
+FALLBACK:   cargo-tarpaulin
+  - Pure-Rust, Linux-only (no Windows/macOS support).
+  - Native JSON + LCOV emitter.
+  - Install: `cargo install cargo-tarpaulin`.
+
+DETECTION ORDER: llvm-cov first, tarpaulin fallback, error if neither.
+The `detect_coverage_tool()` function in
+crates/buff-lang-cli/src/commands/coverage.rs probes both via
+`<tool> --version` with stdio piped to null.
+
+The llvm-cov JSON parser in crates/buff-lang-cli/src/coverage/parse.rs
+also handles the segments fallback (when llvm-cov emits only the
+compressed region table without the per-line array).
+
+================================================================================
+ITEM 3: MAPPING ARCHITECTURE
+================================================================================
+
+The mapping pipeline is split into 5 pure, individually-testable stages
+under crates/buff-lang-cli/src/coverage/:
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │ Stage 1: parse_llvm_cov_json(json: &str)                         │
+  │   -> Result<Vec<RustLineHit>, LlvmCovError>                      │
+  │   Walks data[*].files[*].lines[*] (or .segments[*] fallback).    │
+  │   Permissive: missing count → 0, missing filename → skip.        │
+  │   Deterministic output: sorted by (rust_file, rust_line).        │
+  ├──────────────────────────────────────────────────────────────────┤
+  │ Stage 2: map_rust_to_buff(                                       │
+  │            hits: &[RustLineHit],                                 │
+  │            source_map: &SourceMap,                               │
+  │            paths: &[(SourceId, PathBuf)],                        │
+  │          ) -> Vec<BuffLineHit>                                   │
+  │   For each RustLineHit:                                          │
+  │     1. lookup_buff(rust_line) → Buff Span (T60).                 │
+  │     2. lookup(span.source_id, span.start) → (buff_line, col).    │
+  │     3. paths side-table → buff_file path.                        │
+  │   Rust lines that fail any lookup are dropped (None → filter).   │
+  │   Note: T60 lookup_buff falls back to closest line at-or-below   │
+  │   when an exact rust_line isn't registered (mirrors rustc's      │
+  │   "diagnostic points at start of failing statement" semantics).  │
+  ├──────────────────────────────────────────────────────────────────┤
+  │ Stage 3: BuffCoverage::aggregate(hits: &[BuffLineHit])           │
+  │   -> BuffCoverage                                                 │
+  │   BTreeMap<PathBuf, BTreeMap<usize, u64>> — sums duplicate       │
+  │   (file, line) entries. Sorted iteration → deterministic         │
+  │   report rendering.                                              │
+  ├──────────────────────────────────────────────────────────────────┤
+  │ Stage 4a: render_lcov(coverage: &BuffCoverage) -> String         │
+  │   Emits LCOV .info tracefile:                                    │
+  │     SF:<path>                                                    │
+  │     DA:<line>,<count>  (per instrumented line)                   │
+  │     LF:<total_lines>                                             │
+  │     LH:<covered_lines>                                           │
+  │     end_of_record                                                │
+  ├──────────────────────────────────────────────────────────────────┤
+  │ Stage 4b: render_html(coverage: &BuffCoverage) -> String         │
+  │   Emits self-contained <!DOCTYPE html> document:                 │
+  │     - Overall % with red/yellow/green color threshold            │
+  │       (< 75% red, 75-90% yellow, >= 90% green — genhtml style)   │
+  │     - Per-file summary table                                      │
+  │     - Per-file <pre> line detail with .hit / .miss classes       │
+  │   No external CSS/JS/images — embeddable in CI artifacts.        │
+  └──────────────────────────────────────────────────────────────────┘
+
+The CLI subcommand (commands/coverage.rs) wires these stages together:
+
+  run(path, html, lcov, output, release)
+    │
+    ├─ detect_coverage_tool() — None → print hint + bail (USER ACTION)
+    ├─ compile_to_rust(file)  — re-runs front-end so .rs sits next to .buff
+    ├─ run_coverage_tool(tool, &rust_file, release) — subprocess, captures JSON
+    ├─ parse_llvm_cov_json(&json) — Vec<RustLineHit>
+    ├─ populate_identity_mapping(&mut map, id, buff_source) — GAP-1 stopgap
+    ├─ map_rust_to_buff(&rust_hits, &map, &paths_side_table)
+    ├─ BuffCoverage::aggregate(&buff_hits)
+    ├─ print_summary(&coverage) — stderr (one line per file + overall %)
+    ├─ if html { render_html + write to coverage/index.html or --output }
+    └─ if lcov { render_lcov + write to coverage/lcov.info or --output }
+
+================================================================================
+GAP-1: CODEGEN DOES NOT EXPOSE SOURCEMAP TO THE CLI
+================================================================================
+
+The T60 SourceMap is populated INSIDE buff-lang-codegen-rust (via
+CodegenContext::record_mapping during generate_rust). The CLI cannot
+currently retrieve this populated SourceMap — generate_rust returns
+only the formatted Rust source String.
+
+v1.10 STOPGAP: The CLI constructs an IDENTITY mapping in
+populate_identity_mapping() (commands/coverage.rs) — every Rust line N
+maps to the Buff span starting at byte offset of Buff line N. This
+produces a sensible report when the codegen layout closely mirrors the
+source (1 Buff statement → 1 Rust statement) but is IMPRECISE when
+codegen expands/emits boilerplate.
+
+The mapping MODULE is fully tested with synthetic SourceMaps (see
+coverage/map.rs unit tests) — it correctly handles real multi-line
+mappings, fallbacks, and multi-file scenarios. The CLI integration
+gap is the only fidelity issue; the module is production-ready.
+
+POST-v1.10 FIX: Add a getter to buff-lang-codegen-rust::CodegenContext
+that returns the populated SourceMap + a (SourceId, PathBuf) side-
+table. Then the CLI replaces populate_identity_mapping with
+`codegen_out.source_map` (one-line change). Estimated effort: 1-2h.
+Out of scope for T137 (would touch buff-lang-codegen-rust — banned
+per task spec).
+
+================================================================================
+GAP-2: PROJECT-WIDE COVERAGE (currently single-file only)
+================================================================================
+
+Buff's CLI compile pipeline is single-file: `buff run foo.buff` reads
+one .buff file, lexes/parses/codegens into one .rs file, and invokes
+rustc on it. The `buff coverage` subcommand inherits this limitation —
+`buff coverage foo.buff` works; `buff coverage` (no path, project-wide)
+returns an error directing users to GAP-2 documentation.
+
+POST-v1.10 FIX: Wire T120 project-mode (buff.toml → Cargo.toml +
+cargo build) into the coverage path so `buff coverage` invokes
+`cargo llvm-cov` at the project root. Estimated effort: 2-3h.
+Out of scope for T137.
+
+================================================================================
+ITEM 4: FILES MODIFIED / CREATED
+================================================================================
+
+NEW FILES (8):
+  crates/buff-lang-cli/src/coverage/mod.rs        — module wiring + re-exports
+  crates/buff-lang-cli/src/coverage/model.rs      — RustLineHit, BuffLineHit,
+                                                     BuffFileCoverage, BuffCoverage
+                                                     (+ unit tests: 5)
+  crates/buff-lang-cli/src/coverage/parse.rs      — parse_llvm_cov_json
+                                                     (+ unit tests: 8)
+  crates/buff-lang-cli/src/coverage/map.rs        — map_rust_to_buff
+                                                     (+ unit tests: 7)
+  crates/buff-lang-cli/src/coverage/lcov.rs       — render_lcov
+                                                     (+ unit tests: 6)
+  crates/buff-lang-cli/src/coverage/html.rs       — render_html
+                                                     (+ unit tests: 6)
+  crates/buff-lang-cli/src/commands/coverage.rs   — CLI subcommand + dispatch
+                                                     (+ unit tests: 12)
+  crates/buff-lang-cli/tests/coverage_t137.rs     — integration tests (16)
+
+MODIFIED FILES (4):
+  crates/buff-lang-cli/src/lib.rs             — added `pub mod coverage;`
+  crates/buff-lang-cli/src/cli.rs             — added `Command::Coverage { ... }` variant
+  crates/buff-lang-cli/src/commands/mod.rs    — added `pub mod coverage;`
+  crates/buff-lang-cli/src/main.rs            — added dispatch arm for Command::Coverage
+
+UNCHANGED (per task spec):
+  crates/buff-lang-error/                     — T60 SourceMap API consumed read-only
+  All other compiler + tooling crates         — no source modifications
+
+NO Cargo.toml changes (no new deps — reuses serde_json + anyhow +
+thiserror + buff-lang-error already in buff-lang-cli's manifest).
+
+================================================================================
+ITEM 5: GATE OUTPUTS (all green)
+================================================================================
+
+Working dir: C:\Users\vsbb1\source\repos\buff
+MSVC env (set before every cargo command):
+  $msvc="C:\BuildTools\VC\Tools\MSVC\14.44.35207"
+  $env:LIB="$msvc\lib\onecore\x64;...;ucrt\x64"
+  $env:INCLUDE="$msvc\include;...;winrt"
+  $env:PATH="$msvc\bin\Hostx64\x64;$env:PATH"
+  $env:CC="$msvc\bin\Hostx64\x64\cl.exe"
+  $env:CXX=$env:CC
+
+GATE 1: cargo fmt -p buff-lang-cli --check
+  Status: PASS (exit 0)
+  Output: (no diff)
+
+GATE 2: cargo clippy -p buff-lang-cli --all-targets -- -D warnings
+  Status: PASS (exit 0)
+  Output: "Finished `dev` profile [unoptimized + debuginfo] target(s)
+           in 1.96s"
+  (PowerShell "NativeCommandError" / "Checking ..." lines are NOISE —
+   the gate is judged by the Finished line + $LASTEXITCODE = 0.)
+
+GATE 3: cargo test -p buff-lang-cli --lib
+  Status: PASS
+  Result: "test result: ok. 281 passed; 0 failed; 0 ignored; 0 measured;
+          0 filtered out; finished in 0.29s"
+  (Existing 235 tests + 46 new coverage tests across the 6 new modules
+   + 12 CLI tests in commands/coverage.rs.)
+
+GATE 4: cargo test -p buff-lang-cli --test coverage_t137
+  Status: PASS
+  Result: "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured;
+          0 filtered out; finished in 0.26s"
+
+All gates scoped to buff-lang-cli only (--workspace NOT used per task
+spec; wgpu segfaults/hangs on this Windows host).
+
+================================================================================
+ITEM 6: USER ACTION RECIPE (for live coverage runs)
+================================================================================
+
+See the sibling file:
+  .sisyphus/evidence/task-137-coverage-USER-ACTION.txt
+
+It contains the PowerShell recipe for:
+  - Installing cargo-llvm-cov + llvm-tools-preview rustup component.
+  - Setting up a Cargo.toml wrapper around a Buff-generated .rs file
+    (cargo-llvm-cov requires a cargo project).
+  - Running `buff coverage examples/ola.buff --html --lcov
+    --output artifacts/cov`.
+  - Opening the HTML report in the default browser.
+  - Submitting the LCOV tracefile to Coveralls / Codecov.
+
+The mapping module + report emitters run locally WITHOUT llvm-cov
+installed — the USER ACTION only kicks in for the actual coverage
+collection step.
+
+================================================================================
+ITEM 7: PARTIAL IMPLEMENTATIONS / DEFERRED
+================================================================================
+
+PARTIAL (documented as gaps above):
+  - GAP-1: codegen SourceMap not exposed → identity mapping stopgap.
+  - GAP-2: project-wide coverage not yet wired (single-file only).
+
+OUT OF SCOPE per task spec:
+  - Branch coverage, MC/DC, GPU shader coverage.
+  - Live coverage run on a real project (USER ACTION recipe only).
+  - Actual llvm-cov installation (USER ACTION recipe only).
+
+NOT TOUCHED:
+  - No compiler crates modified.
+  - No buff-lang-error source changes (read-only consumption).
+  - No Cargo.toml version bumps (buff-lang-cli stays at 1.2.0).
+  - No .sisyphus/ plan/notepad/boulder.json edits.
+
+================================================================================
+END OF EVIDENCE FILE
+================================================================================

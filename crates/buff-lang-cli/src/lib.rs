@@ -35,6 +35,7 @@ pub mod check;
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod coverage;
 pub mod error_mapper;
 pub mod fmt;
 pub mod naming_lint;

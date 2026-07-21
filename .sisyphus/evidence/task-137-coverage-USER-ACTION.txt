@@ -1,0 +1,238 @@
+T137 — Coverage tooling — USER ACTION recipe
+============================================
+Generated: 2026-07-21
+Scope: PowerShell recipe for installing llvm-cov + running
+       `buff coverage --html` on a real Buff project + opening the
+       report.
+
+This file assumes you are on Windows with PowerShell 5.1+ and the
+Buff CLI built from source (cargo build -p buff-lang-cli). Adapt the
+$WORKDIR paths to your environment. macOS/Linux users: replace the
+MSVC env block with the appropriate toolchain (or just rely on rustup
+to provide the linker).
+
+================================================================================
+PREREQUISITES
+================================================================================
+
+1. Rust toolchain (1.95.0+):
+   rustup toolchain install 1.95.0
+   rustup default 1.95.0
+
+2. llvm-tools-preview rustup component (REQUIRED by cargo-llvm-cov):
+   rustup component add llvm-tools-preview
+
+3. cargo-llvm-cov binary:
+   cargo install cargo-llvm-cov
+
+   Verify:
+   cargo llvm-cov --version
+   # Expected: cargo-llvm-cov 0.8.x (or newer)
+
+4. (Optional, Linux only) cargo-tarpaulin as a fallback:
+   cargo install cargo-tarpaulin
+
+5. Build the Buff CLI:
+   cd <path-to-buff-repo>
+   cargo build -p buff-lang-cli
+   # The buff binary is at target/debug/buff.exe (Windows) or
+   # target/debug/buff (macOS/Linux).
+
+================================================================================
+STEP 1 — Set up the MSVC environment (Windows only)
+================================================================================
+
+Run this in EVERY new PowerShell session before invoking cargo /
+buff / cargo-llvm-cov:
+
+$msvc = "C:\BuildTools\VC\Tools\MSVC\14.44.35207"
+$env:LIB = "$msvc\lib\onecore\x64;$msvc\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
+$env:INCLUDE = "$msvc\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt"
+$env:PATH = "$msvc\bin\Hostx64\x64;$env:PATH"
+$env:CC = "$msvc\bin\Hostx64\x64\cl.exe"
+$env:CXX = $env:CC
+
+(Adjust the MSVC + Windows Kits versions to match your installation
+if different from the pinned ones above.)
+
+================================================================================
+STEP 2 — Verify the buff coverage subcommand detects llvm-cov
+================================================================================
+
+cd <path-to-buff-repo>
+.\target\debug\buff.exe coverage --help
+
+# Expected: clap renders the Coverage subcommand help with flags:
+#   --html
+#   --lcov
+#   --output <PATH>
+#   --release
+#   [PATH] (optional, .buff file)
+
+# Detect the installed tool:
+.\target\debug\buff.exe coverage examples\ola.buff
+# Expected stderr:
+#   Using coverage tool: cargo-llvm-cov
+#   ... (coverage output) ...
+# Overall: <percentage>%
+
+# If no tool is detected, the CLI prints:
+#   No Rust coverage tool detected on PATH.
+#   Install one of:
+#     cargo install cargo-llvm-cov   (preferred ...)
+#     cargo install cargo-tarpaulin  (Linux only)
+# Followed by `bail!` with a non-zero exit code.
+
+================================================================================
+STEP 3 — Set up a Cargo.toml wrapper (REQUIRED for cargo-llvm-cov)
+================================================================================
+
+cargo-llvm-cov requires a cargo project — it doesn't run on standalone
+.rs files. The Buff CLI's compile_to_rust() writes a .rs file next to
+the .buff source; we need to wrap that .rs file in a minimal cargo
+scaffold so cargo-llvm-cov can instrument + run it.
+
+One-time setup (per Buff project you want to coverage-run):
+
+# 1. Transpile the .buff source to .rs (writes examples/ola.rs):
+.\target\debug\buff.exe build examples\ola.buff
+
+# 2. Create a cargo wrapper:
+mkdir coverage_runner
+cd coverage_runner
+cargo init --name buff_coverage_runner --bin
+
+# 3. Copy the transpiled .rs into the cargo src/:
+copy ..\examples\ola.rs src\main.rs
+
+# 4. (If the transpiled .rs uses prelude types, add the corresponding
+#    crates as dependencies. examples/ola.buff uses print(), which
+#    the codegen lowers to println! — no extra deps needed for this
+#    minimal example. For projects using DateTime/Regex/URL/etc, add:
+#    cargo add chrono regex reqwest ... )
+
+# 5. Add a test (cargo-llvm-cov needs at least one test to collect
+#    coverage data; otherwise it reports 0% for everything). Create
+#    tests/it_works.rs:
+#        #[test]
+#        fn it_works() {
+#            // Invoke the transpiled main() if exported, OR
+#            // just assert something trivial to seed coverage.
+#            assert_eq!(2 + 2, 4);
+#        }
+
+================================================================================
+STEP 4 — Run coverage via the Buff CLI
+================================================================================
+
+From the cargo wrapper directory (coverage_runner/):
+
+..\..\target\debug\buff.exe coverage ..\examples\ola.buff `
+    --html --lcov --output artifacts\cov --release
+
+# What happens under the hood:
+#   1. Buff CLI detects cargo-llvm-cov on PATH (preferred).
+#   2. Re-transpiles examples/ola.buff → examples/ola.rs (refreshes
+#      the .rs file in case the source changed).
+#   3. Constructs an identity SourceMap from the .buff source.
+#   4. Invokes `cargo llvm-cov --json --coverage-only [--release]`
+#      in the parent of the .rs file.
+#   5. Parses the JSON, maps to .buff lines, aggregates.
+#   6. Writes:
+#        artifacts\cov\index.html  (self-contained HTML report)
+#        artifacts\cov\lcov.info   (LCOV tracefile for CI upload)
+#   7. Prints a per-file summary + overall % to stderr.
+
+# Expected stderr output:
+#   Using coverage tool: cargo-llvm-cov
+#   Coverage summary:
+#     examples/ola.buff — X/Y lines (Z.Z%)
+#   Overall: Z.Z%
+#   Wrote HTML report to artifacts\cov\index.html
+#   Wrote LCOV report to artifacts\cov\lcov.info
+
+================================================================================
+STEP 5 — Open the HTML report
+================================================================================
+
+# Windows:
+Start-Process artifacts\cov\index.html
+
+# macOS:
+open artifacts/cov/index.html
+
+# Linux:
+xdg-open artifacts/cov/index.html
+
+The report shows:
+  - Overall coverage % (color-coded: red < 75%, yellow 75-90%, green >= 90%).
+  - Per-file summary table (covered / total / %).
+  - Per-file line detail (green rows = hit, red rows = uncovered).
+
+================================================================================
+STEP 6 — Submit LCOV to a CI coverage service (optional)
+================================================================================
+
+Coveralls (https://coveralls.io):
+  - Set the COVERALLS_REPO_TOKEN env var to your repo's token.
+  - Run:
+    cargo install coveralls
+    coveralls artifacts\cov\lcov.info
+
+Codecov (https://codecov.io):
+  - Set the CODECOV_TOKEN env var.
+  - Run:
+    $env:CODECOV_TOKEN = "<your-token>"
+    Invoke-WebRequest -Uri https://codecov.io/upload -Method Post -InFile artifacts\cov\lcov.info
+
+================================================================================
+KNOWN ISSUES (see task-137-coverage.txt for full GAP list)
+================================================================================
+
+GAP-1 — IDENTITY MAPPING STOPGAP: The T60 SourceMap is populated inside
+buff-lang-codegen-rust during generate_rust, but the codegen crate
+does NOT currently expose the populated SourceMap to the CLI. The
+v1.10 stopgap (populate_identity_mapping in commands/coverage.rs)
+treats every Rust line N as mapping to Buff line N. This produces
+accurate reports when the codegen layout closely mirrors the source
+(one Buff statement → one Rust statement) but is IMPRECISE when
+codegen expands/emits boilerplate (e.g. complex prelude lowers,
+async wrappers). Post-v1.10 fix: add a getter to CodegenContext
+returning the populated SourceMap; replace the identity mapping
+with the real one (one-line CLI change).
+
+GAP-2 — SINGLE-FILE ONLY: The CLI requires a .buff file path.
+Project-wide coverage (`buff coverage` with no path, walking
+buff.toml) is post-v1.10 work — needs T120 project-mode integration.
+
+GAP-3 — TEST SEEDING: cargo-llvm-cov needs at least one #[test] to
+collect coverage. The Buff CLI does NOT auto-seed tests — the user
+must add a tests/ directory to their cargo wrapper (STEP 3.5 above)
+or wire their existing test suite into the wrapper project.
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Error: "no coverage tool found on PATH"
+  → Run STEP 1 (install cargo-llvm-cov + llvm-tools-preview).
+
+Error: "cargo llvm-cov exited with status..."
+  → Most likely the cargo wrapper is missing or src/main.rs is empty.
+    Verify STEP 3.
+
+Error: "failed to parse cargo-llvm-cov JSON output"
+  → cargo-llvm-cov version mismatch. Verify `cargo llvm-cov --version`
+    is 0.8.x or newer. Older versions used a different JSON schema.
+
+Error: HTML report shows 0% coverage everywhere
+  → No tests ran (GAP-3). Add a tests/ directory to the cargo wrapper.
+
+Error: HTML report shows wildly inflated line numbers
+  → The identity mapping stopgap (GAP-1) is over-counting. This is
+    expected for v1.10; the post-v1.10 fix replaces it with the real
+    SourceMap.
+
+================================================================================
+END OF USER ACTION RECIPE
+================================================================================

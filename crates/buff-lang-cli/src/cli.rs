@@ -378,6 +378,68 @@ pub enum Command {
         cmd: UiCmd,
     },
 
+    /// `buff coverage [PATH] [--html] [--lcov] [--output <PATH>] [--release]`
+    /// — collect + render `.buff` source coverage (T137).
+    ///
+    /// Wraps `cargo llvm-cov` (preferred) or `cargo-tarpaulin` (fallback),
+    /// captures Rust-level line coverage on the generated `.rs` file,
+    /// and reverse-maps the hits back to `.buff` lines via the T60
+    /// [`SourceMap`](buff_lang_error::SourceMap).
+    ///
+    /// # Modes
+    ///
+    /// - Default (no flags) — prints a per-file coverage summary to stdout.
+    /// - `--html` — writes a self-contained HTML report (use `--output`
+    ///   to set the path; default `coverage/index.html`).
+    /// - `--lcov` — writes an LCOV `.info` tracefile (default
+    ///   `coverage/lcov.info`).
+    /// - `--html --lcov` — writes both.
+    ///
+    /// # Tool detection
+    ///
+    /// Detects `cargo llvm-cov` first (preferred — faster, native
+    /// LCOV emitter, workspaces). Falls back to `cargo-tarpaulin`.
+    /// When neither is installed, prints a install hint + exits
+    /// non-zero (see `.sisyphus/evidence/task-137-coverage-USER-ACTION.txt`
+    /// for the PowerShell install recipe).
+    ///
+    /// # Build-host limitation
+    ///
+    /// The mapping layer + report generation are fully local-buildable
+    /// and unit-tested. The actual llvm-cov / tarpaulin invocation
+    /// requires the tool to be installed on the host — see the
+    /// USER-ACTION recipe for the install + run walkthrough.
+    Coverage {
+        /// Input `.buff` source file (omit to coverage-run the
+        /// whole project — currently a single-file pipeline only).
+        #[arg(value_name = "FILE")]
+        path: Option<PathBuf>,
+
+        /// Emit a self-contained HTML report (in addition to the
+        /// stdout summary).
+        #[arg(long)]
+        html: bool,
+
+        /// Emit an LCOV `.info` tracefile (in addition to the stdout
+        /// summary).
+        #[arg(long)]
+        lcov: bool,
+
+        /// Output path. For `--html`, defaults to `coverage/index.html`.
+        /// For `--lcov`, defaults to `coverage/lcov.info`. When both
+        /// are set, `--output` is treated as a directory prefix.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Run the underlying coverage tool with release optimizations
+        /// (`cargo llvm-cov --release` / `cargo tarpaulin --release`).
+        /// Off by default — debug coverage is faster to collect, which
+        /// usually matters more in the tight edit-test loop than the
+        /// runtime speedup.
+        #[arg(long)]
+        release: bool,
+    },
+
     /// `buff ssr <FILE>` — Server-Side Render a `.buffhtml` Single-File
     /// Component to HTML on stdout (T135).
     ///

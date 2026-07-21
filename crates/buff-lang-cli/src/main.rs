@@ -83,5 +83,18 @@ fn main() -> Result<()> {
             output,
             release,
         } => buff_lang_cli::commands::ssr::run(&file, output.as_deref(), release),
+        Command::Coverage {
+            path,
+            html,
+            lcov,
+            output,
+            release,
+        } => buff_lang_cli::commands::coverage::run(
+            path.as_deref(),
+            html,
+            lcov,
+            output.as_deref(),
+            release,
+        ),
     }
 }
