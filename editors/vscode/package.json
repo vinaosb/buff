@@ -37,7 +37,9 @@
   },
   "activationEvents": [
     "onLanguage:buff",
-    "workspaceContains:**/*.buff"
+    "onLanguage:buffhtml",
+    "workspaceContains:**/*.buff",
+    "workspaceContains:**/*.buffhtml"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -52,6 +54,15 @@
           ".buff"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "buffhtml",
+        "aliases": [
+          "Buff HTML"
+        ],
+        "extensions": [
+          ".buffhtml"
+        ]
       }
     ],
     "grammars": [
@@ -59,6 +70,11 @@
         "language": "buff",
         "scopeName": "source.buff",
         "path": "./syntaxes/buff.tmLanguage.json"
+      },
+      {
+        "language": "buffhtml",
+        "scopeName": "source.buffhtml",
+        "path": "./syntaxes/buffhtml.tmLanguage.json"
       }
     ],
     "snippets": [

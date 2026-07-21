@@ -1,0 +1,239 @@
+{
+  "name": "Buff HTML",
+  "scopeName": "source.buffhtml",
+  "fileTypes": ["buffhtml"],
+  "patterns": [
+    { "include": "#script-block" },
+    { "include": "#html-comment" },
+    { "include": "#directive-comment" },
+    { "include": "#directive-each" },
+    { "include": "#directive-if" },
+    { "include": "#directive-each-end" },
+    { "include": "#directive-if-end" },
+    { "include": "#directive-else" },
+    { "include": "#fragment-begin" },
+    { "include": "#fragment-end" },
+    { "include": "#tag" },
+    { "include": "#interpolation" }
+  ],
+  "repository": {
+    "script-block": {
+      "begin": "<script\\s+lang=\"buff\"[^>]*>",
+      "beginCaptures": {
+        "0": { "name": "meta.tag.script.buffhtml" }
+      },
+      "end": "</script>",
+      "endCaptures": {
+        "0": { "name": "meta.tag.script.buffhtml" }
+      },
+      "patterns": [
+        { "include": "source.buff" }
+      ]
+    },
+    "html-comment": {
+      "name": "comment.block.html.buffhtml",
+      "begin": "<!--",
+      "end": "-->"
+    },
+    "directive-comment": {
+      "name": "comment.block.directive.buffhtml",
+      "begin": "\\{#\\s",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      },
+      "end": "#\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      }
+    },
+    "directive-each": {
+      "contentName": "meta.directive.each.buffhtml",
+      "begin": "\\{#each\\s+",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.directive.buffhtml punctuation.definition.directive.buffhtml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      },
+      "patterns": [
+        { "include": "source.buff" }
+      ]
+    },
+    "directive-if": {
+      "contentName": "meta.directive.if.buffhtml",
+      "begin": "\\{#if\\s+",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.directive.buffhtml punctuation.definition.directive.buffhtml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      },
+      "patterns": [
+        { "include": "source.buff" }
+      ]
+    },
+    "directive-each-end": {
+      "name": "keyword.control.directive.buffhtml",
+      "match": "\\{/each\\}",
+      "captures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      }
+    },
+    "directive-if-end": {
+      "name": "keyword.control.directive.buffhtml",
+      "match": "\\{/if\\}",
+      "captures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      }
+    },
+    "directive-else": {
+      "contentName": "meta.directive.else.buffhtml",
+      "begin": "\\{:else(\\s+if\\s+)?",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.directive.buffhtml punctuation.definition.directive.buffhtml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.directive.buffhtml" }
+      },
+      "patterns": [
+        { "include": "source.buff" }
+      ]
+    },
+    "fragment-begin": {
+      "name": "meta.tag.fragment.begin.buffhtml",
+      "match": "<>",
+      "captures": {
+        "0": { "name": "punctuation.definition.tag.begin.buffhtml entity.name.tag.buffhtml" }
+      }
+    },
+    "fragment-end": {
+      "name": "meta.tag.fragment.end.buffhtml",
+      "match": "</>",
+      "captures": {
+        "0": { "name": "punctuation.definition.tag.end.buffhtml entity.name.tag.buffhtml" }
+      }
+    },
+    "tag": {
+      "patterns": [
+        { "include": "#tag-structure" }
+      ]
+    },
+    "tag-structure": {
+      "name": "meta.tag.other.buffhtml",
+      "begin": "(<)([a-zA-Z][a-zA-Z0-9]*(?:-[a-zA-Z0-9]+)*)\\b",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.buffhtml" },
+        "2": { "name": "entity.name.tag.buffhtml" }
+      },
+      "end": "(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.end.buffhtml" }
+      },
+      "patterns": [
+        { "include": "#tag-attributes" }
+      ]
+    },
+    "tag-attributes": {
+      "patterns": [
+        { "include": "#attribute-event" },
+        { "include": "#attribute-spread" },
+        { "include": "#attribute-generic" },
+        { "include": "#attribute-string-double" },
+        { "include": "#attribute-string-single" },
+        { "include": "#attribute-expression" },
+        { "include": "#attribute-boolean" }
+      ]
+    },
+    "attribute-event": {
+      "match": "(on:[a-zA-Z_][a-zA-Z0-9_]*(?:_[a-zA-Z0-9_]+)*)\\s*(=)\\s*",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.event.buffhtml" },
+        "2": { "name": "punctuation.separator.key-value.buffhtml" }
+      }
+    },
+    "attribute-spread": {
+      "name": "meta.attribute.spread.buffhtml",
+      "begin": "(\\{)(\\.\\.\\.)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.buffhtml.interpolation.begin" },
+        "2": { "name": "keyword.operator.spread.buffhtml" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.buffhtml.interpolation.end" }
+      },
+      "patterns": [
+        { "include": "source.buff" }
+      ]
+    },
+    "attribute-generic": {
+      "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(\\{)",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.buffhtml" },
+        "2": { "name": "punctuation.separator.key-value.buffhtml" },
+        "3": { "name": "punctuation.definition.buffhtml.interpolation.begin" }
+      }
+    },
+    "attribute-string-double": {
+      "begin": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(\")",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.buffhtml" },
+        "2": { "name": "punctuation.separator.key-value.buffhtml" },
+        "3": { "name": "string.quoted.double.buffhtml punctuation.definition.string.begin.buffhtml" }
+      },
+      "end": "(\")",
+      "endCaptures": {
+        "1": { "name": "string.quoted.double.buffhtml punctuation.definition.string.end.buffhtml" }
+      },
+      "patterns": [
+        { "include": "#interpolation" }
+      ]
+    },
+    "attribute-string-single": {
+      "begin": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(')",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.buffhtml" },
+        "2": { "name": "punctuation.separator.key-value.buffhtml" },
+        "3": { "name": "string.quoted.single.buffhtml punctuation.definition.string.begin.buffhtml" }
+      },
+      "end": "(')",
+      "endCaptures": {
+        "1": { "name": "string.quoted.single.buffhtml punctuation.definition.string.end.buffhtml" }
+      },
+      "patterns": [
+        { "include": "#interpolation" }
+      ]
+    },
+    "attribute-expression": {
+      "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*(=)\\s*(\\{)",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.buffhtml" },
+        "2": { "name": "punctuation.separator.key-value.buffhtml" },
+        "3": { "name": "punctuation.definition.buffhtml.interpolation.begin" }
+      }
+    },
+    "attribute-boolean": {
+      "match": "\\s([a-zA-Z_][a-zA-Z0-9_-]*)\\b",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.buffhtml" }
+      }
+    },
+    "interpolation": {
+      "name": "meta.interpolation.buffhtml",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.buffhtml.interpolation.begin" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.buffhtml.interpolation.end" }
+      },
+      "patterns": [
+        { "include": "source.buff" }
+      ]
+    }
+  }
+}
