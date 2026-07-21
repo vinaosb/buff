@@ -1,0 +1,22 @@
+name: "Setup Buff"
+description: "Install the Buff programming language via buffup"
+author: "buff-lang"
+
+branding:
+  icon: "download"
+  color: "blue"
+
+inputs:
+  buff-version:
+    description: "Version of Buff to install (e.g., '1.0.0' or 'latest')"
+    required: false
+    default: "latest"
+  buffup-version:
+    description: "Version of buffup installer to use (e.g., '0.1.0' or 'latest')"
+    required: false
+    default: "latest"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
+  post: "dist/index.js"

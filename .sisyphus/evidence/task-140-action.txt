@@ -1,0 +1,60 @@
+TASK-140: setup-buff GitHub Action
+====================================
+Date: 2026-07-21
+Status: COMPLETED
+
+Files Created
+--------------
+actions/setup-buff/action.yml          - Action metadata (name, inputs, runs)
+actions/setup-buff/package.json        - Dependencies & scripts
+actions/setup-buff/tsconfig.json       - TypeScript config (strict, ES2022, CommonJS)
+actions/setup-buff/.gitignore          - node_modules/, *.log, .eslintcache
+actions/setup-buff/.eslintrc.json      - ESLint config (TS parser, no-explicit-any)
+actions/setup-buff/jest.config.js      - Jest config (ts-jest preset, 80% coverage threshold)
+actions/setup-buff/README.md           - Usage docs with example workflow
+actions/setup-buff/src/index.ts        - Main entrypoint (install, cache, PATH setup)
+actions/setup-buff/src/helpers/url.ts  - Install script URL builder
+actions/setup-buff/src/helpers/version.ts - SemVer parser, cache key builder
+actions/setup-buff/src/helpers/path.ts - PATH/BUFF_HOME helpers
+actions/setup-buff/__tests__/url.test.ts    - 8 tests for URL building
+actions/setup-buff/__tests__/version.test.ts - 12 tests for version parsing & cache keys
+actions/setup-buff/__tests__/path.test.ts   - 4 tests for PATH helpers
+actions/setup-buff/dist/index.js       - Compiled output (committed for Actions runtime)
+actions/setup-buff/dist/helpers/url.js
+actions/setup-buff/dist/helpers/version.js
+actions/setup-buff/dist/helpers/path.js
+
+Build Results
+--------------
+npm run build: PASS (tsc, zero errors)
+npm run test:  PASS (27 tests, 3 suites, 86.3% line coverage)
+npm run lint:  PASS (zero errors, zero warnings)
+
+Coverage Details
+-----------------
+url.ts:     100% stmts, 100% branch, 100% funcs, 100% lines
+version.ts: 100% stmts, 100% branch, 100% funcs, 100% lines
+path.ts:    78.26% stmts, 67.56% branch, 76.92% funcs, 82.85% lines
+Total:      86.3% stmts, 78.94% branch, 83.33% funcs, 90.32% lines
+
+Action Behavior
+----------------
+1. Reads buff-version and buffup-version inputs
+2. Sets BUFF_HOME env var to $HOME/.buff
+3. Restores $HOME/.buff/versions/ from cache (key: ${{ runner.os }}-${{ runner.arch }}-buff-${{ version }})
+4. If cache miss:
+   a. Downloads + runs buffup install script (curl|sh on Unix, PowerShell on Windows)
+   b. Runs `buffup install <version>`
+   c. Runs `buffup default <version>`
+   d. Saves $HOME/.buff/versions/ to cache
+5. Appends $HOME/.buff/bin to GITHUB_PATH
+6. On failure: core.setFailed() + exit code 1
+
+Platform Support: linux, darwin, win32 (unsupported platforms logged as error)
+
+Notes
+------
+- dist/index.js is committed (Actions runs compiled output, not src)
+- Publishing to Marketplace is a manual user action (noted in README)
+- No git operations performed (Atlas handles git)
+- No Rust crates or other top-level directories modified
