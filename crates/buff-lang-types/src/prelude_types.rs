@@ -1036,6 +1036,103 @@ pub enum PreludeType {
     /// + Sync>, no lifetimes, every public body catch_unwind-wrapped
     /// per FFI guide R6).
     Web,
+    /// T18 (v1.15 frameworks wave 3): the `Database` runtime-value
+    /// type — a database access MVP wrapping the pure-Rust `sqlx`
+    /// crate (SQLite + PostgreSQL drivers via the
+    /// `runtime-tokio-rustls` feature — NOT native-tls per
+    /// workspace hard rule from AGENTS.md "Pure-Rust preference").
+    /// Constructed via the prelude associated function
+    /// `Database.connect(url)` which returns the runtime
+    /// `buff_db::Pool` value (a connection pool wrapping
+    /// `sqlx::any::AnyPool`).
+    ///
+    /// Intended Buff surface (per T18 spec lines 2333-2337):
+    /// - `Database.connect(url) -> Pool` — assoc fn ctor (shipped
+    ///   here, in this T18 commit).
+    /// - `pool.query(sql, params) -> Vector<Row>` — instance method
+    ///   (DEFERRED to a sibling task that adds the coordinated
+    ///   `Type::Pool` variant in `ty.rs` OUTSIDE the T18 shared zone
+    ///   per the MUST NOT in the T18 task brief — mirrors the T17
+    ///   Web / T20 ReactiveSignal forward-declaration precedent).
+    /// - `pool.execute(sql, params) -> Int` — instance method (DEFERRED).
+    /// - `pool.begin() -> Transaction` — instance method (DEFERRED).
+    /// - `tx.commit() / tx.rollback() -> Void` — instance methods (DEFERRED).
+    ///
+    /// `buff_type()` returns [`Type::Unknown`] for MVP — the
+    /// coordinated [`Type::Pool`] variant in `ty.rs` is a follow-up
+    /// sibling task OUTSIDE the T18 shared zone (mirrors the T8
+    /// Tensor / T11 Signal forward-declaration precedent).
+    /// `is_namespace_only()` returns `false` (Database IS a runtime
+    /// value, like Regex / Image / World).
+    ///
+    /// Records `buff-db` + `sqlx` + `tokio` in codegen
+    /// `extern_crates` when a Buff program uses `Database.*`.
+    /// EXPERIMENTAL badge per T18 spec — surface may evolve before
+    /// v1.18 stabilisation (migrations + compile-time SQL validation
+    /// + MySQL/MSSQL/Oracle drivers are explicitly deferred per T18
+    /// must-not #3/#4/#5).
+    ///
+    /// FFI-safe: complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers; owned
+    /// String / Vec<Row> / Pool at the boundary; fallible ops return
+    /// `Result<T, DbError>`; `Pool` is `Clone + Send + Sync`; no
+    /// lifetimes on Pool / Row; no panic sites in non-test code).
+    ///
+    /// NO `diesel`, NO `libpq`, NO native-tls, NO cc-rs — matches
+    /// the T18 task spec mandate and the "no C library, no Docker"
+    /// hard rule from T126/T127.
+    Database,
+    /// T27 (v1.13 frameworks wave 5): the `Fuzz` namespace — the
+    /// property-based fuzzing entry point. Wraps the in-tree
+    /// pure-Rust `buff-fuzz` crate (`buff_fuzz::run`) backed by
+    /// `proptest` 1.5 (NOT libFuzzer / cargo-fuzz / AFL — those
+    /// link C/C++ shims via cc-rs, which would FAIL on this
+    /// Windows MSVC host per the "no C library, no Docker" hard
+    /// rule). One assoc fn:
+    /// - `Fuzz.run(strategy, iterations, closure) -> Void` — drive
+    ///   the property `closure` with `iterations` random inputs
+    ///   from `strategy`. The closure shape is `Fn(Int) -> Bool`
+    ///   for MVP (Buff `Int` lowers to `i64`); future tasks
+    ///   surface a typed `FuzzValue` enum closure.
+    ///
+    /// `Fuzz` is **never a runtime value** — it's a NAMESPACE
+    /// exposing only associated functions (mirrors Log / Toml /
+    /// Hash / HMAC / OS / Audit / Signature exactly).
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `buff-fuzz` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Fuzz.*` (mirrors
+    /// the chrono / regex / sha2 / buff-mock codegen-only linking
+    /// boundary).
+    ///
+    /// NO `cargo-fuzz`, NO `afl.rs`, NO cc-rs — matches the
+    /// T27 task spec mandate and the "Windows host with no MSVC"
+    /// constraint that pushed hand-rolled lexer/parser.
+    Fuzz,
+    /// T27 (v1.13 frameworks wave 5): the `Strategy` namespace —
+    /// the random-input generator builder. Wraps the in-tree
+    /// pure-Rust `buff-fuzz` crate (`buff_fuzz::Strategy`).
+    /// Five assoc fns (each constructs a `Strategy` value fed to
+    /// `Fuzz.run`):
+    /// - `Strategy.int(min, max) -> Strategy` — inclusive Int range.
+    ///   Two args. Reuses the shared `Int` variant (also used by
+    ///   `Random.int`), dispatched on the (Strategy, Int) pair.
+    /// - `Strategy.float(min, max) -> Strategy` — Float range.
+    ///   Two args. Reuses the shared `Float` variant.
+    /// - `Strategy.bool() -> Strategy` — boolean generator.
+    ///   Zero args.
+    /// - `Strategy.string(max_len) -> Strategy` — String generator
+    ///   with bounded length. One arg.
+    /// - `Strategy.bytes(max_len) -> Strategy` — bytes generator
+    ///   with bounded length. One arg.
+    ///
+    /// `Strategy` is **never a runtime value at the Buff Type
+    /// level** — it's a NAMESPACE whose assoc fns return opaque
+    /// `buff_fuzz::Strategy` values. `buff_type()` returns
+    /// [`Type::Void`]; `is_namespace_only()` returns `true`.
+    /// The `buff-fuzz` crate is recorded in codegen `extern_crates`
+    /// when a Buff program uses `Strategy.*` (shared with the
+    /// Fuzz.* walker — both lower to `buff_fuzz::*`).
+    Strategy,
 }
 
 impl PreludeType {
@@ -1211,6 +1308,31 @@ impl PreludeType {
         // Real-time playback deferred to v1.18+; synthesis deferred
         // to buff-dsp T11.
         PreludeType::Audio,
+        // T17 (v1.15 frameworks wave 3): Web - HTTP server runtime-value
+        // type wrapping the in-tree `buff-web` crate (`buff_web::Web`)
+        // backed by `axum` 0.8 + `tokio` + `serde_json`. Constructed via
+        // `Web.new()` (empty) or `Web.bind(addr)` (empty + bind addr);
+        // 8 instance methods (get / post / put / delete / patch /
+        // middleware / listen / run). EXPERIMENTAL badge per T17 spec.
+        // The assoc fns return `Type::Unknown` (forward-declaration -
+        // the coordinated `Type::Web` variant in `ty.rs` is a follow-up
+        // sibling task outside the T17 shared zone, mirroring the T8
+        // Tensor / T11 Signal / T12-Tensor precedent). Codegen lowering
+        // for the 2 assoc fns is shipped in this T17 commit (dispatch
+        // on PreludeType, NOT Type, so no Type::Web variant needed).
+        PreludeType::Web,
+        // T18: Database — runtime-value type returned by
+        // `Database.connect(url)`. Forward-declared as `Type::Unknown`
+        // (mirrors the T17 Web precedent); the codegen lowering for
+        // `Database.connect` is shipped in this same T18 commit, but
+        // instance-method dispatch (`pool.query` / `pool.execute` /
+        // `pool.begin` / `tx.commit` / `tx.rollback`) is deferred to
+        // a sibling task that adds the coordinated `Type::Pool`
+        // variant in `ty.rs` (outside the T18 shared zone per the
+        // MUST NOT in the task brief). EXPERIMENTAL badge per T18
+        // spec. Records `buff-db` + `sqlx` + `tokio` in codegen
+        // `extern_crates` when a Buff program uses `Database.*`.
+        PreludeType::Database,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -1423,6 +1545,15 @@ impl PreludeType {
             PreludeType::ReactiveSignal => "ReactiveSignal",
             PreludeType::ReactiveComputed => "ReactiveComputed",
             PreludeType::ReactiveEffect => "ReactiveEffect",
+            // T17: Web - canonical name matching the user-facing
+            // `Web.new()` / `Web.bind(addr)` / `web.get(...)` surface.
+            // The underlying Rust type is `buff_web::Web` (the wrapper
+            // around `axum::Router` + `tokio::runtime` + serde_json).
+            PreludeType::Web => "Web",
+            // T18: Database - canonical PascalCase name matching the
+            // user-facing `Database.connect(url)` surface. The codegen
+            // splices `buff_db::Pool::connect(url)` directly.
+            PreludeType::Database => "Database",
         }
     }
 
@@ -1641,6 +1772,28 @@ impl PreludeType {
             PreludeType::ReactiveSignal => Type::Void,
             PreludeType::ReactiveComputed => Type::Void,
             PreludeType::ReactiveEffect => Type::Void,
+            // T17: Web IS a runtime value (NOT namespace-only) but
+            // for MVP returns Type::Unknown as a forward-declaration
+            // contract. The coordinated `Type::Web` variant in `ty.rs`
+            // is a follow-up sibling task OUTSIDE the T17 shared zone
+            // (mirrors the T8 Tensor / T11 Signal / T12-Tensor
+            // precedent). The codegen layer splices `buff_web::Web::*`
+            // paths directly in the assoc-fn lowering; the instance-
+            // method lowering (web.get / web.listen / ...) is also a
+            // follow-up (requires Type::Web for receiver-type dispatch
+            // in `instance_fn_lookup`).
+            PreludeType::Web => Type::Unknown,
+            // T18: Database IS a runtime value (NOT namespace-only).
+            // Returns [`Type::Unknown`] (forward-declaration, mirrors
+            // the T17 Web precedent); the codegen layer splices the
+            // real `buff_db::Pool::*` paths. A coordinated
+            // [`Type::Pool`] variant in `ty.rs` is a follow-up
+            // sibling task OUTSIDE the T18 shared zone per the MUST
+            // NOT in the task brief. `Database.connect(url)` returns
+            // the runtime Pool value (also typed as `Type::Unknown`
+            // in `assoc_fn_return_type` — the codegen emits
+            // `buff_db::Pool::connect(&url).await?`).
+            PreludeType::Database => Type::Unknown,
         }
     }
 
@@ -3173,6 +3326,58 @@ pub fn assoc_fn_return_type(
         (PreludeType::Observe, PreludeAssocFn::Histogram) => Some(Type::Void),
         (PreludeType::Observe, PreludeAssocFn::Gauge) => Some(Type::Void),
         (PreludeType::Observe, PreludeAssocFn::Bootstrap) => Some(Type::Void),
+        // T20: ReactiveSignal / ReactiveComputed / ReactiveEffect
+        // assoc fns. Each ctor returns the matching runtime value
+        // (modeled as Type::Unknown — the coordinated
+        // Type::ReactiveSignal / ReactiveComputed / ReactiveEffect
+        // variants in ty.rs are follow-up sibling tasks OUTSIDE the
+        // T20 shared zone, mirroring the T8 Tensor / T11 Signal-DSP
+        // forward-declaration precedent). The codegen-lowered
+        // `buff_reactive::Signal::new(v)` /
+        // `buff_reactive::Computed::new(f)` /
+        // `buff_reactive::Effect::new(f)` calls splice the path
+        // directly; the Buff-side type check accepts the Unknown
+        // return so `buff check` validates the syntax.
+        (PreludeType::ReactiveSignal, PreludeAssocFn::New) => Some(Type::Unknown),
+        (PreludeType::ReactiveComputed, PreludeAssocFn::New) => Some(Type::Unknown),
+        (PreludeType::ReactiveEffect, PreludeAssocFn::New) => Some(Type::Unknown),
+        // T17: Web assoc fns. Both ctors return Web (modeled as
+        // Type::Unknown for MVP - the coordinated Type::Web variant
+        // in ty.rs is a follow-up sibling task outside the T17 shared
+        // zone, mirroring the T8 Tensor / T11 Signal / T12-Tensor
+        // forward-declaration precedent). The codegen-lowered
+        // `buff_web::Web::new()` / `buff_web::Web::bind(addr)` calls
+        // splice the path directly; the Buff-side type check accepts
+        // the Unknown return so `buff check` validates the syntax.
+        //
+        // `Web.new()` -> Web. Zero args. Wraps `buff_web::Web::new()`
+        // (infallible - returns an empty Web with no routes / no
+        // middleware / no bind addr).
+        (PreludeType::Web, PreludeAssocFn::New) => Some(Type::Unknown),
+        // `Web.bind(addr)` -> Web. One arg (String). Wraps
+        // `buff_web::Web::bind(addr)` (infallible - returns an empty
+        // Web with the bind addr preset; the user adds routes via
+        // web.get / web.post / ... and starts serving via web.run()).
+        (PreludeType::Web, PreludeAssocFn::Bind) => Some(Type::Unknown),
+        // T18: Database.connect(url) -> Pool (forward-declared as
+        // Type::Unknown). Wraps `buff_db::Pool::connect(&url).await?`
+        // (the `?` propagates DbError per Buff's R3 error-mapping
+        // contract — the Buff user's surrounding fn must return
+        // `Result<T, DbError>` so `?` can splice cleanly; the Buff
+        // `?` operator is the standard error-propagation idiom,
+        // mirroring `regex::Regex::new(p)?` from T124d and
+        // `buff_image::Image::from_path(p)?` from T9).
+        //
+        // The `Connect` variant is shared with TCP.connect /
+        // WebSocket.connect (existing variants — same name,
+        // different per-type lowering, dispatched on the
+        // (Database, Connect) pair). The codegen lowering emits the
+        // async call via `.await` (Buff has no `await` keyword — the
+        // codegen auto-inserts it when the surrounding fn is async
+        // per the T31 async-propagation path). Records `buff-db` +
+        // `sqlx` + `tokio` in codegen `extern_crates` (mirrors the
+        // chrono / regex / tracing codegen-only linking boundary).
+        (PreludeType::Database, PreludeAssocFn::Connect) => Some(Type::Unknown),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -3531,6 +3736,64 @@ pub enum PreludeInstanceFn {
     /// as Type::Unknown at this layer because Buff has no surface
     /// AudioSummary type variant.
     Summarize,
+    /// T20: `s.get() -> T` — read the current value of a reactive
+    /// Signal/Computed AND register the calling observer (Effect /
+    /// Computed) as a subscriber. Zero args.
+    Get,
+    /// T20: `s.set(value) -> Void` — write a new value to a reactive
+    /// Signal and notify subscribers. One arg (T).
+    Set,
+    /// T20: `s.update(fn) -> Void` — read-modify-write on a reactive
+    /// Signal. One arg (`Fn(&mut T) -> Void`).
+    Update,
+    /// T20: `c.invalidate() -> Void` — manually clear a Computed's
+    /// cache. Zero args.
+    Invalidate,
+    // ---- Web instance methods (T17) -----------------------------------
+    // Eight instance methods on Web values. Dispatched on
+    // (Type::Web, variant) pairs — BUT Type::Web is a forward-
+    // declaration sibling task (out of T17 shared zone, mirrors the
+    // T8/T11/T12-Tensor precedent). The `instance_fn_return_type`
+    // arms for these variants are therefore DEFERRED to the
+    // coordinated sibling task that adds Type::Web to ty.rs. The
+    // variants themselves + their `name()` spellings are shipped
+    // here so the parser + the PreludeInstanceFn ALL set see them
+    // (lets `buff check` validate `web.<method>(...)` syntax today).
+    //
+    // Each variant is Web-only (no shared variants with prior prelude
+    // instance fns) because the receiver semantics differ — `web.get
+    // (path, handler)` takes a String + a closure, NOT a Map key like
+    // `env.get(name)`. Buff §6 reserved-keyword constraint: `use`
+    // is reserved so the middleware-registration method is `middleware`
+    // (not `use`); `listen` is unreserved and matches the T17 QA
+    // scenario spec verbatim ("s.listen(port: 8080)").
+    /// `web.get(path, handler) -> Web`. Two args (String path, Handler
+    /// closure). Registers a GET route. The codegen lowering will
+    /// emit `recv.get(path, std::sync::Arc::new(handler))` once
+    /// Type::Web lands (forward-declaration contract).
+    RouteGet,
+    /// `web.post(path, handler) -> Web`. POST route. Same shape as
+    /// RouteGet.
+    RoutePost,
+    /// `web.put(path, handler) -> Web`. PUT route.
+    RoutePut,
+    /// `web.delete(path, handler) -> Web`. DELETE route.
+    RouteDelete,
+    /// `web.patch(path, handler) -> Web`. PATCH route.
+    RoutePatch,
+    /// `web.middleware(mw) -> Web`. One arg (MiddlewareFn closure).
+    /// Pushes the middleware onto the dispatch chain.
+    Middleware,
+    /// `web.listen(port: N) -> Void`. One named arg (Int port). Binds
+    /// `0.0.0.0:{port}` and serves forever (synchronous — Buff has
+    /// no `await` keyword per AGENTS.md §6; the codegen-lowered
+    /// Rust wraps axum::serve in `tokio::runtime::Runtime::new()?.
+    /// block_on(...)` per FFI guide Example 3). The QA scenario in
+    /// the T17 spec writes this verb as `s.listen(port: 8080)`.
+    Listen,
+    /// `web.run() -> Void`. Zero args. Serves on the bind addr set
+    /// by `Web.bind(addr)` (defaults to `0.0.0.0:8080`).
+    Run,
 }
 
 impl PreludeInstanceFn {
@@ -3645,6 +3908,28 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Mix,
         PreludeInstanceFn::Slice,
         PreludeInstanceFn::Summarize,
+        // T20: Reactive instance methods — Get / Set / Update /
+        // Invalidate. Dispatched on (Type::Unknown, Method) pairs so
+        // the T26 field-access heuristic does NOT rewrite `s.get()`
+        // as `s.get`.
+        PreludeInstanceFn::Get,
+        PreludeInstanceFn::Set,
+        PreludeInstanceFn::Update,
+        PreludeInstanceFn::Invalidate,
+        // T17: Web instance methods (8 distinct names). All Web-only
+        // (no shared variants with prior prelude instance fns). The
+        // HTTP-verb-named variants (route_get / route_post / route_put
+        // / route_delete / route_patch) are prefixed `route_` to avoid
+        // a clash with `Env.get` / `Args.get` (shared `Get` variant).
+        // `middleware` / `listen` / `run` are unambiguous verbs.
+        PreludeInstanceFn::RouteGet,
+        PreludeInstanceFn::RoutePost,
+        PreludeInstanceFn::RoutePut,
+        PreludeInstanceFn::RouteDelete,
+        PreludeInstanceFn::RoutePatch,
+        PreludeInstanceFn::Middleware,
+        PreludeInstanceFn::Listen,
+        PreludeInstanceFn::Run,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -3763,6 +4048,28 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Mix => "mix",
             PreludeInstanceFn::Slice => "slice",
             PreludeInstanceFn::Summarize => "summarize",
+            // T20: Reactive instance method names mirror the
+            // `buff_reactive::Signal` / `buff_reactive::Computed` /
+            // `buff_reactive::Effect` method names 1:1.
+            PreludeInstanceFn::Get => "get",
+            PreludeInstanceFn::Set => "set",
+            PreludeInstanceFn::Update => "update",
+            PreludeInstanceFn::Invalidate => "invalidate",
+            // T17: Web instance method names mirror the user-facing
+            // Buff surface (`web.get(...)` / `web.middleware(...)` /
+            // `web.listen(port: N)` / `web.run()`). The HTTP-verb
+            // variants drop the `route_` prefix on the surface — the
+            // `route_` prefix exists only at the Rust enum level to
+            // disambiguate from `Env.get` / `Args.get` (shared `Get`
+            // variant). `middleware` / `listen` / `run` map 1:1.
+            PreludeInstanceFn::RouteGet => "get",
+            PreludeInstanceFn::RoutePost => "post",
+            PreludeInstanceFn::RoutePut => "put",
+            PreludeInstanceFn::RouteDelete => "delete",
+            PreludeInstanceFn::RoutePatch => "patch",
+            PreludeInstanceFn::Middleware => "middleware",
+            PreludeInstanceFn::Listen => "listen",
+            PreludeInstanceFn::Run => "run",
         }
     }
 }
@@ -4124,6 +4431,28 @@ pub fn instance_fn_return_type(
         // `buf.save(path)` -> Void. WAV encode.
         (Type::Audio, PreludeInstanceFn::Save) => Some(Type::Void),
 
+        // T20: Reactive instance methods. Dispatched on
+        // (Type::Unknown, Method) because the coordinated
+        // Type::ReactiveSignal / ReactiveComputed / ReactiveEffect
+        // variants in ty.rs are follow-up sibling tasks OUTSIDE the
+        // T20 shared zone (mirrors the T17 Web forward-declaration
+        // precedent). When type inference resolves the receiver to
+        // Type::Unknown (e.g. `let s = ReactiveSignal.new(10)` whose
+        // assoc fn returns Type::Unknown), the dispatcher matches
+        // here and the codegen emits `recv.method(args)` directly.
+        // Rust's method resolution then finds the matching
+        // `buff_reactive::Signal::get` / `set` / `update` /
+        // `Computed::get` / `Effect::run` method.
+        //
+        // `s.get()` -> T. Zero args. Element type Unknown.
+        (Type::Unknown, PreludeInstanceFn::Get) => Some(Type::Unknown),
+        // `s.set(value)` -> Void. One arg (T).
+        (Type::Unknown, PreludeInstanceFn::Set) => Some(Type::Void),
+        // `s.update(fn)` -> Void. One arg (`Fn(&mut T) -> Void`).
+        (Type::Unknown, PreludeInstanceFn::Update) => Some(Type::Void),
+        // `c.invalidate()` -> Void. Zero args. Manually clear cache.
+        (Type::Unknown, PreludeInstanceFn::Invalidate) => Some(Type::Void),
+
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
         _ => None,
@@ -4178,6 +4507,7 @@ mod tests {
                 && t != PreludeType::URL
                 && t != PreludeType::Path
                 && t != PreludeType::Process
+                && t != PreludeType::Web
             {
                 assert!(t.buff_type().is_prelude_datetime());
             }

@@ -1,0 +1,18 @@
+import ReactiveSignal
+import ReactiveComputed
+import ReactiveEffect
+
+func main()
+    let count = ReactiveSignal.new(0)
+    let doubled = ReactiveComputed.new({ || count.get() * 2 })
+
+    ReactiveEffect.new({ ||
+        print("doubled = " + doubled.get())
+    })
+
+    print("--- increment one at a time ---")
+    count.set(1)
+    count.set(2)
+    count.set(3)
+
+    print("--- final doubled = " + doubled.get() + " ---")

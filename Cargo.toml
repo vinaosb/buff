@@ -875,3 +875,77 @@ handlebars = "6"
 # buff-audio / buff-dsp / buff-dataframe pattern so the codegen
 # `extern_crates` registration resolves to the same in-tree version.
 buff-template = { path = "crates/buff-template" }
+# T18: `buff-db` — database access MVP wrapping `sqlx` (industry-standard
+# async Rust DB layer). Pure-Rust: NO libpq, NO native-tls, NO diesel —
+# matches the "no C library, no Docker" hard rule from T126/T127 and the
+# workspace "rustls-tls NOT native-tls" rule from AGENTS.md.
+#
+# - `sqlx` 0.8: the canonical pure-Rust async SQL toolkit. We use the
+#   `runtime-tokio-rustls` feature (NOT `runtime-tokio-native-tls` —
+#   workspace hard rule per AGENTS.md "Pure-Rust preference" + the
+#   T126/T127 "no C library" rule). The `sqlite` + `postgres` cargo
+#   features enable the two MVP drivers (per T18 spec line 2336
+#   "Support SQLite + PostgreSQL for MVP"; MySQL/MSSQL/Oracle are
+#   explicitly deferred — T18 must-not #5). API surface used:
+#   `sqlx::AnyPool::connect(url).await` (pool ctor),
+#   `sqlx::query(sql).fetch_all(&pool).await` (SELECT),
+#   `sqlx::query(sql).execute(&pool).await` (DDL/DML),
+#   `pool.begin().await` (transaction),
+#   `tx.commit().await` / `tx.rollback().await` (tx control).
+#   Pinned to major 0.8 (the long-standing surface since the 2023
+#   `Any` driver unification; 0.7 is superseded).
+#
+# - `tokio` is already pinned at the workspace level (T31 async
+#   propagation); T18 reuses that pin for the tokio runtime that
+#   `sqlx::runtime-tokio-rustls` pulls in transitively. The Buff
+#   codegen auto-inserts `#[tokio::main]` on `main()` when async
+#   calls are detected (existing T31 path).
+#
+# `sqlx` is recorded in the codegen `extern_crates` BTreeSet when a
+# Buff program uses `Database.*` (mirrors the chrono / tracing /
+# regex codegen-only linking boundary: the single-file `buff run`
+# rustc path does NOT link it; cargo-project wiring is deferred per
+# the existing precedent). Snapshots + extern_crates set is the
+# verifiable contract.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "any"] }
+# T18: `buff-db` workspace path dep — mirrors the buff-template /
+# buff-image / buff-audio / buff-dsp / buff-dataframe pattern so any
+# future consumer (codegen-lowered `Database.*` calls, IDE
+# hover/completion) resolves to the same in-tree version during the
+# v1.15 frameworks wave. Records `buff-db` (NOT `buff_lang_db` — the
+# framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-db = { path = "crates/buff-db" }
+# T17: `buff-web` workspace path dep — mirrors the buff-db /
+# buff-template / buff-image / buff-audio / buff-dsp / buff-dataframe
+# pattern so any future consumer (codegen-lowered `Web.new()` /
+# `Web.bind(addr)` / `web.*` calls, IDE hover/completion) resolves to
+# the same in-tree version during the v1.15 frameworks wave. Records
+# `buff-web` (NOT `buff_lang_web` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+#
+# The wrapper crate wraps `axum` 0.8 + `tokio` 1.40 + `serde_json` 1
+# (all already pinned at the workspace level for buff-registry T126 +
+# the stdlib networking modules T124m); buff-web re-uses those pins
+# via `.workspace = true` in its Cargo.toml. No new top-level deps
+# are introduced by buff-web itself (the four it needs are all
+# pre-pinned). Mirrors the chrono / regex / tracing codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# buff-web; cargo-project wiring is deferred). Snapshots +
+# extern_crates set is the verifiable contract.
+buff-web = { path = "crates/buff-web" }
+# T20: `buff-reactive` workspace path dep — Solid.js / Vue-inspired
+# callback-based reactive primitives (Signal + Computed + Effect +
+# batch). Single-threaded `Rc<RefCell>` MVP per the T20 spec; NO
+# Stream<T> dependency (deferred to v1.18+); NO multi-threaded
+# signals (deferred to v1.18+). Pure-Rust, no native C deps, no
+# cc-rs — matches the "no C library, no Docker" hard rule from
+# T126/T127 and the wider workspace stance that killed
+# chumsky/logos/zmq. Mirrors the buff-image / buff-audio /
+# buff-dataframe / buff-template / buff-web pattern so any future
+# consumer (codegen-lowered `ReactiveSignal.new(...)` /
+# `ReactiveComputed.new(...)` / `ReactiveEffect.new(...)` calls,
+# IDE hover/completion, the future T16 buff-game UI integration)
+# resolves to the same in-tree version during the v1.13 frameworks
+# wave.
+buff-reactive = { path = "crates/buff-reactive" }

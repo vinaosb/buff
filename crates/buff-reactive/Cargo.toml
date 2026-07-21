@@ -1,0 +1,38 @@
+[package]
+name = "buff-reactive"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = """\
+Reactive primitives for Buff: Signal, Computed, Effect \
+callbacks. Solid.js / Vue-inspired callback model \
+(single-threaded Rc<RefCell> MVP — NO Stream dependency; \
+NO multi-threaded signals).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "reactive", "signals", "computed", "effect"]
+categories = ["data-structures", "rust-patterns"]
+
+[lib]
+name = "buff_reactive"
+path = "src/lib.rs"
+
+[dependencies]
+# T20: buff-reactive ships a pure-Rust callback-based reactive system
+# (Signal + Computed + Effect + batch). NO external runtime deps —
+# the entire implementation is `std::cell::{Rc, RefCell}` + `std::any::Any`
+# (for type-erased effect callback storage). This matches the spec's
+# "no Stream dependency" rule (Stream<T> is deferred to v1.18+ per
+# the T20 lock-scope) and the broader "pure-Rust, no cc-rs, no native
+# deps" stance from AGENTS.md.
+#
+# The `thiserror` workspace dep (already pinned at the workspace level)
+# covers the ReactiveError enum derive (mirrors buff-dataframe /
+# buff-ecs / buff-lang-runtime's error-enum pattern).
+thiserror.workspace = true
+
+[dev-dependencies]
+# T20: insta for snapshot tests of the public API surface (mirrors
+# the buff-dataframe / buff-tensor test workflow). Snapshot tests
+# live in `tests/snapshots.rs`.
+insta.workspace = true

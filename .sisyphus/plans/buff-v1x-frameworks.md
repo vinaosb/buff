@@ -2486,7 +2486,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 20. `buff-reactive` — Signals + Computed + Effect Callbacks (depends T1; no Stream dependency)
+- [x] 20. `buff-reactive` — Signals + Computed + Effect Callbacks (depends T1; no Stream dependency)
 
   **What to do** (revised post-T2 scope reduction):
   - Create `crates/buff-reactive/`.

@@ -837,6 +837,25 @@ impl RustCodegen {
             self.extern_crates.insert("hound".to_string());
             self.extern_crates.insert("symphonia".to_string());
         }
+        // T20: register `buff-reactive` when the program references
+        // any of the three reactive namespaces (`ReactiveSignal` /
+        // `ReactiveComputed` / `ReactiveEffect`). Generated code uses
+        // fully-qualified `buff_reactive::Signal::new` /
+        // `buff_reactive::Computed::new` / `buff_reactive::Effect::new`
+        // paths so no top-level `use` import is emitted — but the
+        // recorded name signals to the pipeline / build-driver that
+        // the generated Cargo project must declare `buff-reactive` in
+        // `[dependencies]`. Mirrors the buff-image / buff-audio /
+        // buff-dataframe / buff-audit pattern. The walker checks all
+        // three namespaces because the user typically composes
+        // Signal + Computed + Effect together; recording once for
+        // any of them is sufficient (idempotent BTreeSet insert).
+        if program_uses_namespace(decls, "ReactiveSignal")
+            || program_uses_namespace(decls, "ReactiveComputed")
+            || program_uses_namespace(decls, "ReactiveEffect")
+        {
+            self.extern_crates.insert("buff-reactive".to_string());
+        }
         // T26: register `buff-audit` when the program references the
         // prelude `Audit` OR `Signature` modules (`Audit.scan(...)`
         // / `Signature.sign(...)` etc.). Also records
@@ -856,6 +875,22 @@ impl RustCodegen {
             self.extern_crates.insert("sha2".to_string());
             self.extern_crates.insert("hex".to_string());
             self.extern_crates.insert("rand".to_string());
+        }
+        // T27: register `buff-fuzz` when the program references either
+        // the prelude `Fuzz` OR `Strategy` modules (`Fuzz.run(...)` /
+        // `Strategy.int(...)` / etc.). Also records `proptest`
+        // transitively (the wrapper crate wraps `proptest::test_runner::
+        // TestRunner` + `proptest::strategy::Strategy` for the runtime
+        // API). Mirrors the T9 Image / T10 Audio / T26 Audit pattern.
+        // NO `cargo-fuzz`, NO `afl.rs`, NO cc-rs - proptest is pure-Rust
+        // (matches the "no C library, no Docker" hard rule + the
+        // "Windows host with no MSVC" constraint that pushed hand-rolled
+        // lexer/parser).
+        if program_uses_namespace(decls, "Fuzz")
+            || program_uses_namespace(decls, "Strategy")
+        {
+            self.extern_crates.insert("buff-fuzz".to_string());
+            self.extern_crates.insert("proptest".to_string());
         }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
@@ -4809,6 +4844,131 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Signature.keypair codegen parse: {e}")))
             }
+            // T27: Fuzz.run(strategy, iterations, closure) -> Void.
+            // Three args (Strategy, Int, closure). Wraps
+            // `buff_fuzz::run(&strategy, iterations as u32, |n: i64| closure_body(n))`.
+            // The lowered call returns FuzzSummary; the codegen
+            // discards it via `let _ = buff_fuzz::run(...)` so the
+            // Buff surface stays Void-only. Records `buff-fuzz` +
+            // `proptest` in extern_crates via the narrow
+            // `program_uses_namespace("Fuzz")` walker.
+            //
+            // The `Run` variant is Fuzz-only - no other prelude type
+            // exposes a method named `run` today.
+            (T::Fuzz, A::Run) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "Fuzz.run() expects exactly 3 args (strategy, iterations, closure), got {}",
+                        args.len()
+                    )));
+                }
+                let strategy = self.lower_expr(&args[0])?;
+                let iterations = self.lower_expr(&args[1])?;
+                let closure = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    let _ = buff_fuzz::run(&#strategy, #iterations as u32, #closure);
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Fuzz.run codegen parse: {e}")))
+            }
+            // T27: Strategy.int(min, max) -> Strategy. Two args (Int, Int).
+            // Wraps `buff_fuzz::Strategy::int(min, max)`. The `Int`
+            // variant is shared with `Random.int(min, max)` (T124f),
+            // dispatched on the (Strategy, Int) pair.
+            (T::Strategy, A::Int) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "Strategy.int() expects exactly 2 args (min, max), got {}",
+                        args.len()
+                    )));
+                }
+                let min = self.lower_expr(&args[0])?;
+                let max = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fuzz::Strategy::int(#min, #max)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strategy.int codegen parse: {e}")))
+            }
+            // T27: Strategy.float(min, max) -> Strategy. Two args (Float, Float).
+            // Wraps `buff_fuzz::Strategy::float(min, max)`. The `Float`
+            // variant is shared with `Random.float()` (T124f), dispatched
+            // on the (Strategy, Float) pair.
+            (T::Strategy, A::Float) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "Strategy.float() expects exactly 2 args (min, max), got {}",
+                        args.len()
+                    )));
+                }
+                let min = self.lower_expr(&args[0])?;
+                let max = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fuzz::Strategy::float(#min as f64, #max as f64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strategy.float codegen parse: {e}")))
+            }
+            // T27: Strategy.bool() -> Strategy. Zero args. Wraps
+            // `buff_fuzz::Strategy::bool()`.
+            (T::Strategy, A::Bool) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fuzz::Strategy::bool()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strategy.bool codegen parse: {e}")))
+            }
+            // T27: Strategy.string(max_len) -> Strategy. One arg (Int).
+            // Wraps `buff_fuzz::Strategy::string(max_len)`.
+            (T::Strategy, A::String) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fuzz::Strategy::string(#arg as usize)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strategy.string codegen parse: {e}")))
+            }
+            // T27: Strategy.bytes(max_len) -> Strategy. One arg (Int).
+            // Wraps `buff_fuzz::Strategy::bytes(max_len)`.
+            (T::Strategy, A::Bytes) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fuzz::Strategy::bytes(#arg as usize)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Strategy.bytes codegen parse: {e}")))
+            }
+            // T20: ReactiveSignal.new(value) -> Signal<T>. One arg (T).
+            // Wraps `buff_reactive::Signal::new(value)` (infallible).
+            (T::ReactiveSignal, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_reactive::Signal::new(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("ReactiveSignal.new codegen parse: {e}")))
+            }
+            // T20: ReactiveComputed.new(fn) -> Computed<T>. One arg
+            // (closure `Fn() -> T`). Wraps `buff_reactive::Computed::new(fn)`.
+            (T::ReactiveComputed, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_reactive::Computed::new(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("ReactiveComputed.new codegen parse: {e}")))
+            }
+            // T20: ReactiveEffect.new(fn) -> Effect. One arg (closure
+            // `Fn() -> Void`). Wraps `buff_reactive::Effect::new(fn)`.
+            (T::ReactiveEffect, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_reactive::Effect::new(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("ReactiveEffect.new codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -6253,6 +6413,64 @@ impl RustCodegen {
                 "{recv_ty}.{:?}() is not a recognised prelude instance method",
                 pmethod
             ))),
+            // T20: Reactive instance methods on Type::Unknown receivers.
+            // Dispatched when type inference resolves the receiver to
+            // Type::Unknown (the forward-declaration contract for
+            // ReactiveSignal.new / ReactiveComputed.new /
+            // ReactiveEffect.new return values — coordinated
+            // Type::ReactiveSignal / ReactiveComputed / ReactiveEffect
+            // variants in ty.rs are follow-up sibling tasks OUTSIDE
+            // the T20 shared zone). Each arm emits the method call
+            // directly; Rust's method resolution finds the matching
+            // `buff_reactive::Signal::get` / `set` / `update` /
+            // `Computed::get` / `Effect::run` method.
+            M::Get if matches!(recv_ty, Type::Unknown) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "get() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                Ok(method_call_no_args(recv, "get"))
+            }
+            M::Set if matches!(recv_ty, Type::Unknown) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "set() expects exactly 1 arg (the new value), got {}",
+                        args.len()
+                    )));
+                }
+                let value = self.lower_expr(&args[0])?;
+                Ok(method_call_one_arg(recv, "set", value))
+            }
+            M::Update if matches!(recv_ty, Type::Unknown) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "update() expects exactly 1 arg (the mutating closure), got {}",
+                        args.len()
+                    )));
+                }
+                let closure = self.lower_expr(&args[0])?;
+                // `Signal::update` returns `Result<(), ReactiveError>`;
+                // discard via `.ok()` so generated code is panic-free
+                // and infallible at the Buff surface (mirrors the
+                // DataFrame / Image unwrap_or_default stance).
+                let call = method_call_one_arg(recv, "update", closure);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #call.ok()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Signal.update codegen parse: {e}")))
+            }
+            M::Invalidate if matches!(recv_ty, Type::Unknown) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "invalidate() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                Ok(method_call_no_args(recv, "invalidate"))
+            }
         }
     }
 
