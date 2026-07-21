@@ -56,6 +56,11 @@ buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-codegen-rust.workspace = true
 buff-lang-error.workspace = true
+# T24: `buff backtrace <LOG>` subcommand + `.buffmap` sidecar emission
+# in the build pipeline. Pure consumer of the crate's public API
+# (build_source_map + serialize_to_string + remap_panic_backtrace);
+# NO compilation logic added to the CLI.
+buff-lang-debug-info.workspace = true
 # T133: `.buffhtml` SFC integration. The 3 core crates (ast-rsx, parser,
 # codegen-buffhtml) shipped at commit 1d879f3 with the floor grammar
 # (decision record `rsx-syntax-feasibility.md` §6). These deps wire them

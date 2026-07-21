@@ -697,7 +697,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 24. Stack Traces with Buff Spans (Source Map + Panic Hook)
+- [x] 24. Stack Traces with Buff Spans (Source Map + Panic Hook)
 
   **What to do** *(added post-comparative-analysis — every scripting language solves this)*:
   - Create `crates/buff-lang-debug-info/` (new crate).
@@ -856,7 +856,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 1. Multi-file Linking + Cargo Project Generation
+- [x] 1. Multi-file Linking + Cargo Project Generation
 
   **What to do**:
   - Extend `buff-lang-cli` to compile multi-file Buff projects end-to-end: parse `import { x } from "./path.buff"` and `export` declarations across files, build a module graph, type-check across files, emit a single Cargo project (multi-file `src/`) and invoke `cargo build`/`cargo run`.

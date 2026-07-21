@@ -609,6 +609,7 @@ dependencies = [
  "buff-lang-buffhtml-parser",
  "buff-lang-codegen-buffhtml",
  "buff-lang-codegen-rust",
+ "buff-lang-debug-info",
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-parser",
@@ -655,6 +656,7 @@ name = "buff-lang-codegen-rust"
 version = "1.2.0"
 dependencies = [
  "buff-lang-ast",
+ "buff-lang-debug-info",
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-parser",
@@ -681,12 +683,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-lang-debug-info"
+version = "1.2.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "insta",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-lang-error"
 version = "1.2.0"
 dependencies = [
  "insta",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "buff-lang-ffi-guide"
+version = "1.0.0"
 
 [[package]]
 name = "buff-lang-lexer"
@@ -715,6 +733,7 @@ version = "1.2.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-codegen-wgsl",
+ "buff-lang-debug-info",
  "buff-lang-error",
  "bytemuck",
  "insta",

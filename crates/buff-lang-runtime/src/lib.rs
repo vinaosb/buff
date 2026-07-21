@@ -105,3 +105,25 @@ pub use tiling::{
     dispatch_map_with_tiling, dispatch_tiled, max_elements_per_tile, tile_ranges,
     vram_budget_from_device, TiledDispatcher,
 };
+
+/// T24: Initialise the Buff runtime panic hook so user programs see
+/// Buff-source-mapped stack traces automatically.
+///
+/// Looks up the `.buffmap` file via `BUFF_MAP_PATH` env var (falling
+/// back to `<current_exe>.buffmap`) and installs a
+/// `std::panic::set_hook` interceptor that walks the Rust backtrace on
+/// panic and translates each frame to its Buff source location via the
+/// source map. `RUST_BACKTRACE=1` is always preserved as an escape
+/// hatch — the full Rust trace is printed AFTER the Buff trace.
+///
+/// Calling this more than once is a no-op (`std::panic::set_hook`
+/// overwrites the previous hook; the source map is cached in a
+/// `OnceLock` inside `buff_lang_debug_info`).
+///
+/// **When to call**: the Buff CLI calls this from generated `fn main()`
+/// startup so user programs get Buff traces transparently. Library
+/// consumers of `buff-lang-runtime` (the REPL, Jupyter kernel, DAP
+/// server) MAY call this manually if they want the same UX.
+pub fn init() {
+    buff_lang_debug_info::install_panic_hook();
+}

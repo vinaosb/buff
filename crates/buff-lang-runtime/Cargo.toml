@@ -7,6 +7,11 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 thiserror.workspace = true
 buff-lang-error.workspace = true
+# T24: panic hook installer for Buff-span stack traces. Consumes ONLY
+# the public `install_panic_hook` function; does NOT add any compute
+# logic to this crate. The hook is registered transparently at runtime
+# init so user programs see Buff-source-mapped traces automatically.
+buff-lang-debug-info.workspace = true
 rayon.workspace = true
 tokio.workspace = true
 wgpu.workspace = true

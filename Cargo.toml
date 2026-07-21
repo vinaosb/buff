@@ -285,6 +285,12 @@ buff-lang-codegen-rust = { path = "crates/buff-lang-codegen-rust" }
 buff-lang-codegen-wgsl = { path = "crates/buff-lang-codegen-wgsl" }
 buff-lang-runtime = { path = "crates/buff-lang-runtime" }
 buff-lang-error = { path = "crates/buff-lang-error" }
+# T24: source-map sidecar + panic hook for Buff-span stack traces.
+# Surgical unblock — registered here so the workspace glob
+# `members = ["crates/*"]` and the `buff-lang-debug-info.workspace = true`
+# references in buff-lang-cli, buff-lang-codegen-rust, and
+# buff-lang-runtime resolve consistently. T24 owns the runtime logic.
+buff-lang-debug-info = { path = "crates/buff-lang-debug-info" }
 buff-lang-cli = { path = "crates/buff-lang-cli" }
 buff-lsp = { path = "crates/buff-lsp" }
 # T125-prep: thin evaluation engine crate. Reuses the existing

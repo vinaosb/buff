@@ -4,6 +4,7 @@
 //! so [`main.rs`](../main.rs) can dispatch with a single match arm.
 
 pub mod add;
+pub mod backtrace;
 pub mod build;
 pub mod check;
 pub mod clean;

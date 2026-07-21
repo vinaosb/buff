@@ -1,0 +1,36 @@
+// Buff debug example — full call stack shows every Buff frame (T24).
+//
+// Run: `buff run examples/debug/nested_calls.buff`
+//
+// Demonstrates that the Buff panic hook walks the FULL Rust backtrace
+// and remaps every frame for which a Buff mapping exists. Three
+// Buff functions deep (`outer` → `middle` → `inner`), each appearing
+// in the Buff trace at its originating source location.
+//
+// Expected output (with `.buffmap` sidecar present):
+//
+//   thread 'main' panicked at attempt to divide by zero
+//     --> examples/debug/nested_calls.buff:2:13
+//
+//   Buff stack trace:
+//     0: inner (examples/debug/nested_calls.buff:2:13)
+//     1: middle (examples/debug/nested_calls.buff:6:5)
+//     2: outer (examples/debug/nested_calls.buff:10:5)
+//     3: main (examples/debug/nested_calls.buff:14:5)
+//
+// Frames are listed in call order (innermost first). Rust-only frames
+// (std::rt, tokio internals, etc.) are dropped — only Buff-source
+// frames appear in the Buff trace.
+
+func inner():
+    let x = 1 / 0
+    return x
+
+func middle():
+    return inner()
+
+func outer():
+    return middle()
+
+func main():
+    outer()

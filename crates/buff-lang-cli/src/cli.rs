@@ -596,6 +596,37 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         source_map: Option<PathBuf>,
     },
+
+    /// `buff backtrace <LOG>` — post-process a captured Rust panic log
+    /// into a Buff-source-mapped stack trace (T24).
+    ///
+    /// Reads a Rust panic log / core-dump backtrace from `<LOG>` (or
+    /// stdin when `<LOG>` is `-`), loads the `.buffmap` sidecar (from
+    /// `BUFF_MAP_PATH` env var or `<LOG>.buffmap` or
+    /// `<current_exe>.buffmap`), and prints a Buff-stack-trace by
+    /// reverse-mapping each Rust frame to its originating `.buff`
+    /// source location.
+    ///
+    /// **Offline use**: this subcommand does NOT invoke rustc or the
+    /// Buff pipeline. It's a pure post-processor over a recorded Rust
+    /// trace + a `.buffmap` sidecar — useful for incident review,
+    /// bug-report triage, and CI-failure forensics.
+    ///
+    /// When no `.buffmap` is found, prints the input log unchanged +
+    /// exits with a warning (defensive — the user can still inspect
+    /// the raw Rust trace).
+    Backtrace {
+        /// Path to the captured Rust panic log / backtrace. Use `-`
+        /// to read from stdin.
+        #[arg(value_name = "LOG")]
+        log: PathBuf,
+
+        /// Explicit `.buffmap` source-map path. When omitted, the
+        /// subcommand discovers one via `BUFF_MAP_PATH` or sibling
+        /// file conventions.
+        #[arg(long, value_name = "PATH")]
+        buffmap: Option<PathBuf>,
+    },
 }
 
 /// Subcommands of `buff jupyter`.

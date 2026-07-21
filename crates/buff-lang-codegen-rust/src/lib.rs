@@ -84,6 +84,36 @@ pub fn generate_rust(
     Ok(format(&file))
 }
 
+/// T24: lower a slice of Buff declarations to formatted Rust source +
+/// capture the Rust-line ↔ Buff-span source map for `.buffmap` sidecar
+/// emission.
+///
+/// Equivalent to [`generate_rust`] followed by
+/// [`buff_lang_debug_info::build_source_map`]. The CLI calls this when
+/// `buff build` / `buff run` want to emit a `.buffmap` alongside the
+/// compiled binary so the runtime panic hook can remap Rust backtraces
+/// to Buff source locations.
+///
+/// The source map is built from the FORMATTED Rust source (post-
+/// `prettyplease`) so the recorded Rust line numbers match what `rustc`
+/// actually sees — and what shows up in panic `Location` rows. The
+/// `buff_source` slice is consumed for byte-offset → `(line, col)`
+/// lookup; it must be the same source that produced `decls`.
+pub fn generate_rust_with_source_map(
+    decls: &[buff_lang_ast::Decl],
+    buff_path: &std::path::Path,
+    buff_source: &str,
+) -> Result<(String, buff_lang_debug_info::SourceMap), buff_lang_error::CodegenError> {
+    let rust_source = generate_rust(decls)?;
+    let source_map = buff_lang_debug_info::build_source_map(
+        decls,
+        &rust_source,
+        buff_path,
+        buff_source,
+    );
+    Ok((rust_source, source_map))
+}
+
 /// T0-B4: lower a slice of Buff declarations to formatted Rust source,
 /// gated by the resolved feature set.
 ///

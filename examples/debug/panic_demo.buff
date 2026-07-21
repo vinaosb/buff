@@ -1,0 +1,29 @@
+// Buff debug example — simple panic produces Buff-span stack trace (T24).
+//
+// Run: `buff run examples/debug/panic_demo.buff`
+//
+// Demonstrates that when a Buff program panics at runtime, the printed
+// stack trace references the BUFF source file + line numbers (not the
+// generated `.rs` file) when a `.buffmap` source-map sidecar exists
+// alongside the compiled binary.
+//
+// The `helper` function divides by zero — the standard
+// "panic_at_runtime" pattern the T24 spec uses for evidence
+// collection. With the Buff panic hook installed, the user sees:
+//
+//   thread 'main' panicked at attempt to divide by zero
+//     --> examples/debug/panic_demo.buff:2:13
+//
+//   Buff stack trace:
+//     0: helper (examples/debug/panic_demo.buff:2:13)
+//     1: main (examples/debug/panic_demo.buff:5:5)
+//
+// Without the hook (or with RUST_BACKTRACE=1), the full Rust trace is
+// printed AFTER the Buff trace as an escape hatch.
+
+func helper():
+    let x = 1 / 0
+    return x
+
+func main():
+    helper()

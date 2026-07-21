@@ -1,0 +1,26 @@
+// Buff debug example — async task panic produces Buff-span stack trace (T24).
+//
+// Run: `buff run examples/debug/async_panic.buff`
+//
+// Demonstrates that when an async task spawned by `spawn` panics, the
+// Buff panic hook still catches it and prints a Buff-source-mapped
+// trace. The hook is registered transparently at runtime init —
+// regardless of whether the panic originates from a sync or async
+// context, the same `.buffmap` translation applies.
+//
+// NOTE: end-to-end async execution requires the tokio runtime to be
+// linked (deferred to T32 multi-crate Cargo project wiring); the
+// codegen is verified but the panic trace is captured only when run
+// inside the full async pipeline. See `.sisyphus/evidence/task-24-*`
+// for captured traces from the integration test runner.
+
+async func fetch_value():
+    let x = 1 / 0
+    return x
+
+async func runner():
+    let t = spawn fetch_value()
+    return t.result()
+
+func main():
+    runner()

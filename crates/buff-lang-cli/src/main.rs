@@ -136,5 +136,8 @@ fn main() -> Result<()> {
             backend,
             source_map,
         } => buff_lang_cli::commands::debug::run(&file, backend.as_deref(), source_map.as_deref()),
+        Command::Backtrace { log, buffmap } => {
+            buff_lang_cli::commands::backtrace::run(&log, buffmap.as_deref())
+        }
     }
 }

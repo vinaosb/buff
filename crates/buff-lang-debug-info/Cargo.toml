@@ -1,0 +1,34 @@
+[package]
+name = "buff-lang-debug-info"
+version = "1.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Buff-span stack traces via .buffmap source map sidecar + panic hook"
+
+[dependencies]
+# T24: source-map sidecar + panic hook for Buff-span stack traces.
+#
+# Pure-Rust deps only — NO native C, NO OpenSSL, matches the "no C library,
+# no Docker" hard rule from the AGENTS.md.
+#
+# - `serde` + `serde_json`: the `.buffmap` sidecar file is a JSON document
+#   carrying the bidirectional Rust-line ↔ Buff-(file,line,col,span) mapping
+#   plus the originating Buff identifier names (function names especially).
+#   Same wire format concerns as buff-dap's DAP messages.
+# - `thiserror`: crate-local error enum (`DebugInfoError`) propagated up
+#   through `anyhow` at the CLI boundary (mirrors buff-dap / buff-jupyter /
+#   buff-repl precedent).
+# - `buff-lang-error`: reuses the canonical `Span` + `SourceId` types so the
+#   source map aligns with every AST node's `span` field. Pure consumer of
+#   the public API — NO mutation of the crate itself.
+# - `buff-lang-ast`: needed for `FuncDecl` walking during capture (collecting
+#   function names + their spans). Same minimal-surface consumer pattern as
+#   buff-lang-codegen-rust's `collect_func_param_names`.
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+buff-lang-error.workspace = true
+buff-lang-ast.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
