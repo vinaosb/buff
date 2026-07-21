@@ -31,6 +31,27 @@ version = "0.1.0"
 edition = "0.1"
 "#;
 
+/// T0-C1: v2 manifest template emitted by `buff new --template <name>`
+/// (Buff SDK 2.0). Carries `edition = "2026"` + `stability = "experimental"`
+/// + the v2 section skeletons so newly-scaffolded projects opt into v2.
+pub const BUFF_TOML_V2_TEMPLATE: &str = r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2026"
+stability = "experimental"
+
+[features]
+default = []
+
+[lints]
+clippy = "deny"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+"#;
+
 /// `src/main.buff` entry-point template.
 ///
 /// `{name}` is referenced in a leading comment. The body is the canonical v0.1
@@ -48,6 +69,83 @@ func main():
 pub const GITIGNORE_TEMPLATE: &str = r#"target/
 buff.lock
 *.rs
+.env
+"#;
+
+/// T0-C1: shared `tests/test_hello.buff` emitted by every template.
+/// Mirrors the canonical "first test" pattern: a single `@test` fn that
+/// asserts a trivial equality. Templates can add more tests later.
+pub const TEST_HELLO_BUFF_TEMPLATE: &str = r#"// Smoke test for {name}.
+// Run with: buff test tests/test_hello.buff
+
+@test
+fn test_greeting():
+    let expected = "Hello, " + "world" + "!"
+    assert(expected == "Hello, world!")
+"#;
+
+/// T0-C1: shared `examples/hello.buff` emitted by every template.
+/// A minimal `func main(): print(...)` runnable via `buff run examples/hello.buff`.
+pub const EXAMPLE_HELLO_BUFF_TEMPLATE: &str = r#"// Example for {name}.
+// Run with: buff run examples/hello.buff
+
+func main():
+    print("Hello from {name}!")
+"#;
+
+/// T0-C1: shared `.github/workflows/ci.yml` emitted by every template.
+/// 3-OS matrix (ubuntu/windows/macos), Rust 1.95.0 (matches repo pin),
+/// runs `buff fmt --check` + `buff check -D` + `buff test`. Mirrors the
+/// CI the buff-lang org runs on its own crates.
+pub const CI_YML_TEMPLATE: &str = r#"name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Install Buff
+        run: cargo install --git https://github.com/buff-lang/buff buff-lang-cli
+      - name: Format check
+        run: buff fmt --check
+      - name: Type check
+        run: buff check -D
+      - name: Test
+        run: buff test
+"#;
+
+/// T0-I2: multi-stage `Dockerfile` template (console template only).
+/// `builder` image carries rustc + Buff toolchain; `slim` image is the
+/// minimal runtime. Mirrors the official `ghcr.io/buff-lang/buff:builder`
+/// + `:slim` images shipped in v1.12 (T141).
+pub const DOCKERFILE_TEMPLATE: &str = r#"# Multi-stage build for {name}.
+FROM ghcr.io/buff-lang/buff:builder AS build
+WORKDIR /app
+COPY . .
+RUN buff build --release
+
+FROM ghcr.io/buff-lang/buff:slim
+COPY --from=build /app/target/release/{name} /usr/local/bin/{name}
+ENTRYPOINT ["{name}"]
+"#;
+
+/// `.env.example` template — documents required env vars without leaking
+/// secrets. Emitted by templates that touch env vars (T0-D2).
+pub const ENV_EXAMPLE_TEMPLATE: &str = r#"# Copy to .env and fill in real values.
+# .env is gitignored.
+EXAMPLE_KEY=your-value-here
 "#;
 
 /// `README.md` template — minimal usage instructions referencing `buff run`.
@@ -123,16 +221,34 @@ pub fn render_template(template: &str, name: &str) -> String {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TemplateKind {
     /// A runnable application with `src/main.buff` (default; v0.1 behavior).
+    /// Exposed as `--template console` in v2 (T0-C1).
     #[default]
     Binary,
     /// A library module with `src/lib.buff` exporting functions for import.
     Lib,
     /// An async server starter (`async func` + `spawn`); v1.0 runtime to run.
+    /// Legacy flag `--server`; not in the v2 7-template list (alias to
+    /// console with async demo content for backward compat).
     Server,
     /// A GPU-dispatch starter carrying `@prefer(gpu)` hints; v1.0 runtime to run.
+    /// Legacy flag `--gpu`; not in the v2 7-template list (alias to console
+    /// with gpu demo content for backward compat).
     Gpu,
     /// A multi-crate workspace layout with member directories under `crates/`.
     Workspace,
+    /// T0-C1: `buff-web` + `buff-template` HTTP server scaffold (v1.14+
+    /// runtime to actually serve requests; the file is a starter).
+    Web,
+    /// T0-C1: `buff-ml` + `buff-tensor` project scaffold (v1.15+ runtime
+    /// for tensor GPU dispatch; the file is a starter demonstrating the
+    /// intended import surface).
+    Ml,
+    /// T0-C1: `buff-game` + `buff-ecs` project scaffold (v1.16+ runtime
+    /// for the game loop; the file is a starter).
+    Game,
+    /// T0-C1: `buff-pipeline` + `buff-dataframe` ETL scaffold (v1.17+
+    /// runtime for the pipeline runner; the file is a starter).
+    Pipeline,
 }
 
 impl TemplateKind {
@@ -141,13 +257,65 @@ impl TemplateKind {
     /// `--template` value parser share a single source of truth.
     pub fn as_kebab(&self) -> &'static str {
         match self {
-            TemplateKind::Binary => "binary",
+            // T0-C1: Binary is exposed as "console" in the v2 template list.
+            TemplateKind::Binary => "console",
             TemplateKind::Lib => "lib",
             TemplateKind::Server => "server",
             TemplateKind::Gpu => "gpu",
             TemplateKind::Workspace => "workspace",
+            TemplateKind::Web => "web",
+            TemplateKind::Ml => "ml",
+            TemplateKind::Game => "game",
+            TemplateKind::Pipeline => "pipeline",
         }
     }
+
+    /// T0-C1: iterate the 7 user-visible templates. Used by `buff new
+    /// --template list` (future) + tests. Excludes the legacy `Server`
+    /// and `Gpu` variants (those are reachable only via the `--server`
+    /// / `--gpu` flags, not advertised as named templates).
+    pub fn user_visible() -> &'static [TemplateKind] {
+        &[
+            TemplateKind::Binary,
+            TemplateKind::Lib,
+            TemplateKind::Web,
+            TemplateKind::Ml,
+            TemplateKind::Game,
+            TemplateKind::Pipeline,
+            TemplateKind::Workspace,
+        ]
+    }
+}
+
+/// T0-C1: select a [`TemplateKind`] from the `--template <name>` CLI flag.
+///
+/// Accepts the lowercase kebab-name (see [`TemplateKind::as_kebab`]).
+/// Returns `Ok(kind)` on match, `Err` with a helpful message listing the
+/// valid names on miss. The legacy `Server` and `Gpu` kinds are reachable
+/// here too (`--template server` / `--template gpu`) for completeness,
+/// though they're not advertised in the 7-template list.
+pub fn template_from_name(name: &str) -> Result<TemplateKind, String> {
+    Ok(match name {
+        "console" | "binary" => TemplateKind::Binary,
+        "lib" => TemplateKind::Lib,
+        "server" => TemplateKind::Server,
+        "gpu" => TemplateKind::Gpu,
+        "workspace" => TemplateKind::Workspace,
+        "web" => TemplateKind::Web,
+        "ml" => TemplateKind::Ml,
+        "game" => TemplateKind::Game,
+        "pipeline" => TemplateKind::Pipeline,
+        other => {
+            let valid: Vec<&'static str> = TemplateKind::user_visible()
+                .iter()
+                .map(TemplateKind::as_kebab)
+                .collect();
+            return Err(format!(
+                "unknown template `{other}` (valid: {})",
+                valid.join(", ")
+            ));
+        }
+    })
 }
 
 /// Selects a [`TemplateKind`] from individual CLI boolean flags (T112).
@@ -271,6 +439,92 @@ version = "0.1.0"
 edition = "0.1"
 "#;
 
+// ===========================================================================
+// T0-C1 — New v2 template content (web / ml / game / pipeline)
+// ===========================================================================
+
+/// `src/main.buff` for the `web` template (T0-C1).
+///
+/// Demonstrates the intended `buff-web` HTTP server import surface. The
+/// `buff-web` crate arrives with v1.14; the scaffolded file is a starter
+/// — running it requires the runtime, but `buff check` accepts the import
+/// declaration today (the resolver will resolve once buff-web lands).
+pub const WEB_MAIN_BUFF_TEMPLATE: &str = r#"// {name} - generated by `buff new --template web`
+// HTTP server starter using buff-web (v1.14 runtime required to run).
+// Define routes below; the server listens on port 8080 by default.
+
+import { Server, Route } from "buff-web"
+
+func main():
+    let server = Server.new(port: 8080)
+    server.route(Route.get("/", handler))
+    server.serve()
+
+func handler():
+    return "Hello from {name}!"
+"#;
+
+/// `src/main.buff` for the `ml` template (T0-C1).
+///
+/// Demonstrates the `buff-tensor` import surface. v1.15 runtime required
+/// to actually dispatch tensor ops; the file is a starter.
+pub const ML_MAIN_BUFF_TEMPLATE: &str = r#"// {name} - generated by `buff new --template ml`
+// ML starter using buff-tensor (v1.15 runtime required to run).
+// Tensors dispatch to GPU automatically when @prefer(gpu) is set.
+
+import { Tensor } from "buff-tensor"
+
+@prefer(gpu)
+func train_step(xs: Tensor, ys: Tensor):
+    let predictions = xs.multiply(ys)
+    return predictions
+
+func main():
+    let xs = Tensor.zeros(Shape.of(64, 64))
+    let ys = Tensor.ones(Shape.of(64, 64))
+    let result = train_step(xs: xs, ys: ys)
+    print(result)
+"#;
+
+/// `src/main.buff` for the `game` template (T0-C1).
+///
+/// Demonstrates the `buff-ecs` entity-component-system import surface.
+/// v1.16 runtime required for the game loop.
+pub const GAME_MAIN_BUFF_TEMPLATE: &str = r#"// {name} - generated by `buff new --template game`
+// Game starter using buff-ecs (v1.16 runtime required to run).
+// Define entities + systems; the engine drives the fixed-tick loop.
+
+import { World, Entity, System } from "buff-ecs"
+
+func main():
+    let world = World.new()
+    let player = world.spawn(Entity.new(name: "player"))
+    world.add_system(System.new(update))
+    world.run(fps: 60)
+
+func update():
+    print("tick")
+"#;
+
+/// `src/main.buff` for the `pipeline` template (T0-C1).
+///
+/// Demonstrates the `buff-dataframe` ETL import surface. v1.17 runtime
+/// required for the pipeline runner.
+pub const PIPELINE_MAIN_BUFF_TEMPLATE: &str = r#"// {name} - generated by `buff new --template pipeline`
+// ETL pipeline starter using buff-dataframe (v1.17 runtime required to run).
+// Stages compose left-to-right via the |> operator.
+
+import { DataFrame, Pipeline } from "buff-dataframe"
+
+func main():
+    let df = DataFrame.load("input.csv")
+    let result = df
+        |> Pipeline.filter(row: row.value > 0)
+        |> Pipeline.map(row: row.with_value(value: row.value * 2))
+        |> Pipeline.collect()
+    result.save("output.csv")
+"#;
+
 /// A single scaffolded file: a path relative to the project root and the
 /// already-rendered content to write at that path.
 pub type ScaffoldFile = (&'static str, String);
@@ -283,6 +537,14 @@ pub type ScaffoldFile = (&'static str, String);
 ///
 /// Every template emits a root manifest (`buff.toml`), `.gitignore`, and
 /// `README.md`; the template-specific files differ.
+///
+/// # T0-C1 — v2 template set
+///
+/// The 7 user-visible templates each emit a v2 manifest + a `tests/`
+/// directory + an `examples/` directory + a CI workflow. Legacy
+/// `Binary`/`Lib`/`Server`/`Gpu` paths preserve the v0.5/v1.0 layout
+/// (v1 manifest, no tests/examples/CI) so existing integrations and
+/// snapshot tests continue to work.
 pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFile> {
     let render = |t: &str| render_template(t, name);
     let mut files: Vec<ScaffoldFile> = Vec::new();
@@ -291,11 +553,33 @@ pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFil
     // standard [package] manifest.
     let root_toml = match template {
         TemplateKind::Workspace => WORKSPACE_BUFF_TOML_TEMPLATE,
-        _ => BUFF_TOML_TEMPLATE,
+        // Legacy Binary/Lib/Server/Gpu keep the v1 manifest for backward
+        // compat (existing snapshot tests assert its shape). The 4 new
+        // v2 templates opt into the v2 manifest.
+        TemplateKind::Binary
+        | TemplateKind::Lib
+        | TemplateKind::Server
+        | TemplateKind::Gpu => BUFF_TOML_TEMPLATE,
+        TemplateKind::Web | TemplateKind::Ml | TemplateKind::Game | TemplateKind::Pipeline => {
+            BUFF_TOML_V2_TEMPLATE
+        }
     };
     files.push(("buff.toml", render(root_toml)));
     files.push((".gitignore", GITIGNORE_TEMPLATE.to_string()));
     files.push(("README.md", render(README_TEMPLATE)));
+
+    // T0-C1: the 4 new templates also emit tests/ + examples/ + CI +
+    // .env.example (the latter signals the template is "v2-aware").
+    let is_v2_template = matches!(
+        template,
+        TemplateKind::Web | TemplateKind::Ml | TemplateKind::Game | TemplateKind::Pipeline
+    );
+    if is_v2_template {
+        files.push(("tests/test_hello.buff", render(TEST_HELLO_BUFF_TEMPLATE)));
+        files.push(("examples/hello.buff", render(EXAMPLE_HELLO_BUFF_TEMPLATE)));
+        files.push((".github/workflows/ci.yml", CI_YML_TEMPLATE.to_string()));
+        files.push((".env.example", ENV_EXAMPLE_TEMPLATE.to_string()));
+    }
 
     match template {
         TemplateKind::Binary => {
@@ -327,6 +611,18 @@ pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFil
                 "crates/utils/src/lib.buff",
                 render(WORKSPACE_UTILS_LIB_BUFF_TEMPLATE),
             ));
+        }
+        TemplateKind::Web => {
+            files.push(("src/main.buff", render(WEB_MAIN_BUFF_TEMPLATE)));
+        }
+        TemplateKind::Ml => {
+            files.push(("src/main.buff", render(ML_MAIN_BUFF_TEMPLATE)));
+        }
+        TemplateKind::Game => {
+            files.push(("src/main.buff", render(GAME_MAIN_BUFF_TEMPLATE)));
+        }
+        TemplateKind::Pipeline => {
+            files.push(("src/main.buff", render(PIPELINE_MAIN_BUFF_TEMPLATE)));
         }
     }
 
@@ -421,5 +717,156 @@ mod tests {
         assert!(paths.contains(&"crates/core/src/main.buff"));
         assert!(paths.contains(&"crates/utils/buff.toml"));
         assert!(paths.contains(&"crates/utils/src/lib.buff"));
+    }
+
+    // -----------------------------------------------------------------------
+    // T0-C1 — v2 template set
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn template_from_name_recognises_all_user_visible() {
+        for kind in TemplateKind::user_visible() {
+            let name = kind.as_kebab();
+            let resolved = template_from_name(name).expect("user-visible name resolves");
+            assert_eq!(resolved, *kind, "mismatch for name `{name}`");
+        }
+    }
+
+    #[test]
+    fn template_from_name_accepts_legacy_binary_alias() {
+        // "binary" is the v0.5 kebab name; it maps to the same variant as "console".
+        let resolved = template_from_name("binary").expect("legacy alias works");
+        assert_eq!(resolved, TemplateKind::Binary);
+    }
+
+    #[test]
+    fn template_from_name_rejects_unknown() {
+        let err = template_from_name("nonexistent").expect_err("unknown name must error");
+        assert!(err.contains("console"), "err lists valid names: {err}");
+        assert!(err.contains("workspace"), "err lists valid names: {err}");
+    }
+
+    #[test]
+    fn binary_kebab_is_console_in_v2() {
+        // T0-C1: the user-visible name for the default template is "console".
+        assert_eq!(TemplateKind::Binary.as_kebab(), "console");
+    }
+
+    #[test]
+    fn user_visible_lists_exactly_seven_templates() {
+        assert_eq!(TemplateKind::user_visible().len(), 7, "exactly 7 v2 templates");
+    }
+
+    #[test]
+    fn v2_templates_emit_full_layout() {
+        for kind in [
+            TemplateKind::Web,
+            TemplateKind::Ml,
+            TemplateKind::Game,
+            TemplateKind::Pipeline,
+        ] {
+            let files = files_for_template(kind, "demo");
+            let paths: Vec<&str> = files.iter().map(|(p, _)| *p).collect();
+            assert!(paths.contains(&"buff.toml"), "{:?} missing buff.toml", kind);
+            assert!(paths.contains(&"src/main.buff"), "{:?} missing src/main.buff", kind);
+            assert!(
+                paths.contains(&"tests/test_hello.buff"),
+                "{:?} missing tests/test_hello.buff",
+                kind
+            );
+            assert!(
+                paths.contains(&"examples/hello.buff"),
+                "{:?} missing examples/hello.buff",
+                kind
+            );
+            assert!(paths.contains(&"README.md"), "{:?} missing README.md", kind);
+            assert!(
+                paths.contains(&".github/workflows/ci.yml"),
+                "{:?} missing CI workflow",
+                kind
+            );
+            assert!(paths.contains(&".gitignore"), "{:?} missing .gitignore", kind);
+            assert!(paths.contains(&".env.example"), "{:?} missing .env.example", kind);
+        }
+    }
+
+    #[test]
+    fn v2_manifest_emits_stability_and_edition_2026() {
+        let files = files_for_template(TemplateKind::Web, "demo");
+        let buff_toml = files
+            .iter()
+            .find(|(p, _)| *p == "buff.toml")
+            .map(|(_, c)| c.as_str())
+            .expect("buff.toml present");
+        assert!(
+            buff_toml.contains("edition = \"2026\""),
+            "v2 edition missing: {buff_toml}"
+        );
+        assert!(
+            buff_toml.contains("stability = \"experimental\""),
+            "stability missing: {buff_toml}"
+        );
+        assert!(
+            buff_toml.contains("[features]"),
+            "[features] section missing: {buff_toml}"
+        );
+        assert!(
+            buff_toml.contains("[lints]"),
+            "[lints] section missing: {buff_toml}"
+        );
+    }
+
+    #[test]
+    fn v2_template_main_buff_uses_framework_imports() {
+        let web = files_for_template(TemplateKind::Web, "demo");
+        let main = web
+            .iter()
+            .find(|(p, _)| *p == "src/main.buff")
+            .map(|(_, c)| c.as_str())
+            .expect("web main.buff");
+        assert!(main.contains("buff-web"), "web template imports buff-web: {main}");
+
+        let ml = files_for_template(TemplateKind::Ml, "demo");
+        let main = ml
+            .iter()
+            .find(|(p, _)| *p == "src/main.buff")
+            .map(|(_, c)| c.as_str())
+            .expect("ml main.buff");
+        assert!(main.contains("buff-tensor"), "ml template imports buff-tensor: {main}");
+
+        let game = files_for_template(TemplateKind::Game, "demo");
+        let main = game
+            .iter()
+            .find(|(p, _)| *p == "src/main.buff")
+            .map(|(_, c)| c.as_str())
+            .expect("game main.buff");
+        assert!(main.contains("buff-ecs"), "game template imports buff-ecs: {main}");
+
+        let pipe = files_for_template(TemplateKind::Pipeline, "demo");
+        let main = pipe
+            .iter()
+            .find(|(p, _)| *p == "src/main.buff")
+            .map(|(_, c)| c.as_str())
+            .expect("pipeline main.buff");
+        assert!(
+            main.contains("buff-dataframe"),
+            "pipeline template imports buff-dataframe: {main}"
+        );
+    }
+
+    #[test]
+    fn ci_yml_template_runs_three_os_matrix() {
+        let files = files_for_template(TemplateKind::Web, "demo");
+        let ci = files
+            .iter()
+            .find(|(p, _)| *p == ".github/workflows/ci.yml")
+            .map(|(_, c)| c.as_str())
+            .expect("ci.yml present");
+        assert!(ci.contains("ubuntu-latest"), "ci: {ci}");
+        assert!(ci.contains("windows-latest"), "ci: {ci}");
+        assert!(ci.contains("macos-latest"), "ci: {ci}");
+        assert!(ci.contains("buff fmt --check"), "ci runs buff fmt: {ci}");
+        assert!(ci.contains("buff check -D"), "ci runs buff check: {ci}");
+        assert!(ci.contains("buff test"), "ci runs buff test: {ci}");
     }
 }

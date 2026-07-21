@@ -113,7 +113,9 @@ pub enum Command {
     ///
     /// By default scaffolds a runnable binary (`src/main.buff`). Pass exactly
     /// one of the template flags to select an alternative starter layout
-    /// (T112): `--lib`, `--server`, `--gpu`, `--workspace`.
+    /// (T112): `--lib`, `--server`, `--gpu`, `--workspace`. Alternatively,
+    /// use `--template <NAME>` (T0-C1) to pick from the 7 v2 templates:
+    /// `console`, `lib`, `web`, `ml`, `game`, `pipeline`, `workspace`.
     New {
         /// Name of the project (must be a valid Buff identifier, not a keyword).
         #[arg(value_name = "NAME")]
@@ -136,6 +138,13 @@ pub enum Command {
         /// `crates/utils`).
         #[arg(long)]
         workspace: bool,
+
+        /// T0-C1: pick a template by name. One of: `console`, `lib`,
+        /// `web`, `ml`, `game`, `pipeline`, `workspace`. Mutually
+        /// exclusive with the legacy `--lib`/`--server`/`--gpu`/
+        /// `--workspace` flags.
+        #[arg(long, value_name = "NAME")]
+        template: Option<String>,
     },
 
     /// Initialize a Buff project in the current directory.

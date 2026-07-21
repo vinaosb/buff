@@ -29,10 +29,19 @@ fn main() -> Result<()> {
             server,
             gpu,
             workspace,
+            template,
         } => {
-            let template = scaffold::template_from_flags(lib, server, gpu, workspace)
-                .map_err(anyhow::Error::msg)?;
-            buff_lang_cli::commands::new::run(&name, template)
+            // T0-C1: --template <name> takes precedence over the legacy
+            // boolean flags; if both are set, --template wins and a warning
+            // is logged via the error mapper (rather than failing — UX
+            // matches Cargo's `--bin`/`--lib` precedence).
+            let kind = if let Some(name) = &template {
+                scaffold::template_from_name(name).map_err(anyhow::Error::msg)?
+            } else {
+                scaffold::template_from_flags(lib, server, gpu, workspace)
+                    .map_err(anyhow::Error::msg)?
+            };
+            buff_lang_cli::commands::new::run(&name, kind)
         }
         Command::Init => buff_lang_cli::commands::init::run(),
         Command::Test { file, pattern } => {

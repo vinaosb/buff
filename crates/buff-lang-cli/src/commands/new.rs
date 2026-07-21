@@ -74,6 +74,15 @@ pub fn run(name: &str, template: TemplateKind) -> Result<()> {
         TemplateKind::Workspace => {
             eprintln!("Workspace members: crates/core, crates/utils");
         }
+        TemplateKind::Web | TemplateKind::Ml | TemplateKind::Game | TemplateKind::Pipeline => {
+            // T0-C1: v2 templates — runtime arrives with the matching
+            // framework wave (v1.14-v1.17). Today the scaffolded file is
+            // a starter; `buff check` accepts the imports today, `buff run`
+            // resolves once the framework crate lands.
+            eprintln!("Run with: buff run {name}/src/main.buff (requires matching framework crate)");
+            eprintln!("Tests at: {name}/tests/test_hello.buff");
+            eprintln!("Examples at: {name}/examples/hello.buff");
+        }
     }
     Ok(())
 }
