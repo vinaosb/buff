@@ -2440,7 +2440,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
 ### v1.12 "Distribution scale" — buffup + CI Action + Docker
 
-- [ ] **T139: buffup version manager** [unspecified-high]
+- [x] **T139: buffup version manager** [unspecified-high]
 
   **What to do**:
   - `buffup` CLI for installing/switching Buff versions
@@ -2481,7 +2481,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(buffup): version manager for installing and switching Buff versions`
 
-- [ ] **T140: setup-buff GitHub Action** [quick]
+- [x] **T140: setup-buff GitHub Action** [quick]
 
   **What to do**:
   - Create `setup-buff` GitHub Action (TypeScript or composite)
@@ -2516,7 +2516,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(ci): setup-buff GitHub Action`
 
-- [ ] **T141: Docker images** [quick]
+- [x] **T141: Docker images** [quick]
 
   **What to do**:
   - `buff:builder` image: Rust toolchain + Buff CLI (for CI builds)
