@@ -239,11 +239,20 @@ fn make_driver_path(buffhtml_file: &Path) -> PathBuf {
         .filter(|s| !s.is_empty())
         .unwrap_or("buffhtml");
     let mut driver = buffhtml_file.to_path_buf();
-    // `set_file_name` (not `set_extension`) so the dotted suffix
-    // `ssr.<pid>.<tid>.rs` becomes part of the file name, not collapsed
+    // `set_file_name` (not `set_extension`) so the suffix
+    // `ssr_<pid>_<tid>.rs` becomes part of the file name, not collapsed
     // into a single extension segment by `Path::set_extension`.
+    //
+    // IMPORTANT: the separator characters between `stem`, `ssr`, the pid,
+    // and the thread id are UNDERSCORES, not dots. rustc derives the
+    // crate name from the `.rs` file's stem when `--crate-name` is not
+    // passed explicitly; dots are not valid in Rust identifiers and
+    // rustc rejects them with "invalid character '.' in crate name".
+    // Underscores produce a valid derived crate name
+    // (`<stem>_ssr_<pid>_<tid>`) and still keep the filename unique per
+    // process/thread pair, which is what the PID/TID suffix is for.
     driver.set_file_name(format!(
-        "{stem}.ssr.{}.{}.rs",
+        "{stem}_ssr_{}_{}.rs",
         std::process::id(),
         thread_id_sanitised
     ));
@@ -329,8 +338,8 @@ mod tests {
             "file name should encode PID for concurrency isolation; got {file_name}"
         );
         assert!(
-            file_name.starts_with("counter.ssr."),
-            "file name should start with stem + .ssr. prefix; got {file_name}"
+            file_name.starts_with("counter_ssr_"),
+            "file name should start with stem + _ssr_ prefix (underscores, not dots — rustc derives crate name from filename and rejects dots); got {file_name}"
         );
         assert!(
             file_name.ends_with(".rs"),
