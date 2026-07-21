@@ -1,0 +1,35 @@
+<script lang="buff" props="Props">
+    // typed_props.buffhtml — T134 component-model example 2.
+    //
+    // Exercises the `props="Props"` interface declaration. The script
+    // body declares `struct Props { name: String, count: i32 }` and
+    // codegen:
+    //   1. Hoists the struct to module scope.
+    //   2. Switches the signature to `fn Greeting(props: Props)`.
+    //   3. Splices `let Props { name, count, .. } = props;` at fn
+    //      entry so the rsx!{} body can reference `name` + `count`.
+    //
+    // The parent (rendered below the component definition) invokes
+    // `<Greeting name="World" count: 42 />` — the prop type
+    // pre-checker (item 3 of T134) accepts this call because:
+    //   - `name` is required + provided + the literal `"World"` is a
+    //     String literal (matches the declared type).
+    //   - `count` is required + provided + the literal `42` is an
+    //     integer literal (matches the declared `i32`).
+
+    // Declared interface — hoisted to module scope by codegen.
+    #[derive(Clone, PartialEq)]
+    struct Props {
+        name: String,
+        count: i32,
+    }
+
+    // The body statements below are spliced into the component fn
+    // AFTER the auto-generated `let Props { name, count, .. } = props;`
+    // destructure. They reference `name` + `count` directly.
+    let greeting = format!("Hello, {}! You have {} messages.", name, count);
+</script>
+
+<div class="greeting">
+    <h2>{greeting}</h2>
+</div>

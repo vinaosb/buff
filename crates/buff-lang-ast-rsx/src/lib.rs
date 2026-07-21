@@ -46,14 +46,28 @@ pub struct RsxTemplateFile {
     pub span: Span,
 }
 
-/// `<script lang="buff"> ... </script>` block.
+/// `<script lang="buff" props="Props"> ... </script>` block.
 ///
 /// `source` is the raw text between the tags (unmodified). Downstream
 /// passes (CLI) feed this through `buff-lang-lexer` + `buff-lang-parser`
 /// to extract component logic. T133 does not interpret it.
+///
+/// `props` (T134) carries the optional type-name declared via the
+/// `props="..."` attribute on `<script>`. When present, it names the
+/// Rust `struct` declared inside the script body that holds the
+/// component's prop interface — codegen hoists the struct to module
+/// scope and generates a `let <Type> { ... } = props;` destructure so
+/// the script-body statements can reference fields directly. When
+/// `None`, the component takes no props (backward-compatible with the
+/// T133 floor).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScriptBlock {
     pub lang: String,
+    /// Optional `props="TypeName"` attribute value — names the
+    /// Rust `struct` declared inside the script body that codegen
+    /// hoists to module scope + destructures at function entry.
+    /// `None` when the attribute is absent (T133 floor behavior).
+    pub props: Option<String>,
     pub source: String,
     pub span: Span,
 }
@@ -363,6 +377,23 @@ impl ScriptBlock {
     pub fn new(lang: impl Into<String>, source: impl Into<String>, span: Span) -> Self {
         Self {
             lang: lang.into(),
+            props: None,
+            source: source.into(),
+            span,
+        }
+    }
+
+    /// T134 constructor — carries an explicit `props="..."` attribute
+    /// value naming the prop-interface struct.
+    pub fn with_props(
+        lang: impl Into<String>,
+        props: impl Into<String>,
+        source: impl Into<String>,
+        span: Span,
+    ) -> Self {
+        Self {
+            lang: lang.into(),
+            props: Some(props.into()),
             source: source.into(),
             span,
         }

@@ -98,8 +98,15 @@ pub enum BuffHtmlTokenKind {
     SlotOpen,
     /// `<script ...>` opening. The lexer then emits [`Self::ScriptText`] for
     /// the raw body and [`Self::ScriptClose`] for `</script>`.
+    ///
+    /// T134 extension: the `props="..."` attribute is captured alongside
+    /// `lang="..."`. Both are surfaced via this token so the parser +
+    /// codegen can auto-generate the component's prop interface.
     ScriptOpen {
         lang: String,
+        /// Optional `props="TypeName"` attribute value (`None` when
+        /// absent — T133 floor behavior).
+        props: Option<String>,
     },
     ScriptText(String),
     ScriptClose,
@@ -335,8 +342,9 @@ impl<'src> LexerState<'src> {
                 Ok(())
             }
             "script" => {
-                // Parse attributes locally (we only care about `lang="..."`).
-                let lang = self.scan_script_attrs()?;
+                // Parse attributes locally (we capture `lang="..."` and,
+                // optionally, `props="..."`).
+                let (lang, props) = self.scan_script_attrs()?;
                 // Consume the trailing `>` directly (do NOT emit TagEnd —
                 // ScriptOpen's span already encompasses it).
                 self.skip_ws();
@@ -348,7 +356,7 @@ impl<'src> LexerState<'src> {
                 }
                 self.pos += 1; // consume `>`
                 self.tokens.push(BuffHtmlToken::new(
-                    BuffHtmlTokenKind::ScriptOpen { lang },
+                    BuffHtmlTokenKind::ScriptOpen { lang, props },
                     self.span(start, self.pos),
                 ));
                 // Body: raw text until `</script>`.
@@ -368,9 +376,12 @@ impl<'src> LexerState<'src> {
     }
 
     /// Scan attributes for a `<script>` block WITHOUT emitting attribute
-    /// tokens into the output stream — only `lang` is captured.
-    fn scan_script_attrs(&mut self) -> Result<String, BuffHtmlParseError> {
+    /// tokens into the output stream — only `lang` and (T134) `props` are
+    /// captured. Returns `(lang, props)` where `props` is `None` when the
+    /// attribute is absent.
+    fn scan_script_attrs(&mut self) -> Result<(String, Option<String>), BuffHtmlParseError> {
         let mut lang = String::from("buff");
+        let mut props: Option<String> = None;
         loop {
             self.skip_ws();
             if self.pos >= self.bytes.len() {
@@ -380,7 +391,7 @@ impl<'src> LexerState<'src> {
                 ));
             }
             match self.bytes[self.pos] {
-                b'>' => return Ok(lang),
+                b'>' => return Ok((lang, props)),
                 b'/' => {
                     if self.pos + 1 < self.bytes.len() && self.bytes[self.pos + 1] == b'>' {
                         return Err(BuffHtmlParseError::lex(
@@ -418,8 +429,10 @@ impl<'src> LexerState<'src> {
                             if self.pos < self.bytes.len() {
                                 self.pos += 1; // consume closing quote
                             }
-                            if name == "lang" {
-                                lang = val;
+                            match name.as_str() {
+                                "lang" => lang = val,
+                                "props" => props = Some(val),
+                                _ => { /* ignore unknown script attrs (forward-compat) */ }
                             }
                         }
                     }
@@ -1481,9 +1494,40 @@ mod tests {
     #[test]
     fn script_block_captures_body() {
         let k = t("<script lang=\"buff\">hello</script>");
-        assert!(matches!(&k[0], BuffHtmlTokenKind::ScriptOpen { lang } if lang == "buff"));
+        assert!(matches!(
+            &k[0],
+            BuffHtmlTokenKind::ScriptOpen { lang, .. } if lang == "buff"
+        ));
         assert!(matches!(&k[1], BuffHtmlTokenKind::ScriptText(s) if s == "hello"));
         assert!(matches!(k[2], BuffHtmlTokenKind::ScriptClose));
+    }
+
+    #[test]
+    fn script_block_captures_props_attribute() {
+        // T134: `<script lang="buff" props="Props">` captures both attrs.
+        let k = t("<script lang=\"buff\" props=\"Props\">body</script>");
+        match &k[0] {
+            BuffHtmlTokenKind::ScriptOpen {
+                lang,
+                props: Some(p),
+            } => {
+                assert_eq!(lang, "buff");
+                assert_eq!(p, "Props");
+            }
+            other => panic!("expected ScriptOpen with props=Some, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn script_block_without_props_yields_none() {
+        let k = t("<script lang=\"buff\">body</script>");
+        match &k[0] {
+            BuffHtmlTokenKind::ScriptOpen { lang, props } => {
+                assert_eq!(lang, "buff");
+                assert!(props.is_none(), "props must be None when absent: {props:?}");
+            }
+            other => panic!("expected ScriptOpen, got {other:?}"),
+        }
     }
 
     #[test]

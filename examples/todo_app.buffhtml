@@ -1,0 +1,67 @@
+<script lang="buff" props="Props">
+    // todo_app.buffhtml — T134 component-model example 4.
+    //
+    // A realistic small app combining: typed props + lifecycle hooks
+    // + `{#each}` keyed iteration + `{#if}` conditional + child
+    // composition. The component is `TodoApp` — receives an initial
+    // list of todos via typed props, manages a ` Signal<Vec<(String, bool)>>`
+    // state, and renders an interactive list with toggle + filter.
+    //
+    // This is the canonical "does the component model hold up under a
+    // non-trivial example?" smoke check. End-to-end wasm32 render is
+    // a USER ACTION (see `.sisyphus/evidence/task-130-dioxus-render-USER-ACTION.txt`);
+    // local unit tests assert the codegen shape only.
+
+    #[derive(Clone, PartialEq)]
+    struct Props {
+        title: String,
+    }
+
+    // State — a Vec of (label, done) tuples. Re-evaluated reactively
+    // when toggled via `toggle_todo`.
+    let mut todos = use_signal(|| vec![
+        ("Learn Buff".to_string(), false),
+        ("Write .buffhtml".to_string(), false),
+        ("Ship v1.9".to_string(), true),
+    ]);
+
+    // Lifecycle hooks: log mount/unmount for debugging.
+    on_init(|| { /* "TodoApp mounted" */ });
+    on_destroy(|| { /* "TodoApp unmounted" */ });
+
+    // Toggle the done flag on the i-th todo. We clone the Vec out
+    // (it's cheap for this example's size) and write it back.
+    let toggle_todo = move |i: usize| {
+        let mut snapshot = todos.read().clone();
+        if i < snapshot.len() {
+            snapshot[i].1 = !snapshot[i].1;
+            todos.set(snapshot);
+        }
+    };
+
+    // Compute remaining count for the header.
+    let remaining: usize = todos.read().iter().filter(|t| !t.1).count();
+</script>
+
+<div class="todo-app">
+    <h2>{title} ({remaining} remaining)</h2>
+
+    <ul>
+        {#each todos.read().clone() as todo, i}
+            <li>
+                {#if todo.1}
+                    <span class="done">{todo.0}</span>
+                {:else}
+                    <span>{todo.0}</span>
+                {/if}
+                <button on:click={move |_| toggle_todo(i)}>Toggle</button>
+            </li>
+        {/each}
+    </ul>
+
+    {#if remaining == 0}
+        <p>All done!</p>
+    {:else}
+        <p>You still have work to do.</p>
+    {/if}
+</div>

@@ -77,9 +77,14 @@ impl Parser {
         let mut script: Option<ScriptBlock> = None;
         let mut root: Vec<RsxNode> = Vec::new();
 
-        // Optional leading `<script lang="buff"> ... </script>` block.
-        if let BuffHtmlTokenKind::ScriptOpen { ref lang } = self.peek() {
+        // Optional leading `<script lang="buff" props="..."> ... </script>` block.
+        if let BuffHtmlTokenKind::ScriptOpen {
+            ref lang,
+            ref props,
+        } = self.peek()
+        {
             let lang_clone = lang.clone();
+            let props_clone = props.clone();
             let open_span = self.span_here();
             self.advance(); // ScriptOpen
             let body = match self.peek() {
@@ -96,11 +101,19 @@ impl Parser {
             }
             let end_span = self.span_here();
             self.advance();
-            script = Some(ScriptBlock::new(
-                lang_clone,
-                body,
-                Span::new(open_span.start, end_span.end, self.source_id),
-            ));
+            script = Some(match props_clone {
+                Some(p) => ScriptBlock::with_props(
+                    lang_clone,
+                    p,
+                    body,
+                    Span::new(open_span.start, end_span.end, self.source_id),
+                ),
+                None => ScriptBlock::new(
+                    lang_clone,
+                    body,
+                    Span::new(open_span.start, end_span.end, self.source_id),
+                ),
+            });
         }
 
         while !self.is_at_end() {

@@ -1,0 +1,38 @@
+<script lang="buff" props="Props">
+    // composition_demo.buffhtml — T134 component-model example 3.
+    //
+    // Exercises the FULL component model: typed props + named slots
+    // (T133 stretch) + child composition + lifecycle hooks.
+    //
+    // The component is `Card` — a layout wrapper that exposes two
+    // named slots (`header` + `footer`) plus a default slot. Parents
+    // pass slotted content via `<template slot="...">` children, and
+    // the `Card`'s template positions them with `<slot name="..."/>`.
+    //
+    // The body also wires `on_init` to demonstrate lifecycle hooks
+    // composes cleanly with the typed-props codegen path.
+
+    #[derive(Clone, PartialEq)]
+    struct Props {
+        title: String,
+    }
+
+    // `on_init` runs after the destructure; `title` is in scope.
+    on_init(|| {
+        // In a real app: log "Card with title {title} mounted" —
+        // omitted to keep the example framework-agnostic.
+    });
+</script>
+
+<div class="card">
+    <div class="card-header">
+        <h3>{title}</h3>
+        <slot name="header" />
+    </div>
+    <div class="card-body">
+        <slot />
+    </div>
+    <div class="card-footer">
+        <slot name="footer" />
+    </div>
+</div>

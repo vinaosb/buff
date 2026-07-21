@@ -31,9 +31,14 @@
 //! named slots, keyed each, spread props, two-way binding, await, `{@html}`.
 
 pub mod error;
+pub mod prop_check;
 pub mod span_map;
 
 pub use error::BuffHtmlCodegenError;
+pub use prop_check::{
+    check_props, extract_interface, ComponentInterface, PropCheckDiagnostic, PropCheckKind,
+    PropField, PropInterfaceRegistry,
+};
 pub use span_map::{SpanMap, SpanMapBuilder};
 
 use buff_lang_ast_rsx::{
@@ -149,6 +154,23 @@ fn build_rsx_macro(body: TokenStream) -> syn::Expr {
 /// block (as a `const &str` holder the CLI can extract), and the
 /// `#[component] fn <name>() -> Element` function wrapping the `rsx!{}`
 /// expression.
+///
+/// T134 extension: when the script block declares a `props="Type"`
+/// attribute, this function:
+/// 1. Parses the script source as a Rust block (statements list).
+/// 2. Hoists all top-level `Item`s (notably the named struct + any
+///    `use` imports) to module scope ahead of the component fn.
+/// 3. Splices all non-item statements (let-bindings, expressions)
+///    into the component body ahead of the `rsx!{}` expression.
+/// 4. Auto-generates the `let <Type> { f1, f2, .. } = props;`
+///    destructure as the FIRST body statement so script-body code can
+///    reference the prop fields by name.
+/// 5. Switches the signature to `fn <name>(props: <Type>) -> Element`.
+///
+/// When no `props` attribute is present, falls back to the T133 floor
+/// behavior: script source is preserved as a `const __BUFF_SCRIPT_SOURCE`
+/// (verbatim, for downstream CLI integration) and the component takes
+/// no parameters.
 fn build_file_items(
     component_name: &str,
     rsx_macro: syn::Expr,
@@ -158,27 +180,86 @@ fn build_file_items(
         use dioxus::prelude::*;
     };
 
-    // The script block is preserved as a `const &str` so the generated file
-    // remains a valid `syn::File`. The CLI's downstream pass will pull the
-    // source out and feed it through `buff-lang-lexer` + `buff-lang-parser`
-    // to extract component logic. T133 codegen does not interpret it.
-    let script_items: Vec<syn::Item> = match script {
-        Some(s) => {
+    // Decompose the script into:
+    // - `module_items`: top-level Rust items (structs, uses, fn decls)
+    //   that live at module scope. Empty when there's no script block.
+    // - `body_stmts`: statements that live inside the component body
+    //   (let-bindings, side-effect calls like on_init/on_destroy).
+    // - `script_holder`: optional `const __BUFF_SCRIPT_SOURCE` for the
+    //   T133-floor no-props case (preserved for CLI downstream pass).
+    // - `props_interface`: parsed Props interface (when `props="..."`),
+    //   used to build the destructure + signature.
+    let mut module_items: Vec<syn::Item> = Vec::new();
+    let mut body_stmts: Vec<syn::Stmt> = Vec::new();
+    let mut script_holder: Option<syn::Item> = None;
+    let mut props_interface: Option<PropsInterface> = None;
+
+    if let Some(s) = script {
+        if let Some(props_name) = &s.props {
+            // T134 path — parse + splice + destructure.
+            let parsed = parse_script_block(&s.source);
+            let pi = extract_props_interface(&parsed, props_name);
+            module_items.extend(parsed.module_items);
+            body_stmts.extend(parsed.body_stmts);
+            // Even if the named struct is missing from the script
+            // body, surface the `props: <Type>` signature so rustc
+            // produces a clean "type not found" diagnostic against
+            // the generated source (mapped back via SpanMap).
+            props_interface = Some(pi.unwrap_or_else(|| PropsInterface::name_only(props_name)));
+        } else {
+            // T133 floor — script preserved verbatim as a const for the
+            // CLI's downstream pass. Component body is just the rsx!{}.
             let raw = &s.source;
-            let script_holder: syn::Item = syn::parse_quote! {
+            script_holder = Some(syn::parse_quote! {
                 #[doc = "buffhtml script block — extracted by buff-lang-cli"]
                 const __BUFF_SCRIPT_SOURCE: &str = #raw;
-            };
-            vec![script_holder]
+            });
         }
-        None => Vec::new(),
-    };
+    }
 
     let component_ident = syn::Ident::new(component_name, proc_macro2::Span::call_site());
+
+    // Build the destructure statement (always first when a Props
+    // interface is declared) so subsequent body statements see the
+    // fields in scope.
+    if let Some(pi) = &props_interface {
+        body_stmts.insert(0, pi.destructure_stmt());
+    }
+
     let block = syn::Block {
         brace_token: Default::default(),
-        stmts: vec![syn::Stmt::Expr(rsx_macro, None)],
+        stmts: {
+            let mut all = body_stmts;
+            all.push(syn::Stmt::Expr(rsx_macro, None));
+            all
+        },
     };
+
+    // Build the signature: `fn Name(props: <Type>) -> Element` when a
+    // Props interface is declared; `fn Name() -> Element` otherwise.
+    let inputs = match &props_interface {
+        Some(pi) => {
+            let mut p = syn::punctuated::Punctuated::new();
+            p.push(syn::FnArg::Typed(syn::PatType {
+                attrs: Vec::new(),
+                pat: Box::new(syn::Pat::Ident(syn::PatIdent {
+                    attrs: Vec::new(),
+                    ident: syn::Ident::new("props", proc_macro2::Span::call_site()),
+                    by_ref: None,
+                    mutability: None,
+                    subpat: None,
+                })),
+                colon_token: Default::default(),
+                ty: Box::new(syn::Type::Path(syn::TypePath {
+                    qself: None,
+                    path: pi.type_path(),
+                })),
+            }));
+            p
+        }
+        None => syn::punctuated::Punctuated::new(),
+    };
+
     let sig = syn::Signature {
         constness: None,
         asyncness: None,
@@ -188,7 +269,7 @@ fn build_file_items(
         ident: component_ident,
         generics: Default::default(),
         paren_token: Default::default(),
-        inputs: syn::punctuated::Punctuated::new(),
+        inputs,
         variadic: None,
         output: syn::ReturnType::Type(Default::default(), Box::new(syn::parse_quote!(Element))),
     };
@@ -201,9 +282,129 @@ fn build_file_items(
     });
 
     let mut items = vec![use_item];
-    items.extend(script_items);
+    // Module-level items from the script (the Props struct + any uses).
+    items.append(&mut module_items);
+    if let Some(h) = script_holder {
+        items.push(h);
+    }
     items.push(component_item);
     items
+}
+
+// ---------------------------------------------------------------------------
+// Script-block parsing — T134.
+// ---------------------------------------------------------------------------
+
+/// Parsed view of a `.buffhtml` script body, split into module-level
+/// items (structs, uses, fn decls) and function-body statements (let
+/// bindings, side-effect calls).
+#[derive(Default)]
+struct ParsedScript {
+    module_items: Vec<syn::Item>,
+    body_stmts: Vec<syn::Stmt>,
+}
+
+/// Parse the script body as a Rust block by wrapping it in `{...}`.
+/// On failure (script source has a Rust syntax error), the script is
+/// emitted as zero items + zero body statements — rustc will then
+/// surface the original error against the generated source position
+/// (the SpanMap will translate it back to the .buffhtml span).
+fn parse_script_block(source: &str) -> ParsedScript {
+    let wrapped = format!("{{{source}}}");
+    let block: syn::Block = match syn::parse_str(&wrapped) {
+        Ok(b) => b,
+        Err(_) => return ParsedScript::default(),
+    };
+    let mut out = ParsedScript::default();
+    for stmt in block.stmts {
+        match stmt {
+            syn::Stmt::Item(item) => out.module_items.push(item),
+            other => out.body_stmts.push(other),
+        }
+    }
+    out
+}
+
+/// Captured view of the declared Props interface — used both to emit
+/// the destructure at function entry and to generate the `props: Type`
+/// signature parameter.
+struct PropsInterface {
+    /// The struct path visible from the generated component fn.
+    /// Always a single-segment identifier today (the script-block
+    /// struct lives at module scope), but stored as a `syn::Path` so
+    /// future generics / lifetimes are additive.
+    type_name: syn::Path,
+    /// Field identifiers declared in the struct body. Used to emit
+    /// `let <Type> { f1, f2, .. } = props;`.
+    field_idents: Vec<syn::Ident>,
+}
+
+impl PropsInterface {
+    /// Build the `syn::Path` for the `props: <Type>` signature param.
+    fn type_path(&self) -> syn::Path {
+        self.type_name.clone()
+    }
+
+    /// Construct the destructure statement: `let <Type> { f1, f2, .. } = props;`.
+    ///
+    /// When field_idents is empty (struct missing from script body),
+    /// emits `let <Type> { .. } = props;` — the `..` makes it
+    /// compile-compatible even with an unknown struct (rustc surfaces
+    /// the type-not-found diagnostic).
+    fn destructure_stmt(&self) -> syn::Stmt {
+        let type_path = self.type_name.clone();
+        let fields = &self.field_idents;
+        if fields.is_empty() {
+            syn::parse_quote! {
+                let #type_path { .. } = props;
+            }
+        } else {
+            syn::parse_quote! {
+                let #type_path { #(#fields),*, .. } = props;
+            }
+        }
+    }
+
+    /// Fallback constructor for the "name declared but struct not found"
+    /// case — still surfaces the `props: <Type>` signature so rustc can
+    /// produce a clean "type not found" error against the generated
+    /// position (the SpanMap translates it back to the .buffhtml source).
+    fn name_only(props_name: &str) -> Self {
+        let type_name =
+            syn::Path::from(syn::Ident::new(props_name, proc_macro2::Span::call_site()));
+        PropsInterface {
+            type_name,
+            field_idents: Vec::new(),
+        }
+    }
+}
+
+/// Search the parsed script for the struct declaration matching
+/// `props_name`. Returns `None` if no such struct exists (codegen will
+/// then emit `fn Comp(props: <missing>)` — rustc surfaces the error).
+fn extract_props_interface(parsed: &ParsedScript, props_name: &str) -> Option<PropsInterface> {
+    let target_ident = syn::Ident::new(props_name, proc_macro2::Span::call_site());
+    for item in &parsed.module_items {
+        if let syn::Item::Struct(s) = item {
+            if s.ident == target_ident {
+                let field_idents: Vec<syn::Ident> = s
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        f.ident
+                            .clone()
+                            .unwrap_or_else(|| syn::Ident::new("_", proc_macro2::Span::call_site()))
+                    })
+                    .collect();
+                let type_name = syn::Path::from(target_ident.clone());
+                return Some(PropsInterface {
+                    type_name,
+                    field_idents,
+                });
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

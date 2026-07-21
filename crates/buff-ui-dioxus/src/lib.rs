@@ -165,6 +165,24 @@ pub use dioxus::prelude::use_signal;
 #[doc(inline)]
 pub use dioxus::prelude::use_memo;
 
+/// Re-export of `use_effect` — the canonical side-effect hook.
+///
+/// Runs the closure on mount AND whenever any signal read inside it
+/// changes. Used internally by [`on_init`] for the "run once after
+/// mount" pattern. Exposed at the wrapper surface so T134+ codegen
+/// (and hand-written Rust inside `.buffhtml` script blocks) can reach
+/// it without depending on a private dioxus path.
+#[doc(inline)]
+pub use dioxus::prelude::use_effect;
+
+/// Re-export of `use_drop` — the canonical scope-cleanup hook.
+///
+/// Schedules a `Drop`-style callback to run when the current
+/// component scope is destroyed (unmounted). Used internally by
+/// [`on_destroy`]. Re-exported for parity with [`use_effect`].
+#[doc(inline)]
+pub use dioxus::prelude::use_drop;
+
 /// Re-export of `Signal<T>` — the reactive cell type returned by
 /// [`use_signal`].
 ///
@@ -248,6 +266,86 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// (3b) Lifecycle-hook helpers — T134.
+// ---------------------------------------------------------------------------
+
+/// `on_init(callback)` — run a closure **once** after the component
+/// mounts. Lowers onto Dioxus 0.7's [`use_effect`] internally.
+///
+/// `.buffhtml` script blocks invoke this directly:
+///
+/// ```ignore
+/// // Greeting.buffhtml
+/// <script lang="buff">
+///     on_init(|| { /* log "mounted" */ });
+/// </script>
+/// <div>{name}</div>
+/// ```
+///
+/// # Why wrap `use_effect`?
+///
+/// `use_effect` accepts `FnMut` and reruns whenever a tracked signal
+/// changes. The "init" semantic is "run once after mount," so the
+/// wrapper drains an `Option<F>` on the first invocation and becomes
+/// a no-op thereafter. This guarantees the user's closure sees its
+/// effects fire exactly once even if the component re-renders before
+/// unmount.
+///
+/// # Panics (host unit tests)
+///
+/// Like [`use_signal`], `use_effect` queries a thread-local scope at
+/// call time and panics with `no current scope` outside a Dioxus
+/// component body. Behavioral coverage lives in
+/// `tests/lifecycle_hooks.rs` (which builds the syn tree the codegen
+/// emits, runs it through `prettyplease`, and asserts the lowered
+/// tokens), NOT in a runtime `#[test]`.
+pub fn on_init<F>(callback: F)
+where
+    F: FnOnce() + 'static,
+{
+    let mut slot = Some(callback);
+    use_effect(move || {
+        if let Some(f) = slot.take() {
+            f();
+        }
+    });
+}
+
+/// `on_destroy(callback)` — run a closure **once** when the component
+/// unmounts. Lowers onto Dioxus 0.7's [`use_drop`] (the canonical
+/// scope-cleanup hook — Dioxus attaches a `Drop`-implementing guard to
+/// the current scope that fires the closure on teardown).
+///
+/// `.buffhtml` script blocks invoke this directly:
+///
+/// ```ignore
+/// // Timer.buffhtml
+/// <script lang="buff">
+///     on_destroy(|| { /* cancel interval */ });
+/// </script>
+/// <div>{elapsed}</div>
+/// ```
+///
+/// # Why a helper at all?
+///
+/// `use_drop` is already trivially callable as `buff_ui_dioxus::use_drop(f)`.
+/// The `on_destroy` alias exists for **symmetry with [`on_init`]** and to
+/// give `.buffhtml` script-block authors a single conceptual pair
+/// ("init" + "destroy") rather than two unrelated entry points
+/// ("init" via helper + "destroy" via a differently-named hook).
+///
+/// # Panics (host unit tests)
+///
+/// Same caveat as [`on_init`] — `use_drop` panics outside a Dioxus
+/// scope. Coverage is structural (see `tests/lifecycle_hooks.rs`).
+pub fn on_destroy<F>(callback: F)
+where
+    F: FnOnce() + 'static,
+{
+    use_drop(callback);
+}
+
+// ---------------------------------------------------------------------------
 // Launch entry point.
 // ---------------------------------------------------------------------------
 
@@ -285,6 +383,13 @@ mod tests {
         // Value-level symbol: the one helper we own. Referenced via
         // `let _ = PATH;` so the compiler considers it used.
         let _ = on_signal_mut::<i32, fn(&mut i32)>;
+
+        // T134 lifecycle helpers — referenced as path values so the
+        // compiler resolves their monomorphized `fn` item. We do NOT
+        // call them (they would panic outside a Dioxus scope — see
+        // `on_init` / `on_destroy` docs).
+        let _ = on_init::<fn()>;
+        let _ = on_destroy::<fn()>;
 
         // Type-level symbols — referenced via position in a phantom
         // tuple. `_` binding is fine here; we just need them in the

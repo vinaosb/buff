@@ -497,3 +497,152 @@ fn await_block_with_catch_emits_error_arm() {
         "expected `ResourceState::Ready` match arm in:\n{src}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// T134 — component interface declaration + lifecycle hooks.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn t134_script_without_props_keeps_t133_floor() {
+    // When no `props` attribute is present, codegen keeps the T133
+    // floor behavior: `const __BUFF_SCRIPT_SOURCE` + zero-arg component.
+    let src = gen(
+        r#"<script lang="buff">let mut count = use_signal(|| 0);</script>
+<div />"#,
+    );
+    assert!(
+        src.contains("__BUFF_SCRIPT_SOURCE"),
+        "T133-floor `__BUFF_SCRIPT_SOURCE` const must be preserved (no-props path):\n{src}"
+    );
+    assert!(
+        !src.contains("fn BuffHtmlComponent(props:"),
+        "no-props path must NOT generate a `props:` parameter:\n{src}"
+    );
+}
+
+#[test]
+fn t134_props_attribute_generates_props_param() {
+    // `<script lang="buff" props="Props">` switches the signature to
+    // `fn Comp(props: Props) -> Element`.
+    let src = gen(r#"<script lang="buff" props="Props">
+struct Props {
+    name: String,
+    count: i32,
+}
+</script>
+<div />"#);
+    assert!(
+        src.contains("fn BuffHtmlComponent(props: Props)"),
+        "expected `fn Comp(props: Props)` signature from props= attribute:\n{src}"
+    );
+    assert!(
+        !src.contains("__BUFF_SCRIPT_SOURCE"),
+        "props= path must NOT emit the legacy __BUFF_SCRIPT_SOURCE const:\n{src}"
+    );
+}
+
+#[test]
+fn t134_props_struct_hoisted_to_module_scope() {
+    // The `struct Props { ... }` declared in the script body must
+    // appear at module scope (outside the component fn) so the
+    // `props: Props` parameter is visible.
+    let src = gen(r#"<script lang="buff" props="Props">
+struct Props {
+    name: String,
+}
+</script>
+<div />"#);
+    assert!(
+        src.contains("struct Props"),
+        "expected `struct Props` declaration to survive in:\n{src}"
+    );
+    // The struct must appear BEFORE the component fn (module scope).
+    let struct_pos = src
+        .find("struct Props")
+        .expect("struct Props must be present");
+    let fn_pos = src
+        .find("fn BuffHtmlComponent")
+        .expect("component fn must be present");
+    assert!(
+        struct_pos < fn_pos,
+        "struct Props must be hoisted ABOVE the component fn (module scope),\n\
+         got struct at {struct_pos}, fn at {fn_pos}:\n{src}"
+    );
+}
+
+#[test]
+fn t134_props_destructure_uses_all_field_names() {
+    // The auto-generated destructure must list every declared field
+    // (so the script body can reference them by name).
+    let src = gen(r#"<script lang="buff" props="Props">
+struct Props {
+    name: String,
+    count: i32,
+    active: bool,
+}
+</script>
+<div />"#);
+    // Destructure form: `let Props { name, count, active, .. } = props;`
+    assert!(
+        src.contains("let Props"),
+        "expected `let Props {{ ... }} = props;` destructure:\n{src}"
+    );
+    for field in ["name", "count", "active"] {
+        assert!(
+            src.contains(field),
+            "expected field `{field}` to appear in generated source:\n{src}"
+        );
+    }
+    assert!(
+        src.contains("= props"),
+        "expected destructure to assign from `props`:\n{src}"
+    );
+}
+
+#[test]
+fn t134_props_script_body_statements_spliced_into_fn() {
+    // The script body's non-item statements (let bindings, side-effect
+    // calls) must be spliced into the function body AHEAD of the rsx!{}
+    // expression.
+    let src = gen(r#"<script lang="buff" props="Props">
+struct Props {
+    initial: i32,
+}
+let mut count = use_signal(|| initial);
+</script>
+<div>{count}</div>"#);
+    assert!(
+        src.contains("let mut count"),
+        "expected `let mut count` body statement to be spliced into fn:\n{src}"
+    );
+    assert!(
+        src.contains("use_signal(|| initial)"),
+        "expected `initial` prop field to be in scope after destructure:\n{src}"
+    );
+    // body statement must come AFTER the destructure + BEFORE rsx!.
+    let destructure_pos = src.find("let Props").expect("destructure must be present");
+    let body_pos = src
+        .find("let mut count")
+        .expect("body stmt must be present");
+    let rsx_pos = src.find("rsx!").expect("rsx! must be present");
+    assert!(
+        destructure_pos < body_pos && body_pos < rsx_pos,
+        "expected order destructure < body < rsx!, got {destructure_pos} < {body_pos} < {rsx_pos}:\n{src}"
+    );
+}
+
+#[test]
+fn t134_props_with_unknown_type_name_falls_through() {
+    // When the script declares `props="Missing"` but no matching
+    // struct is found in the body, codegen still emits the `props:
+    // Missing` signature (rustc surfaces the error against the
+    // generated position — the SpanMap translates it back).
+    let src = gen(r#"<script lang="buff" props="Missing">
+let x = 42;
+</script>
+<div />"#);
+    assert!(
+        src.contains("fn BuffHtmlComponent(props: Missing)"),
+        "expected signature to use the declared type name verbatim:\n{src}"
+    );
+}
