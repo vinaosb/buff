@@ -1350,13 +1350,50 @@ impl RustCodegen {
                 // feature gating at the dep-resolution layer, not via
                 // per-fn attributes).
                 "feature" => continue,
+                // T0-B2: `@internal` is convention-only for v1.13-v1.17.
+                // The LSP / docs surface a warning when the fn is used
+                // outside its declaring crate; no Rust lowering needed.
+                "internal" => continue,
+                // T0-F2: test-related attributes (alongside @test). Each
+                // lowers 1:1 to the corresponding Rust test attribute.
+                "should_panic" => attrs.push(syn::parse_quote!(#[should_panic])),
+                "ignore" => attrs.push(syn::parse_quote!(#[ignore])),
+                "bench" => attrs.push(syn::parse_quote!(#[bench])),
+                // T0-F2: `@property` requires proptest as an extern dep
+                // (arrives with future buff-test crate). For v1.13 we
+                // strip it — the attribute is accepted by the parser so
+                // users can write the source today; lowering is deferred.
+                "property" => continue,
+                // T0-G3: `@deprecated(since = "X", replacement = "Y")`
+                // lowers to Rust's `#[deprecated(since = "X", note =
+                // "use 'Y'")]`. Both keyword args are optional — when
+                // absent, the corresponding Rust field is omitted.
+                "deprecated" => {
+                    let since = attr.named_args.get("since");
+                    let note: Option<String> = attr
+                        .named_args
+                        .get("replacement")
+                        .map(|r| format!("use '{r}'"))
+                        .or_else(|| attr.named_args.get("note").cloned());
+                    let parsed = match (since, note) {
+                        (Some(s), Some(n)) => {
+                            syn::parse_quote!(#[deprecated(since = #s, note = #n)])
+                        }
+                        (Some(s), None) => syn::parse_quote!(#[deprecated(since = #s)]),
+                        (None, Some(n)) => syn::parse_quote!(#[deprecated(note = #n)]),
+                        (None, None) => syn::parse_quote!(#[deprecated]),
+                    };
+                    attrs.push(parsed);
+                }
                 // Unknown attribute — surface as a codegen error so the
                 // user knows it was not applied (rather than silently
                 // dropping it). Future tasks can add recognised attributes
                 // (e.g. `@inline` → `#[inline]`) here.
                 other => {
                     return Err(self.unsupported(&format!(
-                        "unrecognised attribute `@{other}` (only `@test`, `@feature` are supported)"
+                        "unrecognised attribute `@{other}` \
+                         (supported: @test, @feature, @internal, @deprecated, \
+                         @should_panic, @ignore, @bench, @property)"
                     )));
                 }
             }

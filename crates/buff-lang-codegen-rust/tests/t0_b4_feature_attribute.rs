@@ -16,6 +16,7 @@ fn feature_attr(name: &str) -> Attribute {
     Attribute {
         name: Ident::new("feature", Span::dummy()),
         args: vec![name.to_string()],
+        named_args: std::collections::BTreeMap::new(),
         span: Span::dummy(),
     }
 }

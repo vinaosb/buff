@@ -420,6 +420,7 @@ mod tests {
         Attribute {
             name: Ident::new("prefer", dummy()),
             args: vec!["gpu".to_string()],
+            named_args: std::collections::BTreeMap::new(),
             span: dummy(),
         }
     }
@@ -428,6 +429,7 @@ mod tests {
         Attribute {
             name: Ident::new("prefer", dummy()),
             args: vec!["cpu".to_string()],
+            named_args: std::collections::BTreeMap::new(),
             span: dummy(),
         }
     }

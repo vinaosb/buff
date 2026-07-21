@@ -96,6 +96,7 @@ fn prefer_gpu_attr() -> Attribute {
     Attribute {
         name: ident("prefer"),
         args: vec!["gpu".to_string()],
+        named_args: std::collections::BTreeMap::new(),
         span: span(),
     }
 }
@@ -105,6 +106,7 @@ fn prefer_gpu_multi_attr() -> Attribute {
     Attribute {
         name: ident("prefer"),
         args: vec!["gpu".to_string(), "force".to_string()],
+        named_args: std::collections::BTreeMap::new(),
         span: span(),
     }
 }
@@ -113,6 +115,7 @@ fn prefer_cpu_attr() -> Attribute {
     Attribute {
         name: ident("prefer"),
         args: vec!["cpu".to_string()],
+        named_args: std::collections::BTreeMap::new(),
         span: span(),
     }
 }

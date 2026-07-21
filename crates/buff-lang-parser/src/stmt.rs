@@ -2692,6 +2692,12 @@ pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, 
         // Optional `( arg, arg, ... )` — args are bare identifiers or
         // string-literal text. Stored as raw strings for forward-compat.
         let mut args: Vec<String> = Vec::new();
+        // T0-G3: named `key = "value"` args go in a separate map so
+        // codegen can look up by name (e.g. `@deprecated(since = "2.0",
+        // replacement = "new_fn")`). Both forms can coexist on the same
+        // attribute.
+        let mut named_args: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
         let end = if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
             stream.advance(); // consume `(`
             if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
@@ -2702,6 +2708,94 @@ pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, 
                             stream.eof_span(),
                         ))
                     })?;
+                    // T0-G3: detect named-arg form `ident = "string"`.
+                    // The identifier becomes the key; the following `=`
+                    // and string literal become the value.
+                    if let TokenKind::Ident(key) = &arg_tok.kind {
+                        if matches!(stream.peek_kind(), Some(TokenKind::Assign)) {
+                            stream.advance(); // consume `=`
+                            // Value must be a string literal (the parser
+                            // already rejects interpolation; we re-use
+                            // the same StringStart/StringPart/StringEnd
+                            // triple walk below for the value).
+                            let val_tok = stream.advance().ok_or_else(|| {
+                                ParseError::new(Diagnostic::error(
+                                    "expected string after `=` in named attribute argument",
+                                    stream.eof_span(),
+                                ))
+                            })?;
+                            let value = match val_tok.kind {
+                                TokenKind::StringStart => {
+                                    let part = stream.advance().ok_or_else(|| {
+                                        ParseError::new(Diagnostic::error(
+                                            "expected string content in named attribute argument",
+                                            stream.eof_span(),
+                                        ))
+                                    })?;
+                                    let s = match part.kind {
+                                        TokenKind::StringPart(s) => s,
+                                        other => {
+                                            return Err(ParseError::new(Diagnostic::error(
+                                                format!(
+                                                    "expected string content in named arg, found `{other}`"
+                                                ),
+                                                part.span,
+                                            )));
+                                        }
+                                    };
+                                    let end_tok = stream.advance().ok_or_else(|| {
+                                        ParseError::new(Diagnostic::error(
+                                            "unterminated string in named attribute argument",
+                                            stream.eof_span(),
+                                        ))
+                                    })?;
+                                    if !matches!(end_tok.kind, TokenKind::StringEnd) {
+                                        return Err(ParseError::new(Diagnostic::error(
+                                            "string interpolation not allowed in named attribute argument",
+                                            end_tok.span,
+                                        )));
+                                    }
+                                    s
+                                }
+                                other => {
+                                    return Err(ParseError::new(Diagnostic::error(
+                                        format!(
+                                            "expected string literal after `=` in named attribute argument, found `{other}`"
+                                        ),
+                                        val_tok.span,
+                                    )));
+                                }
+                            };
+                            named_args.insert(key.clone(), value);
+                            match stream.peek_kind() {
+                                Some(TokenKind::Comma) => {
+                                    stream.advance();
+                                    if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                                        break;
+                                    }
+                                }
+                                Some(TokenKind::RParen) => break,
+                                Some(other) => {
+                                    return Err(ParseError::new(Diagnostic::error(
+                                        format!(
+                                            "expected `,` or `)` after named attribute argument, found `{other}`"
+                                        ),
+                                        stream
+                                            .peek()
+                                            .map(|t| t.span)
+                                            .unwrap_or_else(|| stream.eof_span()),
+                                    )));
+                                }
+                                None => {
+                                    return Err(ParseError::new(Diagnostic::error(
+                                        "unterminated attribute argument list (missing `)`)",
+                                        stream.eof_span(),
+                                    )));
+                                }
+                            }
+                            continue;
+                        }
+                    }
                     let arg = match &arg_tok.kind {
                         TokenKind::Ident(s) => s.clone(),
                         TokenKind::StringStart => {
@@ -2781,6 +2875,7 @@ pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, 
         attrs.push(Attribute {
             name,
             args,
+            named_args,
             span: Span::new(start, end, source_id),
         });
     }

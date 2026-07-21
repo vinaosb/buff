@@ -3,6 +3,7 @@
 //! A source file is a sequence of [`Decl`]s (functions, structs, enums,
 //! imports, modules, traits). Declarations form the module-level structure.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::common::{Block, Ident, Param};
@@ -176,27 +177,51 @@ pub struct FuncDecl {
 /// too. The parser collects zero-or-more leading `@name` forms before a
 /// `func` declaration and stores them in declaration order (leftmost
 /// attribute first).
+///
+/// # T0 — named arguments
+///
+/// The `named_args` field (T0-G3) carries `key = "value"` pairs for
+/// attributes like `@deprecated(since = "2.0", replacement = "new_fn")`.
+/// Positional args go in [`Attribute::args`]; keyword args go in
+/// [`Attribute::named_args`]. Both can coexist on the same attribute.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     /// The attribute name without the leading `@` (e.g. `"test"`).
     pub name: Ident,
-    /// Optional parenthesised arguments (e.g. `@prefer(gpu)` carries
-    /// `["gpu"]`). Empty for `@test`. Carried for forward-compat so the
-    /// v0.5→future `@prefer(gpu)` shape doesn't need another AST migration.
+    /// Optional parenthesised positional arguments (e.g. `@prefer(gpu)`
+    /// carries `["gpu"]`). Empty for `@test`. Carried for forward-compat
+    /// so the v0.5→future `@prefer(gpu)` shape doesn't need another AST
+    /// migration.
     pub args: Vec<String>,
+    /// Optional `key = "value"` named arguments (T0-G3). Populated by
+    /// the parser for forms like `@deprecated(since = "2.0",
+    /// replacement = "new_fn")`. Empty for v0.5-era attributes that
+    /// use only positional args.
+    pub named_args: BTreeMap<String, String>,
     pub span: Span,
 }
 
 impl fmt::Display for Attribute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "@{}", self.name)?;
-        if !self.args.is_empty() {
+        let has_positional = !self.args.is_empty();
+        let has_named = !self.named_args.is_empty();
+        if has_positional || has_named {
             f.write_str("(")?;
             for (i, a) in self.args.iter().enumerate() {
                 if i > 0 {
                     f.write_str(", ")?;
                 }
                 write!(f, "{a:?}")?;
+            }
+            if has_positional && has_named {
+                f.write_str(", ")?;
+            }
+            for (i, (k, v)) in self.named_args.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{k} = {v:?}")?;
             }
             f.write_str(")")?;
         }
