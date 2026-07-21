@@ -796,3 +796,82 @@ buff-dsp = { path = "crates/buff-dsp" }
 # (NOT `buff_lang_dataframe` — the framework-crate naming convention
 # drops the `-lang` infix per AGENTS.md).
 buff-dataframe = { path = "crates/buff-dataframe" }
+# T27: `buff-fuzz` — property-based fuzzing framework. Workspace
+# path dep mirrors the buff-mock / buff-dataframe / buff-image /
+# buff-audio pattern so any future consumer (codegen-lowered
+# `Fuzz.*` / `Strategy.*` calls, the buff-mock integration for
+# fuzz-with-mocks, IDE hover/completion) resolves to the same
+# in-tree version during the v1.13 frameworks wave. Records
+# `buff-fuzz` (NOT `buff_lang_fuzz` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-fuzz = { path = "crates/buff-fuzz" }
+# T26: `buff-audit` — security scanning + code signing. Two pure-Rust
+# crypto crates cover the extern surface per the T4 FFI guide (no raw
+# pointers, owned `Vec<u8>` / `String` at the boundary):
+#
+# - `ed25519-dalek` 2.0: the canonical pure-Rust Ed25519 implementation
+#   (no cc-rs, no native C deps, no assembler shims — matches the "no C
+#   library, no Docker" hard rule from T126/T127 and the "no `ring` /
+#   no native-tls" rule from the T26 task spec). API surface used:
+#   `ed25519_dalek::SigningKey::generate()` (CSPRNG keypair via
+#   `rand_core::OsRng` — pulled transitively by ed25519-dalek's
+#   `rand_core` feature; re-exports `VerifyingKey` / `Signer` /
+#   `Verifier` traits), `signing_key.sign(data).to_bytes()` (64-byte
+#   detached signature), `verifying_key::VerifyingKey::from_bytes(&pk)?`
+#   + `verifying_key.verify_strict(data, &sig)?` (returns
+#   `Result<(), SignatureError>` — mapped to `AuditError::BadSignature`
+#   via `From`). We enable `rand_core` (CSPRNG keypair generation) +
+#   the `zeroize` feature is left at the default (on) for key
+#   material hygiene. The `fast` / `asm` features are NOT enabled
+#   (asm pulls cc-rs; fast uses nightly-only SIMD — neither belongs
+#   on the Windows MSVC host). Pinned to major 2 (the long-standing
+#   surface — `SigningKey`/`VerifyingKey`/`Signer`/`Verifier` — that
+#   the Rust ecosystem has targeted since the 2022 rework).
+#
+# - `sha2` is already pinned at the workspace level (T124k); T26
+#   reuses that pin for the dependency-manifest hashing path
+#   (`Audit.scan` digests each `[dependencies]` line via SHA-256 to
+#   match it against the static advisory DB without spurious
+#   whitespace / version-string false-positives).
+#
+# - `hex` is already pinned at the workspace level (T124h); T26
+#   reuses that pin for encoding / decoding the signature + keypair
+#   bytes (the Buff-visible surface is hex strings; the Rust surface
+#   is byte arrays).
+#
+# - `rand` is already pinned at the workspace level (T124f); T26
+#   reuses that pin for the `Signature.keypair()` assoc fn which
+#   generates a fresh ed25519 keypair (the workspace `rand` 0.8
+#   `rand::rngs::OsRng` constructor is consumed by
+#   `ed25519_dalek::SigningKey::generate(&mut OsRng)`).
+#
+# `ed25519-dalek` + `sha2` + `hex` + `rand` are recorded in the
+# codegen `extern_crates` BTreeSet when a Buff program uses `Audit.*`
+# or `Signature.*` (mirrors the chrono / tracing / regex codegen-only
+# linking boundary: the single-file `buff run` rustc path does NOT
+# link them; cargo-project wiring is deferred per the existing
+# precedent). Snapshots + extern_crates set is the verifiable
+# contract.
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "zeroize"] }
+# T26: `buff-audit` workspace path dep — mirrors the buff-fuzz /
+# buff-image / buff-audio / buff-dsp / buff-dataframe pattern so any
+# future consumer (codegen-lowered `Audit.*` / `Signature.*` calls,
+# the codegen `extern_crates` registration, IDE hover/completion)
+# resolves to the same in-tree version during the v1.13 frameworks
+# wave. Records `buff-audit` (NOT `buff_lang_audit` — the framework-
+# crate naming convention drops the `-lang` infix per AGENTS.md).
+buff-audit = { path = "crates/buff-audit" }
+# T19: `handlebars` — pure-Rust runtime HTML templating engine (no macros,
+# no compile-time codegen). We use handlebars over askama because askama
+# requires a proc-macro at compile time (breaks the "no macro dependence"
+# rule from the T19 spec). handlebars 6.x is the stable major: the API
+# surface used is `Handlebars::new()`, `.register_template_string(name, src)`,
+# `.render(name, &ctx)` — all pure-Rust, no native deps, no cc-rs. Mirrors
+# the chrono/tracing/regex/toml/rand codegen-only linking boundary (single-
+# file `buff run` rustc path does NOT link it; cargo-project wiring is
+# deferred). Pinned to major 6 (the long-standing surface since 2022).
+handlebars = "6"
+# T19: `buff-template` workspace path dep — mirrors the buff-image /
+# buff-audio / buff-dsp / buff-dataframe pattern so the codegen
+# `extern_crates` registration resolves to the same in-tree version.
+buff-template = { path = "crates/buff-template" }

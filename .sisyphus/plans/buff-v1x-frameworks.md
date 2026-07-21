@@ -2407,7 +2407,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 19. `buff-template` — HTML Templating (wraps askama)
+- [x] 19. `buff-template` — HTML Templating (wraps handlebars)
 
   **What to do**:
   - Create `crates/buff-template/`.
@@ -2575,7 +2575,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 21. `buff-observe` — Structured Observability (wraps tracing + opentelemetry)
+- [x] 21. `buff-observe` — Structured Observability (wraps tracing + opentelemetry)
 
   **What to do**:
   - Create `crates/buff-observe/`.

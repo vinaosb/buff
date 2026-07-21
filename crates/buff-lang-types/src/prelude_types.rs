@@ -2988,6 +2988,15 @@ pub fn assoc_fn_return_type(
         (PreludeType::Window, PreludeAssocFn::Hann) => Some(Type::Void),
         (PreludeType::Window, PreludeAssocFn::Hamming) => Some(Type::Void),
         (PreludeType::Window, PreludeAssocFn::Blackman) => Some(Type::Void),
+        // T21: Observe namespace methods return Void (namespace-only).
+        // The codegen splices `buff_observe::*::new(...)` / `Tracer::bootstrap()`
+        // directly — the return values are consumed by the generated Rust
+        // and never need a Buff Type variant for the MVP.
+        (PreludeType::Observe, PreludeAssocFn::Span) => Some(Type::Void),
+        (PreludeType::Observe, PreludeAssocFn::Counter) => Some(Type::Void),
+        (PreludeType::Observe, PreludeAssocFn::Histogram) => Some(Type::Void),
+        (PreludeType::Observe, PreludeAssocFn::Gauge) => Some(Type::Void),
+        (PreludeType::Observe, PreludeAssocFn::Bootstrap) => Some(Type::Void),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.

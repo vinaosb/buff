@@ -6098,6 +6098,27 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("AudioBuffer.save codegen parse: {e}")))
             }
+            // T19: Template.render(context_json) -> String. One arg
+            // (String — a JSON object). Wraps
+            // `buff_template::Template::render(&self, &ctx)
+            // .unwrap_or_default()` (panic-free on render failure —
+            // missing variable / partial error collapses to empty
+            // string, matching Buff's "no panicking generated code"
+            // rule).
+            M::Render if matches!(recv_ty, Type::Template) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "render() expects exactly 1 arg (context_json), got {}",
+                        args.len()
+                    )));
+                }
+                let ctx = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.render(#ctx).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Template.render codegen parse: {e}")))
+            }
             // Non-Image / Non-Audio receiver with an Image-only /
             // Audio-only method (Width / Height / PixelFormat /
             // GetPixel / SetPixel / Grayscale / Invert / Resize /
@@ -6126,6 +6147,7 @@ impl RustCodegen {
             | M::Mix
             | M::Slice
             | M::Summarize
+            | M::Render
             | M::Save => Err(self.unsupported(&format!(
                 "{recv_ty}.{:?}() is not a recognised prelude instance method",
                 pmethod

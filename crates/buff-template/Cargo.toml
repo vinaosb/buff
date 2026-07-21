@@ -1,0 +1,32 @@
+[package]
+name = "buff-template"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+HTML templating for Buff. \
+Pure-Rust MVP wrapping the `handlebars` crate. \
+Runtime-only (no compile-time macros). \
+Per T19 spec: Template.from_path / Template.from_string / template.render.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "template", "handlebars", "html"]
+categories = ["web-programming::templating"]
+
+[lib]
+name = "buff_template"
+path = "src/lib.rs"
+
+[dependencies]
+# T19 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# handlebars 6: pure-Rust runtime HTML templating — no macros, no native
+# deps. API surface used: Handlebars::new / register_template_string /
+# render.
+handlebars.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
