@@ -65,6 +65,16 @@ Every modern language forces a painful trade-off:
 | **v1.0** | *Production* | Heterogeneous CPU/GPU computing, tooling, release | ✅ Core shipped |
 | **v1.1** | *Try Buff* | Playground, tree-sitter grammar, website — discover and try Buff | ✅ Shipped |
 | **v1.2** | *Use Buff* | LSP server + VSCode extension — editor intelligence | ✅ Shipped |
+| **v1.3** | *Rust interop* | `extern` bindgen, Cargo polish, side-by-side example library, Dioxus feasibility spike | ✅ Shipped |
+| **v1.4** | *Stdlib + Cargo* | 12 stdlib modules (DateTime/Log/Regex/Toml/Math/Filesystem/Crypto/Networking/…), stable error codes with online catalog, git deps, workspace support | ✅ Shipped |
+| **v1.5** | *REPL* | Shared `buff-eval` crate extracted; REPL with rustyline, session state, `:type` introspection, `:load`, multi-line input, history | ✅ Shipped |
+| **v1.6** | *Registry* | Pure-Rust `buff-registry` HTTP server (axum + semver, in-memory store); `buff add`/`publish`/`install` CLI; `buff deps`/`outdated` | ✅ Shipped |
+| **v1.7** | *Jupyter* | Pure-Rust ZMQ kernel (`buff-jupyter`); 5-socket protocol + HMAC; cross-cell state; rich MIME display + `?`/`??` introspection | ✅ Shipped |
+| **v1.8** | *Web / frontend* | `buff-ui-dioxus` wrapper (Dioxus 0.7); `buff ui dev` WebSocket hot-reload server; `buff ui new --desktop` Tauri scaffolding | ✅ Shipped |
+| **v1.9** | *RSX for Buff* | `.buffhtml` SFC pipeline (Option C: parallel format, no compiler changes) — AST + parser + codegen; component model with lifecycle hooks + typed props; SSR via `dioxus-ssr` | ✅ Shipped |
+| **v1.10** | *Production hardening* | `buff-dap` Debug Adapter Protocol translation proxy; `buff coverage` Rust-line → `.buff` source-line mapping (llvm-cov/tarpaulin) | ✅ Shipped |
+| **v1.11** | *Education* | `bufflings` Rustlings-style exercise runner (list/start/verify/progress/watch); 25 exercises across 11 topics; verification engine + CI solvability gate | ✅ Shipped |
+| **v1.12** | *Distribution scale* | `buffup` Rust toolchain-style version manager; `setup-buff` GitHub Action (TypeScript, caches `~/.buff/versions/`); Docker `builder` + `slim` images with multi-arch buildx | ✅ Shipped |
 
 **Compiles today:** hand-rolled lexer (byte-scanner + offside rule), hand-rolled
 parser (recursive-descent + Pratt), AST with spans, type inference, Rust
