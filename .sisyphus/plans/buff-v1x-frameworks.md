@@ -2918,7 +2918,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 27. `buff fuzz` — Fuzzing Support via libFuzzer
+- [x] 27. `buff fuzz` — Fuzzing Support via libFuzzer
 
   **What to do** *(added post-comparative-analysis — security-critical frameworks need fuzzing)*:
   - Create `crates/buff-fuzz/` crate (thin wrapper around libFuzzer via extern).

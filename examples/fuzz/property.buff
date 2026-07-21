@@ -1,0 +1,14 @@
+// Buff T27 example — property-based fuzzing with Fuzz + Strategy.
+// Run: `buff run examples/fuzz/property.buff`
+
+func main():
+    let s = Strategy.int(0, 1000)
+    let summary = Fuzz.run(s, 256, { n =>
+        n * n >= 0
+    })
+    print("iterations:   " + summary.iterations)
+    print("failed count: " + summary.failed_count)
+    if summary.passed:
+        print("result:       PASS (n*n >= 0 for every input)")
+    else:
+        print("result:       FAIL")

@@ -1,0 +1,71 @@
+[package]
+name = "buff-fuzz"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Property-based fuzzing framework for the Buff language — Strategy + Fuzz runtime API"
+
+[lib]
+name = "buff_fuzz"
+path = "src/lib.rs"
+
+[dependencies]
+# T27: Property-based fuzzing framework for the Buff language. Provides
+# a runtime API (`Strategy` value type + `Fuzz.run(strategy, count,
+# closure)` entry point) usable directly from Rust tests, PLUS a
+# codegen-time helper (`lower_fuzz_harness`) that emits the test-runner
+# boilerplate as `syn::Item`s for a future `@fuzz`-attribute integration
+# (mirrors the T25 buff-mock pattern exactly — runtime workaround per
+# the T3 macro-spike DEFER outcome).
+#
+# - `proptest` 1.5 (workspace): the canonical Rust property-testing
+#   crate. Pure-Rust, no cc-rs, no native deps — matches the "no C
+#   library, no Docker" hard rule from AGENTS.md. We deliberately use
+#   `proptest` (NOT cargo-fuzz / AFL.rs) because those frameworks
+#   require linking libFuzzer (a C/C++ library) which would FAIL on
+#   this Windows MSVC host (same class of cc-rs avoidance that pushed
+#   the hand-rolled lexer/parser per AGENTS.md). `proptest` ships the
+#   stable `test_runner::TestRunner` + `strategy::Strategy` API surface
+#   that the runtime wraps; the user-facing Buff surface exposes a
+#   smaller, opinionated API over it.
+# - `thiserror`: crate-local error enum (`FuzzError`) propagated up
+#   through `anyhow` at the test boundary. Mirrors buff-mock / buff-dap
+#   / buff-eval precedent.
+# - `buff-lang-ast`: FuncDecl / Param / Block / Expr access in the
+#   `lowering` module (codegen helper). The crate is otherwise pure-Rust
+#   and does NOT need the parser/types/codegen crates — keeping the
+#   dependency footprint minimal (mirrors buff-mock's stance).
+# - `syn` / `quote` / `proc-macro2`: the `lowering` module emits
+#   `syn::Item` directly (no raw strings — project hard rule). The
+#   output is consumed by `buff-lang-codegen-rust` or by tests that
+#   pretty-print the generated harness for inspection.
+proptest.workspace = true
+thiserror.workspace = true
+buff-lang-ast.workspace = true
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+
+[dev-dependencies]
+# T27: tests assert (a) runtime behavior (run a property with a known
+# passing/failing strategy) and (b) codegen-output shape (lower_fuzz_
+# harness produces an `fn` whose prettyplease-formatted source contains
+# the expected `buff_fuzz::run(...)` delegation). `insta` snapshots pin
+# the generated source so future changes to the lowering logic surface
+# clearly during review. `prettyplease` is the same formatter used by
+# buff-lang-codegen-rust — keeping output byte-comparable.
+insta.workspace = true
+prettyplease.workspace = true
+
+# T27: examples live under `examples/fuzz/` (a subdirectory). Cargo's
+# default example discovery does NOT recurse into subdirs, so each
+# example is declared explicitly via a `[[example]]` table. Mirrors
+# the `examples/<topic>/` layout used in buff-mock / buff-lang-runtime /
+# buff-cli for grouping related demo programs.
+[[example]]
+name = "fuzz_int_property"
+path = "examples/fuzz/fuzz_int_property.rs"
+
+[[example]]
+name = "fuzz_string_property"
+path = "examples/fuzz/fuzz_string_property.rs"
