@@ -434,7 +434,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 > Tasks T60-T72 (quality/meta tasks) use COMPACT format: What / LOC budget / Deps / Acceptance + Commit. Full QA scenarios deferred to implementation time.
 > A task WITHOUT QA Scenarios is INCOMPLETE for T0-T59. No exceptions for those.
 
-- [ ] 0. **Buff SDK 2.0 — Project Model, Conventions, Templates, and Reference Implementation**
+- [x] 0. **Buff SDK 2.0 — Project Model, Conventions, Templates, and Reference Implementation**
 
   **Goal**: Establish the unified Buff developer experience — the .NET-Core-style evolution that lets frameworks compose consistently and users learn Buff once. Covers all 10 convention categories (A-J). Single comprehensive foundation task; everything in Wave 2-5 follows these conventions.
 
