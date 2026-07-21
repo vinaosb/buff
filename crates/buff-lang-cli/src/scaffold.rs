@@ -568,7 +568,19 @@ pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFil
     files.push((".gitignore", GITIGNORE_TEMPLATE.to_string()));
     files.push(("README.md", render(README_TEMPLATE)));
 
-    // T0-C1: the 4 new templates also emit tests/ + examples/ + CI +
+    // T0-I1: every template ships a CI workflow (3-OS matrix running
+    // buff fmt + buff check + buff test). Universal so newly-scaffolded
+    // projects work the same regardless of template.
+    files.push((".github/workflows/ci.yml", CI_YML_TEMPLATE.to_string()));
+
+    // T0-I2: the console template additionally ships a multi-stage
+    // Dockerfile (builder + slim runtime). Other templates can ship
+    // Dockerfiles in future tasks as their framework runtimes mature.
+    if matches!(template, TemplateKind::Binary) {
+        files.push(("Dockerfile", render(DOCKERFILE_TEMPLATE)));
+    }
+
+    // T0-C1: the 4 new templates also emit tests/ + examples/ +
     // .env.example (the latter signals the template is "v2-aware").
     let is_v2_template = matches!(
         template,
@@ -577,7 +589,6 @@ pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFil
     if is_v2_template {
         files.push(("tests/test_hello.buff", render(TEST_HELLO_BUFF_TEMPLATE)));
         files.push(("examples/hello.buff", render(EXAMPLE_HELLO_BUFF_TEMPLATE)));
-        files.push((".github/workflows/ci.yml", CI_YML_TEMPLATE.to_string()));
         files.push((".env.example", ENV_EXAMPLE_TEMPLATE.to_string()));
     }
 
@@ -868,5 +879,86 @@ mod tests {
         assert!(ci.contains("buff fmt --check"), "ci runs buff fmt: {ci}");
         assert!(ci.contains("buff check -D"), "ci runs buff check: {ci}");
         assert!(ci.contains("buff test"), "ci runs buff test: {ci}");
+    }
+
+    // -----------------------------------------------------------------------
+    // T0-I1 + T0-I2 — universal CI + console Dockerfile
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn every_template_ships_ci_workflow() {
+        // T0-I1: .github/workflows/ci.yml is universal across ALL templates,
+        // including the legacy Binary/Lib/Server/Gpu/Workspace paths.
+        for kind in [
+            TemplateKind::Binary,
+            TemplateKind::Lib,
+            TemplateKind::Server,
+            TemplateKind::Gpu,
+            TemplateKind::Workspace,
+            TemplateKind::Web,
+            TemplateKind::Ml,
+            TemplateKind::Game,
+            TemplateKind::Pipeline,
+        ] {
+            let files = files_for_template(kind, "demo");
+            let paths: Vec<&str> = files.iter().map(|(p, _)| *p).collect();
+            assert!(
+                paths.contains(&".github/workflows/ci.yml"),
+                "{:?} missing CI workflow",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn console_template_ships_dockerfile() {
+        // T0-I2: only the console (Binary) template ships a Dockerfile.
+        let files = files_for_template(TemplateKind::Binary, "demo");
+        let paths: Vec<&str> = files.iter().map(|(p, _)| *p).collect();
+        assert!(paths.contains(&"Dockerfile"), "console missing Dockerfile");
+    }
+
+    #[test]
+    fn non_console_templates_skip_dockerfile() {
+        for kind in [
+            TemplateKind::Lib,
+            TemplateKind::Server,
+            TemplateKind::Gpu,
+            TemplateKind::Workspace,
+            TemplateKind::Web,
+            TemplateKind::Ml,
+            TemplateKind::Game,
+            TemplateKind::Pipeline,
+        ] {
+            let files = files_for_template(kind, "demo");
+            let paths: Vec<&str> = files.iter().map(|(p, _)| *p).collect();
+            assert!(
+                !paths.contains(&"Dockerfile"),
+                "{:?} should NOT ship a Dockerfile (console-only for v1.13)",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn dockerfile_template_uses_multistage_build() {
+        let files = files_for_template(TemplateKind::Binary, "demo");
+        let dockerfile = files
+            .iter()
+            .find(|(p, _)| *p == "Dockerfile")
+            .map(|(_, c)| c.as_str())
+            .expect("Dockerfile present");
+        assert!(
+            dockerfile.contains("FROM ghcr.io/buff-lang/buff:builder AS build"),
+            "missing builder stage: {dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("FROM ghcr.io/buff-lang/buff:slim"),
+            "missing slim runtime stage: {dockerfile}"
+        );
+        assert!(
+            dockerfile.contains("buff build --release"),
+            "missing build step: {dockerfile}"
+        );
     }
 }
