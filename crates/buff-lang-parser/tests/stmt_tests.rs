@@ -561,6 +561,7 @@ fn test_param_display() {
         name: Ident::new("x", dummy_span()),
         ty: named_type("Int"),
         default_value: None,
+        is_comptime: false,
         span: dummy_span(),
     };
     assert_eq!(shape(&p), "x: Int");

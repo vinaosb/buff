@@ -12879,6 +12879,7 @@ mod tests {
                 span: dummy_span(),
             },
             default_value: None,
+            is_comptime: false,
             span: dummy_span(),
         };
         let _stmt = Stmt::Break(dummy_span());

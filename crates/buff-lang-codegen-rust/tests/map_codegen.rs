@@ -92,6 +92,7 @@ fn closure(params: &[&str], body: Expr) -> Expr {
             name: ident(p),
             ty: placeholder_ty(),
             default_value: None,
+            is_comptime: false,
             span: span(),
         })
         .collect();

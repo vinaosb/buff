@@ -1,0 +1,35 @@
+// Channel<T> MPSC primitive — producer/consumer pattern (T2 v1.13 wave 1).
+//
+// Run: `cargo run -p buff-lang-cli -- run examples/channels/producer_consumer.buff`
+//
+// Demonstrates the canonical producer/consumer shape: one producer
+// task spawns and writes a sequence of values; the main task acts as
+// the consumer, draining the channel until the producer drops the
+// sender (signaled by `receiver.recv()` returning `None`).
+//
+// The producer's `sender` is MOVED into the spawn body (Buff's
+// move-by-default semantics hide the transfer; the codegen wraps
+// the closure as `async move { ... }` so the spawned task owns the
+// sender). When the spawn body exits, the sender is dropped; the
+// receiver's next `recv()` returns `None`, terminating the consumer
+// loop.
+//
+// STATUS — CODEGEN-VERIFIED ONLY (mirrors hello.buff's status).
+
+func main():
+    let (sender, receiver) = Channel.new(8)
+
+    spawn {
+        producer(sender)
+    }
+
+    var sum: Int = 0
+    for let next = receiver.recv() {
+        sum = sum + next
+    }
+    print(sum)
+
+func producer(sender: Sender<Int>):
+    for i in 1..=10 {
+        sender.send(i)
+    }

@@ -101,6 +101,9 @@ fn closure(params: &[&str], body: Expr) -> Expr {
             name: ident(p),
             ty: placeholder_ty(),
             default_value: None,
+            is_comptime: false,
+            is_comptime: false,
+            is_comptime: false,
             span: span(),
         })
         .collect();
@@ -124,6 +127,9 @@ fn nested_closure(outer_params: &[&str], inner_params: &[&str], inner_body: Expr
             name: ident(p),
             ty: placeholder_ty(),
             default_value: None,
+            is_comptime: false,
+            is_comptime: false,
+            is_comptime: false,
             span: span(),
         })
         .collect();

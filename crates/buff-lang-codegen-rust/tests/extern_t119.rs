@@ -433,8 +433,10 @@ fn t119_direct_externfuncdecl_construction_lowers_correctly() {
             name: ident("s"),
             ty: named_ty("String"),
             default_value: None,
+            is_comptime: false,
+            is_comptime: false,
             span: span(),
-        }],
+            }],
         return_type: Some(named_ty("String")),
         span: span(),
     };

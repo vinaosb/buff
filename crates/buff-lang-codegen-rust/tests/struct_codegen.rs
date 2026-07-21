@@ -162,6 +162,7 @@ fn _param_smoke() -> Param {
         name: ident("_"),
         ty: named_ty("Int"),
         default_value: None,
+        is_comptime: false,
         span: span(),
     }
 }

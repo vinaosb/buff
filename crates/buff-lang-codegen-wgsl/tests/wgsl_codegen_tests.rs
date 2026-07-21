@@ -90,6 +90,7 @@ fn x_param(ty: Option<&str>) -> Param {
             span: span(),
         },
         default_value: None,
+        is_comptime: false,
         span: span(),
     }
 }

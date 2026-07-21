@@ -1184,6 +1184,7 @@ mod tests {
                 name: Ident::new(name, span()),
                 ty: named_type(ty),
                 default_value: None,
+                is_comptime: false,
                 span: span(),
             }],
             return_type: None,
@@ -1373,6 +1374,7 @@ mod tests {
             name: Ident::new(name, span()),
             ty: named_type("_"),
             default_value: None,
+            is_comptime: false,
             span: span(),
         }
     }

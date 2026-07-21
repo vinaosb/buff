@@ -43,6 +43,7 @@ fn union_func(name: &str, param_name: &str, ty: TypeRef) -> Decl {
             name: ident(param_name),
             ty: ty.clone(),
             default_value: None,
+            is_comptime: false,
             span: span(),
         }],
         return_type: Some(ty),

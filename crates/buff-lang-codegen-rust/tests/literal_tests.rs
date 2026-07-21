@@ -446,6 +446,7 @@ fn test_codegen_param_type_propagates_to_let() {
             name: ident("n"),
             ty: named_type("Int"),
             default_value: None,
+            is_comptime: false,
             span: span(),
         }],
         return_type: None,

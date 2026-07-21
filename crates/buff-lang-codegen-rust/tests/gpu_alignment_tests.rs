@@ -123,6 +123,7 @@ fn typed_closure(param_name: &str, param_ty: TypeRef, body: Expr) -> Expr {
             name: ident(param_name),
             ty: param_ty,
             default_value: None,
+            is_comptime: false,
             span: span(),
         }],
         body: Block {

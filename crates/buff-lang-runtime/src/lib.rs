@@ -78,6 +78,7 @@
 //! [`std::collections::BTreeSet`] — never `HashMap`/`HashSet` — to keep
 //! behavior reproducible across hosts (project hard rule).
 
+pub mod channel;
 pub mod cold_start;
 pub mod cpu;
 pub mod dispatch;
@@ -89,6 +90,11 @@ pub mod mock_gpu;
 pub mod threshold;
 pub mod tiling;
 
+// T2 (v1.13 wave 1): MPSC channel primitive. Exposed at the crate root
+// so generated code references `buff_lang_runtime::Channel`, `Sender`,
+// `Receiver` directly — framework users see the runtime abstraction,
+// NOT the underlying `tokio::sync::mpsc` paths (Metis G6).
+pub use channel::{Channel, Receiver, Sender};
 pub use cold_start::{BufferPool, ColdStartBackend, PipelineCache};
 pub use cpu::{CpuDispatcher, CpuDispatcherError};
 pub use dispatch::{DispatchKind, Dispatcher};

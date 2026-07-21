@@ -42,6 +42,8 @@ use buff_lang_ast::ty::TypeRef;
 use buff_lang_ast::{Expr, Literal, Stmt};
 use buff_lang_codegen_wgsl::generate_wgsl;
 use buff_lang_error::Span;
+// T0 attribute-named-args bridge: BTreeMap needed for Attribute init.
+use std::collections::BTreeMap;
 
 // A small shader source — content doesn't matter for most tests since
 // the Mock backend ignores it and the real backend only sees it when
@@ -462,6 +464,7 @@ fn hints_prefer_from_attributes_bridges_ast_attribute_to_prefer() {
     let gpu_attr = Attribute {
         name: Ident::new("prefer", span),
         args: vec!["gpu".to_string()],
+        named_args: BTreeMap::new(),
         span,
     };
     assert_eq!(prefer_from_attributes(&[gpu_attr]), Prefer::Gpu);
@@ -470,6 +473,7 @@ fn hints_prefer_from_attributes_bridges_ast_attribute_to_prefer() {
     let npu_attr = Attribute {
         name: Ident::new("prefer", span),
         args: vec!["npu".to_string()],
+        named_args: BTreeMap::new(),
         span,
     };
     assert_eq!(prefer_from_attributes(&[npu_attr]), Prefer::Npu);
@@ -481,6 +485,7 @@ fn hints_prefer_from_attributes_bridges_ast_attribute_to_prefer() {
     let test_attr = Attribute {
         name: Ident::new("test", span),
         args: vec![],
+        named_args: BTreeMap::new(),
         span,
     };
     assert_eq!(prefer_from_attributes(&[test_attr]), Prefer::None);
@@ -489,11 +494,13 @@ fn hints_prefer_from_attributes_bridges_ast_attribute_to_prefer() {
     let gpu_first = Attribute {
         name: Ident::new("prefer", span),
         args: vec!["gpu".to_string()],
+        named_args: BTreeMap::new(),
         span,
     };
     let npu_second = Attribute {
         name: Ident::new("prefer", span),
         args: vec!["npu".to_string()],
+        named_args: BTreeMap::new(),
         span,
     };
     assert_eq!(
@@ -505,6 +512,7 @@ fn hints_prefer_from_attributes_bridges_ast_attribute_to_prefer() {
     let multi_arg = Attribute {
         name: Ident::new("prefer", span),
         args: vec!["gpu".to_string(), "force".to_string()],
+        named_args: BTreeMap::new(),
         span,
     };
     assert_eq!(prefer_from_attributes(&[multi_arg]), Prefer::None);
@@ -549,6 +557,7 @@ fn hints_dispatch_with_prefer_real_gpu_large_input_matches_cpu_oracle() {
                 span,
             },
             default_value: None,
+            is_comptime: false,
             span,
         }],
         body,

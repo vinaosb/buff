@@ -844,6 +844,7 @@ mod tests {
                 name: Ident::new(*p, span()),
                 ty: placeholder_ty(),
                 default_value: None,
+                is_comptime: false,
                 span: span(),
             })
             .collect();

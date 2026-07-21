@@ -148,6 +148,7 @@ fn tuples_codegen_tuple_as_param_type() {
             name: ident("t"),
             ty: tuple_ty(vec![named_ty("Int"), named_ty("Int")]),
             default_value: None,
+            is_comptime: false,
             span: span(),
         }],
         return_type: Some(named_ty("Int")),

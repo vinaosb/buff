@@ -86,6 +86,7 @@ fn int_param(name: &str) -> Param {
         name: ident(name),
         ty: named_ty("Int"),
         default_value: None,
+        is_comptime: false,
         span: span(),
     }
 }
@@ -265,6 +266,7 @@ fn extern_func_string_param_type_maps_correctly() {
             name: ident("s"),
             ty: named_ty("String"),
             default_value: None,
+            is_comptime: false,
             span: span(),
         }],
         Some(named_ty("String")),
@@ -350,6 +352,7 @@ fn ast_typeref_generic_containers_map_inner_types_correctly() {
                 name: ident("x"),
                 ty,
                 default_value: None,
+                is_comptime: false,
                 span: span(),
             }],
             None,

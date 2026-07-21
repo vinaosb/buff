@@ -48,6 +48,7 @@ fn lambda(param: &str, body_expr: Expr) -> Expr {
             name: Ident::new(param, sp()),
             ty: placeholder_tyref(),
             default_value: None,
+            is_comptime: false,
             span: sp(),
         }],
         body: Block {

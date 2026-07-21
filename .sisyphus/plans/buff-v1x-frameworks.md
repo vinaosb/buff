@@ -972,7 +972,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 2. `Channel<T>` MPSC Primitive (REDUCED SCOPE — Stream/select deferred to v1.18+)
+- [x] 2. `Channel<T>` MPSC Primitive (REDUCED SCOPE — Stream/select deferred to v1.18+)
 
   **Scope reduction rationale** (post-user-feedback re-assessment):
   Buff already has comprehensive async coverage that eliminates the need for a general `Stream<T>` type or `select` expression in v1.13-v1.17:

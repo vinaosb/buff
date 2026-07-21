@@ -37,6 +37,10 @@
 //! ```
 
 pub mod atomic_analysis;
+// T53: comptime-facts → Rust `const` items lowering. Consumes
+// buff_lang_types::ComptimeFacts and emits one Item::Const per
+// evaluated value.
+pub mod comptime;
 pub mod context;
 pub mod format;
 pub mod gpu_alignment;

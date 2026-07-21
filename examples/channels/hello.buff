@@ -1,0 +1,27 @@
+// Channel<T> MPSC primitive — basic send/recv roundtrip (T2 v1.13 wave 1).
+//
+// Run: `cargo run -p buff-lang-cli -- run examples/channels/hello.buff`
+//
+// Demonstrates Buff's in-process MPSC channel:
+//   - `Channel.new(buf_size)` constructs a bounded `(Sender<T>,
+//     Receiver<T>)` pair backed by `tokio::sync::mpsc` (hidden
+//     behind `buff_lang_runtime::Channel` per Metis G6).
+//   - `sender.send(value)` is async via auto-await (no `await`
+//     keyword — the codegen inserts `.await` at the call site).
+//   - `receiver.recv()` returns `Option<T>`: `Some(value)` when a
+//     value arrives; `None` when all senders were dropped (the
+//     canonical channel-closed semantic).
+//
+// STATUS — CODEGEN-VERIFIED ONLY (does NOT run end-to-end yet):
+// The generated Rust requires the external `tokio` crate AND the
+// in-tree `buff-lang-runtime` crate (which wraps tokio::sync::mpsc).
+// The single-file `rustc` pipeline cannot link external crates
+// (same codegen-only boundary as async_demo.buff from T31). The
+// codegen itself is exercised by
+// crates/buff-lang-codegen-rust/tests/channel_codegen.rs.
+
+func main():
+    let (sender, receiver) = Channel.new(10)
+    spawn { sender.send(42) }
+    let x = receiver.recv()
+    print(x)

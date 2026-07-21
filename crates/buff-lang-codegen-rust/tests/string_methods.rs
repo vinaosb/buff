@@ -100,6 +100,7 @@ fn codegen_with_string_param(stmt: Stmt) -> String {
                 span: span(),
             },
             default_value: None,
+            is_comptime: false,
             span: span(),
         }],
         return_type: None,

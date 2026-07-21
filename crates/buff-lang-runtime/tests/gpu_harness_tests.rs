@@ -61,6 +61,7 @@ fn x_times_two_lambda() -> Expr {
                 span,
             },
             default_value: None,
+            is_comptime: false,
             span,
         }],
         body,

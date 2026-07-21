@@ -71,6 +71,7 @@ fn func_decl_with_defaults(
                 name: ident(n),
                 ty: named_type(t),
                 default_value: dv.clone(),
+                is_comptime: false,
                 span: span(),
             })
             .collect(),

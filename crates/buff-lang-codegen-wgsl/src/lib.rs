@@ -274,6 +274,14 @@ fn extract_single_expr_body(body: &Block) -> Result<Expr, WgslError> {
                 hint: " (got a defer statement; T44 supports only a single expression body)"
                     .to_string(),
             }),
+            // T53: comptime block - WGSL lambdas do not support comptime
+            // (CPU fallback path). Surgical stub; T53 owns the full
+            // comptime lowering.
+            Stmt::ComptimeBlock { .. } => Err(WgslError::InvalidLambdaBody {
+                count: 1,
+                hint: " (got a comptime block; T44 supports only a single expression body)"
+                    .to_string(),
+            }),
         },
         0 => Err(WgslError::InvalidLambdaBody {
             count: 0,
