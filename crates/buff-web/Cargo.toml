@@ -1,0 +1,53 @@
+[package]
+name = "buff-web"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Production HTTP web framework for Buff. \
+Wraps `axum` 0.8 + `tokio` + `serde_json` via a safe FFI boundary \
+per the T4 FFI guide. MVP scope: HTTP server config + route table + \
+middleware chain + Request/Response builders. NO WebSocket (use \
+existing stdlib), NO template rendering (T19 buff-template handles \
+that), NO ORM/database integration (T18 buff-db handles that).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "web", "http", "server", "axum"]
+categories = ["web-programming::http-server"]
+
+[lib]
+name = "buff_web"
+path = "src/lib.rs"
+
+[dependencies]
+# T17 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# API surface used:
+# - axum 0.8: `Router::new().route(path, method_router)`,
+#   `axum::routing::{get, post, put, delete, patch}`,
+#   `axum::extract::Request`, `axum::response::{IntoResponse, Response}`,
+#   `axum::body::Body`, `axum::http::{StatusCode, HeaderMap, HeaderName,
+#   HeaderValue, Method}`. Pinned to 0.8 (NOT 0.7) because 0.8
+#   introduced the `{param}` path syntax and the canonical
+#   `axum::serve(listener, app)` API — both are the current canonical
+#   surface; 0.7 is in maintenance only. Mirrors the buff-registry
+#   precedent (T126) which already pins axum 0.8 at the workspace level.
+axum.workspace = true
+# tokio 1.40: `tokio::runtime::Runtime::new()` + `runtime.block_on(...)`
+# + `tokio::net::TcpListener::bind(addr)` for the `Web::listen(port)` /
+# `Web::run()` entry points. Buff surfaces a SYNCHRONOUS listen() call
+# (Buff has no `await` keyword per AGENTS.md §6) — the codegen-lowered
+# Rust wraps the async axum::serve in `runtime.block_on(...)` per
+# FFI guide Example 3 (T4 extern_reqwest.buff precedent).
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# `tower::ServiceExt::oneshot` for in-process Router-driving tests
+# (mirrors the buff-registry T126 test pattern — no TCP port
+# allocation, no subprocess). Pure-Rust test-only dep.
+insta.workspace = true
+tower.workspace = true

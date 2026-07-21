@@ -1,0 +1,22 @@
+# T17 .buff example: minimal HTTP server (FORWARD-DECL).
+#
+# Requires the coordinated Type::Web codegen lowering arm + the
+# `Type::Web` variant in `crates/buff-lang-types/src/ty.rs` (which
+# is OUTSIDE the T17 shared zone per the v1x-frameworks sibling-task
+# rules). The prelude registry entry `PreludeType::Web` +
+# PreludeAssocFn::{New, Bind} + the 8 PreludeInstanceFn variants
+# (RouteGet/Post/Put/Delete/Patch + Middleware + Listen + Run) were
+# added in the same T17 commit as this example. See
+# crates/buff-web/AGENTS.md "RELATIONSHIP TO OTHER CRATES" for the
+# wiring map.
+
+from "buff/web" import Web, Request, Response
+
+func main():
+    app = Web.new()
+
+    app.get(path: "/", handler: { _req => Response.text("hello, web") })
+    app.get(path: "/health", handler: { _req => Response.json({ "status": "ok" }) })
+
+    print("buff-web hello example listening on http://0.0.0.0:8080")
+    app.listen(port: 8080)

@@ -2238,7 +2238,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 17. `buff-web` — Production Web Framework (wraps axum)
+- [x] 17. `buff-web` — Production Web Framework (wraps axum)
 
   **What to do**:
   - Create `crates/buff-web/`.
