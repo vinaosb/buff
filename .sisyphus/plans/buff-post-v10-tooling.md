@@ -2369,7 +2369,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `feat(bufflings): CLI with list/start/verify/progress/watch`
 
-- [ ] **T138b: Exercise content (25 exercises)** [writing]
+- [x] **T138b: Exercise content (25 exercises)** [writing]
 
   **What to do**:
   - Write 25 exercises across 12 topics: basics, functions, types, control flow, structs, enums, traits, pattern matching, error handling, async, collections, generics/modules
@@ -2402,7 +2402,7 @@ Phase 2: EXPANSION (markets where Rust is weak — AFTER adoption)
 
   **Commit**: `docs(bufflings): 25 exercises across 12 topics with solutions`
 
-- [ ] **T138c: Verification engine + CI solvability gate** [writing]
+- [x] **T138c: Verification engine + CI solvability gate** [writing]
 
   **What to do**:
   - Verification: run exercise `.buff` through compiler, check against expected output/tests
