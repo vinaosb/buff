@@ -918,6 +918,24 @@ impl RustCodegen {
             self.extern_crates.insert("sqlx".to_string());
             self.extern_crates.insert("tokio".to_string());
         }
+        // T33: register `buff-http-client` + `reqwest` when the program
+        // references the prelude `HttpClient` module (`HttpClient.new()` /
+        // `client.get(url)` / etc.). Mirrors the T9 Image / T10 AudioBuffer
+        // / T17 Web / T18 Database pattern.
+        if program_uses_namespace(decls, "HttpClient") {
+            self.extern_crates.insert("buff-http-client".to_string());
+            self.extern_crates.insert("reqwest".to_string());
+        }
+        // T30: register `buff-config` + `figment` + `notify` when the
+        // program references the prelude `Config` module (`Config.new()` /
+        // `cfg.set_default(key, val)` / etc.). Namespace-only module
+        // (mirror Log / Toml / Math / Random). The `figment` + `notify`
+        // crates are the two external deps the wrapper crate wraps.
+        if program_uses_namespace(decls, "Config") {
+            self.extern_crates.insert("buff-config".to_string());
+            self.extern_crates.insert("figment".to_string());
+            self.extern_crates.insert("notify".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -5064,6 +5082,134 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Web.bind codegen parse: {e}")))
             }
+            // T33: HttpClient.new() -> HttpClient. Zero args. Wraps
+            // `buff_http_client::HttpClient::new()` (infallible -
+            // returns a new client with default settings). Records
+            // `buff-http-client` + `reqwest` in extern_crates via the
+            // `program_uses_namespace("HttpClient")` walker. Dispatch
+            // on (PreludeType::HttpClient, New) - mirrors the (Web,
+            // New) / (Channel, New) precedent.
+            (T::HttpClient, A::New) => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_http_client::HttpClient::new()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("HttpClient.new codegen parse: {e}")))
+            }
+            // T30: Config module — namespace-only (no runtime value).
+            // `Config.new()` creates a `buff_config::Config` and stores
+            // it in a thread-local static so subsequent method calls
+            // (`cfg.set_default`, `cfg.load_file`, etc.) operate on the
+            // same instance. The codegen emits a lazy-static pattern
+            // (one Config per thread — no Mutex contention for the
+            // common single-threaded case). Mirrors the Log / Toml /
+            // Math namespace-only pattern.
+            (T::Config, A::New) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {{
+                    static CONFIG: std::sync::LazyLock<buff_config::Config> =
+                        std::sync::LazyLock::new(buff_config::Config::new);
+                    &*CONFIG
+                }};
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.new codegen parse: {e}")))
+            }
+            // `Config.set_default(key, val)` -> Void. Two args.
+            (T::Config, A::SetDefault) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "set_default() expects exactly 2 args (key, value), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let val = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.set_default(#key, #val)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.set_default codegen parse: {e}")))
+            }
+            // `Config.load_file(path)` -> Void. One arg.
+            (T::Config, A::LoadFile) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.load_file(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.load_file codegen parse: {e}")))
+            }
+            // `Config.load_env(prefix)` -> Void. One arg.
+            (T::Config, A::LoadEnv) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.load_env(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.load_env codegen parse: {e}")))
+            }
+            // `Config.load_args(args)` -> Void. One arg (Vector<String>).
+            (T::Config, A::LoadArgs) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.load_args(&#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.load_args codegen parse: {e}")))
+            }
+            // `Config.get(key)` -> Option<String>. One arg. Reuses the
+            // shared `Get` variant (also used by Args.get / Env.get).
+            (T::Config, A::Get) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.get(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.get codegen parse: {e}")))
+            }
+            // `Config.get_int(key)` -> Option<Int>. One arg.
+            (T::Config, A::GetInt) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.get_int(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.get_int codegen parse: {e}")))
+            }
+            // `Config.get_float(key)` -> Option<Float>. One arg.
+            (T::Config, A::GetFloat) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.get_float(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.get_float codegen parse: {e}")))
+            }
+            // `Config.get_bool(key)` -> Option<Bool>. One arg.
+            (T::Config, A::GetBool) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.get_bool(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.get_bool codegen parse: {e}")))
+            }
+            // `Config.watch(path, callback)` -> Void. Two args.
+            (T::Config, A::Watch) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "watch() expects exactly 2 args (path, callback), got {}",
+                        args.len()
+                    )));
+                }
+                let path = self.lower_expr(&args[0])?;
+                let cb = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    CONFIG.watch(#path, #cb).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Config.watch codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -9000,6 +9146,17 @@ impl RustCodegen {
             // when a Buff program uses `DataFrame.*` (via the narrow
             // `program_uses_namespace("DataFrame")` walker).
             Type::DataFrame => "buff_dataframe::DataFrame",
+            // T33: HTTP client. Opaque runtime-value type mapped to
+            // `buff_http_client::HttpClient`. No generic parameter, no
+            // turbofish needed. Mirrors the T9 Image / T7 DataFrame
+            // precedent: if a user annotates a let binding with an
+            // explicit HttpClient type, codegen emits the concrete
+            // path; otherwise Rust infers the type from the initializer
+            // (HttpClient.new()). The `buff-http-client` crate is
+            // recorded in `extern_crates` when a Buff program uses
+            // `HttpClient.*` (via the narrow
+            // `program_uses_namespace("HttpClient")` walker).
+            Type::HttpClient => "buff_http_client::HttpClient",
         };
         Some(rust_path_type(rust_name))
     }

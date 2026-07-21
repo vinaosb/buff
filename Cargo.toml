@@ -12,6 +12,20 @@ proptest = "1.5"
 wgpu = "26.0"
 rayon = "1.10"
 tokio = { version = "1.40", features = ["full", "test-util"] }
+# T35: `cron` 0.13 — the canonical Rust cron-expression parser (the de-facto
+# standard for cron schedule parsing in the Rust ecosystem). API surface used:
+# `cron::Schedule::from_str(expr)` (returns `Result<Schedule, ScheduleParseError>`)
+# + `schedule.upcoming(Utc).take(1).next()` for next-fire-time computation.
+# Pure-Rust, no native deps, no cc-rs — matches the "no C library, no Docker"
+# hard rule. Pinned to major 0.13 (the long-standing surface since 2024 —
+# `Schedule::from_str` + `upcoming(chrono::Utc)` has been stable for years).
+cron = "0.13"
+# T21 (buff-observe): opentelemetry OTLP export. Pinned to 0.27 (the
+# long-standing surface since 2024 — `opentelemetry::global::tracer()` +
+# `opentelemetry_otlp::new_exporter().tonic()` API). Pure-Rust via tonic
+# + prost (no native C deps). Matches the "no C library" hard rule.
+opentelemetry = { version = "0.27", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["grpc-tonic"] }
 bytemuck = { version = "1.18", features = ["derive"] }
 pollster = "0.4"
 rust_decimal = "1.36"
@@ -490,6 +504,19 @@ buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }
 # `crates/buff-lang-cli/src/ui_dev/watcher.rs`), so we do NOT pull
 # `notify-debouncer-mini` — keeping the dep surface minimal.
 notify = "6"
+# T30: `figment` 0.10 — the canonical pure-Rust layered config crate
+# (the de-facto Rust ecosystem default for config with layered
+# providers). API surface used: Figment::new(), Figment::merge(),
+# Figment::extract(), figment::providers::{Env, Serialized, Format,
+# Toml, Yaml, Json}. Pure-Rust, no native deps, no cc-rs — matches
+# the "no C library, no Docker" hard rule. Features: `toml`, `yaml`,
+# `json` enable the three file-format providers; `env` is always
+# available. Pinned to major 0.10 (the long-standing surface since
+# 2023 — the `Figment::merge` + `Figment::extract` API has been
+# stable across 0.10.x). Mirrors the conservative-pin philosophy
+# already in use across the workspace (chrono 0.4, rand 0.8, axum
+# 0.8, rustyline 15, notify 6).
+figment = { version = "0.10", features = ["toml", "yaml", "json"] }
 # T133: RSX-for-Buff Option C (`.buffhtml` SFC). Two new core crates ship the
 # floor grammar (decision record `rsx-syntax-feasibility.md` §6):
 # - `buff-lang-ast-rsx`: pure-data AST for the `.buffhtml` SFC. Separate from
@@ -949,3 +976,227 @@ buff-web = { path = "crates/buff-web" }
 # resolves to the same in-tree version during the v1.13 frameworks
 # wave.
 buff-reactive = { path = "crates/buff-reactive" }
+# T29: `buff-validate` — declarative schema validation (pydantic-
+# equivalent). The MVP wraps the `validator` crate's free-standing
+# trait validators (email / url / length / range / regex) — the
+# `derive` macro feature is OFF per the T29 must-not #1 ("no
+# compile-time macro validation"). The `unicode` feature is ON for
+# proper char-counting in length rules (mirrors the workspace's
+# unicode-aware stance via `unicode-segmentation`). Pure-Rust, no
+# native C deps, no cc-rs — matches the "no C library, no Docker"
+# hard rule. API surface used:
+# - `validator::ValidateEmail::validate_email(&str) -> bool` for
+#   the `email` rule kind.
+# - `validator::ValidateUrl::validate_url(&str) -> bool` for `url`.
+# - `validator::ValidateLength::validate_length(Some(min),
+#   Some(max), None) -> bool` for `length`.
+# - `validator::ValidateRange::validate_range(Some(min),
+#   Some(max), None, None) -> bool` for `range`.
+# Pinned to major 0.20 (the long-standing surface — the trait
+# methods we consume are stable since 0.18; 0.19/0.20 ship the
+# identical trait API with bugfixes; mirrors the chrono 0.4 /
+# rand 0.8 conservative-pin philosophy already in use across the
+# workspace). The `card` feature is OFF (no credit-card validation
+# in MVP — not on the T29 surface).
+validator = { version = "0.20", default-features = false, features = ["unicode"] }
+# T29: `buff-validate` workspace path dep — mirrors the buff-image /
+# buff-audio / buff-dataframe / buff-template / buff-web / buff-
+# reactive pattern so any future consumer (codegen-lowered
+# `Validator.new()` / `validator.with_email(...)` / `validator.
+# validate(...)` calls, IDE hover/completion) resolves to the same
+# in-tree version during the v1.16 frameworks wave. Records
+# `buff-validate` (NOT `buff_lang_validate` — the framework-crate
+# naming convention drops the `-lang` infix per AGENTS.md).
+buff-validate = { path = "crates/buff-validate" }
+# T35: `buff-jobs` — background job queue + cron scheduler MVP.
+# Wraps the pure-Rust `cron` crate for cron-expression parsing +
+# ships an in-memory `tokio::sync::Mutex`-free queue (the MVP uses
+# `std::sync::Mutex` + `std::collections::VecDeque` so the surface
+# stays synchronous; an async `Worker.run_async` + Redis backend is
+# v1.18+). Two new top-level crates cover the extern surface per the
+# T4 FFI guide (no raw pointers, owned `String` payloads at the
+# boundary):
+#
+# - `cron` 0.12: the canonical pure-Rust cron expression parser
+#   (no cc-rs, no native C deps, no assembler shims — matches the
+#   "no C library, no Docker" hard rule from T126/T127 and the
+#   wider workspace stance that killed chumsky/logos/zmq). API
+#   surface used: `cron::Schedule::from_str(expr)` (returns
+#   `Result<Schedule, CronError>` - mapped to
+#   `JobsError::InvalidCron` via `From`) +
+#   `schedule.after(&now).take(1).next()` for the next-fire
+#   computation. Pinned to major 0.12 (the long-standing surface
+#   since the 2022 7-field redesign; 0.11 is superseded). Mirrors
+#   the chrono/tokio/regex/rand 0.8 conservative-pin philosophy.
+#
+# - `chrono`, `thiserror`, `uuid`, `serde`, `serde_json` are
+#   already pinned at the workspace level (T124b/T124-base/T124h/
+#   T124i); T35 reuses those pins via `.workspace = true` in its
+#   Cargo.toml. No new top-level deps beyond `cron`.
+#
+# The crate follows the buff-fuzz (T27) pattern exactly:
+# 1. Runtime API (Queue + Job + Worker + Scheduler + Backoff) —
+#    pure-Rust library usable directly from any Rust test / binary.
+# 2. Codegen helper (`lower_jobs_register`) — emits a `syn::Item`
+#    for the future `@job` attribute integration in
+#    `buff-lang-codegen-rust` (mirrors buff-fuzz's
+#    `lower_fuzz_harness` exactly).
+# Zero parser/AST/codegen-rust ripple — the MVP is self-contained
+# (per the T3 macro-spike DEFER outcome documented in
+# `.sisyphus/decisions/macro-system-v1x.md`). The prelude /
+# `extern_crates` walker integration in `buff-lang-types` +
+# `buff-lang-codegen-rust` is deferred to a coordinated multi-task
+# finish commit once the conflict-zone dust settles (mirrors the
+# buff-fuzz precedent).
+# T35: `buff-jobs` workspace path dep — mirrors the buff-fuzz /
+# buff-image / buff-audio / buff-dataframe / buff-template /
+# buff-web / buff-reactive pattern so any future consumer
+# (codegen-lowered `Queue.memory()` / `scheduler.cron(...)` calls,
+# the future `@job` attribute codegen integration, IDE
+# hover/completion, T139 bufflings background-jobs tutorial)
+# resolves to the same in-tree version during the v1.15 frameworks
+# wave. Records `buff-jobs` (NOT `buff_lang_jobs` — the framework-
+# crate naming convention drops the `-lang` infix per AGENTS.md).
+buff-jobs = { path = "crates/buff-jobs" }
+# T31: `buff-cache` MVP — in-memory + distributed cache for Buff.
+# Wraps the `moka` crate (the de-facto pure-Rust concurrent cache
+# used by the Rust ecosystem — Tokio / TiKV / Amphora / etc). Pure-
+# Rust, no native deps, no cc-rs, no assembler shims — matches the
+# "no C library, no Docker" hard rule from T126/T127 and the wider
+# workspace stance that killed chumsky/logos/zmq.
+#
+# API surface used (all stable since 0.12):
+# - `moka::sync::Cache::<K, V>::builder()
+#     .max_capacity(n)
+#     .time_to_live(Duration)
+#     .time_to_idle(Duration)
+#     .build()` for `Cache.new(max_capacity)`.
+# - `cache.insert(key, value)` for `cache.set(key, value)` /
+#   `cache.set(key, value, ttl)`.
+# - `cache.get(&key)` for `cache.get(key)` (returns `Option<V>`).
+# - `cache.invalidate(&key)` for `cache.delete(key)`.
+# - `cache.run_pending_tasks()` for the synchronous drain helper.
+# - `cache.entry_count()` for `cache.len()`.
+#
+# Pinned to major 0.12 (released 2024 — the long-standing surface
+# most of the Rust ecosystem targets). 0.12 finalised the
+# `sync::Cache` builder + entry-count API we depend on; pre-0.12
+# had a slightly different eviction-policy API that would require
+# source rewriting. Mirrors the conservative-pin philosophy already
+# in use across the workspace (chrono 0.4, rand 0.8, axum 0.8,
+# rustyline 15, notify 6, image 0.25).
+#
+# Distributed backend (`redis` crate): DEFERRED to v1.18+ per the
+# T31 task spec's "If problematic, defer distributed to v1.18+ and
+# ship in-memory MVP only (document in AGENTS.md)" guidance. The
+# `redis` crate's rustls feature (`redis = { features =
+# ["tls-rustls"] }`) is pure-Rust on paper but pulls a substantial
+# async + connection-pool surface that complicates the MVP smoke
+# test on the Windows MSVC host (vcruntime.h / cc-rs class of
+# issues that pushed hand-rolled lexer/parser per AGENTS.md). The
+# `cache.set(key, value, ttl: Duration)` surface is shaped so the
+# future Redis backend is a drop-in: keys/values are `String`, TTL
+# is a `chrono::Duration` (same one the Buff prelude already
+# surfaces), and the dispatch is keyed on the cache instance's
+# backend enum (a single `Backend::{Memory, Redis}` match arm).
+#
+# The crate is recorded in the codegen `extern_crates` BTreeSet
+# when a Buff program uses `Cache` (mirrors the chrono / regex /
+# tracing / base64 / sha2 codegen-only linking boundary: the
+# single-file `buff run` rustc path does NOT link it; cargo-project
+# wiring is deferred per the existing precedent). Snapshots +
+# extern_crates set is the verifiable contract.
+moka = { version = "0.12", default-features = false, features = ["sync"] }
+# T31: `buff-cache` workspace path dep — mirrors the buff-template /
+# buff-image / buff-audio / buff-dsp / buff-dataframe / buff-reactive
+# pattern so any future consumer (codegen-lowered `Cache.new(...)` /
+# `cache.*` calls, IDE hover/completion, the future Redis backend
+# v1.18+) resolves to the same in-tree version during the v1.16
+# frameworks wave. Records `buff-cache` (NOT `buff_lang_cache` —
+# the framework-crate naming convention drops the `-lang` infix
+# per AGENTS.md).
+buff-cache = { path = "crates/buff-cache" }
+# T30: `buff-config` workspace path dep — mirrors the buff-image /
+# buff-audio / buff-dsp / buff-dataframe pattern so any future
+# consumer (codegen-lowered `Config.*` calls, IDE hover/completion)
+# resolves to the same in-tree version during the v1.13 frameworks
+# wave. Records `buff-config` (NOT `buff_lang_config` — the
+# framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-config = { path = "crates/buff-config" }
+# T33: `buff-http-client` workspace path dep — idiomatic HTTP client
+# wrapping the `reqwest` crate (already pinned at the workspace level
+# for T127). Mirrors the buff-image / buff-audio / buff-dsp /
+# buff-dataframe pattern so any future consumer (codegen-lowered
+# `HttpClient.*` / `client.*` / `resp.*` calls, IDE hover/completion)
+# resolves to the same in-tree version during the v1.13 frameworks
+# wave. Records `buff-http-client` (NOT `buff_lang_http_client` —
+# the framework-crate naming convention drops the `-lang` infix
+# per AGENTS.md).
+buff-http-client = { path = "crates/buff-http-client" }
+# T34: `buff-auth` deps — JWT + OAuth2 + password hashing + RBAC.
+# Three pure-Rust RustCrypto / community crates cover the extern
+# surface per the T4 FFI guide. Added by T31 (this commit) because
+# T34 created crates/buff-auth without registering the workspace
+# deps — workspace glob `crates/*` cannot load buff-auth otherwise,
+# which blocks every sibling crate's `cargo check`. Versions chosen
+# to match the wider RustCrypto ecosystem pin philosophy:
+# - `jsonwebtoken` 9: HS256/RS256/ES256 via the `rust_crypto`
+#   backend (NOT `ring` / `aws-lc-rs` — pure-Rust, no cc-rs).
+# - `argon2` 0.5: RustCrypto Argon2id PHC-string format (pure-Rust).
+# - `oauth2` 4: rustls-tls via reqwest (NOT native-tls).
+# All three are recorded in `extern_crates` when a Buff program
+# uses `JWT.*` / `OAuth2Client.*` / `Password.*` (mirrors the
+# chrono/regex/tracing codegen-only linking boundary).
+jsonwebtoken = "9"
+argon2 = "0.5"
+oauth2 = "4"
+# T36: `buff-resilience` MVP — resilience patterns (retry + circuit
+# breaker + rate limiter + timeout + composable pipeline). The crate
+# HAND-ROLLS all four primitives on `std::time` + `std::thread` — it
+# does NOT pull `tower` or `governor` even though the T36 task spec
+# mentioned them as candidate backends. Rationale:
+#
+# - `tower`'s `Service` trait is `async`-first (the `Response`
+#   associated type is wrapped in a `Future<Output = Result<T, E>>`).
+#   Adopting tower would force the Buff surface to be `async` —
+#   violating Buff's "no `await`, async propagates invisibly" rule
+#   (Buff §6 mandates no `_async` suffix; the language's anti-
+#   function-coloring guarantee means users never write `await`).
+#   Buff's existing stdlib (`DateTime`, `Regex`, `Hash`, etc.) is
+#   sync-only for the same reason.
+#
+# - `governor` 0.6+ depends on `quanta` for high-resolution timing.
+#   `quanta` pulls `cc-rs` on non-x86 targets (it has an asm fallback
+#   for x86 but a C shim elsewhere). The same cc-rs-on-Windows-MSVC
+#   host issue that pushed the lexer/parser to be hand-rolled (per
+#   AGENTS.md NOTES) would block `governor` here. `std::time::Instant`
+#   is the pure-Rust alternative; the 1ms-poll cadence it enables is
+#   documented in `crates/buff-resilience/src/lib.rs::POLL_CADENCE`.
+#
+# - The 4 primitives + Pipeline composition are <400 LOC of pure
+#   `std::time` + `std::thread` logic. Small enough to hand-roll
+#   correctly with full test coverage (27 tests + 5 insta snapshots
+#   per the T36 acceptance criteria). Adding tower/governor would
+#   inflate compile time + dep tree without buying meaningful
+#   robustness for the MVP scope.
+#
+# Future v1.18+ enhancements may add an async variant of the Pipeline
+# (e.g. `PipelineAsync`) backed by `tokio::time::sleep` + `tokio::select!`
+# for true timeout cancellation. The current sync Timeout is a SOFT
+# timeout — it spawns the handler on a worker thread and polls
+# `JoinHandle::is_finished()` on a 1ms cadence; if the deadline
+# elapses, the join handle is dropped (worker thread continues in
+# the background until it finishes). This is the only safe way to
+# enforce a timeout in pure Rust without async.
+#
+# Pure-Rust, no native C deps, no cc-rs — matches the "no C library,
+# no Docker" hard rule from T126/T127. Mirrors the buff-image /
+# buff-template / buff-dsp / buff-dataframe / buff-fuzz / buff-audit
+# pattern so any future consumer (codegen-lowered `Pipeline.new()` /
+# `RetryPolicy.*` / `CircuitBreaker.*` / `RateLimiter.*` / `Timeout.*`
+# calls, IDE hover/completion) resolves to the same in-tree version
+# during the v1.16 frameworks wave. Records `buff-resilience` (NOT
+# `buff_lang_resilience` — the framework-crate naming convention
+# drops the `-lang` infix per AGENTS.md).
+buff-resilience = { path = "crates/buff-resilience" }

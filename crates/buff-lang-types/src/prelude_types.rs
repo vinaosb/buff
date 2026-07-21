@@ -1082,6 +1082,35 @@ pub enum PreludeType {
     /// the T18 task spec mandate and the "no C library, no Docker"
     /// hard rule from T126/T127.
     Database,
+    /// T33 (v1.13 frameworks wave 5): the `HttpClient` runtime-value
+    /// type — an idiomatic HTTP client wrapping the `reqwest` crate
+    /// (already pinned at the workspace level for T127) via a safe
+    /// FFI boundary per the T4 FFI guide. Constructed via the
+    /// prelude associated function `HttpClient.new()` (returns a
+    /// new client with default settings); carries the instance
+    /// methods `client.get(url)`, `client.post(url)`,
+    /// `client.put(url)`, `client.delete(url)` — each returning a
+    /// `RequestBuilder` (opaque, typed `Type::Unknown` for MVP).
+    /// The `RequestBuilder` carries `.header(name, val)`,
+    /// `.json(body)`, `.timeout(secs)`, `.send()` (returns
+    /// `Response`, also opaque for MVP). The `Response` carries
+    /// `.status()`, `.text()`, `.json()`, `.bytes()`, `.headers()`.
+    ///
+    /// `buff_type()` returns [`Type::HttpClient`] (a real value
+    /// type, NOT [`Type::Void`] like `Log`). `is_namespace_only()`
+    /// returns `false` (HttpClient IS a runtime value, like Regex /
+    /// Image / World). The `reqwest` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `HttpClient.*`
+    /// (mirrors the chrono / regex / tracing codegen-only linking
+    /// boundary). Pure-Rust, CPU-only.
+    ///
+    /// FFI-safe: complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers; owned
+    /// HttpClient / RequestBuilder / Response at the boundary; fallible
+    /// ops return `Result<T, HttpError>`; HttpClient is `Clone + Send
+    /// + Sync`; no lifetimes; every public body catch_unwind-wrapped
+    /// per FFI guide R6).
+    HttpClient,
     /// T27 (v1.13 frameworks wave 5): the `Fuzz` namespace — the
     /// property-based fuzzing entry point. Wraps the in-tree
     /// pure-Rust `buff-fuzz` crate (`buff_fuzz::run`) backed by
@@ -1333,6 +1362,28 @@ impl PreludeType {
         // spec. Records `buff-db` + `sqlx` + `tokio` in codegen
         // `extern_crates` when a Buff program uses `Database.*`.
         PreludeType::Database,
+        // T33: HttpClient — idiomatic HTTP client wrapping reqwest.
+        // Runtime-value type (mirrors Regex / Image / World). The
+        // assoc fn `HttpClient.new()` returns the runtime value;
+        // instance methods `client.get(url)` / `client.post(url)` /
+        // `client.put(url)` / `client.delete(url)` return opaque
+        // RequestBuilder values (typed `Type::Unknown` for MVP).
+        // Records `buff-http-client` + `reqwest` in codegen
+        // `extern_crates` when a Buff program uses `HttpClient.*`.
+        PreludeType::HttpClient,
+        // T30: Config — layered configuration namespace (viper-equivalent).
+        // Wraps the `buff-config` crate (`buff_config::Config`). Namespace-
+        // only module (mirror Log / Toml / Math / Random). The assoc fns
+        // `Config.new()` / `Config.set_default(key, val)` / `Config.load_file(p)`
+        // / `Config.load_env(prefix)` / `Config.load_args(args)` / `Config.get(key)`
+        // / `Config.get_int(key)` / `Config.get_float(key)` / `Config.get_bool(key)`
+        // / `Config.watch(path, callback)` are all dispatched on the
+        // PreludeType::Config namespace. `buff_type()` returns Type::Void
+        // (Config is namespace-only — no runtime value). Records `buff-config`
+        // + `figment` + `notify` in codegen `extern_crates` when a Buff
+        // program uses `Config.*` (mirrors the chrono / regex / tracing
+        // codegen-only linking boundary). Pure-Rust, no native deps.
+        PreludeType::Config,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -1554,6 +1605,20 @@ impl PreludeType {
             // user-facing `Database.connect(url)` surface. The codegen
             // splices `buff_db::Pool::connect(url)` directly.
             PreludeType::Database => "Database",
+            // T33: HttpClient — canonical PascalCase name matching the
+            // user-facing `HttpClient.new()` / `client.get(url)` surface.
+            // The codegen splices `buff_http_client::HttpClient::new()`
+            // directly.
+            PreludeType::HttpClient => "HttpClient",
+            // T30: Config — canonical PascalCase name matching the
+            // user-facing `Config.new()` / `cfg.set_default(key, val)` /
+            // `cfg.load_file(path)` / `cfg.load_env(prefix)` /
+            // `cfg.load_args(args)` / `cfg.get(key)` / `cfg.get_int(key)` /
+            // `cfg.get_float(key)` / `cfg.get_bool(key)` /
+            // `cfg.watch(path, callback)` surface. The underlying Rust
+            // type is `buff_config::Config`. Namespace-only (no runtime
+            // value — mirrors Log / Toml / Math / Random).
+            PreludeType::Config => "Config",
         }
     }
 
@@ -1794,6 +1859,16 @@ impl PreludeType {
             // in `assoc_fn_return_type` — the codegen emits
             // `buff_db::Pool::connect(&url).await?`).
             PreludeType::Database => Type::Unknown,
+            // T33: HttpClient IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::HttpClient`] variant; the
+            // codegen layer maps it to `buff_http_client::HttpClient`.
+            PreludeType::HttpClient => Type::HttpClient,
+            // T30: Config is a namespace-only module (mirror Log / Toml /
+            // Math / Random). The namespace itself has no value
+            // representation; only its associated functions are callable.
+            // `buff_type()` returns Type::Void (Config is NOT a runtime
+            // value — it's a namespace for layered config operations).
+            PreludeType::Config => Type::Void,
         }
     }
 
@@ -1837,6 +1912,7 @@ impl PreludeType {
                 | PreludeType::ReactiveSignal
                 | PreludeType::ReactiveComputed
                 | PreludeType::ReactiveEffect
+                | PreludeType::Config
         )
     }
 }
@@ -2393,6 +2469,34 @@ pub enum PreludeAssocFn {
     /// `Window.blackman(n)` - Blackman window of length n. One arg (Int).
     /// Returns Window. Wraps `buff_dsp::Window::blackman(n)`.
     Blackman,
+    // ---- Config (T30) ----------------------------------------------------
+    /// `Config.set_default(key, value)` - set a default value. Two args
+    /// (String key, any serializable value). Returns Void. Lowest
+    /// precedence in the layered config stack.
+    SetDefault,
+    /// `Config.load_file(path)` - load a config file (TOML/YAML/JSON).
+    /// One arg (String / Path). Returns Void. Format inferred from
+    /// extension. Wraps `buff_config::Config::load_file(path)?`.
+    LoadFile,
+    /// `Config.load_env(prefix)` - load env vars with prefix. One arg
+    /// (String prefix). Returns Void. Strips prefix from keys.
+    LoadEnv,
+    /// `Config.load_args(args)` - load CLI args. One arg (Vector<String>).
+    /// Returns Void. Parses `--key=value` and `--key value` forms.
+    LoadArgs,
+    /// `Config.get_int(key)` - get an integer value. One arg (String key).
+    /// Returns Option<Int>. Wraps `buff_config::Config::get_int(key)`.
+    GetInt,
+    /// `Config.get_float(key)` - get a float value. One arg (String key).
+    /// Returns Option<Float>. Wraps `buff_config::Config::get_float(key)`.
+    GetFloat,
+    /// `Config.get_bool(key)` - get a boolean value. One arg (String key).
+    /// Returns Option<Bool>. Wraps `buff_config::Config::get_bool(key)`.
+    GetBool,
+    /// `Config.watch(path, callback)` - watch a config file for changes.
+    /// Two args (String path, callback fn). Returns Void. Fires callback
+    /// on file modification. Wraps `buff_config::Config::watch(path, cb)?`.
+    Watch,
 }
 
 impl PreludeAssocFn {
@@ -2541,6 +2645,20 @@ impl PreludeAssocFn {
         PreludeAssocFn::Hann,
         PreludeAssocFn::Hamming,
         PreludeAssocFn::Blackman,
+        // T30: Config assoc fns (8 distinct names): set_default / load_file
+        // / load_env / load_args / get_int / get_float / get_bool / watch.
+        // `New` is shared with Channel.new (dispatched on (Config, New)
+        // pair). `Get` is shared with Args.get / Env.get (dispatched on
+        // (Config, Get) pair). All Config-only beyond those two shared
+        // variants. Namespace-only module (mirror Log / Toml / Math).
+        PreludeAssocFn::SetDefault,
+        PreludeAssocFn::LoadFile,
+        PreludeAssocFn::LoadEnv,
+        PreludeAssocFn::LoadArgs,
+        PreludeAssocFn::GetInt,
+        PreludeAssocFn::GetFloat,
+        PreludeAssocFn::GetBool,
+        PreludeAssocFn::Watch,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -2600,6 +2718,27 @@ impl PreludeAssocFn {
             PreludeAssocFn::Hann => "hann",
             PreludeAssocFn::Hamming => "hamming",
             PreludeAssocFn::Blackman => "blackman",
+            // T30: Config method names. Mirror the `buff_config::Config`
+            // method names so codegen can splice
+            // `buff_config::Config::set_default(key, val)` /
+            // `buff_config::Config::load_file(path)` /
+            // `buff_config::Config::load_env(prefix)` /
+            // `buff_config::Config::load_args(args)` /
+            // `buff_config::Config::get_int(key)` /
+            // `buff_config::Config::get_float(key)` /
+            // `buff_config::Config::get_bool(key)` /
+            // `buff_config::Config::watch(path, cb)` paths without
+            // rewriting. `new` and `get` are shared with Channel.new /
+            // Args.get / Env.get (dispatched on (Config, New) /
+            // (Config, Get) pair).
+            PreludeAssocFn::SetDefault => "set_default",
+            PreludeAssocFn::LoadFile => "load_file",
+            PreludeAssocFn::LoadEnv => "load_env",
+            PreludeAssocFn::LoadArgs => "load_args",
+            PreludeAssocFn::GetInt => "get_int",
+            PreludeAssocFn::GetFloat => "get_float",
+            PreludeAssocFn::GetBool => "get_bool",
+            PreludeAssocFn::Watch => "watch",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -3378,6 +3517,30 @@ pub fn assoc_fn_return_type(
         // `sqlx` + `tokio` in codegen `extern_crates` (mirrors the
         // chrono / regex / tracing codegen-only linking boundary).
         (PreludeType::Database, PreludeAssocFn::Connect) => Some(Type::Unknown),
+        // T33: HttpClient.new() -> HttpClient. Zero args. Wraps
+        // `buff_http_client::HttpClient::new()` (infallible - returns
+        // a new client with default settings). Returns the concrete
+        // `Type::HttpClient` variant (unlike Web / Database which
+        // forward-declare as Type::Unknown — HttpClient has a proper
+        // Type variant in this same T33 commit).
+        (PreludeType::HttpClient, PreludeAssocFn::New) => Some(Type::HttpClient),
+        // T30: Config module — namespace-only (no runtime value). The
+        // assoc fns return Void (set_default / load_file / load_env /
+        // load_args / watch) or Option<Int> / Option<Float> / Option<Bool>
+        // (get_int / get_float / get_bool) or Option<String> (get — shared
+        // with Args.get / Env.get). `Config.new()` returns Void (the
+        // namespace itself is never a value; the codegen creates a
+        // `buff_config::Config` internally and splices method calls on it).
+        (PreludeType::Config, PreludeAssocFn::New) => Some(Type::Void),
+        (PreludeType::Config, PreludeAssocFn::SetDefault) => Some(Type::Void),
+        (PreludeType::Config, PreludeAssocFn::LoadFile) => Some(Type::Void),
+        (PreludeType::Config, PreludeAssocFn::LoadEnv) => Some(Type::Void),
+        (PreludeType::Config, PreludeAssocFn::LoadArgs) => Some(Type::Void),
+        (PreludeType::Config, PreludeAssocFn::Get) => Some(Type::option(Type::string())),
+        (PreludeType::Config, PreludeAssocFn::GetInt) => Some(Type::option(Type::int_default())),
+        (PreludeType::Config, PreludeAssocFn::GetFloat) => Some(Type::option(Type::float_default())),
+        (PreludeType::Config, PreludeAssocFn::GetBool) => Some(Type::option(Type::bool())),
+        (PreludeType::Config, PreludeAssocFn::Watch) => Some(Type::Void),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.

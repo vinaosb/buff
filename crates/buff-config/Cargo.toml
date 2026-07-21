@@ -1,0 +1,38 @@
+[package]
+name = "buff-config"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Layered configuration for Buff (viper-equivalent). \
+Wraps the mature `figment` crate for layered config: \
+defaults -> file (TOML/YAML/JSON) -> env vars -> CLI args. \
+Hot reload via `notify` file watcher.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "config", "figment", "layered", "hot-reload"]
+categories = ["config", "development-tools"]
+
+[lib]
+name = "buff_config"
+path = "src/lib.rs"
+
+[dependencies]
+# T30: figment 0.10 — the canonical pure-Rust layered config crate
+# (the de-facto Rust ecosystem default for config with layered
+# providers). API surface used: Figment::new(), Figment::merge(),
+# Figment::extract(), figment::providers::{Env, Serialized, Format,
+# Toml, Yaml, Json}. Pure-Rust, no native deps, no cc-rs — matches
+# the "no C library, no Docker" hard rule.
+figment.workspace = true
+# T30: notify 6 — cross-platform file watcher for hot reload.
+# Already pinned at the workspace level for T131 (buff ui dev).
+# API surface used: RecommendedWatcher, Watcher::new_immediate,
+# RecursiveMode::NonRecursive, EventKind::Modify.
+notify.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

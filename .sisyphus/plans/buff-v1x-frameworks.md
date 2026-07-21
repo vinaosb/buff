@@ -3257,7 +3257,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Validation passes/fails correctly on test structs. JSON Schema export works. 3 examples + 10 tests.
   - **Commit**: `feat(buff-validate): MVP schema validation + JSON Schema export`
 
-- [ ] 30. `buff-config` — Layered Configuration (viper-equivalent)
+- [x] 30. `buff-config` — Layered Configuration (viper-equivalent)
 
   **What to do**: Wrap Rust `figment` crate (or `config` crate). Provide layered config: defaults → file (TOML/YAML/JSON) → env vars → CLI args. Type-safe config structs via existing struct decl. Hot reload via `config.watch(callback)`. Cross-language prevalence: 6/6 (dynaconf/convict/viper/figment/typesafe/Microsoft.Extensions.Configuration).
   - **LOC budget**: ≤2000, ≤20 fns. **External deps**: `figment`, `notify` (hot reload).
