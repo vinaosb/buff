@@ -1,0 +1,171 @@
+T138a: Bufflings CLI + Exercise Runner — Evidence
+====================================================
+Date: 2026-07-21
+Task: Build `crates/bufflings/` (NEW crate, v1.0.0) — Rustlings-style exercise runner for Buff
+Status: COMPLETE
+
+FILES CREATED
+------------
+crates/bufflings/
+  Cargo.toml              — v1.0.0, edition 2021, MIT OR Apache-2.0, dual bin+lib
+  src/main.rs             — 7 lines, thin dispatch to lib::run()
+  src/lib.rs              — 221 lines, top-level dispatch + 7 subcommand handlers
+  src/cli.rs              — 50 lines, clap derive (Command enum: List, Start, Verify, Progress, Watch, Hint)
+  src/exercise.rs         — 105 lines, manifest loading + ExerciseEntry/TopicGroup structs
+  src/progress.rs         — 238 lines, ~/.bufflings/progress.toml persistence + ISO timestamp
+  src/verify.rs           — 140 lines, TODO detection + buff check subprocess invocation
+  src/watch.rs            — 310 lines, notify 6.x file watcher with 200ms trailing-edge debounce
+  tests/integration_tests.rs — 225 lines, 14 integration tests (manifest, TODO, CLI parse, progress)
+
+exercises/
+  bufflings.toml          — Exercise manifest (5 exercises across 4 topics)
+  basics/
+    variables1.buff       — Seed: print variable (TODO marker)
+    variables1.README.md   — Concept explanation
+    variables1.sol.buff    — Solution file
+    hello1.buff            — Seed: hello world (TODO marker)
+    hello1.README.md       — Concept explanation
+    hello1.sol.buff         — Solution file
+  functions/
+    functions1.buff        — Seed: define a function (TODO marker)
+    functions1.README.md    — Concept explanation
+    functions1.sol.buff     — Solution file
+  control_flow/
+    if1.buff               — Seed: if/else classification (TODO marker)
+    if1.README.md           — Concept explanation
+    if1.sol.buff            — Solution file
+  types/
+    option1.buff           — Seed: Option<T> pattern match (TODO marker)
+    option1.README.md       — Concept explanation
+    option1.sol.buff        — Solution file
+
+.sisyphus/evidence/
+  task-138a-cli.txt        — This file
+
+FILES MODIFIED
+--------------
+None. Zero changes to existing crates. bufflings is fully independent.
+
+CLI DESIGN
+----------
+7 subcommands via clap derive (mirrors buff-lang-cli pattern):
+  bufflings list               — Show exercises with [x]/[ ] status per topic
+  bufflings start <name>       — Print path, open $EDITOR if set
+  bufflings verify <name>       — TODO fast-fail, then `buff check` subprocess
+  bufflings verify --all        — Verify all, exit 0 only if all pass
+  bufflings progress           — X/Y summary with percentage
+  bufflings watch               — notify 6.x file watcher, 200ms debounce, auto-verify on save
+  bufflings hint <name>         — Show hint from manifest
+
+VERIFICATION ENGINE
+------------------
+1. Fast-fail: scan for `// TODO:` lines in source → NotDoneYet (no buff invocation)
+2. Run `buff check <path>` subprocess → exit 0 = Solved, non-zero = CompileError(stderr)
+3. BuffNotFound when `buff` binary not on PATH (graceful degradation)
+
+EXERCISE STRUCTURE
+------------------
+  exercises/
+    bufflings.toml              — TOML manifest: [[topics]] with nested [[topics.exercises]]
+    <topic>/
+      <name>.buff               — Exercise file with // TODO: markers
+      <name>.README.md          — Concept explanation (human-readable)
+      <name>.sol.buff            — Solution file (for T138c CI gate; no TODO markers)
+
+SEED EXERCISES (5 exercises, 4 topics)
+-----------------------------------------
+  basics/variables1     — Declare + print a variable
+  basics/hello1         — Hello world with print()
+  functions/functions1   — Define and call a function
+  control_flow/if1       — if/else with return values
+  types/option1          — Option<T> with match
+
+PROGRESS PERSISTENCE
+--------------------
+  Location: ~/.bufflings/progress.toml
+  Format: [exercise_name] done = bool, last_verified = "ISO-8601"
+  Best-effort: missing dir/file → empty store, no panic
+
+WATCH MODE
+----------
+  Reuses T131 trailing-edge debounce pattern (notify 6.x + tokio)
+  200ms debounce constant (same as buff-lang-cli/src/ui_dev/watcher.rs)
+  Clear screen (ANSI escape) + color output:
+    Green = Solved, Red = CompileError, Yellow = NotDoneYet
+  Mock watcher available for unit testing (tokio::test start_paused)
+
+MOCK STRATEGY FOR BUFF SUBPROCESS
+---------------------------------
+  Unit tests use VerifyConfig { buff_bin: "fake_name" } → BuffNotFound outcome
+  Integration tests verify TODO fast-fail on seed exercises (no buff needed)
+  Solution files verify absence of TODO markers (no buff needed)
+  Live `buff check` invocation requires user-installed buff binary (USER ACTION)
+
+DEPENDENCIES (all workspace-pinned, no new external deps)
+-------------------------------------------------------
+  clap 4.5          — CLI argument parsing
+  anyhow 1.0        — Error handling
+  thiserror 1.0     — Custom error types
+  serde 1           — Serialization
+  toml 0.8          — Manifest + progress persistence
+  tokio 1.40        — Async runtime for file watcher
+  notify 6          — File system watcher
+  dirs 5            — Home directory resolution
+
+GATES (all passing)
+------------------
+  cargo fmt -p bufflings --check          → exit 0
+  cargo clippy -p bufflings --all-targets -- -D warnings  → exit 0
+  cargo test -p bufflings                 → 33/33 pass (19 unit + 14 integration)
+
+TEST BREAKDOWN
+---------------
+Unit tests (19):
+  exercise: empty_manifest_has_zero_total, manifest_finds_entry_by_name
+  progress: progress_store_round_trip, progress_store_empty_serializes_cleanly,
+            mark_done_overwrites_previous, count_done_with_manifest,
+            chrono_now_iso_produces_non_empty_string
+  verify: contains_todo_detects_marker, contains_todo_ignores_non_todo_comments,
+          contains_todo_ignores_empty_source, contains_todo_detects_indented_marker,
+          contains_todo_is_case_sensitive, contains_todo_allows_comment_after_marker,
+          run_buff_check_returns_buff_not_found_for_missing_bin,
+          verify_exercise_fast_fails_on_todo, verify_exercise_skips_buff_on_no_todo
+  watch: mock_watcher_delivers_batch_after_debounce,
+          mock_watcher_resets_timer_on_each_event,
+          spawn_watcher_rejects_nonexistent_path
+
+Integration tests (14):
+  load_seed_manifest_finds_all_exercises, manifest_entries_have_hints,
+  seed_exercises_contain_todo_markers, solution_files_contain_no_todo_markers,
+  verify_solution_file_without_buff_returns_buff_not_found,
+  verify_seed_exercise_fast_fails_to_not_done_yet,
+  progress_persist_to_temp_file,
+  cli_parse_list, cli_parse_start, cli_parse_verify_single,
+  cli_parse_verify_all, cli_parse_progress, cli_parse_watch, cli_parse_hint
+
+DESIGN DECISIONS
+----------------
+1. NO source dependency on buff-lang-cli. bufflings shells out to `buff` subprocess.
+   This keeps bufflings standalone and avoids pulling clap+tokio transitively.
+
+2. Exercise manifest uses TOML [[topics]] array-of-tables pattern (not BTreeMap).
+   Each topic has a name + exercises array. Simpler to read, easier to reorder.
+
+3. Solution files use .sol.buff extension (not in a separate solutions/ dir).
+   They live next to exercises. T138c uses them for CI gate comparison.
+
+4. Progress file uses ISO-8601 timestamps via std::time (no chrono dependency).
+   Keeps the dep surface minimal.
+
+5. No ANSI color crate (crossterm/termcolor/etc). Colors use raw ANSI escapes.
+   Matches the "no new deps" mandate.
+
+6. Watch mode spawns a tokio current-thread runtime (matching buff-repl pattern).
+   The single-threaded runtime is sufficient for one file watcher.
+
+SCOPE NOTES
+-----------
+  T138b writes the full 25 exercises (this task ships 5 seed exercises only).
+  T138c implements the CI gate (compares .sol.buff vs .buff, rejects TODO markers).
+  No per-crate AGENTS.md created (stayed in scope per task spec).
+  No git mutations performed (Atlas commits).

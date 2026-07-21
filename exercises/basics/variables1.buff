@@ -1,0 +1,7 @@
+// Variables exercise
+// The `print` function is built into Buff's prelude.
+// Fix the code below to print "Buff" instead of the placeholder.
+
+func main():
+    // TODO: Change this to print your name or "Buff"
+    print("TODO")

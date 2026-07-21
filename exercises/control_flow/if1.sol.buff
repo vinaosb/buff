@@ -1,0 +1,14 @@
+// Solution: Control flow exercise
+
+func classify(n: Int<64>) -> String:
+    if n > 0:
+        return "positive"
+    else if n == 0:
+        return "zero"
+    else:
+        return "negative"
+
+func main():
+    print(classify(5))
+    print(classify(0))
+    print(classify(-3))

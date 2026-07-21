@@ -1,0 +1,7 @@
+// Solution: Functions exercise
+
+func greet(name: String):
+    print("Hello, " + name + "!")
+
+func main():
+    greet("Buff")

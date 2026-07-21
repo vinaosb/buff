@@ -1,0 +1,12 @@
+// Solution: Option type exercise
+
+func maybe_double(n: Option<Int<64>) -> Option<Int<64>>:
+    match n:
+        case Some(v):
+            return Some(v * 2)
+        case None:
+            return None
+
+func main():
+    print(maybe_double(Some(21)))
+    print(maybe_double(None))

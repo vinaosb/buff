@@ -1,0 +1,9 @@
+// Option type exercise
+// Buff uses `Option<T>` instead of null.
+// `Option<T>` is either `Some(value)` or `None`.
+// Write a function `maybe_double(n: Option<Int<64>>) -> Option<Int<64>>`
+// that doubles the value inside Some, or returns None.
+
+func main():
+    // TODO: Implement maybe_double using match
+    print("TODO")

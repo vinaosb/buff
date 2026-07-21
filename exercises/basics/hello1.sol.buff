@@ -1,0 +1,4 @@
+// Solution: Hello, Buff!
+
+func main():
+    print("Hello, Buff!")

@@ -1,0 +1,39 @@
+# Bufflings exercise manifest
+# Each [[topics]] entry represents a topic group containing exercises.
+
+[[topics]]
+name = "basics"
+
+[[topics.exercises]]
+name = "variables1"
+path = "basics/variables1.buff"
+hint = "In Buff, you declare variables with `let`. Try: `let name = \"Buff\"`"
+
+[[topics.exercises]]
+name = "hello1"
+path = "basics/hello1.buff"
+hint = "Use the `print` function to output text. Buff uses indentation for blocks."
+
+[[topics]]
+name = "functions"
+
+[[topics.exercises]]
+name = "functions1"
+path = "functions/functions1.buff"
+hint = "Buff functions use `func name(params):` syntax. The body is indented."
+
+[[topics]]
+name = "control_flow"
+
+[[topics.exercises]]
+name = "if1"
+path = "control_flow/if1.buff"
+hint = "Buff uses `if condition:` with an indented body. No braces needed."
+
+[[topics]]
+name = "types"
+
+[[topics.exercises]]
+name = "option1"
+path = "types/option1.buff"
+hint = "Buff uses `Option<T>` with `match` to handle values that may be absent."

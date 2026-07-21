@@ -1,0 +1,7 @@
+// Hello, Buff!
+// Your first Buff program.
+// Use the `print` function to display "Hello, Buff!" to the console.
+
+func main():
+    // TODO: Replace this line with: print("Hello, Buff!")
+    print("TODO")

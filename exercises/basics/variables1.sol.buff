@@ -1,0 +1,5 @@
+// Solution: Variables exercise
+// Print "Buff" to the console.
+
+func main():
+    print("Buff")

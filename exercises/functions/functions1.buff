@@ -1,0 +1,9 @@
+// Functions exercise
+// Buff functions are declared with `func name(params):`
+// The body is indented (offside rule, no braces).
+// Create a function called `greet` that takes a `name` parameter
+// and prints "Hello, <name>!".
+
+func main():
+    // TODO: Define a `greet` function below, then call it
+    print("TODO")
