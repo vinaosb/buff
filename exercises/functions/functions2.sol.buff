@@ -1,0 +1,11 @@
+// Solution: Functions — multiple params + named args
+
+func greet(name: String, excited: Bool):
+    if excited:
+        print("Hello, " + name + "!")
+    else:
+        print("Hello, " + name)
+
+func main():
+    greet("Buff", excited: true)
+    greet("Buff", excited: false)

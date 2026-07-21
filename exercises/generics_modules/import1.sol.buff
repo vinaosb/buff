@@ -1,0 +1,6 @@
+// Solution: Modules — import / export declarations
+
+import { greet } from "./greet.buff"
+
+export func main():
+    print("imported")

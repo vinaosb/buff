@@ -1,0 +1,10 @@
+// Solution: Error handling — the builtin Error type
+
+func divide(a: Int, b: Int) -> Result<Int, Error>:
+    if b == 0:
+        return Error("divide by zero")
+    return Ok(a / b)
+
+func main():
+    match divide(10, 2) { Ok(v) => print(v), Err(_) => print(0) }
+    match divide(10, 0) { Ok(v) => print(v), Err(_) => print(0) }

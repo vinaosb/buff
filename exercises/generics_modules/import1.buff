@@ -1,0 +1,12 @@
+// Modules: import / export declarations
+// Buff uses ES6-style module syntax:
+//   import { greet } from "./hello.buff"
+//   export func main(): ...
+// The parser accepts these declarations even in a single-file mock.
+// Add ONE import line at the top (the file path doesn't need to exist
+// for this exercise — we're testing SYNTAX, not module resolution).
+
+// TODO: Add an import declaration here: `import { greet } from "./greet.buff"`
+
+export func main():
+    print("TODO")

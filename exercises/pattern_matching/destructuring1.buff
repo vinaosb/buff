@@ -1,0 +1,9 @@
+// Pattern matching: destructuring bindings
+// Buff's `let` can destructure tuples and struct-shaped data.
+//   let (x, y) = pair           // tuple destructuring
+//   let Point { x, y } = p      // struct-pattern destructuring
+// Use tuple destructuring to swap two values without a temp variable.
+
+func main():
+    // TODO: Use `let (a, b) = (1, 2)` then print a, b.
+    print("TODO")

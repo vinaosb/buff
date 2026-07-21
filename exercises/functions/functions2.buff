@@ -1,0 +1,11 @@
+// Functions: multiple parameters + named arguments
+// Buff functions can take multiple positional parameters.
+// Buff also supports NAMED arguments for booleans and options:
+//   fetch(url, cache: true)      // named arg
+// Define `greet(name, excited: Bool)` that prints "Hello, NAME!" or
+// "Hello, NAME!" with an exclamation when excited is true.
+
+func main():
+    // TODO: Define greet(name: String, excited: Bool) above main
+    // Then call it with positional + named args below.
+    print("TODO")

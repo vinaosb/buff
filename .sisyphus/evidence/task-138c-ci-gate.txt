@@ -42,11 +42,73 @@ This catches unsolvable exercises before they ship. The workflow itself is decla
 
 Tests do NOT shell out to the real `buff` binary. They reuse T138a's mock pattern (`VerifyConfig { buff_bin: "fake" }`) where `run_buff_check` returns `BuffNotFound`. This makes `verify_all_with_solutions` + `apply_solution` hermetic and deterministic in CI.
 
-## Gates
+## Gates (re-verified this session — 2026-07-21)
 
-- `cargo fmt -p bufflings --check` → exit 0
-- `cargo clippy -p bufflings --all-targets -- -D warnings` → exit 0
-- `cargo test -p bufflings` → 41/41 pass (27 unit + 14 integration)
+MSVC env MANDATORY prefix applied (per AGENTS.md):
+  $msvc="C:\BuildTools\VC\Tools\MSVC\14.44.35207"; LIB/INCLUDE/PATH set;
+  CC=CXX=cl.exe.
+
+Two clippy::style regressions found on first run, both fixed in this
+session (the rest of T138c was pre-staged by T138a at 36d91d3):
+
+  FIX 1 — crates/bufflings/src/verify.rs line 205
+    - path.extension().map_or(false, |e| e == "buff")
+    + path.extension().is_some_and(|e| e == "buff")
+    rationale: clippy::unnecessary_map_or (rust-1.95.0 lint set).
+
+  FIX 2 — crates/bufflings/src/lib.rs line 224
+    - fn cmd_verify_all_with_solutions(... exercises_dir: &PathBuf, ...)
+    + fn cmd_verify_all_with_solutions(... exercises_dir: &std::path::Path, ...)
+    rationale: clippy::ptr_arg (function takes slice by ref, not owned).
+
+Post-fix gate output:
+- `cargo fmt -p bufflings --check`                  → exit 0, no diff.
+- `cargo clippy -p bufflings --all-targets -- -D warnings`
+                                                     → `Finished dev
+                                                       profile ... in
+                                                       0.19s`, no
+                                                       warnings.
+- `cargo test -p bufflings`                         → 27 unit + 14
+                                                       integration + 0
+                                                       doc = 41/41 pass
+                                                       in 0.03s.
+
+Notable T138c verification tests all green:
+  - verify::tests::verify_all_with_solutions_empty_dir
+  - verify::tests::verify_all_with_solutions_applies_and_verifies
+  - verify::tests::verify_all_with_solutions_skips_non_sol_files
+  - verify::tests::apply_solution_copies_sol_over_buff
+  - verify::tests::apply_solution_fails_when_sol_missing
+  - verify::tests::solution_report_counts
+  - verify::tests::wrong_output_variant_exists
+  - verify::tests::not_started_variant_exists
+
+All buff subprocess interactions in tests use the mock pattern
+`VerifyConfig { buff_bin: "fake_buff_for_test" }` → BuffNotFound; no
+real shell-out.
+
+## How to test the CI gate locally (USER ACTION)
+
+The bufflings.yml workflow only runs server-side on github.com. To
+exercise the same logic locally before pushing:
+
+  # 1. Build both binaries (release, to mirror CI).
+  cargo build -p buff-lang-cli --release
+  cargo build -p bufflings --release
+
+  # 2. Put `buff` on PATH (binary is invoked by name in run_buff_check).
+  $env:PATH = "$pwd\target\release;$env:PATH"   # Windows PowerShell
+  # export PATH="$PWD/target/release:$PATH"     # Linux/macOS
+
+  # 3. Run the CI command directly.
+  ./target/release/bufflings verify-all-with-solutions
+  # Expected:
+  #   Solvability gate: N/N solutions pass buff check
+  #     [OK]   hello1
+  #     [OK]   variables1
+  #     ...
+  # Exit code 0 if all pass; 1 with [FAIL]/[SKIP]/stderr if any
+  # solution fails or buff is missing.
 
 ## Notes
 

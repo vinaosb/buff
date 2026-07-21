@@ -1,0 +1,7 @@
+// Solution: Pattern matching — destructuring bindings
+
+func main():
+    let pair = (1, 2)
+    let (a, b) = pair
+    print(a)
+    print(b)

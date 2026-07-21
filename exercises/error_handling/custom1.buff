@@ -1,0 +1,10 @@
+// Error handling: the builtin Error type
+// Buff ships a builtin Error type constructed with `Error("message")`.
+// It lowers to `Err(Error::new(...))` and implements Rust's std::error::Error.
+// Write `divide(a: Int, b: Int) -> Result<Int, Error>` that returns
+// `Error("divide by zero")` when b == 0, otherwise Ok(a / b).
+
+// TODO: Define divide here.
+
+func main():
+    print("TODO")

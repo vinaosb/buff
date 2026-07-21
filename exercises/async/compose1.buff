@@ -1,0 +1,12 @@
+// Async composition: calling one async fn from another
+// Because Buff has no `await` keyword, composition is invisible:
+//   async func one() -> Int { return 1 }
+//   func two() -> Int { return one() + 1 }   // auto-promoted to async
+// Define `async func first() -> Int { return 10 }` and a sync-looking
+// `func second() -> Int` that returns `first() + 5`.
+
+// TODO: Define async func first() here.
+// TODO: Define func second() that calls first().
+
+func main():
+    print("TODO")

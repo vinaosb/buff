@@ -1,0 +1,8 @@
+// Solution: Enums — defining an enumerated type
+
+enum Status { Pending, Active, Done }
+
+func main():
+    print("Pending")
+    print("Active")
+    print("Done")

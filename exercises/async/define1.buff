@@ -1,0 +1,10 @@
+// Async functions: define + spawn
+// Buff has NO `await` keyword. Async-ness propagates automatically through
+// the call graph. Use `async func name():` to declare, and
+// `spawn task()` + `task.result()` to run concurrently.
+// Define `async func fetch_value() -> Int` returning 42, then spawn it.
+
+// TODO: Define `async func fetch_value() -> Int` here.
+
+func main():
+    print("TODO")

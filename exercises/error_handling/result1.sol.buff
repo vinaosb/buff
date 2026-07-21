@@ -1,0 +1,14 @@
+// Solution: Error handling — Result + `?` propagation
+
+func parse_int(s: String) -> Result<Int, Error>:
+    if s == "42":
+        return Ok(42)
+    return Error("not 42")
+
+func parse_and_double(s: String) -> Result<Int, Error>:
+    let n = parse_int(s)?
+    return Ok(n * 2)
+
+func main():
+    match parse_and_double("42") { Ok(v) => print(v), Err(_) => print(0) }
+    match parse_and_double("nope") { Ok(v) => print(v), Err(_) => print(0) }

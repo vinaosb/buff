@@ -1,0 +1,15 @@
+// Solution: Enums — matching variants with data
+
+enum Shape { Circle(Float), Rect(Float, Float), Point }
+
+func area(s: Shape) -> Float:
+    return match s {
+        Circle(r) => 3.14 * r * r,
+        Rect(w, h) => w * h,
+        Point => 0.0,
+    }
+
+func main():
+    print(area(Circle(2)))
+    print(area(Rect(3, 4)))
+    print(area(Point))

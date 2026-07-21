@@ -1,0 +1,9 @@
+// Solution: Generic types in action
+
+func main():
+    let nums: Vector<Int> = [1, 2, 3]
+    let maybe: Option<String> = None
+    let outcome: Result<Int, Error> = Ok(7)
+    print(nums.len())
+    print(maybe)
+    print(outcome)

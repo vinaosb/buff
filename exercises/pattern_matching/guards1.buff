@@ -1,0 +1,10 @@
+// Pattern matching: guard statements
+// Buff's `guard ... else { ... }` is an early-return check.
+//   guard CONDITION else { return ... }      // diverge if CONDITION is false
+//   guard let Some(x) = opt else { return }  // diverge if the pattern fails
+// Use a guard to reject negative numbers in `sqrt_safe(n: Int) -> Int`.
+
+func main():
+    // TODO: Implement sqrt_safe(n: Int) -> Int that guards n >= 0,
+    //       then prints sqrt_safe(9) and sqrt_safe(-1).
+    print("TODO")

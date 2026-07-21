@@ -1,0 +1,9 @@
+// Solution: Pattern matching — guard statements
+
+func sqrt_safe(n: Int) -> Int:
+    guard n >= 0 else { return 0 }
+    return n
+
+func main():
+    print(sqrt_safe(9))
+    print(sqrt_safe(-1))

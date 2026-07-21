@@ -1,0 +1,9 @@
+// Solution: Type annotations exercise
+
+func main():
+    let name: String = "Buff"
+    let count: Int = 42
+    let ready: Bool = true
+    print(name)
+    print(count)
+    print(ready)

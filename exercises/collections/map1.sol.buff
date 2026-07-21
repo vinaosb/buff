@@ -1,0 +1,5 @@
+// Solution: Collections — Map<K, V> basics
+
+func main():
+    let scores = {1: 10, 2: 20, 3: 30}
+    print(scores.len())

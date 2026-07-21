@@ -1,0 +1,19 @@
+// Type annotations exercise
+// Buff's type inference usually picks the right type for you.
+// Sometimes you want to be explicit. The core primitive types are:
+//   Int       — 64-bit signed integer
+//   String    — UTF-8 text
+//   Bool      — true / false
+//   Float     — 32-bit floating point
+// Annotate each binding below with the correct type.
+
+func main():
+    // TODO: Annotate `name` with the String type
+    let name = "Buff"
+    // TODO: Annotate `count` with the Int type
+    let count = 42
+    // TODO: Annotate `ready` with the Bool type
+    let ready = true
+    print(name)
+    print(count)
+    print(ready)

@@ -1,0 +1,13 @@
+// Solution: Match — literal & wildcard patterns
+
+func describe(n: Int):
+    match n {
+        0 => print("zero"),
+        1 => print("one"),
+        _ => print("many"),
+    }
+
+func main():
+    describe(0)
+    describe(1)
+    describe(7)

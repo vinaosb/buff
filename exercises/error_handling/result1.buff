@@ -1,0 +1,17 @@
+// Error handling: Result + `?` propagation
+// Composing fallible functions is the bread-and-butter of Buff errors.
+//   `?` after a Result expression unwraps Ok, propagates Err.
+// Write `parse_and_double(s: String) -> Result<Int, Error>` that:
+//   1. parse_int(s) -> Result<Int, Error>     (provided below as a stub)
+//   2. returns Ok(2 * n) on success
+//   3. uses `?` to propagate the parse error early
+
+func parse_int(s: String) -> Result<Int, Error>:
+    if s == "42":
+        return Ok(42)
+    return Error("not 42")
+
+// TODO: Define parse_and_double using `?`
+
+func main():
+    print("TODO")

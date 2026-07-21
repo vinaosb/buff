@@ -1,0 +1,7 @@
+// Solution: For-in loops
+
+func main():
+    let mut sum = 0
+    for n in 1..=5:
+        sum = sum + n
+    print(sum)

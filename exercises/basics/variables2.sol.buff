@@ -1,0 +1,6 @@
+// Solution: Mutable variables exercise
+
+func main():
+    let mut counter = 0
+    counter = counter + 1
+    print(counter)

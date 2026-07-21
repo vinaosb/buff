@@ -1,0 +1,8 @@
+// Mutable variables exercise
+// In Buff, bindings are immutable by default. Add `mut` to allow reassignment.
+// Build a counter that starts at 0, increments to 1, then prints the value.
+
+func main():
+    // TODO: Declare a mutable binding `counter` initialized to 0
+    // TODO: Reassign counter to counter + 1
+    print(0)

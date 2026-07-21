@@ -1,0 +1,11 @@
+// Solution: Async — define + spawn
+
+async func fetch_value() -> Int:
+    return 42
+
+func main():
+    let value = fetch_value()
+    print(value)
+    let task = spawn fetch_value()
+    let answer = task.result()
+    print(answer)

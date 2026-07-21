@@ -1,0 +1,8 @@
+// For-in loops
+// Buff uses `for VAR in ITERABLE:` with an indented body.
+// The iterable can be a Vector literal, a range `a..b`, or `a..=b`.
+// Sum the numbers 1..=5 (inclusive) and print the result.
+
+func main():
+    // TODO: Use `for n in 1..=5:` to accumulate a sum
+    print(0)

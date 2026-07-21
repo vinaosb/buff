@@ -1,0 +1,12 @@
+// Result<T, E> and the `?` operator
+// Buff uses `Result<T, E>` for fallible operations.
+//   Ok(value)        — success
+//   Error("message") — failure (lowers to Err(Error::new(...)))
+// The `?` operator early-returns the Err from the enclosing function.
+// Implement `parse_small(n: Int) -> Result<Int, Error>` that:
+//   returns Error("too small")          if n < 10
+//   returns Ok(n)                       otherwise
+
+func main():
+    // TODO: Implement parse_small, then call it on 5 and 20.
+    print("TODO")

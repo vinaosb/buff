@@ -1,0 +1,10 @@
+// Solution: Result<T, E> and the `?` operator
+
+func parse_small(n: Int) -> Result<Int, Error>:
+    if n < 10:
+        return Error("too small")
+    return Ok(n)
+
+func main():
+    match parse_small(5) { Ok(v) => print(v), Err(_) => print(0) }
+    match parse_small(20) { Ok(v) => print(v), Err(_) => print(0) }

@@ -1,6 +1,6 @@
 // Solution: Control flow exercise
 
-func classify(n: Int<64>) -> String:
+func classify(n: Int) -> String:
     if n > 0:
         return "positive"
     else if n == 0:

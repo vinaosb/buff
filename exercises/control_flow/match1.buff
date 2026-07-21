@@ -1,0 +1,9 @@
+// Match expression — literal & wildcard patterns
+// Buff's `match` expression selects an arm by pattern.
+// Syntax: `match SCRUTINEE { PAT => EXPR, PAT => EXPR, ... }`
+// Patterns include literals (numbers, strings) and the `_` wildcard catch-all.
+// Write `describe(n: Int)` that prints "zero", "one", or "many".
+
+func main():
+    // TODO: Implement describe(n: Int) using match, then call it on 0, 1, and 7
+    print("TODO")

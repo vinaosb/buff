@@ -1,6 +1,6 @@
 // Control flow exercise
 // Buff uses indentation-based if/else blocks.
-// Write a function `classify(n: Int<64>) -> String` that returns:
+// Write a function `classify(n: Int) -> String` that returns:
 //   "positive" if n > 0
 //   "zero"     if n == 0
 //   "negative" if n < 0

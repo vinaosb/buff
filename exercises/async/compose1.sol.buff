@@ -1,0 +1,10 @@
+// Solution: Async composition
+
+async func first() -> Int:
+    return 10
+
+func second() -> Int:
+    return first() + 5
+
+func main():
+    print(second())

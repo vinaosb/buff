@@ -1,0 +1,16 @@
+// Generic types in action
+// Buff ships powerful generics: Vector<T>, Map<K,V>, Option<T>, Result<T,E>.
+// The angle brackets carry the type parameters. The compiler usually infers
+// them from the literal — you rarely write them out.
+// Annotate the bindings below with explicit generic type parameters.
+
+func main():
+    // TODO: Annotate `nums` as Vector<Int>
+    let nums = [1, 2, 3]
+    // TODO: Annotate `maybe` as Option<String>
+    let maybe = None
+    // TODO: Annotate `outcome` as Result<Int, Error>
+    let outcome = Ok(7)
+    print(nums.len())
+    print(maybe)
+    print(outcome)

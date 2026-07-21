@@ -1,8 +1,22 @@
 # Bufflings exercise manifest
 # Each [[topics]] entry represents a topic group containing exercises.
+# Total: 25 exercises across 11 topics.
+#
+# T138b: added 20 new exercises to the 5 seed exercises shipped by T138a.
+# Three proposed exercises were dropped (see evidence/task-138b-exercises.md):
+#   - structs/define1, structs/methods1  (Buff has NO struct-decl parser;
+#     the `struct` keyword is reserved but `parse_one_decl` has no KwStruct
+#     arm — only codegen AST construction works, not source parsing).
+#   - traits/polymorphism1               (Buff has no `impl` keyword and no
+#     trait-bounds syntax; trait satisfaction is via `extend Type { ... }`).
 
 [[topics]]
 name = "basics"
+
+[[topics.exercises]]
+name = "hello1"
+path = "basics/hello1.buff"
+hint = "Use the `print` function to output text. Buff uses indentation for blocks."
 
 [[topics.exercises]]
 name = "variables1"
@@ -10,9 +24,14 @@ path = "basics/variables1.buff"
 hint = "In Buff, you declare variables with `let`. Try: `let name = \"Buff\"`"
 
 [[topics.exercises]]
-name = "hello1"
-path = "basics/hello1.buff"
-hint = "Use the `print` function to output text. Buff uses indentation for blocks."
+name = "variables2"
+path = "basics/variables2.buff"
+hint = "Add `mut` between `let` and the name to allow reassignment: `let mut counter = 0`."
+
+[[topics.exercises]]
+name = "types1"
+path = "basics/types1.buff"
+hint = "The annotation goes between name and `=`: `let name: String = \"Buff\"`."
 
 [[topics]]
 name = "functions"
@@ -22,6 +41,16 @@ name = "functions1"
 path = "functions/functions1.buff"
 hint = "Buff functions use `func name(params):` syntax. The body is indented."
 
+[[topics.exercises]]
+name = "functions2"
+path = "functions/functions2.buff"
+hint = "Header: `func greet(name: String, excited: Bool):`. Call: `greet(\"Buff\", excited: true)`."
+
+[[topics.exercises]]
+name = "functions3"
+path = "functions/functions3.buff"
+hint = "Base case `if n <= 1: return 1`, then `return n * factorial(n - 1)`."
+
 [[topics]]
 name = "control_flow"
 
@@ -30,6 +59,16 @@ name = "if1"
 path = "control_flow/if1.buff"
 hint = "Buff uses `if condition:` with an indented body. No braces needed."
 
+[[topics.exercises]]
+name = "for1"
+path = "control_flow/for1.buff"
+hint = "`for n in 1..=5:` over an inclusive range. Use `let mut sum = 0` to accumulate."
+
+[[topics.exercises]]
+name = "match1"
+path = "control_flow/match1.buff"
+hint = "Match uses braces: `return match n { 0 => \"zero\", 1 => \"one\", _ => \"many\" }`."
+
 [[topics]]
 name = "types"
 
@@ -37,3 +76,94 @@ name = "types"
 name = "option1"
 path = "types/option1.buff"
 hint = "Buff uses `Option<T>` with `match` to handle values that may be absent."
+
+[[topics.exercises]]
+name = "result1"
+path = "types/result1.buff"
+hint = "Header: `func parse_small(n: Int) -> Result<Int, Error>:`. Return `Error(\"msg\")` or `Ok(value)`."
+
+[[topics]]
+name = "enums"
+
+[[topics.exercises]]
+name = "define1"
+path = "enums/define1.buff"
+hint = "Brace form: `enum Status { Pending, Active, Done }`. Variants comma-separated."
+
+[[topics.exercises]]
+name = "match1"
+path = "enums/match1.buff"
+hint = "Destructure payloads in match arms: `Circle(r) => 3.14 * r * r, Rect(w, h) => w * h`."
+
+[[topics]]
+name = "traits"
+
+[[topics.exercises]]
+name = "define1"
+path = "traits/define1.buff"
+hint = "Trait uses braces: `trait Summarize { func summary(self) -> String; }`. Methods via `extend String { ... }`."
+
+[[topics]]
+name = "pattern_matching"
+
+[[topics.exercises]]
+name = "destructuring1"
+path = "pattern_matching/destructuring1.buff"
+hint = "Tuple destructuring: `let (a, b) = pair`. Use `_` to skip a slot."
+
+[[topics.exercises]]
+name = "guards1"
+path = "pattern_matching/guards1.buff"
+hint = "Guard statement: `guard n >= 0 else { return 0 }`. The else block must diverge."
+
+[[topics]]
+name = "error_handling"
+
+[[topics.exercises]]
+name = "result1"
+path = "error_handling/result1.buff"
+hint = "The `?` operator propagates Err: `let n = parse_int(s)?` unwraps Ok or returns early."
+
+[[topics.exercises]]
+name = "custom1"
+path = "error_handling/custom1.buff"
+hint = "Builtin Error type: `return Error(\"divide by zero\")` (NOT `return Err(...)`). Success is `return Ok(value)`."
+
+[[topics]]
+name = "async"
+
+[[topics.exercises]]
+name = "define1"
+path = "async/define1.buff"
+hint = "Header: `async func fetch_value() -> Int:`. Spawn: `let task = spawn fetch_value()` then `task.result()`."
+
+[[topics.exercises]]
+name = "compose1"
+path = "async/compose1.buff"
+hint = "Calling an async fn from a sync fn is invisible: `return first() + 5`. The compiler auto-inserts `.await`."
+
+[[topics]]
+name = "collections"
+
+[[topics.exercises]]
+name = "vector1"
+path = "collections/vector1.buff"
+hint = "`let mut stack = [1, 2]`, `stack.push(3)`, `stack.pop()` returns Option<T>."
+
+[[topics.exercises]]
+name = "map1"
+path = "collections/map1.buff"
+hint = "Map literal uses braces: `let scores = {1: 10, 2: 20, 3: 30}`. Then `scores.len()`."
+
+[[topics]]
+name = "generics_modules"
+
+[[topics.exercises]]
+name = "generic_func1"
+path = "generics_modules/generic_func1.buff"
+hint = "Annotation: `let nums: Vector<Int> = [1, 2, 3]`. Angle brackets carry the type param."
+
+[[topics.exercises]]
+name = "import1"
+path = "generics_modules/import1.buff"
+hint = "Top of file: `import { greet } from \"./greet.buff\"`. Export: `export func main():`."

@@ -1,0 +1,8 @@
+// Solution: Collections — Vector<T> basics
+
+func main():
+    let mut stack = [1, 2]
+    stack.push(3)
+    print(stack.len())
+    let top = stack.pop()
+    match top { Some(x) => print(x), None => print(0) }

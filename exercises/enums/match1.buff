@@ -1,0 +1,14 @@
+// Enums: matching variants with data
+// Each variant can carry data: `Circle(Float)`, `Rect(Float, Float)`.
+// Use a Variant pattern in `match` to destructure the payload.
+// Define `Shape` and write `area(s: Shape) -> Float` that returns:
+//   3.14 * r * r       for Circle(r)
+//   w * h              for Rect(w, h)
+//   0                  for Point
+
+// TODO: Define `enum Shape { Circle(Float), Rect(Float, Float), Point }`
+
+// TODO: Define `func area(s: Shape) -> Float:` that matches on s.
+
+func main():
+    print("TODO")

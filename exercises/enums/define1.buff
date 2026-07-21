@@ -1,0 +1,9 @@
+// Enums: defining your own enumerated type
+// Buff enums use the brace form: `enum Name { Variant1, Variant2, ... }`
+// Variants can be UNIT (no payload) or carry DATA: `Circle(Float)`.
+// Define a `Status` enum with three variants: Pending, Active, Done.
+
+// TODO: Define `enum Status { ... }` here (above main).
+
+func main():
+    print("TODO")

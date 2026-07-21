@@ -1,0 +1,10 @@
+// Functions: recursion
+// A Buff function can call itself. The body MUST indent under the header.
+// Write `factorial(n: Int) -> Int` that returns:
+//   1                  if n <= 1
+//   n * factorial(n-1) otherwise
+// Then print factorial(5) which should be 120.
+
+func main():
+    // TODO: Define factorial above main, then call it here.
+    print(0)

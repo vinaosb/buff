@@ -1,0 +1,14 @@
+// Solution: Traits — declaring and satisfying a trait
+
+trait Summarize {
+    func summary(self) -> String;
+}
+
+extend String {
+    func summary(self) -> String {
+        return "String value"
+    }
+}
+
+func main():
+    print("hello".summary())

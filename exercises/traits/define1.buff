@@ -1,0 +1,13 @@
+// Traits: declaring and satisfying a trait
+// A Buff trait declares a set of methods a type should provide.
+//   trait NAME { func method(self) -> RetType; }    // required method
+// Methods are added to a type via `extend TYPE { func ... }`:
+//   extend String { func shout(self) -> String { ... } }
+// Define `trait Summarize { func summary(self) -> String; }`
+// and extend String with a `summary` method returning "String: N chars".
+
+// TODO: Define `trait Summarize { ... }` here.
+// TODO: Define `extend String { ... }` with the summary method.
+
+func main():
+    print("TODO")

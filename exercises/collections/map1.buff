@@ -1,0 +1,8 @@
+// Collections: Map<K, V> basics
+// Buff's `Map<K, V>` lowers to Rust's `HashMap<K, V>`.
+// Literal uses braces (data-form): `{1: 10, 2: 20}`.
+// Build a small scores map and check its size.
+
+func main():
+    // TODO: Declare `let scores = {1: 10, 2: 20, 3: 30}` and print its length.
+    print("TODO")
