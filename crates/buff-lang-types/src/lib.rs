@@ -18,6 +18,11 @@
 // the crate root so the codegen pass (and downstream tools) can call
 // `buff_lang_types::analyze_async(...)` without a long module path.
 pub mod async_analysis;
+// T53: Zig-style comptime interpreter. Evaluates `comptime { ... }`
+// blocks during type checking, producing constants the codegen splices
+// into generated Rust source. Re-exported at the crate root so the
+// codegen pass + `buff check` can call `analyze_program(...)` directly.
+pub mod comptime;
 pub mod env;
 pub mod exhaustiveness;
 pub mod infer;
@@ -48,6 +53,13 @@ pub mod recursion;
 pub mod ty;
 
 pub use env::TypeEnv;
+// T53: comptime interpreter + program-level analysis entry point.
+// Re-exported at crate root so the codegen pass + `buff check` can call
+// `buff_lang_types::analyze_program(...)` without a long module path.
+pub use comptime::{
+    analyze_program, ComptimeError, ComptimeFacts, ComptimeInterpreter, ComptimeValue,
+    COMPTIME_MAX_DEPTH,
+};
 // T31: async call-graph propagation. Re-exported at crate root so callers
 // (codegen, CLI, snapshot tests) can use `analyze_async`, `build_call_graph`,
 // `propagate_async`, etc. without a long path. Deterministic (BTreeMap/

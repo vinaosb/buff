@@ -115,6 +115,10 @@ pub enum ErrorCode {
     /// E1109 — An `extern "C" func ...` declaration was given generic
     /// parameters, which Buff rejects on extern functions.
     ExternGenericsUnsupported,
+    /// E1110 — A `comptime` block or parameter was malformed (T53).
+    /// Examples: `comptime` not followed by a block; `comptime` used in
+    /// expression position (only block + param positions are valid).
+    MalformedComptime,
 
     // -----------------------------------------------------------------------
     // E12xx — Type-checking (buff-lang-types)
@@ -144,6 +148,16 @@ pub enum ErrorCode {
     /// E1209 — A module/import error: file not found, circular import,
     /// missing export, or unsupported stdlib path.
     ModuleError,
+    /// E1210 — A `comptime` block failed to evaluate (T53). The comptime
+    /// interpreter hit a construct it cannot reduce to a constant.
+    ComptimeEvaluationFailed,
+    /// E1211 — A `comptime` block attempted an I/O operation (T53). I/O
+    /// is forbidden at compile time; only pure computation is allowed.
+    ComptimeIoForbidden,
+    /// E1212 — A `comptime` block attempted reflection beyond type info
+    /// (T53). Inspecting field layouts or calling methods by name is not
+    /// allowed; only type-level queries are permitted.
+    ComptimeReflectionForbidden,
 
     // -----------------------------------------------------------------------
     // E13xx — Codegen (buff-lang-codegen-rust)
@@ -159,6 +173,10 @@ pub enum ErrorCode {
     /// *warning* — codegen still emits the call, but it can deadlock the
     /// single-threaded async runtime.
     AsyncBlockDeadlock,
+    /// E1304 — Codegen could not lower a `comptime` construct (T53). The
+    /// comptime interpreter ran but produced a value codegen cannot splice
+    /// into the generated Rust source.
+    ComptimeLoweringFailed,
 }
 
 impl ErrorCode {
@@ -192,6 +210,7 @@ impl ErrorCode {
             ErrorCode::UnterminatedList => "E1107",
             ErrorCode::UnsupportedAbi => "E1108",
             ErrorCode::ExternGenericsUnsupported => "E1109",
+            ErrorCode::MalformedComptime => "E1110",
             // E12xx — Type-checking
             ErrorCode::UndefinedVariable => "E1201",
             ErrorCode::BinaryOpTypeMismatch => "E1202",
@@ -202,10 +221,14 @@ impl ErrorCode {
             ErrorCode::NonExhaustiveMatch => "E1207",
             ErrorCode::PreferGpuOnRecursiveFunction => "E1208",
             ErrorCode::ModuleError => "E1209",
+            ErrorCode::ComptimeEvaluationFailed => "E1210",
+            ErrorCode::ComptimeIoForbidden => "E1211",
+            ErrorCode::ComptimeReflectionForbidden => "E1212",
             // E13xx — Codegen
             ErrorCode::UnsupportedCodegen => "E1301",
             ErrorCode::CodegenParseError => "E1302",
             ErrorCode::AsyncBlockDeadlock => "E1303",
+            ErrorCode::ComptimeLoweringFailed => "E1304",
         }
     }
 
@@ -239,6 +262,7 @@ impl ErrorCode {
             ErrorCode::ExternGenericsUnsupported => {
                 "generics are not supported on `extern` functions"
             }
+            ErrorCode::MalformedComptime => "malformed `comptime` block or parameter",
             ErrorCode::UndefinedVariable => "undefined variable",
             ErrorCode::BinaryOpTypeMismatch => "binary operator applied to incompatible types",
             ErrorCode::AssignTypeMismatch => "assignment type mismatch",
@@ -250,11 +274,19 @@ impl ErrorCode {
                 "`@prefer(gpu)` is not allowed on recursive functions"
             }
             ErrorCode::ModuleError => "module / import resolution error",
+            ErrorCode::ComptimeEvaluationFailed => "comptime evaluation failed",
+            ErrorCode::ComptimeIoForbidden => "I/O is not allowed at comptime",
+            ErrorCode::ComptimeReflectionForbidden => {
+                "reflection beyond type info is not allowed at comptime"
+            }
             ErrorCode::UnsupportedCodegen => "unsupported language feature in code generation",
             ErrorCode::CodegenParseError => {
                 "codegen produced invalid rust (internal compiler error)"
             }
             ErrorCode::AsyncBlockDeadlock => "`block()` inside an async function can deadlock",
+            ErrorCode::ComptimeLoweringFailed => {
+                "codegen cannot lower a comptime value to Rust"
+            }
         }
     }
 
@@ -286,6 +318,7 @@ impl ErrorCode {
             ErrorCode::UnterminatedList => "A delimited list (`{...}`, `(...)`, `<...>`) reached end of input without its closing delimiter. This usually means a missing `)`, `}`, or `>` at the end of a long declaration. The error message includes which list was being parsed. Fix: add the missing closing delimiter at the end of the construct.",
             ErrorCode::UnsupportedAbi => "An `extern \"ABI\" func ...` declaration used an ABI string other than `\"C\"`. Buff v1.3 supports only the C ABI for cross-language stability (T119 spec); other ABIs (Rust, system, stdcall, fastcall, …) are deferred. Fix: declare the extern function with `extern \"C\"`, or wrap the foreign call in a C shim.",
             ErrorCode::ExternGenericsUnsupported => "An `extern \"C\" func ...` declaration was given generic type parameters (`<T>`). Extern functions lower to raw C symbols, which cannot be monomorphised. Fix: declare one concrete extern function per type you need, and have each call a typed Rust wrapper on the other side.",
+            ErrorCode::MalformedComptime => "A `comptime` block or parameter was malformed. `comptime` must be followed by a `{ ... }` block in statement position, or appear before a parameter name in a function signature (`fn f(comptime T: Type, x: T)`). Bare `comptime` in expression position is not valid. Fix: wrap the comptime expression in a block, or move the `comptime` modifier to a valid position.",
             ErrorCode::UndefinedVariable => "A name used in an expression is not in scope. The type-checker could not find it as a local, parameter, function, struct/enum/trait name, or prelude builtin. Fix: check the spelling, import the module that exports it, or — for builtins like `print` — confirm the prelude is loaded (it is implicit; you do not need to import it).",
             ErrorCode::BinaryOpTypeMismatch => "A binary operator (`+`, `-`, `*`, `/`, `<`, `==`, `and`, `or`, `|`, `&`, `^`, …) was applied to operands whose types it does not accept. For example, `Int + String`, or `Int < Bool`. The message names the two operand types. Fix: cast one side explicitly, or rethink the operation — Buff's numerics follow Rust's, so integer division and unsigned/signed mix are common surprises.",
             ErrorCode::AssignTypeMismatch => "An assignment (`x = expr`) or `let x = expr` has a right-hand side whose type is not assignable to the left-hand side's type. The message names both types. Fix: annotate the binding with a different type, transform the RHS (e.g. `Int.from(s)` instead of bare `s`), or change the type of the variable.",
@@ -295,9 +328,13 @@ impl ErrorCode {
             ErrorCode::NonExhaustiveMatch => "A `match` expression does not list arms for every possible value of its scrutinee type. For enums this means every variant must appear (or be covered by `_`). For `Bool` both `true` and `false` must appear. The error message names a value that is not covered. Fix: add an arm for the missing value, or add a `_` catch-all.",
             ErrorCode::PreferGpuOnRecursiveFunction => "A function marked `@prefer(gpu)` calls itself (directly or transitively). GPU shaders cannot recurse — the WGSL execution model has no call stack. Fix: remove `@prefer(gpu)` and let the runtime dispatch to CPU, or refactor the recursion into an iterative loop.",
             ErrorCode::ModuleError => "An `import` or `export` declaration failed to resolve. Sub-causes: the target file does not exist; an import cycle was detected; a name you tried to import is not in the module's `export` list; or the import path is a stdlib path that is not yet wired up in v0.5. The message distinguishes these. Fix: check the path spelling, break import cycles, ensure the name is exported, or — for stdlib imports — wait for the v1.0 stdlib rollout.",
+            ErrorCode::ComptimeEvaluationFailed => "A `comptime { ... }` block failed to evaluate at compile time. The comptime interpreter could not reduce the block to a constant value — common causes are: a non-`comptime` function call, a value that depends on a runtime parameter, or an unsupported expression kind. Fix: mark the called function `comptime` as well, or move the work to runtime by removing the `comptime` wrapper.",
+            ErrorCode::ComptimeIoForbidden => "A `comptime { ... }` block attempted an I/O operation (file read, network call, print with side effects, spawn, etc.). I/O is forbidden at compile time — only pure computation is allowed, mirroring Zig's comptime rules. Fix: move the I/O out of the `comptime` block, or replace it with a pure computation (e.g. a constant lookup table instead of a config-file read).",
+            ErrorCode::ComptimeReflectionForbidden => "A `comptime { ... }` block attempted reflection beyond type-level queries. Inspecting field layouts, calling methods by string name, or walking struct definitions at runtime is not allowed at comptime. Fix: limit comptime code to type-level queries (`Type.of(x)`, `Type.fields(T)`) and ordinary value computation.",
             ErrorCode::UnsupportedCodegen => "The Buff AST node you wrote has no Rust codegen implementation yet in this version of the compiler. This is a feature-gated rejection, not a syntax or type error — the front-end accepted your code but codegen cannot lower it. The message names the construct. Fix: rewrite the construct using a supported equivalent, or wait for the feature in a later version.",
             ErrorCode::CodegenParseError => "Codegen produced a Rust token stream that `syn` refused to parse back into an AST. This is always an internal compiler error — the user's Buff program is well-formed; the bug is in the codegen pass. The message includes the `syn` parse error for triage. Fix: report the bug with a minimal reproducer; as a workaround, rewrite the offending construct using a simpler equivalent.",
             ErrorCode::AsyncBlockDeadlock => "`block()` was called inside an `async func`. `block_on` parks the current worker thread, which can prevent any future scheduled on the same worker from running — a deadlock. Codegen still emits the call (so you can see what you wrote), but treats it as a warning. Fix: remove `block()` and let the async fn `return` the future directly, or restructure so the blocking work happens in a non-async function.",
+            ErrorCode::ComptimeLoweringFailed => "Codegen could not splice a comptime-evaluated value into the generated Rust source. The comptime interpreter produced a value of a shape the lowering pass does not yet handle (e.g. a nested array of structs, or a value of a user-defined type without a `const` constructor). Fix: simplify the comptime expression so its result is a primitive literal or a flat array of primitives.",
         }
     }
 
@@ -332,6 +369,7 @@ impl ErrorCode {
             ErrorCode::UnterminatedList,
             ErrorCode::UnsupportedAbi,
             ErrorCode::ExternGenericsUnsupported,
+            ErrorCode::MalformedComptime,
             // E12xx — Type-checking
             ErrorCode::UndefinedVariable,
             ErrorCode::BinaryOpTypeMismatch,
@@ -342,10 +380,14 @@ impl ErrorCode {
             ErrorCode::NonExhaustiveMatch,
             ErrorCode::PreferGpuOnRecursiveFunction,
             ErrorCode::ModuleError,
+            ErrorCode::ComptimeEvaluationFailed,
+            ErrorCode::ComptimeIoForbidden,
+            ErrorCode::ComptimeReflectionForbidden,
             // E13xx — Codegen
             ErrorCode::UnsupportedCodegen,
             ErrorCode::CodegenParseError,
             ErrorCode::AsyncBlockDeadlock,
+            ErrorCode::ComptimeLoweringFailed,
         ]
     }
 }
