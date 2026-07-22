@@ -1,0 +1,32 @@
+// T57 — Mathematical Syntax Edition: implicit multiplication.
+//
+// Activated by `edition = "scientific"` in buff.toml. This file demos the
+// Julia-inspired juxtaposition rule: a number literal directly followed
+// by an identifier, parenthesized expression, or function call is
+// interpreted as multiplication — NO `*` required.
+//
+// ASCII alternative: write `2 * x` explicitly. The implicit form is pure
+// syntactic sugar.
+//
+// (This file is a syntax demo — it is parsed but not executed end-to-end;
+// the underlying `Vector<T>` / `Matrix<T>` types arrive with buff-tensor
+// in a separate task.)
+
+func physics_demo():
+    // 2x  →  2 * x
+    let x = 10
+    let doubled = 2x
+    print(doubled)
+
+    // 2(x + 1)  →  2 * (x + 1)
+    let scaled = 2(x + 1)
+    print(scaled)
+
+    // 3sin(x)  →  3 * sin(x)
+    // sin is a free prelude function — no import needed.
+    let amplitude = 3sin(x)
+    print(amplitude)
+
+    // High precedence: `2x + 1` parses as `(2 * x) + 1`, NOT `2 * (x + 1)`.
+    let with_add = 2x + 1
+    print(with_add)

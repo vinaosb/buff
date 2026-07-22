@@ -361,18 +361,108 @@ fn parse_additive(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 
 fn parse_multiplicative(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let mut lhs = parse_unary(stream)?;
-    while let Some(op) = stream.peek_kind().and_then(mul_op) {
-        stream.advance();
-        let rhs = parse_unary(stream)?;
-        let span = combine_span(&lhs, &rhs);
-        lhs = Expr::BinaryOp {
-            op,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            span,
-        };
+    loop {
+        if let Some(op) = stream.peek_kind().and_then(mul_op) {
+            stream.advance();
+            let rhs = parse_unary(stream)?;
+            let span = combine_span(&lhs, &rhs);
+            lhs = Expr::BinaryOp {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        } else if stream.edition().is_scientific()
+            && !stream.in_matrix_row()
+            && ends_with_numberlike(&lhs)
+            && is_implicit_mult_start(stream.peek_kind())
+        {
+            // T57: implicit multiplication — `2x`, `2(x+y)`, `3sin(x)`.
+            // Synthesise a `*` without consuming any operator token. The
+            // LHS-shape check (`ends_with_numberlike`) prevents `x y` from
+            // being treated as `x * y` — only numeric-primary LHS triggers
+            // the rewrite. Closing-delimiter LHS (`(a+b)`) also qualifies
+            // so `2(x+y)` works when wrapped: `(2)(x)` → `(2) * (x)`.
+            let rhs = parse_unary(stream)?;
+            let span = combine_span(&lhs, &rhs);
+            lhs = Expr::BinaryOp {
+                op: BinaryOp::Mul,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
+        } else {
+            break;
+        }
     }
     Ok(lhs)
+}
+
+/// Whether `expr` is a numeric primary suitable as the LHS of an implicit
+/// multiplication (T57). Returns `true` for any numeric literal, a
+/// parenthesised numeric expression, or any closing-delimiter-terminated
+/// postfix expression (`f(x)`, `v[i]`) — i.e. the contexts where `2x` /
+/// `2(...)` / `f(x)g(y)` make sense.
+fn ends_with_numberlike(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(
+            Literal::Int(_)
+            | Literal::Float(_)
+            | Literal::Double(_)
+            | Literal::Byte(_)
+            | Literal::Decimal(_),
+            _,
+        ) => true,
+        // Any postfix-built expression (`f(x)`, `v[i]`, `a.b`, `x?`)
+        // terminates with a closing delimiter or identifier; implicit mult
+        // after one of these matches the Julia rule `(a+b)(c+d)` → mul.
+        Expr::FuncCall { .. }
+        | Expr::MethodCall { .. }
+        | Expr::Index { .. }
+        | Expr::Try { .. }
+        | Expr::TupleLit(_, _) => true,
+        _ => false,
+    }
+}
+
+/// Whether `expr` is a bare numeric literal (T57). Used by the
+/// `parse_postfix` call-arm to break out and let implicit multiplication
+/// handle `<number>(...)` instead of treating the number as a callee.
+fn is_numeric_primary(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Literal(
+            Literal::Int(_)
+                | Literal::Float(_)
+                | Literal::Double(_)
+                | Literal::Byte(_)
+                | Literal::Decimal(_)
+                | Literal::Char(_),
+            _,
+        )
+    )
+}
+
+/// Whether the upcoming token would start a fresh postfix primary suitable
+/// as the RHS of an implicit multiplication (T57).
+///
+/// Accepts identifiers (`2x`, `3sin(x)`), opening parens (`2(x+y)`), and
+/// opening brackets (`2[1,2,3]`). Numeric literals are also accepted so
+/// `2 3` parses as `2 * 3` (rare but unambiguous in expression position).
+fn is_implicit_mult_start(kind: Option<&TokenKind>) -> bool {
+    matches!(
+        kind,
+        Some(
+            TokenKind::Ident(_)
+                | TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::IntLit(_)
+                | TokenKind::FloatLit(_)
+                | TokenKind::DoubleLit(_)
+                | TokenKind::ByteLit(_)
+                | TokenKind::DecimalLit(_)
+        )
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +486,56 @@ fn parse_unary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
             span,
         });
     }
+    // T57: Unicode prefix operators ∑ ∏ √ desugar to free prelude function
+    // calls (`sum(expr)` / `product(expr)` / `sqrt(expr)`). The operand is
+    // parsed at the unary level so `√x + 1` parses as `(sqrt(x)) + 1`, not
+    // `sqrt(x + 1)` — matching Julia's high-precedence prefix behaviour.
+    // Rejected in the Standard edition via `Edition::require_for`.
+    if let Some(kind) = stream.peek_kind().cloned() {
+        if let Some(callee_name) = unicode_prefix_desugar(&kind) {
+            stream.edition().require_for(&kind).map_err(|msg| {
+                ParseError::new(Diagnostic::error(
+                    msg,
+                    stream
+                        .peek()
+                        .map(|t| t.span)
+                        .unwrap_or_else(|| stream.eof_span()),
+                ))
+            })?;
+            let prefix_tok = stream
+                .advance()
+                .expect("peek guaranteed a Unicode prefix token");
+            let operand = parse_unary(stream)?;
+            let span = Span::new(
+                prefix_tok.span.start,
+                operand.span().end,
+                stream.source_id(),
+            );
+            let callee = Expr::Ident(
+                Ident::new(callee_name.to_string(), prefix_tok.span),
+                prefix_tok.span,
+            );
+            return Ok(Expr::FuncCall {
+                callee: Box::new(callee),
+                args: vec![operand],
+                span,
+            });
+        }
+    }
     parse_postfix(stream)
+}
+
+/// Maps a Unicode prefix operator token to its ASCII prelude-function name
+/// (T57). Returns `Some(name)` for `∑`/`∏`/`√` and `None` for every other
+/// token kind. The ASCII alternative is the documented contract: a user can
+/// always write `sum(xs)` instead of `∑ xs`.
+fn unicode_prefix_desugar(kind: &TokenKind) -> Option<&'static str> {
+    match kind {
+        TokenKind::Sum => Some("sum"),
+        TokenKind::Product => Some("product"),
+        TokenKind::Sqrt => Some("sqrt"),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +579,17 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                 }
             }
             Some(TokenKind::LParen) => {
+                // T57: in the scientific edition, `<number>(...)` is IMPLICIT
+                // MULTIPLICATION, not a function call. Break out of the
+                // postfix loop so the parent `parse_multiplicative` sees the
+                // numeric-primary LHS followed by `(` and synthesises the
+                // `*`. (In the standard edition the call-arm fires as
+                // before, preserving the historical behaviour where
+                // `2(...)` was a call — though that was always a type
+                // error downstream, never a valid program.)
+                if stream.edition().is_scientific() && is_numeric_primary(&expr) {
+                    break;
+                }
                 stream.advance(); // consume '('
                 let args = parse_call_args(stream)?;
                 let rparen = stream.expect(TokenKind::RParen)?;
@@ -553,6 +703,35 @@ fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                 let span = Span::new(expr.span().start, q.span.end, stream.source_id());
                 expr = Expr::Try {
                     expr: Box::new(expr),
+                    span,
+                };
+            }
+            // T57: postfix adjoint/transpose operator `A'`. Desugars IN THE
+            // PARSER to `A.transpose()` (a method call). The lexer emits
+            // `Adjoint` only when the previous significant token is
+            // expression-ending, so reaching this arm means the user wrote
+            // `<expr>'` in a postfix context. Rejected in the Standard
+            // edition via `Edition::require_for`. ASCII alternative: the
+            // `.transpose()` method itself.
+            Some(TokenKind::Adjoint) => {
+                stream
+                    .edition()
+                    .require_for(&TokenKind::Adjoint)
+                    .map_err(|msg| {
+                        ParseError::new(Diagnostic::error(
+                            msg,
+                            stream
+                                .peek()
+                                .map(|t| t.span)
+                                .unwrap_or_else(|| stream.eof_span()),
+                        ))
+                    })?;
+                let adj = stream.advance().expect("peek guaranteed Adjoint");
+                let span = Span::new(expr.span().start, adj.span.end, stream.source_id());
+                expr = Expr::MethodCall {
+                    receiver: Box::new(expr),
+                    method: Ident::new("transpose".to_string(), adj.span),
+                    args: Vec::new(),
                     span,
                 };
             }
@@ -750,56 +929,196 @@ fn parse_one_call_arg(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> 
 // Level 14 — primary: literals, identifiers, parenthesized expressions.
 // ---------------------------------------------------------------------------
 
-/// Parse a comma-separated list of expressions delimited by `open` / `close`
-/// tokens, where the `open` token is the next significant token on the stream.
+/// Parse a `[...]` collection literal, dispatching between the historical
+/// comma-separated `ArrayLit` (T23) and the scientific-edition matrix
+/// literal `[1 2; 3 4]` (T57).
 ///
-/// Each element is parsed via `parse_expression`. Trailing comma is allowed
-/// (`[a, b,]`, `(a, b,)`). The empty form is supported (`[]`, `()`).
-/// Returns the list of parsed elements plus the bounding token pair (so
-/// callers can compute spans).
+/// The two shapes are distinguished by content, NOT by edition:
+/// - `[1, 2, 3]` (only commas) → flat `ArrayLit` (backward compat, BOTH
+///   editions).
+/// - `[1 2 3]` (whitespace-separated, no commas) → nested `ArrayLit` (a
+///   1-row matrix). Scientific edition only.
+/// - `[1; 2; 3]` (semicolons) → nested `ArrayLit` (a column vector).
+///   Scientific edition only.
+/// - `[1 2; 3 4]` (whitespace + semicolons) → nested `ArrayLit` (2x2
+///   matrix). Scientific edition only.
 ///
-/// This is the REFACTOR extraction shared between `parse_array_literal`
-/// (Vector collection literals, T23) and `parse_call_args` (function/closure
-/// argument lists). It exists to DRY up the comma-trailing logic and make
-/// future collection-literal additions (T25 map entries) consistent.
-///
-/// `kind_name` is used in error messages (e.g. "expected `]` to close Vector
-/// literal"). The caller is responsible for advancing past `open` — this
-/// helper assumes the cursor is positioned AT the first element (or `close`
-/// for an empty list).
-fn parse_comma_list_until(
-    stream: &mut TokenStream<'_>,
-    close: TokenKind,
-    kind_name: &'static str,
-) -> Result<Vec<Expr>, ParseError> {
-    let mut elements = Vec::new();
-    if matches!(stream.peek_kind(), Some(k) if *k == close) {
-        return Ok(elements);
+/// The dispatch is content-driven because `[1, 2, 3]` is unambiguously a
+/// comma-separated Vector in either edition (preserving the standard
+/// edition's parsing 100% unchanged), while any non-comma separation is
+/// unambiguously a matrix (the standard edition would reject such input
+/// as a parse error anyway — `[1 2]` is not a valid Vector literal under
+/// historical rules).
+fn parse_collection_literal(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    let lb = stream.expect(TokenKind::LBracket)?;
+    let source_id = stream.source_id();
+    // Empty `[]` → empty ArrayLit (historical).
+    if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
+        let rb = stream.expect(TokenKind::RBracket)?;
+        let span = Span::new(lb.span.start, rb.span.end, source_id);
+        return Ok(Expr::ArrayLit {
+            elements: Vec::new(),
+            span,
+        });
     }
-    elements.push(parse_expression(stream)?);
+    // Parse first row, tracking separator usage. If neither whitespace nor
+    // `;` was seen, the row's contents are the comma-separated Vector
+    // elements (or a single element) — fall through to the historical
+    // shape by continuing the comma loop inline.
+    let (mut row_elements, saw_whitespace_sep) = parse_matrix_row(stream)?;
+    let is_matrix = saw_whitespace_sep || matches!(stream.peek_kind(), Some(TokenKind::Semicolon));
+    if is_matrix {
+        // Scientific-edition gate: matrix literals are an opt-in extension.
+        // Uses a direct edition check (NOT `Edition::require_for`) because
+        // the trigger token here is `Semicolon` (or whitespace separation),
+        // neither of which is a token-level edition marker — the matrix
+        // SYNTACTIC FORM is what's gated, not a single token.
+        if !stream.edition().is_scientific() {
+            return Err(ParseError::new(Diagnostic::error(
+                "matrix literals (`[1 2; 3 4]`) require `edition = \"scientific\"` in buff.toml",
+                lb.span,
+            )));
+        }
+        let mut rows: Vec<Expr> = Vec::new();
+        let row_span_start = row_elements
+            .first()
+            .map(|e| e.span().start)
+            .unwrap_or(lb.span.start);
+        let row_span_end = row_elements
+            .last()
+            .map(|e| e.span().end)
+            .unwrap_or(lb.span.end);
+        rows.push(Expr::ArrayLit {
+            elements: std::mem::take(&mut row_elements),
+            span: Span::new(row_span_start, row_span_end, source_id),
+        });
+        while matches!(stream.peek_kind(), Some(TokenKind::Semicolon)) {
+            stream.advance();
+            // Allow trailing semicolon: `[1; 2; 3;]`.
+            if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
+                break;
+            }
+            let (mut elems, _) = parse_matrix_row(stream)?;
+            let s = elems
+                .first()
+                .map(|e| e.span().start)
+                .unwrap_or_else(|| stream.span_here().start);
+            let e = elems
+                .last()
+                .map(|e| e.span().end)
+                .unwrap_or_else(|| stream.span_here().end);
+            rows.push(Expr::ArrayLit {
+                elements: std::mem::take(&mut elems),
+                span: Span::new(s, e, source_id),
+            });
+        }
+        let rb = stream.expect(TokenKind::RBracket)?;
+        let span = Span::new(lb.span.start, rb.span.end, source_id);
+        return Ok(Expr::ArrayLit {
+            elements: rows,
+            span,
+        });
+    }
+    // Comma-separated shape: continue the historical ArrayLit loop, picking
+    // up where `parse_matrix_row` left off (it already collected the first
+    // element + any comma-separated ones).
     while matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
-        stream.advance(); // consume ','
-                          // Allow trailing comma.
-        if matches!(stream.peek_kind(), Some(k) if *k == close) {
+        stream.advance();
+        if matches!(stream.peek_kind(), Some(TokenKind::RBracket)) {
             break;
         }
-        elements.push(parse_expression(stream)?);
+        row_elements.push(parse_expression(stream)?);
     }
-    let _ = kind_name; // currently unused; reserved for richer error msgs.
-    Ok(elements)
+    let rb = stream.expect(TokenKind::RBracket)?;
+    let span = Span::new(lb.span.start, rb.span.end, source_id);
+    Ok(Expr::ArrayLit {
+        elements: row_elements,
+        span,
+    })
 }
 
-/// Parse a collection literal `[e1, e2, ...]` whose opening `[` is the next
-/// significant token (T23).
+/// Parse ONE row of a matrix literal: a sequence of expressions separated
+/// by whitespace and/or commas, terminated by `;` or `]` (which are NOT
+/// consumed here — the caller handles them).
 ///
-/// Allows an empty literal `[]`, a trailing comma, and arbitrary expressions
-/// as elements. Builds an [`Expr::ArrayLit`].
-fn parse_array_literal(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
-    let lb = stream.expect(TokenKind::LBracket)?;
-    let elements = parse_comma_list_until(stream, TokenKind::RBracket, "Vector literal")?;
-    let rb = stream.expect(TokenKind::RBracket)?;
-    let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
-    Ok(Expr::ArrayLit { elements, span })
+/// Returns `(elements, saw_whitespace_separator)`. The flag is `true` when
+/// at least one pair of elements was separated by whitespace (no comma
+/// between them) — that's the signal the caller uses to detect a
+/// scientific-edition matrix vs. a historical comma-separated Vector.
+///
+/// Inside the [`TokenStream`] layer, whitespace is already collapsed — the
+/// parser sees two consecutive expression-starter tokens (`IntLit` `IntLit`)
+/// as the marker of whitespace separation. This matches how Julia's lexer
+/// handles matrix literals.
+fn parse_matrix_row(stream: &mut TokenStream<'_>) -> Result<(Vec<Expr>, bool), ParseError> {
+    // T57: while inside a matrix row, implicit multiplication is SUPPRESSED
+    // — whitespace is the row-element separator, not juxtaposition. The
+    // enter/exit bracket makes this local to this function; the rest of
+    // the parser is unaffected.
+    stream.enter_matrix_row();
+    let result = parse_matrix_row_inner(stream);
+    stream.exit_matrix_row();
+    result
+}
+
+fn parse_matrix_row_inner(stream: &mut TokenStream<'_>) -> Result<(Vec<Expr>, bool), ParseError> {
+    let mut elements: Vec<Expr> = Vec::new();
+    let mut saw_whitespace_sep = false;
+    elements.push(parse_expression(stream)?);
+    loop {
+        match stream.peek_kind() {
+            Some(TokenKind::Comma) => {
+                stream.advance();
+                if matches!(
+                    stream.peek_kind(),
+                    Some(TokenKind::RBracket) | Some(TokenKind::Semicolon)
+                ) {
+                    break;
+                }
+                elements.push(parse_expression(stream)?);
+            }
+            // Whitespace-separated continuation: any token that could start
+            // a fresh expression. In scientific-edition matrix context this
+            // means `[1 2 3]` parses as three elements.
+            Some(k) if starts_matrix_element(k) => {
+                saw_whitespace_sep = true;
+                elements.push(parse_expression(stream)?);
+            }
+            _ => break,
+        }
+    }
+    Ok((elements, saw_whitespace_sep))
+}
+
+/// Whether a token kind can begin a fresh matrix-row element (T57). Used
+/// by [`parse_matrix_row`] to detect whitespace-separated continuation.
+fn starts_matrix_element(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::IntLit(_)
+            | TokenKind::FloatLit(_)
+            | TokenKind::DoubleLit(_)
+            | TokenKind::ByteLit(_)
+            | TokenKind::DecimalLit(_)
+            | TokenKind::CharLit(_)
+            | TokenKind::StringStart
+            | TokenKind::RegexLit(_)
+            | TokenKind::Ident(_)
+            | TokenKind::LParen
+            | TokenKind::LBracket
+            | TokenKind::LBrace
+            | TokenKind::Minus
+            | TokenKind::Not
+            | TokenKind::Tilde
+            | TokenKind::KwTrue
+            | TokenKind::KwFalse
+            | TokenKind::KwIf
+            | TokenKind::KwMatch
+            | TokenKind::KwSpawn
+            | TokenKind::Sum
+            | TokenKind::Product
+            | TokenKind::Sqrt
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1561,8 +1880,16 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     // T23: A collection literal `[e1, e2, ...]` (or empty `[]`). Allow a
     // trailing comma. The element expressions are full expressions so
     // `[a + b, f(x)]` works.
+    //
+    // T57: In the scientific edition, `[` can ALSO begin a matrix literal
+    // — `[1 2 3]` (row vector), `[1; 2; 3]` (column vector),
+    // `[1 2; 3 4]` (2x2). The disambiguation is done inside
+    // [`parse_collection_literal`]: if the contents use `;` as a row
+    // separator OR use whitespace as an element separator (no comma), it
+    // is a matrix (nested `ArrayLit`); otherwise it falls through to the
+    // historical comma-separated `ArrayLit` shape.
     if matches!(tok.kind, TokenKind::LBracket) {
-        return parse_array_literal(stream);
+        return parse_collection_literal(stream);
     }
 
     // T25: A `{` at primary position is ambiguous between a closure

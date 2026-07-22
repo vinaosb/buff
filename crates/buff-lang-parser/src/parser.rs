@@ -24,6 +24,7 @@ use buff_lang_ast::Decl;
 use buff_lang_error::{Diagnostic, ParseError, SourceId};
 use buff_lang_lexer::TokenKind;
 
+use crate::options::Edition;
 use crate::stmt::{
     parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl,
     parse_extern_crate_decl, parse_extern_func_decl_with_abi, parse_func_decl, parse_import_decl,
@@ -274,7 +275,22 @@ pub fn parse(
     tokens: &[buff_lang_lexer::Token],
     source_id: SourceId,
 ) -> Result<Vec<Decl>, ParseError> {
-    let mut stream = TokenStream::new(tokens, source_id);
+    parse_with_edition(tokens, source_id, Edition::default())
+}
+
+/// Edition-aware variant of [`parse`] (T57). Accepts an explicit [`Edition`]
+/// which selects whether the parser accepts scientific-edition syntax
+/// extensions (implicit multiplication, Unicode operators, matrix literals,
+/// adjoint). Default-edition callers should use [`parse`] instead — this
+/// function exists for the build pipeline to plumb the `edition` field from
+/// `buff.toml` into the parser without making every existing call site
+/// aware of editions.
+pub fn parse_with_edition(
+    tokens: &[buff_lang_lexer::Token],
+    source_id: SourceId,
+    edition: Edition,
+) -> Result<Vec<Decl>, ParseError> {
+    let mut stream = TokenStream::with_edition(tokens, source_id, edition);
     let mut decls = Vec::new();
     while let Some(d) = parse_one_decl(&mut stream)? {
         decls.push(d);
@@ -353,7 +369,20 @@ pub fn parse_expression(
     tokens: &[buff_lang_lexer::Token],
     source_id: SourceId,
 ) -> Result<buff_lang_ast::Expr, ParseError> {
-    let mut stream = TokenStream::new(tokens, source_id);
+    parse_expression_with_edition(tokens, source_id, Edition::default())
+}
+
+/// Edition-aware variant of [`parse_expression`] (T57). Mirrors
+/// [`parse_with_edition`]: the parser accepts scientific-edition extensions
+/// iff `edition` is [`Edition::Scientific`]. Convenience entry point for
+/// REPL / Jupyter / test harnesses that want to evaluate a single
+/// expression under the scientific edition.
+pub fn parse_expression_with_edition(
+    tokens: &[buff_lang_lexer::Token],
+    source_id: SourceId,
+    edition: Edition,
+) -> Result<buff_lang_ast::Expr, ParseError> {
+    let mut stream = TokenStream::with_edition(tokens, source_id, edition);
     let expr = crate::expr::parse_expression(&mut stream)?;
     if !stream.is_at_end() {
         return Err(stream.unexpected("extra tokens after expression"));

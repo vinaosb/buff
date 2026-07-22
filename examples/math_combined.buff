@@ -1,0 +1,42 @@
+// T57 — Mathematical Syntax Edition: all features combined.
+//
+// Activated by `edition = "scientific"` in buff.toml. This file exercises
+// every T57 extension in one program so reviewers can see how the
+// features compose:
+//   - implicit multiplication
+//   - Unicode operators (∑ ∏ √ ≤ ≥ ≠)
+//   - matrix literals
+//   - adjoint postfix
+//
+// The example mirrors a small linear-algebra workflow: build a matrix,
+// inspect its shape, do some arithmetic, take its transpose.
+
+func combined_demo():
+    // Build a 2x2 matrix using whitespace + `;` syntax.
+    let A = [1 2; 3 4]
+
+    // Transpose via the postfix adjoint.
+    let At = A'
+
+    // Implicit multiplication: 2A  →  2 * A
+    // (Julia users expect scalar-matrix multiplication to read naturally.)
+    let scaled = 2A
+    print(scaled)
+
+    // Unicode prefix operators on flat data.
+    let xs = [1, 2, 3, 4, 5]
+    let total = ∑xs
+    let prod_all = ∏xs
+    let root = √total
+    print(root)
+
+    // Unicode comparison aliases (work in BOTH editions — pure spelling).
+    if total ≠ 0:
+        print("sum is non-zero")
+    if prod_all ≥ 100:
+        print("product exceeds 100")
+
+    // Combined: implicit mult + adjoint.
+    // 3At  →  3 * At  →  3 * A.transpose()
+    let scaled_transpose = 3At
+    print(scaled_transpose)

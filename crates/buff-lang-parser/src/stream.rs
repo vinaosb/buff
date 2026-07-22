@@ -11,6 +11,8 @@
 use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
+use crate::options::Edition;
+
 /// A read-only cursor over a slice of tokens.
 ///
 /// Tracks the current position and the source id used to fabricate spans for
@@ -19,22 +21,67 @@ pub struct TokenStream<'a> {
     tokens: &'a [Token],
     pos: usize,
     source_id: SourceId,
+    edition: Edition,
+    matrix_row_depth: usize,
 }
 
 impl<'a> TokenStream<'a> {
-    /// Construct a new cursor over `tokens`. The cursor does not clone; it
-    /// borrows the slice for its entire lifetime.
+    /// Construct a new cursor over `tokens` with the default
+    /// [`Edition::Standard`]. The cursor does not clone; it borrows the slice
+    /// for its entire lifetime.
     pub fn new(tokens: &'a [Token], source_id: SourceId) -> Self {
+        Self::with_edition(tokens, source_id, Edition::default())
+    }
+
+    /// Construct a new cursor over `tokens` with a specific [`Edition`]
+    /// (T57). Used by the scientific-edition entry points
+    /// ([`parse_with_edition`](crate::parse_with_edition) and friends) to
+    /// opt into the Julia-inspired mathematical syntax extensions.
+    pub fn with_edition(tokens: &'a [Token], source_id: SourceId, edition: Edition) -> Self {
         Self {
             tokens,
             pos: 0,
             source_id,
+            edition,
+            matrix_row_depth: 0,
         }
     }
 
     /// The [`SourceId`] associated with this stream.
     pub fn source_id(&self) -> SourceId {
         self.source_id
+    }
+
+    /// The [`Edition`] this stream was constructed with (T57). Parser arms
+    /// that implement scientific-edition syntax consult this to decide
+    /// whether to accept the extension.
+    pub fn edition(&self) -> Edition {
+        self.edition
+    }
+
+    /// Returns `true` while the cursor is inside a scientific-edition matrix
+    /// row parse (T57). Used by [`parse_multiplicative`](crate::expr) to
+    /// suppress implicit multiplication inside `[1 2 3]` — there, whitespace
+    /// is the row-element separator, not juxtaposition. The depth is a
+    /// counter (not a bool) so nested matrix literals parse correctly.
+    pub fn in_matrix_row(&self) -> bool {
+        self.matrix_row_depth > 0
+    }
+
+    /// Increment the matrix-row nesting counter (T57). Pair with
+    /// [`Self::exit_matrix_row`]; the [`parse_matrix_row`](crate::expr)
+    /// helper brackets its body with enter/exit calls so the rest of the
+    /// parser can consult [`Self::in_matrix_row`].
+    pub fn enter_matrix_row(&mut self) {
+        self.matrix_row_depth = self.matrix_row_depth.saturating_add(1);
+    }
+
+    /// Decrement the matrix-row nesting counter (T57). See
+    /// [`Self::enter_matrix_row`].
+    pub fn exit_matrix_row(&mut self) {
+        if self.matrix_row_depth > 0 {
+            self.matrix_row_depth -= 1;
+        }
     }
 
     /// Look at the current token (skipping any layout tokens). Returns

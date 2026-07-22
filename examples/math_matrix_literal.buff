@@ -1,0 +1,41 @@
+// T57 — Mathematical Syntax Edition: matrix literals.
+//
+// Activated by `edition = "scientific"` in buff.toml. Matrix literals use
+// the Julia/MATLAB syntax:
+//   - whitespace separates elements WITHIN a row
+//   - `;` separates ROWS
+//   - commas are ALSO accepted within a row (optional)
+//
+// Shapes:
+//   [1 2 3]            row vector    (1x3)
+//   [1; 2; 3]          column vector (3x1)
+//   [1 2; 3 4]         2x2 matrix
+//   [1 2 3; 4 5 6; 7 8 9]   3x3 matrix
+//
+// Desugars to nested Vector<Vector<T>> — NO new matrix type is introduced
+// (the T57 contract: "no new types, just syntax sugar"). The historical
+// comma-separated `[1, 2, 3]` STILL parses as a flat Vector in both
+// editions (backward compatible).
+//
+// ASCII alternative: write `[[1, 2], [3, 4]]` explicitly.
+
+func matrix_demo():
+    // Row vector — 1x3.
+    let row = [1 2 3]
+    print(row)
+
+    // Column vector — 3x1.
+    let col = [10; 20; 30]
+    print(col)
+
+    // 2x2 matrix.
+    let m22 = [1 2; 3 4]
+    print(m22)
+
+    // 3x3 matrix.
+    let identity_like = [1 0 0; 0 1 0; 0 0 1]
+    print(identity_like)
+
+    // Backward compat: comma-separated flat Vector still works.
+    let flat = [1, 2, 3]
+    print(flat)

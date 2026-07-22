@@ -1,0 +1,32 @@
+// T57 — Mathematical Syntax Edition: adjoint/transpose postfix `A'`.
+//
+// Activated by `edition = "scientific"` in buff.toml. The postfix `'`
+// operator on a matrix expression desugars to `.transpose()` — Julia and
+// MATLAB both use this notation.
+//
+// The lexer disambiguates `'` between:
+//   - char literal start (`'a'`, `'\n'`, `'🚀'`)
+//   - adjoint postfix (`A'`, `(M + N)'`)
+// using the same "previous-significant-token" heuristic as the `/`
+// regex-vs-division disambiguation: `'` is the adjoint operator when it
+// follows an expression-ending token (ident, literal, `)`, `]`), and
+// begins a char literal otherwise.
+//
+// ASCII alternative: write `M.transpose()` explicitly.
+
+func adjoint_demo():
+    let M = [1 2; 3 4]
+
+    // M'  →  M.transpose()
+    let MT = M'
+    print(MT)
+
+    // Works after any postfix expression:
+    //   (M + N)'   →   (M + N).transpose()
+    let N = [5 6; 7 8]
+    let sum_T = (M + N)'
+    print(sum_T)
+
+    // Chained: M''  →  M.transpose().transpose()  (back to M, modulo ownership)
+    let double_T = M''
+    print(double_T)

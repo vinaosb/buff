@@ -3524,7 +3524,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > Opt-in language extensions inspired by Julia, targeted at numerical/scientific users. Both features are edition-gated (require `edition = "scientific"` in buff.toml).
 
-- [ ] 57. Mathematical Syntax Edition (Julia-inspired)
+- [x] 57. Mathematical Syntax Edition (Julia-inspired)
 
   **What to do**: Add opt-in mathematical syntax activated by `edition = "scientific"` in buff.toml. Features:
   1. **Implicit multiplication**: `2x` parses as `2 * x`; `2(x+y)` parses as `2 * (x+y)`. Lexer change to insert implicit `*` between number and identifier/lparen.

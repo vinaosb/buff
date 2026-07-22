@@ -19,11 +19,15 @@
 //! - [`parser`]: top-level [`parser::parse`] returning `Vec<Decl>`.
 
 pub mod expr;
+pub mod options;
 pub mod parser;
 pub mod stmt;
 pub mod stream;
 
-pub use parser::{parse, parse_expression, parse_recovering};
+pub use options::Edition;
+pub use parser::{
+    parse, parse_expression, parse_expression_with_edition, parse_recovering, parse_with_edition,
+};
 pub use stmt::{
     parse_attributes, parse_block, parse_block_braces, parse_enum_decl, parse_export_decl,
     parse_extend_decl, parse_extern_crate_decl, parse_extern_func_decl_with_abi, parse_func_decl,

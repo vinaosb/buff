@@ -162,8 +162,48 @@ pub enum TokenKind {
     /// is inserted as the FIRST argument of the right-hand call. The desugar
     /// happens entirely in the parser (no new AST variant), so this token
     /// never reaches codegen. Lexed as a 2-char operator BEFORE the single
-    /// `|` ([`TokenKind::Pipe`]) so `|>` is matched greedily.
+    /// `|` ([`TokenKind::Pipe`]) so `|>` is matched greedily instead of
+    /// splitting into `|` + `>` (which would parse as `Try` then a stray
+    /// field access).
     PipeGt,
+
+    // --- T57: Unicode mathematical operators (scientific edition) ---
+    //
+    // These are ALWAYS lexed (the lexer is edition-agnostic), but the parser
+    // accepts them ONLY when `edition = "scientific"` is active. In the
+    // default Standard edition, encountering one is a parse error pointing
+    // the user at the edition opt-in. ASCII alternatives are documented per
+    // variant — Buff never FORCES users to type Unicode.
+    /// `∑` (U+2211 N-ARY SUMMATION). ASCII alternative: `sum(...)`. Parser
+    /// desugars `∑ expr` to `sum(expr)` (a free prelude function call).
+    Sum,
+    /// `∏` (U+220F N-ARY PRODUCT). ASCII alternative: `product(...)`. Parser
+    /// desugars `∏ expr` to `product(expr)`.
+    Product,
+    /// `√` (U+221A SQUARE ROOT). ASCII alternative: `sqrt(...)`. Parser
+    /// desugars `√ expr` to `sqrt(expr)`.
+    Sqrt,
+    /// `∈` (U+2208 ELEMENT OF). ASCII alternative: the `in` keyword. Aliases
+    /// `KwIn` at parse time.
+    InUni,
+    /// `∉` (U+2209 NOT AN ELEMENT OF). ASCII alternative: `not in`. Parser
+    /// treats it as the negated membership test.
+    NotInUni,
+    /// `⊂` (U+2282 SUBSET OF). ASCII alternative: `.is_subset(...)` method
+    /// call. Parser desugars `a ⊂ b` to `a.is_subset(b)`.
+    SubsetUni,
+    /// `≈` (U+2248 ALMOST EQUAL TO). ASCII alternative: `==` (with tolerance
+    /// applied at the type-system level — currently a direct alias of `EqEq`
+    /// semantics). Parser lowers to `BinaryOp::Eq`.
+    ApproxUni,
+    /// Postfix adjoint/transpose operator `'` (U+0027 APOSTROPHE) — T57.
+    ///
+    /// The lexer is context-sensitive about `'`: when the previous
+    /// significant token is expression-ending (Ident, literal, `)`, `]`),
+    /// the apostrophe is emitted as `Adjoint`; otherwise it begins a
+    /// [`CharLit`](TokenKind::CharLit). ASCII alternative: `.transpose()`
+    /// method call. Parser desugars `A'` to `A.transpose()`.
+    Adjoint,
 
     // --- Delimiters ---
     LParen,
@@ -354,6 +394,15 @@ impl fmt::Display for TokenKind {
             Self::PercentEq => write!(f, "%="),
             // T69: pipeline operator `|>`.
             Self::PipeGt => write!(f, "|>"),
+            // T57: Unicode mathematical operators.
+            Self::Sum => write!(f, "∑"),
+            Self::Product => write!(f, "∏"),
+            Self::Sqrt => write!(f, "√"),
+            Self::InUni => write!(f, "∈"),
+            Self::NotInUni => write!(f, "∉"),
+            Self::SubsetUni => write!(f, "⊂"),
+            Self::ApproxUni => write!(f, "≈"),
+            Self::Adjoint => write!(f, "'"),
             // Delimiters
             Self::LParen => write!(f, "("),
             Self::RParen => write!(f, ")"),

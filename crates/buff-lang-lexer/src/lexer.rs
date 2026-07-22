@@ -225,7 +225,26 @@ fn lex_range(
         // Char literal `'x'` — a single Unicode scalar value. Disambiguates
         // from the ASCII apostrophe by requiring a closing `'` after one
         // scalar value (with optional escape).
+        //
+        // T57: This same `'` byte is ALSO the postfix adjoint/transpose
+        // operator in the scientific edition (`A'` → `A.transpose()`). The
+        // two uses are disambiguated by the SAME "previous-significant-token"
+        // heuristic used for `/` (regex vs division): when `'` follows an
+        // expression-ending token (Ident, literal, `)`, `]`), it is the
+        // Adjoint operator; when it follows an operator, delimiter, or
+        // keyword that opens an expression slot, it begins a char literal.
+        // This mirrors how Rust's lexer distinguishes lifetime labels from
+        // char literals, and keeps the lexer edition-agnostic (the token is
+        // always lexed; the parser rejects it in the default edition).
         if c == b'\'' {
+            if is_expression_context(out) {
+                out.push(Token::new(
+                    TokenKind::Adjoint,
+                    Span::new(tok_start, tok_start + 1, source_id),
+                ));
+                pos += 1;
+                continue;
+            }
             pos = scan_char(source, pos, source_id, out)?;
             continue;
         }
@@ -273,6 +292,20 @@ fn lex_range(
             pos += 1;
             out.push(Token::new(kind, Span::new(tok_start, pos, source_id)));
             continue;
+        }
+
+        // T57: Unicode mathematical operators (∑ ∏ √ ∈ ∉ ⊂ ≈ ≤ ≥ ≠ →). The
+        // lexer is edition-agnostic — the parser accepts these tokens only
+        // when `edition = "scientific"` is active. Pure-alias operators
+        // (≤ ≥ ≠ →) are emitted as their existing ASCII token kinds so no
+        // parser change is needed for those four; the others get dedicated
+        // kinds. ASCII alternatives are documented on each TokenKind variant.
+        if c >= 0x80 {
+            if let Some((kind, len)) = scan_unicode_operator(source, pos, end) {
+                pos += len;
+                out.push(Token::new(kind, Span::new(tok_start, pos, source_id)));
+                continue;
+            }
         }
 
         return Err(LexerError::unexpected_char(
@@ -854,6 +887,17 @@ fn byte_lit(value: u32, span: Span) -> Result<TokenKind, LexerError> {
 // ---------------------------------------------------------------------------
 
 fn scan_operator(source: &str, pos: &mut usize, start: usize, end: usize) -> Option<TokenKind> {
+    // T57: the byte-scanner falls through to here for ALL non-whitespace,
+    // non-comment, non-literal bytes — including the high-bit bytes that
+    // begin multi-byte UTF-8 sequences (the Unicode mathematical operators
+    // ∑ ∏ √ ∈ etc.). Slicing `source[start..start+N]` on such a byte would
+    // land mid-char and panic. Short-circuit: high-bit bytes are not ASCII
+    // operators, so skip the operator scan entirely and let the caller's
+    // Unicode-operator branch handle them.
+    let bytes = source.as_bytes();
+    if bytes[start] >= 0x80 {
+        return None;
+    }
     // 3-char operators first (so `..=` is not split into `..` + `=`).
     if start + 3 <= end {
         let three = &source[start..start + 3];
@@ -937,6 +981,86 @@ fn single_char_kind(c: u8) -> Option<TokenKind> {
         b'@' => TokenKind::At,
         _ => return None,
     })
+}
+
+// ---------------------------------------------------------------------------
+// T57: Unicode mathematical operator scanning.
+//
+// The lexer's main loop is byte-oriented (ASCII fast path). Multi-byte UTF-8
+// sequences (any byte >= 0x80) fall through to `scan_unicode_operator`, which
+// pattern-matches the source slice against the supported operator glyphs.
+//
+// Pure-alias operators (≤ ≥ ≠ →) are emitted as their existing ASCII token
+// kinds (LtEq/GtEq/NotEq/Arrow) so the parser needs NO new dispatch arms for
+// them — they're indistinguishable from the ASCII spelling downstream. The
+// remaining operators (∑ ∏ √ ∈ ∉ ⊂ ≈) get dedicated TokenKind variants
+// because they have no exact ASCII equivalent at the token level.
+//
+// `pos` is the byte offset of the start of the glyph; `end` is the source
+// upper bound. Returns `Some((kind, byte_len))` on match, else `None` (the
+// caller falls through to "unexpected char").
+// ---------------------------------------------------------------------------
+
+fn scan_unicode_operator(source: &str, pos: usize, end: usize) -> Option<(TokenKind, usize)> {
+    // Each glyph's UTF-8 byte sequence is matched as a literal slice. The
+    // byte lengths are: 3 for U+2200..U+27FF (covering all the mathematical
+    // operators here), and 3 for U+2190..U+21FF (the arrow block).
+    //
+    // Pure-alias spellings (≤ ≥ ≠ →) return the EXISTING ASCII token kind
+    // so the parser needs no new arms for them.
+    let candidates: &[(&str, TokenKind)] = &[
+        ("\u{2211}", TokenKind::Sum),       // ∑
+        ("\u{220F}", TokenKind::Product),   // ∏
+        ("\u{221A}", TokenKind::Sqrt),      // √
+        ("\u{2208}", TokenKind::InUni),     // ∈
+        ("\u{2209}", TokenKind::NotInUni),  // ∉
+        ("\u{2282}", TokenKind::SubsetUni), // ⊂
+        ("\u{2248}", TokenKind::ApproxUni), // ≈
+        ("\u{2264}", TokenKind::LtEq),      // ≤  (alias)
+        ("\u{2265}", TokenKind::GtEq),      // ≥  (alias)
+        ("\u{2260}", TokenKind::NotEq),     // ≠  (alias)
+        ("\u{2192}", TokenKind::Arrow),     // →  (alias)
+    ];
+    for (glyph, kind) in candidates {
+        let g = glyph.as_bytes();
+        if pos + g.len() <= end && source.as_bytes()[pos..pos + g.len()] == *g {
+            return Some((kind.clone(), g.len()));
+        }
+    }
+    let _ = end;
+    None
+}
+
+// ---------------------------------------------------------------------------
+// T57: Adjoint `'` disambiguator.
+//
+// The apostrophe byte `'` is overloaded between the CharLit start and the
+// postfix adjoint/transpose operator. The disambiguation is the SAME
+// "previous-significant-token" heuristic used for `/` (regex vs division):
+// when `'` follows an expression-ending token, it is the Adjoint operator;
+// otherwise it begins a char literal. This keeps the lexer edition-agnostic
+// (the parser rejects Adjoint in the default edition).
+// ---------------------------------------------------------------------------
+
+fn is_expression_context(out: &[Token]) -> bool {
+    match out.last().map(|t| &t.kind) {
+        // Anything that ends a postfix expression can take the adjoint.
+        Some(
+            TokenKind::Ident(_)
+            | TokenKind::RParen
+            | TokenKind::RBracket
+            | TokenKind::CharLit(_)
+            | TokenKind::ByteLit(_)
+            | TokenKind::IntLit(_)
+            | TokenKind::FloatLit(_)
+            | TokenKind::DoubleLit(_)
+            | TokenKind::DecimalLit(_)
+            | TokenKind::StringEnd
+            | TokenKind::KwTrue
+            | TokenKind::KwFalse,
+        ) => true,
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------

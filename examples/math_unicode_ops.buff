@@ -1,0 +1,44 @@
+// T57 — Mathematical Syntax Edition: Unicode operators.
+//
+// Activated by `edition = "scientific"` in buff.toml. Buff accepts the
+// common mathematical Unicode operators as ALIASES for existing ASCII
+// tokens. Every Unicode operator has an ASCII alternative — Buff never
+// forces users to type Unicode.
+//
+// Coverage:
+//   ∑  →  sum(expr)        (ASCII: sum(...))
+//   ∏  →  product(expr)    (ASCII: product(...))
+//   √  →  sqrt(expr)       (ASCII: sqrt(...))
+//   ≤  →  <=               (ASCII: <=, works in BOTH editions)
+//   ≥  →  >=               (ASCII: >=, works in BOTH editions)
+//   ≠  →  !=               (ASCII: !=, works in BOTH editions)
+//   →  →  ->               (ASCII: ->, works in BOTH editions)
+//
+// The four comparison/arrow aliases (≤ ≥ ≠ →) are pure SPELLING VARIANTS
+// — they lex into the existing ASCII token kinds, so they work in BOTH
+// editions. The prefix operators (∑ ∏ √) are scientific-edition only.
+
+func unicode_demo():
+    let xs = [1, 2, 3, 4, 5]
+
+    // ∑ xs  →  sum(xs)
+    let total = ∑xs
+    print(total)
+
+    // ∏ xs  →  product(xs)
+    let product_all = ∏xs
+    print(product_all)
+
+    // √x  →  sqrt(x)
+    let root = √16
+    print(root)
+
+    // Comparison aliases (work in BOTH editions — pure spelling).
+    let a = 1
+    let b = 2
+    if a ≤ b:
+        print("a is at most b")
+    if a ≠ b:
+        print("a is not b")
+    if b ≥ a:
+        print("b is at least a")

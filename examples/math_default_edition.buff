@@ -1,0 +1,41 @@
+// T57 — Default edition regression demo.
+//
+// This file uses ONLY the historical Buff syntax (no scientific-edition
+// extensions). It exists to prove the default edition is 100% backwards
+// compatible: every program that compiled under v1.18 still compiles
+// under v1.19 with `edition = "standard"` (the default).
+//
+// What's NOT in this file (would be a parse error in the default edition):
+//   - implicit multiplication:  `2x`           → ERROR
+//   - Unicode prefix operators: `√x`, `∑xs`    → ERROR
+//   - matrix literals:          `[1 2; 3 4]`   → ERROR
+//   - adjoint postfix:          `A'`           → ERROR
+//
+// What IS allowed in BOTH editions (pure Unicode SPELLING of ASCII tokens):
+//   - `≤`  for  `<=`
+//   - `≥`  for  `>=`
+//   - `≠`  for  `!=`
+//   - `→`  for  `->`
+// These four work regardless of edition because they lex directly into
+// the existing ASCII token kinds.
+
+func default_edition_demo():
+    // Standard arithmetic — works in every edition.
+    let x = 10
+    let y = 2 * x + 1
+    print(y)
+
+    // Standard Vector literal (comma-separated) — works in every edition.
+    let xs = [1, 2, 3]
+    print(xs)
+
+    // Standard function calls — explicit multiplication required.
+    let scaled = 3 * sin(x)
+    print(scaled)
+
+    // The four Unicode comparison aliases work in BOTH editions because
+    // they are pure spelling variants of existing ASCII tokens.
+    if x ≤ y:
+        print("x <= y")
+    if x ≠ 0:
+        print("x != 0")
