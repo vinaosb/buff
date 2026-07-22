@@ -1,0 +1,45 @@
+[package]
+name = "buff-auth"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+JWT + OAuth2 + password hashing + RBAC for Buff. \
+Pure-Rust MVP (no `ring`, no native-tls, no cc-rs). \
+Wraps `jsonwebtoken` (rust_crypto backend) + `argon2` + \
+`oauth2` (rustls-tls) via a safe FFI boundary per the \
+T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "auth", "jwt", "oauth2", "rbac"]
+categories = ["authentication", "cryptography", "web-programming"]
+
+[lib]
+name = "buff_auth"
+path = "src/lib.rs"
+
+[dependencies]
+# T34 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# API surface used:
+# - jsonwebtoken::encode / decode (HS256 only via the `rust_crypto`
+#   backend — pure-Rust, NO `ring`, NO `aws-lc-rs`, NO cc-rs, matches
+#   the T34 task spec mandate).
+# - argon2::Argon2 / PasswordHash / PasswordHasher / PasswordVerifier
+#   (the RustCrypto Argon2 PHC-string format; pure-Rust).
+# - oauth2::ClientBuilder + AuthorizationCode + TokenResponse for the
+#   auth-code flow (pure-Rust, rustls-tls via reqwest).
+# - reqwest::blocking::Client for the OAuth2 token-exchange HTTP call
+#   (rustls-tls feature, NOT native-tls — workspace hard rule).
+jsonwebtoken.workspace = true
+argon2.workspace = true
+oauth2.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

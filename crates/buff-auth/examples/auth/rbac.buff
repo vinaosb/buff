@@ -1,0 +1,19 @@
+# T34 .buff example: RBAC policy (FORWARD-DECL).
+#
+# Requires the coordinated PreludeType::Rbac + PreludeAssocFn::Enforce
+# codegen lowering arms (this task, T34 finish).
+
+from "auth" import Rbac
+
+func main():
+    policy = Rbac.new()
+    policy.add(role: "admin", resource: "*", action: "read")
+    policy.add(role: "admin", resource: "users", action: "delete")
+    policy.add(role: "user", resource: "posts", action: "read")
+    policy.add(role: "*", resource: "health", action: "read")
+
+    print("policy size: ${policy.len()}")
+
+    admin_roles = Vector.new("admin")
+    print("admin can delete users: ${policy.enforce(roles: admin_roles, resource: "users", action: "delete")}")
+    print("admin can read anything: ${policy.enforce(roles: admin_roles, resource: "anything", action: "read")}")

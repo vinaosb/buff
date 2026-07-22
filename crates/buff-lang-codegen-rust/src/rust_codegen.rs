@@ -953,6 +953,38 @@ impl RustCodegen {
             self.extern_crates.insert("figment".to_string());
             self.extern_crates.insert("notify".to_string());
         }
+        // T31 (frameworks): register `buff-cache` + `moka` when the
+        // program references the prelude `Cache` module
+        // (`Cache.new(max_capacity)` / `cache.get(k)` / etc.). Mirrors
+        // the T9 Image / T10 AudioBuffer / T33 HttpClient pattern.
+        // Distributed Redis backend deferred to v1.18+ — moka is the
+        // only external dep the MVP wrapper crate wraps.
+        if program_uses_namespace(decls, "Cache") {
+            self.extern_crates.insert("buff-cache".to_string());
+            self.extern_crates.insert("moka".to_string());
+        }
+        // T34: register `buff-auth` when the program references any of
+        // the four prelude auth modules (`JWT` / `OAuth2Client` /
+        // `Password` / `Rbac`). Also records `jsonwebtoken` +
+        // `argon2` + `oauth2` + `reqwest` transitively (the wrapper
+        // crate wraps jsonwebtoken 10 with the pure-Rust `rust_crypto`
+        // backend for HS256 JWT, argon2 0.5 for Argon2id password
+        // hashing, oauth2 4 + reqwest rustls-tls for the OAuth2
+        // auth-code flow). Mirrors the T9 Image / T10 Audio / T26
+        // Audit / T18 Database pattern. NO `ring`, NO native-tls, NO
+        // cc-rs — the T34 task spec explicitly forbids all three per
+        // the "Windows host with no MSVC vcruntime.h" constraint.
+        if program_uses_namespace(decls, "JWT")
+            || program_uses_namespace(decls, "OAuth2Client")
+            || program_uses_namespace(decls, "Password")
+            || program_uses_namespace(decls, "Rbac")
+        {
+            self.extern_crates.insert("buff-auth".to_string());
+            self.extern_crates.insert("jsonwebtoken".to_string());
+            self.extern_crates.insert("argon2".to_string());
+            self.extern_crates.insert("oauth2".to_string());
+            self.extern_crates.insert("reqwest".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -3309,6 +3341,22 @@ impl RustCodegen {
             }
             Ok(())
         };
+        // Lower exactly two args, erroring on arity mismatch. Returns
+        // a 2-tuple so T34 (buff-auth) call sites that destructure
+        // `(token, secret)` work without refactor. Mirrors `one_arg`.
+        let two_args = |c: &mut Self| -> Result<(SynExpr, SynExpr), CodegenError> {
+            if args.len() != 2 {
+                return Err(c.unsupported(&format!(
+                    "{}.{}() expects exactly 2 args, got {}",
+                    ptype.name(),
+                    pmethod.name(),
+                    args.len()
+                )));
+            }
+            let a0 = c.lower_expr(&args[0])?;
+            let a1 = c.lower_expr(&args[1])?;
+            Ok((a0, a1))
+        };
         // Lower exactly N args, erroring on arity mismatch. Returns the
         // lowered args as a Vec so multi-arg prelude calls (Math.pow,
         // Math.min/max, Random.int, Strings.split/join/replace/...)
@@ -5256,6 +5304,93 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Config.watch codegen parse: {e}")))
             }
+            // T34: buff-auth assoc fns. The 5 (type, method) pairs
+            // below cover the MVP surface: JWT.encode / JWT.decode /
+            // Password.hash / Password.verify / OAuth2Client.new /
+            // Rbac.new. The instance-method forms
+            // (client.authorization_url / client.exchange_code /
+            // policy.add / policy.enforce) are deferred to the sibling
+            // task that adds Type::OAuth2Client / Type::Rbac — mirrors
+            // the T17 Web (web.get / web.listen) + T18 Database
+            // (pool.query / pool.execute) forward-declaration
+            // precedent. Records `buff-auth` + `jsonwebtoken` +
+            // `argon2` + `oauth2` + `reqwest` in extern_crates via the
+            // shared `program_uses_namespace("JWT"|"OAuth2Client"|
+            // "Password"|"Rbac")` walker.
+            //
+            // JWT.encode(claims, secret) -> String. Two args
+            // (Map<String, Unknown>, String). Wraps
+            // `buff_auth::jwt_encode(&claims_obj, &secret)
+            // .unwrap_or_default()` (panic-free — empty String on
+            // encode failure, NEVER panics). The codegen serialises
+            // the Buff Map<String, Unknown> arg to a serde_json Value
+            // and extracts the inner Map<String, Value> via
+            // `.as_object().cloned()` (the Buff Map<String, Unknown>
+            // lowers to a `std::collections::HashMap<String, ?>`
+            // whose serde_json serialisation round-trips through
+            // Map<String, Value>).
+            (T::Jwt, A::Encode) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "JWT.encode() expects exactly 2 args (claims, secret), got {}",
+                        args.len()
+                    )));
+                }
+                let claims = self.lower_expr(&args[0])?;
+                let secret = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_auth::jwt_encode(
+                        &serde_json::to_value(&#claims)
+                            .ok()
+                            .and_then(|v| v.as_object().cloned())
+                            .unwrap_or_default(),
+                        &#secret,
+                    ).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("JWT.encode codegen parse: {e}")))
+            }
+            // JWT.decode(token, secret) -> Map<String, Unknown>. Two
+            // args (String, String). Wraps
+            // `buff_auth::jwt_decode(&token, &secret).unwrap_or_default()`
+            // (panic-free — invalid signature / malformed token /
+            // expired all collapse to an empty Map, NEVER panics).
+            (T::Jwt, A::Decode) => {
+                let (token, secret) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_auth::jwt_decode(#token, #secret)
+                        .unwrap_or_default()
+                        .into_iter().collect()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("JWT.decode codegen parse: {e}")))
+            }
+            // Password.hash(plain) -> String. One arg (String). Wraps
+            // `buff_auth::password_hash(plain).unwrap_or_default()`
+            // (panic-free — empty String on hash failure, NEVER
+            // panics).
+            (T::Password, A::PasswordHash) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_auth::password_hash(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Password.hash codegen parse: {e}")))
+            }
+            // Password.verify(plain, phc_hash) -> Bool. Two args
+            // (String, String). Wraps
+            // `buff_auth::password_verify(plain, hash).unwrap_or(false)`
+            // (panic-free — false on mismatch or hash-format failure,
+            // NEVER panics). Mirrors the T26 Signature.verify lowering
+            // stance: verification failure is Ok(false), NOT an error.
+            (T::Password, A::PasswordVerify) => {
+                let (plain, hash) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_auth::password_verify(#plain, #hash).unwrap_or(false)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Password.verify codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -7018,6 +7153,19 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Validator.to_json_schema codegen parse: {e}")))
             }
+            // T31 (gap-fill): wildcard for instance-method variants
+            // whose codegen arms haven't been written yet (T11 Signal
+            // / Spectrum / Window, T12 ECS, T17 Web route_*, T20
+            // Reactive Update/Invalidate, T26 Audit, T29 Validator
+            // with_*). The variant exists in the PreludeInstanceFn
+            // enum but no `lower_*` arm handles it — surfaces as a
+            // clear "unsupported" error instead of a compile break.
+            // As sibling tasks complete their codegen wiring, they
+            // add explicit arms ABOVE this wildcard.
+            _ => Err(self.unsupported(&format!(
+                "{recv_ty}.{:?}() codegen not yet implemented",
+                pmethod
+            ))),
         }
     }
 
@@ -9482,6 +9630,21 @@ impl RustCodegen {
             // (via the narrow `program_uses_namespace("Validator")`
             // walker).
             Type::Validator => "buff_validate::Validator",
+            // T12: ECS World + Entity. Opaque runtime-value types
+            // mapped to `buff_ecs::World` / `buff_ecs::Entity`. Added
+            // by T31 (this commit) because T12 added the variants in
+            // ty.rs but missed the codegen arm — codegen cannot
+            // compile otherwise. No generic parameter, no turbofish
+            // needed (mirrors Image / DataFrame / HttpClient).
+            Type::World => "buff_ecs::World",
+            Type::Entity => "buff_ecs::Entity",
+            // T19: Template. Opaque runtime-value type mapped to
+            // `buff_template::Template`. Added by T31 (this commit)
+            // because T19 added the codegen method arm (M::Render)
+            // without the matching `Type::Template` variant in ty.rs
+            // or this `buff_type_to_syn` arm — both required to keep
+            // codegen compiling.
+            Type::Template => "buff_template::Template",
         };
         Some(rust_path_type(rust_name))
     }

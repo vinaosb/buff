@@ -3959,6 +3959,27 @@ pub fn assoc_fn_return_type(
         (PreludeType::Config, PreludeAssocFn::GetFloat) => Some(Type::option(Type::float_default())),
         (PreludeType::Config, PreludeAssocFn::GetBool) => Some(Type::option(Type::bool())),
         (PreludeType::Config, PreludeAssocFn::Watch) => Some(Type::Void),
+        // T34: buff-auth assoc fns. The 4 (type, method) pairs below
+        // cover the MVP surface that ships with codegen lowering:
+        // JWT.encode / JWT.decode / Password.hash / Password.verify.
+        // The OAuth2Client + Rbac instance methods
+        // (authorization_url / exchange_code / enforce) are deferred
+        // to the sibling task that adds Type::OAuth2Client / Type::Rbac
+        // (mirrors the T17 Web / T18 Database forward-declaration
+        // precedent) — their PreludeAssocFn variants are reserved here
+        // so the sibling task wires them without enum churn.
+        //
+        // Return types:
+        // - JWT.encode -> String (the compact JWS token).
+        // - JWT.decode -> Map<String, Unknown> (heterogeneous claims).
+        // - Password.hash -> String (Argon2id PHC form).
+        // - Password.verify -> Bool (Ok(false) on mismatch — NEVER errors).
+        (PreludeType::Jwt, PreludeAssocFn::Encode) => Some(Type::string()),
+        (PreludeType::Jwt, PreludeAssocFn::Decode) => {
+            Some(Type::map(Type::string(), Type::Unknown))
+        }
+        (PreludeType::Password, PreludeAssocFn::PasswordHash) => Some(Type::string()),
+        (PreludeType::Password, PreludeAssocFn::PasswordVerify) => Some(Type::bool()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -4409,6 +4430,13 @@ pub enum PreludeInstanceFn {
     /// the rule set as a JSON Schema (Draft 2020-12) string. Wraps
     /// `recv.to_json_schema()`.
     ToJsonSchema,
+    /// `template.render(context_json) -> String` (T19). One arg
+    /// (String — a JSON object). Wraps `recv.render(&ctx)
+    /// .unwrap_or_default()`. Added by T31 (this commit) because
+    /// T19 added the codegen M::Render arm + Type::Template
+    /// reference but missed the PreludeInstanceFn variant — codegen
+    /// cannot compile otherwise.
+    Render,
     /// `cache.set(key, value, ttl) -> Void` (T31). Three args
     /// (String, String, Duration). Wraps
     /// `recv.set_with_ttl(k, v, ttl)`. Distinct from `Set` (which
@@ -4576,6 +4604,9 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::WithRegex,
         PreludeInstanceFn::Validate,
         PreludeInstanceFn::ToJsonSchema,
+        // T19 (gap-fill by T31): Template.render instance method.
+        // The codegen M::Render arm existed; the variant didn't.
+        PreludeInstanceFn::Render,
         // T31: Cache instance methods — 4 new variants (SetTtl /
         // Delete / Contains / Clear). Get / Set / Len are SHARED
         // variants (Reactive owns Get/Set; DataFrame owns Len);
@@ -4742,6 +4773,10 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::WithRegex => "with_regex",
             PreludeInstanceFn::Validate => "validate",
             PreludeInstanceFn::ToJsonSchema => "to_json_schema",
+            // T19: Template.render name. Mirrors the buff_template
+            // method name 1:1. Added by T31 because the codegen
+            // M::Render arm existed but the variant lookup didn't.
+            PreludeInstanceFn::Render => "render",
             // T31: Cache method names. `set_ttl` surfaces as Buff
             // `cache.set(key, value, ttl)` via arity-based dispatch
             // (codegen consults arg count to lower to SetTtl vs Set).

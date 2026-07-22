@@ -1,0 +1,19 @@
+# T34 .buff example: OAuth2 authorization-code flow (FORWARD-DECL).
+#
+# Requires the coordinated PreludeType::OAuth2Client + PreludeAssocFn
+# ::AuthorizationUrl / ExchangeCode codegen lowering arms (this task,
+# T34 finish).
+
+from "auth" import OAuth2Client
+
+func main():
+    client = OAuth2Client.new(
+        client_id: "my-client-id",
+        client_secret: "my-client-secret",
+        auth_url: "https://accounts.example.com/oauth2/auth",
+        token_url: "https://accounts.example.com/oauth2/token",
+        redirect_url: "https://myapp.example.com/callback",
+        scopes: Vector.new("profile", "email")
+    )
+    url = client.authorization_url()
+    print("confidential client auth URL: ${url}")

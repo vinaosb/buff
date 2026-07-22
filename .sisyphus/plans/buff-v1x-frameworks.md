@@ -3293,7 +3293,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: GET/POST/PUT/DELETE work. JSON body serialization works. Timeout + retry composes with T36. 3 examples + 10 tests.
   - **Commit**: `feat(buff-http-client): MVP reqwest wrapper with fluent API`
 
-- [ ] 34. `buff-auth` — JWT + OAuth2 + Password Hashing + RBAC
+- [x] 34. `buff-auth` — JWT + OAuth2 + Password Hashing + RBAC
 
   **What to do**: Wrap Rust crates: `jsonwebtoken` (JWT), `oauth2` (OAuth2 client flows), `argon2` (password hashing), `casbin` or custom (RBAC). Provide: `JWT.encode(claims, secret)`, `JWT.decode(token, secret)`, `OAuth2Client.authorization_url()`, `OAuth2Client.exchange_code(code)`, `Password.hash(plain)`, `Password.verify(plain, hash)`, `Rbac.enforce(user, resource, action)`. Cross-language prevalence: 6/6 (Authlib/Passport/golang-jwt/oauth2/Spring Security/IdentityServer4).
   - **LOC budget**: ≤3000, ≤25 fns. **External deps**: `jsonwebtoken`, `oauth2`, `argon2`, optionally `casbin`.

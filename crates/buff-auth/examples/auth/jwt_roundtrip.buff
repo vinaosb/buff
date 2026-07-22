@@ -1,0 +1,21 @@
+# T34 .buff example: JWT roundtrip (FORWARD-DECL).
+#
+# Requires the coordinated PreludeType::Jwt + PreludeAssocFn::JwtEncode
+# / JwtDecode codegen lowering arms (this task, T34 finish). See
+# crates/buff-auth/AGENTS.md "RELATIONSHIP TO OTHER CRATES" for the
+# wiring map.
+
+from "auth" import JWT
+
+func main():
+    secret = "super-secret-key"
+    claims = HashMap.new()
+    claims.set("sub", "user-42")
+    claims.set("role", "admin")
+
+    token = JWT.encode(claims: claims, secret: secret)
+    print("token: ${token}")
+
+    decoded = JWT.decode(token: token, secret: secret)
+    sub = decoded.get("sub").or(default: "")
+    print("decoded sub: ${sub}")
