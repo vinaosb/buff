@@ -3302,7 +3302,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: JWT roundtrip works. OAuth2 auth-code flow works against test provider. Password hash/verify works. RBAC enforces policy. 4 examples + 15 tests.
   - **Commit**: `feat(buff-auth): MVP JWT + OAuth2 + password hashing + RBAC`
 
-- [ ] 35. `buff-jobs` — Background Job Queue + Scheduler
+- [x] 35. `buff-jobs` — Background Job Queue + Scheduler
 
   **What to do**: Wrap Rust `apalis` crate (or `tokio-cron-scheduler`). Provide: `Queue.new(backend)`, `queue.enqueue(job)`, `queue.worker(handler)`, `Scheduler.cron(expr, job)`, `Scheduler.interval(duration, job)`. Backends: in-memory (MVP), Redis (defer). Job priorities, retries via T36, dead-letter queue. Cross-language prevalence: 6/6 (Celery/Bull/asynq/apalis/Quartz/Hangfire).
   - **LOC budget**: ≤3000, ≤25 fns. **External deps**: `apalis` or `tokio-cron-scheduler`, `cron`.
