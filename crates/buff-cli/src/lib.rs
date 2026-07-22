@@ -249,22 +249,19 @@ impl App {
     fn build_command(&self) -> clap::Command {
         let node = match self.inner.lock() {
             Ok(n) => n,
-            Err(e) => {
-                let msg = e.to_string();
-                return clap::Command::new(msg.as_str());
-            }
+            Err(e) => return clap::Command::new(e.to_string()),
         };
-        let mut cmd = clap::Command::new(node.name.as_str());
+        let mut cmd = clap::Command::new(node.name.clone());
         if let Some(ref about) = node.about {
-            cmd = cmd.about(about.as_str());
+            cmd = cmd.about(about.clone());
         }
         if let Some(ref version) = node.version {
-            cmd = cmd.version(version.as_str());
+            cmd = cmd.version(version.clone());
         }
         for (name, short, desc) in &node.flags {
-            let mut arg = clap::Arg::new(name.as_str())
-                .long(name.as_str())
-                .help(desc.as_str())
+            let mut arg = clap::Arg::new(name.clone())
+                .long(name.clone())
+                .help(desc.clone())
                 .action(clap::ArgAction::SetTrue);
             if *short != '\0' {
                 arg = arg.short(*short);
@@ -272,9 +269,9 @@ impl App {
             cmd = cmd.arg(arg);
         }
         for (name, short, desc) in &node.options {
-            let mut arg = clap::Arg::new(name.as_str())
-                .long(name.as_str())
-                .help(desc.as_str())
+            let mut arg = clap::Arg::new(name.clone())
+                .long(name.clone())
+                .help(desc.clone())
                 .action(clap::ArgAction::Set)
                 .num_args(1);
             if *short != '\0' {
@@ -283,8 +280,8 @@ impl App {
             cmd = cmd.arg(arg);
         }
         for (name, desc) in &node.args {
-            let arg = clap::Arg::new(name.as_str())
-                .help(desc.as_str())
+            let arg = clap::Arg::new(name.clone())
+                .help(desc.clone())
                 .num_args(1);
             cmd = cmd.arg(arg);
         }
