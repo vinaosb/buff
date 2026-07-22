@@ -1,0 +1,58 @@
+[package]
+name = "buff-pubsub"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+In-process event bus for Buff. \
+Pure-Rust MVP built standalone on T2 Channel<T> semantics \
+(no extern required). \
+Wraps `crossbeam-channel` for per-subscription queues + \
+`tokio` for async integration. Distributed pub/sub \
+deferred to v1.18+.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "pubsub", "event-bus", "events", "broadcast"]
+categories = ["concurrency", "data-structures"]
+
+[lib]
+name = "buff_pubsub"
+path = "src/lib.rs"
+
+[dependencies]
+# T41 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# `crossbeam-channel` 0.5 is the per-subscription queue primitive.
+# API surface used: `crossbeam_channel::unbounded::<Event>()` for the
+# (Sender, Receiver) pair stored per subscription. Sender is held in
+# the topic→subs map; Receiver is drained by a worker thread which
+# calls the user handler for each Event. Dropping the Sender (via
+# `unsubscribe` or `clear`) causes the worker's `recv()` to return
+# `RecvError` (disconnected) so the worker exits cleanly.
+#
+# `tokio` 1.40 is the async runtime. The MVP surface is synchronous
+# (subscribe/publish are sync fns) but the worker spawn uses
+# `tokio::task::spawn_blocking` when a runtime is active (so an async
+# user program can call `bus.subscribe(...)` from inside a `spawn`
+# block without panicking on "no runtime running"). Falls back to
+# `std::thread::spawn` when no tokio runtime is active (sync use).
+# tokio is also a [dev-dependencies] for the `pubsub_async.rs`
+# example and the async integration tests in `tests/core.rs`.
+#
+# Both crates are already pinned at the workspace level (crossbeam-
+# channel for the LSP server's `select!` debounce, tokio for the
+# buff-lang-runtime + async test-util). Reusing the workspace pins
+# keeps the conservative-pin philosophy intact (no version drift).
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+insta.workspace = true
+# tokio dev-dep adds the `macros` + `test-util` features for
+# `#[tokio::test]` + `tokio::time::advance` in async tests. The lib
+# dep above has only rt/sync/time (no macros); we add macros here so
+# the lib doesn't pay for the proc-macro surface in production.
+tokio = { workspace = true, features = ["macros", "test-util", "rt", "rt-multi-thread", "sync", "time"] }

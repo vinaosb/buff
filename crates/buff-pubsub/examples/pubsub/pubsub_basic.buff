@@ -1,0 +1,27 @@
+# T41 .buff example: basic subscribe + publish (FORWARD-DECL).
+#
+# Requires the coordinated Type::EventBus codegen lowering arm
+# (separate follow-up commit per the buff-image T9 precedent:
+# MVP crate ships first, prelude+codegen wiring lands next).
+# See crates/buff-pubsub/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
+# for the wiring map (to be added in the follow-up commit).
+
+from "pubsub" import EventBus
+
+func main():
+    bus = EventBus.new()
+    print("created: ${bus}")
+
+    id = bus.subscribe(topic: "greeting", handler: { event =>
+        print("received on ${event.topic()}: ${event.payload()}")
+    })
+    print("subscribed with id: ${id}")
+
+    delivered = bus.publish(topic: "greeting", payload: "hello, world")
+    print("delivered to ${delivered} subscriber(s)")
+
+    print("topic_count: ${bus.topic_count()}")
+    print("subscriber_count: ${bus.subscriber_count(topic: "greeting")}")
+
+    bus.unsubscribe(id: id)
+    print("after unsubscribe: ${bus.subscriber_count(topic: "greeting")}")
