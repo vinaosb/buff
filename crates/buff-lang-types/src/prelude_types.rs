@@ -5222,10 +5222,10 @@ pub enum PreludeInstanceFn {
     /// `doc.root() -> XmlElement` — borrow the root element. Zero args.
     /// XmlDocument-only.
     Root,
-    /// `doc.find(xpath) -> Option<XmlElement>` — find first element
-    /// matching a simple XPath-like path. One arg (String). XmlDocument-only.
-    /// Returns `None` when no element matches.
-    Find,
+    // NOTE: `Find` is shared with `regex.find(text)` above (line ~4698).
+    // Dispatch is via `(Type::XmlDocument, Find)` pair in `instance_fn_return_type`
+    // + `lower_prelude_type_instance_fn` — same Find variant, different Type first arg.
+    // (Earlier T50 draft duplicated the variant; consolidated to avoid E0428.)
     /// `doc.to_string() -> String` — serialize back to XML. Zero args.
     /// XmlDocument-only.
     ToString,
