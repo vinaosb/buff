@@ -1,0 +1,21 @@
+# T39 .buff example: roundtrip a directory through a ZIP archive (FORWARD-DECL).
+#
+# Requires the coordinated Type::Archive codegen lowering arm (this
+# task, T39 finish). The prelude registry entry `PreludeType::Archive`
+# + assoc-method arms are added in the same T39 finish commit as this
+# example. See crates/buff-archive/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+#
+# Format is auto-detected from the output_path extension (`.zip` → Zip,
+# `.tar.gz` → Gz, `.tar.zst` → Zstd, etc.) — matching the cross-
+# language convention of `tar -czf x.tar.gz src/`.
+
+from "archive" import Archive
+
+func main():
+    src = "/tmp/buff_archive_src"
+    Archive.compress_dir(input_dir: src, output_path: "/tmp/buff_archive_out.zip")
+    print("compressed to /tmp/buff_archive_out.zip")
+
+    Archive.extract(archive_path: "/tmp/buff_archive_out.zip", output_dir: "/tmp/buff_archive_extracted")
+    print("extracted to /tmp/buff_archive_extracted")

@@ -1,0 +1,14 @@
+# T39 .buff example: roundtrip through uncompressed TAR (FORWARD-DECL).
+#
+# See archive_zip.buff for the wiring map. Format auto-detected from
+# the output_path extension (`.tar` → Tar).
+
+from "archive" import Archive
+
+func main():
+    src = "/tmp/buff_archive_src"
+    Archive.compress_dir(input_dir: src, output_path: "/tmp/buff_archive_out.tar")
+    print("compressed to /tmp/buff_archive_out.tar")
+
+    Archive.extract(archive_path: "/tmp/buff_archive_out.tar", output_dir: "/tmp/buff_archive_extracted")
+    print("extracted to /tmp/buff_archive_extracted")

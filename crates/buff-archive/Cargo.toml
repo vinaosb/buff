@@ -1,0 +1,65 @@
+[package]
+name = "buff-archive"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Zip/Tar/Gz/Zstd compression for Buff. \
+Pure-Rust MVP wrapping the mature `zip`, `tar`, `flate2`, \
+and `ruzstd` crates via a safe FFI boundary per the T4 \
+FFI guide. NO 7z, RAR, BZip2, or encryption (per T39 spec).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "archive", "zip", "tar", "gzip"]
+categories = ["compression", "filesystem"]
+
+[lib]
+name = "buff_archive"
+path = "src/lib.rs"
+
+[dependencies]
+# T39 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# - `zip` 2.x (workspace): pure-Rust ZIP read+write via deflate
+#   (default-features = false + features = ["deflate"] drops C libzstd
+#   and the rest of the exotic codecs that would violate the "no C
+#   library" hard rule).
+# - `tar` 0.4 (workspace, already pinned for T127/T139): pure-Rust
+#   tarball read+write.
+# - `flate2` 1.x (workspace, already pinned for T139): pure-Rust gzip
+#   via the default `miniz_oxide` backend.
+# - `ruzstd` 0.8 (workspace): pure-Rust Zstandard compress+decompress
+#   (NOT the canonical `zstd` crate — that one wraps C libzstd via
+#   cc-rs and would break the "no C library" rule).
+# - `thiserror`: crate-local ArchiveError derive.
+zip.workspace = true
+tar.workspace = true
+flate2.workspace = true
+ruzstd.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+# T39: examples live under `examples/archive/` (a subdirectory). Cargo's
+# default example discovery does NOT recurse into subdirs, so each
+# example is declared explicitly via a `[[example]]` table. Mirrors
+# the `examples/<topic>/` layout used in buff-image / buff-fuzz /
+# buff-lang-runtime / buff-cli for grouping related demo programs.
+[[example]]
+name = "archive_zip"
+path = "examples/archive/archive_zip.rs"
+
+[[example]]
+name = "archive_tar"
+path = "examples/archive/archive_tar.rs"
+
+[[example]]
+name = "archive_gz"
+path = "examples/archive/archive_gz.rs"
+
+[[example]]
+name = "archive_zstd"
+path = "examples/archive/archive_zstd.rs"

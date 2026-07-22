@@ -3342,7 +3342,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Fluent chains read naturally. Failure messages descriptive. 5 examples + 15 tests.
   - **Commit**: `feat(buff-assertions): MVP fluent test assertions`
 
-- [ ] 39. `buff-archive` — Zip/Tar/Gz/Zstd Compression
+- [x] 39. `buff-archive` — Zip/Tar/Gz/Zstd Compression
 
   **What to do**: Wrap Rust crates: `zip` (read/write zip), `tar` (tarballs), `flate2` (gzip), `zstd` (Zstandard). Provide unified API: `Archive.compress_dir(input_dir, output_path, format)`, `Archive.extract(archive_path, output_dir)`, `Format.{Zip,Tar,Gz,Zstd}` enum. Cross-language prevalence: 6/6 (zipfile/zlib/compress/flate2-tar-zstd/java.util.zip/System.IO.Compression).
   - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `zip`, `tar`, `flate2`, `zstd`.

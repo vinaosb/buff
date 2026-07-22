@@ -1,0 +1,17 @@
+# T39 .buff example: roundtrip through .tar.zst (FORWARD-DECL).
+#
+# Uses the pure-Rust `ruzstd` backend (NOT the canonical `zstd`
+# crate which wraps C libzstd). See archive_zip.buff for the wiring
+# map + crates/buff-archive/AGENTS.md "Pure-Rust deviation" note.
+# Format auto-detected from the output_path extension (`.tar.zst` →
+# Zstd).
+
+from "archive" import Archive
+
+func main():
+    src = "/tmp/buff_archive_src"
+    Archive.compress_dir(input_dir: src, output_path: "/tmp/buff_archive_out.tar.zst")
+    print("compressed to /tmp/buff_archive_out.tar.zst")
+
+    Archive.extract(archive_path: "/tmp/buff_archive_out.tar.zst", output_dir: "/tmp/buff_archive_extracted")
+    print("extracted to /tmp/buff_archive_extracted")
