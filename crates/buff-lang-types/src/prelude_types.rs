@@ -1668,6 +1668,41 @@ pub enum PreludeType {
     /// an arg. Codegen lowering lives in the buff-chat crate
     /// (`buff_chat::Platform::*`). Pure-Rust, CPU-only.
     Platform,
+    /// T48: `Provider` — the Ethereum JSON-RPC provider runtime value.
+    /// Constructed via `Provider.new(rpc_url)`; carries the instance
+    /// methods `provider.chain_id()` / `provider.block_number()` /
+    /// `provider.get_balance(addr)` / `provider.get_nonce(addr)` /
+    /// `provider.wait_for_tx(hash)`. Wraps `buff_web3::Provider`
+    /// (`Arc<EthProvider<Http>>`, `Send + Sync + Clone`). Pure-Rust TLS
+    /// via rustls (the `ethers` `rustls` feature flag); shared tokio
+    /// runtime hidden behind `block_on`. Mirrors HttpClient (T33) /
+    /// Bot (T47). Pure-Rust, CPU-only.
+    Provider,
+    /// T48: `Wallet` — the secp256k1 private-key wallet runtime value.
+    /// Constructed via `Wallet.from_private_key(key)`; carries the
+    /// instance methods `wallet.address()` / `wallet.connect(provider)`
+    /// / `wallet.sign_message(msg)`. Wraps `buff_web3::Wallet`
+    /// (wrapping `ethers::signers::LocalWallet`). Pure-Rust, CPU-only.
+    Wallet,
+    /// T48: `ConnectedWallet` — the Wallet+Provider pair (signing
+    /// client) runtime value. Constructed ONLY via
+    /// `wallet.connect(provider)`; carries the single instance method
+    /// `cw.address()`. Wraps `buff_web3::ConnectedWallet` (`{provider,
+    /// wallet}` pair struct). Pure-Rust, CPU-only.
+    ConnectedWallet,
+    /// T48: `Contract` — the deployed smart contract runtime value.
+    /// Constructed via `Contract.new(address, abi, client)`; carries
+    /// the instance methods `contract.address()` /
+    /// `contract.method(name)`. Wraps `buff_web3::Contract`
+    /// (`{address, abi, client}` struct). Pure-Rust, CPU-only.
+    Contract,
+    /// T48: `ContractMethod` — the chainable ABI method call-builder
+    /// runtime value. Constructed ONLY via `contract.method(name)`;
+    /// carries the chainable instance methods `m.arg(name, value)` /
+    /// `m.args(values)` + terminal `m.call()` / `m.send()`. Wraps
+    /// `buff_web3::ContractMethod` (`{address, abi, client,
+    /// method_name, args}` struct). Pure-Rust, CPU-only.
+    ContractMethod,
 }
 
 impl PreludeType {
@@ -2055,6 +2090,23 @@ impl PreludeType {
         PreludeType::Bot,
         PreludeType::ChatMessage,
         PreludeType::Platform,
+        // T48: Provider / Wallet / ConnectedWallet / Contract /
+        // ContractMethod — buff-web3 runtime values (Ethereum RPC +
+        // smart contract bindings via ethers-rs). All five are runtime
+        // values (mirrors Image / Point / Bot — none are namespace-only
+        // like Log / Toml / MsgPack). Records `buff-web3` + `ethers`
+        // + `tokio` + `reqwest` + `serde_json` + `hex` in extern_crates
+        // via the `program_uses_namespace("Provider")` / ("Wallet") /
+        // ("ConnectedWallet") / ("Contract") / ("ContractMethod")
+        // walkers (the walker fires on any of the five names because
+        // the user always composes Provider + Wallet + Contract
+        // together; recording once for any of them is sufficient —
+        // idempotent BTreeSet insert).
+        PreludeType::Provider,
+        PreludeType::Wallet,
+        PreludeType::ConnectedWallet,
+        PreludeType::Contract,
+        PreludeType::ContractMethod,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2406,6 +2458,19 @@ impl PreludeType {
             PreludeType::Bot => "Bot",
             PreludeType::ChatMessage => "ChatMessage",
             PreludeType::Platform => "Platform",
+            // T48: buff-web3 types — canonical PascalCase names
+            // matching the user-facing `Provider.new(url)` /
+            // `Wallet.from_private_key(key)` / `wallet.connect(p)` /
+            // `Contract.new(addr, abi, wallet)` / `contract.method(name)`
+            // / `m.arg(name, value)` / `m.call()` / `m.send()` surface.
+            // The underlying Rust crate is `buff_web3`
+            // (`buff_web3::{Provider, Wallet, ConnectedWallet, Contract,
+            // ContractMethod}`).
+            PreludeType::Provider => "Provider",
+            PreludeType::Wallet => "Wallet",
+            PreludeType::ConnectedWallet => "ConnectedWallet",
+            PreludeType::Contract => "Contract",
+            PreludeType::ContractMethod => "ContractMethod",
         }
     }
 
@@ -2788,6 +2853,16 @@ impl PreludeType {
             PreludeType::Bot => Type::Bot,
             PreludeType::ChatMessage => Type::ChatMessage,
             PreludeType::Platform => Type::Platform,
+            // T48: Provider / Wallet / ConnectedWallet / Contract /
+            // ContractMethod ARE runtime values (NOT namespace-only).
+            // Returns the matching opaque Type variant; the codegen
+            // layer maps them to `buff_web3::{Provider, Wallet,
+            // ConnectedWallet, Contract, ContractMethod}`.
+            PreludeType::Provider => Type::Provider,
+            PreludeType::Wallet => Type::Wallet,
+            PreludeType::ConnectedWallet => Type::ConnectedWallet,
+            PreludeType::Contract => Type::Contract,
+            PreludeType::ContractMethod => Type::ContractMethod,
         }
     }
 
@@ -3594,6 +3669,17 @@ pub enum PreludeAssocFn {
     /// Buff's "no panicking generated code" rule). Buff §7 ctor naming
     /// convention permits `Type.from_*()`.
     FromCoords,
+    /// T48: `Wallet.from_private_key(key)` — derive a wallet from a
+    /// hex-encoded secp256k1 private key. One arg (String — accepts
+    /// `0x`-prefixed or bare 64-char hex). Returns `Wallet`. Wraps
+    /// `buff_web3::Wallet::from_private_key(&key)
+    /// .unwrap_or_default()` (panic-free — Wallet impls Default as a
+    /// "burner" wallet derived from a fixed test key, NEVER use on
+    /// mainnet; the codegen-lowered `.unwrap_or_default()` collapses
+    /// `Web3Error::InvalidPrivateKey` to a default Wallet per Buff's
+    /// "no panicking generated code" rule). Buff §7 ctor naming
+    /// convention permits `Type.from_*()`. Wallet-only.
+    FromPrivateKey,
 }
 
 impl PreludeAssocFn {
@@ -3823,6 +3909,14 @@ impl PreludeAssocFn {
         PreludeAssocFn::Stem,
         PreludeAssocFn::Tokenize,
         PreludeAssocFn::Sentences,
+        // T48: Wallet.from_private_key — single-arg secp256k1 wallet
+        // ctor. Wallet-only — dispatched on the (Wallet, FromPrivateKey)
+        // pair in `assoc_fn_return_type`. Buff §7 ctor convention
+        // permits `Type.from_*()`. No other prelude type today exposes
+        // this verb (if a future task adds a second wallet-style
+        // namespace it can reuse this variant on the (FutureType,
+        // FromPrivateKey) pair).
+        PreludeAssocFn::FromPrivateKey,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -3957,6 +4051,11 @@ impl PreludeAssocFn {
             PreludeAssocFn::Stem => "stem",
             PreludeAssocFn::Tokenize => "tokenize",
             PreludeAssocFn::Sentences => "sentences",
+            // T48: Wallet.from_private_key — name mirrors the
+            // `buff_web3::Wallet::from_private_key` Rust method name
+            // 1:1 so codegen can splice the path without rewriting.
+            // Buff §7 ctor naming convention permits `Type.from_*()`.
+            PreludeAssocFn::FromPrivateKey => "from_private_key",
             // T37 (sibling): Faker.with_locale / Faker.with_seed —
             // sibling task added the variants + ALL + return-type
             // entries but missed the name() match arms. Defensive
@@ -5018,6 +5117,39 @@ pub fn assoc_fn_return_type(
         // (Bot, New) / (ChatMessage, New) pairs.
         (PreludeType::Bot, PreludeAssocFn::New) => Some(Type::bot()),
         (PreludeType::ChatMessage, PreludeAssocFn::New) => Some(Type::chat_message()),
+        // T48: buff-web3 constructors.
+        //
+        // `Provider.new(rpc_url)` is fallible in Rust (returns
+        // `Result<Provider, Web3Error>`) but surfaces as infallible on
+        // the Buff side via codegen's `.unwrap_or_default()` (Provider
+        // impls Default as a localhost-pointed no-op provider — added
+        // in the T48 MVP commit). `New` is shared with Channel.new /
+        // Faker.new / Bot.new / ChatMessage.new / Point.new /
+        // XmlElement.new / Message.new (T52) — dispatched on the
+        // (Provider, New) / (Contract, New) pairs.
+        //
+        // `Contract.new(address, abi_json, client)` is also fallible
+        // (returns `Result<Contract, Web3Error>`) but surfaces as
+        // infallible via `.unwrap_or_default()` (Contract impls Default
+        // as a zero-address + empty-ABI + read-only contract).
+        //
+        // `Wallet.from_private_key(key)` is the Wallet-only ctor (new
+        // variant `FromPrivateKey` — Wallet-specific). Also fallible
+        // but surfaces as infallible via `.unwrap_or_default()` (Wallet
+        // impls Default as a "burner" wallet).
+        //
+        // `Wallet.connect(provider)` is the Wallet → ConnectedWallet
+        // transform. Infallible in Rust (returns ConnectedWallet
+        // directly — no failure mode). Reuses the existing shared
+        // `Connect` variant (TCP.connect / WebSocket.connect) —
+        // dispatched on the (Wallet, Connect) pair.
+        (PreludeType::Provider, PreludeAssocFn::New) => Some(Type::provider()),
+        (PreludeType::Contract, PreludeAssocFn::New) => Some(Type::contract()),
+        (PreludeType::Wallet, PreludeAssocFn::FromPrivateKey) => Some(Type::wallet()),
+        // `Wallet.connect(provider)` is an INSTANCE method on a Wallet
+        // value (not a Type.method assoc fn like TCP.connect) — see the
+        // (Type::Wallet, PreludeInstanceFn::Connect) arm in
+        // `instance_fn_return_type` below.
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -5756,6 +5888,86 @@ pub enum PreludeInstanceFn {
     /// Wraps `buff_chat::Platform::is_telegram(recv)` (infallible —
     /// Copy value). Platform-only. Mirrors [`Self::IsDiscord`].
     IsTelegram,
+    // ---- T48: buff-web3 instance methods ------------------------------
+    // Provider (5 accessors), Wallet (SignMessage), Contract (Method),
+    // ContractMethod (Arg / Args / Call). All dispatched on
+    // (Type, variant) pairs in `instance_fn_return_type`. Address /
+    // Send reuse existing shared variants (Faker.address /
+    // SmtpClient.send respectively). Wallet.connect reuses Connect
+    // (TCP.connect / WebSocket.connect).
+    /// `provider.chain_id() -> Int` (Provider). Zero args. EIP-155
+    /// chain ID (Mainnet = 1, Sepolia = 11155111). Wraps
+    /// `recv.chain_id().unwrap_or_default() as i64` (panic-free —
+    /// Web3Error::Rpc collapses to 0). Provider-only.
+    ChainId,
+    /// `provider.block_number() -> Int` (Provider). Zero args. Latest
+    /// sealed block height. Wraps `recv.block_number()
+    /// .unwrap_or_default() as i64`. Provider-only.
+    BlockNumber,
+    /// `provider.get_balance(address) -> Int` (Provider). One arg
+    /// (String address — 0x-prefixed 40 hex chars). Returns the low
+    /// 128 bits of the U256 wei balance (sufficient for any realistic
+    /// balance — 2^128 wei ≈ 6.8 * 10^14 ETH). Wraps
+    /// `recv.get_balance(&address).unwrap_or_default() as i64`.
+    /// Provider-only.
+    GetBalance,
+    /// `provider.get_nonce(address) -> Int` (Provider). One arg
+    /// (String address). Returns the next transaction index the
+    /// network expects from this account. Wraps
+    /// `recv.get_nonce(&address).unwrap_or_default() as i64`.
+    /// Provider-only.
+    GetNonce,
+    /// `provider.wait_for_tx(tx_hash) -> String` (Provider). One arg
+    /// (String tx_hash — 0x-prefixed 64 hex chars). Returns the
+    /// receipt status: `"0x1"` (success), `"0x0"` (reverted),
+    /// `"pending"`, or `"not-found"`. Wraps
+    /// `recv.wait_for_tx(&hash).unwrap_or_default()`. Provider-only.
+    WaitForTx,
+    /// `wallet.sign_message(message) -> String` (Wallet). One arg
+    /// (String message). EIP-191 personal_sign — returns the 65-byte
+    /// signature as `0x`-prefixed hex (includes recovery byte so the
+    /// signature can be verified off-chain). Wraps
+    /// `recv.sign_message(&msg).unwrap_or_default()`. Wallet-only.
+    SignMessage,
+    /// `contract.method(name) -> ContractMethod` (Contract). One arg
+    /// (String method name). Builds the call — chain `.arg()` /
+    /// `.args()` then terminate with `.call()` (read) or `.send()`
+    /// (write, requires ConnectedWallet). Returns
+    /// `Web3Error::MethodNotFound` if the ABI has no function with
+    /// that name (surfaces as Default ContractMethod via the codegen
+    /// `.unwrap_or_default()` collapse). Wraps `recv.method(&name)
+    /// .unwrap_or_default()`. Contract-only.
+    Method,
+    /// `m.arg(name, value) -> ContractMethod` (ContractMethod). Two
+    /// args (String name — currently IGNORED at the wire layer because
+    /// `ethers::abi::Token` doesn't carry names for non-tuple inputs;
+    /// future tuple support may consume it; String value — spliced as
+    /// `ethers::abi::Token::String((#value).to_string())`). Chainable
+    /// — consumes self, returns Self. Mirrors Validator.with_* /
+    /// Email.body builder pattern. ContractMethod-only.
+    Arg,
+    /// `m.args(values) -> ContractMethod` (ContractMethod). One arg
+    /// (`Vector<String>` values — each spliced as
+    /// `ethers::abi::Token::String`). Chainable — consumes self,
+    /// returns Self. Bulk-add variant of [`Self::Arg`]. Wraps
+    /// `recv.args((#values).into_iter().map(|v|
+    /// ethers::abi::Token::String(v)))`. ContractMethod-only.
+    Args,
+    /// `m.call() -> String` (ContractMethod). Zero args. Executes
+    /// the method as a read-only `eth_call`. Returns the ABI-decoded
+    /// return value as debug-formatted text (single-value returns
+    /// are the bare value; multi-value returns are
+    /// `[Token, Token, ...]`). Wraps `recv.call()
+    /// .unwrap_or_default()`. ContractMethod-only.
+    Call,
+    /// T48: `wallet.connect(provider) -> ConnectedWallet` (Wallet).
+    /// One arg (Provider). Infallible (returns ConnectedWallet
+    /// directly — no failure mode). Consumes self (move semantics).
+    /// Wraps `recv.connect(#provider)`. Mirrors the PreludeAssocFn::
+    /// Connect variant NAME but lives in a SEPARATE enum (instance
+    /// method vs assoc fn — `wallet.connect(p)` is `recv.method(args)`,
+    /// `TCP.connect(h, p)` is `Type.method(args)`). Wallet-only.
+    Connect,
 }
 
 impl PreludeInstanceFn {
@@ -6023,6 +6235,30 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::IsDm,
         PreludeInstanceFn::IsDiscord,
         PreludeInstanceFn::IsTelegram,
+        // T48: buff-web3 instance methods (10 new variants). `Address`
+        // is shared with Faker.address (existing variant — dispatched
+        // on the (Wallet, Address) / (ConnectedWallet, Address) /
+        // (Contract, Address) pairs). `Send` is shared with Connection
+        // / WsConnection / Sender / SmtpClient (existing variant —
+        // dispatched on the (ContractMethod, Send) pair). The 10 new
+        // variants are: Provider (ChainId / BlockNumber / GetBalance /
+        // GetNonce / WaitForTx), Wallet (SignMessage), Contract
+        // (Method), ContractMethod (Arg / Args / Call). All dispatched
+        // on the (Type, Method) pair via `instance_fn_return_type`.
+        PreludeInstanceFn::ChainId,
+        PreludeInstanceFn::BlockNumber,
+        PreludeInstanceFn::GetBalance,
+        PreludeInstanceFn::GetNonce,
+        PreludeInstanceFn::WaitForTx,
+        PreludeInstanceFn::SignMessage,
+        PreludeInstanceFn::Method,
+        PreludeInstanceFn::Arg,
+        PreludeInstanceFn::Args,
+        PreludeInstanceFn::Call,
+        // T48: Wallet.connect — INSTANCE-method Connect (distinct from
+        // the PreludeAssocFn::Connect variant — same name, different
+        // enum, different dispatch shape: recv.method vs Type.method).
+        PreludeInstanceFn::Connect,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -6308,6 +6544,39 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::IsDm => "is_dm",
             PreludeInstanceFn::IsDiscord => "is_discord",
             PreludeInstanceFn::IsTelegram => "is_telegram",
+            // T48: buff-web3 instance method names mirror the
+            // `buff_web3::{Provider, Wallet, ConnectedWallet, Contract,
+            // ContractMethod}` Rust method names 1:1 so the codegen
+            // can splice `recv.chain_id()` / `recv.block_number()` /
+            // `recv.get_balance(&a)` / `recv.get_nonce(&a)` /
+            // `recv.wait_for_tx(&h)` / `recv.sign_message(&m)` /
+            // `recv.method(&n)` / `recv.arg(...)` / `recv.args(...)` /
+            // `recv.call()` without rewriting. The shared `Address`
+            // variant ("address") covers Wallet.address /
+            // ConnectedWallet.address / Contract.address; the shared
+            // `Send` variant ("send") covers ContractMethod.send;
+            // the shared `Connect` variant ("connect") covers
+            // Wallet.connect (these reuse existing names already
+            // mapped by the Faker / SmtpClient / TCP arms).
+            PreludeInstanceFn::ChainId => "chain_id",
+            PreludeInstanceFn::BlockNumber => "block_number",
+            PreludeInstanceFn::GetBalance => "get_balance",
+            PreludeInstanceFn::GetNonce => "get_nonce",
+            PreludeInstanceFn::WaitForTx => "wait_for_tx",
+            PreludeInstanceFn::SignMessage => "sign_message",
+            PreludeInstanceFn::Method => "method",
+            PreludeInstanceFn::Arg => "arg",
+            PreludeInstanceFn::Args => "args",
+            PreludeInstanceFn::Call => "call",
+            // T48: `wallet.connect(provider)` — name mirrors the
+            // `buff_web3::Wallet::connect` Rust method name 1:1 so
+            // codegen can splice `wallet.connect(provider)` without
+            // rewriting. NOTE: this is the INSTANCE-method Connect
+            // (PreludeInstanceFn::Connect — receiver is a wallet
+            // value), NOT the assoc-fn Connect (PreludeAssocFn::
+            // Connect — receiver is the bare namespace Ident
+            // `TCP`/`WebSocket`). Same name, different enum.
+            PreludeInstanceFn::Connect => "connect",
         }
     }
 }
@@ -6929,6 +7198,69 @@ pub fn instance_fn_return_type(
         (Type::ChatMessage, PreludeInstanceFn::IsDm) => Some(Type::Bool),
         (Type::Platform, PreludeInstanceFn::IsDiscord) => Some(Type::Bool),
         (Type::Platform, PreludeInstanceFn::IsTelegram) => Some(Type::Bool),
+
+        // T48: buff-web3 instance methods. All panic-free via the
+        // codegen's `.unwrap_or_default()` / `as i64` collapse
+        // (mirrors T9 Image / T45 Point / T47 Bot / T52 Message).
+        //
+        // Provider (5 accessors): chain_id / block_number / get_nonce
+        // return Int (Buff's Int<64> — u64 at the Rust layer lifted to
+        // i64 via `as`); get_balance returns Int (low 128 bits of U256
+        // wei balance — u128 lifted to i64); wait_for_tx returns String
+        // (the receipt status code). All Web3Error::Rpc / Panic
+        // failures collapse to 0 / String::default() — NEVER panics.
+        //
+        // Wallet (2 accessors + SignMessage): address returns String
+        // (shared `Address` variant — already mapped by the Faker arm
+        // for "address"); connect returns ConnectedWallet (shared
+        // `Connect` variant — already mapped by the TCP arm for
+        // "connect"); sign_message returns String (the 65-byte EIP-191
+        // signature as hex). Wallet.connect consumes self — the codegen
+        // lowers `wallet.connect(p)` to `wallet.connect(p)` (move).
+        //
+        // ConnectedWallet.address: shared `Address` variant —
+        // dispatched on (ConnectedWallet, Address) pair, returns
+        // String (proxies to the inner wallet's address).
+        //
+        // Contract (Method + Address): address returns String (shared
+        // `Address` variant — dispatched on (Contract, Address) pair);
+        // method returns ContractMethod (the call builder). Both
+        // Web3Error::MethodNotFound / InvalidAddress collapse to
+        // Default ContractMethod / String::default() via
+        // `.unwrap_or_default()` — NEVER panics.
+        //
+        // ContractMethod (Arg / Args / Call + Send): arg / args return
+        // ContractMethod (chainable — consume self, return Self,
+        // mirrors Email.body / Validator.with_* builder pattern);
+        // call returns String (ABI-decoded return value as debug-
+        // formatted text — single-value returns are the bare value;
+        // multi-value returns are `[Token, Token, ...]`); send returns
+        // String (the 32-byte tx hash as `0x`-prefixed hex — shared
+        // `Send` variant dispatched on (ContractMethod, Send) pair,
+        // distinct lowering from (Connection, Send) / (WsConnection,
+        // Send) / (Sender, Send) / (SmtpClient, Send)). All
+        // Web3Error::AbiEncode / AbiDecode / Rpc / WalletNotConnected
+        // failures collapse to ContractMethod::default() /
+        // String::default() — NEVER panics.
+        (Type::Provider, PreludeInstanceFn::ChainId) => Some(Type::int_default()),
+        (Type::Provider, PreludeInstanceFn::BlockNumber) => Some(Type::int_default()),
+        (Type::Provider, PreludeInstanceFn::GetBalance) => Some(Type::int_default()),
+        (Type::Provider, PreludeInstanceFn::GetNonce) => Some(Type::int_default()),
+        (Type::Provider, PreludeInstanceFn::WaitForTx) => Some(Type::String),
+
+        (Type::Wallet, PreludeInstanceFn::Address) => Some(Type::String),
+        (Type::Wallet, PreludeInstanceFn::Connect) => Some(Type::connected_wallet()),
+        (Type::Wallet, PreludeInstanceFn::SignMessage) => Some(Type::String),
+
+        (Type::ConnectedWallet, PreludeInstanceFn::Address) => Some(Type::String),
+
+        (Type::Contract, PreludeInstanceFn::Address) => Some(Type::String),
+        (Type::Contract, PreludeInstanceFn::Method) => Some(Type::contract_method()),
+
+        (Type::ContractMethod, PreludeInstanceFn::Arg) => Some(Type::contract_method()),
+        (Type::ContractMethod, PreludeInstanceFn::Args) => Some(Type::contract_method()),
+        (Type::ContractMethod, PreludeInstanceFn::Call) => Some(Type::String),
+        (Type::ContractMethod, PreludeInstanceFn::Send) => Some(Type::String),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

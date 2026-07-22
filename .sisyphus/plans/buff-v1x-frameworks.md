@@ -3424,7 +3424,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Bot connects to test server (Discord test mode + Telegram bot API). Command dispatch works. 3 examples + 10 tests (mock API).
   - **Commit**: `feat(buff-chat): MVP Discord + Telegram bot framework`
 
-- [ ] 48. `buff-web3` — Blockchain RPC + Smart Contracts
+- [x] 48. `buff-web3` — Blockchain RPC + Smart Contracts
 
   **What to do**: Wrap Rust `ethers-rs` crate. Provide: `Provider.new(rpc_url)`, `Wallet.from_private_key(key)`, `Contract.new(address, abi, wallet)`, `contract.method(name).call()`, `contract.method(name).send()`. Read/write blockchain. Cross-language: 4/6 (web3.py/ethers.js/ethers-rs/Web3j).
   - **LOC budget**: ≤3000, ≤25 fns. **External deps**: `ethers`, `ethers-contract`, `ethers-signers`.

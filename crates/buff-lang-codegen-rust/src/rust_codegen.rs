@@ -1176,6 +1176,38 @@ impl RustCodegen {
             self.extern_crates.insert("async-trait".to_string());
             self.extern_crates.insert("tokio".to_string());
         }
+        // T48: register `buff-web3` when the program references any of
+        // the five prelude web3 namespaces (`Provider.*` / `Wallet.*` /
+        // `ConnectedWallet.*` / `Contract.*` / `ContractMethod.*`).
+        // Also records `ethers` (the upstream Ethereum RPC + signer
+        // crate, with the `rustls` feature — NOT native-tls per
+        // AGENTS.md hard rule), `tokio` (the multi-threaded runtime
+        // shared via `buff_web3`'s OnceLock), `reqwest` (transitive
+        // via ethers' Http provider — rustls-tls), `serde_json`
+        // (transitive via ethers' ABI parser), and `hex` (transitive
+        // via Wallet.sign_message hex-encoding + ContractMethod tx-
+        // hash formatting). The walker checks all five namespaces
+        // because the user always composes Provider + Wallet +
+        // Contract together (a ContractMethod value arises only via
+        // `contract.method(name)` which requires a Contract, which
+        // requires either a Provider or ConnectedWallet); recording
+        // once for any of them is sufficient (idempotent BTreeSet
+        // insert). Mirrors the T9 Image / T18 Database / T34 buff-auth
+        // / T42 buff-email / T47 buff-chat pattern. Pure-Rust, CPU-
+        // only (network I/O never runs on the GPU path).
+        if program_uses_namespace(decls, "Provider")
+            || program_uses_namespace(decls, "Wallet")
+            || program_uses_namespace(decls, "ConnectedWallet")
+            || program_uses_namespace(decls, "Contract")
+            || program_uses_namespace(decls, "ContractMethod")
+        {
+            self.extern_crates.insert("buff-web3".to_string());
+            self.extern_crates.insert("ethers".to_string());
+            self.extern_crates.insert("tokio".to_string());
+            self.extern_crates.insert("reqwest".to_string());
+            self.extern_crates.insert("serde_json".to_string());
+            self.extern_crates.insert("hex".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -6204,6 +6236,75 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Text.sentences codegen parse: {e}")))
             }
+            // T48: Provider.new(rpc_url) -> Provider. One arg (String).
+            // Wraps `buff_web3::Provider::new(&url).unwrap_or_default()`
+            // (panic-free — Provider impls Default as a localhost-pointed
+            // no-op provider; the codegen-lowered `.unwrap_or_default()`
+            // collapses `Web3Error::InvalidUrl` / `Web3Error::Panic` to
+            // the default Provider per Buff's "no panicking generated
+            // code" rule). Records `buff-web3` + `ethers` + `tokio` +
+            // `reqwest` + `serde_json` + `hex` in extern_crates via the
+            // `program_uses_namespace("Provider")` walker.
+            (T::Provider, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_web3::Provider::new(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Provider.new codegen parse: {e}")))
+            }
+            // T48: Wallet.from_private_key(key) -> Wallet. One arg
+            // (String — accepts `0x`-prefixed or bare 64-char hex).
+            // Wraps `buff_web3::Wallet::from_private_key(&key)
+            // .unwrap_or_default()` (panic-free — Wallet impls Default
+            // as a "burner" wallet derived from a fixed test key,
+            // NEVER use on mainnet; the codegen-lowered
+            // `.unwrap_or_default()` collapses
+            // `Web3Error::InvalidPrivateKey` / `Web3Error::Panic` to
+            // the default Wallet). Records `buff-web3` + `ethers` +
+            // `tokio` + `reqwest` + `serde_json` + `hex` in
+            // extern_crates via the `program_uses_namespace("Wallet")`
+            // walker.
+            (T::Wallet, A::FromPrivateKey) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_web3::Wallet::from_private_key(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Wallet.from_private_key codegen parse: {e}"))
+                })
+            }
+            // T48: Contract.new(address, abi_json, client) -> Contract.
+            // Three args (String address, String abi JSON,
+            // Provider|ConnectedWallet client). Wraps
+            // `buff_web3::Contract::new(&addr, &abi, #client)
+            // .unwrap_or_default()` (panic-free — Contract impls
+            // Default as a zero-address + empty-ABI + read-only
+            // contract; the codegen-lowered `.unwrap_or_default()`
+            // collapses `Web3Error::InvalidAddress` /
+            // `Web3Error::InvalidAbi` / `Web3Error::Panic` to the
+            // default Contract). The `client` arg is spliced directly
+            // — the buff_web3 `IntoClient` trait accepts both Provider
+            // (read-only) and ConnectedWallet (signing). Records
+            // `buff-web3` + `ethers` + `tokio` + `reqwest` +
+            // `serde_json` + `hex` in extern_crates via the
+            // `program_uses_namespace("Contract")` walker.
+            (T::Contract, A::New) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "Contract.new expects exactly 3 args (address, abi_json, client), got {}",
+                        args.len()
+                    )));
+                }
+                let address = self.lower_expr(&args[0])?;
+                let abi = self.lower_expr(&args[1])?;
+                let client = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_web3::Contract::new(&#address, &#abi, #client).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Contract.new codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -7030,18 +7131,31 @@ impl RustCodegen {
                     .map_err(|e| self.unsupported(&format!("Receiver.close codegen parse: {e}")))
             }
             // T124m: Send / Recv / Close on a non-(Connection /
-            // WsConnection) receiver type fall through to a clear
+            // WsConnection / Sender / Receiver / SmtpClient /
+            // ContractMethod) receiver type fall through to a clear
             // error (mirrors the unreachable defensive arm in
             // lower_prelude_type_assoc_fn). The registry's
             // instance_fn_lookup already rejected the (type,
             // method) pair before reaching this point; this arm
             // is the safety net for future runtime-value types
             // that might also expose `send` / `recv` / `close`
-            // methods.
-            M::Send | M::Recv | M::Close => Err(self.unsupported(&format!(
-                "{recv_ty}.{:?}() is not a recognised prelude instance method",
-                pmethod
-            ))),
+            // methods. T42 (SmtpClient.send) + T48
+            // (ContractMethod.send) have their own dedicated arms
+            // LATER in this match — the guard below excludes them
+            // from this wildcard so they reach their dedicated
+            // arms (without the guard, this wildcard would catch
+            // them first as dead code).
+            M::Send | M::Recv | M::Close
+                if !matches!(
+                    recv_ty,
+                    Type::SmtpClient | Type::ContractMethod
+                ) =>
+            {
+                Err(self.unsupported(&format!(
+                    "{recv_ty}.{:?}() is not a recognised prelude instance method",
+                    pmethod
+                )))
+            }
             // T7: DataFrame instance methods. Each chainable method
             // returns `buff_dataframe::DataFrame` so the user can
             // chain `df.select(cols).filter(pred).head(10)`. The
@@ -9094,6 +9208,240 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("SmtpClient.send codegen parse: {e}")))
+            }
+            // T48: buff-web3 instance methods. Each lowers to a
+            // fully-qualified `buff_web3::*` method chained with
+            // `.unwrap_or_default()` / `as i64` (panic-free — mirrors
+            // T9 Image / T45 Point / T47 Bot / T52 Message). The
+            // shared `Address` variant covers Wallet.address /
+            // ConnectedWallet.address / Contract.address; the shared
+            // `Connect` variant covers Wallet.connect; the shared
+            // `Send` variant covers ContractMethod.send.
+            //
+            // `provider.chain_id()` -> Int. Zero args. Wraps
+            // `recv.chain_id().unwrap_or_default() as i64`.
+            M::ChainId if matches!(recv_ty, Type::Provider) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "chain_id() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.chain_id().unwrap_or_default() as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Provider.chain_id codegen parse: {e}")))
+            }
+            // `provider.block_number()` -> Int. Zero args.
+            M::BlockNumber if matches!(recv_ty, Type::Provider) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "block_number() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.block_number().unwrap_or_default() as i64
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Provider.block_number codegen parse: {e}"))
+                })
+            }
+            // `provider.get_balance(address)` -> Int. One arg (String).
+            M::GetBalance if matches!(recv_ty, Type::Provider) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "get_balance() expects exactly 1 arg (address), got {}",
+                        args.len()
+                    )));
+                }
+                let address = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.get_balance(&#address).unwrap_or_default() as i64
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Provider.get_balance codegen parse: {e}"))
+                })
+            }
+            // `provider.get_nonce(address)` -> Int. One arg (String).
+            M::GetNonce if matches!(recv_ty, Type::Provider) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "get_nonce() expects exactly 1 arg (address), got {}",
+                        args.len()
+                    )));
+                }
+                let address = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.get_nonce(&#address).unwrap_or_default() as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Provider.get_nonce codegen parse: {e}")))
+            }
+            // `provider.wait_for_tx(tx_hash)` -> String. One arg (String).
+            M::WaitForTx if matches!(recv_ty, Type::Provider) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "wait_for_tx() expects exactly 1 arg (tx_hash), got {}",
+                        args.len()
+                    )));
+                }
+                let hash = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.wait_for_tx(&#hash).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Provider.wait_for_tx codegen parse: {e}"))
+                })
+            }
+            // `wallet.address()` -> String. Zero args. Shared `Address`
+            // variant dispatched on (Wallet, Address) / (ConnectedWallet,
+            // Address) / (Contract, Address) pairs. Infallible (the
+            // underlying buff_web3 methods return String directly).
+            M::Address if matches!(recv_ty, Type::Wallet | Type::ConnectedWallet | Type::Contract) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "address() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.address()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("web3 .address codegen parse: {e}")))
+            }
+            // `wallet.connect(provider)` -> ConnectedWallet. One arg
+            // (Provider). Infallible (returns ConnectedWallet directly —
+            // no failure mode). Wraps `recv.connect(#provider)` (move
+            // semantics — consumes self). Shared `Connect` variant
+            // dispatched on (Wallet, Connect) — distinct lowering from
+            // TCP.connect / WebSocket.connect.
+            M::Connect if matches!(recv_ty, Type::Wallet) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "connect() expects exactly 1 arg (provider), got {}",
+                        args.len()
+                    )));
+                }
+                let provider = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.connect(#provider)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Wallet.connect codegen parse: {e}")))
+            }
+            // `wallet.sign_message(message)` -> String. One arg (String).
+            // Wraps `recv.sign_message(&msg).unwrap_or_default()` (panic-
+            // free — Web3Error::Rpc collapses to String::default()).
+            M::SignMessage if matches!(recv_ty, Type::Wallet) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "sign_message() expects exactly 1 arg (message), got {}",
+                        args.len()
+                    )));
+                }
+                let message = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.sign_message(&#message).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Wallet.sign_message codegen parse: {e}"))
+                })
+            }
+            // `contract.method(name)` -> ContractMethod. One arg (String).
+            // Wraps `recv.method(&name).unwrap_or_default()` (panic-free —
+            // MethodNotFound / InvalidAbi collapses to a default
+            // ContractMethod whose .call() / .send() return Default).
+            M::Method if matches!(recv_ty, Type::Contract) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "method() expects exactly 1 arg (name), got {}",
+                        args.len()
+                    )));
+                }
+                let name = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.method(&#name).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Contract.method codegen parse: {e}")))
+            }
+            // `m.arg(name, value)` -> ContractMethod. Two args (String
+            // name, String value). The name is currently IGNORED at the
+            // wire layer (ethers::abi::Token doesn't carry names for
+            // non-tuple inputs); future tuple support may consume it.
+            // The value is spliced as `ethers::abi::Token::String`.
+            // Chainable — consumes self, returns Self (mirrors
+            // Validator.with_* / Email.body builder pattern).
+            M::Arg if matches!(recv_ty, Type::ContractMethod) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "arg() expects exactly 2 args (name, value), got {}",
+                        args.len()
+                    )));
+                }
+                let value = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.arg(ethers::abi::Token::String((#value).to_string()))
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("ContractMethod.arg codegen parse: {e}")))
+            }
+            // `m.args(values)` -> ContractMethod. One arg (Vector<String>).
+            // Each value spliced as `ethers::abi::Token::String`.
+            // Chainable — consumes self, returns Self.
+            M::Args if matches!(recv_ty, Type::ContractMethod) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "args() expects exactly 1 arg (values), got {}",
+                        args.len()
+                    )));
+                }
+                let values = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.args((#values).into_iter().map(|v| ethers::abi::Token::String(v)))
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("ContractMethod.args codegen parse: {e}")))
+            }
+            // `m.call()` -> String. Zero args. Wraps `recv.call()
+            // .unwrap_or_default()` (panic-free — Web3Error::Rpc /
+            // AbiDecode collapses to String::default()).
+            M::Call if matches!(recv_ty, Type::ContractMethod) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "call() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.call().unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ContractMethod.call codegen parse: {e}"))
+                })
+            }
+            // `m.send()` -> String. Zero args. Wraps `recv.send()
+            // .unwrap_or_default()` (panic-free — Web3Error::Rpc /
+            // WalletNotConnected collapses to String::default()). Shared
+            // `Send` variant dispatched on (ContractMethod, Send) —
+            // distinct lowering from Connection.send /
+            // WsConnection.send / Sender.send / SmtpClient.send.
+            M::Send if matches!(recv_ty, Type::ContractMethod) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "send() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.send().unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ContractMethod.send codegen parse: {e}"))
+                })
             }
             // T31 (gap-fill): wildcard for instance-method variants
             // whose codegen arms haven't been written yet (T11 Signal
@@ -11692,6 +12040,17 @@ impl RustCodegen {
             Type::Bot => "buff_chat::Bot",
             Type::ChatMessage => "buff_chat::Message",
             Type::Platform => "buff_chat::Platform",
+            // T48: prelude web3 types. `Provider` / `Wallet` /
+            // `ConnectedWallet` / `Contract` / `ContractMethod` are
+            // all runtime values (mirrors Image / Point / Bot — none
+            // are namespace-only). Map to `buff_web3::*` paths 1:1
+            // (no renaming needed — Buff surface names match the Rust
+            // struct names in `buff_web3::`).
+            Type::Provider => "buff_web3::Provider",
+            Type::Wallet => "buff_web3::Wallet",
+            Type::ConnectedWallet => "buff_web3::ConnectedWallet",
+            Type::Contract => "buff_web3::Contract",
+            Type::ContractMethod => "buff_web3::ContractMethod",
         };
         Some(rust_path_type(rust_name))
     }

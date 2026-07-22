@@ -862,6 +862,82 @@ pub enum Type {
     /// [`PreludeInstanceFn::IsTelegram`]. Mirrors [`Type::StemAlgorithm`]
     /// (T46) as an opaque enum passed primarily as an arg.
     Platform,
+    /// T48: the Ethereum JSON-RPC provider runtime-value type. Maps to
+    /// `buff_web3::Provider` at codegen time. Constructed via the
+    /// associated function `Provider.new(rpc_url)`; carries the instance
+    /// methods `.chain_id()`, `.block_number()`, `.get_balance(addr)`,
+    /// `.get_nonce(addr)`, `.wait_for_tx(tx_hash)`. Pure-Rust TLS via
+    /// rustls (the `ethers` `rustls` feature flag); the shared tokio
+    /// runtime is hidden behind `buff_web3::Provider`'s block_on layer.
+    ///
+    /// This is **additive** (T48). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::HttpClient`] (T33) / [`Type::Bot`] (T47) as a
+    /// runtime-value-with-rich-instance-methods type. The underlying Rust
+    /// type is `buff_web3::Provider` (an `Arc<EthProvider<Http>>` wrapper,
+    /// `Send + Sync + Clone`). Pure-Rust, CPU-only (NO GPU dispatch —
+    /// network I/O never runs on the GPU path).
+    Provider,
+    /// T48: the secp256k1 private-key wallet runtime-value type. Maps to
+    /// `buff_web3::Wallet` at codegen time. Constructed via the associated
+    /// function `Wallet.from_private_key(key)`; carries the instance
+    /// methods `.address()`, `.connect(provider)`, `.sign_message(msg)`.
+    /// `connect` consumes self and returns a [`ConnectedWallet`] that can
+    /// be passed to [`Contract::new`] for transaction signing.
+    ///
+    /// This is **additive** (T48). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Provider`] (T48) / [`Type::Bot`] (T47). The
+    /// underlying Rust type is `buff_web3::Wallet` (wrapping
+    /// `ethers::signers::LocalWallet`). Pure-Rust, CPU-only.
+    Wallet,
+    /// T48: the [`Wallet`] bound to a [`Provider`] — the "client" type
+    /// passed to [`Contract::new`] for signing transactions. Maps to
+    /// `buff_web3::ConnectedWallet` at codegen time. Constructed ONLY via
+    /// `wallet.connect(provider)`; carries the single instance method
+    /// `.address()` (proxies to the inner wallet).
+    ///
+    /// This is **additive** (T48). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Wallet`] (T48) as the second web3 runtime-value
+    /// type. The underlying Rust type is `buff_web3::ConnectedWallet`
+    /// (a `{provider, wallet}` pair struct). Pure-Rust, CPU-only.
+    ConnectedWallet,
+    /// T48: the deployed smart contract runtime-value type. Maps to
+    /// `buff_web3::Contract` at codegen time. Constructed via the
+    /// associated function `Contract.new(address, abi, client)` where
+    /// `client` is a [`Provider`] (read-only) or [`ConnectedWallet`]
+    /// (signing); carries the instance methods `.address()` and
+    /// `.method(name)` (the call-builder ctor). Read-only contracts can
+    /// `.call()`; signing contracts can additionally `.send()`.
+    ///
+    /// This is **additive** (T48). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Provider`] (T48) / [`Type::HttpClient`] (T33) /
+    /// [`Type::Bot`] (T47) as a runtime-value-with-rich-instance-methods
+    /// type. The underlying Rust type is `buff_web3::Contract` (a
+    /// `{address, abi, client}` struct). Pure-Rust, CPU-only.
+    Contract,
+    /// T48: the chainable call builder for a single ABI method invocation.
+    /// Maps to `buff_web3::ContractMethod` at codegen time. Constructed
+    /// ONLY via `contract.method(name)`; carries the chainable instance
+    /// methods `.arg(value)` / `.args(values)` (builder pattern — consume
+    /// self, return Self) and the terminal `.call()` (read — returns
+    /// ABI-decoded String) / `.send()` (write — returns the 32-byte tx
+    /// hash hex String, requires a ConnectedWallet).
+    ///
+    /// This is **additive** (T48). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Validator`] (T29) as a runtime-value-with-builder-
+    /// pattern instance methods. The underlying Rust type is
+    /// `buff_web3::ContractMethod` (a `{address, abi, client, method_name,
+    /// args}` struct). Pure-Rust, CPU-only.
+    ContractMethod,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1677,6 +1753,85 @@ impl Type {
         matches!(self, Type::Platform)
     }
 
+    /// T48: the Ethereum JSON-RPC provider type. Maps to
+    /// `buff_web3::Provider` at codegen time. See [`Type::Provider`] for
+    /// the full surface contract (constructor + 5 instance methods).
+    pub fn provider() -> Self {
+        Type::Provider
+    }
+
+    /// T48: Returns `true` if this type is the prelude web3 `Provider`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`provider.chain_id()`, `provider.block_number()`,
+    /// `provider.get_balance(addr)`, ...) to the `buff_web3::Provider`
+    /// lowering.
+    pub fn is_prelude_provider(&self) -> bool {
+        matches!(self, Type::Provider)
+    }
+
+    /// T48: the secp256k1 private-key wallet type. Maps to
+    /// `buff_web3::Wallet` at codegen time. See [`Type::Wallet`] for the
+    /// full surface contract (constructor + 3 instance methods).
+    pub fn wallet() -> Self {
+        Type::Wallet
+    }
+
+    /// T48: Returns `true` if this type is the prelude web3 `Wallet`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`wallet.address()`, `wallet.connect(provider)`,
+    /// `wallet.sign_message(msg)`) to the `buff_web3::Wallet` lowering.
+    pub fn is_prelude_wallet(&self) -> bool {
+        matches!(self, Type::Wallet)
+    }
+
+    /// T48: the Wallet+Provider pair (signing client) type. Maps to
+    /// `buff_web3::ConnectedWallet` at codegen time. See
+    /// [`Type::ConnectedWallet`] for the full surface contract (single
+    /// `.address()` instance method).
+    pub fn connected_wallet() -> Self {
+        Type::ConnectedWallet
+    }
+
+    /// T48: Returns `true` if this type is the prelude web3
+    /// `ConnectedWallet` runtime value. Used to dispatch instance method
+    /// calls (`cw.address()`) to the `buff_web3::ConnectedWallet`
+    /// lowering.
+    pub fn is_prelude_connected_wallet(&self) -> bool {
+        matches!(self, Type::ConnectedWallet)
+    }
+
+    /// T48: the deployed smart contract type. Maps to
+    /// `buff_web3::Contract` at codegen time. See [`Type::Contract`] for
+    /// the full surface contract (constructor + 2 instance methods).
+    pub fn contract() -> Self {
+        Type::Contract
+    }
+
+    /// T48: Returns `true` if this type is the prelude web3 `Contract`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`contract.address()`, `contract.method(name)`) to the
+    /// `buff_web3::Contract` lowering.
+    pub fn is_prelude_contract(&self) -> bool {
+        matches!(self, Type::Contract)
+    }
+
+    /// T48: the chainable ABI method call-builder type. Maps to
+    /// `buff_web3::ContractMethod` at codegen time. See
+    /// [`Type::ContractMethod`] for the full surface contract (chainable
+    /// `.arg(name, value)` / `.args(values)` + terminal `.call()` /
+    /// `.send()`).
+    pub fn contract_method() -> Self {
+        Type::ContractMethod
+    }
+
+    /// T48: Returns `true` if this type is the prelude web3
+    /// `ContractMethod` runtime value. Used to dispatch instance method
+    /// calls (`m.arg(name, value)`, `m.args(values)`, `m.call()`,
+    /// `m.send()`) to the `buff_web3::ContractMethod` lowering.
+    pub fn is_prelude_contract_method(&self) -> bool {
+        matches!(self, Type::ContractMethod)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -1893,6 +2048,15 @@ impl fmt::Display for Type {
             Type::Bot => f.write_str("Bot"),
             Type::ChatMessage => f.write_str("ChatMessage"),
             Type::Platform => f.write_str("Platform"),
+            // T48: prelude web3 types. All five are runtime values
+            // (mirrors Provider / Wallet / Contract surfaces from
+            // ethers-rs / web3.py / ethers.js). Display mirrors the
+            // Buff surface name in all five cases.
+            Type::Provider => f.write_str("Provider"),
+            Type::Wallet => f.write_str("Wallet"),
+            Type::ConnectedWallet => f.write_str("ConnectedWallet"),
+            Type::Contract => f.write_str("Contract"),
+            Type::ContractMethod => f.write_str("ContractMethod"),
         }
     }
 }
