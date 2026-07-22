@@ -675,6 +675,12 @@ pub enum Type {
     /// / `buff_msgpack::deserialize(&bytes).unwrap_or_default()` for
     /// the two associated functions. Pure-Rust, no native deps.
     MsgPack,
+    /// T50: an XML document runtime value, mapped to
+    /// `buff_xml::XmlDocument` at codegen time. Constructed via the
+    /// associated function `Xml.from_str(xml) -> XmlDocument`; carries
+    /// the instance methods `.root()`, `.find(xpath)`, `.to_string()`.
+    /// This is **additive** (T50). Pure-Rust, CPU-only.
+    Xml,
 }
 
 /// The width of an integer type (`Int` or `Bits`).

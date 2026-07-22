@@ -1552,6 +1552,20 @@ pub enum PreludeType {
     /// walker with `Document.*`). Pure-Rust TLS via rustls (NOT
     /// native-tls).
     Crawler,
+    /// T50: `Xml` — runtime-value type wrapping `buff_xml::XmlDocument`.
+    /// Constructed via `Xml.from_str(xml)`; carries the instance methods
+    /// `.root()`, `.find(xpath)`, `.to_string()`. Mirrors Image / Faker
+    /// as a runtime-value-with-instance-methods type. Pure-Rust, CPU-only.
+    Xml,
+    /// T51: `MsgPack` — MessagePack binary format namespace.
+    /// Namespace-only (like `Log` / `Toml` / `Base64` / `Hex` / `Yaml` /
+    /// `Csv`). Provides `MsgPack.serialize(value) -> Bytes` and
+    /// `MsgPack.deserialize(bytes) -> Value` (plus
+    /// `MsgPack.roundtrip(value) -> Option<Value>`). Codegen lowering
+    /// lives in the buff-msgpack crate (`buff_msgpack::serialize`
+    /// / `buff_msgpack::deserialize` / `buff_msgpack::roundtrip`).
+    /// Pure-Rust, no native deps.
+    MsgPack,
 }
 
 impl PreludeType {
@@ -2183,10 +2197,6 @@ impl PreludeType {
             // `Xml.from_str(xml)` / `doc.root()` / `doc.find(xpath)` surface.
             // The underlying Rust type is `buff_xml::XmlDocument`.
             PreludeType::Xml => "Xml",
-            // T50: Xml IS a runtime value (NOT namespace-only).
-            // Returns the opaque [`Type::Xml`] variant; the codegen
-            // layer maps it to `buff_xml::XmlDocument`.
-            PreludeType::Xml => Type::Xml,
             // T51: MsgPack — MessagePack binary format namespace.
             // Namespace-only (no runtime value — mirrors Log / Toml /
             // Base64 / Hex / Yaml / Csv). The underlying Rust crate
@@ -2530,6 +2540,10 @@ impl PreludeType {
             // are callable. Both return `Vector<Byte>` (Bytes) and
             // `Value` respectively.
             PreludeType::MsgPack => Type::MsgPack,
+            // T50: Xml IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Xml`] variant; the codegen
+            // layer maps it to `buff_xml::XmlDocument`.
+            PreludeType::Xml => Type::Xml,
         }
     }
 
@@ -3309,6 +3323,22 @@ pub enum PreludeAssocFn {
     /// propagates XmlError::EmptyInput per Buff's R3 error-
     /// mapping contract). Xml-only.
     FromStr,
+    // ---- T51: MsgPack -----------------------------------------------------
+    /// `MsgPack.serialize(value)` — encode a value to MessagePack
+    /// bytes. One arg. MsgPack-only. Wraps
+    /// `buff_msgpack::serialize(&value).unwrap_or_default()` (empty
+    /// Vec on failure — panic-free).
+    Serialize,
+    /// `MsgPack.deserialize(bytes)` — decode MessagePack bytes back
+    /// into a value. One arg. MsgPack-only. Wraps
+    /// `buff_msgpack::deserialize(&bytes).unwrap_or_default()`
+    /// (Value::Null on failure — panic-free).
+    Deserialize,
+    /// `MsgPack.roundtrip(value)` — serialize + deserialize, returning
+    /// `Option<Value>`. One arg. MsgPack-only. Wraps
+    /// `buff_msgpack::roundtrip(&value)` directly (the runtime fn
+    /// already returns Option).
+    Roundtrip,
 }
 
 impl PreludeAssocFn {
@@ -3513,6 +3543,17 @@ impl PreludeAssocFn {
         PreludeAssocFn::Extract,
         // T50: Xml.from_str — single-arg XML parse.
         PreludeAssocFn::FromStr,
+        // T51: MsgPack assoc fns (3 distinct names): serialize /
+        // deserialize / roundtrip. All MsgPack-only — dispatched on
+        // the (MsgPack, Serialize) / (MsgPack, Deserialize) /
+        // (MsgPack, Roundtrip) pairs in `assoc_fn_return_type`. No
+        // other prelude type today exposes these verbs (Base64 /
+        // Hex / URLEncode / JWT use the lower-level `Encode` /
+        // `Decode` pair instead — the (type, method) dispatch in
+        // `assoc_fn_return_type` validates each combination).
+        PreludeAssocFn::Serialize,
+        PreludeAssocFn::Deserialize,
+        PreludeAssocFn::Roundtrip,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -3661,6 +3702,14 @@ impl PreludeAssocFn {
             PreludeAssocFn::FromHtml => "from_html",
             // T50: Xml.from_str — canonical name for "parse from string".
             PreludeAssocFn::FromStr => "from_str",
+            // T51: MsgPack.serialize / .deserialize / .roundtrip.
+            // Mirrors the underlying `buff_msgpack::serialize` /
+            // `buff_msgpack::deserialize` /
+            // `buff_msgpack::roundtrip` Rust fn names so codegen
+            // splices `buff_msgpack::<name>(...)` without rewriting.
+            PreludeAssocFn::Serialize => "serialize",
+            PreludeAssocFn::Deserialize => "deserialize",
+            PreludeAssocFn::Roundtrip => "roundtrip",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -4561,18 +4610,21 @@ pub fn assoc_fn_return_type(
         //     English — defensive, never silently corrupts).
         //   - `buff_nlp::Text::tokenize(&text)`
         //   - `buff_nlp::Text::sentences(&text)`
-        (PreludeType::Text, PreludeAssocFn::DetectLanguage) => {
-            Some(Type::option(Type::string()))
-        }
+        (PreludeType::Text, PreludeAssocFn::DetectLanguage) => Some(Type::option(Type::string())),
         (PreludeType::Text, PreludeAssocFn::Stem) => Some(Type::string()),
         (PreludeType::Text, PreludeAssocFn::Tokenize) => Some(Type::vector(Type::string())),
         (PreludeType::Text, PreludeAssocFn::Sentences) => Some(Type::vector(Type::string())),
         // T51: MsgPack assoc fns. `MsgPack.serialize(value)` -> Bytes
-        // (Vector<Byte>). Wraps `buff_msgpack::serialize(&value)?`.
-        // `MsgPack.deserialize(bytes)` -> Value. Wraps
-        // `buff_msgpack::deserialize(&bytes)?`.
-        (PreludeType::MsgPack, PreludeAssocFn::Encode) => Some(Type::vector(Type::byte())),
-        (PreludeType::MsgPack, PreludeAssocFn::Decode) => Some(Type::string()),
+        // (Vector<Byte>). Wraps `buff_msgpack::serialize(&value)
+        // .unwrap_or_default()` (empty Vec on failure — NEVER panics).
+        // `MsgPack.deserialize(bytes)` -> dynamic Value (typed
+        // `Type::Unknown` at the Buff layer — there is no surface
+        // JsonValue variant; mirrors how Random.choice / Shuffle
+        // model dynamic returns). `MsgPack.roundtrip(value)` ->
+        // Option<Value> (None on either step failing).
+        (PreludeType::MsgPack, PreludeAssocFn::Serialize) => Some(Type::vector(Type::byte())),
+        (PreludeType::MsgPack, PreludeAssocFn::Deserialize) => Some(Type::Unknown),
+        (PreludeType::MsgPack, PreludeAssocFn::Roundtrip) => Some(Type::option(Type::Unknown)),
         // T43: buff-scrape assoc fns. Two pairs cover the MVP surface.
         // `Document.from_html(html)` -> Document. One arg (String).
         // Wraps `buff_scrape::Document::from_html(&html)?` (the `?`

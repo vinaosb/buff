@@ -1094,7 +1094,8 @@ impl RustCodegen {
             self.extern_crates.insert("buff-nlp".to_string());
             self.extern_crates.insert("whatlang".to_string());
             self.extern_crates.insert("rust-stemmers".to_string());
-            self.extern_crates.insert("unicode-segmentation".to_string());
+            self.extern_crates
+                .insert("unicode-segmentation".to_string());
         }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
@@ -5739,7 +5740,7 @@ impl RustCodegen {
             // `buff-msgpack` + `rmp-serde` + `serde_json` in
             // extern_crates via the
             // `program_uses_namespace("MsgPack")` walker.
-            (T::MsgPack, A::Encode) => {
+            (T::MsgPack, A::Serialize) => {
                 let arg = one_arg(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_msgpack::serialize(&#arg).unwrap_or_default()
@@ -5749,16 +5750,30 @@ impl RustCodegen {
             }
             // T51: MsgPack.deserialize(bytes) -> Value. Wraps
             // `buff_msgpack::deserialize(&bytes).unwrap_or_default()`
-            // (empty string on deserialize failure — NEVER panics).
-            // The arg is a `Vector<Byte>` on the Buff surface (Vec<u8>
-            // after codegen lowering); the codegen passes it by ref.
-            (T::MsgPack, A::Decode) => {
+            // (returns `serde_json::Value::Null` on deserialize failure
+            // — `Value` impls `Default`; NEVER panics). The arg is a
+            // `Vector<Byte>` on the Buff surface (Vec<u8> after
+            // codegen lowering); the codegen passes it by ref.
+            (T::MsgPack, A::Deserialize) => {
                 let arg = one_arg(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_msgpack::deserialize(&#arg).unwrap_or_default()
                 };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("MsgPack.deserialize codegen parse: {e}"))
+                })
+            }
+            // T51: MsgPack.roundtrip(value) -> Option<Value>. Wraps
+            // `buff_msgpack::roundtrip(&value)` directly — the
+            // runtime fn already returns `Option<serde_json::Value>`
+            // (None on either step failing). NEVER panics.
+            (T::MsgPack, A::Roundtrip) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_msgpack::roundtrip(&#arg)
+                };
                 syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("MsgPack.deserialize codegen parse: {e}")))
+                    .map_err(|e| self.unsupported(&format!("MsgPack.roundtrip codegen parse: {e}")))
             }
             // T50: Xml.from_str(xml) -> XmlDocument. One arg (String).
             // Wraps `buff_xml::XmlDocument::from_str(&xml)
