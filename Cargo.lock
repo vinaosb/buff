@@ -838,16 +838,14 @@ dependencies = [
 name = "buff-jobs"
 version = "1.0.0"
 dependencies = [
- "buff-lang-ast",
  "chrono",
  "cron",
  "insta",
- "proc-macro2",
- "quote",
+ "prettyplease",
  "serde",
  "serde_json",
- "syn 2.0.119",
  "thiserror 1.0.69",
+ "tokio",
  "uuid",
 ]
 

@@ -485,6 +485,16 @@ pub enum Type {
     /// `hecs::Entity` (`(u32, u32)` id+generation pair) — no raw
     /// pointers, no lifetimes, `Copy + Send + Sync + 'static`.
     Entity,
+    /// T19: the `Template` runtime-value type — a compiled HTML
+    /// template wrapping `buff_template::Template` (itself wrapping
+    /// `handlebars::Handlebars`). Constructed via the associated
+    /// functions `Template.from_string(src)` /
+    /// `Template.from_path(path)`; carries the instance method
+    /// `template.render(context_json) -> String`. Added by T31
+    /// (this commit) because T19 added the codegen `M::Render` arm
+    /// but missed the matching `Type::Template` variant — codegen
+    /// cannot compile otherwise.
+    Template,
     /// T33: the `HttpClient` runtime-value type — an idiomatic HTTP
     /// client wrapping `reqwest::blocking::Client` via a safe FFI
     /// boundary per the T4 FFI guide. Constructed via the prelude
@@ -1163,6 +1173,7 @@ impl fmt::Display for Type {
             // diagnostics read naturally.
             Type::World => f.write_str("World"),
             Type::Entity => f.write_str("Entity"),
+            Type::Template => f.write_str("Template"),
             // T33: prelude HTTP client type. Opaque value type mapped
             // to `buff_http_client::HttpClient`. Display mirrors the
             // Buff surface name.

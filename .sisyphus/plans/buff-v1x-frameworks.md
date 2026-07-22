@@ -3266,7 +3266,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Layered precedence works. Hot reload callback fires on file change. 3 examples + 10 tests.
   - **Commit**: `feat(buff-config): MVP layered config with hot reload`
 
-- [ ] 31. `buff-cache` — In-Memory + Distributed Cache
+- [x] 31. `buff-cache` — In-Memory + Distributed Cache
 
   **What to do**: Wrap Rust `moka` crate (in-memory) + `redis` crate (distributed). Provide `Cache.new(max_capacity)`, `cache.get(key)`, `cache.set(key, value, ttl)`, `cache.delete(key)`. TTL eviction. LRU semantics. Redis backend optional via feature flag. Cross-language prevalence: 6/6 (cachetools/lru-cache/go-cache/moka/Caffeine/MemoryCache).
   - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `moka`, `redis` (optional).

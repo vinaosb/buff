@@ -1,0 +1,23 @@
+# T31 .buff example: basic cache set/get/delete (FORWARD-DECL).
+#
+# Requires the coordinated Type::Cache codegen lowering arm (this task,
+# T31 finish). The prelude registry entry `PreludeType::Cache` +
+# instance-method arms were added in the same T31 finish commit as this
+# example. See crates/buff-cache/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+
+from "cache" import Cache
+
+func main():
+    cache = Cache.new(max_capacity: 100)
+    print("created: ${cache}")
+
+    cache.set(key: "user:1", value: "alice")
+    cache.set(key: "user:2", value: "bob")
+
+    print("user:1 -> ${cache.get(key: "user:1").or(default: "(missing)")}")
+
+    cache.delete(key: "user:1")
+    print("after delete: user:1 present? ${cache.contains(key: "user:1")}")
+
+    print("final entry count: ${cache.len()}")

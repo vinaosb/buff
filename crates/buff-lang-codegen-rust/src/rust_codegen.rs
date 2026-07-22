@@ -6385,10 +6385,12 @@ impl RustCodegen {
                 )))
             }
             // `Len` is shared between DataFrame.len (above) and
-            // future Vector.len / Map.len / Series.len — dispatched
-            // on receiver type. Non-DataFrame receivers fall through
-            // to the existing method-resolution path.
-            M::Len => Err(self.unsupported(&format!(
+            // future Vector.len / Map.len / Series.len / Cache.len —
+            // dispatched on receiver type. Non-DataFrame / non-Cache
+            // receivers fall through to the existing method-resolution
+            // path. T31 (Cache) arm lives below; the guard on this
+            // arm skips Cache so the Cache-specific arm fires first.
+            M::Len if !matches!(recv_ty, Type::Cache) => Err(self.unsupported(&format!(
                 "{recv_ty}.len() is not a recognised prelude instance method",
             ))),
             // T9: Image instance methods. Each filter returning a new

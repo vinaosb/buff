@@ -1,0 +1,33 @@
+[package]
+name = "buff-cache"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+In-memory cache for Buff. \
+Pure-Rust MVP wrapping the `moka` crate (sync, LRU + TTL eviction). \
+Per T31 spec: Cache.new(max_capacity) / cache.get / cache.set / \
+cache.delete. Distributed Redis backend deferred to v1.18+.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "cache", "moka", "lru", "ttl"]
+categories = ["caching", "data-structures"]
+
+[lib]
+name = "buff_cache"
+path = "src/lib.rs"
+
+[dependencies]
+# T31 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# moka 0.12 (sync feature only): pure-Rust concurrent cache with
+# tinyLFU admission control + LRU eviction + per-entry TTL/TTI.
+# API surface used: moka::sync::Cache::builder / max_capacity /
+# time_to_live / insert / get / invalidate / entry_count /
+# run_pending_tasks.
+moka = { workspace = true, default-features = false, features = ["sync"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
