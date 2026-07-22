@@ -1613,6 +1613,27 @@ pub enum PreludeType {
     /// prior prelude type exactly — it is the first opaque enum
     /// passed-only-as-arg in the prelude. Pure-Rust, CPU-only.
     StemAlgorithm,
+    /// T52: `Protobuf` — Protocol Buffers binary format namespace.
+    /// Namespace-only (like `MsgPack` / `Log` / `Toml` / `Base64` /
+    /// `Hex` / `Yaml` / `Csv`). Provides `Protobuf.serialize(value)
+    /// -> Bytes` and `Protobuf.deserialize(bytes) -> Value` (plus
+    /// `Protobuf.roundtrip(value) -> Option<Value>`). Codegen lowering
+    /// lives in the buff-protobuf crate (`buff_protobuf::serialize`
+    /// / `buff_protobuf::deserialize` / `buff_protobuf::roundtrip`).
+    /// Pure-Rust, no native deps (NO protoc / NO protoc-built `.proto`
+    /// codegen in MVP — gRPC streaming + `prost-build` deferred).
+    Protobuf,
+    /// T52: `Message` — a protobuf-encoded message runtime value.
+    /// Constructed via `Message.new(value)` (encode) /
+    /// `Message.from_bytes(bytes)` / `Message.decode(bytes)` (decode);
+    /// carries the instance methods `.byte_size() -> Int`,
+    /// `.type_url() -> String`, `.payload() -> Value`,
+    /// `.encode() -> Vector<Byte>`. Mirrors Image / Xml / Point as a
+    /// runtime-value-with-rich-instance-methods type. Codegen lowering
+    /// lives in the buff-protobuf crate (`buff_protobuf::Message::*`).
+    /// Pure-Rust, CPU-only; uses the well-known
+    /// `google.protobuf.Struct` schema as the dynamic message surface.
+    Message,
 }
 
 impl PreludeType {
@@ -1970,6 +1991,19 @@ impl PreludeType {
         // Pure-Rust, CPU-only.
         PreludeType::Language,
         PreludeType::StemAlgorithm,
+        // T52: Protobuf / Message — two new prelude types for the
+        // buff-protobuf surface. Protobuf is namespace-only (mirrors
+        // MsgPack — Protobuf.serialize / .deserialize / .roundtrip
+        // are the only callable fns; the namespace itself has no value).
+        // Message is a runtime-value (mirrors Image / Xml — Message.new
+        // / Message.from_bytes / Message.decode are the ctors; carries
+        // byte_size / type_url / payload / encode instance methods).
+        // Codegen lowering lives in the buff-protobuf crate; the codegen
+        // arms + PreludeInstanceFn entries are added in this same
+        // commit (T52 owns the full protobuf prelude+codegen surface).
+        // Pure-Rust, CPU-only; gRPC streaming + prost-build deferred.
+        PreludeType::Protobuf,
+        PreludeType::Message,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2301,6 +2335,14 @@ impl PreludeType {
             // `buff_nlp::{Language, StemAlgorithm}`.
             PreludeType::Language => "Language",
             PreludeType::StemAlgorithm => "StemAlgorithm",
+            // T52: Protobuf / Message — canonical PascalCase names
+            // matching the user-facing `Protobuf.serialize(value)` /
+            // `Protobuf.deserialize(bytes)` / `Message.new(value)` /
+            // `msg.byte_size()` surface. The underlying Rust crate is
+            // `buff_protobuf` (`buff_protobuf::serialize` /
+            // `buff_protobuf::Message`).
+            PreludeType::Protobuf => "Protobuf",
+            PreludeType::Message => "Message",
         }
     }
 
@@ -2642,6 +2684,18 @@ impl PreludeType {
             // [`Type::StemAlgorithm`] variant; the codegen layer maps
             // it to `buff_nlp::StemAlgorithm`.
             PreludeType::StemAlgorithm => Type::StemAlgorithm,
+            // T52: Protobuf is a namespace-only module (mirror MsgPack
+            // / Log / Toml / Base64 / Hex / Yaml / Csv). The namespace
+            // itself has no value representation; only its associated
+            // functions (`Protobuf.serialize` / `Protobuf.deserialize`
+            // / `Protobuf.roundtrip`) are callable. Returns
+            // [`Type::Protobuf`] for match-exhaustiveness (mirrors
+            // `MsgPack => Type::MsgPack`); the codegen arm rarely fires.
+            PreludeType::Protobuf => Type::Protobuf,
+            // T52: Message IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Message`] variant; the codegen
+            // layer maps it to `buff_protobuf::Message`.
+            PreludeType::Message => Type::Message,
             // T51: MsgPack is a namespace-only module (mirror Log /
             // Toml / Base64 / Hex / Yaml / Csv). The namespace itself
             // has no value representation; only its associated
@@ -2714,6 +2768,7 @@ impl PreludeType {
                 | PreludeType::Archive
                 | PreludeType::Text
                 | PreludeType::MsgPack
+                | PreludeType::Protobuf
         )
     }
 }
@@ -4816,6 +4871,35 @@ pub fn assoc_fn_return_type(
         (PreludeType::LineString, PreludeAssocFn::FromCoords) => Some(Type::LineString),
         (PreludeType::Polygon, PreludeAssocFn::New) => Some(Type::Polygon),
         (PreludeType::Polygon, PreludeAssocFn::FromCoords) => Some(Type::Polygon),
+        // T52: Protobuf assoc fns. `Protobuf.serialize(value)` -> Bytes
+        // (Vector<Byte>). Wraps `buff_protobuf::serialize(&value)
+        // .unwrap_or_default()` (empty Vec on failure — NEVER panics).
+        // `Protobuf.deserialize(bytes)` -> dynamic Value (typed
+        // `Type::Unknown` at the Buff layer — there is no surface
+        // JsonValue variant; mirrors how MsgPack.deserialize / Random
+        // .choice model dynamic returns). `Protobuf.roundtrip(value)`
+        // -> Option<Value> (None on either step failing). Mirrors T51
+        // MsgPack assoc fns 1:1 — the runtime surface is identical.
+        (PreludeType::Protobuf, PreludeAssocFn::Serialize) => Some(Type::vector(Type::byte())),
+        (PreludeType::Protobuf, PreludeAssocFn::Deserialize) => Some(Type::Unknown),
+        (PreludeType::Protobuf, PreludeAssocFn::Roundtrip) => Some(Type::option(Type::Unknown)),
+        // T52: Message constructors. `Message.new(value)` -> Message
+        // (encode a Value to protobuf wire-format bytes). `Message.
+        // from_bytes(bytes)` / `Message.decode(bytes)` -> Message
+        // (decode raw wire-format bytes). All three are fallible in
+        // Rust (return `Result<Message, ProtobufError>`) but surface
+        // as infallible on the Buff side via codegen's
+        // `unwrap_or_default()` (Message impls Default as an
+        // empty-payload message — added in the T52 MVP commit).
+        // `New` is shared with Channel.new / Faker.new / Crawler.new
+        // / Point.new / XmlElement.new (dispatched on the
+        // (Message, New) pair). `FromBytes` is shared with
+        // Image.from_bytes (dispatched on (Message, FromBytes)).
+        // `Decode` is shared with Base64.decode / Hex.decode /
+        // URLEncode.decode (dispatched on (Message, Decode)).
+        (PreludeType::Message, PreludeAssocFn::New) => Some(Type::Message),
+        (PreludeType::Message, PreludeAssocFn::FromBytes) => Some(Type::Message),
+        (PreludeType::Message, PreludeAssocFn::Decode) => Some(Type::Message),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -5433,6 +5517,41 @@ pub enum PreludeInstanceFn {
     /// `language.name()` reuses the existing shared `Name` variant
     /// (also used by `faker.name()` — dispatched on the receiver type).
     Code,
+    // ---- T52: buff-protobuf Message instance methods -------------------
+    /// `message.byte_size()` — encoded payload size in bytes. Zero
+    /// args. Returns `Int`. Message-only. Wraps
+    /// `buff_protobuf::Message::byte_size(recv) as i64` (the
+    /// underlying Rust method returns `usize`; the cast lifts to
+    /// Buff's `Int<64>`).
+    ByteSize,
+    /// `message.type_url()` — the canonical type URL identifying the
+    /// message schema. Zero args. Returns `String`. Message-only. Always
+    /// `"type.googleapis.com/google.protobuf.Struct"` in this MVP
+    /// (future `.proto`-codegen tasks may extend the surface with
+    /// user-defined message types). Wraps
+    /// `buff_protobuf::Message::type_url(recv).to_string()`.
+    TypeUrl,
+    /// `message.payload()` — decode the payload back into a Value.
+    /// Zero args. Returns `Value` (typed `Type::Unknown` at the Buff
+    /// layer — there is no surface JsonValue variant; mirrors how
+    /// MsgPack.deserialize / Random.choice model dynamic returns).
+    /// Message-only. Wraps
+    /// `buff_protobuf::Message::payload(recv).unwrap_or_default()`
+    /// (Value::Null on decode failure — panic-free via
+    /// `.unwrap_or_default()`, NOT bare `.unwrap()`).
+    Payload,
+    /// `message.encode()` — the encoded protobuf wire-format bytes
+    /// (length-delimited `google.protobuf.Struct`). Zero args. Returns
+    /// `Vector<Byte>`. Message-only. Wraps
+    /// `buff_protobuf::Message::encode(recv).to_vec()` (the underlying
+    /// Rust method returns `&[u8]`; the `.to_vec()` lifts to owned
+    /// `Vec<u8>` per FFI guide R2 — Buff surfaces owned values).
+    /// Distinct from the PreludeAssocFn::Encode variant (which is the
+    /// Base64.encode / Hex.encode *associated-function* shape). This
+    /// Encode is an *instance method* on a Message value — same name,
+    /// different enum (PreludeInstanceFn vs PreludeAssocFn), different
+    /// dispatch table.
+    Encode,
 }
 
 impl PreludeInstanceFn {
@@ -5668,6 +5787,14 @@ impl PreludeInstanceFn {
         // instance method; if a future type adds one it can reuse
         // this variant on the (FutureType, Code) pair).
         PreludeInstanceFn::Code,
+        // T52: buff-protobuf Message instance methods (4 new variants):
+        // byte_size / type_url / payload / encode. All Message-only
+        // (no shared variants with prior prelude instance fns). Each
+        // dispatched on (Type::Message, variant) pairs.
+        PreludeInstanceFn::ByteSize,
+        PreludeInstanceFn::TypeUrl,
+        PreludeInstanceFn::Payload,
+        PreludeInstanceFn::Encode,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -5908,6 +6035,15 @@ impl PreludeInstanceFn {
             // `language.name()` reuses the existing shared `Name`
             // variant (already mapped to "name" by the Faker arm below).
             PreludeInstanceFn::Code => "code",
+            // T52: buff-protobuf Message instance method names mirror
+            // the `buff_protobuf::Message` Rust method names 1:1 so
+            // the codegen can splice `recv.byte_size()` /
+            // `recv.type_url()` / `recv.payload()` / `recv.encode()`
+            // without rewriting.
+            PreludeInstanceFn::ByteSize => "byte_size",
+            PreludeInstanceFn::TypeUrl => "type_url",
+            PreludeInstanceFn::Payload => "payload",
+            PreludeInstanceFn::Encode => "encode",
             // T11: Signal instance methods (Fft, Ifft, Lowpass, Highpass,
             // Bandpass, ApplyWindow, Spectrogram, Magnitude, Phase).
             PreludeInstanceFn::Fft => "fft",
@@ -6490,6 +6626,23 @@ pub fn instance_fn_return_type(
         // (Faker, Name) pairs.
         (Type::Language, PreludeInstanceFn::Code) => Some(Type::String),
         (Type::Language, PreludeInstanceFn::Name) => Some(Type::String),
+
+        // T52: buff-protobuf Message instance methods. `msg.byte_size()`
+        // returns Int (the encoded byte count — usize at the Rust layer,
+        // lifted to Buff's Int<64> via `as i64`). `msg.type_url()`
+        // returns String (the canonical
+        // `type.googleapis.com/google.protobuf.Struct` URL — never
+        // varies in this MVP). `msg.payload()` returns Value (typed
+        // Type::Unknown — there is no surface JsonValue variant; mirrors
+        // how MsgPack.deserialize / Random.choice model dynamic returns;
+        // the codegen wraps with `.unwrap_or_default()` for panic-free
+        // Value::Null collapse). `msg.encode()` returns Vector<Byte>
+        // (a fresh `Vec<u8>` cloned from the inner `&[u8]` per FFI
+        // guide R2 — Buff surfaces owned values).
+        (Type::Message, PreludeInstanceFn::ByteSize) => Some(Type::int_default()),
+        (Type::Message, PreludeInstanceFn::TypeUrl) => Some(Type::String),
+        (Type::Message, PreludeInstanceFn::Payload) => Some(Type::Unknown),
+        (Type::Message, PreludeInstanceFn::Encode) => Some(Type::vector(Type::byte())),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

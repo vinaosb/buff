@@ -3457,7 +3457,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Roundtrip serialize/deserialize preserves values. Cross-compatible with Python msgpack. 3 examples + 10 tests.
   - **Commit**: `feat(buff-msgpack): MVP MessagePack binary format`
 
-- [ ] 52. `buff-protobuf` — Protocol Buffers
+- [x] 52. `buff-protobuf` — Protocol Buffers
 
   **What to do**: Wrap Rust `prost` crate (Rust protobuf compiler). Provide: buff CLI command `buff proto <proto-file> <output-dir>` generates Buff types from `.proto` definitions. Runtime: `Message.encode()`, `Message.decode(bytes)`. gRPC client/server scaffolding (combine with T17 buff-web). Cross-language: 6/6 (protobuf in all 6 languages).
   - **LOC budget**: ≤3000, ≤20 fns. **External deps**: `prost`, `prost-build`, `prost-types`, `tonic` (gRPC).

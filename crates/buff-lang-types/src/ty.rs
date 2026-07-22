@@ -778,6 +778,53 @@ pub enum Type {
     /// `buff_nlp::StemAlgorithm` (an enum with 18 variants matching
     /// `rust_stemmers::Algorithm` 1:1).
     StemAlgorithm,
+    /// T52: the `Protobuf` Protocol-Buffers format namespace, mapped
+    /// to `buff_protobuf` at codegen time. Namespace-only (like
+    /// `MsgPack` / `Log` / `Toml` / `Base64` / `Hex` / `Yaml` / `Csv`)
+    /// — the type itself is never instantiated as a runtime value;
+    /// only its associated functions are callable
+    /// (`Protobuf.serialize(value) -> Bytes`,
+    /// `Protobuf.deserialize(bytes) -> Value`,
+    /// `Protobuf.roundtrip(value) -> Option<Value>`). `buff_type()`
+    /// returns [`Type::Protobuf`] for match-exhaustiveness (mirrors
+    /// [`Type::MsgPack`]); the codegen arm rarely fires in practice.
+    ///
+    /// This is **additive** (T52): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` will be extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_protobuf`
+    /// predicate. The `is_numeric` / `is_float_like` / `is_integer_like`
+    /// / `is_gpu_eligible` predicates all return `false` for `Protobuf`.
+    ///
+    /// Mirrors [`Type::MsgPack`] (T51) as the closest sibling — both
+    /// are namespace-only binary-format modules wrapping pure-Rust
+    /// codec crates. The underlying Rust crate is `buff_protobuf`
+    /// (wrapping `prost` + `prost-types`); the codegen emits
+    /// `buff_protobuf::serialize(&value).unwrap_or_default()` /
+    /// `buff_protobuf::deserialize(&bytes).unwrap_or_default()` /
+    /// `buff_protobuf::roundtrip(&value)` for the three associated
+    /// functions. Pure-Rust, no native deps (NO protoc / NO protoc-built
+    /// .proto codegen in MVP — gRPC streaming + prost-build deferred).
+    Protobuf,
+    /// T52: a protobuf-encoded message runtime value, mapped to
+    /// `buff_protobuf::Message` at codegen time. Constructed via
+    /// `Message.new(value)` (encode a `Value` to protobuf wire-format
+    /// bytes) or `Message.from_bytes(bytes)` / `Message.decode(bytes)`
+    /// (decode raw wire-format bytes); carries the instance methods
+    /// `.byte_size() -> Int`, `.type_url() -> String`,
+    /// `.payload() -> Value`, `.encode() -> Vector<Byte>`.
+    ///
+    /// This is **additive** (T52). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Xml`] (T50) as a
+    /// runtime-value-with-rich-instance-methods type. The underlying
+    /// Rust type is `buff_protobuf::Message` (a struct wrapping an
+    /// owned `Vec<u8>` payload + the canonical
+    /// `type.googleapis.com/google.protobuf.Struct` type URL). Pure-Rust,
+    /// CPU-only; the well-known `google.protobuf.Struct` schema is the
+    /// dynamic message surface (no `.proto` build-time codegen in MVP).
+    Message,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1420,6 +1467,41 @@ impl Type {
         matches!(self, Type::MsgPack)
     }
 
+    /// T52: the `Protobuf` Protocol-Buffers format namespace type. Maps
+    /// to `buff_protobuf` at codegen time. Namespace-only — never
+    /// instantiated as a runtime value; only its associated functions
+    /// are callable (`Protobuf.serialize` / `Protobuf.deserialize` /
+    /// `Protobuf.roundtrip`). Mirrors `Type::MsgPack` (T51).
+    pub fn protobuf() -> Self {
+        Type::Protobuf
+    }
+
+    /// T52: Returns `true` if this type is the prelude `Protobuf`
+    /// namespace. Namespace-only (no runtime value — like MsgPack /
+    /// Log / Toml / Base64 / Hex).
+    pub fn is_prelude_protobuf(&self) -> bool {
+        matches!(self, Type::Protobuf)
+    }
+
+    /// T52: the protobuf-encoded message type. Maps to
+    /// `buff_protobuf::Message` at codegen time. Constructed via
+    /// `Message.new(value)` / `Message.from_bytes(bytes)` /
+    /// `Message.decode(bytes)`; supports the instance methods
+    /// `message.byte_size()`, `message.type_url()`,
+    /// `message.payload()`, `message.encode()`.
+    pub fn message() -> Self {
+        Type::Message
+    }
+
+    /// T52: Returns `true` if this type is the prelude `Message`
+    /// runtime value (a protobuf-encoded message). Used to dispatch
+    /// instance method calls (`msg.byte_size()`, `msg.type_url()`,
+    /// `msg.payload()`, `msg.encode()`) to the `buff_protobuf::Message`
+    /// lowering.
+    pub fn is_prelude_message(&self) -> bool {
+        matches!(self, Type::Message)
+    }
+
     /// T45: the 2D geospatial point type. Maps to `buff_geo::Point` at
     /// codegen time. Constructed via `Point.new(x, y)`; supports the
     /// instance methods `point.x()`, `point.y()`,
@@ -1715,6 +1797,12 @@ impl fmt::Display for Type {
             Type::Text => f.write_str("Text"),
             Type::Language => f.write_str("Language"),
             Type::StemAlgorithm => f.write_str("StemAlgorithm"),
+            // T52: prelude Protobuf namespace + Message instance type.
+            // `Protobuf` is namespace-only (mirrors MsgPack); `Message`
+            // is a runtime value (mirrors Image / Xml). Display mirrors
+            // the Buff surface name in both cases.
+            Type::Protobuf => f.write_str("Protobuf"),
+            Type::Message => f.write_str("Message"),
         }
     }
 }

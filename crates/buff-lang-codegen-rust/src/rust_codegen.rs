@@ -1037,6 +1037,25 @@ impl RustCodegen {
             self.extern_crates.insert("rmp-serde".to_string());
             self.extern_crates.insert("serde_json".to_string());
         }
+        // T52: register `buff-protobuf` + `prost` + `prost-types` +
+        // `serde_json` when the program references the prelude
+        // `Protobuf` OR `Message` modules (`Protobuf.serialize(value)`
+        // / `Protobuf.deserialize(bytes)` / `Message.new(value)` /
+        // `Message.from_bytes(bytes)` / `msg.byte_size()` / etc.).
+        // The walker checks both namespaces because the user always
+        // composes Protobuf + Message together (a Message value arises
+        // only via Message.new which encodes via Protobuf.serialize
+        // internally); recording once for either is sufficient
+        // (idempotent BTreeSet insert). Also records `prost` +
+        // `prost-types` + `serde_json` transitively (the wrapper crate
+        // wraps all three). Mirrors the T51 MsgPack + T42 Email +
+        // T50 Xml registration pattern.
+        if program_uses_namespace(decls, "Protobuf") || program_uses_namespace(decls, "Message") {
+            self.extern_crates.insert("buff-protobuf".to_string());
+            self.extern_crates.insert("prost".to_string());
+            self.extern_crates.insert("prost-types".to_string());
+            self.extern_crates.insert("serde_json".to_string());
+        }
         // T42: register `buff-email` + `lettre` + `handlebars` when
         // the program references the prelude `Email` OR `SmtpClient`
         // modules (`Email.new(from, to, subject)` /
@@ -5808,6 +5827,104 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("MsgPack.roundtrip codegen parse: {e}")))
             }
+            // T52: Protobuf.serialize(value) -> Vector<Byte>. Wraps
+            // `buff_protobuf::serialize(&value).unwrap_or_default()`
+            // (empty Vec on serialize failure — NEVER panics, matching
+            // Buff's "no panicking generated code" rule). Records
+            // `buff-protobuf` + `prost` + `prost-types` + `serde_json`
+            // in extern_crates via the
+            // `program_uses_namespace("Protobuf")` /
+            // `program_uses_namespace("Message")` walker. Mirrors T51
+            // MsgPack.serialize 1:1.
+            (T::Protobuf, A::Serialize) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_protobuf::serialize(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Protobuf.serialize codegen parse: {e}"))
+                })
+            }
+            // T52: Protobuf.deserialize(bytes) -> Value. Wraps
+            // `buff_protobuf::deserialize(&bytes).unwrap_or_default()`
+            // (returns `serde_json::Value::Null` on deserialize failure
+            // — `Value` impls `Default`; NEVER panics). The arg is a
+            // `Vector<Byte>` on the Buff surface (Vec<u8> after
+            // codegen lowering); the codegen passes it by ref. Mirrors
+            // T51 MsgPack.deserialize 1:1.
+            (T::Protobuf, A::Deserialize) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_protobuf::deserialize(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Protobuf.deserialize codegen parse: {e}"))
+                })
+            }
+            // T52: Protobuf.roundtrip(value) -> Option<Value>. Wraps
+            // `buff_protobuf::roundtrip(&value)` directly — the
+            // runtime fn already returns `Option<serde_json::Value>`
+            // (None on either step failing). NEVER panics. Mirrors T51
+            // MsgPack.roundtrip 1:1.
+            (T::Protobuf, A::Roundtrip) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_protobuf::roundtrip(&#arg)
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Protobuf.roundtrip codegen parse: {e}"))
+                })
+            }
+            // T52: Message.new(value) -> Message. One arg (the value
+            // to encode). Wraps `buff_protobuf::Message::new(&value)
+            // .unwrap_or_default()` (panic-free on encode failure —
+            // Message impls Default as an empty-payload message).
+            // `New` is shared with Channel.new / Faker.new /
+            // Crawler.new / Point.new / XmlElement.new — dispatched
+            // on the (Message, New) pair. Records `buff-protobuf` +
+            // `prost` + `prost-types` + `serde_json` in extern_crates
+            // via the `program_uses_namespace("Message")` walker.
+            (T::Message, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_protobuf::Message::new(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Message.new codegen parse: {e}")))
+            }
+            // T52: Message.from_bytes(bytes) -> Message. One arg
+            // (Vector<Byte>). Wraps
+            // `buff_protobuf::Message::from_bytes(bytes)
+            // .unwrap_or_default()` (panic-free on decode failure /
+            // empty buffer — Message impls Default). `FromBytes` is
+            // shared with Image.from_bytes — dispatched on the
+            // (Message, FromBytes) pair.
+            (T::Message, A::FromBytes) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_protobuf::Message::from_bytes(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Message.from_bytes codegen parse: {e}"))
+                })
+            }
+            // T52: Message.decode(bytes) -> Message. Class-method
+            // alias for Message.from_bytes — same lowering shape but
+            // takes a `&[u8]` (Bytes ref) instead of `Vec<u8>` (owned
+            // bytes). The codegen splices the arg directly (Buff's
+            // `Vector<Byte>` lowers to `Vec<u8>` which deref-coerces
+            // to `&[u8]` for the underlying `Message::decode(&[u8])`
+            // Rust signature). `Decode` is shared with Base64.decode /
+            // Hex.decode / URLEncode.decode — dispatched on the
+            // (Message, Decode) pair.
+            (T::Message, A::Decode) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_protobuf::Message::decode(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Message.decode codegen parse: {e}")))
+            }
             // T50: Xml.from_str(xml) -> XmlDocument. One arg (String).
             // Wraps `buff_xml::XmlDocument::from_str(&xml)
             // .unwrap_or_default()` (panic-free on empty/parse failure —
@@ -7368,6 +7485,90 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Language.name codegen parse: {e}")))
+            }
+            // T52: buff-protobuf Message instance methods. All
+            // infallible — `buff_protobuf::Message::byte_size` /
+            // `type_url` / `encode` return `usize` / `&str` / `&[u8]`
+            // directly (no Result wrapper). `payload` is fallible in
+            // Rust (returns `Result<Value, ProtobufError>`) so the
+            // codegen wraps with `.unwrap_or_default()` (Value::Null
+            // on decode failure — panic-free via
+            // `.unwrap_or_default()`, NOT bare `.unwrap()`). Records
+            // `buff-protobuf` + `prost` + `prost-types` + `serde_json`
+            // in extern_crates via the
+            // `program_uses_namespace("Message")` walker.
+            //
+            // `message.byte_size()` -> Int. Zero args. Wraps
+            // `recv.byte_size() as i64` (the underlying Rust method
+            // returns `usize`; the cast lifts to Buff's `Int<64>`).
+            M::ByteSize if matches!(recv_ty, Type::Message) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "byte_size() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.byte_size() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Message.byte_size codegen parse: {e}")))
+            }
+            // `message.type_url()` -> String. Zero args. Wraps
+            // `recv.type_url().to_string()` (the underlying Rust
+            // method returns `&str`; the `.to_string()` lifts to
+            // owned String per FFI guide R2 — Buff surfaces owned
+            // values).
+            M::TypeUrl if matches!(recv_ty, Type::Message) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "type_url() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.type_url().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Message.type_url codegen parse: {e}")))
+            }
+            // `message.payload()` -> Value. Zero args. Wraps
+            // `recv.payload().unwrap_or_default()` (Value::Null on
+            // decode failure — panic-free via `.unwrap_or_default()`,
+            // NOT bare `.unwrap()`).
+            M::Payload if matches!(recv_ty, Type::Message) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "payload() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.payload().unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Message.payload codegen parse: {e}")))
+            }
+            // `message.encode()` -> Vector<Byte>. Zero args. Wraps
+            // `recv.encode().to_vec()` (the underlying Rust method
+            // returns `&[u8]`; the `.to_vec()` lifts to owned `Vec<u8>`
+            // per FFI guide R2 — Buff surfaces owned values). Distinct
+            // from `PreludeAssocFn::Encode` (the Base64.encode /
+            // Hex.encode *associated-function* shape) — this Encode is
+            // an *instance method* on a Message value (different enum,
+            // different dispatch table).
+            M::Encode if matches!(recv_ty, Type::Message) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "encode() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.encode().to_vec()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Message.encode codegen parse: {e}")))
             }
             // T37: Faker instance methods. All infallible — the
             // `buff_fake::Faker` methods return owned String / i64
@@ -11085,6 +11286,13 @@ impl RustCodegen {
             Type::Text => "buff_nlp::Text",
             Type::Language => "buff_nlp::Language",
             Type::StemAlgorithm => "buff_nlp::StemAlgorithm",
+            // T52: prelude Protobuf namespace + Message instance type.
+            // `Protobuf` is namespace-only (mirrors MsgPack — the arm
+            // rarely fires in practice but is required for match
+            // exhaustiveness). `Message` is a runtime value (mirrors
+            // Image / Xml). Both map to `buff_protobuf::*` paths.
+            Type::Protobuf => "buff_protobuf::Protobuf",
+            Type::Message => "buff_protobuf::Message",
         };
         Some(rust_path_type(rust_name))
     }
