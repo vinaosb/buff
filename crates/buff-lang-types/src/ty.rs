@@ -395,6 +395,16 @@ pub enum Type {
     /// / `recv.blur(sigma)` for the 10 instance methods. Pure-Rust,
     /// CPU-only per Metis G7 lock (NO GPU dispatch).
     Image,
+    /// T31 (v1.16 frameworks): the in-memory Cache runtime-value type.
+    /// Maps to `buff_cache::Cache` at codegen time. Constructed via
+    /// `Cache.new(max_capacity)`; carries the instance methods
+    /// `.get(key)`, `.set(key, value)`, `.set(key, value, ttl)`,
+    /// `.delete(key)`, `.contains(key)`, `.clear()`, `.len()`.
+    /// Wraps `moka::sync::Cache<String, (String, Option<Instant>)>`
+    /// behind an `Arc` (Send + Sync, clone-cheap). Per-entry TTL via
+    /// stored deadline (lazy eviction on get/contains). Distributed
+    /// Redis backend DEFERRED to v1.18+ per the T31 task spec.
+    Cache,
     /// T7 (v1.13 frameworks): the columnar-DataFrame runtime-value
     /// type. Maps to `buff_dataframe::DataFrame` at codegen time.
     /// Constructed via `DataFrame.from_csv(path)` /
@@ -475,6 +485,49 @@ pub enum Type {
     /// `hecs::Entity` (`(u32, u32)` id+generation pair) — no raw
     /// pointers, no lifetimes, `Copy + Send + Sync + 'static`.
     Entity,
+    /// T33: the `HttpClient` runtime-value type — an idiomatic HTTP
+    /// client wrapping `reqwest::blocking::Client` via a safe FFI
+    /// boundary per the T4 FFI guide. Constructed via the prelude
+    /// associated function `HttpClient.new()` (returns a new client
+    /// with default settings); carries the instance methods
+    /// `client.get(url)`, `client.post(url)`, `client.put(url)`,
+    /// `client.delete(url)` — each returning a `RequestBuilder`
+    /// (opaque, typed `Type::Unknown` for MVP). The `RequestBuilder`
+    /// carries `.header(name, val)`, `.json(body)`, `.timeout(secs)`,
+    /// `.send()` (returns `Response`, also opaque for MVP). The
+    /// `Response` carries `.status()`, `.text()`, `.json()`,
+    /// `.bytes()`, `.headers()`.
+    ///
+    /// This is **additive** (T33): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `HttpClient`. Underlying
+    /// Rust type is `buff_http_client::HttpClient` (a struct wrapping
+    /// `reqwest::blocking::Client`). Pure-Rust, CPU-only.
+    HttpClient,
+    /// T29: the `Validator` runtime-value type — a declarative schema
+    /// validator (pydantic-equivalent) wrapping
+    /// `buff_validate::Validator` at codegen time. Constructed via
+    /// `Validator.new()` (empty rule set); carries the builder
+    /// instance methods `.with_email(field)`,
+    /// `.with_url(field)`, `.with_length(field, min, max)`,
+    /// `.with_range(field, min, max)`, `.with_regex(field, pattern)`,
+    /// each returning a new Validator (Buff "no visible references"
+    /// stance — builders consume self); plus the action methods
+    /// `.validate(map) -> Result<Void, String>` and
+    /// `.to_json_schema() -> String`.
+    ///
+    /// This is **additive** (T29): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Validator`. Underlying
+    /// Rust type is `buff_validate::Validator` (a struct wrapping
+    /// `Vec<Rule>` where `Rule` is an internal enum). Pure-Rust,
+    /// CPU-only. The MVP wraps `validator::ValidateEmail` /
+    /// `ValidateUrl` / `ValidateLength` / `ValidateRange` trait
+    /// methods on `&str` / integer values; NO derive macros (T29
+    /// must-not #1: "no compile-time macro validation").
+    Validator,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -850,6 +903,23 @@ impl Type {
         matches!(self, Type::Image)
     }
 
+    /// T31: the in-memory Cache runtime-value type. Maps to
+    /// `buff_cache::Cache` at codegen time. Constructed via
+    /// `Cache.new(max_capacity)`; carries the instance methods
+    /// `.get(key)`, `.set(key, value)`, `.set(key, value, ttl)`,
+    /// `.delete(key)`, `.contains(key)`, `.clear()`, `.len()`.
+    pub fn cache() -> Self {
+        Type::Cache
+    }
+
+    /// T31: Returns `true` if this type is the prelude `Cache`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`cache.get(k)`, `cache.set(k, v)`, `cache.delete(k)`, ...)
+    /// to the `buff_cache::Cache` lowering.
+    pub fn is_prelude_cache(&self) -> bool {
+        matches!(self, Type::Cache)
+    }
+
     /// T7: the columnar-DataFrame runtime-value type. Maps to
     /// `buff_dataframe::DataFrame` at codegen time. Constructed via
     /// `DataFrame.from_csv(path)` / `DataFrame.from_json(path)`;
@@ -914,6 +984,34 @@ impl Type {
     /// lowering.
     pub fn is_prelude_entity(&self) -> bool {
         matches!(self, Type::Entity)
+    }
+
+    /// T33: Returns `true` if this type is the prelude `HttpClient`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`client.get(url)`, `client.post(url)`, etc.) to the
+    /// `buff_http_client::HttpClient` lowering.
+    pub fn is_prelude_http_client(&self) -> bool {
+        matches!(self, Type::HttpClient)
+    }
+
+    /// T29: the declarative-schema-validator type. Maps to
+    /// `buff_validate::Validator` at codegen time. Constructed via
+    /// `Validator.new()` (empty); supports the builder methods
+    /// `v.with_email(field)`, `v.with_url(field)`,
+    /// `v.with_length(field, min, max)`,
+    /// `v.with_range(field, min, max)`,
+    /// `v.with_regex(field, pattern)`, plus the action methods
+    /// `v.validate(input)`, `v.to_json_schema()`.
+    pub fn validator() -> Self {
+        Type::Validator
+    }
+
+    /// T29: Returns `true` if this type is the prelude `Validator`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`v.validate(...)`, `v.to_json_schema()`) to the
+    /// `buff_validate::Validator` lowering.
+    pub fn is_prelude_validator(&self) -> bool {
+        matches!(self, Type::Validator)
     }
 
     /// Returns `true` if this type **must** run on the CPU (never GPU).
@@ -1052,6 +1150,10 @@ impl fmt::Display for Type {
             // `buff_image::Image`. Display mirrors the Buff surface
             // name (`Image`).
             Type::Image => f.write_str("Image"),
+            // T31: cache. Opaque runtime-value type mapped to
+            // `buff_cache::Cache`. Display mirrors the Buff surface
+            // name (`Cache`).
+            Type::Cache => f.write_str("Cache"),
             Type::DataFrame => f.write_str("DataFrame"),
             Type::Audio => f.write_str("AudioBuffer"),
             // T12: prelude ECS types. Opaque value types whose
@@ -1061,6 +1163,14 @@ impl fmt::Display for Type {
             // diagnostics read naturally.
             Type::World => f.write_str("World"),
             Type::Entity => f.write_str("Entity"),
+            // T33: prelude HTTP client type. Opaque value type mapped
+            // to `buff_http_client::HttpClient`. Display mirrors the
+            // Buff surface name.
+            Type::HttpClient => f.write_str("HttpClient"),
+            // T29: prelude validator type. Opaque value type mapped
+            // to `buff_validate::Validator`. Display mirrors the
+            // Buff surface name.
+            Type::Validator => f.write_str("Validator"),
         }
     }
 }

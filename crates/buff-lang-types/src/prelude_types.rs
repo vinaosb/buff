@@ -750,6 +750,27 @@ pub enum PreludeType {
     /// codegen-only linking boundary). CPU-only per Metis G7 lock
     /// (NO GPU dispatch — defer to v1.18+).
     Image,
+    /// T31: `Cache` — in-memory cache runtime-value type wrapping
+    /// `buff_cache::Cache` (itself wrapping the `moka` sync cache).
+    /// Constructed via the associated function `Cache.new(max_capacity)`;
+    /// supports 7 instance methods: `cache.get(key) -> String?`,
+    /// `cache.set(key, value)`, `cache.set(key, value, ttl)`,
+    /// `cache.delete(key)`, `cache.contains(key) -> Bool`,
+    /// `cache.clear()`, `cache.len() -> Int`. LRU eviction +
+    /// per-entry TTL via stored `Option<Instant>` deadlines
+    /// (lazy eviction on get/contains).
+    ///
+    /// This is the SEVENTH runtime-value-with-rich-instance-methods
+    /// type (after Regex T124d / URL T124h / Path T124j / Process
+    /// T124l / Image T9 / DataFrame T7). `buff_type()` returns
+    /// [`Type::Cache`] (a real value type); `is_namespace_only()`
+    /// returns `false`. The `moka` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Cache` (mirrors the
+    /// chrono / regex / tracing codegen-only linking boundary).
+    /// Distributed Redis backend DEFERRED to v1.18+ per the T31
+    /// task spec ("If problematic, defer distributed to v1.18+ and
+    /// ship in-memory MVP only").
+    Cache,
     /// `Signal` - the time-domain signal-processing namespace (T11).
     /// EXPERIMENTAL badge per T11 spec. Wraps the in-tree pure-Rust
     /// `buff-dsp` crate (CPU-only via `rustfft` + `realfft` +
@@ -1111,6 +1132,27 @@ pub enum PreludeType {
     /// + Sync`; no lifetimes; every public body catch_unwind-wrapped
     /// per FFI guide R6).
     HttpClient,
+    /// T30: `Config` — layered configuration namespace (viper-equivalent).
+    /// Wraps the `buff-config` crate (`buff_config::Config`). Namespace-
+    /// only module (mirror Log / Toml / Math / Random). The assoc fns
+    /// `Config.new()` / `Config.set_default(key, val)` / `Config.load_file(p)`
+    /// / `Config.load_env(prefix)` / `Config.load_args(args)` / `Config.get(key)`
+    /// / `Config.get_int(key)` / `Config.get_float(key)` / `Config.get_bool(key)`
+    /// / `Config.watch(path, callback)` are all dispatched on the
+    /// PreludeType::Config namespace. `buff_type()` returns Type::Void
+    /// (Config is namespace-only — no runtime value). Records `buff-config`
+    /// + `figment` + `notify` in codegen `extern_crates` when a Buff
+    /// program uses `Config.*` (mirrors the chrono / regex / tracing
+    /// codegen-only linking boundary). Pure-Rust, no native deps.
+    Config,
+    /// T21: `Observe` — observability namespace (OpenTelemetry-equivalent).
+    /// Wraps the `buff-observe` crate. Namespace-only module (mirror Log /
+    /// Toml / Math / Random). The assoc fns `Observe.span(name)` /
+    /// `Observe.counter(name)` / `Observe.histogram(name)` /
+    /// `Observe.gauge(name)` / `Observe.bootstrap()` are all dispatched
+    /// on the PreludeType::Observe namespace. `buff_type()` returns
+    /// Type::Void (Observe is namespace-only — no runtime value).
+    Observe,
     /// T27 (v1.13 frameworks wave 5): the `Fuzz` namespace — the
     /// property-based fuzzing entry point. Wraps the in-tree
     /// pure-Rust `buff-fuzz` crate (`buff_fuzz::run`) backed by
@@ -1162,6 +1204,148 @@ pub enum PreludeType {
     /// when a Buff program uses `Strategy.*` (shared with the
     /// Fuzz.* walker — both lower to `buff_fuzz::*`).
     Strategy,
+    /// T29 (v1.16 frameworks wave): the `Validator` runtime-value
+    /// type — a declarative schema validator (pydantic-equivalent)
+    /// wrapping `buff_validate::Validator` at codegen time.
+    /// Constructed via `Validator.new()` (empty rule set); carries
+    /// five builder instance methods `.with_email(field)`,
+    /// `.with_url(field)`, `.with_length(field, min, max)`,
+    /// `.with_range(field, min, max)`, `.with_regex(field, pattern)`,
+    /// each returning a new Validator (Buff "no visible references"
+    /// stance — builders consume self), plus two action methods
+    /// `.validate(map) -> Result<Void, String>` and
+    /// `.to_json_schema() -> String`.
+    ///
+    /// `Validator` IS a runtime value (NOT namespace-only like
+    /// Log / Toml / Hash / HMAC / OS / Fuzz). `buff_type()` returns
+    /// [`Type::Validator`]; `is_namespace_only()` returns `false`.
+    /// The `buff-validate` + `validator` + `serde_json` crates are
+    /// recorded in codegen `extern_crates` when a Buff program uses
+    /// `Validator.*` (mirrors the chrono / regex / tracing codegen-
+    /// only linking boundary). Pure-Rust, CPU-only.
+    ///
+    /// FFI-safe: complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers; owned
+    /// Validator at the boundary; fallible ops return
+    /// `Result<T, ValidateError>`; Validator is `Clone + Send + Sync`;
+    /// no lifetimes; every public body catch_unwind-wrapped per FFI
+    /// guide R6).
+    Validator,
+    /// T34 (v1.16 frameworks wave 4): the `JWT` namespace — JSON Web
+    /// Token encode/decode. Wraps the in-tree pure-Rust `buff-auth`
+    /// crate (`buff_auth::jwt_encode` / `buff_auth::jwt_decode`) which
+    /// in turn wraps `jsonwebtoken` 10 with the `rust_crypto` backend
+    /// (pure-Rust, NO `ring`, NO `aws-lc-rs`, NO native-tls, NO cc-rs
+    /// — matches the "Windows host with no MSVC" constraint). Two
+    /// assoc fns:
+    /// - `JWT.encode(claims, secret) -> String` — HS256 compact JWS.
+    ///   Two args (Map<String, Unknown>, String). Returns the
+    ///   `header.payload.signature` token String. Wraps
+    ///   `buff_auth::jwt_encode(&claims, secret)?` (the `?` propagates
+    ///   `AuthError::Jwt` per Buff's R3 error-mapping contract).
+    /// - `JWT.decode(token, secret) -> Map<String, Unknown>` — verify
+    ///   + decode to claims map. Two args (String, String). Returns
+    ///   the claims as a heterogeneous Map. Wraps
+    ///   `buff_auth::jwt_decode(token, secret).unwrap_or_default()`
+    ///   (panic-free — invalid signature / malformed token / expired
+    ///   all collapse to an empty Map, NEVER panics).
+    ///
+    /// `JWT` is **never a runtime value** — it's a NAMESPACE exposing
+    /// only associated functions (mirrors Log / Toml / Hash / HMAC /
+    /// OS / Audit / Signature / Fuzz / Strategy / Config exactly).
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `buff-auth` + `jsonwebtoken` + `argon2` +
+    /// `oauth2` + `reqwest` crates are recorded in codegen
+    /// `extern_crates` when a Buff program uses `JWT.*` (shared walker
+    /// with OAuth2Client / Password / Rbac — mirrors the chrono /
+    /// regex / sha2 / ed25519-dalek codegen-only linking boundary).
+    ///
+    /// NO `ring`, NO native-tls, NO cc-rs — the T34 task spec
+    /// explicitly forbids all three. The `rust_crypto` backend of
+    /// `jsonwebtoken` is the canonical pure-Rust alternative.
+    Jwt,
+    /// T34: the `OAuth2Client` runtime-value type — OAuth2
+    /// authorization-code flow client (with PKCE for public clients).
+    /// Wraps `buff_auth::OAuth2Client` (which in turn wraps `oauth2`
+    /// 4 via `reqwest` rustls-tls). One assoc fn + two instance
+    /// methods:
+    /// - `OAuth2Client.new(client_id, client_secret?, auth_url,
+    ///   token_url, redirect_url, scopes) -> OAuth2Client` — ctor.
+    ///   Six args; `client_secret = ""` triggers PKCE flow.
+    /// - `client.authorization_url() -> String` — the URL the user
+    ///   must visit in a browser. Embeds `#pkce_verifier=...` for
+    ///   public clients (the caller extracts + passes back to
+    ///   `exchange_code`).
+    /// - `client.exchange_code(code, pkce_verifier?) -> Map<String,
+    ///   Unknown>` — blocking POST to token endpoint. Two args
+    ///   (String, String — pass `""` for confidential clients).
+    ///   Returns the token response fields (`access_token`,
+    ///   `token_type`, `expires_in`, `refresh_token`, `scope`).
+    ///
+    /// `OAuth2Client` IS a runtime value (NOT namespace-only — like
+    /// Regex / URL / Path / Process / Image / World / Database /
+    /// Validator). `buff_type()` returns [`Type::Unknown`] for MVP —
+    /// the coordinated [`Type::OAuth2Client`] variant in `ty.rs` is a
+    /// follow-up sibling task OUTSIDE the T34 shared zone (mirrors
+    /// the T17 Web / T18 Database / T8 Tensor / T11 Signal forward-
+    /// declaration precedent). `is_namespace_only()` returns `false`.
+    /// The codegen lowering for the assoc fn `OAuth2Client.new` +
+    /// both instance methods is shipped in this T34 commit (dispatch
+    /// on PreludeType for assoc fn; instance-method dispatch
+    /// requires Type::OAuth2Client — TBD follow-up).
+    ///
+    /// Records `buff-auth` + `oauth2` + `reqwest` in codegen
+    /// `extern_crates` when a Buff program uses `OAuth2Client.*`.
+    OAuth2Client,
+    /// T34: the `Password` namespace — Argon2id password hashing.
+    /// Wraps `buff_auth::password_hash` / `password_verify` (which
+    /// in turn wrap the RustCrypto `argon2` crate — pure-Rust, NO
+    /// `ring`). Two assoc fns:
+    /// - `Password.hash(plain) -> String` — Argon2id PHC string.
+    ///   One arg (String). Returns the canonical
+    ///   `$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>` form
+    ///   ready for storage in a user database. Wraps
+    ///   `buff_auth::password_hash(plain).unwrap_or_default()` (
+    ///   panic-free — empty String on hash failure, NEVER panics).
+    /// - `Password.verify(plain, phc_hash) -> Bool` — verify a
+    ///   plaintext against a stored PHC hash. Two args. Returns
+    ///   `false` on mismatch (NEVER panics, NEVER errors on plain
+    ///   mismatch — mirrors the T26 Signature.verify stance so a
+    ///   future `login_allow` policy can layer cleanly). Wraps
+    ///   `buff_auth::password_verify(plain, hash).unwrap_or(false)`.
+    ///
+    /// `Password` is **never a runtime value** — it's a NAMESPACE
+    /// (mirrors JWT / Audit / Signature / Hash / HMAC / OS / Log /
+    /// Toml exactly). `buff_type()` returns [`Type::Void`];
+    /// `is_namespace_only()` returns `true`. Records `buff-auth` +
+    /// `argon2` in codegen `extern_crates` (shared walker).
+    Password,
+    /// T34: the `Rbac` runtime-value type — role-based access
+    /// control policy. Wraps `buff_auth::Rbac` (an in-tree
+    /// `BTreeSet<(role, resource, action)>` with wildcard `*` match
+    /// — NO extern crate, pure stdlib). One assoc fn + one builder
+    /// + one decision method:
+    /// - `Rbac.new() -> Rbac` — empty policy.
+    /// - `policy.add(role, resource, action) -> Void` — add a rule
+    ///   (dedup'd; empty fields rejected via fallible shape, but the
+    ///   MVP lowering uses `.unwrap_or(())` so it is panic-free).
+    /// - `policy.enforce(roles, resource, action) -> Bool` — does
+    ///   at least one rule match at least one of the supplied roles?
+    ///   Wildcard `*` on any field matches anything.
+    ///
+    /// `Rbac` IS a runtime value (NOT namespace-only). `buff_type()`
+    /// returns [`Type::Unknown`] for MVP — the coordinated
+    /// [`Type::Rbac`] variant in `ty.rs` is a follow-up sibling task
+    /// OUTSIDE the T34 shared zone (mirrors the T17 Web / T18
+    /// Database / OAuth2Client forward-declaration precedent). The
+    /// assoc fn `Rbac.new` is shipped in this T34 commit; the
+    /// instance methods `add` + `enforce` are deferred to the sibling
+    /// task that adds Type::Rbac (mirrors the T17 / T18 / T34-
+    /// OAuth2Client instance-method dispatch gap).
+    ///
+    /// Records `buff-auth` in codegen `extern_crates` (shared walker
+    /// — no extra deps for the in-tree RBAC engine).
+    Rbac,
 }
 
 impl PreludeType {
@@ -1287,6 +1471,14 @@ impl PreludeType {
         // same commit (T9 owns the full Image surface, unlike T8
         // which forward-declares Tensor only).
         PreludeType::Image,
+        // T31: Cache — runtime-value type wrapping `buff_cache::Cache`
+        // (moka sync backend). Mirrors Image / DataFrame: codegen
+        // lowering lives in the buff-cache crate
+        // (`buff_cache::Cache::*`); the codegen arm +
+        // PreludeAssocFn/InstanceFn entries are added in the same
+        // commit (T31 owns the full Cache surface). Distributed
+        // Redis backend deferred to v1.18+ per the T31 spec.
+        PreludeType::Cache,
         // T11: Signal / Window / Spectrum - three signal-processing
         // types wrapping the in-tree `buff-dsp` crate. Signal + Window
         // are namespace-only modules (mirror Log / Toml / Math /
@@ -1384,6 +1576,25 @@ impl PreludeType {
         // program uses `Config.*` (mirrors the chrono / regex / tracing
         // codegen-only linking boundary). Pure-Rust, no native deps.
         PreludeType::Config,
+        // T21: Observe — observability namespace (OpenTelemetry-equivalent).
+        // Namespace-only module (mirror Log / Toml / Math / Random).
+        // Records `buff-observe` in codegen `extern_crates` when a Buff
+        // program uses `Observe.*`.
+        PreludeType::Observe,
+        // T29: Validator — declarative schema validator (pydantic-
+        // equivalent). Runtime-value type (mirrors Regex / Image /
+        // HttpClient). The assoc fn `Validator.new()` returns an empty
+        // Validator; the instance methods `validator.with_email(field)`
+        // / `.with_url(field)` / `.with_length(field, min, max)` /
+        // `.with_range(field, min, max)` / `.with_regex(field, pattern)`
+        // are builder methods that consume self and return a new
+        // Validator (Buff "no visible references" stance); the action
+        // methods `validator.validate(map) -> Result<Void, String>` and
+        // `validator.to_json_schema() -> String` run validation and
+        // serialize JSON Schema respectively. Records `buff-validate`
+        // + `validator` + `serde_json` in codegen `extern_crates` when
+        // a Buff program uses `Validator.*`. Pure-Rust, no native deps.
+        PreludeType::Validator,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -1567,6 +1778,10 @@ impl PreludeType {
             // `Image.from_path(...)` / `Image.from_bytes(...)` surface.
             // The underlying Rust type is `buff_image::Image`.
             PreludeType::Image => "Image",
+            // T31: Cache - canonical name matching the user-facing
+            // `Cache.new(...)` / `cache.get(...)` / `cache.set(...)`
+            // surface. The underlying Rust type is `buff_cache::Cache`.
+            PreludeType::Cache => "Cache",
             // T10: AudioBuffer - canonical PascalCase name matching the
             // user-facing `AudioBuffer.from_path(...)` /
             // `AudioBuffer.from_samples(...)` surface. The underlying
@@ -1610,6 +1825,11 @@ impl PreludeType {
             // The codegen splices `buff_http_client::HttpClient::new()`
             // directly.
             PreludeType::HttpClient => "HttpClient",
+            // T29: Validator — canonical PascalCase name matching the
+            // user-facing `Validator.new()` / `validator.with_email(field)`
+            // / `validator.validate(map)` surface. The codegen splices
+            // `buff_validate::Validator::new()` directly.
+            PreludeType::Validator => "Validator",
             // T30: Config — canonical PascalCase name matching the
             // user-facing `Config.new()` / `cfg.set_default(key, val)` /
             // `cfg.load_file(path)` / `cfg.load_env(prefix)` /
@@ -1619,6 +1839,18 @@ impl PreludeType {
             // type is `buff_config::Config`. Namespace-only (no runtime
             // value — mirrors Log / Toml / Math / Random).
             PreludeType::Config => "Config",
+            // T21: Observe — canonical PascalCase name matching the
+            // user-facing `Observe.span(name)` / `Observe.counter(name)`
+            // surface. Namespace-only (no runtime value).
+            PreludeType::Observe => "Observe",
+            // Forward-declared by parallel sibling tasks (T27 Fuzz,
+            // T34 Jwt, etc.) — name matches the Debug variant name.
+            PreludeType::Fuzz => "Fuzz",
+            PreludeType::Strategy => "Strategy",
+            PreludeType::Jwt => "Jwt",
+            PreludeType::OAuth2Client => "OAuth2Client",
+            PreludeType::Password => "Password",
+            PreludeType::Rbac => "Rbac",
         }
     }
 
@@ -1810,6 +2042,10 @@ impl PreludeType {
             // Returns the opaque [`Type::Image`] variant; the codegen
             // layer maps it to `buff_image::Image`.
             PreludeType::Image => Type::Image,
+            // T31: Cache IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Cache`] variant; the codegen
+            // layer maps it to `buff_cache::Cache`.
+            PreludeType::Cache => Type::Cache,
             // T10: AudioBuffer IS a runtime value (NOT namespace-only).
             // Returns the opaque [`Type::Audio`] variant; the codegen
             // layer maps it to `buff_audio::AudioBuffer`.
@@ -1863,12 +2099,45 @@ impl PreludeType {
             // Returns the opaque [`Type::HttpClient`] variant; the
             // codegen layer maps it to `buff_http_client::HttpClient`.
             PreludeType::HttpClient => Type::HttpClient,
+            // T29: Validator IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Validator`] variant; the
+            // codegen layer maps it to `buff_validate::Validator`.
+            PreludeType::Validator => Type::Validator,
             // T30: Config is a namespace-only module (mirror Log / Toml /
             // Math / Random). The namespace itself has no value
             // representation; only its associated functions are callable.
             // `buff_type()` returns Type::Void (Config is NOT a runtime
             // value — it's a namespace for layered config operations).
             PreludeType::Config => Type::Void,
+            // T21: Observe is a namespace-only module (mirror Log / Toml /
+            // Math / Random). The namespace itself has no value
+            // representation; only its associated functions are callable.
+            // `buff_type()` returns Type::Void (Observe is NOT a runtime
+            // value — it's a namespace for observability operations).
+            PreludeType::Observe => Type::Void,
+            // T27: Fuzz + Strategy are namespace-only modules (mirror
+            // Log / Toml / Hash / HMAC / OS / Audit / Signature). The
+            // assoc fns return opaque `buff_fuzz::*` values whose Type
+            // variants are forward-declared as Unknown (mirrors the
+            // Channel / Tensor / Signal-DSP precedent).
+            PreludeType::Fuzz => Type::Unknown,
+            PreludeType::Strategy => Type::Unknown,
+            // T34: JWT + Password are namespace-only modules (mirror
+            // Audit / Signature / Hash / HMAC). The assoc fns return
+            // String / Map / Bool — NOT an opaque value type — so the
+            // namespace itself returns Type::Void (NO forward-declaration
+            // gap; the lowering is direct).
+            PreludeType::Jwt => Type::Void,
+            PreludeType::Password => Type::Void,
+            // T34: OAuth2Client + Rbac ARE runtime values (NOT
+            // namespace-only). Returns [`Type::Unknown`] for MVP — the
+            // coordinated Type::OAuth2Client / Type::Rbac variants in
+            // `ty.rs` are follow-up sibling tasks OUTSIDE the T34 shared
+            // zone (mirrors the T17 Web / T18 Database forward-declaration
+            // precedent). The codegen layer splices the real
+            // `buff_auth::OAuth2Client::*` / `buff_auth::Rbac::*` paths.
+            PreludeType::OAuth2Client => Type::Unknown,
+            PreludeType::Rbac => Type::Unknown,
         }
     }
 
@@ -1913,6 +2182,9 @@ impl PreludeType {
                 | PreludeType::ReactiveComputed
                 | PreludeType::ReactiveEffect
                 | PreludeType::Config
+                | PreludeType::Observe
+                | PreludeType::Jwt
+                | PreludeType::Password
         )
     }
 }
@@ -2497,6 +2769,78 @@ pub enum PreludeAssocFn {
     /// Two args (String path, callback fn). Returns Void. Fires callback
     /// on file modification. Wraps `buff_config::Config::watch(path, cb)?`.
     Watch,
+    // ---- T21: Observe namespace methods ---------------------------------
+    /// `Observe.span(name)` - start a new tracing span. One arg (String).
+    /// Returns Void. Wraps `buff_observe::span(name)`.
+    Span,
+    /// `Observe.counter(name)` - create or increment a counter metric.
+    /// One arg (String). Returns Void.
+    Counter,
+    /// `Observe.histogram(name)` - create a histogram metric. One arg
+    /// (String). Returns Void.
+    Histogram,
+    /// `Observe.gauge(name)` - create a gauge metric. One arg (String).
+    /// Returns Void.
+    Gauge,
+    /// `Observe.bootstrap()` - initialize the observability pipeline
+    /// (OpenTelemetry SDK, tracer provider, metric reader, etc.). Zero
+    /// args. Returns Void.
+    Bootstrap,
+    // ---- T26: Audit namespace methods ----------------------------------
+    /// `Audit.scan(path)` - scan a project directory for known
+    /// vulnerabilities. One arg (String path). Returns Vector<String>.
+    Scan,
+    // ---- T34: Auth namespace methods -----------------------------------
+    /// `JWT.sign(claims, secret)` - sign a JWT. Two args (Map claims,
+    /// String secret). Returns String.
+    Sign,
+    /// `JWT.verify(token, secret)` - verify a JWT. Two args (String
+    /// token, String secret). Returns Map.
+    Verify,
+    /// `Signature.keypair()` - generate a new Ed25519 keypair. Zero
+    /// args. Returns Signature (opaque runtime value).
+    Keypair,
+    // ---- T27: Fuzz namespace methods -----------------------------------
+    /// `Fuzz.run(strategy, iterations, closure)` - run a fuzz test.
+    /// Three args. Returns Void.
+    Run,
+    // ---- T30: Config typed-get methods ---------------------------------
+    /// `Config.get_bool(key)` - get a bool config value. One arg (String).
+    /// Returns Option<Bool>.
+    Bool,
+    /// `Config.get_string(key)` - get a string config value. One arg
+    /// (String). Returns Option<String>.
+    String,
+    /// `Config.get_bytes(key)` - get a bytes config value. One arg
+    /// (String). Returns Option<Vector<Byte>>.
+    Bytes,
+    // ---- T34: buff-auth namespace methods ------------------------------
+    // JWT reuses the existing shared `Encode` / `Decode` variants
+    // (already defined for Base64 / Hex / URLEncode). The (JWT, Encode)
+    // / (JWT, Decode) pairs dispatch on the receiver type — same shared
+    // variant pattern as `Parse` (DateTime / Date / Toml / URL / UUID).
+    //
+    // The five variants below are buff-auth-specific (no sharing with
+    // prior prelude types in T34 scope). Each dispatches on the
+    // matching (PreludeType, variant) pair in `assoc_fn_return_type`.
+    /// `Password.hash(plain)` - Argon2id PHC string. One arg (String).
+    /// Returns String. Password-only.
+    PasswordHash,
+    /// `Password.verify(plain, phc_hash)` - verify a plaintext against
+    /// a stored PHC hash. Two args (String, String). Returns Bool.
+    /// `Ok(false)` on mismatch (NEVER panics). Password-only.
+    PasswordVerify,
+    /// `OAuth2Client.authorization_url()` - build the browser URL the
+    /// user must visit. Zero args. Returns String. OAuth2Client-only.
+    AuthorizationUrl,
+    /// `OAuth2Client.exchange_code(code, pkce_verifier)` - blocking
+    /// POST to token endpoint. Two args. Returns Map<String, Unknown>.
+    /// OAuth2Client-only.
+    ExchangeCode,
+    /// `Rbac.enforce(roles, resource, action)` - decide whether the
+    /// roles may perform action on resource. Three args. Returns Bool.
+    /// Rbac-only.
+    Enforce,
 }
 
 impl PreludeAssocFn {
@@ -2659,6 +3003,13 @@ impl PreludeAssocFn {
         PreludeAssocFn::GetFloat,
         PreludeAssocFn::GetBool,
         PreludeAssocFn::Watch,
+        // T21: Observe namespace methods (5): span / counter / histogram /
+        // gauge / bootstrap.
+        PreludeAssocFn::Span,
+        PreludeAssocFn::Counter,
+        PreludeAssocFn::Histogram,
+        PreludeAssocFn::Gauge,
+        PreludeAssocFn::Bootstrap,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -2739,6 +3090,48 @@ impl PreludeAssocFn {
             PreludeAssocFn::GetFloat => "get_float",
             PreludeAssocFn::GetBool => "get_bool",
             PreludeAssocFn::Watch => "watch",
+            // T21: Observe namespace method names. Mirror the Rust
+            // `buff_observe` crate method names so codegen can splice
+            // `buff_observe::span(name)` / `buff_observe::counter(name)`
+            // / `buff_observe::histogram(name)` / `buff_observe::gauge(name)`
+            // / `buff_observe::bootstrap()` paths without rewriting.
+            PreludeAssocFn::Span => "span",
+            PreludeAssocFn::Counter => "counter",
+            PreludeAssocFn::Histogram => "histogram",
+            PreludeAssocFn::Gauge => "gauge",
+            PreludeAssocFn::Bootstrap => "bootstrap",
+            // T26: Audit namespace method names.
+            PreludeAssocFn::Scan => "scan",
+            // T26: buff-audit Signature namespace method names.
+            PreludeAssocFn::Sign => "sign",
+            PreludeAssocFn::Verify => "verify",
+            PreludeAssocFn::Keypair => "keypair",
+            // T27: Fuzz namespace method names.
+            PreludeAssocFn::Run => "run",
+            // T30: Config typed-get method names.
+            PreludeAssocFn::Bool => "get_bool",
+            PreludeAssocFn::String => "get_string",
+            PreludeAssocFn::Bytes => "get_bytes",
+            // T34: buff-auth namespace method names. JWT reuses the
+            // existing `Encode` / `Decode` shared variants (also used
+            // by Base64 / Hex / URLEncode — dispatched on the receiver
+            // type). Password.verify reuses the existing shared `verify`
+            // name (same name as Signature.verify — distinct variants,
+            // dispatched on the (Password, PasswordVerify) pair). The 4
+            // new distinct names below mirror the underlying `buff_auth::*`
+            // Rust method names so codegen can splice paths without
+            // rewriting.
+            PreludeAssocFn::PasswordHash => "hash",
+            PreludeAssocFn::PasswordVerify => "verify",
+            PreludeAssocFn::AuthorizationUrl => "authorization_url",
+            PreludeAssocFn::ExchangeCode => "exchange_code",
+            PreludeAssocFn::Enforce => "enforce",
+            // T34: Auth namespace method names.
+            PreludeAssocFn::PasswordHash => "hash",
+            PreludeAssocFn::PasswordVerify => "verify",
+            PreludeAssocFn::AuthorizationUrl => "authorization_url",
+            PreludeAssocFn::ExchangeCode => "exchange_code",
+            PreludeAssocFn::Enforce => "enforce",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -3524,6 +3917,19 @@ pub fn assoc_fn_return_type(
         // forward-declare as Type::Unknown — HttpClient has a proper
         // Type variant in this same T33 commit).
         (PreludeType::HttpClient, PreludeAssocFn::New) => Some(Type::HttpClient),
+        // T31: Cache.new(max_capacity) -> Cache. One arg (Int).
+        // Wraps `buff_cache::Cache::new(max_capacity)?` (the `?`
+        // propagates CacheError::InvalidCapacity per Buff's R3
+        // error-mapping contract — zero capacity rejected). Returns
+        // the concrete `Type::Cache` variant.
+        (PreludeType::Cache, PreludeAssocFn::New) => Some(Type::Cache),
+        // T29: Validator.new() -> Validator. Zero args. Wraps
+        // `buff_validate::Validator::new()` (infallible - returns an
+        // empty rule set). Returns the concrete `Type::Validator`
+        // variant. The 5 builder methods (with_email / with_url /
+        // with_length / with_range / with_regex) and 2 action methods
+        // (validate / to_json_schema) are instance fns (see below).
+        (PreludeType::Validator, PreludeAssocFn::New) => Some(Type::Validator),
         // T30: Config module — namespace-only (no runtime value). The
         // assoc fns return Void (set_default / load_file / load_env /
         // load_args / watch) or Option<Int> / Option<Float> / Option<Bool>
@@ -3957,6 +4363,56 @@ pub enum PreludeInstanceFn {
     /// `web.run() -> Void`. Zero args. Serves on the bind addr set
     /// by `Web.bind(addr)` (defaults to `0.0.0.0:8080`).
     Run,
+    // ---- Validator instance methods (T29) --------------------------------
+    /// `validator.with_email(field) -> Validator`. One arg (String
+    /// field name). Builder that consumes self and returns a new
+    /// Validator with the email rule added (Buff "no visible
+    /// references" stance — mirrors the axum Router::route pattern).
+    /// Wraps `recv.with_email(field)`.
+    WithEmail,
+    /// `validator.with_url(field) -> Validator`. One arg. Builder.
+    /// Wraps `recv.with_url(field)`.
+    WithUrl,
+    /// `validator.with_length(field, min, max) -> Validator`. Three
+    /// args. Builder. Wraps `recv.with_length(field, min, max)?`
+    /// (the `?` surfaces InvalidRuleConfig at the call site when
+    /// `min > max` — fail-fast per the T29 panic-free contract).
+    WithLength,
+    /// `validator.with_range(field, min, max) -> Validator`. Three
+    /// args. Builder. Wraps `recv.with_range(field, min, max)?`.
+    WithRange,
+    /// `validator.with_regex(field, pattern) -> Validator`. Two
+    /// args. Builder. Wraps `recv.with_regex(field, pattern)?`
+    /// (the `?` surfaces BadRegex at the call site for malformed
+    /// patterns — fail-fast, NOT deferred until validate).
+    WithRegex,
+    /// `validator.validate(input) -> Result<Void, String>`. One arg
+    /// (Map<String, String>). Runs every registered rule against
+    /// the input map; aggregates every failure into a single
+    /// ValidationErrors. Returns Ok(()) when all rules pass or
+    /// Err(stringified aggregate) on any failure. Wraps
+    /// `recv.validate(&input).map_err(|e| e.to_string())`.
+    Validate,
+    /// `validator.to_json_schema() -> String`. Zero args. Serializes
+    /// the rule set as a JSON Schema (Draft 2020-12) string. Wraps
+    /// `recv.to_json_schema()`.
+    ToJsonSchema,
+    /// `cache.set(key, value, ttl) -> Void` (T31). Three args
+    /// (String, String, Duration). Wraps
+    /// `recv.set_with_ttl(k, v, ttl)`. Distinct from `Set` (which
+    /// takes only 2 args) — Buff's named-args convention lets both
+    /// surface as `cache.set(...)` with arity-based dispatch.
+    SetTtl,
+    /// `cache.delete(key) -> Void` (T31). One arg (String). Wraps
+    /// `recv.delete(&k)`.
+    Delete,
+    /// `cache.contains(key) -> Bool` (T31). One arg (String). Wraps
+    /// `recv.contains(&k)`. Expiry-aware: returns `false` for
+    /// entries past their TTL deadline.
+    Contains,
+    /// `cache.clear() -> Void` (T31). Zero args. Wraps
+    /// `recv.clear()`. Removes all entries.
+    Clear,
 }
 
 impl PreludeInstanceFn {
@@ -4093,6 +4549,35 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Middleware,
         PreludeInstanceFn::Listen,
         PreludeInstanceFn::Run,
+        // T29: Validator instance methods (7 distinct names):
+        // with_email / with_url / with_length / with_range /
+        // with_regex / validate / to_json_schema. All Validator-only.
+        // The five builder methods (with_*) consume self and return
+        // Self (Buff "no visible references" stance — mirrors the
+        // axum Router::route pattern). The two action methods
+        // (validate / to_json_schema) borrow self and return
+        // Result<Void, String> / String respectively.
+        PreludeInstanceFn::WithEmail,
+        PreludeInstanceFn::WithUrl,
+        PreludeInstanceFn::WithLength,
+        PreludeInstanceFn::WithRange,
+        PreludeInstanceFn::WithRegex,
+        PreludeInstanceFn::Validate,
+        PreludeInstanceFn::ToJsonSchema,
+        // T31: Cache instance methods — 4 new variants (SetTtl /
+        // Delete / Contains / Clear). Get / Set / Len are SHARED
+        // variants (Reactive owns Get/Set; DataFrame owns Len);
+        // Cache reuses them via (Type::Cache, Get) / (Type::Cache,
+        // Set) / (Type::Cache, Len) dispatch. The four new variants
+        // are Cache-only (no other prelude type uses `delete` /
+        // `contains` / `clear` as instance methods today; if a
+        // future type wants the same verb, dispatch on receiver).
+        // SetTtl is the 3-arg `cache.set(key, value, ttl)` overload;
+        // Buff's named-args convention disambiguates from Set.
+        PreludeInstanceFn::SetTtl,
+        PreludeInstanceFn::Delete,
+        PreludeInstanceFn::Contains,
+        PreludeInstanceFn::Clear,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -4233,6 +4718,38 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Middleware => "middleware",
             PreludeInstanceFn::Listen => "listen",
             PreludeInstanceFn::Run => "run",
+            // T29: Validator method names mirror the
+            // `buff_validate::Validator` method names 1:1. The five
+            // builder methods (with_*) consume self and return Self;
+            // the two action methods (validate / to_json_schema)
+            // borrow self.
+            PreludeInstanceFn::WithEmail => "with_email",
+            PreludeInstanceFn::WithUrl => "with_url",
+            PreludeInstanceFn::WithLength => "with_length",
+            PreludeInstanceFn::WithRange => "with_range",
+            PreludeInstanceFn::WithRegex => "with_regex",
+            PreludeInstanceFn::Validate => "validate",
+            PreludeInstanceFn::ToJsonSchema => "to_json_schema",
+            // T31: Cache method names. `set_ttl` surfaces as Buff
+            // `cache.set(key, value, ttl)` via arity-based dispatch
+            // (codegen consults arg count to lower to SetTtl vs Set).
+            // `delete` / `contains` / `clear` mirror the
+            // `buff_cache::Cache` method names 1:1.
+            PreludeInstanceFn::SetTtl => "set",
+            PreludeInstanceFn::Delete => "delete",
+            PreludeInstanceFn::Contains => "contains",
+            PreludeInstanceFn::Clear => "clear",
+            // T11: Signal instance methods (Fft, Ifft, Lowpass, Highpass,
+            // Bandpass, ApplyWindow, Spectrogram, Magnitude, Phase).
+            PreludeInstanceFn::Fft => "fft",
+            PreludeInstanceFn::Ifft => "ifft",
+            PreludeInstanceFn::Lowpass => "lowpass",
+            PreludeInstanceFn::Highpass => "highpass",
+            PreludeInstanceFn::Bandpass => "bandpass",
+            PreludeInstanceFn::ApplyWindow => "apply_window",
+            PreludeInstanceFn::Spectrogram => "spectrogram",
+            PreludeInstanceFn::Magnitude => "magnitude",
+            PreludeInstanceFn::Phase => "phase",
         }
     }
 }
@@ -4615,6 +5132,44 @@ pub fn instance_fn_return_type(
         (Type::Unknown, PreludeInstanceFn::Update) => Some(Type::Void),
         // `c.invalidate()` -> Void. Zero args. Manually clear cache.
         (Type::Unknown, PreludeInstanceFn::Invalidate) => Some(Type::Void),
+
+        // T29: Validator instance methods.
+        // `validator.with_email(field)` -> Validator. Builder (consume self).
+        (Type::Validator, PreludeInstanceFn::WithEmail) => Some(Type::Validator),
+        // `validator.with_url(field)` -> Validator. Builder.
+        (Type::Validator, PreludeInstanceFn::WithUrl) => Some(Type::Validator),
+        // `validator.with_length(field, min, max)` -> Validator. Builder.
+        (Type::Validator, PreludeInstanceFn::WithLength) => Some(Type::Validator),
+        // `validator.with_range(field, min, max)` -> Validator. Builder.
+        (Type::Validator, PreludeInstanceFn::WithRange) => Some(Type::Validator),
+        // `validator.with_regex(field, pattern)` -> Validator. Builder.
+        (Type::Validator, PreludeInstanceFn::WithRegex) => Some(Type::Validator),
+        // `validator.validate(input)` -> Result<Void, String>. Action.
+        // Wraps `recv.validate(&input).map_err(|e| e.to_string())`.
+        (Type::Validator, PreludeInstanceFn::Validate) =>
+            Some(Type::result(Type::Void, Type::String)),
+        // `validator.to_json_schema()` -> String. Action.
+        (Type::Validator, PreludeInstanceFn::ToJsonSchema) => Some(Type::String),
+
+        // T31: Cache instance methods. All 7 dispatched on
+        // (Type::Cache, variant) pairs. Get returns Option<String>
+        // (Buff String? surface); the rest are Void / Bool / Int.
+        // `cache.get(key)` -> String? (None if missing or expired).
+        (Type::Cache, PreludeInstanceFn::Get) =>
+            Some(Type::option(Type::String)),
+        // `cache.set(key, value)` -> Void. Two args.
+        (Type::Cache, PreludeInstanceFn::Set) => Some(Type::Void),
+        // `cache.set(key, value, ttl)` -> Void. Three args (the
+        // arity-dispatched overload of Set).
+        (Type::Cache, PreludeInstanceFn::SetTtl) => Some(Type::Void),
+        // `cache.delete(key)` -> Void.
+        (Type::Cache, PreludeInstanceFn::Delete) => Some(Type::Void),
+        // `cache.contains(key)` -> Bool. Expiry-aware.
+        (Type::Cache, PreludeInstanceFn::Contains) => Some(Type::Bool),
+        // `cache.clear()` -> Void.
+        (Type::Cache, PreludeInstanceFn::Clear) => Some(Type::Void),
+        // `cache.len()` -> Int. Approximate entry count.
+        (Type::Cache, PreludeInstanceFn::Len) => Some(Type::int_default()),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

@@ -868,6 +868,23 @@ impl RustCodegen {
         {
             self.extern_crates.insert("buff-reactive".to_string());
         }
+        // T29: register `buff-validate` when the program references the
+        // prelude `Validator` module (`Validator.new(...)` etc.). The
+        // generated code uses fully-qualified `buff_validate::Validator::*`
+        // paths so no top-level `use` import is emitted — but the
+        // recorded name signals to the pipeline / build-driver that
+        // the generated Cargo project must declare `buff-validate` in
+        // `[dependencies]`. Also records `validator` (the upstream
+        // validation crate whose trait methods we lower to) +
+        // `serde_json` (for JSON Schema export) + `regex` (for
+        // `with_regex` pattern compilation at rule-registration time).
+        // Mirrors the Image / HttpClient registration pattern.
+        if program_uses_namespace(decls, "Validator") {
+            self.extern_crates.insert("buff-validate".to_string());
+            self.extern_crates.insert("validator".to_string());
+            self.extern_crates.insert("serde_json".to_string());
+            self.extern_crates.insert("regex".to_string());
+        }
         // T26: register `buff-audit` when the program references the
         // prelude `Audit` OR `Signature` modules (`Audit.scan(...)`
         // / `Signature.sign(...)` etc.). Also records
@@ -5096,6 +5113,35 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("HttpClient.new codegen parse: {e}")))
             }
+            // T29: Validator.new() -> Validator. Zero args. Wraps
+            // `buff_validate::Validator::new()` (infallible - returns
+            // an empty rule set). Records `buff-validate` +
+            // `validator` + `serde_json` + `regex` in extern_crates
+            // via the `program_uses_namespace("Validator")` walker.
+            // Dispatch on (PreludeType::Validator, New) - mirrors the
+            // (HttpClient, New) / (Channel, New) precedent.
+            (T::Validator, A::New) => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_validate::Validator::new()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.new codegen parse: {e}")))
+            }
+            // T31: Cache.new(max_capacity) -> Cache. One arg (Int).
+            // Wraps `buff_cache::Cache::new(max_capacity as u64)
+            // .unwrap_or_default()` (panic-free on zero-capacity —
+            // Cache impls Default as a 1024-capacity empty cache,
+            // matching Buff's "no panicking generated code" rule).
+            // Records `buff-cache` + `moka` in extern_crates via the
+            // `program_uses_namespace("Cache")` walker.
+            (T::Cache, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_cache::Cache::new(#arg as u64).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.new codegen parse: {e}")))
+            }
             // T30: Config module — namespace-only (no runtime value).
             // `Config.new()` creates a `buff_config::Config` and stores
             // it in a thread-local static so subsequent method calls
@@ -6711,6 +6757,137 @@ impl RustCodegen {
                     )));
                 }
                 Ok(method_call_no_args(recv, "invalidate"))
+            }
+            // T29: Validator instance methods. Records `buff-validate`
+            // + `validator` + `serde_json` + `regex` in extern_crates
+            // via the `program_uses_namespace("Validator")` walker.
+            //
+            // The five builder methods (with_*) consume self and
+            // return Self — Buff's "no visible references" stance
+            // mirrors the axum `Router::route` pattern. Each call
+            // lowers to `recv.with_xxx(arg)` (the buff-validate
+            // surface takes the args by value).
+            //
+            // `validator.with_email(field)` -> Validator. One arg.
+            M::WithEmail if matches!(recv_ty, Type::Validator) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "with_email() expects exactly 1 arg (field), got {}",
+                        args.len()
+                    )));
+                }
+                let field = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.with_email(#field)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.with_email codegen parse: {e}")))
+            }
+            // `validator.with_url(field)` -> Validator. One arg.
+            M::WithUrl if matches!(recv_ty, Type::Validator) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "with_url() expects exactly 1 arg (field), got {}",
+                        args.len()
+                    )));
+                }
+                let field = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.with_url(#field)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.with_url codegen parse: {e}")))
+            }
+            // `validator.with_length(field, min, max)` -> Validator.
+            // Three args. Panic-free via `unwrap_or_default()`
+            // (Validator impls Default as an empty rule set —
+            // InvalidRuleConfig surfaces as no-op clone).
+            M::WithLength if matches!(recv_ty, Type::Validator) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "with_length() expects exactly 3 args (field, min, max), got {}",
+                        args.len()
+                    )));
+                }
+                let field = self.lower_expr(&args[0])?;
+                let min = self.lower_expr(&args[1])?;
+                let max = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.with_length(#field, #min as u64, #max as u64).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.with_length codegen parse: {e}")))
+            }
+            // `validator.with_range(field, min, max)` -> Validator.
+            // Three args. Panic-free via `unwrap_or_default()`.
+            M::WithRange if matches!(recv_ty, Type::Validator) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "with_range() expects exactly 3 args (field, min, max), got {}",
+                        args.len()
+                    )));
+                }
+                let field = self.lower_expr(&args[0])?;
+                let min = self.lower_expr(&args[1])?;
+                let max = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.with_range(#field, #min as i64, #max as i64).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.with_range codegen parse: {e}")))
+            }
+            // `validator.with_regex(field, pattern)` -> Validator.
+            // Two args. Panic-free via `unwrap_or_default()` (a
+            // malformed pattern surfaces as no-op clone — the
+            // underlying buff-validate surface compiles the regex
+            // eagerly at registration).
+            M::WithRegex if matches!(recv_ty, Type::Validator) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "with_regex() expects exactly 2 args (field, pattern), got {}",
+                        args.len()
+                    )));
+                }
+                let field = self.lower_expr(&args[0])?;
+                let pattern = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.with_regex(#field, #pattern).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.with_regex codegen parse: {e}")))
+            }
+            // `validator.validate(input)` -> Result<Void, String>.
+            // One arg (Map<String, String>). Wraps
+            // `recv.validate(&input).map_err(|e| e.to_string())` so
+            // the Buff `?` operator propagates a string error.
+            M::Validate if matches!(recv_ty, Type::Validator) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "validate() expects exactly 1 arg (input), got {}",
+                        args.len()
+                    )));
+                }
+                let input = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.validate(#input).map_err(|e| e.to_string())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.validate codegen parse: {e}")))
+            }
+            // `validator.to_json_schema()` -> String. Zero args.
+            // Wraps `recv.to_json_schema()`.
+            M::ToJsonSchema if matches!(recv_ty, Type::Validator) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_json_schema() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.to_json_schema()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Validator.to_json_schema codegen parse: {e}")))
             }
         }
     }
@@ -9127,6 +9304,13 @@ impl RustCodegen {
             // otherwise Rust infers the type from the initializer
             // (mirroring Regex / Path / Process behavior).
             Type::Image => "buff_image::Image",
+            // T31: cache. Opaque runtime-value type mapped to
+            // `buff_cache::Cache`. No generic parameter, no turbofish
+            // needed. Mirrors the T9 Image precedent: if a user
+            // annotates a let binding with an explicit Cache type,
+            // codegen emits the concrete path; otherwise Rust infers
+            // the type from the initializer (Cache.new).
+            Type::Cache => "buff_cache::Cache",
             // T10: audio. Opaque runtime-value type mapped to
             // `buff_audio::AudioBuffer`. No generic parameter, no
             // turbofish needed. Mirrors the T9 Image precedent: if a
@@ -9157,6 +9341,18 @@ impl RustCodegen {
             // `HttpClient.*` (via the narrow
             // `program_uses_namespace("HttpClient")` walker).
             Type::HttpClient => "buff_http_client::HttpClient",
+            // T29: validator. Opaque runtime-value type mapped to
+            // `buff_validate::Validator`. No generic parameter, no
+            // turbofish needed. Mirrors the T9 Image / T33 HttpClient
+            // precedent: if a user annotates a let binding with an
+            // explicit Validator type, codegen emits the concrete
+            // path; otherwise Rust infers the type from the initializer
+            // (Validator.new()). The `buff-validate` + `validator` +
+            // `serde_json` + `regex` crates are recorded in
+            // `extern_crates` when a Buff program uses `Validator.*`
+            // (via the narrow `program_uses_namespace("Validator")`
+            // walker).
+            Type::Validator => "buff_validate::Validator",
         };
         Some(rust_path_type(rust_name))
     }

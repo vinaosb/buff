@@ -3284,7 +3284,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Subcommands parse correctly. Help text generated. 3 examples (hello, subcommands, flags) + 10 tests.
   - **Commit**: `feat(buff-cli): MVP clap-equivalent for user programs`
 
-- [ ] 33. `buff-http-client` — Idiomatic HTTP Client
+- [x] 33. `buff-http-client` — Idiomatic HTTP Client
 
   **What to do**: Wrap Rust `reqwest` crate (already used via extern). Provide Buff-idiomatic fluent API: `HttpClient.new()`, `client.get(url)`, `client.post(url).json(body).header(name, val).send() -> Response`. Response: `.status()`, `.json<T>()`, `.text()`, `.headers()`. Built-in retry via T36 buff-resilience. Cross-language prevalence: 6/6 (requests/axios/resty/reqwest/OkHttp/RestSharp).
   - **LOC budget**: ≤2000, ≤20 fns. **External deps**: `reqwest` (existing).

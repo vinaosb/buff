@@ -1,0 +1,33 @@
+[package]
+name = "buff-http-client"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Idiomatic HTTP client for Buff. \
+Pure-Rust MVP wrapping the mature `reqwest` crate \
+via a safe FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "http", "client", "reqwest"]
+categories = ["web-programming::http-client"]
+
+[lib]
+name = "buff_http_client"
+path = "src/lib.rs"
+
+[dependencies]
+# T33 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# reqwest 0.12: de-facto Rust HTTP client. Features: blocking (sync
+# API for Buff), json (serde_json body), rustls-tls (pure-Rust TLS).
+# Already pinned at workspace level with default-features=false +
+# rustls-tls + json + blocking.
+reqwest.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+httpmock.workspace = true
+serde_json.workspace = true
