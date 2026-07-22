@@ -681,6 +681,52 @@ pub enum Type {
     /// the instance methods `.root()`, `.find(xpath)`, `.to_string()`.
     /// This is **additive** (T50). Pure-Rust, CPU-only.
     Xml,
+    /// T45: a 2D geospatial point with `f64` coordinates, mapped to
+    /// `buff_geo::Point` at codegen time. Constructed via the associated
+    /// function `Point.new(x, y)`; carries the instance methods `.x()`,
+    /// `.y()`, `.distance_to(other)`. CPU-only per Metis G7 lock (NO
+    /// GPU dispatch).
+    ///
+    /// This is **additive** (T45): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Point`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Regex`] (T124d) as a
+    /// runtime-value-with-rich-instance-methods type. The underlying
+    /// Rust type is `buff_geo::Point` (a struct wrapping
+    /// `geo_types::Point<f64>`) — the codegen emits
+    /// `buff_geo::Point::new(x, y)` for the ctor and `recv.x()` /
+    /// `recv.y()` / `recv.distance_to(other)` for the instance methods.
+    /// Pure-Rust, CPU-only.
+    Point,
+    /// T45: a geospatial polyline — an ordered sequence of [`Point`]s,
+    /// mapped to `buff_geo::LineString` at codegen time. Constructed via
+    /// `LineString.new(points)` or `LineString.from_coords(flat)`; carries
+    /// the instance method `.length()`. CPU-only per Metis G7 lock.
+    ///
+    /// This is **additive** (T45). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] as a
+    /// runtime-value-with-instance-methods type. The underlying Rust type
+    /// is `buff_geo::LineString` (wrapping `geo_types::LineString<f64>`).
+    LineString,
+    /// T45: a geospatial polygon — an outer ring + future interior holes,
+    /// mapped to `buff_geo::Polygon` at codegen time. Constructed via
+    /// `Polygon.new(ring)` or `Polygon.from_coords(flat)`; carries the
+    /// instance methods `.area()`, `.contains(point)`,
+    /// `.intersects(other)`. CPU-only per Metis G7 lock.
+    ///
+    /// This is **additive** (T45). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] as a
+    /// runtime-value-with-instance-methods type. The underlying Rust type
+    /// is `buff_geo::Polygon` (wrapping `geo_types::Polygon<f64>`). The
+    /// MVP supports only the outer ring (no holes); holes are a v1.18+
+    /// enhancement.
+    Polygon,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1307,6 +1353,52 @@ impl Type {
         matches!(self, Type::MsgPack)
     }
 
+    /// T45: the 2D geospatial point type. Maps to `buff_geo::Point` at
+    /// codegen time. Constructed via `Point.new(x, y)`; supports the
+    /// instance methods `point.x()`, `point.y()`,
+    /// `point.distance_to(other)`.
+    pub fn point() -> Self {
+        Type::Point
+    }
+
+    /// T45: Returns `true` if this type is the prelude `Point` runtime
+    /// value. Used to dispatch instance method calls (`p.x()`, `p.y()`,
+    /// `p.distance_to(q)`) to the `buff_geo::Point` lowering.
+    pub fn is_prelude_point(&self) -> bool {
+        matches!(self, Type::Point)
+    }
+
+    /// T45: the geospatial LineString type. Maps to
+    /// `buff_geo::LineString` at codegen time. Constructed via
+    /// `LineString.new(points)` / `LineString.from_coords(flat)`;
+    /// supports the instance method `ls.length()`.
+    pub fn line_string() -> Self {
+        Type::LineString
+    }
+
+    /// T45: Returns `true` if this type is the prelude `LineString`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`ls.length()`) to the `buff_geo::LineString` lowering.
+    pub fn is_prelude_line_string(&self) -> bool {
+        matches!(self, Type::LineString)
+    }
+
+    /// T45: the geospatial Polygon type. Maps to `buff_geo::Polygon`
+    /// at codegen time. Constructed via `Polygon.new(ring)` /
+    /// `Polygon.from_coords(flat)`; supports the instance methods
+    /// `poly.area()`, `poly.contains(point)`, `poly.intersects(other)`.
+    pub fn polygon() -> Self {
+        Type::Polygon
+    }
+
+    /// T45: Returns `true` if this type is the prelude `Polygon`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`poly.area()`, `poly.contains(p)`, `poly.intersects(o)`) to
+    /// the `buff_geo::Polygon` lowering.
+    pub fn is_prelude_polygon(&self) -> bool {
+        matches!(self, Type::Polygon)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -1492,6 +1584,12 @@ impl fmt::Display for Type {
             // to `buff_xml::XmlDocument`. Display mirrors the Buff
             // surface name.
             Type::Xml => f.write_str("Xml"),
+            // T45: prelude geo types. Opaque value types mapped to
+            // `buff_geo::{Point, LineString, Polygon}`. Display mirrors
+            // the Buff surface name.
+            Type::Point => f.write_str("Point"),
+            Type::LineString => f.write_str("LineString"),
+            Type::Polygon => f.write_str("Polygon"),
         }
     }
 }

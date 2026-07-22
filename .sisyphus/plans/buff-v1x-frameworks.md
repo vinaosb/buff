@@ -3400,7 +3400,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > Rust-ecosystem leverage: specialized frameworks where Buff wraps a mature Rust crate to provide idiomatic API. These address 1-3 language ecosystems but unlock valuable use cases.
 
-- [ ] 45. `buff-geo` — Geospatial / GIS
+- [x] 45. `buff-geo` — Geospatial / GIS
 
   **What to do**: Wrap Rust `geo` crate + `geo-types`. Provide: `Point.new(lat, lon)`, `Polygon.from_coords(...)`, `LineString`, distance/area/buffer/intersect ops, `Projection.wgs84_to_web_mercator()`. Cross-language: 4/6 (shapely/turf/geo/JTS — Java/C# have libraries too).
   - **LOC budget**: ≤2500, ≤25 fns. **External deps**: `geo`, `geo-types`, `proj`.

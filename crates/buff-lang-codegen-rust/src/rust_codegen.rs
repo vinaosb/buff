@@ -1097,6 +1097,24 @@ impl RustCodegen {
             self.extern_crates
                 .insert("unicode-segmentation".to_string());
         }
+        // T45: register `buff-geo` when the program references any of
+        // the three prelude geo namespaces (`Point.*` / `LineString.*`
+        // / `Polygon.*`). Also records `geo` + `geo-types` transitively
+        // (the wrapper crate wraps both for Euclidean distance / length
+        // / area / Contains / Intersects algorithms). The walker checks
+        // all three namespaces because the user typically composes
+        // Point + LineString + Polygon together; recording once for any
+        // of them is sufficient (idempotent BTreeSet insert). Mirrors
+        // the T9 Image / T43 buff-scrape / T42 buff-email pattern.
+        // Pure-Rust, CPU-only per Metis G7 lock (NO GPU dispatch).
+        if program_uses_namespace(decls, "Point")
+            || program_uses_namespace(decls, "LineString")
+            || program_uses_namespace(decls, "Polygon")
+        {
+            self.extern_crates.insert("buff-geo".to_string());
+            self.extern_crates.insert("geo".to_string());
+            self.extern_crates.insert("geo-types".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -5789,6 +5807,75 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Xml.from_str codegen parse: {e}")))
             }
+            // T45: Point.new(x, y) -> Point. Two args (Float, Float).
+            // Wraps `buff_geo::Point::new(x, y)` (infallible — the
+            // underlying geo_types::Point::new never fails). Records
+            // `buff-geo` + `geo` + `geo-types` in extern_crates via the
+            // `program_uses_namespace("Point")` walker.
+            (T::Point, A::New) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "Point.new expects exactly 2 args (x, y), got {}",
+                        args.len()
+                    )));
+                }
+                let x = self.lower_expr(&args[0])?;
+                let y = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_geo::Point::new(#x, #y)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Point.new codegen parse: {e}")))
+            }
+            // T45: LineString.new(points) -> LineString. One arg
+            // (Vector<Point>). Wraps
+            // `buff_geo::LineString::new(points).unwrap_or_default()`
+            // (panic-free on empty input — LineString impls Default).
+            (T::LineString, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_geo::LineString::new(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("LineString.new codegen parse: {e}")))
+            }
+            // T45: LineString.from_coords(flat) -> LineString. One arg
+            // (Vector<Float>). Wraps
+            // `buff_geo::LineString::from_coords(coords).unwrap_or_default()`
+            // (panic-free on empty / odd-length input).
+            (T::LineString, A::FromCoords) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_geo::LineString::from_coords(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("LineString.from_coords codegen parse: {e}"))
+                })
+            }
+            // T45: Polygon.new(ring) -> Polygon. One arg (Vector<Point>).
+            // Wraps `buff_geo::Polygon::new(ring).unwrap_or_default()`
+            // (panic-free on degenerate input — Polygon impls Default).
+            (T::Polygon, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_geo::Polygon::new(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Polygon.new codegen parse: {e}")))
+            }
+            // T45: Polygon.from_coords(flat) -> Polygon. One arg
+            // (Vector<Float>). Wraps
+            // `buff_geo::Polygon::from_coords(coords).unwrap_or_default()`
+            // (panic-free on empty / odd-length / degenerate input).
+            (T::Polygon, A::FromCoords) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_geo::Polygon::from_coords(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Polygon.from_coords codegen parse: {e}"))
+                })
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -6991,6 +7078,124 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Image.blur codegen parse: {e}")))
+            }
+            // T45: buff-geo instance methods. Each lowers to the
+            // matching `buff_geo::{Point, LineString, Polygon}` method.
+            // All infallible at the codegen layer (the wrapper crate's
+            // methods return f64 / bool directly — no unwrap_or_default
+            // needed). Records `buff-geo` + `geo` + `geo-types` in
+            // extern_crates via the `program_uses_namespace("Point")` /
+            // ("LineString") / ("Polygon") walkers.
+            //
+            // `point.x()` -> Float. Zero args. Wraps `recv.x()`.
+            M::X if matches!(recv_ty, Type::Point) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "x() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.x()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Point.x codegen parse: {e}")))
+            }
+            // `point.y()` -> Float. Zero args. Wraps `recv.y()`.
+            M::Y if matches!(recv_ty, Type::Point) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "y() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.y()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Point.y codegen parse: {e}")))
+            }
+            // `point.distance_to(other)` -> Float. One arg (Point).
+            // Wraps `recv.distance_to(other)`.
+            M::DistanceTo if matches!(recv_ty, Type::Point) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "distance_to() expects exactly 1 arg (other Point), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.distance_to(#other)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Point.distance_to codegen parse: {e}")))
+            }
+            // `line_string.length()` -> Float. Zero args. Wraps
+            // `recv.length()`.
+            M::Length if matches!(recv_ty, Type::LineString) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "length() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.length()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("LineString.length codegen parse: {e}"))
+                })
+            }
+            // `polygon.area()` -> Float. Zero args. Wraps `recv.area()`.
+            M::Area if matches!(recv_ty, Type::Polygon) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "area() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.area()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Polygon.area codegen parse: {e}")))
+            }
+            // `polygon.contains(point)` -> Bool. One arg (Point).
+            // Wraps `recv.contains(point)`. Shared `Contains` variant —
+            // dispatched on (Polygon, Contains) pair (same variant as
+            // Cache.contains, different receiver type).
+            M::Contains if matches!(recv_ty, Type::Polygon) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "contains() expects exactly 1 arg (Point), got {}",
+                        args.len()
+                    )));
+                }
+                let pt = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.contains(#pt)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Polygon.contains codegen parse: {e}")))
+            }
+            // `polygon.intersects(other)` -> Bool. One arg (Polygon).
+            // Wraps `recv.intersects(&other)` (panic-free via
+            // catch_unwind inside the wrapper per FFI guide R6).
+            M::Intersects if matches!(recv_ty, Type::Polygon) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "intersects() expects exactly 1 arg (other Polygon), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.intersects(&#other)
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Polygon.intersects codegen parse: {e}"))
+                })
             }
             // T37: Faker instance methods. All infallible — the
             // `buff_fake::Faker` methods return owned String / i64
@@ -10620,6 +10825,13 @@ impl RustCodegen {
             // for match exhaustiveness (the rust_name match has no `_`
             // wildcard). Mirrors Type::Regex arm shape above.
             Type::MsgPack => "buff_msgpack::MsgPack",
+            // T45: prelude geo types. Opaque runtime-value types
+            // mapped to `buff_geo::{Point, LineString, Polygon}`. No
+            // generic parameters, no turbofish needed. Mirrors the T9
+            // Image / T50 Xml precedent.
+            Type::Point => "buff_geo::Point",
+            Type::LineString => "buff_geo::LineString",
+            Type::Polygon => "buff_geo::Polygon",
         };
         Some(rust_path_type(rust_name))
     }

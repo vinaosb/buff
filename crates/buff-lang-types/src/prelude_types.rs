@@ -1566,6 +1566,27 @@ pub enum PreludeType {
     /// / `buff_msgpack::deserialize` / `buff_msgpack::roundtrip`).
     /// Pure-Rust, no native deps.
     MsgPack,
+    /// T45: `Point` — a 2D geospatial point with f64 coordinates.
+    /// Runtime-value type wrapping `buff_geo::Point` (which wraps
+    /// `geo_types::Point<f64>`). Constructed via `Point.new(x, y)`; carries
+    /// the instance methods `.x()`, `.y()`, `.distance_to(other)`.
+    /// Mirrors Image / Faker / Regex as a runtime-value-with-rich-
+    /// instance-methods type. Pure-Rust, CPU-only per Metis G7 lock.
+    Point,
+    /// T45: `LineString` — a geospatial polyline (ordered sequence of
+    /// Points). Runtime-value type wrapping `buff_geo::LineString` (which
+    /// wraps `geo_types::LineString<f64>`). Constructed via
+    /// `LineString.new(points)` / `LineString.from_coords(flat)`; carries
+    /// the instance method `.length()`. Mirrors Point as a runtime-value-
+    /// with-instance-methods type. Pure-Rust, CPU-only.
+    LineString,
+    /// T45: `Polygon` — a geospatial polygon (outer ring + future holes).
+    /// Runtime-value type wrapping `buff_geo::Polygon` (which wraps
+    /// `geo_types::Polygon<f64>`). Constructed via `Polygon.new(ring)` /
+    /// `Polygon.from_coords(flat)`; carries the instance methods `.area()`,
+    /// `.contains(point)`, `.intersects(other)`. Mirrors Point as a
+    /// runtime-value-with-instance-methods type. Pure-Rust, CPU-only.
+    Polygon,
 }
 
 impl PreludeType {
@@ -1894,6 +1915,18 @@ impl PreludeType {
         // lives in the buff-msgpack crate (`buff_msgpack::serialize`
         // / `buff_msgpack::deserialize`). Pure-Rust, no native deps.
         PreludeType::MsgPack,
+        // T45: Point / LineString / Polygon — three runtime-value geo
+        // types wrapping the in-tree pure-Rust `buff-geo` crate
+        // (`buff_geo::{Point, LineString, Polygon}`) backed by `geo` +
+        // `geo-types`. All three are runtime-value-with-rich-instance-
+        // methods types (after Regex / URL / Path / Process / Image /
+        // Cache / HttpClient). Codegen lowering lives in the buff-geo
+        // crate; the codegen arm + PreludeAssocFn/InstanceFn entries
+        // are added in this same commit (T45 owns the full geo surface).
+        // Pure-Rust, CPU-only per Metis G7 lock; NO GPU dispatch.
+        PreludeType::Point,
+        PreludeType::LineString,
+        PreludeType::Polygon,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2202,6 +2235,14 @@ impl PreludeType {
             // Base64 / Hex / Yaml / Csv). The underlying Rust crate
             // is `buff_msgpack`.
             PreludeType::MsgPack => "MsgPack",
+            // T45: Point / LineString / Polygon — canonical PascalCase
+            // names matching the user-facing `Point.new(x, y)` /
+            // `LineString.from_coords(...)` / `Polygon.new(ring)`
+            // surface. The underlying Rust types are
+            // `buff_geo::{Point, LineString, Polygon}`.
+            PreludeType::Point => "Point",
+            PreludeType::LineString => "LineString",
+            PreludeType::Polygon => "Polygon",
         }
     }
 
@@ -2544,6 +2585,13 @@ impl PreludeType {
             // Returns the opaque [`Type::Xml`] variant; the codegen
             // layer maps it to `buff_xml::XmlDocument`.
             PreludeType::Xml => Type::Xml,
+            // T45: Point / LineString / Polygon ARE runtime values
+            // (NOT namespace-only). Returns the matching opaque Type
+            // variant; the codegen layer maps them to
+            // `buff_geo::{Point, LineString, Polygon}`.
+            PreludeType::Point => Type::Point,
+            PreludeType::LineString => Type::LineString,
+            PreludeType::Polygon => Type::Polygon,
         }
     }
 
@@ -3339,6 +3387,16 @@ pub enum PreludeAssocFn {
     /// `buff_msgpack::roundtrip(&value)` directly (the runtime fn
     /// already returns Option).
     Roundtrip,
+    /// T45: `LineString.from_coords(flat)` / `Polygon.from_coords(flat)`
+    /// — construct from a flat `Vec<f64>` of interleaved `[x1, y1, x2,
+    /// y2, ...]` coordinates. One arg (`Vector<Float>`). Returns
+    /// `LineString` / `Polygon`. Wraps `buff_geo::LineString::from
+    /// _coords(coords).unwrap_or_default()` / `buff_geo::Polygon::from
+    /// _coords(coords).unwrap_or_default()` (panic-free on empty /
+    /// odd-length input — the wrapper returns Default on failure per
+    /// Buff's "no panicking generated code" rule). Buff §7 ctor naming
+    /// convention permits `Type.from_*()`.
+    FromCoords,
 }
 
 impl PreludeAssocFn {
@@ -3554,6 +3612,10 @@ impl PreludeAssocFn {
         PreludeAssocFn::Serialize,
         PreludeAssocFn::Deserialize,
         PreludeAssocFn::Roundtrip,
+        // T45: LineString.from_coords / Polygon.from_coords — flat
+        // Vec<f64> coordinate-list ctor. Dispatched on the
+        // (LineString, FromCoords) / (Polygon, FromCoords) pairs.
+        PreludeAssocFn::FromCoords,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -3710,6 +3772,12 @@ impl PreludeAssocFn {
             PreludeAssocFn::Serialize => "serialize",
             PreludeAssocFn::Deserialize => "deserialize",
             PreludeAssocFn::Roundtrip => "roundtrip",
+            // T45: LineString.from_coords / Polygon.from_coords —
+            // Buff §7 `Type.from_*()` ctor naming convention. Mirrors
+            // the buff_geo Rust method names so codegen can splice
+            // `buff_geo::LineString::from_coords(...)` /
+            // `buff_geo::Polygon::from_coords(...)` without rewriting.
+            PreludeAssocFn::FromCoords => "from_coords",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -4642,6 +4710,20 @@ pub fn assoc_fn_return_type(
         // contract). Returns the opaque Type::Xml variant; the codegen
         // layer maps it to `buff_xml::XmlDocument`.
         (PreludeType::Xml, PreludeAssocFn::FromStr) => Some(Type::Xml),
+        // T45: buff-geo constructors. Point.new is infallible (wraps
+        // `buff_geo::Point::new(x, y)` directly). LineString.new /
+        // LineString.from_coords / Polygon.new / Polygon.from_coords
+        // are fallible in Rust (return `Result<_, GeoError>`) but
+        // surface as infallible on the Buff side via codegen's
+        // `unwrap_or_default()` (LineString / Polygon impl Default).
+        // `New` is shared with Channel.new / Faker.new / Crawler.new
+        // (dispatched on (Point, New) / (LineString, New) /
+        // (Polygon, New) pairs). `FromCoords` is geo-only.
+        (PreludeType::Point, PreludeAssocFn::New) => Some(Type::Point),
+        (PreludeType::LineString, PreludeAssocFn::New) => Some(Type::LineString),
+        (PreludeType::LineString, PreludeAssocFn::FromCoords) => Some(Type::LineString),
+        (PreludeType::Polygon, PreludeAssocFn::New) => Some(Type::Polygon),
+        (PreludeType::Polygon, PreludeAssocFn::FromCoords) => Some(Type::Polygon),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -5229,6 +5311,24 @@ pub enum PreludeInstanceFn {
     /// `doc.to_string() -> String` — serialize back to XML. Zero args.
     /// XmlDocument-only.
     ToString,
+    // ---- T45: buff-geo instance methods --------------------------------
+    /// `point.x()` — x coordinate. Zero args. Returns Float. Point-only.
+    X,
+    /// `point.y()` — y coordinate. Zero args. Returns Float. Point-only.
+    Y,
+    /// `point.distance_to(other)` — Euclidean distance. One arg (Point).
+    /// Returns Float. Point-only.
+    DistanceTo,
+    /// `line_string.length()` — Euclidean length. Zero args. Returns
+    /// Float. LineString-only.
+    Length,
+    /// `polygon.area()` — unsigned area. Zero args. Returns Float.
+    /// Polygon-only.
+    Area,
+    /// `polygon.intersects(other)` — test intersection. One arg
+    /// (Polygon). Returns Bool. Polygon-only. Wraps `catch_unwind`
+    /// (BooleanOps) per FFI guide R6.
+    Intersects,
 }
 
 impl PreludeInstanceFn {
@@ -5443,6 +5543,15 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Root,
         PreludeInstanceFn::Find,
         PreludeInstanceFn::ToString,
+        // T45: buff-geo instance methods (6 new variants). `Contains`
+        // is shared with Cache.contains (existing variant — dispatched
+        // on (Polygon, Contains) pair). The 6 new variants are geo-only.
+        PreludeInstanceFn::X,
+        PreludeInstanceFn::Y,
+        PreludeInstanceFn::DistanceTo,
+        PreludeInstanceFn::Length,
+        PreludeInstanceFn::Area,
+        PreludeInstanceFn::Intersects,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -5661,6 +5770,17 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Root => "root",
             PreludeInstanceFn::Find => "find",
             PreludeInstanceFn::ToString => "to_string",
+            // T45: buff-geo instance method names mirror the
+            // `buff_geo::{Point, LineString, Polygon}` Rust method
+            // names 1:1 so the codegen can splice `recv.x()` /
+            // `recv.distance_to(other)` / `recv.area()` etc. without
+            // rewriting.
+            PreludeInstanceFn::X => "x",
+            PreludeInstanceFn::Y => "y",
+            PreludeInstanceFn::DistanceTo => "distance_to",
+            PreludeInstanceFn::Length => "length",
+            PreludeInstanceFn::Area => "area",
+            PreludeInstanceFn::Intersects => "intersects",
             // T11: Signal instance methods (Fft, Ifft, Lowpass, Highpass,
             // Bandpass, ApplyWindow, Spectrogram, Magnitude, Phase).
             PreludeInstanceFn::Fft => "fft",
@@ -6203,6 +6323,20 @@ pub fn instance_fn_return_type(
         (Type::Xml, PreludeInstanceFn::Find) => Some(Type::option(Type::Xml)),
         // `doc.to_string()` -> String. Zero args.
         (Type::Xml, PreludeInstanceFn::ToString) => Some(Type::String),
+
+        // T45: buff-geo instance methods. Point.x / Point.y return
+        // Float (f64); Point.distance_to returns Float; LineString
+        // .length returns Float; Polygon.area returns Float;
+        // Polygon.contains returns Bool (shared `Contains` variant —
+        // dispatched on (Polygon, Contains) pair, same variant as
+        // Cache.contains); Polygon.intersects returns Bool.
+        (Type::Point, PreludeInstanceFn::X) => Some(Type::float_default()),
+        (Type::Point, PreludeInstanceFn::Y) => Some(Type::float_default()),
+        (Type::Point, PreludeInstanceFn::DistanceTo) => Some(Type::float_default()),
+        (Type::LineString, PreludeInstanceFn::Length) => Some(Type::float_default()),
+        (Type::Polygon, PreludeInstanceFn::Area) => Some(Type::float_default()),
+        (Type::Polygon, PreludeInstanceFn::Contains) => Some(Type::Bool),
+        (Type::Polygon, PreludeInstanceFn::Intersects) => Some(Type::Bool),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
