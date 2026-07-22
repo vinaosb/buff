@@ -1421,6 +1421,59 @@ buff-fsm = { path = "crates/buff-fsm" }
 # spawn_blocking` for runtime-aware worker spawn; `tokio::time::
 # sleep` for the async example / test polling cadence.
 buff-pubsub = { path = "crates/buff-pubsub" }
+# T42: `buff-email` MVP — SMTP + templated email for Buff. Wraps the
+# pure-Rust `lettre` crate (the de-facto Rust ecosystem SMTP
+# transport + message builder, maintained by the lettre org).
+# Pure-Rust TLS via the `rustls` feature (NOT `native-tls` —
+# workspace hard rule from AGENTS.md "Pure-Rust preference" + the
+# T126/T127 "no C library" rule). NO `ring` runtime dep at the
+# workspace level (lettre's `ring` crypto backend is enabled in this
+# pin so the TLS handshake has a crypto provider; the alternative
+# `aws-lc-rs` backend would pull cc-rs).
+#
+# - `lettre` 0.11: the long-standing SMTP transport + message
+#   builder. API surface used:
+#   * `lettre::Message::builder().from(.parse()?).to(.parse()?)`
+#     `.subject(s).multipart(MultiPart::alternative_plain_html(...))`
+#     for the buildable message (matches `Email.new` + `email.body` +
+#     `email.html`).
+#   * `lettre::message::Attachment::new(name).body(bytes, content_type)`
+#     for file attachments (matches `email.attach`).
+#   * `lettre::SmtpTransport::relay(host)?.port(p).credentials(c).build()`
+#     for the STARTTLS SMTP transport with the given credentials
+#     (matches `SmtpClient.new`).
+#   * `lettre::Transport::send(&message)` for the blocking send
+#     (matches `client.send(email)`).
+#
+#   Features enabled: `builder` (Message + MultiPart + Attachment),
+#   `smtp-transport` (SmtpTransport + Credentials), `rustls` (pure-
+#   Rust TLS via rustls), `ring` (rustls crypto backend), `webpki-
+#   roots` (Mozilla root CA certs for cert validation). `default-
+#   features = false` drops the default-on `native-tls` + the tokio
+#   async runtime — matches the workspace hard rule + keeps the dep
+#   surface minimal (Buff's MVP uses the blocking transport; the
+#   async-std / tokio variants are deferred to v1.18+).
+#
+# - `handlebars` is already pinned at the workspace level (T19 line
+#   910); T42 reuses that pin for `email.html(template, context)`
+#   rendering (the same engine buff-template uses).
+#
+# `lettre` + `handlebars` are recorded in the codegen `extern_crates`
+# BTreeSet when a Buff program uses `Email.*` or `SmtpClient.*`
+# (mirrors the chrono / regex / tracing codegen-only linking
+# boundary: the single-file `buff run` rustc path does NOT link them;
+# cargo-project wiring is deferred per the existing precedent).
+# Snapshots + extern_crates set is the verifiable contract.
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls", "ring", "webpki-roots"] }
+# T42: `buff-email` workspace path dep — mirrors the buff-template /
+# buff-image / buff-audio / buff-dsp / buff-dataframe / buff-pubsub
+# pattern so any future consumer (codegen-lowered `Email.new(...)` /
+# `email.*` / `SmtpClient.new(...)` / `client.send(...)` calls, IDE
+# hover/completion, T139 bufflings email tutorial) resolves to the
+# same in-tree version during the v1.17 frameworks wave. Records
+# `buff-email` (NOT `buff_lang_email` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-email = { path = "crates/buff-email" }
 # T39: `buff-archive` workspace path dep — mirrors the buff-image /
 # buff-cache / buff-resilience / buff-pubsub pattern so any future
 # consumer (codegen-lowered `Archive.compress_dir(...)` /
