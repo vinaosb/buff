@@ -1,0 +1,17 @@
+# T46 .buff example: tokenize + sentence-segment a paragraph (FORWARD-DECL).
+#
+# Requires the coordinated PreludeType::Text codegen lowering arm (this
+# task, T46 finish).
+
+from "nlp" import Text
+
+func main():
+    paragraph = "Hello world! This is a test. Tokenization is fun."
+
+    print("Tokens:")
+    for token in Text.tokenize(paragraph):
+        print(" ", token)
+
+    print("Sentences:")
+    for sent in Text.sentences(paragraph):
+        print(" ", sent)

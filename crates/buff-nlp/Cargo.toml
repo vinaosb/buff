@@ -1,0 +1,70 @@
+[package]
+name = "buff-nlp"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Text processing / NLP for Buff. \
+Pure-Rust MVP wrapping the mature `whatlang` (language detection), \
+`rust-stemmers` (Porter / Snowball stemmer), and \
+`unicode-segmentation` (UAX #29 word + sentence segmentation) \
+crates via a safe FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "nlp", "text", "language", "stemmer"]
+categories = ["text-processing"]
+
+[lib]
+name = "buff_nlp"
+path = "src/lib.rs"
+
+[dependencies]
+# T46 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# - `whatlang` 0.16 (workspace, new in T46): pure-Rust natural-language
+#   identification (no native deps, no cc-rs). Detects 69+ languages
+#   via trigram statistical classification. API surface used:
+#   `whatlang::Detector::detect(text) -> Option<Info>` + `Info::lang()
+#   -> Lang` + `Lang::code() -> &'static str` + `Lang::name() ->
+#   &'static str`. Matches the "no C library" hard rule.
+# - `rust-stemmers` 1.2 (workspace, new in T46): pure-Rust Snowball
+#   stemmer for 18 languages (Arabic, Danish, Dutch, English, Finnish,
+#   French, German, Greek, Hungarian, Italian, Norwegian, Portuguese,
+#   Romanian, Russian, Spanish, Swedish, Tamil, Turkish). API surface
+#   used: `rust_stemmers::Stemmer::new(Algorithm::English) -> Result<
+#   Stemmer, Error>` + `stemmer.stem(word) -> Cow<str>`. The pure-Rust
+#   reimplementation of the canonical Snowball reference; matches the
+#   "no C library" hard rule.
+# - `unicode-segmentation` 1.12 (workspace, already pinned for T124
+#   String segmentation): pure-Rust UAX #29 Unicode text segmentation.
+#   API surface used: `UnicodeSegmentation::unicode_words(s) -> Words`
+#   for word tokenization + `UnicodeSegmentation::unicode_sentences(s)
+#   -> Sentences` for sentence boundary detection.
+# - `thiserror`: crate-local NlpError derive.
+whatlang.workspace = true
+rust-stemmers.workspace = true
+unicode-segmentation.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+# T46: examples live under `examples/nlp/` (a subdirectory). Cargo's
+# default example discovery does NOT recurse into subdirs, so each
+# example is declared explicitly via a `[[example]]` table. Mirrors
+# the `examples/<topic>/` layout used in buff-image / buff-fuzz /
+# buff-archive / buff-lang-runtime / buff-cli for grouping related
+# demo programs.
+[[example]]
+name = "nlp_detect_language"
+path = "examples/nlp/nlp_detect_language.rs"
+
+[[example]]
+name = "nlp_stem_words"
+path = "examples/nlp/nlp_stem_words.rs"
+
+[[example]]
+name = "nlp_tokenize"
+path = "examples/nlp/nlp_tokenize.rs"

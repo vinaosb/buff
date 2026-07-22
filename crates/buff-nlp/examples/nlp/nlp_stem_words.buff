@@ -1,0 +1,17 @@
+# T46 .buff example: stem a list of words in English + Portuguese (FORWARD-DECL).
+#
+# Requires the coordinated PreludeType::Text codegen lowering arm (this
+# task, T46 finish).
+
+from "nlp" import Text
+
+func main():
+    words = ["running", "jumping", "happily"]
+    for word in words:
+        stem = Text.stem(word: word, algorithm: .english)
+        print(word, "->", stem)
+
+    pt_words = ["correndo", "pulando", "gatos"]
+    for word in pt_words:
+        stem = Text.stem(word: word, algorithm: .portuguese)
+        print(word, "->", stem)

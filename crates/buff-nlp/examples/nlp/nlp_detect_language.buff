@@ -1,0 +1,21 @@
+# T46 .buff example: detect natural language of text samples (FORWARD-DECL).
+#
+# Requires the coordinated PreludeType::Text codegen lowering arm (this
+# task, T46 finish). The prelude registry entry `PreludeType::Text` +
+# assoc-method arms are added in the same T46 finish commit as this
+# example. See crates/buff-nlp/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+
+from "nlp" import Text
+
+func main():
+    samples = [
+        "The quick brown fox jumps over the lazy dog.",
+        "A raposa marrom salta sobre o cachorro.",
+    ]
+    for sample in samples:
+        match Text.detect_language(sample):
+            some(lang):
+                print(lang.name(), "(", lang.code(), ")")
+            none:
+                print("(no language detected)")
