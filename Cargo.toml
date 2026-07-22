@@ -1896,6 +1896,18 @@ criterion = "0.5"
 # AGENTS.md).
 buff-simd = { path = "crates/buff-simd" }
 
+# T59: `buff-actors` workspace path dep — actor model + supervisor
+# trees for the v1.x frameworks wave. Pure-Rust MVP wrapping
+# `crossbeam-channel` (T41/T117 workspace pin) for the per-actor
+# mailbox + `std::thread` for the actor loop (deterministic
+# `JoinHandle::join` for graceful shutdown + supervisor crash
+# detection). NO new external deps introduced — reuses the existing
+# `crossbeam-channel` + `thiserror` workspace pins (the
+# conservative-pin philosophy stays intact; no version drift).
+# Records `buff-actors` (NOT `buff_lang_actors` — the framework-
+# crate naming convention drops the `-lang` infix per AGENTS.md).
+buff-actors = { path = "crates/buff-actors" }
+
 # T60: Binary Size Minimization profile.
 #
 # `cargo build --profile minimal` (selected by `buff build --minimal`)

@@ -1773,6 +1773,22 @@ pub enum PreludeType {
     /// `wide` crate (stable portable SIMD — NO nightly `std::simd`, NO
     /// runtime `is_x86_feature_detected!` detection per T54 spec).
     Simd,
+    /// T59: actor-system runtime-value type. Maps to
+    /// `buff_actors::ActorSystem`. Constructed via `ActorSystem.new()`.
+    ActorSystem,
+    /// T59: handle to a running actor. Maps to `buff_actors::ActorRef`.
+    ActorRef,
+    /// T59: supervisor runtime-value type. Maps to
+    /// `buff_actors::Supervisor`.
+    Supervisor,
+    /// T59: child-spawn factory record. Maps to
+    /// `buff_actors::supervisor::ChildSpec`.
+    ChildSpec,
+    /// T59: restart-strategy enum (namespace-only — mirrors Platform
+    /// / StemAlgorithm). Variants: `.permanent` / `.temporary` /
+    /// `.transient`. Maps to
+    /// `buff_actors::supervisor::RestartStrategy`.
+    RestartStrategy,
 }
 
 impl PreludeType {
@@ -2195,6 +2211,17 @@ impl PreludeType {
         // per Metis G7 lock (NO GPU dispatch); NO nightly std::simd,
         // NO runtime detection per T54 spec.
         PreludeType::Simd,
+        // T59: buff-actors prelude types — 5 namespaces / runtime
+        // values (ActorSystem + ActorRef + Supervisor + ChildSpec +
+        // RestartStrategy). ActorSystem / ActorRef / Supervisor /
+        // ChildSpec ARE runtime values; RestartStrategy is namespace-
+        // only. All registered via `program_uses_namespace
+        // ("ActorSystem" | "Supervisor" | ...)` walker.
+        PreludeType::ActorSystem,
+        PreludeType::ActorRef,
+        PreludeType::Supervisor,
+        PreludeType::ChildSpec,
+        PreludeType::RestartStrategy,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2521,6 +2548,16 @@ impl PreludeType {
             // user-facing `Simd.splat(x)` / `Simd.from_array(arr)`
             // surface. The underlying Rust type is `buff_simd::Simd`.
             PreludeType::Simd => "Simd",
+            // T59: actor types — canonical PascalCase names matching
+            // the user-facing `ActorSystem.new()` / `system.spawn(...)`
+            // / `Supervisor.new(...)` / `ChildSpec.new(...)` /
+            // `RestartStrategy.permanent` surface. Underlying Rust
+            // crate is `buff-actors`.
+            PreludeType::ActorSystem => "ActorSystem",
+            PreludeType::ActorRef => "ActorRef",
+            PreludeType::Supervisor => "Supervisor",
+            PreludeType::ChildSpec => "ChildSpec",
+            PreludeType::RestartStrategy => "RestartStrategy",
             // T46: Language / StemAlgorithm — canonical PascalCase names
             // matching the user-facing `lang.code()` / `lang.name()`
             // (Language) and `Text.stem(word, algorithm: .english)`
@@ -2949,6 +2986,15 @@ impl PreludeType {
             // Returns the opaque [`Type::Simd`] variant; the codegen
             // layer maps it to `buff_simd::Simd`.
             PreludeType::Simd => Type::Simd,
+            // T59: actor types — ActorSystem / ActorRef / Supervisor /
+            // ChildSpec / RestartStrategy. Returns the matching opaque
+            // Type variant; the codegen layer maps them to
+            // `buff_actors::*` / `buff_actors::supervisor::*`.
+            PreludeType::ActorSystem => Type::ActorSystem,
+            PreludeType::ActorRef => Type::ActorRef,
+            PreludeType::Supervisor => Type::Supervisor,
+            PreludeType::ChildSpec => Type::ChildSpec,
+            PreludeType::RestartStrategy => Type::RestartStrategy,
             // T47: Bot / ChatMessage / Platform ARE runtime values
             // (NOT namespace-only). Returns the matching opaque Type
             // variant; the codegen layer maps them to
@@ -3038,6 +3084,7 @@ impl PreludeType {
                 | PreludeType::ECDH
                 | PreludeType::Argon2
                 | PreludeType::Simd
+                | PreludeType::RestartStrategy
         )
     }
 }

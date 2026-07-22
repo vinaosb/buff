@@ -1,0 +1,22 @@
+# T59 example: graceful shutdown.
+# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+
+import std::actors
+
+func main():
+    let sys = ActorSystem.new()
+    let refs = []
+    for i in range(0, 5):
+        let r = sys.spawn(Worker.new(id: i))
+        refs.append(r)
+    for r in refs:
+        for _ in range(0, 10):
+            r.send(message: ())
+    sys.shutdown()
+
+struct Worker:
+    let id: Int
+    func new(id: Int) -> Worker:
+        Worker(id: id)
+    func handle(message: Message) -> Action:
+        Action.continue

@@ -3555,7 +3555,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > Actor model and fault-tolerance patterns inspired by Erlang/Elixir/Gleam. Built on top of existing Channel<T> (T2) and spawn primitives.
 
-- [ ] 59. `buff-actors` — Actor Model + Supervisor Trees (Gleam/Erlang-inspired)
+- [x] 59. `buff-actors` — Actor Model + Supervisor Trees (Gleam/Erlang-inspired)
 
   **What to do**: Build actor abstraction on top of T2 Channel<T> + spawn. Provide:
   1. **Actor trait**: `trait Actor { required func handle(message: Message) -> Action; }`. Each actor runs in its own task, receives messages via Channel, processes via `handle`.
@@ -3737,7 +3737,7 @@ cargo run -p buff-lang-cli -- doc --scaffold                    # Expected: emit
 - [ ] **v1.18 frameworks all ship MVP** (geo/nlp/chat/web3/crypto-extras/xml/msgpack/protobuf)
 - [ ] **v1.19 language inspirations all ship**: comptime + SIMD + compile-speed + property wrappers
 - [ ] **v1.19 Julia-inspired features ship**: mathematical syntax edition + multiple dispatch
-- [ ] **v1.19 actor framework ships**: buff-actors with supervisor trees
+- [x] **v1.19 actor framework ships**: buff-actors with supervisor trees
 - [ ] **T28 audit converged**: a full discovery scan finds zero new trivial issues
 - [ ] **All new crates have AGENTS.md and README.md** (created by T28 if missing)
 - [ ] **CHANGELOG.md exists** covering v1.0-v1.24 (created/updated by T28)

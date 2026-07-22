@@ -795,6 +795,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-actors"
+version = "1.0.0"
+dependencies = [
+ "crossbeam-channel",
+ "insta",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-archive"
 version = "1.0.0"
 dependencies = [

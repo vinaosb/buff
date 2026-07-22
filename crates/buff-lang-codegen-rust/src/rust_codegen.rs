@@ -1148,6 +1148,23 @@ impl RustCodegen {
             self.extern_crates.insert("buff-simd".to_string());
             self.extern_crates.insert("wide".to_string());
         }
+        // T59: register `buff-actors` when the program references any
+        // of the actor namespaces (`ActorSystem.*` / `ActorRef.*` /
+        // `Supervisor.*` / `ChildSpec.*` / `RestartStrategy.*`).
+        // Also records `crossbeam-channel` transitively (the
+        // per-actor mailbox primitive). The MVP uses `std::thread`
+        // (NOT `tokio`) for deterministic `JoinHandle::join` on
+        // graceful shutdown; a future v1.18+ async variant would
+        // also record `tokio`. Mirrors the T54 Simd walker pattern.
+        if program_uses_namespace(decls, "ActorSystem")
+            || program_uses_namespace(decls, "ActorRef")
+            || program_uses_namespace(decls, "Supervisor")
+            || program_uses_namespace(decls, "ChildSpec")
+            || program_uses_namespace(decls, "RestartStrategy")
+        {
+            self.extern_crates.insert("buff-actors".to_string());
+            self.extern_crates.insert("crossbeam-channel".to_string());
+        }
         // T50: register `buff-xml` when the program references either
         // of the two prelude xml namespaces (`Xml.*` /
         // `XmlElement.*`). Also records `quick-xml` transitively (the
@@ -12490,6 +12507,15 @@ impl RustCodegen {
             // `wide::f32x4`). No generic parameters, no turbofish
             // needed. Mirrors the T9 Image / T45 Point precedent.
             Type::Simd => "buff_simd::Simd",
+            // T59: prelude actor types. Opaque runtime-value types
+            // mapped to `buff_actors::{ActorSystem, ActorRef,
+            // Supervisor}` + `buff_actors::supervisor::{ChildSpec,
+            // RestartStrategy}`. No generic parameters.
+            Type::ActorSystem => "buff_actors::ActorSystem",
+            Type::ActorRef => "buff_actors::ActorRef",
+            Type::Supervisor => "buff_actors::Supervisor",
+            Type::ChildSpec => "buff_actors::supervisor::ChildSpec",
+            Type::RestartStrategy => "buff_actors::supervisor::RestartStrategy",
             // T46: prelude NLP types. `Text` is namespace-only (mirrors
             // MsgPack — the arm rarely fires in practice but is required
             // for match exhaustiveness). `Language` is a runtime value

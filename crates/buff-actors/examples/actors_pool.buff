@@ -1,0 +1,24 @@
+# T59 example: actor pool - N workers, fan-out a job batch.
+# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+
+import std::actors
+
+func main():
+    let sys = ActorSystem.new()
+    let refs = []
+    for i in range(0, 4):
+        let r = sys.spawn(PoolWorker.new(worker_id: i))
+        refs.append(r)
+    for r in refs:
+        for j in range(1, 6):
+            r.send(message: j)
+    sys.shutdown()
+
+struct PoolWorker:
+    let worker_id: Int
+    func new(worker_id: Int) -> PoolWorker:
+        PoolWorker(worker_id: worker_id)
+    func handle(message: Message) -> Action:
+        if let Ok(n) = message.as_int():
+            print("[worker ${self.worker_id}] ${n}^2 = ${n * n}")
+        Action.continue

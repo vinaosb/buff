@@ -1043,6 +1043,29 @@ pub enum Type {
     /// Pure-Rust, CPU-only; wraps the `wide` crate (stable portable
     /// SIMD — NO nightly `std::simd`, NO runtime detection).
     Simd,
+    /// T59: the actor-system runtime type. Maps to
+    /// `buff_actors::ActorSystem`. Constructed via
+    /// `ActorSystem.new()`; carries `.spawn` / `.register` /
+    /// `.lookup` / `.shutdown` / `.actor_count`.
+    ActorSystem,
+    /// T59: a handle to a running actor. Maps to
+    /// `buff_actors::ActorRef`. Returned by `spawn` / `start_child`;
+    /// carries `.send` / `.stop` / `.id`. Cheap to clone.
+    ActorRef,
+    /// T59: the supervisor runtime type. Maps to
+    /// `buff_actors::Supervisor`. Constructed via `Supervisor.new`
+    /// / `.with_strategy`; carries `.start_child` / `.strategy` /
+    /// `.child_count` / `.shutdown`.
+    Supervisor,
+    /// T59: a child-spawn factory record. Maps to
+    /// `buff_actors::supervisor::ChildSpec`. Constructed via
+    /// `ChildSpec.new(factory)`; carries `.with_name` / `.name`.
+    ChildSpec,
+    /// T59: the restart-strategy enum (namespace-only — mirrors
+    /// Platform / StemAlgorithm). Variants `.permanent` /
+    /// `.temporary` / `.transient`. Maps to
+    /// `buff_actors::supervisor::RestartStrategy`.
+    RestartStrategy,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1784,6 +1807,57 @@ impl Type {
         matches!(self, Type::Simd)
     }
 
+    /// T59: the actor-system runtime type. Maps to
+    /// `buff_actors::ActorSystem`.
+    pub fn actor_system() -> Self {
+        Type::ActorSystem
+    }
+
+    /// T59: Returns `true` if this type is `ActorSystem`.
+    pub fn is_prelude_actor_system(&self) -> bool {
+        matches!(self, Type::ActorSystem)
+    }
+
+    /// T59: the `ActorRef` runtime type.
+    pub fn actor_ref() -> Self {
+        Type::ActorRef
+    }
+
+    /// T59: Returns `true` if this type is `ActorRef`.
+    pub fn is_prelude_actor_ref(&self) -> bool {
+        matches!(self, Type::ActorRef)
+    }
+
+    /// T59: the `Supervisor` runtime type.
+    pub fn supervisor() -> Self {
+        Type::Supervisor
+    }
+
+    /// T59: Returns `true` if this type is `Supervisor`.
+    pub fn is_prelude_supervisor(&self) -> bool {
+        matches!(self, Type::Supervisor)
+    }
+
+    /// T59: the `ChildSpec` runtime type.
+    pub fn child_spec() -> Self {
+        Type::ChildSpec
+    }
+
+    /// T59: Returns `true` if this type is `ChildSpec`.
+    pub fn is_prelude_child_spec(&self) -> bool {
+        matches!(self, Type::ChildSpec)
+    }
+
+    /// T59: the `RestartStrategy` enum (namespace-only).
+    pub fn restart_strategy() -> Self {
+        Type::RestartStrategy
+    }
+
+    /// T59: Returns `true` if this type is `RestartStrategy`.
+    pub fn is_prelude_restart_strategy(&self) -> bool {
+        matches!(self, Type::RestartStrategy)
+    }
+
     /// T46: the `Text` NLP namespace type. Maps to `buff_nlp::Text` at
     /// codegen time. Namespace-only — never instantiated as a runtime
     /// value; only its associated functions are callable
@@ -2232,6 +2306,15 @@ impl fmt::Display for Type {
             // to `buff_simd::Simd` (a 4-lane f32x4 register). Display
             // mirrors the Buff surface name.
             Type::Simd => f.write_str("Simd"),
+            // T59: prelude actor types. Opaque runtime-value types
+            // mapped to `buff_actors::{ActorSystem, ActorRef,
+            // Supervisor}` + `buff_actors::supervisor::{ChildSpec,
+            // RestartStrategy}`.
+            Type::ActorSystem => f.write_str("ActorSystem"),
+            Type::ActorRef => f.write_str("ActorRef"),
+            Type::Supervisor => f.write_str("Supervisor"),
+            Type::ChildSpec => f.write_str("ChildSpec"),
+            Type::RestartStrategy => f.write_str("RestartStrategy"),
             // T46: prelude NLP types. `Text` is namespace-only (mirrors
             // MsgPack); `Language` is a runtime value (mirrors Point);
             // `StemAlgorithm` is an opaque enum (only passed as arg).

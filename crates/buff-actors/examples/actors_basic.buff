@@ -1,0 +1,22 @@
+# T59 example: actor basics - spawn + send + shutdown.
+# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+#
+# Run via:
+#   buff run examples/actors_basic.buff
+
+import std::actors
+
+func main():
+    let sys = ActorSystem.new()
+    let ref = sys.spawn(Echo.new())
+    ref.send(message: "alpha")
+    ref.send(message: "beta")
+    ref.send(message: "gamma")
+    sys.shutdown()
+
+struct Echo:
+    func new() -> Echo:
+        Echo()
+    func handle(message: Message) -> Action:
+        print("echo: ${message}")
+        Action.continue

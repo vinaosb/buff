@@ -1,0 +1,21 @@
+# T59 example: supervisor trees + "let it crash".
+# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+
+import std::actors
+
+func main():
+    let sys = ActorSystem.new()
+    let sup = Supervisor.new(strategy: RestartStrategy.permanent)
+    let ref = sup.start_child(spec: Counter.spec())
+    for i in range(0, 5):
+        ref.send(message: i)
+    sys.shutdown()
+
+struct Counter:
+    func spec() -> ChildSpec:
+        ChildSpec.new(factory: { => Counter.new() })
+    func new() -> Counter:
+        Counter()
+    func handle(message: Message) -> Action:
+        print("counter got ${message}")
+        Action.continue

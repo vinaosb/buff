@@ -1,0 +1,28 @@
+# T59 example: named actors - register + lookup.
+# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+
+import std::actors
+
+func main():
+    let sys = ActorSystem.new()
+    let logger_ref = sys.spawn(Logger.new())
+    sys.register(name: "logger", actor: logger_ref)
+    let counter_ref = sys.spawn(Counter.new())
+    sys.register(name: "counter", actor: counter_ref)
+    let found = sys.lookup(name: "logger")
+    if found != nil:
+        found.send(message: "hello from lookup")
+    sys.shutdown()
+
+struct Logger:
+    func new() -> Logger:
+        Logger()
+    func handle(message: Message) -> Action:
+        print("[logger] ${message}")
+        Action.continue
+
+struct Counter:
+    func new() -> Counter:
+        Counter()
+    func handle(message: Message) -> Action:
+        Action.continue

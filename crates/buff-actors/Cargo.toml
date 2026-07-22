@@ -1,0 +1,57 @@
+[package]
+name = "buff-actors"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Actor model + supervisor trees for Buff (Gleam/Erlang-inspired). \
+Pure-Rust MVP built standalone on T2 Channel<T> semantics. \
+Wraps `crossbeam-channel` for the per-actor mailbox + \
+`std::thread` for the actor loop (deterministic join for \
+graceful shutdown + supervisor restart). NO distributed \
+actors (single-process), NO hot code swap, NO actor \
+persistence — deferred to v1.18+.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "actor", "actor-model", "supervisor", "erlang"]
+categories = ["concurrency", "asynchronous"]
+
+[lib]
+name = "buff_actors"
+path = "src/lib.rs"
+
+[dependencies]
+# T59 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# `crossbeam-channel` 0.5 is the per-actor mailbox primitive.
+# API surface used: `crossbeam_channel::unbounded::<Message>()` for the
+# (Sender, Receiver) pair created per actor. Sender is held by the
+# ActorRef (one per actor); Receiver is drained by the actor's own
+# std::thread in a `while let Ok(msg) = rx.recv()` loop. Dropping every
+# Sender for an actor (via ActorRef drop + ActorSystem::shutdown) causes
+# `recv()` to return `Err(RecvError)` (disconnected) so the actor exits
+# cleanly. Same primitive + same shutdown semantics as `buff-pubsub`
+# (T41) and `lsp-server` (T117) — reusing the workspace pin keeps the
+# conservative-pin philosophy intact (no version drift).
+#
+# `thiserror` 1.0 is the derive macro for the `ActorError` enum.
+#
+# NO `tokio` runtime dep is required for the MVP: the actor loop uses
+# `std::thread::spawn` (deterministic `JoinHandle::join` for graceful
+# shutdown + supervisor restart detection). A future v1.18+ async
+# variant can layer in `tokio::task::spawn` via the same spawn-shaped
+# surface (mirrors the buff-pubsub spawn_blocking-when-runtime-active
+# pattern). Keeping the MVP sync-only means the lib stays free of the
+# tokio proc-macro surface in production.
+#
+# Both crates are already pinned at the workspace level (crossbeam-
+# channel for the LSP server's `select!` debounce + buff-pubsub's
+# mailbox; thiserror for every error enum in the workspace). Reusing
+# the workspace pins keeps the conservative-pin philosophy intact.
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
