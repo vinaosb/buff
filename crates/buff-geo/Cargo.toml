@@ -1,0 +1,31 @@
+[package]
+name = "buff-geo"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Geospatial primitives + GIS ops for Buff. \
+Pure-Rust MVP wrapping the `geo` + `geo-types` crates \
+via a safe FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "geo", "gis", "geospatial", "polygon"]
+categories = ["science::geo"]
+
+[lib]
+name = "buff_geo"
+path = "src/lib.rs"
+
+[dependencies]
+# T45 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# geo 0.28: Point/LineString/Polygon primitives + algorithm traits
+# (EuclideanDistance, EuclideanLength, Area, Contains, Intersects,
+# BooleanOps). Pure-Rust, no native deps, no cc-rs.
+geo.workspace = true
+geo-types.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
