@@ -2,11 +2,16 @@
 //!
 //! Built on [`clap`] derive. Subcommands supported:
 //!
-//! - `buff build <FILE> [--release]` — compile a `.buff` file to a native
-//!   executable. `--release` (T56) compiles with `-C opt-level=3 -C lto=fat
-//!   -C codegen-units=1` for maximum optimization at the cost of slower
-//!   compile times; default is the fast-debug profile (mirrors `cargo build`
-//!   vs `cargo build --release`).
+//! - `buff build <FILE> [--release] [--minimal]` — compile a `.buff` file to
+//!   a native executable. `--release` (T56) compiles with `-C opt-level=3
+//!   -C lto=fat -C codegen-units=1` for maximum-speed optimization at the
+//!   cost of slower compile times. `--minimal` (T60) compiles with
+//!   `-C opt-level=z -C panic=abort -C strip=symbols -C lto=true
+//!   -C codegen-units=1` for minimum binary size (target: <5 MB for
+//!   console-template apps). Default (neither flag) is the fast-debug
+//!   profile (mirrors `cargo build` vs `cargo build --release` vs
+//!   `cargo build --profile minimal`). When both flags are set, `--minimal`
+//!   takes precedence (mirrors cargo's `--profile` semantics).
 //! - `buff run <FILE> [ARGS]... [--release]` — compile and immediately
 //!   execute, cleaning up temporary artifacts afterwards. `--release` selects
 //!   the release optimization profile (T56).
@@ -87,6 +92,19 @@ pub enum Command {
         /// fast-debug profile used since v0.1.
         #[arg(long)]
         release: bool,
+
+        /// Build with size-minimization optimizations (T60):
+        /// `-C opt-level=z -C panic=abort -C strip=symbols -C lto=true
+        /// -C codegen-units=1`. Slowest to compile, smallest binary.
+        /// Use when the size budget matters more than runtime speed
+        /// (Lambda layers, embedded wasm shells, distribution images).
+        /// Target: <5 MB for console-template apps.
+        ///
+        /// Takes precedence over `--release` when both are set (mirrors
+        /// cargo's `--profile` semantics — a more-specific profile wins).
+        /// Opt-in: default (omitted) keeps the fast-debug profile.
+        #[arg(long)]
+        minimal: bool,
 
         /// T1: cross-compile for `<TRIPLE>` (e.g.
         /// `x86_64-unknown-linux-gnu`, `wasm32-wasi`). Forwards to

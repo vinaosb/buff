@@ -17,11 +17,13 @@ fn main() -> Result<()> {
             file,
             output,
             release,
+            minimal,
             target,
         } => buff_lang_cli::commands::build::run(
             file.as_deref(),
             output.as_deref(),
             release,
+            minimal,
             target.as_deref(),
         ),
         Command::Run {
@@ -52,8 +54,8 @@ fn main() -> Result<()> {
         Command::Init => buff_lang_cli::commands::init::run(),
         Command::Doc => buff_lang_cli::commands::doc::run(std::path::Path::new(".")),
         Command::Release { level } => {
-            let lvl = buff_lang_cli::commands::release::BumpLevel::from_str(&level)
-                .ok_or_else(|| {
+            let lvl =
+                buff_lang_cli::commands::release::BumpLevel::from_str(&level).ok_or_else(|| {
                     anyhow::Error::msg(format!(
                         "unknown release level `{level}` (valid: patch, minor, major)"
                     ))
@@ -61,13 +63,12 @@ fn main() -> Result<()> {
             buff_lang_cli::commands::release::run(lvl, std::path::Path::new("."))
         }
         Command::Gen { kind, name } => {
-            let k = buff_lang_cli::commands::gen::kind_from_str(&kind)
-                .ok_or_else(|| {
-                    anyhow::Error::msg(format!(
-                        "unknown generator kind `{kind}` \
+            let k = buff_lang_cli::commands::gen::kind_from_str(&kind).ok_or_else(|| {
+                anyhow::Error::msg(format!(
+                    "unknown generator kind `{kind}` \
                          (valid: module, test, example)"
-                    ))
-                })?;
+                ))
+            })?;
             buff_lang_cli::commands::gen::run(k, &name)
         }
         Command::Test { file, pattern } => {

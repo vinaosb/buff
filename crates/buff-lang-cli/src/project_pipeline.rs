@@ -263,6 +263,15 @@ pub fn cargo_build_project(
     if build_mode.is_release() {
         cmd.arg("--release");
     }
+    if build_mode.is_minimal() {
+        // T60: propagate size-minimization flags to cargo via RUSTFLAGS.
+        // The joined form is correct because rustc_minimal_flags() already
+        // emits each token with the `-C` prefix interleaved.
+        cmd.env(
+            "RUSTFLAGS",
+            crate::pipeline::rustc_minimal_flags().join(" "),
+        );
+    }
     if let Some(triple) = target {
         cmd.arg("--target").arg(triple);
     }
@@ -604,7 +613,11 @@ mod tests {
     #[test]
     fn compile_project_to_cargo_propagates_missing_import_error() {
         let dir = temp_project_dir("missing");
-        let _math = write_buff_fixture(&dir, "math.buff", "export func add(a, b) { return a + b }\n");
+        let _math = write_buff_fixture(
+            &dir,
+            "math.buff",
+            "export func add(a, b) { return a + b }\n",
+        );
         let main = write_buff_fixture(
             &dir,
             "main.buff",

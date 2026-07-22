@@ -1840,3 +1840,56 @@ ethers = { version = "2", default-features = false, features = ["rustls"] }
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-web3 = { path = "crates/buff-web3" }
+
+# T60: Binary Size Minimization profile.
+#
+# `cargo build --profile minimal` (selected by `buff build --minimal`)
+# produces the smallest possible native binary by combining:
+#
+# - `inherits = "release"` — start from the optimized release baseline
+#   (so we get the `-C opt-level=3` groundwork + the Release LTO head
+#   start). The knobs below then push harder on size at the cost of
+#   runtime speed + compile time.
+# - `panic = "abort"` — replace the `unwind` payload (per-panic
+#   landing pads + libunwind linkage on Unix) with a single `abort`
+#   shim. This is the single biggest size win on small programs
+#   (typically -15..-25% binary size). Trade-off: `catch_unwind`
+#   becomes a no-op (panics tear the process down). This is the
+#   intended behaviour for size-constrained deployments (Lambda
+#   layers, embedded wasm shells, distribution images).
+# - `strip = true` — pass `--strip-all` to the linker. Drops symbol
+#   tables + debug info from the final binary. Symbols can be
+#   re-obtained from `*.dwp`/`*.pdb` sidecars (kept by `target/`).
+# - `opt-level = "z"` — LLVM optimize for SIZE (vs `"3"` for speed).
+#   Trades runtime performance (typically +5..15% slower) for binary
+#   size (typically -5..10% smaller). The single setting that
+#   distinguishes `--minimal` from `--release`.
+# - `lto = true` — whole-program Link-Time Optimization (same flavour
+#   as `Release`, just applied to a size-first optimisation pass).
+#   Lets LLVM eliminate dead code across crate boundaries that the
+#   per-crate `opt-level` pass cannot see.
+# - `codegen-units = 1` — force a single LLVM codegen unit so the
+#   whole program is visible to every optimisation pass (mandatory
+#   for `lto = true` to deliver its full benefit). Slower compile,
+#   smaller binary.
+#
+# Acceptance target: console-template Buff app builds <5 MB with
+# `--minimal`. Measured via `cargo build --profile minimal` on a
+# no-extern single-file `.buff` (see `examples/minimal_console.buff`).
+#
+# **Workspace-root placement**: per AGENTS.md, `[profile.*]` sections
+# are forbidden in crate-level Cargo.toml; they live HERE at the
+# workspace root. This is the canonical Cargo convention — profiles
+# are workspace-wide, never per-crate.
+#
+# **Opt-in**: this profile is NOT the default. `cargo build` produces
+# debug binaries; `cargo build --release` produces Release binaries.
+# Users opt in to Minimal via `buff build --minimal` (single-file) or
+# `cargo build --profile minimal` (in a generated cargo project).
+[profile.minimal]
+inherits = "release"
+panic = "abort"
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1

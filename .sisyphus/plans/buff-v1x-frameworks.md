@@ -3577,7 +3577,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > 13 tasks addressing performance, productivity, DX, and ecosystem topics the user explicitly selected in earlier discussion rounds but were not yet added as tasks. Per user directive: "don't defer anything we can actually do in this plan unless specified by me."
 
-- [ ] 60. Binary Size Minimization
+- [x] 60. Binary Size Minimization
   **What**: Add `[profile.minimal]` with `panic = "abort"`, `strip = true`, `opt-level = "z"`. Add `buff build --minimal` flag. Feature-gate tokio/rayon/wgpu (don't link if unused). Document size budget per template. Target: <5MB for console apps.
   **LOC budget**: ≤1500. **Deps**: T0 (profiles). **Acceptance**: Console template builds <5MB with --minimal. 3 examples + 10 tests.
 

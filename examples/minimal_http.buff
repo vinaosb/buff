@@ -1,0 +1,20 @@
+// T60 — minimal HTTP server (showcases feature-gating).
+// Build: `buff build --minimal examples/minimal_http.buff`
+//
+// Demonstrates the size impact of feature-gating. The Buff prelude
+// records `tokio` in the codegen `extern_crates` BTreeSet only when a
+// Buff program actually uses async / networking primitives. This file
+// declares an `async func` to opt into the tokio runtime — the resulting
+// binary will be larger than `minimal_console.buff` but still benefits
+// from `--minimal` profile optimizations.
+//
+// See `docs/binary-size.md` for the size budget per template type.
+
+async func handler() -> Int:
+    return 200
+
+func main():
+    let status = handler()
+    print("HTTP server would listen on :8080")
+    print("status code:")
+    print(status)

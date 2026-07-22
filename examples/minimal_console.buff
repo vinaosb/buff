@@ -1,0 +1,15 @@
+// T60 — minimal-size console app.
+// Build: `buff build --minimal examples/minimal_console.buff`
+//
+// Smallest-possible Buff binary: no extern crates, no prelude types,
+// no async, no GPU dispatch. Just `print` + arithmetic.
+//
+// The `--minimal` profile (panic=abort + opt-level=z + strip + lto=true
+// + codegen-units=1) gives the smallest possible native binary.
+// Target: <5 MB. See `docs/binary-size.md` for size budget per template.
+
+func main():
+    let answer = 6 * 7
+    print("minimal console app")
+    print(answer)
+    print(6 * 7)

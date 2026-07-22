@@ -2,20 +2,25 @@
 //!
 //! Two modes:
 //!
-//! 1. **Single-file mode** (v0.1 behavior): `buff build <FILE> [--release]`
-//!    compiles a single `.buff` file via the Buff pipeline → rustc.
-//!    The `--target` flag is IGNORED in this mode (single-file rustc
-//!    does not cross-compile).
+//! 1. **Single-file mode** (v0.1 behavior): `buff build <FILE> [--release]
+//!    [--minimal]` compiles a single `.buff` file via the Buff pipeline →
+//!    rustc. The `--target` flag is IGNORED in this mode (single-file rustc
+//!    does not cross-compile). The `--minimal` flag (T60) selects the
+//!    size-minimized rustc flag set (`opt-level=z` + `panic=abort` +
+//!    `strip=symbols` + `lto=true` + `codegen-units=1`).
 //!
 //! 2. **Project mode** (T120 / T1 multi-file linking): `buff build
-//!    [--release] [--target <TRIPLE>]` (no file argument) looks for
-//!    `buff.toml` in the current directory, generates `Cargo.toml`,
+//!    [--release] [--minimal] [--target <TRIPLE>]` (no file argument) looks
+//!    for `buff.toml` in the current directory, generates `Cargo.toml`,
 //!    and shells out to `cargo build`. T1 wires this through
 //!    [`project_pipeline::compile_project_to_cargo`] which walks every
 //!    transitively-imported module, builds a module graph (cycle
 //!    detection + visibility check), and flattens everything into a
 //!    single Rust source. `--target list` prints the Buff-supported
-//!    target set and exits without building.
+//!    target set and exits without building. `--minimal` (T60) sets the
+//!    `RUSTFLAGS` env var with the size-minimization flags before invoking
+//!    cargo (so the same flag set applies whether the build goes through
+//!    bare rustc or cargo-driven compilation).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,7 +34,7 @@ use crate::project_pipeline::{
 };
 
 /// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]
-/// [--target <TRIPLE>]`.
+/// [--minimal] [--target <TRIPLE>]`.
 ///
 /// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior;
 /// the `--target` flag is ignored in this mode).
@@ -37,10 +42,14 @@ use crate::project_pipeline::{
 /// `cargo build` (T120 project-level build). The `--target <TRIPLE>` flag
 /// is forwarded to cargo; `--target list` prints the supported-target list
 /// and exits without building.
+///
+/// `minimal` (T60) takes precedence over `release` when both are set —
+/// mirrors cargo's `--profile` semantics (a more-specific profile wins).
 pub fn run(
     file: Option<&Path>,
     output: Option<&Path>,
     release: bool,
+    minimal: bool,
     target: Option<&str>,
 ) -> Result<()> {
     match file {
@@ -55,9 +64,9 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release)
+            build_single_file(f, output, release, minimal)
         }
-        None => build_project(release, target),
+        None => build_project(release, minimal, target),
     }
 }
 
@@ -70,12 +79,21 @@ pub fn run(
 /// - `.buffhtml` (T133): [`pipeline::compile_buffhtml_to_rust`] →
 ///   [`pipeline::compile_buffhtml_rust_to_exe`] with the post-format
 ///   [`SpanMap`] wired through for span-aware error mapping.
-fn build_single_file(file: &Path, output: Option<&Path>, release: bool) -> Result<()> {
+///
+/// `minimal` (T60) selects [`pipeline::BuildMode::Minimal`]; `release`
+/// (T56) selects [`pipeline::BuildMode::Release`]; default is
+/// [`pipeline::BuildMode::Debug`]. When both are set, `minimal` wins.
+fn build_single_file(
+    file: &Path,
+    output: Option<&Path>,
+    release: bool,
+    minimal: bool,
+) -> Result<()> {
     let stem_output: PathBuf = match output {
         Some(p) => pipeline::with_exe_extension(p),
         None => pipeline::with_exe_extension(&file.with_extension("")),
     };
-    let mode = pipeline::BuildMode::from_release_flag(release);
+    let mode = pipeline::BuildMode::from_flags(release, minimal);
 
     let is_buffhtml = file
         .extension()
@@ -111,7 +129,14 @@ fn build_single_file(file: &Path, output: Option<&Path>, release: bool) -> Resul
 /// emission). The Cargo project is emitted at
 /// `<cwd>/buff_target_project/` and cargo is invoked there with the
 /// appropriate flags.
-fn build_project(release: bool, target: Option<&str>) -> Result<()> {
+///
+/// `minimal` (T60) sets the `RUSTFLAGS` env var with the size-minimization
+/// flags before invoking cargo (so the same flag set applies whether the
+/// build goes through bare rustc or cargo-driven compilation). The
+/// workspace-root `Cargo.toml` declares the matching `[profile.minimal]`
+/// block — callers using `cargo build --profile minimal` directly get the
+/// identical behavior.
+fn build_project(release: bool, minimal: bool, target: Option<&str>) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
 
     // --target list short-circuits BEFORE doing any project work so the
@@ -139,7 +164,7 @@ fn build_project(release: bool, target: Option<&str>) -> Result<()> {
     // Workspace mode (T123) — delegate to build_workspace.
     if let Some(c) = &cfg {
         if c.is_workspace() {
-            return build_workspace(&cwd, c, release);
+            return build_workspace(&cwd, c, release, minimal);
         }
     }
 
@@ -147,7 +172,7 @@ fn build_project(release: bool, target: Option<&str>) -> Result<()> {
     let entry = find_project_entry(&cwd)?;
     let project_dir = cwd.join("buff_target_project");
     let compile_out = compile_project_to_cargo(&entry, Some(&project_dir), cfg.as_ref())?;
-    let build_mode = pipeline::BuildMode::from_release_flag(release);
+    let build_mode = pipeline::BuildMode::from_flags(release, minimal);
 
     cargo_build_project(
         &compile_out.project_dir,
@@ -156,10 +181,8 @@ fn build_project(release: bool, target: Option<&str>) -> Result<()> {
         target,
     )?;
 
-    let mode_str = if release { "release" } else { "debug" };
-    let target_str = target
-        .map(|t| format!(" --target {t}"))
-        .unwrap_or_default();
+    let mode_str = mode_label(build_mode);
+    let target_str = target.map(|t| format!(" --target {t}")).unwrap_or_default();
     eprintln!(
         "Built project ({mode_str}{target_str}) — output in {}",
         compile_out.project_dir.display()
@@ -213,7 +236,11 @@ fn find_project_entry(cwd: &Path) -> Result<PathBuf> {
 ///
 /// Shared `target/` + dep-dedup come FREE from cargo workspaces — that's
 /// the entire reason this is a passthrough.
-fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool) -> Result<()> {
+///
+/// `minimal` (T60) sets `RUSTFLAGS` with the size-minimization flags
+/// before invoking cargo — same flag set the single-file path uses
+/// via [`pipeline::rustc_minimal_flags`].
+fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool, minimal: bool) -> Result<()> {
     // `build_workspace` is only reached after `cfg.is_workspace()` returned
     // true in `build_project`, so workspace is guaranteed Some. Use
     // `context` (not `expect`) to honour the no-panic repo rule — if a
@@ -260,10 +287,22 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool) -> Result<()> {
     }
 
     // 3. Shell out to cargo build at workspace root (fans out to members).
+    //    T60: when --minimal is set, propagate the size-minimization flags
+    //    via RUSTFLAGS env var so the same flag set applies as the
+    //    single-file rustc path. (We do NOT pass `--profile minimal`
+    //    because the virtual workspace Cargo.toml we emit does not declare
+    //    the profile — RUSTFLAGS is the universal carrier.)
     let mut cmd = Command::new("cargo");
     cmd.arg("build");
-    if release {
+    if release && !minimal {
         cmd.arg("--release");
+    }
+    if minimal {
+        // T60: size-minimization flags via RUSTFLAGS env var. The joined
+        // form is correct because `rustc_minimal_flags()` already emits
+        // each token with the `-C` prefix (e.g. `-C opt-level=z`), so
+        // `.join(" ")` produces a valid space-separated RUSTFLAGS string.
+        cmd.env("RUSTFLAGS", pipeline::rustc_minimal_flags().join(" "));
     }
 
     let result = cmd
@@ -279,7 +318,8 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool) -> Result<()> {
         anyhow::bail!("cargo build exited with status {}", result.status);
     }
 
-    let mode_str = if release { "release" } else { "debug" };
+    let mode = pipeline::BuildMode::from_flags(release, minimal);
+    let mode_str = mode_label(mode);
     eprintln!(
         "Built workspace with {} member(s) ({mode_str})",
         ws.members.len()
@@ -291,9 +331,9 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool) -> Result<()> {
 /// the success line. Kept here (not on the enum) so the pipeline module
 /// stays free of presentation concerns — this is a CLI-output helper.
 fn mode_label(mode: pipeline::BuildMode) -> &'static str {
-    if mode.is_release() {
-        "release"
-    } else {
-        "debug"
+    match mode {
+        pipeline::BuildMode::Debug => "debug",
+        pipeline::BuildMode::Release => "release",
+        pipeline::BuildMode::Minimal => "minimal",
     }
 }

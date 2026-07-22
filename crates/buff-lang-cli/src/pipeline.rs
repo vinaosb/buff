@@ -23,16 +23,22 @@ use buff_lang_error::{SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 
-/// Compile-time optimization profile (T56).
+/// Compile-time optimization profile (T56 release / T60 minimal).
 ///
 /// Selects which set of rustc flags [`compile_rust_to_exe`] passes to the
 /// backend. `Debug` (the default) preserves the v0.1 behavior — a single
 /// `-O` flag for fast compilation. `Release` enables LTO + maximum
 /// optimization via [`rustc_release_flags`] for production-ready binaries.
+/// `Minimal` (T60) optimizes for binary size via [`rustc_minimal_flags`]
+/// (`opt-level=z`, `panic=abort`, `strip=symbols`, `lto=true`,
+/// `codegen-units=1`) — used when the size budget matters more than
+/// runtime speed (Lambda layers, embedded wasm shells, distribution
+/// images).
 ///
-/// This enum intentionally mirrors the user-facing `--release` CLI flag: the
-/// CLI translates `release: bool` into `BuildMode` via
-/// [`BuildMode::from_release_flag`], keeping the pipeline decoupled from
+/// This enum intentionally mirrors the user-facing `--release` / `--minimal`
+/// CLI flags: the CLI translates the booleans into [`BuildMode`] via
+/// [`BuildMode::from_flags`] (or [`BuildMode::from_release_flag`] for
+/// subcommands that pre-date T60), keeping the pipeline decoupled from
 /// clap-level concerns.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BuildMode {
@@ -43,6 +49,13 @@ pub enum BuildMode {
     /// Release-grade compilation: `opt-level=3` + `lto=fat` +
     /// `codegen-units=1`. Slower compile, smaller+faster binary.
     Release,
+    /// Size-minimized compilation (T60): `opt-level=z` + `panic=abort` +
+    /// `strip=symbols` + `lto=true` + `codegen-units=1`. Slowest compile,
+    /// smallest binary. Use when binary size is the primary constraint
+    /// (e.g. <5 MB target for console apps). Functional inverse of
+    /// [`BuildMode::Release`] — Release trades size for speed, Minimal
+    /// trades speed for size.
+    Minimal,
 }
 
 impl BuildMode {
@@ -52,8 +65,36 @@ impl BuildMode {
     /// This is the single source of truth for the flag→mode mapping — every
     /// caller (`buff build`, `buff run`) goes through here so the behavior
     /// stays consistent across subcommands.
+    ///
+    /// T60 note: subcommands that also accept `--minimal` should use
+    /// [`BuildMode::from_flags`] instead — `Minimal` takes precedence over
+    /// `Release` when both are set (mirrors `--release` precedence in
+    /// cargo: a more-specific profile wins).
     pub fn from_release_flag(release: bool) -> Self {
         if release {
+            BuildMode::Release
+        } else {
+            BuildMode::Debug
+        }
+    }
+
+    /// Translate the CLI `--release` + `--minimal` booleans into a
+    /// [`BuildMode`] (T60).
+    ///
+    /// Precedence (mirrors cargo's `--profile` semantics — more specific
+    /// wins):
+    ///
+    /// - `minimal=true` → [`BuildMode::Minimal`] (regardless of `release`).
+    /// - `minimal=false, release=true` → [`BuildMode::Release`].
+    /// - `minimal=false, release=false` → [`BuildMode::Debug`] (default).
+    ///
+    /// The T60 acceptance ("console template builds <5 MB with `--minimal`")
+    /// exercises the `minimal=true` arm. The `release=true` arm is the
+    /// T56 contract preserved verbatim.
+    pub fn from_flags(release: bool, minimal: bool) -> Self {
+        if minimal {
+            BuildMode::Minimal
+        } else if release {
             BuildMode::Release
         } else {
             BuildMode::Debug
@@ -63,6 +104,11 @@ impl BuildMode {
     /// Returns `true` when this mode is [`BuildMode::Release`].
     pub fn is_release(self) -> bool {
         matches!(self, BuildMode::Release)
+    }
+
+    /// Returns `true` when this mode is [`BuildMode::Minimal`] (T60).
+    pub fn is_minimal(self) -> bool {
+        matches!(self, BuildMode::Minimal)
     }
 }
 
@@ -439,13 +485,19 @@ pub fn compile_rust_to_exe(
     // Select the optimization/LTO flag set based on the build mode.
     // Debug keeps the v0.1 `-O` exactly — byte-identical behavior with the
     // pre-T56 pipeline. Release swaps in the LTO + opt-level=3 + single
-    // codegen-unit block.
+    // codegen-unit block. Minimal (T60) adds size-first knobs:
+    // opt-level=z + panic=abort + strip=symbols.
     match mode {
         BuildMode::Debug => {
             cmd.arg("-O");
         }
         BuildMode::Release => {
             for flag in rustc_release_flags() {
+                cmd.arg(flag);
+            }
+        }
+        BuildMode::Minimal => {
+            for flag in rustc_minimal_flags() {
                 cmd.arg(flag);
             }
         }
@@ -507,6 +559,11 @@ pub fn compile_buffhtml_rust_to_exe(
                 cmd.arg(flag);
             }
         }
+        BuildMode::Minimal => {
+            for flag in rustc_minimal_flags() {
+                cmd.arg(flag);
+            }
+        }
     }
     cmd.arg(rust_file).arg("-o").arg(output);
 
@@ -564,6 +621,53 @@ pub fn rustc_release_flags() -> Vec<&'static str> {
     ]
 }
 
+/// The rustc CLI flags that implement size-minimized compilation (T60).
+///
+/// Returns the argument sequence passed verbatim to `rustc` when
+/// [`compile_rust_to_exe`] is called with [`BuildMode::Minimal`]:
+///
+/// - `-C opt-level=z` — LLVM optimize for SIZE (vs `opt-level=3` for
+///   speed in [`BuildMode::Release`]). The single setting that
+///   distinguishes `--minimal` from `--release`.
+/// - `-C panic=abort` — replace the unwind payload (landing pads +
+///   libunwind linkage) with a single abort shim. Biggest single
+///   size win on small programs (typically -15..-25%).
+/// - `-C strip=symbols` — pass `--strip-all` to the linker. Drops
+///   symbol tables + debug info from the final binary.
+/// - `-C lto=true` — whole-program Link-Time Optimization. Lets LLVM
+///   eliminate dead code across crate boundaries that per-crate
+///   `opt-level` cannot see. (`true` is the thin-lto default flavor;
+///   [`rustc_release_flags`] uses `lto=fat` for max inlining — Minimal
+///   prefers the smaller `true` since size is the primary target.)
+/// - `-C codegen-units=1` — force a single codegen unit so LLVM sees
+///   the whole program at once (required for LTO to deliver its full
+///   benefit).
+///
+/// These are the rustc-level equivalent of Cargo's
+/// `[profile.minimal]` block emitted by [`minimal_profile_toml`] (and
+/// declared in the workspace-root `Cargo.toml`). The split exists
+/// because the v0.1 Buff pipeline invokes `rustc` directly on a single
+/// `.rs` file (no Cargo project) — so the functional path goes through
+/// these flags, while the TOML block is the contract for any
+/// Cargo-driven backend.
+///
+/// T60 acceptance: console-template Buff app builds <5 MB with these
+/// flags + no extern crates. See `examples/minimal_console.buff`.
+pub fn rustc_minimal_flags() -> Vec<&'static str> {
+    vec![
+        "-C",
+        "opt-level=z",
+        "-C",
+        "panic=abort",
+        "-C",
+        "strip=symbols",
+        "-C",
+        "lto=true",
+        "-C",
+        "codegen-units=1",
+    ]
+}
+
 /// Returns the Cargo `[profile.release]` TOML block that mirrors
 /// [`rustc_release_flags`] (T56).
 ///
@@ -590,6 +694,46 @@ pub fn rustc_release_flags() -> Vec<&'static str> {
 /// call, no environment dependence, no side effects.
 pub fn release_profile_toml() -> String {
     "[profile.release]\nlto = true\nopt-level = 3\ncodegen-units = 1\n".to_string()
+}
+
+/// Returns the Cargo `[profile.minimal]` TOML block that mirrors
+/// [`rustc_minimal_flags`] (T60).
+///
+/// The block contains the size-minimization knobs Cargo exposes for
+/// binary-size-optimized builds:
+///
+/// ```toml
+/// [profile.minimal]
+/// inherits = "release"
+/// panic = "abort"
+/// strip = true
+/// opt-level = "z"
+/// lto = true
+/// codegen-units = 1
+/// ```
+///
+/// `inherits = "release"` is the key Cargo-only knob — it layers the
+/// size-first settings on top of the release-grade baseline (so users
+/// get the `-C opt-level=3` groundwork + Release LTO head start before
+/// the size-first overrides kick in). The rustc-level equivalent
+/// ([`rustc_minimal_flags`]) cannot express `inherits` (rustc has no
+/// profile inheritance), so it specifies every flag directly.
+///
+/// Although the current single-file pipeline drives `rustc` directly
+/// (and therefore uses [`rustc_minimal_flags`] functionally), this
+/// string is:
+///
+/// 1. The T60 QA assertion target — `minimal_profile_toml().contains("opt-level = \"z\"")`.
+/// 2. Already declared in the workspace-root `Cargo.toml` so
+///    `cargo build --profile minimal` works in any cargo-driven path
+///    (project / workspace builds via [`crate::project_pipeline`]).
+/// 3. Documentation of the contract between the rustc-level flags and
+///    the equivalent Cargo profile, so the two never silently drift.
+///
+/// Determinism: this is a pure fixed-string function — same output on
+/// every call, no environment dependence, no side effects.
+pub fn minimal_profile_toml() -> String {
+    "[profile.minimal]\ninherits = \"release\"\npanic = \"abort\"\nstrip = true\nopt-level = \"z\"\nlto = true\ncodegen-units = 1\n".to_string()
 }
 
 /// Return `path` with the platform's executable extension applied.

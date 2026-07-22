@@ -155,6 +155,9 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/pattern_matching.buff`](./examples/pattern_matching.buff) | `match`, `Option<T>`, `Result<T,E>` arms | ✅ v0.5 (runs) |
 | [`examples/error_handling.buff`](./examples/error_handling.buff) | `Result`, `?` propagation, builtin `Error` | ✅ v0.5 (runs) |
 | [`examples/prelude_demo.buff`](./examples/prelude_demo.buff) | Minimal `print(1+2)` prelude smoke test | ✅ v0.1 (runs) |
+| [`examples/minimal_console.buff`](./examples/minimal_console.buff) | Smallest-possible binary (`buff build --minimal`) | ✅ v1.19 (T60) |
+| [`examples/minimal_http.buff`](./examples/minimal_http.buff) | Async fn → tokio feature-gating under `--minimal` | ✅ v1.19 (T60) |
+| [`examples/minimal_compute.buff`](./examples/minimal_compute.buff) | CPU-bound compute (no GPU/rayon) under `--minimal` | ✅ v1.19 (T60) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
 
@@ -241,6 +244,22 @@ cargo check --workspace
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
+
+### Binary size minimization (`--minimal`)
+
+Buff supports a built-in size-minimization profile for producing the smallest
+possible native binary (typical use: AWS Lambda layers, embedded targets,
+distribution images). Console-template apps build to **<5 MB** with `--minimal`
+(often ~340 KB on Linux x86_64):
+
+```bash
+buff build --minimal examples/minimal_console.buff   # vs --release for max-speed
+```
+
+The `--minimal` flag activates five size-minimization knobs simultaneously
+(`opt-level=z` + `panic=abort` + `strip=symbols` + `lto=true` +
+`codegen-units=1`). See [`docs/binary-size.md`](./docs/binary-size.md) for
+the size budget per template + the full reference.
 
 ## Contributing
 

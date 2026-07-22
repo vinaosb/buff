@@ -1,0 +1,23 @@
+// T60 — minimal compute (no GPU, no rayon).
+// Build: `buff build --minimal examples/minimal_compute.buff`
+//
+// CPU-bound compute with no `@prefer(gpu)` hint + no `spawn`. The
+// generated Rust uses pure-std iterators (no rayon parallelism, no
+// wgpu shaders) — keeping the binary free of the GPU + rayon runtime
+// linkages even at the default profile. `--minimal` strips the
+// remaining panic unwind machinery + symbol tables.
+//
+// See `docs/binary-size.md` for the size budget per template type.
+
+func sum_squares(n: Int) -> Int:
+    let mut total = 0
+    let mut i = 1
+    for i <= n:
+        total = total + i * i
+        i = i + 1
+    return total
+
+func main():
+    let result = sum_squares(100)
+    print("sum of squares 1..=100:")
+    print(result)
