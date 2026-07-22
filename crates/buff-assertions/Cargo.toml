@@ -1,0 +1,29 @@
+[package]
+name = "buff-assertions"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Fluent test assertions for the Buff language — assertThat-style"
+
+[lib]
+name = "buff_assertions"
+path = "src/lib.rs"
+
+[dependencies]
+# T38: Fluent test assertions. Pure-Rust runtime library providing
+# AssertThat<T> with fluent chain: assertThat(value).isEqualTo(expected),
+# .isGreaterThan(n), .isInstanceOf(Type), .startsWith(s), .contains(item),
+# .throws(fn). No external deps needed — all comparison logic is built on
+# Rust's standard library (PartialEq, PartialOrd, Display, Debug).
+# The crate is self-contained and does NOT depend on any Buff compiler
+# crate, keeping the dependency footprint minimal.
+
+[dev-dependencies]
+
+[[example]]
+name = "hello_assertions"
+path = "examples/assertions/hello_assertions.rs"
+
+[[example]]
+name = "fluent_chains"
+path = "examples/assertions/fluent_chains.rs"

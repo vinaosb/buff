@@ -3334,7 +3334,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Generates plausible values per category. Locale switching works. Seeded RNG reproduces values. 3 examples + 10 tests.
   - **Commit**: `feat(buff-fake): MVP fake data generation with locales`
 
-- [ ] 38. `buff-assertions` — Fluent Test Assertions (assertThat-style)
+- [x] 38. `buff-assertions` — Fluent Test Assertions (assertThat-style)
 
   **What to do**: Wrap Rust `claim` crate (or build on existing `assert_eq`). Provide: `assertThat(value).isEqualTo(expected)`, `.isGreaterThan(n)`, `.isInstanceOf(Type)`, `.startsWith(s)`, `.contains(item)`, `.throws(fn)`. Readable failure messages. Cross-language prevalence: 6/6 (Hamcrest/Chai/testify/claim/AssertJ/FluentAssertions).
   - **LOC budget**: ≤2000, ≤30 fns (fluent API). **External deps**: `claim` (optional).
