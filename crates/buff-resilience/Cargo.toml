@@ -1,0 +1,45 @@
+[package]
+name = "buff-resilience"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Resilience patterns for Buff. \
+Pure-Rust MVP: retry with exponential backoff + circuit breaker + \
+token-bucket rate limiter + timeout + composable pipeline. \
+Per T36 spec: RetryPolicy / CircuitBreaker / RateLimiter / Timeout + \
+Pipeline. Synchronous (no `_async` suffix per Buff §6). \
+Hand-rolled (no `tower`/`governor` dep) — keeps the surface minimal \
+and matches Buff's "no function-coloring" rule.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "resilience", "retry", "circuit-breaker", "rate-limit"]
+categories = ["network-programming", "asynchronous"]
+
+[lib]
+name = "buff_resilience"
+path = "src/lib.rs"
+
+[dependencies]
+# T36 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# T36 ships HAND-ROLLED resilience primitives — no `tower`, no `governor`,
+# no async runtime required. Matches Buff's "no `_async` suffix" (§6) +
+# "no function-coloring" rules. The T36 task spec allows EITHER
+# `tower`/`governor` wrappers OR standalone impls; we pick standalone
+# because:
+#   - tower's `Service` trait is `async`-first (returns `Future<Output =
+#     Result<T, E>>`) which would force the Buff surface to be async —
+#     violating Buff's "no `await`, async propagates invisibly" rule.
+#   - governor's token bucket requires a `clock` abstraction that pulls
+#     in `quanta` (which pulls cc-rs on non-x86 targets) — matching the
+#     workspace's "no cc-rs" rule is simpler with std::time::Instant.
+#   - The 4 primitives + composition are <300 LOC of pure std::time /
+#     std::thread logic — small enough to hand-roll correctly with full
+#     test coverage (15 tests per T36 acceptance).
+# thiserror 1.0: already pinned at the workspace level (line 54).
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

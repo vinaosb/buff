@@ -3311,7 +3311,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Enqueue/dequeue works. Cron schedule fires correctly. Retry policy honored. 3 examples (queue, cron, retry) + 12 tests.
   - **Commit**: `feat(buff-jobs): MVP background queue + cron scheduler`
 
-- [ ] 36. `buff-resilience` — Retry + Circuit Breaker + Rate Limiter + Timeout
+- [x] 36. `buff-resilience` — Retry + Circuit Breaker + Rate Limiter + Timeout
 
   **What to do**: Wrap Rust `tower` middleware crate (or build standalone). Provide: `Retry.policy(max_attempts, backoff)`, `CircuitBreaker.new(failure_threshold, reset_timeout)`, `RateLimiter.new(requests_per_second)`, `Timeout.duration(secs)`. Composable: `pipeline = Retry → CircuitBreaker → RateLimiter → handler`. Cross-language prevalence: 6/6 (tenacity/cockatiel/failsafe-go/tower/Resilience4j/Polly).
   - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `tower` (or standalone), `governor` (rate limiting).

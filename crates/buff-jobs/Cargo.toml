@@ -1,0 +1,85 @@
+[package]
+name = "buff-jobs"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Background job queue + cron scheduler for Buff. \
+Pure-Rust in-memory MVP wrapping the `cron` crate for \
+cron-expression parsing. Dead-letter queue + retry/backoff + \
+priority honoring. Async worker + Redis backend deferred to \
+v1.18+ per the T35 task spec.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "jobs", "queue", "scheduler", "cron"]
+categories = ["concurrency", "data-structures"]
+
+[lib]
+name = "buff_jobs"
+path = "src/lib.rs"
+
+[dependencies]
+# T35 rationale + pin lives in the root `[workspace.dependencies]`
+# per AGENTS.md hard rule ("heavily documented with T-numbered
+# rationale").
+#
+# - `cron` 0.12: pure-Rust cron expression parser. Schedule::from_str
+#   + Schedule::after(now) for next-fire computation. NO cc-rs / NO
+#   native C deps - matches the "no C library, no Docker" rule.
+# - `chrono` 0.4 (workspace): DateTime<Utc> for the next-fire API.
+# - `thiserror` (workspace): JobsError derive.
+# - `uuid` 1 (workspace, features v4): JobId generation.
+#
+# The MVP uses `std::sync::Mutex` + `std::collections::VecDeque`
+# (sync API) so the Buff codegen can lower `queue.enqueue(...)` to a
+# sync Rust call without requiring `.await` insertion (the existing
+# T31 async-propagation codegen lowers `async func` in Buff source,
+# not arbitrary async Rust APIs). An async `Worker.run_async` +
+# tokio::sync::mpsc backend is v1.18+ per the task spec - all types
+# here are `Send + Sync` so the future async path composes cleanly.
+#
+# `serde` + `serde_json` are deferred to v1.18+ (the Redis backend
+# will need them; the in-memory MVP does not). Keeping them out
+# avoids the proc-macro link step on Windows MSVC hosts that lack
+# the UCRT headers (the documented pre-existing blocker documented
+# in buff-image's NOTES section).
+# T35 rationale + pin lives in root `[workspace.dependencies]`
+# per AGENTS.md hard rule ("heavily documented with T-numbered
+# rationale").
+#
+# - `cron` 0.13: pure-Rust cron expression parser. Schedule::from_str
+#   + Schedule::after(now) for next-fire computation. NO cc-rs / NO
+#   native C deps - matches the "no C library, no Docker" rule.
+# - `chrono` 0.4 (workspace): DateTime<Utc> for the next-fire API.
+# - `thiserror` (workspace): JobsError derive.
+# - `uuid` 1 (workspace, features v4): JobId generation.
+# - `serde` + `serde_json` (workspace): Job serialization for future
+#   Redis backend; used by Job derive macros.
+# - `tokio` (workspace): async scheduler + worker runtime.
+#
+# The MVP uses `std::sync::Mutex` + `std::collections::VecDeque`
+# (sync API) so the Buff codegen can lower `queue.enqueue(...)` to a
+# sync Rust call without requiring `.await` insertion. An async
+# `Worker.run_async` + tokio::sync::mpsc backend is v1.18+ per the
+# task spec - all types here are `Send + Sync` so the future async
+# path composes cleanly.
+cron.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+# T35: tests assert (a) runtime behavior (enqueue/dequeue/retry/cron)
+# and (b) codegen-output shape (lower_jobs_register produces an `fn`
+# whose prettyplease-formatted source contains the expected
+# `Queue::memory` / `Worker::new` / `.run(` delegation. `insta`
+# snapshots pin the generated source so future changes to the
+# lowering logic surface clearly during review. `prettyplease` is
+# the same formatter used by buff-lang-codegen-rust — keeping output
+# byte-comparable. Mirrors the buff-fuzz dev-dep stance.
+insta.workspace = true
+prettyplease.workspace = true

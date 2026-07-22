@@ -1,0 +1,28 @@
+# T36 .buff example: full resilience pipeline (FORWARD-DECL).
+#
+# Requires the coordinated Type::ResiliencePipeline codegen lowering
+# arm (this task, T36 finish). The prelude registry entry
+# `PreludeType::ResiliencePipeline` + instance-method arms will be
+# added in the same T36 finish commit as this example. See
+# crates/buff-resilience/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
+# for the wiring map.
+
+from "resilience" import RetryPolicy, CircuitBreaker, RateLimiter, Timeout, Pipeline
+
+func main():
+    retry = RetryPolicy.new(max_attempts: 4, initial_delay_ms: 10, backoff_factor: 2.0)
+    breaker = CircuitBreaker.new(failure_threshold: 5, reset_timeout_ms: 30000)
+    limiter = RateLimiter.new(requests_per_second: 50.0)
+    deadline = Timeout.new(duration_ms: 1000)
+
+    pipeline = Pipeline.new()
+        .retry(policy: retry)
+        .circuit_breaker(cb: breaker)
+        .rate_limiter(rl: limiter)
+        .timeout(t: deadline)
+
+    result = pipeline.execute(handler: fetch_with_retry)
+    print("pipeline result: ${result}")
+
+func fetch_with_retry() -> Result<Int, String>:
+    return Ok(42)
