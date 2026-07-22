@@ -1,0 +1,51 @@
+[package]
+name = "buff-chat"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Discord + Telegram bot framework for Buff. \
+Pure-Rust MVP wrapping `serenity` (Discord Gateway + HTTP API) \
++ `teloxide` (Telegram Bot API) via a safe FFI boundary \
+per the T4 FFI guide. Unified `Bot.new(platform, token)` \
++ `bot.command(name, handler)` + `bot.on_message(handler)` \
++ `bot.start()` surface across both platforms.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "chat", "discord", "telegram", "bot"]
+categories = ["api-bindings", "network-programming"]
+
+[lib]
+name = "buff_chat"
+path = "src/lib.rs"
+
+[dependencies]
+# T47 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# `serenity` 0.12: Discord Gateway + HTTP API. Feature flags
+# `client` + `gateway` + `rustls_backend` + `model` enable the Client
+# + WebSocket gateway + rustls TLS + model types (NO `native_tls_backend`).
+#
+# `teloxide` 0.13: Telegram Bot API. Feature flags `rustls` +
+# `ctrlc_handler` enable rustls TLS + Ctrl-C graceful shutdown (NO
+# `native-tls`).
+#
+# `async-trait` 0.1: required by serenity's EventHandler trait.
+#
+# `tokio` provides the async runtime that `bot.start()` blocks on.
+# The lib dep narrows tokio's features to `rt` + `rt-multi-thread` +
+# `sync` + `macros` (no `test-util` — that's a dev-dep only) so
+# production users don't pay for test-only surfaces.
+#
+# `thiserror` provides the Error derive for ChatError.
+serenity.workspace = true
+teloxide.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
+
+[dev-dependencies]
+insta.workspace = true
+tokio = { workspace = true, features = ["macros", "test-util", "rt", "rt-multi-thread", "sync", "time"] }

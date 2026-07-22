@@ -1,0 +1,32 @@
+# T47 .buff example: basic bot construction + dispatch (FORWARD-DECL).
+#
+# Requires the coordinated Type::Bot codegen lowering arm
+# (separate follow-up commit per the buff-image T9 precedent:
+# MVP crate ships first, prelude+codegen wiring lands next).
+# See crates/buff-chat/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
+# for the wiring map (to be added in the follow-up commit).
+
+from "chat" import Bot, Platform
+
+func main():
+    # Discord bot — pass Platform.Discord or Platform.Telegram.
+    bot = Bot.new(platform: Platform.Discord, token: "your-bot-token")
+
+    # Register a !ping command. Both !ping (Discord) and /ping
+    # (Telegram) trigger the same handler on both platforms.
+    bot.command(name: "ping", handler: { msg =>
+        print("pong from ${msg.author()}!")
+        print("  text: ${msg.text()}")
+        print("  dm:   ${msg.is_dm()}")
+    })
+
+    # Catch-all for non-command messages.
+    bot.on_message(handler: { msg =>
+        print("[msg] @${msg.author()}: ${msg.text()}")
+    })
+
+    print("bot: ${bot}")
+    print("commands registered: ${bot.command_count()}")
+    print("has on_message: ${bot.has_message_handler()}")
+
+    # bot.start()  # blocks — connects to Discord / Telegram
