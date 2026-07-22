@@ -1,0 +1,43 @@
+# T29 .buff example: regex rules (zip code + slug) (FORWARD-DECL).
+#
+# Demonstrates the `with_regex` rule kind. The validator enforces
+# US 5-digit zip codes and URL-safe slug patterns. A bad regex
+# pattern (unbalanced parens) is shown surfacing at rule-registration
+# time (NOT deferred until validate), per the T29 panic-free +
+# fail-fast contract.
+
+from "validate" import Validator
+
+func main():
+    validator = Validator.new()
+        .with_regex(field: "zip", pattern: "^[0-9]{5}$")
+        .with_regex(field: "slug", pattern: "^[a-z0-9-]+$")
+
+    good = {
+        "zip": "94105",
+        "slug": "hello-world",
+    }
+    result = validator.validate(input: good)
+    match result:
+        ok:
+            print("regex-conformant input passed")
+        err(errors):
+            print("unexpected failure: ${errors}")
+
+    bad = {
+        "zip": "9410",
+        "slug": "Hello World!",
+    }
+    bad_result = validator.validate(input: bad)
+    match bad_result:
+        ok:
+            print("unexpected pass")
+        err(errors):
+            print("non-conformant input failed ${errors}")
+
+    bad_validator = Validator.new().with_regex(field: "phone", pattern: "(unbalanced")
+    match bad_validator:
+        ok:
+            print("unexpected: bad pattern compiled")
+        err(e):
+            print("caught bad pattern at registration: ${e}")

@@ -1,0 +1,42 @@
+# T29 .buff example: validate a user-signup form (FORWARD-DECL).
+#
+# Requires the coordinated Type::Validator codegen lowering arm (this
+# task, T29 finish). The prelude registry entry `PreludeType::Validator`
+# + instance-method arms were added in the same T29 finish commit as
+# this example. See crates/buff-validate/AGENTS.md "RELATIONSHIP TO
+# OTHER CRATES" for the wiring map.
+
+from "validate" import Validator, ValidationErrors
+
+func main():
+    validator = Validator.new()
+        .with_email(field: "email")
+        .with_length(field: "name", min: 1, max: 80)
+        .with_range(field: "age", min: 0, max: 150)
+
+    good = {
+        "email": "alice@example.com",
+        "name": "Alice",
+        "age": "30",
+    }
+    result = validator.validate(input: good)
+    match result:
+        ok:
+            print("good submission passed validation")
+        err(errors):
+            print("unexpected failure: ${errors}")
+
+    bad = {
+        "email": "not-an-email",
+        "name": "",
+        "age": "200",
+    }
+    bad_result = validator.validate(input: bad)
+    match bad_result:
+        ok:
+            print("unexpected pass")
+        err(errors):
+            print("bad submission failed with ${errors}")
+
+    print("JSON schema for this validator:")
+    print(validator.to_json_schema())

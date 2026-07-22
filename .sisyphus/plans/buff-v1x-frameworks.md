@@ -3248,7 +3248,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > Universal-pain-point frameworks identified by cross-language analysis (each problem has popular libraries in 6+ languages). All wrap mature Rust crates via safe `extern` FFI per T4 guide. All ship at MVP quality: working happy-path, 3 examples, 10+ tests, README, registry entry with "experimental" badge.
 
-- [ ] 29. `buff-validate` — Declarative Schema Validation (pydantic-equivalent)
+- [x] 29. `buff-validate` — Declarative Schema Validation (pydantic-equivalent)
 
   **What to do**: Wrap Rust `validator` crate (or build derive-based validation on serde). Provide `@validate` attribute on struct fields with rules (email, url, length, range, regex, custom). `Validator.validate(instance) -> Result<(), ValidationErrors>`. Auto-generate JSON Schema from validated structs. Cross-language prevalence: 6/6 (pydantic/Zod/Joi/validator/Hibernate Validator/FluentValidation).
   - **LOC budget**: ≤2000, ≤20 public fns. **External deps**: `validator`, `serde_json` (for JSON Schema).

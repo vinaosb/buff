@@ -63,7 +63,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # the chrono/tracing codegen-only linking boundary (single-file `buff
 # run` rustc path does NOT link it; cargo-project wiring is deferred).
 regex = "1"
-clap = { version = "4.5", features = ["derive"] }
+# T32: clap powers the `buff` compiler binary (T0 buff-lang-cli uses derive
+# API with &'static str literals). buff-cli (T32) exposes clap to USER
+# programs via the builder API — runtime String values flow into clap's
+# `Arg::new` / `.long` / `.help` / `Command::new` / `.version`. The
+# `string` cargo feature unlocks `Str: From<String>` + `Id: From<String>`
+# + `Cow<'static, str>: Into<Str>` (otherwise clap only accepts `&'static
+# str`). Features are unioned across the workspace so adding `string`
+# here is additive — it does NOT change buff-lang-cli's behaviour (its
+# derive macro emits &'static str literals; the `string` feature simply
+# makes additional From impls available). Pure-Rust, no native deps.
+clap = { version = "4.5", features = ["derive", "string"] }
 anyhow = "1.0"
 thiserror = "1.0"
 serde = { version = "1", features = ["derive"] }

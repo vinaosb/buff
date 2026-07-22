@@ -1,0 +1,25 @@
+# T29 .buff example: JSON Schema export (FORWARD-DECL).
+#
+# Demonstrates the `to_json_schema()` method serializing a validator's
+# rule set into a JSON Schema (Draft 2020-12) string.
+
+from "validate" import Validator
+from "serde_json" import parse
+
+func main():
+    validator = Validator.new()
+        .with_email(field: "email")
+        .with_url(field: "homepage")
+        .with_length(field: "name", min: 1, max: 80)
+        .with_range(field: "age", min: 0, max: 150)
+        .with_regex(field: "zip", pattern: "^[0-9]{5}$")
+
+    schema_str = validator.to_json_schema()
+    print("raw schema string: ${schema_str}")
+
+    schema = parse(input: schema_str)
+    print("pretty-printed:")
+    print(schema.to_string())
+
+    required = schema.get(key: "required").len()
+    print("${required} required fields in schema")

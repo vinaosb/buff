@@ -1,0 +1,56 @@
+[package]
+name = "buff-validate"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Declarative schema validation for Buff (pydantic-equivalent). \
+Pure-Rust MVP wrapping the `validator` crate's free-standing \
+trait validators (email/url/length/range/regex) and exporting \
+JSON Schema via `serde_json`. Safe FFI boundary per the T4 guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "validation", "schema", "json-schema", "pydantic"]
+categories = ["data-structures", "development-tools"]
+
+[lib]
+name = "buff_validate"
+path = "src/lib.rs"
+
+[dependencies]
+# T29 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# - `validator` 0.20 (default-features=false): the de-facto Rust ecosystem
+#   validation crate. We enable ONLY the `derive`-less surface (the
+#   free-standing trait validators `ValidateEmail` / `ValidateUrl` /
+#   `ValidateLength` / `ValidateRange` / `ValidateRegex`). The `derive`
+#   feature is OFF (T29 must-not #1: "no compile-time macro validation"
+#   - the derive macro depends on `validator_derive` which is a
+#   proc-macro crate that runs at compile time and does not fit Buff's
+#   transpile model). The `card` feature is OFF (no credit-card
+#   validation in MVP). `unicode` is ON for proper length counting of
+#   non-ASCII text (matches the rest of the workspace's unicode-aware
+#   stance via `unicode-segmentation`).
+#
+# - `serde_json` 1.x: JSON Schema export. Already pinned at the
+#   workspace level (T124a). Used here for `serde_json::json!({...})`
+#   to build the schema object + `serde_json::to_string` for the
+#   serialized output.
+#
+# - `regex` 1.x: regex pattern validation. Already pinned at the
+#   workspace level (T124d). Used to compile user-supplied patterns
+#   into `regex::Regex` instances at rule-registration time so a
+#   malformed pattern surfaces as `Err(ValidationError::BadRegex)`
+#   IMMEDIATELY (not deferred until the first call to `validate`).
+#
+# - `thiserror` for the `ValidationError` enum derive (mirrors the
+#   buff-image / buff-dataframe / buff-tensor error pattern).
+validator = { version = "0.20", default-features = false, features = ["unic"] }
+serde_json.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

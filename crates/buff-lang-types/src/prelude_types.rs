@@ -3010,6 +3010,18 @@ impl PreludeAssocFn {
         PreludeAssocFn::Histogram,
         PreludeAssocFn::Gauge,
         PreludeAssocFn::Bootstrap,
+        // T34: buff-auth assoc fns (5 distinct new names). JWT reuses
+        // the existing shared `Encode` / `Decode` variants (already in
+        // ALL — defined for Base64 / Hex / URLEncode). Password /
+        // OAuth2Client / Rbac introduce 5 new variants; PasswordHash /
+        // PasswordVerify / AuthorizationUrl / ExchangeCode / Enforce.
+        // The (type, method) pair dispatch in `assoc_fn_return_type`
+        // validates each combination.
+        PreludeAssocFn::PasswordHash,
+        PreludeAssocFn::PasswordVerify,
+        PreludeAssocFn::AuthorizationUrl,
+        PreludeAssocFn::ExchangeCode,
+        PreludeAssocFn::Enforce,
     ];
 
     /// The source name of this associated function (the method identifier).

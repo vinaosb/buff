@@ -6434,6 +6434,128 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Image.blur codegen parse: {e}")))
             }
+            // T31: Cache instance methods. Each method lowers to
+            // `buff_cache::Cache::<method>`. The codegen records
+            // `buff-cache` + `moka` in extern_crates via the
+            // `program_uses_namespace("Cache")` walker.
+            //
+            // `cache.get(key)` -> String?. One arg (String). Wraps
+            // `recv.get(&key)` (returns Option<String> natively).
+            M::Get if matches!(recv_ty, Type::Cache) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "get() expects exactly 1 arg (key), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.get(&#key)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.get codegen parse: {e}")))
+            }
+            // `cache.set(key, value)` -> Void. Two args. Wraps
+            // `recv.set(key, value)` (the no-TTL overload).
+            M::Set if matches!(recv_ty, Type::Cache) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "set() expects exactly 2 args (key, value), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let value = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.set(#key, #value)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.set codegen parse: {e}")))
+            }
+            // `cache.set(key, value, ttl)` -> Void. Three args. Wraps
+            // `recv.set_with_ttl(key, value, ttl)`. The Buff surface
+            // uses the same `set` method name (arity-based dispatch
+            // via the codegen's arg-count check); the underlying
+            // Rust method is `set_with_ttl` to avoid overload
+            // ambiguity.
+            M::SetTtl if matches!(recv_ty, Type::Cache) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "set(key, value, ttl) expects exactly 3 args, got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let value = self.lower_expr(&args[1])?;
+                let ttl = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.set_with_ttl(#key, #value, #ttl)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.set(ttl) codegen parse: {e}")))
+            }
+            // `cache.delete(key)` -> Void. One arg. Wraps
+            // `recv.delete(&key)`.
+            M::Delete if matches!(recv_ty, Type::Cache) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "delete() expects exactly 1 arg (key), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.delete(&#key)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.delete codegen parse: {e}")))
+            }
+            // `cache.contains(key)` -> Bool. One arg. Wraps
+            // `recv.contains(&key)`.
+            M::Contains if matches!(recv_ty, Type::Cache) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "contains() expects exactly 1 arg (key), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.contains(&#key)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.contains codegen parse: {e}")))
+            }
+            // `cache.clear()` -> Void. Zero args. Wraps
+            // `recv.clear()`.
+            M::Clear if matches!(recv_ty, Type::Cache) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "clear() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.clear()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.clear codegen parse: {e}")))
+            }
+            // `cache.len()` -> Int. Zero args. Wraps `recv.len() as
+            // i64` (the `as i64` lifts u64 to Buff's Int width).
+            M::Len if matches!(recv_ty, Type::Cache) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "len() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    (#recv.len() as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Cache.len codegen parse: {e}")))
+            }
             // T10: AudioBuffer instance methods. Each method lowers
             // to `buff_audio::AudioBuffer::<method>`. The codegen
             // records `buff-audio` + `hound` + `symphonia` in
@@ -6696,7 +6818,14 @@ impl RustCodegen {
             | M::Slice
             | M::Summarize
             | M::Render
-            | M::Save => Err(self.unsupported(&format!(
+            | M::Save
+            // T31: Cache-only methods. Non-Cache receiver with one of
+            // these methods falls through to a clear error (mirrors
+            // the Image / Audio / Template safety nets above).
+            | M::SetTtl
+            | M::Delete
+            | M::Contains
+            | M::Clear => Err(self.unsupported(&format!(
                 "{recv_ty}.{:?}() is not a recognised prelude instance method",
                 pmethod
             ))),
