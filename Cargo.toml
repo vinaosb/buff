@@ -1519,6 +1519,57 @@ buff-email = { path = "crates/buff-email" }
 # `buff_lang_archive` — the framework-crate naming convention drops
 # the `-lang` infix per AGENTS.md).
 buff-archive = { path = "crates/buff-archive" }
+# T52: `buff-protobuf` MVP — Protocol Buffers for Buff. Wraps the
+# pure-Rust `prost` + `prost-types` crates (the canonical Rust
+# protobuf codec, maintained by tokio-rs — RustCrypto-adjacent,
+# pure-Rust, no protoc / no C deps). Matches the "no C library, no
+# Docker" hard rule from AGENTS.md (same family of cc-rs avoidance
+# that pushed hand-rolled lexer/parser per the project's "Windows
+# host with no MSVC" constraint). The T52 spec forbids gRPC
+# streaming in MVP (unary only) + forbids the reflection API;
+# `prost-build` + `tonic` are listed as future deps but NOT pulled
+# in this MVP (build-time `.proto` codegen + gRPC transport are
+# deferred to a follow-up that composes with T17 buff-web).
+#
+# - `prost` 0.13: pure-Rust protobuf runtime codec + the `Message`
+#   trait. API surface used:
+#   * `prost::Message::encode(&msg, &mut Vec<u8>)` for
+#     `Protobuf.serialize(value) -> Bytes` (length-delimited wire
+#     format).
+#   * `prost::Message::decode::<prost_types::Struct>(&bytes)` for
+#     `Protobuf.deserialize(bytes) -> Value`.
+#   Pinned to major 0.13 (the long-standing surface since 2024 —
+#   `Message::{encode, decode}` has been stable for years; 0.14 is
+#   also fine but 0.13 matches the conservative-pin philosophy
+#   already in use across the workspace — chrono 0.4, rand 0.8,
+#   rustyline 15, axum 0.8). `default-features = false` drops the
+#   unused `prost-derive` feature's std-only paths.
+#
+# - `prost-types` 0.13: the well-known types (`Struct` / `Value` /
+#   `ListValue` / `FileDescriptorSet` etc). Used by `buff-protobuf`
+#   as the dynamic message surface — `Struct` lets the MVP roundtrip
+#   arbitrary `serde_json::Value` through the protobuf wire format
+#   WITHOUT build-time `.proto` codegen. Pinned to 0.13 to match
+#   `prost` (they release in lockstep).
+#
+# `prost` + `prost-types` are recorded in the codegen `extern_crates`
+# BTreeSet when a Buff program uses `Protobuf` (mirrors the chrono /
+# regex / tracing / image codegen-only linking boundary: the
+# single-file `buff run` rustc path does NOT link them; cargo-project
+# wiring is deferred per the existing precedent). Snapshots +
+# extern_crates set is the verifiable contract.
+prost = { version = "0.13", default-features = false, features = ["std"] }
+prost-types = { version = "0.13", default-features = false }
+# T52: `buff-protobuf` workspace path dep — mirrors the buff-image /
+# buff-msgpack / buff-cache / buff-resilience / buff-pubsub pattern
+# so any future consumer (codegen-lowered `Protobuf.serialize(...)`
+# / `Protobuf.deserialize(...)` calls, IDE hover/completion, the
+# T139 bufflings protobuf tutorial, T17 buff-web gRPC unary
+# composition) resolves to the same in-tree version during the v1.17
+# frameworks wave. Records `buff-protobuf` (NOT `buff_lang_protobuf`
+# — the framework-crate naming convention drops the `-lang` infix
+# per AGENTS.md).
+buff-protobuf = { path = "crates/buff-protobuf" }
 # T46: `buff-nlp` workspace path dep — mirrors the buff-image /
 # buff-archive / buff-pubsub pattern so any future consumer
 # (codegen-lowered `Text.detect_language(...)` / `Text.stem(...)`
@@ -1755,3 +1806,37 @@ signature = "2"
 # `buff-crypto-extras` (NOT `buff_lang_crypto_extras` — the framework-
 # crate naming convention drops the `-lang` infix per AGENTS.md).
 buff-crypto-extras = { path = "crates/buff-crypto-extras" }
+# T48: `buff-web3` deps — Ethereum RPC + smart contract bindings.
+# `ethers` 2 with the `rustls` feature flag (NOT `native-tls` — the
+# workspace hard rule from AGENTS.md "Pure-Rust preference"). API
+# surface used (per `crates/buff-web3/src/lib.rs`):
+# - `ethers::providers::{Provider, Http, Provider::try_from(url)}` for
+#   JSON-RPC connectivity (chain_id / get_block_number / get_balance).
+# - `ethers::signers::{LocalWallet, Signer}` for private-key signing
+#   (`LocalWallet::from_str(hex_key)` + `wallet.address()`).
+# - `ethers::contract::Contract` + `Contract::new(addr, abi, client)`
+#   for typed ABI method dispatch.
+# - `ethers::abi::{Contract as Abi, Token, Tokenizable}` for ABI
+#   de/serialisation.
+# - `ethers::types::{Address, H256, U256, U128}` for canonical types.
+#
+# Pure-Rust on all 3 CI OSes (rustls + ring crypto backend — no native
+# C deps, no cc-rs — matches the "no C library" hard rule from T126/
+# T127 and the wider workspace stance that pushed hand-rolled lexer/
+# parser per AGENTS.md NOTES). The `openssl-sys` crate is NOT pulled
+# because the `native-tls` feature is OFF.
+#
+# Mirrors the chrono/regex/tokio/image/lettre codegen-only linking
+# boundary (single-file `buff run` rustc path does NOT link ethers;
+# cargo-project wiring is deferred). Snapshots + extern_crates set is
+# the verifiable contract.
+ethers = { version = "2", default-features = false, features = ["rustls"] }
+# T48: `buff-web3` workspace path dep — mirrors the buff-image /
+# buff-geo / buff-msgpack / buff-crypto-extras pattern so any future
+# consumer (codegen-lowered `Provider.new(...)` / `Wallet.from_*(...)`
+# / `Contract.new(...)` calls, IDE hover/completion, T139 bufflings
+# web3 tutorial) resolves to the same in-tree version during the v1.18
+# frameworks wave. Records `buff-web3` (NOT `buff_lang_web3` — the
+# framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-web3 = { path = "crates/buff-web3" }
