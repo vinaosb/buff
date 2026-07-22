@@ -1333,6 +1333,14 @@ buff-resilience = { path = "crates/buff-resilience" }
 # set is the verifiable contract.
 fluent-bundle = "0.16"
 unic-langid = "0.9"
+# T44: `intl-memoizer` is a transitive dep of `fluent-bundle`. We
+# pull it explicitly so we can name the `concurrent::IntlLangMemoizer`
+# type — the `Send + Sync` variant of the default memoizer that uses
+# `Mutex` instead of `RefCell`. Without this, `Arc<Mutex<I18nInner>>`
+# would fail clippy's `arc_with_non_send_sync` lint because the
+# default memoizer is `!Sync`. Version tracks `fluent-bundle` 0.16
+# (`intl-memoizer` 0.5.3).
+intl-memoizer = "0.5"
 # T44: `buff-i18n` workspace path dep — mirrors the buff-image /
 # buff-audio / buff-cache / buff-resilience / buff-validate / buff-auth
 # pattern so any future consumer (codegen-lowered `I18n.new(...)` /

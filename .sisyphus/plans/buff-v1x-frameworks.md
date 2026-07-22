@@ -3351,7 +3351,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Roundtrip compress → extract preserves files. All 4 formats work. 4 examples + 12 tests.
   - **Commit**: `feat(buff-archive): MVP zip/tar/gz/zstd compression`
 
-- [ ] 40. `buff-fsm` — State Machine Library
+- [x] 40. `buff-fsm` — State Machine Library
 
   **What to do**: Wrap Rust `sfsm` crate (or build standalone). Provide: `Machine.new(initial_state)`, `machine.add_transition(from, event, to, guard, action)`, `machine.fire(event)`, `machine.current_state()`. States as enums, events as enums. Codegen-time transition table validation. Cross-language prevalence: 5/6 (transitions/xstate/looplab-fsm/sfsm/squirrel-foundation/Stateless).
   - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `sfsm` or standalone.

@@ -1,0 +1,35 @@
+# T40 .buff example: order status state machine (FORWARD-DECL).
+#
+# Requires the coordinated Type::Machine codegen lowering arm (future
+# T40 finish commit). See traffic_light.buff header for the wiring
+# rationale.
+
+from "fsm" import Machine
+
+func main():
+    m = Machine.new(initial: "cart")
+    m.add_transition(from: "cart", event: "pay", to: "paid")
+    m.add_transition(from: "cart", event: "cancel", to: "cancelled")
+    m.add_transition(from: "paid", event: "ship", to: "shipped")
+    m.add_transition(from: "paid", event: "cancel", to: "cancelled")
+    m.add_transition(from: "shipped", event: "deliver", to: "delivered")
+    m.mark_terminal(state: "delivered")
+    m.mark_terminal(state: "cancelled")
+
+    print("known states: ${m.states()}")
+    print("known events: ${m.events()}")
+    print("initial: ${m.current_state()}")
+
+    m.fire(event: "pay")
+    print("after pay: ${m.current_state()}")
+
+    print("can cancel from paid? ${m.can_fire(event: \"cancel\")}")
+
+    m.fire(event: "ship")
+    print("after ship: ${m.current_state()}")
+
+    m.fire(event: "deliver")
+    print("after deliver: ${m.current_state()} (terminal=${m.is_terminal()})")
+
+    result = m.fire(event: "ship")
+    print("terminal reject: ${result}")

@@ -1,0 +1,30 @@
+# T40 .buff example: turnstile state machine with action (FORWARD-DECL).
+#
+# Requires the coordinated Type::Machine codegen lowering arm (future
+# T40 finish commit). See traffic_light.buff header for the wiring
+# rationale.
+
+from "fsm" import Machine
+
+func main():
+    customer_count = Counter.new(start: 0)
+
+    m = Machine.new(initial: "locked")
+    m.add_transition(from: "locked", event: "coin", to: "unlocked")
+    m.add_transition(
+        from: "unlocked",
+        event: "push",
+        to: "locked",
+        action: { customer_count.increment() },
+    )
+
+    print("initial: ${m.current_state()}")
+
+    result = m.fire(event: "push")
+    print("push while locked: ${result}")
+
+    m.fire(event: "coin")
+    print("after coin: ${m.current_state()}")
+
+    m.fire(event: "push")
+    print("after push: ${m.current_state()} (customers=${customer_count.value()})")

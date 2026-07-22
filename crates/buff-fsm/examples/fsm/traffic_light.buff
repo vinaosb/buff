@@ -1,0 +1,23 @@
+# T40 .buff example: traffic light state machine (FORWARD-DECL).
+#
+# Requires the coordinated Type::Machine codegen lowering arm (future
+# T40 finish commit). The prelude registry entry `PreludeType::Machine`
+# + instance-method arms will be added when the multi-task codegen
+# finish lands (mirrors the buff-fuzz / buff-jobs precedent: the
+# library ships first; the codegen-lowered Buff surface follows in a
+# coordinated multi-task finish commit to avoid conflict-zone churn
+# across the 8 agents editing shared compiler files).
+
+from "fsm" import Machine
+
+func main():
+    m = Machine.new(initial: "green")
+    m.add_transition(from: "green", event: "tick", to: "yellow")
+    m.add_transition(from: "yellow", event: "tick", to: "red")
+    m.add_transition(from: "red", event: "tick", to: "green")
+
+    print("initial: ${m.current_state()}")
+    for i in Range.new(start: 0, end: 6):
+        m.fire(event: "tick")
+        print("after tick ${i}: ${m.current_state()}")
+    print("cycle repeats unbounded")

@@ -1,0 +1,37 @@
+[package]
+name = "buff-fsm"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+State machine library for Buff. \
+Pure-Rust hand-rolled MVP (no external state-machine dep per T40 spec guidance). \
+Provides `Machine.new(initial)`, `machine.add_transition(from, event, to, guard, action)`, \
+`machine.fire(event)`, `machine.current_state()` with codegen-time transition table \
+validation. Follows the 6 FFI safety rules from the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "fsm", "state-machine", "statemachine", "transitions"]
+categories = ["data-structures", "rust-patterns"]
+
+[lib]
+name = "buff_fsm"
+path = "src/lib.rs"
+
+[dependencies]
+# T40 rationale: hand-rolled MVP, NO external state-machine dep. The T40 task
+# spec offered `statig` OR hand-rolled; hand-rolled wins for MVP because:
+#   1. State + event identifiers are plain `String` — matches the FFI guide
+#      rule R1 (no raw pointers) + R5 (no lifetimes in Buff-visible types).
+#   2. Guard + Action callbacks are `Box<dyn Fn(...) + Send + Sync>` newtypes
+#      (`Guard` / `Action`) — R4 thread safety, R2 ownership boundary.
+#   3. <500 LOC for the core surface; pulling statig would inflate compile
+#      time + dep tree without buying meaningful ergonomics for the MVP scope.
+# `thiserror` is already pinned at the workspace level (line 78) and reused
+# here via `.workspace = true` per the AGENTS.md "Workspace dependency
+# resolution" hard rule (never pin a version in a crate Cargo.toml).
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
