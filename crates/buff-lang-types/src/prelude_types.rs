@@ -1587,6 +1587,24 @@ pub enum PreludeType {
     /// `.contains(point)`, `.intersects(other)`. Mirrors Point as a
     /// runtime-value-with-instance-methods type. Pure-Rust, CPU-only.
     Polygon,
+    /// T46: `Language` — a detected natural language. Runtime-value type
+    /// wrapping `buff_nlp::Language` (which wraps `whatlang::Lang`).
+    /// Constructed ONLY via `Text.detect_language(input) -> Option<
+    /// Language>`; carries the instance methods `.code() -> String`
+    /// (ISO 639-3) and `.name() -> String` (English name). Mirrors
+    /// Point / Image as a runtime-value-with-instance-methods type.
+    /// Pure-Rust, CPU-only.
+    Language,
+    /// T46: `StemAlgorithm` — a Snowball stemming algorithm selector
+    /// (18 supported languages). Opaque enum wrapping
+    /// `buff_nlp::StemAlgorithm` (which maps 1:1 to
+    /// `rust_stemmers::Algorithm`). Passed only as an arg to
+    /// `Text.stem(word, algorithm: .english)`; carries NO instance
+    /// methods and NO constructor (Buff users write enum-variant
+    /// literal syntax `.english` / `.portuguese` / etc.). Mirrors no
+    /// prior prelude type exactly — it is the first opaque enum
+    /// passed-only-as-arg in the prelude. Pure-Rust, CPU-only.
+    StemAlgorithm,
 }
 
 impl PreludeType {
@@ -1927,6 +1945,17 @@ impl PreludeType {
         PreludeType::Point,
         PreludeType::LineString,
         PreludeType::Polygon,
+        // T46: Language / StemAlgorithm — two new prelude types for the
+        // buff-nlp surface. Language is a runtime-value (mirrors Point —
+        // constructed via Text.detect_language, carries code/name
+        // instance methods). StemAlgorithm is an opaque enum passed
+        // only as an arg to Text.stem (mirrors no prior type exactly).
+        // Codegen lowering lives in the buff-nlp crate; the codegen
+        // arms + PreludeInstanceFn entries are added in this same
+        // commit (T46 owns the full nlp prelude+codegen surface).
+        // Pure-Rust, CPU-only.
+        PreludeType::Language,
+        PreludeType::StemAlgorithm,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2243,6 +2272,15 @@ impl PreludeType {
             PreludeType::Point => "Point",
             PreludeType::LineString => "LineString",
             PreludeType::Polygon => "Polygon",
+            // T46: Language / StemAlgorithm — canonical PascalCase names
+            // matching the user-facing `lang.code()` / `lang.name()`
+            // (Language) and `Text.stem(word, algorithm: .english)`
+            // (StemAlgorithm — written as `.english` enum-variant literal
+            // at the call site, but the type name itself surfaces only
+            // in diagnostics). The underlying Rust types are
+            // `buff_nlp::{Language, StemAlgorithm}`.
+            PreludeType::Language => "Language",
+            PreludeType::StemAlgorithm => "StemAlgorithm",
         }
     }
 
@@ -2563,17 +2601,27 @@ impl PreludeType {
             // the result via the filesystem). Mirrors the Log / Toml /
             // Config / Observe / Hash / HMAC / OS pattern exactly.
             PreludeType::Archive => Type::Void,
-            // T46: Text is a namespace-only module (mirror Archive /
-            // Log / Toml / Math / Config / Observe). The namespace
-            // itself has no value representation; only its associated
-            // functions (`Text.detect_language` / `Text.stem` /
-            // `Text.tokenize` / `Text.sentences`) are callable.
-            // detect_language returns Option<String> (the ISO 639-3
-            // language code), stem returns String, tokenize /
-            // sentences return Vector<String>. Mirrors the Archive /
-            // Log / Toml / Config / Observe / Hash / HMAC / OS
-            // pattern exactly.
-            PreludeType::Text => Type::Void,
+            // T46: Text is a namespace-only module (mirror MsgPack /
+            // Archive / Log / Toml). The namespace itself has no value
+            // representation; only its associated functions
+            // (`Text.detect_language` / `Text.stem` / `Text.tokenize` /
+            // `Text.sentences`) are callable. detect_language returns
+            // Option<Language>, stem returns String (with `?`
+            // propagating NlpError), tokenize / sentences return
+            // Vector<String>. The arm returns `Type::Text` (not Void)
+            // for match-exhaustiveness — mirrors the T51 MsgPack
+            // pattern (`MsgPack => Type::MsgPack`).
+            PreludeType::Text => Type::Text,
+            // T46: Language IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Language`] variant; the codegen
+            // layer maps it to `buff_nlp::Language`. Mirrors Point /
+            // Image / Xml.
+            PreludeType::Language => Type::Language,
+            // T46: StemAlgorithm IS a runtime value (an opaque enum
+            // passed only as an arg). Returns the opaque
+            // [`Type::StemAlgorithm`] variant; the codegen layer maps
+            // it to `buff_nlp::StemAlgorithm`.
+            PreludeType::StemAlgorithm => Type::StemAlgorithm,
             // T51: MsgPack is a namespace-only module (mirror Log /
             // Toml / Base64 / Hex / Yaml / Csv). The namespace itself
             // has no value representation; only its associated
@@ -3616,6 +3664,16 @@ impl PreludeAssocFn {
         // Vec<f64> coordinate-list ctor. Dispatched on the
         // (LineString, FromCoords) / (Polygon, FromCoords) pairs.
         PreludeAssocFn::FromCoords,
+        // T46: buff-nlp Text namespace assoc fns (4 distinct names):
+        // detect_language / stem / tokenize / sentences. All
+        // Text-only — dispatched on the (Text, DetectLanguage) /
+        // (Text, Stem) / (Text, Tokenize) / (Text, Sentences) pairs
+        // in `assoc_fn_return_type`. None share a name with an
+        // existing variant (each `(Text, $fn)` pair is unique).
+        PreludeAssocFn::DetectLanguage,
+        PreludeAssocFn::Stem,
+        PreludeAssocFn::Tokenize,
+        PreludeAssocFn::Sentences,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -4669,7 +4727,9 @@ pub fn assoc_fn_return_type(
         // detected). stem returns String (the lowered stem).
         // tokenize / sentences return Vector<String>. The codegen
         // lowering splices:
-        //   - `buff_nlp::Text::detect_language(&text).map(|l| l.code())`
+        //   - `buff_nlp::Text::detect_language(&text)`
+        //     (returns Option<Language> directly — no mapping needed;
+        //     the whatlang wrapper already produces a buff_nlp::Language)
         //   - `buff_nlp::Text::stem(&word,
         //     buff_nlp::StemAlgorithm::from_code(&algorithm)
         //     .unwrap_or(buff_nlp::StemAlgorithm::English))?`
@@ -4678,7 +4738,7 @@ pub fn assoc_fn_return_type(
         //     English — defensive, never silently corrupts).
         //   - `buff_nlp::Text::tokenize(&text)`
         //   - `buff_nlp::Text::sentences(&text)`
-        (PreludeType::Text, PreludeAssocFn::DetectLanguage) => Some(Type::option(Type::string())),
+        (PreludeType::Text, PreludeAssocFn::DetectLanguage) => Some(Type::option(Type::language())),
         (PreludeType::Text, PreludeAssocFn::Stem) => Some(Type::string()),
         (PreludeType::Text, PreludeAssocFn::Tokenize) => Some(Type::vector(Type::string())),
         (PreludeType::Text, PreludeAssocFn::Sentences) => Some(Type::vector(Type::string())),
@@ -5329,6 +5389,12 @@ pub enum PreludeInstanceFn {
     /// (Polygon). Returns Bool. Polygon-only. Wraps `catch_unwind`
     /// (BooleanOps) per FFI guide R6.
     Intersects,
+    // ---- T46: buff-nlp instance methods --------------------------------
+    /// `language.code()` — ISO 639-3 code. Zero args. Returns String.
+    /// Language-only. Mirrors `Language::code` in the buff-nlp crate.
+    /// `language.name()` reuses the existing shared `Name` variant
+    /// (also used by `faker.name()` — dispatched on the receiver type).
+    Code,
 }
 
 impl PreludeInstanceFn {
@@ -5552,6 +5618,13 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Length,
         PreludeInstanceFn::Area,
         PreludeInstanceFn::Intersects,
+        // T46: buff-nlp Language instance methods (1 new variant):
+        // `Code`. `Name` is shared with Faker.name (existing variant —
+        // dispatched on the (Language, Name) pair). `Code` is
+        // Language-only (no other prelude type today exposes a `code`
+        // instance method; if a future type adds one it can reuse
+        // this variant on the (FutureType, Code) pair).
+        PreludeInstanceFn::Code,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -5781,6 +5854,12 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Length => "length",
             PreludeInstanceFn::Area => "area",
             PreludeInstanceFn::Intersects => "intersects",
+            // T46: buff-nlp Language instance method name mirrors the
+            // `buff_nlp::Language::code` Rust method name 1:1 so the
+            // codegen can splice `recv.code()` without rewriting.
+            // `language.name()` reuses the existing shared `Name`
+            // variant (already mapped to "name" by the Faker arm below).
+            PreludeInstanceFn::Code => "code",
             // T11: Signal instance methods (Fft, Ifft, Lowpass, Highpass,
             // Bandpass, ApplyWindow, Spectrogram, Magnitude, Phase).
             PreludeInstanceFn::Fft => "fft",
@@ -6337,6 +6416,17 @@ pub fn instance_fn_return_type(
         (Type::Polygon, PreludeInstanceFn::Area) => Some(Type::float_default()),
         (Type::Polygon, PreludeInstanceFn::Contains) => Some(Type::Bool),
         (Type::Polygon, PreludeInstanceFn::Intersects) => Some(Type::Bool),
+
+        // T46: buff-nlp Language instance methods. `language.code()`
+        // returns String (ISO 639-3 code — three lowercase letters).
+        // `language.name()` returns String (English name — e.g.
+        // "Portuguese"). Both wrap the matching `buff_nlp::Language`
+        // method (which clones the inner `&'static str` into an owned
+        // `String` at the boundary per FFI guide R5). `Name` is shared
+        // with `faker.name()` — dispatched on the (Language, Name) /
+        // (Faker, Name) pairs.
+        (Type::Language, PreludeInstanceFn::Code) => Some(Type::String),
+        (Type::Language, PreludeInstanceFn::Name) => Some(Type::String),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

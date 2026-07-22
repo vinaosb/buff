@@ -3408,7 +3408,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Distance/area calculations correct. Intersection detection works. 3 examples + 12 tests.
   - **Commit**: `feat(buff-geo): MVP geospatial operations`
 
-- [ ] 46. `buff-nlp` — Text Processing / NLP
+- [x] 46. `buff-nlp` — Text Processing / NLP
 
   **What to do**: Wrap Rust `whatlang` (language detection), `rust-stemmers` (Porter stemmer), `unicode-segmentation` (work/char segmentation). Provide: `Text.detect_language(text)`, `Text.stem(word)`, `Text.tokenize(text)`, `Text.sentences(text)`. Cross-language: 3/6 (spaCy/natural/whatlang — Python dominant).
   - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `whatlang`, `rust-stemmers`, `unicode-segmentation`.

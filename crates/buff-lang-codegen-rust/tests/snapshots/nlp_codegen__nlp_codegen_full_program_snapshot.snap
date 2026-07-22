@@ -1,0 +1,19 @@
+---
+source: crates/buff-lang-codegen-rust/tests/nlp_codegen.rs
+assertion_line: 487
+expression: src
+---
+fn main() {
+    let lang: Option<buff_nlp::Language> = buff_nlp::Text::detect_language(
+        &"A raposa marrom salta sobre o cachorro.",
+    );
+    lang.code;
+    lang.clone().name;
+    let stem: String = buff_nlp::Text::stem(
+        &"running",
+        buff_nlp::StemAlgorithm::from_code(&"english")
+            .unwrap_or(buff_nlp::StemAlgorithm::English),
+    )?;
+    let tokens: Vec<String> = buff_nlp::Text::tokenize(&"Hello, world!");
+    let sents: Vec<String> = buff_nlp::Text::sentences(&"Hello world! How are you?");
+}

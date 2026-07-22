@@ -727,6 +727,50 @@ pub enum Type {
     /// MVP supports only the outer ring (no holes); holes are a v1.18+
     /// enhancement.
     Polygon,
+    /// T46: the `Text` NLP namespace, mapped to `buff_nlp::Text` at
+    /// codegen time. Namespace-only (like `MsgPack` / `Log` / `Toml`) —
+    /// the type itself is never instantiated as a runtime value; only
+    /// its associated functions are callable (`Text.detect_language` /
+    /// `Text.stem` / `Text.tokenize` / `Text.sentences`). `buff_type()`
+    /// returns [`Type::Text`] for match-exhaustiveness (mirrors
+    /// [`Type::MsgPack`]); the codegen arm rarely fires in practice.
+    ///
+    /// This is **additive** (T46). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type that
+    /// nonetheless carries a `Type` variant for exhaustiveness. The
+    /// underlying Rust namespace is `buff_nlp::Text` (a unit struct
+    /// namespace marker — never instantiated). Pure-Rust, CPU-only.
+    Text,
+    /// T46: a detected natural language, mapped to `buff_nlp::Language`
+    /// at codegen time. Constructed ONLY via
+    /// `Text.detect_language(input) -> Option<Language>`; carries the
+    /// instance methods `.code() -> String` (ISO 639-3) and
+    /// `.name() -> String` (English name). CPU-only.
+    ///
+    /// This is **additive** (T46). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] (T45) as a
+    /// runtime-value-with-instance-methods type. The underlying Rust type
+    /// is `buff_nlp::Language` (a struct wrapping `whatlang::Lang`).
+    Language,
+    /// T46: a Snowball stemming algorithm selector (18 supported
+    /// languages), mapped to `buff_nlp::StemAlgorithm` at codegen time.
+    /// Opaque enum — only passed as an arg to `Text.stem(word,
+    /// algorithm)`; NO instance methods exposed. Buff users write the
+    /// variants as `.english` / `.portuguese` / etc. (enum-variant
+    /// literal syntax).
+    ///
+    /// This is **additive** (T46). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors no prior type exactly — it is the first opaque enum
+    /// passed-only-as-arg in the prelude. The underlying Rust type is
+    /// `buff_nlp::StemAlgorithm` (an enum with 18 variants matching
+    /// `rust_stemmers::Algorithm` 1:1).
+    StemAlgorithm,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1399,6 +1443,53 @@ impl Type {
         matches!(self, Type::Polygon)
     }
 
+    /// T46: the `Text` NLP namespace type. Maps to `buff_nlp::Text` at
+    /// codegen time. Namespace-only — never instantiated as a runtime
+    /// value; only its associated functions are callable
+    /// (`Text.detect_language` / `Text.stem` / `Text.tokenize` /
+    /// `Text.sentences`). Mirrors `Type::MsgPack` (T51).
+    pub fn text() -> Self {
+        Type::Text
+    }
+
+    /// T46: Returns `true` if this type is the prelude `Text` NLP
+    /// namespace. Namespace-only (no runtime value — like MsgPack).
+    pub fn is_prelude_text(&self) -> bool {
+        matches!(self, Type::Text)
+    }
+
+    /// T46: the detected-natural-language runtime-value type. Maps to
+    /// `buff_nlp::Language` at codegen time. Constructed ONLY via
+    /// `Text.detect_language(input)`; carries the instance methods
+    /// `.code()` / `.name()`.
+    pub fn language() -> Self {
+        Type::Language
+    }
+
+    /// T46: Returns `true` if this type is the prelude `Language`
+    /// runtime value (a detected natural language). Used to dispatch
+    /// instance method calls (`lang.code()`, `lang.name()`) to the
+    /// `buff_nlp::Language` lowering.
+    pub fn is_prelude_language(&self) -> bool {
+        matches!(self, Type::Language)
+    }
+
+    /// T46: the Snowball stemming algorithm selector enum. Maps to
+    /// `buff_nlp::StemAlgorithm` at codegen time. Opaque enum — only
+    /// passed as an arg to `Text.stem(word, algorithm)`; NO instance
+    /// methods exposed.
+    pub fn stem_algorithm() -> Self {
+        Type::StemAlgorithm
+    }
+
+    /// T46: Returns `true` if this type is the prelude `StemAlgorithm`
+    /// opaque enum. Used to dispatch `Text.stem(word, algorithm)`
+    /// codegen (the algorithm arg needs translation from Buff
+    /// enum-variant literal syntax to `buff_nlp::StemAlgorithm::*`).
+    pub fn is_prelude_stem_algorithm(&self) -> bool {
+        matches!(self, Type::StemAlgorithm)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -1590,6 +1681,13 @@ impl fmt::Display for Type {
             Type::Point => f.write_str("Point"),
             Type::LineString => f.write_str("LineString"),
             Type::Polygon => f.write_str("Polygon"),
+            // T46: prelude NLP types. `Text` is namespace-only (mirrors
+            // MsgPack); `Language` is a runtime value (mirrors Point);
+            // `StemAlgorithm` is an opaque enum (only passed as arg).
+            // Display mirrors the Buff surface name in all three cases.
+            Type::Text => f.write_str("Text"),
+            Type::Language => f.write_str("Language"),
+            Type::StemAlgorithm => f.write_str("StemAlgorithm"),
         }
     }
 }

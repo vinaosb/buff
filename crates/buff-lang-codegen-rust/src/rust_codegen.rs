@@ -5876,6 +5876,75 @@ impl RustCodegen {
                     self.unsupported(&format!("Polygon.from_coords codegen parse: {e}"))
                 })
             }
+            // T46: Text.detect_language(text) -> Option<Language>. One
+            // arg (String). Wraps `buff_nlp::Text::detect_language(&text)`
+            // directly — the wrapper already returns Option<Language>
+            // (None on empty input / detection failure). NEVER panics
+            // (the wrapper uses catch_unwind per FFI guide R6). Records
+            // `buff-nlp` + `whatlang` + `rust-stemmers` +
+            // `unicode-segmentation` in extern_crates via the
+            // `program_uses_namespace("Text")` walker.
+            (T::Text, A::DetectLanguage) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_nlp::Text::detect_language(&#arg)
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Text.detect_language codegen parse: {e}"))
+                })
+            }
+            // T46: Text.stem(word, algorithm) -> String. Two args
+            // (String word, String algorithm — lowercase Snowball name
+            // like "english" / "portuguese"). Wraps
+            // `buff_nlp::Text::stem(&word,
+            // buff_nlp::StemAlgorithm::from_code(&algorithm)
+            // .unwrap_or(buff_nlp::StemAlgorithm::English))?` — the
+            // `?` propagates `NlpError` per Buff's R3 error-mapping
+            // contract; unknown algorithm names fall back to English
+            // (defensive, never silently corrupts). The wrapper uses
+            // catch_unwind per FFI guide R6.
+            (T::Text, A::Stem) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "Text.stem expects exactly 2 args (word, algorithm), got {}",
+                        args.len()
+                    )));
+                }
+                let word = self.lower_expr(&args[0])?;
+                let algorithm = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_nlp::Text::stem(
+                        &#word,
+                        buff_nlp::StemAlgorithm::from_code(&#algorithm)
+                            .unwrap_or(buff_nlp::StemAlgorithm::English),
+                    )?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Text.stem codegen parse: {e}")))
+            }
+            // T46: Text.tokenize(text) -> Vector<String>. One arg
+            // (String). Wraps `buff_nlp::Text::tokenize(&text)` —
+            // pure iterator over UAX #29 word boundaries (no panic
+            // vectors; catch_unwind omitted per the lib.rs note).
+            (T::Text, A::Tokenize) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_nlp::Text::tokenize(&#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Text.tokenize codegen parse: {e}")))
+            }
+            // T46: Text.sentences(text) -> Vector<String>. One arg
+            // (String). Wraps `buff_nlp::Text::sentences(&text)` —
+            // pure iterator over UAX #29 sentence boundaries.
+            (T::Text, A::Sentences) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_nlp::Text::sentences(&#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Text.sentences codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -7196,6 +7265,47 @@ impl RustCodegen {
                 syn::parse2(tokens).map_err(|e| {
                     self.unsupported(&format!("Polygon.intersects codegen parse: {e}"))
                 })
+            }
+            // T46: buff-nlp Language instance methods. Both infallible
+            // — the `buff_nlp::Language::code` / `name` methods return
+            // owned String directly (cloning the inner `&'static str`
+            // per FFI guide R5). Records `buff-nlp` + `whatlang` +
+            // `rust-stemmers` + `unicode-segmentation` in extern_crates
+            // via the `program_uses_namespace("Text")` walker (the
+            // walker fires on Text.* calls; Language values arise only
+            // as Text.detect_language return values, so a program that
+            // uses lang.code() always also uses Text.* — the walker
+            // registers buff-nlp correctly either way).
+            //
+            // `language.code()` -> String (ISO 639-3). Zero args.
+            M::Code if matches!(recv_ty, Type::Language) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "code() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.code()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Language.code codegen parse: {e}")))
+            }
+            // `language.name()` -> String (English name). Zero args.
+            // `Name` is shared with `faker.name()` (Faker arm below) —
+            // dispatched on receiver type.
+            M::Name if matches!(recv_ty, Type::Language) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "name() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.name()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Language.name codegen parse: {e}")))
             }
             // T37: Faker instance methods. All infallible — the
             // `buff_fake::Faker` methods return owned String / i64
@@ -10832,6 +10942,15 @@ impl RustCodegen {
             Type::Point => "buff_geo::Point",
             Type::LineString => "buff_geo::LineString",
             Type::Polygon => "buff_geo::Polygon",
+            // T46: prelude NLP types. `Text` is namespace-only (mirrors
+            // MsgPack — the arm rarely fires in practice but is required
+            // for match exhaustiveness). `Language` is a runtime value
+            // (mirrors Point). `StemAlgorithm` is an opaque enum passed
+            // only as an arg to Text.stem. All three map to
+            // `buff_nlp::*` paths.
+            Type::Text => "buff_nlp::Text",
+            Type::Language => "buff_nlp::Language",
+            Type::StemAlgorithm => "buff_nlp::StemAlgorithm",
         };
         Some(rust_path_type(rust_name))
     }
