@@ -1,0 +1,53 @@
+[package]
+name = "buff-web3"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Ethereum RPC + smart contract bindings for Buff. \
+Pure-Rust MVP wrapping the `ethers` crate (rustls-tls, no native-tls). \
+Provides Provider / Wallet / Contract / ContractMethod via a safe \
+FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "ethereum", "web3", "rpc", "blockchain"]
+categories = ["cryptography::cryptocurrencies", "api-bindings"]
+
+[lib]
+name = "buff_web3"
+path = "src/lib.rs"
+
+[dependencies]
+# T48 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# ethers 2.0 with the `rustls` feature flag (NOT native-tls — workspace
+# hard rule from AGENTS.md "Pure-Rust preference"). API surface used:
+# - `ethers::providers::{Provider, Http, Provider::try_from(url)}` for
+#   JSON-RPC connectivity (chain_id / get_block_number / get_balance).
+# - `ethers::signers::{LocalWallet, Signer}` for private-key signing
+#   (`LocalWallet::from_str(hex_key)` + `wallet.address()`).
+# - `ethers::contract::Contract` + `Contract::new(addr, abi, client)`
+#   for typed ABI method dispatch (`contract.method(name).call().await`
+#   + `.send().await`).
+# - `ethers::abi::{Contract as Abi, Token, Tokenizable}` for ABI
+#   de/serialisation (function-arg encoding + return-value decoding).
+# - `ethers::types::{Address, H256, U256, U128}` for canonical types.
+#
+# Pure-Rust on all 3 CI OSes (rustls + ring crypto backend — no native
+# C deps, no cc-rs — matches the "no C library, no Docker" hard rule
+# from T126/T127 and the wider workspace stance that pushed
+# hand-rolled lexer/parser per AGENTS.md NOTES). The `openssl-sys`
+# crate is NOT pulled because the `native-tls` feature is OFF.
+#
+# Mirrors the chrono/regex/tokio/image/lettre codegen-only linking
+# boundary (single-file `buff run` rustc path does NOT link ethers;
+# cargo-project wiring is deferred). Snapshots + extern_crates set is
+# the verifiable contract.
+ethers.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+tokio.workspace = true
