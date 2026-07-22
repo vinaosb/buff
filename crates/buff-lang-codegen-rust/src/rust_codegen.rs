@@ -1115,6 +1115,21 @@ impl RustCodegen {
             self.extern_crates.insert("geo".to_string());
             self.extern_crates.insert("geo-types".to_string());
         }
+        // T50: register `buff-xml` when the program references either
+        // of the two prelude xml namespaces (`Xml.*` /
+        // `XmlElement.*`). Also records `quick-xml` transitively (the
+        // pure-Rust streaming XML parser wrapped by
+        // `buff_xml::XmlDocument::from_str`). The walker checks both
+        // namespaces because the user typically composes Xml +
+        // XmlElement together (Xml.from_str returns XmlDocument,
+        // whose .root() / .find() return XmlElement); recording once
+        // for either is sufficient (idempotent BTreeSet insert).
+        // Mirrors the T9 Image / T43 buff-scrape / T45 buff-geo
+        // pattern. Pure-Rust, CPU-only.
+        if program_uses_namespace(decls, "Xml") || program_uses_namespace(decls, "XmlElement") {
+            self.extern_crates.insert("buff-xml".to_string());
+            self.extern_crates.insert("quick-xml".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -5807,6 +5822,44 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Xml.from_str codegen parse: {e}")))
             }
+            // T50: XmlElement.new(name, text, attrs) -> XmlElement.
+            // Three args (String, String, Map<String,String>). Wraps
+            // `buff_xml::XmlElement::new(&name, &text, attrs_vec)`
+            // where `attrs_vec` is built by `.into_iter().map(|(k, v)|
+            // (k.to_string(), v.to_string())).collect::<Vec<(String,
+            // String)>>()` — the conversion accepts any IntoIterator
+            // yielding string-like tuples (Buff Map literal codegens
+            // to `HashMap<&str, &str>`; user-passed `HashMap<String,
+            // String>` / `Vec<(String, String)>` also work). Infallible
+            // (the wrapper ctor never fails — no `?` / unwrap_or_default
+            // needed). Records `buff-xml` + `quick-xml` in extern_crates
+            // via the `program_uses_namespace("XmlElement")` walker.
+            (T::XmlElement, A::New) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "XmlElement.new expects exactly 3 args (name, text, attrs), got {}",
+                        args.len()
+                    )));
+                }
+                let name = self.lower_expr(&args[0])?;
+                let text = self.lower_expr(&args[1])?;
+                let attrs = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_xml::XmlElement::new(
+                        &(#name).to_string(),
+                        &(#text).to_string(),
+                        (#attrs)
+                            .into_iter()
+                            .map(|(k, v)| (
+                                std::string::ToString::to_string(&k),
+                                std::string::ToString::to_string(&v)
+                            ))
+                            .collect::<Vec<(String, String)>>(),
+                    )
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("XmlElement.new codegen parse: {e}")))
+            }
             // T45: Point.new(x, y) -> Point. Two args (Float, Float).
             // Wraps `buff_geo::Point::new(x, y)` (infallible — the
             // underlying geo_types::Point::new never fails). Records
@@ -6128,7 +6181,16 @@ impl RustCodegen {
             }
             // `regex.find(text)` -> Option<String>. Lowers to
             // `recv.find(text).map(|m| m.as_str().to_string())`.
-            M::Find => {
+            //
+            // T50: the `!matches!(recv_ty, Type::Xml)` guard excludes
+            // XmlDocument — its `.find()` returns `Result<&XmlElement,
+            // XmlError>` (not `Option<regex::Match>`), so the
+            // `.map(|m| m.as_str().to_string())` shape is wrong for
+            // it. The Xml-specific arm (`M::Find if matches!(recv_ty,
+            // Type::Xml)` below) handles XmlDocument via
+            // `XmlDocument::find(&recv, &arg).ok().cloned()`. Without
+            // this guard the Xml arm would be shadowed (unreachable).
+            M::Find if !matches!(recv_ty, Type::Xml) => {
                 if args.len() != 1 {
                     return Err(self.unsupported(&format!(
                         "find() expects exactly 1 arg (the text to search), got {}",
@@ -7832,6 +7894,73 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Xml.to_string codegen parse: {e}")))
+            }
+            // T50: XmlElement instance methods. Each method lowers to
+            // the matching `buff_xml::XmlElement` method. The wrapper
+            // crate's methods return `&str` / `Option<&str>` /
+            // `&[XmlElement]` — the codegen lifts these to owned Buff
+            // values (`String` / `Option<String>` / `Vec<XmlElement>`)
+            // per FFI guide R2 (Buff surfaces only owned values).
+            // Records `buff-xml` + `quick-xml` in extern_crates via
+            // the `program_uses_namespace("XmlElement")` walker.
+            //
+            // `el.name()` -> String. Zero args. Wraps
+            // `recv.name().to_string()` (lifts `&str` -> `String`).
+            M::Name if matches!(recv_ty, Type::XmlElement) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "name() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.name().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("XmlElement.name codegen parse: {e}")))
+            }
+            // `el.text()` -> Option<String>. Zero args. Wraps
+            // `recv.text().map(|s| s.to_string())` (lifts
+            // `Option<&str>` -> `Option<String>`).
+            M::Text if matches!(recv_ty, Type::XmlElement) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "text() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.text().map(|s| s.to_string())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("XmlElement.text codegen parse: {e}")))
+            }
+            // `el.attr(name)` -> Option<String>. One arg (String).
+            // Wraps `recv.attr(&name).map(|s| s.to_string())` (lifts
+            // `Option<&str>` -> `Option<String>`).
+            M::Attr if matches!(recv_ty, Type::XmlElement) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.attr(&#arg).map(|s| s.to_string())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("XmlElement.attr codegen parse: {e}")))
+            }
+            // `el.children()` -> Vector<XmlElement>. Zero args. Wraps
+            // `recv.children().to_vec()` (lifts `&[XmlElement]` ->
+            // `Vec<XmlElement>`).
+            M::Children if matches!(recv_ty, Type::XmlElement) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "children() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.children().to_vec()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("XmlElement.children codegen parse: {e}")))
             }
             // T10: AudioBuffer instance methods. Each method lowers
             // to `buff_audio::AudioBuffer::<method>`. The codegen
@@ -10928,6 +11057,11 @@ impl RustCodegen {
             // uses `Xml.*` (via the narrow
             // `program_uses_namespace("Xml")` walker).
             Type::Xml => "buff_xml::XmlDocument",
+            // T50: XmlElement. Opaque runtime-value type mapped to
+            // `buff_xml::XmlElement`. No generic parameter, no
+            // turbofish needed. Mirrors the Type::Xml arm above
+            // (T50 Xml / XmlDocument precedent).
+            Type::XmlElement => "buff_xml::XmlElement",
             // T51: MsgPack namespace. Opaque type marker — MsgPack is
             // namespace-only (`MsgPack.serialize(...)` /
             // `MsgPack.deserialize(...)` are never instantiated as

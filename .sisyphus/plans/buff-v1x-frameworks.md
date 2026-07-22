@@ -3441,7 +3441,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: AES roundtrip works. RSA sign/verify works. ECDH key agreement works. 4 examples + 15 tests (NIST test vectors).
   - **Commit**: `feat(buff-crypto-extras): MVP AES/RSA/ECC/argon2 beyond Hash/HMAC`
 
-- [ ] 50. `buff-xml` — XML Parsing
+- [x] 50. `buff-xml` — XML Parsing
 
   **What to do**: Wrap Rust `quick-xml` crate. Provide: `Xml.from_str(xml) -> Document`, `doc.root()`, `doc.find(xpath)`, `el.children()`, `el.attr(name)`, `Xml.to_string(doc)`. Streaming for large XML. Cross-language: 6/6 (lxml/quick-xml/jsoup/SAX — all stdlib or popular).
   - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `quick-xml`.

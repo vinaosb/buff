@@ -1557,6 +1557,14 @@ pub enum PreludeType {
     /// `.root()`, `.find(xpath)`, `.to_string()`. Mirrors Image / Faker
     /// as a runtime-value-with-instance-methods type. Pure-Rust, CPU-only.
     Xml,
+    /// T50: `XmlElement` — runtime-value type wrapping
+    /// `buff_xml::XmlElement`. Constructed via
+    /// `XmlElement.new(name, text, attrs)`; carries the instance
+    /// methods `.name()`, `.attr(name)`, `.text()`, `.children()`.
+    /// Also returned by `XmlDocument.root()` / `.find(xpath)`. Mirrors
+    /// Xml / Image / Faker as a runtime-value-with-instance-methods
+    /// type. Pure-Rust, CPU-only.
+    XmlElement,
     /// T51: `MsgPack` — MessagePack binary format namespace.
     /// Namespace-only (like `Log` / `Toml` / `Base64` / `Hex` / `Yaml` /
     /// `Csv`). Provides `MsgPack.serialize(value) -> Bytes` and
@@ -1926,6 +1934,12 @@ impl PreludeType {
         // `.root()`, `.find(xpath)`, `.to_string()`. Mirrors Image / Faker
         // as a runtime-value-with-instance-methods type. Pure-Rust, CPU-only.
         PreludeType::Xml,
+        // T50: XmlElement — runtime-value type wrapping
+        // `buff_xml::XmlElement`. Constructed via
+        // `XmlElement.new(name, text, attrs)`; carries the instance
+        // methods `.name()`, `.attr(name)`, `.text()`, `.children()`.
+        // Pure-Rust, CPU-only.
+        PreludeType::XmlElement,
         // T51: MsgPack — MessagePack binary format namespace.
         // Namespace-only (like Log / Toml / Base64 / Hex / Yaml /
         // Csv). Provides `MsgPack.serialize(value) -> Bytes` and
@@ -2259,6 +2273,12 @@ impl PreludeType {
             // `Xml.from_str(xml)` / `doc.root()` / `doc.find(xpath)` surface.
             // The underlying Rust type is `buff_xml::XmlDocument`.
             PreludeType::Xml => "Xml",
+            // T50: XmlElement — canonical PascalCase name matching the
+            // user-facing `XmlElement.new(name, text, attrs)` /
+            // `el.name()` / `el.attr(name)` / `el.text()` /
+            // `el.children()` surface. The underlying Rust type is
+            // `buff_xml::XmlElement`.
+            PreludeType::XmlElement => "XmlElement",
             // T51: MsgPack — MessagePack binary format namespace.
             // Namespace-only (no runtime value — mirrors Log / Toml /
             // Base64 / Hex / Yaml / Csv). The underlying Rust crate
@@ -2633,6 +2653,10 @@ impl PreludeType {
             // Returns the opaque [`Type::Xml`] variant; the codegen
             // layer maps it to `buff_xml::XmlDocument`.
             PreludeType::Xml => Type::Xml,
+            // T50: XmlElement IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::XmlElement`] variant; the
+            // codegen layer maps it to `buff_xml::XmlElement`.
+            PreludeType::XmlElement => Type::XmlElement,
             // T45: Point / LineString / Polygon ARE runtime values
             // (NOT namespace-only). Returns the matching opaque Type
             // variant; the codegen layer maps them to
@@ -4770,6 +4794,14 @@ pub fn assoc_fn_return_type(
         // contract). Returns the opaque Type::Xml variant; the codegen
         // layer maps it to `buff_xml::XmlDocument`.
         (PreludeType::Xml, PreludeAssocFn::FromStr) => Some(Type::Xml),
+        // T50: XmlElement.new(name, text, attrs) -> XmlElement. Three
+        // args (String, String, Map<String,String>). Wraps
+        // `buff_xml::XmlElement::new(&name, &text, attrs_vec)` (the
+        // codegen inserts `.into_iter().collect()` on the attrs arg
+        // to satisfy the `Vec<(String, String)>` signature — works
+        // for any IntoIterator yielding `(String, String)`). Returns
+        // the opaque Type::XmlElement variant.
+        (PreludeType::XmlElement, PreludeAssocFn::New) => Some(Type::XmlElement),
         // T45: buff-geo constructors. Point.new is infallible (wraps
         // `buff_geo::Point::new(x, y)` directly). LineString.new /
         // LineString.from_coords / Polygon.new / Polygon.from_coords
@@ -5341,6 +5373,12 @@ pub enum PreludeInstanceFn {
     /// `el.attr(name) -> String?` (T43). One arg (String). Element-
     /// only. Returns `None` when the attribute is absent.
     Attr,
+    /// `el.children() -> Vector<XmlElement>` (T50). Zero args.
+    /// XmlElement-only. Returns the (possibly empty) child element
+    /// vector. Mirrors `buff_xml::XmlElement::children` returning
+    /// `&[XmlElement]` (codegen lifts to `Vec<XmlElement>` via
+    /// `.to_vec()` — Buff surfaces owned values per FFI guide R2).
+    Children,
     /// `el.inner_html() -> String` (T43). Zero args. Element-only.
     /// Returns the inner HTML (content WITHOUT opening/closing tag).
     InnerHtml,
@@ -5609,6 +5647,11 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Root,
         PreludeInstanceFn::Find,
         PreludeInstanceFn::ToString,
+        // T50: XmlElement instance methods. `Name` (shared with Faker /
+        // Language), `Text` (shared with Document / Element), `Attr`
+        // (shared with Element) are reused via (XmlElement, X)
+        // dispatch. `Children` is XmlElement-only (new variant).
+        PreludeInstanceFn::Children,
         // T45: buff-geo instance methods (6 new variants). `Contains`
         // is shared with Cache.contains (existing variant — dispatched
         // on (Polygon, Contains) pair). The 6 new variants are geo-only.
@@ -5843,6 +5886,11 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Root => "root",
             PreludeInstanceFn::Find => "find",
             PreludeInstanceFn::ToString => "to_string",
+            // T50: XmlElement instance method name. `name` / `text` /
+            // `attr` reuse the existing shared variants (Name / Text /
+            // Attr — already mapped by the Faker / Document / Element
+            // arms above). `children` is XmlElement-only.
+            PreludeInstanceFn::Children => "children",
             // T45: buff-geo instance method names mirror the
             // `buff_geo::{Point, LineString, Polygon}` Rust method
             // names 1:1 so the codegen can splice `recv.x()` /
@@ -6396,12 +6444,27 @@ pub fn instance_fn_return_type(
         (Type::Crawler, PreludeInstanceFn::RobotsAllows) => Some(Type::bool()),
 
         // T50: Xml instance methods.
-        // `doc.root()` -> XmlElement (opaque, typed as Type::Xml for MVP).
-        (Type::Xml, PreludeInstanceFn::Root) => Some(Type::Xml),
+        // `doc.root()` -> XmlElement. Zero args.
+        (Type::Xml, PreludeInstanceFn::Root) => Some(Type::xml_element()),
         // `doc.find(xpath)` -> Option<XmlElement>. One arg (String).
-        (Type::Xml, PreludeInstanceFn::Find) => Some(Type::option(Type::Xml)),
+        (Type::Xml, PreludeInstanceFn::Find) => Some(Type::option(Type::xml_element())),
         // `doc.to_string()` -> String. Zero args.
         (Type::Xml, PreludeInstanceFn::ToString) => Some(Type::String),
+
+        // T50: XmlElement instance methods. `Name` is shared with
+        // Faker / Language; `Text` is shared with Document / Element;
+        // `Attr` is shared with Element; `Children` is XmlElement-only.
+        // All return owned Buff values (String / Option<String> /
+        // Vector<XmlElement>) per FFI guide R2 — the codegen lifts
+        // `&str` / `Option<&str>` / `&[XmlElement]` to owned.
+        // `el.name()` -> String. Zero args.
+        (Type::XmlElement, PreludeInstanceFn::Name) => Some(Type::String),
+        // `el.text()` -> Option<String>. Zero args.
+        (Type::XmlElement, PreludeInstanceFn::Text) => Some(Type::option(Type::String)),
+        // `el.attr(name)` -> Option<String>. One arg (String).
+        (Type::XmlElement, PreludeInstanceFn::Attr) => Some(Type::option(Type::String)),
+        // `el.children()` -> Vector<XmlElement>. Zero args.
+        (Type::XmlElement, PreludeInstanceFn::Children) => Some(Type::vector(Type::xml_element())),
 
         // T45: buff-geo instance methods. Point.x / Point.y return
         // Float (f64); Point.distance_to returns Float; LineString

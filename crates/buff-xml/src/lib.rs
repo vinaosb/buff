@@ -83,9 +83,7 @@ impl XmlDocument {
             return Err(XmlError::EmptyInput);
         }
         let xml_owned = xml.to_string();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            parse_document(&xml_owned)
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| parse_document(&xml_owned)));
         match result {
             Ok(Ok(doc)) => Ok(doc),
             Ok(Err(err)) => Err(err),
@@ -126,9 +124,7 @@ impl XmlDocument {
 
     /// Serialize this document back to an XML string.
     pub fn to_string(&self) -> Result<String, XmlError> {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            serialize_element(&self.root, 0)
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| serialize_element(&self.root, 0)));
         match result {
             Ok(s) => Ok(s),
             Err(_) => Err(XmlError::Panic),
@@ -137,6 +133,24 @@ impl XmlDocument {
 }
 
 impl XmlElement {
+    /// Construct a new `XmlElement` with the given name, text content,
+    /// and attributes. The element has no children.
+    ///
+    /// Used by the Buff `XmlElement.new(name, text, attrs)` constructor
+    /// (T50 prelude wiring). The `attrs` arg is a `Vec<(String, String)>`
+    /// because Buff's map-literal codegen produces a `HashMap<String,
+    /// String>` and the codegen inserts `.into_iter().collect()` to
+    /// satisfy this signature (works for any IntoIterator yielding
+    /// `(String, String)`).
+    pub fn new(name: &str, text: &str, attrs: Vec<(String, String)>) -> Self {
+        XmlElement {
+            name: name.to_string(),
+            attrs,
+            text: text.to_string(),
+            children: Vec::new(),
+        }
+    }
+
     /// The element's tag name.
     pub fn name(&self) -> &str {
         &self.name
@@ -145,7 +159,10 @@ impl XmlElement {
     /// Get the value of an attribute by name. Returns `None` if the
     /// attribute does not exist.
     pub fn attr(&self, name: &str) -> Option<&str> {
-        self.attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     /// The concatenated text content of this element (excluding child

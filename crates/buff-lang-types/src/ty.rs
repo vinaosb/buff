@@ -681,6 +681,13 @@ pub enum Type {
     /// the instance methods `.root()`, `.find(xpath)`, `.to_string()`.
     /// This is **additive** (T50). Pure-Rust, CPU-only.
     Xml,
+    /// T50: an XML element runtime value, mapped to
+    /// `buff_xml::XmlElement` at codegen time. Returned by
+    /// `XmlDocument.root()` / `XmlDocument.find(xpath)`; constructed
+    /// directly via `XmlElement.new(name, text, attrs)`. Carries the
+    /// instance methods `.name()`, `.attr(name)`, `.text()`,
+    /// `.children()`. This is **additive** (T50). Pure-Rust, CPU-only.
+    XmlElement,
     /// T45: a 2D geospatial point with `f64` coordinates, mapped to
     /// `buff_geo::Point` at codegen time. Constructed via the associated
     /// function `Point.new(x, y)`; carries the instance methods `.x()`,
@@ -1391,6 +1398,22 @@ impl Type {
         matches!(self, Type::Xml)
     }
 
+    /// T50: the XML element type. Maps to `buff_xml::XmlElement` at
+    /// codegen time. Returned by `XmlDocument.root()` /
+    /// `XmlDocument.find(xpath)`; supports the instance methods
+    /// `.name()`, `.attr(name)`, `.text()`, `.children()`.
+    pub fn xml_element() -> Self {
+        Type::XmlElement
+    }
+
+    /// T50: Returns `true` if this type is the prelude `XmlElement`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`el.name()`, `el.attr(name)`, `el.text()`, `el.children()`)
+    /// to the `buff_xml::XmlElement` lowering.
+    pub fn is_prelude_xml_element(&self) -> bool {
+        matches!(self, Type::XmlElement)
+    }
+
     /// T51: Returns `true` if this type is the prelude `MsgPack` namespace.
     /// Namespace-only (no runtime value — like Log / Toml / Base64 / Hex).
     pub fn is_prelude_msgpack(&self) -> bool {
@@ -1675,6 +1698,10 @@ impl fmt::Display for Type {
             // to `buff_xml::XmlDocument`. Display mirrors the Buff
             // surface name.
             Type::Xml => f.write_str("Xml"),
+            // T50: prelude XmlElement type. Opaque runtime-value type
+            // mapped to `buff_xml::XmlElement`. Display mirrors the
+            // Buff surface name.
+            Type::XmlElement => f.write_str("XmlElement"),
             // T45: prelude geo types. Opaque value types mapped to
             // `buff_geo::{Point, LineString, Polygon}`. Display mirrors
             // the Buff surface name.

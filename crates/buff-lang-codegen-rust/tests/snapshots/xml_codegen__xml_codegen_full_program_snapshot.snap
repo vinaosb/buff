@@ -1,0 +1,41 @@
+---
+source: crates/buff-lang-codegen-rust/tests/xml_codegen.rs
+assertion_line: 680
+expression: src
+---
+fn main() {
+    let doc: buff_xml::XmlDocument = buff_xml::XmlDocument::from_str(
+            &"<root><a>hello</a></root>",
+        )
+        .unwrap_or_default();
+    let root = buff_xml::XmlDocument::root(&doc).clone();
+    root.name;
+    root.clone().text;
+    let found = buff_xml::XmlDocument::find(&doc.clone(), &"root/a").ok().cloned();
+    buff_xml::XmlDocument::to_string(&doc.clone()).unwrap_or_default();
+    let el: buff_xml::XmlElement = buff_xml::XmlElement::new(
+        &("test").to_string(),
+        &("hello").to_string(),
+        (std::collections::HashMap::from([("key", "val")]))
+            .into_iter()
+            .map(|(k, v)| (
+                std::string::ToString::to_string(&k),
+                std::string::ToString::to_string(&v),
+            ))
+            .collect::<Vec<(String, String)>>(),
+    );
+    el.attr(&"key").map(|s| s.to_string());
+    el.clone().children().to_vec();
+    let el2: buff_xml::XmlElement = buff_xml::XmlElement::new(
+        &("x").to_string(),
+        &("y").to_string(),
+        (std::collections::HashMap::from([]))
+            .into_iter()
+            .map(|(k, v)| (
+                std::string::ToString::to_string(&k),
+                std::string::ToString::to_string(&v),
+            ))
+            .collect::<Vec<(String, String)>>(),
+    );
+    el2.name().to_string();
+}
