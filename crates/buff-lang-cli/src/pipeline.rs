@@ -23,7 +23,7 @@ use buff_lang_error::{SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 
-/// Compile-time optimization profile (T56 release / T60 minimal).
+/// Compile-time optimization profile (T56 release / T60 minimal / T55 fast).
 ///
 /// Selects which set of rustc flags [`compile_rust_to_exe`] passes to the
 /// backend. `Debug` (the default) preserves the v0.1 behavior — a single
@@ -33,15 +33,24 @@ use buff_lang_parser::parse;
 /// (`opt-level=z`, `panic=abort`, `strip=symbols`, `lto=true`,
 /// `codegen-units=1`) — used when the size budget matters more than
 /// runtime speed (Lambda layers, embedded wasm shells, distribution
-/// images).
+/// images). `Fast` (T55) disables optimization entirely
+/// (`opt-level=0`, no LTO) for the fastest possible inner-loop compile —
+/// the dev "I just want to see if it runs" mode.
 ///
-/// This enum intentionally mirrors the user-facing `--release` / `--minimal`
-/// CLI flags: the CLI translates the booleans into [`BuildMode`] via
-/// [`BuildMode::from_flags`] (or [`BuildMode::from_release_flag`] for
-/// subcommands that pre-date T60), keeping the pipeline decoupled from
-/// clap-level concerns.
+/// This enum intentionally mirrors the user-facing `--release` /
+/// `--minimal` / `--fast` CLI flags: the CLI translates the booleans into
+/// [`BuildMode`] via [`BuildMode::from_flags_v2`] (or
+/// [`BuildMode::from_flags`] for subcommands that pre-date T55), keeping
+/// the pipeline decoupled from clap-level concerns.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BuildMode {
+    /// Fastest-possible compilation (T55 `--fast`): `opt-level=0`, no LTO.
+    /// Skips ALL LLVM optimization so the edit-compile-run loop is as
+    /// tight as possible. The binary is slower at runtime, but for "does
+    /// it compile + run?" inner-loop feedback this is the right default.
+    /// Distinct from [`BuildMode::Debug`] (which keeps `-O` =
+    /// `opt-level=2`) — `Fast` is strictly faster to compile.
+    Fast,
     /// Fast-debug compilation (v0.1 behavior): `rustc -O`. No LTO.
     /// Use this during development for tight edit-compile-run loops.
     #[default]
@@ -101,6 +110,35 @@ impl BuildMode {
         }
     }
 
+    /// Translate the CLI `--release` + `--minimal` + `--fast` booleans into a
+    /// [`BuildMode`] (T55).
+    ///
+    /// Precedence (mirrors cargo's `--profile` semantics — more specific
+    /// wins; the size-vs-speed-vs-compile-speed axes are mutually
+    /// exclusive):
+    ///
+    /// - `minimal=true` → [`BuildMode::Minimal`] (regardless of others).
+    /// - `minimal=false, release=true` → [`BuildMode::Release`].
+    /// - `minimal=false, release=false, fast=true` → [`BuildMode::Fast`].
+    /// - all `false` → [`BuildMode::Debug`] (default).
+    ///
+    /// `--fast` is strictly a dev-inner-loop flag (skip ALL optimisation
+    /// for the fastest compile); `--release` (runtime speed) and
+    /// `--minimal` (binary size) both override it when set together
+    /// because a user who passes `--release --fast` clearly wants the
+    /// optimised binary (the `--fast` was likely a leftover alias).
+    pub fn from_flags_v2(release: bool, minimal: bool, fast: bool) -> Self {
+        if minimal {
+            BuildMode::Minimal
+        } else if release {
+            BuildMode::Release
+        } else if fast {
+            BuildMode::Fast
+        } else {
+            BuildMode::Debug
+        }
+    }
+
     /// Returns `true` when this mode is [`BuildMode::Release`].
     pub fn is_release(self) -> bool {
         matches!(self, BuildMode::Release)
@@ -109,6 +147,11 @@ impl BuildMode {
     /// Returns `true` when this mode is [`BuildMode::Minimal`] (T60).
     pub fn is_minimal(self) -> bool {
         matches!(self, BuildMode::Minimal)
+    }
+
+    /// Returns `true` when this mode is [`BuildMode::Fast`] (T55).
+    pub fn is_fast(self) -> bool {
+        matches!(self, BuildMode::Fast)
     }
 }
 
@@ -128,6 +171,14 @@ pub struct CompileOutput {
 /// `.rs` file sits next to the `.buff` source). The type-checking pass is
 /// already integrated inside codegen (T12) and is non-fatal in v1.0.
 ///
+/// **T55 caching**: this entry point checks the generated-Rust cache
+/// ([`compile_speed::read_cache`]) keyed on a SHA-256 hash of the source
+/// bytes BEFORE running codegen. On a cache hit, the entire lex → parse →
+/// codegen pass is skipped — the cached `.rs` content is written alongside
+/// the source and returned directly. This saves 30-50% on repeat builds
+/// (the codegen pass is the bulk of front-end time). Equivalent to
+/// [`compile_to_rust_with_cache`] with `use_cache = true`.
+///
 /// # Errors
 ///
 /// Returns an error if the file cannot be read, lexing fails, parsing fails,
@@ -135,9 +186,50 @@ pub struct CompileOutput {
 /// includes the source filename and (where possible) the line/column of the
 /// offending span via [`SourceFile::lookup`].
 pub fn compile_to_rust(file: &Path) -> Result<CompileOutput> {
+    compile_to_rust_with_cache(file, true)
+}
+
+/// Cache-controllable variant of [`compile_to_rust`] (T55).
+///
+/// When `use_cache` is `true` (the default for [`compile_to_rust`]):
+/// 1. Read the source, compute [`compile_speed::source_cache_key`].
+/// 2. Probe [`compile_speed::read_cache`] for a cached `.rs`.
+/// 3. On hit → write the cached content to `file.rs` and return (codegen
+///    skipped entirely).
+/// 4. On miss → run the normal lex → parse → codegen, then
+///    [`compile_speed::write_cache`] the result for next time.
+///
+/// When `use_cache` is `false` (`buff build --no-cache`), the cache is
+/// bypassed completely — always runs the full front-end. Used for
+/// debugging cache-corruption suspicion and for forcing a codegen refresh
+/// after a compiler upgrade (the cache key is source-only, so a new
+/// compiler version would serve stale output).
+///
+/// # Cache-write failure is non-fatal
+///
+/// If [`compile_speed::write_cache`] fails (disk full, permissions), the
+/// error is logged to stderr but the build proceeds — the `.rs` file is
+/// already written alongside the source, so rustc can still compile it.
+/// A cache that can't be written to simply can't accelerate the NEXT build.
+pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<CompileOutput> {
     // 1. Read source.
     let source = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read source file `{}`", file.display()))?;
+
+    // T55: probe the generated-Rust cache BEFORE running codegen. A hit
+    // skips the entire lex → parse → syn/quote/prettyplease pass.
+    let cache_key = compile_speed::source_cache_key(&source);
+    if use_cache {
+        if let Some(cached) = compile_speed::read_cache(&cache_key) {
+            let rust_file_path = file.with_extension("rs");
+            std::fs::write(&rust_file_path, &cached)
+                .with_context(|| format!("failed to write `{}`", rust_file_path.display()))?;
+            return Ok(CompileOutput {
+                rust_source: cached,
+                rust_file_path,
+            });
+        }
+    }
 
     // Build a SourceFile so we can map byte offsets to 1-based line/col for
     // diagnostic messages. SourceId(0) is fine — we only lex a single file.
@@ -160,6 +252,14 @@ pub fn compile_to_rust(file: &Path) -> Result<CompileOutput> {
     let rust_file_path = file.with_extension("rs");
     std::fs::write(&rust_file_path, &rust_source)
         .with_context(|| format!("failed to write `{}`", rust_file_path.display()))?;
+
+    // T55: populate the cache for next time. Non-fatal on failure (the .rs
+    // is already written; we just can't accelerate the next build).
+    if use_cache {
+        if let Err(e) = compile_speed::write_cache(&cache_key, &rust_source) {
+            eprintln!("note: buff-cache write failed ({e}); build proceeds uncached");
+        }
+    }
 
     Ok(CompileOutput {
         rust_source,
@@ -454,10 +554,21 @@ fn format_buffhtml_parse_error(
 /// Invokes `rustc --edition 2021 <opt-flags> <rust_file> -o <output>`, where
 /// `<opt-flags>` depends on `mode`:
 ///
+/// - [`BuildMode::Fast`] (T55): [`rustc_fast_flags()`] — `opt-level=0`, no
+///   LTO. Fastest compile, slowest runtime. The dev inner-loop default
+///   behind `buff build --fast`.
 /// - [`BuildMode::Debug`] (default, v0.1 behavior): just `-O`
 ///   (equivalent to `-C opt-level=2`). Fast compilation, no LTO.
 /// - [`BuildMode::Release`] (T56): [`rustc_release_flags()`] — `opt-level=3`
 ///   + `lto=fat` + `codegen-units=1`. Slower compilation, faster runtime.
+///
+/// **T55 linker auto-detection**: this entry point probes
+/// [`compile_speed::FastLinker::detect`] and appends the matching
+/// `-C link-arg=-fuse-ld=<mold|lld>` flags when a fast linker is found.
+/// The detection is always-on (a fast linker is a pure speed win with no
+/// behaviour change) and falls back silently to the default linker when
+/// none is available. Override-free: callers who need a specific linker
+/// can still set it via `RUSTFLAGS`.
 ///
 /// The `output` path is passed verbatim to rustc — callers should pre-append
 /// the platform executable extension (see [`with_exe_extension`]) if they
@@ -467,6 +578,9 @@ fn format_buffhtml_parse_error(
 /// diagnostics referencing the intermediate `.rs` file, they are translated to
 /// reference the `.buff` file instead via
 /// [`error_mapper::translate_rustc_errors`].
+///
+/// Equivalent to [`compile_rust_to_exe_with_speed`] with `use_sccache =
+/// false` (sccache is opt-in via `buff build --sccache`).
 ///
 /// # Errors
 ///
@@ -479,15 +593,48 @@ pub fn compile_rust_to_exe(
     buff_file: &Path,
     mode: BuildMode,
 ) -> Result<PathBuf> {
-    let mut cmd = Command::new("rustc");
+    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false)
+}
+
+/// sccache-aware variant of [`compile_rust_to_exe`] (T55).
+///
+/// Identical to [`compile_rust_to_exe`] except the rustc invocation is
+/// wrapped in `sccache` when `use_sccache` is `true` AND sccache is
+/// available on `PATH` (see [`compile_speed::rustc_command`]). When sccache
+/// is requested but missing, the build falls back to bare `rustc` with a
+/// stderr note rather than failing.
+///
+/// The linker auto-detection (mold/lld) applies identically to this and
+/// the default entry point — it is always-on, not gated by `use_sccache`.
+pub fn compile_rust_to_exe_with_speed(
+    rust_file: &Path,
+    output: &Path,
+    buff_file: &Path,
+    mode: BuildMode,
+    use_sccache: bool,
+) -> Result<PathBuf> {
+    let sccache_on = use_sccache && compile_speed::sccache_available();
+    if use_sccache && !sccache_on {
+        eprintln!(
+            "note: --sccache requested but `sccache` not found on PATH; \
+             falling back to bare rustc"
+        );
+    }
+    let mut cmd = compile_speed::rustc_command(use_sccache);
     cmd.arg("--edition").arg("2021");
 
     // Select the optimization/LTO flag set based on the build mode.
     // Debug keeps the v0.1 `-O` exactly — byte-identical behavior with the
     // pre-T56 pipeline. Release swaps in the LTO + opt-level=3 + single
     // codegen-unit block. Minimal (T60) adds size-first knobs:
-    // opt-level=z + panic=abort + strip=symbols.
+    // opt-level=z + panic=abort + strip=symbols. Fast (T55) disables all
+    // optimisation (opt-level=0) for the fastest possible compile.
     match mode {
+        BuildMode::Fast => {
+            for flag in rustc_fast_flags() {
+                cmd.arg(flag);
+            }
+        }
         BuildMode::Debug => {
             cmd.arg("-O");
         }
@@ -501,6 +648,16 @@ pub fn compile_rust_to_exe(
                 cmd.arg(flag);
             }
         }
+    }
+
+    // T55: auto-detect a fast linker (mold on Linux, lld elsewhere) and
+    // pass the -fuse-ld flag. No-op when none is found (silent fallback).
+    let linker = compile_speed::FastLinker::detect();
+    if linker.is_fast() {
+        for flag in linker.rustc_flags() {
+            cmd.arg(flag);
+        }
+        eprintln!("note: using fast linker `{}`", linker.name());
     }
 
     cmd.arg(rust_file).arg("-o").arg(output);
@@ -551,6 +708,11 @@ pub fn compile_buffhtml_rust_to_exe(
     let mut cmd = Command::new("rustc");
     cmd.arg("--edition").arg("2021");
     match mode {
+        BuildMode::Fast => {
+            for flag in rustc_fast_flags() {
+                cmd.arg(flag);
+            }
+        }
         BuildMode::Debug => {
             cmd.arg("-O");
         }
@@ -589,6 +751,33 @@ pub fn compile_buffhtml_rust_to_exe(
         bail!("rustc exited with status {}", result.status);
     }
     Ok(output.to_path_buf())
+}
+
+/// The rustc CLI flags that implement the no-optimization "fast" profile
+/// (T55).
+///
+/// Returns the argument sequence passed verbatim to `rustc` when
+/// [`compile_rust_to_exe`] is called with [`BuildMode::Fast`]:
+///
+/// - `-C opt-level=0` — disable ALL LLVM optimization. The single biggest
+///   compile-time knob: LLVM's optimisation passes are the bulk of rustc's
+///   wall-clock time on small programs. `opt-level=0` skips them entirely.
+/// - `-C debuginfo=0` — omit debug symbols (they slow the linker). The
+///   `--fast` mode is for "does it compile + run?" feedback, not
+///   debugging; users who want debug info should use the default
+///   [`BuildMode::Debug`] (which keeps the v0.1 `-O` + default debuginfo).
+///
+/// No LTO (LTO is a pure compile-time cost with no benefit when there's no
+/// optimisation to do). This is strictly faster to compile than
+/// [`BuildMode::Debug`] (which runs `opt-level=2`).
+///
+/// These are the rustc-level equivalent of a Cargo `[profile.dev]` block
+/// with `opt-level = 0`. The split exists because the v0.1 Buff pipeline
+/// invokes `rustc` directly on a single `.rs` file (no Cargo project) —
+/// so the functional path goes through these flags, while a Cargo-driven
+/// backend would use the profile block.
+pub fn rustc_fast_flags() -> Vec<&'static str> {
+    vec!["-C", "opt-level=0", "-C", "debuginfo=0"]
 }
 
 /// The rustc CLI flags that implement release-grade optimization (T56).

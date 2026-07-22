@@ -1,0 +1,40 @@
+// T55 — medium-size project for compile-speed benchmarking.
+// Build: `buff build --fast examples/medium_project.buff`
+//
+// A realistic-size single file (~6 functions) that exercises the codegen
+// path enough to show a measurable difference between `--fast`,
+// default (debug `-O`), and `--release`. Use with `buff bench-compile`
+// to record timing across commits.
+
+func square(n: Int) -> Int:
+    return n * n
+
+func sum_up_to(n: Int) -> Int:
+    if n <= 0:
+        return 0
+    return n + sum_up_to(n - 1)
+
+func max_of(a: Int, b: Int) -> Int:
+    if a > b:
+        return a
+    return b
+
+func clamp(value: Int, lo: Int, hi: Int) -> Int:
+    if value < lo:
+        return lo
+    if value > hi:
+        return hi
+    return value
+
+func factorial(n: Int) -> Int:
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+func main():
+    print("medium project demo")
+    print(square(7))
+    print(sum_up_to(10))
+    print(max_of(3, 8))
+    print(clamp(15, 0, 10))
+    print(factorial(5))

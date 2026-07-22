@@ -3492,7 +3492,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: `Simd<Float, 4>` operations produce correct results vs scalar equivalents. Benchmark shows ≥3x speedup on dot product vs scalar loop. 4 examples + 15 tests.
   - **Commit**: `feat(buff-simd): MVP Simd<T,N> first-class SIMD types (Mojo-inspired)`
 
-- [ ] 55. Compile-Speed Optimization Program (V/Go-inspired)
+- [x] 55. Compile-Speed Optimization Program (V/Go-inspired)
 
   **What to do**: Buff's #1 DX risk is inheriting Rust's slow compiles (30-90s for medium projects). This task owns a multi-pronged compile-speed program:
   1. **Incremental compilation audit** — verify Cargo incremental is on by default in `buff build`; measure improvement.

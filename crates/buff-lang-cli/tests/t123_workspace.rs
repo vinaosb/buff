@@ -371,7 +371,8 @@ fn integration_builds_two_member_workspace() {
     let _cwd_guard = CwdGuard(prev.clone());
 
     // Drive the library API: buff build (no file → workspace mode).
-    buff_lang_cli::commands::build::run(None, None, false).expect("build must succeed");
+    buff_lang_cli::commands::build::run(None, None, false, false, false, false, false, None)
+        .expect("build must succeed");
 
     // Assert both member binaries were compiled. cargo build places
     // binaries at target/debug/<name>(.exe).

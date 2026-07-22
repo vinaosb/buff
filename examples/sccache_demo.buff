@@ -1,0 +1,26 @@
+// T55 — sccache + fast linker demo.
+// Build: `buff build --sccache examples/sccache_demo.buff`
+//
+// The `--sccache` flag wraps the rustc invocation in `sccache` for
+// cross-project crate caching (complementary to the per-source codegen
+// cache). When sccache is on PATH:
+//   - rustc becomes `sccache rustc ...`
+//   - `.cargo/config.toml` is written so bare `cargo build`/`cargo test`
+//     also pick up sccache.
+//
+// A fast linker (mold on Linux, lld elsewhere) is auto-detected and used
+// silently — no flag needed. This gives a 2-5x link-speedup with no
+// behaviour change.
+//
+// When sccache is NOT installed, the build falls back to bare rustc with
+// a stderr note (never fails the build).
+
+func distance(x1: Int, y1: Int, x2: Int, y2: Int) -> Int:
+    let dx = x2 - x1
+    let dy = y2 - y1
+    return dx * dx + dy * dy
+
+func main():
+    let d = distance(0, 0, 3, 4)
+    print("sccache + fast linker demo")
+    print(d)

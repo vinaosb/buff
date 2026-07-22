@@ -5,6 +5,7 @@
 
 pub mod add;
 pub mod backtrace;
+pub mod bench_compile;
 pub mod build;
 pub mod check;
 pub mod clean;

@@ -106,6 +106,53 @@ pub enum Command {
         #[arg(long)]
         minimal: bool,
 
+        /// Build with the no-optimization "fast" profile (T55):
+        /// `-C opt-level=0 -C debuginfo=0`. Fastest possible compile,
+        /// slowest runtime. The dev inner-loop mode for "does it
+        /// compile + run?" feedback. Distinct from `--minimal` (which
+        /// optimizes for binary SIZE) and `--release` (which optimizes
+        /// for runtime SPEED) — `--fast` optimizes for COMPILE speed.
+        ///
+        /// Lowest precedence: `--minimal` and `--release` both override
+        /// it when set together (a user who passes `--release --fast`
+        /// clearly wants the optimised binary).
+        ///
+        /// Opt-in: default (omitted) keeps the fast-debug profile
+        /// (`-O`, which runs `opt-level=2`). `--fast` is strictly faster
+        /// to compile than the default because it skips LLVM optimisation
+        /// entirely.
+        #[arg(long)]
+        fast: bool,
+
+        /// Bypass the generated-Rust cache (T55). By default `buff build`
+        /// caches the codegen output keyed on a SHA-256 hash of the
+        /// `.buff` source — a cache hit skips the entire lex → parse →
+        /// codegen pass. `--no-cache` forces a full front-end re-run.
+        ///
+        /// Use this when you suspect stale cache content (e.g. after a
+        /// compiler upgrade — the cache key is source-only, so a new
+        /// compiler version would serve the old codegen output).
+        ///
+        /// Opt-in: default (omitted) keeps caching ON.
+        #[arg(long)]
+        no_cache: bool,
+
+        /// Wrap the rustc invocation in `sccache` for cross-project crate
+        /// caching (T55). When sccache is on `PATH`, the rustc call
+        /// becomes `sccache rustc ...` so compiled crates are shared
+        /// across projects. Also writes a `.cargo/config.toml` snippet
+        /// (`rustc-wrapper = "sccache"`) so subsequent bare `cargo
+        /// build` / `cargo test` invocations go through sccache too.
+        ///
+        /// When sccache is requested but NOT installed, the build falls
+        /// back to bare `rustc` with a stderr note (never fails the build).
+        ///
+        /// Opt-in: default (omitted) does NOT use sccache (it has side
+        /// effects — runs a background server, writes to
+        /// `~/.cache/sccache/`).
+        #[arg(long)]
+        sccache: bool,
+
         /// T1: cross-compile for `<TRIPLE>` (e.g.
         /// `x86_64-unknown-linux-gnu`, `wasm32-wasi`). Forwards to
         /// cargo's `--target` flag. Pass `list` to print the
@@ -645,6 +692,28 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         buffmap: Option<PathBuf>,
     },
+
+    /// `buff bench-compile` — measure + record compile times across
+    /// project sizes (T55).
+    ///
+    /// Synthesises deterministic small/medium/large `.buff` fixtures
+    /// (5 / 50 / 200 functions), times the full pipeline
+    /// (codegen + rustc) on each, and appends a dated row to
+    /// `benchmarks/compile-speed.md`. When a previous report exists,
+    /// prints a delta comparison (faster / slower / unchanged) so
+    /// regressions are visible at a glance.
+    ///
+    /// The benchmark is deterministic (same fixtures every run) so
+    /// cross-commit comparisons are meaningful. Wall-clock times are
+    /// host-dependent — use the delta column, not absolute numbers,
+    /// to judge regressions.
+    ///
+    /// # Output
+    ///
+    /// - Prints a per-tier summary table to stdout.
+    /// - Appends a dated row to `benchmarks/compile-speed.md`
+    ///   (created if missing) in the current directory.
+    BenchCompile,
 }
 
 /// Subcommands of `buff jupyter`.

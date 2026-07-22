@@ -1,0 +1,19 @@
+// T55 — fast-build demo.
+// Build: `buff build --fast examples/fast_build_demo.buff`
+//
+// The `--fast` flag disables ALL LLVM optimisation (`opt-level=0`) so the
+// edit-compile-run loop is as tight as possible. The binary is slower at
+// runtime, but for "does it compile + run?" inner-loop feedback this is
+// the right profile. Distinct from `--release` (runtime speed) and
+// `--minimal` (binary size) — `--fast` optimises for COMPILE speed.
+//
+// Repeat builds are also cached: a second `buff build` on UNCHANGED
+// source skips codegen entirely (cache hit). Use `--no-cache` to bypass.
+
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+func main():
+    let result = add(3, 4)
+    print("fast build demo")
+    print(result)

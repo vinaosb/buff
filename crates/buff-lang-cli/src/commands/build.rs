@@ -3,16 +3,18 @@
 //! Two modes:
 //!
 //! 1. **Single-file mode** (v0.1 behavior): `buff build <FILE> [--release]
-//!    [--minimal]` compiles a single `.buff` file via the Buff pipeline →
-//!    rustc. The `--target` flag is IGNORED in this mode (single-file rustc
-//!    does not cross-compile). The `--minimal` flag (T60) selects the
+//!    [--minimal] [--fast]` compiles a single `.buff` file via the Buff
+//!    pipeline → rustc. The `--target` flag is IGNORED in this mode (single-file
+//!    rustc does not cross-compile). The `--minimal` flag (T60) selects the
 //!    size-minimized rustc flag set (`opt-level=z` + `panic=abort` +
-//!    `strip=symbols` + `lto=true` + `codegen-units=1`).
+//!    `strip=symbols` + `lto=true` + `codegen-units=1`). The `--fast` flag
+//!    (T55) selects the no-optimization profile (`opt-level=0` +
+//!    `debuginfo=0`) for the fastest possible compile.
 //!
 //! 2. **Project mode** (T120 / T1 multi-file linking): `buff build
-//!    [--release] [--minimal] [--target <TRIPLE>]` (no file argument) looks
-//!    for `buff.toml` in the current directory, generates `Cargo.toml`,
-//!    and shells out to `cargo build`. T1 wires this through
+//!    [--release] [--minimal] [--fast] [--target <TRIPLE>]` (no file
+//!    argument) looks for `buff.toml` in the current directory, generates
+//!    `Cargo.toml`, and shells out to `cargo build`. T1 wires this through
 //!    [`project_pipeline::compile_project_to_cargo`] which walks every
 //!    transitively-imported module, builds a module graph (cycle
 //!    detection + visibility check), and flattens everything into a
@@ -21,12 +23,20 @@
 //!    `RUSTFLAGS` env var with the size-minimization flags before invoking
 //!    cargo (so the same flag set applies whether the build goes through
 //!    bare rustc or cargo-driven compilation).
+//!
+//! T55 compile-speed knobs (all opt-in):
+//!
+//! - `--no-cache` — bypass the generated-Rust cache (force full codegen).
+//! - `--sccache` — wrap rustc in `sccache` for cross-project crate caching
+//!   (also writes `.cargo/config.toml` so bare `cargo` picks it up).
+//! - `--fast` — lowest-precedence profile; `--minimal`/`--release` override.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
 
+use crate::compile_speed;
 use crate::config::{self, BuffConfig};
 use crate::pipeline;
 use crate::project_pipeline::{
@@ -34,7 +44,7 @@ use crate::project_pipeline::{
 };
 
 /// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]
-/// [--minimal] [--target <TRIPLE>]`.
+/// [--minimal] [--fast] [--no-cache] [--sccache] [--target <TRIPLE>]`.
 ///
 /// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior;
 /// the `--target` flag is ignored in this mode).
@@ -43,15 +53,26 @@ use crate::project_pipeline::{
 /// is forwarded to cargo; `--target list` prints the supported-target list
 /// and exits without building.
 ///
-/// `minimal` (T60) takes precedence over `release` when both are set —
+/// Precedence: `minimal` (T60) > `release` (T56) > `fast` (T55) > debug —
 /// mirrors cargo's `--profile` semantics (a more-specific profile wins).
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     file: Option<&Path>,
     output: Option<&Path>,
     release: bool,
     minimal: bool,
+    fast: bool,
+    no_cache: bool,
+    sccache: bool,
     target: Option<&str>,
 ) -> Result<()> {
+    // T55: when --sccache is requested, write the .cargo/config.toml
+    // snippet so bare `cargo build`/`cargo test` also pick up sccache.
+    // Best-effort — a write failure logs a warning but does not fail the
+    // build (the `buff build` path still wraps rustc directly).
+    if sccache {
+        write_sccache_config_best_effort();
+    }
     match file {
         Some(f) => {
             if let Some(t) = target {
@@ -64,9 +85,31 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release, minimal)
+            build_single_file(f, output, release, minimal, fast, no_cache, sccache)
         }
-        None => build_project(release, minimal, target),
+        None => build_project(release, minimal, fast, target),
+    }
+}
+
+/// Write `[build] rustc-wrapper = "sccache"` to `.cargo/config.toml` so
+/// subsequent bare `cargo` invocations also use sccache (T55).
+///
+/// Best-effort: creates `.cargo/` on demand, overwrites `config.toml`
+/// idempotently. A write failure logs a stderr note and returns `Ok(())`
+/// — the `buff build` rustc-wrapper path still works regardless.
+fn write_sccache_config_best_effort() {
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let cargo_dir = cwd.join(".cargo");
+    if let Err(e) = std::fs::create_dir_all(&cargo_dir) {
+        eprintln!("note: could not create `{}` ({e})", cargo_dir.display());
+        return;
+    }
+    let config_path = cargo_dir.join("config.toml");
+    if let Err(e) = std::fs::write(&config_path, compile_speed::sccache_cargo_config_toml()) {
+        eprintln!("note: could not write `{}` ({e})", config_path.display());
     }
 }
 
@@ -74,26 +117,31 @@ pub fn run(
 /// (v0.1 behavior; T133 extends to `.buffhtml`).
 ///
 /// Dispatches on file extension:
-/// - `.buff` (default): [`pipeline::compile_to_rust`] →
-///   [`pipeline::compile_rust_to_exe`].
+/// - `.buff` (default): [`pipeline::compile_to_rust_with_cache`] →
+///   [`pipeline::compile_rust_to_exe_with_speed`].
 /// - `.buffhtml` (T133): [`pipeline::compile_buffhtml_to_rust`] →
 ///   [`pipeline::compile_buffhtml_rust_to_exe`] with the post-format
 ///   [`SpanMap`] wired through for span-aware error mapping.
 ///
 /// `minimal` (T60) selects [`pipeline::BuildMode::Minimal`]; `release`
-/// (T56) selects [`pipeline::BuildMode::Release`]; default is
-/// [`pipeline::BuildMode::Debug`]. When both are set, `minimal` wins.
+/// (T56) selects [`pipeline::BuildMode::Release`]; `fast` (T55) selects
+/// [`pipeline::BuildMode::Fast`]; default is
+/// [`pipeline::BuildMode::Debug`]. Precedence: minimal > release > fast.
+#[allow(clippy::too_many_arguments)]
 fn build_single_file(
     file: &Path,
     output: Option<&Path>,
     release: bool,
     minimal: bool,
+    fast: bool,
+    no_cache: bool,
+    sccache: bool,
 ) -> Result<()> {
     let stem_output: PathBuf = match output {
         Some(p) => pipeline::with_exe_extension(p),
         None => pipeline::with_exe_extension(&file.with_extension("")),
     };
-    let mode = pipeline::BuildMode::from_flags(release, minimal);
+    let mode = pipeline::BuildMode::from_flags_v2(release, minimal, fast);
 
     let is_buffhtml = file
         .extension()
@@ -114,8 +162,16 @@ fn build_single_file(
         return Ok(());
     }
 
-    let compile_out = pipeline::compile_to_rust(file)?;
-    pipeline::compile_rust_to_exe(&compile_out.rust_file_path, &stem_output, file, mode)?;
+    // T55: cache ON by default (--no-cache bypasses); sccache opt-in.
+    let use_cache = !no_cache;
+    let compile_out = pipeline::compile_to_rust_with_cache(file, use_cache)?;
+    pipeline::compile_rust_to_exe_with_speed(
+        &compile_out.rust_file_path,
+        &stem_output,
+        file,
+        mode,
+        sccache,
+    )?;
     eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());
     eprintln!("  rust:   {}", compile_out.rust_file_path.display());
@@ -136,7 +192,7 @@ fn build_single_file(
 /// workspace-root `Cargo.toml` declares the matching `[profile.minimal]`
 /// block — callers using `cargo build --profile minimal` directly get the
 /// identical behavior.
-fn build_project(release: bool, minimal: bool, target: Option<&str>) -> Result<()> {
+fn build_project(release: bool, minimal: bool, fast: bool, target: Option<&str>) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
 
     // --target list short-circuits BEFORE doing any project work so the
@@ -164,7 +220,7 @@ fn build_project(release: bool, minimal: bool, target: Option<&str>) -> Result<(
     // Workspace mode (T123) — delegate to build_workspace.
     if let Some(c) = &cfg {
         if c.is_workspace() {
-            return build_workspace(&cwd, c, release, minimal);
+            return build_workspace(&cwd, c, release, minimal, fast);
         }
     }
 
@@ -172,7 +228,7 @@ fn build_project(release: bool, minimal: bool, target: Option<&str>) -> Result<(
     let entry = find_project_entry(&cwd)?;
     let project_dir = cwd.join("buff_target_project");
     let compile_out = compile_project_to_cargo(&entry, Some(&project_dir), cfg.as_ref())?;
-    let build_mode = pipeline::BuildMode::from_flags(release, minimal);
+    let build_mode = pipeline::BuildMode::from_flags_v2(release, minimal, fast);
 
     cargo_build_project(
         &compile_out.project_dir,
@@ -240,7 +296,13 @@ fn find_project_entry(cwd: &Path) -> Result<PathBuf> {
 /// `minimal` (T60) sets `RUSTFLAGS` with the size-minimization flags
 /// before invoking cargo — same flag set the single-file path uses
 /// via [`pipeline::rustc_minimal_flags`].
-fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool, minimal: bool) -> Result<()> {
+fn build_workspace(
+    root: &Path,
+    cfg: &BuffConfig,
+    release: bool,
+    minimal: bool,
+    fast: bool,
+) -> Result<()> {
     // `build_workspace` is only reached after `cfg.is_workspace()` returned
     // true in `build_project`, so workspace is guaranteed Some. Use
     // `context` (not `expect`) to honour the no-panic repo rule — if a
@@ -318,7 +380,7 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool, minimal: bool) 
         anyhow::bail!("cargo build exited with status {}", result.status);
     }
 
-    let mode = pipeline::BuildMode::from_flags(release, minimal);
+    let mode = pipeline::BuildMode::from_flags_v2(release, minimal, fast);
     let mode_str = mode_label(mode);
     eprintln!(
         "Built workspace with {} member(s) ({mode_str})",
@@ -332,6 +394,7 @@ fn build_workspace(root: &Path, cfg: &BuffConfig, release: bool, minimal: bool) 
 /// stays free of presentation concerns — this is a CLI-output helper.
 fn mode_label(mode: pipeline::BuildMode) -> &'static str {
     match mode {
+        pipeline::BuildMode::Fast => "fast",
         pipeline::BuildMode::Debug => "debug",
         pipeline::BuildMode::Release => "release",
         pipeline::BuildMode::Minimal => "minimal",

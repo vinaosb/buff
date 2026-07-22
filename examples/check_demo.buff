@@ -1,0 +1,26 @@
+// T55 — standalone typecheck demo (no codegen, no rustc).
+// Check: `buff check examples/check_demo.buff`
+//
+// `buff check` runs lex → parse → type inference WITHOUT codegen or
+// rustc. It's the fastest feedback path — completes in <2s on a medium
+// project. Type errors exit 1; naming-convention warnings (e.g.
+// camelCase function names) exit 0 by default (pass `-D` to treat as
+// errors).
+//
+// Use `buff check` in the tight inner loop; reserve `buff build` for
+// when you need an actual binary.
+
+func is_even(n: Int) -> Int:
+    if n % 2 == 0:
+        return 1
+    return 0
+
+func classify(n: Int) -> Int:
+    if is_even(n) == 1:
+        return n
+    return 0 - n
+
+func main():
+    print("check demo")
+    print(classify(42))
+    print(classify(7))

@@ -18,12 +18,18 @@ fn main() -> Result<()> {
             output,
             release,
             minimal,
+            fast,
+            no_cache,
+            sccache,
             target,
         } => buff_lang_cli::commands::build::run(
             file.as_deref(),
             output.as_deref(),
             release,
             minimal,
+            fast,
+            no_cache,
+            sccache,
             target.as_deref(),
         ),
         Command::Run {
@@ -140,5 +146,6 @@ fn main() -> Result<()> {
         Command::Backtrace { log, buffmap } => {
             buff_lang_cli::commands::backtrace::run(&log, buffmap.as_deref())
         }
+        Command::BenchCompile => buff_lang_cli::commands::bench_compile::run(),
     }
 }

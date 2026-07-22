@@ -34,6 +34,7 @@
 pub mod check;
 pub mod cli;
 pub mod commands;
+pub mod compile_speed;
 pub mod config;
 pub mod coverage;
 pub mod error_mapper;
