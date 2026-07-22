@@ -424,6 +424,18 @@ pub enum Type {
     /// stored deadline (lazy eviction on get/contains). Distributed
     /// Redis backend DEFERRED to v1.18+ per the T31 task spec.
     Cache,
+    /// T44 (v1.17 frameworks): the internationalization runtime-value
+    /// type. Maps to `buff_i18n::I18n` at codegen time. Constructed
+    /// via `I18n.new(locale)` / `I18n.with_fallback(locale, fallback)`;
+    /// carries the instance methods `.add_resource(locale, ftl)`,
+    /// `.load(locale)`, `.set_fallback(locale)`,
+    /// `.available_locales()`, `.current_locale()`,
+    /// `.fallback_locale()`, `.translate(key)`,
+    /// `.translate_with_args(key, args)`, `.has_message(key)`,
+    /// `.warnings()`. Wraps `Arc<Mutex<I18nInner>>` (Send + Sync,
+    /// clone-cheap). Per T44 spec: NO machine translation, NO RTL
+    /// layout helpers (UI concern).
+    I18n,
     /// T7 (v1.13 frameworks): the columnar-DataFrame runtime-value
     /// type. Maps to `buff_dataframe::DataFrame` at codegen time.
     /// Constructed via `DataFrame.from_csv(path)` /
@@ -557,6 +569,90 @@ pub enum Type {
     /// methods on `&str` / integer values; NO derive macros (T29
     /// must-not #1: "no compile-time macro validation").
     Validator,
+    /// T42: the `Email` runtime-value type — a buildable email
+    /// message wrapping `buff_email::Email` at codegen time.
+    /// Constructed via the prelude associated function
+    /// `Email.new(from, to, subject)` (validates RFC 5322 mailboxes
+    /// up front via `lettre::message::Mailbox::from_str`); carries
+    /// the builder instance methods `email.body(text)` /
+    /// `email.html(template, context_json)` / `email.attach(path)`,
+    /// each consuming `self` and returning a new `Email` (Buff "no
+    /// visible references" stance — builders consume self, matches
+    /// the Validator / HttpClient surface).
+    ///
+    /// This is **additive** (T42): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Email`. Underlying Rust
+    /// type is `buff_email::Email` (a struct wrapping the
+    /// constituent parts — from / to / subject / optional plain
+    /// body / optional rendered HTML body / queued attachments).
+    /// Pure-Rust, CPU-only. The MVP wraps `lettre::Message::builder`
+    /// + `lettre::message::{MultiPart, Attachment}` at send time.
+    Email,
+    /// T42: the `SmtpClient` runtime-value type — a configured SMTP
+    /// transport wrapping `buff_email::SmtpClient` at codegen time.
+    /// Constructed via the prelude associated function
+    /// `SmtpClient.new(host, port, username, password)` (configures
+    /// STARTTLS via `lettre::SmtpTransport::relay`); carries the
+    /// single instance method `client.send(email) -> Result<Void,
+    /// EmailError>`. The underlying TLS is pure-Rust rustls (NOT
+    /// native-tls per AGENTS.md hard rule).
+    ///
+    /// This is **additive** (T42): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `SmtpClient`. Underlying
+    /// Rust type is `buff_email::SmtpClient` (a struct wrapping
+    /// `lettre::SmtpTransport`). Pure-Rust, CPU-only. IMAP / POP3
+    /// receiving explicitly deferred to v1.22+ per T42 must-not #1.
+    SmtpClient,
+    /// T43: the `Document` runtime-value type — a parsed HTML
+    /// document wrapping `buff_scrape::Document` (itself wrapping a
+    /// cached `String` source + lazy `scraper::Html` rebuild per
+    /// access). Constructed via the associated function
+    /// `Document.from_html(html)`; carries 4 instance methods:
+    /// `doc.select(css)`, `doc.text()`, `doc.html()`,
+    /// `doc.title()`. Pure-Rust scraper backend (no JS rendering
+    /// per T43 spec).
+    ///
+    /// This is **additive** (T43): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Document`. Underlying
+    /// Rust type is `buff_scrape::Document` (a struct wrapping an
+    /// owned `String` source — `scraper::Html` is rebuilt per
+    /// `select`/`text`/`title` call because scraper's `Html` is
+    /// `!Send + !Sync`; the wrapper stays `Send + Sync + Clone`).
+    Document,
+    /// T43: the `Element` runtime-value type — a single selected
+    /// HTML element wrapping `buff_scrape::Element`. Constructed as
+    /// the return value of `Document.select(css)` /
+    /// `Element.select(css)`; carries 5 instance methods:
+    /// `el.text()`, `el.attr(name)`, `el.html()`, `el.inner_html()`,
+    /// `el.select(css)`. Owned (`'static + Send + Sync + Clone`) —
+    /// text/html/inner_html/attrs are cached eagerly at construction.
+    ///
+    /// This is **additive** (T43). The `is_numeric` / `is_float_like`
+    /// / `is_integer_like` / `is_gpu_eligible` predicates all return
+    /// `false` for `Element`. Underlying Rust type is
+    /// `buff_scrape::Element` (a struct wrapping owned `String`s +
+    /// `BTreeMap<String, String>` attrs — no raw pointers, no
+    /// lifetimes, satisfies FFI guide R1/R4/R5).
+    Element,
+    /// T43: the `Crawler` runtime-value type — an HTTP crawler
+    /// wrapping `buff_scrape::Crawler`. Constructed via the
+    /// associated function `Crawler.new(seed_url)`; carries 4
+    /// instance methods: `crawler.seed()`, `crawler.fetch(url)`,
+    /// `crawler.crawl(max_pages)`, `crawler.robots_allows(url)`.
+    /// Single-host BFS, robots.txt-aware (fail-open on missing
+    /// robots.txt). NO distributed crawling (forbidden by T43 spec).
+    ///
+    /// This is **additive** (T43). Underlying Rust type is
+    /// `buff_scrape::Crawler` (a struct wrapping
+    /// `reqwest::blocking::Client` + seed `String`). Pure-Rust TLS
+    /// via rustls (NOT native-tls).
+    Crawler,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -966,6 +1062,25 @@ impl Type {
         matches!(self, Type::Cache)
     }
 
+    /// T44: the internationalization runtime-value type. Maps to
+    /// `buff_i18n::I18n` at codegen time. Constructed via
+    /// `I18n.new(locale)` / `I18n.with_fallback(locale, fallback)`;
+    /// carries 10 instance methods (add_resource / load /
+    /// set_fallback / available_locales / current_locale /
+    /// fallback_locale / translate / translate_with_args / has_message
+    /// / warnings).
+    pub fn i18n() -> Self {
+        Type::I18n
+    }
+
+    /// T44: Returns `true` if this type is the prelude `I18n`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`i18n.translate(k)`, `i18n.add_resource(l, f)`,
+    /// `i18n.load(l)`, ...) to the `buff_i18n::I18n` lowering.
+    pub fn is_prelude_i18n(&self) -> bool {
+        matches!(self, Type::I18n)
+    }
+
     /// T7: the columnar-DataFrame runtime-value type. Maps to
     /// `buff_dataframe::DataFrame` at codegen time. Constructed via
     /// `DataFrame.from_csv(path)` / `DataFrame.from_json(path)`;
@@ -1058,6 +1173,88 @@ impl Type {
     /// `buff_validate::Validator` lowering.
     pub fn is_prelude_validator(&self) -> bool {
         matches!(self, Type::Validator)
+    }
+
+    /// T42: the buildable-email type. Maps to `buff_email::Email` at
+    /// codegen time. Constructed via `Email.new(from, to, subject)`;
+    /// supports the builder methods `email.body(text)`,
+    /// `email.html(template, context_json)`, `email.attach(path)`.
+    pub fn email() -> Self {
+        Type::Email
+    }
+
+    /// T42: Returns `true` if this type is the prelude `Email`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`email.body(...)`, `email.html(...)`, `email.attach(...)`)
+    /// to the `buff_email::Email` lowering.
+    pub fn is_prelude_email(&self) -> bool {
+        matches!(self, Type::Email)
+    }
+
+    /// T42: the SMTP-client type. Maps to `buff_email::SmtpClient` at
+    /// codegen time. Constructed via `SmtpClient.new(host, port,
+    /// username, password)`; supports the instance method
+    /// `client.send(email)`.
+    pub fn smtp_client() -> Self {
+        Type::SmtpClient
+    }
+
+    /// T42: Returns `true` if this type is the prelude `SmtpClient`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`client.send(email)`) to the `buff_email::SmtpClient`
+    /// lowering.
+    pub fn is_prelude_smtp_client(&self) -> bool {
+        matches!(self, Type::SmtpClient)
+    }
+
+    /// T43: the HTML-Document type. Maps to `buff_scrape::Document`
+    /// at codegen time. Constructed via `Document.from_html(html)`;
+    /// supports 4 instance methods (`select`, `text`, `html`,
+    /// `title`).
+    pub fn document() -> Self {
+        Type::Document
+    }
+
+    /// T43: Returns `true` if this type is the prelude `Document`
+    /// runtime value (parsed HTML tree). Used to dispatch instance
+    /// method calls (`doc.select(...)`, `doc.text()`, ...,
+    /// `doc.title()`) to the `buff_scrape::Document` lowering.
+    pub fn is_prelude_document(&self) -> bool {
+        matches!(self, Type::Document)
+    }
+
+    /// T43: the HTML-Element type. Maps to `buff_scrape::Element`
+    /// at codegen time. Constructed as the return value of
+    /// `Document.select(css)` / `Element.select(css)`; supports 5
+    /// instance methods (`text`, `attr`, `html`, `inner_html`,
+    /// `select`).
+    pub fn element() -> Self {
+        Type::Element
+    }
+
+    /// T43: Returns `true` if this type is the prelude `Element`
+    /// runtime value (single selected HTML element). Used to
+    /// dispatch instance method calls (`el.text()`, `el.attr(...)`,
+    /// ...) to the `buff_scrape::Element` lowering.
+    pub fn is_prelude_element(&self) -> bool {
+        matches!(self, Type::Element)
+    }
+
+    /// T43: the HTTP-crawler type. Maps to `buff_scrape::Crawler`
+    /// at codegen time. Constructed via `Crawler.new(seed_url)`;
+    /// supports 4 instance methods (`seed`, `fetch`, `crawl`,
+    /// `robots_allows`).
+    pub fn crawler() -> Self {
+        Type::Crawler
+    }
+
+    /// T43: Returns `true` if this type is the prelude `Crawler`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`crawler.fetch(...)`, `crawler.crawl(...)`, ...,
+    /// `crawler.robots_allows(...)`) to the `buff_scrape::Crawler`
+    /// lowering.
+    pub fn is_prelude_crawler(&self) -> bool {
+        matches!(self, Type::Crawler)
     }
 
     /// Returns `true` if this type **must** run on the CPU (never GPU).
@@ -1204,6 +1401,7 @@ impl fmt::Display for Type {
             // `buff_cache::Cache`. Display mirrors the Buff surface
             // name (`Cache`).
             Type::Cache => f.write_str("Cache"),
+            Type::I18n => f.write_str("I18n"),
             Type::DataFrame => f.write_str("DataFrame"),
             Type::Audio => f.write_str("AudioBuffer"),
             // T12: prelude ECS types. Opaque value types whose
@@ -1222,6 +1420,20 @@ impl fmt::Display for Type {
             // to `buff_validate::Validator`. Display mirrors the
             // Buff surface name.
             Type::Validator => f.write_str("Validator"),
+            // T42: prelude email type. Opaque value type mapped to
+            // `buff_email::Email`. Display mirrors the Buff surface
+            // name.
+            Type::Email => f.write_str("Email"),
+            // T42: prelude SMTP client type. Opaque value type mapped
+            // to `buff_email::SmtpClient`. Display mirrors the Buff
+            // surface name.
+            Type::SmtpClient => f.write_str("SmtpClient"),
+            // T43: prelude scrape types. Opaque value types mapped to
+            // `buff_scrape::{Document, Element, Crawler}`. Display
+            // mirrors the Buff surface names.
+            Type::Document => f.write_str("Document"),
+            Type::Element => f.write_str("Element"),
+            Type::Crawler => f.write_str("Crawler"),
         }
     }
 }

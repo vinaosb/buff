@@ -1,0 +1,32 @@
+# T42 .buff example: HTML email via handlebars template (FORWARD-DECL).
+#
+# Requires the coordinated Type::Email + Type::SmtpClient codegen
+# lowering arms (this task, T42 finish). The prelude registry entries
+# `PreludeType::Email` + `PreludeType::SmtpClient` + assoc-fn +
+# instance-fn arms are added in the same T42 finish commit as this
+# example. See crates/buff-email/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+
+from "email" import Email, SmtpClient
+
+func main():
+    template = "<h1>Welcome, {{name}}!</h1><ul>{% for item in items %}<li>{{item}}</li>{% endfor %}</ul>"
+    context = "{\"name\":\"Buff\",\"items\":[\"Onboarding\",\"Tips\",\"Community\"]}"
+
+    email = Email.new(
+        from: "noreply@buff.dev",
+        to: "user@example.com",
+        subject: "Welcome to Buff",
+    )
+    email = email.body(text: "Welcome to Buff! (plain text fallback)")
+    email = email.html(template: template, context: context)
+    print("built: ${email}")
+
+    client = SmtpClient.new(
+        host: "smtp.mailtrap.io",
+        port: 587,
+        username: "mockuser",
+        password: "mockpass",
+    )
+    client.send(email: email)
+    print("sent HTML email.")

@@ -3367,7 +3367,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Subscribe/publish delivers events to all subscribers. Multiple subscribers receive same event. 3 examples + 10 tests.
   - **Commit**: `feat(buff-pubsub): MVP in-process event bus`
 
-- [ ] 42. `buff-email` — SMTP + Templated Email
+- [x] 42. `buff-email` — SMTP + Templated Email
 
   **What to do**: Wrap Rust `lettre` crate. Provide: `Email.new(from, to, subject)`, `email.body(text)`, `email.html(template, context)`, `email.attach(path)`, `SmtpClient.send(email)`. Templating via T19 buff-template (handlebars). Cross-language prevalence: 5/6 (emails/nodemailer/gomail/lettre/JavaMail/MailKit).
   - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `lettre`, `handlebars` (existing).
@@ -3376,7 +3376,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Send plain-text email via SMTP. HTML template renders. Attachments work. 3 examples + 10 tests (use mailtrap or mock SMTP).
   - **Commit**: `feat(buff-email): MVP SMTP client with templates`
 
-- [ ] 43. `buff-scrape` — HTML Parsing + Crawling
+- [x] 43. `buff-scrape` — HTML Parsing + Crawling
 
   **What to do**: Wrap Rust `scraper` crate (HTML parsing) + `fantoccini` (headless browser via WebDriver). Provide: `Document.from_html(html)`, `doc.select(css) -> Vector<Element>`, `el.text()`, `el.attr(name)`, `Crawler.new(seed_url)`, `crawler.follow_links(policy)`. Cross-language prevalence: 6/6 (BeautifulSoup/cheerio/colly/scraper/Jsoup/HtmlAgilityPack).
   - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `scraper`, `fantoccini` (optional), `reqwest` (existing via T33).
@@ -3385,7 +3385,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Parse static HTML. CSS selector queries work. Crawler respects robots.txt. 3 examples + 12 tests.
   - **Commit**: `feat(buff-scrape): MVP HTML parsing + crawling`
 
-- [ ] 44. `buff-i18n` — Internationalization
+- [x] 44. `buff-i18n` — Internationalization
 
   **What to do**: Wrap Rust `fluent` crate (Mozilla's i18n system) + `rust-i18n` for simpler workflows. Provide: `t!(key, locale: "en")` macro-like function, `I18n.load(locale)`, `I18n.available_locales()`. Message catalogs in `locales/<locale>.ftl` (Fluent) or `.toml`. Pluralization, gender, ICU MessageFormat. Cross-language prevalence: 6/6 (babel/i18next/gotext/fluent/ICU4J/IStringLocalizer).
   - **LOC budget**: ≤2500, ≤15 fns. **External deps**: `fluent`, `rust-i18n`, `unic-langid`.

@@ -1,0 +1,31 @@
+[package]
+name = "buff-email"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+SMTP + templated email for Buff. \
+Pure-Rust MVP wrapping the `lettre` crate (rustls-tls, NOT native-tls) \
++ `handlebars` for templates. \
+Per T42 spec: Email.new / email.body / email.html / email.attach / \
+SmtpClient.new / SmtpClient.send.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "email", "smtp", "lettre", "handlebars"]
+categories = ["email", "web-programming"]
+
+[lib]
+name = "buff_email"
+path = "src/lib.rs"
+
+[dependencies]
+# T42 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+lettre.workspace = true
+handlebars.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

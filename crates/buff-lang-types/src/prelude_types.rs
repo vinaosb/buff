@@ -788,6 +788,27 @@ pub enum PreludeType {
     /// task spec ("If problematic, defer distributed to v1.18+ and
     /// ship in-memory MVP only").
     Cache,
+    /// `I18n` - the internationalization runtime-value type (T44).
+    /// EXPERIMENTAL badge per T44 spec. Wraps the in-tree pure-Rust
+    /// `buff-i18n` crate backed by Mozilla's `fluent-bundle` +
+    /// `unic-langid` (BCP 47). Per T44 spec: NO machine translation,
+    /// NO RTL layout helpers (UI concern). `I18n.new(locale)` /
+    /// `I18n.with_fallback(locale, fallback)` ctors + MVP instance
+    /// methods `i18n.add_resource(locale, ftl)` / `i18n.load(locale)`
+    /// / `i18n.translate(key)`. The other 7 instance methods
+    /// (SetFallback / AvailableLocales / CurrentLocale /
+    /// FallbackLocale / TranslateWithArgs / HasMessage / Warnings)
+    /// are available on the Rust type but codegen-wiring is deferred
+    /// to a follow-up to keep the shared-zone footprint minimal.
+    /// `is_namespace_only()` returns `false` (this is the Nth
+    /// runtime-value-with-rich-instance-methods type after Regex /
+    /// URL / Path / Process / Image / DataFrame / Audio / Faker /
+    /// Cache). `buff_type()` returns [`Type::I18n`]. Records
+    /// `buff-i18n` + `fluent-bundle` + `unic-langid` in codegen
+    /// `extern_crates` when a Buff program uses `I18n.*` (mirrors
+    /// the chrono / regex / tracing / image codegen-only linking
+    /// boundary). Pure-Rust only — no cc-rs, no native deps.
+    I18n,
     /// `Signal` - the time-domain signal-processing namespace (T11).
     /// EXPERIMENTAL badge per T11 spec. Wraps the in-tree pure-Rust
     /// `buff-dsp` crate (CPU-only via `rustfft` + `realfft` +
@@ -1248,6 +1269,37 @@ pub enum PreludeType {
     /// no lifetimes; every public body catch_unwind-wrapped per FFI
     /// guide R6).
     Validator,
+    /// T39 (v1.17 frameworks wave 6): the `Archive` namespace —
+    /// Zip / Tar / Gz / Zstd compression. Wraps the in-tree pure-Rust
+    /// `buff-archive` crate (`buff_archive::Archive::*`) backed by
+    /// `zip` 2 (deflate-only — pure-Rust, NO C libzstd transitively),
+    /// `tar` 0.4, `flate2` 1.x (pure-Rust `miniz_oxide` backend), and
+    /// `ruzstd` 0.8 (pure-Rust — NOT the canonical `zstd` crate which
+    /// wraps C libzstd via cc-rs, violating the "no C library" rule).
+    /// Two assoc fns:
+    /// - `Archive.compress_dir(input_dir, output_path, format: String)`
+    ///   -> Void. Three args. Wraps
+    ///   `buff_archive::Archive::compress_dir(input_dir, output_path,
+    ///   buff_archive::Format::from_extension(&format)
+    ///   .unwrap_or(buff_archive::Format::Zip))?` (the `?` propagates
+    ///   `ArchiveError` per Buff's R3 error-mapping contract; the
+    ///   String→Format conversion lets the Buff surface use a plain
+    ///   String for the format arg, matching the cross-language
+    ///   convention of `tar -cf x.tar.zst` / `gzip file`).
+    /// - `Archive.extract(archive_path, output_dir)` -> Void. Two
+    ///   args. Wraps `buff_archive::Archive::extract(archive_path,
+    ///   output_dir)?` (the format is auto-detected from the file's
+    ///   extension inside the wrapper).
+    ///
+    /// This is a namespace-only module (mirror Log / Toml / Math /
+    /// Config / Observe): `buff_type()` returns `Type::Void`. The
+    /// crate records `buff-archive` + `zip` + `tar` + `flate2` +
+    /// `ruzstd` in codegen `extern_crates` when a Buff program uses
+    /// `Archive.*` (mirrors the chrono / regex / tracing / image
+    /// codegen-only linking boundary). Pure-Rust, no native deps.
+    /// NO 7z, RAR, BZip2, encryption-at-rest — all forbidden by the
+    /// T39 task spec.
+    Archive,
     /// T34 (v1.16 frameworks wave 4): the `JWT` namespace — JSON Web
     /// Token encode/decode. Wraps the in-tree pure-Rust `buff-auth`
     /// crate (`buff_auth::jwt_encode` / `buff_auth::jwt_decode`) which
@@ -1363,6 +1415,106 @@ pub enum PreludeType {
     /// Records `buff-auth` in codegen `extern_crates` (shared walker
     /// — no extra deps for the in-tree RBAC engine).
     Rbac,
+    /// T42 (v1.17 frameworks wave): the `Email` runtime-value type —
+    /// a buildable email message wrapping `buff_email::Email` at
+    /// codegen time (which in turn wraps `lettre::Message::builder`).
+    /// Constructed via the prelude associated function
+    /// `Email.new(from, to, subject)` (validates RFC 5322 mailboxes);
+    /// carries the three builder instance methods `email.body(text)`,
+    /// `email.html(template, context_json)`, `email.attach(path)`,
+    /// each consuming `self` and returning a new `Email` (Buff "no
+    /// visible references" stance — mirrors Validator / HttpClient).
+    ///
+    /// `Email` IS a runtime value (NOT namespace-only like Log /
+    /// Toml / JWT). `buff_type()` returns [`Type::Email`];
+    /// `is_namespace_only()` returns `false`. The `buff-email` +
+    /// `lettre` + `handlebars` crates are recorded in codegen
+    /// `extern_crates` when a Buff program uses `Email.*` (mirrors
+    /// the chrono / regex / tracing codegen-only linking boundary).
+    /// Pure-Rust, CPU-only. TLS via rustls (NOT native-tls).
+    ///
+    /// FFI-safe: complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md` (no raw pointers; owned
+    /// Email at the boundary; fallible ops return
+    /// `Result<T, EmailError>`; Email is `Clone + Send + Sync`; no
+    /// lifetimes; every public body catch_unwind-wrapped per FFI
+    /// guide R6).
+    Email,
+    /// T42 (v1.17 frameworks wave): the `SmtpClient` runtime-value
+    /// type — a configured SMTP transport wrapping
+    /// `buff_email::SmtpClient` at codegen time (which in turn wraps
+    /// `lettre::SmtpTransport::relay(...).port(...).credentials(...)
+    /// .build()`). Constructed via the prelude associated function
+    /// `SmtpClient.new(host, port, username, password)` (configures
+    /// STARTTLS — pure-Rust rustls, NOT native-tls); carries the
+    /// single instance method `client.send(email) -> Result<Void,
+    /// EmailError>`.
+    ///
+    /// `SmtpClient` IS a runtime value. `buff_type()` returns
+    /// [`Type::SmtpClient`]; `is_namespace_only()` returns `false`.
+    /// The `buff-email` + `lettre` crates are recorded in codegen
+    /// `extern_crates` when a Buff program uses `SmtpClient.*`
+    /// (shared walker with `Email.*` — mirrors the chrono / regex /
+    /// tracing codegen-only linking boundary). Pure-Rust, CPU-only.
+    ///
+    /// FFI-safe: complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md`. IMAP / POP3 receiving
+    /// explicitly deferred to v1.22+ per T42 must-not #1.
+    SmtpClient,
+    /// T43 (v1.17 frameworks): the `Document` runtime-value type —
+    /// a parsed HTML document wrapping `buff_scrape::Document` at
+    /// codegen time. Constructed via the prelude associated
+    /// function `Document.from_html(html)` (zero network I/O —
+    /// `Document` is purely an in-memory parse; for HTTP fetch use
+    /// `Crawler.fetch`); carries 4 instance methods:
+    /// `doc.select(css) -> Vector<Element>`, `doc.text() -> String`,
+    /// `doc.html() -> String`, `doc.title() -> String?`.
+    ///
+    /// `Document` IS a runtime value. `buff_type()` returns
+    /// [`Type::Document`]; `is_namespace_only()` returns `false`.
+    /// The `buff-scrape` + `scraper` crates are recorded in codegen
+    /// `extern_crates` when a Buff program uses `Document.*` (mirrors
+    /// the chrono / regex / tracing codegen-only linking boundary).
+    /// Pure-Rust, CPU-only. NO JS rendering (deferred to an optional
+    /// `fantoccini` path per T43 spec).
+    ///
+    /// FFI-safe: complies with all 6 rules from
+    /// `crates/buff-lang-ffi-guide/GUIDE.md`. `scraper::Html` is
+    /// `!Send + !Sync`; the wrapper caches the source `String` and
+    /// re-parses per access so the Buff-visible `Document` IS
+    /// `Send + Sync + Clone`.
+    Document,
+    /// T43: the `Element` runtime-value type — a single selected
+    /// HTML element wrapping `buff_scrape::Element` at codegen time.
+    /// Constructed as the return value of `Document.select(css)` /
+    /// `Element.select(css)` (NOT via an associated function —
+    /// Elements come from queries only). Carries 5 instance methods:
+    /// `el.text() -> String`, `el.attr(name) -> String?`,
+    /// `el.html() -> String`, `el.inner_html() -> String`,
+    /// `el.select(css) -> Vector<Element>`.
+    ///
+    /// `Element` IS a runtime value. `buff_type()` returns
+    /// [`Type::Element`]; `is_namespace_only()` returns `false`.
+    /// Owned values: text / html / inner_html / attrs are cached
+    /// eagerly at construction (cheap clones + `Send + Sync + Clone`).
+    Element,
+    /// T43: the `Crawler` runtime-value type — an HTTP crawler
+    /// wrapping `buff_scrape::Crawler` at codegen time. Constructed
+    /// via the prelude associated function
+    /// `Crawler.new(seed_url)`; carries 4 instance methods:
+    /// `crawler.seed() -> String`, `crawler.fetch(url) -> Document`,
+    /// `crawler.crawl(max_pages) -> Vector<String>`,
+    /// `crawler.robots_allows(url) -> Bool`. Single-host BFS;
+    /// robots.txt-aware (fail-open on missing rules). NO distributed
+    /// crawling (forbidden by T43 spec).
+    ///
+    /// `Crawler` IS a runtime value. `buff_type()` returns
+    /// [`Type::Crawler`]; `is_namespace_only()` returns `false`.
+    /// The `buff-scrape` + `reqwest` crates are recorded in codegen
+    /// `extern_crates` when a Buff program uses `Crawler.*` (shared
+    /// walker with `Document.*`). Pure-Rust TLS via rustls (NOT
+    /// native-tls).
+    Crawler,
 }
 
 impl PreludeType {
@@ -1502,6 +1654,20 @@ impl PreludeType {
         // commit (T31 owns the full Cache surface). Distributed
         // Redis backend deferred to v1.18+ per the T31 spec.
         PreludeType::Cache,
+        // T44: I18n — internationalization runtime-value type wrapping
+        // `buff_i18n::I18n` (Mozilla `fluent-bundle` + `unic-langid`).
+        // Mirrors Image / Cache / Faker: codegen lowering lives in the
+        // buff-i18n crate; the codegen arm + PreludeAssocFn/InstanceFn
+        // entries for the MVP ctor + instance-method surface (New /
+        // WithFallback / AddResource / Load / Translate) are added in
+        // the same commit (T44 owns the full MVP surface). The other
+        // 7 instance methods (SetFallback / AvailableLocales /
+        // CurrentLocale / FallbackLocale / TranslateWithArgs /
+        // HasMessage / Warnings) are available in the Rust crate but
+        // codegen-wiring deferred to a follow-up to keep the shared-
+        // zone footprint minimal. EXPERIMENTAL badge per T44 spec.
+        // Pure-Rust only — NO machine translation, NO RTL helpers.
+        PreludeType::I18n,
         // T11: Signal / Window / Spectrum - three signal-processing
         // types wrapping the in-tree `buff-dsp` crate. Signal + Window
         // are namespace-only modules (mirror Log / Toml / Math /
@@ -1618,6 +1784,43 @@ impl PreludeType {
         // + `validator` + `serde_json` in codegen `extern_crates` when
         // a Buff program uses `Validator.*`. Pure-Rust, no native deps.
         PreludeType::Validator,
+        // T39: Archive — namespace-only module (mirror Log / Toml /
+        // Math / Config / Observe) wrapping the in-tree pure-Rust
+        // `buff-archive` crate. Two assoc fns: `Archive.compress_dir`
+        // / `Archive.extract`. Records `buff-archive` + `zip` + `tar`
+        // + `flate2` + `ruzstd` in codegen `extern_crates` when a
+        // Buff program uses `Archive.*`. Pure-Rust, no native deps
+        // (NOT the canonical `zstd` crate — see the variant rustdoc
+        // above + root Cargo.toml workspace rationale).
+        PreludeType::Archive,
+        // T42: Email — runtime-value type with rich instance methods.
+        // Mirrors Image / Faker / HttpClient / Validator. Codegen
+        // lowering lives in the buff-email crate
+        // (`buff_email::Email::*`); the codegen arm +
+        // PreludeAssocFn/InstanceFn entries are added in this same
+        // commit (T42 owns the full Email surface).
+        PreludeType::Email,
+        // T42: SmtpClient — runtime-value type wrapping
+        // `buff_email::SmtpClient` (lettre SmtpTransport). Mirrors
+        // Email: codegen lowering in the buff-email crate, codegen
+        // arm + PreludeAssocFn/InstanceFn entries in this same
+        // commit.
+        PreludeType::SmtpClient,
+        // T43: Document / Element / Crawler — three runtime-value
+        // types wrapping the in-tree pure-Rust `buff-scrape` crate
+        // (`buff_scrape::{Document, Element, Crawler}`) backed by
+        // `scraper` (HTML parse + CSS selectors) + `reqwest`
+        // (rustls-tls HTTP). All three are runtime-value-with-rich-
+        // instance-methods types (after Regex / URL / Path / Process
+        // / Image / Cache / HttpClient). Codegen lowering lives in
+        // the buff-scrape crate; the codegen arm +
+        // PreludeAssocFn/InstanceFn entries are added in this same
+        // commit (T43 owns the full scrape surface). Pure-Rust,
+        // CPU-only; NO JS rendering (T43 spec); NO distributed
+        // crawling (T43 spec).
+        PreludeType::Document,
+        PreludeType::Element,
+        PreludeType::Crawler,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -1809,6 +2012,10 @@ impl PreludeType {
             // `Cache.new(...)` / `cache.get(...)` / `cache.set(...)`
             // surface. The underlying Rust type is `buff_cache::Cache`.
             PreludeType::Cache => "Cache",
+            // T44: I18n - canonical name matching the user-facing
+            // `I18n.new(...)` / `i18n.translate(...)` surface. The
+            // underlying Rust type is `buff_i18n::I18n`.
+            PreludeType::I18n => "I18n",
             // T10: AudioBuffer - canonical PascalCase name matching the
             // user-facing `AudioBuffer.from_path(...)` /
             // `AudioBuffer.from_samples(...)` surface. The underlying
@@ -1857,6 +2064,26 @@ impl PreludeType {
             // / `validator.validate(map)` surface. The codegen splices
             // `buff_validate::Validator::new()` directly.
             PreludeType::Validator => "Validator",
+            // T42: Email — canonical PascalCase name matching the
+            // user-facing `Email.new(from, to, subject)` /
+            // `email.body(text)` / `email.html(template, ctx)` /
+            // `email.attach(path)` surface. The codegen splices
+            // `buff_email::Email::new(...)` directly.
+            PreludeType::Email => "Email",
+            // T42: SmtpClient — canonical PascalCase name matching the
+            // user-facing `SmtpClient.new(host, port, user, pass)` /
+            // `client.send(email)` surface. The codegen splices
+            // `buff_email::SmtpClient::new(...)` directly.
+            PreludeType::SmtpClient => "SmtpClient",
+            // T43: Document / Element / Crawler — canonical PascalCase
+            // names matching the user-facing `Document.from_html(html)`
+            // / `doc.select(css)` / `el.text()` / `Crawler.new(seed)`
+            // / `crawler.fetch(url)` / `crawler.crawl(max_pages)`
+            // surfaces. The codegen splices
+            // `buff_scrape::{Document, Element, Crawler}::*` directly.
+            PreludeType::Document => "Document",
+            PreludeType::Element => "Element",
+            PreludeType::Crawler => "Crawler",
             // T30: Config — canonical PascalCase name matching the
             // user-facing `Config.new()` / `cfg.set_default(key, val)` /
             // `cfg.load_file(path)` / `cfg.load_env(prefix)` /
@@ -1878,6 +2105,13 @@ impl PreludeType {
             PreludeType::OAuth2Client => "OAuth2Client",
             PreludeType::Password => "Password",
             PreludeType::Rbac => "Rbac",
+            // T39: Archive — canonical PascalCase name matching the
+            // user-facing `Archive.compress_dir(...)` /
+            // `Archive.extract(...)` surface. The underlying Rust
+            // namespace is `buff_archive::Archive` (a unit struct
+            // namespace marker — never instantiated). Namespace-only
+            // module (mirrors Log / Toml / Math / Config / Observe).
+            PreludeType::Archive => "Archive",
         }
     }
 
@@ -2077,6 +2311,10 @@ impl PreludeType {
             // Returns the opaque [`Type::Cache`] variant; the codegen
             // layer maps it to `buff_cache::Cache`.
             PreludeType::Cache => Type::Cache,
+            // T44: I18n IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::I18n`] variant; the codegen
+            // layer maps it to `buff_i18n::I18n`.
+            PreludeType::I18n => Type::I18n,
             // T10: AudioBuffer IS a runtime value (NOT namespace-only).
             // Returns the opaque [`Type::Audio`] variant; the codegen
             // layer maps it to `buff_audio::AudioBuffer`.
@@ -2134,6 +2372,22 @@ impl PreludeType {
             // Returns the opaque [`Type::Validator`] variant; the
             // codegen layer maps it to `buff_validate::Validator`.
             PreludeType::Validator => Type::Validator,
+            // T42: Email IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Email`] variant; the codegen
+            // layer maps it to `buff_email::Email`.
+            PreludeType::Email => Type::Email,
+            // T42: SmtpClient IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::SmtpClient`] variant; the
+            // codegen layer maps it to `buff_email::SmtpClient`.
+            PreludeType::SmtpClient => Type::SmtpClient,
+            // T43: Document / Element / Crawler ARE runtime values
+            // (NOT namespace-only). Returns the opaque
+            // [`Type::Document`] / [`Type::Element`] /
+            // [`Type::Crawler`] variants; the codegen layer maps them
+            // to `buff_scrape::{Document, Element, Crawler}`.
+            PreludeType::Document => Type::Document,
+            PreludeType::Element => Type::Element,
+            PreludeType::Crawler => Type::Crawler,
             // T30: Config is a namespace-only module (mirror Log / Toml /
             // Math / Random). The namespace itself has no value
             // representation; only its associated functions are callable.
@@ -2169,6 +2423,15 @@ impl PreludeType {
             // `buff_auth::OAuth2Client::*` / `buff_auth::Rbac::*` paths.
             PreludeType::OAuth2Client => Type::Unknown,
             PreludeType::Rbac => Type::Unknown,
+            // T39: Archive is a namespace-only module (mirror Log /
+            // Toml / Math / Config / Observe). The namespace itself
+            // has no value representation; only its associated
+            // functions (`Archive.compress_dir` / `Archive.extract`)
+            // are callable. Both return Void (the side-effecting
+            // archive operations write to disk; the Buff user reads
+            // the result via the filesystem). Mirrors the Log / Toml /
+            // Config / Observe / Hash / HMAC / OS pattern exactly.
+            PreludeType::Archive => Type::Void,
         }
     }
 
@@ -2216,6 +2479,7 @@ impl PreludeType {
                 | PreludeType::Observe
                 | PreludeType::Jwt
                 | PreludeType::Password
+                | PreludeType::Archive
         )
     }
 }
@@ -2676,12 +2940,12 @@ pub enum PreludeAssocFn {
     /// `Channel.new(buf_size)` - construct a bounded MPSC channel
     /// pair. One arg (Int buf_size). Returns `(Sender<T>,
     /// Receiver<T>)` tuple. Wraps
-     /// `buff_lang_runtime::Channel::new(buf_size)` which internally
-     /// calls `tokio::sync::mpsc::channel(buf_size)` (the runtime
-     /// hides tokio behind the abstraction per Metis G6). Channel-only.
-     /// The T parameter is implicit (Type-level we return a tuple
-     /// of opaque Sender/Receiver; Rust infers T from subsequent
-     /// `sender.send(value)` / `receiver.recv()` usage).
+    /// `buff_lang_runtime::Channel::new(buf_size)` which internally
+    /// calls `tokio::sync::mpsc::channel(buf_size)` (the runtime
+    /// hides tokio behind the abstraction per Metis G6). Channel-only.
+    /// The T parameter is implicit (Type-level we return a tuple
+    /// of opaque Sender/Receiver; Rust infers T from subsequent
+    /// `sender.send(value)` / `receiver.recv()` usage).
     New,
     // ---- Tensor constructors (T8) ------------------------------------
     // Each variant lowers to the matching `buff_tensor::Tensor`
@@ -2889,6 +3153,36 @@ pub enum PreludeAssocFn {
     /// roles may perform action on resource. Three args. Returns Bool.
     /// Rbac-only.
     Enforce,
+    // T39 (sibling defensive backfill): buff-archive namespace method
+    // variants. The T39 task added these to ALL + name() + return-type
+    // maps but missed the enum declaration. Defensive add so the
+    // shared file compiles; T39 owns the full surface.
+    /// `Archive.compress_dir(src, dest)` - compress a directory. Two
+    /// args (String src, String dest). Returns Void. Archive-only.
+    CompressDir,
+    /// `Archive.extract(archive, dest)` - extract an archive. Two args
+    /// (String archive_path, String dest_dir). Returns Void. Archive-only.
+    Extract,
+    // ---- T44: I18n namespace methods ------------------------------------
+    // I18n.new(locale) reuses the existing shared `New` variant
+    // (already defined for Channel / Cache / Faker). The (I18n, New)
+    // pair dispatches on the receiver type — same shared-variant
+    // pattern as `Parse` / `New` / `Get`.
+    /// `I18n.with_fallback(locale, fallback)` - construct an I18n
+    /// catalog with distinct current and fallback locales. Two args
+    /// (String locale, String fallback). Returns I18n. I18n-only.
+    WithFallback,
+    // ---- T43: buff-scrape assoc fns ------------------------------------
+    // Crawler.new(seed_url) reuses the existing shared `New` variant
+    // (already defined for Channel / Cache / Faker / I18n). The
+    // (Crawler, New) pair dispatches on the receiver type. The single
+    // new variant below is Document-only.
+    /// `Document.from_html(html)` - parse an HTML string into a
+    /// Document. One arg (String). Returns Document. Wraps
+    /// `buff_scrape::Document::from_html(&html)?` (the `?`
+    /// propagates ScrapeError::EmptyInput per Buff's R3 error-
+    /// mapping contract). Document-only.
+    FromHtml,
 }
 
 impl PreludeAssocFn {
@@ -3077,6 +3371,20 @@ impl PreludeAssocFn {
         PreludeAssocFn::AuthorizationUrl,
         PreludeAssocFn::ExchangeCode,
         PreludeAssocFn::Enforce,
+        // T44: I18n.with_fallback — distinct current/fallback locales.
+        // I18n.new reuses the shared `New` variant.
+        PreludeAssocFn::WithFallback,
+        // T43: Document.from_html — single-arg HTML parse. Crawler.new
+        // reuses the shared `New` variant.
+        PreludeAssocFn::FromHtml,
+        // T39: buff-archive assoc fns (2 distinct new names). Both
+        // are Archive-only — dispatched on the (Archive, CompressDir)
+        // / (Archive, Extract) pairs in `assoc_fn_return_type`. No
+        // other prelude type today exposes these verbs; if a future
+        // task adds a second archive-style namespace, it can reuse
+        // these variants on the (FutureType, CompressDir) pair.
+        PreludeAssocFn::CompressDir,
+        PreludeAssocFn::Extract,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -3193,12 +3501,28 @@ impl PreludeAssocFn {
             PreludeAssocFn::AuthorizationUrl => "authorization_url",
             PreludeAssocFn::ExchangeCode => "exchange_code",
             PreludeAssocFn::Enforce => "enforce",
-            // T34: Auth namespace method names.
-            PreludeAssocFn::PasswordHash => "hash",
-            PreludeAssocFn::PasswordVerify => "verify",
-            PreludeAssocFn::AuthorizationUrl => "authorization_url",
-            PreludeAssocFn::ExchangeCode => "exchange_code",
-            PreludeAssocFn::Enforce => "enforce",
+            // T44: I18n constructor with explicit fallback locale.
+            PreludeAssocFn::WithFallback => "with_fallback",
+            // T43: Document.from_html — Buff §7 `Type.from_*()` ctor
+            // naming convention permits the form. Crawler.new reuses
+            // the shared `New` variant name ("new").
+            PreludeAssocFn::FromHtml => "from_html",
+            // T39: buff-archive namespace method names. Both names
+            // mirror the `buff_archive::Archive` Rust method names.
+            PreludeAssocFn::CompressDir => "compress_dir",
+            PreludeAssocFn::Extract => "extract",
+            // T37 (sibling): Faker.with_locale / Faker.with_seed —
+            // sibling task added the variants + ALL + return-type
+            // entries but missed the name() match arms. Defensive
+            // backfill (canonical Rust method names 1:1) so the
+            // shared file compiles; buff-fake's full codegen wiring
+            // is the T37 owner's responsibility.
+            PreludeAssocFn::WithLocale => "with_locale",
+            PreludeAssocFn::WithSeed => "with_seed",
+            // T43: Document.from_html — Buff §7 `Type.from_*()` ctor
+            // naming convention permits the form. Crawler.new reuses
+            // the shared `New` variant name ("new").
+            PreludeAssocFn::FromHtml => "from_html",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -3854,10 +4178,9 @@ pub fn assoc_fn_return_type(
         // params on prelude types); Rust's type inference derives T
         // from subsequent `sender.send(value)` / `receiver.recv()`
         // usage at the codegen level.
-        (PreludeType::Channel, PreludeAssocFn::New) => Some(Type::tuple(vec![
-            Type::Sender,
-            Type::Receiver,
-        ])),
+        (PreludeType::Channel, PreludeAssocFn::New) => {
+            Some(Type::tuple(vec![Type::Sender, Type::Receiver]))
+        }
         // T8: Tensor constructor assoc fns. Each returns the opaque
         // Tensor value type. For MVP we surface `Type::Unknown`
         // because the coordinated `Type::Tensor` variant lives in
@@ -3903,6 +4226,18 @@ pub fn assoc_fn_return_type(
         // `Faker.with_seed(locale, seed)` -> Faker. Two args (String
         // locale, Int seed). Wraps `buff_fake::Faker::with_seed(locale, seed)`.
         (PreludeType::Faker, PreludeAssocFn::WithSeed) => Some(Type::Faker),
+        // T44: I18n assoc fns. `I18n.new(locale)` -> I18n. One arg
+        // (String locale). Wraps `buff_i18n::I18n::new(locale)
+        // .unwrap_or_default()` (panic-free on invalid locale —
+        // returns an empty English catalog, matching Buff's "no
+        // panicking generated code" rule). Records `buff-i18n` +
+        // `fluent-bundle` + `unic-langid` in extern_crates.
+        (PreludeType::I18n, PreludeAssocFn::New) => Some(Type::I18n),
+        // `I18n.with_fallback(locale, fallback)` -> I18n. Two args
+        // (String locale, String fallback). Wraps
+        // `buff_i18n::I18n::with_fallback(locale, fallback)
+        // .unwrap_or_default()` (panic-free fallback).
+        (PreludeType::I18n, PreludeAssocFn::WithFallback) => Some(Type::I18n),
         // T10: AudioBuffer assoc fns. `AudioBuffer.from_path(path)`
         // -> AudioBuffer. Wraps `buff_audio::AudioBuffer::from_path(p)?
         // ` (the `?` propagates AudioError per R3). Decodes WAV via
@@ -4006,6 +4341,22 @@ pub fn assoc_fn_return_type(
         // with_length / with_range / with_regex) and 2 action methods
         // (validate / to_json_schema) are instance fns (see below).
         (PreludeType::Validator, PreludeAssocFn::New) => Some(Type::Validator),
+        // T42: Email.new(from, to, subject) -> Email. Three args
+        // (String from, String to, String subject). Wraps
+        // `buff_email::Email::new(from, to, subject)?` (the `?`
+        // propagates EmailError::InvalidAddress per Buff's R3
+        // error-mapping contract). Returns the concrete `Type::Email`
+        // variant. The 3 builder methods (body / html / attach) are
+        // instance fns (see below).
+        (PreludeType::Email, PreludeAssocFn::New) => Some(Type::Email),
+        // T42: SmtpClient.new(host, port, username, password) ->
+        // SmtpClient. Four args (String host, Int port, String
+        // username, String password). Wraps
+        // `buff_email::SmtpClient::new(host, port as u16, user,
+        // pass)?` (the `?` propagates EmailError::InvalidRelay).
+        // Returns the concrete `Type::SmtpClient` variant. The 1
+        // action method (send) is an instance fn (see below).
+        (PreludeType::SmtpClient, PreludeAssocFn::New) => Some(Type::SmtpClient),
         // T30: Config module — namespace-only (no runtime value). The
         // assoc fns return Void (set_default / load_file / load_env /
         // load_args / watch) or Option<Int> / Option<Float> / Option<Bool>
@@ -4020,7 +4371,9 @@ pub fn assoc_fn_return_type(
         (PreludeType::Config, PreludeAssocFn::LoadArgs) => Some(Type::Void),
         (PreludeType::Config, PreludeAssocFn::Get) => Some(Type::option(Type::string())),
         (PreludeType::Config, PreludeAssocFn::GetInt) => Some(Type::option(Type::int_default())),
-        (PreludeType::Config, PreludeAssocFn::GetFloat) => Some(Type::option(Type::float_default())),
+        (PreludeType::Config, PreludeAssocFn::GetFloat) => {
+            Some(Type::option(Type::float_default()))
+        }
         (PreludeType::Config, PreludeAssocFn::GetBool) => Some(Type::option(Type::bool())),
         (PreludeType::Config, PreludeAssocFn::Watch) => Some(Type::Void),
         // T34: buff-auth assoc fns. The 4 (type, method) pairs below
@@ -4044,6 +4397,29 @@ pub fn assoc_fn_return_type(
         }
         (PreludeType::Password, PreludeAssocFn::PasswordHash) => Some(Type::string()),
         (PreludeType::Password, PreludeAssocFn::PasswordVerify) => Some(Type::bool()),
+        // T39: Archive namespace methods (2). Both are side-effecting
+        // filesystem operations that write to / read from disk; the
+        // Buff surface types them as Void (the user re-reads the
+        // result via the filesystem, mirroring the Log / Toml /
+        // Config / Observe namespace-only pattern). The codegen
+        // lowering splices `buff_archive::Archive::compress_dir(...)
+        // ?` / `buff_archive::Archive::extract(...)?` (the `?`
+        // propagates `ArchiveError` per Buff's R3 error-mapping
+        // contract — the surrounding fn must return
+        // `Result<T, ArchiveError>`).
+        (PreludeType::Archive, PreludeAssocFn::CompressDir) => Some(Type::Void),
+        (PreludeType::Archive, PreludeAssocFn::Extract) => Some(Type::Void),
+        // T43: buff-scrape assoc fns. Two pairs cover the MVP surface.
+        // `Document.from_html(html)` -> Document. One arg (String).
+        // Wraps `buff_scrape::Document::from_html(&html)?` (the `?`
+        // propagates ScrapeError::EmptyInput per R3).
+        // `Crawler.new(seed_url)` -> Crawler. One arg (String).
+        // Wraps `buff_scrape::Crawler::new(&seed)?` (the `?`
+        // propagates ScrapeError::EmptyInput per R3). Codegen lowers
+        // to `unwrap_or_default()` for the panic-free guarantee
+        // (Crawler impls Default as an about:blank-seeded client).
+        (PreludeType::Document, PreludeAssocFn::FromHtml) => Some(Type::Document),
+        (PreludeType::Crawler, PreludeAssocFn::New) => Some(Type::Crawler),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -4388,6 +4764,23 @@ pub enum PreludeInstanceFn {
     /// String end). Random datetime in RFC 3339 range. Wraps
     /// `recv.datetime(&start, &end).unwrap_or_default()` (panic-free).
     FakerDatetime,
+    // ---- Email instance methods (T42) ----------------------------------
+    // Three builder methods on Email values. Each consumes `self` and
+    // returns a new Email (Buff "no visible references" stance —
+    // mirrors the Validator with_* builder pattern). Dispatched on
+    // (Type::Email, variant) pairs. The codegen lowers to the matching
+    // `buff_email::Email::{body, html, attach}` methods.
+    /// `email.body(text) -> Email`. One arg (String plain-text body).
+    /// Sets / overwrites the plain-text body. Builder pattern.
+    Body,
+    /// `email.html(template, context_json) -> Email`. Two args (String
+    /// handlebars template, String JSON context). Renders the template
+    /// via `handlebars::Handlebars::render` and stores the result as
+    /// the HTML body.
+    Html,
+    /// `email.attach(path) -> Email`. One arg (String path). Queues a
+    /// file attachment (opened + encoded at send time).
+    Attach,
     // ---- AudioBuffer instance methods (T10) ---------------------------
     // Ten instance methods on AudioBuffer values. Dispatched on
     // (Type::Audio, variant) pairs. CPU-only per Metis G7 (NO GPU
@@ -4548,6 +4941,61 @@ pub enum PreludeInstanceFn {
     /// `cache.clear() -> Void` (T31). Zero args. Wraps
     /// `recv.clear()`. Removes all entries.
     Clear,
+    /// `i18n.add_resource(locale, ftl) -> Void` (T44 MVP). Two args
+    /// (String locale, String ftl). Wraps
+    /// `recv.add_resource(locale, ftl).unwrap_or(())` (panic-free on
+    /// Fluent parse error — silently drops the resource; matches
+    /// Buff's "no panicking generated code" rule). Full Result<T,E>
+    /// surface deferred to a follow-up.
+    AddResource,
+    /// `i18n.load(locale) -> Void` (T44 MVP). One arg (String). Wraps
+    /// `recv.load(locale).unwrap_or(())` (panic-free on
+    /// LocaleNotLoaded — no-op).
+    Load,
+    /// `i18n.translate(key) -> String` (T44 MVP). One arg (String).
+    /// Wraps `recv.translate(key)` (current → fallback → key string).
+    /// Records a warning on missing keys (surfaced via
+    /// `recv.warnings()` in the Rust crate; codegen-wiring deferred).
+    Translate,
+    // ---- T43: buff-scrape instance methods ------------------------------
+    // Document/Element/Crawler methods. The shared `Select` variant
+    // (already defined for DataFrame.select) is reused via
+    // (Document, Select) / (Element, Select) dispatch — same shared-
+    // variant pattern as `Parse` / `New` / `Get`. The shared `Html`
+    // variant (already defined for Email.html) is reused via
+    // (Document, Html) / (Element, Html) dispatch (semantics: zero-
+    // arg HTML serialization accessor on scrape types vs. two-arg
+    // template-rendering builder on Email — distinct lowering per
+    // receiver type). The 8 new variants below are scrape-only.
+    /// `doc.text() / el.text() -> String` (T43). Zero args.
+    /// Document variant concatenates ALL text nodes; Element variant
+    /// concatenates descendant text nodes of the element.
+    Text,
+    /// `doc.title() -> String?` (T43). Zero args. Document-only.
+    /// Returns `None` when the document has no `<title>` element.
+    Title,
+    /// `el.attr(name) -> String?` (T43). One arg (String). Element-
+    /// only. Returns `None` when the attribute is absent.
+    Attr,
+    /// `el.inner_html() -> String` (T43). Zero args. Element-only.
+    /// Returns the inner HTML (content WITHOUT opening/closing tag).
+    InnerHtml,
+    /// `crawler.seed() -> String` (T43). Zero args. Crawler-only.
+    /// Round-trip accessor for the seed URL passed to `Crawler.new`.
+    Seed,
+    /// `crawler.fetch(url) -> Document` (T43). One arg (String URL).
+    /// Crawler-only. GET + parse. HTTP non-2xx surfaces as
+    /// `ScrapeError::Http`.
+    Fetch,
+    /// `crawler.crawl(max_pages) -> Vector<String>` (T43). One arg
+    /// (Int). Crawler-only. Same-host BFS, robots-aware. Returns the
+    /// visited URLs (BFS order). `max_pages <= 0` returns empty Vec
+    /// without any fetch.
+    Crawl,
+    /// `crawler.robots_allows(url) -> Bool` (T43). One arg (String
+    /// URL). Crawler-only. Fail-open: returns `true` when robots.txt
+    /// is unreachable (per the Robots Exclusion Protocol guidance).
+    RobotsAllows,
 }
 
 impl PreludeInstanceFn {
@@ -4709,6 +5157,12 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::WithRegex,
         PreludeInstanceFn::Validate,
         PreludeInstanceFn::ToJsonSchema,
+        // T42: Email instance methods — 3 new variants. Dispatched on
+        // (Type::Email, variant) pairs. Each consumes self + returns
+        // a new Email (Buff "no visible references" builder pattern).
+        PreludeInstanceFn::Body,
+        PreludeInstanceFn::Html,
+        PreludeInstanceFn::Attach,
         // T19 (gap-fill by T31): Template.render instance method.
         // The codegen M::Render arm existed; the variant didn't.
         PreludeInstanceFn::Render,
@@ -4726,6 +5180,32 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Delete,
         PreludeInstanceFn::Contains,
         PreludeInstanceFn::Clear,
+        // T44: I18n instance methods — 3 MVP variants (AddResource /
+        // Load / Translate). Each dispatched on (Type::I18n, variant)
+        // pairs. The remaining 7 I18n methods (SetFallback /
+        // AvailableLocales / CurrentLocale / FallbackLocale /
+        // TranslateWithArgs / HasMessage / Warnings) are available on
+        // the `buff_i18n::I18n` Rust type but codegen-wiring is
+        // deferred to a follow-up to keep the shared-zone footprint
+        // minimal. AddResource / Load / Translate suffice for the T44
+        // acceptance-criteria examples (three-locale roundtrip +
+        // parameterized translation).
+        PreludeInstanceFn::AddResource,
+        PreludeInstanceFn::Load,
+        PreludeInstanceFn::Translate,
+        // T43: buff-scrape instance methods (8 new variants). The
+        // shared `Select` (DataFrame-owned) + `Html` (Email-owned)
+        // variants cover Document/Element.select + Document/Element
+        // .html via (Type, Method) dispatch. The 8 new variants below
+        // are scrape-only.
+        PreludeInstanceFn::Text,
+        PreludeInstanceFn::Title,
+        PreludeInstanceFn::Attr,
+        PreludeInstanceFn::InnerHtml,
+        PreludeInstanceFn::Seed,
+        PreludeInstanceFn::Fetch,
+        PreludeInstanceFn::Crawl,
+        PreludeInstanceFn::RobotsAllows,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -4878,6 +5358,13 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::WithRegex => "with_regex",
             PreludeInstanceFn::Validate => "validate",
             PreludeInstanceFn::ToJsonSchema => "to_json_schema",
+            // T42: Email builder method names. Mirror the
+            // `buff_email::Email::{body, html, attach}` method names
+            // 1:1 so the codegen can splice `recv.body(...)` etc.
+            // without rewriting.
+            PreludeInstanceFn::Body => "body",
+            PreludeInstanceFn::Html => "html",
+            PreludeInstanceFn::Attach => "attach",
             // T19: Template.render name. Mirrors the buff_template
             // method name 1:1. Added by T31 because the codegen
             // M::Render arm existed but the variant lookup didn't.
@@ -4891,6 +5378,48 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Delete => "delete",
             PreludeInstanceFn::Contains => "contains",
             PreludeInstanceFn::Clear => "clear",
+            // T44: I18n MVP instance method names mirror the
+            // `buff_i18n::I18n` Rust method names 1:1 so codegen can
+            // splice `recv.add_resource(locale, ftl)` / `recv.load(l)`
+            // / `recv.translate(k)` without rewriting.
+            PreludeInstanceFn::AddResource => "add_resource",
+            PreludeInstanceFn::Load => "load",
+            PreludeInstanceFn::Translate => "translate",
+            // T37 (sibling): Faker instance method names — backfill
+            // the name() arms the T37 task missed. Canonical names
+            // mirror `buff_fake::Faker` 1:1 except FakerInt /
+            // FakerDatetime which collide with Buff's `Int` / built-in
+            // DateTime type names so they use the lowercased form.
+            PreludeInstanceFn::Name => "name",
+            PreludeInstanceFn::Email => "email",
+            PreludeInstanceFn::Address => "address",
+            PreludeInstanceFn::Phone => "phone",
+            PreludeInstanceFn::Uuid => "uuid",
+            PreludeInstanceFn::Lorem => "lorem",
+            PreludeInstanceFn::FakerInt => "int",
+            PreludeInstanceFn::FakerDatetime => "datetime",
+            // T42 (sibling): Email builder methods — backfill the
+            // name() arms the T42 task missed. Canonical Rust method
+            // names 1:1.
+            PreludeInstanceFn::Body => "body",
+            PreludeInstanceFn::Html => "html",
+            PreludeInstanceFn::Attach => "attach",
+            // T43: buff-scrape instance method names mirror the
+            // `buff_scrape::{Document, Element, Crawler}` Rust method
+            // names 1:1 so codegen can splice `recv.text()` /
+            // `recv.title()` / `recv.attr(name)` / `recv.inner_html()`
+            // / `recv.seed()` / `recv.fetch(url)` / `recv.crawl(n)`
+            // / `recv.robots_allows(url)` without rewriting. The
+            // shared `Select` ("select") + `Html` ("html") variants
+            // cover Document/Element.select + Document/Element.html.
+            PreludeInstanceFn::Text => "text",
+            PreludeInstanceFn::Title => "title",
+            PreludeInstanceFn::Attr => "attr",
+            PreludeInstanceFn::InnerHtml => "inner_html",
+            PreludeInstanceFn::Seed => "seed",
+            PreludeInstanceFn::Fetch => "fetch",
+            PreludeInstanceFn::Crawl => "crawl",
+            PreludeInstanceFn::RobotsAllows => "robots_allows",
             // T11: Signal instance methods (Fft, Ifft, Lowpass, Highpass,
             // Bandpass, ApplyWindow, Spectrogram, Magnitude, Phase).
             PreludeInstanceFn::Fft => "fft",
@@ -5322,17 +5851,44 @@ pub fn instance_fn_return_type(
         (Type::Validator, PreludeInstanceFn::WithRegex) => Some(Type::Validator),
         // `validator.validate(input)` -> Result<Void, String>. Action.
         // Wraps `recv.validate(&input).map_err(|e| e.to_string())`.
-        (Type::Validator, PreludeInstanceFn::Validate) =>
-            Some(Type::result(Type::Void, Type::String)),
+        (Type::Validator, PreludeInstanceFn::Validate) => {
+            Some(Type::result(Type::Void, Type::String))
+        }
         // `validator.to_json_schema()` -> String. Action.
         (Type::Validator, PreludeInstanceFn::ToJsonSchema) => Some(Type::String),
+
+        // T42: Email instance methods. All three builder methods
+        // consume self and return a new Email (Buff "no visible
+        // references" stance — mirrors Validator with_*). Dispatched
+        // on (Type::Email, variant) pairs. Each lowers to the
+        // matching `buff_email::Email::{body, html, attach}` method.
+        // `email.body(text)` -> Email. One arg (String plain body).
+        (Type::Email, PreludeInstanceFn::Body) => Some(Type::Email),
+        // `email.html(template, context_json)` -> Email. Two args
+        // (String handlebars template, String JSON context). Renders
+        // via `handlebars::Handlebars::render` then stores as the
+        // HTML body.
+        (Type::Email, PreludeInstanceFn::Html) => Some(Type::Email),
+        // `email.attach(path)` -> Email. One arg (String path).
+        // Queues a file attachment for read+encode at send time.
+        (Type::Email, PreludeInstanceFn::Attach) => Some(Type::Email),
+
+        // T42: SmtpClient instance method. The single send method is
+        // dispatched on (Type::SmtpClient, Send) — shares the Send
+        // variant with TCP / WebSocket / Sender. Returns Void (the
+        // Buff codegen discards the Result via unwrap_or_default
+        // panic-free — invalid email / SMTP failure is a no-op at
+        // the Buff surface, matching the Image save / Cache set
+        // precedent).
+        // `client.send(email)` -> Void. One arg (Email). Wraps
+        // `recv.send(&email).unwrap_or_default()`.
+        (Type::SmtpClient, PreludeInstanceFn::Send) => Some(Type::Void),
 
         // T31: Cache instance methods. All 7 dispatched on
         // (Type::Cache, variant) pairs. Get returns Option<String>
         // (Buff String? surface); the rest are Void / Bool / Int.
         // `cache.get(key)` -> String? (None if missing or expired).
-        (Type::Cache, PreludeInstanceFn::Get) =>
-            Some(Type::option(Type::String)),
+        (Type::Cache, PreludeInstanceFn::Get) => Some(Type::option(Type::String)),
         // `cache.set(key, value)` -> Void. Two args.
         (Type::Cache, PreludeInstanceFn::Set) => Some(Type::Void),
         // `cache.set(key, value, ttl)` -> Void. Three args (the
@@ -5346,6 +5902,58 @@ pub fn instance_fn_return_type(
         (Type::Cache, PreludeInstanceFn::Clear) => Some(Type::Void),
         // `cache.len()` -> Int. Approximate entry count.
         (Type::Cache, PreludeInstanceFn::Len) => Some(Type::int_default()),
+        // T44 MVP: I18n instance methods. All 3 dispatched on
+        // (Type::I18n, variant) pairs. AddResource / Load are Void
+        // (panic-free `unwrap_or(())` in codegen); Translate returns
+        // String (current → fallback → key string contract).
+        (Type::I18n, PreludeInstanceFn::AddResource) => Some(Type::Void),
+        (Type::I18n, PreludeInstanceFn::Load) => Some(Type::Void),
+        (Type::I18n, PreludeInstanceFn::Translate) => Some(Type::String),
+
+        // T43: buff-scrape instance methods. The 10 pairs below cover
+        // the full MVP surface: 4 Document + 5 Element + 4 Crawler,
+        // reusing shared `Select` + `Html` variants (DataFrame-owned
+        // + Email-owned respectively) for the cross-type overlap.
+        // All panic-free at the codegen layer (Document/Element are
+        // owned wrappers — no `?` needed; Crawler methods lower to
+        // `unwrap_or_default()` / direct call per the panic-free
+        // codegen contract).
+        //
+        // Document instance methods (4):
+        // `doc.select(css)` -> Vector<Element>. One arg (String).
+        // Shared `Select` variant dispatched on (Document, Select).
+        (Type::Document, PreludeInstanceFn::Select) => Some(Type::vector(Type::Element)),
+        // `doc.text()` -> String. Zero args.
+        (Type::Document, PreludeInstanceFn::Text) => Some(Type::String),
+        // `doc.html()` -> String. Zero args. Shared `Html` variant
+        // dispatched on (Document, Html) — distinct lowering from
+        // the (Email, Html) builder (zero-arg accessor vs. two-arg
+        // template renderer).
+        (Type::Document, PreludeInstanceFn::Html) => Some(Type::String),
+        // `doc.title()` -> String?. Zero args.
+        (Type::Document, PreludeInstanceFn::Title) => Some(Type::option(Type::String)),
+        // Element instance methods (5):
+        // `el.select(css)` -> Vector<Element>. One arg (String).
+        // Shared `Select` dispatched on (Element, Select).
+        (Type::Element, PreludeInstanceFn::Select) => Some(Type::vector(Type::Element)),
+        // `el.text()` -> String. Zero args.
+        (Type::Element, PreludeInstanceFn::Text) => Some(Type::String),
+        // `el.attr(name)` -> String?. One arg (String).
+        (Type::Element, PreludeInstanceFn::Attr) => Some(Type::option(Type::String)),
+        // `el.html()` -> String. Zero args. Shared `Html` dispatched
+        // on (Element, Html).
+        (Type::Element, PreludeInstanceFn::Html) => Some(Type::String),
+        // `el.inner_html()` -> String. Zero args.
+        (Type::Element, PreludeInstanceFn::InnerHtml) => Some(Type::String),
+        // Crawler instance methods (4):
+        // `crawler.seed()` -> String. Zero args.
+        (Type::Crawler, PreludeInstanceFn::Seed) => Some(Type::String),
+        // `crawler.fetch(url)` -> Document. One arg (String URL).
+        (Type::Crawler, PreludeInstanceFn::Fetch) => Some(Type::Document),
+        // `crawler.crawl(max_pages)` -> Vector<String>. One arg (Int).
+        (Type::Crawler, PreludeInstanceFn::Crawl) => Some(Type::vector(Type::String)),
+        // `crawler.robots_allows(url)` -> Bool. One arg (String URL).
+        (Type::Crawler, PreludeInstanceFn::RobotsAllows) => Some(Type::bool()),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
@@ -5649,7 +6257,7 @@ mod tests {
         // with-methods type (Spectrum) shipped in T11 + 1 runtime-
         // value-with-methods type (DataFrame) shipped in T7
         // = 36 total prelude types.
-        assert_eq!(PreludeType::ALL.len(), 36);
+        assert_eq!(PreludeType::ALL.len(), 37);
     }
 
     #[test]

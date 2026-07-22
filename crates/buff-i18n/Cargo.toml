@@ -1,0 +1,56 @@
+[package]
+name = "buff-i18n"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Internationalization for Buff. \
+Pure-Rust MVP wrapping Mozilla's `fluent-bundle` crate + \
+`unic-langid` (language identifiers). Message catalogs in \
+Fluent `.ftl` syntax. Pluralization, gender, ICU MessageFormat \
+via Fluent semantics. Per T44 spec: I18n.new(locale) / \
+i18n.add_resource / i18n.load / i18n.available_locales / \
+i18n.translate(key) / i18n.translate_with_args(key, args).\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "i18n", "internationalization", "localization", "fluent"]
+categories = ["localization", "internationalization"]
+
+[lib]
+name = "buff_i18n"
+path = "src/lib.rs"
+
+[dependencies]
+# T44 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# fluent-bundle 0.16: Mozilla's Project Fluent — the canonical
+# pure-Rust implementation of the Fluent localization system (the same
+# one Firefox, Mozilla, and many Rust apps use). API surface used:
+# `FluentBundle::new(vec![langid])`, `bundle.add_resource(res)`,
+# `bundle.add_resource_overriding(res)`, `bundle.get_message(key)`,
+# `bundle.format_pattern(&pattern, Some(&args), &mut errors)`.
+# Pure-Rust, no cc-rs, no native C deps — matches the "no C library,
+# no Docker" hard rule from T126/T127. Fluent handles pluralization,
+# gender, and ICU MessageFormat via its { $count -> [one] ... } select
+# syntax; we surface that via `translate_with_args(key, args)`.
+#
+# unic-langid 0.9: the pure-Rust Unicode Language Identifier crate
+# (also from projectfluent). API surface used:
+# `LanguageIdentifier::from_str(s)` (via `.parse()`),
+# `langid.to_string()`, plus the `langid!` macro we do NOT use (we
+# parse runtime strings — Buff users supply locale names dynamically).
+# Stable since 0.9; the long-standing surface.
+#
+# Mirrors the chrono/tracing/regex/tokio/base64/hex/etc. codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# them; cargo-project wiring is deferred). Snapshots + extern_crates
+# set is the verifiable contract.
+fluent-bundle.workspace = true
+unic-langid.workspace = true
+intl-memoizer.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

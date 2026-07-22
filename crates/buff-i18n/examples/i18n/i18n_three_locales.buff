@@ -1,0 +1,27 @@
+// T44 Buff-side forward declaration for examples/i18n_three_locales.rs.
+// Mirrors the buff-image/examples/image/*.buff pattern: declares the
+// I18n type + methods so a future compiler pass can lower this file
+// to the matching Rust example. Run with `cargo run -p buff-lang-cli
+// -- run examples/i18n/i18n_three_locales.buff` once the codegen arm
+// is wired (T44 codegen integration).
+
+extern "C" from "buff-i18n" func i18n_new(locale: String) -> I18n
+extern "C" from "buff-i18n" func i18n_with_fallback(locale: String, fallback: String) -> I18n
+extern "C" from "buff-i18n" func i18n_add_resource(handle: I18n, locale: String, ftl: String) -> Void
+extern "C" from "buff-i18n" func i18n_load(handle: I18n, locale: String) -> Void
+extern "C" from "buff-i18n" func i18n_translate(handle: I18n, key: String) -> String
+
+func main() {
+    let i18n = I18n.new(locale: "en")
+    i18n.add_resource(locale: "en", ftl: "hello = Hello, world!")
+    i18n.add_resource(locale: "pt-BR", ftl: "hello = Olá, mundo!")
+    i18n.add_resource(locale: "es", ftl: "hello = ¡Hola, mundo!")
+
+    print(i18n.translate(key: "hello"))
+
+    i18n.load(locale: "pt-BR")
+    print(i18n.translate(key: "hello"))
+
+    i18n.load(locale: "es")
+    print(i18n.translate(key: "hello"))
+}

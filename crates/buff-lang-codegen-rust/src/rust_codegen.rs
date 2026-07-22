@@ -909,9 +909,7 @@ impl RustCodegen {
         // T9 Image / T10 Audio / T124k Hash+HMAC pattern. NO `ring`,
         // NO native-tls, NO cc-rs - ed25519-dalek is the canonical
         // pure-Rust Ed25519.
-        if program_uses_namespace(decls, "Audit")
-            || program_uses_namespace(decls, "Signature")
-        {
+        if program_uses_namespace(decls, "Audit") || program_uses_namespace(decls, "Signature") {
             self.extern_crates.insert("buff-audit".to_string());
             self.extern_crates.insert("ed25519-dalek".to_string());
             self.extern_crates.insert("sha2".to_string());
@@ -928,9 +926,7 @@ impl RustCodegen {
         // (matches the "no C library, no Docker" hard rule + the
         // "Windows host with no MSVC" constraint that pushed hand-rolled
         // lexer/parser).
-        if program_uses_namespace(decls, "Fuzz")
-            || program_uses_namespace(decls, "Strategy")
-        {
+        if program_uses_namespace(decls, "Fuzz") || program_uses_namespace(decls, "Strategy") {
             self.extern_crates.insert("buff-fuzz".to_string());
             self.extern_crates.insert("proptest".to_string());
         }
@@ -976,6 +972,18 @@ impl RustCodegen {
             self.extern_crates.insert("buff-cache".to_string());
             self.extern_crates.insert("moka".to_string());
         }
+        // T44: register `buff-i18n` when the program references the
+        // I18n prelude type (`I18n.new(locale)` / `I18n.with_fallback`
+        // / `i18n.add_resource` / `i18n.load` / `i18n.translate`).
+        // Also records `fluent-bundle` + `unic-langid` transitively
+        // (the upstream crates `buff-i18n` wraps). Distributed /
+        // machine-translation backends explicitly forbidden by T44
+        // spec — `fluent-bundle` + `unic-langid` are the only deps.
+        if program_uses_namespace(decls, "I18n") {
+            self.extern_crates.insert("buff-i18n".to_string());
+            self.extern_crates.insert("fluent-bundle".to_string());
+            self.extern_crates.insert("unic-langid".to_string());
+        }
         // T34: register `buff-auth` when the program references any of
         // the four prelude auth modules (`JWT` / `OAuth2Client` /
         // `Password` / `Rbac`). Also records `jsonwebtoken` +
@@ -996,6 +1004,63 @@ impl RustCodegen {
             self.extern_crates.insert("jsonwebtoken".to_string());
             self.extern_crates.insert("argon2".to_string());
             self.extern_crates.insert("oauth2".to_string());
+            self.extern_crates.insert("reqwest".to_string());
+        }
+        // T39: register `buff-archive` when the program references
+        // the `Archive` namespace. Also records `zip` (deflate-only,
+        // default-features disabled — pure-Rust), `tar` 0.4, `flate2`
+        // 1.x (pure-Rust `miniz_oxide` backend), and `ruzstd` 0.8
+        // (pure-Rust Zstd — NOT the canonical `zstd` crate which
+        // wraps C libzstd via cc-rs, violating the "no C library"
+        // hard rule). Mirrors the T9 Image / T17 Web / T18 Database
+        // pattern. NO 7z, RAR, BZip2, encryption-at-rest — all
+        // forbidden by the T39 task spec.
+        if program_uses_namespace(decls, "Archive") {
+            self.extern_crates.insert("buff-archive".to_string());
+            self.extern_crates.insert("zip".to_string());
+            self.extern_crates.insert("tar".to_string());
+            self.extern_crates.insert("flate2".to_string());
+            self.extern_crates.insert("ruzstd".to_string());
+        }
+        // T42: register `buff-email` + `lettre` + `handlebars` when
+        // the program references the prelude `Email` OR `SmtpClient`
+        // modules (`Email.new(from, to, subject)` /
+        // `email.body(text)` / `email.html(tpl, ctx)` /
+        // `email.attach(path)` / `SmtpClient.new(host, port, user,
+        // pass)` / `client.send(email)`). The walker checks both
+        // namespaces because the user always composes Email +
+        // SmtpClient together; recording once for either is
+        // sufficient (idempotent BTreeSet insert). Also records
+        // `lettre` (the pure-Rust SMTP transport + message builder
+        // via the `rustls` feature — NOT `native-tls` per AGENTS.md
+        // hard rule) + `handlebars` (the templating engine shared
+        // with T19 buff-template for `email.html(template, context)`
+        // rendering). Mirrors the T9 Image / T18 Database / T34
+        // buff-auth pattern.
+        if program_uses_namespace(decls, "Email") || program_uses_namespace(decls, "SmtpClient") {
+            self.extern_crates.insert("buff-email".to_string());
+            self.extern_crates.insert("lettre".to_string());
+            self.extern_crates.insert("handlebars".to_string());
+        }
+        // T43: register `buff-scrape` when the program references any
+        // of the three prelude scrape namespaces (`Document.*` /
+        // `Element.*` / `Crawler.*`). Also records `scraper`
+        // transitively (the HTML parser + CSS selector engine wrapped
+        // by `buff-scrape::Document` / `buff-scrape::Element`) and
+        // `reqwest` transitively (the rustls-tls HTTP client wrapped
+        // by `buff-scrape::Crawler`). The walker checks all three
+        // namespaces because the user composes Document + Element +
+        // Crawler together; recording once for any of them is
+        // sufficient (idempotent BTreeSet insert). Mirrors the T9
+        // Image / T18 Database / T34 buff-auth / T42 buff-email
+        // pattern. Pure-Rust, CPU-only (no JS rendering, no
+        // distributed crawling — both forbidden by T43 spec).
+        if program_uses_namespace(decls, "Document")
+            || program_uses_namespace(decls, "Element")
+            || program_uses_namespace(decls, "Crawler")
+        {
+            self.extern_crates.insert("buff-scrape".to_string());
+            self.extern_crates.insert("scraper".to_string());
             self.extern_crates.insert("reqwest".to_string());
         }
         // T31: run async call-graph propagation BEFORE per-function
@@ -4820,8 +4885,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_dataframe::DataFrame::from_csv(#arg).unwrap_or_default()
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("DataFrame.from_csv codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("DataFrame.from_csv codegen parse: {e}"))
+                })
             }
             // T7: DataFrame.from_json(path) -> DataFrame. Same shape
             // as FromCsv — panic-free via `unwrap_or_default()`.
@@ -4831,8 +4897,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_dataframe::DataFrame::from_json(#arg).unwrap_or_default()
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("DataFrame.from_json codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("DataFrame.from_json codegen parse: {e}"))
+                })
             }
             // T9: Image.from_path(path) -> Image. Wraps
             // `buff_image::Image::from_path(arg).unwrap_or_default()`
@@ -4922,8 +4989,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_audio::AudioBuffer::from_path(#arg).unwrap_or_default()
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("AudioBuffer.from_path codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("AudioBuffer.from_path codegen parse: {e}"))
+                })
             }
             // T10: AudioBuffer.from_samples(samples, sample_rate,
             // channels) -> AudioBuffer. Three args (Vec<f32>, u32,
@@ -4946,8 +5014,9 @@ impl RustCodegen {
                     buff_audio::AudioBuffer::from_samples(#samples, #sample_rate as u32, #channels as u16)
                         .unwrap_or_default()
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("AudioBuffer.from_samples codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("AudioBuffer.from_samples codegen parse: {e}"))
+                })
             }
             // T26: Audit.scan(path) -> Vector<String>. One arg (String
             // / Path). Wraps `buff_audit::scan(&arg)
@@ -5132,8 +5201,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_reactive::Signal::new(#arg)
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("ReactiveSignal.new codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ReactiveSignal.new codegen parse: {e}"))
+                })
             }
             // T20: ReactiveComputed.new(fn) -> Computed<T>. One arg
             // (closure `Fn() -> T`). Wraps `buff_reactive::Computed::new(fn)`.
@@ -5142,8 +5212,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_reactive::Computed::new(#arg)
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("ReactiveComputed.new codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ReactiveComputed.new codegen parse: {e}"))
+                })
             }
             // T20: ReactiveEffect.new(fn) -> Effect. One arg (closure
             // `Fn() -> Void`). Wraps `buff_reactive::Effect::new(fn)`.
@@ -5152,8 +5223,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     buff_reactive::Effect::new(#arg)
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("ReactiveEffect.new codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ReactiveEffect.new codegen parse: {e}"))
+                })
             }
             // T18: Database.connect(url) -> Pool (forward-declared as
             // `Type::Unknown` in prelude_types.rs; the buff-db crate's
@@ -5252,6 +5324,56 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Validator.new codegen parse: {e}")))
             }
+            // T42: Email.new(from, to, subject) -> Email. Three args
+            // (String from, String to, String subject). Wraps
+            // `buff_email::Email::new(&from, &to, &subject)?` (the
+            // `?` propagates EmailError::InvalidAddress per Buff's
+            // R3 error-mapping contract). Records `buff-email` +
+            // `lettre` + `handlebars` in extern_crates via the
+            // `program_uses_namespace("Email")` walker. Dispatch on
+            // (PreludeType::Email, New) - mirrors the (Validator,
+            // New) / (HttpClient, New) / (Cache, New) precedent.
+            (T::Email, A::New) => {
+                if args.len() != 3 {
+                    return Err(self.unsupported(&format!(
+                        "Email.new() expects exactly 3 args (from, to, subject), got {}",
+                        args.len()
+                    )));
+                }
+                let from = self.lower_expr(&args[0])?;
+                let to = self.lower_expr(&args[1])?;
+                let subject = self.lower_expr(&args[2])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_email::Email::new(&#from, &#to, &#subject)?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Email.new codegen parse: {e}")))
+            }
+            // T42: SmtpClient.new(host, port, username, password) ->
+            // SmtpClient. Four args (String host, Int port, String
+            // username, String password). Wraps
+            // `buff_email::SmtpClient::new(&host, port as u16, &user,
+            // &pass)?` (the `?` propagates EmailError::InvalidRelay).
+            // Records `buff-email` + `lettre` in extern_crates
+            // (shared walker with Email). Dispatch on
+            // (PreludeType::SmtpClient, New).
+            (T::SmtpClient, A::New) => {
+                if args.len() != 4 {
+                    return Err(self.unsupported(&format!(
+                        "SmtpClient.new() expects exactly 4 args (host, port, username, password), got {}",
+                        args.len()
+                    )));
+                }
+                let host = self.lower_expr(&args[0])?;
+                let port = self.lower_expr(&args[1])?;
+                let username = self.lower_expr(&args[2])?;
+                let password = self.lower_expr(&args[3])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_email::SmtpClient::new(&#host, #port as u16, &#username, &#password)?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("SmtpClient.new codegen parse: {e}")))
+            }
             // T31: Cache.new(max_capacity) -> Cache. One arg (Int).
             // Wraps `buff_cache::Cache::new(max_capacity as u64)
             // .unwrap_or_default()` (panic-free on zero-capacity —
@@ -5266,6 +5388,73 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Cache.new codegen parse: {e}")))
+            }
+            // T44: I18n.new(locale) -> I18n. One arg (String). Wraps
+            // `buff_i18n::I18n::new(&locale).unwrap_or_default()`
+            // (panic-free on invalid locale — I18n impls Default as
+            // an empty English catalog, matching Buff's "no
+            // panicking generated code" rule + the Image / Cache /
+            // Document precedent). Records `buff-i18n` +
+            // `fluent-bundle` + `unic-langid` in extern_crates via
+            // the `program_uses_namespace("I18n")` walker.
+            (T::I18n, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_i18n::I18n::new(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("I18n.new codegen parse: {e}")))
+            }
+            // T44: I18n.with_fallback(locale, fallback) -> I18n. Two
+            // args (String locale, String fallback). Wraps
+            // `buff_i18n::I18n::with_fallback(&locale, &fallback)
+            // .unwrap_or_default()` (panic-free).
+            (T::I18n, A::WithFallback) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "with_fallback() expects exactly 2 args (locale, fallback), got {}",
+                        args.len()
+                    )));
+                }
+                let locale = self.lower_expr(&args[0])?;
+                let fallback = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_i18n::I18n::with_fallback(&#locale, &#fallback).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("I18n.with_fallback codegen parse: {e}"))
+                })
+            }
+            // T43: Document.from_html(html) -> Document. One arg
+            // (String). Wraps `buff_scrape::Document::from_html(&html)
+            // .unwrap_or_default()` (panic-free on empty input —
+            // Document impls Default as `<html></html>`, matching
+            // Buff's "no panicking generated code" rule; mirrors the
+            // Image.from_path `unwrap_or_default()` precedent). Records
+            // `buff-scrape` + `scraper` in extern_crates via the
+            // `program_uses_namespace("Document")` walker.
+            (T::Document, A::FromHtml) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Document::from_html(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Document.from_html codegen parse: {e}"))
+                })
+            }
+            // T43: Crawler.new(seed_url) -> Crawler. One arg (String).
+            // Wraps `buff_scrape::Crawler::new(&seed)
+            // .unwrap_or_default()` (panic-free on empty seed —
+            // Crawler impls Default as an about:blank-seeded client).
+            // Records `buff-scrape` + `reqwest` in extern_crates via
+            // the `program_uses_namespace("Crawler")` walker.
+            (T::Crawler, A::New) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Crawler::new(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Crawler.new codegen parse: {e}")))
             }
             // T30: Config module — namespace-only (no runtime value).
             // `Config.new()` creates a `buff_config::Config` and stores
@@ -5298,8 +5487,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     CONFIG.set_default(#key, #val)
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("Config.set_default codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Config.set_default codegen parse: {e}"))
+                })
             }
             // `Config.load_file(path)` -> Void. One arg.
             (T::Config, A::LoadFile) => {
@@ -5468,6 +5658,47 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Password.verify codegen parse: {e}")))
             }
+            // T39: Archive.compress_dir(input_dir, output_path) -> Void.
+            // Two args. Wraps `buff_archive::Archive::compress_dir(
+            // input_dir, output_path, buff_archive::Format::from_path(
+            // std::path::Path::new(&output_path)).unwrap_or(
+            // buff_archive::Format::Zip))?` (the `?` propagates
+            // `ArchiveError` per Buff's R3 error-mapping contract; the
+            // format is auto-detected from the output_path extension —
+            // `.zip` → Zip, `.tar.gz` → Gz, `.tar.zst` → Zstd, etc.,
+            // matching the cross-language convention of `tar -czf
+            // x.tar.gz src/`). Records `buff-archive` + `zip` + `tar`
+            // + `flate2` + `ruzstd` in extern_crates via the
+            // `program_uses_namespace("Archive")` walker.
+            (T::Archive, A::CompressDir) => {
+                let (input_dir, output_path) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_archive::Archive::compress_dir(
+                        #input_dir,
+                        #output_path,
+                        buff_archive::Format::from_path(std::path::Path::new(&#output_path))
+                            .unwrap_or(buff_archive::Format::Zip),
+                    )?
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Archive.compress_dir codegen parse: {e}"))
+                })
+            }
+            // T39: Archive.extract(archive_path, output_dir) -> Void.
+            // Two args. Wraps `buff_archive::Archive::extract(
+            // archive_path, output_dir)?` (the format is auto-detected
+            // from the file's extension inside the wrapper). Records
+            // `buff-archive` + `zip` + `tar` + `flate2` + `ruzstd` in
+            // extern_crates via the `program_uses_namespace("Archive")`
+            // walker.
+            (T::Archive, A::Extract) => {
+                let (archive_path, output_dir) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_archive::Archive::extract(#archive_path, #output_dir)?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Archive.extract codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -5566,6 +5797,22 @@ impl RustCodegen {
     ) -> Result<SynExpr, CodegenError> {
         use buff_lang_types::PreludeInstanceFn as M;
         let recv = self.lower_expr(receiver)?;
+        // Defensive `one_arg` closure for instance methods that take a
+        // single positional arg (added by T44 buff-i18n backfill —
+        // also unblocks T42/T43 sibling code that already used the
+        // name without defining it locally). Mirrors the
+        // `lower_prelude_type_assoc_fn::one_arg` closure shape.
+        let pmethod_name = pmethod.name();
+        let one_arg = |c: &mut Self| -> Result<SynExpr, CodegenError> {
+            if args.len() != 1 {
+                return Err(c.unsupported(&format!(
+                    "{}() expects exactly 1 arg, got {}",
+                    pmethod_name,
+                    args.len()
+                )));
+            }
+            c.lower_expr(&args[0])
+        };
         // All current instance methods are either 0-arg or 1-arg (format).
         // We validate arity once here so the dispatch below doesn't repeat
         // the check.
@@ -6454,8 +6701,15 @@ impl RustCodegen {
             // Non-DataFrame receiver with a DataFrame-only method
             // (Select/Filter/Sort/Head/GroupBy/Agg/ToTableString) falls
             // through to a clear error (mirrors the Send/Recv/Close
-            // safety net).
-            M::Select | M::Filter | M::Sort | M::Head | M::GroupBy | M::Agg | M::ToTableString => {
+            // safety net). T43 excludes Type::Document / Type::Element
+            // from the M::Select catch-all so the buff-scrape arms
+            // below fire first (mirrors how the `M::Len` arm excludes
+            // Type::Cache).
+            M::Select if !matches!(recv_ty, Type::Document | Type::Element)
+                => Err(self.unsupported(&format!(
+                    "{recv_ty}.select() is not a recognised prelude instance method",
+                ))),
+            M::Filter | M::Sort | M::Head | M::GroupBy | M::Agg | M::ToTableString => {
                 Err(self.unsupported(&format!(
                     "{recv_ty}.{:?}() is not a recognised prelude instance method",
                     pmethod
@@ -6888,6 +7142,248 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Cache.len codegen parse: {e}")))
+            }
+            // T44 MVP: I18n instance methods. AddResource / Load are
+            // 2-arg / 1-arg Void methods wrapped in `.unwrap_or(())`
+            // for panic-free codegen (mirrors the Cache.set / SetTtl
+            // stance). Translate is a 1-arg String method. The 7
+            // deferred methods (SetFallback / AvailableLocales /
+            // CurrentLocale / FallbackLocale / TranslateWithArgs /
+            // HasMessage / Warnings) are available on the
+            // `buff_i18n::I18n` Rust type but codegen-wiring is
+            // deferred to a follow-up.
+            M::AddResource if matches!(recv_ty, Type::I18n) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "add_resource() expects exactly 2 args (locale, ftl), got {}",
+                        args.len()
+                    )));
+                }
+                let locale = self.lower_expr(&args[0])?;
+                let ftl = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.add_resource(&#locale, &#ftl).unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("I18n.add_resource codegen parse: {e}")))
+            }
+            // `i18n.load(locale)` -> Void. One arg (String). Wraps
+            // `recv.load(&locale).unwrap_or(())` (panic-free on
+            // LocaleNotLoaded — no-op).
+            M::Load if matches!(recv_ty, Type::I18n) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "load() expects exactly 1 arg (locale), got {}",
+                        args.len()
+                    )));
+                }
+                let locale = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.load(&#locale).unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("I18n.load codegen parse: {e}")))
+            }
+            // `i18n.translate(key)` -> String. One arg (String).
+            // Wraps `recv.translate(&key)` (current → fallback → key
+            // string contract — NEVER panics).
+            M::Translate if matches!(recv_ty, Type::I18n) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "translate() expects exactly 1 arg (key), got {}",
+                        args.len()
+                    )));
+                }
+                let key = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.translate(&#key)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("I18n.translate codegen parse: {e}")))
+            }
+            // T43: buff-scrape instance methods. Each method lowers to
+            // `buff_scrape::{Document, Element, Crawler}::<method>`. The
+            // codegen records `buff-scrape` + `scraper` (for Document /
+            // Element) or `reqwest` (for Crawler) in extern_crates via
+            // the `program_uses_namespace("Document" / "Element" /
+            // "Crawler")` walker. All methods are panic-free at the
+            // codegen layer (Document/Element/Crawler all impl Default;
+            // fallible ops lower to `unwrap_or_default()` or `?`
+            // depending on whether the receiver itself is consumed).
+            //
+            // ---- Document instance methods (4) -----------------
+            // `doc.select(css)` -> Vector<Element>. One arg (String).
+            // Wraps `buff_scrape::Document::select(&recv, &css)
+            // .unwrap_or_default()` (panic-free on invalid CSS — empty
+            // Vec returned; mirrors the Image.from_path panic-free
+            // pattern).
+            M::Select if matches!(recv_ty, Type::Document) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Document::select(&#recv, &#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Document.select codegen parse: {e}")))
+            }
+            // `doc.text()` -> String. Zero args. Wraps `recv.text()`.
+            M::Text if matches!(recv_ty, Type::Document) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "text() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.text()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Document.text codegen parse: {e}")))
+            }
+            // `doc.html()` -> String. Zero args. Wraps `recv.html()`.
+            // Shared `Html` variant — distinct from (Email, Html)
+            // (two-arg template builder).
+            M::Html if matches!(recv_ty, Type::Document) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "html() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.html()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Document.html codegen parse: {e}")))
+            }
+            // `doc.title()` -> String?. Zero args. Wraps `recv.title()`.
+            M::Title if matches!(recv_ty, Type::Document) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "title() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.title()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Document.title codegen parse: {e}")))
+            }
+            // ---- Element instance methods (5) -----------------
+            // `el.select(css)` -> Vector<Element>. One arg (String).
+            // Wraps `Element::select(&recv, &css).unwrap_or_default()`.
+            M::Select if matches!(recv_ty, Type::Element) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Element::select(&#recv, &#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Element.select codegen parse: {e}")))
+            }
+            // `el.text()` -> String. Zero args. Wraps `recv.text()`.
+            M::Text if matches!(recv_ty, Type::Element) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "text() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.text()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Element.text codegen parse: {e}")))
+            }
+            // `el.attr(name)` -> String?. One arg (String). Wraps
+            // `recv.attr(&name)`.
+            M::Attr if matches!(recv_ty, Type::Element) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.attr(&#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Element.attr codegen parse: {e}")))
+            }
+            // `el.html()` -> String. Zero args. Wraps `recv.html()`.
+            M::Html if matches!(recv_ty, Type::Element) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "html() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.html()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Element.html codegen parse: {e}")))
+            }
+            // `el.inner_html()` -> String. Zero args. Wraps
+            // `recv.inner_html()`.
+            M::InnerHtml if matches!(recv_ty, Type::Element) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "inner_html() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.inner_html()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Element.inner_html codegen parse: {e}")))
+            }
+            // ---- Crawler instance methods (4) -----------------
+            // `crawler.seed()` -> String. Zero args. Wraps `recv.seed()`.
+            M::Seed if matches!(recv_ty, Type::Crawler) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "seed() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.seed()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Crawler.seed codegen parse: {e}")))
+            }
+            // `crawler.fetch(url)` -> Document. One arg (String URL).
+            // Wraps `Crawler::fetch(&recv, &url).unwrap_or_default()`
+            // (panic-free on network / HTTP error — Document impls
+            // Default as `<html></html>`; matches the Image.from_path
+            // `unwrap_or_default()` panic-free pattern).
+            M::Fetch if matches!(recv_ty, Type::Crawler) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Crawler::fetch(&#recv, &#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Crawler.fetch codegen parse: {e}")))
+            }
+            // `crawler.crawl(max_pages)` -> Vector<String>. One arg
+            // (Int). Wraps `Crawler::crawl(&recv, max_pages as i64)
+            // .unwrap_or_default()` (panic-free on network error —
+            // returns whatever was crawled before the failure).
+            M::Crawl if matches!(recv_ty, Type::Crawler) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Crawler::crawl(&#recv, #arg as i64).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Crawler.crawl codegen parse: {e}")))
+            }
+            // `crawler.robots_allows(url)` -> Bool. One arg (String URL).
+            // Wraps `Crawler::robots_allows(&recv, &url)` (infallible —
+            // returns `true` on robots.txt fetch failure per the Robots
+            // Exclusion Protocol fail-open guidance).
+            M::RobotsAllows if matches!(recv_ty, Type::Crawler) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_scrape::Crawler::robots_allows(&#recv, &#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Crawler.robots_allows codegen parse: {e}")))
             }
             // T10: AudioBuffer instance methods. Each method lowers
             // to `buff_audio::AudioBuffer::<method>`. The codegen
@@ -7350,6 +7846,87 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Validator.to_json_schema codegen parse: {e}")))
+            }
+            // T42: Email builder methods. Each consumes self and
+            // returns a new Email (Buff "no visible references"
+            // stance — mirrors Validator with_* + HttpClient.new).
+            // `email.body(text)` -> Email. One arg (String plain).
+            // Wraps `recv.body(&text)?` (the `?` propagates
+            // EmailError::Panic — only failure mode for a string
+            // setter per the catch_unwind contract).
+            M::Body if matches!(recv_ty, Type::Email) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "body() expects exactly 1 arg (text), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.body(&#text)?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Email.body codegen parse: {e}")))
+            }
+            // `email.html(template, context_json)` -> Email. Two args
+            // (String handlebars template, String JSON context).
+            // Wraps `recv.html(&template, &ctx)?` (the `?` propagates
+            // EmailError::TemplateParse / TemplateRender).
+            M::Html if matches!(recv_ty, Type::Email) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "html() expects exactly 2 args (template, context_json), got {}",
+                        args.len()
+                    )));
+                }
+                let template = self.lower_expr(&args[0])?;
+                let context = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.html(&#template, &#context)?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Email.html codegen parse: {e}")))
+            }
+            // `email.attach(path)` -> Email. One arg (String path).
+            // Wraps `recv.attach(&path)?` (panic-free — file is NOT
+            // read at builder time; EmailError surfaces at send time
+            // via the build_message MIME-assembly path).
+            M::Attach if matches!(recv_ty, Type::Email) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "attach() expects exactly 1 arg (path), got {}",
+                        args.len()
+                    )));
+                }
+                let path = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.attach(&#path)?
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Email.attach codegen parse: {e}")))
+            }
+            // T42: SmtpClient action method. The single send method
+            // is dispatched on (Type::SmtpClient, Send) — shares the
+            // Send variant with TCP / WebSocket / Sender. Returns
+            // Void (the codegen discards the Result via
+            // unwrap_or_default panic-free — invalid email / SMTP
+            // failure is a no-op at the Buff surface, matching the
+            // Image save / Cache set precedent).
+            // `client.send(email)` -> Void. One arg (Email). Wraps
+            // `recv.send(&email).unwrap_or_default()`.
+            M::Send if matches!(recv_ty, Type::SmtpClient) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "send() expects exactly 1 arg (email), got {}",
+                        args.len()
+                    )));
+                }
+                let email = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.send(&#email).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("SmtpClient.send codegen parse: {e}")))
             }
             // T31 (gap-fill): wildcard for instance-method variants
             // whose codegen arms haven't been written yet (T11 Signal
@@ -9791,6 +10368,13 @@ impl RustCodegen {
             // codegen emits the concrete path; otherwise Rust infers
             // the type from the initializer (Cache.new).
             Type::Cache => "buff_cache::Cache",
+            // T44: I18n runtime-value type maps to `buff_i18n::I18n`
+            // at codegen time. Mirrors the Cache/Image precedent: no
+            // generic parameter, no turbofish. If a user annotates a
+            // let binding with an explicit I18n type, codegen emits
+            // the concrete path; otherwise Rust infers the type from
+            // the initializer (I18n.new).
+            Type::I18n => "buff_i18n::I18n",
             // T10: audio. Opaque runtime-value type mapped to
             // `buff_audio::AudioBuffer`. No generic parameter, no
             // turbofish needed. Mirrors the T9 Image precedent: if a
@@ -9833,6 +10417,43 @@ impl RustCodegen {
             // (via the narrow `program_uses_namespace("Validator")`
             // walker).
             Type::Validator => "buff_validate::Validator",
+            // T42: email. Opaque runtime-value type mapped to
+            // `buff_email::Email`. No generic parameter, no turbofish
+            // needed. Mirrors the T9 Image / T33 HttpClient / T29
+            // Validator precedent: if a user annotates a let binding
+            // with an explicit Email type, codegen emits the concrete
+            // path; otherwise Rust infers the type from the
+            // initializer (Email.new). The `buff-email` + `lettre`
+            // + `handlebars` crates are recorded in `extern_crates`
+            // when a Buff program uses `Email.*` (via the narrow
+            // `program_uses_namespace("Email")` walker).
+            Type::Email => "buff_email::Email",
+            // T42: SMTP client. Opaque runtime-value type mapped to
+            // `buff_email::SmtpClient`. No generic parameter, no
+            // turbofish needed. Mirrors the Email precedent: if a
+            // user annotates a let binding with an explicit
+            // SmtpClient type, codegen emits the concrete path;
+            // otherwise Rust infers the type from the initializer
+            // (SmtpClient.new). The `buff-email` + `lettre` crates
+            // are recorded in `extern_crates` (shared walker with
+            // `Email.*`).
+            Type::SmtpClient => "buff_email::SmtpClient",
+            // T43: HTML Document / Element / Crawler. Opaque runtime-
+            // value types mapped to `buff_scrape::{Document, Element,
+            // Crawler}`. No generic parameter, no turbofish needed.
+            // Mirrors the T9 Image / T31 Cache / T42 Email precedent:
+            // if a user annotates a let binding with an explicit
+            // Document / Element / Crawler type, codegen emits the
+            // concrete path; otherwise Rust infers the type from the
+            // initializer (Document.from_html / Element returned from
+            // select / Crawler.new). The `buff-scrape` + `scraper`
+            // + `reqwest` crates are recorded in `extern_crates` when
+            // a Buff program uses any of these (via the shared
+            // `program_uses_namespace("Document" / "Element" /
+            // "Crawler")` walker).
+            Type::Document => "buff_scrape::Document",
+            Type::Element => "buff_scrape::Element",
+            Type::Crawler => "buff_scrape::Crawler",
             // T12: ECS World + Entity. Opaque runtime-value types
             // mapped to `buff_ecs::World` / `buff_ecs::Entity`. Added
             // by T31 (this commit) because T12 added the variants in

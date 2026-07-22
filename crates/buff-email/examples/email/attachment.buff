@@ -1,0 +1,34 @@
+# T42 .buff example: email with file attachment (FORWARD-DECL).
+#
+# Requires the coordinated Type::Email + Type::SmtpClient codegen
+# lowering arms (this task, T42 finish). The prelude registry entries
+# `PreludeType::Email` + `PreludeType::SmtpClient` + assoc-fn +
+# instance-fn arms are added in the same T42 finish commit as this
+# example. See crates/buff-email/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+
+from "email" import Email, SmtpClient
+from "filesystem" import Tempfile
+
+func main():
+    tmp = Tempfile.create()
+    Filesystem.write_text(path: tmp, content: "Hello from the attached file!")
+    print("wrote temp attachment to: ${tmp}")
+
+    email = Email.new(
+        from: "noreply@buff.dev",
+        to: "user@example.com",
+        subject: "Invoice attached",
+    )
+    email = email.body(text: "Please find your invoice attached.")
+    email = email.attach(path: tmp)
+    print("built: ${email}")
+
+    client = SmtpClient.new(
+        host: "smtp.mailtrap.io",
+        port: 587,
+        username: "mockuser",
+        password: "mockpass",
+    )
+    client.send(email: email)
+    print("sent email with attachment.")
