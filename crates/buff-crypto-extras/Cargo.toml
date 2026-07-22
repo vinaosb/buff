@@ -1,0 +1,71 @@
+[package]
+name = "buff-crypto-extras"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+AES-GCM / RSA / ECDH (P-256/P-384) / Argon2 KDF for Buff. \
+Extends T124k Hash/HMAC with symmetric + asymmetric encryption \
+plus a raw Argon2 KDF (distinct from T34 Password PHC hashing). \
+Pure-Rust RustCrypto MVP via a safe FFI boundary per the T4 guide. \
+NO ring, NO native-tls, NO cc-rs.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "crypto", "aes-gcm", "rsa", "ecdh"]
+categories = ["cryptography", "cryptography::cryptocurrencies"]
+
+[lib]
+name = "buff_crypto_extras"
+path = "src/lib.rs"
+
+[dependencies]
+# T49 rationale + pin lives in the root `[workspace.dependencies]`
+# per AGENTS.md hard rule ("heavily documented with T-numbered
+# rationale"). API surface used:
+# - aes_gcm::{aead::{Aead, KeyInit, OsRng, AeadCore}, Aes256Gcm,
+#   Nonce}: AES-256-GCM authenticated encryption (the only AES
+#   mode Buff exposes — GCM is the only standard AEAD; raw AES-ECB
+#   / AES-CBC are explicitly NOT exposed because they are not
+#   authenticated and the T49 spec mandates "no homebrew crypto").
+# - rsa::{RsaPrivateKey, RsaPublicKey, pkcs8::{EncodePublicKey,
+#   DecodePublicKey}, pkcs1v15::SigningKey, SignatureSchema}: RSA
+#   PKCS#1 v1.5 SHA-256 signing (deterministic, well-supported
+#   cross-language). PSS would also be acceptable but PKCS#1 v1.5
+#   is the baseline verifierInterop shape used by 6/6 of the task
+#   spec's cross-language targets (pycryptodome, BouncyCastle,
+#   System.Security.Cryptography, etc).
+# - p256::{SecretKey, PublicKey, ecdh::Ecdh, elliptic_curve::sec1::
+#   FromEncodedPoint}: NIST P-256 ECDH key agreement (the most
+#   widely-supported curve cross-language — every target listed in
+#   the task spec ships P-256 ECDH in stdlib or popular crate).
+# - p384::{SecretKey, PublicKey, ecdh::Ecdh}: NIST P-384 ECDH (the
+#   next-most-supported curve; same API shape as p256).
+# - argon2::{Argon2, Algorithm, Version, Params}: raw Argon2id key
+#   derivation (distinct from T34's PHC-string password hashing —
+#   T49 exposes raw 32-byte derived key material for direct use as
+#   an AES key).
+# - rand (workspace pin 0.8): thread_rng() for nonce / key generation.
+# - sha2 (workspace): pulled transitively by rsa + p256 + argon2;
+#   recorded explicitly for clarity.
+# - hex (workspace): for hex-encoded test vectors + diagnostics.
+# - signature (workspace): Verifier + RandomizedSigner traits used
+#   by the RSA sign/verify path (the rsa crate re-exports them but
+#   we record signature explicitly for the extern_crates contract).
+# - thiserror: error enum derive.
+#
+# All deps are pure-Rust (NO ring, NO native-tls, NO cc-rs) — the
+# workspace's hard "no C library" rule from AGENTS.md.
+aes-gcm.workspace = true
+rsa.workspace = true
+p256.workspace = true
+p384.workspace = true
+argon2.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+signature.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

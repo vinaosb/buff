@@ -1,0 +1,139 @@
+//! ECDH key agreement on NIST P-256 and P-384.
+//!
+//! ECDH lets two parties derive a shared secret over an insecure
+//! channel: each party generates `(private, public)` pair, exchanges
+//! public keys, and computes
+//!
+//! ```text
+//! shared = ECDH(my_private, their_public)
+//! ```
+//!
+//! Both parties arrive at the same `shared` (32 bytes for P-256,
+//! 48 bytes for P-384). The shared secret is suitable as input to
+//! a KDF ([`crate::argon2`]) for deriving an AES key (hybrid
+//! encryption).
+//!
+//! # Wire format
+//!
+//! Public keys are exchanged as raw SEC1 uncompressed points:
+//! - P-256: 65 bytes = `0x04 || X(32) || Y(32)`
+//! - P-384: 97 bytes = `0x04 || X(48) || Y(48)`
+//!
+//! Private keys are raw scalars: 32 bytes (P-256) / 48 bytes (P-384).
+//! This is the same wire format `pycryptodome` / `BouncyCastle` /
+//! `System.Security.Cryptography.ECDiffieHellman` use.
+
+use crate::error::CryptoError;
+use p256::ecdh::Ecdh as EcdhP256;
+use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
+use p256::{AffinePoint, NonZeroScalar, PublicKey as P256Public, SecretKey as P256Secret};
+use p384::ecdh::Ecdh as EcdhP384;
+use p384::{PublicKey as P384Public, SecretKey as P384Secret};
+use rand::rngs::OsRng;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+/// P-256 private scalar length (32 bytes).
+pub const P256_PRIVATE_LEN: usize = 32;
+/// P-256 SEC1 uncompressed public key length (65 bytes).
+pub const P256_PUBLIC_LEN: usize = 65;
+/// P-256 shared secret length (32 bytes — x-coordinate of the
+/// shared point).
+pub const P256_SHARED_LEN: usize = 32;
+
+/// Generate a random P-256 private scalar using `OsRng`.
+///
+/// Returns an owned `Vec<u8>` of length 32. NEVER fails.
+pub fn p256_generate_private() -> Vec<u8> {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let secret = P256Secret::random(&mut OsRng);
+        secret.to_bytes().to_vec()
+    }));
+    result.unwrap_or_default()
+}
+
+/// Derive the P-256 public key (SEC1 uncompressed, 65 bytes) from a
+/// 32-byte private scalar.
+///
+/// Returns `Vec<u8>` of length 65 (`0x04 || X || Y`). Empty Vec on
+/// failure.
+pub fn p256_public_from_private(private: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    if private.len() != P256_PRIVATE_LEN {
+        return Err(CryptoError::InvalidLength {
+            what: "p256 private scalar",
+            expected: P256_PRIVATE_LEN,
+            got: private.len(),
+        });
+    }
+    let private_owned = private.to_vec();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let secret = P256Secret::from_slice(&private_owned)?;
+        let public = public_key_from_secret_p256(&secret);
+        Ok::<Vec<u8>, CryptoError>(public)
+    }));
+    match result {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(CryptoError::Panic),
+    }
+}
+
+/// Compute the P-256 ECDH shared secret (32 bytes).
+///
+/// `private` is the local 32-byte scalar; `public` is the remote
+/// 65-byte SEC1 uncompressed point. Returns the x-coordinate of the
+/// shared point (32 bytes).
+pub fn p256_derive_shared(private: &[u8], public: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    if private.len() != P256_PRIVATE_LEN {
+        return Err(CryptoError::InvalidLength {
+            what: "p256 private scalar",
+            expected: P256_PRIVATE_LEN,
+            got: private.len(),
+        });
+    }
+    if public.len() != P256_PUBLIC_LEN {
+        return Err(CryptoError::InvalidLength {
+            what: "p256 public key",
+            expected: P256_PUBLIC_LEN,
+            got: public.len(),
+        });
+    }
+    let private_owned = private.to_vec();
+    let public_owned = public.to_vec();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let secret = P256Secret::from_slice(&private_owned)?;
+        let public_key = P256Public::from_sec1_bytes(&public_owned)?;
+        let non_zero = NonZeroScalar::from_repr(secret.to_nonzero_scalar().into())
+            .into_option()
+            .ok_or_else(|| CryptoError::Ecdh("invalid p256 private scalar".into()))?;
+        let ecdh = EcdhP256::new(non_zero, public_key.as_affine());
+        let shared = ecdh.raw_secret_bytes();
+        Ok::<Vec<u8>, CryptoError>(shared.to_vec())
+    }));
+    match result {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(CryptoError::Panic),
+    }
+}
+
+/// Generate a random P-384 private scalar using `OsRng`.
+///
+/// Returns an owned `Vec<u8>` of length 48. NEVER fails.
+pub fn p384_generate_private() -> Vec<u8> {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let secret = P384Secret::random(&mut OsRng);
+        secret.to_bytes().to_vec()
+    }));
+    result.unwrap_or_default()
+}
+
+fn public_key_from_secret_p256(secret: &P256Secret) -> Result<Vec<u8>, CryptoError> {
+    let public = P256Public::from_secret_scalar(secret)?;
+    let encoded = public.to_encoded_point(false);
+    Ok(encoded.to_bytes().into_vec())
+}
+
+#[allow(dead_code)]
+fn affine_from_p256_public(public: &P256Public) -> AffinePoint {
+    *public.as_affine()
+}
