@@ -1,0 +1,34 @@
+// T56 example: all three property wrappers in one program.
+//
+// Demonstrates `@State`, `@Published`, and `@Cached` side-by-side.
+// Each desugars at parse time to a buff-reactive primitive:
+//
+//   @State let x = init            ->  ReactiveSignal.new(init)
+//   @Published let y = init        ->  ReactiveSignal.new(init)
+//   @Cached(fn) let z              ->  ReactiveComputed.new({ || fn() })
+//
+// Additive-only: existing user-written `ReactiveSignal.new(..)` /
+// `.set(..)` / `.get()` calls continue to work unchanged.
+
+func compute_bonus() -> Int:
+    return 100
+
+func main():
+    @State let count = 0
+    @Published let score = 0
+    @Cached(compute_bonus) let bonus
+
+    ReactiveEffect.new({ ||
+        print("count = " + count.get() + ", score = " + score.get())
+    })
+
+    print("--- incrementing count ---")
+    count.set(1)
+
+    print("--- bumping score (published) ---")
+    score.set(10)
+    score.set(20)
+
+    print("--- cached bonus (computed once) ---")
+    print("bonus = " + bonus.get())
+    print("bonus = " + bonus.get())

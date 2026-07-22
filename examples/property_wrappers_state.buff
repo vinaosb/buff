@@ -1,0 +1,17 @@
+// T56 example: @State property wrapper (Swift-inspired).
+//
+// `@State let count = 0` desugars at parse time to
+// `let count = ReactiveSignal.new(0)`, exposing the reactive cell
+// surface (`count.get()` / `count.set(v)` / `count.update(fn)`)
+// without making the user spell out `ReactiveSignal.new(..)`.
+
+func main():
+    @State let count = 0
+
+    print("initial count = " + count.get())
+
+    count.set(5)
+    print("after set(5)   = " + count.get())
+
+    count.update({ old => old + 1 })
+    print("after update   = " + count.get())

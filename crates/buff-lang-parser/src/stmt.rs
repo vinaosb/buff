@@ -73,6 +73,13 @@ use crate::stream::TokenStream;
 pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     match stream.peek_kind() {
         Some(TokenKind::KwLet) => parse_let(stream),
+        // T56: property wrappers (`@State`, `@Published`, `@Cached`) —
+        // Swift-inspired attribute-driven codegen. The parser rewrites
+        // the following `let` into a regular `let` that initialises a
+        // `ReactiveSignal` (for `@State`/`@Published`) or
+        // `ReactiveComputed` (for `@Cached`). PURE parse-time desugar:
+        // no new AST nodes (mirrors `|>`/`?.`/`??` precedent).
+        Some(TokenKind::At) => parse_statement_with_property_wrappers(stream),
         Some(TokenKind::KwIf) => {
             // if-as-expression: parse as Expr, wrap in ExprStmt.
             let expr = parse_if_expr(stream)?;
@@ -655,6 +662,300 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
 // ---------------------------------------------------------------------------
 // Internal: per-statement parsers
 // ---------------------------------------------------------------------------
+
+// T56: property-wrapper attribute names recognised on `let` statements.
+// These are the ONLY built-in wrappers in v1.13 (no user-defined wrappers
+// in MVP per the T56 spec). Kept as a `const` slice so the parser,
+// examples, and tests agree on the canonical surface.
+const PROPERTY_WRAPPER_ATTRS: &[&str] = &["State", "Published", "Cached"];
+
+/// T56: parse a statement led by a property-wrapper attribute
+/// (`@State`/`@Published`/`@Cached`).
+///
+/// Behaviour:
+/// - Collects leading `@name` attributes via the existing
+///   [`parse_attributes`] helper (same machinery as `@test`/`@prefer(gpu)`).
+/// - Validates that AT MOST ONE wrapper attribute is present and that it
+///   is one of the three recognised names (`State`/`Published`/`Cached`).
+/// - Expects the next token to be `let` and delegates to [`parse_let`]
+///   to obtain the underlying `Stmt::LetDecl`.
+/// - Rewrites the LetDecl's `value` to desugar the wrapper:
+///   - `@State let x = init`      → `let x = ReactiveSignal.new(init)`
+///   - `@Published let x = init`  → `let x = ReactiveSignal.new(init)`
+///   - `@Cached(fn) let x [= ..]` → `let x = ReactiveComputed.new({ || fn() })`
+///
+/// This is a PURE parse-time desugar: no new AST nodes (mirrors `|>`/`?.`/
+/// `??`). The codegen sees a normal `Stmt::LetDecl` whose value is a
+/// `MethodCall` on `ReactiveSignal`/`ReactiveComputed`, which the existing
+/// prelude-type-assoc-fn codegen arm lowers to
+/// `buff_reactive::Signal::new(..)`/`buff_reactive::Computed::new(..)`.
+/// The existing `program_uses_namespace(decls, "ReactiveSignal" |
+/// "ReactiveComputed")` walker then records `buff-reactive` in
+/// `extern_crates` automatically.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] (using the existing [`ErrorCode::UnexpectedToken`]
+/// code, since the T56 spec does not introduce a new ErrorCode — ErrorCodes
+/// are STABLE FOREVER per the AGENTS.md anti-pattern list) when:
+/// - an unknown attribute name appears (e.g. `@Observed`),
+/// - more than one wrapper attribute is stacked (e.g. `@State @Published`),
+/// - the next token after the attribute is not `let`,
+/// - `@Cached` is used without exactly one positional arg,
+/// - the underlying `let` parses as a destructuring `Stmt::LetPattern`
+///   (destructuring + property wrappers is rejected for MVP simplicity).
+fn parse_statement_with_property_wrappers(
+    stream: &mut TokenStream<'_>,
+) -> Result<Stmt, ParseError> {
+    let attrs = parse_attributes(stream)?;
+    debug_assert!(
+        !attrs.is_empty(),
+        "parse_statement_with_property_wrappers called without leading `@`"
+    );
+
+    // Validate the attribute list: exactly ONE recognised wrapper, no extras.
+    let mut wrapper: Option<&str> = None;
+    for a in &attrs {
+        let name = a.name.name.as_str();
+        if !PROPERTY_WRAPPER_ATTRS.contains(&name) {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    format!(
+                        "unknown property wrapper `@{name}`; recognised wrappers are: State, Published, Cached"
+                    ),
+                    a.span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        if let Some(prev) = wrapper {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    format!(
+                        "only one property wrapper per `let` is allowed (saw `@{prev}` and `@{name}`)"
+                    ),
+                    a.span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        wrapper = Some(name);
+    }
+    // `parse_attributes` only returns a non-empty Vec when it consumed at
+    // least one `@` token, and this function is only called when the
+    // dispatcher saw `TokenKind::At`. Match (not `.expect`) so the
+    // unreachable branch returns a ParseError rather than panicking.
+    let Some(wrapper) = wrapper else {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "internal: parse_statement_with_property_wrappers called without a wrapper attribute",
+                stream.span_here(),
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    };
+
+    // @Cached requires exactly one positional arg naming the compute fn.
+    let cached_fn_name: Option<&str> = if wrapper == "Cached" {
+        if attrs.len() != 1 {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    "`@Cached` cannot be combined with other property wrappers",
+                    attrs[0].span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        let args = &attrs[0].args;
+        if args.len() != 1 {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    format!(
+                        "`@Cached(compute_fn)` requires exactly 1 positional arg (the compute function name); got {}",
+                        args.len()
+                    ),
+                    attrs[0].span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        // Reject named args on @Cached (e.g. `@Cached(fn = "x")`).
+        if !attrs[0].named_args.is_empty() {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    "`@Cached` does not accept named arguments (use positional: `@Cached(compute_fn)`)",
+                    attrs[0].span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        Some(args[0].as_str())
+    } else {
+        // @State/@Published: reject any args (e.g. `@State(42)` is invalid).
+        if !attrs[0].args.is_empty() || !attrs[0].named_args.is_empty() {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    format!(
+                        "`@{wrapper}` takes no arguments (use plain `@{wrapper} let x = init`)"
+                    ),
+                    attrs[0].span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        None
+    };
+    let cached_fn_span = attrs[0].span;
+
+    // The next significant token MUST be `let`.
+    if !matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
+        let span = stream
+            .peek()
+            .map(|t| t.span)
+            .unwrap_or_else(|| stream.eof_span());
+        let found = stream
+            .peek_kind()
+            .map(|k| k.to_string())
+            .unwrap_or_else(|| "end of input".into());
+        return Err(ParseError::new(
+            Diagnostic::error(
+                format!(
+                    "property wrapper `@{wrapper}` must precede a `let` binding, found `{found}`"
+                ),
+                span,
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    }
+
+    // Parse the underlying let (returns Stmt::LetDecl or Stmt::LetPattern).
+    let mut let_stmt = parse_let(stream)?;
+
+    // Reject destructuring patterns (LetPattern) for MVP — the desugar
+    // assumes a single binding name.
+    if !matches!(let_stmt, Stmt::LetDecl { .. }) {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "property wrappers do not support destructuring `let` targets (use a plain `let` and apply the wrapper to each binding)",
+                cached_fn_span,
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    }
+
+    // Destructure the LetDecl so we can rewrite `value`. The `mutable`
+    // and `ty` fields are intentionally discarded: the wrapper cell is
+    // always immutable (mutation goes through `.set(..)`/`.update(..)`),
+    // and the user's annotation would describe `T` not `Signal<T>`/`Computed<T>`
+    // (emitting it would produce incoherent Rust like `let x: Int = Signal::new(0)`).
+    let Stmt::LetDecl {
+        name,
+        value: original_value,
+        mutable: _,
+        ty: _,
+        span: let_span,
+    } = let_stmt
+    else {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "internal: parse_let returned non-LetDecl after guard",
+                cached_fn_span,
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    };
+
+    let desugared_value = match wrapper {
+        "State" | "Published" => build_reactive_signal_new(original_value, let_span),
+        "Cached" => {
+            // `cached_fn_name` is `Some(_)` here because the @Cached
+            // validation above returns Err when the arg is missing.
+            // Match (not `.expect`) to keep the unreachable branch
+            // panic-free (AGENTS.md hard rule).
+            let Some(fn_name) = cached_fn_name else {
+                return Err(ParseError::new(
+                    Diagnostic::error(
+                        "internal: @Cached reached desugar without a compute-fn name",
+                        cached_fn_span,
+                    )
+                    .with_code(ErrorCode::UnexpectedToken),
+                ));
+            };
+            build_reactive_computed_new(fn_name, cached_fn_span, let_span)
+        }
+        _ => {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    format!("internal: unrecognised property wrapper `@{wrapper}` reached desugar"),
+                    cached_fn_span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+    };
+
+    let_stmt = Stmt::LetDecl {
+        name,
+        value: desugared_value,
+        // The wrapper is immutable: the Signal/Computed cell itself is
+        // never reassigned (mutation happens through `.set(..)`/`.update(..)`).
+        // Dropping `mut` keeps the generated Rust idiomatic.
+        mutable: false,
+        // Drop any user type annotation: the binding's actual Rust type is
+        // `Signal<T>`/`Computed<T>`, not the `T` the user may have annotated.
+        // Letting Rust infer keeps the generated source compiling.
+        ty: None,
+        span: let_span,
+    };
+    Ok(let_stmt)
+}
+
+/// T56 helper: build the AST Expr for `ReactiveSignal.new(value)`.
+///
+/// Produces `Expr::MethodCall { receiver: Ident("ReactiveSignal"),
+/// method: "new", args: [value] }`. The codegen's existing
+/// `lower_prelude_type_assoc_fn` arm for `(PreludeType::ReactiveSignal,
+/// PreludeAssocFn::New)` lowers this to `buff_reactive::Signal::new(value)`.
+fn build_reactive_signal_new(value: Expr, span: Span) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(Expr::Ident(Ident::new("ReactiveSignal", span), span)),
+        method: Ident::new("new", span),
+        args: vec![value],
+        span,
+    }
+}
+
+/// T56 helper: build the AST Expr for
+/// `ReactiveComputed.new({ || fn_name() })`.
+///
+/// The closure body is the ExprStmt of a no-arg call to `fn_name`. The
+/// codegen's existing `(PreludeType::ReactiveComputed, PreludeAssocFn::New)`
+/// arm lowers this to `buff_reactive::Computed::new(|| fn_name())`.
+fn build_reactive_computed_new(fn_name: &str, name_span: Span, let_span: Span) -> Expr {
+    let fn_call = Expr::FuncCall {
+        callee: Box::new(Expr::Ident(Ident::new(fn_name, name_span), name_span)),
+        args: Vec::new(),
+        span: name_span,
+    };
+    let lambda = Expr::Lambda {
+        params: Vec::new(),
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(fn_call, name_span)],
+            span: name_span,
+        },
+        return_type: None,
+        span: name_span,
+    };
+    Expr::MethodCall {
+        receiver: Box::new(Expr::Ident(
+            Ident::new("ReactiveComputed", name_span),
+            name_span,
+        )),
+        method: Ident::new("new", name_span),
+        args: vec![lambda],
+        span: let_span,
+    }
+}
 
 /// `let [mut] name[: Type] = expr`
 fn parse_let(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
@@ -2735,10 +3036,10 @@ pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, 
                     if let TokenKind::Ident(key) = &arg_tok.kind {
                         if matches!(stream.peek_kind(), Some(TokenKind::Assign)) {
                             stream.advance(); // consume `=`
-                            // Value must be a string literal (the parser
-                            // already rejects interpolation; we re-use
-                            // the same StringStart/StringPart/StringEnd
-                            // triple walk below for the value).
+                                              // Value must be a string literal (the parser
+                                              // already rejects interpolation; we re-use
+                                              // the same StringStart/StringPart/StringEnd
+                                              // triple walk below for the value).
                             let val_tok = stream.advance().ok_or_else(|| {
                                 ParseError::new(Diagnostic::error(
                                     "expected string after `=` in named attribute argument",

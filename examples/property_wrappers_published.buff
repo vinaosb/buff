@@ -1,0 +1,18 @@
+// T56 example: @Published property wrapper (Swift-inspired).
+//
+// `@Published let score = 100` desugars to `let score = ReactiveSignal.new(100)`.
+// `@Published` is the "observable" variant — semantically distinct from
+// `@State` (it's meant for cross-component shared state) but lowers to
+// the same Signal cell in MVP. An `ReactiveEffect.new(..)` block
+// re-runs whenever any Signal it reads is mutated.
+
+func main():
+    @Published let score = 100
+
+    ReactiveEffect.new({ ||
+        print("score changed -> " + score.get())
+    })
+
+    print("--- bumping score ---")
+    score.set(110)
+    score.set(120)

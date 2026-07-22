@@ -1,0 +1,18 @@
+// T56 example: @Cached(compute_fn) property wrapper (Swift-inspired).
+//
+// `@Cached(expensive_fn) let cached` desugars at parse time to
+// `let cached = ReactiveComputed.new({ || expensive_fn() })`.
+// `ReactiveComputed` is buff-reactive's lazy + memoised derived value:
+// the closure runs ONCE on first `.get()`, the result is cached, and
+// the cache is invalidated automatically when any Signal the closure
+// reads changes.
+
+func expensive_fn() -> Int:
+    print("(running expensive_fn)")
+    return 42
+
+func main():
+    @Cached(expensive_fn) let cached
+
+    print("first  read: " + cached.get())
+    print("second read: " + cached.get())

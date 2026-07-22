@@ -3508,7 +3508,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Repeat `buff build` is ≥40% faster than baseline (cache hit). `buff check` completes in <2s on medium project. Benchmark report published. 5 examples + 10 tests.
   - **Commit**: `feat(cli): compile-speed optimization program (caching + mold + sccache + bench)`
 
-- [ ] 56. Property Wrappers — `@State`, `@Published`, `@Cached` (Swift-inspired)
+- [x] 56. Property Wrappers — `@State`, `@Published`, `@Cached` (Swift-inspired)
 
   **What to do**: Add Swift-style property wrappers as attribute-driven codegen. `@State var count = 0` desugars to `let count = Signal.new(0)` + accessors. `@Published var score` desugars to observable signal. `@Cached(compute_fn)` desugars to memoized lazy value. Reduces boilerplate for reactive patterns. Enhances T20 buff-reactive.
   - **Why**: Swift's SwiftUI adoption exploded because property wrappers made reactive state ergonomic. Same opportunity for Buff with buff-reactive + v1.9 RSX UI.
