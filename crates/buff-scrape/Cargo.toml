@@ -1,0 +1,45 @@
+[package]
+name = "buff-scrape"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+HTML parsing + crawling for Buff. \
+Pure-Rust MVP wrapping the `scraper` crate (HTML + CSS selectors) \
+and `reqwest` (already pinned workspace with rustls-tls) \
+via a safe FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "html", "scraper", "crawler", "scraping"]
+categories = ["web-programming", "parsing"]
+
+[lib]
+name = "buff_scrape"
+path = "src/lib.rs"
+
+[dependencies]
+# T43 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# scraper 0.22: pure-Rust HTML parser + CSS selector engine built on
+# `html5ever` + `selectors` (both pure-Rust — NO cc-rs, NO native C
+# shim). API surface used: scraper::Html::parse_document +
+# Html::select + Selector::parse + ElementRef::value().attr(...) +
+# ElementRef::text() + ElementRef::html() + ElementRef::inner_html().
+# `Send + Sync` so values cross spawn boundaries per FFI guide R4.
+scraper.workspace = true
+# T43: reqwest 0.12 already pinned at workspace level with
+# default-features=false + rustls-tls + json + blocking. Used for
+# the Crawler side: crawler.fetch(url) + crawler.crawl(max_pages)
+# + robots.txt retrieval. Pure-Rust TLS via rustls (NOT native-tls).
+reqwest.workspace = true
+# T43: `url` 2 — needed directly by `crates/buff-scrape/src/crawler.rs`
+# for URL resolution (`url::Url::parse` + `Url::join` for relative
+# href resolution against the seed). Already a workspace dep (T124h
+# URL prelude type). Mirrors the buff-auth pattern.
+url.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+httpmock.workspace = true

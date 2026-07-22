@@ -1,0 +1,21 @@
+# T43 .buff example: parse HTML + query headings + links (FORWARD-DECL).
+#
+# Requires the coordinated Type::Document + Type::Crawler codegen
+# lowering arms (this task, T43 finish). The prelude registry entries
+# `PreludeType::Document` + `PreludeType::Crawler` + assoc/instance
+# method arms were added in the same T43 finish commit as this
+# example. See crates/buff-scrape/AGENTS.md "RELATIONSHIP TO OTHER
+# CRATES" for the wiring map.
+
+from "scrape" import Document
+
+func main():
+    html = "<html><body><h1>Hello</h1><a href=\"/about\">About</a></body></html>"
+    doc = Document.from_html(html: html)
+    print("title:", doc.title())
+
+    heading = doc.select(css: "h1").get(0)
+    print("heading text:", heading.text())
+
+    links = doc.select(css: "a")
+    print("found", len(links), "links")

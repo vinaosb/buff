@@ -1,0 +1,16 @@
+# T43 .buff example: Crawler fetch + crawl (robots.txt respected).
+
+from "scrape" import Crawler
+
+func main():
+    crawler = Crawler.new(seed_url: "https://example.com/")
+
+    home = crawler.fetch(url: "https://example.com/")
+    print("home title:", home.title())
+
+    print("page1 allowed:", crawler.robots_allows(url: "https://example.com/page1"))
+
+    visited = crawler.crawl(max_pages: 10)
+    print("crawled", len(visited), "pages")
+    for url in visited:
+        print("  ", url)

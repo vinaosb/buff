@@ -1,0 +1,17 @@
+# T43 .buff example: drill into an HTML tree via nested Element.select.
+
+from "scrape" import Document
+
+func main():
+    html = """<html><body>
+        <article class=\"post\"><h2>First</h2><a href=\"/p/1\">read</a></article>
+        <article class=\"post\"><h2>Second</h2><a href=\"/p/2\">read</a></article>
+    </body></html>"""
+
+    doc = Document.from_html(html: html)
+    posts = doc.select(css: "article.post")
+    print("found", len(posts), "posts")
+    for post in posts:
+        heading = post.select(css: "h2").get(0)
+        link = post.select(css: "a").get(0)
+        print("  heading:", heading.text(), "link:", link.attr(name: "href"))
