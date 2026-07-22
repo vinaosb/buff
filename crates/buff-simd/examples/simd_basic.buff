@@ -1,0 +1,14 @@
+# T54 example: SIMD basics - splat + add + sum.
+# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_simd::*).
+#
+# Run via:
+#   buff run examples/simd_basic.buff
+
+func main():
+    let a = Simd.from_array([1.0, 2.0, 3.0, 4.0])
+    let b = Simd.splat(10.0)
+    let sum_lane = a.add(b)
+    print(a)
+    print(b)
+    print(sum_lane)
+    print(sum_lane.sum())

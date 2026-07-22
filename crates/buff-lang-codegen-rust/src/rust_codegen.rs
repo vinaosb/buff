@@ -1134,6 +1134,20 @@ impl RustCodegen {
             self.extern_crates.insert("geo".to_string());
             self.extern_crates.insert("geo-types".to_string());
         }
+        // T54: register `buff-simd` when the program references the
+        // `Simd` namespace (`Simd.splat(x)` / `Simd.from_slice(s)` /
+        // `Simd.from_array(arr)` / `simd.add(other)` etc.). Also
+        // records `wide` transitively (the pure-Rust portable SIMD
+        // wrapper crate that `buff_simd::Simd` wraps — `wide::f32x4`).
+        // Mirrors the T9 Image / T45 buff-geo / T43 buff-scrape pattern.
+        // Pure-Rust, CPU-only per Metis G7 lock (NO GPU dispatch — GPU
+        // SIMD is WGSL's job via `buff-lang-codegen-wgsl`); NO nightly
+        // `std::simd`, NO runtime `is_x86_feature_detected!` detection
+        // per T54 spec ("Must NOT" clause).
+        if program_uses_namespace(decls, "Simd") {
+            self.extern_crates.insert("buff-simd".to_string());
+            self.extern_crates.insert("wide".to_string());
+        }
         // T50: register `buff-xml` when the program references either
         // of the two prelude xml namespaces (`Xml.*` /
         // `XmlElement.*`). Also records `quick-xml` transitively (the
@@ -6206,6 +6220,58 @@ impl RustCodegen {
                     self.unsupported(&format!("Polygon.from_coords codegen parse: {e}"))
                 })
             }
+            // T54: buff-simd constructors. Each lowers to the matching
+            // `buff_simd::Simd::*` associated function. `Simd.splat(x)`
+            // and `Simd.from_array(arr)` are infallible (wrap the
+            // underlying `wide::f32x4` ctors directly). `Simd.from_slice
+            // (slice)` is fallible in Rust (returns
+            // `Result<_, SimdError>`) but surfaces as infallible on the
+            // Buff side via `.unwrap_or_default()` (Simd impls Default
+            // as `splat(0.0)`). Records `buff-simd` + `wide` in
+            // extern_crates via the `program_uses_namespace("Simd")`
+            // walker.
+            //
+            // `Simd.splat(x)` -> Simd. One arg (Float). Wraps
+            // `buff_simd::Simd::splat(x)`.
+            (T::Simd, A::Splat) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "Simd.splat expects exactly 1 arg (x: Float), got {}",
+                        args.len()
+                    )));
+                }
+                let x = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_simd::Simd::splat(#x as f32)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.splat codegen parse: {e}")))
+            }
+            // `Simd.from_slice(slice)` -> Simd. One arg (Vector<Float>).
+            // Wraps
+            // `buff_simd::Simd::from_slice(&slice).unwrap_or_default()`
+            // (panic-free on too-short / non-finite input).
+            (T::Simd, A::FromSlice) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_simd::Simd::from_slice(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.from_slice codegen parse: {e}")))
+            }
+            // `Simd.from_array(arr)` -> Simd. One arg (Vector<Float>).
+            // Wraps `buff_simd::Simd::from_array(...)` via the slice
+            // path (the wrapper accepts a slice; codegen passes the
+            // array as a slice reference). Infallible via
+            // `.unwrap_or_default()`.
+            (T::Simd, A::FromArray) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_simd::Simd::from_slice(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.from_array codegen parse: {e}")))
+            }
             // T46: Text.detect_language(text) -> Option<Language>. One
             // arg (String). Wraps `buff_nlp::Text::detect_language(&text)`
             // directly — the wrapper already returns Option<Language>
@@ -7889,6 +7955,138 @@ impl RustCodegen {
                 syn::parse2(tokens).map_err(|e| {
                     self.unsupported(&format!("Polygon.intersects codegen parse: {e}"))
                 })
+            }
+            // T54: buff-simd instance methods. Each lowers to the
+            // matching `buff_simd::Simd` method. The 4 lane-wise binary
+            // ops (add/sub/mul/div) each take one Simd arg and return
+            // Simd. The 3 horizontal reductions (sum/min/max) take no
+            // args and return f32. The extract (to_vec) takes no args
+            // and returns Vec<f32>. All infallible at the codegen layer
+            // (the wrapper crate's methods return Simd / f32 / Vec<f32>
+            // directly — no unwrap_or_default needed). Records
+            // `buff-simd` + `wide` in extern_crates via the
+            // `program_uses_namespace("Simd")` walker.
+            //
+            // `simd.add(other)` -> Simd. One arg (Simd). Wraps
+            // `recv.add(other)`.
+            M::Add if matches!(recv_ty, Type::Simd) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "add() expects exactly 1 arg (other Simd), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.add(#other)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.add codegen parse: {e}")))
+            }
+            // `simd.sub(other)` -> Simd. One arg (Simd). Wraps
+            // `recv.sub(other)`.
+            M::Sub if matches!(recv_ty, Type::Simd) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "sub() expects exactly 1 arg (other Simd), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.sub(#other)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.sub codegen parse: {e}")))
+            }
+            // `simd.mul(other)` -> Simd. One arg (Simd). Wraps
+            // `recv.mul(other)`.
+            M::Mul if matches!(recv_ty, Type::Simd) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "mul() expects exactly 1 arg (other Simd), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.mul(#other)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.mul codegen parse: {e}")))
+            }
+            // `simd.div(other)` -> Simd. One arg (Simd). Wraps
+            // `recv.div(other)`.
+            M::Div if matches!(recv_ty, Type::Simd) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "div() expects exactly 1 arg (other Simd), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.div(#other)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.div codegen parse: {e}")))
+            }
+            // `simd.sum()` -> Float. Zero args. Wraps `recv.sum()`.
+            M::Sum if matches!(recv_ty, Type::Simd) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "sum() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.sum()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.sum codegen parse: {e}")))
+            }
+            // `simd.min()` -> Float. Zero args. Wraps `recv.min()`.
+            M::Min if matches!(recv_ty, Type::Simd) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "min() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.min()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.min codegen parse: {e}")))
+            }
+            // `simd.max()` -> Float. Zero args. Wraps `recv.max()`.
+            M::Max if matches!(recv_ty, Type::Simd) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "max() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.max()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.max codegen parse: {e}")))
+            }
+            // `simd.to_vec()` -> Vector<Float>. Zero args. Wraps
+            // `recv.to_vec()`.
+            M::ToVec if matches!(recv_ty, Type::Simd) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_vec() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.to_vec()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Simd.to_vec codegen parse: {e}")))
             }
             // T46: buff-nlp Language instance methods. Both infallible
             // — the `buff_nlp::Language::code` / `name` methods return
@@ -12287,6 +12485,11 @@ impl RustCodegen {
             Type::Point => "buff_geo::Point",
             Type::LineString => "buff_geo::LineString",
             Type::Polygon => "buff_geo::Polygon",
+            // T54: prelude SIMD type. Opaque runtime-value type mapped
+            // to `buff_simd::Simd` (a 4-lane f32x4 register wrapping
+            // `wide::f32x4`). No generic parameters, no turbofish
+            // needed. Mirrors the T9 Image / T45 Point precedent.
+            Type::Simd => "buff_simd::Simd",
             // T46: prelude NLP types. `Text` is namespace-only (mirrors
             // MsgPack — the arm rarely fires in practice but is required
             // for match exhaustiveness). `Language` is a runtime value

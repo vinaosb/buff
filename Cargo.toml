@@ -1840,6 +1840,61 @@ ethers = { version = "2", default-features = false, features = ["rustls"] }
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-web3 = { path = "crates/buff-web3" }
+# T54: `wide` 0.7 — portable stable-SIMD wrapper for the `buff-simd`
+# crate (Mojo-inspired first-class `Simd<T, N>` types). API surface used
+# (all stable since 0.7):
+# - `wide::f32x4::splat(x: f32) -> f32x4` for `Simd.splat(x)`.
+# - `wide::f32x4::new([f32; 4]) -> f32x4` for `Simd.from_array(arr)`.
+# - `f32x4 + f32x4` / `-` / `*` / `/` operator overloads for lane-wise
+#   `Simd.add` / `.sub` / `.mul` / `.div`.
+# - `f32x4::to_array() -> [f32; 4]` for horizontal reductions
+#   (`Simd.sum` / `.min` / `.max` / `.to_vec`).
+# - `f32x4::min(other)` / `f32x4::max(other)` for element-wise
+#   `Simd.lane_min` / `.lane_max`.
+#
+# Pure-Rust, NO cc-rs, NO assembler shims, NO nightly `std::simd` —
+# matches the "no C library, no Docker" hard rule from T126/T127 and
+# the wider workspace stance that killed chumsky/logos/zmq. `wide`
+# selects the best register width at COMPILE TIME via
+# `#[cfg(target_feature = "...")]` (NO runtime
+# `is_x86_feature_detected!` detection — per T54 spec "Must NOT" clause).
+# CPU-only per Metis G7 lock (NO GPU dispatch — GPU SIMD is WGSL's job
+# via `buff-lang-codegen-wgsl`).
+#
+# Pinned to major 0.7 (released 2024 — the long-standing surface most
+# of the Rust ecosystem targets; `f32x4::splat` / `::new` /
+# `::to_array` + operator overloads have been stable for years).
+# Mirrors the conservative-pin philosophy already in use across the
+# workspace (chrono 0.4, rand 0.8, geo 0.28).
+#
+# The crate is recorded in the codegen `extern_crates` BTreeSet when a
+# Buff program uses the `Simd` namespace (mirrors the chrono / regex /
+# tracing / image codegen-only linking boundary: the single-file
+# `buff run` rustc path does NOT link it; cargo-project wiring is
+# deferred per the existing precedent). Snapshots + extern_crates set
+# is the verifiable contract.
+wide = "0.7"
+# T54: `criterion` 0.5 — the canonical Rust micro-benchmark harness
+# (the de-facto standard for statistical benchmarking with warmup +
+# outlier detection). Used by `crates/buff-simd/benches/dot_product.rs`
+# for the T54 acceptance criterion (>=3x speedup on dot product vs
+# scalar loop). Pure-Rust (uses `plotters` for optional HTML render —
+# no native deps). API surface used:
+# - `criterion::{black_box, Criterion, criterion_group, criterion_main}`
+# - `c.benchmark_group("name").bench_function("case", |b| b.iter(|| ...))`.
+# Pinned to major 0.5 (the long-standing surface since 2023 —
+# `bench_function` + `benchmark_group` API). dev-dep only (never linked
+# into the compiler or runtime). Mirrors the conservative-pin philosophy.
+criterion = "0.5"
+# T54: `buff-simd` workspace path dep — mirrors the buff-image /
+# buff-geo / buff-msgpack / buff-crypto-extras pattern so any future
+# consumer (codegen-lowered `Simd.splat(...)` / `Simd.from_slice(...)`
+# / `simd.add(...)` calls, IDE hover/completion, T139 bufflings SIMD
+# tutorial) resolves to the same in-tree version during the v1.19
+# language-evolution wave. Records `buff-simd` (NOT `buff_lang_simd` —
+# the framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-simd = { path = "crates/buff-simd" }
 
 # T60: Binary Size Minimization profile.
 #

@@ -1,0 +1,37 @@
+[package]
+name = "buff-simd"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+First-class SIMD types for Buff (Mojo-inspired). \
+Pure-Rust MVP wrapping the `wide` crate (stable portable \
+SIMD — NO nightly `std::simd`, NO runtime detection, NO GPU). \
+`Simd<T, N>` exposes `splat` / `from_slice` / `from_array` ctors \
++ `add` / `sub` / `mul` / `div` / `sum` / `min` / `max` / `to_vec` \
+instance methods for hand-optimized hot loops.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "simd", "vector", "wide", "mojo"]
+categories = ["hardware-support", "mathematics"]
+
+[lib]
+name = "buff_simd"
+path = "src/lib.rs"
+
+[dependencies]
+# T54 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# wide 0.7: portable stable SIMD wrapper (f32x4 / i32x4 / u32x4 etc).
+# Pure-Rust, no cc-rs, no nightly std::simd. Compile-time target-feature
+# selection (NO runtime is_x86_feature_detected! detection — per T54 spec).
+wide.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[[bench]]
+name = "dot_product"
+harness = false

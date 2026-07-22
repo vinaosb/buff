@@ -1021,6 +1021,28 @@ pub enum Type {
     /// owned `String`s — public_pem + private_pem — `Send + Sync +
     /// Clone`). Pure-Rust, CPU-only.
     RsaKeypair,
+    /// T54: a 4-lane `f32` SIMD register (the concrete realisation of the
+    /// conceptual `Simd<Float, 4>`), mapped to `buff_simd::Simd` at
+    /// codegen time. Constructed via `Simd.splat(x)` (broadcast),
+    /// `Simd.from_slice(slice)` (length-checked), or
+    /// `Simd.from_array(arr)`; carries the instance methods `.add(other)`,
+    /// `.sub(other)`, `.mul(other)`, `.div(other)` (lane-wise binary),
+    /// `.sum()`, `.min()`, `.max()` (horizontal reductions),
+    /// `.to_vec()` (extract). CPU-only per Metis G7 lock (NO GPU
+    /// dispatch — GPU SIMD is WGSL's job via `buff-lang-codegen-wgsl`).
+    ///
+    /// This is **additive** (T54). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`
+    /// for `Simd` (a SIMD register is an opaque container, not a scalar).
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] (T45) as a
+    /// runtime-value-with-rich-instance-methods type. The underlying Rust
+    /// type is `buff_simd::Simd` (a struct wrapping `wide::f32x4` — a
+    /// 128-bit SSE/NEON register). The MVP is **fixed at 4 lanes**; the
+    /// generic `<T, N>` parameter plumbing is deferred to v1.20+.
+    /// Pure-Rust, CPU-only; wraps the `wide` crate (stable portable
+    /// SIMD — NO nightly `std::simd`, NO runtime detection).
+    Simd,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1744,6 +1766,24 @@ impl Type {
         matches!(self, Type::Polygon)
     }
 
+    /// T54: the 4-lane `f32` SIMD register type (the concrete
+    /// `Simd<Float, 4>`). Maps to `buff_simd::Simd` at codegen time.
+    /// Constructed via `Simd.splat(x)` / `Simd.from_slice(slice)` /
+    /// `Simd.from_array(arr)`; supports the instance methods
+    /// `simd.add(other)` / `.sub` / `.mul` / `.div` / `.sum()` /
+    /// `.min()` / `.max()` / `.to_vec()`.
+    pub fn simd() -> Self {
+        Type::Simd
+    }
+
+    /// T54: Returns `true` if this type is the prelude `Simd` runtime
+    /// value. Used to dispatch instance method calls (`s.add(o)`,
+    /// `s.mul(o)`, `s.sum()`, `s.min()`, `s.max()`, `s.to_vec()`) to
+    /// the `buff_simd::Simd` lowering.
+    pub fn is_prelude_simd(&self) -> bool {
+        matches!(self, Type::Simd)
+    }
+
     /// T46: the `Text` NLP namespace type. Maps to `buff_nlp::Text` at
     /// codegen time. Namespace-only — never instantiated as a runtime
     /// value; only its associated functions are callable
@@ -2188,6 +2228,10 @@ impl fmt::Display for Type {
             Type::Point => f.write_str("Point"),
             Type::LineString => f.write_str("LineString"),
             Type::Polygon => f.write_str("Polygon"),
+            // T54: prelude SIMD type. Opaque runtime-value type mapped
+            // to `buff_simd::Simd` (a 4-lane f32x4 register). Display
+            // mirrors the Buff surface name.
+            Type::Simd => f.write_str("Simd"),
             // T46: prelude NLP types. `Text` is namespace-only (mirrors
             // MsgPack); `Language` is a runtime value (mirrors Point);
             // `StemAlgorithm` is an opaque enum (only passed as arg).

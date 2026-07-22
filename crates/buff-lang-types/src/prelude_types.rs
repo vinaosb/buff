@@ -1759,6 +1759,20 @@ pub enum PreludeType {
     /// private_pem: String}` struct — `Send + Sync + Clone`).
     /// Pure-Rust, CPU-only.
     RsaKeypair,
+    /// T54: `Simd` — a 4-lane `f32` SIMD register (the concrete
+    /// realisation of the conceptual `Simd<Float, 4>`). Runtime-value
+    /// type wrapping `buff_simd::Simd` (which wraps `wide::f32x4` — a
+    /// 128-bit SSE/NEON register). Constructed via `Simd.splat(x)`
+    /// (broadcast), `Simd.from_slice(slice)` (length-checked), or
+    /// `Simd.from_array(arr)`; carries the instance methods `.add(other)`,
+    /// `.sub(other)`, `.mul(other)`, `.div(other)` (lane-wise binary),
+    /// `.sum()`, `.min()`, `.max()` (horizontal reductions), `.to_vec()`
+    /// (extract). Mirrors Image / Point / RsaKeypair as a runtime-value-
+    /// with-rich-instance-methods type. Pure-Rust, CPU-only per Metis
+    /// G7 lock (NO GPU dispatch — GPU SIMD is WGSL's job); wraps the
+    /// `wide` crate (stable portable SIMD — NO nightly `std::simd`, NO
+    /// runtime `is_x86_feature_detected!` detection per T54 spec).
+    Simd,
 }
 
 impl PreludeType {
@@ -2174,6 +2188,13 @@ impl PreludeType {
         PreludeType::ECDH,
         PreludeType::Argon2,
         PreludeType::RsaKeypair,
+        // T54: Simd — 4-lane f32 SIMD register runtime-value type
+        // wrapping the in-tree pure-Rust `buff-simd` crate
+        // (`buff_simd::Simd`) backed by `wide` (f32x4). Registered via
+        // `program_uses_namespace("Simd")` walker. Pure-Rust, CPU-only
+        // per Metis G7 lock (NO GPU dispatch); NO nightly std::simd,
+        // NO runtime detection per T54 spec.
+        PreludeType::Simd,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2496,6 +2517,10 @@ impl PreludeType {
             PreludeType::Point => "Point",
             PreludeType::LineString => "LineString",
             PreludeType::Polygon => "Polygon",
+            // T54: Simd — canonical PascalCase name matching the
+            // user-facing `Simd.splat(x)` / `Simd.from_array(arr)`
+            // surface. The underlying Rust type is `buff_simd::Simd`.
+            PreludeType::Simd => "Simd",
             // T46: Language / StemAlgorithm — canonical PascalCase names
             // matching the user-facing `lang.code()` / `lang.name()`
             // (Language) and `Text.stem(word, algorithm: .english)`
@@ -2920,6 +2945,10 @@ impl PreludeType {
             PreludeType::Point => Type::Point,
             PreludeType::LineString => Type::LineString,
             PreludeType::Polygon => Type::Polygon,
+            // T54: Simd IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Simd`] variant; the codegen
+            // layer maps it to `buff_simd::Simd`.
+            PreludeType::Simd => Type::Simd,
             // T47: Bot / ChatMessage / Platform ARE runtime values
             // (NOT namespace-only). Returns the matching opaque Type
             // variant; the codegen layer maps them to
@@ -3008,6 +3037,7 @@ impl PreludeType {
                 | PreludeType::RSA
                 | PreludeType::ECDH
                 | PreludeType::Argon2
+                | PreludeType::Simd
         )
     }
 }
@@ -3826,6 +3856,24 @@ pub enum PreludeAssocFn {
     /// Vector<Byte> salt 16B). Returns `Vector<Byte>` (32 bytes).
     /// Argon2-only.
     DeriveKey,
+    /// T54: `Simd.splat(x)` — broadcast a scalar `f32` to all 4 lanes
+    /// of a `Simd<Float, 4>` register. One arg (Float). Returns `Simd`.
+    /// Wraps `buff_simd::Simd::splat(x)` (infallible — the underlying
+    /// `wide::f32x4::splat` never fails). Simd-only.
+    Splat,
+    /// T54: `Simd.from_slice(slice)` — construct from a flat slice of
+    /// at least 4 `f32` values (reads the first 4). One arg
+    /// (`Vector<Float>`). Returns `Simd`. Wraps
+    /// `buff_simd::Simd::from_slice(&slice).unwrap_or_default()`
+    /// (panic-free on too-short / non-finite input — Simd impls Default
+    /// as `splat(0.0)`). Simd-only.
+    FromSlice,
+    /// T54: `Simd.from_array(arr)` — construct from a fixed-size
+    /// 4-element array. One arg (`Vector<Float>` of length 4).
+    /// Returns `Simd`. Wraps `buff_simd::Simd::from_array(arr)`
+    /// (infallible). Simd-only. Buff §7 ctor naming convention permits
+    /// `Type.from_*()`.
+    FromArray,
 }
 
 impl PreludeAssocFn {
@@ -4078,6 +4126,12 @@ impl PreludeAssocFn {
         PreludeAssocFn::DeriveShared,
         PreludeAssocFn::GenerateSalt,
         PreludeAssocFn::DeriveKey,
+        // T54: Simd ctors — splat / from_slice / from_array. Dispatched
+        // on the (Simd, Splat) / (Simd, FromSlice) / (Simd, FromArray)
+        // pairs.
+        PreludeAssocFn::Splat,
+        PreludeAssocFn::FromSlice,
+        PreludeAssocFn::FromArray,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -4265,6 +4319,13 @@ impl PreludeAssocFn {
             // `buff_geo::LineString::from_coords(...)` /
             // `buff_geo::Polygon::from_coords(...)` without rewriting.
             PreludeAssocFn::FromCoords => "from_coords",
+            // T54: Simd ctor names mirror the `buff_simd::Simd` Rust
+            // method names 1:1 so codegen can splice
+            // `buff_simd::Simd::splat(...)` / `::from_slice(...)` /
+            // `::from_array(...)` without rewriting.
+            PreludeAssocFn::Splat => "splat",
+            PreludeAssocFn::FromSlice => "from_slice",
+            PreludeAssocFn::FromArray => "from_array",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -5257,6 +5318,15 @@ pub fn assoc_fn_return_type(
         (PreludeType::LineString, PreludeAssocFn::FromCoords) => Some(Type::LineString),
         (PreludeType::Polygon, PreludeAssocFn::New) => Some(Type::Polygon),
         (PreludeType::Polygon, PreludeAssocFn::FromCoords) => Some(Type::Polygon),
+        // T54: buff-simd constructors. `Simd.splat(x)` is infallible
+        // (wraps `buff_simd::Simd::splat(x)` directly). `Simd.from_slice
+        // (slice)` is fallible in Rust (returns `Result<_, SimdError>`)
+        // but surfaces as infallible on the Buff side via codegen's
+        // `unwrap_or_default()` (Simd impls Default as `splat(0.0)`).
+        // `Simd.from_array(arr)` is infallible. All three return `Simd`.
+        (PreludeType::Simd, PreludeAssocFn::Splat) => Some(Type::Simd),
+        (PreludeType::Simd, PreludeAssocFn::FromSlice) => Some(Type::Simd),
+        (PreludeType::Simd, PreludeAssocFn::FromArray) => Some(Type::Simd),
         // T52: Protobuf assoc fns. `Protobuf.serialize(value)` -> Bytes
         // (Vector<Byte>). Wraps `buff_protobuf::serialize(&value)
         // .unwrap_or_default()` (empty Vec on failure — NEVER panics).
@@ -6202,6 +6272,31 @@ pub enum PreludeInstanceFn {
     /// PKCS#8 PEM string (`-----BEGIN PRIVATE KEY-----`). Wraps
     /// `recv.private_pem.clone()`. RsaKeypair-only.
     PrivatePem,
+    // ---- T54: buff-simd instance methods (8) ---------------------------
+    /// `simd.add(other)` — lane-wise addition. One arg (Simd).
+    /// Returns Simd. Simd-only.
+    Add,
+    /// `simd.sub(other)` — lane-wise subtraction. One arg (Simd).
+    /// Returns Simd. Simd-only.
+    Sub,
+    /// `simd.mul(other)` — lane-wise multiplication. One arg (Simd).
+    /// Returns Simd. Simd-only.
+    Mul,
+    /// `simd.div(other)` — lane-wise division. One arg (Simd).
+    /// Returns Simd. Simd-only.
+    Div,
+    /// `simd.sum()` — horizontal sum (reduce). Zero args. Returns
+    /// Float. Simd-only.
+    Sum,
+    /// `simd.min()` — horizontal min (smallest lane). Zero args.
+    /// Returns Float. Simd-only.
+    Min,
+    /// `simd.max()` — horizontal max (largest lane). Zero args.
+    /// Returns Float. Simd-only.
+    Max,
+    /// `simd.to_vec()` — extract 4 lanes to `Vector<Float>`. Zero
+    /// args. Returns `Vector<Float>`. Simd-only.
+    ToVec,
 }
 
 impl PreludeInstanceFn {
@@ -6505,6 +6600,16 @@ impl PreludeInstanceFn {
         // `String`, Buff hides references from users).
         PreludeInstanceFn::PublicPem,
         PreludeInstanceFn::PrivatePem,
+        // T54: buff-simd instance methods (8 new variants). All
+        // dispatched on the (Simd, <Variant>) pairs. Simd-only.
+        PreludeInstanceFn::Add,
+        PreludeInstanceFn::Sub,
+        PreludeInstanceFn::Mul,
+        PreludeInstanceFn::Div,
+        PreludeInstanceFn::Sum,
+        PreludeInstanceFn::Min,
+        PreludeInstanceFn::Max,
+        PreludeInstanceFn::ToVec,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -6830,6 +6935,18 @@ impl PreludeInstanceFn {
             // without rewriting.
             PreludeInstanceFn::PublicPem => "public_pem",
             PreludeInstanceFn::PrivatePem => "private_pem",
+            // T54: buff-simd instance method names mirror the
+            // `buff_simd::Simd` Rust method names 1:1 so codegen can
+            // splice `recv.add(other)` / `recv.mul(other)` / `recv.sum()`
+            // / `recv.to_vec()` etc. without rewriting.
+            PreludeInstanceFn::Add => "add",
+            PreludeInstanceFn::Sub => "sub",
+            PreludeInstanceFn::Mul => "mul",
+            PreludeInstanceFn::Div => "div",
+            PreludeInstanceFn::Sum => "sum",
+            PreludeInstanceFn::Min => "min",
+            PreludeInstanceFn::Max => "max",
+            PreludeInstanceFn::ToVec => "to_vec",
         }
     }
 }
@@ -7390,6 +7507,19 @@ pub fn instance_fn_return_type(
         (Type::Polygon, PreludeInstanceFn::Area) => Some(Type::float_default()),
         (Type::Polygon, PreludeInstanceFn::Contains) => Some(Type::Bool),
         (Type::Polygon, PreludeInstanceFn::Intersects) => Some(Type::Bool),
+
+        // T54: buff-simd instance methods. `simd.add/sub/mul/div(other)`
+        // each return Simd (lane-wise binary). `simd.sum/min/max()` each
+        // return Float (horizontal reductions). `simd.to_vec()` returns
+        // `Vector<Float>` (extract 4 lanes).
+        (Type::Simd, PreludeInstanceFn::Add) => Some(Type::Simd),
+        (Type::Simd, PreludeInstanceFn::Sub) => Some(Type::Simd),
+        (Type::Simd, PreludeInstanceFn::Mul) => Some(Type::Simd),
+        (Type::Simd, PreludeInstanceFn::Div) => Some(Type::Simd),
+        (Type::Simd, PreludeInstanceFn::Sum) => Some(Type::float_default()),
+        (Type::Simd, PreludeInstanceFn::Min) => Some(Type::float_default()),
+        (Type::Simd, PreludeInstanceFn::Max) => Some(Type::float_default()),
+        (Type::Simd, PreludeInstanceFn::ToVec) => Some(Type::vector(Type::float_default())),
 
         // T46: buff-nlp Language instance methods. `language.code()`
         // returns String (ISO 639-3 code — three lowercase letters).

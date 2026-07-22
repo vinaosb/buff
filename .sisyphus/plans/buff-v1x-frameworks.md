@@ -3482,7 +3482,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Compile-time fibonacci(10) precomputes to constant. Generic `comptime max(Type, T, T)` specializes per type. Lookup table builds at compile time. Comptime errors show Buff source spans. 5 examples + 20 tests.
   - **Commit**: `feat(ast): comptime compile-time execution engine (Zig-inspired)`
 
-- [ ] 54. `Simd<T, N>` — First-Class SIMD Types (Mojo-inspired)
+- [x] 54. `Simd<T, N>` — First-Class SIMD Types (Mojo-inspired)
 
   **What to do**: Add `Simd<T, N>` type to buff-tensor or new buff-simd crate. Represents N values of type T in a SIMD register (e.g., `Simd<Float, 4>` = 4 floats in 128-bit register). Operations: `Simd.splat(x)`, `simd.add(other)`, `simd.mul(other)`, `simd.sum()`, `simd.min()`/`simd.max()`. Auto-vectorization remains for non-explicit code; `Simd<T,N>` for hand-optimized hot loops. Wraps Rust's `std::simd` (stable since 1.51) or `packed_simd2`.
   - **Why**: 4-8x speedup for compute frameworks (buff-tensor T8, buff-science T13, buff-ml T15, buff-image T9, buff-dsp T11) in hot loops where auto-vectorizer misses.
