@@ -395,6 +395,25 @@ pub enum Type {
     /// / `recv.blur(sigma)` for the 10 instance methods. Pure-Rust,
     /// CPU-only per Metis G7 lock (NO GPU dispatch).
     Image,
+    /// T37: a fake-data generator, mapped to `buff_fake::Faker` at
+    /// codegen time. Constructed via `Faker.new()` (default locale,
+    /// random seed), `Faker.with_locale(locale)`, or
+    /// `Faker.with_seed(locale, seed)`; supports the instance methods
+    /// `.name()`, `.email()`, `.address()`, `.phone()`, `.uuid()`,
+    /// `.lorem(words)`, `.int(min, max)`, `.datetime(start, end)`.
+    ///
+    /// This is **additive** (T37): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` will be extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_faker`
+    /// predicate. The `is_numeric` / `is_float_like` / `is_integer_like`
+    /// / `is_gpu_eligible` predicates all return `false` for `Faker`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) as a runtime-value-with-rich-
+    /// instance-methods type. The underlying Rust type is
+    /// `buff_fake::Faker` (a struct wrapping a locale + seeded StdRng).
+    /// Pure-Rust, no native deps.
+    Faker,
     /// T31 (v1.16 frameworks): the in-memory Cache runtime-value type.
     /// Maps to `buff_cache::Cache` at codegen time. Constructed via
     /// `Cache.new(max_capacity)`; carries the instance methods
@@ -913,6 +932,23 @@ impl Type {
         matches!(self, Type::Image)
     }
 
+    /// T37: the fake-data generator type. Maps to `buff_fake::Faker`
+    /// at codegen time. Constructed via `Faker.new()` /
+    /// `Faker.with_locale(locale)` / `Faker.with_seed(locale, seed)`;
+    /// supports 8 instance methods (`name`, `email`, `address`,
+    /// `phone`, `uuid`, `lorem`, `int`, `datetime`).
+    pub fn faker() -> Self {
+        Type::Faker
+    }
+
+    /// T37: Returns `true` if this type is the prelude `Faker`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`faker.name()`, `faker.email()`, ...) to the
+    /// `buff_fake::Faker` lowering.
+    pub fn is_prelude_faker(&self) -> bool {
+        matches!(self, Type::Faker)
+    }
+
     /// T31: the in-memory Cache runtime-value type. Maps to
     /// `buff_cache::Cache` at codegen time. Constructed via
     /// `Cache.new(max_capacity)`; carries the instance methods
@@ -1160,6 +1196,10 @@ impl fmt::Display for Type {
             // `buff_image::Image`. Display mirrors the Buff surface
             // name (`Image`).
             Type::Image => f.write_str("Image"),
+            // T37: fake-data generator. Opaque runtime-value type
+            // mapped to `buff_fake::Faker`. Display mirrors the Buff
+            // surface name (`Faker`).
+            Type::Faker => f.write_str("Faker"),
             // T31: cache. Opaque runtime-value type mapped to
             // `buff_cache::Cache`. Display mirrors the Buff surface
             // name (`Cache`).

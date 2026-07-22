@@ -750,6 +750,23 @@ pub enum PreludeType {
     /// codegen-only linking boundary). CPU-only per Metis G7 lock
     /// (NO GPU dispatch — defer to v1.18+).
     Image,
+    /// T37: `Faker` — a fake-data generator wrapping `buff_fake::Faker`.
+    /// Constructed via the associated functions `Faker.new()` (default
+    /// locale, random seed), `Faker.with_locale(locale)` (en-US or
+    /// pt-BR), `Faker.with_seed(locale, seed)` (reproducible output);
+    /// supports 8 instance methods: `faker.name()`, `faker.email()`,
+    /// `faker.address()`, `faker.phone()`, `faker.uuid()`,
+    /// `faker.lorem(words)`, `faker.int(min, max)`,
+    /// `faker.datetime(start, end)`.
+    ///
+    /// This is a runtime-value-with-rich-instance-methods type
+    /// (mirroring Image T9 / Regex T124d). `buff_type()` returns
+    /// [`Type::Faker`] (a real value type); `is_namespace_only()`
+    /// returns `false`. The `fake` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Faker` (mirrors
+    /// the chrono / regex / tracing codegen-only linking boundary).
+    /// Pure-Rust, no native deps.
+    Faker,
     /// T31: `Cache` — in-memory cache runtime-value type wrapping
     /// `buff_cache::Cache` (itself wrapping the `moka` sync cache).
     /// Constructed via the associated function `Cache.new(max_capacity)`;
@@ -1471,6 +1488,12 @@ impl PreludeType {
         // same commit (T9 owns the full Image surface, unlike T8
         // which forward-declares Tensor only).
         PreludeType::Image,
+        // T37: Faker — runtime-value type with rich instance methods.
+        // Mirrors Image / Regex. Codegen lowering lives in the
+        // buff-fake crate (`buff_fake::Faker::*`); the codegen arm +
+        // PreludeAssocFn/InstanceFn entries are added in this same
+        // commit (T37 owns the full Faker surface).
+        PreludeType::Faker,
         // T31: Cache — runtime-value type wrapping `buff_cache::Cache`
         // (moka sync backend). Mirrors Image / DataFrame: codegen
         // lowering lives in the buff-cache crate
@@ -1778,6 +1801,10 @@ impl PreludeType {
             // `Image.from_path(...)` / `Image.from_bytes(...)` surface.
             // The underlying Rust type is `buff_image::Image`.
             PreludeType::Image => "Image",
+            // T37: Faker - canonical name matching the user-facing
+            // `Faker.new()` / `Faker.with_locale(...)` / `faker.name()`
+            // surface. The underlying Rust type is `buff_fake::Faker`.
+            PreludeType::Faker => "Faker",
             // T31: Cache - canonical name matching the user-facing
             // `Cache.new(...)` / `cache.get(...)` / `cache.set(...)`
             // surface. The underlying Rust type is `buff_cache::Cache`.
@@ -2042,6 +2069,10 @@ impl PreludeType {
             // Returns the opaque [`Type::Image`] variant; the codegen
             // layer maps it to `buff_image::Image`.
             PreludeType::Image => Type::Image,
+            // T37: Faker IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Faker`] variant; the codegen
+            // layer maps it to `buff_fake::Faker`.
+            PreludeType::Faker => Type::Faker,
             // T31: Cache IS a runtime value (NOT namespace-only).
             // Returns the opaque [`Type::Cache`] variant; the codegen
             // layer maps it to `buff_cache::Cache`.
@@ -2716,6 +2747,23 @@ pub enum PreludeAssocFn {
     /// in a future buff-web integration) or reading from a database
     /// BLOB column.
     FromBytes,
+    // ---- Faker constructors (T37) ------------------------------------
+    // Each variant lowers to the matching `buff_fake::Faker`
+    // constructor in codegen. Returns `Type::Faker` (a real
+    // runtime-value variant — added in the same T37 commit). Buff §7
+    // ctor convention permits `Type.from_*()` and `Type.new()` (this
+    // surface), forbids `Type.create()` / `Type.build()` / `new Type()`.
+    // `New` is shared with Channel.new (dispatched on (Faker, New)
+    // pair).
+    /// `Faker.with_locale(locale)` - create a Faker with the given
+    /// locale. One arg (String, either "en-US" or "pt-BR"). Returns
+    /// Faker. Wraps `buff_fake::Faker::with_locale(locale)`.
+    WithLocale,
+    /// `Faker.with_seed(locale, seed)` - create a Faker with the given
+    /// locale and seed for reproducible output. Two args (String
+    /// locale, Int seed). Returns Faker. Wraps
+    /// `buff_fake::Faker::with_seed(locale, seed)`.
+    WithSeed,
     /// T10: `AudioBuffer.from_samples(samples, sample_rate, channels)` -
     /// construct an audio buffer from already-interleaved f32 samples.
     /// Three args (Vector<Float> samples in `-1.0..=1.0`, Int sample_rate
@@ -2979,6 +3027,13 @@ impl PreludeAssocFn {
         // permits `Type.from_*()`. Mirrors the DataFrame ctor pattern.
         PreludeAssocFn::FromPath,
         PreludeAssocFn::FromBytes,
+        // T37: Faker constructors (3 distinct names): new (shared with
+        // Channel.new), with_locale, with_seed. Faker-only beyond the
+        // shared `New` variant. Buff §7 ctor naming convention permits
+        // `Type.new()` and `Type.with_*()`.
+        PreludeAssocFn::New,
+        PreludeAssocFn::WithLocale,
+        PreludeAssocFn::WithSeed,
         // T10: AudioBuffer constructor (1 distinct name): from_samples.
         // AudioBuffer-only. Reuses the Buff §7 `Type.from_*()` ctor
         // naming convention. `from_path` is shared with Image /
@@ -3839,6 +3894,15 @@ pub fn assoc_fn_return_type(
         // `buff_image::Image::from_bytes(&b)?`. Used for HTTP-downloaded
         // image bytes / database BLOBs.
         (PreludeType::Image, PreludeAssocFn::FromBytes) => Some(Type::Image),
+        // T37: Faker assoc fns. `Faker.new()` -> Faker. Wraps
+        // `buff_fake::Faker::new()`. Default locale (en-US), random seed.
+        (PreludeType::Faker, PreludeAssocFn::New) => Some(Type::Faker),
+        // `Faker.with_locale(locale)` -> Faker. One arg (String locale).
+        // Wraps `buff_fake::Faker::with_locale(locale)`.
+        (PreludeType::Faker, PreludeAssocFn::WithLocale) => Some(Type::Faker),
+        // `Faker.with_seed(locale, seed)` -> Faker. Two args (String
+        // locale, Int seed). Wraps `buff_fake::Faker::with_seed(locale, seed)`.
+        (PreludeType::Faker, PreludeAssocFn::WithSeed) => Some(Type::Faker),
         // T10: AudioBuffer assoc fns. `AudioBuffer.from_path(path)`
         // -> AudioBuffer. Wraps `buff_audio::AudioBuffer::from_path(p)?
         // ` (the `?` propagates AudioError per R3). Decodes WAV via
@@ -4293,6 +4357,37 @@ pub enum PreludeInstanceFn {
     /// blur. Infallible — the codegen lowers to `recv.blur(sigma as
     /// f32)` directly (sigma=0 is a no-op clone).
     Blur,
+    // ---- Faker instance methods (T37) ----------------------------------
+    // Eight instance methods on Faker values. Dispatched on
+    // (Type::Faker, variant) pairs. Each variant lowers to the matching
+    // `buff_fake::Faker` method in codegen. Pure-Rust, no native deps.
+    /// `faker.name() -> String`. Zero args. Random full name in the
+    /// configured locale. Wraps `recv.name()` (infallible).
+    Name,
+    /// `faker.email() -> String`. Zero args. Random email address.
+    /// Wraps `recv.email()` (infallible).
+    Email,
+    /// `faker.address() -> String`. Zero args. Random street address.
+    /// Wraps `recv.address()` (infallible).
+    Address,
+    /// `faker.phone() -> String`. Zero args. Random phone number.
+    /// Wraps `recv.phone()` (infallible).
+    Phone,
+    /// `faker.uuid() -> String`. Zero args. Random UUID v4 string.
+    /// Wraps `recv.uuid()` (infallible).
+    Uuid,
+    /// `faker.lorem(words) -> String`. One arg (Int word_count).
+    /// Lorem ipsum text with the given number of words. Wraps
+    /// `recv.lorem(words as usize)` (infallible).
+    Lorem,
+    /// `faker.int(min, max) -> Int`. Two args (Int min, Int max).
+    /// Random integer in [min, max] (inclusive). Wraps
+    /// `recv.int(min, max)` (infallible).
+    FakerInt,
+    /// `faker.datetime(start, end) -> String`. Two args (String start,
+    /// String end). Random datetime in RFC 3339 range. Wraps
+    /// `recv.datetime(&start, &end).unwrap_or_default()` (panic-free).
+    FakerDatetime,
     // ---- AudioBuffer instance methods (T10) ---------------------------
     // Ten instance methods on AudioBuffer values. Dispatched on
     // (Type::Audio, variant) pairs. CPU-only per Metis G7 (NO GPU
@@ -4553,6 +4648,16 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Resize,
         PreludeInstanceFn::Crop,
         PreludeInstanceFn::Blur,
+        // T37: Faker instance methods (8 distinct names): name / email /
+        // address / phone / uuid / lorem / int / datetime. All Faker-only.
+        PreludeInstanceFn::Name,
+        PreludeInstanceFn::Email,
+        PreludeInstanceFn::Address,
+        PreludeInstanceFn::Phone,
+        PreludeInstanceFn::Uuid,
+        PreludeInstanceFn::Lorem,
+        PreludeInstanceFn::FakerInt,
+        PreludeInstanceFn::FakerDatetime,
         // T10: AudioBuffer instance methods (10 distinct names):
         // samples / sample_rate / channels / frames / duration_secs
         // / amplify / normalize / mix / slice / summarize. `Save` is
@@ -5118,6 +5223,30 @@ pub fn instance_fn_return_type(
         (Type::Image, PreludeInstanceFn::Crop) => Some(Type::Image),
         // `img.blur(sigma)` -> Image. Gaussian. Chainable.
         (Type::Image, PreludeInstanceFn::Blur) => Some(Type::Image),
+
+        // T37: Faker instance methods. All infallible at the codegen
+        // layer (no unwrap_or_default needed — the buff_fake methods
+        // return owned String / i64 directly). `name` / `email` /
+        // `address` / `phone` / `uuid` / `lorem` return String.
+        // `int` returns Int (Buff's Int<64>). `datetime` returns
+        // String (RFC 3339).
+        //
+        // `faker.name()` -> String. Random full name.
+        (Type::Faker, PreludeInstanceFn::Name) => Some(Type::String),
+        // `faker.email()` -> String. Random email address.
+        (Type::Faker, PreludeInstanceFn::Email) => Some(Type::String),
+        // `faker.address()` -> String. Random street address.
+        (Type::Faker, PreludeInstanceFn::Address) => Some(Type::String),
+        // `faker.phone()` -> String. Random phone number.
+        (Type::Faker, PreludeInstanceFn::Phone) => Some(Type::String),
+        // `faker.uuid()` -> String. Random UUID v4.
+        (Type::Faker, PreludeInstanceFn::Uuid) => Some(Type::String),
+        // `faker.lorem(words)` -> String. Lorem ipsum with N words.
+        (Type::Faker, PreludeInstanceFn::Lorem) => Some(Type::String),
+        // `faker.int(min, max)` -> Int. Random int in [min, max].
+        (Type::Faker, PreludeInstanceFn::FakerInt) => Some(Type::int_default()),
+        // `faker.datetime(start, end)` -> String. RFC 3339 datetime.
+        (Type::Faker, PreludeInstanceFn::FakerDatetime) => Some(Type::String),
 
         // T10: AudioBuffer instance methods. The accessors (samples /
         // sample_rate / channels / frames / duration_secs) return

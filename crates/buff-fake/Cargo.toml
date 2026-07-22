@@ -1,0 +1,36 @@
+[package]
+name = "buff-fake"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Fake data generation for Buff. \
+Pure-Rust MVP wrapping the `fake` crate. \
+Provides Faker.name(), Faker.email(), Faker.address(), \
+Faker.phone(), Faker.uuid(), Faker.lorem(words), \
+Faker.int(min, max), Faker.datetime(range). \
+Locales: en-US, pt-BR.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "fake", "faker", "data-generation"]
+categories = ["development-tools::testing"]
+
+[lib]
+name = "buff_fake"
+path = "src/lib.rs"
+
+[dependencies]
+# T37 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# fake 2.x: pure-Rust fake data generation — matches "no C library" rule.
+# API surface used: fake::faker::name::en::Name, fake::faker::internet::en::SafeEmail,
+# fake::faker::address::en::StreetAddress, fake::faker::phone_number::en::PhoneNumber,
+# fake::uuid::UUIDv4, fake::faker::lorem::en::Words, fake::faker::number::en::Number,
+# fake::faker::datetime::en::DateTime, fake::locales::EN, fake::locales::PT_BR.
+fake.workspace = true
+rand.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

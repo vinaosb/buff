@@ -588,6 +588,42 @@ httpmock = "0.7"
 # installer scripts, IDE integrations) resolves to the same in-tree
 # version during the v1.12 tooling wave.
 buffup = { path = "crates/buffup" }
+# T43: `scraper` 0.22 — the canonical pure-Rust HTML parser + CSS
+# selector engine built on `html5ever` (servo's HTML5 parser) +
+# `selectors` (servo's CSS selector engine) + `cssparser`. All
+# pure-Rust, NO cc-rs, NO native C shim — matches the "no C
+# library, no Docker" hard rule from T126/T127 (same family of
+# cc-rs-avoidance that pushed hand-rolled lexer/parser per
+# AGENTS.md). API surface used by `crates/buff-scrape`:
+# - `scraper::Html::parse_document(html: &str) -> Html` (parse)
+# - `scraper::Selector::parse(css: &str) -> Result<Selector, SelectorErrorKind>`
+#   (CSS selector compile; SelectorErrorKind impls Display)
+# - `html.select(&selector) -> Select` (iterator over ElementRef)
+# - `html.root_element() -> ElementRef` (root <html> element)
+# - `element_ref.value().attr(name) -> Option<&str>` (attribute)
+# - `element_ref.text() -> Text` (descendant text-node iterator)
+# - `element_ref.html() / inner_html() -> String` (serialization)
+# NOTE: scraper::Html + ElementRef are !Send + !Sync (internal
+# html5ever tendril borrow graph). buff-scrape works around this
+# by caching the source String in Document/Element and re-parsing
+# per access (mirrors how Regex caches its pattern + SourceRegistry
+# for thread-safety). The wrapper types Document / Element /
+# Crawler are Send + Sync — the FFI guide R4 holds at the Buff-
+# visible boundary. Pinned to major 0.22 (the long-standing
+# surface since 2024 — the Html/Selector/ElementRef API has been
+# stable across 0.18-0.27). 0.22 is conservative on Rust 1.95;
+# 0.27 (released 2026-05) requires Rust 1.74+ which the pinned
+# 1.95.0 toolchain satisfies — bump to 0.27 is a no-op follow-up.
+scraper = "0.22"
+# T43: `buff-scrape` workspace path dep — mirrors the buff-image /
+# buff-http-client / buff-cache / buff-auth pattern so any future
+# consumer (codegen-lowered `Document.from_html(...)` /
+# `doc.select(...)` / `Crawler.new(...)` calls, IDE hover/completion)
+# resolves to the same in-tree version during the v1.17 frameworks
+# wave. Records `buff-scrape` (NOT `buff_lang_scrape` — the
+# framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-scrape = { path = "crates/buff-scrape" }
 # T12: `buff-ecs` workspace path dep — Entity-Component-System
 # foundation for buff-game (T16). Mirrors the buff-eval / buff-repl /
 # buff-lsp / buff-registry / buff-jupyter / buff-dap / buffup pattern
@@ -1174,6 +1210,46 @@ buff-http-client = { path = "crates/buff-http-client" }
 jsonwebtoken = "9"
 argon2 = "0.5"
 oauth2 = "4"
+# T39: `zip` crate — pure-Rust ZIP read+write. We pin to major 2
+# (the long-standing stable surface since the 1.x → 2.x graduation;
+# `zip::ZipWriter::new`, `start_file`, `finish`, `ZipArchive::new`,
+# `by_index`, `extract` are all stable across both majors). The
+# default features pull in C libzstd transitively (via the optional
+# `zstd` feature flag → `zstd` crate → `zstd-sys` → `cc-rs` build of
+# the upstream C `libzstd` source). That violates the buff workspace's
+# hard "no C library, no cc-rs, no native-tls" rule from AGENTS.md
+# (same family that killed chumsky/logos/zmq per the NOTES section).
+# We disable default features and enable ONLY the pure-Rust `deflate`
+# codec (which uses `flate2` with the `miniz_oxide` pure-Rust backend
+# already pinned at the workspace level for T139). This drops support
+# for zstd-compressed entries INSIDE zip files (still uncommon in the
+# wild; deflate remains the dominant zip codec). NO encryption, NO
+# bzip2, NO lzma, NO ppmd, NO xz, NO aes-crypto — all of which either
+# pull C deps or are explicitly forbidden by the T39 task spec
+# ("Must NOT do: No 7z, RAR, BZip2; no encryption-at-rest"). Pure-Rust
+# on all 3 CI OSes; mirrors the chrono/regex/tokio/tar/flate2
+# codegen-only linking boundary (single-file `buff run` rustc path
+# does NOT link zip; cargo-project wiring is deferred). Snapshots +
+# extern_crates set is the verifiable contract.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# T39: `ruzstd` crate — pure-Rust Zstandard (RFC 8878) implementation.
+# We use `ruzstd` (NOT the canonical `zstd` crate) because the
+# canonical crate wraps C `libzstd` via `zstd-sys`'s `cc::Build::compile()`
+# build script (invokes the C compiler on Facebook's zstd C source).
+# That violates the buff workspace's hard "no C library, no cc-rs"
+# rule from AGENTS.md (same family that killed chumsky/logos/zmq).
+# `ruzstd` 0.8.x ships both `encoding::compress_to_vec(data, level)`
+# and `decoding::StreamingDecoder::new(reader)?.read_to_end(&mut out)`
+# — full compress+decompress roundtrip in 100% safe Rust (no `unsafe`,
+# no native deps, no cc-rs, no assembler shims). Compression ratio /
+# speed are below the C libzstd reference but the T39 acceptance only
+# requires "Roundtrip compress → extract preserves files" — ratio is
+# not on the surface. Pinned to major 0.8 (the long-standing surface
+# since 2024 — `CompressionLevel::Fastest` + `StreamingDecoder` API
+# has been stable for years). Mirrors the chrono 0.4 / rand 0.8 /
+# rustyline 15 / notify 6 / image 0.25 / zip 2 conservative-pin
+# philosophy already in use across the workspace.
+ruzstd = "0.8"
 # T36: `buff-resilience` MVP — resilience patterns (retry + circuit
 # breaker + rate limiter + timeout + composable pipeline). The crate
 # HAND-ROLLS all four primitives on `std::time` + `std::thread` — it
@@ -1223,3 +1299,134 @@ oauth2 = "4"
 # `buff_lang_resilience` — the framework-crate naming convention
 # drops the `-lang` infix per AGENTS.md).
 buff-resilience = { path = "crates/buff-resilience" }
+# T44: `buff-i18n` MVP — internationalization via Mozilla's Project Fluent.
+# Two pure-Rust crates cover the extern surface per the T4 FFI guide
+# (no raw pointers, owned String/Vec<String> at the boundary):
+#
+# - `fluent-bundle` 0.16: Mozilla's canonical pure-Rust Fluent engine
+#   (the same one Firefox / Mozilla VPN / many Rust apps use). API
+#   surface used: `FluentBundle::new(vec![langid])`,
+#   `bundle.add_resource(res)`, `bundle.add_resource_overriding(res)`,
+#   `bundle.get_message(key) -> Option<FluentMessage>`,
+#   `msg.value() -> Option<&Pattern>`,
+#   `bundle.format_pattern(&pattern, Some(&args), &mut errors) -> Cow<str>`.
+#   Fluent's `{ $count -> [one] ... *[other] ... }` select syntax
+#   handles pluralization, gender, and ICU MessageFormat natively
+#   (the T44 spec's three required features). Pure-Rust, no cc-rs, no
+#   native C deps — matches the "no C library, no Docker" hard rule.
+#   Pinned to major 0.16 (the long-standing surface since 2024; the
+#   API surface we depend on has been stable across the 0.15/0.16
+#   range). NOT the `fluent` 0.17 umbrella — we use the lower-level
+#   `fluent-bundle` to avoid pulling `fluent-pseudo` + `fluent-langneg`
+#   (not needed for MVP).
+#
+# - `unic-langid` 0.9: pure-Rust Unicode Language Identifier crate
+#   (also from projectfluent). API surface used:
+#   `LanguageIdentifier::from_str(s)` (via `FromStr` trait),
+#   `langid.to_string()`. We do NOT use the `langid!` compile-time
+#   macro — Buff users supply locale names dynamically at runtime.
+#   Stable since 0.9 (the long-standing surface).
+#
+# Mirrors the chrono/tracing/regex/tokio/image/fluent/etc. codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# them; cargo-project wiring is deferred). Snapshots + extern_crates
+# set is the verifiable contract.
+fluent-bundle = "0.16"
+unic-langid = "0.9"
+# T44: `buff-i18n` workspace path dep — mirrors the buff-image /
+# buff-audio / buff-cache / buff-resilience / buff-validate / buff-auth
+# pattern so any future consumer (codegen-lowered `I18n.new(...)` /
+# `i18n.*` calls, IDE hover/completion, the future buff-ui i18n-aware
+# component story) resolves to the same in-tree version during the
+# v1.17 frameworks wave. Records `buff-i18n` (NOT `buff_lang_i18n` —
+# the framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-i18n = { path = "crates/buff-i18n" }
+# T37: `buff-fake` — fake data generation (Faker-equivalent). Wraps the
+# `fake` crate (pure-Rust, no native deps, no cc-rs — matches the "no C
+# library, no Docker" hard rule). API surface used:
+# `fake::faker::name::en::Name`, `fake::faker::internet::en::SafeEmail`,
+# `fake::faker::address::en::StreetAddress`,
+# `fake::faker::phone_number::en::PhoneNumber`, `fake::uuid::UUIDv4`,
+# `fake::faker::lorem::en::Words`, `fake::faker::number::en::Number`,
+# `fake::faker::datetime::en::DateTime`, `fake::locales::EN`,
+# `fake::locales::PT_BR`. Pinned to major 2 (the long-standing surface
+# since 2023 — `fake_with_rng(&mut rng)` + locale-specific faker modules
+# have been stable across 2.x). Mirrors the rand 0.8 / chrono 0.4
+# conservative-pin philosophy already in use across the workspace.
+# Recorded in the codegen `extern_crates` BTreeSet when a Buff program
+# uses `Faker` (mirrors the chrono / regex / tracing codegen-only
+# linking boundary). Pure-Rust, no native deps.
+fake = "2"
+# T37: `buff-fake` workspace path dep — mirrors the buff-image /
+# buff-audio / buff-dsp / buff-dataframe pattern so any future consumer
+# (codegen-lowered `Faker.*` calls, IDE hover/completion) resolves to
+# the same in-tree version during the v1.13 frameworks wave. Records
+# `buff-fake` (NOT `buff_lang_fake` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-fake = { path = "crates/buff-fake" }
+# T40: `buff-fsm` MVP — state machine library (no external dep). The
+# T40 spec offered `statig` OR hand-rolled; hand-rolled wins for MVP
+# because state/event identifiers are plain `String` (FFI guide R1
+# + R5), guard/action closures are `Box<dyn Fn(...) + Send + Sync>`
+# newtypes (R4 thread safety, R2 ownership), and <500 LOC for the
+# core surface. Pure-Rust, no cc-rs, no native C deps, no assembler
+# shims — matches the "no C library, no Docker" hard rule from
+# T126/T127 and the wider workspace stance that killed
+# chumsky/logos/zmq.
+#
+# API surface used (all in-tree, no upstream API to track):
+# - `buff_fsm::Machine::new(initial) -> Result<Machine, FsmError>`
+#   for `Machine.new(initial: ...)`.
+# - `machine.add_transition(from, event, to, guard?, action?)` for
+#   `machine.add_transition(...)` (guards/actions optional).
+# - `machine.fire(event)` for `machine.fire(event: ...)` — wrapped
+#   in `catch_unwind` per FFI guide R6 so user-supplied guard/action
+#   panics surface as `Err(FsmError::Panic)` instead of process
+#   abort.
+# - `machine.current_state()`, `initial_state()`, `is_in(s)`,
+#   `is_terminal()`, `can_fire(e)`, `mark_terminal(s)`, `reset()`,
+#   `states()`, `events()`, `transitions()` accessors.
+#
+# `thiserror` is already pinned at the workspace level (line 78);
+# T40 reuses that pin via `.workspace = true`. No other deps.
+#
+# Mirrors the buff-image / buff-template / buff-cache / buff-
+# resilience pattern so any future consumer (codegen-lowered
+# `Machine.new(...)` / `machine.*` calls, IDE hover/completion,
+# T139 bufflings state-machine tutorial) resolves to the same
+# in-tree version during the v1.16 frameworks wave. Records
+# `buff-fsm` (NOT `buff_lang_fsm` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-fsm = { path = "crates/buff-fsm" }
+# T41: `buff-pubsub` MVP — in-process event bus for Buff. Built
+# standalone on T2 Channel<T> semantics (no extern required per the
+# T41 task spec). The MVP wraps `crossbeam-channel` (already pinned
+# at line 103 for the LSP server's `select!` debounce) for the
+# per-subscription queue + `tokio` (already pinned at line 14 with
+# `features = ["full", "test-util"]` for the runtime + async test
+# utilities) for runtime-aware worker spawning. The lib dep narrows
+# tokio's features to `["rt", "rt-multi-thread", "sync", "time"]`
+# (no `macros` — that's a dev-dep only) so production users don't
+# pay for the proc-macro surface. Pure-Rust, no cc-rs, no native
+# deps — matches the "no C library, no Docker" hard rule from
+# T126/T127. Distributed pub/sub (Redis Pub/Sub, NATS, Kafka,
+# RabbitMQ bridges) DEFERRED to v1.18+ per the T41 task spec.
+# Mirrors the buff-image / buff-cache / buff-resilience codegen-only
+# linking boundary (single-file `buff run` rustc path does NOT link
+# buff-pubsub; cargo-project wiring is deferred per existing
+# precedent). API surface used: `crossbeam_channel::unbounded()`
+# for per-subscription (Sender, Receiver) pair; `tokio::runtime::
+# Handle::try_current()` for runtime detection + `tokio::task::
+# spawn_blocking` for runtime-aware worker spawn; `tokio::time::
+# sleep` for the async example / test polling cadence.
+buff-pubsub = { path = "crates/buff-pubsub" }
+# T39: `buff-archive` workspace path dep — mirrors the buff-image /
+# buff-cache / buff-resilience / buff-pubsub pattern so any future
+# consumer (codegen-lowered `Archive.compress_dir(...)` /
+# `Archive.extract(...)` calls, IDE hover/completion, the T139
+# bufflings archive tutorial) resolves to the same in-tree version
+# during the v1.17 frameworks wave. Records `buff-archive` (NOT
+# `buff_lang_archive` — the framework-crate naming convention drops
+# the `-lang` infix per AGENTS.md).
+buff-archive = { path = "crates/buff-archive" }

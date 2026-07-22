@@ -827,6 +827,19 @@ impl RustCodegen {
             self.extern_crates.insert("buff-image".to_string());
             self.extern_crates.insert("image".to_string());
         }
+        // T37: register `buff-fake` when the program references the
+        // prelude `Faker` module (`Faker.new()` / `Faker.with_locale()`
+        // / `faker.name()` etc.). The generated code uses fully-
+        // qualified `buff_fake::Faker::*` paths so no top-level `use`
+        // import is emitted — but the recorded name signals to the
+        // pipeline / build-driver that the generated Cargo project
+        // must declare `buff-fake` in `[dependencies]`. Also records
+        // `fake` transitively (the wrapper crate wraps the `fake`
+        // crate). Mirrors the T9 Image registration pattern.
+        if program_uses_namespace(decls, "Faker") {
+            self.extern_crates.insert("buff-fake".to_string());
+            self.extern_crates.insert("fake".to_string());
+        }
         // T10: register `buff-audio` when the program references the
         // prelude `AudioBuffer` module (`AudioBuffer.from_path(...)`
         // etc.). Also records `hound` + `symphonia` transitively (the
@@ -3278,6 +3291,23 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("assert_eq() codegen parse: {e}")))
             }
+            // T38: assertThat(value) → buff_assertions::assertThat(value)
+            // The fluent assertion entry point. Lowers to the
+            // buff_assertions crate's assertThat function, which returns
+            // an AssertThat<T> wrapper with chainable methods.
+            PreludeFn::AssertThat => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(
+                        "assertThat() expects exactly 1 argument (the value to assert on)",
+                    ));
+                }
+                let value = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_assertions::assertThat(#value)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("assertThat() codegen parse: {e}")))
+            }
         }
     }
 
@@ -4831,6 +4861,53 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Image.from_bytes codegen parse: {e}")))
+            }
+            // T37: Faker.new() -> Faker. Wraps
+            // `buff_fake::Faker::new()` (default locale en-US, random
+            // seed). Infallible — no unwrap_or_default needed. Records
+            // `buff-fake` + `fake` in extern_crates via the
+            // `program_uses_namespace("Faker")` walker.
+            (T::Faker, A::New) => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fake::Faker::new()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.new codegen parse: {e}")))
+            }
+            // T37: Faker.with_locale(locale) -> Faker. One arg (String
+            // locale, either "en-US" or "pt-BR"). Wraps
+            // `buff_fake::Faker::with_locale(locale)`.
+            (T::Faker, A::WithLocale) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fake::Faker::with_locale(match #arg.as_str() {
+                        "pt-BR" => buff_fake::FakerLocale::PtBr,
+                        _ => buff_fake::FakerLocale::EnUs,
+                    })
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.with_locale codegen parse: {e}")))
+            }
+            // T37: Faker.with_seed(locale, seed) -> Faker. Two args
+            // (String locale, Int seed). Wraps
+            // `buff_fake::Faker::with_seed(locale, seed)`.
+            (T::Faker, A::WithSeed) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "Faker.with_seed expects exactly 2 args (locale, seed), got {}",
+                        args.len()
+                    )));
+                }
+                let locale = self.lower_expr(&args[0])?;
+                let seed = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_fake::Faker::with_seed(match #locale.as_str() {
+                        "pt-BR" => buff_fake::FakerLocale::PtBr,
+                        _ => buff_fake::FakerLocale::EnUs,
+                    }, #seed as u64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.with_seed codegen parse: {e}")))
             }
             // T10: AudioBuffer.from_path(path) -> AudioBuffer. Wraps
             // `buff_audio::AudioBuffer::from_path(arg)
@@ -6570,6 +6647,125 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Image.blur codegen parse: {e}")))
+            }
+            // T37: Faker instance methods. All infallible — the
+            // `buff_fake::Faker` methods return owned String / i64
+            // directly (no unwrap_or_default needed). Records
+            // `buff-fake` + `fake` in extern_crates via the
+            // `program_uses_namespace("Faker")` walker.
+            //
+            // `faker.name()` -> String. Zero args.
+            M::Name if matches!(recv_ty, Type::Faker) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "name() takes no arguments, got {}", args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.name()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.name codegen parse: {e}")))
+            }
+            // `faker.email()` -> String. Zero args.
+            M::Email if matches!(recv_ty, Type::Faker) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "email() takes no arguments, got {}", args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.email()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.email codegen parse: {e}")))
+            }
+            // `faker.address()` -> String. Zero args.
+            M::Address if matches!(recv_ty, Type::Faker) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "address() takes no arguments, got {}", args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.address()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.address codegen parse: {e}")))
+            }
+            // `faker.phone()` -> String. Zero args.
+            M::Phone if matches!(recv_ty, Type::Faker) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "phone() takes no arguments, got {}", args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.phone()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.phone codegen parse: {e}")))
+            }
+            // `faker.uuid()` -> String. Zero args.
+            M::Uuid if matches!(recv_ty, Type::Faker) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "uuid() takes no arguments, got {}", args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.uuid()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.uuid codegen parse: {e}")))
+            }
+            // `faker.lorem(words)` -> String. One arg (Int word_count).
+            M::Lorem if matches!(recv_ty, Type::Faker) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "lorem() expects exactly 1 arg (word_count), got {}", args.len()
+                    )));
+                }
+                let word_count = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.lorem(#word_count as usize)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.lorem codegen parse: {e}")))
+            }
+            // `faker.int(min, max)` -> Int. Two args (Int min, Int max).
+            M::FakerInt if matches!(recv_ty, Type::Faker) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "int() expects exactly 2 args (min, max), got {}", args.len()
+                    )));
+                }
+                let min = self.lower_expr(&args[0])?;
+                let max = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.int(#min, #max)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.int codegen parse: {e}")))
+            }
+            // `faker.datetime(start, end)` -> String. Two args (String
+            // start, String end). Wraps `recv.datetime(&start, &end)
+            // .unwrap_or_default()` (panic-free — empty string on error).
+            M::FakerDatetime if matches!(recv_ty, Type::Faker) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "datetime() expects exactly 2 args (start, end), got {}", args.len()
+                    )));
+                }
+                let start = self.lower_expr(&args[0])?;
+                let end = self.lower_expr(&args[1])?;
+                let start_ref = coerce_str_arg_to_ref(start, &args[0]);
+                let end_ref = coerce_str_arg_to_ref(end, &args[1]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.datetime(#start_ref, #end_ref).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Faker.datetime codegen parse: {e}")))
             }
             // T31: Cache instance methods. Each method lowers to
             // `buff_cache::Cache::<method>`. The codegen records
@@ -9583,6 +9779,11 @@ impl RustCodegen {
             // otherwise Rust infers the type from the initializer
             // (mirroring Regex / Path / Process behavior).
             Type::Image => "buff_image::Image",
+            // T37: prelude Faker type. Plain `buff_fake::Faker` path
+            // — no generic argument needed. Generated code uses the
+            // fully-qualified path so no `use` import is emitted.
+            // Mirrors the T9 Image precedent.
+            Type::Faker => "buff_fake::Faker",
             // T31: cache. Opaque runtime-value type mapped to
             // `buff_cache::Cache`. No generic parameter, no turbofish
             // needed. Mirrors the T9 Image precedent: if a user

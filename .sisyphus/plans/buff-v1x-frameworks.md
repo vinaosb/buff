@@ -3326,7 +3326,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 > Testing + I/O + state frameworks identified by cross-language analysis (4-5 languages prevalence). All wrap mature Rust crates via safe extern FFI per T4 guide. MVP quality.
 
-- [ ] 37. `buff-fake` — Fake Data Generation (Faker-equivalent)
+- [x] 37. `buff-fake` — Fake Data Generation (Faker-equivalent)
 
   **What to do**: Wrap Rust `fake` crate. Provide: `Fake.name()`, `Fake.email()`, `Fake.address()`, `Fake.phone()`, `Fake.uuid()`, `Fake.lorem(words)`, `Fake.int(min, max)`, `Fake.datetime(range)`. Locales: en-US, pt-BR (matches existing PT-BR example convention). Cross-language prevalence: 6/6 (Faker/Faker.js/gofakeit/fake/EasyRandom/Bogus).
   - **LOC budget**: ≤1500, ≤15 fns. **External deps**: `fake`.
@@ -3359,7 +3359,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: State transitions correctly. Invalid transitions error. Guards block transitions. Actions fire. 3 examples (traffic light, order status, turnstile) + 12 tests.
   - **Commit**: `feat(buff-fsm): MVP state machine library`
 
-- [ ] 41. `buff-pubsub` — In-Process Event Bus
+- [x] 41. `buff-pubsub` — In-Process Event Bus
 
   **What to do**: Build standalone on T2 Channel<T> (no extern needed). Provide: `EventBus.new()`, `bus.subscribe(topic, handler)`, `bus.publish(topic, event)`. Topics as strings. Handlers as closures. Optional: typed events via generics. Cross-language prevalence: 5/6 (blinker/EventEmitter/eventbus/EventBus — Go uses channels natively).
   - **LOC budget**: ≤1500, ≤10 fns. **External deps**: none (uses T2 Channel<T>).
