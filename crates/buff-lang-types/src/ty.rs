@@ -818,13 +818,50 @@ pub enum Type {
     /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
     ///
     /// Mirrors [`Type::Image`] (T9) / [`Type::Xml`] (T50) as a
-    /// runtime-value-with-rich-instance-methods type. The underlying
-    /// Rust type is `buff_protobuf::Message` (a struct wrapping an
+    /// runtime-value-with-rich-instance-methods type. The underlying Rust
+    /// type is `buff_protobuf::Message` (a struct wrapping an
     /// owned `Vec<u8>` payload + the canonical
     /// `type.googleapis.com/google.protobuf.Struct` type URL). Pure-Rust,
     /// CPU-only; the well-known `google.protobuf.Struct` schema is the
     /// dynamic message surface (no `.proto` build-time codegen in MVP).
     Message,
+    /// T47: the cross-platform chat bot runtime-value type. Maps to
+    /// `buff_chat::Bot` at codegen time. Constructed via
+    /// `Bot.new(platform, token)`; carries the instance methods
+    /// `bot.command(name, handler)` / `bot.on_message(handler)` /
+    /// `bot.start()` / `bot.stop()` / `bot.dispatch(msg)` /
+    /// `bot.platform()` / `bot.is_running()` / `bot.command_count()` /
+    /// `bot.has_message_handler()`. Mirrors [`Type::Image`] (T9) /
+    /// [`Type::Point`] (T45) as a runtime-value-with-rich-instance-methods
+    /// type. The underlying Rust type is `buff_chat::Bot` (an
+    /// `Arc<RwLock<BotInner>>` wrapper, `Send + Sync`, `Clone`).
+    /// Pure-Rust, CPU-only; serenity (Discord) + teloxide (Telegram)
+    /// both use rustls + ring (NO native-tls, NO cc-rs).
+    Bot,
+    /// T47: the chat `Message` runtime-value type. Maps to
+    /// `buff_chat::Message` at codegen time. Constructed via
+    /// `ChatMessage.new(text, channel, author, platform, is_dm)`;
+    /// carries the instance methods `msg.text()` / `msg.channel()` /
+    /// `msg.author()` / `msg.platform()` / `msg.is_dm()`.
+    ///
+    /// **Naming**: named `ChatMessage` (NOT `Message`) at the Buff surface
+    /// to avoid colliding with the T52 protobuf [`Type::Message`] variant
+    /// (which lowers to `buff_protobuf::Message`). Buff users writing a
+    /// chat bot write `let m = ChatMessage.new(...)`; the shorter
+    /// `Message` name is reserved by T52. Mirrors [`Type::Image`] (T9) /
+    /// [`Type::Point`] (T45) as a runtime-value-with-instance-methods type.
+    ChatMessage,
+    /// T47: the chat `Platform` enum-like runtime-value type. Maps to
+    /// `buff_chat::Platform` at codegen time. The two variants
+    /// (`Platform::Discord` / `Platform::Telegram`) are exposed as
+    /// associated constants (`Platform.Discord` / `Platform.Telegram` —
+    /// zero-arg `Type.NAME` access shape, lowered through
+    /// [`PreludeAssocConst::Discord`] / [`PreludeAssocConst::Telegram`]).
+    /// The instance methods `platform.is_discord()` / `platform.is_telegram()`
+    /// are exposed via [`PreludeInstanceFn::IsDiscord`] /
+    /// [`PreludeInstanceFn::IsTelegram`]. Mirrors [`Type::StemAlgorithm`]
+    /// (T46) as an opaque enum passed primarily as an arg.
+    Platform,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1595,6 +1632,51 @@ impl Type {
         matches!(self, Type::StemAlgorithm)
     }
 
+    /// T47: the cross-platform chat bot runtime-value type. Maps to
+    /// `buff_chat::Bot` at codegen time. See [`Type::Bot`] for the full
+    /// surface contract (constructor + 8 instance methods).
+    pub fn bot() -> Self {
+        Type::Bot
+    }
+
+    /// T47: Returns `true` if this type is the prelude `Bot` runtime
+    /// value. Used to dispatch instance method calls (`bot.command(...)`,
+    /// `bot.start()`, etc.) to the `buff_chat::Bot` lowering.
+    pub fn is_prelude_bot(&self) -> bool {
+        matches!(self, Type::Bot)
+    }
+
+    /// T47: the chat `Message` runtime-value type. Maps to
+    /// `buff_chat::Message` at codegen time. See [`Type::ChatMessage`]
+    /// for the naming rationale (T52 collision).
+    pub fn chat_message() -> Self {
+        Type::ChatMessage
+    }
+
+    /// T47: Returns `true` if this type is the prelude chat `ChatMessage`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`msg.text()`, `msg.author()`, etc.) to the `buff_chat::Message`
+    /// lowering.
+    pub fn is_prelude_chat_message(&self) -> bool {
+        matches!(self, Type::ChatMessage)
+    }
+
+    /// T47: the chat `Platform` enum-like runtime-value type. Maps to
+    /// `buff_chat::Platform` at codegen time. See [`Type::Platform`] for
+    /// the variant-access lowering (`Platform.Discord` /
+    /// `Platform.Telegram`).
+    pub fn platform() -> Self {
+        Type::Platform
+    }
+
+    /// T47: Returns `true` if this type is the prelude chat `Platform`
+    /// enum. Used to dispatch instance method calls (`platform.is_discord()`,
+    /// `platform.is_telegram()`) and `Platform.NAME` constant access to
+    /// the `buff_chat::Platform` lowering.
+    pub fn is_prelude_platform(&self) -> bool {
+        matches!(self, Type::Platform)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -1803,6 +1885,14 @@ impl fmt::Display for Type {
             // the Buff surface name in both cases.
             Type::Protobuf => f.write_str("Protobuf"),
             Type::Message => f.write_str("Message"),
+            // T47: prelude chat types. `Bot` / `ChatMessage` /
+            // `Platform` are all runtime values (mirrors Point /
+            // Language). Display mirrors the Buff surface name in all
+            // three cases. Note `ChatMessage` (not `Message`) — T52
+            // owns the shorter `Message` name (protobuf).
+            Type::Bot => f.write_str("Bot"),
+            Type::ChatMessage => f.write_str("ChatMessage"),
+            Type::Platform => f.write_str("Platform"),
         }
     }
 }

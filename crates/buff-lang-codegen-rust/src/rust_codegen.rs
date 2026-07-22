@@ -1149,6 +1149,33 @@ impl RustCodegen {
             self.extern_crates.insert("buff-xml".to_string());
             self.extern_crates.insert("quick-xml".to_string());
         }
+        // T47: register `buff-chat` when the program references any of
+        // the three prelude chat namespaces (`Bot.*` /
+        // `ChatMessage.*` / `Platform.*`). Also records `serenity`
+        // (Discord Gateway + HTTP API — pure-Rust via rustls_backend,
+        // NOT native_tls_backend) + `teloxide` (Telegram Bot API —
+        // pure-Rust via rustls, NOT native_tls) + `async-trait`
+        // (serenity's EventHandler trait bridge) + `tokio` (the
+        // multi-threaded runtime `Bot::start` builds internally)
+        // transitively. The walker checks all three namespaces because
+        // the user typically composes Bot + ChatMessage + Platform
+        // together (Bot.new takes Platform; ChatMessage values arise
+        // only inside handler closures); recording once for any of
+        // them is sufficient (idempotent BTreeSet insert). Mirrors the
+        // T9 Image / T43 buff-scrape / T45 buff-geo / T50 buff-xml
+        // pattern. Pure-Rust, CPU-only; both serenity + teloxide use
+        // rustls + ring (NO native-tls, NO cc-rs — matches the
+        // "no C library, no Docker" hard rule from T126/T127).
+        if program_uses_namespace(decls, "Bot")
+            || program_uses_namespace(decls, "ChatMessage")
+            || program_uses_namespace(decls, "Platform")
+        {
+            self.extern_crates.insert("buff-chat".to_string());
+            self.extern_crates.insert("serenity".to_string());
+            self.extern_crates.insert("teloxide".to_string());
+            self.extern_crates.insert("async-trait".to_string());
+            self.extern_crates.insert("tokio".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -5925,6 +5952,68 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Message.decode codegen parse: {e}")))
             }
+            // T47: Bot.new(platform, token) -> Bot. Two args (Platform,
+            // String). Wraps `buff_chat::Bot::new(platform, token)
+            // .unwrap_or_default()` (panic-free on construction
+            // failure — Bot impls Default as an empty Discord bot,
+            // added in the T47 MVP commit). `New` is shared with
+            // Channel.new / Faker.new / Point.new / XmlElement.new /
+            // Message.new (T52) — dispatched on the (Bot, New) pair.
+            // Records `buff-chat` + `serenity` + `teloxide` +
+            // `async-trait` + `tokio` in extern_crates via the
+            // `program_uses_namespace("Bot")` walker.
+            (T::Bot, A::New) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "Bot.new expects exactly 2 args (platform, token), got {}",
+                        args.len()
+                    )));
+                }
+                let platform = self.lower_expr(&args[0])?;
+                let token = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_chat::Bot::new(#platform, (#token).to_string()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.new codegen parse: {e}")))
+            }
+            // T47: ChatMessage.new(text, channel, author, platform,
+            // is_dm) -> ChatMessage. Five args (String, String,
+            // String, Platform, Bool). Wraps
+            // `buff_chat::Message::new(text, channel, author,
+            // platform, is_dm)` directly (infallible — the underlying
+            // Message::new ctor has no failure mode). The token-
+            // coercion `(#x).to_string()` on each String arg handles
+            // Buff's `&str`-from-literal lowering (the codegen inserts
+            // the coercion so the user can pass either String or &str
+            // — the wrapper ctor takes owned `String` per FFI guide
+            // R5). Records `buff-chat` + `serenity` + `teloxide` +
+            // `async-trait` + `tokio` in extern_crates via the
+            // `program_uses_namespace("ChatMessage")` walker.
+            (T::ChatMessage, A::New) => {
+                if args.len() != 5 {
+                    return Err(self.unsupported(&format!(
+                        "ChatMessage.new expects exactly 5 args (text, channel, author, platform, is_dm), got {}",
+                        args.len()
+                    )));
+                }
+                let text = self.lower_expr(&args[0])?;
+                let channel = self.lower_expr(&args[1])?;
+                let author = self.lower_expr(&args[2])?;
+                let platform = self.lower_expr(&args[3])?;
+                let is_dm = self.lower_expr(&args[4])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_chat::Message::new(
+                        (#text).to_string(),
+                        (#channel).to_string(),
+                        (#author).to_string(),
+                        #platform,
+                        #is_dm,
+                    )
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("ChatMessage.new codegen parse: {e}")))
+            }
             // T50: Xml.from_str(xml) -> XmlDocument. One arg (String).
             // Wraps `buff_xml::XmlDocument::from_str(&xml)
             // .unwrap_or_default()` (panic-free on empty/parse failure —
@@ -6165,6 +6254,14 @@ impl RustCodegen {
             // std::f64::consts;` import.
             (T::Math, C::Pi) => "std::f64::consts::PI",
             (T::Math, C::E) => "std::f64::consts::E",
+            // T47: `Platform.Discord` / `Platform.Telegram` ->
+            // `buff_chat::Platform::Discord` / `::Telegram`. Both
+            // variants are `Copy` enum units; the codegen-lowered path
+            // is fully-qualified so the generated crate needs no `use
+            // buff_chat::Platform;` import. Mirrors the Math const
+            // lowering shape (zero-arg `Type.NAME` access).
+            (T::Platform, C::Discord) => "buff_chat::Platform::Discord",
+            (T::Platform, C::Telegram) => "buff_chat::Platform::Telegram",
             // Every other combination was already rejected by
             // `assoc_const_lookup` in the caller; this arm is
             // unreachable but required for exhaustiveness.
@@ -7569,6 +7666,298 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Message.encode codegen parse: {e}")))
+            }
+            // T47: buff-chat Bot instance methods. The Bot wrapper's
+            // methods all panic-free via `.unwrap_or(())` (command /
+            // on_message / start / stop / dispatch — return Result in
+            // Rust but collapse to Void at the Buff surface per FFI
+            // guide R3) or infallible directly (is_running /
+            // command_count / has_message_handler / platform — return
+            // bool / usize / Platform directly). Records `buff-chat` +
+            // `serenity` + `teloxide` + `async-trait` + `tokio` in
+            // extern_crates via the `program_uses_namespace("Bot")`
+            // walker.
+            //
+            // `bot.command(name, handler)` -> Void. Two args (String
+            // name, closure handler). The closure is spliced directly
+            // — Rust coerces `|msg| ...` to the `F: Fn(Message) +
+            // Send + Sync + 'static` bound on `Bot::command` (no
+            // Arc::new / Box::new wrap needed; the wrapper ctor does
+            // the Arc-sharing internally). `.unwrap_or(())` collapses
+            // ChatError::EmptyCommandName / DuplicateCommand to Void
+            // (silently swallowed at the Buff surface).
+            M::Command if matches!(recv_ty, Type::Bot) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "command() expects exactly 2 args (name, handler), got {}",
+                        args.len()
+                    )));
+                }
+                let name = self.lower_expr(&args[0])?;
+                let handler = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.command(&(#name).to_string(), move |msg| #handler).unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.command codegen parse: {e}")))
+            }
+            // `bot.on_message(handler)` -> Void. One arg (closure
+            // handler). Same closure-splice shape as `command` minus
+            // the name arg. `.unwrap_or(())` collapses registration
+            // failure to Void.
+            M::OnMessage if matches!(recv_ty, Type::Bot) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "on_message() expects exactly 1 arg (handler), got {}",
+                        args.len()
+                    )));
+                }
+                let handler = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.on_message(move |msg| #handler).unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.on_message codegen parse: {e}")))
+            }
+            // `bot.start()` -> Void. Zero args. Blocks on the platform
+            // event loop. `.unwrap_or(())` collapses ChatError to Void
+            // (AlreadyRunning / AlreadyInRuntime / Connect / Runtime).
+            M::Start if matches!(recv_ty, Type::Bot) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "start() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.start().unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.start codegen parse: {e}")))
+            }
+            // `bot.stop()` -> Void. Zero args. Cooperative shutdown
+            // (AtomicBool flag). `.unwrap_or(())` collapses
+            // ChatError::NotRunning to Void.
+            M::Stop if matches!(recv_ty, Type::Bot) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "stop() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.stop().unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.stop codegen parse: {e}")))
+            }
+            // `bot.dispatch(msg)` -> Void. One arg (ChatMessage). The
+            // public testing entry — exercises the handler routing
+            // without a live network connection (T47 "mock API").
+            M::Dispatch if matches!(recv_ty, Type::Bot) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "dispatch() expects exactly 1 arg (Message), got {}",
+                        args.len()
+                    )));
+                }
+                let msg = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.dispatch(#msg).unwrap_or(())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.dispatch codegen parse: {e}")))
+            }
+            // `bot.is_running()` -> Bool. Zero args. Infallible (the
+            // wrapper returns false on poisoned lock, never panics).
+            M::IsRunning if matches!(recv_ty, Type::Bot) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "is_running() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.is_running()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.is_running codegen parse: {e}")))
+            }
+            // `bot.command_count()` -> Int. Zero args. The underlying
+            // Rust method returns `usize`; the `as i64` lifts to
+            // Buff's `Int<64>`.
+            M::CommandCount if matches!(recv_ty, Type::Bot) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "command_count() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.command_count() as i64
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Bot.command_count codegen parse: {e}"))
+                })
+            }
+            // `bot.has_message_handler()` -> Bool. Zero args.
+            M::HasMessageHandler if matches!(recv_ty, Type::Bot) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "has_message_handler() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.has_message_handler()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Bot.has_message_handler codegen parse: {e}"))
+                })
+            }
+            // `bot.platform()` -> Platform. Zero args. Infallible (Copy
+            // value, never panics). Shared `Platform` variant —
+            // dispatched on the (Bot, Platform) pair (same variant as
+            // ChatMessage.platform, different receiver type).
+            M::Platform if matches!(recv_ty, Type::Bot) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "platform() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.platform()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Bot.platform codegen parse: {e}")))
+            }
+            // T47: buff-chat ChatMessage instance methods. All
+            // infallible — the `buff_chat::Message` methods return
+            // `&str` / Platform / bool directly (the codegen wraps
+            // &str returns in `.to_string()` so Buff surfaces owned
+            // String values per FFI guide R2). Records `buff-chat` +
+            // `serenity` + `teloxide` + `async-trait` + `tokio` in
+            // extern_crates via the `program_uses_namespace
+            // ("ChatMessage")` walker.
+            //
+            // `msg.text()` -> String. Zero args. Shared `Text`
+            // variant — dispatched on the (ChatMessage, Text) pair
+            // (same variant as Document / Element / XmlElement.text,
+            // different receiver type).
+            M::Text if matches!(recv_ty, Type::ChatMessage) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "text() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.text().to_string()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ChatMessage.text codegen parse: {e}"))
+                })
+            }
+            // `msg.channel()` -> String. Zero args.
+            M::Channel if matches!(recv_ty, Type::ChatMessage) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "channel() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.channel().to_string()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ChatMessage.channel codegen parse: {e}"))
+                })
+            }
+            // `msg.author()` -> String. Zero args.
+            M::Author if matches!(recv_ty, Type::ChatMessage) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "author() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.author().to_string()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ChatMessage.author codegen parse: {e}"))
+                })
+            }
+            // `msg.platform()` -> Platform. Zero args. Shared
+            // `Platform` variant — dispatched on the
+            // (ChatMessage, Platform) pair (same variant as
+            // Bot.platform, different receiver type).
+            M::Platform if matches!(recv_ty, Type::ChatMessage) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "platform() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.platform()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ChatMessage.platform codegen parse: {e}"))
+                })
+            }
+            // `msg.is_dm()` -> Bool. Zero args.
+            M::IsDm if matches!(recv_ty, Type::ChatMessage) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "is_dm() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.is_dm()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ChatMessage.is_dm codegen parse: {e}"))
+                })
+            }
+            // T47: buff-chat Platform instance methods. Both
+            // infallible — the `buff_chat::Platform::is_discord` /
+            // `is_telegram` methods return `bool` directly (Copy
+            // value). Records `buff-chat` + `serenity` + `teloxide` +
+            // `async-trait` + `tokio` in extern_crates via the
+            // `program_uses_namespace("Platform")` walker.
+            //
+            // `platform.is_discord()` -> Bool. Zero args.
+            M::IsDiscord if matches!(recv_ty, Type::Platform) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "is_discord() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.is_discord()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Platform.is_discord codegen parse: {e}"))
+                })
+            }
+            // `platform.is_telegram()` -> Bool. Zero args.
+            M::IsTelegram if matches!(recv_ty, Type::Platform) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "is_telegram() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.is_telegram()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Platform.is_telegram codegen parse: {e}"))
+                })
             }
             // T37: Faker instance methods. All infallible — the
             // `buff_fake::Faker` methods return owned String / i64
@@ -11293,6 +11682,16 @@ impl RustCodegen {
             // Image / Xml). Both map to `buff_protobuf::*` paths.
             Type::Protobuf => "buff_protobuf::Protobuf",
             Type::Message => "buff_protobuf::Message",
+            // T47: prelude chat types. `Bot` / `ChatMessage` /
+            // `Platform` are all runtime values (mirrors Image /
+            // Point). Map to `buff_chat::*` paths. Note: `ChatMessage`
+            // (Buff surface) maps to `buff_chat::Message` (Rust surface)
+            // — the renaming avoids colliding with T52's
+            // `buff_protobuf::Message` (the shorter `Message` Buff name
+            // is owned by T52).
+            Type::Bot => "buff_chat::Bot",
+            Type::ChatMessage => "buff_chat::Message",
+            Type::Platform => "buff_chat::Platform",
         };
         Some(rust_path_type(rust_name))
     }

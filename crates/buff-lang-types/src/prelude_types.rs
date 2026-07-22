@@ -1634,6 +1634,40 @@ pub enum PreludeType {
     /// Pure-Rust, CPU-only; uses the well-known
     /// `google.protobuf.Struct` schema as the dynamic message surface.
     Message,
+    /// T47: `Bot` — a cross-platform chat bot runtime value (Discord via
+    /// serenity, Telegram via teloxide). Constructed via
+    /// `Bot.new(platform, token)`; carries the instance methods
+    /// `bot.command(name, handler)` / `bot.on_message(handler)` /
+    /// `bot.start()` / `bot.stop()` / `bot.dispatch(msg)` /
+    /// `bot.platform()` / `bot.is_running()` / `bot.command_count()` /
+    /// `bot.has_message_handler()`. Mirrors Image / Point / Message as a
+    /// runtime-value-with-rich-instance-methods type. Codegen lowering
+    /// lives in the buff-chat crate (`buff_chat::Bot::*`). Pure-Rust,
+    /// CPU-only; both serenity + teloxide use rustls + ring (NO
+    /// native-tls, NO cc-rs — matches the "no C library, no Docker"
+    /// hard rule).
+    Bot,
+    /// T47: `ChatMessage` — the chat message runtime value. Named
+    /// `ChatMessage` (NOT `Message`) at the Buff surface to avoid
+    /// colliding with the T52 protobuf [`PreludeType::Message`] variant.
+    /// Constructed via `ChatMessage.new(text, channel, author, platform,
+    /// is_dm)`; carries the instance methods `msg.text()` /
+    /// `msg.channel()` / `msg.author()` / `msg.platform()` /
+    /// `msg.is_dm()`. Mirrors Image / Point / Message (T52). Codegen
+    /// lowering lives in the buff-chat crate
+    /// (`buff_chat::Message::*`). Pure-Rust, CPU-only.
+    ChatMessage,
+    /// T47: `Platform` — the chat platform enum-like runtime value
+    /// (`Platform.Discord` / `Platform.Telegram`). The two variants are
+    /// exposed as associated constants (zero-arg `Type.NAME` access
+    /// shape — lowered through `PreludeAssocConst::Discord` /
+    /// `PreludeAssocConst::Telegram`); the instance methods
+    /// `platform.is_discord()` / `platform.is_telegram()` are exposed
+    /// via `PreludeInstanceFn::IsDiscord` / `PreludeInstanceFn::IsTelegram`.
+    /// Mirrors StemAlgorithm (T46) as an opaque enum passed primarily as
+    /// an arg. Codegen lowering lives in the buff-chat crate
+    /// (`buff_chat::Platform::*`). Pure-Rust, CPU-only.
+    Platform,
 }
 
 impl PreludeType {
@@ -2002,8 +2036,25 @@ impl PreludeType {
         // arms + PreludeInstanceFn entries are added in this same
         // commit (T52 owns the full protobuf prelude+codegen surface).
         // Pure-Rust, CPU-only; gRPC streaming + prost-build deferred.
+        // T52: Protobuf / Message — protobuf runtime-value + namespace
+        // types. `Protobuf` is namespace-only (mirrors MsgPack); `Message`
+        // is a runtime value (mirrors Image / Xml / Point). Records
+        // `buff-protobuf` + `prost` + `prost-types` + `serde_json` in
+        // extern_crates via the `program_uses_namespace("Protobuf")` /
+        // ("Message") walkers.
         PreludeType::Protobuf,
         PreludeType::Message,
+        // T47: Bot / ChatMessage / Platform — buff-chat runtime values
+        // (Discord + Telegram via serenity + teloxide). `Bot` /
+        // `ChatMessage` are runtime values (mirrors Image / Point);
+        // `Platform` is an enum-like runtime value (mirrors
+        // StemAlgorithm). Records `buff-chat` + `serenity` + `teloxide`
+        // + `async-trait` + `tokio` in extern_crates via the
+        // `program_uses_namespace("Bot")` / ("ChatMessage") /
+        // ("Platform") walkers.
+        PreludeType::Bot,
+        PreludeType::ChatMessage,
+        PreludeType::Platform,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2343,6 +2394,18 @@ impl PreludeType {
             // `buff_protobuf::Message`).
             PreludeType::Protobuf => "Protobuf",
             PreludeType::Message => "Message",
+            // T47: Bot / ChatMessage / Platform — canonical PascalCase
+            // names matching the user-facing `Bot.new(platform, token)`
+            // / `bot.command(name, handler)` / `ChatMessage.new(...)`
+            // / `msg.text()` / `Platform.Discord` /
+            // `platform.is_discord()` surface. The underlying Rust crate
+            // is `buff_chat` (`buff_chat::Bot` / `buff_chat::Message` /
+            // `buff_chat::Platform`). Note `ChatMessage` (not
+            // `Message`) — T52 owns the shorter `Message` name
+            // (protobuf).
+            PreludeType::Bot => "Bot",
+            PreludeType::ChatMessage => "ChatMessage",
+            PreludeType::Platform => "Platform",
         }
     }
 
@@ -2718,6 +2781,13 @@ impl PreludeType {
             PreludeType::Point => Type::Point,
             PreludeType::LineString => Type::LineString,
             PreludeType::Polygon => Type::Polygon,
+            // T47: Bot / ChatMessage / Platform ARE runtime values
+            // (NOT namespace-only). Returns the matching opaque Type
+            // variant; the codegen layer maps them to
+            // `buff_chat::{Bot, Message (as ChatMessage), Platform}`.
+            PreludeType::Bot => Type::Bot,
+            PreludeType::ChatMessage => Type::ChatMessage,
+            PreludeType::Platform => Type::Platform,
         }
     }
 
@@ -4103,11 +4173,34 @@ pub enum PreludeAssocConst {
     /// `Math.E` (Euler's number) - the base of the natural logarithm.
     /// Returns Float (lowers to `std::f64::consts::E`).
     E,
+    /// T47: `Platform.Discord` — the Discord variant of the chat
+    /// `Platform` enum. Returns [`Type::Platform`] (lowers to
+    /// `buff_chat::Platform::Discord`). Used as the `platform:` arg to
+    /// `Bot.new(...)` and surfaced by `msg.platform()`. Mirrors the
+    /// T124f Math assoc-const shape (zero-arg `Type.NAME` access); the
+    /// variant name `Discord` is PascalCase (NOT UPPERCASE like PI/E —
+    /// Rust enum-variant convention) and matches the source surface
+    /// `Platform.Discord` 1:1 so the codegen can splice the canonical
+    /// Rust path without rewriting.
+    Discord,
+    /// T47: `Platform.Telegram` — the Telegram variant of the chat
+    /// `Platform` enum. Returns [`Type::Platform`] (lowers to
+    /// `buff_chat::Platform::Telegram`). Mirrors [`Self::Discord`].
+    Telegram,
 }
 
 impl PreludeAssocConst {
     /// All recognised associated-constant names.
-    pub const ALL: &'static [PreludeAssocConst] = &[PreludeAssocConst::Pi, PreludeAssocConst::E];
+    pub const ALL: &'static [PreludeAssocConst] = &[
+        PreludeAssocConst::Pi,
+        PreludeAssocConst::E,
+        // T47: Platform enum variants — accessed as `Platform.Discord` /
+        // `Platform.Telegram` (zero-arg). Dispatched on the
+        // (Platform, Discord) / (Platform, Telegram) pairs in
+        // `assoc_const_return_type`.
+        PreludeAssocConst::Discord,
+        PreludeAssocConst::Telegram,
+    ];
 
     /// The source name of this associated constant (the identifier the user
     /// writes after the dot). Note constant names are UPPERCASE per the
@@ -4119,6 +4212,12 @@ impl PreludeAssocConst {
             // without rewriting.
             PreludeAssocConst::Pi => "PI",
             PreludeAssocConst::E => "E",
+            // T47: PascalCase Rust enum-variant naming for the two
+            // `Platform` variants — matches `buff_chat::Platform::Discord`
+            // / `buff_chat::Platform::Telegram` 1:1 so the codegen can
+            // splice the canonical Rust path without rewriting.
+            PreludeAssocConst::Discord => "Discord",
+            PreludeAssocConst::Telegram => "Telegram",
         }
     }
 }
@@ -4152,6 +4251,13 @@ pub fn assoc_const_return_type(type_: PreludeType, const_: PreludeAssocConst) ->
         // Math.PI / Math.E -> Float (f64).
         (PreludeType::Math, PreludeAssocConst::Pi) => Some(Type::float_default()),
         (PreludeType::Math, PreludeAssocConst::E) => Some(Type::float_default()),
+        // T47: Platform.Discord / Platform.Telegram -> Platform. Lowers
+        // to `buff_chat::Platform::Discord` / `::Telegram` at codegen
+        // time. Both variants carry the same Buff type (`Platform`);
+        // the codegen dispatches on the (Platform, Discord) /
+        // (Platform, Telegram) pair to splice the matching Rust path.
+        (PreludeType::Platform, PreludeAssocConst::Discord) => Some(Type::platform()),
+        (PreludeType::Platform, PreludeAssocConst::Telegram) => Some(Type::platform()),
         // Every other (type, const) pair is invalid.
         _ => None,
     }
@@ -4900,6 +5006,18 @@ pub fn assoc_fn_return_type(
         (PreludeType::Message, PreludeAssocFn::New) => Some(Type::Message),
         (PreludeType::Message, PreludeAssocFn::FromBytes) => Some(Type::Message),
         (PreludeType::Message, PreludeAssocFn::Decode) => Some(Type::Message),
+        // T47: buff-chat constructors. `Bot.new(platform, token)` is
+        // fallible in Rust (returns `Result<Bot, ChatError>`) but
+        // surfaces as infallible on the Buff side via codegen's
+        // `unwrap_or_default()` (Bot impls Default as an empty Discord
+        // bot — added in the T47 MVP commit). `ChatMessage.new(text,
+        // channel, author, platform, is_dm)` is infallible in Rust
+        // (returns `Message` directly — no failure mode). `New` is
+        // shared with Channel.new / Faker.new / Point.new /
+        // XmlElement.new / Message.new (T52) — dispatched on the
+        // (Bot, New) / (ChatMessage, New) pairs.
+        (PreludeType::Bot, PreludeAssocFn::New) => Some(Type::bot()),
+        (PreludeType::ChatMessage, PreludeAssocFn::New) => Some(Type::chat_message()),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -5552,6 +5670,92 @@ pub enum PreludeInstanceFn {
     /// different enum (PreludeInstanceFn vs PreludeAssocFn), different
     /// dispatch table.
     Encode,
+    // ---- T47: buff-chat instance methods (Bot / ChatMessage / Platform)
+    // ----
+    // 15 new variants. `Text` is reused (shared with Document / Element
+    // / XmlElement — dispatched on (ChatMessage, Text) pair).
+    /// `bot.command(name, handler) -> Void` (Bot). Two args
+    /// (String name, closure handler `|Message| -> Void`). Wraps
+    /// `buff_chat::Bot::command(recv, &name, |msg| <closure body>)
+    /// .unwrap_or(())` (panic-free via `.unwrap_or(())` —
+    /// registration failure is silently swallowed at the Buff
+    /// surface; a future task can surface ChatError if needed).
+    /// Bot-only. Both `!ping` (Discord) and `/ping` (Telegram)
+    /// trigger the same handler.
+    Command,
+    /// `bot.on_message(handler) -> Void` (Bot). One arg (closure
+    /// handler `|Message| -> Void`). Wraps
+    /// `buff_chat::Bot::on_message(recv, |msg| <closure body>)
+    /// .unwrap_or(())` (panic-free via `.unwrap_or(())` —
+    /// registration failure is silently swallowed). Bot-only.
+    /// Mirrors [`Self::Command`] but without the name arg (the
+    /// catch-all handler).
+    OnMessage,
+    /// `bot.start() -> Void` (Bot). Zero args. Wraps
+    /// `buff_chat::Bot::start(recv).unwrap_or(())` (panic-free —
+    /// blocks on the platform event loop; failure is silently
+    /// swallowed). Bot-only. The codegen lowers the void return
+    /// rather than surfacing `Result<(), ChatError>` because Buff
+    /// has no `?` propagation across FFI boundaries (per the FFI
+    /// guide R3, errors are mapped to defaults at the boundary).
+    Start,
+    /// `bot.stop() -> Void` (Bot). Zero args. Wraps
+    /// `buff_chat::Bot::stop(recv).unwrap_or(())` (panic-free).
+    /// Bot-only. Cooperative shutdown via AtomicBool flag — does
+    /// NOT immediately abort the event loop (in-flight handlers
+    /// run to completion).
+    Stop,
+    /// `bot.dispatch(msg) -> Void` (Bot). One arg (ChatMessage).
+    /// Wraps `buff_chat::Bot::dispatch(recv, msg).unwrap_or(())`
+    /// (panic-free). Bot-only. Public so tests and programmatic
+    /// callers can exercise the handler routing without a live
+    /// network connection (the T47 "mock API" acceptance criterion).
+    Dispatch,
+    /// `bot.is_running() -> Bool` (Bot). Zero args. Wraps
+    /// `buff_chat::Bot::is_running(recv)` (infallible — returns
+    /// false on poisoned lock, never panics). Bot-only.
+    /// Point-in-time snapshot of the running AtomicBool flag.
+    IsRunning,
+    /// `bot.command_count() -> Int` (Bot). Zero args. Wraps
+    /// `buff_chat::Bot::command_count(recv) as i64` (infallible —
+    /// returns 0 on poisoned lock). Bot-only. The underlying Rust
+    /// method returns `usize`; the cast lifts to Buff's `Int<64>`.
+    CommandCount,
+    /// `bot.has_message_handler() -> Bool` (Bot). Zero args. Wraps
+    /// `buff_chat::Bot::has_message_handler(recv)` (infallible —
+    /// returns false on poisoned lock). Bot-only.
+    HasMessageHandler,
+    /// `msg.channel() -> String` (ChatMessage). Zero args. Wraps
+    /// `buff_chat::Message::channel(recv).to_string()` (the
+    /// underlying Rust method returns `&str`; the `.to_string()`
+    /// lifts to owned String per FFI guide R2 — Buff surfaces
+    /// owned values). ChatMessage-only.
+    Channel,
+    /// `msg.author() -> String` (ChatMessage). Zero args. Wraps
+    /// `buff_chat::Message::author(recv).to_string()`. ChatMessage-
+    /// only. Returns the display name (Discord) or username sans
+    /// `@` (Telegram); empty String when the author is unknown.
+    Author,
+    /// `bot.platform()` / `msg.platform()` -> Platform (Bot /
+    /// ChatMessage). Zero args. Wraps
+    /// `buff_chat::Bot::platform(recv)` /
+    /// `buff_chat::Message::platform(recv)` (both infallible —
+    /// return Copy values directly). Dispatched on the
+    /// (Bot, Platform) / (ChatMessage, Platform) pairs.
+    Platform,
+    /// `msg.is_dm() -> Bool` (ChatMessage). Zero args. Wraps
+    /// `buff_chat::Message::is_dm(recv)` (infallible). ChatMessage-
+    /// only. Whether the message was sent in a private (direct
+    /// message) context.
+    IsDm,
+    /// `platform.is_discord() -> Bool` (Platform). Zero args.
+    /// Wraps `buff_chat::Platform::is_discord(recv)` (infallible —
+    /// Copy value). Platform-only.
+    IsDiscord,
+    /// `platform.is_telegram() -> Bool` (Platform). Zero args.
+    /// Wraps `buff_chat::Platform::is_telegram(recv)` (infallible —
+    /// Copy value). Platform-only. Mirrors [`Self::IsDiscord`].
+    IsTelegram,
 }
 
 impl PreludeInstanceFn {
@@ -5795,6 +5999,30 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::TypeUrl,
         PreludeInstanceFn::Payload,
         PreludeInstanceFn::Encode,
+        // T47: buff-chat instance methods (15 new variants). `Text` is
+        // reused (shared with Document / Element / XmlElement —
+        // dispatched on (ChatMessage, Text) pair). The 15 new variants
+        // cover Bot (Command / OnMessage / Start / Stop / Dispatch /
+        // IsRunning / CommandCount / HasMessageHandler), ChatMessage
+        // (Channel / Author / Platform / IsDm), and Platform (IsDiscord
+        // / IsTelegram). `Platform` is the accessor variant (returns
+        // Type::Platform); `IsDiscord` / `IsTelegram` are predicates.
+        // `OnMessage` is a registration variant (mirrors `Command` —
+        // takes a single handler closure, no name arg).
+        PreludeInstanceFn::Command,
+        PreludeInstanceFn::OnMessage,
+        PreludeInstanceFn::Start,
+        PreludeInstanceFn::Stop,
+        PreludeInstanceFn::Dispatch,
+        PreludeInstanceFn::IsRunning,
+        PreludeInstanceFn::CommandCount,
+        PreludeInstanceFn::HasMessageHandler,
+        PreludeInstanceFn::Channel,
+        PreludeInstanceFn::Author,
+        PreludeInstanceFn::Platform,
+        PreludeInstanceFn::IsDm,
+        PreludeInstanceFn::IsDiscord,
+        PreludeInstanceFn::IsTelegram,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -6055,6 +6283,31 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Spectrogram => "spectrogram",
             PreludeInstanceFn::Magnitude => "magnitude",
             PreludeInstanceFn::Phase => "phase",
+            // T47: buff-chat instance method names mirror the
+            // `buff_chat::{Bot, Message, Platform}` Rust method names
+            // 1:1 so the codegen can splice `recv.command(name, h)` /
+            // `recv.on_message(h)` / `recv.start()` / `recv.stop()` /
+            // `recv.dispatch(msg)` / `recv.is_running()` /
+            // `recv.command_count()` / `recv.has_message_handler()` /
+            // `recv.channel()` / `recv.author()` / `recv.platform()` /
+            // `recv.is_dm()` / `recv.is_discord()` / `recv.is_telegram()`
+            // without rewriting. Note `ChatMessage.text()` reuses the
+            // existing shared `Text` variant (already mapped to "text"
+            // by the T43 Document / Element arm above).
+            PreludeInstanceFn::Command => "command",
+            PreludeInstanceFn::OnMessage => "on_message",
+            PreludeInstanceFn::Start => "start",
+            PreludeInstanceFn::Stop => "stop",
+            PreludeInstanceFn::Dispatch => "dispatch",
+            PreludeInstanceFn::IsRunning => "is_running",
+            PreludeInstanceFn::CommandCount => "command_count",
+            PreludeInstanceFn::HasMessageHandler => "has_message_handler",
+            PreludeInstanceFn::Channel => "channel",
+            PreludeInstanceFn::Author => "author",
+            PreludeInstanceFn::Platform => "platform",
+            PreludeInstanceFn::IsDm => "is_dm",
+            PreludeInstanceFn::IsDiscord => "is_discord",
+            PreludeInstanceFn::IsTelegram => "is_telegram",
         }
     }
 }
@@ -6643,6 +6896,39 @@ pub fn instance_fn_return_type(
         (Type::Message, PreludeInstanceFn::TypeUrl) => Some(Type::String),
         (Type::Message, PreludeInstanceFn::Payload) => Some(Type::Unknown),
         (Type::Message, PreludeInstanceFn::Encode) => Some(Type::vector(Type::byte())),
+
+        // T47: buff-chat instance methods. All panic-free via the
+        // codegen's `.unwrap_or(())` / `.unwrap_or_default()` collapse
+        // (mirrors T9 Image / T45 Point / T52 Message). Bot.command
+        // returns Void (registration — failure is silently swallowed
+        // at the Buff surface per FFI guide R3). Bot.start / stop /
+        // dispatch return Void (block-on-event-loop or signal-shutdown
+        // ops — never surface ChatError to the Buff layer). Bot.
+        // is_running / has_message_handler return Bool. Bot.command_
+        // count returns Int (usize cast to i64). Bot.platform /
+        // Message.platform return Platform (Copy value). ChatMessage
+        // channel / author return String (.to_string() lifts &str).
+        // ChatMessage.is_dm returns Bool. ChatMessage.text reuses the
+        // existing shared `Text` variant — dispatched on the
+        // (ChatMessage, Text) pair (returns String, mirrors Document
+        // / Element / XmlElement). Platform.is_discord /
+        // is_telegram return Bool (Copy value).
+        (Type::Bot, PreludeInstanceFn::Command) => Some(Type::Void),
+        (Type::Bot, PreludeInstanceFn::OnMessage) => Some(Type::Void),
+        (Type::Bot, PreludeInstanceFn::Start) => Some(Type::Void),
+        (Type::Bot, PreludeInstanceFn::Stop) => Some(Type::Void),
+        (Type::Bot, PreludeInstanceFn::Dispatch) => Some(Type::Void),
+        (Type::Bot, PreludeInstanceFn::IsRunning) => Some(Type::Bool),
+        (Type::Bot, PreludeInstanceFn::CommandCount) => Some(Type::int_default()),
+        (Type::Bot, PreludeInstanceFn::HasMessageHandler) => Some(Type::Bool),
+        (Type::Bot, PreludeInstanceFn::Platform) => Some(Type::platform()),
+        (Type::ChatMessage, PreludeInstanceFn::Text) => Some(Type::String),
+        (Type::ChatMessage, PreludeInstanceFn::Channel) => Some(Type::String),
+        (Type::ChatMessage, PreludeInstanceFn::Author) => Some(Type::String),
+        (Type::ChatMessage, PreludeInstanceFn::Platform) => Some(Type::platform()),
+        (Type::ChatMessage, PreludeInstanceFn::IsDm) => Some(Type::Bool),
+        (Type::Platform, PreludeInstanceFn::IsDiscord) => Some(Type::Bool),
+        (Type::Platform, PreludeInstanceFn::IsTelegram) => Some(Type::Bool),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
