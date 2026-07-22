@@ -1,0 +1,30 @@
+[package]
+name = "buff-xml"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+XML parsing for Buff. \
+Pure-Rust MVP wrapping the `quick-xml` crate for streaming \
+XML parsing via a safe FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "xml", "parse", "quick-xml"]
+categories = ["parser-implementations", "text-processing"]
+
+[lib]
+name = "buff_xml"
+path = "src/lib.rs"
+
+[dependencies]
+# T50 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# quick-xml 0.37: pure-Rust streaming XML parser — matches the "no C
+# library" rule. API surface used: Reader::from_str / read_event /
+# Writer::new / write_event + {BytesStart,BytesText,Event} types.
+quick-xml.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
