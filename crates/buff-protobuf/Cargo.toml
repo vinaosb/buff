@@ -1,0 +1,42 @@
+[package]
+name = "buff-protobuf"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Protocol Buffers for Buff. \
+Pure-Rust MVP wrapping the `prost` + `prost-types` crates. \
+Provides Protobuf.serialize(value) -> Bytes and \
+Protobuf.deserialize(bytes) -> Value via a safe \
+FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "protobuf", "protocol-buffers", "serialization", "grpc"]
+categories = ["encoding", "data-structures"]
+
+[lib]
+name = "buff_protobuf"
+path = "src/lib.rs"
+
+[dependencies]
+# T52 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# prost 0.13: pure-Rust Protocol Buffers runtime (encode/decode + the
+# `Message` trait). API surface used:
+# `prost::Message::encode(msg, &mut buf)` / `Message::decode(buf)` for
+# length-delimited wire format. prost-types 0.13: the well-known types
+# (`Struct` / `Value` / `ListValue`) which give a JSON-shaped dynamic
+# message surface so the MVP can roundtrip arbitrary `serde_json::Value`
+# through the protobuf wire format WITHOUT build-time .proto codegen.
+# Pure-Rust, no native deps, no cc-rs — matches the "no C library" hard
+# rule. gRPC streaming + .proto→Buff type codegen (prost-build/tonic)
+# are DEFERRED per the T52 task spec (unary-only MVP, no streaming).
+prost.workspace = true
+prost-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
