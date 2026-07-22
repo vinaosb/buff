@@ -130,6 +130,12 @@ pub enum PreludeFn {
     /// functions, but recognised everywhere (a bare `assert_eq` call in a
     /// non-test fn still lowers to `assert_eq!` — Rust accepts it).
     AssertEq,
+    // --- Testing (T38) -------------------------------------------------
+    /// `assertThat(value)` — fluent test assertion entry point. Returns an
+    /// `AssertThat<T>` wrapper whose methods (isEqualTo, isGreaterThan, ...)
+    /// panic with descriptive messages on failure. Lowers to
+    /// `buff_assertions::assertThat(value)`.
+    AssertThat,
 }
 
 impl PreludeFn {
@@ -162,6 +168,8 @@ impl PreludeFn {
         PreludeFn::Sleep,
         // Testing
         PreludeFn::AssertEq,
+        // T38: Fluent test assertions.
+        PreludeFn::AssertThat,
     ];
 
     /// The source-name of this prelude function (the identifier the user
@@ -190,6 +198,7 @@ impl PreludeFn {
             PreludeFn::Input => "input",
             PreludeFn::Sleep => "sleep",
             PreludeFn::AssertEq => "assert_eq",
+            PreludeFn::AssertThat => "assertThat",
         }
     }
 
@@ -215,6 +224,7 @@ impl PreludeFn {
             PreludeFn::Input => PreludeCategory::Io,
             PreludeFn::Sleep => PreludeCategory::System,
             PreludeFn::AssertEq => PreludeCategory::Test,
+            PreludeFn::AssertThat => PreludeCategory::Test,
         }
     }
 }
@@ -338,6 +348,12 @@ pub fn return_type(fn_: PreludeFn, arg_tys: &[Type]) -> Type {
         // --- Testing (T35) ---------------------------------------------
         // assert_eq(a, b) -> Void (panics on mismatch, returns () on success)
         PreludeFn::AssertEq => Type::Void,
+        // --- Testing (T38) ---------------------------------------------
+        // assertThat(value) -> AssertThat<T> (fluent assertion wrapper).
+        // Return type tracks the input value's type so the wrapper's
+        // chained methods (isEqualTo, isGreaterThan, etc.) typecheck
+        // against the original value. Lowers to buff_assertions::assertThat(v).
+        PreludeFn::AssertThat => arg_tys.first().cloned().unwrap_or(Type::Unknown),
     }
 }
 

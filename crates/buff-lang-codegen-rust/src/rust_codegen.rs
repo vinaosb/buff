@@ -10613,6 +10613,13 @@ impl RustCodegen {
             // uses `Xml.*` (via the narrow
             // `program_uses_namespace("Xml")` walker).
             Type::Xml => "buff_xml::XmlDocument",
+            // T51: MsgPack namespace. Opaque type marker — MsgPack is
+            // namespace-only (`MsgPack.serialize(...)` /
+            // `MsgPack.deserialize(...)` are never instantiated as
+            // values), so this arm rarely fires in practice. Required
+            // for match exhaustiveness (the rust_name match has no `_`
+            // wildcard). Mirrors Type::Regex arm shape above.
+            Type::MsgPack => "buff_msgpack::MsgPack",
         };
         Some(rust_path_type(rust_name))
     }
