@@ -1022,6 +1022,21 @@ impl RustCodegen {
             self.extern_crates.insert("flate2".to_string());
             self.extern_crates.insert("ruzstd".to_string());
         }
+        // T51: register `buff-msgpack` + `rmp-serde` + `serde_json`
+        // when the program references the prelude `MsgPack` module
+        // (`MsgPack.serialize(value)` / `MsgPack.deserialize(bytes)`).
+        // The generated code uses fully-qualified `buff_msgpack::*`
+        // paths so no top-level `use` import is emitted — but the
+        // recorded name signals to the pipeline / build-driver that
+        // the generated Cargo project must declare `buff-msgpack` in
+        // `[dependencies]`. Also records `rmp-serde` + `serde_json`
+        // transitively (the wrapper crate wraps both). Mirrors the
+        // T9 Image / T39 Archive registration pattern.
+        if program_uses_namespace(decls, "MsgPack") {
+            self.extern_crates.insert("buff-msgpack".to_string());
+            self.extern_crates.insert("rmp-serde".to_string());
+            self.extern_crates.insert("serde_json".to_string());
+        }
         // T42: register `buff-email` + `lettre` + `handlebars` when
         // the program references the prelude `Email` OR `SmtpClient`
         // modules (`Email.new(from, to, subject)` /
@@ -1062,6 +1077,24 @@ impl RustCodegen {
             self.extern_crates.insert("buff-scrape".to_string());
             self.extern_crates.insert("scraper".to_string());
             self.extern_crates.insert("reqwest".to_string());
+        }
+        // T46: register `buff-nlp` when the program references the
+        // `Text` namespace (`Text.detect_language(text)` /
+        // `Text.stem(word, algorithm)` / `Text.tokenize(text)` /
+        // `Text.sentences(text)`). Also records `whatlang`
+        // (pure-Rust trigram language identifier — 69+ languages),
+        // `rust-stemmers` (pure-Rust Snowball stemmer for 18
+        // languages — NOT a C binding), and `unicode-segmentation`
+        // (already pinned for T124 String segmentation — pure-Rust
+        // UAX #29 word + sentence segmentation). Mirrors the T9
+        // Image / T18 Database / T34 buff-auth / T39 buff-archive
+        // pattern. NO lemmatization, NO ML-based NER, NO embeddings
+        // — all forbidden by the T46 task spec (v1.20+ work).
+        if program_uses_namespace(decls, "Text") {
+            self.extern_crates.insert("buff-nlp".to_string());
+            self.extern_crates.insert("whatlang".to_string());
+            self.extern_crates.insert("rust-stemmers".to_string());
+            self.extern_crates.insert("unicode-segmentation".to_string());
         }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
@@ -5699,6 +5732,48 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Archive.extract codegen parse: {e}")))
             }
+            // T51: MsgPack.serialize(value) -> Vector<Byte>. Wraps
+            // `buff_msgpack::serialize(&value).unwrap_or_default()`
+            // (empty Vec on serialize failure — NEVER panics, matching
+            // Buff's "no panicking generated code" rule). Records
+            // `buff-msgpack` + `rmp-serde` + `serde_json` in
+            // extern_crates via the
+            // `program_uses_namespace("MsgPack")` walker.
+            (T::MsgPack, A::Encode) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_msgpack::serialize(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("MsgPack.serialize codegen parse: {e}")))
+            }
+            // T51: MsgPack.deserialize(bytes) -> Value. Wraps
+            // `buff_msgpack::deserialize(&bytes).unwrap_or_default()`
+            // (empty string on deserialize failure — NEVER panics).
+            // The arg is a `Vector<Byte>` on the Buff surface (Vec<u8>
+            // after codegen lowering); the codegen passes it by ref.
+            (T::MsgPack, A::Decode) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_msgpack::deserialize(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("MsgPack.deserialize codegen parse: {e}")))
+            }
+            // T50: Xml.from_str(xml) -> XmlDocument. One arg (String).
+            // Wraps `buff_xml::XmlDocument::from_str(&xml)
+            // .unwrap_or_default()` (panic-free on empty/parse failure —
+            // XmlDocument impls Default as a root-only document). Records
+            // `buff-xml` + `quick-xml` in extern_crates via the
+            // `program_uses_namespace("Xml")` walker.
+            (T::Xml, A::FromStr) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_xml::XmlDocument::from_str(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Xml.from_str codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -7384,6 +7459,49 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Crawler.robots_allows codegen parse: {e}")))
+            }
+            // T50: Xml instance methods. Each method lowers to
+            // `buff_xml::XmlDocument::<method>`. The codegen records
+            // `buff-xml` + `quick-xml` in extern_crates via the
+            // `program_uses_namespace("Xml")` walker. All methods
+            // panic-free at the codegen layer.
+            //
+            // `doc.root()` -> XmlDocument (opaque). Zero args.
+            M::Root if matches!(recv_ty, Type::Xml) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "root() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_xml::XmlDocument::root(&#recv).clone()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Xml.root codegen parse: {e}")))
+            }
+            // `doc.find(xpath)` -> Option<XmlDocument>. One arg (String).
+            M::Find if matches!(recv_ty, Type::Xml) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_xml::XmlDocument::find(&#recv, &#arg).ok().cloned()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Xml.find codegen parse: {e}")))
+            }
+            // `doc.to_string()` -> String. Zero args.
+            M::ToString if matches!(recv_ty, Type::Xml) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_string() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_xml::XmlDocument::to_string(&#recv).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Xml.to_string codegen parse: {e}")))
             }
             // T10: AudioBuffer instance methods. Each method lowers
             // to `buff_audio::AudioBuffer::<method>`. The codegen
@@ -10469,6 +10587,17 @@ impl RustCodegen {
             // or this `buff_type_to_syn` arm — both required to keep
             // codegen compiling.
             Type::Template => "buff_template::Template",
+            // T50: Xml. Opaque runtime-value type mapped to
+            // `buff_xml::XmlDocument`. No generic parameter, no
+            // turbofish needed. Mirrors the T9 Image / T31 Cache
+            // precedent: if a user annotates a let binding with an
+            // explicit Xml type, codegen emits the concrete path;
+            // otherwise Rust infers the type from the initializer
+            // (Xml.from_str). The `buff-xml` + `quick-xml` crates
+            // are recorded in `extern_crates` when a Buff program
+            // uses `Xml.*` (via the narrow
+            // `program_uses_namespace("Xml")` walker).
+            Type::Xml => "buff_xml::XmlDocument",
         };
         Some(rust_path_type(rust_name))
     }

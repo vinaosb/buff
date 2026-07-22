@@ -1,0 +1,36 @@
+[package]
+name = "buff-msgpack"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+MessagePack binary format for Buff. \
+Pure-Rust MVP wrapping the `rmp-serde` crate. \
+Provides MsgPack.serialize(value) -> Bytes and \
+MsgPack.deserialize(bytes) -> Value via a safe \
+FFI boundary per the T4 FFI guide.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "msgpack", "serialization", "binary"]
+categories = ["encoding", "data-structures"]
+
+[lib]
+name = "buff_msgpack"
+path = "src/lib.rs"
+
+[dependencies]
+# T51 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+# rmp-serde 1.3: pure-Rust MessagePack + serde integration — matches
+# the "no C library" hard rule. API surface used:
+# rmp_serde::to_vec(&value) -> Result<Vec<u8>, Error> for serialize,
+# rmp_serde::from_slice::<serde_json::Value>(&bytes) -> Result<Value, Error>
+# for deserialize. Pure-Rust, no native deps, no cc-rs.
+rmp-serde.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -653,6 +653,28 @@ pub enum Type {
     /// `reqwest::blocking::Client` + seed `String`). Pure-Rust TLS
     /// via rustls (NOT native-tls).
     Crawler,
+    /// T51: a MessagePack binary format namespace, mapped to
+    /// `buff_msgpack` at codegen time. Constructed via the
+    /// associated functions `MsgPack.serialize(value) -> Bytes`
+    /// and `MsgPack.deserialize(bytes) -> Value`. This is a
+    /// namespace-only type (like `Log` / `Toml` / `Base64` /
+    /// `Hex` / `Yaml` / `Csv`) — it has no runtime value
+    /// representation; `buff_type()` returns [`Type::Void`].
+    ///
+    /// This is **additive** (T51): no existing variant was renamed,
+    /// reordered, or had its payload altered. All exhaustive `match`es
+    /// on `Type` will be extended with an arm for the new variant:
+    /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_msgpack`
+    /// predicate. The `is_numeric` / `is_float_like` / `is_integer_like`
+    /// / `is_gpu_eligible` predicates all return `false` for `MsgPack`.
+    ///
+    /// Mirrors [`Type::Base64`] / [`Type::Hex`] / [`Type::Yaml`] /
+    /// [`Type::Csv`] as a namespace-only prelude type. The underlying
+    /// Rust crate is `buff_msgpack` (wrapping `rmp_serde`) — the
+    /// codegen emits `buff_msgpack::serialize(&value).unwrap_or_default()`
+    /// / `buff_msgpack::deserialize(&bytes).unwrap_or_default()` for
+    /// the two associated functions. Pure-Rust, no native deps.
+    MsgPack,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1257,6 +1279,28 @@ impl Type {
         matches!(self, Type::Crawler)
     }
 
+    /// T50: the XML document type. Maps to `buff_xml::XmlDocument` at
+    /// codegen time. Constructed via `Xml.from_str(xml)`; supports
+    /// the instance methods `.root()`, `.find(xpath)`, `.to_string()`.
+    /// Pure-Rust, CPU-only.
+    pub fn xml() -> Self {
+        Type::Xml
+    }
+
+    /// T50: Returns `true` if this type is the prelude `Xml` runtime
+    /// value. Used to dispatch instance method calls
+    /// (`doc.root()`, `doc.find(xpath)`, `doc.to_string()`) to the
+    /// `buff_xml::XmlDocument` lowering.
+    pub fn is_prelude_xml(&self) -> bool {
+        matches!(self, Type::Xml)
+    }
+
+    /// T51: Returns `true` if this type is the prelude `MsgPack` namespace.
+    /// Namespace-only (no runtime value — like Log / Toml / Base64 / Hex).
+    pub fn is_prelude_msgpack(&self) -> bool {
+        matches!(self, Type::MsgPack)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -1434,6 +1478,14 @@ impl fmt::Display for Type {
             Type::Document => f.write_str("Document"),
             Type::Element => f.write_str("Element"),
             Type::Crawler => f.write_str("Crawler"),
+            // T51: prelude MsgPack namespace. Namespace-only (no runtime
+            // value — like Log / Toml / Base64 / Hex / Yaml / Csv).
+            // Display mirrors the Buff surface name.
+            Type::MsgPack => f.write_str("MsgPack"),
+            // T50: prelude Xml type. Opaque runtime-value type mapped
+            // to `buff_xml::XmlDocument`. Display mirrors the Buff
+            // surface name.
+            Type::Xml => f.write_str("Xml"),
         }
     }
 }

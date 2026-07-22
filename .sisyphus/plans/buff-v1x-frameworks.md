@@ -3416,7 +3416,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Language detection accuracy >90% on test corpus. Stemmer produces correct stems. 3 examples + 10 tests.
   - **Commit**: `feat(buff-nlp): MVP text processing (detection, stemmer, tokenizer)`
 
-- [ ] 47. `buff-chat` — Discord/Telegram Bots
+- [x] 47. `buff-chat` — Discord/Telegram Bots
 
   **What to do**: Wrap Rust `serenity` (Discord) + `teloxide` (Telegram). Provide unified `Bot.new(platform, token)`, `bot.command(name, handler)`, `bot.on_message(handler)`, `bot.start()`. Cross-platform handler abstraction. Cross-language: 5/6 (discord.py/discord.js/discordgo/serenity/JDA).
   - **LOC budget**: ≤3000, ≤20 fns. **External deps**: `serenity`, `teloxide`.
@@ -3449,7 +3449,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Parse well-formed XML. XPath queries work. Streaming doesn't OOM on large files. 3 examples + 10 tests.
   - **Commit**: `feat(buff-xml): MVP XML parsing via quick-xml`
 
-- [ ] 51. `buff-msgpack` — MessagePack Binary Format
+- [x] 51. `buff-msgpack` — MessagePack Binary Format
 
   **What to do**: Wrap Rust `rmp-serde` crate. Provide: `MsgPack.serialize(value) -> Bytes`, `MsgPack.deserialize(bytes) -> Value`. Auto-derive for structs (post-T3 macro). Cross-language: 6/6 (msgpack/python-msgpack/msgpack-lite/rmp-serde/MsgPack-Jackson/MessagePack-CSharp).
   - **LOC budget**: ≤1500, ≤10 fns. **External deps**: `rmp-serde`, `serde` (existing).

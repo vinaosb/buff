@@ -1300,6 +1300,43 @@ pub enum PreludeType {
     /// NO 7z, RAR, BZip2, encryption-at-rest — all forbidden by the
     /// T39 task spec.
     Archive,
+    /// T46 (v1.18 frameworks wave 7): the `Text` namespace — text
+    /// processing / NLP. Wraps the in-tree pure-Rust `buff-nlp` crate
+    /// (`buff_nlp::Text::*`) backed by `whatlang` 0.16 (language
+    /// detection — pure-Rust trigram classifier for 69+ languages),
+    /// `rust-stemmers` 1.2 (Snowball stemmer for 18 languages — pure-
+    /// Rust reference, NO C bindings), and `unicode-segmentation` 1.12
+    /// (UAX #29 word + sentence segmentation — already pinned for T124
+    /// String segmentation). Four assoc fns:
+    /// - `Text.detect_language(text)` -> String? (Option). One arg.
+    ///   Wraps `buff_nlp::Text::detect_language(&text).map(|l|
+    ///   l.code())` (returns the ISO 639-3 code so the Buff surface
+    ///   stays simple — `Option<String>`; the full Language struct
+    ///   lives in the Rust crate).
+    /// - `Text.stem(word, algorithm: String)` -> String. Two args.
+    ///   Wraps `buff_nlp::Text::stem(&word,
+    ///   StemAlgorithm::from_code(&algorithm).unwrap_or(English))?`
+    ///   (the `?` propagates `NlpError` per Buff's R3 error-mapping
+    ///   contract; the String→StemAlgorithm conversion lets the Buff
+    ///   surface use a plain String for the algorithm arg, matching
+    ///   the cross-language convention of `"english"` / `"portuguese"`
+    ///   / `"french"` Snowball names).
+    /// - `Text.tokenize(text)` -> Vector<String>. One arg. Wraps
+    ///   `buff_nlp::Text::tokenize(&text)` (UAX #29 word boundary
+    ///   segmentation; drops punctuation + whitespace).
+    /// - `Text.sentences(text)` -> Vector<String>. One arg. Wraps
+    ///   `buff_nlp::Text::sentences(&text)` (UAX #29 sentence boundary
+    ///   segmentation).
+    ///
+    /// This is a namespace-only module (mirror Archive / Log / Toml /
+    /// Math / Config / Observe): `buff_type()` returns `Type::Void`.
+    /// The crate records `buff-nlp` + `whatlang` + `rust-stemmers` +
+    /// `unicode-segmentation` in codegen `extern_crates` when a Buff
+    /// program uses `Text.*` (mirrors the chrono / regex / tracing /
+    /// image codegen-only linking boundary). Pure-Rust, no native
+    /// deps. NO lemmatization, NO ML-based NER, NO embeddings — all
+    /// deferred to v1.20+ (T46 ships the pure-Rust MVP only).
+    Text,
     /// T34 (v1.16 frameworks wave 4): the `JWT` namespace — JSON Web
     /// Token encode/decode. Wraps the in-tree pure-Rust `buff-auth`
     /// crate (`buff_auth::jwt_encode` / `buff_auth::jwt_decode`) which
@@ -1793,6 +1830,16 @@ impl PreludeType {
         // (NOT the canonical `zstd` crate — see the variant rustdoc
         // above + root Cargo.toml workspace rationale).
         PreludeType::Archive,
+        // T46: Text — namespace-only module (mirror Archive / Log /
+        // Toml / Math / Config / Observe) wrapping the in-tree pure-
+        // Rust `buff-nlp` crate. Four assoc fns: `Text.detect_
+        // language` / `Text.stem` / `Text.tokenize` / `Text.
+        // sentences`. Records `buff-nlp` + `whatlang` + `rust-
+        // stemmers` + `unicode-segmentation` in codegen `extern_
+        // crates` when a Buff program uses `Text.*`. Pure-Rust, no
+        // native deps (whatlang + rust-stemmers + unicode-segmentation
+        // — all pure-Rust, NO C bindings, NO cc-rs).
+        PreludeType::Text,
         // T42: Email — runtime-value type with rich instance methods.
         // Mirrors Image / Faker / HttpClient / Validator. Codegen
         // lowering lives in the buff-email crate
@@ -1821,6 +1868,18 @@ impl PreludeType {
         PreludeType::Document,
         PreludeType::Element,
         PreludeType::Crawler,
+        // T50: Xml — runtime-value type wrapping `buff_xml::XmlDocument`.
+        // Constructed via `Xml.from_str(xml)`; carries the instance methods
+        // `.root()`, `.find(xpath)`, `.to_string()`. Mirrors Image / Faker
+        // as a runtime-value-with-instance-methods type. Pure-Rust, CPU-only.
+        PreludeType::Xml,
+        // T51: MsgPack — MessagePack binary format namespace.
+        // Namespace-only (like Log / Toml / Base64 / Hex / Yaml /
+        // Csv). Provides `MsgPack.serialize(value) -> Bytes` and
+        // `MsgPack.deserialize(bytes) -> Value`. Codegen lowering
+        // lives in the buff-msgpack crate (`buff_msgpack::serialize`
+        // / `buff_msgpack::deserialize`). Pure-Rust, no native deps.
+        PreludeType::MsgPack,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2112,6 +2171,27 @@ impl PreludeType {
             // namespace marker — never instantiated). Namespace-only
             // module (mirrors Log / Toml / Math / Config / Observe).
             PreludeType::Archive => "Archive",
+            // T46: Text — canonical PascalCase name matching the
+            // user-facing `Text.detect_language(...)` / `Text.stem(...)`
+            // / `Text.tokenize(...)` / `Text.sentences(...)` surface.
+            // The underlying Rust namespace is `buff_nlp::Text` (a unit
+            // struct namespace marker — never instantiated).
+            // Namespace-only module (mirrors Archive / Log / Toml /
+            // Math / Config / Observe).
+            PreludeType::Text => "Text",
+            // T50: Xml — canonical PascalCase name matching the user-facing
+            // `Xml.from_str(xml)` / `doc.root()` / `doc.find(xpath)` surface.
+            // The underlying Rust type is `buff_xml::XmlDocument`.
+            PreludeType::Xml => "Xml",
+            // T50: Xml IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Xml`] variant; the codegen
+            // layer maps it to `buff_xml::XmlDocument`.
+            PreludeType::Xml => Type::Xml,
+            // T51: MsgPack — MessagePack binary format namespace.
+            // Namespace-only (no runtime value — mirrors Log / Toml /
+            // Base64 / Hex / Yaml / Csv). The underlying Rust crate
+            // is `buff_msgpack`.
+            PreludeType::MsgPack => "MsgPack",
         }
     }
 
@@ -2432,6 +2512,24 @@ impl PreludeType {
             // the result via the filesystem). Mirrors the Log / Toml /
             // Config / Observe / Hash / HMAC / OS pattern exactly.
             PreludeType::Archive => Type::Void,
+            // T46: Text is a namespace-only module (mirror Archive /
+            // Log / Toml / Math / Config / Observe). The namespace
+            // itself has no value representation; only its associated
+            // functions (`Text.detect_language` / `Text.stem` /
+            // `Text.tokenize` / `Text.sentences`) are callable.
+            // detect_language returns Option<String> (the ISO 639-3
+            // language code), stem returns String, tokenize /
+            // sentences return Vector<String>. Mirrors the Archive /
+            // Log / Toml / Config / Observe / Hash / HMAC / OS
+            // pattern exactly.
+            PreludeType::Text => Type::Void,
+            // T51: MsgPack is a namespace-only module (mirror Log /
+            // Toml / Base64 / Hex / Yaml / Csv). The namespace itself
+            // has no value representation; only its associated
+            // functions (`MsgPack.serialize` / `MsgPack.deserialize`)
+            // are callable. Both return `Vector<Byte>` (Bytes) and
+            // `Value` respectively.
+            PreludeType::MsgPack => Type::MsgPack,
         }
     }
 
@@ -2480,6 +2578,8 @@ impl PreludeType {
                 | PreludeType::Jwt
                 | PreludeType::Password
                 | PreludeType::Archive
+                | PreludeType::Text
+                | PreludeType::MsgPack
         )
     }
 }
@@ -3163,6 +3263,25 @@ pub enum PreludeAssocFn {
     /// `Archive.extract(archive, dest)` - extract an archive. Two args
     /// (String archive_path, String dest_dir). Returns Void. Archive-only.
     Extract,
+    // ---- T46: buff-nlp namespace methods --------------------------------
+    // Four namespace-only assoc fns on the Text prelude type. None
+    // share a name with an existing variant, so no disambiguation
+    // dispatch is needed in assoc_fn_lookup (each `(Text, $fn)` pair
+    // is unique).
+    /// `Text.detect_language(text)` - detect natural language. One
+    /// arg (String text). Returns Option<String> (the ISO 639-3
+    /// language code; None if no language detected). Text-only.
+    DetectLanguage,
+    /// `Text.stem(word, algorithm)` - Snowball stem a word. Two args
+    /// (String word, String algorithm — lowercase Snowball name like
+    /// "english" / "portuguese"). Returns String. Text-only.
+    Stem,
+    /// `Text.tokenize(text)` - UAX #29 word segmentation. One arg
+    /// (String text). Returns Vector<String>. Text-only.
+    Tokenize,
+    /// `Text.sentences(text)` - UAX #29 sentence segmentation. One
+    /// arg (String text). Returns Vector<String>. Text-only.
+    Sentences,
     // ---- T44: I18n namespace methods ------------------------------------
     // I18n.new(locale) reuses the existing shared `New` variant
     // (already defined for Channel / Cache / Faker). The (I18n, New)
@@ -3183,6 +3302,13 @@ pub enum PreludeAssocFn {
     /// propagates ScrapeError::EmptyInput per Buff's R3 error-
     /// mapping contract). Document-only.
     FromHtml,
+    // ---- T50: Xml ---------------------------------------------------------
+    /// `Xml.from_str(xml)` — parse an XML string into an XmlDocument.
+    /// One arg (String). Xml-only. Wraps
+    /// `buff_xml::XmlDocument::from_str(&xml)?` (the `?`
+    /// propagates XmlError::EmptyInput per Buff's R3 error-
+    /// mapping contract). Xml-only.
+    FromStr,
 }
 
 impl PreludeAssocFn {
@@ -3385,6 +3511,8 @@ impl PreludeAssocFn {
         // these variants on the (FutureType, CompressDir) pair.
         PreludeAssocFn::CompressDir,
         PreludeAssocFn::Extract,
+        // T50: Xml.from_str — single-arg XML parse.
+        PreludeAssocFn::FromStr,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -3507,10 +3635,18 @@ impl PreludeAssocFn {
             // naming convention permits the form. Crawler.new reuses
             // the shared `New` variant name ("new").
             PreludeAssocFn::FromHtml => "from_html",
+            // T50: Xml.from_str — canonical name for "parse from string".
+            PreludeAssocFn::FromStr => "from_str",
             // T39: buff-archive namespace method names. Both names
             // mirror the `buff_archive::Archive` Rust method names.
             PreludeAssocFn::CompressDir => "compress_dir",
             PreludeAssocFn::Extract => "extract",
+            // T46: buff-nlp namespace method names. All four mirror
+            // the `buff_nlp::Text` Rust method names 1:1.
+            PreludeAssocFn::DetectLanguage => "detect_language",
+            PreludeAssocFn::Stem => "stem",
+            PreludeAssocFn::Tokenize => "tokenize",
+            PreludeAssocFn::Sentences => "sentences",
             // T37 (sibling): Faker.with_locale / Faker.with_seed —
             // sibling task added the variants + ALL + return-type
             // entries but missed the name() match arms. Defensive
@@ -3523,6 +3659,8 @@ impl PreludeAssocFn {
             // naming convention permits the form. Crawler.new reuses
             // the shared `New` variant name ("new").
             PreludeAssocFn::FromHtml => "from_html",
+            // T50: Xml.from_str — canonical name for "parse from string".
+            PreludeAssocFn::FromStr => "from_str",
             // T124e: Toml.stringify — canonical name for "serialize back
             // to text". Mirrors JSON.stringify from JS / `dumps` from
             // Python's `json` / `to_string` from Rust's `toml` crate.
@@ -4409,6 +4547,32 @@ pub fn assoc_fn_return_type(
         // `Result<T, ArchiveError>`).
         (PreludeType::Archive, PreludeAssocFn::CompressDir) => Some(Type::Void),
         (PreludeType::Archive, PreludeAssocFn::Extract) => Some(Type::Void),
+        // T46: Text namespace methods (4). detect_language returns
+        // Option<String> (the ISO 639-3 code; None when no language
+        // detected). stem returns String (the lowered stem).
+        // tokenize / sentences return Vector<String>. The codegen
+        // lowering splices:
+        //   - `buff_nlp::Text::detect_language(&text).map(|l| l.code())`
+        //   - `buff_nlp::Text::stem(&word,
+        //     buff_nlp::StemAlgorithm::from_code(&algorithm)
+        //     .unwrap_or(buff_nlp::StemAlgorithm::English))?`
+        //     (the `?` propagates `NlpError` per Buff's R3 error-
+        //     mapping contract; unknown algorithm names fall back to
+        //     English — defensive, never silently corrupts).
+        //   - `buff_nlp::Text::tokenize(&text)`
+        //   - `buff_nlp::Text::sentences(&text)`
+        (PreludeType::Text, PreludeAssocFn::DetectLanguage) => {
+            Some(Type::option(Type::string()))
+        }
+        (PreludeType::Text, PreludeAssocFn::Stem) => Some(Type::string()),
+        (PreludeType::Text, PreludeAssocFn::Tokenize) => Some(Type::vector(Type::string())),
+        (PreludeType::Text, PreludeAssocFn::Sentences) => Some(Type::vector(Type::string())),
+        // T51: MsgPack assoc fns. `MsgPack.serialize(value)` -> Bytes
+        // (Vector<Byte>). Wraps `buff_msgpack::serialize(&value)?`.
+        // `MsgPack.deserialize(bytes)` -> Value. Wraps
+        // `buff_msgpack::deserialize(&bytes)?`.
+        (PreludeType::MsgPack, PreludeAssocFn::Encode) => Some(Type::vector(Type::byte())),
+        (PreludeType::MsgPack, PreludeAssocFn::Decode) => Some(Type::string()),
         // T43: buff-scrape assoc fns. Two pairs cover the MVP surface.
         // `Document.from_html(html)` -> Document. One arg (String).
         // Wraps `buff_scrape::Document::from_html(&html)?` (the `?`
@@ -4420,6 +4584,12 @@ pub fn assoc_fn_return_type(
         // (Crawler impls Default as an about:blank-seeded client).
         (PreludeType::Document, PreludeAssocFn::FromHtml) => Some(Type::Document),
         (PreludeType::Crawler, PreludeAssocFn::New) => Some(Type::Crawler),
+        // T50: Xml.from_str(xml) -> XmlDocument. One arg (String).
+        // Wraps `buff_xml::XmlDocument::from_str(&xml)?` (the `?`
+        // propagates XmlError::EmptyInput per Buff's R3 error-mapping
+        // contract). Returns the opaque Type::Xml variant; the codegen
+        // layer maps it to `buff_xml::XmlDocument`.
+        (PreludeType::Xml, PreludeAssocFn::FromStr) => Some(Type::Xml),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -4996,6 +5166,17 @@ pub enum PreludeInstanceFn {
     /// URL). Crawler-only. Fail-open: returns `true` when robots.txt
     /// is unreachable (per the Robots Exclusion Protocol guidance).
     RobotsAllows,
+    // ---- T50: Xml instance methods ----------------------------------------
+    /// `doc.root() -> XmlElement` — borrow the root element. Zero args.
+    /// XmlDocument-only.
+    Root,
+    /// `doc.find(xpath) -> Option<XmlElement>` — find first element
+    /// matching a simple XPath-like path. One arg (String). XmlDocument-only.
+    /// Returns `None` when no element matches.
+    Find,
+    /// `doc.to_string() -> String` — serialize back to XML. Zero args.
+    /// XmlDocument-only.
+    ToString,
 }
 
 impl PreludeInstanceFn {
@@ -5206,6 +5387,10 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Fetch,
         PreludeInstanceFn::Crawl,
         PreludeInstanceFn::RobotsAllows,
+        // T50: Xml instance methods — Root / Find / ToString.
+        PreludeInstanceFn::Root,
+        PreludeInstanceFn::Find,
+        PreludeInstanceFn::ToString,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -5420,6 +5605,10 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Fetch => "fetch",
             PreludeInstanceFn::Crawl => "crawl",
             PreludeInstanceFn::RobotsAllows => "robots_allows",
+            // T50: Xml instance method names.
+            PreludeInstanceFn::Root => "root",
+            PreludeInstanceFn::Find => "find",
+            PreludeInstanceFn::ToString => "to_string",
             // T11: Signal instance methods (Fft, Ifft, Lowpass, Highpass,
             // Bandpass, ApplyWindow, Spectrogram, Magnitude, Phase).
             PreludeInstanceFn::Fft => "fft",
@@ -5954,6 +6143,14 @@ pub fn instance_fn_return_type(
         (Type::Crawler, PreludeInstanceFn::Crawl) => Some(Type::vector(Type::String)),
         // `crawler.robots_allows(url)` -> Bool. One arg (String URL).
         (Type::Crawler, PreludeInstanceFn::RobotsAllows) => Some(Type::bool()),
+
+        // T50: Xml instance methods.
+        // `doc.root()` -> XmlElement (opaque, typed as Type::Xml for MVP).
+        (Type::Xml, PreludeInstanceFn::Root) => Some(Type::Xml),
+        // `doc.find(xpath)` -> Option<XmlElement>. One arg (String).
+        (Type::Xml, PreludeInstanceFn::Find) => Some(Type::option(Type::Xml)),
+        // `doc.to_string()` -> String. Zero args.
+        (Type::Xml, PreludeInstanceFn::ToString) => Some(Type::String),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

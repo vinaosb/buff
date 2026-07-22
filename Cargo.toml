@@ -78,6 +78,15 @@ anyhow = "1.0"
 thiserror = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# T51: `rmp-serde` 1.3 — pure-Rust MessagePack + serde integration.
+# API surface used: `rmp_serde::to_vec(&value)` for serialize,
+# `rmp_serde::from_slice::<serde_json::Value>(&bytes)` for deserialize.
+# Pure-Rust, no native deps, no cc-rs — matches the "no C library"
+# hard rule from AGENTS.md. Pinned to major 1 (the long-standing
+# surface since 2022 — the `to_vec` / `from_slice` API has been
+# stable across 1.x). Mirrors the conservative-pin philosophy already
+# in use across the workspace (chrono 0.4, rand 0.8, axum 0.8).
+rmp-serde = "1.3"
 toml = "0.8"
 # T114: Wasm transpile-only playground. wasm-bindgen + panic hook for
 # browser-side transpilation. The version floats within the 0.2.x range
@@ -765,6 +774,25 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # Bufflings image-processing exercises, IDE integrations) resolves to
 # the same in-tree version during the v1.13 frameworks wave.
 buff-image = { path = "crates/buff-image" }
+# T50: `buff-xml` — XML parsing for Buff. Wraps the `quick-xml` crate
+# (pure-Rust streaming XML parser — no native C deps, no cc-rs, matches
+# the "no C library, no Docker" hard rule from AGENTS.md). API surface
+# used: `Reader::from_str` / `Reader::read_event_into` / `Event::{Start,
+# End, Text, Empty, Eof}` for parsing; `Writer::new` / `Writer::write_event`
+# for serialization (though the MVP serializes via string building to keep
+# the dependency surface minimal). Pinned to major 0.37 (the long-standing
+# surface since 2025 — the `Reader::from_str` + `read_event_into` +
+# `BytesStart::attributes` API has been stable across 0.36-0.37). Pure-Rust,
+# no native deps. Mirrors the conservative-pin philosophy already in use
+# across the workspace (chrono 0.4, rand 0.8, image 0.25, axum 0.8).
+quick-xml = "0.37"
+# T50: `buff-xml` workspace path dep — mirrors the buff-image / buff-cache
+# pattern so any future consumer (codegen-lowered `Xml.from_str(...)` /
+# `doc.find(...)` calls, IDE hover/completion) resolves to the same in-tree
+# version during the v1.17 frameworks wave. Records `buff-xml` (NOT
+# `buff_lang_xml` — the framework-crate naming convention drops the `-lang`
+# infix per AGENTS.md).
+buff-xml = { path = "crates/buff-xml" }
 # T10: `buff-audio` AudioBuffer MVP wraps three pure-Rust audio crates.
 # All three are 100% pure-Rust (no cc-rs, no native C deps, no
 # assembler shims) — matches the "no C library, no Docker" hard rule
@@ -1491,3 +1519,239 @@ buff-email = { path = "crates/buff-email" }
 # `buff_lang_archive` — the framework-crate naming convention drops
 # the `-lang` infix per AGENTS.md).
 buff-archive = { path = "crates/buff-archive" }
+# T46: `buff-nlp` workspace path dep — mirrors the buff-image /
+# buff-archive / buff-pubsub pattern so any future consumer
+# (codegen-lowered `Text.detect_language(...)` / `Text.stem(...)`
+# / `Text.tokenize(...)` / `Text.sentences(...)` calls, IDE
+# hover/completion, the T139 bufflings NLP tutorial) resolves to the
+# same in-tree version during the v1.18 frameworks wave. Records
+# `buff-nlp` (NOT `buff_lang_nlp` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-nlp = { path = "crates/buff-nlp" }
+# T46: `whatlang` 0.16 — pure-Rust natural-language identification
+# (69+ languages via trigram statistical classification). API surface
+# used: `whatlang::Detector::detect(text) -> Option<Info>` +
+# `Info::lang() -> Lang` + `Lang::code() -> &'static str` + `Lang::
+# name() -> &'static str`. Pure-Rust, no native deps, no cc-rs —
+# matches the "no C library, no Docker" hard rule. Pinned to major
+# 0.16 (the long-standing surface since 2023 — `Detector::detect`
+# returning `Option<Info>` has been stable across 0.13-0.16; we pin
+# to the latest stable major).
+whatlang = "0.16"
+# T46: `rust-stemmers` 1.2 — pure-Rust Snowball stemmer for 18
+# languages (Arabic, Danish, Dutch, English, Finnish, French, German,
+# Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian,
+# Russian, Spanish, Swedish, Tamil, Turkish). API surface used:
+# `rust_stemmers::Stemmer::new(Algorithm::English) -> Result<Stemmer,
+# Error>` + `stemmer.stem(word: &str) -> Cow<str>`. The pure-Rust
+# reimplementation of the canonical Snowball reference (the upstream
+# Snowball project ships reference algorithms at snowballstem.org;
+# rust-stemmers ports them to pure Rust — NO C bindings, no cc-rs).
+# Pinned to major 1.2 (stable since 2019; the Algorithm enum +
+# Stemmer::new Result return + stem method have been stable for
+# years). Matches the "no C library" hard rule.
+rust-stemmers = "1.2"
+# T47: `buff-chat` MVP — Discord + Telegram bot framework for Buff.
+# Wraps two pure-Rust bot crates per the T4 FFI guide (no raw
+# pointers, owned String at the boundary, catch_unwind on every
+# public entry point):
+#
+# - `serenity` 0.12: the de-facto pure-Rust Discord bot framework
+#   (the canonical Rust library for the Discord Gateway + HTTP API).
+#   API surface used:
+#   * `serenity::client::Client::builder(token, intents)` +
+#     `.event_handler(impl EventHandler).await` for the WebSocket
+#     gateway connection.
+#   * `serenity::client::EventHandler` trait (the `#[async_trait]`
+#     `async fn message(&self, ctx, msg)` handler) for dispatching
+#     incoming messages to our `Bot::dispatch_inner`.
+#   * `serenity::model::gateway::GatewayIntents::{GUILD_MESSAGES,
+#     DIRECT_MESSAGES, MESSAGE_CONTENT}` for the required intent
+#     flags (MESSAGE_CONTENT is a privileged intent — must be enabled
+#     in the Discord Developer Portal).
+#   * `serenity::model::channel::Message::{content, author, channel_id,
+#     guild_id}` for converting serenity's Message to our platform-
+#     agnostic `buff_chat::Message`.
+#   Features enabled: `client`, `gateway`, `rustls_backend`, `model`.
+#   `default-features = false` drops the default-on `native_tls_backend`
+#   (OpenSSL/SChannel/SecureTransport) — matches the workspace hard
+#   rule "Pure-Rust preference: rustls NOT native-tls". The
+#   `rustls_backend` feature uses rustls + ring (pure-Rust TLS stack,
+#   no cc-rs, no native C deps) — matches the "no C library, no Docker"
+#   hard rule from T126/T127.
+#   Pinned to major 0.12 (the long-standing surface since 2024 — the
+#   Client::builder + EventHandler + GatewayIntents API has been stable
+#   across 0.11/0.12). NOT 0.13+ until verified on the pinned 1.95.0
+#   toolchain — mirrors the rand 0.8 / chrono 0.4 conservative-pin
+#   philosophy.
+#
+# - `teloxide` 0.13: the de-facto pure-Rust Telegram bot framework
+#   (the canonical Rust library for the Telegram Bot API). API surface
+#   used:
+#   * `teloxide::Bot::new(token)` for the bot client.
+#   * `teloxide::repl(bot, handler).await` for the simple long-polling
+#     REPL that dispatches incoming messages to our closure.
+#   * `teloxide::types::Message::{text, chat, from}` for converting
+#     Telegram's Message to our platform-agnostic Message.
+#   * `teloxide::types::ChatId` (i64 newtype) + the positive-ID-is-DM
+#     heuristic for `is_dm` detection.
+#   Features enabled: `rustls` (pure-Rust TLS via rustls). `default-
+#   features = false` drops the default-on `native-tls` — matches the
+#   workspace hard rule.
+#   Pinned to major 0.13 (the long-standing surface since 2024 —
+#   `Bot::new` + `teloxide::repl` + `Message::{text, chat, from}` API
+#   has been stable across 0.12/0.13). NOT 0.14+ until verified on
+#   the pinned 1.95.0 toolchain.
+#
+# - `async-trait` 0.1: required by serenity 0.12's EventHandler trait
+#   (serenity re-exports it as `serenity::async_trait` but we add the
+#   workspace pin so the bridge module can `use async_trait::async_trait`
+#   directly if needed). Pure-Rust, no native deps.
+#
+# All three are recorded in the codegen `extern_crates` BTreeSet when
+# a Buff program uses `Bot.*` (mirrors the chrono / regex / tracing /
+# lettre codegen-only linking boundary: the single-file `buff run`
+# rustc path does NOT link them; cargo-project wiring is deferred per
+# the existing precedent). Snapshots + extern_crates set is the
+# verifiable contract.
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model"] }
+teloxide = { version = "0.13", default-features = false, features = ["rustls", "ctrlc_handler"] }
+async-trait = "0.1"
+# T47: `buff-chat` workspace path dep — mirrors the buff-image /
+# buff-pubsub / buff-email pattern so any future consumer
+# (codegen-lowered `Bot.new(...)` / `bot.*` calls, IDE
+# hover/completion, the T139 bufflings bot tutorial) resolves to the
+# same in-tree version during the v1.17 frameworks wave. Records
+# `buff-chat` (NOT `buff_lang_chat` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-chat = { path = "crates/buff-chat" }
+# T51: `buff-msgpack` workspace path dep — MessagePack binary format
+# wrapping `rmp-serde`. Mirrors the buff-image / buff-audio / buff-dsp
+# pattern so any future consumer (codegen-lowered `MsgPack.serialize(...)`
+# / `MsgPack.deserialize(...)` calls, IDE hover/completion) resolves to
+# the same in-tree version during the v1.13 frameworks wave. Records
+# `buff-msgpack` (NOT `buff_lang_msgpack` — the framework-crate naming
+# convention drops the `-lang` infix per AGENTS.md).
+buff-msgpack = { path = "crates/buff-msgpack" }
+# T45: `buff-geo` MVP — geospatial / GIS primitives for Buff. Wraps the
+# pure-Rust `geo` + `geo-types` crates (the de-facto Rust ecosystem
+# default for geospatial primitives — the geo-rs org's maintained
+# successor to `rust-geo`). Pure-Rust, no native C deps, no cc-rs, no
+# assembler shims — matches the "no C library, no Docker" hard rule
+# from T126/T127 and the wider workspace stance that killed
+# chumsky/logos/zmq.
+#
+# API surface used (all stable since 0.28):
+# - `geo_types::Point::<f64>::new(x, y)` for `Point.new(x, y)`.
+# - `geo_types::LineString::<f64>::from(vec![points])` for
+#   `LineString.new(points)` / `LineString.from_coords(coords)`.
+# - `geo_types::Polygon::<f64>::new(outer_ring, vec![])` for
+#   `Polygon.new(outer_ring)` (no interior holes for MVP).
+# - `geo::algorithm::{EuclideanDistance, EuclideanLength, Area,
+#   Contains, Intersects, BooleanOps}` for the distance/length/area/
+#   contains/intersects/buffer ops the T45 surface mandates.
+# - `geo::algorithm::webmercator::WebMercator` OR the inline EPSG:3857
+#   closed-form for `Projection.wgs84_to_web_mercator(point)`.
+#
+# Pinned to major 0.28 (released 2024 — the long-standing surface most
+# of the Rust ecosystem targets). 0.28 finalised the
+# `algorithm::{EuclideanDistance, EuclideanLength, Area, Contains,
+# Intersects, BooleanOps}` trait surface we depend on; pre-0.28 had a
+# slightly different `BooleanOps` API that would require source
+# rewriting. `geo-types` is tracked in lockstep with `geo` (the
+# umbrella re-exports it). Mirrors the conservative-pin philosophy
+# already in use across the workspace (chrono 0.4, rand 0.8, axum
+# 0.8, image 0.25).
+#
+# The crate is recorded in the codegen `extern_crates` BTreeSet when a
+# Buff program uses `Point` / `LineString` / `Polygon` / `Projection`
+# (mirrors the chrono / regex / tracing / image codegen-only linking
+# boundary: the single-file `buff run` rustc path does NOT link it;
+# cargo-project wiring is deferred per the existing precedent).
+# Snapshots + extern_crates set is the verifiable contract.
+geo = "0.28"
+# T45: `geo-types` is sibling-tracked with `geo` (the umbrella
+# re-exports the types but we depend on the source crate directly for
+# the `Point::<f64>` / `LineString::<f64>` / `Polygon::<f64>`
+# constructors). Same version as `geo` (lockstep per the geo-rs org
+# release cadence).
+geo-types = "0.7"
+# T45: `geohash` is the pure-Rust geohash encoder/decoder (the
+# canonical Rust ecosystem default — stable since 0.13). Optional
+# utility for the future `Point.geohash()` instance method; not
+# required for the T45 MVP surface (distance/area/buffer/intersect)
+# but workspace-pinned so a follow-up can splice it without
+# re-pinning. Mirrors the chrono 0.4 / rand 0.8 conservative-pin
+# philosophy already in use across the workspace.
+geohash = "0.13"
+# T45: `buff-geo` workspace path dep — mirrors the buff-image /
+# buff-msgpack pattern so any future consumer (codegen-lowered
+# `Point.new(...)` / `LineString.new(...)` / `Polygon.new(...)` /
+# `Projection.*` calls, IDE hover/completion, T139 bufflings geo
+# tutorial) resolves to the same in-tree version during the v1.18
+# frameworks wave. Records `buff-geo` (NOT `buff_lang_geo` — the
+# framework-crate naming convention drops the `-lang` infix per
+# AGENTS.md).
+buff-geo = { path = "crates/buff-geo" }
+# T49: `buff-crypto-extras` deps — AES-GCM + RSA + ECDH (P-256/P-384)
+# + Argon2 raw KDF. Five pure-Rust RustCrypto crates cover the extern
+# surface per the T4 FFI guide (no `ring`, no `aws-lc-rs`, no `cc-rs`
+# — the workspace hard rule). Added by T49 (this commit) because the
+# crate cannot resolve without these workspace pins.
+#
+# - `aes-gcm` 0.10: RustCrypto AEAD. API used: `Aes256Gcm::new(key)`,
+#   `cipher.encrypt(nonce, pt)`, `cipher.decrypt(nonce, ct)`. AES-256-
+#   GCM is the only AES mode Buff exposes (raw AES-ECB / AES-CBC are
+#   NOT authenticated and the T49 spec mandates "no homebrew crypto").
+#   Default features suffice (no `heapless` / `stream` toggles needed).
+#
+# - `rsa` 0.9: RustCrypto RSA. API used: `RsaPrivateKey::new`,
+#   `RsaPublicKey::from(&private)`, `to_pkcs8_pem`,
+#   `to_public_key_pem`, `pkcs1v15::SigningKey::<Sha256>::new`,
+#   `sign_with_rng`, `pkcs1v15::VerifyingKey`,
+#   `Verifier::verify`. PKCS#1 v1.5 SHA-256 is the deterministic
+#   baseline signature scheme with the widest cross-language support
+#   (matches OpenSSL / pycryptodome / BouncyCastle /
+#   System.Security.Cryptography default). Default features pull
+#   `sha2` + `signature` transitively — both already workspace-pinned.
+#
+# - `p256` 0.13: RustCrypto NIST P-256 elliptic curve. API used:
+#   `SecretKey::random(&mut OsRng)`, `to_bytes`,
+#   `PublicKey::from_secret_scalar`, `to_encoded_point(false)`,
+#   `PublicKey::from_sec1_bytes`, `ecdh::Ecdh::new(scalar, affine)`,
+#   `raw_secret_bytes()`. Default features include `ecdh` + the sec1
+#   codec (NO `ecdsa` needed because T49 scopes ECC to ECDH; the
+#   signature surface lives in T26 Signature / RSA here).
+#
+# - `p384` 0.13: RustCrypto NIST P-384 elliptic curve. Same API shape
+#   as `p256`. P-384 is the next-most-supported curve cross-language;
+#   included for the 6/6 cross-language interoperability contract.
+#
+# - `signature` 2: RustCrypto `Verifier` + `RandomizedSigner` traits
+#   used by the RSA sign/verify path. The `rsa` crate re-exports
+#   them but we workspace-pin `signature` explicitly so other future
+#   crypto wrappers (T26 Signature backend, ECDSA over P-256) reuse
+#   the same pin without re-declaring.
+#
+# `argon2` 0.5, `rand` 0.8, `sha2` 0.10, `hex` 0.4 already pinned at
+# the workspace level (T34 / T124b / T124k); T49 reuses those pins.
+# All five new pins + the four re-uses are recorded in the codegen
+# `extern_crates` BTreeSet when a Buff program uses `AES.*` / `RSA.*`
+# / `ECDH.*` / `Argon2.*` (mirrors the chrono/regex/tracing/sha2/
+# hmac codegen-only linking boundary: the single-file `buff run`
+# rustc path does NOT link them; cargo-project wiring is deferred).
+# Snapshots + extern_crates set is the verifiable contract.
+aes-gcm = "0.10"
+rsa = "0.9"
+p256 = "0.13"
+p384 = "0.13"
+signature = "2"
+# T49: `buff-crypto-extras` workspace path dep — mirrors the
+# buff-image / buff-geo / buff-msgpack pattern so any future consumer
+# (codegen-lowered `AES.encrypt(...)` / `RSA.sign(...)` /
+# `ECDH.derive_shared(...)` / `Argon2.derive_key(...)` calls, IDE
+# hover/completion, T139 bufflings crypto tutorial) resolves to the
+# same in-tree version during the v1.18 frameworks wave. Records
+# `buff-crypto-extras` (NOT `buff_lang_crypto_extras` — the framework-
+# crate naming convention drops the `-lang` infix per AGENTS.md).
+buff-crypto-extras = { path = "crates/buff-crypto-extras" }
