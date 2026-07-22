@@ -37,7 +37,16 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 pub const MIN_BITS: usize = 2048;
 
 /// An RSA keypair — `(public_pem, private_pem)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Derives `Default` (both PEM strings default to empty) so the
+/// codegen-lowered `RSA.generate_keypair(bits)` call can collapse
+/// the `Result<RsaKeypair, CryptoError>` to a default value on
+/// failure via `.unwrap_or_default()` — matching Buff's "no
+/// panicking generated code" rule (mirrors T48 buff_web3::Wallet +
+/// T48 buff_web3::Provider's Default-impl precedent). NEVER use the
+/// Default value in production — an empty PEM string is a malformed
+/// key; the default exists solely as a panic-free failure fallback.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RsaKeypair {
     pub public_pem: String,
     pub private_pem: String,

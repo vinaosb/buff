@@ -938,6 +938,89 @@ pub enum Type {
     /// `buff_web3::ContractMethod` (a `{address, abi, client, method_name,
     /// args}` struct). Pure-Rust, CPU-only.
     ContractMethod,
+    /// T49: the `AES` namespace type, mapped to
+    /// `buff_crypto_extras::AES` at codegen time. Namespace-only
+    /// (like `MsgPack` / `Log` / `Toml` / `Base64` / `Hex` / `Yaml` /
+    /// `Csv`) — the type itself is never instantiated as a runtime
+    /// value; only its associated functions are callable
+    /// (`AES.generate_key()` / `AES.generate_nonce()` /
+    /// `AES.encrypt(key, nonce, plaintext)` /
+    /// `AES.decrypt(key, nonce, ciphertext)`). `buff_type()` returns
+    /// [`Type::AES`] for match-exhaustiveness (mirrors [`Type::MsgPack`]);
+    /// the codegen arm rarely fires in practice.
+    ///
+    /// This is **additive** (T49). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type that
+    /// nonetheless carries a `Type` variant for exhaustiveness. The
+    /// underlying Rust crate is `buff_crypto_extras` (wrapping
+    /// `aes_gcm::Aes256Gcm`). Pure-Rust, CPU-only (NO GPU dispatch —
+    /// AEAD never runs on the GPU path).
+    AES,
+    /// T49: the `RSA` namespace type, mapped to
+    /// `buff_crypto_extras::RSA` at codegen time. Namespace-only
+    /// (like AES). Only its associated functions are callable
+    /// (`RSA.generate_keypair(bits: 2048)` /
+    /// `RSA.sign(private_pem, data)` /
+    /// `RSA.verify(public_pem, data, signature)`).
+    /// `buff_type()` returns [`Type::RSA`] for match-exhaustiveness
+    /// (mirrors [`Type::MsgPack`]); the codegen arm rarely fires.
+    ///
+    /// This is **additive** (T49). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type. The
+    /// underlying Rust crate is `buff_crypto_extras` (wrapping the
+    /// `rsa` PKCS#1 v1.5 SHA-256 sign/verify path). Pure-Rust, CPU-only.
+    RSA,
+    /// T49: the `ECDH` namespace type, mapped to
+    /// `buff_crypto_extras::ECDH` at codegen time. Namespace-only
+    /// (like AES / RSA). Only its associated functions are callable
+    /// (`ECDH.generate_private()` /
+    /// `ECDH.public_from_private(private)` /
+    /// `ECDH.derive_shared(private, public)`). `buff_type()` returns
+    /// [`Type::ECDH`] for match-exhaustiveness (mirrors
+    /// [`Type::MsgPack`]); the codegen arm rarely fires.
+    ///
+    /// This is **additive** (T49). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type. The
+    /// underlying Rust crate is `buff_crypto_extras` (wrapping the
+    /// `p256` / `p384` ECDH key agreement path). Pure-Rust, CPU-only.
+    ECDH,
+    /// T49: the `Argon2` namespace type, mapped to
+    /// `buff_crypto_extras::Argon2` at codegen time. Namespace-only
+    /// (like AES / RSA / ECDH). Only its associated functions are
+    /// callable (`Argon2.generate_salt()` /
+    /// `Argon2.derive_key(password, salt)`). `buff_type()` returns
+    /// [`Type::Argon2`] for match-exhaustiveness (mirrors
+    /// [`Type::MsgPack`]); the codegen arm rarely fires.
+    ///
+    /// This is **additive** (T49). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type. The
+    /// underlying Rust crate is `buff_crypto_extras` (wrapping the
+    /// `argon2` raw Argon2id KDF — distinct from T34's PHC-string
+    /// Password hashing). Pure-Rust, CPU-only.
+    Argon2,
+    /// T49: the `RsaKeypair` runtime-value type, mapped to
+    /// `buff_crypto_extras::RsaKeypair` at codegen time. Constructed
+    /// ONLY via `RSA.generate_keypair(bits: 2048)`; carries the two
+    /// instance methods `.public_pem() -> String` and
+    /// `.private_pem() -> String` (PEM-string accessors).
+    ///
+    /// This is **additive** (T49). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
+    ///
+    /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] (T45) as a
+    /// runtime-value-with-instance-methods type. The underlying Rust
+    /// type is `buff_crypto_extras::RsaKeypair` (a struct wrapping two
+    /// owned `String`s — public_pem + private_pem — `Send + Sync +
+    /// Clone`). Pure-Rust, CPU-only.
+    RsaKeypair,
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1832,6 +1915,84 @@ impl Type {
         matches!(self, Type::ContractMethod)
     }
 
+    /// T49: the `AES` namespace type. Maps to `buff_crypto_extras::AES`
+    /// at codegen time. Namespace-only — never instantiated as a runtime
+    /// value; only its associated functions are callable
+    /// (`AES.generate_key` / `AES.generate_nonce` / `AES.encrypt` /
+    /// `AES.decrypt`). Mirrors `Type::MsgPack` (T51).
+    pub fn aes() -> Self {
+        Type::AES
+    }
+
+    /// T49: Returns `true` if this type is the prelude `AES` namespace.
+    /// Namespace-only (no runtime value — like MsgPack / Log / Toml).
+    pub fn is_prelude_aes(&self) -> bool {
+        matches!(self, Type::AES)
+    }
+
+    /// T49: the `RSA` namespace type. Maps to `buff_crypto_extras::RSA`
+    /// at codegen time. Namespace-only — never instantiated as a runtime
+    /// value; only its associated functions are callable
+    /// (`RSA.generate_keypair` / `RSA.sign` / `RSA.verify`). Mirrors
+    /// `Type::MsgPack` (T51).
+    pub fn rsa() -> Self {
+        Type::RSA
+    }
+
+    /// T49: Returns `true` if this type is the prelude `RSA` namespace.
+    /// Namespace-only (no runtime value — like MsgPack / Log / Toml).
+    pub fn is_prelude_rsa(&self) -> bool {
+        matches!(self, Type::RSA)
+    }
+
+    /// T49: the `ECDH` namespace type. Maps to
+    /// `buff_crypto_extras::ECDH` at codegen time. Namespace-only —
+    /// never instantiated as a runtime value; only its associated
+    /// functions are callable (`ECDH.generate_private` /
+    /// `ECDH.public_from_private` / `ECDH.derive_shared`). Mirrors
+    /// `Type::MsgPack` (T51).
+    pub fn ecdh() -> Self {
+        Type::ECDH
+    }
+
+    /// T49: Returns `true` if this type is the prelude `ECDH` namespace.
+    /// Namespace-only (no runtime value — like MsgPack / Log / Toml).
+    pub fn is_prelude_ecdh(&self) -> bool {
+        matches!(self, Type::ECDH)
+    }
+
+    /// T49: the `Argon2` namespace type. Maps to
+    /// `buff_crypto_extras::Argon2` at codegen time. Namespace-only —
+    /// never instantiated as a runtime value; only its associated
+    /// functions are callable (`Argon2.generate_salt` /
+    /// `Argon2.derive_key`). Mirrors `Type::MsgPack` (T51).
+    pub fn argon2() -> Self {
+        Type::Argon2
+    }
+
+    /// T49: Returns `true` if this type is the prelude `Argon2`
+    /// namespace. Namespace-only (no runtime value — like MsgPack /
+    /// Log / Toml).
+    pub fn is_prelude_argon2(&self) -> bool {
+        matches!(self, Type::Argon2)
+    }
+
+    /// T49: the RSA keypair runtime-value type. Maps to
+    /// `buff_crypto_extras::RsaKeypair` at codegen time. Constructed
+    /// ONLY via `RSA.generate_keypair(bits)`; carries the instance
+    /// methods `.public_pem()` / `.private_pem()`.
+    pub fn rsa_keypair() -> Self {
+        Type::RsaKeypair
+    }
+
+    /// T49: Returns `true` if this type is the prelude `RsaKeypair`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`pair.public_pem()`, `pair.private_pem()`) to the
+    /// `buff_crypto_extras::RsaKeypair` lowering.
+    pub fn is_prelude_rsa_keypair(&self) -> bool {
+        matches!(self, Type::RsaKeypair)
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -2057,6 +2218,15 @@ impl fmt::Display for Type {
             Type::ConnectedWallet => f.write_str("ConnectedWallet"),
             Type::Contract => f.write_str("Contract"),
             Type::ContractMethod => f.write_str("ContractMethod"),
+            // T49: prelude crypto-extras types. AES / RSA / ECDH /
+            // Argon2 are namespace-only (mirrors MsgPack); RsaKeypair
+            // is a runtime value (mirrors Image / Point). Display
+            // mirrors the Buff surface name in all five cases.
+            Type::AES => f.write_str("AES"),
+            Type::RSA => f.write_str("RSA"),
+            Type::ECDH => f.write_str("ECDH"),
+            Type::Argon2 => f.write_str("Argon2"),
+            Type::RsaKeypair => f.write_str("RsaKeypair"),
         }
     }
 }

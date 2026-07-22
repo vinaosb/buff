@@ -3432,7 +3432,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Connect to public RPC. Read contract state. Sign and send transaction (testnet). 3 examples + 12 tests (use local testnet).
   - **Commit**: `feat(buff-web3): MVP Ethereum client + contract interaction`
 
-- [ ] 49. `buff-crypto-extras` — AES/RSA/ECC/argon2 (beyond Hash/HMAC)
+- [x] 49. `buff-crypto-extras` — AES/RSA/ECC/argon2 (beyond Hash/HMAC)
 
   **What to do**: Extend T124k Hash/HMAC with symmetric/asymmetric encryption. Wrap Rust `aes-gcm` (AES), `rsa`, `p256`/`p384` (ECC), `argon2` (already used in T34). Provide: `AES.encrypt(plaintext, key)`, `AES.decrypt(ciphertext, key)`, `RSA.generate_keypair()`, `RSA.sign(data, private)`, `ECDH.derive_shared(private, public)`. Cross-language: 6/6 (cryptography/pycryptodome/crypto/ring/BouncyCastle/System.Security.Cryptography).
   - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `aes-gcm`, `rsa`, `p256`, `argon2` (shared with T34).

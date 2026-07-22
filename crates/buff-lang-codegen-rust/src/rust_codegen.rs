@@ -1208,6 +1208,45 @@ impl RustCodegen {
             self.extern_crates.insert("serde_json".to_string());
             self.extern_crates.insert("hex".to_string());
         }
+        // T49: register `buff-crypto-extras` when the program references
+        // any of the five prelude crypto-extras namespaces (`AES.*` /
+        // `RSA.*` / `ECDH.*` / `Argon2.*` / `RsaKeypair.*`). Also
+        // records the upstream RustCrypto crates the wrapper consumes:
+        // `aes-gcm` (AES-256-GCM AEAD), `rsa` (PKCS#1 v1.5 SHA-256
+        // signatures), `p256` + `p384` (NIST ECDH key agreement),
+        // `argon2` (raw Argon2id KDF — shared with T34 buff-auth's
+        // PHC-string Password hashing), `sha2` (pulled transitively by
+        // rsa + p256 + argon2; recorded explicitly for clarity),
+        // `rand` (CSPRNG for nonce/key/salt generation), `signature`
+        // (Verifier + RandomizedSigner traits used by the RSA path —
+        // the rsa crate re-exports them but we record signature
+        // explicitly for the extern_crates contract), and `hex` (for
+        // hex-encoded test vectors + diagnostics). The walker checks
+        // all five namespaces because the user typically composes
+        // AES + RSA + ECDH + Argon2 + RsaKeypair together (a
+        // RsaKeypair value arises only via `RSA.generate_keypair`);
+        // recording once for any of them is sufficient (idempotent
+        // BTreeSet insert). Mirrors the T9 Image / T43 buff-scrape /
+        // T45 buff-geo / T50 buff-xml / T47 buff-chat / T48 buff-web3
+        // pattern. Pure-Rust, CPU-only (NO ring, NO native-tls, NO
+        // cc-rs — matches the AGENTS.md "no C library" hard rule).
+        if program_uses_namespace(decls, "AES")
+            || program_uses_namespace(decls, "RSA")
+            || program_uses_namespace(decls, "ECDH")
+            || program_uses_namespace(decls, "Argon2")
+            || program_uses_namespace(decls, "RsaKeypair")
+        {
+            self.extern_crates.insert("buff-crypto-extras".to_string());
+            self.extern_crates.insert("aes-gcm".to_string());
+            self.extern_crates.insert("rsa".to_string());
+            self.extern_crates.insert("p256".to_string());
+            self.extern_crates.insert("p384".to_string());
+            self.extern_crates.insert("argon2".to_string());
+            self.extern_crates.insert("sha2".to_string());
+            self.extern_crates.insert("rand".to_string());
+            self.extern_crates.insert("signature".to_string());
+            self.extern_crates.insert("hex".to_string());
+        }
         // T31: run async call-graph propagation BEFORE per-function
         // lowering so each `lower_func` call can override `is_async` with
         // the propagated value. Buff has no `await` keyword — async-ness
@@ -6305,6 +6344,201 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Contract.new codegen parse: {e}")))
             }
+            // T49: AES.generate_key() -> Vector<Byte>. Zero args.
+            // Wraps `buff_crypto_extras::aes_gcm_api::generate_key()`
+            // (infallible — returns Vec<u8> directly via
+            // `Aes256Gcm::generate_key(&mut OsRng)`; OsRng::fill_bytes
+            // is infallible on all platforms Buff supports). Records
+            // `buff-crypto-extras` + 8 RustCrypto crates in
+            // extern_crates via the
+            // `program_uses_namespace("AES")` walker.
+            (T::AES, A::GenerateKey) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::aes_gcm_api::generate_key()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AES.generate_key codegen parse: {e}")))
+            }
+            // T49: AES.generate_nonce() -> Vector<Byte>. Zero args.
+            // Wraps `buff_crypto_extras::aes_gcm_api::generate_nonce()`
+            // (infallible — returns the 12-byte GCM nonce via
+            // `Aes256Gcm::generate_nonce(&mut OsRng)`).
+            (T::AES, A::GenerateNonce) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::aes_gcm_api::generate_nonce()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("AES.generate_nonce codegen parse: {e}"))
+                })
+            }
+            // T49: AES.encrypt(key, nonce, plaintext) -> Vector<Byte>.
+            // Three args. Wraps `buff_crypto_extras::aes_gcm_api::
+            // encrypt(&key, &nonce, &plaintext).unwrap_or_default()`
+            // (empty Vec on any failure — wrong key/nonce length,
+            // AES engine error, panic — NEVER panics, matching
+            // Buff's "no panicking generated code" rule). The args
+            // are spliced by reference so the underlying `&[u8]`
+            // bounds are satisfied for both Vec<u8> and slices.
+            (T::AES, A::Encrypt) => {
+                let mut lowered = n_args(self, 3)?;
+                let key = lowered.remove(0);
+                let nonce = lowered.remove(0);
+                let plaintext = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::aes_gcm_api::encrypt(#key.as_slice(), #nonce.as_slice(), #plaintext.as_slice()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AES.encrypt codegen parse: {e}")))
+            }
+            // T49: AES.decrypt(key, nonce, ciphertext) -> Vector<Byte>.
+            // Three args. Wraps `buff_crypto_extras::aes_gcm_api::
+            // decrypt(&key, &nonce, &ciphertext).unwrap_or_default()`
+            // (empty Vec on auth-tag mismatch / wrong key / wrong
+            // nonce length / panic — NEVER panics). Same shape as
+            // AES.encrypt.
+            (T::AES, A::Decrypt) => {
+                let mut lowered = n_args(self, 3)?;
+                let key = lowered.remove(0);
+                let nonce = lowered.remove(0);
+                let ciphertext = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::aes_gcm_api::decrypt(#key.as_slice(), #nonce.as_slice(), #ciphertext.as_slice()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("AES.decrypt codegen parse: {e}")))
+            }
+            // T49: RSA.generate_keypair(bits) -> RsaKeypair. One arg
+            // (Int). Wraps `buff_crypto_extras::rsa_api::generate_keypair
+            // (bits as usize).unwrap_or_default()` (panic-free — the
+            // wrapper crate's RsaKeypair impls Default as the
+            // empty-PEM-string fallback; the codegen-lowered
+            // `.unwrap_or_default()` collapses CryptoError::
+            // InvalidLength / Panic to the default RsaKeypair per
+            // Buff's "no panicking generated code" rule). The `as
+            // usize` lifts Buff's Int<64> to the usize Rust expects.
+            // Computationally expensive (~100ms for 2048-bit, ~1s
+            // for 4096-bit).
+            (T::RSA, A::GenerateKeypair) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::rsa_api::generate_keypair(#arg as usize).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("RSA.generate_keypair codegen parse: {e}"))
+                })
+            }
+            // T49: RSA.sign(private_pem, data) -> Vector<Byte>. Two
+            // args (String, Vector<Byte>). Wraps
+            // `buff_crypto_extras::rsa_api::sign(&private_pem,
+            // data.as_slice()).unwrap_or_default()` (empty Vec on
+            // malformed PEM / sign engine failure / panic — NEVER
+            // panics; the empty-Vec fallback is the correct
+            // user-facing behavior since RSA.verify will return
+            // false for any non-matching signature, including an
+            // empty one).
+            (T::RSA, A::Sign) => {
+                let (private_pem, data) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::rsa_api::sign(&#private_pem, #data.as_slice()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("RSA.sign codegen parse: {e}")))
+            }
+            // T49: RSA.verify(public_pem, data, signature) -> Bool.
+            // Three args. Wraps `buff_crypto_extras::rsa_api::verify(
+            // &public_pem, data.as_slice(), signature.as_slice())`
+            // (the wrapper already returns `bool` — false on any
+            // failure: signature mismatch, malformed PEM, invalid
+            // signature bytes, or panic — mirrors T26 Signature.
+            // verify + T34 Password.verify stance so a future
+            // verify_allow policy can layer cleanly). NO
+            // `.unwrap_or_default()` needed (the wrapper collapses
+            // all failures to `false` itself).
+            (T::RSA, A::Verify) => {
+                let mut lowered = n_args(self, 3)?;
+                let public_pem = lowered.remove(0);
+                let data = lowered.remove(0);
+                let signature = lowered.remove(0);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::rsa_api::verify(&#public_pem, #data.as_slice(), #signature.as_slice())
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("RSA.verify codegen parse: {e}")))
+            }
+            // T49: ECDH.generate_private() -> Vector<Byte>. Zero
+            // args. Wraps `buff_crypto_extras::ecdh_api::
+            // p256_generate_private()` (infallible — returns the
+            // 32-byte P-256 scalar via `P256Secret::random(&mut
+            // OsRng)`).
+            (T::ECDH, A::GeneratePrivate) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::ecdh_api::p256_generate_private()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ECDH.generate_private codegen parse: {e}"))
+                })
+            }
+            // T49: ECDH.public_from_private(private) -> Vector<Byte>.
+            // One arg (Vector<Byte>). Wraps
+            // `buff_crypto_extras::ecdh_api::p256_public_from_private
+            // (private.as_slice()).unwrap_or_default()` (empty Vec
+            // on wrong length / invalid scalar / panic — NEVER
+            // panics).
+            (T::ECDH, A::PublicFromPrivate) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::ecdh_api::p256_public_from_private(#arg.as_slice()).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ECDH.public_from_private codegen parse: {e}"))
+                })
+            }
+            // T49: ECDH.derive_shared(private, public) ->
+            // Vector<Byte>. Two args. Wraps
+            // `buff_crypto_extras::ecdh_api::p256_derive_shared(
+            // private.as_slice(), public.as_slice())
+            // .unwrap_or_default()` (empty Vec on wrong length /
+            // invalid point / cofactor edge case / panic — NEVER
+            // panics).
+            (T::ECDH, A::DeriveShared) => {
+                let (private, public) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::ecdh_api::p256_derive_shared(#private.as_slice(), #public.as_slice()).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("ECDH.derive_shared codegen parse: {e}"))
+                })
+            }
+            // T49: Argon2.generate_salt() -> Vector<Byte>. Zero
+            // args. Wraps `buff_crypto_extras::argon2_api::
+            // generate_salt()` (infallible — fills a 16-byte Vec
+            // via `rand::thread_rng().fill_bytes`).
+            (T::Argon2, A::GenerateSalt) => {
+                no_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::argon2_api::generate_salt()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Argon2.generate_salt codegen parse: {e}"))
+                })
+            }
+            // T49: Argon2.derive_key(password, salt) -> Vector<Byte>.
+            // Two args (String, Vector<Byte>). Wraps
+            // `buff_crypto_extras::argon2_api::derive_key(&password,
+            // salt.as_slice()).unwrap_or_default()` (empty Vec on
+            // wrong salt length / Argon2 engine failure / panic —
+            // NEVER panics).
+            (T::Argon2, A::DeriveKey) => {
+                let (password, salt) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_crypto_extras::argon2_api::derive_key(&#password, #salt.as_slice()).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Argon2.derive_key codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -9443,6 +9677,45 @@ impl RustCodegen {
                     self.unsupported(&format!("ContractMethod.send codegen parse: {e}"))
                 })
             }
+            // T49: RsaKeypair.public_pem() -> String. Zero args.
+            // Wraps `recv.public_pem.clone()` (the underlying field
+            // is `String`; `.clone()` lifts `&String` to owned
+            // `String` per Buff's "hide references from users" rule).
+            // Infallible (no failure mode — the field is always
+            // populated when constructed via RSA.generate_keypair).
+            // Shared `PublicPem` variant dispatched on
+            // (RsaKeypair, PublicPem).
+            M::PublicPem if matches!(recv_ty, Type::RsaKeypair) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "public_pem() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.public_pem.clone()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("RsaKeypair.public_pem codegen parse: {e}"))
+                })
+            }
+            // T49: RsaKeypair.private_pem() -> String. Zero args.
+            // Wraps `recv.private_pem.clone()`. Same shape as
+            // public_pem above.
+            M::PrivatePem if matches!(recv_ty, Type::RsaKeypair) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "private_pem() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.private_pem.clone()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("RsaKeypair.private_pem codegen parse: {e}"))
+                })
+            }
             // T31 (gap-fill): wildcard for instance-method variants
             // whose codegen arms haven't been written yet (T11 Signal
             // / Spectrum / Window, T12 ECS, T17 Web route_*, T20
@@ -12051,6 +12324,17 @@ impl RustCodegen {
             Type::ConnectedWallet => "buff_web3::ConnectedWallet",
             Type::Contract => "buff_web3::Contract",
             Type::ContractMethod => "buff_web3::ContractMethod",
+            // T49: prelude crypto-extras types. AES / RSA / ECDH /
+            // Argon2 are namespace-only (mirrors MsgPack — the arms
+            // rarely fire in practice but are required for match
+            // exhaustiveness). RsaKeypair is a runtime value (mirrors
+            // Image / Point / Wallet). All five map to
+            // `buff_crypto_extras::*` paths.
+            Type::AES => "buff_crypto_extras::AES",
+            Type::RSA => "buff_crypto_extras::RSA",
+            Type::ECDH => "buff_crypto_extras::ECDH",
+            Type::Argon2 => "buff_crypto_extras::Argon2",
+            Type::RsaKeypair => "buff_crypto_extras::RsaKeypair",
         };
         Some(rust_path_type(rust_name))
     }

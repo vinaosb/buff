@@ -1703,6 +1703,62 @@ pub enum PreludeType {
     /// `buff_web3::ContractMethod` (`{address, abi, client,
     /// method_name, args}` struct). Pure-Rust, CPU-only.
     ContractMethod,
+    /// T49: `AES` — AES-256-GCM authenticated encryption namespace.
+    /// Namespace-only (like `MsgPack` / `Log` / `Toml` / `Base64` /
+    /// `Hex` / `Yaml` / `Csv` / `Text` / `Protobuf`). Provides
+    /// `AES.generate_key() -> Vector<Byte>` (32 bytes),
+    /// `AES.generate_nonce() -> Vector<Byte>` (12 bytes),
+    /// `AES.encrypt(key, nonce, plaintext) -> Vector<Byte>`
+    /// (ciphertext || 16-byte GCM tag), `AES.decrypt(key, nonce,
+    /// ciphertext) -> Vector<Byte>` (recovered plaintext). Codegen
+    /// lowering lives in the buff-crypto-extras crate
+    /// (`buff_crypto_extras::AES::*`). Pure-Rust, CPU-only (NO GPU
+    /// dispatch — AEAD never runs on the GPU path).
+    AES,
+    /// T49: `RSA` — RSA PKCS#1 v1.5 SHA-256 digital signature
+    /// namespace. Namespace-only (like `AES` / `MsgPack` / `Log`).
+    /// Provides `RSA.generate_keypair(bits: 2048) -> RsaKeypair`,
+    /// `RSA.sign(private_pem, data) -> Vector<Byte>` (raw signature
+    /// bytes — 256 bytes for 2048-bit modulus),
+    /// `RSA.verify(public_pem, data, signature) -> Bool` (false on
+    /// any failure — mirrors T26 Signature.verify + T34
+    /// Password.verify). RSAES-PKCS1-v1_5 / RSAES-OAEP encryption
+    /// is deliberately NOT exposed (T49 spec scopes RSA to
+    /// signatures; for public-key encryption use hybrid AES-GCM +
+    /// ECDH). Codegen lowering lives in the buff-crypto-extras
+    /// crate (`buff_crypto_extras::RSA::*`). Pure-Rust, CPU-only.
+    RSA,
+    /// T49: `ECDH` — NIST P-256 / P-384 ECDH key agreement
+    /// namespace. Namespace-only (like `AES` / `RSA` / `MsgPack`).
+    /// Provides `ECDH.generate_private() -> Vector<Byte>` (32-byte
+    /// P-256 scalar), `ECDH.public_from_private(private) ->
+    /// Vector<Byte>` (65-byte SEC1 uncompressed point),
+    /// `ECDH.derive_shared(private, public) -> Vector<Byte>` (32-byte
+    /// shared secret — x-coordinate of the shared point). Codegen
+    /// lowering lives in the buff-crypto-extras crate
+    /// (`buff_crypto_extras::ECDH::*`). Pure-Rust, CPU-only.
+    ECDH,
+    /// T49: `Argon2` — raw Argon2id key-derivation namespace. Distinct
+    /// from T34's PHC-string Password hashing (Password.hash returns
+    /// a PHC string for human password storage; Argon2.derive_key
+    /// returns raw 32-byte derived key material for direct use as an
+    /// AES-256 key). Namespace-only (like `AES` / `RSA` / `ECDH`).
+    /// Provides `Argon2.generate_salt() -> Vector<Byte>` (16 bytes),
+    /// `Argon2.derive_key(password, salt) -> Vector<Byte>` (32 bytes).
+    /// Defaults follow OWASP Argon2id (2024): m=19456 KiB, t=2, p=1.
+    /// Codegen lowering lives in the buff-crypto-extras crate
+    /// (`buff_crypto_extras::Argon2::*`). Pure-Rust, CPU-only.
+    Argon2,
+    /// T49: `RsaKeypair` — the RSA keypair runtime-value type (the
+    /// single instance type in T49 — AES / RSA / ECDH / Argon2 are
+    /// all namespace-only). Constructed ONLY via
+    /// `RSA.generate_keypair(bits: 2048)`; carries the two instance
+    /// methods `.public_pem() -> String` (Spki SubjectPublicKeyInfo
+    /// PEM) and `.private_pem() -> String` (PKCS#8 PEM). Wraps
+    /// `buff_crypto_extras::RsaKeypair` (`{public_pem: String,
+    /// private_pem: String}` struct — `Send + Sync + Clone`).
+    /// Pure-Rust, CPU-only.
+    RsaKeypair,
 }
 
 impl PreludeType {
@@ -2107,6 +2163,17 @@ impl PreludeType {
         PreludeType::ConnectedWallet,
         PreludeType::Contract,
         PreludeType::ContractMethod,
+        // T49: buff-crypto-extras prelude types — 4 namespaces
+        // (AES / RSA / ECDH / Argon2) + 1 instance type
+        // (RsaKeypair, constructed via RSA.generate_keypair). All
+        // registered via `program_uses_namespace("AES")` /
+        // ("RSA") / ("ECDH") / ("Argon2") / ("RsaKeypair")
+        // walkers.
+        PreludeType::AES,
+        PreludeType::RSA,
+        PreludeType::ECDH,
+        PreludeType::Argon2,
+        PreludeType::RsaKeypair,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -2471,6 +2538,13 @@ impl PreludeType {
             PreludeType::ConnectedWallet => "ConnectedWallet",
             PreludeType::Contract => "Contract",
             PreludeType::ContractMethod => "ContractMethod",
+            // T49: buff-crypto-extras prelude types — names mirror the
+            // Buff surface so source-level identifiers map 1:1.
+            PreludeType::AES => "AES",
+            PreludeType::RSA => "RSA",
+            PreludeType::ECDH => "ECDH",
+            PreludeType::Argon2 => "Argon2",
+            PreludeType::RsaKeypair => "RsaKeypair",
         }
     }
 
@@ -2863,6 +2937,22 @@ impl PreludeType {
             PreludeType::ConnectedWallet => Type::ConnectedWallet,
             PreludeType::Contract => Type::Contract,
             PreludeType::ContractMethod => Type::ContractMethod,
+            // T49: AES / RSA / ECDH / Argon2 are namespace-only modules
+            // (mirror MsgPack / Log / Toml). The namespace itself has no
+            // value representation; only its associated functions are
+            // callable. Returns the matching opaque Type variant for
+            // match-exhaustiveness (mirrors `MsgPack => Type::MsgPack`);
+            // the codegen arm rarely fires in practice.
+            PreludeType::AES => Type::AES,
+            PreludeType::RSA => Type::RSA,
+            PreludeType::ECDH => Type::ECDH,
+            PreludeType::Argon2 => Type::Argon2,
+            // T49: RsaKeypair IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::RsaKeypair`] variant; the codegen
+            // layer maps it to `buff_crypto_extras::RsaKeypair`. Mirrors
+            // Image / Point / Bot / Wallet as runtime-value-with-instance-
+            // methods types.
+            PreludeType::RsaKeypair => Type::RsaKeypair,
         }
     }
 
@@ -2914,6 +3004,10 @@ impl PreludeType {
                 | PreludeType::Text
                 | PreludeType::MsgPack
                 | PreludeType::Protobuf
+                | PreludeType::AES
+                | PreludeType::RSA
+                | PreludeType::ECDH
+                | PreludeType::Argon2
         )
     }
 }
@@ -3680,6 +3774,58 @@ pub enum PreludeAssocFn {
     /// "no panicking generated code" rule). Buff §7 ctor naming
     /// convention permits `Type.from_*()`. Wallet-only.
     FromPrivateKey,
+    // ---- T49: buff-crypto-extras namespace assoc fns -------------------
+    // 10 new distinct names + reuse of the existing shared `Sign` /
+    // `Verify` variants (also dispatched for T26 Signature / T34 JWT,
+    // the (type, method) pair disambiguates). All dispatched on the
+    // (PreludeType, PreludeAssocFn) pair in `assoc_fn_return_type`.
+    /// T49: `AES.generate_key()` — generate a random 32-byte AES-256
+    /// key using OsRng (CSPRNG). Zero args. Returns `Vector<Byte>`
+    /// (32 bytes). AES-only.
+    GenerateKey,
+    /// T49: `AES.generate_nonce()` — generate a random 12-byte GCM
+    /// nonce using OsRng. Zero args. Returns `Vector<Byte>` (12
+    /// bytes). AES-only.
+    GenerateNonce,
+    /// T49: `AES.encrypt(key, nonce, plaintext)` — encrypt with
+    /// AES-256-GCM. Three args (Vector<Byte> key 32B, Vector<Byte>
+    /// nonce 12B, Vector<Byte> plaintext). Returns `Vector<Byte>`
+    /// (ciphertext || 16-byte GCM tag). AES-only.
+    Encrypt,
+    /// T49: `AES.decrypt(key, nonce, ciphertext)` — decrypt AES-256-GCM.
+    /// Three args (Vector<Byte> key, Vector<Byte> nonce, Vector<Byte>
+    /// ciphertext-with-tag). Returns `Vector<Byte>` (plaintext).
+    /// AES-only.
+    Decrypt,
+    /// T49: `RSA.generate_keypair(bits)` — generate a fresh RSA
+    /// keypair of `bits` modulus size. One arg (Int). Returns
+    /// `RsaKeypair`. RSA-only. Distinct from `Signature.keypair`
+    /// (T26 Ed25519, zero-arg) — different arity + different type.
+    GenerateKeypair,
+    /// T49: `ECDH.generate_private()` — generate a random 32-byte
+    /// P-256 private scalar using OsRng. Zero args. Returns
+    /// `Vector<Byte>` (32 bytes). ECDH-only.
+    GeneratePrivate,
+    /// T49: `ECDH.public_from_private(private)` — derive the P-256
+    /// public key (SEC1 uncompressed, 65 bytes) from a 32-byte
+    /// private scalar. One arg (Vector<Byte>). Returns `Vector<Byte>`
+    /// (65 bytes — `0x04 || X || Y`). ECDH-only.
+    PublicFromPrivate,
+    /// T49: `ECDH.derive_shared(private, public)` — compute the P-256
+    /// ECDH shared secret. Two args (Vector<Byte> private 32B,
+    /// Vector<Byte> public 65B). Returns `Vector<Byte>` (32 bytes —
+    /// x-coordinate of the shared point). ECDH-only.
+    DeriveShared,
+    /// T49: `Argon2.generate_salt()` — generate a random 16-byte
+    /// salt using OsRng. Zero args. Returns `Vector<Byte>` (16 bytes).
+    /// Argon2-only.
+    GenerateSalt,
+    /// T49: `Argon2.derive_key(password, salt)` — derive a 32-byte
+    /// key from `password` + `salt` using Argon2id (OWASP defaults:
+    /// m=19456 KiB, t=2, p=1). Two args (String password,
+    /// Vector<Byte> salt 16B). Returns `Vector<Byte>` (32 bytes).
+    /// Argon2-only.
+    DeriveKey,
 }
 
 impl PreludeAssocFn {
@@ -3917,6 +4063,21 @@ impl PreludeAssocFn {
         // namespace it can reuse this variant on the (FutureType,
         // FromPrivateKey) pair).
         PreludeAssocFn::FromPrivateKey,
+        // T49: buff-crypto-extras assoc fns (10 distinct new names +
+        // reuse of existing shared `Sign` / `Verify` for RSA.sign /
+        // RSA.verify). All dispatched on the (PreludeType, method)
+        // pair in `assoc_fn_return_type`. AES (4) + RSA (1) + ECDH (3)
+        // + Argon2 (2).
+        PreludeAssocFn::GenerateKey,
+        PreludeAssocFn::GenerateNonce,
+        PreludeAssocFn::Encrypt,
+        PreludeAssocFn::Decrypt,
+        PreludeAssocFn::GenerateKeypair,
+        PreludeAssocFn::GeneratePrivate,
+        PreludeAssocFn::PublicFromPrivate,
+        PreludeAssocFn::DeriveShared,
+        PreludeAssocFn::GenerateSalt,
+        PreludeAssocFn::DeriveKey,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -4056,6 +4217,26 @@ impl PreludeAssocFn {
             // 1:1 so codegen can splice the path without rewriting.
             // Buff §7 ctor naming convention permits `Type.from_*()`.
             PreludeAssocFn::FromPrivateKey => "from_private_key",
+            // T49: buff-crypto-extras assoc fn names mirror the
+            // underlying `buff_crypto_extras::{AES, RSA, ECDH,
+            // Argon2}::*` Rust method names 1:1 so codegen can
+            // splice `buff_crypto_extras::AES::generate_key()` /
+            // `buff_crypto_extras::RSA::generate_keypair(bits)` /
+            // `buff_crypto_extras::ECDH::derive_shared(...)` /
+            // `buff_crypto_extras::Argon2::derive_key(...)` paths
+            // without rewriting. RSA.sign / RSA.verify reuse the
+            // existing shared `Sign` / `Verify` variants (already
+            // mapped to "sign" / "verify" by the T26/T34 arm above).
+            PreludeAssocFn::GenerateKey => "generate_key",
+            PreludeAssocFn::GenerateNonce => "generate_nonce",
+            PreludeAssocFn::Encrypt => "encrypt",
+            PreludeAssocFn::Decrypt => "decrypt",
+            PreludeAssocFn::GenerateKeypair => "generate_keypair",
+            PreludeAssocFn::GeneratePrivate => "generate_private",
+            PreludeAssocFn::PublicFromPrivate => "public_from_private",
+            PreludeAssocFn::DeriveShared => "derive_shared",
+            PreludeAssocFn::GenerateSalt => "generate_salt",
+            PreludeAssocFn::DeriveKey => "derive_key",
             // T37 (sibling): Faker.with_locale / Faker.with_seed —
             // sibling task added the variants + ALL + return-type
             // entries but missed the name() match arms. Defensive
@@ -5150,6 +5331,48 @@ pub fn assoc_fn_return_type(
         // value (not a Type.method assoc fn like TCP.connect) — see the
         // (Type::Wallet, PreludeInstanceFn::Connect) arm in
         // `instance_fn_return_type` below.
+        // T49: buff-crypto-extras assoc fn return types. Most return
+        // `Vector<Byte>` (raw bytes — keys / nonces / ciphertexts /
+        // signatures / shared secrets / salts / derived keys); Verify
+        // returns Bool (false on any failure, mirrors T26 / T34);
+        // GenerateKeypair returns RsaKeypair (the single instance type
+        // in T49). All panic-free via the codegen's `unwrap_or_default`
+        // / `.unwrap_or(false)` collapse.
+        //
+        // AES (4): generate_key / generate_nonce / encrypt / decrypt.
+        // Encrypt / Decrypt wrap the underlying Result<Vec<u8>,
+        // CryptoError> via `.unwrap_or_default()` (empty Vec on
+        // failure — NEVER panics). GenerateKey / GenerateNonce are
+        // infallible (return Vec<u8> directly).
+        (PreludeType::AES, PreludeAssocFn::GenerateKey) => Some(Type::vector(Type::byte())),
+        (PreludeType::AES, PreludeAssocFn::GenerateNonce) => Some(Type::vector(Type::byte())),
+        (PreludeType::AES, PreludeAssocFn::Encrypt) => Some(Type::vector(Type::byte())),
+        (PreludeType::AES, PreludeAssocFn::Decrypt) => Some(Type::vector(Type::byte())),
+        // RSA (3): generate_keypair / sign / verify. GenerateKeypair
+        // returns the RsaKeypair instance type (constructed ONLY via
+        // this fn — no other path). Sign returns raw signature bytes
+        // (256 bytes for 2048-bit modulus). Verify returns Bool (false
+        // on any failure — mirrors T26 Signature.verify + T34
+        // Password.verify stance).
+        (PreludeType::RSA, PreludeAssocFn::GenerateKeypair) => Some(Type::rsa_keypair()),
+        (PreludeType::RSA, PreludeAssocFn::Sign) => Some(Type::vector(Type::byte())),
+        (PreludeType::RSA, PreludeAssocFn::Verify) => Some(Type::bool()),
+        // ECDH (3): generate_private / public_from_private /
+        // derive_shared. GeneratePrivate is infallible (returns Vec
+        // directly). PublicFromPrivate / DeriveShared wrap the
+        // underlying Result<Vec<u8>, CryptoError> via
+        // `.unwrap_or_default()` (empty Vec on failure — NEVER
+        // panics).
+        (PreludeType::ECDH, PreludeAssocFn::GeneratePrivate) => Some(Type::vector(Type::byte())),
+        (PreludeType::ECDH, PreludeAssocFn::PublicFromPrivate) => Some(Type::vector(Type::byte())),
+        (PreludeType::ECDH, PreludeAssocFn::DeriveShared) => Some(Type::vector(Type::byte())),
+        // Argon2 (2): generate_salt / derive_key. GenerateSalt is
+        // infallible (returns Vec directly). DeriveKey wraps the
+        // underlying Result<Vec<u8>, CryptoError> via
+        // `.unwrap_or_default()` (empty Vec on failure — NEVER
+        // panics).
+        (PreludeType::Argon2, PreludeAssocFn::GenerateSalt) => Some(Type::vector(Type::byte())),
+        (PreludeType::Argon2, PreludeAssocFn::DeriveKey) => Some(Type::vector(Type::byte())),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -5968,6 +6191,17 @@ pub enum PreludeInstanceFn {
     /// method vs assoc fn — `wallet.connect(p)` is `recv.method(args)`,
     /// `TCP.connect(h, p)` is `Type.method(args)`). Wallet-only.
     Connect,
+    // ---- T49: RsaKeypair instance methods (2) -------------------------
+    /// `pair.public_pem() -> String`. Zero args. Returns the
+    /// Spki SubjectPublicKeyInfo PEM string (`-----BEGIN PUBLIC
+    /// KEY-----`). Wraps `recv.public_pem.clone()` (the underlying
+    /// field is `String`; `.clone()` lifts `&String` to owned
+    /// `String` per Buff's "hide references" rule). RsaKeypair-only.
+    PublicPem,
+    /// `pair.private_pem() -> String`. Zero args. Returns the
+    /// PKCS#8 PEM string (`-----BEGIN PRIVATE KEY-----`). Wraps
+    /// `recv.private_pem.clone()`. RsaKeypair-only.
+    PrivatePem,
 }
 
 impl PreludeInstanceFn {
@@ -6259,6 +6493,18 @@ impl PreludeInstanceFn {
         // the PreludeAssocFn::Connect variant — same name, different
         // enum, different dispatch shape: recv.method vs Type.method).
         PreludeInstanceFn::Connect,
+        // T49: RsaKeypair instance methods — 2 new variants for the
+        // PEM-string accessors. Both zero-arg; both return String.
+        // Dispatched on the (Type::RsaKeypair, method) pair. The
+        // Buff surface reads `pair.public_pem()` / `pair.private_pem()`
+        // — mirrors the underlying `buff_crypto_extras::RsaKeypair`
+        // Rust struct field names (the wrapper exposes them as
+        // accessor methods, NOT direct field access, so the codegen
+        // emits `recv.public_pem().clone()` / `recv.private_pem()
+        // .clone()` — the `.clone()` lifts `&String` to owned
+        // `String`, Buff hides references from users).
+        PreludeInstanceFn::PublicPem,
+        PreludeInstanceFn::PrivatePem,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -6577,6 +6823,13 @@ impl PreludeInstanceFn {
             // Connect — receiver is the bare namespace Ident
             // `TCP`/`WebSocket`). Same name, different enum.
             PreludeInstanceFn::Connect => "connect",
+            // T49: RsaKeypair instance method names mirror the
+            // underlying `buff_crypto_extras::RsaKeypair` Rust
+            // struct field names 1:1 so codegen can splice
+            // `recv.public_pem.clone()` / `recv.private_pem.clone()`
+            // without rewriting.
+            PreludeInstanceFn::PublicPem => "public_pem",
+            PreludeInstanceFn::PrivatePem => "private_pem",
         }
     }
 }
@@ -7261,6 +7514,14 @@ pub fn instance_fn_return_type(
         (Type::ContractMethod, PreludeInstanceFn::Args) => Some(Type::contract_method()),
         (Type::ContractMethod, PreludeInstanceFn::Call) => Some(Type::String),
         (Type::ContractMethod, PreludeInstanceFn::Send) => Some(Type::String),
+
+        // T49: RsaKeypair instance methods. Both PEM-string accessors
+        // return String (owned `String` lifted from `&String` via
+        // `.clone()` — Buff hides references from users). Infallible
+        // (no failure mode — the underlying fields are always
+        // populated when constructed via RSA.generate_keypair).
+        (Type::RsaKeypair, PreludeInstanceFn::PublicPem) => Some(Type::String),
+        (Type::RsaKeypair, PreludeInstanceFn::PrivatePem) => Some(Type::String),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.
