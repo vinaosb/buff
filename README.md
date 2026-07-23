@@ -75,6 +75,18 @@ Every modern language forces a painful trade-off:
 | **v1.10** | *Production hardening* | `buff-dap` Debug Adapter Protocol translation proxy; `buff coverage` Rust-line → `.buff` source-line mapping (llvm-cov/tarpaulin) | ✅ Shipped |
 | **v1.11** | *Education* | `bufflings` Rustlings-style exercise runner (list/start/verify/progress/watch); 25 exercises across 11 topics; verification engine + CI solvability gate | ✅ Shipped |
 | **v1.12** | *Distribution scale* | `buffup` Rust toolchain-style version manager; `setup-buff` GitHub Action (TypeScript, caches `~/.buff/versions/`); Docker `builder` + `slim` images with multi-arch buildx | ✅ Shipped |
+| **v1.13** | *SDK 2.0 foundations* | Comptime (T53, Zig-inspired); `Channel<T>` MPSC; multi-file project linking (T1); buff-span stack traces; `buff.toml` v2 schema; 7 built-in templates + `buff gen`; attributes `@internal`/`@deprecated`/`@bench`/`@property`/`@feature` | ✅ Shipped |
+| **v1.14** | *Wave 2 — data/numerical* | Framework crate MVPs: `buff-dataframe`, `buff-tensor`, `buff-image`, `buff-audio`, `buff-ecs`, `buff-dsp`, `buff-mock` | ✅ Shipped |
+| **v1.15** | *Wave 3 — server/runtime* | Framework crate MVPs: `buff-fuzz`, `buff-web`, `buff-db`, `buff-reactive`, `buff-audit`, `buff-observe`, `buff-template` | ✅ Shipped |
+| **v1.16** | *Wave 4 — infrastructure* | Framework crate MVPs: `buff-cache`, `buff-auth`, `buff-validate`, `buff-resilience`, `buff-http-client`, `buff-jobs`, `buff-cli`, `buff-config` | ✅ Shipped |
+| **v1.17** | *Wave 5 — text/data* | Framework crate MVPs: `buff-scrape`, `buff-i18n`, `buff-archive`, `buff-fsm`, `buff-pubsub`, `buff-fake`, `buff-assertions` | ✅ Shipped |
+| **v1.18** | *Wave 6 — interop/protocol* | Framework crate MVPs: `buff-crypto-extras`, `buff-web3`, `buff-chat`, `buff-protobuf`, `buff-xml`, `buff-nlp`, `buff-geo`, `buff-msgpack` (+ prelude/codegen wiring) | ✅ Shipped |
+| **v1.19** | *Language surface* | Multiple dispatch (Julia-inspired); mathematical syntax edition; property wrappers `@State`/`@Published`/`@Cached`; `buff-actors`, `buff-simd`; CLI `--minimal` + compile-speed program | ✅ Shipped |
+| **v1.20** | *DX tooling* | `buff watch` (T64); `buff refactor` rename/extract/inline (T66); error suggestion engine + rustc→Buff span mapping (T63); docs site (Zola, T67); PGO + cold-start benchmark | ✅ Shipped |
+| **v1.21** | *Tooling & docs polish* | `buff-plugins` (T72); registry quality signals (T70); onboarding guides (T69); 50+ recipe cookbook (T68); formal stability promise (T71) | ✅ Shipped |
+| **v1.22** | *Wave 10 — science/ML/game* | `buff-science` (T13, nalgebra); `buff-pipeline` (T14, DAG + Channel); `buff-ml` (T15, autodiff + layers + optimizers); `buff-game` (T16, loop/assets/render) | ✅ Shipped |
+| **v1.23** | *Wave 11 — flagship* | T22 API-compat spike (4 integration examples + mismatch report); T23 Data Science Workbench flagship; lexer-compat `#`→`//` sweep + antipattern fixes | ✅ Shipped |
+| **v1.24** | *Audit & Polish* | T28 iterative documentation & codebase refinement pass (convergence-gated); CHANGELOG backfill v1.13–v1.24; per-crate AGENTS.md for missing crates; root AGENTS.md + CONTRIBUTING refresh | ✅ Shipped |
 
 **Compiles today:** hand-rolled lexer (byte-scanner + offside rule), hand-rolled
 parser (recursive-descent + Pratt), AST with spans, type inference, Rust
@@ -160,6 +172,14 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/minimal_compute.buff`](./examples/minimal_compute.buff) | CPU-bound compute (no GPU/rayon) under `--minimal` | ✅ v1.19 (T60) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
+| [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (parse-only³) |
+| [`examples/tensor/matmul.buff`](./examples/tensor/matmul.buff) | 2-D matmul (v1.14) | 🔶 v1.14 (parse-only³) |
+| [`examples/pipeline/simple.buff`](./examples/pipeline/simple.buff) | `Source.from_csv` → filter → `Sink.to_csv` DAG (v1.22) | 🔶 v1.22 (parse-only³) |
+| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Vector.zeros`, `Matrix.identity` linalg (v1.22) | 🔶 v1.22 (parse-only³) |
+| [`examples/ml/hello.buff`](./examples/ml/hello.buff) | `Linear.new`, `mse_loss`, `SGD.new` training (v1.22) | 🔶 v1.22 (parse-only³) |
+| [`examples/game/hello.buff`](./examples/game/hello.buff) | Game loop, `Window.new`, `Renderer` (v1.22) | 🔶 v1.22 (parse-only³) |
+| [`examples/integration/`](./examples/integration/) | T22 multi-framework integration (dataframe+tensor+pipeline+reactive+web) | 🔶 v1.23 (parse-only³) |
+| [`examples/data-science-workbench/`](./examples/data-science-workbench/) | T23 flagship notebook app (dataframe+ml+pipeline+web+reactive) | 🔶 v1.23 (parse-only³) |
 
 > **Legend:** ✅ *runs* — `buff run` compiles and executes end-to-end.
 > 🔶 *codegen-only* — transpiles to valid Rust (verified by tests), but the
@@ -167,6 +187,10 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 > ¹ async needs the external `tokio` crate (T32 deferred Cargo-project wiring);
 > ² modules need multi-file linking — `import`/`export` parse and the module
 > graph resolves (T29), but the CLI compiles one file at a time.
+> ³ **Framework examples (v1.14–v1.23)** parse cleanly and pass `buff check`;
+> end-to-end `buff run` execution is codegen-deferred — the `Type::{Tensor,
+> DataFrame, Pipeline, …}` variants and their codegen lowering arms are a
+> coordinated sibling task (see `.sisyphus/decisions/api-compat-v20.md`).
 > See [`.sisyphus/notepads/buff-v05-language/issues.md`](./.sisyphus/notepads/buff-v05-language/issues.md)
 > for the full list of v0.5 end-to-end gaps.
 
