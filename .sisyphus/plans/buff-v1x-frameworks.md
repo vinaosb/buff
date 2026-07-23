@@ -1890,7 +1890,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 13. `buff-science` — Linear Algebra + FFT + Stats (depends T8)
+- [x] 13. `buff-science` — Linear Algebra + FFT + Stats (depends T8)
 
   **What to do**:
   - Create `crates/buff-science/`.
@@ -1972,7 +1972,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 14. `buff-pipeline` — DAG-based ETL + Bounded Channel Queues (depends T2 Channel)
+- [x] 14. `buff-pipeline` — DAG-based ETL + Bounded Channel Queues (depends T2 Channel)
 
   **What to do** (revised post-T2 scope reduction):
   - Create `crates/buff-pipeline/`.
@@ -2065,7 +2065,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 15. `buff-ml` — Neural Network Layers + Autodiff (depends T8)
+- [x] 15. `buff-ml` — Neural Network Layers + Autodiff (depends T8)
 
   **What to do**:
   - Create `crates/buff-ml/`.
@@ -2154,7 +2154,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 16. `buff-game` — Game Loop + Asset Pipeline + Rendering (depends T12)
+- [x] 16. `buff-game` — Game Loop + Asset Pipeline + Rendering (depends T12)
 
   **What to do**:
   - Create `crates/buff-game/`.
