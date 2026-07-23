@@ -116,7 +116,12 @@ pub fn cross_entropy(pred: &Var, target: &Tensor) -> MlResult<Var> {
     let probs_cap = Tensor::from_vec(probs, vec![batch, classes])?;
     let target_cap = target.clone();
     let backward: Box<dyn FnOnce(&mut crate::autodiff::TapeInner)> = Box::new(move |inner| {
-        let g_scalar = inner.nodes[zi].grad.as_slice().first().copied().unwrap_or(0.0);
+        let g_scalar = inner.nodes[zi]
+            .grad
+            .as_slice()
+            .first()
+            .copied()
+            .unwrap_or(0.0);
         // dL/dlogits = (probs - target) / batch, scaled by incoming grad.
         let ps = probs_cap.as_slice();
         let ts = target_cap.as_slice();
@@ -141,7 +146,10 @@ mod tests {
     fn mse_loss_zero_when_equal() {
         let tape = Tape::new();
         let p = tape
-            .leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![3]).unwrap(), true)
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![3]).unwrap(),
+                true,
+            )
             .unwrap();
         let t = Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let loss = mse_loss(&p, &t).unwrap();
@@ -151,7 +159,9 @@ mod tests {
     #[test]
     fn mse_loss_shape_mismatch_errors() {
         let tape = Tape::new();
-        let p = tape.leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true).unwrap();
+        let p = tape
+            .leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true)
+            .unwrap();
         let t = Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         assert!(mse_loss(&p, &t).is_err());
     }
@@ -162,7 +172,10 @@ mod tests {
         // mse = (0+4+9)/3 = 13/3. grad = 2*diff/3 = [0, 4/3, 2].
         let tape = Tape::new();
         let p = tape
-            .leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![3]).unwrap(), true)
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![3]).unwrap(),
+                true,
+            )
             .unwrap();
         let t = Tensor::from_vec(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
         let loss = mse_loss(&p, &t).unwrap();
@@ -194,7 +207,9 @@ mod tests {
     #[test]
     fn cross_entropy_rejects_wrong_rank() {
         let tape = Tape::new();
-        let logits = tape.leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true).unwrap();
+        let logits = tape
+            .leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true)
+            .unwrap();
         let target = Tensor::from_vec(vec![1.0, 0.0], vec![2]).unwrap();
         assert!(cross_entropy(&logits, &target).is_err());
     }

@@ -438,7 +438,10 @@ mod tests {
     fn linear_forward_shape() {
         let tape = Tape::new();
         let x = tape
-            .leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(), false)
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+                false,
+            )
             .unwrap();
         let l = Linear::new(2, 3).unwrap();
         let y = l.forward(x, false).unwrap();
@@ -449,7 +452,10 @@ mod tests {
     fn linear_forward_rejects_wrong_input_dim() {
         let tape = Tape::new();
         let x = tape
-            .leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(), false)
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
+                false,
+            )
             .unwrap();
         let l = Linear::new(2, 3).unwrap();
         assert!(l.forward(x, false).is_err());
@@ -469,7 +475,9 @@ mod tests {
     #[test]
     fn linear_load_parameters_rejects_wrong_count() {
         let mut l = Linear::new(2, 3).unwrap();
-        assert!(l.load_parameters(&[Tensor::zeros(vec![2, 3]).unwrap()]).is_err());
+        assert!(l
+            .load_parameters(&[Tensor::zeros(vec![2, 3]).unwrap()])
+            .is_err());
     }
 
     #[test]
@@ -484,7 +492,10 @@ mod tests {
     fn dropout_is_noop_in_eval_mode() {
         let tape = Tape::new();
         let x = tape
-            .leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(), false)
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+                false,
+            )
             .unwrap();
         let d = Dropout::new(0.5).unwrap();
         let y = d.forward(x.clone(), false).unwrap();
@@ -496,7 +507,10 @@ mod tests {
     fn dropout_zero_rate_is_identity() {
         let tape = Tape::new();
         let x = tape
-            .leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap(), false)
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap(),
+                false,
+            )
             .unwrap();
         let d = Dropout::new(0.0).unwrap();
         let y = d.forward(x.clone(), true).unwrap();

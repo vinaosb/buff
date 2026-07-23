@@ -28,12 +28,7 @@ fn linear_target(x: &Tensor, w: f32, b: f32) -> Tensor {
 
 /// Helper: create a fresh Linear(1,1) with known weights, forward+backward
 /// on the given x/target, and return (weight_grad, bias_grad).
-fn linear_1x1_grads(
-    w_val: f32,
-    b_val: f32,
-    x: &Tensor,
-    target: &Tensor,
-) -> (f32, f32) {
+fn linear_1x1_grads(w_val: f32, b_val: f32, x: &Tensor, target: &Tensor) -> (f32, f32) {
     use buff_ml::Layer;
     let mut layer = Linear::new(1, 1).unwrap();
     layer
@@ -419,10 +414,7 @@ fn snapshot_sigmoid_zero() {
 fn dropout_training_modifies_some() {
     let tape = Tape::new();
     let x = tape
-        .leaf(
-            Tensor::from_vec(vec![1.0; 100], vec![100]).unwrap(),
-            false,
-        )
+        .leaf(Tensor::from_vec(vec![1.0; 100], vec![100]).unwrap(), false)
         .unwrap();
     let d = Dropout::new(0.5).unwrap();
     let y = d.forward(x.clone(), true).unwrap();
@@ -507,7 +499,11 @@ fn mse_loss_symmetric() {
     let loss2 = mse_loss(&vb, &a).unwrap();
 
     assert!(
-        approx(loss1.value().as_slice()[0], loss2.value().as_slice()[0], 1e-6),
+        approx(
+            loss1.value().as_slice()[0],
+            loss2.value().as_slice()[0],
+            1e-6
+        ),
         "MSE loss not symmetric"
     );
 }

@@ -43,8 +43,8 @@ pub(crate) fn save_model(model: &Model, path: &str) -> MlResult<()> {
 /// The model's layer count and kinds must match the file.
 pub(crate) fn load_model(model: &mut Model, path: &str) -> MlResult<()> {
     let json_str = fs::read_to_string(path)?;
-    let layers_json: Vec<serde_json::Value> = serde_json::from_str(&json_str)
-        .map_err(|e| MlError::Serialization(e.to_string()))?;
+    let layers_json: Vec<serde_json::Value> =
+        serde_json::from_str(&json_str).map_err(|e| MlError::Serialization(e.to_string()))?;
 
     if layers_json.len() != model.layers.len() {
         return Err(MlError::Serialization(format!(

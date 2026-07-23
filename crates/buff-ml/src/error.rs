@@ -21,37 +21,23 @@ pub enum MlError {
     /// the input's last dim does not equal `input_dim`, or elementwise ops
     /// on tensors of different shapes).
     #[error("shape mismatch: {lhs:?} vs {rhs:?}")]
-    ShapeMismatch {
-        lhs: Vec<usize>,
-        rhs: Vec<usize>,
-    },
+    ShapeMismatch { lhs: Vec<usize>, rhs: Vec<usize> },
 
     /// A rank mismatch (e.g. `Linear` forward expects a rank-2 input).
     #[error("rank mismatch: expected rank {expected}, got {actual}")]
-    RankMismatch {
-        actual: usize,
-        expected: usize,
-    },
+    RankMismatch { actual: usize, expected: usize },
 
     /// A dimension was zero where a positive size is required.
     #[error("dimension {name} must be positive, got {value}")]
-    InvalidDimension {
-        name: &'static str,
-        value: usize,
-    },
+    InvalidDimension { name: &'static str, value: usize },
 
     /// A probability argument was outside `[0, 1]` (e.g. `Dropout::new(-0.5)`).
     #[error("probability out of range [0, 1]: {value}")]
-    InvalidProbability {
-        value: f32,
-    },
+    InvalidProbability { value: f32 },
 
     /// A learning rate / scalar hyperparameter was non-finite or non-positive.
     #[error("invalid hyperparameter {name}: {value}")]
-    InvalidHyperparameter {
-        name: &'static str,
-        value: f32,
-    },
+    InvalidHyperparameter { name: &'static str, value: f32 },
 
     /// The serialized model JSON was malformed or referenced an unknown
     /// layer kind.

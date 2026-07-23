@@ -5,7 +5,7 @@
 //!
 //! Usage: cargo run --example xor -p buff-ml
 
-use buff_ml::{Linear, Model, Optimizer, ReLU, SGD, Tape, mse_loss};
+use buff_ml::{mse_loss, Linear, Model, Optimizer, ReLU, Tape, SGD};
 use buff_tensor::Tensor;
 
 fn main() {

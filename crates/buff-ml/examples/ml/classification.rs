@@ -4,7 +4,7 @@
 //!
 //! Usage: cargo run --example classification -p buff-ml
 
-use buff_ml::{Layer, Linear, Model, Optimizer, ReLU, SGD, Tape, cross_entropy};
+use buff_ml::{cross_entropy, Layer, Linear, Model, Optimizer, ReLU, Tape, SGD};
 use buff_tensor::Tensor;
 
 fn main() {
@@ -73,7 +73,9 @@ fn main() {
     let tape = Tape::new();
     let xv = tape.leaf(x.clone(), false).expect("leaf");
     let logits = model.forward(xv, false).expect("forward");
-    let probs = buff_ml::Softmax::new().forward(logits, false).expect("softmax");
+    let probs = buff_ml::Softmax::new()
+        .forward(logits, false)
+        .expect("softmax");
     let binding = probs.value();
     let prob_vals = binding.as_slice();
     let mut correct = 0;
@@ -83,10 +85,15 @@ fn main() {
         let predicted = if p0 > p1 { 0 } else { 1 };
         let actual = if i < 4 { 0 } else { 1 };
         let mark = if predicted == actual { "✓" } else { "✗" };
-        println!("  sample {i}: P(0)={p0:.4} P(1)={p1:.4} → class {predicted} (actual={actual}) {mark}");
+        println!(
+            "  sample {i}: P(0)={p0:.4} P(1)={p1:.4} → class {predicted} (actual={actual}) {mark}"
+        );
         if predicted == actual {
             correct += 1;
         }
     }
-    println!("\nAccuracy: {correct}/8 ({:.0}%)", correct as f32 / 8.0 * 100.0);
+    println!(
+        "\nAccuracy: {correct}/8 ({:.0}%)",
+        correct as f32 / 8.0 * 100.0
+    );
 }

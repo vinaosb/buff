@@ -2,7 +2,7 @@
 //!
 //! Usage: cargo run --example linear_regression -p buff-ml
 
-use buff_ml::{Linear, Model, Optimizer, SGD, Tape, mse_loss};
+use buff_ml::{mse_loss, Linear, Model, Optimizer, Tape, SGD};
 use buff_tensor::Tensor;
 
 fn main() {

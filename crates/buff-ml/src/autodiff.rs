@@ -207,12 +207,18 @@ impl Default for Tape {
             Err(rc) => {
                 // Should not happen (fresh tape), but fall back to a clone
                 // of the inner state to honor the `Default` contract.
-                let inner = rc.inner.borrow().nodes.iter().map(|n| Node {
-                    value: n.value.clone(),
-                    grad: n.grad.clone(),
-                    backward: None,
-                    requires_grad: n.requires_grad,
-                }).collect();
+                let inner = rc
+                    .inner
+                    .borrow()
+                    .nodes
+                    .iter()
+                    .map(|n| Node {
+                        value: n.value.clone(),
+                        grad: n.grad.clone(),
+                        backward: None,
+                        requires_grad: n.requires_grad,
+                    })
+                    .collect();
                 Tape {
                     inner: RefCell::new(TapeInner { nodes: inner }),
                 }
@@ -297,7 +303,7 @@ impl Var {
         let xi = self.index;
         let yi = rhs.index;
         let zi = self.tape.next_index();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             accum_add(&mut inner.nodes[xi].grad, &gz);
             accum_add(&mut inner.nodes[yi].grad, &gz);
@@ -314,7 +320,7 @@ impl Var {
         let xi = self.index;
         let yi = rhs.index;
         let zi = self.tape.next_index();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             accum_add(&mut inner.nodes[xi].grad, &gz);
             // rhs gets -grad.
@@ -337,7 +343,7 @@ impl Var {
         // Capture forward values for the cross-terms.
         let xv_cap = xv.clone();
         let yv_cap = yv.clone();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             let gx = gz.mul(&yv_cap).unwrap_or_else(|_| zero_tensor_like(&gz));
             let gy = gz.mul(&xv_cap).unwrap_or_else(|_| zero_tensor_like(&gz));
@@ -354,7 +360,7 @@ impl Var {
         let rg = self.requires_grad;
         let xi = self.index;
         let zi = self.tape.next_index();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             let gx = gz.scale(scalar).unwrap_or_else(|_| zero_tensor_like(&gz));
             accum_add(&mut inner.nodes[xi].grad, &gx);
@@ -375,7 +381,7 @@ impl Var {
         // Capture transposes for the backward (shapes guaranteed compatible).
         let y_t = transpose_or_zero(&yv);
         let x_t = transpose_or_zero(&xv);
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             // gx += gz @ y^T   (shape [m,n] @ [n,k] -> [m,k] == x shape)
             let gx = gz.matmul(&y_t).unwrap_or_else(|_| zero_tensor_like(&gz));
@@ -423,7 +429,7 @@ impl Var {
         let xi = self.index;
         let bi = bias.index;
         let zi = self.tape.next_index();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             // self.grad += gz (same shape).
             accum_add(&mut inner.nodes[xi].grad, &gz);
@@ -451,7 +457,7 @@ impl Var {
         let zi = self.tape.next_index();
         // Capture the forward mask (1 where x>0, else 0).
         let xv_cap = xv.clone();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             let mut gx = gz.clone();
             let xs = xv_cap.as_slice();
@@ -480,7 +486,7 @@ impl Var {
         let zi = self.tape.next_index();
         // Capture the sigmoid output s for the backward (s*(1-s)).
         let s_cap = zv.clone();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             let mut gx = gz.clone();
             let ss = s_cap.as_slice();
@@ -530,7 +536,7 @@ impl Var {
         let xi = self.index;
         let zi = self.tape.next_index();
         let s_cap = zv.clone();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
+        let backward: BackwardFn = Box::new(move |inner| {
             let gz = inner.nodes[zi].grad.clone();
             let gs = gz.as_slice();
             let ss = s_cap.as_slice();
@@ -563,8 +569,13 @@ impl Var {
         let zi = self.tape.next_index();
         let x_shape = xv.shape().as_slice().to_vec();
         let x_len = xv.len();
-        let backward: Box<dyn FnOnce(&mut TapeInner)> = Box::new(move |inner| {
-            let g_scalar = inner.nodes[zi].grad.as_slice().first().copied().unwrap_or(0.0);
+        let backward: BackwardFn = Box::new(move |inner| {
+            let g_scalar = inner.nodes[zi]
+                .grad
+                .as_slice()
+                .first()
+                .copied()
+                .unwrap_or(0.0);
             let broadcast = Tensor::from_vec(vec![g_scalar; x_len], x_shape.clone())
                 .unwrap_or_else(|_| zero_tensor_like(&inner.nodes[xi].grad));
             accum_add(&mut inner.nodes[xi].grad, &broadcast);
@@ -597,16 +608,22 @@ mod tests {
     #[test]
     fn var_leaf_requires_grad_flag() {
         let tape = Tape::new();
-        let v = tape.leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true).unwrap();
+        let v = tape
+            .leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true)
+            .unwrap();
         assert!(v.requires_grad());
-        let c = tape.leaf(Tensor::from_vec(vec![1.0], vec![1]).unwrap(), false).unwrap();
+        let c = tape
+            .leaf(Tensor::from_vec(vec![1.0], vec![1]).unwrap(), false)
+            .unwrap();
         assert!(!c.requires_grad());
     }
 
     #[test]
     fn var_grad_none_when_no_requires_grad() {
         let tape = Tape::new();
-        let c = tape.leaf(Tensor::from_vec(vec![3.0], vec![1]).unwrap(), false).unwrap();
+        let c = tape
+            .leaf(Tensor::from_vec(vec![3.0], vec![1]).unwrap(), false)
+            .unwrap();
         let s = c.sum_all().unwrap();
         s.backward().unwrap();
         assert!(c.grad().is_none());
@@ -615,8 +632,12 @@ mod tests {
     #[test]
     fn add_backward_is_identity() {
         let tape = Tape::new();
-        let a = tape.leaf(Tensor::from_vec(vec![2.0, 3.0], vec![2]).unwrap(), true).unwrap();
-        let b = tape.leaf(Tensor::from_vec(vec![5.0, 7.0], vec![2]).unwrap(), true).unwrap();
+        let a = tape
+            .leaf(Tensor::from_vec(vec![2.0, 3.0], vec![2]).unwrap(), true)
+            .unwrap();
+        let b = tape
+            .leaf(Tensor::from_vec(vec![5.0, 7.0], vec![2]).unwrap(), true)
+            .unwrap();
         let z = a.add(&b).unwrap();
         z.backward().unwrap();
         assert_eq!(z.value().as_slice(), &[7.0, 10.0]);
@@ -627,8 +648,12 @@ mod tests {
     #[test]
     fn mul_backward_swaps_inputs() {
         let tape = Tape::new();
-        let a = tape.leaf(Tensor::from_vec(vec![2.0, 3.0], vec![2]).unwrap(), true).unwrap();
-        let b = tape.leaf(Tensor::from_vec(vec![4.0, 5.0], vec![2]).unwrap(), true).unwrap();
+        let a = tape
+            .leaf(Tensor::from_vec(vec![2.0, 3.0], vec![2]).unwrap(), true)
+            .unwrap();
+        let b = tape
+            .leaf(Tensor::from_vec(vec![4.0, 5.0], vec![2]).unwrap(), true)
+            .unwrap();
         let z = a.mul(&b).unwrap();
         z.backward().unwrap();
         // dz/da = b, dz/db = a
@@ -639,7 +664,9 @@ mod tests {
     #[test]
     fn scale_backward_multiplies_grad() {
         let tape = Tape::new();
-        let a = tape.leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true).unwrap();
+        let a = tape
+            .leaf(Tensor::from_vec(vec![1.0, 2.0], vec![2]).unwrap(), true)
+            .unwrap();
         let z = a.scale(3.0).unwrap();
         z.backward().unwrap();
         assert_eq!(z.value().as_slice(), &[3.0, 6.0]);
@@ -649,7 +676,12 @@ mod tests {
     #[test]
     fn sum_all_backward_broadcasts_scalar() {
         let tape = Tape::new();
-        let a = tape.leaf(Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(), true).unwrap();
+        let a = tape
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+                true,
+            )
+            .unwrap();
         let s = a.sum_all().unwrap();
         s.backward().unwrap();
         assert!(approx(s.value().as_slice()[0], 10.0));
@@ -662,16 +694,18 @@ mod tests {
         // x = [[1,2],[3,4]] (2x2), y = [[5,6],[7,8]] (2x2)
         // z = x@y = [[19,22],[43,50]]
         let tape = Tape::new();
-        let x = tape.leaf(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
-            true,
-        )
-        .unwrap();
-        let y = tape.leaf(
-            Tensor::from_vec(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap(),
-            true,
-        )
-        .unwrap();
+        let x = tape
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+                true,
+            )
+            .unwrap();
+        let y = tape
+            .leaf(
+                Tensor::from_vec(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap(),
+                true,
+            )
+            .unwrap();
         let z = x.matmul(&y).unwrap();
         z.backward().unwrap();
         // dz/dx = z.grad @ y^T ; z.grad = ones(2,2) ; y^T=[[5,7],[6,8]]
@@ -687,12 +721,15 @@ mod tests {
     fn add_row_bias_backward_sums_batch() {
         // x [[1,2],[3,4]] (2x2), bias [10,20]
         let tape = Tape::new();
-        let x = tape.leaf(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
-            true,
-        )
-        .unwrap();
-        let b = tape.leaf(Tensor::from_vec(vec![10.0, 20.0], vec![2]).unwrap(), true).unwrap();
+        let x = tape
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+                true,
+            )
+            .unwrap();
+        let b = tape
+            .leaf(Tensor::from_vec(vec![10.0, 20.0], vec![2]).unwrap(), true)
+            .unwrap();
         let z = x.add_row_bias(&b).unwrap();
         assert_eq!(z.value().as_slice(), &[11.0, 22.0, 13.0, 24.0]);
         z.backward().unwrap();
@@ -704,7 +741,12 @@ mod tests {
     #[test]
     fn relu_backward_masks_nonpositive() {
         let tape = Tape::new();
-        let a = tape.leaf(Tensor::from_vec(vec![-1.0, 2.0, 0.0, 3.0], vec![2, 2]).unwrap(), true).unwrap();
+        let a = tape
+            .leaf(
+                Tensor::from_vec(vec![-1.0, 2.0, 0.0, 3.0], vec![2, 2]).unwrap(),
+                true,
+            )
+            .unwrap();
         let z = a.relu().unwrap();
         assert_eq!(z.value().as_slice(), &[0.0, 2.0, 0.0, 3.0]);
         z.backward().unwrap();
@@ -715,7 +757,9 @@ mod tests {
     #[test]
     fn sigmoid_backward_correct_derivative() {
         let tape = Tape::new();
-        let a = tape.leaf(Tensor::from_vec(vec![0.0], vec![1]).unwrap(), true).unwrap();
+        let a = tape
+            .leaf(Tensor::from_vec(vec![0.0], vec![1]).unwrap(), true)
+            .unwrap();
         let z = a.sigmoid().unwrap();
         z.backward().unwrap();
         let s = z.value().as_slice()[0]; // sigmoid(0) = 0.5
@@ -727,11 +771,12 @@ mod tests {
     #[test]
     fn softmax_outputs_sum_to_one_per_row() {
         let tape = Tape::new();
-        let a = tape.leaf(
-            Tensor::from_vec(vec![1.0, 2.0, 3.0, 1.0, 0.0, -1.0], vec![2, 3]).unwrap(),
-            false,
-        )
-        .unwrap();
+        let a = tape
+            .leaf(
+                Tensor::from_vec(vec![1.0, 2.0, 3.0, 1.0, 0.0, -1.0], vec![2, 3]).unwrap(),
+                false,
+            )
+            .unwrap();
         let z = a.softmax().unwrap();
         for r in 0..2 {
             let zv = z.value();
