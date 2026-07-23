@@ -252,6 +252,7 @@ fn build_minimal_flag_parses_true_when_passed_minimal_build() {
             release,
             minimal,
             target: _,
+            ..
         } => {
             assert_eq!(file, Some(PathBuf::from("foo.buff")));
             assert!(minimal, "--minimal must parse to `true`");

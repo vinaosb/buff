@@ -22,16 +22,30 @@ fn main() -> Result<()> {
             no_cache,
             sccache,
             target,
-        } => buff_lang_cli::commands::build::run(
-            file.as_deref(),
-            output.as_deref(),
-            release,
-            minimal,
-            fast,
-            no_cache,
-            sccache,
-            target.as_deref(),
-        ),
+            pgo,
+            pgo_use,
+        } => {
+            // T62: --pgo intercepts the normal build path and dispatches
+            // to commands::pgo (3-phase PGO orchestrator). PGO is
+            // orthogonal to --release/--minimal/--fast (it instruments OR
+            // consumes a profile), so those flags are ignored when --pgo
+            // is set. When --pgo is absent, the normal build path runs
+            // unchanged (backward compat).
+            if pgo {
+                buff_lang_cli::commands::pgo::run(file.as_deref(), output.as_deref(), pgo_use, None)
+            } else {
+                buff_lang_cli::commands::build::run(
+                    file.as_deref(),
+                    output.as_deref(),
+                    release,
+                    minimal,
+                    fast,
+                    no_cache,
+                    sccache,
+                    target.as_deref(),
+                )
+            }
+        }
         Command::Run {
             file,
             args,

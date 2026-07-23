@@ -1960,3 +1960,52 @@ strip = true
 opt-level = "z"
 lto = true
 codegen-units = 1
+
+# T62: Profile-Guided Optimization (PGO) baseline profile.
+#
+# `buff build --pgo` automates the 3-step rustc/LLVM PGO flow:
+#
+# 1. **Instrument** (Phase 1, `buff build --pgo`): compile with
+#    `-C profile-generate=./target/pgo-data` so rustc emits
+#    edge-profiling counters into the binary.
+# 2. **Run** (Phase 2, manual): execute the instrumented binary against
+#    a representative workload (e.g. `./pgo_demo && ./pgo_benchmark`).
+#    The counters write `*.profraw` files into `./target/pgo-data/`.
+# 3. **Use** (Phase 3, `buff build --pgo --use`): merge the captured
+#    `.profraw` files via `llvm-profdata merge` →
+#    `./target/pgo-data/merged.profdata`, then recompile with
+#    `-C profile-use=./target/pgo-data/merged.profdata`. LLVM uses the
+#    profile to drive inlining + block-layout decisions, typically
+#    yielding 10%+ speedup on compute-heavy code vs `--release`.
+#
+# **Why this profile just inherits `release`**: the actual PGO knobs
+# (`-C profile-generate` / `-C profile-use`) are phase-dependent and
+# MUST be passed dynamically by `buff build --pgo` (a static
+# `[profile.pgo]` cannot express "instrument on first build, use on
+# second"). This profile therefore only fixes the LTO + codegen-units
+# baseline that BOTH phases share (`lto = "fat"` + `codegen-units = 1`,
+# matching `[profile.release]`) so cargo-driven paths that select
+# `--profile pgo` get the same groundwork as the single-file rustc path.
+#
+# Acceptance target: PGO build shows 10%+ speedup on the benchmark
+# suite vs regular `--release`. Measured via `examples/pgo_benchmark.buff`
+# (compute-heavy: fibonacci + matrix multiply).
+#
+# **`llvm-profdata` requirement**: Phase 3 (`--pgo --use`) requires
+# `llvm-profdata` on `PATH` to merge the raw `.profraw` counters into
+# the `merged.profdata` LLVM consumes. `rustup` ships it
+# (`rustup component add llvm-tools-preview`). When missing, `buff build
+# --pgo --use` surfaces a stderr note + exits non-zero (the merge step
+# cannot be skipped — rustc rejects a directory of `.profraw` files).
+#
+# **Workspace-root placement**: per AGENTS.md, `[profile.*]` sections
+# are forbidden in crate-level Cargo.toml; they live HERE at the
+# workspace root (same convention as `[profile.minimal]` above).
+#
+# **Opt-in**: this profile is NOT the default. Users opt in via
+# `buff build --pgo` (single-file rustc path) or
+# `cargo build --profile pgo` (in a generated cargo project).
+[profile.pgo]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

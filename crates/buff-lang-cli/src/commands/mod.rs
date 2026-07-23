@@ -22,6 +22,7 @@ pub mod jupyter;
 pub mod login;
 pub mod new;
 pub mod outdated;
+pub mod pgo;
 pub mod publish;
 pub mod registry;
 pub mod release;

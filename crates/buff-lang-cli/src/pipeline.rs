@@ -23,6 +23,8 @@ use buff_lang_error::{SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 
+use crate::compile_speed;
+
 /// Compile-time optimization profile (T56 release / T60 minimal / T55 fast).
 ///
 /// Selects which set of rustc flags [`compile_rust_to_exe`] passes to the
@@ -923,6 +925,126 @@ pub fn release_profile_toml() -> String {
 /// every call, no environment dependence, no side effects.
 pub fn minimal_profile_toml() -> String {
     "[profile.minimal]\ninherits = \"release\"\npanic = \"abort\"\nstrip = true\nopt-level = \"z\"\nlto = true\ncodegen-units = 1\n".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// T62: Profile-Guided Optimization (PGO) helpers.
+// ---------------------------------------------------------------------------
+
+/// Default directory where PGO profiling data is stored (T62).
+///
+/// Phase 1 (`buff build --pgo`) passes this to rustc via
+/// `-C profile-generate=<PGO_DATA_DIR>` so the instrumented binary
+/// writes its `*.profraw` counter files here on every run. Phase 3
+/// (`buff build --pgo --use`) merges them into
+/// `<PGO_DATA_DIR>/merged.profdata` via `llvm-profdata` and feeds
+/// that back to rustc via `-C profile-use=<PGO_DATA_DIR>/merged.profdata`.
+pub const PGO_DATA_DIR: &str = "./target/pgo-data";
+
+/// Filename for the merged profile data consumed by Phase 3 (T62).
+///
+/// `llvm-profdata merge *.profdata -o <PGO_DATA_DIR>/<PGO_MERGED_PROFILE>`
+/// produces this file; rustc then consumes it via
+/// `-C profile-use=<PGO_DATA_DIR>/<PGO_MERGED_PROFILE>`.
+pub const PGO_MERGED_PROFILE: &str = "merged.profdata";
+
+/// The rustc CLI flags for Phase 1 of PGO — the instrumented build (T62).
+///
+/// Returns the argument sequence passed verbatim to `rustc` when
+/// `buff build --pgo` runs Phase 1:
+///
+/// - `-C profile-generate=<dir>` — emit edge-profiling counters into
+///   `<dir>/` on every execution of the resulting binary. The counters
+///   land as `*.profraw` files (one per process run).
+/// - `-C opt-level=3` + `-C lto=fat` + `-C codegen-units=1` — the same
+///   release-grade baseline as [`rustc_release_flags`], so the
+///   instrumented binary's runtime characteristics match the final
+///   profile-guided build (the profile is only useful if the workload
+///   exercises representative code paths at representative speeds).
+///
+/// The `<dir>` defaults to [`PGO_DATA_DIR`] but is parameterised so
+/// callers (notably `commands::pgo`) can override it for tests or
+/// custom layouts.
+pub fn rustc_pgo_instrument_flags(profile_dir: &str) -> Vec<String> {
+    vec![
+        "-C".to_string(),
+        format!("profile-generate={profile_dir}"),
+        "-C".to_string(),
+        "opt-level=3".to_string(),
+        "-C".to_string(),
+        "lto=fat".to_string(),
+        "-C".to_string(),
+        "codegen-units=1".to_string(),
+    ]
+}
+
+/// The rustc CLI flags for Phase 3 of PGO — the profile-guided rebuild (T62).
+///
+/// Returns the argument sequence passed verbatim to `rustc` when
+/// `buff build --pgo --use` runs Phase 3:
+///
+/// - `-C profile-use=<merged.profdata>` — feed the merged profile data
+///   (produced by `llvm-profdata merge` over the Phase 1 `.profraw`
+///   files) back to LLVM so it can drive inlining + block-layout
+///   decisions. Typically yields 10%+ speedup vs `--release` on
+///   compute-heavy code.
+/// - `-C opt-level=3` + `-C lto=fat` + `-C codegen-units=1` — the same
+///   release-grade baseline as [`rustc_release_flags`] (must match
+///   Phase 1's [`rustc_pgo_instrument_flags`] so the profile maps onto
+///   the same inlining decisions).
+///
+/// The `<merged_path>` is `<profile_dir>/<PGO_MERGED_PROFILE>` by
+/// convention (see [`pgo_merged_profile_path`]).
+pub fn rustc_pgo_use_flags(merged_profile_path: &str) -> Vec<String> {
+    vec![
+        "-C".to_string(),
+        format!("profile-use={merged_profile_path}"),
+        "-C".to_string(),
+        "opt-level=3".to_string(),
+        "-C".to_string(),
+        "lto=fat".to_string(),
+        "-C".to_string(),
+        "codegen-units=1".to_string(),
+    ]
+}
+
+/// Compute the conventional merged-profile path from a profile-data dir (T62).
+///
+/// `<dir>` defaults to [`PGO_DATA_DIR`] when `None`. Returns
+/// `<dir>/<PGO_MERGED_PROFILE>` so callers don't have to repeat the
+/// path-join incantation. Used by `commands::pgo` to pass to both
+/// `llvm-profdata merge -o <path>` (Phase 3 setup) and
+/// [`rustc_pgo_use_flags`] (Phase 3 rustc invocation).
+pub fn pgo_merged_profile_path(profile_dir: Option<&str>) -> String {
+    let dir = profile_dir.unwrap_or(PGO_DATA_DIR);
+    format!("{dir}/{PGO_MERGED_PROFILE}")
+}
+
+/// Returns the Cargo `[profile.pgo]` TOML block that mirrors the
+/// workspace-root declaration (T62).
+///
+/// The block contains the LTO + codegen-units baseline that BOTH PGO
+/// phases share:
+///
+/// ```toml
+/// [profile.pgo]
+/// inherits = "release"
+/// lto = "fat"
+/// codegen-units = 1
+/// ```
+///
+/// **Why just `inherits = "release"` + LTO knobs**: the actual PGO
+/// flags (`-C profile-generate` / `-C profile-use`) are phase-dependent
+/// and MUST be passed dynamically by `buff build --pgo` (a static
+/// Cargo profile cannot express "instrument on first build, use on
+/// second"). This profile therefore only fixes the baseline that both
+/// phases share so cargo-driven paths selecting `--profile pgo` get
+/// the same groundwork as the single-file rustc path.
+///
+/// Determinism: this is a pure fixed-string function — same output on
+/// every call, no environment dependence, no side effects.
+pub fn pgo_profile_toml() -> String {
+    "[profile.pgo]\ninherits = \"release\"\nlto = \"fat\"\ncodegen-units = 1\n".to_string()
 }
 
 /// Return `path` with the platform's executable extension applied.

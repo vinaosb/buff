@@ -1,0 +1,79 @@
+// T62 — PGO benchmark variant (optimized for profiling).
+// PGO flow:
+//   buff build --pgo examples/pgo_benchmark.buff
+//   ./pgo_benchmark                           # Phase 2: capture profile
+//   buff build --pgo --use examples/pgo_benchmark.buff
+//   time ./pgo_benchmark                      # measure the speedup
+//
+// Same compute shape as `pgo_demo.buff` but tuned for benchmarking:
+//   - fib(30) (deeper recursion → more call-edge counters).
+//   - 16x16 matrix multiply (more iterations → tighter inner-loop data).
+//   - Prints a checksum so output correctness is verifiable across
+//     --release / --pgo / --pgo --use builds (a PGO bug that changes
+//     the result is silently catastrophic).
+//
+// Acceptance target: PGO build (--pgo --use) shows 10%+ speedup vs
+// regular --release on this workload. Measure with:
+//   buff build --release examples/pgo_benchmark.buff && time ./pgo_benchmark
+//   buff build --pgo examples/pgo_benchmark.buff && ./pgo_benchmark
+//   buff build --pgo --use examples/pgo_benchmark.buff && time ./pgo_benchmark
+
+func fib(n: Int) -> Int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+func matrix_multiply(a: Vector<Vector<Int>>, b: Vector<Vector<Int>>) -> Vector<Vector<Int>>:
+    let n = a.len()
+    let mut result: Vector<Vector<Int>> = []
+    let mut i = 0
+    for i < n:
+        let mut row: Vector<Int> = []
+        let mut j = 0
+        for j < n:
+            let mut sum = 0
+            let mut k = 0
+            for k < n:
+                sum = sum + a[i][k] * b[k][j]
+                k = k + 1
+            row.push(sum)
+            j = j + 1
+        result.push(row)
+        i = i + 1
+    return result
+
+func checksum(matrix: Vector<Vector<Int>>) -> Int:
+    let mut total = 0
+    let n = matrix.len()
+    let mut i = 0
+    for i < n:
+        let mut j = 0
+        for j < n:
+            total = total + matrix[i][j]
+            j = j + 1
+        i = i + 1
+    return total
+
+func main():
+    let fib_result = fib(30)
+    print("fib(30) =", fib_result)
+
+    let n = 16
+    let mut a: Vector<Vector<Int>> = []
+    let mut b: Vector<Vector<Int>> = []
+    let mut i = 0
+    for i < n:
+        let mut row_a: Vector<Int> = []
+        let mut row_b: Vector<Int> = []
+        let mut j = 0
+        for j < n:
+            row_a.push((i + j) % 11)
+            row_b.push((i * j) % 13)
+            j = j + 1
+        a.push(row_a)
+        b.push(row_b)
+        i = i + 1
+
+    let product = matrix_multiply(a, b)
+    let sum = checksum(product)
+    print("matrix checksum =", sum)

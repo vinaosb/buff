@@ -106,6 +106,48 @@ pub enum Command {
         #[arg(long)]
         minimal: bool,
 
+        /// Build with Profile-Guided Optimization (T62). Automates the
+        /// 3-step rustc/LLVM PGO flow:
+        ///
+        /// - `buff build --pgo <FILE>` (Phase 1 — instrument): compiles
+        ///   with `-C profile-generate=./target/pgo-data` so the binary
+        ///   emits edge-profiling counters into `./target/pgo-data/`
+        ///   on every run.
+        /// - **Phase 2 (manual)**: run the instrumented binary against a
+        ///   representative workload (e.g. `./pgo_demo && ./pgo_benchmark`,
+        ///   or your app's real test suite). Counter data is written as
+        ///   `*.profraw` files.
+        /// - `buff build --pgo --use <FILE>` (Phase 3 — profile-guided
+        ///   rebuild): merges the `.profraw` files via `llvm-profdata`
+        ///   into `./target/pgo-data/merged.profdata`, then recompiles
+        ///   with `-C profile-use=./target/pgo-data/merged.profdata`.
+        ///   LLVM uses the profile to drive inlining + block layout,
+        ///   typically yielding 10%+ speedup vs `--release` on
+        ///   compute-heavy code.
+        ///
+        /// **`llvm-profdata` requirement**: Phase 3 (`--pgo --use`)
+        /// requires `llvm-profdata` on `PATH` (`rustup component add
+        /// llvm-tools-preview`). When missing, the build surfaces a
+        /// stderr note + exits non-zero.
+        ///
+        /// Opt-in: default (omitted) keeps the fast-debug profile.
+        /// Independent of `--release`/`--minimal`/`--fast` (PGO is an
+        /// orthogonal axis — it instruments OR consumes a profile, it
+        /// does not select a size/speed knob).
+        #[arg(long)]
+        pgo: bool,
+
+        /// Phase-3 selector for `--pgo` (T62). Only meaningful when
+        /// `--pgo` is also set. When omitted (default), `--pgo` runs
+        /// Phase 1 (instrument). When set, `--pgo` runs Phase 3
+        /// (profile-guided rebuild using the merged profile data).
+        ///
+        /// Has no effect on its own — `buff build --use` (without
+        /// `--pgo`) is a no-op flag that falls through to the normal
+        /// build path.
+        #[arg(long = "use")]
+        pgo_use: bool,
+
         /// Build with the no-optimization "fast" profile (T55):
         /// `-C opt-level=0 -C debuginfo=0`. Fastest possible compile,
         /// slowest runtime. The dev inner-loop mode for "does it
