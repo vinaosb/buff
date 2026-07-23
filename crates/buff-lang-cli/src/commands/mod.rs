@@ -36,3 +36,4 @@ pub mod ui_build;
 pub mod ui_dev;
 pub mod ui_new;
 pub mod update;
+pub mod watch;

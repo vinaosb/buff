@@ -1,0 +1,24 @@
+// T64 — `buff watch` workflow demo for a (placeholder) HTTP server.
+// Watch + rebuild + restart:
+//   buff watch examples/hot_reload_server.buff --exec "./hot_reload_server"
+//
+// NOTE: this file is a *placeholder* demonstrating the `buff watch`
+// edit-rebuild-restart loop only. It compiles to a binary that prints
+// the configured port + exits — the real async TCP listener + route
+// hot-swap is the deferred half of T64 (server route hot-swap was
+// descoped from this commit because it requires deeper buff-web
+// integration; see the task spec).
+//
+// Suggested workflow:
+//   1. `buff watch examples/hot_reload_server.buff --exec "./hot_reload_server"`
+//   2. Edit the message below + save.
+//   3. `buff watch` rebuilds + re-runs the binary — you see the new
+//      message on the next iteration's stdout.
+//   4. Ctrl-C to stop the loop.
+
+func main():
+    let port = 8080
+    let message = "hello from hot_reload_server (placeholder)"
+    print(message)
+    print("would listen on port:")
+    print(port)

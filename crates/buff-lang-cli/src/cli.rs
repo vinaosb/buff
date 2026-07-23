@@ -861,6 +861,36 @@ pub enum Command {
         #[command(subcommand)]
         cmd: RefactorCmd,
     },
+
+    /// Watch `.buff` files for changes + rebuild on save. Debounced 500ms.
+    ///
+    /// Usage: `buff watch <PATH> [--exec <CMD>]`. Recursively watches
+    /// the file or directory at `<PATH>` (default: `.`) and on each
+    /// `.buff` change runs [`commands::build::run`] with the changed
+    /// file. When `--exec <CMD>` is set, the command runs after each
+    /// rebuild (e.g. `--exec "buff test"` or `--exec "./serve.sh"`);
+    /// CMD is interpreted via `sh -c` on Unix + `cmd /c` on Windows.
+    ///
+    /// Loop until Ctrl-C / SIGINT. **T64 SIMPLIFIED SCOPE**: this
+    /// commit ships the standalone file-watcher + rebuild loop only.
+    /// Server route hot-swap (the original T64 spec) is deferred to a
+    /// later commit — `buff watch` does NOT touch `buff-web`.
+    Watch {
+        /// File or directory to watch (recursive). Default: current
+        /// working directory. A single `.buff` file is also accepted
+        /// (the watcher then observes its containing directory so
+        /// sibling module edits also trigger rebuilds).
+        #[arg(value_name = "PATH", default_value = ".")]
+        path: PathBuf,
+
+        /// Optional command to run after each successful rebuild. The
+        /// command runs via `sh -c <CMD>` on Unix + `cmd /c <CMD>` on
+        /// Windows. Failures are surfaced as stderr notes but do NOT
+        /// exit the watch loop (you typically want to keep iterating
+        /// even when the post-build hook fails).
+        #[arg(long, value_name = "CMD")]
+        exec: Option<String>,
+    },
 }
 
 /// Subcommands of `buff refactor` (T66).

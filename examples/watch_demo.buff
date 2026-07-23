@@ -1,0 +1,21 @@
+// T64 — `buff watch` demo.
+// Watch + rebuild:
+//   buff watch examples/watch_demo.buff
+//
+// Edit this file (e.g. change the message or the multiplier) and save.
+// `buff watch` debounces saves by 500ms, then re-runs `buff build`
+// automatically. Each rebuild prints a `Built <exe>` line + a
+// timestamp to stderr.
+//
+// To also run the rebuilt binary on every save, combine with `--exec`:
+//   buff watch examples/watch_demo.buff --exec "./watch_demo"
+//
+// The watch loop runs until Ctrl-C / SIGINT. Build failures do NOT
+// exit the loop — fix + save to retry.
+
+func square(n: Int) -> Int:
+    return n * n
+
+func main():
+    print("buff watch demo")
+    print(square(12))

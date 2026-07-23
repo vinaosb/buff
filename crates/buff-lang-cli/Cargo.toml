@@ -105,7 +105,8 @@ buff-jupyter.workspace = true
 #
 # `notify` is the file watcher. We pin to major 6 (workspace pin) for
 # the reasons documented at the workspace dep declaration. Pure-Rust,
-# no native C dep.
+# no native C dep. T131 (dev server) + T64 (`buff watch` standalone
+# subcommand) both consume the same `RecommendedWatcher` surface.
 #
 # `tower` is needed for the `ServiceExt` trait used in the dev-server
 # unit tests (`tower::ServiceExt::oneshot` to drive the `Router`

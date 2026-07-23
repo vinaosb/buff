@@ -329,7 +329,7 @@ v1.20.0 (Developer Experience — 7 tasks):
 ├── T61: Cold-start benchmarks [quick] ✅
 ├── T62: PGO support           [quick] ✅
 ├── T63: Error quality         (needs T24) [unspecified-high] ✅
-├── T64: Hot reload            (needs T16+T17) [unspecified-high]
+├── T64: Hot reload            (needs T16+T17) [unspecified-high] ✅
 ├── T65: AI integration        [unspecified-high] ✅
 ├── T66: Refactoring tools     (needs T24) [unspecified-high] ✅
 └── T67: Docs site             [unspecified-high] ✅

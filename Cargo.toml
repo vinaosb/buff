@@ -509,7 +509,7 @@ dioxus-ssr = "0.7"
 # tutorial runner) resolves to the same in-tree version during the v1.x
 # tooling wave.
 buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }
-# T131: `buff ui dev` cross-platform file watcher. We pin `notify` to
+# T131 + T64: cross-platform file watcher. We pin `notify` to
 # major 6 (released 2023 — the long-standing surface). notify 6 ships
 # the stable `RecommendedWatcher` + `Watcher` trait + `EventKind` enum
 # that the dev server consumes; 7.x (2024) and 8.x (2025) ship nearly
@@ -522,6 +522,8 @@ buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }
 # in-tree via a tokio::time::sleep buffer (see
 # `crates/buff-lang-cli/src/ui_dev/watcher.rs`), so we do NOT pull
 # `notify-debouncer-mini` — keeping the dep surface minimal.
+# T64: `buff watch <PATH>` reuses the same pin for the standalone
+# file-watcher subcommand (debounced 500ms via std::time::Instant).
 notify = "6"
 # T30: `figment` 0.10 — the canonical pure-Rust layered config crate
 # (the de-facto Rust ecosystem default for config with layered
