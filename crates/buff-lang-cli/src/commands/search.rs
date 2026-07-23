@@ -58,10 +58,7 @@ pub fn render_search_results(results: &[SearchResult], query: &str) -> String {
     let mut out = String::new();
     for row in results {
         let badges = format_badges_inline(&row.badges);
-        out.push_str(&format!(
-            "{badges}{} {}\n",
-            row.name, row.latest_version
-        ));
+        out.push_str(&format!("{badges}{} {}\n", row.name, row.latest_version));
     }
     out
 }

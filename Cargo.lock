@@ -1142,6 +1142,7 @@ dependencies = [
  "buff-lang-lexer",
  "buff-lang-parser",
  "buff-lang-types",
+ "buff-plugins",
  "buff-registry",
  "buff-repl",
  "buff-ui-dioxus",
@@ -1294,6 +1295,7 @@ dependencies = [
  "buff-lang-lexer",
  "buff-lang-parser",
  "buff-lang-types",
+ "buff-plugins",
  "crossbeam-channel",
  "insta",
  "lsp-server",
@@ -1361,6 +1363,20 @@ dependencies = [
  "console_error_panic_hook",
  "serde_json",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "buff-plugins"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "insta",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]

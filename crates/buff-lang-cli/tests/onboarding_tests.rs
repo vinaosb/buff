@@ -47,12 +47,7 @@ const REQUIRED_FILES: &[&str] = &[
 
 /// The four backgrounds T69 covers. Used to validate the landing
 /// page links and to keep test #4 in sync with the spec.
-const BACKGROUNDS: &[&str] = &[
-    "python",
-    "rust",
-    "go",
-    "javascript",
-];
+const BACKGROUNDS: &[&str] = &["python", "rust", "go", "javascript"];
 
 /// A Zola frontmatter block starts at byte 0 with `+++\n` and ends
 /// with the next line that is exactly `+++`. Returns `true` iff such
@@ -94,9 +89,8 @@ fn all_required_onboarding_files_exist() {
         // The T69 LOC budget is <=2500 across all four guides + index.
         // We assert a generous lower bound per guide (~150 lines)
         // to catch a half-written guide that snuck through.
-        let content = fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("failed to read {}: {e}", path.display())
-        });
+        let content = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
         let line_count = content.lines().count();
         let min_lines = if rel == &"_index.md" { 50 } else { 150 };
         assert!(
@@ -181,9 +175,34 @@ fn every_guide_covers_syntax_tooling_and_ecosystem() {
     // required sections fails loudly.
     let required_topics: &[(&str, &[&str])] = &[
         // (topic_name, keywords — at least ONE must appear)
-        ("syntax mapping", &["syntax mapping", "syntax", "| python |", "| go |", "| rust |", "| javascript |", "mapping table"]),
-        ("tooling migration", &["tooling", "buff add", "buff build", "buff run", "buff fmt", "buff check", "buff test"]),
-        ("ecosystem mapping", &["ecosystem", "prelude", "buff-", "registry", "framework"]),
+        (
+            "syntax mapping",
+            &[
+                "syntax mapping",
+                "syntax",
+                "| python |",
+                "| go |",
+                "| rust |",
+                "| javascript |",
+                "mapping table",
+            ],
+        ),
+        (
+            "tooling migration",
+            &[
+                "tooling",
+                "buff add",
+                "buff build",
+                "buff run",
+                "buff fmt",
+                "buff check",
+                "buff test",
+            ],
+        ),
+        (
+            "ecosystem mapping",
+            &["ecosystem", "prelude", "buff-", "registry", "framework"],
+        ),
     ];
 
     let mut failures: Vec<String> = Vec::new();
@@ -287,9 +306,7 @@ fn landing_page_links_to_all_four_guides() {
         mentions(&content, "Buff"),
         "landing page does not mention 'Buff' in body text"
     );
-    let mentions_any_bg = BACKGROUNDS
-        .iter()
-        .any(|bg| mentions(&content, bg));
+    let mentions_any_bg = BACKGROUNDS.iter().any(|bg| mentions(&content, bg));
     assert!(
         mentions_any_bg,
         "landing page does not mention any of the four backgrounds ({:?}) \

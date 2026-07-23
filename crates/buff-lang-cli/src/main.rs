@@ -132,9 +132,7 @@ fn main() -> Result<()> {
         Command::Install { name } => buff_lang_cli::commands::install::run(&name).map(|_| ()),
         Command::Deps { why } => buff_lang_cli::commands::deps::run(why.as_deref()),
         Command::Outdated => buff_lang_cli::commands::outdated::run(),
-        Command::Search { query } => {
-            buff_lang_cli::commands::search::run(query.as_deref())
-        }
+        Command::Search { query } => buff_lang_cli::commands::search::run(query.as_deref()),
         Command::Ai { cmd } => {
             use buff_lang_cli::check::CheckOutcome;
             let outcome = buff_lang_cli::commands::ai::run(cmd)?;

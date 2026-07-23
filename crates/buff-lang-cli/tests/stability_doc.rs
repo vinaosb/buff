@@ -49,9 +49,8 @@ fn stability_promise_decision_doc_exists_and_is_nonempty() {
         path.display()
     );
 
-    let content = fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!("failed to read {}: {e}", path.display())
-    });
+    let content = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
     // The T71 LOC budget is <=1000 lines for the document. We assert a
     // generous lower bound (a real stability contract is not a one-liner)
