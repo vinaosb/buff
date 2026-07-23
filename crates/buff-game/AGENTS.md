@@ -89,7 +89,7 @@ Per `crates/buff-lang-ffi-guide/GUIDE.md`:
 
 CI runs `cargo test -p buff-game` on all 3 OSes. On Windows MSVC hosts, the `ahash` build-script linker issue (missing `msvcrt.lib`) blocks test linking — use `cargo check -p buff-game --all-targets` to verify the test code type-checks.
 
-## PUBLIC API SURFACE (~32 public functions, 40-fn cap)
+## PUBLIC API SURFACE (40 public functions, 40-fn cap — at limit)
 
 **Game (14):** `new`, `add_scene`, `run`, `quit`, `step`, `is_running`, `elapsed`, `scene_count`, `world`, `world_mut`, `input`, `input_mut`, `renderer_mut`, `config`
 
@@ -109,8 +109,6 @@ CI runs `cargo test -p buff-game` on all 3 OSes. On Windows MSVC hosts, the `aha
 
 **Texture (2):** `width`, `height`
 
-**AudioBuffer (7):** `samples`, `sample_rate`, `channels`, `frames`, `duration_secs`, `amplify`, `default`
-
 **Key (1):** `from_str` (FromStr impl)
 
-Total: **~48 public functions** — slightly over the 40-fn cap. AudioBuffer methods are inherent methods on a public struct, adding ~7. This needs T16 spec amendment or the AudioBuffer should be made `pub(crate)`.
+Total: **40 public functions** — exactly at the T16 40-fn cap. AudioBuffer is `pub(crate)` (not re-exported), so its methods do not count toward the public surface.

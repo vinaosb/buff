@@ -63,7 +63,7 @@
 //! | [`Texture`] | `width`, `height` |
 //! | [`Key`] | `from_str` (FromStr impl) |
 //!
-//! Total: ~32 public functions — well within the T16 40-fn cap.
+//! Total: 40 public functions — exactly at the T16 40-fn cap.
 //!
 //! # Panic-free contract
 //!
