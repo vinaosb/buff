@@ -106,6 +106,10 @@ pub fn publish_project(
         version: version.to_string(),
         deps,
         tarball_b64: base64::engine::general_purpose::STANDARD.encode(&tarball),
+        // T70: quality attachments default to None — a future `buff
+        // publish --coverage <report>` flag can populate these.
+        tested_coverage: None,
+        documented_coverage: None,
     };
 
     eprintln!("Uploading {name}@{version} to {base_url}");

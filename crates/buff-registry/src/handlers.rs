@@ -15,6 +15,7 @@
 //! 6. Render response JSON.
 
 use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -23,11 +24,13 @@ use axum::response::IntoResponse;
 use axum::Json;
 use base64::Engine as _;
 use semver::{Version, VersionReq};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{RegistryError, StorageError};
+use crate::quality::{compute_badges, Package, QualityBadges};
 use crate::storage::{
-    DepSpec, PublishRequest, PublishResponse, ResolveResponse, VERSION_EXISTS_MARKER,
+    DepSpec, PackageSummary, PublishRequest, PublishResponse, QualityAttachment, ResolveResponse,
+    VERSION_EXISTS_MARKER,
 };
 use crate::{validate_name, AppState};
 
@@ -39,6 +42,29 @@ const BEARER_PREFIX: &str = "Bearer ";
 pub(crate) struct ResolveParams {
     /// A Cargo-style semver requirement (`^1.0.0`, `>=2.0.0`, `*`, etc.).
     pub(crate) req: String,
+}
+
+/// Query-string parameters for the T70 search endpoint.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SearchParams {
+    /// The search query (case-insensitive substring match against
+    /// package names). When empty, all packages are returned.
+    pub(crate) q: Option<String>,
+}
+
+/// T70: One row of the `GET /api/v1/search` response body.
+///
+/// Carries the package name + latest version + the pre-computed
+/// [`QualityBadges`]. The CLI renders this as:
+/// `[verified] [maintained] [tested 85%] [documented 72%] <name> <ver>`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SearchResultRow {
+    /// The package name.
+    pub name: String,
+    /// The latest published version (canonical semver string).
+    pub latest_version: String,
+    /// The computed quality badges.
+    pub badges: QualityBadges,
 }
 
 /// `POST /api/v1/publish`.
@@ -87,12 +113,36 @@ pub(crate) async fn publish(
         return Err(RegistryError::CycleDetected);
     }
 
-    // --- 7. Store ----------------------------------------------------------
+    // --- 7. Build T70 quality attachment + publish timestamp ----------------
+    // The publish timestamp is unix-seconds (NOT Instant — we need
+    // wall-clock time for the "maintained" badge, which compares across
+    // server restarts). `duration_since(UNIX_EPOCH)` fails only on
+    // pre-epoch clocks (never in practice); the fallback is `None`,
+    // which means "maintained" defaults to false for that entry.
+    let published_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .ok();
+    let quality = QualityAttachment {
+        tested_coverage: request.tested_coverage,
+        documented_coverage: request.documented_coverage,
+        security_audit: None,
+    };
+    // The author is the bearer token — the "who published this" signal
+    // the verified-publisher badge checks against the verified-author set.
+    let author = Some(token.to_string());
+
+    // --- 8. Store ----------------------------------------------------------
     let deps = request.deps.clone();
-    let put_result =
-        state
-            .storage
-            .put_version(&request.name, version.clone(), request.deps, tarball);
+    let put_result = state.storage.put_version(
+        &request.name,
+        version.clone(),
+        request.deps,
+        tarball,
+        author,
+        published_at,
+        quality,
+    );
     match put_result {
         Ok(()) => (),
         Err(StorageError::Failure(msg)) if msg == VERSION_EXISTS_MARKER => {
@@ -182,6 +232,87 @@ pub(crate) async fn resolve(
     }))
 }
 
+/// T70: `GET /api/v1/packages/{name}/badges`.
+///
+/// Returns the computed [`QualityBadges`] for `name`. Anonymous (no
+/// auth). `404 Not Found` if the package has no published versions.
+///
+/// Badge computation reads the LATEST published version's metadata
+/// (author, publish timestamp, attached coverage / doc / audit data)
+/// and resolves `verified_publisher` against the storage's
+/// verified-author set.
+pub(crate) async fn get_badges(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, RegistryError> {
+    let summary = latest_summary(&state, &name)?.ok_or(RegistryError::NotFound)?;
+    let badges = compute_from_summary(&state, &summary)?;
+    Ok(Json(badges))
+}
+
+/// T70: `GET /api/v1/search?q=<query>`.
+///
+/// Returns every published package whose name contains `q`
+/// (case-insensitive substring). When `q` is empty or absent, all
+/// packages are returned. Each row carries the computed
+/// [`QualityBadges`] so the CLI can render badges inline.
+pub(crate) async fn search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchParams>,
+) -> Result<impl IntoResponse, RegistryError> {
+    let q = params.q.as_deref().unwrap_or("").to_ascii_lowercase();
+    let summaries = state.storage.list_packages()?;
+    let mut rows: Vec<SearchResultRow> = Vec::with_capacity(summaries.len());
+    for summary in summaries {
+        if !q.is_empty() && !summary.name.to_ascii_lowercase().contains(&q) {
+            continue;
+        }
+        let badges = compute_from_summary(&state, &summary)?;
+        rows.push(SearchResultRow {
+            name: summary.name,
+            latest_version: summary.latest_version,
+            badges,
+        });
+    }
+    Ok(Json(rows))
+}
+
+/// Build a [`Package`] view from a [`PackageSummary`] + resolve
+/// `verified_publisher` against the storage's verified-author set,
+/// then compute badges relative to `SystemTime::now()`.
+///
+/// Extracted so both [`get_badges`] and [`search`] share the same
+/// computation path (no drift between the two endpoints).
+fn compute_from_summary(
+    state: &AppState,
+    summary: &PackageSummary,
+) -> Result<QualityBadges, RegistryError> {
+    let verified_publisher = match &summary.author {
+        Some(author) => state.storage.is_verified_author(author)?,
+        None => false,
+    };
+    let last_published_at = summary.last_published_at.and_then(|secs| {
+        SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(secs))
+    });
+    let package = Package {
+        name: summary.name.clone(),
+        verified_publisher,
+        last_published_at,
+        tested_coverage: summary.quality.tested_coverage,
+        documented_coverage: summary.quality.documented_coverage,
+        security_audit: summary.quality.security_audit.clone(),
+    };
+    Ok(compute_badges(&package, SystemTime::now()))
+}
+
+/// Fetch the [`PackageSummary`] for `name` (latest version only).
+///
+/// Returns `Ok(None)` when the package has no published versions.
+fn latest_summary(state: &AppState, name: &str) -> Result<Option<PackageSummary>, RegistryError> {
+    let summaries = state.storage.list_packages()?;
+    Ok(summaries.into_iter().find(|s| s.name == name))
+}
+
 /// Extract the bearer token from an `Authorization` header.
 ///
 /// Returns `Some(token)` iff the header is present and starts with
@@ -244,7 +375,7 @@ fn has_cycle(
 mod tests {
     use super::*;
     use crate::storage::DepSpec;
-    use crate::storage::Storage;
+    use crate::storage::{QualityAttachment, Storage};
     use crate::InMemoryStorage;
 
     fn dep(name: &str) -> DepSpec {
@@ -288,6 +419,9 @@ mod tests {
                 Version::parse("1.0.0").expect("version"),
                 vec![dep("b")],
                 Vec::new(),
+                None,
+                None,
+                QualityAttachment::default(),
             )
             .expect("put a");
         let cyclic = has_cycle(&storage, "b", &[dep("a")]).expect("storage ok");

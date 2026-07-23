@@ -3617,7 +3617,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **What**: Create tailored guides: "Buff for Python developers" (show async without await, type hints comparison, DataFrame vs pandas), "Buff for Rust developers" (show borrow-checker-free code, extern FFI, trait system), "Buff for Go developers" (spawn vs goroutines, Channel vs channels, interfaces vs traits), "Buff for JavaScript developers" (async model, callback patterns, web frameworks).
   **LOC budget**: ≤2500 (content). **Deps**: T67 (docs site). **Acceptance**: 4 guides published. Each covers syntax, tooling, ecosystem mapping. Code examples compile. 4 tests.
 
-- [ ] 70. Package Quality Signals
+- [x] 70. Package Quality Signals
   **What**: Extend registry (v1.6 buff-registry) with quality badges beyond T0 stability: "verified publisher" (authenticated author), "maintained" (commits in 6 months), "tested" (coverage %), "documented" (doc comment coverage). Surface in `buff search` results and registry web UI.
   **LOC budget**: ≤2000. **Deps**: T0, T26 (buff-audit for security badge). **Acceptance**: Badges computed per package. Search results show badges. 4 badge types implemented. 10 tests.
 

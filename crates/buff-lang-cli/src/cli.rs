@@ -513,6 +513,26 @@ pub enum Command {
     /// rather than aborting the whole report.
     Outdated,
 
+    /// `buff search [QUERY]` — search the buff registry (T70).
+    ///
+    /// Calls `GET /api/v1/search?q=<QUERY>` on the buff registry
+    /// (`$BUFF_REGISTRY_URL`, default `http://127.0.0.1:7878`) and
+    /// prints each result with quality badges inline:
+    ///
+    /// ```text
+    /// [verified] [maintained] [tested 85%] [documented 72%] buff-dataframe 1.0.0
+    /// ```
+    ///
+    /// When `<QUERY>` is omitted, all published packages are listed.
+    /// The query is a case-insensitive substring match against
+    /// package names (mirrors `cargo search`).
+    Search {
+        /// The search query (case-insensitive substring). Omit to
+        /// list all published packages.
+        #[arg(value_name = "QUERY")]
+        query: Option<String>,
+    },
+
     /// `buff ai` — AI assistant integration (T65).
     ///
     /// Generates an "AI context pack" describing the Buff language + the

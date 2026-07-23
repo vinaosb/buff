@@ -30,6 +30,7 @@ pub mod registry;
 pub mod release;
 pub mod repl;
 pub mod run;
+pub mod search;
 pub mod ssr;
 pub mod test;
 pub mod ui_build;

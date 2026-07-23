@@ -37,6 +37,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::error::StorageError;
+use crate::quality::AuditResult;
 
 /// A single dependency edge declared by a published package version.
 ///
@@ -55,16 +56,32 @@ pub struct DepSpec {
 /// Metadata for one published version of a package, returned by
 /// [`Storage::get_package`] and serialized as JSON in the
 /// `GET /api/v1/package/<name>` response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Eq` is intentionally NOT derived: `SystemTime` (in
+/// [`VersionInfo::published_at`]) implements `PartialEq` but not `Eq`
+/// (different monotonic clocks are not totally ordered). The DTO is
+/// never used as a `BTreeMap`/`HashSet` key, so dropping `Eq` has no
+/// downstream impact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VersionInfo {
     /// The version string (canonical form from `Version::to_string`).
     pub version: String,
     /// The version's declared dependencies.
     pub deps: Vec<DepSpec>,
+    /// T70: Wall-clock publish time (unix seconds since `UNIX_EPOCH`),
+    /// or `None` for legacy entries published before the quality-signals
+    /// extension. Surfaced for the "maintained" badge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<u64>,
+    /// T70: The author (publish token) that published this version,
+    /// or `None` for legacy entries. Surfaced for the "verified
+    /// publisher" badge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 /// Full package metadata returned by `GET /api/v1/package/<name>`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackageMetadata {
     /// The package name.
     pub name: String,
@@ -73,10 +90,39 @@ pub struct PackageMetadata {
 }
 
 /// Internal record for one stored `(name, version)` pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PackageVersion {
     pub(crate) deps: Vec<DepSpec>,
     pub(crate) tarball: Vec<u8>,
+    /// T70: Wall-clock publish time (unix seconds since `UNIX_EPOCH`).
+    pub(crate) published_at: Option<u64>,
+    /// T70: The author (publish token) that published this version.
+    pub(crate) author: Option<String>,
+    /// T70: Attached quality signals (coverage / doc / audit).
+    pub(crate) quality: QualityAttachment,
+}
+
+/// T70: Quality signals a publisher attaches at publish time. Stored
+/// alongside the tarball + deps and surfaced in badge computation.
+///
+/// All fields are `Option` — a publisher that attaches no coverage
+/// report publishes with [`QualityAttachment::default`] (all `None`),
+/// and the package's `tested` / `documented` badges are `None`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct QualityAttachment {
+    /// Test coverage percentage (`0.0..=100.0`) from a
+    /// `cargo llvm-cov` / `cargo-tarpaulin` report. `None` when the
+    /// publisher attached no report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tested_coverage: Option<f32>,
+    /// Doc-comment coverage percentage (`0.0..=100.0`). `None` when
+    /// unmeasured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documented_coverage: Option<f32>,
+    /// Result of a T26 `buff-audit` scan. `None` until a scan is run
+    /// (the registry does NOT auto-scan in the MVP).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub security_audit: Option<AuditResult>,
 }
 
 /// The wire-format body of `POST /api/v1/publish`.
@@ -84,7 +130,11 @@ pub(crate) struct PackageVersion {
 /// `tarball_b64` is the raw tarball bytes base64-encoded so the entire
 /// publish request is a single JSON object (no multipart parsing, no
 /// binary body ordering issues). Decoded by the handler before storage.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// T70: `tested_coverage` / `documented_coverage` are optional quality
+/// attachments the publisher sends to populate the package's badges.
+/// Omit them (or send `null`) for a package with no coverage data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublishRequest {
     /// The package name (validated by the handler before storage).
     pub name: String,
@@ -94,6 +144,14 @@ pub struct PublishRequest {
     pub deps: Vec<DepSpec>,
     /// Base64-encoded tarball bytes.
     pub tarball_b64: String,
+    /// T70: Optional test coverage % (`0.0..=100.0`) from a coverage
+    /// report. Populates [`QualityBadges::tested`]. Defaults to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tested_coverage: Option<f32>,
+    /// T70: Optional doc-comment coverage % (`0.0..=100.0`).
+    /// Populates [`QualityBadges::documented`]. Defaults to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub documented_coverage: Option<f32>,
 }
 
 /// Response body for `POST /api/v1/publish` (201 Created).
@@ -116,6 +174,46 @@ pub struct ResolveResponse {
     pub version: String,
 }
 
+/// T70: A search-result row returned by `GET /api/v1/search?q=...`.
+///
+/// Aggregates the package name + latest version + the quality data
+/// needed for badge computation (the handler calls
+/// [`crate::quality::compute_badges`] on this to populate the
+/// `badges` field in the JSON response).
+///
+/// `Eq` is intentionally NOT derived (mirrors [`VersionInfo`] — the
+/// `quality` field carries `Option` types that are fine for `PartialEq`
+/// but the struct is never keyed in a map).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackageSummary {
+    /// The package name.
+    pub name: String,
+    /// The latest published version (canonical semver string).
+    pub latest_version: String,
+    /// The author of the latest version, or `None` for legacy entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Wall-clock publish time of the latest version (unix seconds),
+    /// or `None` for legacy entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_published_at: Option<u64>,
+    /// Attached quality signals from the latest version.
+    #[serde(default, skip_serializing_if = "QualityAttachment::is_empty")]
+    pub quality: QualityAttachment,
+}
+
+impl QualityAttachment {
+    /// `true` when all fields are `None` (no quality data attached).
+    /// Used by serde `skip_serializing_if` to omit the `quality` field
+    /// entirely for packages with no attachments.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tested_coverage.is_none()
+            && self.documented_coverage.is_none()
+            && self.security_audit.is_none()
+    }
+}
+
 /// Persistence abstraction for the registry.
 ///
 /// Implementations must be `Send + Sync` so they can be shared across
@@ -134,12 +232,21 @@ pub trait Storage: Send + Sync {
     ///
     /// Cycle detection and rate limiting are NOT done here — they live
     /// in the handler so the storage trait stays persistence-only.
+    ///
+    /// T70: `author` is the publish token (resolved by the handler from
+    /// the `Authorization` header); `published_at` is the wall-clock
+    /// publish time (unix seconds, set by the handler); `quality`
+    /// carries the publisher's optional coverage / doc / audit
+    /// attachments.
     fn put_version(
         &self,
         name: &str,
         version: Version,
         deps: Vec<DepSpec>,
         tarball: Vec<u8>,
+        author: Option<String>,
+        published_at: Option<u64>,
+        quality: QualityAttachment,
     ) -> Result<(), StorageError>;
 
     /// Fetch full metadata for `name`, or `Ok(None)` if the package has
@@ -181,6 +288,19 @@ pub trait Storage: Send + Sync {
         window: Duration,
         max: usize,
     ) -> Result<bool, StorageError>;
+
+    /// T70: List every published package as a [`PackageSummary`] row
+    /// (name + latest version + quality data). Used by the search
+    /// endpoint to render results with badges.
+    ///
+    /// Returns an empty `Vec` when no packages are published.
+    fn list_packages(&self) -> Result<Vec<PackageSummary>, StorageError>;
+
+    /// T70: Return `true` iff `author` is in the registry's
+    /// verified-author set. MVP: mock — the in-memory backend exposes
+    /// [`InMemoryStorage::add_verified_author`] for tests / local dev.
+    /// Future: GitHub OAuth verified-email check.
+    fn is_verified_author(&self, author: &str) -> Result<bool, StorageError>;
 }
 
 /// Pure-Rust in-memory backend for the Buff registry.
@@ -209,6 +329,8 @@ struct Inner {
     tokens: BTreeSet<String>,
     /// token -> recent publish timestamps (rolling window).
     rate: BTreeMap<String, Vec<Instant>>,
+    /// T70: verified-author set (mock — populated via `add_verified_author`).
+    verified_authors: BTreeSet<String>,
 }
 
 impl std::fmt::Debug for Inner {
@@ -220,6 +342,7 @@ impl std::fmt::Debug for Inner {
             .field("packages", &self.packages)
             .field("tokens", &self.tokens)
             .field("rate_tokens", &self.rate.keys().collect::<Vec<&String>>())
+            .field("verified_authors", &self.verified_authors)
             .finish()
     }
 }
@@ -247,6 +370,19 @@ impl InMemoryStorage {
             inner.tokens.insert(token.to_string());
         }
     }
+
+    /// T70: Register a verified author (mock — real verification via
+    /// GitHub OAuth verified-email is deferred). Idempotent.
+    ///
+    /// Once an author is in this set, every package whose latest
+    /// version was published by that author (token) gets the
+    /// `verified_publisher` badge. The check is consulted via
+    /// [`Storage::is_verified_author`].
+    pub fn add_verified_author(&self, author: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.verified_authors.insert(author.to_string());
+        }
+    }
 }
 
 impl Storage for InMemoryStorage {
@@ -256,6 +392,9 @@ impl Storage for InMemoryStorage {
         version: Version,
         deps: Vec<DepSpec>,
         tarball: Vec<u8>,
+        author: Option<String>,
+        published_at: Option<u64>,
+        quality: QualityAttachment,
     ) -> Result<(), StorageError> {
         let mut inner = self
             .inner
@@ -265,7 +404,16 @@ impl Storage for InMemoryStorage {
         if by_version.contains_key(&version) {
             return Err(StorageError::Failure(VERSION_EXISTS_MARKER.to_string()));
         }
-        by_version.insert(version, PackageVersion { deps, tarball });
+        by_version.insert(
+            version,
+            PackageVersion {
+                deps,
+                tarball,
+                published_at,
+                author,
+                quality,
+            },
+        );
         Ok(())
     }
 
@@ -285,6 +433,8 @@ impl Storage for InMemoryStorage {
             .map(|(v, pv)| VersionInfo {
                 version: v.to_string(),
                 deps: pv.deps.clone(),
+                published_at: pv.published_at,
+                author: pv.author.clone(),
             })
             .collect();
         Ok(Some(PackageMetadata {
@@ -348,6 +498,36 @@ impl Storage for InMemoryStorage {
         }
         timestamps.push(now);
         Ok(true)
+    }
+
+    fn list_packages(&self) -> Result<Vec<PackageSummary>, StorageError> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|e| StorageError::Failure(format!("mutex poisoned: {e}")))?;
+        Ok(inner
+            .packages
+            .iter()
+            .filter_map(|(name, by_version)| {
+                // Pick the latest version (BTreeMap ascending → last entry).
+                let (latest_v, latest_pv) = by_version.iter().next_back()?;
+                Some(PackageSummary {
+                    name: name.clone(),
+                    latest_version: latest_v.to_string(),
+                    author: latest_pv.author.clone(),
+                    last_published_at: latest_pv.published_at,
+                    quality: latest_pv.quality.clone(),
+                })
+            })
+            .collect())
+    }
+
+    fn is_verified_author(&self, author: &str) -> Result<bool, StorageError> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|e| StorageError::Failure(format!("mutex poisoned: {e}")))?;
+        Ok(inner.verified_authors.contains(author))
     }
 }
 

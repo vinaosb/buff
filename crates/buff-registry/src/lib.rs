@@ -34,6 +34,8 @@
 //! | GET    | `/api/v1/package/{name}`              | no   | —                  | `200` ([`PackageMetadata`]) or `404` |
 //! | GET    | `/api/v1/download/{name}/{version}`   | no   | —                  | `200` octet-stream or `404`          |
 //! | GET    | `/api/v1/resolve/{name}?req=<semver>` | no   | —                  | `200` ([`ResolveResponse`]) or `404` |
+//! | GET    | `/api/v1/packages/{name}/badges`      | no   | —                  | `200` ([`QualityBadges`]) or `404` (T70) |
+//! | GET    | `/api/v1/search?q=<query>`            | no   | —                  | `200` `Vec<SearchResultRow>` (T70)   |
 //!
 //! # DEFERRED (post-v1.6)
 //!
@@ -85,6 +87,7 @@
 
 mod error;
 mod handlers;
+mod quality;
 mod storage;
 
 use std::sync::Arc;
@@ -94,9 +97,10 @@ use axum::routing::{get, post};
 use axum::Router;
 
 pub use error::{RegistryError, StorageError};
+pub use quality::{compute_badges, AuditResult, Package, QualityBadges, MAINTAINED_WINDOW};
 pub use storage::{
-    DepSpec, InMemoryStorage, PackageMetadata, PublishRequest, PublishResponse, ResolveResponse,
-    Storage, StorageResult, VersionInfo,
+    DepSpec, InMemoryStorage, PackageMetadata, PackageSummary, PublishRequest, PublishResponse,
+    QualityAttachment, ResolveResponse, Storage, StorageResult, VersionInfo,
 };
 
 /// The default bind address when `BUFF_REGISTRY_ADDR` is unset.
@@ -165,6 +169,11 @@ pub fn app(state: AppState) -> Router {
         .route("/api/v1/package/{name}", get(handlers::get_package))
         .route("/api/v1/download/{name}/{version}", get(handlers::download))
         .route("/api/v1/resolve/{name}", get(handlers::resolve))
+        .route(
+            "/api/v1/packages/{name}/badges",
+            get(handlers::get_badges),
+        )
+        .route("/api/v1/search", get(handlers::search))
         .with_state(state)
 }
 

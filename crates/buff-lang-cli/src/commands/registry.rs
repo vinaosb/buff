@@ -111,7 +111,7 @@ pub struct DepSpec {
 /// On-the-wire shape of `POST /api/v1/publish` (request body).
 ///
 /// Mirrors [`buff_registry::PublishRequest`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublishRequest {
     /// The package name.
     pub name: String,
@@ -121,6 +121,12 @@ pub struct PublishRequest {
     pub deps: Vec<DepSpec>,
     /// Base64-encoded tarball bytes.
     pub tarball_b64: String,
+    /// T70: Optional test coverage % attached at publish time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tested_coverage: Option<f32>,
+    /// T70: Optional doc-comment coverage % attached at publish time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub documented_coverage: Option<f32>,
 }
 
 /// On-the-wire shape of the `POST /api/v1/publish` 201 response.
@@ -330,6 +336,69 @@ pub fn publish_package(
     decode_response(response)
 }
 
+/// T70: On-the-wire shape of `GET /api/v1/packages/<name>/badges`.
+///
+/// Mirrors [`buff_registry::QualityBadges`] (locally redefined so the
+/// CLI does NOT depend on `buff-registry` at runtime — same rationale
+/// as [`ResolveResponse`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QualityBadges {
+    /// `true` when the publishing author is in the verified-author set.
+    pub verified_publisher: bool,
+    /// `true` when the latest version was published within 180 days.
+    pub maintained: bool,
+    /// Test coverage % (`0.0..=100.0`), or `None` when unmeasured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tested: Option<f32>,
+    /// Doc-comment coverage %, or `None` when unmeasured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub documented: Option<f32>,
+}
+
+/// T70: One row of the `GET /api/v1/search?q=...` response.
+///
+/// Mirrors the registry's `SearchResultRow` shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchResult {
+    /// The package name.
+    pub name: String,
+    /// The latest published version (canonical semver string).
+    pub latest_version: String,
+    /// The computed quality badges.
+    pub badges: QualityBadges,
+}
+
+/// T70: GET `/api/v1/packages/<name>/badges` — fetch the quality badges
+/// for `name`. Returns `Err` on connection failure or non-2xx response.
+pub fn fetch_badges(base_url: &str, name: &str) -> Result<QualityBadges> {
+    let client = http_client()?;
+    let url = format!(
+        "{}/api/v1/packages/{}/badges",
+        base_url.trim_end_matches('/'),
+        url_encode(name)
+    );
+    let response = client
+        .get(&url)
+        .send()
+        .with_context(|| format!("failed to GET {url} (registry unavailable?)"))?;
+    decode_response(response)
+}
+
+/// T70: GET `/api/v1/search?q=<query>` — search published packages.
+///
+/// `query` is a case-insensitive substring matched against package
+/// names. An empty `query` returns all packages.
+pub fn search_packages(base_url: &str, query: &str) -> Result<Vec<SearchResult>> {
+    let client = http_client()?;
+    let url = format!("{}/api/v1/search", base_url.trim_end_matches('/'));
+    let response = client
+        .get(&url)
+        .query(&[("q", query)])
+        .send()
+        .with_context(|| format!("failed to GET {url} (registry unavailable?)"))?;
+    decode_response(response)
+}
+
 /// Decode an HTTP response into `T`, surfacing the registry's JSON
 /// `error` field when present (matches the
 /// `{"error": "<message>"}` body shape documented in
@@ -510,6 +579,8 @@ mod tests {
                 req: "^1.0.0".to_string(),
             }],
             tarball_b64: "AAAA".to_string(),
+            tested_coverage: None,
+            documented_coverage: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "demo");
@@ -517,5 +588,10 @@ mod tests {
         assert_eq!(json["tarball_b64"], "AAAA");
         assert_eq!(json["deps"][0]["name"], "other");
         assert_eq!(json["deps"][0]["req"], "^1.0.0");
+        // T70: None quality fields are skipped (skip_serializing_if).
+        assert!(
+            json.get("tested_coverage").is_none(),
+            "None tested_coverage omitted"
+        );
     }
 }
