@@ -101,8 +101,12 @@ pub fn run() -> Result<()> {
     }
 
     let timed: &[Duration] = &all_runs[WARMUP_COUNT..];
+<<<<<<< HEAD
     let stats =
         RunStats::compute(timed).with_context(|| "no timed samples to compute stats from")?;
+=======
+    let stats = RunStats::compute(timed);
+>>>>>>> f50a2afc5e723fca16fa8b4917cfc9a721e92b98
     println!();
     println!(
         "{:<8} {:>10} {:>10} {:>10}",

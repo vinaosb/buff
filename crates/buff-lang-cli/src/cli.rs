@@ -816,6 +816,7 @@ pub enum Command {
     /// - Writes `benchmarks/cold-start.json` (machine-readable).
     /// - Writes/appends `benchmarks/cold-start.md` (human-readable).
     BenchColdStart,
+<<<<<<< HEAD
 }
 
 /// Subcommands of `buff ai` (T65).
@@ -850,6 +851,8 @@ pub enum AiCmd {
         #[arg(value_name = "FILE")]
         file: PathBuf,
     },
+=======
+>>>>>>> f50a2afc5e723fca16fa8b4917cfc9a721e92b98
 }
 
 /// Subcommands of `buff jupyter`.

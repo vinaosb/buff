@@ -1,0 +1,15 @@
+// Buff T65 example — known-valid code for `buff ai verify`.
+//
+// This file is intentionally simple and parses + type-checks cleanly.
+// `buff ai verify examples/ai_verify_valid.buff` MUST return success
+// (exit 0, no diagnostics).
+//
+// The intent is to give AI tools a green-path reference: every
+// construct here is canonical Buff and exercises the prelude.
+
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+func main():
+    let result = add(2, 3)
+    println(result)

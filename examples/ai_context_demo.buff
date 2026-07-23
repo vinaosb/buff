@@ -1,0 +1,38 @@
+// Buff T65 example — AI context pack demo.
+//
+// This is a small, deliberately-illustrative program an AI tool might
+// generate after being shown the output of `buff ai context`. It
+// exercises:
+//
+// - typed function params + return types
+// - the prelude `print` / `read_line` / `Int` / `String` functions
+// - `Option<T>` pattern matching
+// - `Vector<T>` and a `for` loop
+// - a `struct` definition + a constructor using `Type.new` convention
+//
+// Run end-to-end:  buff run examples/ai_context_demo.buff
+// Verify syntax:   buff ai verify examples/ai_context_demo.buff
+
+struct User:
+    name: String
+    age: Int
+
+func User.new(name: String, age: Int) -> User:
+    return User { name: name, age: age }
+
+func greet(user: User) -> String:
+    return "hello " + user.name + " (age " + String(user.age) + ")"
+
+func main():
+    let alice = User.new("Alice", 30)
+    print(greet(alice))
+
+    let numbers: Vector<Int> = [1, 2, 3, 4, 5]
+    let total = sum(numbers)
+    print("sum is " + String(total))
+
+func sum(xs: Vector<Int>) -> Int:
+    var acc = 0
+    for x in xs:
+        acc = acc + x
+    return acc

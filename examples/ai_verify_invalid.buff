@@ -1,0 +1,15 @@
+// Buff T65 example — known-INVALID code for `buff ai verify`.
+//
+// This file deliberately contains a type error so `buff ai verify` can
+// demonstrate its error-catching + AI-hint features:
+//
+//   - `x` is annotated `Int` but assigned a `String` literal.
+//
+// `buff ai verify examples/ai_verify_invalid.buff` MUST exit non-zero
+// and surface at least one Error-severity diagnostic.
+//
+// DO NOT FIX THE TYPE ERROR — it is the entire point of this file.
+
+func main():
+    let x: Int = "not an int"
+    print(x)
