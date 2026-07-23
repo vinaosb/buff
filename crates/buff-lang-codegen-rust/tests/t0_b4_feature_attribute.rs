@@ -74,7 +74,11 @@ fn filter_multiple_features_independent() {
         to_decl(plain_fn("always")),
     ];
     let filtered = filter_by_features(&decls, &["a".to_string(), "c".to_string()]);
-    assert_eq!(filtered.len(), 3, "a_fn + c_fn + always survive; b_fn dropped");
+    assert_eq!(
+        filtered.len(),
+        3,
+        "a_fn + c_fn + always survive; b_fn dropped"
+    );
 }
 
 #[test]
@@ -83,8 +87,8 @@ fn generate_rust_with_features_emits_enabled_only() {
         to_decl(plain_fn("always_emitted")),
         to_decl(feature_fn("only_with_logging", "logging")),
     ];
-    let src = generate_rust_with_features(&decls, &["logging".to_string()])
-        .expect("codegen succeeds");
+    let src =
+        generate_rust_with_features(&decls, &["logging".to_string()]).expect("codegen succeeds");
     assert!(src.contains("fn always_emitted"), "src: {src}");
     assert!(src.contains("fn only_with_logging"), "src: {src}");
 }
@@ -110,8 +114,8 @@ fn generate_rust_with_features_strips_feature_attr() {
     // the dep-resolution layer, not via per-fn attributes). The fn body
     // is emitted clean.
     let decls = vec![to_decl(feature_fn("enabled_fn", "logging"))];
-    let src = generate_rust_with_features(&decls, &["logging".to_string()])
-        .expect("codegen succeeds");
+    let src =
+        generate_rust_with_features(&decls, &["logging".to_string()]).expect("codegen succeeds");
     assert!(src.contains("fn enabled_fn"), "src: {src}");
     assert!(
         !src.contains("#[feature"),

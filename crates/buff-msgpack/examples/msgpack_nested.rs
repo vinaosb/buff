@@ -18,7 +18,10 @@ fn main() {
     println!("Serialized {} bytes", bytes.len());
 
     let decoded = buff_msgpack::deserialize(&bytes).expect("deserialize");
-    println!("Decoded: {}", serde_json::to_string_pretty(&decoded).unwrap());
+    println!(
+        "Decoded: {}",
+        serde_json::to_string_pretty(&decoded).unwrap()
+    );
 
     assert_eq!(value, decoded);
     println!("Nested roundtrip OK!");

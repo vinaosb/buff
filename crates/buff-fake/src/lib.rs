@@ -148,14 +148,14 @@ impl Faker {
         let result = catch_unwind(AssertUnwindSafe(|| match self.locale {
             FakerLocale::EnUs => {
                 use fake::faker::lorem::en::Words;
-                let words: Vec<String> = Words(word_count..=word_count)
-                    .fake_with_rng(&mut self.rng);
+                let words: Vec<String> =
+                    Words(word_count..=word_count).fake_with_rng(&mut self.rng);
                 words.join(" ")
             }
             FakerLocale::PtBr => {
                 use fake::faker::lorem::pt_br::Words;
-                let words: Vec<String> = Words(word_count..=word_count)
-                    .fake_with_rng(&mut self.rng);
+                let words: Vec<String> =
+                    Words(word_count..=word_count).fake_with_rng(&mut self.rng);
                 words.join(" ")
             }
         }));
@@ -191,12 +191,15 @@ impl Faker {
                 ));
             }
             use fake::faker::datetime::en::DateTime;
-            let dt: chrono::DateTime<chrono::Utc> = DateTime()
-                .fake_with_rng(&mut self.rng);
+            let dt: chrono::DateTime<chrono::Utc> = DateTime().fake_with_rng(&mut self.rng);
             // Clamp to the requested range
-            let clamped = if dt < start_dt { start_dt.into() }
-                else if dt > end_dt { end_dt.into() }
-                else { dt };
+            let clamped = if dt < start_dt {
+                start_dt.into()
+            } else if dt > end_dt {
+                end_dt.into()
+            } else {
+                dt
+            };
             Ok(clamped.to_rfc3339())
         }));
         match result {

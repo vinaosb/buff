@@ -27,7 +27,8 @@ impl Greeter for Mock<dyn Greeter> {
 
 fn main() {
     let mock = Mock::<dyn Greeter>::new();
-    mock.expect("greet").returning(ReturnValue::String("hello world".into()));
+    mock.expect("greet")
+        .returning(ReturnValue::String("hello world".into()));
 
     let result = mock.greet("buff".into());
     println!("{result}");

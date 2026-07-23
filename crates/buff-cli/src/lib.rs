@@ -198,9 +198,7 @@ impl App {
     pub fn parse(self, args: Vec<String>) -> Result<ParsedArgs, CliError> {
         let positional_names = self.collect_positional_names();
         let cmd = self.build_command();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            cmd.try_get_matches_from(args)
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| cmd.try_get_matches_from(args)));
         match result {
             Ok(Ok(matches)) => Ok(ParsedArgs {
                 matches,
@@ -221,9 +219,7 @@ impl App {
     pub fn parse_or_exit(self, args: Vec<String>) -> ParsedArgs {
         let positional_names = self.collect_positional_names();
         let cmd = self.build_command();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            cmd.try_get_matches_from(args)
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| cmd.try_get_matches_from(args)));
         match result {
             Ok(Ok(matches)) => ParsedArgs {
                 matches,
@@ -280,9 +276,7 @@ impl App {
             cmd = cmd.arg(arg);
         }
         for (name, desc) in &node.args {
-            let arg = clap::Arg::new(name.clone())
-                .help(desc.clone())
-                .num_args(1);
+            let arg = clap::Arg::new(name.clone()).help(desc.clone()).num_args(1);
             cmd = cmd.arg(arg);
         }
         for sub in &node.subcommands {
@@ -367,9 +361,7 @@ impl ParsedArgs {
     /// names or options that were not provided on the command line.
     pub fn option(&self, name: &str) -> Option<String> {
         if self.matches.try_contains_id(name).unwrap_or(false) {
-            self.matches
-                .get_one::<String>(name)
-                .map(|s| s.to_string())
+            self.matches.get_one::<String>(name).map(|s| s.to_string())
         } else {
             None
         }
@@ -379,9 +371,7 @@ impl ParsedArgs {
     /// Returns `None` for unknown names or unset positionals.
     pub fn arg(&self, name: &str) -> Option<String> {
         if self.matches.try_contains_id(name).unwrap_or(false) {
-            self.matches
-                .get_one::<String>(name)
-                .map(|s| s.to_string())
+            self.matches.get_one::<String>(name).map(|s| s.to_string())
         } else {
             None
         }
@@ -443,7 +433,11 @@ mod tests {
         let app = App::new("tool".to_string())
             .about("does stuff".to_string())
             .version("1.0.0".to_string())
-            .flag("verbose".to_string(), "v".to_string(), "verbose".to_string());
+            .flag(
+                "verbose".to_string(),
+                "v".to_string(),
+                "verbose".to_string(),
+            );
         let node = app.inner.lock().expect("test lock");
         assert_eq!(node.about.as_deref(), Some("does stuff"));
         assert_eq!(node.version.as_deref(), Some("1.0.0"));

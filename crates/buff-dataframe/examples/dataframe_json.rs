@@ -7,9 +7,7 @@ fn main() {
     let df = DataFrame::from_json("examples/dataframe/rows.jsonl").unwrap_or_default();
     println!("Loaded rows: {}", df.len());
 
-    let projected = df
-        .select(&["name", "score"])
-        .unwrap_or_default();
+    let projected = df.select(&["name", "score"]).unwrap_or_default();
     println!("Projected columns:");
     println!("{}", projected.to_table_string());
 

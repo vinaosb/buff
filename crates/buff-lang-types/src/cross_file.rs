@@ -3,9 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use buff_lang_ast::{
-    Decl, EnumDecl, FuncDecl, ImportDecl, StructDecl, TraitDecl, TypeRef,
-};
+use buff_lang_ast::{Decl, EnumDecl, FuncDecl, ImportDecl, StructDecl, TraitDecl, TypeRef};
 
 use crate::project::ParsedProject;
 
@@ -245,13 +243,25 @@ mod tests {
                  export enum Color { Red, Green, Blue }\n\
                  export trait Greetable { fn name() -> String }\n",
             ),
-            ("/main.buff", "import { Point } from \"./defs.buff\"\nfunc main() { return 0 }"),
+            (
+                "/main.buff",
+                "import { Point } from \"./defs.buff\"\nfunc main() { return 0 }",
+            ),
         ]);
         let project = parse_project_with_loader(&p("/main.buff"), &loader).expect("parses");
         let table = CrossFileSymbolTable::from_project(&project);
-        assert_eq!(table.lookup("Point").map(|s| s.kind), Some(SymbolKind::Struct));
-        assert_eq!(table.lookup("Color").map(|s| s.kind), Some(SymbolKind::Enum));
-        assert_eq!(table.lookup("Greetable").map(|s| s.kind), Some(SymbolKind::Trait));
+        assert_eq!(
+            table.lookup("Point").map(|s| s.kind),
+            Some(SymbolKind::Struct)
+        );
+        assert_eq!(
+            table.lookup("Color").map(|s| s.kind),
+            Some(SymbolKind::Enum)
+        );
+        assert_eq!(
+            table.lookup("Greetable").map(|s| s.kind),
+            Some(SymbolKind::Trait)
+        );
     }
 
     #[test]
@@ -271,7 +281,10 @@ mod tests {
             .iter()
             .map(|s| s.name.as_str())
             .collect();
-        assert!(visible.contains(&"greet"), "greet should be visible in main");
+        assert!(
+            visible.contains(&"greet"),
+            "greet should be visible in main"
+        );
     }
 
     #[test]
@@ -307,7 +320,10 @@ mod tests {
                  export func alpha() { return 0 }\n\
                  export func mu() { return 0 }\n",
             ),
-            ("/main.buff", "import { zeta } from \"./defs.buff\"\nfunc main() { return 0 }"),
+            (
+                "/main.buff",
+                "import { zeta } from \"./defs.buff\"\nfunc main() { return 0 }",
+            ),
         ]);
         let project = parse_project_with_loader(&p("/main.buff"), &loader).expect("parses");
         let table = CrossFileSymbolTable::from_project(&project);

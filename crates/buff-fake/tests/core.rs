@@ -121,7 +121,10 @@ fn faker_pt_br_generates_portuguese_names() {
     let name = faker.name();
     assert!(!name.is_empty(), "pt-BR name should not be empty");
     // Portuguese names often have accented characters
-    assert!(name.contains(' ') || name.len() > 3, "pt-BR name should be plausible");
+    assert!(
+        name.contains(' ') || name.len() > 3,
+        "pt-BR name should be plausible"
+    );
 }
 
 #[test]
@@ -129,7 +132,11 @@ fn faker_different_seeds_different_output() {
     let mut faker_a = Faker::with_seed(FakerLocale::EnUs, 1);
     let mut faker_b = Faker::with_seed(FakerLocale::EnUs, 2);
     // Very unlikely that two different seeds produce the same name
-    assert_ne!(faker_a.name(), faker_b.name(), "different seeds should differ");
+    assert_ne!(
+        faker_a.name(),
+        faker_b.name(),
+        "different seeds should differ"
+    );
 }
 
 // ---- Insta snapshots ---------------------------------------------------

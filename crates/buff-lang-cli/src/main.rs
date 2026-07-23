@@ -132,6 +132,14 @@ fn main() -> Result<()> {
         Command::Install { name } => buff_lang_cli::commands::install::run(&name).map(|_| ()),
         Command::Deps { why } => buff_lang_cli::commands::deps::run(why.as_deref()),
         Command::Outdated => buff_lang_cli::commands::outdated::run(),
+        Command::Ai { cmd } => {
+            use buff_lang_cli::check::CheckOutcome;
+            let outcome = buff_lang_cli::commands::ai::run(cmd)?;
+            if matches!(outcome, CheckOutcome::HasErrors) {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Command::Jupyter { cmd } => buff_lang_cli::commands::jupyter::run(cmd),
         Command::Ui { cmd } => buff_lang_cli::commands::ui_dev::run(cmd),
         Command::Ssr {

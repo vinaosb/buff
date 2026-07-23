@@ -17,11 +17,13 @@ fn main() {
     });
     server.mock(|when, then| {
         when.method(httpmock::Method::GET).path("/page1");
-        then.status(200).body("<html><body><h1>Page 1</h1></body></html>");
+        then.status(200)
+            .body("<html><body><h1>Page 1</h1></body></html>");
     });
     server.mock(|when, then| {
         when.method(httpmock::Method::GET).path("/page2");
-        then.status(200).body("<html><body><h1>Page 2</h1></body></html>");
+        then.status(200)
+            .body("<html><body><h1>Page 2</h1></body></html>");
     });
     server.mock(|when, then| {
         when.method(httpmock::Method::GET).path("/robots.txt");

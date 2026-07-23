@@ -34,16 +34,46 @@ fn main() {
     println!("commands: {}", bot.command_count());
 
     let mock_msgs = vec![
-        Message::new("!ping".to_string(), "1".to_string(), "alice".to_string(), Platform::Discord, false),
-        Message::new("hello there".to_string(), "1".to_string(), "bob".to_string(), Platform::Discord, false),
-        Message::new("!ping again".to_string(), "1".to_string(), "alice".to_string(), Platform::Discord, false),
-        Message::new("goodbye".to_string(), "1".to_string(), "charlie".to_string(), Platform::Discord, true),
+        Message::new(
+            "!ping".to_string(),
+            "1".to_string(),
+            "alice".to_string(),
+            Platform::Discord,
+            false,
+        ),
+        Message::new(
+            "hello there".to_string(),
+            "1".to_string(),
+            "bob".to_string(),
+            Platform::Discord,
+            false,
+        ),
+        Message::new(
+            "!ping again".to_string(),
+            "1".to_string(),
+            "alice".to_string(),
+            Platform::Discord,
+            false,
+        ),
+        Message::new(
+            "goodbye".to_string(),
+            "1".to_string(),
+            "charlie".to_string(),
+            Platform::Discord,
+            true,
+        ),
     ];
     for msg in mock_msgs {
         bot.dispatch(msg).expect("dispatch");
     }
 
     println!("\n--- summary ---");
-    println!("ping handler fired: {} times", *ping_count.lock().expect("lock"));
-    println!("on_message fired:   {} times", *other_count.lock().expect("lock"));
+    println!(
+        "ping handler fired: {} times",
+        *ping_count.lock().expect("lock")
+    );
+    println!(
+        "on_message fired:   {} times",
+        *other_count.lock().expect("lock")
+    );
 }

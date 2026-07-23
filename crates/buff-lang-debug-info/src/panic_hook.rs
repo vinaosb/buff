@@ -55,7 +55,9 @@ static BUFF_MAP: OnceLock<Option<SourceMap>> = OnceLock::new();
 /// [`OnceLock`] so repeated calls return cheaply.
 pub fn install_panic_hook() {
     let map_path = resolve_buff_map_path();
-    let map = map_path.as_ref().and_then(|p| format::read_from_file(p).ok());
+    let map = map_path
+        .as_ref()
+        .and_then(|p| format::read_from_file(p).ok());
     let _ = BUFF_MAP.set(map);
     std::panic::set_hook(Box::new(buff_panic_handler));
 }
@@ -111,10 +113,7 @@ fn buff_panic_handler(info: &std::panic::PanicHookInfo<'_>) {
         .name()
         .map(String::from)
         .unwrap_or_else(|| "<unnamed>".to_string());
-    let _ = writeln!(
-        stderr,
-        "thread '{thread_name}' panicked at {payload_str}"
-    );
+    let _ = writeln!(stderr, "thread '{thread_name}' panicked at {payload_str}");
 
     if let (Some(loc), Some(map)) = (location, map) {
         let rust_file = loc.file();
@@ -156,7 +155,10 @@ fn buff_panic_handler(info: &std::panic::PanicHookInfo<'_>) {
         }
     }
 
-    if std::env::var("RUST_BACKTRACE").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("RUST_BACKTRACE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
         let _ = writeln!(stderr, "\nFull Rust backtrace (RUST_BACKTRACE=1):");
         let _ = writeln!(stderr, "{}", std::backtrace::Backtrace::force_capture());
     }
@@ -274,8 +276,14 @@ mod tests {
 
     #[test]
     fn extract_rust_line_returns_none_for_non_rs() {
-        assert_eq!(extract_rust_line_from_frame("   1: foo\n             at libc.so.6"), None);
-        assert_eq!(extract_rust_line_from_frame("note: run with RUST_BACKTRACE=1"), None);
+        assert_eq!(
+            extract_rust_line_from_frame("   1: foo\n             at libc.so.6"),
+            None
+        );
+        assert_eq!(
+            extract_rust_line_from_frame("note: run with RUST_BACKTRACE=1"),
+            None
+        );
     }
 
     #[test]
@@ -350,10 +358,8 @@ mod tests {
 
     #[test]
     fn resolve_buff_map_path_reads_env_var_when_file_exists() {
-        let tmp = std::env::temp_dir().join(format!(
-            "buff-test-buffmap-{}.buffmap",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("buff-test-buffmap-{}.buffmap", std::process::id()));
         std::fs::write(&tmp, "{}").unwrap_or_else(|e| panic!("write {e}"));
         std::env::set_var("BUFF_MAP_PATH", &tmp);
         let result = resolve_buff_map_path();

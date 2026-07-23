@@ -82,20 +82,17 @@ fn test_command_registration() {
     let bot = buff_chat::Bot::new(Platform::Discord, "token".to_string()).expect("bot");
     assert_eq!(bot.command_count(), 0);
 
-    bot.command("ping", |_msg| {})
-        .expect("register ping");
+    bot.command("ping", |_msg| {}).expect("register ping");
     assert_eq!(bot.command_count(), 1);
 
-    bot.command("echo", |_msg| {})
-        .expect("register echo");
+    bot.command("echo", |_msg| {}).expect("register echo");
     assert_eq!(bot.command_count(), 2);
 }
 
 #[test]
 fn test_duplicate_command_rejected() {
     let bot = buff_chat::Bot::new(Platform::Discord, "token".to_string()).expect("bot");
-    bot.command("ping", |_msg| {})
-        .expect("first ping");
+    bot.command("ping", |_msg| {}).expect("first ping");
     let err = bot.command("ping", |_msg| {});
     assert!(matches!(err, Err(ChatError::DuplicateCommand(_))));
 }
@@ -141,7 +138,8 @@ fn test_dispatch_bang_command() {
     .expect("register");
 
     bot.dispatch(make_msg("!ping")).expect("dispatch");
-    bot.dispatch(make_msg("!ping hello world")).expect("dispatch with args");
+    bot.dispatch(make_msg("!ping hello world"))
+        .expect("dispatch with args");
 
     assert!(
         poll_for(|| received.lock().map(|g| g.len()).unwrap_or(0) >= 2, 200),
@@ -149,7 +147,10 @@ fn test_dispatch_bang_command() {
     );
 
     let captured = received.lock().expect("final lock").clone();
-    assert_eq!(captured, vec!["!ping".to_string(), "!ping hello world".to_string()]);
+    assert_eq!(
+        captured,
+        vec!["!ping".to_string(), "!ping hello world".to_string()]
+    );
 }
 
 #[test]
@@ -231,10 +232,14 @@ fn test_dispatch_unknown_command_falls_through() {
     })
     .expect("register on_message");
 
-    bot.dispatch(make_msg("!unknown")).expect("dispatch unknown");
+    bot.dispatch(make_msg("!unknown"))
+        .expect("dispatch unknown");
 
     assert!(
-        poll_for(|| msg_received.lock().map(|g| g.len()).unwrap_or(0) >= 1, 200),
+        poll_for(
+            || msg_received.lock().map(|g| g.len()).unwrap_or(0) >= 1,
+            200
+        ),
         "unknown command should fall through to on_message"
     );
     assert!(

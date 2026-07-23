@@ -83,9 +83,7 @@ fn eventbus_subscribe_returns_unique_ids() {
     let id1 = bus
         .subscribe("topic", register_capture(buf.clone()))
         .expect("sub1");
-    let id2 = bus
-        .subscribe("topic", register_capture(buf))
-        .expect("sub2");
+    let id2 = bus.subscribe("topic", register_capture(buf)).expect("sub2");
     assert_ne!(id1, id2, "subscription ids must be unique");
     assert_eq!(bus.subscriber_count("topic"), 2);
 }
@@ -122,9 +120,7 @@ fn eventbus_publish_delivers_to_single_subscriber() {
         .subscribe("topic", register_capture(buf.clone()))
         .expect("subscribe");
 
-    let delivered = bus
-        .publish("topic", "hello".to_string())
-        .expect("publish");
+    let delivered = bus.publish("topic", "hello".to_string()).expect("publish");
     assert_eq!(delivered, 1);
 
     assert!(
@@ -156,22 +152,22 @@ fn eventbus_publish_delivers_to_multiple_subscribers() {
         .expect("publish");
     assert_eq!(delivered, 3);
 
-    assert!(wait_for(|| buf_a.lock().map(|g| g.len() >= 1).unwrap_or(false)));
-    assert!(wait_for(|| buf_b.lock().map(|g| g.len() >= 1).unwrap_or(false)));
-    assert!(wait_for(|| buf_c.lock().map(|g| g.len() >= 1).unwrap_or(false)));
+    assert!(wait_for(|| buf_a
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
+    assert!(wait_for(|| buf_b
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
+    assert!(wait_for(|| buf_c
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
 
-    assert_eq!(
-        buf_a.lock().expect("a").clone(),
-        vec!["ping".to_string()]
-    );
-    assert_eq!(
-        buf_b.lock().expect("b").clone(),
-        vec!["ping".to_string()]
-    );
-    assert_eq!(
-        buf_c.lock().expect("c").clone(),
-        vec!["ping".to_string()]
-    );
+    assert_eq!(buf_a.lock().expect("a").clone(), vec!["ping".to_string()]);
+    assert_eq!(buf_b.lock().expect("b").clone(), vec!["ping".to_string()]);
+    assert_eq!(buf_c.lock().expect("c").clone(), vec!["ping".to_string()]);
 }
 
 #[test]
@@ -183,11 +179,13 @@ fn eventbus_multiple_publishes_deliver_in_order() {
         .expect("subscribe");
 
     for i in 0..5 {
-        bus.publish("topic", format!("event-{i}"))
-            .expect("publish");
+        bus.publish("topic", format!("event-{i}")).expect("publish");
     }
 
-    assert!(wait_for(|| buf.lock().map(|g| g.len() >= 5).unwrap_or(false)));
+    assert!(wait_for(|| buf
+        .lock()
+        .map(|g| g.len() >= 5)
+        .unwrap_or(false)));
     let captured = buf.lock().expect("lock").clone();
     assert_eq!(
         captured,
@@ -254,7 +252,10 @@ fn eventbus_unsubscribe_does_not_affect_other_subscribers() {
         .expect("publish");
     assert_eq!(delivered, 1);
 
-    assert!(wait_for(|| buf_a.lock().map(|g| g.len() >= 1).unwrap_or(false)));
+    assert!(wait_for(|| buf_a
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
     std::thread::sleep(Duration::from_millis(20));
     assert!(buf_b.lock().expect("b empty").is_empty());
 }
@@ -269,9 +270,7 @@ fn eventbus_clear_drops_all_subscriptions() {
     let _id2 = bus
         .subscribe("t2", register_capture(buf.clone()))
         .expect("sub t2");
-    let _id3 = bus
-        .subscribe("t3", register_capture(buf))
-        .expect("sub t3");
+    let _id3 = bus.subscribe("t3", register_capture(buf)).expect("sub t3");
     assert_eq!(bus.topic_count(), 3);
 
     bus.clear();
@@ -287,7 +286,10 @@ fn eventbus_clear_drops_all_subscriptions() {
         .expect("resubscribe");
     bus.publish("new-topic", "after-clear".to_string())
         .expect("publish");
-    assert!(wait_for(|| buf2.lock().map(|g| g.len() >= 1).unwrap_or(false)));
+    assert!(wait_for(|| buf2
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
 }
 
 // ---- topic_count + subscriber_count --------------------------------------
@@ -322,9 +324,7 @@ fn eventbus_subscriber_count_is_per_topic() {
     let _ = bus
         .subscribe("t1", register_capture(buf.clone()))
         .expect("sub t1 again");
-    let _ = bus
-        .subscribe("t2", register_capture(buf))
-        .expect("sub t2");
+    let _ = bus.subscribe("t2", register_capture(buf)).expect("sub t2");
 
     assert_eq!(bus.subscriber_count("t1"), 2);
     assert_eq!(bus.subscriber_count("t2"), 1);
@@ -350,15 +350,23 @@ fn panicking_handler_does_not_kill_worker_or_drop_subsequent_events() {
         .expect("subscribe");
 
     // First event: normal delivery.
-    bus.publish("topic", "before".to_string()).expect("publish 1");
-    assert!(wait_for(|| buf.lock().map(|g| g.len() >= 1).unwrap_or(false)));
+    bus.publish("topic", "before".to_string())
+        .expect("publish 1");
+    assert!(wait_for(|| buf
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
 
     // Second event: handler panics. Worker catches it and survives.
     bus.publish("topic", "boom".to_string()).expect("publish 2");
 
     // Third event: must still be delivered (worker did not die).
-    bus.publish("topic", "after".to_string()).expect("publish 3");
-    assert!(wait_for(|| buf.lock().map(|g| g.len() >= 2).unwrap_or(false)));
+    bus.publish("topic", "after".to_string())
+        .expect("publish 3");
+    assert!(wait_for(|| buf
+        .lock()
+        .map(|g| g.len() >= 2)
+        .unwrap_or(false)));
 
     let captured = buf.lock().expect("lock").clone();
     assert_eq!(captured, vec!["before".to_string(), "after".to_string()]);
@@ -387,7 +395,10 @@ fn eventbus_clone_shares_inner_state() {
         .publish("topic", "via-clone".to_string())
         .expect("publish via clone");
     assert_eq!(delivered, 1);
-    assert!(wait_for(|| buf.lock().map(|g| g.len() >= 1).unwrap_or(false)));
+    assert!(wait_for(|| buf
+        .lock()
+        .map(|g| g.len() >= 1)
+        .unwrap_or(false)));
 }
 
 // ---- Async integration (tokio runtime active) ----------------------------

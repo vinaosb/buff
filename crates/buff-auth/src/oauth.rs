@@ -47,10 +47,15 @@ impl OAuth2Client {
         }
     }
 
-    fn build_core(&self) -> Result<
+    fn build_core(
+        &self,
+    ) -> Result<
         oauth2::Client<
             oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
-            oauth2::StandardTokenResponse<oauth2::basic::BasicTokenFields, oauth2::basic::BasicTokenType>,
+            oauth2::StandardTokenResponse<
+                oauth2::basic::BasicTokenFields,
+                oauth2::basic::BasicTokenType,
+            >,
             oauth2::basic::BasicTokenExtraFields,
             oauth2::StandardRevocableToken,
             oauth2::StandardErrorResponse<oauth2::RevocationErrorResponseType>,
@@ -64,8 +69,8 @@ impl OAuth2Client {
             .map_err(|e| AuthError::OAuth2(format!("token url: {e}")))?;
         let redirect_url = RedirectUrl::new(self.redirect_url.clone())
             .map_err(|e| AuthError::OAuth2(format!("redirect url: {e}")))?;
-        let mut builder = oauth2::Client::new(client_id, auth_url, token_url)
-            .set_redirect_uri(redirect_url);
+        let mut builder =
+            oauth2::Client::new(client_id, auth_url, token_url).set_redirect_uri(redirect_url);
         if let Some(secret) = self.client_secret.as_ref() {
             builder = builder.set_client_secret(ClientSecret::new(secret.clone()));
         }
@@ -134,8 +139,8 @@ impl OAuth2Client {
         let client = self.clone();
         let code_owned = code.to_string();
         let verifier_owned = pkce_verifier.map(|s| s.to_string());
-        let result =
-            catch_unwind(AssertUnwindSafe(|| -> Result<Map<String, Value>, AuthError> {
+        let result = catch_unwind(AssertUnwindSafe(
+            || -> Result<Map<String, Value>, AuthError> {
                 let core = client.build_core()?;
                 let http = reqwest::blocking::Client::builder()
                     .use_rustls_tls()
@@ -143,9 +148,7 @@ impl OAuth2Client {
                     .map_err(|e| AuthError::OAuth2(format!("http client: {e}")))?;
                 let mut req = core.exchange_code(AuthorizationCode::new(code_owned));
                 if let Some(verifier) = verifier_owned.as_ref() {
-                    req = req.set_pkce_verifier(oauth2::PkceCodeVerifier::new(
-                        verifier.clone(),
-                    ));
+                    req = req.set_pkce_verifier(oauth2::PkceCodeVerifier::new(verifier.clone()));
                 }
                 let token_response = req.request(&http)?;
                 let json = serde_json::to_value(token_response)?;
@@ -157,7 +160,8 @@ impl OAuth2Client {
                         Ok(single)
                     }
                 }
-            }));
+            },
+        ));
         match result {
             Ok(Ok(map)) => Ok(map),
             Ok(Err(err)) => Err(err),

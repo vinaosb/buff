@@ -145,9 +145,7 @@ impl Tracer {
                     let _ = tracing_subscriber::fmt()
                         .with_env_filter(
                             tracing_subscriber::EnvFilter::try_from_default_env()
-                                .unwrap_or_else(|_| {
-                                    tracing_subscriber::EnvFilter::new("info")
-                                }),
+                                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
                         )
                         .with(otel_layer)
                         .try_init();
@@ -204,11 +202,7 @@ impl Span {
     ///
     /// The value must be a type that implements `tracing::Value` (i64, f64,
     /// String, bool, etc.).
-    pub fn field<V: tracing::field::AsField + std::fmt::Debug>(
-        &self,
-        name: &str,
-        value: V,
-    ) {
+    pub fn field<V: tracing::field::AsField + std::fmt::Debug>(&self, name: &str, value: V) {
         self.inner.record(name, value);
     }
 

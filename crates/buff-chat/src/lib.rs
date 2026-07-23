@@ -457,11 +457,10 @@ impl std::fmt::Display for Bot {
 /// `Some("echo")`, `"hello"` → `None`, `"!"` → `None`.
 fn extract_command_name(text: &str) -> Option<String> {
     let trimmed = text.trim_start();
-    let rest = trimmed.strip_prefix('!').or_else(|| trimmed.strip_prefix('/'))?;
-    let name: String = rest
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect();
+    let rest = trimmed
+        .strip_prefix('!')
+        .or_else(|| trimmed.strip_prefix('/'))?;
+    let name: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
     if name.is_empty() {
         None
     } else {

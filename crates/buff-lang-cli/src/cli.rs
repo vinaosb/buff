@@ -513,6 +513,33 @@ pub enum Command {
     /// rather than aborting the whole report.
     Outdated,
 
+    /// `buff ai` — AI assistant integration (T65).
+    ///
+    /// Generates an "AI context pack" describing the Buff language + the
+    /// current project so users can paste it into Copilot / Claude / etc.
+    /// Also runs `buff check` on AI-generated `.buff` code via `verify`.
+    ///
+    /// # Subcommands
+    ///
+    /// - `buff ai context [--project <PATH>] [--output <PATH>]` — emit a
+    ///   Markdown context pack to stdout (or `--output <file>`). The pack
+    ///   includes: language syntax summary, available prelude types +
+    ///   functions, per-Type method signatures, current project structure
+    ///   (when run inside a project), and pointers to the examples/
+    ///   directory. `--project <PATH>` overrides the project root
+    ///   (default: current directory). Pure-offline — does NOT call any
+    ///   AI APIs; the user copies the pack into their AI tool of choice.
+    /// - `buff ai verify <FILE>` — type-check AI-generated Buff code via
+    ///   the existing T55 standalone typecheck pipeline. Returns the same
+    ///   exit codes as `buff check` (0 clean, 0 warnings, 1 errors) plus
+    ///   AI-friendly hints (e.g. "did you mean `print` instead of
+    ///   `prnt`?") appended to error diagnostics.
+    Ai {
+        /// The subcommand to run.
+        #[command(subcommand)]
+        cmd: AiCmd,
+    },
+
     /// Jupyter kernel management (T129a).
     ///
     /// Subcommands:
@@ -789,6 +816,40 @@ pub enum Command {
     /// - Writes `benchmarks/cold-start.json` (machine-readable).
     /// - Writes/appends `benchmarks/cold-start.md` (human-readable).
     BenchColdStart,
+}
+
+/// Subcommands of `buff ai` (T65).
+#[derive(Subcommand, Debug)]
+pub enum AiCmd {
+    /// Generate an AI context pack (Markdown) describing the Buff
+    /// language surface + the current project's structure. Emit to
+    /// stdout by default, or `--output <file>` to write to disk.
+    Context {
+        /// Output path. When omitted, the pack is printed to stdout.
+        /// When set, the pack is written to `<OUTPUT>` (overwriting
+        /// if it exists) instead of being printed.
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+
+        /// Project root to scan for `.buff` sources. Default: the
+        /// current working directory. When the path has no `.buff`
+        /// files (and no `buff.toml`), the project-structure section
+        /// is omitted from the pack (the language surface is always
+        /// emitted).
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Type-check AI-generated `.buff` code via the T55 standalone
+    /// typecheck pipeline. Reports errors with AI-friendly hints
+    /// appended (e.g. suggestions for misspelled prelude functions).
+    /// Same exit-code semantics as `buff check` (0 clean, 0 warnings,
+    /// 1 errors).
+    Verify {
+        /// Input `.buff` source file produced by an AI tool.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
 }
 
 /// Subcommands of `buff jupyter`.

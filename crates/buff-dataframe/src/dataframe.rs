@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::error::{DfError, Result};
+use crate::groupby::{AggOp, GroupBy};
 use crate::read;
 use crate::series::{ColumnKind, Series};
-use crate::groupby::{AggOp, GroupBy};
 
 /// Schema-aware columnar DataFrame.
 ///
@@ -31,14 +31,17 @@ impl DataFrame {
         }
         let ncols = headers.len();
         let kinds: Vec<ColumnKind> = (0..ncols)
-            .map(|col| infer_column_kind(rows.iter().map(|r| r.get(col).map(|s| s.as_str())))
-            )
+            .map(|col| infer_column_kind(rows.iter().map(|r| r.get(col).map(|s| s.as_str()))))
             .collect();
         let mut columns: BTreeMap<String, Series> = BTreeMap::new();
         for (col, name) in headers.iter().enumerate() {
             columns.insert(name.clone(), build_series(kinds[col], rows.iter(), col));
         }
-        DataFrame { columns, order: headers, grouped_by: None }
+        DataFrame {
+            columns,
+            order: headers,
+            grouped_by: None,
+        }
     }
 
     pub fn from_csv<P: AsRef<std::path::Path>>(path: P) -> Result<DataFrame> {
@@ -84,7 +87,11 @@ impl DataFrame {
             columns.insert(col.to_string(), series.clone());
             order.push(col.to_string());
         }
-        Ok(DataFrame { columns, order, grouped_by: None })
+        Ok(DataFrame {
+            columns,
+            order,
+            grouped_by: None,
+        })
     }
 
     pub fn filter<F>(&self, predicate: F) -> Result<DataFrame>
@@ -102,10 +109,16 @@ impl DataFrame {
                 Some(s) => s,
                 None => continue,
             };
-            let indices: Vec<usize> = (0..series.len()).filter(|&i| mask.get(i).copied().unwrap_or(false)).collect();
+            let indices: Vec<usize> = (0..series.len())
+                .filter(|&i| mask.get(i).copied().unwrap_or(false))
+                .collect();
             columns.insert(name.clone(), series.select_indices(&indices));
         }
-        Ok(DataFrame { columns, order: self.order.clone(), grouped_by: None })
+        Ok(DataFrame {
+            columns,
+            order: self.order.clone(),
+            grouped_by: None,
+        })
     }
 
     pub fn sort(&self, col: &str) -> Result<DataFrame> {
@@ -124,7 +137,11 @@ impl DataFrame {
             };
             columns.insert(name.clone(), s.select_indices(&indices));
         }
-        Ok(DataFrame { columns, order: self.order.clone(), grouped_by: None })
+        Ok(DataFrame {
+            columns,
+            order: self.order.clone(),
+            grouped_by: None,
+        })
     }
 
     pub fn head(&self, n: usize) -> DataFrame {
@@ -137,7 +154,11 @@ impl DataFrame {
             };
             columns.insert(name.clone(), s.slice(0, limit));
         }
-        DataFrame { columns, order: self.order.clone(), grouped_by: None }
+        DataFrame {
+            columns,
+            order: self.order.clone(),
+            grouped_by: None,
+        }
     }
 
     pub fn join(&self, other: &DataFrame, on: &str) -> Result<DataFrame> {
@@ -182,7 +203,11 @@ impl DataFrame {
             };
             columns.insert(name.clone(), s.select_indices(&matched_right));
         }
-        Ok(DataFrame { columns, order, grouped_by: None })
+        Ok(DataFrame {
+            columns,
+            order,
+            grouped_by: None,
+        })
     }
 
     pub fn group_by(&self, col: &str) -> Result<GroupBy> {
@@ -237,11 +262,7 @@ impl DataFrame {
     }
 
     pub fn to_table_string(&self) -> String {
-        let mut widths: Vec<usize> = self
-            .order
-            .iter()
-            .map(|name| name.len())
-            .collect();
+        let mut widths: Vec<usize> = self.order.iter().map(|name| name.len()).collect();
         let rows = self.len();
         for r in 0..rows {
             for (c, name) in self.order.iter().enumerate() {
@@ -298,7 +319,11 @@ impl DataFrame {
     }
 
     pub(crate) fn from_parts(columns: BTreeMap<String, Series>, order: Vec<String>) -> DataFrame {
-        DataFrame { columns, order, grouped_by: None }
+        DataFrame {
+            columns,
+            order,
+            grouped_by: None,
+        }
     }
 }
 
@@ -321,11 +346,17 @@ pub struct RowView<'a> {
 
 impl<'a> RowView<'a> {
     pub fn get_int(&self, col: &str) -> Option<i64> {
-        self.df.get_column(col).and_then(|s| s.as_int_slice()).and_then(|v| v.get(self.idx).copied())
+        self.df
+            .get_column(col)
+            .and_then(|s| s.as_int_slice())
+            .and_then(|v| v.get(self.idx).copied())
     }
 
     pub fn get_float(&self, col: &str) -> Option<f64> {
-        self.df.get_column(col).and_then(|s| s.as_float_slice()).and_then(|v| v.get(self.idx).copied())
+        self.df
+            .get_column(col)
+            .and_then(|s| s.as_float_slice())
+            .and_then(|v| v.get(self.idx).copied())
     }
 
     pub fn get_string(&self, col: &str) -> Option<&str> {
@@ -336,7 +367,10 @@ impl<'a> RowView<'a> {
     }
 
     pub fn get_bool(&self, col: &str) -> Option<bool> {
-        self.df.get_column(col).and_then(|s| s.as_bool_slice()).and_then(|v| v.get(self.idx).copied())
+        self.df
+            .get_column(col)
+            .and_then(|s| s.as_bool_slice())
+            .and_then(|v| v.get(self.idx).copied())
     }
 }
 
@@ -401,13 +435,21 @@ where
     match kind {
         ColumnKind::Int => {
             let v: Vec<i64> = rows
-                .map(|r| r.get(col).and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or_default())
+                .map(|r| {
+                    r.get(col)
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .unwrap_or_default()
+                })
                 .collect();
             Series::Int(v)
         }
         ColumnKind::Float => {
             let v: Vec<f64> = rows
-                .map(|r| r.get(col).and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or_default())
+                .map(|r| {
+                    r.get(col)
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .unwrap_or_default()
+                })
                 .collect();
             Series::Float(v)
         }
@@ -418,7 +460,9 @@ where
             Series::Bool(v)
         }
         ColumnKind::String => {
-            let v: Vec<String> = rows.map(|r| r.get(col).cloned().unwrap_or_default()).collect();
+            let v: Vec<String> = rows
+                .map(|r| r.get(col).cloned().unwrap_or_default())
+                .collect();
             Series::String(v)
         }
     }
@@ -427,7 +471,11 @@ where
 fn compare_cells(s: &Series, a: usize, b: usize) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match s {
-        Series::Int(v) => v.get(a).copied().unwrap_or_default().cmp(&v.get(b).copied().unwrap_or_default()),
+        Series::Int(v) => v
+            .get(a)
+            .copied()
+            .unwrap_or_default()
+            .cmp(&v.get(b).copied().unwrap_or_default()),
         Series::Float(v) => {
             let x = v.get(a).copied().unwrap_or_default();
             let y = v.get(b).copied().unwrap_or_default();
@@ -438,7 +486,11 @@ fn compare_cells(s: &Series, a: usize, b: usize) -> std::cmp::Ordering {
             .map(|s| s.as_str())
             .unwrap_or("")
             .cmp(v.get(b).map(|s| s.as_str()).unwrap_or("")),
-        Series::Bool(v) => v.get(a).copied().unwrap_or(false).cmp(&v.get(b).copied().unwrap_or(false)),
+        Series::Bool(v) => v
+            .get(a)
+            .copied()
+            .unwrap_or(false)
+            .cmp(&v.get(b).copied().unwrap_or(false)),
     }
 }
 

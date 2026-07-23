@@ -65,8 +65,14 @@ fn queue_priority_deques_critical_first() {
         .expect("enqueue");
     q.enqueue(make_job("normal").with_priority(Priority::Normal))
         .expect("enqueue");
-    assert_eq!(q.dequeue().expect("dequeue").expect("job").payload(), "critical");
-    assert_eq!(q.dequeue().expect("dequeue").expect("job").payload(), "normal");
+    assert_eq!(
+        q.dequeue().expect("dequeue").expect("job").payload(),
+        "critical"
+    );
+    assert_eq!(
+        q.dequeue().expect("dequeue").expect("job").payload(),
+        "normal"
+    );
     assert_eq!(q.dequeue().expect("dequeue").expect("job").payload(), "low");
 }
 
@@ -77,8 +83,14 @@ fn queue_equal_priority_preserves_fifo() {
         .expect("enqueue");
     q.enqueue(make_job("second").with_priority(Priority::High))
         .expect("enqueue");
-    assert_eq!(q.dequeue().expect("dequeue").expect("job").payload(), "first");
-    assert_eq!(q.dequeue().expect("dequeue").expect("job").payload(), "second");
+    assert_eq!(
+        q.dequeue().expect("dequeue").expect("job").payload(),
+        "first"
+    );
+    assert_eq!(
+        q.dequeue().expect("dequeue").expect("job").payload(),
+        "second"
+    );
 }
 
 #[test]
@@ -167,9 +179,7 @@ fn worker_routes_to_dead_letter_when_budget_exhausted() {
     )
     .expect("enqueue");
     let w = Worker::new(q.clone());
-    let stats = w
-        .run(|_| Err("permanent".to_string()))
-        .expect("worker run");
+    let stats = w.run(|_| Err("permanent".to_string())).expect("worker run");
     assert_eq!(stats.processed, 3);
     assert_eq!(stats.succeeded, 0);
     assert_eq!(stats.dead_lettered, 1);

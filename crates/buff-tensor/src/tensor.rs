@@ -414,13 +414,7 @@ mod tests {
     fn tensor_reshape_mismatch() {
         let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let err = t.reshape(vec![2, 2]).unwrap_err();
-        assert_eq!(
-            err,
-            TensorError::ReshapeMismatch {
-                got: 6,
-                target: 4,
-            }
-        );
+        assert_eq!(err, TensorError::ReshapeMismatch { got: 6, target: 4 });
     }
 
     #[test]
@@ -456,11 +450,7 @@ mod tests {
     #[test]
     fn tensor_transpose_perm_basic() {
         // Shape [2,3,4], permute axes (1,0,2) -> [3,2,4].
-        let t = Tensor::from_vec(
-            (0..24).map(|i| i as f32).collect(),
-            vec![2, 3, 4],
-        )
-        .unwrap();
+        let t = Tensor::from_vec((0..24).map(|i| i as f32).collect(), vec![2, 3, 4]).unwrap();
         let tt = t.transpose_perm(&[1, 0, 2]).unwrap();
         assert_eq!(tt.shape().as_slice(), &[3, 2, 4]);
         assert_eq!(tt.len(), 24);

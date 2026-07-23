@@ -110,7 +110,12 @@ impl Query {
         };
         let mut out = format!("SELECT {cols} FROM {}", self.table);
         for j in &self.joins {
-            out.push_str(&format!(" {} JOIN {} ON {}", j.kind.as_str(), j.table, j.on));
+            out.push_str(&format!(
+                " {} JOIN {} ON {}",
+                j.kind.as_str(),
+                j.table,
+                j.on
+            ));
         }
         if !self.where_clauses.is_empty() {
             out.push_str(" WHERE ");
@@ -164,10 +169,7 @@ mod tests {
             .filter("age > 18")
             .filter("city = 'London'")
             .sql();
-        assert_eq!(
-            q,
-            "SELECT * FROM users WHERE age > 18 AND city = 'London'"
-        );
+        assert_eq!(q, "SELECT * FROM users WHERE age > 18 AND city = 'London'");
     }
 
     #[test]

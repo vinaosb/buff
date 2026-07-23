@@ -8,10 +8,8 @@
 use buff_archive::{Archive, Format};
 
 fn main() {
-    let root = std::env::temp_dir().join(format!(
-        "buff_archive_zip_example-{}",
-        std::process::id(),
-    ));
+    let root =
+        std::env::temp_dir().join(format!("buff_archive_zip_example-{}", std::process::id(),));
     let src = root.join("src");
     let archive_path = root.join("out.zip");
     let extracted = root.join("extracted");
@@ -25,7 +23,9 @@ fn main() {
         "compressed {} -> {} ({} bytes)",
         src.display(),
         archive_path.display(),
-        std::fs::metadata(&archive_path).map(|m| m.len()).unwrap_or(0),
+        std::fs::metadata(&archive_path)
+            .map(|m| m.len())
+            .unwrap_or(0),
     );
 
     Archive::extract(&archive_path, &extracted).expect("extract zip");

@@ -284,9 +284,7 @@ impl ErrorCode {
                 "codegen produced invalid rust (internal compiler error)"
             }
             ErrorCode::AsyncBlockDeadlock => "`block()` inside an async function can deadlock",
-            ErrorCode::ComptimeLoweringFailed => {
-                "codegen cannot lower a comptime value to Rust"
-            }
+            ErrorCode::ComptimeLoweringFailed => "codegen cannot lower a comptime value to Rust",
         }
     }
 

@@ -14,7 +14,8 @@ fn main() {
     let port = spin_local_mock_smtp();
     println!("mock SMTP listening on 127.0.0.1:{port}");
 
-    let tmp = std::env::temp_dir().join(format!("buff-email-attachment-{}.txt", std::process::id()));
+    let tmp =
+        std::env::temp_dir().join(format!("buff-email-attachment-{}.txt", std::process::id()));
     std::fs::write(&tmp, b"Hello from the attached file!").expect("write temp");
     println!("wrote temp attachment to: {}", tmp.display());
 
@@ -26,8 +27,7 @@ fn main() {
         .expect("attach");
     println!("built: {email}");
 
-    let client =
-        SmtpClient::new("127.0.0.1", port, "mockuser", "mockpass").expect("smtp client");
+    let client = SmtpClient::new("127.0.0.1", port, "mockuser", "mockpass").expect("smtp client");
     client.send(&email).expect("send");
     println!("sent email with attachment.");
     let _ = std::fs::remove_file(&tmp);

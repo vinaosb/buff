@@ -436,7 +436,7 @@ fn t119_direct_externfuncdecl_construction_lowers_correctly() {
             is_comptime: false,
             is_comptime: false,
             span: span(),
-            }],
+        }],
         return_type: Some(named_ty("String")),
         span: span(),
     };

@@ -127,10 +127,7 @@ impl Response {
         })?;
         let mut header_map = HeaderMap::new();
         for (name, value) in self.headers {
-            header_map.insert(
-                HeaderName::try_from(name)?,
-                HeaderValue::try_from(value)?,
-            );
+            header_map.insert(HeaderName::try_from(name)?, HeaderValue::try_from(value)?);
         }
         let body = Body::from(self.body);
         Ok((status, header_map, body).into_response())

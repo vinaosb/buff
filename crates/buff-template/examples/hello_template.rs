@@ -7,9 +7,7 @@ use buff_template::Template;
 
 fn main() {
     let t = Template::from_string("Hello {{name}}!").expect("compile template");
-    let out = t
-        .render(r#"{"name": "Buff"}"#)
-        .expect("render with name");
+    let out = t.render(r#"{"name": "Buff"}"#).expect("render with name");
     println!("{out}");
     assert_eq!(out, "Hello Buff!");
 }

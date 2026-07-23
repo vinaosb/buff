@@ -1557,7 +1557,10 @@ modules = ["./src/prelude.buff"]
         assert_eq!(pkg.stability, Some(Stability::Experimental));
         assert!(cfg.features.declares("logging"));
         assert!(cfg.features.declares("json"));
-        assert!(cfg.features.declares("default") || cfg.features.default.contains(&"logging".to_string()));
+        assert!(
+            cfg.features.declares("default")
+                || cfg.features.default.contains(&"logging".to_string())
+        );
         assert_eq!(cfg.lints.severity("clippy"), Some("deny"));
         assert_eq!(cfg.lints.severity("naming"), Some("warn"));
         cfg.profile.dev.as_ref().expect("dev profile");
@@ -1575,7 +1578,10 @@ version = "0.2.1"
 edition = "0.1"
 "#;
         let cfg = BuffConfig::parse(toml).expect("v1 manifest must parse (backward compat)");
-        assert_eq!(cfg.package.as_ref().map(|p| p.name.as_str()), Some("legacy"));
+        assert_eq!(
+            cfg.package.as_ref().map(|p| p.name.as_str()),
+            Some("legacy")
+        );
         assert!(cfg.features.features.is_empty());
         assert!(cfg.features.default.is_empty());
         assert!(cfg.lints.lints.is_empty());
@@ -1743,7 +1749,10 @@ debug = 2
             prelude: Default::default(),
         };
         let cargo = generate_cargo_toml(&cfg);
-        assert!(cargo.contains("[workspace.dependencies]"), "missing block: {cargo}");
+        assert!(
+            cargo.contains("[workspace.dependencies]"),
+            "missing block: {cargo}"
+        );
         assert!(cargo.contains("serde = \"1.0\""), "missing serde: {cargo}");
         assert!(cargo.contains("tokio = \"1.40\""), "missing tokio: {cargo}");
     }
@@ -1831,8 +1840,11 @@ debug = 2
         let _ = std::fs::remove_dir_all(&root);
         let nested = root.join("crates/api/src");
         std::fs::create_dir_all(&nested).expect("mkdir nested");
-        std::fs::write(root.join("buff.toml"), "[package]\nname = \"x\"\nversion = \"0.1.0\"\n")
-            .expect("write root manifest");
+        std::fs::write(
+            root.join("buff.toml"),
+            "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write root manifest");
         let found = discover_manifest(&nested).expect("manifest found in ancestor");
         assert_eq!(found.0, root.join("buff.toml"));
         let _ = std::fs::remove_dir_all(&root);

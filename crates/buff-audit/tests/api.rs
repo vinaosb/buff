@@ -10,8 +10,10 @@
 //!
 //! Pure-Rust; no network; deterministic advisory DB.
 
-use buff_audit::{keypair, known_advisories, scan, scan_with_detail, sign, verify, AdvisoryHit,
-    AuditError, MANIFEST_PATHS};
+use buff_audit::{
+    keypair, known_advisories, scan, scan_with_detail, sign, verify, AdvisoryHit, AuditError,
+    MANIFEST_PATHS,
+};
 
 #[test]
 fn manifest_paths_priority_chain_lists_buff_lock_first() {
@@ -29,10 +31,7 @@ fn known_advisories_returns_seed_entries() {
 
 #[test]
 fn scan_returns_empty_when_no_manifest_exists() {
-    let tmp = std::env::temp_dir().join(format!(
-        "buff-audit-test-empty-{}",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("buff-audit-test-empty-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("mkdir");
     let hits = scan(&tmp).expect("scan on empty dir");
@@ -42,10 +41,8 @@ fn scan_returns_empty_when_no_manifest_exists() {
 
 #[test]
 fn scan_finds_vulnerable_chrono_in_cargo_lock() {
-    let tmp = std::env::temp_dir().join(format!(
-        "buff-audit-test-vuln-cargo-{}",
-        std::process::id()
-    ));
+    let tmp =
+        std::env::temp_dir().join(format!("buff-audit-test-vuln-cargo-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("mkdir");
     let cargo_lock = tmp.join("Cargo.lock");
@@ -70,10 +67,8 @@ checksum = "1e37c4b6c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c"
 
 #[test]
 fn scan_finds_vulnerable_chrono_in_buff_toml() {
-    let tmp = std::env::temp_dir().join(format!(
-        "buff-audit-test-vuln-buff-{}",
-        std::process::id()
-    ));
+    let tmp =
+        std::env::temp_dir().join(format!("buff-audit-test-vuln-buff-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("mkdir");
     let buff_toml = tmp.join("buff.toml");
@@ -98,10 +93,7 @@ chrono = "0.4.19"
 
 #[test]
 fn scan_skips_patched_versions() {
-    let tmp = std::env::temp_dir().join(format!(
-        "buff-audit-test-patched-{}",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("buff-audit-test-patched-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("mkdir");
     let cargo_lock = tmp.join("Cargo.lock");
@@ -123,10 +115,7 @@ version = "0.4.20"
 
 #[test]
 fn scan_with_detail_returns_advisory_hit_struct() {
-    let tmp = std::env::temp_dir().join(format!(
-        "buff-audit-test-detail-{}",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("buff-audit-test-detail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("mkdir");
     let cargo_lock = tmp.join("Cargo.lock");

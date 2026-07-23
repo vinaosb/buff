@@ -160,7 +160,11 @@ impl<T: Clone + 'static> Computed<T> {
             let value = compute();
             cell.borrow_mut().cached = Some(value);
         });
-        self.cell.borrow().cached.clone().unwrap_or_else(|| (self.compute)())
+        self.cell
+            .borrow()
+            .cached
+            .clone()
+            .unwrap_or_else(|| (self.compute)())
     }
 
     pub fn invalidate(&self) {

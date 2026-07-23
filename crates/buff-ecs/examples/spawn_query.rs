@@ -20,10 +20,7 @@ struct Velocity {
 fn main() {
     let mut world = World::new();
 
-    let _player = world.spawn_two(
-        Position { x: 0.0, y: 0.0 },
-        Velocity { dx: 1.0, dy: 0.0 },
-    );
+    let _player = world.spawn_two(Position { x: 0.0, y: 0.0 }, Velocity { dx: 1.0, dy: 0.0 });
     let _obstacle = world.spawn(Position { x: 5.0, y: 5.0 });
 
     let positions = world.query::<Position>();

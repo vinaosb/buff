@@ -21,7 +21,10 @@ fn main() {
 
     cache.set("d".to_string(), "4".to_string());
     cache.run_pending_tasks();
-    println!("after 4th insert under capacity pressure: {} entries", cache.len());
+    println!(
+        "after 4th insert under capacity pressure: {} entries",
+        cache.len()
+    );
     println!("a still present? {}", cache.contains("a"));
     println!("b still present? {}", cache.contains("b"));
 

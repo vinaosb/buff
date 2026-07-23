@@ -343,13 +343,7 @@ mod tests {
     fn shape_reduce_axis_out_of_bounds() {
         let s = Shape::new(vec![2, 3]).unwrap();
         let err = s.reduce_axis(5).unwrap_err();
-        assert_eq!(
-            err,
-            TensorError::AxisOutOfBounds {
-                axis: 5,
-                rank: 2,
-            }
-        );
+        assert_eq!(err, TensorError::AxisOutOfBounds { axis: 5, rank: 2 });
     }
 
     #[test]

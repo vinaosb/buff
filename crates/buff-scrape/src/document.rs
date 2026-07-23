@@ -63,8 +63,8 @@ impl Document {
         }
         let css_owned = css.to_string();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let selector = Selector::parse(&css_owned)
-                .map_err(|e| ScrapeError::Selector(e.to_string()))?;
+            let selector =
+                Selector::parse(&css_owned).map_err(|e| ScrapeError::Selector(e.to_string()))?;
             let document = self.parsed();
             let elements: Vec<Element> =
                 document.select(&selector).map(Element::from_ref).collect();

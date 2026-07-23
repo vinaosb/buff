@@ -18,7 +18,8 @@ fn main() {
     let small = gray.resize(50, 50).expect("resize");
     println!("after resize: {}x{}", small.width(), small.height());
 
-    let path = std::env::temp_dir().join(format!("buff_image_load_filter-{}.png", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("buff_image_load_filter-{}.png", std::process::id()));
     small.save(&path).expect("save");
     println!("saved to: {}", path.display());
 

@@ -24,8 +24,11 @@ fn app_new_initializes() {
 
 #[test]
 fn app_flag_parses_long_form() {
-    let app = App::new("tool".to_string())
-        .flag("verbose".to_string(), "v".to_string(), "verbose".to_string());
+    let app = App::new("tool".to_string()).flag(
+        "verbose".to_string(),
+        "v".to_string(),
+        "verbose".to_string(),
+    );
     let parsed = app.parse(argv(&["tool", "--verbose"])).expect("parse");
     assert!(parsed.flag("verbose"));
     assert!(!parsed.flag("missing"));
@@ -33,16 +36,22 @@ fn app_flag_parses_long_form() {
 
 #[test]
 fn app_flag_parses_short_form() {
-    let app = App::new("tool".to_string())
-        .flag("verbose".to_string(), "v".to_string(), "verbose".to_string());
+    let app = App::new("tool".to_string()).flag(
+        "verbose".to_string(),
+        "v".to_string(),
+        "verbose".to_string(),
+    );
     let parsed = app.parse(argv(&["tool", "-v"])).expect("parse");
     assert!(parsed.flag("verbose"));
 }
 
 #[test]
 fn app_flag_absent_returns_false() {
-    let app = App::new("tool".to_string())
-        .flag("verbose".to_string(), "v".to_string(), "verbose".to_string());
+    let app = App::new("tool".to_string()).flag(
+        "verbose".to_string(),
+        "v".to_string(),
+        "verbose".to_string(),
+    );
     let parsed = app.parse(argv(&["tool"])).expect("parse");
     assert!(!parsed.flag("verbose"));
 }
@@ -73,8 +82,7 @@ fn app_option_short_form() {
 
 #[test]
 fn app_arg_positional() {
-    let app = App::new("tool".to_string())
-        .arg("path".to_string(), "path to file".to_string());
+    let app = App::new("tool".to_string()).arg("path".to_string(), "path to file".to_string());
     let parsed = app.parse(argv(&["tool", "/tmp/x"])).expect("parse");
     assert_eq!(parsed.arg("path"), Some("/tmp/x".to_string()));
     assert_eq!(parsed.args(), vec!["/tmp/x".to_string()]);
@@ -85,9 +93,7 @@ fn app_multiple_positionals_preserve_order() {
     let app = App::new("cp".to_string())
         .arg("src".to_string(), "source".to_string())
         .arg("dst".to_string(), "destination".to_string());
-    let parsed = app
-        .parse(argv(&["cp", "a.txt", "b.txt"]))
-        .expect("parse");
+    let parsed = app.parse(argv(&["cp", "a.txt", "b.txt"])).expect("parse");
     assert_eq!(parsed.arg("src"), Some("a.txt".to_string()));
     assert_eq!(parsed.arg("dst"), Some("b.txt".to_string()));
     assert_eq!(
@@ -100,13 +106,11 @@ fn app_multiple_positionals_preserve_order() {
 fn app_subcommand_dispatch() {
     let app = App::new("multi".to_string()).about("demo".to_string());
     let greet = app.command("greet".to_string(), "say hi".to_string());
-    greet.option(
-        "name".to_string(),
-        "n".to_string(),
-        "name".to_string(),
-    );
+    greet.option("name".to_string(), "n".to_string(), "name".to_string());
 
-    let parsed = app.parse(argv(&["multi", "greet", "-n", "alice"])).expect("parse");
+    let parsed = app
+        .parse(argv(&["multi", "greet", "-n", "alice"]))
+        .expect("parse");
     assert_eq!(parsed.subcommand(), Some("greet".to_string()));
     let sub = parsed.subcommand_args();
     assert_eq!(sub.option("name"), Some("alice".to_string()));
@@ -124,7 +128,11 @@ fn app_subcommand_none_when_not_matched() {
 fn app_help_text_contains_name_and_about() {
     let app = App::new("mytool".to_string())
         .about("does useful things".to_string())
-        .flag("verbose".to_string(), "v".to_string(), "verbose mode".to_string());
+        .flag(
+            "verbose".to_string(),
+            "v".to_string(),
+            "verbose mode".to_string(),
+        );
     let help = app.help_text();
     assert!(help.contains("mytool"), "help should contain app name");
     assert!(
@@ -168,7 +176,11 @@ fn app_command_returns_child_visible_to_parent() {
     // of buff-cli (Arc<Mutex<Node>> shared via clone).
     let app = App::new("parent".to_string());
     let child = app.command("child".to_string(), "sub".to_string());
-    child.flag("verbose".to_string(), "v".to_string(), "verbose".to_string());
+    child.flag(
+        "verbose".to_string(),
+        "v".to_string(),
+        "verbose".to_string(),
+    );
     let parsed = app
         .parse(argv(&["parent", "child", "--verbose"]))
         .expect("parse");
@@ -202,12 +214,12 @@ fn snapshot_app_display() {
 fn snapshot_help_text_basic() {
     let app = App::new("snap".to_string())
         .about("snap about".to_string())
-        .flag("verbose".to_string(), "v".to_string(), "verbose mode".to_string())
-        .option(
-            "name".to_string(),
-            "n".to_string(),
-            "set name".to_string(),
+        .flag(
+            "verbose".to_string(),
+            "v".to_string(),
+            "verbose mode".to_string(),
         )
+        .option("name".to_string(), "n".to_string(), "set name".to_string())
         .arg("path".to_string(), "input path".to_string());
     insta::assert_snapshot!("help_text_basic", app.help_text());
 }
@@ -217,8 +229,6 @@ fn snapshot_parsed_args_debug() {
     let app = App::new("snap".to_string())
         .arg("first".to_string(), "first positional".to_string())
         .arg("second".to_string(), "second positional".to_string());
-    let parsed = app
-        .parse(argv(&["snap", "a", "b"]))
-        .expect("parse");
+    let parsed = app.parse(argv(&["snap", "a", "b"])).expect("parse");
     insta::assert_snapshot!("parsed_args_debug", format!("{parsed:?}"));
 }

@@ -110,14 +110,26 @@ impl Series {
 
     pub(crate) fn select_indices(&self, idxs: &[usize]) -> Series {
         match self {
-            Series::Int(v) => Series::Int(idxs.iter().map(|&i| v.get(i).copied().unwrap_or_default()).collect()),
-            Series::Float(v) => Series::Float(idxs.iter().map(|&i| v.get(i).copied().unwrap_or_default()).collect()),
+            Series::Int(v) => Series::Int(
+                idxs.iter()
+                    .map(|&i| v.get(i).copied().unwrap_or_default())
+                    .collect(),
+            ),
+            Series::Float(v) => Series::Float(
+                idxs.iter()
+                    .map(|&i| v.get(i).copied().unwrap_or_default())
+                    .collect(),
+            ),
             Series::String(v) => Series::String(
                 idxs.iter()
                     .map(|&i| v.get(i).cloned().unwrap_or_default())
                     .collect(),
             ),
-            Series::Bool(v) => Series::Bool(idxs.iter().map(|&i| v.get(i).copied().unwrap_or_default()).collect()),
+            Series::Bool(v) => Series::Bool(
+                idxs.iter()
+                    .map(|&i| v.get(i).copied().unwrap_or_default())
+                    .collect(),
+            ),
         }
     }
 }

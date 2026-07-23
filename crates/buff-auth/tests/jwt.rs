@@ -14,7 +14,10 @@ fn jwt_round_trip_preserves_string_and_bool_claims() {
     claims.insert("admin".to_string(), Value::Bool(true));
     let token = jwt_encode(&claims, "secret").expect("encode");
     let decoded = jwt_decode(&token, "secret").expect("decode");
-    assert_eq!(decoded.get("sub"), Some(&Value::String("user-1".to_string())));
+    assert_eq!(
+        decoded.get("sub"),
+        Some(&Value::String("user-1".to_string()))
+    );
     assert_eq!(decoded.get("admin"), Some(&Value::Bool(true)));
 }
 
@@ -53,11 +56,12 @@ fn jwt_decode_rejects_empty_token() {
 
 #[test]
 fn jwt_encoded_token_has_three_compact_components() {
-    let token = jwt_encode(
-        &Map::from([("x".to_string(), Value::Bool(true))]),
-        "secret",
-    )
-    .expect("encode");
+    let token =
+        jwt_encode(&Map::from([("x".to_string(), Value::Bool(true))]), "secret").expect("encode");
     let parts: Vec<&str> = token.split('.').collect();
-    assert_eq!(parts.len(), 3, "JWT compact form is header.payload.signature");
+    assert_eq!(
+        parts.len(),
+        3,
+        "JWT compact form is header.payload.signature"
+    );
 }

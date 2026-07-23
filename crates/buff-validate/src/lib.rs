@@ -52,16 +52,32 @@ pub use schema::json_escape;
 use std::collections::HashMap;
 
 use regex::Regex;
-use validator::{ValidateEmail, ValidateLength, ValidateRange, ValidateUrl};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use validator::{ValidateEmail, ValidateLength, ValidateRange, ValidateUrl};
 
 #[derive(Debug, Clone)]
 enum Rule {
-    Email { field: String },
-    Url { field: String },
-    Length { field: String, min: u64, max: u64 },
-    Range { field: String, min: i64, max: i64 },
-    Regex { field: String, pattern: String, compiled: Regex },
+    Email {
+        field: String,
+    },
+    Url {
+        field: String,
+    },
+    Length {
+        field: String,
+        min: u64,
+        max: u64,
+    },
+    Range {
+        field: String,
+        min: i64,
+        max: i64,
+    },
+    Regex {
+        field: String,
+        pattern: String,
+        compiled: Regex,
+    },
 }
 
 impl Rule {
@@ -137,7 +153,9 @@ impl Rule {
                     });
                 }
             }
-            Rule::Regex { pattern, compiled, .. } => {
+            Rule::Regex {
+                pattern, compiled, ..
+            } => {
                 if !compiled.is_match(value) {
                     errors.push(ValidationError::InvalidRegex {
                         field: field.to_string(),
@@ -233,10 +251,7 @@ impl Validator {
         self.rules.len()
     }
 
-    pub fn validate(
-        &self,
-        input: &HashMap<String, String>,
-    ) -> Result<(), ValidationErrors> {
+    pub fn validate(&self, input: &HashMap<String, String>) -> Result<(), ValidationErrors> {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let mut errors = ValidationErrors::new();
             for rule in &self.rules {
@@ -278,16 +293,40 @@ impl PartialEq for Validator {
                 (Rule::Email { field: fa }, Rule::Email { field: fb }) if fa == fb => {}
                 (Rule::Url { field: fa }, Rule::Url { field: fb }) if fa == fb => {}
                 (
-                    Rule::Length { field: fa, min: mna, max: mxa },
-                    Rule::Length { field: fb, min: mnb, max: mxb },
+                    Rule::Length {
+                        field: fa,
+                        min: mna,
+                        max: mxa,
+                    },
+                    Rule::Length {
+                        field: fb,
+                        min: mnb,
+                        max: mxb,
+                    },
                 ) if fa == fb && mna == mnb && mxa == mxb => {}
                 (
-                    Rule::Range { field: fa, min: mna, max: mxa },
-                    Rule::Range { field: fb, min: mnb, max: mxb },
+                    Rule::Range {
+                        field: fa,
+                        min: mna,
+                        max: mxa,
+                    },
+                    Rule::Range {
+                        field: fb,
+                        min: mnb,
+                        max: mxb,
+                    },
                 ) if fa == fb && mna == mnb && mxa == mxb => {}
                 (
-                    Rule::Regex { field: fa, pattern: pa, .. },
-                    Rule::Regex { field: fb, pattern: pb, .. },
+                    Rule::Regex {
+                        field: fa,
+                        pattern: pa,
+                        ..
+                    },
+                    Rule::Regex {
+                        field: fb,
+                        pattern: pb,
+                        ..
+                    },
                 ) if fa == fb && pa == pb => {}
                 _ => return false,
             }

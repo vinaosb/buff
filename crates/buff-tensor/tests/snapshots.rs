@@ -97,11 +97,7 @@ fn snapshot_transpose_2d() {
 #[test]
 fn snapshot_3d_reduce_axis_1() {
     // Shape [2,2,2]: 8 elements. Sum along axis 1 -> shape [2,2].
-    let t = Tensor::from_vec(
-        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-        vec![2, 2, 2],
-    )
-    .unwrap();
+    let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]).unwrap();
     let r = t.sum_axis(1).unwrap();
     insta::assert_snapshot!(format!(
         "input shape={:?} reduce(1) shape={:?} reduce(1) data={:?}",

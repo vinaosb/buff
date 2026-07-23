@@ -64,13 +64,13 @@
 //! CPU-only (Metitis G7). No Parquet (v1.18+). No streaming (load-into-memory).
 //! No GPU dispatch. No lazy execution (deferred to v1.18+ per T7 spec).
 
-mod error;
-mod series;
 mod dataframe;
+mod error;
 mod groupby;
 mod read;
+mod series;
 
-pub use error::{DfError, Result};
-pub use series::{Series, ColumnKind};
 pub use dataframe::DataFrame;
-pub use groupby::{GroupBy, AggOp};
+pub use error::{DfError, Result};
+pub use groupby::{AggOp, GroupBy};
+pub use series::{ColumnKind, Series};

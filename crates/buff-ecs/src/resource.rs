@@ -158,10 +158,7 @@ mod tests {
         r.insert(PlayerName("Hero".to_string()));
         assert_eq!(r.len(), 2);
         assert_eq!(r.get::<Score>(), Some(&Score(42)));
-        assert_eq!(
-            r.get::<PlayerName>(),
-            Some(&PlayerName("Hero".to_string()))
-        );
+        assert_eq!(r.get::<PlayerName>(), Some(&PlayerName("Hero".to_string())));
         r.clear();
         assert!(r.is_empty());
     }

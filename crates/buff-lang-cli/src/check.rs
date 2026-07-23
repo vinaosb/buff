@@ -684,7 +684,10 @@ pub fn collect_deprecated_call_warnings(decls: &[Decl]) -> Vec<Diagnostic> {
     // Pass 1: build the deprecated-fn map.
     let mut deprecated: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
     for decl in decls {
-        if let Decl::FuncDecl(FuncDecl { name, attributes, .. }) = decl {
+        if let Decl::FuncDecl(FuncDecl {
+            name, attributes, ..
+        }) = decl
+        {
             for attr in attributes {
                 if attr.name.name == "deprecated" {
                     let since = attr.named_args.get("since").cloned();
@@ -741,7 +744,11 @@ fn collect_deprecated_calls_in_expr(
         Expr::FuncCall { callee, args, span } => {
             if let Expr::Ident(ident, _) = callee.as_ref() {
                 if let Some((since, replacement)) = deprecated.get(&ident.name) {
-                    let msg = format_deprecated_warning(&ident.name, since.as_deref(), replacement.as_deref());
+                    let msg = format_deprecated_warning(
+                        &ident.name,
+                        since.as_deref(),
+                        replacement.as_deref(),
+                    );
                     out.push(Diagnostic::warning(msg, *span));
                 }
             }

@@ -18,7 +18,10 @@ fn lowpass_passes_dc_attenuates_nyquist() {
     let dc_gain = rms(dc_out.as_slice()) / rms(dc.as_slice()).max(1e-9);
     let nyq_gain = rms(nyq_out.as_slice()) / rms(nyq.as_slice()).max(1e-9);
     assert!(dc_gain > 0.99, "lowpass should pass DC: dc_gain={dc_gain}");
-    assert!(nyq_gain < 0.5, "lowpass should attenuate Nyquist: nyq_gain={nyq_gain}");
+    assert!(
+        nyq_gain < 0.5,
+        "lowpass should attenuate Nyquist: nyq_gain={nyq_gain}"
+    );
 }
 
 #[test]
@@ -30,8 +33,14 @@ fn highpass_attenuates_dc_passes_nyquist() {
     let nyq_out = nyq.highpass(100.0);
     let dc_gain = rms(dc_out.as_slice()) / rms(dc.as_slice()).max(1e-9);
     let nyq_gain = rms(nyq_out.as_slice()) / rms(nyq.as_slice()).max(1e-9);
-    assert!(dc_gain < 0.5, "highpass should attenuate DC: dc_gain={dc_gain}");
-    assert!(nyq_gain > 0.5, "highpass should pass Nyquist: nyq_gain={nyq_gain}");
+    assert!(
+        dc_gain < 0.5,
+        "highpass should attenuate DC: dc_gain={dc_gain}"
+    );
+    assert!(
+        nyq_gain > 0.5,
+        "highpass should pass Nyquist: nyq_gain={nyq_gain}"
+    );
 }
 
 #[test]
@@ -77,7 +86,10 @@ fn lowpass_cascade_attenuates_more() {
     let two_pass = one_pass.lowpass(500.0);
     let gain_one = rms(one_pass.as_slice()) / rms(sig.as_slice()).max(1e-9);
     let gain_two = rms(two_pass.as_slice()) / rms(sig.as_slice()).max(1e-9);
-    assert!(gain_two < gain_one, "two passes should attenuate more: g1={gain_one} g2={gain_two}");
+    assert!(
+        gain_two < gain_one,
+        "two passes should attenuate more: g1={gain_one} g2={gain_two}"
+    );
 }
 
 fn rms(xs: &[f64]) -> f64 {

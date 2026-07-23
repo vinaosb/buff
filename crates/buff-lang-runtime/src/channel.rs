@@ -150,9 +150,12 @@ impl<T> Sender<T> {
     /// NEVER. The underlying tokio send is awaitable; failures surface
     /// as `Err` per the variant table above.
     pub async fn send(&self, value: T) -> Result<(), RuntimeError> {
-        self.0.send(value).await.map_err(|_| RuntimeError::Unsupported {
-            detail: "channel send failed (receiver dropped)".to_string(),
-        })
+        self.0
+            .send(value)
+            .await
+            .map_err(|_| RuntimeError::Unsupported {
+                detail: "channel send failed (receiver dropped)".to_string(),
+            })
     }
 }
 
@@ -242,8 +245,8 @@ mod tests {
     fn channel_struct_is_copy() {
         let c1 = Channel;
         let c2 = c1; // Copy
-        // Equality on the unit struct is trivially true; the
-        // assertion confirms `PartialEq` + `Copy` derive.
+                     // Equality on the unit struct is trivially true; the
+                     // assertion confirms `PartialEq` + `Copy` derive.
         assert_eq!(c1, c2);
     }
 }

@@ -36,14 +36,18 @@ fn main() {
         println!(
             "  call {}: level={}, message={}",
             i + 1,
-            args.first().and_then(|a| match a {
-                ArgumentValue::String(s) => Some(s.as_str()),
-                _ => None,
-            }).unwrap_or("?"),
-            args.get(1).and_then(|a| match a {
-                ArgumentValue::String(s) => Some(s.as_str()),
-                _ => None,
-            }).unwrap_or("?"),
+            args.first()
+                .and_then(|a| match a {
+                    ArgumentValue::String(s) => Some(s.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("?"),
+            args.get(1)
+                .and_then(|a| match a {
+                    ArgumentValue::String(s) => Some(s.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("?"),
         );
     }
 

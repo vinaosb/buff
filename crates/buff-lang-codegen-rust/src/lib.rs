@@ -109,12 +109,8 @@ pub fn generate_rust_with_source_map(
     buff_source: &str,
 ) -> Result<(String, buff_lang_debug_info::SourceMap), buff_lang_error::CodegenError> {
     let rust_source = generate_rust(decls)?;
-    let source_map = buff_lang_debug_info::build_source_map(
-        decls,
-        &rust_source,
-        buff_path,
-        buff_source,
-    );
+    let source_map =
+        buff_lang_debug_info::build_source_map(decls, &rust_source, buff_path, buff_source);
     Ok((rust_source, source_map))
 }
 

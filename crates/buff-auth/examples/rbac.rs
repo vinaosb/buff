@@ -5,7 +5,9 @@ use buff_auth::Rbac;
 fn main() {
     let mut policy = Rbac::new();
     policy.add("admin", "*", "read").expect("admin rule 1");
-    policy.add("admin", "users", "delete").expect("admin rule 2");
+    policy
+        .add("admin", "users", "delete")
+        .expect("admin rule 2");
     policy.add("user", "posts", "read").expect("user rule 1");
     policy.add("*", "health", "read").expect("anon rule 1");
 

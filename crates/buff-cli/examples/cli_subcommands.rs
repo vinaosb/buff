@@ -11,20 +11,14 @@ fn main() {
 
     let app = App::new("multi".to_string()).about("Subcommand demo".to_string());
 
-    let greet = app.command(
-        "greet".to_string(),
-        "Say hello to NAME".to_string(),
-    );
+    let greet = app.command("greet".to_string(), "Say hello to NAME".to_string());
     greet.option(
         "name".to_string(),
         "n".to_string(),
         "Who to greet".to_string(),
     );
 
-    let count = app.command(
-        "count".to_string(),
-        "Count to N".to_string(),
-    );
+    let count = app.command("count".to_string(), "Count to N".to_string());
     count.arg("n".to_string(), "How high to count".to_string());
 
     let parsed = match app.parse(args) {
@@ -43,10 +37,7 @@ fn main() {
         }
         Some("count") => {
             let sub = parsed.subcommand_args();
-            let n: u64 = sub
-                .arg("n")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(3);
+            let n: u64 = sub.arg("n").and_then(|s| s.parse().ok()).unwrap_or(3);
             for i in 1..=n {
                 println!("{i}");
             }

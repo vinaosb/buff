@@ -10,9 +10,7 @@ use buff_template::{Template, TemplateError};
 #[test]
 fn from_string_compiles_valid_template() {
     let t = Template::from_string("Hello {{name}}!").expect("valid template");
-    let out = t
-        .render(r#"{"name": "Buff"}"#)
-        .expect("render with name");
+    let out = t.render(r#"{"name": "Buff"}"#).expect("render with name");
     assert_eq!(out, "Hello Buff!");
 }
 
@@ -34,9 +32,7 @@ fn from_path_loads_and_renders() {
     let tmp = std::env::temp_dir().join(format!("buff-template-test-{}.html", std::process::id()));
     std::fs::write(&tmp, "<h1>{{title}}</h1>").expect("write test template");
     let t = Template::from_path(&tmp).expect("load from path");
-    let out = t
-        .render(r#"{"title": "Hello"}"#)
-        .expect("render from path");
+    let out = t.render(r#"{"title": "Hello"}"#).expect("render from path");
     assert_eq!(out, "<h1>Hello</h1>");
     let _ = std::fs::remove_file(&tmp);
 }
@@ -50,18 +46,14 @@ fn from_path_missing_file() {
 #[test]
 fn render_with_variable_substitution() {
     let t = Template::from_string("Hello {{name}}!").expect("compile");
-    let out = t
-        .render(r#"{"name": "World"}"#)
-        .expect("render world");
+    let out = t.render(r#"{"name": "World"}"#).expect("render world");
     assert_eq!(out, "Hello World!");
 }
 
 #[test]
 fn render_with_loop() {
-    let t = Template::from_string(
-        "{% for item in items %}{{item}} {% endfor %}",
-    )
-    .expect("compile loop");
+    let t = Template::from_string("{% for item in items %}{{item}} {% endfor %}")
+        .expect("compile loop");
     let out = t
         .render(r#"{"items": ["a", "b", "c"]}"#)
         .expect("render loop");
@@ -70,20 +62,14 @@ fn render_with_loop() {
 
 #[test]
 fn render_with_conditional_true() {
-    let t = Template::from_string(
-        "{% if ok %}yes{% else %}no{% endif %}",
-    )
-    .expect("compile cond");
+    let t = Template::from_string("{% if ok %}yes{% else %}no{% endif %}").expect("compile cond");
     let out = t.render(r#"{"ok": true}"#).expect("render true");
     assert_eq!(out, "yes");
 }
 
 #[test]
 fn render_with_conditional_false() {
-    let t = Template::from_string(
-        "{% if ok %}yes{% else %}no{% endif %}",
-    )
-    .expect("compile cond");
+    let t = Template::from_string("{% if ok %}yes{% else %}no{% endif %}").expect("compile cond");
     let out = t.render(r#"{"ok": false}"#).expect("render false");
     assert_eq!(out, "no");
 }

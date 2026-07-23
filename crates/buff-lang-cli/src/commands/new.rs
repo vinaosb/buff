@@ -79,7 +79,9 @@ pub fn run(name: &str, template: TemplateKind) -> Result<()> {
             // framework wave (v1.14-v1.17). Today the scaffolded file is
             // a starter; `buff check` accepts the imports today, `buff run`
             // resolves once the framework crate lands.
-            eprintln!("Run with: buff run {name}/src/main.buff (requires matching framework crate)");
+            eprintln!(
+                "Run with: buff run {name}/src/main.buff (requires matching framework crate)"
+            );
             eprintln!("Tests at: {name}/tests/test_hello.buff");
             eprintln!("Examples at: {name}/examples/hello.buff");
         }

@@ -84,8 +84,7 @@ fn web_post_rejects_missing_leading_slash() {
 #[test]
 fn web_middleware_increments_count() {
     let mut app = Web::new();
-    let mw: buff_web::MiddlewareFn =
-        Arc::new(|req, next| next(req));
+    let mw: buff_web::MiddlewareFn = Arc::new(|req, next| next(req));
     app.middleware(mw);
     assert_eq!(app.middleware_count(), 1);
 }
@@ -156,19 +155,17 @@ fn request_accessors_round_trip() {
     );
     assert_eq!(req.method(), "POST");
     assert_eq!(req.path(), "/echo");
-    assert_eq!(req.header("content-type"), Some("application/json".to_string()));
+    assert_eq!(
+        req.header("content-type"),
+        Some("application/json".to_string())
+    );
     assert_eq!(req.header("missing"), None);
     assert_eq!(req.body().expect("body"), r#"{"hello":"world"}"#);
 }
 
 #[test]
 fn request_json_returns_value() {
-    let req = Request::new(
-        "POST",
-        "/",
-        vec![],
-        br#"{"x":42}"#.to_vec(),
-    );
+    let req = Request::new("POST", "/", vec![], br#"{"x":42}"#.to_vec());
     let value = req.json().expect("json");
     assert_eq!(value["x"], 42);
 }
@@ -252,7 +249,10 @@ fn snapshot_method_all_variants() {
 #[test]
 fn snapshot_response_text_default_headers() {
     let resp = Response::text("hello");
-    insta::assert_snapshot!("response_text_headers", format!("{:?}", resp.headers_list()));
+    insta::assert_snapshot!(
+        "response_text_headers",
+        format!("{:?}", resp.headers_list())
+    );
 }
 
 #[test]

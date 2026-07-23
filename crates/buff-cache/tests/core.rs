@@ -23,10 +23,7 @@ fn cache_new_creates_empty_cache() {
 #[test]
 fn cache_new_rejects_zero_capacity() {
     let err = Cache::new(0).unwrap_err();
-    assert!(matches!(
-        err,
-        CacheError::InvalidCapacity { requested: 0 }
-    ));
+    assert!(matches!(err, CacheError::InvalidCapacity { requested: 0 }));
 }
 
 #[test]
@@ -98,11 +95,7 @@ fn cache_len_reflects_inserts_and_deletes() {
 #[test]
 fn cache_set_with_ttl_zero_acts_like_set() {
     let cache = Cache::new(10).expect("10-capacity");
-    cache.set_with_ttl(
-        "k".to_string(),
-        "v".to_string(),
-        Duration::from_secs(0),
-    );
+    cache.set_with_ttl("k".to_string(), "v".to_string(), Duration::from_secs(0));
     thread::sleep(Duration::from_millis(10));
     assert_eq!(cache.get("k"), Some("v".to_string()));
 }
@@ -123,11 +116,7 @@ fn cache_set_with_ttl_evicts_after_deadline() {
 #[test]
 fn cache_contains_respects_ttl_expiry() {
     let cache = Cache::new(10).expect("10-capacity");
-    cache.set_with_ttl(
-        "k".to_string(),
-        "v".to_string(),
-        Duration::from_millis(30),
-    );
+    cache.set_with_ttl("k".to_string(), "v".to_string(), Duration::from_millis(30));
     assert!(cache.contains("k"));
     thread::sleep(Duration::from_millis(60));
     assert!(!cache.contains("k"));
@@ -141,11 +130,7 @@ fn cache_set_with_distinct_deadlines_coexist() {
         "1".to_string(),
         Duration::from_millis(30),
     );
-    cache.set_with_ttl(
-        "slow".to_string(),
-        "2".to_string(),
-        Duration::from_secs(60),
-    );
+    cache.set_with_ttl("slow".to_string(), "2".to_string(), Duration::from_secs(60));
     thread::sleep(Duration::from_millis(60));
     assert_eq!(cache.get("fast"), None);
     assert_eq!(cache.get("slow"), Some("2".to_string()));

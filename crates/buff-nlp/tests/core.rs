@@ -71,10 +71,7 @@ fn stem_english_various_words() {
         Text::stem("happily", StemAlgorithm::English).unwrap(),
         "happili"
     );
-    assert_eq!(
-        Text::stem("cats", StemAlgorithm::English).unwrap(),
-        "cat"
-    );
+    assert_eq!(Text::stem("cats", StemAlgorithm::English).unwrap(), "cat");
 }
 
 #[test]
@@ -100,10 +97,7 @@ fn stem_idempotent_on_already_stemmed() {
 #[test]
 fn tokenize_drops_punctuation_and_whitespace() {
     let tokens = Text::tokenize("Hello, world! Foo; bar: baz.");
-    assert_eq!(
-        tokens,
-        vec!["Hello", "world", "Foo", "bar", "baz"]
-    );
+    assert_eq!(tokens, vec!["Hello", "world", "Foo", "bar", "baz"]);
 }
 
 #[test]

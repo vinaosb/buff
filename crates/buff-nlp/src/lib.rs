@@ -221,7 +221,8 @@ impl Text {
         }
         let input_owned = input.to_string();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            whatlang::Detector::detect(&input_owned).map(|info| Language::from_whatlang(info.lang()))
+            whatlang::Detector::detect(&input_owned)
+                .map(|info| Language::from_whatlang(info.lang()))
         }));
         match result {
             Ok(Some(lang)) => Some(lang),
@@ -290,11 +291,12 @@ impl Text {
 // ---------------------------------------------------------------------------
 
 fn stem_inner(word: &str, algorithm: StemAlgorithm) -> Result<String, NlpError> {
-    let stemmer = rust_stemmers::Stemmer::new(algorithm.to_rust_stemmers())
-        .map_err(|e| NlpError::StemmerInit {
+    let stemmer = rust_stemmers::Stemmer::new(algorithm.to_rust_stemmers()).map_err(|e| {
+        NlpError::StemmerInit {
             algorithm,
             message: e.to_string(),
-        })?;
+        }
+    })?;
     Ok(stemmer.stem(word).into_owned())
 }
 

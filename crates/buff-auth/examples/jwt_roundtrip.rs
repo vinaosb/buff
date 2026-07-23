@@ -15,6 +15,18 @@ fn main() {
     println!("token: {token}");
 
     let decoded = jwt_decode(&token, secret).expect("decode");
-    println!("decoded sub  = {}", decoded.get("sub").and_then(|v| v.as_str()).unwrap_or_default());
-    println!("decoded role = {}", decoded.get("role").and_then(|v| v.as_str()).unwrap_or_default());
+    println!(
+        "decoded sub  = {}",
+        decoded
+            .get("sub")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+    );
+    println!(
+        "decoded role = {}",
+        decoded
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+    );
 }

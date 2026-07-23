@@ -20,8 +20,7 @@ fn main() {
         .expect("body");
     println!("built: {email}");
 
-    let client =
-        SmtpClient::new("127.0.0.1", port, "mockuser", "mockpass").expect("smtp client");
+    let client = SmtpClient::new("127.0.0.1", port, "mockuser", "mockpass").expect("smtp client");
     client.send(&email).expect("send");
     println!("sent.");
 }

@@ -27,12 +27,11 @@
 //! support — currently only `Unit`, which has no Rust literal form).
 
 use proc_macro2::Span as ProcSpan;
-use syn::{
-    Expr as SynExpr, ExprArray, ExprLit, Item, ItemConst, Lit, LitInt, Type as SynType,
-    Visibility,
-};
 use syn::punctuated::Punctuated;
 use syn::token::{Colon, Comma, Const, Semi};
+use syn::{
+    Expr as SynExpr, ExprArray, ExprLit, Item, ItemConst, Lit, LitInt, Type as SynType, Visibility,
+};
 
 use buff_lang_error::{CodegenError, Diagnostic, ErrorCode, Span as BuffSpan};
 use buff_lang_types::{ComptimeFacts, ComptimeValue};

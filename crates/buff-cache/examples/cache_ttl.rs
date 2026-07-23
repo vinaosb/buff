@@ -18,13 +18,13 @@ fn main() {
         "1".to_string(),
         Duration::from_millis(50),
     );
-    cache.set_with_ttl(
-        "slow".to_string(),
-        "2".to_string(),
-        Duration::from_secs(60),
-    );
+    cache.set_with_ttl("slow".to_string(), "2".to_string(), Duration::from_secs(60));
 
-    println!("at t=0ms: fast={:?} slow={:?}", cache.get("fast"), cache.get("slow"));
+    println!(
+        "at t=0ms: fast={:?} slow={:?}",
+        cache.get("fast"),
+        cache.get("slow")
+    );
 
     thread::sleep(Duration::from_millis(80));
     println!(

@@ -21,7 +21,10 @@ fn confidential() -> OAuth2Client {
 #[test]
 fn oauth2_authorization_url_confidential_has_required_components() {
     let url = confidential().authorization_url().expect("auth url");
-    assert!(url.starts_with("https://accounts.example.com/auth"), "url was: {url}");
+    assert!(
+        url.starts_with("https://accounts.example.com/auth"),
+        "url was: {url}"
+    );
     assert!(url.contains("client_id=client-1"), "missing client_id");
     assert!(url.contains("redirect_uri="), "missing redirect_uri");
     assert!(url.contains("response_type=code"), "missing response_type");

@@ -20,10 +20,13 @@ fn main() {
     let schema_str = validator.to_json_schema();
     println!("raw schema string: {schema_str}");
 
-    let schema: serde_json::Value = serde_json::from_str(&schema_str)
-        .expect("schema is valid JSON");
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_str).expect("schema is valid JSON");
     println!("pretty-printed:");
-    println!("{}", serde_json::to_string_pretty(&schema).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&schema).unwrap_or_default()
+    );
 
     let required = schema
         .get("required")

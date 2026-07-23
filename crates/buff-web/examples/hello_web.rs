@@ -16,11 +16,8 @@ use std::sync::Arc;
 fn main() {
     let mut app = Web::new();
 
-    app.get(
-        "/",
-        Arc::new(|_req: Request| Response::text("hello, web")),
-    )
-    .expect("register / route");
+    app.get("/", Arc::new(|_req: Request| Response::text("hello, web")))
+        .expect("register / route");
 
     app.get(
         "/health",

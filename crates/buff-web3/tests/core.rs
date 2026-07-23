@@ -21,12 +21,10 @@ use buff_web3::{
 // NEVER use on mainnet; documented at
 // https://book.getfoundry.sh/reference/anvil/). Used by both the
 // unit-test Wallet construction and the ignored integration tests.
-const ANVIL_KEY_A: &str =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const ANVIL_KEY_A: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const ANVIL_ADDR_A: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
-const ANVIL_KEY_B: &str =
-    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const ANVIL_KEY_B: &str = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
 const ERC20_ABI: &str = r#"[
     {"type":"function","name":"balanceOf","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
@@ -86,13 +84,19 @@ fn wallet_from_private_key_accepts_no_prefix() {
 #[test]
 fn wallet_from_private_key_rejects_short_key() {
     let err = Wallet::from_private_key("0xdeadbeef").unwrap_err();
-    assert!(matches!(err, Web3Error::InvalidPrivateKey(_)), "got {err:?}");
+    assert!(
+        matches!(err, Web3Error::InvalidPrivateKey(_)),
+        "got {err:?}"
+    );
 }
 
 #[test]
 fn wallet_from_private_key_rejects_garbage() {
     let err = Wallet::from_private_key("not a key at all").unwrap_err();
-    assert!(matches!(err, Web3Error::InvalidPrivateKey(_)), "got {err:?}");
+    assert!(
+        matches!(err, Web3Error::InvalidPrivateKey(_)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -142,12 +146,8 @@ fn contract_new_accepts_wrapped_abi_form() {
 #[test]
 fn contract_new_rejects_empty_abi() {
     let provider = Provider::new("http://localhost:8545").expect("provider");
-    let err = Contract::new(
-        "0x0000000000000000000000000000000000000000",
-        "",
-        provider,
-    )
-    .unwrap_err();
+    let err =
+        Contract::new("0x0000000000000000000000000000000000000000", "", provider).unwrap_err();
     assert!(matches!(err, Web3Error::InvalidAbi(_)), "got {err:?}");
 }
 
@@ -312,7 +312,10 @@ fn provider_block_number_increases() {
     let block_a = p.block_number().expect("block_number");
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let block_b = p.block_number().expect("block_number again");
-    assert!(block_b >= block_a, "block did not advance: {block_a} -> {block_b}");
+    assert!(
+        block_b >= block_a,
+        "block did not advance: {block_a} -> {block_b}"
+    );
 }
 
 #[test]

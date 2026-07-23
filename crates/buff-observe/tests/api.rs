@@ -53,7 +53,10 @@ fn observe_error_types() {
     let err = ObserveError::AlreadyInitialized;
     assert_eq!(format!("{err}"), "tracer provider already initialised");
     let err = ObserveError::Panic;
-    assert_eq!(format!("{err}"), "internal panic in observability subsystem");
+    assert_eq!(
+        format!("{err}"),
+        "internal panic in observability subsystem"
+    );
     let err = ObserveError::Message("custom".into());
     assert_eq!(format!("{err}"), "custom");
 }

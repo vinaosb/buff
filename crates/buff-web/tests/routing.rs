@@ -34,10 +34,7 @@ fn make_request(method: &str, uri: &str, body: &str) -> axum::extract::Request {
         .expect("build test request")
 }
 
-async fn send(
-    app: Web,
-    req: axum::extract::Request,
-) -> axum::response::Response {
+async fn send(app: Web, req: axum::extract::Request) -> axum::response::Response {
     app.build_router()
         .oneshot(req)
         .await
@@ -54,11 +51,8 @@ async fn body_string(resp: axum::response::Response) -> String {
 #[tokio::test]
 async fn get_text_route_returns_body() {
     let mut app = Web::new();
-    app.get(
-        "/",
-        Arc::new(|_req| Response::text("hello")),
-    )
-    .expect("get /");
+    app.get("/", Arc::new(|_req| Response::text("hello")))
+        .expect("get /");
     let resp = send(app, make_request("GET", "/", "")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let body = body_string(resp).await;
@@ -71,16 +65,14 @@ async fn post_json_route_round_trips_payload() {
     app.post(
         "/echo",
         Arc::new(|req: Request| {
-            let value = req.json().unwrap_or_else(|_| serde_json::json!({"error": "bad json"}));
+            let value = req
+                .json()
+                .unwrap_or_else(|_| serde_json::json!({"error": "bad json"}));
             Response::json(&value)
         }),
     )
     .expect("post /echo");
-    let resp = send(
-        app,
-        make_request("POST", "/echo", r#"{"name":"buff"}"#),
-    )
-    .await;
+    let resp = send(app, make_request("POST", "/echo", r#"{"name":"buff"}"#)).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let body = body_string(resp).await;
     assert_eq!(body, r#"{"name":"buff"}"#);
@@ -114,11 +106,7 @@ async fn put_route_returns_200_with_payload() {
         }),
     )
     .expect("put /items/{id}");
-    let resp = send(
-        app,
-        make_request("PUT", "/items/7", "updated"),
-    )
-    .await;
+    let resp = send(app, make_request("PUT", "/items/7", "updated")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let body = body_string(resp).await;
     assert_eq!(body, "updated");
@@ -127,11 +115,8 @@ async fn put_route_returns_200_with_payload() {
 #[tokio::test]
 async fn delete_route_returns_text() {
     let mut app = Web::new();
-    app.delete(
-        "/items/{id}",
-        Arc::new(|_req| Response::text("deleted")),
-    )
-    .expect("delete /items/{id}");
+    app.delete("/items/{id}", Arc::new(|_req| Response::text("deleted")))
+        .expect("delete /items/{id}");
     let resp = send(app, make_request("DELETE", "/items/3", "")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let body = body_string(resp).await;
@@ -174,11 +159,8 @@ async fn middleware_short_circuits_with_its_own_response() {
         r
     });
     app.middleware(mw);
-    app.get(
-        "/open",
-        Arc::new(|_req| Response::text("never reached")),
-    )
-    .expect("get /open");
+    app.get("/open", Arc::new(|_req| Response::text("never reached")))
+        .expect("get /open");
     let resp = send(app, make_request("GET", "/open", "")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
     let body = body_string(resp).await;
@@ -206,25 +188,26 @@ async fn middleware_chain_executes_in_registration_order() {
     let mut app = Web::new();
     let mw1: buff_web::MiddlewareFn = Arc::new(|req, next| {
         let resp = next(req);
-        let body = std::str::from_utf8(resp.body_bytes()).unwrap_or("").to_string();
+        let body = std::str::from_utf8(resp.body_bytes())
+            .unwrap_or("")
+            .to_string();
         let mut r = Response::text(&format!("[mw1:{body}]"));
         r.status(resp.status_code());
         r
     });
     let mw2: buff_web::MiddlewareFn = Arc::new(|req, next| {
         let resp = next(req);
-        let body = std::str::from_utf8(resp.body_bytes()).unwrap_or("").to_string();
+        let body = std::str::from_utf8(resp.body_bytes())
+            .unwrap_or("")
+            .to_string();
         let mut r = Response::text(&format!("[mw2:{body}]"));
         r.status(resp.status_code());
         r
     });
     app.middleware(mw1);
     app.middleware(mw2);
-    app.get(
-        "/chain",
-        Arc::new(|_req| Response::text("handler")),
-    )
-    .expect("get /chain");
+    app.get("/chain", Arc::new(|_req| Response::text("handler")))
+        .expect("get /chain");
     let resp = send(app, make_request("GET", "/chain", "")).await;
     let body = body_string(resp).await;
     assert_eq!(body, "[mw1:[mw2:handler]]");
@@ -235,14 +218,12 @@ async fn request_header_passed_through_to_handler() {
     let mut app = Web::new();
     app.get(
         "/auth",
-        Arc::new(|req: Request| {
-            match req.header("authorization") {
-                Some(token) if token == "Bearer secret" => Response::text("ok"),
-                _ => {
-                    let mut r = Response::text("unauthorized");
-                    r.status(401);
-                    r
-                }
+        Arc::new(|req: Request| match req.header("authorization") {
+            Some(token) if token == "Bearer secret" => Response::text("ok"),
+            _ => {
+                let mut r = Response::text("unauthorized");
+                r.status(401);
+                r
             }
         }),
     )

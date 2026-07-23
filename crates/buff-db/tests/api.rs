@@ -46,7 +46,11 @@ async fn pool_execute_dml_returns_one_row() {
     let n = pool
         .execute(
             "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-            &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+            &[
+                DbParam::Int(1),
+                DbParam::Text("Ada".into()),
+                DbParam::Int(36),
+            ],
         )
         .await
         .unwrap();
@@ -59,13 +63,20 @@ async fn pool_query_one_returns_row() {
     pool.execute(SCHEMA, &[]).await.unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
 
     let row = pool
-        .query_one("SELECT id, name FROM users WHERE id = ?", &[DbParam::Int(1)])
+        .query_one(
+            "SELECT id, name FROM users WHERE id = ?",
+            &[DbParam::Int(1)],
+        )
         .await
         .unwrap();
 
@@ -77,7 +88,9 @@ async fn pool_query_one_returns_row() {
 async fn pool_query_one_returns_error_when_empty() {
     let pool = Pool::connect("sqlite::memory:").await.unwrap();
     pool.execute(SCHEMA, &[]).await.unwrap();
-    let res = pool.query_one("SELECT * FROM users WHERE id = ?", &[DbParam::Int(999)]).await;
+    let res = pool
+        .query_one("SELECT * FROM users WHERE id = ?", &[DbParam::Int(999)])
+        .await;
     assert!(res.is_err());
     let e = res.unwrap_err();
     assert!(matches!(e, DbError::Query(_)));
@@ -91,7 +104,11 @@ async fn pool_clone_is_shareable_across_tasks() {
     let p2 = pool.clone();
     p1.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();

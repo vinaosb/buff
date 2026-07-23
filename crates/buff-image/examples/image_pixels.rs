@@ -12,13 +12,24 @@ fn main() {
     println!("created: {}x{}", img.width(), img.height());
 
     let corner = img.get_pixel(0, 0).expect("pixel (0,0)");
-    println!("corner pixel: r={}, g={}, b={}", corner.r(), corner.g(), corner.b());
+    println!(
+        "corner pixel: r={}, g={}, b={}",
+        corner.r(),
+        corner.g(),
+        corner.b()
+    );
 
     for i in 0..100 {
-        img.set_pixel(i, i, Color::rgb(0, 255, 0)).expect("set_pixel");
+        img.set_pixel(i, i, Color::rgb(0, 255, 0))
+            .expect("set_pixel");
     }
     let mid = img.get_pixel(50, 50).expect("pixel (50,50)");
-    println!("mid-diagonal pixel: r={}, g={}, b={}", mid.r(), mid.g(), mid.b());
+    println!(
+        "mid-diagonal pixel: r={}, g={}, b={}",
+        mid.r(),
+        mid.g(),
+        mid.b()
+    );
 
     let path = std::env::temp_dir().join(format!("buff_image_pixels-{}.png", std::process::id()));
     img.save(&path).expect("save");

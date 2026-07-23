@@ -168,7 +168,10 @@ fn response_headers_from_mock() {
         .send()
         .expect("GET should succeed");
     let headers = resp.headers();
-    assert_eq!(headers.get("content-type").map(|s| s.as_str()), Some("application/json"));
+    assert_eq!(
+        headers.get("content-type").map(|s| s.as_str()),
+        Some("application/json")
+    );
     assert_eq!(headers.get("x-custom").map(|s| s.as_str()), Some("buff"));
     mock.assert();
 }

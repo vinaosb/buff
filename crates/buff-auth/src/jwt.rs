@@ -77,7 +77,10 @@ mod smoke_tests {
         let secret = "top-secret";
         let token = jwt_encode(&claims, secret).expect("encode");
         let decoded = jwt_decode(&token, secret).expect("decode");
-        assert_eq!(decoded.get("sub"), Some(&Value::String("alice".to_string())));
+        assert_eq!(
+            decoded.get("sub"),
+            Some(&Value::String("alice".to_string()))
+        );
         assert_eq!(decoded.get("admin"), Some(&Value::Bool(true)));
     }
 

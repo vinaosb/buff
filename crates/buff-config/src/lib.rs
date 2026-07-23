@@ -117,11 +117,16 @@ impl Config {
                 "toml" => Box::new(Toml::file(&path_owned)),
                 "yaml" | "yml" => Box::new(Yaml::file(&path_owned)),
                 "json" => Box::new(Json::file(&path_owned)),
-                _ => return Err(ConfigError::Figment(format!("unsupported config format: .{ext}"))),
+                _ => {
+                    return Err(ConfigError::Figment(format!(
+                        "unsupported config format: .{ext}"
+                    )))
+                }
             };
-            let mut fig = self.inner.lock().map_err(|e| {
-                ConfigError::Figment(format!("lock error: {e}"))
-            })?;
+            let mut fig = self
+                .inner
+                .lock()
+                .map_err(|e| ConfigError::Figment(format!("lock error: {e}")))?;
             *fig = std::mem::take(&mut *fig).merge(provider);
             Ok(())
         }));
@@ -261,9 +266,7 @@ impl Config {
             }
         });
 
-        Ok(ConfigWatcher {
-            _watcher: watcher,
-        })
+        Ok(ConfigWatcher { _watcher: watcher })
     }
 }
 

@@ -19,13 +19,21 @@ fn main() {
     let bot = Bot::new(Platform::Telegram, token).expect("bot");
 
     bot.command("ping", |msg| {
-        println!("[CMD] /ping from @{} in chat {}", msg.author(), msg.channel());
+        println!(
+            "[CMD] /ping from @{} in chat {}",
+            msg.author(),
+            msg.channel()
+        );
         println!("[CMD]   is_dm: {}", msg.is_dm());
     })
     .expect("register ping");
 
     bot.command("start", |msg| {
-        println!("[CMD] /start from @{} (chat: {})", msg.author(), msg.channel());
+        println!(
+            "[CMD] /start from @{} (chat: {})",
+            msg.author(),
+            msg.channel()
+        );
     })
     .expect("register start");
 

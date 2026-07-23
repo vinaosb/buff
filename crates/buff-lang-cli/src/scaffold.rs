@@ -616,10 +616,9 @@ pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFil
         // Legacy Binary/Lib/Server/Gpu keep the v1 manifest for backward
         // compat (existing snapshot tests assert its shape). The 4 new
         // v2 templates opt into the v2 manifest.
-        TemplateKind::Binary
-        | TemplateKind::Lib
-        | TemplateKind::Server
-        | TemplateKind::Gpu => BUFF_TOML_TEMPLATE,
+        TemplateKind::Binary | TemplateKind::Lib | TemplateKind::Server | TemplateKind::Gpu => {
+            BUFF_TOML_TEMPLATE
+        }
         TemplateKind::Web | TemplateKind::Ml | TemplateKind::Game | TemplateKind::Pipeline => {
             BUFF_TOML_V2_TEMPLATE
         }
@@ -886,7 +885,11 @@ mod tests {
 
     #[test]
     fn user_visible_lists_exactly_seven_templates() {
-        assert_eq!(TemplateKind::user_visible().len(), 7, "exactly 7 v2 templates");
+        assert_eq!(
+            TemplateKind::user_visible().len(),
+            7,
+            "exactly 7 v2 templates"
+        );
     }
 
     #[test]
@@ -900,7 +903,11 @@ mod tests {
             let files = files_for_template(kind, "demo");
             let paths: Vec<&str> = files.iter().map(|(p, _)| *p).collect();
             assert!(paths.contains(&"buff.toml"), "{:?} missing buff.toml", kind);
-            assert!(paths.contains(&"src/main.buff"), "{:?} missing src/main.buff", kind);
+            assert!(
+                paths.contains(&"src/main.buff"),
+                "{:?} missing src/main.buff",
+                kind
+            );
             assert!(
                 paths.contains(&"tests/test_hello.buff"),
                 "{:?} missing tests/test_hello.buff",
@@ -917,8 +924,16 @@ mod tests {
                 "{:?} missing CI workflow",
                 kind
             );
-            assert!(paths.contains(&".gitignore"), "{:?} missing .gitignore", kind);
-            assert!(paths.contains(&".env.example"), "{:?} missing .env.example", kind);
+            assert!(
+                paths.contains(&".gitignore"),
+                "{:?} missing .gitignore",
+                kind
+            );
+            assert!(
+                paths.contains(&".env.example"),
+                "{:?} missing .env.example",
+                kind
+            );
         }
     }
 
@@ -956,7 +971,10 @@ mod tests {
             .find(|(p, _)| *p == "src/main.buff")
             .map(|(_, c)| c.as_str())
             .expect("web main.buff");
-        assert!(main.contains("buff-web"), "web template imports buff-web: {main}");
+        assert!(
+            main.contains("buff-web"),
+            "web template imports buff-web: {main}"
+        );
 
         let ml = files_for_template(TemplateKind::Ml, "demo");
         let main = ml
@@ -964,7 +982,10 @@ mod tests {
             .find(|(p, _)| *p == "src/main.buff")
             .map(|(_, c)| c.as_str())
             .expect("ml main.buff");
-        assert!(main.contains("buff-tensor"), "ml template imports buff-tensor: {main}");
+        assert!(
+            main.contains("buff-tensor"),
+            "ml template imports buff-tensor: {main}"
+        );
 
         let game = files_for_template(TemplateKind::Game, "demo");
         let main = game
@@ -972,7 +993,10 @@ mod tests {
             .find(|(p, _)| *p == "src/main.buff")
             .map(|(_, c)| c.as_str())
             .expect("game main.buff");
-        assert!(main.contains("buff-ecs"), "game template imports buff-ecs: {main}");
+        assert!(
+            main.contains("buff-ecs"),
+            "game template imports buff-ecs: {main}"
+        );
 
         let pipe = files_for_template(TemplateKind::Pipeline, "demo");
         let main = pipe

@@ -97,7 +97,7 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 is_comptime: false,
                 is_comptime: false,
                 span: span(),
-                })
+            })
             .collect(),
         return_type: None,
         body: Block {
@@ -179,7 +179,7 @@ fn lambda(params: &[&str], body: Expr) -> Expr {
                 is_comptime: false,
                 is_comptime: false,
                 span: span(),
-                })
+            })
             .collect(),
         body: Block {
             stmts: vec![expr_stmt(body)],

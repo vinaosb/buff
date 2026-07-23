@@ -25,7 +25,11 @@ fn main() {
     let mut latency = Histogram::new("request_duration_ms");
     latency.observe(42.5);
     latency.observe(15.3);
-    println!("histogram count: {}, sum: {}", latency.count(), latency.sum());
+    println!(
+        "histogram count: {}, sum: {}",
+        latency.count(),
+        latency.sum()
+    );
 
     // Set a gauge value.
     let mut cpu = Gauge::new("cpu_usage");

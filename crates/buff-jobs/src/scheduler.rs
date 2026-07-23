@@ -50,9 +50,8 @@ impl Scheduler {
 
     pub async fn cron(&self, expr: impl Into<String>, job: Job) -> JobsResult<JobId> {
         let expr = expr.into();
-        let _schedule = cron::Schedule::from_str(&expr).map_err(|e| {
-            JobsError::invalid_cron(&expr, e.to_string())
-        })?;
+        let _schedule = cron::Schedule::from_str(&expr)
+            .map_err(|e| JobsError::invalid_cron(&expr, e.to_string()))?;
 
         let id = job.id().clone();
         let mut scheduled = self.scheduled.lock().await;
@@ -143,10 +142,7 @@ impl Scheduler {
 
     pub async fn next_due(&self) -> Option<Instant> {
         let scheduled = self.scheduled.lock().await;
-        scheduled
-            .iter()
-            .filter_map(|sj| sj.next_fire)
-            .min()
+        scheduled.iter().filter_map(|sj| sj.next_fire).min()
     }
 
     pub async fn pending_count(&self) -> usize {

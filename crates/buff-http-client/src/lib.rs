@@ -198,9 +198,7 @@ impl Response {
     /// Wraps `reqwest::blocking::Response::json::<serde_json::Value>()`.
     /// The body is wrapped in `catch_unwind` per T4 FFI guide R6.
     pub fn json(self) -> Result<serde_json::Value, HttpError> {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            self.inner.json::<serde_json::Value>()
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| self.inner.json::<serde_json::Value>()));
         match result {
             Ok(Ok(val)) => Ok(val),
             Ok(Err(err)) => Err(HttpError::from(err)),
@@ -213,9 +211,7 @@ impl Response {
     /// Wraps `reqwest::blocking::Response::bytes()`. The body is wrapped
     /// in `catch_unwind` per T4 FFI guide R6.
     pub fn bytes(self) -> Result<Vec<u8>, HttpError> {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            self.inner.bytes().map(|b| b.to_vec())
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| self.inner.bytes().map(|b| b.to_vec())));
         match result {
             Ok(Ok(bytes)) => Ok(bytes),
             Ok(Err(err)) => Err(HttpError::from(err)),

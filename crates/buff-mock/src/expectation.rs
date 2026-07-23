@@ -70,8 +70,10 @@ impl Expectation {
         }
         match &self.args_constraint {
             None => true,
-            Some(required) => required.len() == args.len()
-                && required.iter().zip(args.iter()).all(|(r, a)| r == a),
+            Some(required) => {
+                required.len() == args.len()
+                    && required.iter().zip(args.iter()).all(|(r, a)| r == a)
+            }
         }
     }
 }
@@ -165,4 +167,3 @@ impl<'a> ExpectationBuilder<'a> {
         self.state.add_expectation(self.expectation);
     }
 }
-

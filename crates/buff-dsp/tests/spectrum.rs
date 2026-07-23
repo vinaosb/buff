@@ -12,10 +12,16 @@ fn spectrum_freqs_are_linear_spaced() {
     assert_eq!(freqs.len(), spec.len());
     assert!(freqs[0] < 1e-9, "first bin should be DC, got {}", freqs[0]);
     let step = freqs[1];
-    assert!((step - 1.0).abs() < 1e-9, "bin width should be 1 Hz, got {step}");
+    assert!(
+        (step - 1.0).abs() < 1e-9,
+        "bin width should be 1 Hz, got {step}"
+    );
     for (i, &freq) in freqs.iter().enumerate().skip(1) {
         let expected = i as f64 * step;
-        assert!((freq - expected).abs() < 1e-9, "bin {i} not linear: {freq} vs {expected}");
+        assert!(
+            (freq - expected).abs() < 1e-9,
+            "bin {i} not linear: {freq} vs {expected}"
+        );
     }
 }
 
@@ -30,7 +36,10 @@ fn spectrum_magnitudes_via_impulse_signal() {
     let spec = s.fft();
     let mags = spec.magnitudes();
     for (i, &m) in mags.iter().enumerate() {
-        assert!((m - 1.0).abs() < 1e-9, "impulse magnitude at bin {i} should be 1.0, got {m}");
+        assert!(
+            (m - 1.0).abs() < 1e-9,
+            "impulse magnitude at bin {i} should be 1.0, got {m}"
+        );
     }
 }
 
@@ -60,7 +69,11 @@ fn spectrum_phases_via_pure_cosine_at_bin_2() {
 fn spectrogram_single_frame_for_short_signal() {
     let s = Signal::from_vec(vec![0.0; 100], 8_000);
     let frames = s.spectrogram(256);
-    assert_eq!(frames.len(), 1, "short signal should produce 1 zero-padded frame");
+    assert_eq!(
+        frames.len(),
+        1,
+        "short signal should produce 1 zero-padded frame"
+    );
     assert_eq!(frames[0].len(), 129);
 }
 

@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 fn lowers_single_int_value_to_const_item() {
     let mut values = BTreeMap::new();
     values.insert(42usize, ComptimeValue::Int(100));
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 1);
 }
@@ -18,7 +21,10 @@ fn lowers_single_int_value_to_const_item() {
 fn lowers_bool_value() {
     let mut values = BTreeMap::new();
     values.insert(0, ComptimeValue::Bool(true));
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 1);
 }
@@ -27,7 +33,10 @@ fn lowers_bool_value() {
 fn lowers_string_value() {
     let mut values = BTreeMap::new();
     values.insert(0, ComptimeValue::String("hello".to_string()));
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 1);
 }
@@ -39,7 +48,10 @@ fn lowers_array_value() {
         0,
         ComptimeValue::Array(vec![ComptimeValue::Int(1), ComptimeValue::Int(2)]),
     );
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 1);
 }
@@ -50,7 +62,10 @@ fn lowers_multiple_values_in_offset_order() {
     values.insert(100, ComptimeValue::Int(1));
     values.insert(10, ComptimeValue::Int(2));
     values.insert(999, ComptimeValue::Int(3));
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 3);
 }
@@ -66,7 +81,10 @@ fn empty_facts_produces_no_items() {
 fn unit_value_rejected_with_e1304() {
     let mut values = BTreeMap::new();
     values.insert(0, ComptimeValue::Unit);
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let err: CodegenError = lower_comptime_facts(&facts).unwrap_err();
     assert_eq!(err.diagnostic.code, Some(ErrorCode::ComptimeLoweringFailed));
 }
@@ -78,7 +96,10 @@ fn facts_with_errors_still_lower_successful_values() {
     // `facts.values`; failures are in `facts.errors`).
     let mut values = BTreeMap::new();
     values.insert(0, ComptimeValue::Int(7));
-    let facts = ComptimeFacts { values, errors: vec![] };
+    let facts = ComptimeFacts {
+        values,
+        errors: vec![],
+    };
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 1);
 }

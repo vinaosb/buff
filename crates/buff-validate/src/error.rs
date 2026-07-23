@@ -27,9 +27,7 @@ pub enum ValidationError {
     InvalidUrl { field: String, value: String },
 
     /// The input field failed a `length` rule.
-    #[error(
-        "field `{field}` length {actual} is outside the required range {min}..={max}"
-    )]
+    #[error("field `{field}` length {actual} is outside the required range {min}..={max}")]
     InvalidLength {
         field: String,
         min: u64,
@@ -38,9 +36,7 @@ pub enum ValidationError {
     },
 
     /// The input field failed a `range` rule.
-    #[error(
-        "field `{field}` value {actual} is outside the required range {min}..={max}"
-    )]
+    #[error("field `{field}` value {actual} is outside the required range {min}..={max}")]
     InvalidRange {
         field: String,
         min: i64,
@@ -107,9 +103,7 @@ pub struct ValidationErrors {
 
 impl ValidationErrors {
     pub fn new() -> Self {
-        ValidationErrors {
-            errors: Vec::new(),
-        }
+        ValidationErrors { errors: Vec::new() }
     }
 
     pub fn push(&mut self, err: ValidationError) {

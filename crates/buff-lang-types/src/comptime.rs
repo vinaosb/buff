@@ -73,7 +73,10 @@ impl ComptimeValue {
             ComptimeValue::Bool(_) => Type::Bool,
             ComptimeValue::String(_) => Type::String,
             ComptimeValue::Array(els) => {
-                let elem = els.first().map(ComptimeValue::buff_type).unwrap_or(Type::Unknown);
+                let elem = els
+                    .first()
+                    .map(ComptimeValue::buff_type)
+                    .unwrap_or(Type::Unknown);
                 Type::Vector(Box::new(elem))
             }
             ComptimeValue::Unit => Type::Void,
@@ -115,8 +118,7 @@ impl ComptimeError {
     /// Build an I/O-at-comptime rejection (E1211).
     pub fn io_forbidden(message: impl Into<String>, span: Span) -> Self {
         Self {
-            diagnostic: Diagnostic::error(message, span)
-                .with_code(ErrorCode::ComptimeIoForbidden),
+            diagnostic: Diagnostic::error(message, span).with_code(ErrorCode::ComptimeIoForbidden),
         }
     }
 
@@ -217,7 +219,10 @@ impl ComptimeInterpreter {
             Expr::Ident(ident, _) => match self.env.get(&ident.name) {
                 Some(v) => Ok(v.clone()),
                 None => Err(ComptimeError::failed(
-                    format!("comptime cannot evaluate identifier `{}` (not bound)", ident.name),
+                    format!(
+                        "comptime cannot evaluate identifier `{}` (not bound)",
+                        ident.name
+                    ),
                     span,
                 )),
             },
@@ -265,10 +270,7 @@ impl ComptimeInterpreter {
                 if let Expr::Ident(name, _) = callee.as_ref() {
                     if is_io_function(&name.name) {
                         return Err(ComptimeError::io_forbidden(
-                            format!(
-                                "`{}` performs I/O and cannot run at comptime",
-                                name.name
-                            ),
+                            format!("`{}` performs I/O and cannot run at comptime", name.name),
                             span,
                         ));
                     }
@@ -287,15 +289,13 @@ impl ComptimeInterpreter {
                     span,
                 ))
             }
-            Expr::MethodCall { method, .. } => {
-                Err(ComptimeError::failed(
-                    format!(
-                        "comptime cannot evaluate method call `.{}` (only literals and operators)",
-                        method
-                    ),
-                    span,
-                ))
-            }
+            Expr::MethodCall { method, .. } => Err(ComptimeError::failed(
+                format!(
+                    "comptime cannot evaluate method call `.{}` (only literals and operators)",
+                    method
+                ),
+                span,
+            )),
             Expr::Spawn { .. } => Err(ComptimeError::io_forbidden(
                 "`spawn` performs I/O (task scheduling) and cannot run at comptime",
                 span,
@@ -319,13 +319,12 @@ impl ComptimeInterpreter {
             Literal::String(s) => Ok(ComptimeValue::String(s.clone())),
             Literal::Byte(b) => Ok(ComptimeValue::Int(*b as i64)),
             Literal::Char(c) => Ok(ComptimeValue::Int(*c as i64)),
-            Literal::Float(_)
-            | Literal::Double(_)
-            | Literal::Decimal(_)
-            | Literal::Regex(_) => Err(ComptimeError::failed(
-                "comptime float/decimal/regex literals are not yet supported",
-                span,
-            )),
+            Literal::Float(_) | Literal::Double(_) | Literal::Decimal(_) | Literal::Regex(_) => {
+                Err(ComptimeError::failed(
+                    "comptime float/decimal/regex literals are not yet supported",
+                    span,
+                ))
+            }
         }
     }
 
@@ -504,7 +503,11 @@ pub fn analyze_program(decls: &[buff_lang_ast::Decl]) -> ComptimeFacts {
 
 /// Walk a single declaration, recursing into function bodies to find
 /// comptime blocks. Mutates `facts` in place.
-fn walk_decl(decl: &buff_lang_ast::Decl, interp: &mut ComptimeInterpreter, facts: &mut ComptimeFacts) {
+fn walk_decl(
+    decl: &buff_lang_ast::Decl,
+    interp: &mut ComptimeInterpreter,
+    facts: &mut ComptimeFacts,
+) {
     let body = match decl {
         buff_lang_ast::Decl::FuncDecl(f) => Some(&f.body),
         _ => None,
@@ -539,7 +542,9 @@ fn walk_stmt(stmt: &Stmt, interp: &mut ComptimeInterpreter, facts: &mut Comptime
         Stmt::ForIn { body, .. }
         | Stmt::ForWhile { body, .. }
         | Stmt::ForLet { body, .. }
-        | Stmt::Guard { else_block: body, .. } => walk_block(body, interp, facts),
+        | Stmt::Guard {
+            else_block: body, ..
+        } => walk_block(body, interp, facts),
         _ => {}
     }
 }
@@ -653,7 +658,10 @@ mod tests {
         let mut interp = ComptimeInterpreter::new();
         let block = block(vec![
             let_stmt("x", int_expr(10)),
-            expr_stmt(Expr::Ident(buff_lang_ast::Ident::new("x", dummy_span()), dummy_span())),
+            expr_stmt(Expr::Ident(
+                buff_lang_ast::Ident::new("x", dummy_span()),
+                dummy_span(),
+            )),
         ]);
         assert_eq!(interp.eval_block(&block).unwrap(), ComptimeValue::Int(10));
     }
@@ -796,16 +804,16 @@ mod tests {
         assert_eq!(facts.values.len(), 1);
         assert_eq!(facts.errors.len(), 1);
         assert!(!facts.is_clean());
-        assert_eq!(
-            facts.value_at(100),
-            Some(&ComptimeValue::Int(7))
-        );
+        assert_eq!(facts.value_at(100), Some(&ComptimeValue::Int(7)));
     }
 
     #[test]
     fn unbound_identifier_fails() {
         let mut interp = ComptimeInterpreter::new();
-        let expr = Expr::Ident(buff_lang_ast::Ident::new("missing", dummy_span()), dummy_span());
+        let expr = Expr::Ident(
+            buff_lang_ast::Ident::new("missing", dummy_span()),
+            dummy_span(),
+        );
         let err = interp.eval_expr(&expr).unwrap_err();
         assert!(err.diagnostic.message.contains("not bound"));
     }

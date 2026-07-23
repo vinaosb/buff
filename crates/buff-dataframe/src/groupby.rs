@@ -46,7 +46,12 @@ impl GroupBy {
     pub fn agg(&self, col: &str, op: AggOp) -> DataFrame {
         let series = match self.parent.get_column(col) {
             Some(s) => s,
-            None => return DataFrame::from_rows(vec![self.key_column.clone(), col.to_string()], Vec::new()),
+            None => {
+                return DataFrame::from_rows(
+                    vec![self.key_column.clone(), col.to_string()],
+                    Vec::new(),
+                )
+            }
         };
         let mut key_col: Vec<String> = Vec::with_capacity(self.groups.len());
         let mut val_col: Vec<String> = Vec::with_capacity(self.groups.len());
@@ -57,7 +62,11 @@ impl GroupBy {
         }
         DataFrame::from_rows(
             vec![self.key_column.clone(), col.to_string()],
-            key_col.into_iter().zip(val_col).map(|(k, v)| vec![k, v]).collect(),
+            key_col
+                .into_iter()
+                .zip(val_col)
+                .map(|(k, v)| vec![k, v])
+                .collect(),
         )
     }
 
@@ -86,7 +95,10 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
     }
     match series {
         Series::Int(v) => {
-            let xs: Vec<i64> = indices.iter().map(|&i| v.get(i).copied().unwrap_or_default()).collect();
+            let xs: Vec<i64> = indices
+                .iter()
+                .map(|&i| v.get(i).copied().unwrap_or_default())
+                .collect();
             match op {
                 AggOp::Sum => xs.iter().sum::<i64>().to_string(),
                 AggOp::Mean => {
@@ -102,7 +114,10 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
             }
         }
         Series::Float(v) => {
-            let xs: Vec<f64> = indices.iter().map(|&i| v.get(i).copied().unwrap_or_default()).collect();
+            let xs: Vec<f64> = indices
+                .iter()
+                .map(|&i| v.get(i).copied().unwrap_or_default())
+                .collect();
             match op {
                 AggOp::Sum => format!("{}", xs.iter().sum::<f64>()),
                 AggOp::Mean => {
@@ -118,20 +133,36 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
             }
         }
         Series::Bool(v) => {
-            let xs: Vec<bool> = indices.iter().map(|&i| v.get(i).copied().unwrap_or_default()).collect();
+            let xs: Vec<bool> = indices
+                .iter()
+                .map(|&i| v.get(i).copied().unwrap_or_default())
+                .collect();
             match op {
                 AggOp::Sum => xs.iter().filter(|&&b| b).count().to_string(),
                 AggOp::Mean => format!(
                     "{}",
                     xs.iter().filter(|&&b| b).count() as f64 / xs.len().max(1) as f64
                 ),
-                AggOp::Min => xs.iter().any(|&b| !b).then_some("false").unwrap_or("true").to_string(),
-                AggOp::Max => xs.iter().any(|&b| b).then_some("true").unwrap_or("false").to_string(),
+                AggOp::Min => xs
+                    .iter()
+                    .any(|&b| !b)
+                    .then_some("false")
+                    .unwrap_or("true")
+                    .to_string(),
+                AggOp::Max => xs
+                    .iter()
+                    .any(|&b| b)
+                    .then_some("true")
+                    .unwrap_or("false")
+                    .to_string(),
                 AggOp::Count => unreachable!(),
             }
         }
         Series::String(v) => {
-            let xs: Vec<&str> = indices.iter().map(|&i| v.get(i).map(|s| s.as_str()).unwrap_or("")).collect();
+            let xs: Vec<&str> = indices
+                .iter()
+                .map(|&i| v.get(i).map(|s| s.as_str()).unwrap_or(""))
+                .collect();
             match op {
                 AggOp::Min => xs.iter().min().copied().unwrap_or("").to_string(),
                 AggOp::Max => xs.iter().max().copied().unwrap_or("").to_string(),

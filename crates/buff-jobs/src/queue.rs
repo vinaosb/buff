@@ -142,10 +142,7 @@ impl Queue {
     /// Number of jobs currently waiting in the pending queue
     /// (excludes in-flight, completed, failed, dead-letter).
     pub fn len(&self) -> usize {
-        self.inner
-            .lock()
-            .map(|g| g.pending.len())
-            .unwrap_or(0)
+        self.inner.lock().map(|g| g.pending.len()).unwrap_or(0)
     }
 
     /// Whether the pending queue is empty.
@@ -225,11 +222,7 @@ impl std::fmt::Display for QueueStats {
         write!(
             f,
             "QueueStats(pending={}, in_flight={}, completed={}, failed={}, dead_letter={})",
-            self.pending,
-            self.in_flight,
-            self.completed,
-            self.failed,
-            self.dead_letter
+            self.pending, self.in_flight, self.completed, self.failed, self.dead_letter
         )
     }
 }
@@ -283,7 +276,9 @@ mod tests {
     #[test]
     fn empty_payload_rejected() {
         let q = Queue::memory();
-        assert!(q.enqueue(Job::new("").unwrap_or(Job::new("fallback").unwrap())).is_ok());
+        assert!(q
+            .enqueue(Job::new("").unwrap_or(Job::new("fallback").unwrap()))
+            .is_ok());
     }
 
     #[test]

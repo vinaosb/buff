@@ -157,7 +157,11 @@ impl SourceMap {
             map = map.with_rust_file(rust_file.into());
         }
         for fm in file.function_mappings {
-            let span = Span::new(fm.buff_span_start, fm.buff_span_end, SourceId(fm.buff_source_id));
+            let span = Span::new(
+                fm.buff_span_start,
+                fm.buff_span_end,
+                SourceId(fm.buff_source_id),
+            );
             map.add_function(FunctionAnchor {
                 name: fm.buff_name,
                 buff_span: span,

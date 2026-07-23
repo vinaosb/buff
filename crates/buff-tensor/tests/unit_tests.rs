@@ -4,7 +4,7 @@
 //! Per T8 spec line 1474: "15+ unit tests (math-heavy -> proptest
 //! required for numeric ops)".
 
-use buff_tensor::{MVP_RANK_CAP, Shape, Tensor, TensorError};
+use buff_tensor::{Shape, Tensor, TensorError, MVP_RANK_CAP};
 
 // ===========================================================================
 // Shape tests (8)

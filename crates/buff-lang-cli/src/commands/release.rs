@@ -100,9 +100,7 @@ pub fn run(level: BumpLevel, project_dir: &Path) -> Result<()> {
     // 5. Update CHANGELOG.md.
     let changelog_path = project_dir.join("CHANGELOG.md");
     let prev_changelog = fs::read_to_string(&changelog_path).unwrap_or_default();
-    let new_section = format!(
-        "## v{new_version}\n\n- (Add your release notes here.)\n\n"
-    );
+    let new_section = format!("## v{new_version}\n\n- (Add your release notes here.)\n\n");
     let updated_changelog = format!("# Changelog\n\n{new_section}{prev_changelog}");
     fs::write(&changelog_path, &updated_changelog)
         .with_context(|| format!("failed to write {}", changelog_path.display()))?;

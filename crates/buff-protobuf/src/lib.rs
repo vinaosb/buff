@@ -328,8 +328,7 @@ fn proto_value_to_json(value: &prost_types::Value) -> Result<serde_json::Value, 
         None => Ok(serde_json::Value::Null),
         Some(Kind::NullValue(_)) => Ok(serde_json::Value::Null),
         Some(Kind::NumberValue(f)) => {
-            let n = serde_json::Number::from_f64(*f)
-                .unwrap_or_else(|| serde_json::Number::from(0));
+            let n = serde_json::Number::from_f64(*f).unwrap_or_else(|| serde_json::Number::from(0));
             Ok(serde_json::Value::Number(n))
         }
         Some(Kind::StringValue(s)) => Ok(serde_json::Value::String(s.clone())),

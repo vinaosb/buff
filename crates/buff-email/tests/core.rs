@@ -155,9 +155,7 @@ fn email_attach_queues_path() {
         .expect("attach");
     assert_eq!(email.attachments().len(), 1);
     assert_eq!(
-        email.attachments()[0]
-            .to_string_lossy()
-            .replace('\\', "/"),
+        email.attachments()[0].to_string_lossy().replace('\\', "/"),
         "/tmp/does-not-need-to-exist-yet.txt"
     );
 }

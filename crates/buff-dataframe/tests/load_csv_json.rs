@@ -18,8 +18,14 @@ fn load_csv_basic() {
     let df = DataFrame::from_csv(&path).expect("load");
     assert_eq!(df.column_names(), vec!["name", "age", "city"]);
     assert_eq!(df.len(), 3);
-    assert!(matches!(df.get_column("age").unwrap().kind(), ColumnKind::Int));
-    assert!(matches!(df.get_column("name").unwrap().kind(), ColumnKind::String));
+    assert!(matches!(
+        df.get_column("age").unwrap().kind(),
+        ColumnKind::Int
+    ));
+    assert!(matches!(
+        df.get_column("name").unwrap().kind(),
+        ColumnKind::String
+    ));
     let ages = df.get_column("age").unwrap().as_int_slice().unwrap();
     assert_eq!(ages, &[36, 41, 85]);
 }
@@ -29,8 +35,14 @@ fn load_csv_with_floats() {
     let csv = "x,y\n1.5,10\n2.5,20\n3.5,30\n";
     let path = write_temp("floats.csv", csv);
     let df = DataFrame::from_csv(&path).expect("load");
-    assert!(matches!(df.get_column("x").unwrap().kind(), ColumnKind::Float));
-    assert!(matches!(df.get_column("y").unwrap().kind(), ColumnKind::Int));
+    assert!(matches!(
+        df.get_column("x").unwrap().kind(),
+        ColumnKind::Float
+    ));
+    assert!(matches!(
+        df.get_column("y").unwrap().kind(),
+        ColumnKind::Int
+    ));
 }
 
 #[test]
@@ -38,8 +50,14 @@ fn load_csv_with_bools() {
     let csv = "flag\ntrue\nfalse\ntrue\n";
     let path = write_temp("bools.csv", csv);
     let df = DataFrame::from_csv(&path).expect("load");
-    assert!(matches!(df.get_column("flag").unwrap().kind(), ColumnKind::Bool));
-    assert_eq!(df.get_column("flag").unwrap().as_bool_slice().unwrap(), &[true, false, true]);
+    assert!(matches!(
+        df.get_column("flag").unwrap().kind(),
+        ColumnKind::Bool
+    ));
+    assert_eq!(
+        df.get_column("flag").unwrap().as_bool_slice().unwrap(),
+        &[true, false, true]
+    );
 }
 
 #[test]
@@ -76,21 +94,29 @@ fn load_json_lines() {
     assert!(df.column_names().contains(&"name".to_string()));
     assert!(df.column_names().contains(&"age".to_string()));
     assert!(df.column_names().contains(&"active".to_string()));
-    assert!(matches!(df.get_column("age").unwrap().kind(), ColumnKind::Int));
-    assert!(matches!(df.get_column("active").unwrap().kind(), ColumnKind::Bool));
-    assert!(matches!(df.get_column("name").unwrap().kind(), ColumnKind::String));
+    assert!(matches!(
+        df.get_column("age").unwrap().kind(),
+        ColumnKind::Int
+    ));
+    assert!(matches!(
+        df.get_column("active").unwrap().kind(),
+        ColumnKind::Bool
+    ));
+    assert!(matches!(
+        df.get_column("name").unwrap().kind(),
+        ColumnKind::String
+    ));
 }
 
 #[test]
 fn load_json_floats_promote_mixed() {
-    let json = concat!(
-        "{\"x\": 1}\n",
-        "{\"x\": 1.5}\n",
-        "{\"x\": 2}\n"
-    );
+    let json = concat!("{\"x\": 1}\n", "{\"x\": 1.5}\n", "{\"x\": 2}\n");
     let path = write_temp("mixed.jsonl", json);
     let df = DataFrame::from_json(&path).expect("load");
-    assert!(matches!(df.get_column("x").unwrap().kind(), ColumnKind::Float));
+    assert!(matches!(
+        df.get_column("x").unwrap().kind(),
+        ColumnKind::Float
+    ));
 }
 
 #[test]

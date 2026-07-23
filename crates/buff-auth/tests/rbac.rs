@@ -8,7 +8,8 @@ use buff_auth::{AuthError, Rbac};
 
 fn policy() -> Rbac {
     let mut p = Rbac::new();
-    p.add("admin", "users", "delete").expect("admin delete users");
+    p.add("admin", "users", "delete")
+        .expect("admin delete users");
     p.add("admin", "*", "read").expect("admin read any");
     p.add("user", "posts", "read").expect("user read posts");
     p.add("*", "health", "read").expect("anon read health");
@@ -43,9 +44,18 @@ fn rbac_enforce_denies_when_no_rule_matches() {
 #[test]
 fn rbac_add_rejects_empty_fields() {
     let mut p = Rbac::new();
-    assert!(matches!(p.add("", "x", "y").unwrap_err(), AuthError::Rbac(_)));
-    assert!(matches!(p.add("x", "", "y").unwrap_err(), AuthError::Rbac(_)));
-    assert!(matches!(p.add("x", "y", "").unwrap_err(), AuthError::Rbac(_)));
+    assert!(matches!(
+        p.add("", "x", "y").unwrap_err(),
+        AuthError::Rbac(_)
+    ));
+    assert!(matches!(
+        p.add("x", "", "y").unwrap_err(),
+        AuthError::Rbac(_)
+    ));
+    assert!(matches!(
+        p.add("x", "y", "").unwrap_err(),
+        AuthError::Rbac(_)
+    ));
 }
 
 #[test]

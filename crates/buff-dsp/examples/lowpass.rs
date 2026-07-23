@@ -34,8 +34,14 @@ fn main() {
 
     println!("sample_rate  = {sr} Hz");
     println!("n_samples    = {n}");
-    println!("bin_100      = {bin_100}  ({:.2} Hz)", bin_100 as f64 * sr as f64 / n as f64);
-    println!("bin_5000     = {bin_5000} ({:.2} Hz)", bin_5000 as f64 * sr as f64 / n as f64);
+    println!(
+        "bin_100      = {bin_100}  ({:.2} Hz)",
+        bin_100 as f64 * sr as f64 / n as f64
+    );
+    println!(
+        "bin_5000     = {bin_5000} ({:.2} Hz)",
+        bin_5000 as f64 * sr as f64 / n as f64
+    );
     println!("atten_100    = {atten_100:.4}");
     println!("atten_5000   = {atten_5000:.4}");
 

@@ -98,10 +98,7 @@ mod tests {
             lhs: vec![2, 3],
             rhs: vec![3, 2],
         };
-        assert_eq!(
-            err.to_string(),
-            "shape mismatch: lhs=[2, 3] rhs=[3, 2]"
-        );
+        assert_eq!(err.to_string(), "shape mismatch: lhs=[2, 3] rhs=[3, 2]");
     }
 
     #[test]
@@ -110,10 +107,7 @@ mod tests {
             index: vec![5],
             shape: vec![3],
         };
-        assert_eq!(
-            err.to_string(),
-            "index out of bounds: index=[5] shape=[3]"
-        );
+        assert_eq!(err.to_string(), "index out of bounds: index=[5] shape=[3]");
     }
 
     #[test]

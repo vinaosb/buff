@@ -142,10 +142,7 @@ mod smoke_tests {
         }
         impl Greeter for Mock<dyn Greeter> {
             fn greet(&self, name: String) -> String {
-                self.record_call(
-                    "greet",
-                    vec![ArgumentValue::String(name)],
-                );
+                self.record_call("greet", vec![ArgumentValue::String(name)]);
                 match self.lookup_return("greet", &[]) {
                     Some(ReturnValue::String(s)) => s,
                     _ => String::new(),

@@ -65,8 +65,8 @@ fn assert_roundtrip(input_root: &std::path::Path, extracted_root: &std::path::Pa
             "extracted file missing: {}",
             extracted.display()
         );
-        let got = fs::read_to_string(&extracted)
-            .unwrap_or_else(|_| panic!("read extracted {}", rel));
+        let got =
+            fs::read_to_string(&extracted).unwrap_or_else(|_| panic!("read extracted {}", rel));
         assert_eq!(got, expected, "content mismatch in extracted {rel}");
     }
 }
@@ -108,10 +108,22 @@ fn format_extension_round_trips() {
 
 #[test]
 fn format_from_path_simple_extensions() {
-    assert_eq!(Format::from_path(std::path::Path::new("a.zip")), Some(Format::Zip));
-    assert_eq!(Format::from_path(std::path::Path::new("a.tar")), Some(Format::Tar));
-    assert_eq!(Format::from_path(std::path::Path::new("a.gz")), Some(Format::Gz));
-    assert_eq!(Format::from_path(std::path::Path::new("a.zst")), Some(Format::Zstd));
+    assert_eq!(
+        Format::from_path(std::path::Path::new("a.zip")),
+        Some(Format::Zip)
+    );
+    assert_eq!(
+        Format::from_path(std::path::Path::new("a.tar")),
+        Some(Format::Tar)
+    );
+    assert_eq!(
+        Format::from_path(std::path::Path::new("a.gz")),
+        Some(Format::Gz)
+    );
+    assert_eq!(
+        Format::from_path(std::path::Path::new("a.zst")),
+        Some(Format::Zstd)
+    );
 }
 
 #[test]
@@ -215,23 +227,22 @@ fn roundtrip_zstd_dir() {
 #[test]
 fn roundtrip_gz_bytes() {
     let original = b"the quick brown fox jumps over the lazy dog".repeat(64);
-    let compressed =
-        Archive::compress_bytes(&original, Format::Gz).expect("compress bytes gz");
+    let compressed = Archive::compress_bytes(&original, Format::Gz).expect("compress bytes gz");
     assert!(
         compressed.len() < original.len(),
         "gzip should compress repetitive input: got {} from {}",
         compressed.len(),
         original.len()
     );
-    let recovered = Archive::decompress_bytes(&compressed, Format::Gz).expect("decompress bytes gz");
+    let recovered =
+        Archive::decompress_bytes(&compressed, Format::Gz).expect("decompress bytes gz");
     assert_eq!(recovered, original);
 }
 
 #[test]
 fn roundtrip_zstd_bytes() {
     let original = b"the quick brown fox jumps over the lazy dog".repeat(64);
-    let compressed =
-        Archive::compress_bytes(&original, Format::Zstd).expect("compress bytes zstd");
+    let compressed = Archive::compress_bytes(&original, Format::Zstd).expect("compress bytes zstd");
     let recovered =
         Archive::decompress_bytes(&compressed, Format::Zstd).expect("decompress bytes zstd");
     assert_eq!(recovered, original);
@@ -243,12 +254,16 @@ fn compress_bytes_rejects_multifile_formats() {
     let err = Archive::compress_bytes(data, Format::Zip).unwrap_err();
     assert!(matches!(
         err,
-        ArchiveError::UnsupportedForByteStream { format: Format::Zip }
+        ArchiveError::UnsupportedForByteStream {
+            format: Format::Zip
+        }
     ));
     let err = Archive::compress_bytes(data, Format::Tar).unwrap_err();
     assert!(matches!(
         err,
-        ArchiveError::UnsupportedForByteStream { format: Format::Tar }
+        ArchiveError::UnsupportedForByteStream {
+            format: Format::Tar
+        }
     ));
 }
 
@@ -321,14 +336,13 @@ fn snapshot_format_all_variants() {
 #[test]
 fn snapshot_archive_error_debug() {
     let err1 = ArchiveError::EmptyInput;
-    let err2 = ArchiveError::UnsupportedForByteStream { format: Format::Zip };
+    let err2 = ArchiveError::UnsupportedForByteStream {
+        format: Format::Zip,
+    };
     let err3 = ArchiveError::UnknownFormat {
         path: "/tmp/foo.bin".into(),
     };
-    insta::assert_snapshot!(
-        "archive_error_debug",
-        format!("{err1}\n{err2}\n{err3}")
-    );
+    insta::assert_snapshot!("archive_error_debug", format!("{err1}\n{err2}\n{err3}"));
 }
 
 #[test]
@@ -344,7 +358,14 @@ fn snapshot_format_extension_lookup_table() {
 #[test]
 fn snapshot_format_from_path_samples() {
     let samples = [
-        "a.zip", "a.tar", "a.gz", "a.zst", "a.tar.gz", "a.tar.zst", "a.txt", "noext",
+        "a.zip",
+        "a.tar",
+        "a.gz",
+        "a.zst",
+        "a.tar.gz",
+        "a.tar.zst",
+        "a.txt",
+        "noext",
     ];
     let rendered = samples
         .iter()

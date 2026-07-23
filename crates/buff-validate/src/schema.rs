@@ -25,9 +25,7 @@ pub(crate) fn serialize_schema(rules: &[Rule]) -> String {
         if !required.contains(&field) {
             required.push(field.clone());
         }
-        let entry = properties
-            .entry(field.clone())
-            .or_insert_with(|| json!({}));
+        let entry = properties.entry(field.clone()).or_insert_with(|| json!({}));
         if !entry.is_object() {
             *entry = json!({});
         }

@@ -63,13 +63,11 @@ pub fn run(dir: &Path) -> Result<()> {
     let mut crate_indexes: Vec<(String, String)> = Vec::new();
     for (pkg_name, pkg_dir) in &packages {
         let crate_docs_dir = docs_root.join(pkg_name);
-        fs::create_dir_all(&crate_docs_dir).with_context(|| {
-            format!("failed to create {}", crate_docs_dir.display())
-        })?;
+        fs::create_dir_all(&crate_docs_dir)
+            .with_context(|| format!("failed to create {}", crate_docs_dir.display()))?;
         let html = render_crate_page(pkg_name, pkg_dir);
         let out = crate_docs_dir.join("index.html");
-        fs::write(&out, &html)
-            .with_context(|| format!("failed to write {}", out.display()))?;
+        fs::write(&out, &html).with_context(|| format!("failed to write {}", out.display()))?;
         crate_indexes.push((pkg_name.clone(), format!("{pkg_name}/index.html")));
     }
 
@@ -108,9 +106,7 @@ fn render_crate_page(pkg_name: &str, pkg_dir: &Path) -> String {
         html.push_str("<p>No .buff source files found under <code>src/</code>.</p>\n");
     } else {
         for (file, exports) in &sections {
-            html.push_str(&format!(
-                "<h2><code>{file}</code></h2>\n<ul>\n"
-            ));
+            html.push_str(&format!("<h2><code>{file}</code></h2>\n<ul>\n"));
             if exports.is_empty() {
                 html.push_str("  <li><em>(no top-level exports)</em></li>\n");
             } else {
@@ -127,11 +123,7 @@ fn render_crate_page(pkg_name: &str, pkg_dir: &Path) -> String {
 
 /// Recursive walker: discover every `.buff` file under `root`, parse
 /// it, collect its top-level `export` decl names into `sections`.
-fn walk_buff_files(
-    current: &Path,
-    root: &Path,
-    sections: &mut BTreeMap<String, Vec<String>>,
-) {
+fn walk_buff_files(current: &Path, root: &Path, sections: &mut BTreeMap<String, Vec<String>>) {
     let Ok(entries) = fs::read_dir(current) else {
         return;
     };
@@ -184,9 +176,7 @@ fn render_workspace_index(crate_indexes: &[(String, String)]) -> String {
         html.push_str("  <li><em>No crates documented.</em></li>\n");
     } else {
         for (name, href) in crate_indexes {
-            html.push_str(&format!(
-                "  <li><a href=\"{href}\">{name}</a></li>\n"
-            ));
+            html.push_str(&format!("  <li><a href=\"{href}\">{name}</a></li>\n"));
         }
     }
     html.push_str("</ul>\n</body>\n</html>\n");

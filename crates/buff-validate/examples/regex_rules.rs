@@ -17,7 +17,9 @@ fn main() -> Result<(), ValidationError> {
     let mut good: HashMap<String, String> = HashMap::new();
     good.insert("zip".to_string(), "94105".to_string());
     good.insert("slug".to_string(), "hello-world".to_string());
-    validator.validate(&good).map_err(|e| e.into_iter().next().unwrap_or(ValidationError::Panic))?;
+    validator
+        .validate(&good)
+        .map_err(|e| e.into_iter().next().unwrap_or(ValidationError::Panic))?;
     println!("regex-conformant input passed");
 
     let mut bad: HashMap<String, String> = HashMap::new();

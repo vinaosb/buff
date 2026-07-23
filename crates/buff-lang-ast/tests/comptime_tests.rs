@@ -6,7 +6,7 @@ use buff_lang_ast::{
     ty::TypeRef,
     Expr, Literal,
 };
-use buff_lang_error::{ErrorCode, Span, SourceId};
+use buff_lang_error::{ErrorCode, SourceId, Span};
 
 fn span_at(start: usize, end: usize) -> Span {
     Span::new(start, end, SourceId(1))

@@ -29,9 +29,7 @@ fn main() {
         }
     };
 
-    let name = parsed
-        .option("name")
-        .unwrap_or_else(|| "world".to_string());
+    let name = parsed.option("name").unwrap_or_else(|| "world".to_string());
     let greeting = parsed
         .arg("greeting")
         .unwrap_or_else(|| "Hello".to_string());

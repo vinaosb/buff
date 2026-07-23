@@ -75,8 +75,8 @@ impl Element {
         let css_owned = css.to_string();
         let html_owned = self.html.clone();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let selector = Selector::parse(&css_owned)
-                .map_err(|e| ScrapeError::Selector(e.to_string()))?;
+            let selector =
+                Selector::parse(&css_owned).map_err(|e| ScrapeError::Selector(e.to_string()))?;
             let fragment = scraper::Html::parse_fragment(&html_owned);
             let elements: Vec<Element> =
                 fragment.select(&selector).map(Element::from_ref).collect();

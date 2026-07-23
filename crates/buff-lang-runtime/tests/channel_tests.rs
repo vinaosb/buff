@@ -84,7 +84,11 @@ fn channel_bounded_backpressure_blocks_send_at_capacity() {
         sender.send(2).await.expect("send 2 within capacity");
         // Drain one slot, freeing room for the third send.
         let first = receiver.recv().await;
-        assert_eq!(first, Some(1), "first recv drains the oldest buffered value");
+        assert_eq!(
+            first,
+            Some(1),
+            "first recv drains the oldest buffered value"
+        );
         // Third send now completes (slot freed).
         sender.send(3).await.expect("send 3 after a slot was freed");
         drop(sender);
@@ -92,7 +96,11 @@ fn channel_bounded_backpressure_blocks_send_at_capacity() {
         while let Some(v) = receiver.recv().await {
             rest.push(v);
         }
-        assert_eq!(rest, vec![2, 3], "drain remaining buffered values after close");
+        assert_eq!(
+            rest,
+            vec![2, 3],
+            "drain remaining buffered values after close"
+        );
     });
 }
 
@@ -258,9 +266,7 @@ fn channel_rendezvous_buffer_zero_syncs_send_with_recv() {
         // would block forever. We use tokio::join! to run send and
         // recv concurrently.
         let send_fut = sender.send("handshake".to_string());
-        let recv_fut = async {
-            receiver.recv().await
-        };
+        let recv_fut = async { receiver.recv().await };
         let (send_result, recv_result) = tokio::join!(send_fut, recv_fut);
         send_result.expect("rendezvous send completes when recv pulls");
         assert_eq!(

@@ -195,7 +195,10 @@ fn build_impl_method(sig: &MethodSig) -> ImplItemFn {
     }
 
     let output = match &sig.return_type {
-        Some(rt) => ReturnType::Type(Token![->](Span::call_site()), Box::new(lower_typeref_to_syn(rt))),
+        Some(rt) => ReturnType::Type(
+            Token![->](Span::call_site()),
+            Box::new(lower_typeref_to_syn(rt)),
+        ),
         None => ReturnType::Default,
     };
 
@@ -507,8 +510,8 @@ fn default_for_type(ty: &TypeRef) -> Expr {
                 method: Ident::new("new", Span::call_site()),
                 turbofish: None,
                 paren_token: Default::default(),
-        args: Punctuated::new(),
-    }),
+                args: Punctuated::new(),
+            }),
             "Int" => Expr::Lit(syn::ExprLit {
                 attrs: Vec::new(),
                 lit: syn::Lit::Int(syn::LitInt::new("0_i64", Span::call_site())),
@@ -564,8 +567,8 @@ fn lower_typeref_to_syn(ty: &TypeRef) -> SynType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use buff_lang_ast::{Ident, MethodSig, Param, TraitDecl};
     use buff_lang_ast::Span;
+    use buff_lang_ast::{Ident, MethodSig, Param, TraitDecl};
     use quote::ToTokens;
 
     fn dummy_span() -> Span {

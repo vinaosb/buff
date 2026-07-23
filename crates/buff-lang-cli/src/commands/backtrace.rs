@@ -81,7 +81,8 @@ fn read_log(path: &Path) -> Result<String> {
             .context("failed to read log from stdin")?;
         return Ok(buf);
     }
-    std::fs::read_to_string(path).with_context(|| format!("failed to read log `{}`", path.display()))
+    std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read log `{}`", path.display()))
 }
 
 /// Resolve the `.buffmap` file path.
@@ -92,10 +93,7 @@ fn read_log(path: &Path) -> Result<String> {
 /// 3. `<log_path>.buffmap` sibling when it exists.
 /// 4. `<current_exe>.buffmap` when it exists (reuses the runtime
 ///    panic-hook discovery).
-fn resolve_buffmap_path(
-    override_path: Option<&Path>,
-    log_path: &Path,
-) -> Result<Option<PathBuf>> {
+fn resolve_buffmap_path(override_path: Option<&Path>, log_path: &Path) -> Result<Option<PathBuf>> {
     if let Some(p) = override_path {
         if !p.exists() {
             bail!("--buffmap path does not exist: {}", p.display());

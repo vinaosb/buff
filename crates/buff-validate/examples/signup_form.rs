@@ -6,7 +6,7 @@
 // form submission. The example shows both a passing submission and a
 // failing submission (multi-rule aggregate error report).
 
-use buff_validate::{Validator, ValidationErrors};
+use buff_validate::{ValidationErrors, Validator};
 use std::collections::HashMap;
 
 fn main() -> Result<(), ValidationErrors> {

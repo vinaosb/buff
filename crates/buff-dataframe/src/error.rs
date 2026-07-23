@@ -5,9 +5,15 @@ pub enum DfError {
     Io(String),
     Csv(String),
     Json(String),
-    SchemaMismatch { column: String, detail: String },
+    SchemaMismatch {
+        column: String,
+        detail: String,
+    },
     UnknownColumn(String),
-    TypeMismatch { column: String, expected: &'static str },
+    TypeMismatch {
+        column: String,
+        expected: &'static str,
+    },
     Empty,
 }
 

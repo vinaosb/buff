@@ -13,9 +13,9 @@ use buff_lang_ast::{common::Ident, decl::FuncDecl, Decl};
 use buff_lang_error::{SourceId, Span};
 
 use buff_lang_debug_info::{
-    build_source_map, deserialize, install_panic_hook, remap_panic_backtrace,
-    serialize_to_string, BuffLocation, BuffMapFile, FunctionAnchor, FunctionMapping,
-    LineMapping, MAP_FORMAT_VERSION, SourceMap,
+    build_source_map, deserialize, install_panic_hook, remap_panic_backtrace, serialize_to_string,
+    BuffLocation, BuffMapFile, FunctionAnchor, FunctionMapping, LineMapping, SourceMap,
+    MAP_FORMAT_VERSION,
 };
 use buff_lang_error::SourceFile;
 
@@ -176,10 +176,8 @@ fn serialize_to_string_is_deterministic_across_calls() {
 
 #[test]
 fn deserialize_picks_up_buff_file_path() {
-    let mut map = SourceMap::new().with_buff_file(
-        PathBuf::from("examples/debug/panic_demo.buff"),
-        SourceId(0),
-    );
+    let mut map = SourceMap::new()
+        .with_buff_file(PathBuf::from("examples/debug/panic_demo.buff"), SourceId(0));
     map.add_line_mapping(
         1,
         BuffLocation {
@@ -192,7 +190,9 @@ fn deserialize_picks_up_buff_file_path() {
     let json = serialize_to_string(&map).expect("serialize");
     let back = deserialize(&json).expect("deserialize");
     assert_eq!(
-        back.buff_file.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        back.buff_file
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
         Some("examples/debug/panic_demo.buff".to_string())
     );
 }
@@ -294,7 +294,10 @@ fn build_source_map_realistic_panic_demo() {
     assert_eq!(map.functions[0].rust_end_line, 4);
     assert_eq!(map.functions[1].name, "main");
     assert_eq!(map.functions[1].rust_start_line, 5);
-    assert_eq!(map.buff_file.as_ref().map(|p| p.to_path_buf()), Some(path.to_path_buf()));
+    assert_eq!(
+        map.buff_file.as_ref().map(|p| p.to_path_buf()),
+        Some(path.to_path_buf())
+    );
 }
 
 #[test]
@@ -323,7 +326,10 @@ fn lookup_buff_handles_function_end_line_inclusive() {
 
 #[test]
 fn source_file_lookup_returns_correct_line_col() {
-    let sf = SourceFile::new(PathBuf::from("test.buff"), "first\nsecond\nthird".to_string());
+    let sf = SourceFile::new(
+        PathBuf::from("test.buff"),
+        "first\nsecond\nthird".to_string(),
+    );
     assert_eq!(sf.lookup(0), Some((1, 1)));
     assert_eq!(sf.lookup(6), Some((2, 1)));
     assert_eq!(sf.lookup(13), Some((3, 1)));

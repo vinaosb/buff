@@ -163,7 +163,10 @@ impl Signal {
     /// `Signal.from_vec(data, sample_rate)` in Buff. The ctor takes
     /// ownership of `data` (R2: Rust owns the heap allocation).
     pub fn from_vec(samples: Vec<f64>, sample_rate: u32) -> Self {
-        Self { samples, sample_rate }
+        Self {
+            samples,
+            sample_rate,
+        }
     }
 
     /// Synthesize `n` samples of a `freq_hz` sine wave at `sample_rate`.
@@ -281,7 +284,10 @@ impl Window {
 
     fn new(kind: WindowKind, n: usize) -> Self {
         if n == 0 {
-            return Self { coeffs: Vec::new(), kind };
+            return Self {
+                coeffs: Vec::new(),
+                kind,
+            };
         }
         let coeffs = compute_window(kind, n);
         Self { coeffs, kind }
@@ -317,8 +323,14 @@ impl Signal {
     pub fn fft(&self) -> Spectrum {
         let sr = self.sample_rate;
         match externs::dsp_fft_forward(&self.samples, sr) {
-            Some(bins) => Spectrum { bins, sample_rate: sr },
-            None => Spectrum { bins: Vec::new(), sample_rate: sr },
+            Some(bins) => Spectrum {
+                bins,
+                sample_rate: sr,
+            },
+            None => Spectrum {
+                bins: Vec::new(),
+                sample_rate: sr,
+            },
         }
     }
 
@@ -331,8 +343,14 @@ impl Signal {
     pub fn ifft(spectrum: Spectrum) -> Signal {
         let sr = spectrum.sample_rate;
         match externs::dsp_fft_inverse(&spectrum.bins, sr) {
-            Some(samples) => Signal { samples, sample_rate: sr },
-            None => Signal { samples: Vec::new(), sample_rate: sr },
+            Some(samples) => Signal {
+                samples,
+                sample_rate: sr,
+            },
+            None => Signal {
+                samples: Vec::new(),
+                sample_rate: sr,
+            },
         }
     }
 }
@@ -407,7 +425,13 @@ impl Biquad {
     fn normalise(b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> Self {
         if a0.abs() < 1e-300 {
             // Degenerate: pass-through.
-            return Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
+            return Self {
+                b0: 1.0,
+                b1: 0.0,
+                b2: 0.0,
+                a1: 0.0,
+                a2: 0.0,
+            };
         }
         Self {
             b0: b0 / a0,
@@ -441,12 +465,16 @@ impl Signal {
     /// Apply a low-pass filter at `cutoff_hz` (RBJ biquad, Q = 1/√2
     /// ≈ Butterworth).
     pub fn lowpass(&self, cutoff_hz: f64) -> Signal {
-        self.apply_biquad(|sr| Biquad::lowpass(sr as f64, cutoff_hz, std::f64::consts::FRAC_1_SQRT_2))
+        self.apply_biquad(|sr| {
+            Biquad::lowpass(sr as f64, cutoff_hz, std::f64::consts::FRAC_1_SQRT_2)
+        })
     }
 
     /// Apply a high-pass filter at `cutoff_hz` (RBJ biquad, Q = 1/√2).
     pub fn highpass(&self, cutoff_hz: f64) -> Signal {
-        self.apply_biquad(|sr| Biquad::highpass(sr as f64, cutoff_hz, std::f64::consts::FRAC_1_SQRT_2))
+        self.apply_biquad(|sr| {
+            Biquad::highpass(sr as f64, cutoff_hz, std::f64::consts::FRAC_1_SQRT_2)
+        })
     }
 
     /// Apply a band-pass filter between `low_hz` and `high_hz` (RBJ
@@ -460,8 +488,8 @@ impl Signal {
             return self.clone();
         }
         let bq = mk(self.sample_rate);
-        let filtered = externs::dsp_biquad_filter(&self.samples, bq)
-            .unwrap_or_else(|| self.samples.clone());
+        let filtered =
+            externs::dsp_biquad_filter(&self.samples, bq).unwrap_or_else(|| self.samples.clone());
         Signal::from_vec(filtered, self.sample_rate)
     }
 
@@ -521,7 +549,10 @@ impl Signal {
                 *s *= w;
             }
             let bins = externs::dsp_fft_forward(&frame, self.sample_rate).unwrap_or_default();
-            out.push(Spectrum { bins, sample_rate: self.sample_rate });
+            out.push(Spectrum {
+                bins,
+                sample_rate: self.sample_rate,
+            });
         }
         out
     }
@@ -561,8 +592,7 @@ mod externs {
         let mut planner = realfft::RealFftPlanner::<f64>::new();
         let r2c = planner.plan_fft_forward(n);
         let mut real_buf = input.to_vec();
-        let mut complex_buf =
-            vec![rustfft::num_complex::Complex64::new(0.0, 0.0); n / 2 + 1];
+        let mut complex_buf = vec![rustfft::num_complex::Complex64::new(0.0, 0.0); n / 2 + 1];
         let r = catch_unwind(AssertUnwindSafe(|| {
             r2c.process(&mut real_buf, &mut complex_buf)
         }));
@@ -592,9 +622,7 @@ mod externs {
             c2r.process(&mut complex_buf, &mut real_buf)
         }));
         match r {
-            Ok(Ok(())) => {
-                Some(real_buf)
-            }
+            Ok(Ok(())) => Some(real_buf),
             Ok(Err(_)) => Some(Vec::new()),
             Err(_) => None,
         }
@@ -682,8 +710,10 @@ mod tests {
         let mut mixed = Vec::with_capacity(2048);
         for i in 0..2048 {
             let t = i as f64 / sr as f64;
-            mixed.push((2.0 * std::f64::consts::PI * 100.0 * t).sin()
-                + (2.0 * std::f64::consts::PI * 5000.0 * t).sin());
+            mixed.push(
+                (2.0 * std::f64::consts::PI * 100.0 * t).sin()
+                    + (2.0 * std::f64::consts::PI * 5000.0 * t).sin(),
+            );
         }
         let s = Signal::from_vec(mixed, sr);
         let filtered = s.lowpass(500.0);

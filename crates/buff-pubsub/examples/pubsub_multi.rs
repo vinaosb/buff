@@ -46,9 +46,7 @@ fn main() {
 
     println!("subscribers registered: {}", bus.subscriber_count("tick"));
 
-    let delivered = bus
-        .publish("tick", "beat-1".to_string())
-        .expect("publish");
+    let delivered = bus.publish("tick", "beat-1".to_string()).expect("publish");
     println!("delivered to {delivered} subscribers (expected 3)");
 
     wait_for_count(&s1, 1);
@@ -59,7 +57,8 @@ fn main() {
     assert_eq!(s2.lock().expect("s2").clone(), vec!["beat-1".to_string()]);
     assert_eq!(s3.lock().expect("s3").clone(), vec!["beat-1".to_string()]);
 
-    bus.publish("tick", "beat-2".to_string()).expect("publish 2");
+    bus.publish("tick", "beat-2".to_string())
+        .expect("publish 2");
     wait_for_count(&s1, 2);
 
     let total_events: usize = [s1, s2, s3]

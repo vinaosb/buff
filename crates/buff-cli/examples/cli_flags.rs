@@ -11,8 +11,16 @@ fn main() {
 
     let app = App::new("ls-like".to_string())
         .about("Demo: flags + options + positionals".to_string())
-        .flag("all".to_string(), "a".to_string(), "show hidden".to_string())
-        .flag("long".to_string(), "l".to_string(), "long format".to_string())
+        .flag(
+            "all".to_string(),
+            "a".to_string(),
+            "show hidden".to_string(),
+        )
+        .flag(
+            "long".to_string(),
+            "l".to_string(),
+            "long format".to_string(),
+        )
         .option(
             "sort".to_string(),
             "s".to_string(),

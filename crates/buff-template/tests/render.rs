@@ -21,10 +21,7 @@ fn render_html_escaping() {
         .render(r#"{"content": "<script>alert('xss')</script>"}"#)
         .expect("render html");
     // handlebars auto-escapes HTML by default
-    assert_eq!(
-        out,
-        "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"
-    );
+    assert_eq!(out, "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;");
 }
 
 #[test]
@@ -45,17 +42,13 @@ fn render_with_helpers() {
 
 #[test]
 fn render_with_each_else() {
-    let t = Template::from_string(
-        "{{#each items}}{{this}}{{else}}empty{{/each}}",
-    )
-    .expect("compile each-else");
+    let t = Template::from_string("{{#each items}}{{this}}{{else}}empty{{/each}}")
+        .expect("compile each-else");
     let out = t
         .render(r#"{"items": ["a", "b"]}"#)
         .expect("render with items");
     assert_eq!(out, "ab");
-    let out2 = t
-        .render(r#"{"items": []}"#)
-        .expect("render empty items");
+    let out2 = t.render(r#"{"items": []}"#).expect("render empty items");
     assert_eq!(out2, "empty");
 }
 
@@ -78,12 +71,6 @@ fn render_multiple_variables() {
 #[test]
 fn render_boolean_context() {
     let t = Template::from_string("{{#if flag}}yes{{/if}}").expect("compile");
-    assert_eq!(
-        t.render(r#"{"flag": true}"#).expect("true"),
-        "yes"
-    );
-    assert_eq!(
-        t.render(r#"{"flag": false}"#).expect("false"),
-        ""
-    );
+    assert_eq!(t.render(r#"{"flag": true}"#).expect("true"), "yes");
+    assert_eq!(t.render(r#"{"flag": false}"#).expect("false"), "");
 }

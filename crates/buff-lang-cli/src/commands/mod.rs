@@ -4,6 +4,7 @@
 //! so [`main.rs`](../main.rs) can dispatch with a single match arm.
 
 pub mod add;
+pub mod ai;
 pub mod backtrace;
 pub mod bench_cold_start;
 pub mod bench_compile;

@@ -13,7 +13,8 @@ fn main() {
     let port = spin_local_mock_smtp();
     println!("mock SMTP listening on 127.0.0.1:{port}");
 
-    let template = "<h1>Welcome, {{name}}!</h1><ul>{% for item in items %}<li>{{item}}</li>{% endfor %}</ul>";
+    let template =
+        "<h1>Welcome, {{name}}!</h1><ul>{% for item in items %}<li>{{item}}</li>{% endfor %}</ul>";
     let context = r#"{"name":"Buff","items":["Onboarding","Tips","Community"]}"#;
 
     let email = Email::new("noreply@buff.dev", "user@example.com", "Welcome to Buff")
@@ -24,8 +25,7 @@ fn main() {
         .expect("html");
     println!("built: {email}");
 
-    let client =
-        SmtpClient::new("127.0.0.1", port, "mockuser", "mockpass").expect("smtp client");
+    let client = SmtpClient::new("127.0.0.1", port, "mockuser", "mockpass").expect("smtp client");
     client.send(&email).expect("send");
     println!("sent HTML email.");
 }

@@ -87,12 +87,7 @@ impl Point {
             return Err(GeoError::DegeneratePolygon { n: 0 });
         }
         if radius == 0.0 {
-            let ring = geo_types::LineString::<f64>::from(vec![
-                self.0,
-                self.0,
-                self.0,
-                self.0,
-            ]);
+            let ring = geo_types::LineString::<f64>::from(vec![self.0, self.0, self.0, self.0]);
             return Ok(Polygon(geo_types::Polygon::<f64>::new(ring, vec![])));
         }
         let cx = self.0.x();
@@ -198,8 +193,7 @@ impl Polygon {
         if ring.len() < 3 {
             return Err(GeoError::DegeneratePolygon { n: ring.len() });
         }
-        let mut pts: Vec<geo_types::Coord<f64>> =
-            ring.into_iter().map(|p| p.0.into()).collect();
+        let mut pts: Vec<geo_types::Coord<f64>> = ring.into_iter().map(|p| p.0.into()).collect();
         let first = pts[0];
         let last = pts[pts.len() - 1];
         if first.x != last.x || first.y != last.y {
@@ -306,7 +300,10 @@ impl Projection {
             return Err(GeoError::LatitudeOutOfRange { lat });
         }
         let x = WEB_MERCATOR_R * lon.to_radians();
-        let y = WEB_MERCATOR_R * (std::f64::consts::FRAC_PI_4 + lat.to_radians() / 2.0).tan().ln();
+        let y = WEB_MERCATOR_R
+            * (std::f64::consts::FRAC_PI_4 + lat.to_radians() / 2.0)
+                .tan()
+                .ln();
         Ok(Point::new(x, y))
     }
 }

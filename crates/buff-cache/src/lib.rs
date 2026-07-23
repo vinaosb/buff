@@ -100,9 +100,7 @@ impl Cache {
             self.inner.insert(key, (value, None));
             return;
         }
-        let deadline = Instant::now()
-            .checked_add(ttl)
-            .unwrap_or_else(Instant::now);
+        let deadline = Instant::now().checked_add(ttl).unwrap_or_else(Instant::now);
         self.inner.insert(key, (value, Some(deadline)));
     }
 

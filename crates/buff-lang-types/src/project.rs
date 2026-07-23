@@ -71,10 +71,7 @@ pub fn parse_project_with_loader(
     })
 }
 
-fn snapshot_reachable_sources(
-    root: &Path,
-    loader: &dyn ModuleLoader,
-) -> HashMap<PathBuf, String> {
+fn snapshot_reachable_sources(root: &Path, loader: &dyn ModuleLoader) -> HashMap<PathBuf, String> {
     let mut out = HashMap::new();
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     let mut visited: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -140,7 +137,11 @@ fn enrich_cyclic_error(chain_str: &str, source_files: &HashMap<PathBuf, String>)
     for window in links.windows(2) {
         let src_path = PathBuf::from(window[0]);
         let dst_path = PathBuf::from(window[1]);
-        annotated.push(format_path_with_import_pos(&src_path, &dst_path, source_files));
+        annotated.push(format_path_with_import_pos(
+            &src_path,
+            &dst_path,
+            source_files,
+        ));
     }
     if let Some(last) = links.last() {
         annotated.push((*last).to_string());

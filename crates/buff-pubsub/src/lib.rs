@@ -225,10 +225,7 @@ impl EventBus {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let record: SubRecord = (id, tx);
             {
-                let mut map = self
-                    .inner
-                    .write()
-                    .map_err(|_| PubSubError::Panic)?;
+                let mut map = self.inner.write().map_err(|_| PubSubError::Panic)?;
                 map.entry(topic_owned.clone()).or_default().push(record);
             }
             // Worker: drain rx, invoke handler. Exits on disconnect

@@ -61,7 +61,10 @@ pub fn load_json<P: AsRef<Path>>(path: P) -> Result<DataFrame> {
     }
     let mut columns: BTreeMap<String, Series> = BTreeMap::new();
     for name in &order {
-        let kind = columns_seen.get(name).copied().unwrap_or(ColumnKind::String);
+        let kind = columns_seen
+            .get(name)
+            .copied()
+            .unwrap_or(ColumnKind::String);
         let series = build_json_series(kind, name, &rows);
         columns.insert(name.clone(), series);
     }

@@ -77,9 +77,7 @@ fn runtime() -> Result<&'static tokio::runtime::Runtime> {
 
 fn parse_address(s: &str) -> Result<Address> {
     let s_owned = s.trim().to_string();
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        s_owned.parse::<Address>()
-    }));
+    let result = catch_unwind(AssertUnwindSafe(|| s_owned.parse::<Address>()));
     match result {
         Ok(Ok(addr)) => Ok(addr),
         Ok(Err(e)) => Err(Web3Error::InvalidAddress(format!("{s_owned}: {e}"))),
@@ -110,13 +108,9 @@ impl Provider {
         if rpc_url.trim().is_empty() {
             return Err(Web3Error::InvalidUrl("empty URL".into()));
         }
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            EthProvider::<Http>::try_from(rpc_url)
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| EthProvider::<Http>::try_from(rpc_url)));
         match result {
-            Ok(Ok(p)) => Ok(Provider {
-                inner: Arc::new(p),
-            }),
+            Ok(Ok(p)) => Ok(Provider { inner: Arc::new(p) }),
             Ok(Err(e)) => Err(Web3Error::InvalidUrl(e.to_string())),
             Err(_) => Err(Web3Error::Panic),
         }
@@ -136,8 +130,9 @@ impl Provider {
     /// The latest sealed block number (height of the chain).
     pub fn block_number(&self) -> Result<u64> {
         let rt = runtime()?;
-        let result =
-            catch_unwind(AssertUnwindSafe(|| rt.block_on(self.inner.get_block_number())));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            rt.block_on(self.inner.get_block_number())
+        }));
         match result {
             Ok(Ok(n)) => Ok(n.as_u64()),
             Ok(Err(e)) => Err(Web3Error::Rpc(e.to_string())),
@@ -208,10 +203,12 @@ impl Default for Provider {
         // used for RPC. Lets codegen emit `unwrap_or_default()` for
         // panic-free construction on Result<Provider, Web3Error>.
         Provider::new("http://localhost:8545").unwrap_or(Provider {
-            inner: Arc::new(EthProvider::<Http>::try_from("http://127.0.0.1:8545").unwrap_or(
-                EthProvider::<Http>::try_from("http://0.0.0.0:8545")
-                    .unwrap_or_else(|_| unsafe_inert_provider()),
-            )),
+            inner: Arc::new(
+                EthProvider::<Http>::try_from("http://127.0.0.1:8545").unwrap_or(
+                    EthProvider::<Http>::try_from("http://0.0.0.0:8545")
+                        .unwrap_or_else(|_| unsafe_inert_provider()),
+                ),
+            ),
         })
     }
 }
@@ -294,10 +291,12 @@ impl Default for Wallet {
         // A "burner" wallet derived from a fixed test key. NEVER
         // use on mainnet. Lets codegen emit `unwrap_or_default()`
         // for panic-free construction (mirrors Image::default).
-        Wallet::from_private_key("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
-            .unwrap_or(Wallet {
-                inner: LocalWallet::default(),
-            })
+        Wallet::from_private_key(
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
+        .unwrap_or(Wallet {
+            inner: LocalWallet::default(),
+        })
     }
 }
 

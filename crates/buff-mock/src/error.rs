@@ -49,10 +49,7 @@ pub enum MockError {
     /// trait. Carries the trait name + method name so the diagnostic
     /// reads `unknown method `bar` on trait `Foo``.
     #[error("unknown method `{method}` on trait `{trait_name}`")]
-    UnknownMethod {
-        method: String,
-        trait_name: String,
-    },
+    UnknownMethod { method: String, trait_name: String },
 
     /// The interior-mutable mock state was poisoned by a panicking
     /// lock-holder. Recovery is to propagate this as a test failure
@@ -79,4 +76,3 @@ impl<T> From<PoisonError<T>> for MockError {
 
 /// Convenience alias used throughout the crate.
 pub type MockResult<T> = Result<T, MockError>;
-

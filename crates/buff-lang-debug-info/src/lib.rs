@@ -56,7 +56,9 @@ pub mod format;
 pub mod panic_hook;
 
 pub use capture::build_source_map;
-pub use format::{deserialize, serialize_to_string, BuffMapFile, FunctionMapping, LineMapping, MAP_FORMAT_VERSION};
+pub use format::{
+    deserialize, serialize_to_string, BuffMapFile, FunctionMapping, LineMapping, MAP_FORMAT_VERSION,
+};
 pub use panic_hook::{install_panic_hook, remap_panic_backtrace, BuffTrace, BuffTraceFrame};
 
 use std::collections::BTreeMap;
@@ -227,7 +229,8 @@ impl SourceMap {
     /// [`lookup_buff`](Self::lookup_buff) for the panic hook (which
     /// shows function names in stack traces).
     pub fn lookup_name(&self, rust_line: usize) -> Option<&str> {
-        self.lookup_buff(rust_line).and_then(|loc| loc.name.as_deref())
+        self.lookup_buff(rust_line)
+            .and_then(|loc| loc.name.as_deref())
     }
 
     /// Returns `true` when no Rust-line ↔ Buff mappings have been

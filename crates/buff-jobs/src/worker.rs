@@ -144,15 +144,16 @@ mod tests {
         .unwrap();
         let w = Worker::new(q.clone());
         let mut attempts = 0u32;
-        let stats = w.run(|_| {
-            attempts = attempts.saturating_add(1);
-            if attempts < 2 {
-                Err("transient".to_string())
-            } else {
-                Ok(())
-            }
-        })
-        .unwrap();
+        let stats = w
+            .run(|_| {
+                attempts = attempts.saturating_add(1);
+                if attempts < 2 {
+                    Err("transient".to_string())
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap();
         assert_eq!(stats.succeeded, 1);
         assert!(stats.failed >= 1);
         assert_eq!(q.stats().completed, 1);
@@ -183,12 +184,8 @@ mod tests {
         let mut order: Vec<String> = Vec::new();
         q.enqueue(Job::new("low").unwrap().with_priority(Priority::Low))
             .unwrap();
-        q.enqueue(
-            Job::new("high")
-                .unwrap()
-                .with_priority(Priority::High),
-        )
-        .unwrap();
+        q.enqueue(Job::new("high").unwrap().with_priority(Priority::High))
+            .unwrap();
         let w = Worker::new(q.clone());
         w.run(|job| {
             order.push(job.payload().to_string());

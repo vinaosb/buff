@@ -4,10 +4,10 @@ fn fixture_users() -> DataFrame {
     DataFrame::from_rows(
         vec!["id".into(), "name".into(), "age".into(), "city".into()],
         vec![
-            vec!["1".into(), "Ada".into(),    "36".into(), "London".into()],
-            vec!["2".into(), "Alan".into(),   "41".into(), "London".into()],
-            vec!["3".into(), "Grace".into(),  "85".into(), "New York".into()],
-            vec!["4".into(), "Linus".into(),  "55".into(), "Helsinki".into()],
+            vec!["1".into(), "Ada".into(), "36".into(), "London".into()],
+            vec!["2".into(), "Alan".into(), "41".into(), "London".into()],
+            vec!["3".into(), "Grace".into(), "85".into(), "New York".into()],
+            vec!["4".into(), "Linus".into(), "55".into(), "Helsinki".into()],
             vec!["5".into(), "Dennis".into(), "70".into(), "New York".into()],
         ],
     )
@@ -20,23 +20,34 @@ fn from_rows_basic_inference() {
     assert_eq!(df.ncols(), 4);
     assert_eq!(df.len(), 5);
     assert!(!df.is_empty());
-    assert!(matches!(df.get_column("id").unwrap().kind(), ColumnKind::Int));
-    assert!(matches!(df.get_column("name").unwrap().kind(), ColumnKind::String));
-    assert!(matches!(df.get_column("age").unwrap().kind(), ColumnKind::Int));
-    assert!(matches!(df.get_column("city").unwrap().kind(), ColumnKind::String));
+    assert!(matches!(
+        df.get_column("id").unwrap().kind(),
+        ColumnKind::Int
+    ));
+    assert!(matches!(
+        df.get_column("name").unwrap().kind(),
+        ColumnKind::String
+    ));
+    assert!(matches!(
+        df.get_column("age").unwrap().kind(),
+        ColumnKind::Int
+    ));
+    assert!(matches!(
+        df.get_column("city").unwrap().kind(),
+        ColumnKind::String
+    ));
 }
 
 #[test]
 fn from_rows_float_inference() {
     let df = DataFrame::from_rows(
         vec!["x".into()],
-        vec![
-            vec!["1.5".into()],
-            vec!["2.0".into()],
-            vec!["3.14".into()],
-        ],
+        vec![vec!["1.5".into()], vec!["2.0".into()], vec!["3.14".into()]],
     );
-    assert!(matches!(df.get_column("x").unwrap().kind(), ColumnKind::Float));
+    assert!(matches!(
+        df.get_column("x").unwrap().kind(),
+        ColumnKind::Float
+    ));
     let slice = df.get_column("x").unwrap().as_float_slice().unwrap();
     assert_eq!(slice, &[1.5, 2.0, 3.14]);
 }
@@ -45,20 +56,39 @@ fn from_rows_float_inference() {
 fn from_rows_bool_inference() {
     let df = DataFrame::from_rows(
         vec!["flag".into()],
-        vec![vec!["true".into()], vec!["false".into()], vec!["true".into()]],
+        vec![
+            vec!["true".into()],
+            vec!["false".into()],
+            vec!["true".into()],
+        ],
     );
-    assert!(matches!(df.get_column("flag").unwrap().kind(), ColumnKind::Bool));
-    assert_eq!(df.get_column("flag").unwrap().as_bool_slice().unwrap(), &[true, false, true]);
+    assert!(matches!(
+        df.get_column("flag").unwrap().kind(),
+        ColumnKind::Bool
+    ));
+    assert_eq!(
+        df.get_column("flag").unwrap().as_bool_slice().unwrap(),
+        &[true, false, true]
+    );
 }
 
 #[test]
 fn from_rows_empty_cells_kept_as_string() {
     let df = DataFrame::from_rows(
         vec!["a".into(), "b".into()],
-        vec![vec!["1".into(), String::new()], vec!["x".into(), "y".into()]],
+        vec![
+            vec!["1".into(), String::new()],
+            vec!["x".into(), "y".into()],
+        ],
     );
-    assert!(matches!(df.get_column("a").unwrap().kind(), ColumnKind::String));
-    assert!(matches!(df.get_column("b").unwrap().kind(), ColumnKind::String));
+    assert!(matches!(
+        df.get_column("a").unwrap().kind(),
+        ColumnKind::String
+    ));
+    assert!(matches!(
+        df.get_column("b").unwrap().kind(),
+        ColumnKind::String
+    ));
 }
 
 #[test]
@@ -84,7 +114,11 @@ fn filter_by_predicate() {
         .unwrap();
     assert_eq!(londoners.len(), 2);
     assert_eq!(
-        londoners.get_column("name").unwrap().as_string_slice().unwrap(),
+        londoners
+            .get_column("name")
+            .unwrap()
+            .as_string_slice()
+            .unwrap(),
         &["Ada".to_string(), "Alan".to_string()]
     );
 }
@@ -102,7 +136,11 @@ fn sort_ascending() {
     let sorted = df.sort("age").unwrap();
     let ages = sorted.get_column("age").unwrap().as_int_slice().unwrap();
     assert_eq!(ages, &[36, 41, 55, 70, 85]);
-    let names = sorted.get_column("name").unwrap().as_string_slice().unwrap();
+    let names = sorted
+        .get_column("name")
+        .unwrap()
+        .as_string_slice()
+        .unwrap();
     assert_eq!(names, &["Ada", "Alan", "Linus", "Dennis", "Grace"]);
 }
 

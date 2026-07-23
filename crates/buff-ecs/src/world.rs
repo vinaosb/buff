@@ -133,8 +133,7 @@ impl World {
 
     /// Returns `true` if the entity is currently live.
     pub fn contains(&self, entity: Entity) -> bool {
-        catch_unwind(AssertUnwindSafe(|| self.inner.contains(entity.as_hecs())))
-            .unwrap_or(false)
+        catch_unwind(AssertUnwindSafe(|| self.inner.contains(entity.as_hecs()))).unwrap_or(false)
     }
 
     /// Despawn an entity, removing it and all its components. Returns
@@ -222,8 +221,7 @@ impl World {
         self.last_tick_failed.store(false, Ordering::Relaxed);
         let mut systems = std::mem::take(&mut self.systems);
         for system in systems.iter_mut() {
-            let panic_result =
-                catch_unwind(AssertUnwindSafe(|| system.run(self)));
+            let panic_result = catch_unwind(AssertUnwindSafe(|| system.run(self)));
             if panic_result.is_err() {
                 self.last_tick_failed.store(true, Ordering::Relaxed);
             }
@@ -338,10 +336,7 @@ mod tests {
     #[test]
     fn spawn_two_attaches_both_components() {
         let mut w = World::new();
-        let e = w.spawn_two(
-            Position { x: 5.0, y: 5.0 },
-            Velocity { dx: 1.0, dy: 0.0 },
-        );
+        let e = w.spawn_two(Position { x: 5.0, y: 5.0 }, Velocity { dx: 1.0, dy: 0.0 });
         assert_eq!(
             w.get_clone::<Position>(e),
             Some(Position { x: 5.0, y: 5.0 })
@@ -388,10 +383,7 @@ mod tests {
     fn query_returns_all_matching_components() {
         let mut w = World::new();
         w.spawn(Position { x: 1.0, y: 0.0 });
-        w.spawn_two(
-            Position { x: 2.0, y: 0.0 },
-            Velocity { dx: 0.5, dy: 0.5 },
-        );
+        w.spawn_two(Position { x: 2.0, y: 0.0 }, Velocity { dx: 0.5, dy: 0.5 });
         let positions = w.query::<Position>();
         assert_eq!(positions.len(), 2);
         let velocities = w.query::<Velocity>();
@@ -411,10 +403,7 @@ mod tests {
     #[test]
     fn for_each_pair_mut_sees_both_components() {
         let mut w = World::new();
-        let e = w.spawn_two(
-            Position { x: 0.0, y: 0.0 },
-            Velocity { dx: 1.0, dy: 2.0 },
-        );
+        let e = w.spawn_two(Position { x: 0.0, y: 0.0 }, Velocity { dx: 1.0, dy: 2.0 });
         w.for_each_pair_mut(|_id, p: &mut Position, v: &mut Velocity| {
             p.x += v.dx;
             p.y += v.dy;
@@ -428,10 +417,7 @@ mod tests {
     #[test]
     fn tick_runs_registered_systems() {
         let mut w = World::new();
-        let e = w.spawn_two(
-            Position { x: 0.0, y: 0.0 },
-            Velocity { dx: 1.0, dy: 0.0 },
-        );
+        let e = w.spawn_two(Position { x: 0.0, y: 0.0 }, Velocity { dx: 1.0, dy: 0.0 });
         w.add_system(SystemFn::new("move".to_string(), |world: &mut World| {
             world.for_each_pair_mut(|_id, p: &mut Position, v: &mut Velocity| {
                 p.x += v.dx;
@@ -454,10 +440,9 @@ mod tests {
     fn tick_continues_after_panicking_system() {
         let mut w = World::new();
         let e = w.spawn(Counter(0));
-        w.add_system(SystemFn::new(
-            "panicker".to_string(),
-            |_w: &mut World| panic!("boom"),
-        ));
+        w.add_system(SystemFn::new("panicker".to_string(), |_w: &mut World| {
+            panic!("boom")
+        }));
         w.add_system(SystemFn::new(
             "increment".to_string(),
             |world: &mut World| {

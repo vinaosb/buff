@@ -25,7 +25,10 @@ fn main() {
     let stats = worker
         .run(|job| {
             attempt = attempt.saturating_add(1);
-            Err(format!("always fails (attempt {attempt} for {})", job.payload()))
+            Err(format!(
+                "always fails (attempt {attempt} for {})",
+                job.payload()
+            ))
         })
         .expect("worker.run");
 

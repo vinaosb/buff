@@ -22,7 +22,11 @@ fn main() {
     let bot = Bot::new(Platform::Discord, token).expect("bot");
 
     bot.command("ping", |msg| {
-        println!("[CMD] !ping from @{} in channel {}", msg.author(), msg.channel());
+        println!(
+            "[CMD] !ping from @{} in channel {}",
+            msg.author(),
+            msg.channel()
+        );
         println!("[CMD]   text: {:?}", msg.text());
         println!("[CMD]   is_dm: {}", msg.is_dm());
     })

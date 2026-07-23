@@ -286,9 +286,7 @@ impl Tensor {
         self.as_slice()
             .par_iter()
             .copied()
-            .max_by(|a, b| {
-                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
 }
 
@@ -411,7 +409,11 @@ mod tests {
     fn matmul_identity() {
         // a * I = a
         let a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let i = Tensor::from_vec(vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], vec![3, 3]).unwrap();
+        let i = Tensor::from_vec(
+            vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            vec![3, 3],
+        )
+        .unwrap();
         let c = a.matmul(&i).unwrap();
         assert_eq!(c.shape().as_slice(), &[2, 3]);
         assert!(tensor_approx_eq(&c, &a));
@@ -462,11 +464,8 @@ mod tests {
     #[test]
     fn reduce_sum_3d_axis() {
         // shape [2,2,2]: 8 elements. Sum along axis 1 -> shape [2,2].
-        let t = Tensor::from_vec(
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            vec![2, 2, 2],
-        )
-        .unwrap();
+        let t =
+            Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]).unwrap();
         let r = t.sum_axis(1).unwrap();
         assert_eq!(r.shape().as_slice(), &[2, 2]);
         // batch 0: [1,2] + [3,4] = [4,6]
@@ -478,13 +477,7 @@ mod tests {
     fn reduce_axis_out_of_bounds() {
         let t = Tensor::zeros(vec![2, 3]).unwrap();
         let err = t.sum_axis(5).unwrap_err();
-        assert_eq!(
-            err,
-            TensorError::AxisOutOfBounds {
-                axis: 5,
-                rank: 2,
-            }
-        );
+        assert_eq!(err, TensorError::AxisOutOfBounds { axis: 5, rank: 2 });
     }
 
     #[test]

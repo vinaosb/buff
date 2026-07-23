@@ -154,7 +154,11 @@ fn find_fn_end_line(rust_source: &str, fn_start_line: usize) -> usize {
     let lines: Vec<&str> = rust_source.lines().collect();
     let mut depth: i64 = 0;
     let mut seen_open = false;
-    for (idx, line) in lines.iter().enumerate().skip(fn_start_line.saturating_sub(1)) {
+    for (idx, line) in lines
+        .iter()
+        .enumerate()
+        .skip(fn_start_line.saturating_sub(1))
+    {
         for ch in line.chars() {
             if ch == '{' {
                 depth += 1;
@@ -234,7 +238,11 @@ mod tests {
         let main_start = buff.find("func main").unwrap_or(0);
         let main_end = main_start + "func main():\n    return helper()".len();
         let decls = vec![
-            Decl::FuncDecl(make_func_with_span("helper", helper_span_start, helper_span_end)),
+            Decl::FuncDecl(make_func_with_span(
+                "helper",
+                helper_span_start,
+                helper_span_end,
+            )),
             Decl::FuncDecl(make_func_with_span("main", main_start, main_end)),
         ];
         let map = build_source_map(&decls, rust, Path::new("test.buff"), buff);
@@ -269,11 +277,7 @@ mod tests {
     fn build_source_map_handles_missing_fn_in_rust_gracefully() {
         let buff = "func ghost():\n    return 1\n";
         let rust = "fn other() {}\n";
-        let decls = vec![Decl::FuncDecl(make_func_with_span(
-            "ghost",
-            0,
-            10,
-        ))];
+        let decls = vec![Decl::FuncDecl(make_func_with_span("ghost", 0, 10))];
         let map = build_source_map(&decls, rust, Path::new("test.buff"), buff);
         assert_eq!(map.functions.len(), 0, "no match in Rust → skip silently");
     }
@@ -282,15 +286,13 @@ mod tests {
     fn build_source_map_records_buff_path_and_source_id() {
         let buff = "func main():\n    print(1)\n";
         let rust = "fn main() {\n    println!(\"{}\", 1)\n}\n";
-        let decls = vec![Decl::FuncDecl(make_func_with_span(
-            "main",
-            0,
-            buff.len(),
-        ))];
+        let decls = vec![Decl::FuncDecl(make_func_with_span("main", 0, buff.len()))];
         let path = Path::new("examples/debug/panic_demo.buff");
         let map = build_source_map(&decls, rust, path, buff);
         assert_eq!(
-            map.buff_file.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            map.buff_file
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
             Some("examples/debug/panic_demo.buff".to_string())
         );
         assert_eq!(map.source_id, SourceId(0));

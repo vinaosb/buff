@@ -123,11 +123,7 @@ impl<T: ?Sized> Mock<T> {
     /// codegen-emitted trait impl is then responsible for producing a
     /// default value or surfacing an error.
     #[must_use]
-    pub fn lookup_return(
-        &self,
-        method: &str,
-        args: &[ArgumentValue],
-    ) -> Option<ReturnValue> {
+    pub fn lookup_return(&self, method: &str, args: &[ArgumentValue]) -> Option<ReturnValue> {
         self.state.lookup_return(method, args)
     }
 
@@ -175,4 +171,3 @@ impl<T: ?Sized> std::fmt::Debug for Mock<T> {
             .finish_non_exhaustive()
     }
 }
-

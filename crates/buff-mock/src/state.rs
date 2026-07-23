@@ -103,7 +103,11 @@ impl MockState {
     /// expectation matches (the trait impl must then provide a default
     /// value or surface [`MockError::UnexpectedCall`]).
     #[must_use]
-    pub(crate) fn lookup_return(&self, method: &str, args: &[crate::record::ArgumentValue]) -> Option<crate::record::ReturnValue> {
+    pub(crate) fn lookup_return(
+        &self,
+        method: &str,
+        args: &[crate::record::ArgumentValue],
+    ) -> Option<crate::record::ReturnValue> {
         let guard = self.expectations.lock().ok()?;
         for exp in guard.iter() {
             if exp.matches(method, args) {
@@ -178,11 +182,7 @@ impl MockState {
     /// locks sequentially (never nested — see the thread-safety note
     /// on [`MockState`]).
     pub(crate) fn verify(&self) -> MockResult<()> {
-        let expectations = self
-            .expectations
-            .lock()
-            .map_err(MockError::from)?
-            .clone();
+        let expectations = self.expectations.lock().map_err(MockError::from)?.clone();
         let calls = self.calls.lock().map_err(MockError::from)?;
 
         let mut failures: Vec<String> = Vec::new();
@@ -209,10 +209,7 @@ impl MockState {
     /// the `expect()` chain was registered.
     #[must_use]
     pub(crate) fn expectation_count(&self) -> usize {
-        self.expectations
-            .lock()
-            .map(|g| g.len())
-            .unwrap_or(0)
+        self.expectations.lock().map(|g| g.len()).unwrap_or(0)
     }
 }
 
@@ -232,4 +229,3 @@ impl std::fmt::Debug for MockState {
             .finish_non_exhaustive()
     }
 }
-

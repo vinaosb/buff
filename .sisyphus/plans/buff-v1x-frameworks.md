@@ -330,7 +330,7 @@ v1.20.0 (Developer Experience — 7 tasks):
 ├── T62: PGO support           [quick] ✅
 ├── T63: Error quality         (needs T24) [unspecified-high]
 ├── T64: Hot reload            (needs T16+T17) [unspecified-high]
-├── T65: AI integration        [unspecified-high]
+├── T65: AI integration        [unspecified-high] ✅
 ├── T66: Refactoring tools     (needs T24) [unspecified-high]
 └── T67: Docs site             [unspecified-high]
 
@@ -3597,7 +3597,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **What**: Extend T17 buff-web with route hot-swap (change handler → reload without restart). Extend T16 buff-game with ECS system hot-swap. Build on existing v1.8 ui_dev WebSocket infrastructure. `buff watch` subcommand for non-UI code.
   **LOC budget**: ≤2500. **Deps**: T0, T1, T16, T17. **Acceptance**: Server route change live-reloads. Game system hot-swaps. `buff watch` detects file changes. 3 examples + 12 tests.
 
-- [ ] 65. AI Assistant Integration (`buff ai`)
+- [x] 65. AI Assistant Integration (`buff ai`)
   **What**: Add `buff ai` subcommand that generates "AI context pack" — types, signatures, available APIs, idioms, current project structure — as a single file users paste into Copilot/Claude. `buff ai --verify <file>` runs buff check on AI-generated code. Playground integration for immediate feedback.
   **LOC budget**: ≤2000. **Deps**: T0, T1. **Acceptance**: Context pack generated for test project. AI-verify catches syntax errors. 3 examples + 10 tests.
 

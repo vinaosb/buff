@@ -44,5 +44,5 @@ pub mod shape;
 pub mod tensor;
 
 pub use error::{TensorError, TensorResult};
-pub use shape::{MVP_RANK_CAP, Shape};
+pub use shape::{Shape, MVP_RANK_CAP};
 pub use tensor::{Tensor, TensorCore};

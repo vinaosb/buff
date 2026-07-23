@@ -30,7 +30,11 @@ fn load_seed_manifest_finds_all_exercises() {
     let ex_dir = exercises_dir();
     let manifest = load_manifest(&ex_dir).expect("manifest should load from exercises/");
 
-    assert_eq!(manifest.total_count(), 25, "expected 25 exercises (5 seed from T138a + 20 added by T138b)");
+    assert_eq!(
+        manifest.total_count(),
+        25,
+        "expected 25 exercises (5 seed from T138a + 20 added by T138b)"
+    );
 
     // Verify all expected exercises are present
     assert!(manifest.find_entry("variables1").is_some());

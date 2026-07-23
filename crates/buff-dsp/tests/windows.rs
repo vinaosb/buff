@@ -34,10 +34,16 @@ fn hann_window_peaks_at_centre() {
     let peak = coeffs[mid];
     for (i, &c) in coeffs.iter().enumerate() {
         if i != mid {
-            assert!(c <= peak + 1e-12, "hann non-peak {i}={c} exceeds peak {peak}");
+            assert!(
+                c <= peak + 1e-12,
+                "hann non-peak {i}={c} exceeds peak {peak}"
+            );
         }
     }
-    assert!((peak - 1.0).abs() < 1e-12, "hann peak should be 1.0, got {peak}");
+    assert!(
+        (peak - 1.0).abs() < 1e-12,
+        "hann peak should be 1.0, got {peak}"
+    );
 }
 
 #[test]
@@ -46,8 +52,14 @@ fn hamming_window_does_not_reach_zero_at_endpoints() {
     let w = Window::hamming(64);
     let coeffs = w.as_slice();
     let endpoint = coeffs[0];
-    assert!(endpoint > 0.05, "hamming endpoint should be ~0.08, got {endpoint}");
-    assert!(endpoint < 0.15, "hamming endpoint should be ~0.08, got {endpoint}");
+    assert!(
+        endpoint > 0.05,
+        "hamming endpoint should be ~0.08, got {endpoint}"
+    );
+    assert!(
+        endpoint < 0.15,
+        "hamming endpoint should be ~0.08, got {endpoint}"
+    );
 }
 
 #[test]
@@ -59,7 +71,10 @@ fn blackman_window_has_lower_endpoints_than_hann() {
     let hann_mid = hann.as_slice()[16];
     let blackman_mid = blackman.as_slice()[16];
     assert!(blackman_mid > 0.0, "blackman peak should be positive");
-    assert!(blackman_mid < hann_mid, "blackman peak {blackman_mid} should be < hann {hann_mid}");
+    assert!(
+        blackman_mid < hann_mid,
+        "blackman peak {blackman_mid} should be < hann {hann_mid}"
+    );
 }
 
 #[test]

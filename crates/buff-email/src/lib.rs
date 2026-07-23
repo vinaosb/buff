@@ -372,11 +372,10 @@ impl std::fmt::Debug for SmtpClient {
 /// `Result`.
 fn parse_mailbox(addr: &str) -> Result<lettre::message::Mailbox, EmailError> {
     use std::str::FromStr;
-    lettre::message::Mailbox::from_str(addr)
-        .map_err(|e| EmailError::InvalidAddress {
-            addr: addr.to_string(),
-            reason: e.to_string(),
-        })
+    lettre::message::Mailbox::from_str(addr).map_err(|e| EmailError::InvalidAddress {
+        addr: addr.to_string(),
+        reason: e.to_string(),
+    })
 }
 
 /// Render a handlebars template against a JSON context. Returns the
@@ -429,8 +428,7 @@ mod smoke_tests {
 
     #[test]
     fn handlebars_renders_variable() {
-        let rendered =
-            render_handlebars("Hello {{name}}", r#"{"name":"Buff"}"#).expect("render");
+        let rendered = render_handlebars("Hello {{name}}", r#"{"name":"Buff"}"#).expect("render");
         assert_eq!(rendered, "Hello Buff");
     }
 

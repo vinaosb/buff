@@ -124,10 +124,7 @@ fn files_for_gen(kind: GenKind, name: &str) -> Vec<(String, String)> {
         GenKind::Test => {
             vec![(format!("tests/unit/{name}.buff"), render_test_stub(name))]
         }
-        GenKind::Example => vec![(
-            format!("examples/{name}.buff"),
-            render_example_stub(name),
-        )],
+        GenKind::Example => vec![(format!("examples/{name}.buff"), render_example_stub(name))],
     }
 }
 

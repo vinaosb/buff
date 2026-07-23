@@ -20,7 +20,9 @@ fn main() {
     let mut world = World::new();
 
     world.insert_resource(GameState { score: 0, turn: 1 });
-    world.insert_resource(Settings { difficulty: "normal" });
+    world.insert_resource(Settings {
+        difficulty: "normal",
+    });
 
     if let Some(state) = world.get_resource_mut::<GameState>() {
         state.score += 100;
@@ -34,5 +36,8 @@ fn main() {
     println!("settings:   {:?}", settings);
 
     let score = state.map(|s| s.score).unwrap_or(0);
-    println!("resource insert + mutation OK (score={}, expected 100)", score);
+    println!(
+        "resource insert + mutation OK (score={}, expected 100)",
+        score
+    );
 }

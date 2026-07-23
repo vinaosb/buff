@@ -90,7 +90,11 @@ impl Crawler {
         }
         let url_owned = url.to_string();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let resp = self.client.get(&url_owned).send().map_err(ScrapeError::from)?;
+            let resp = self
+                .client
+                .get(&url_owned)
+                .send()
+                .map_err(ScrapeError::from)?;
             let status = resp.status();
             if !status.is_success() {
                 return Err(ScrapeError::Http(format!("HTTP {status}")));
@@ -181,12 +185,10 @@ fn seed_origin(seed: &str) -> Option<String> {
 
 fn is_same_origin(seed: &str, candidate: &str) -> bool {
     match (seed_origin(seed), url::Url::parse(candidate).ok()) {
-        (Some(seed_origin), Some(parsed_candidate)) => {
-            parsed_candidate
-                .host_str()
-                .map(|h| format!("{}://{}", parsed_candidate.scheme(), h) == seed_origin)
-                .unwrap_or(false)
-        }
+        (Some(seed_origin), Some(parsed_candidate)) => parsed_candidate
+            .host_str()
+            .map(|h| format!("{}://{}", parsed_candidate.scheme(), h) == seed_origin)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -210,11 +212,7 @@ fn resolve_against(seed: &str, href: &str) -> Option<String> {
     base.join(href).ok().map(|u| u.to_string())
 }
 
-fn crawl_bfs(
-    crawler: &Crawler,
-    seed: &str,
-    max_pages: usize,
-) -> Result<Vec<String>, ScrapeError> {
+fn crawl_bfs(crawler: &Crawler, seed: &str, max_pages: usize) -> Result<Vec<String>, ScrapeError> {
     let mut visited: BTreeSet<String> = BTreeSet::new();
     let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
     queue.push_back(seed.to_string());

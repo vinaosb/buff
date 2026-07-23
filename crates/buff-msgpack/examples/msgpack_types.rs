@@ -18,7 +18,13 @@ fn main() {
     for (i, value) in cases.iter().enumerate() {
         let bytes = buff_msgpack::serialize(value).expect("serialize");
         let decoded = buff_msgpack::deserialize(&bytes).expect("deserialize");
-        println!("Case {}: {:?} -> {} bytes -> {:?}", i, value, bytes.len(), decoded);
+        println!(
+            "Case {}: {:?} -> {} bytes -> {:?}",
+            i,
+            value,
+            bytes.len(),
+            decoded
+        );
         assert_eq!(*value, decoded);
     }
     println!("All types roundtrip OK!");

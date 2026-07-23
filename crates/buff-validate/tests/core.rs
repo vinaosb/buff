@@ -52,7 +52,9 @@ fn email_rule_rejects_invalid_emails() {
 #[test]
 fn url_rule_validates_homepages() {
     let v = Validator::new().with_url("homepage");
-    assert!(v.validate(&input(&[("homepage", "https://example.com")])).is_ok());
+    assert!(v
+        .validate(&input(&[("homepage", "https://example.com")]))
+        .is_ok());
     let errs = v
         .validate(&input(&[("homepage", "not-a-url")]))
         .unwrap_err();
@@ -68,7 +70,12 @@ fn length_rule_enforces_min_max() {
     let errs = v.validate(&input(&[("name", "a")])).unwrap_err();
     assert!(matches!(
         errs[0],
-        ValidationError::InvalidLength { min: 2, max: 5, actual: 1, .. }
+        ValidationError::InvalidLength {
+            min: 2,
+            max: 5,
+            actual: 1,
+            ..
+        }
     ));
     let errs = v.validate(&input(&[("name", "abcdef")])).unwrap_err();
     assert!(matches!(
@@ -79,9 +86,7 @@ fn length_rule_enforces_min_max() {
 
 #[test]
 fn length_rule_rejects_min_greater_than_max() {
-    let err = Validator::new()
-        .with_length("name", 10, 5)
-        .unwrap_err();
+    let err = Validator::new().with_length("name", 10, 5).unwrap_err();
     assert!(matches!(err, ValidationError::InvalidRuleConfig { .. }));
 }
 
@@ -94,7 +99,12 @@ fn range_rule_enforces_numeric_bounds() {
     let errs = v.validate(&input(&[("age", "200")])).unwrap_err();
     assert!(matches!(
         errs[0],
-        ValidationError::InvalidRange { min: 0, max: 150, actual: 200, .. }
+        ValidationError::InvalidRange {
+            min: 0,
+            max: 150,
+            actual: 200,
+            ..
+        }
     ));
 }
 
@@ -128,7 +138,9 @@ fn regex_rule_surfaces_bad_pattern_at_registration() {
     let err = Validator::new()
         .with_regex("phone", "(unbalanced")
         .unwrap_err();
-    assert!(matches!(err, ValidationError::BadRegex { ref pattern, .. } if pattern == "(unbalanced"));
+    assert!(
+        matches!(err, ValidationError::BadRegex { ref pattern, .. } if pattern == "(unbalanced")
+    );
 }
 
 #[test]
@@ -148,7 +160,10 @@ fn missing_field_surfaces_in_aggregate() {
         })
         .collect();
     fields.sort();
-    assert_eq!(fields, vec!["age".to_string(), "email".to_string(), "name".to_string()]);
+    assert_eq!(
+        fields,
+        vec!["age".to_string(), "email".to_string(), "name".to_string()]
+    );
 }
 
 #[test]
@@ -172,7 +187,10 @@ fn json_schema_has_expected_shape_for_each_rule_kind() {
         .expect("valid rules");
     let schema_str = v.to_json_schema();
     let schema: serde_json::Value = serde_json::from_str(&schema_str).expect("valid JSON");
-    assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
     assert_eq!(schema["type"], "object");
     let required = schema["required"].as_array().expect("required is array");
     assert_eq!(required.len(), 5);
@@ -192,8 +210,7 @@ fn json_schema_merges_multiple_rules_on_same_field() {
         .with_email("email")
         .with_length("email", 5, 80)
         .expect("valid rules");
-    let schema: serde_json::Value =
-        serde_json::from_str(&v.to_json_schema()).expect("valid JSON");
+    let schema: serde_json::Value = serde_json::from_str(&v.to_json_schema()).expect("valid JSON");
     let email_schema = &schema["properties"]["email"];
     assert_eq!(email_schema["format"], "email");
     assert_eq!(email_schema["minLength"], 5);
@@ -237,9 +254,7 @@ fn validation_errors_empty_displays_zero() {
 
 #[test]
 fn validator_display_shows_rule_count() {
-    let v = Validator::new()
-        .with_email("email")
-        .with_url("homepage");
+    let v = Validator::new().with_email("email").with_url("homepage");
     assert_eq!(format!("{v}"), "Validator(2 rule(s))");
 }
 
@@ -292,8 +307,7 @@ fn snapshot_json_schema_for_signup_form() {
         .with_range("age", 0, 150)
         .with_regex("zip", "^[0-9]{5}$")
         .expect("valid rules");
-    let schema: serde_json::Value =
-        serde_json::from_str(&v.to_json_schema()).expect("valid JSON");
+    let schema: serde_json::Value = serde_json::from_str(&v.to_json_schema()).expect("valid JSON");
     insta::assert_snapshot!(
         "json_schema_signup_form",
         serde_json::to_string_pretty(&schema).unwrap_or_default()
@@ -302,8 +316,6 @@ fn snapshot_json_schema_for_signup_form() {
 
 #[test]
 fn snapshot_validator_debug() {
-    let v = Validator::new()
-        .with_email("email")
-        .with_url("homepage");
+    let v = Validator::new().with_email("email").with_url("homepage");
     insta::assert_snapshot!("validator_debug", format!("{v}"));
 }

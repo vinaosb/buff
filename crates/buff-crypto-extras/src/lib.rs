@@ -62,8 +62,7 @@ pub mod rsa_api {
 /// Convenience re-export of the ECDH P-256 surface (4 fns).
 pub mod ecdh_api {
     pub use crate::ecc::{
-        p256_derive_shared, p256_generate_private, p256_public_from_private,
-        p384_generate_private,
+        p256_derive_shared, p256_generate_private, p256_public_from_private, p384_generate_private,
     };
 }
 

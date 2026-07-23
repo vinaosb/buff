@@ -41,10 +41,7 @@ struct Tag(&'static str);
 fn spawn_query_roundtrip() {
     let mut world = World::new();
     let _e1 = world.spawn(Position { x: 0.0, y: 0.0 });
-    let _e2 = world.spawn_two(
-        Position { x: 1.0, y: 1.0 },
-        Velocity { dx: 1.0, dy: 0.0 },
-    );
+    let _e2 = world.spawn_two(Position { x: 1.0, y: 1.0 }, Velocity { dx: 1.0, dy: 0.0 });
 
     let positions: Vec<_> = world.query::<Position>();
     assert_eq!(positions.len(), 2, "both entities have Position");
@@ -59,10 +56,7 @@ fn spawn_query_roundtrip() {
 #[test]
 fn system_modifies_components() {
     let mut world = World::new();
-    let player = world.spawn_two(
-        Position { x: 0.0, y: 0.0 },
-        Velocity { dx: 1.0, dy: 0.0 },
-    );
+    let player = world.spawn_two(Position { x: 0.0, y: 0.0 }, Velocity { dx: 1.0, dy: 0.0 });
 
     world.add_system(SystemFn::new("move".to_string(), |w: &mut World| {
         w.for_each_pair_mut(|_id, p: &mut Position, v: &mut Velocity| {
@@ -116,10 +110,7 @@ fn snapshot_world_empty() {
 fn snapshot_world_after_spawn() {
     let mut world = World::new();
     world.spawn(Health(100));
-    world.spawn_two(
-        Position { x: 1.0, y: 2.0 },
-        Velocity { dx: 0.5, dy: -0.5 },
-    );
+    world.spawn_two(Position { x: 1.0, y: 2.0 }, Velocity { dx: 0.5, dy: -0.5 });
     insta::assert_snapshot!(format!("{world:?}"), @"World { entity_count: 2, system_count: 0, resource_count: 0, .. }");
 }
 
@@ -136,10 +127,7 @@ fn snapshot_world_with_system_and_resource() {
 #[test]
 fn snapshot_world_after_tick() {
     let mut world = World::new();
-    let _e = world.spawn_two(
-        Position { x: 0.0, y: 0.0 },
-        Velocity { dx: 1.0, dy: 1.0 },
-    );
+    let _e = world.spawn_two(Position { x: 0.0, y: 0.0 }, Velocity { dx: 1.0, dy: 1.0 });
     world.add_system(SystemFn::new("move".to_string(), |w: &mut World| {
         w.for_each_pair_mut(|_id, p: &mut Position, v: &mut Velocity| {
             p.x += v.dx;
@@ -187,7 +175,9 @@ fn remove_missing_component_returns_ok_none() {
 fn tick_continues_after_panic_and_sets_flag() {
     let mut world = World::new();
     let e = world.spawn(Health(0));
-    world.add_system(SystemFn::new("boom".to_string(), |_w: &mut World| panic!("kaboom")));
+    world.add_system(SystemFn::new("boom".to_string(), |_w: &mut World| {
+        panic!("kaboom")
+    }));
     world.add_system(SystemFn::new("heal".to_string(), |w: &mut World| {
         w.for_each_mut(|_id, h: &mut Health| {
             h.0 += 5;

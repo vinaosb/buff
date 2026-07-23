@@ -78,7 +78,8 @@ pub type Handler = Arc<dyn Fn(Request) -> Response + Send + Sync>;
 ///
 /// The `next` parameter is a `&dyn Fn` (not boxed) so the middleware
 /// chain allocates one `Vec` per request, not one per middleware.
-pub type MiddlewareFn = Arc<dyn Fn(Request, &dyn Fn(Request) -> Response) -> Response + Send + Sync>;
+pub type MiddlewareFn =
+    Arc<dyn Fn(Request, &dyn Fn(Request) -> Response) -> Response + Send + Sync>;
 
 /// The HTTP method verb for a route registration. Stored inside
 /// [`Web`] as the discriminator for route dispatch.
@@ -286,7 +287,10 @@ impl Web {
     /// Returns [`WebError::Io`] / [`WebError::RuntimeCreate`] /
     /// [`WebError::Panic`] under the same conditions as [`Web::listen`].
     pub fn run(self) -> Result<(), WebError> {
-        let addr_owned = self.bind_addr.clone().unwrap_or_else(|| "0.0.0.0:8080".to_string());
+        let addr_owned = self
+            .bind_addr
+            .clone()
+            .unwrap_or_else(|| "0.0.0.0:8080".to_string());
         self.run_with_addr(&addr_owned)
     }
 

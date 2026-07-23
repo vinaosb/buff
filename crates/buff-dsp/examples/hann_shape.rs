@@ -19,7 +19,11 @@ fn main() {
     println!("]");
 
     let expected = [0.0_f64, 0.1464, 0.5, 0.8536, 1.0, 0.8536, 0.5, 0.1464];
-    assert_eq!(coeffs.len(), expected.len(), "hann(8) must yield 8 coefficients");
+    assert_eq!(
+        coeffs.len(),
+        expected.len(),
+        "hann(8) must yield 8 coefficients"
+    );
     let mut max_err = 0.0_f64;
     for (got, want) in coeffs.iter().zip(expected.iter()) {
         let err = (got - want).abs();
@@ -30,6 +34,9 @@ fn main() {
     println!("max_abs_err = {max_err:.6}");
 
     let tol = 1e-3;
-    assert!(max_err < tol, "max_abs_err {max_err} exceeds tolerance {tol}");
+    assert!(
+        max_err < tol,
+        "max_abs_err {max_err} exceeds tolerance {tol}"
+    );
     println!("PASS: hann(8) coefficients match reference within {tol}.");
 }

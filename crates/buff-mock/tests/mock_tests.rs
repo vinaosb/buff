@@ -5,9 +5,9 @@
 //! "Mock a trait and verify interaction" / "Verify detects unmet
 //! expectations" / "Spy records call arguments".
 
-use buff_mock::{lower_mock_for_trait, ArgumentValue, Mock, MockError, ReturnValue};
-use buff_lang_ast::{Ident, MethodSig, Param, TraitDecl};
 use buff_lang_ast::Span;
+use buff_lang_ast::{Ident, MethodSig, Param, TraitDecl};
+use buff_mock::{lower_mock_for_trait, ArgumentValue, Mock, MockError, ReturnValue};
 
 trait Greeter {
     fn greet(&self, name: String) -> String;
@@ -31,10 +31,7 @@ impl Greeter for Mock<dyn Greeter> {
         }
     }
     fn add(&self, a: i64, b: i64) -> i64 {
-        self.record_call(
-            "add",
-            vec![ArgumentValue::Int(a), ArgumentValue::Int(b)],
-        );
+        self.record_call("add", vec![ArgumentValue::Int(a), ArgumentValue::Int(b)]);
         match self.lookup_return("add", &[]) {
             Some(ReturnValue::Int(i)) => i,
             _ => 0,
@@ -95,7 +92,8 @@ fn mk_greeter_buff_trait() -> TraitDecl {
 #[test]
 fn acceptance_mock_returns_expected_value_when_called() {
     let m = mock();
-    m.expect("greet").returning(ReturnValue::String("hello world".into()));
+    m.expect("greet")
+        .returning(ReturnValue::String("hello world".into()));
     let result = m.greet("buff".into());
     assert_eq!(result, "hello world");
 }
@@ -110,7 +108,8 @@ fn acceptance_mock_default_when_no_expectation() {
 #[test]
 fn acceptance_verify_passes_when_expectations_met() {
     let m = mock();
-    m.expect("greet").returning(ReturnValue::String("hi".into()));
+    m.expect("greet")
+        .returning(ReturnValue::String("hi".into()));
     let _ = m.greet("buff".into());
     assert!(m.verify().is_ok());
 }
@@ -244,7 +243,8 @@ fn acceptance_spy_first_and_last_args_via_calls() {
 fn acceptance_spy_does_not_affect_dispatch() {
     let m = mock();
     let _spy = m.spy("greet");
-    m.expect("greet").returning(ReturnValue::String("hello".into()));
+    m.expect("greet")
+        .returning(ReturnValue::String("hello".into()));
     let r = m.greet("alice".into());
     assert_eq!(r, "hello");
 }
@@ -304,7 +304,8 @@ fn times_zero_violated_by_one_call() {
 #[test]
 fn returning_with_separate_times_constraint() {
     let m = mock();
-    m.expect("greet").returning(ReturnValue::String("hi".into()));
+    m.expect("greet")
+        .returning(ReturnValue::String("hi".into()));
     m.expect("greet").times(1);
     let _ = m.greet("a".into());
     assert!(m.verify().is_ok());
@@ -342,10 +343,8 @@ fn lower_mock_for_trait_rejects_supertraits() {
 #[test]
 fn lower_mock_for_trait_rejects_unsupported_param() {
     let mut t = mk_greeter_buff_trait();
-    t.required[0].params[0].ty = buff_lang_ast::TypeRef::Option(
-        Box::new(named("Int")),
-        dummy_span(),
-    );
+    t.required[0].params[0].ty =
+        buff_lang_ast::TypeRef::Option(Box::new(named("Int")), dummy_span());
     let err = lower_mock_for_trait(&t).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("parameter type"));
@@ -389,7 +388,8 @@ fn call_count_for_filters_by_method() {
 #[test]
 fn clear_resets_mock_to_clean_slate() {
     let m = mock();
-    m.expect("greet").returning(ReturnValue::String("hi".into()));
+    m.expect("greet")
+        .returning(ReturnValue::String("hi".into()));
     let _ = m.greet("a".into());
     assert_eq!(m.calls().len(), 1);
     m.clear();

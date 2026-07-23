@@ -14,7 +14,10 @@ fn main() {
     cfg.set_default("port", 8080);
 
     let tmp_dir = std::env::temp_dir();
-    let config_path = tmp_dir.join(format!("buff_config_hot_reload-{}.toml", std::process::id()));
+    let config_path = tmp_dir.join(format!(
+        "buff_config_hot_reload-{}.toml",
+        std::process::id()
+    ));
 
     // Write initial config
     {

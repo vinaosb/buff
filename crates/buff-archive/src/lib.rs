@@ -220,8 +220,9 @@ impl Archive {
     {
         let archive_path = archive_path.as_ref().to_path_buf();
         let output_dir = output_dir.as_ref().to_path_buf();
-        let result =
-            catch_unwind(AssertUnwindSafe(|| extract_inner(&archive_path, &output_dir)));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            extract_inner(&archive_path, &output_dir)
+        }));
         match result {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => Err(err),
@@ -242,8 +243,9 @@ impl Archive {
             return Err(ArchiveError::EmptyInput);
         }
         let bytes_owned = bytes.to_vec();
-        let result =
-            catch_unwind(AssertUnwindSafe(|| compress_bytes_inner(&bytes_owned, format)));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            compress_bytes_inner(&bytes_owned, format)
+        }));
         match result {
             Ok(Ok(out)) => Ok(out),
             Ok(Err(err)) => Err(err),
@@ -264,8 +266,9 @@ impl Archive {
             return Err(ArchiveError::EmptyInput);
         }
         let bytes_owned = bytes.to_vec();
-        let result =
-            catch_unwind(AssertUnwindSafe(|| decompress_bytes_inner(&bytes_owned, format)));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            decompress_bytes_inner(&bytes_owned, format)
+        }));
         match result {
             Ok(Ok(out)) => Ok(out),
             Ok(Err(err)) => Err(err),
@@ -287,7 +290,10 @@ fn compress_dir_inner(
     if !input_dir.is_dir() {
         return Err(ArchiveError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!("compress_dir: input not a directory: {}", input_dir.display()),
+            format!(
+                "compress_dir: input not a directory: {}",
+                input_dir.display()
+            ),
         )));
     }
     match format {
@@ -323,7 +329,8 @@ fn extract_inner(archive_path: &Path, output_dir: &Path) -> Result<(), ArchiveEr
 fn compress_bytes_inner(bytes: &[u8], format: Format) -> Result<Vec<u8>, ArchiveError> {
     match format {
         Format::Gz => {
-            let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
             encoder
                 .write_all(bytes)
                 .map_err(|e| ArchiveError::Gzip(e.to_string()))?;

@@ -210,9 +210,10 @@ fn projection_wgs84_to_web_mercator_known_value() {
     let p = Point::new(lon, lat);
     let projected = Projection::wgs84_to_web_mercator(p).expect("projects");
     let expected_x = 0.0;
-    let expected_y = 6378137.0 * (std::f64::consts::FRAC_PI_4 + lat.to_radians() / 2.0)
-        .tan()
-        .ln();
+    let expected_y = 6378137.0
+        * (std::f64::consts::FRAC_PI_4 + lat.to_radians() / 2.0)
+            .tan()
+            .ln();
     assert!(approx_eq(projected.x(), expected_x, 1e-3));
     assert!(approx_eq(projected.y(), expected_y, 1e-3));
 }
@@ -276,10 +277,7 @@ fn snapshot_geo_error_all_variants() {
     let e3 = GeoError::DegeneratePolygon { n: 1 };
     let e4 = GeoError::LatitudeOutOfRange { lat: 89.5 };
     let e5 = GeoError::Panic;
-    insta::assert_snapshot!(
-        "geo_error_all",
-        format!("{e1}\n{e2}\n{e3}\n{e4}\n{e5}")
-    );
+    insta::assert_snapshot!("geo_error_all", format!("{e1}\n{e2}\n{e3}\n{e4}\n{e5}"));
 }
 
 #[test]

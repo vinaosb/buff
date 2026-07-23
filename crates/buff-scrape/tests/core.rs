@@ -42,10 +42,7 @@ fn document_select_returns_matching_elements() {
     let doc = Document::from_html(SAMPLE_HTML).expect("parse");
     let items = doc.select("li.item").expect("select");
     assert_eq!(items.len(), 3);
-    let hrefs: Vec<String> = items
-        .iter()
-        .filter_map(|el| el.attr("class"))
-        .collect();
+    let hrefs: Vec<String> = items.iter().filter_map(|el| el.attr("class")).collect();
     assert_eq!(hrefs, vec!["item".to_string(); 3]);
 }
 
@@ -81,7 +78,12 @@ fn document_html_round_trips_source() {
 #[test]
 fn element_text_and_attr_and_html() {
     let doc = Document::from_html(SAMPLE_HTML).expect("parse");
-    let link = doc.select("a").expect("select").into_iter().next().expect("first <a>");
+    let link = doc
+        .select("a")
+        .expect("select")
+        .into_iter()
+        .next()
+        .expect("first <a>");
     assert_eq!(link.text(), "the about page");
     assert_eq!(link.attr("href"), Some("/about".to_string()));
     assert!(link.html().contains("<a"));
@@ -91,7 +93,12 @@ fn element_text_and_attr_and_html() {
 #[test]
 fn element_attr_returns_none_for_missing() {
     let doc = Document::from_html(SAMPLE_HTML).expect("parse");
-    let h1 = doc.select("h1").expect("select").into_iter().next().expect("h1");
+    let h1 = doc
+        .select("h1")
+        .expect("select")
+        .into_iter()
+        .next()
+        .expect("h1");
     assert_eq!(h1.attr("class"), None);
     assert_eq!(h1.text(), "Hello, Buff!");
 }
@@ -99,7 +106,12 @@ fn element_attr_returns_none_for_missing() {
 #[test]
 fn element_select_drills_into_descendants() {
     let doc = Document::from_html(SAMPLE_HTML).expect("parse");
-    let ul = doc.select("ul").expect("select").into_iter().next().expect("ul");
+    let ul = doc
+        .select("ul")
+        .expect("select")
+        .into_iter()
+        .next()
+        .expect("ul");
     let links: Vec<String> = ul
         .select("a")
         .expect("ul.select(a)")
@@ -119,7 +131,12 @@ fn element_select_drills_into_descendants() {
 #[test]
 fn element_equality_and_clone() {
     let doc = Document::from_html(SAMPLE_HTML).expect("parse");
-    let a = doc.select("h1").expect("select").into_iter().next().expect("h1");
+    let a = doc
+        .select("h1")
+        .expect("select")
+        .into_iter()
+        .next()
+        .expect("h1");
     let b = a.clone();
     assert_eq!(a, b);
 }
@@ -127,7 +144,12 @@ fn element_equality_and_clone() {
 #[test]
 fn element_partial_order_debug_format() {
     let doc = Document::from_html(SAMPLE_HTML).expect("parse");
-    let h1 = doc.select("h1").expect("select").into_iter().next().expect("h1");
+    let h1 = doc
+        .select("h1")
+        .expect("select")
+        .into_iter()
+        .next()
+        .expect("h1");
     let debug = format!("{h1:?}");
     assert!(debug.starts_with("Element("));
     let display = format!("{h1}");
@@ -163,9 +185,7 @@ fn crawler_fetch_returns_document() {
     });
 
     let crawler = Crawler::new(&server.base_url()).expect("new");
-    let doc = crawler
-        .fetch(&server.url("/page.html"))
-        .expect("fetch ok");
+    let doc = crawler.fetch(&server.url("/page.html")).expect("fetch ok");
     assert_eq!(doc.title(), Some("Fetched".to_string()));
 }
 
@@ -218,15 +238,18 @@ fn crawler_crawl_bfs_visits_seed_and_linked_pages() {
     });
     server.mock(|when, then| {
         when.method(httpmock::Method::GET).path("/a.html");
-        then.status(200).body(r#"<html><body><a href="/c.html">C</a></body></html>"#);
+        then.status(200)
+            .body(r#"<html><body><a href="/c.html">C</a></body></html>"#);
     });
     server.mock(|when, then| {
         when.method(httpmock::Method::GET).path("/b.html");
-        then.status(200).body(r#"<html><body>B content</body></html>"#);
+        then.status(200)
+            .body(r#"<html><body>B content</body></html>"#);
     });
     server.mock(|when, then| {
         when.method(httpmock::Method::GET).path("/c.html");
-        then.status(200).body(r#"<html><body>C content</body></html>"#);
+        then.status(200)
+            .body(r#"<html><body>C content</body></html>"#);
     });
     // robots.txt: allow everything (no Disallow rules).
     server.mock(|when, then| {
@@ -242,9 +265,7 @@ fn crawler_crawl_bfs_visits_seed_and_linked_pages() {
     assert!(visited.contains(&format!("{base}/b.html")));
     assert!(visited.contains(&format!("{base}/c.html")));
     // External links are not followed.
-    assert!(!visited
-        .iter()
-        .any(|u| u.contains("other.example.com")));
+    assert!(!visited.iter().any(|u| u.contains("other.example.com")));
 }
 
 #[test]
@@ -265,7 +286,8 @@ fn crawler_crawl_respects_robots_disallow() {
         then.status(200).body("<html><body>pub</body></html>");
     });
     server.mock(|when, then| {
-        when.method(httpmock::Method::GET).path("/private/secret.html");
+        when.method(httpmock::Method::GET)
+            .path("/private/secret.html");
         then.status(200).body("<html><body>secret</body></html>");
     });
 

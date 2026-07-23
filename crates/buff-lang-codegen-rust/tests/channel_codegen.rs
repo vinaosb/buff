@@ -194,7 +194,10 @@ fn channel_codegen_new_with_literal_uses_buff_lang_runtime_channel_new() {
 #[test]
 fn channel_codegen_new_with_ident_arg_splices_through() {
     // Channel.new(buf_size) where buf_size is a variable.
-    let src = codegen_one_expr_in("f", ns_assoc_call("Channel", "new", vec![ident_expr("buf_size")]));
+    let src = codegen_one_expr_in(
+        "f",
+        ns_assoc_call("Channel", "new", vec![ident_expr("buf_size")]),
+    );
     assert!(
         src.contains("buff_lang_runtime::Channel::new(buf_size as usize)"),
         "expected `buff_lang_runtime::Channel::new(buf_size as usize)` (ident splice) in: {src}"
@@ -250,11 +253,12 @@ fn sender_codegen_send_uses_runtime_send_with_await_ok() {
     // The .ok() discards the Result<(), RuntimeError>; the user-facing
     // surface is Void in MVP. The .await is auto-inserted per T31.
     let stmts = vec![
-        let_stmt(
-            "sender",
-            ns_assoc_call("Channel", "new", vec![int_expr(8)]),
-        ),
-        expr_stmt(instance_call(ident_expr("sender"), "send", vec![int_expr(42)])),
+        let_stmt("sender", ns_assoc_call("Channel", "new", vec![int_expr(8)])),
+        expr_stmt(instance_call(
+            ident_expr("sender"),
+            "send",
+            vec![int_expr(42)],
+        )),
     ];
     let src = codegen_stmts_in("f", stmts);
     // The runtime Sender::send is called via the wrapper. The exact
@@ -354,7 +358,11 @@ fn channel_codegen_registers_buff_lang_runtime_and_tokio_extern_crates() {
     let main = func_decl(
         "main",
         &[],
-        vec![expr_stmt(ns_assoc_call("Channel", "new", vec![int_expr(4)]))],
+        vec![expr_stmt(ns_assoc_call(
+            "Channel",
+            "new",
+            vec![int_expr(4)],
+        ))],
     );
     let mut codegen = RustCodegen::new();
     let _ = codegen.generate(&[main]).expect("codegen must succeed");
@@ -407,11 +415,12 @@ fn channel_codegen_new_snapshot() {
 #[test]
 fn sender_codegen_send_snapshot() {
     let stmts = vec![
-        let_stmt(
-            "sender",
-            ns_assoc_call("Channel", "new", vec![int_expr(8)]),
-        ),
-        expr_stmt(instance_call(ident_expr("sender"), "send", vec![int_expr(42)])),
+        let_stmt("sender", ns_assoc_call("Channel", "new", vec![int_expr(8)])),
+        expr_stmt(instance_call(
+            ident_expr("sender"),
+            "send",
+            vec![int_expr(42)],
+        )),
     ];
     let src = codegen_stmts_in("f", stmts);
     insta::assert_snapshot!(src);
@@ -452,10 +461,7 @@ fn channel_codegen_full_program_snapshot() {
         "main",
         &[],
         vec![
-            let_stmt(
-                "pair",
-                ns_assoc_call("Channel", "new", vec![int_expr(16)]),
-            ),
+            let_stmt("pair", ns_assoc_call("Channel", "new", vec![int_expr(16)])),
             let_stmt(
                 "_send",
                 instance_call(
