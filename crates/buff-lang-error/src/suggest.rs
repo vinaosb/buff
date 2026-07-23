@@ -73,7 +73,7 @@ pub fn suggest_identifier(input: &str, valid: &[&str]) -> Vec<String> {
     // Mirrors the `format_did_you_mean` contract: returning an empty Vec here
     // lets callers distinguish "input was already correct" from "nothing was
     // close enough" without an extra round-trip.
-    if valid.iter().any(|&v| v == input) {
+    if valid.contains(&input) {
         return Vec::new();
     }
 
@@ -149,7 +149,7 @@ pub fn suggest_with_message(input: &str, valid: &[&str]) -> Option<String> {
         return None;
     }
     // Already-valid input → no suggestion (mirrors suggest_identifier).
-    if valid.iter().any(|&v| v == input) {
+    if valid.contains(&input) {
         return None;
     }
     // Reuse the top-N shortlist, take the head. This keeps the two public
