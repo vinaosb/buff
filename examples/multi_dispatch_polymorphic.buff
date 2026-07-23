@@ -1,0 +1,20 @@
+// T58: Polymorphic dispatch across 3+ types.
+// `combine` has impls for (Int,Int), (Float,Float), (Int,Float), (String,String).
+// (Int + Float auto-promotes to Float via promote_binary — no cast needed.)
+func combine(a: Int, b: Int) -> Int:
+    return a + b
+
+func combine(a: Float, b: Float) -> Float:
+    return a + b
+
+func combine(a: Int, b: Float) -> Float:
+    return a + b
+
+func combine(a: String, b: String) -> String:
+    return a + b
+
+func main():
+    print(combine(1, 2))
+    print(combine(1.0, 2.0))
+    print(combine(1, 2.5))
+    print(combine("hello", "world"))

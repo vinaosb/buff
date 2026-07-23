@@ -1,0 +1,11 @@
+// T58: Basic multiple dispatch — two `combine` impls with different arg types.
+// At call sites the compiler selects the impl matching the argument types.
+func combine(a: Int, b: Int) -> Int:
+    return a + b
+
+func combine(a: Float, b: Float) -> Float:
+    return a + b
+
+func main():
+    print(combine(1, 2))
+    print(combine(1.0, 2.0))

@@ -1,0 +1,17 @@
+// T58: Numeric multiple dispatch — add with three type combinations.
+// Shows how numerical APIs read naturally as top-level functions.
+// (Int + Float auto-promotes to Float via the type system's
+// promote_binary — no explicit cast needed.)
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+func add(a: Int, b: Float) -> Float:
+    return a + b
+
+func add(a: Float, b: Int) -> Float:
+    return a + b
+
+func main():
+    print(add(1, 2))
+    print(add(1, 2.5))
+    print(add(1.5, 2))

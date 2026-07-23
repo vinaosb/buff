@@ -3538,7 +3538,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Acceptance**: Scientific edition parses `2x` correctly. Unicode operators work in editor (LSP completion). Matrix literals produce correct tensors. Default edition unchanged. 6 examples + 20 tests.
   - **Commit**: `feat(ast): mathematical syntax edition (Julia-inspired, opt-in)`
 
-- [ ] 58. Multiple Dispatch for Numerical APIs (Julia-inspired)
+- [x] 58. Multiple Dispatch for Numerical APIs (Julia-inspired)
 
   **What to do**: Extend Buff's trait system to support multiple dispatch — function dispatch on ALL arguments, not just receiver. `func matmul(a: Matrix, b: Vector)` and `func matmul(a: Vector, b: Matrix)` are different methods, dispatched by both argument types. Currently Buff uses single-dispatch (`a.matmul(b)` dispatches on `a` only).
   - **Why**: Numerical operations are often symmetric (`a + b` vs `b + a` have different impls for different type pairs). Multiple dispatch makes `+(Int, Float)`, `+(Matrix, Vector)`, `+(Vector, Matrix)` all natural top-level functions. Julia's entire stdlib is built on this.

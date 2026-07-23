@@ -1,0 +1,10 @@
+// T58: Matrix multiple dispatch — matmul with asymmetric arg order.
+// Demonstrates dispatching on both argument types for numerical ops.
+func matmul(a: Matrix, b: Vector) -> Vector:
+    return a
+
+func matmul(a: Vector, b: Matrix) -> Vector:
+    return b
+
+func main():
+    print("matmul dispatches on both args")

@@ -1,0 +1,15 @@
+// T58: Combined single + multi dispatch coexistence.
+// `process(Int)` is single-dispatch (not a group); `merge` is multi-dispatch.
+func process(a: Int) -> Int:
+    return a * 2
+
+func merge(a: Int, b: Int) -> Int:
+    return a + b
+
+func merge(a: String, b: String) -> String:
+    return a + b
+
+func main():
+    print(process(5))
+    print(merge(1, 2))
+    print(merge("hello", " world"))
