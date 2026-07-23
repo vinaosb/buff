@@ -1,0 +1,17 @@
+// T61 — Cold-start minimal fixture.
+//
+// Smallest-possible Buff program. Used by `buff bench-cold-start` as the
+// timing subject (the inline fixture in `commands/bench_cold_start.rs`
+// mirrors this source byte-for-byte). Run the benchmark with:
+//
+//     buff bench-cold-start
+//
+// Build + run this file directly with:
+//
+//     buff run examples/cold_start_minimal.buff
+//
+// The program prints a single line + exits. Cold-start time (process
+// spawn → first byte on stdout) is the metric of interest.
+
+func main():
+    print("hello")

@@ -714,6 +714,39 @@ pub enum Command {
     /// - Appends a dated row to `benchmarks/compile-speed.md`
     ///   (created if missing) in the current directory.
     BenchCompile,
+
+    /// `buff bench-cold-start` — measure + record native-binary
+    /// cold-start time (T61).
+    ///
+    /// Compiles a minimal `.buff` fixture (`print("hello")`) to a
+    /// native executable via the Buff pipeline → rustc, then times
+    /// the wall-clock duration from process spawn to first byte on
+    /// stdout across N runs (default 10). The median, min, and max
+    /// are reported.
+    ///
+    /// **Acceptance target**: Buff cold-start < 50 ms (matching
+    /// bare Rust). The benchmark emits a JSON + Markdown report at
+    /// `benchmarks/cold-start.{json,md}` documenting the
+    /// methodology + comparison table for Go / Rust / Java / Python
+    /// on AWS Lambda + Cloudflare Workers.
+    ///
+    /// # MVP scope
+    ///
+    /// This subcommand measures **the Buff binary only** — it does
+    /// NOT spawn Go / Rust / Java / Python programs (those reference
+    /// numbers are documented in `benchmarks/cold-start.md` from
+    /// published third-party benchmarks). It does NOT deploy to AWS
+    /// Lambda or Cloudflare Workers — the local measurement is a
+    /// faithful proxy for the cold-start component (process spawn +
+    /// first output) since neither runtime adds per-language
+    /// overhead on top of the native binary.
+    ///
+    /// # Output
+    ///
+    /// - Prints a per-run + summary table to stdout.
+    /// - Writes `benchmarks/cold-start.json` (machine-readable).
+    /// - Writes/appends `benchmarks/cold-start.md` (human-readable).
+    BenchColdStart,
 }
 
 /// Subcommands of `buff jupyter`.

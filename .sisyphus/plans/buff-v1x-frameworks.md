@@ -326,7 +326,7 @@ v1.19.0 (Language Evolution — 7 tasks):
 └── T60: Binary size       [deep]
 
 v1.20.0 (Developer Experience — 7 tasks):
-├── T61: Cold-start benchmarks [quick]
+├── T61: Cold-start benchmarks [quick] ✅
 ├── T62: PGO support           [quick]
 ├── T63: Error quality         (needs T24) [unspecified-high]
 ├── T64: Hot reload            (needs T16+T17) [unspecified-high]
@@ -3581,7 +3581,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **What**: Add `[profile.minimal]` with `panic = "abort"`, `strip = true`, `opt-level = "z"`. Add `buff build --minimal` flag. Feature-gate tokio/rayon/wgpu (don't link if unused). Document size budget per template. Target: <5MB for console apps.
   **LOC budget**: ≤1500. **Deps**: T0 (profiles). **Acceptance**: Console template builds <5MB with --minimal. 3 examples + 10 tests.
 
-- [ ] 61. Cold-Start Benchmarks
+- [x] 61. Cold-Start Benchmarks
   **What**: Build benchmark suite comparing Buff vs Go/Rust/Java/Python cold-start on AWS Lambda + Cloudflare Workers. Publish results to `benchmarks/` directory. Create `buff bench-cold-start` subcommand.
   **LOC budget**: ≤1000. **Deps**: T0, T1. **Acceptance**: Benchmark report published. Buff cold-start <50ms (matching Rust). 2 examples + 5 tests.
 

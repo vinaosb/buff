@@ -1,0 +1,34 @@
+// T61 — Cold-start with module-level init.
+//
+// Demonstrates the cold-start impact of doing non-trivial work BEFORE
+// the first byte of output is written. Real-world Lambda handlers often
+// initialise clients (DB pool, HTTP client, secrets fetch) at module
+// load; this example models that cost with a small CPU-bound computation
+// so the cold-start difference vs `cold_start_minimal.buff` is visible.
+//
+// Build + run:
+//
+//     buff run examples/cold_start_with_init.buff
+//
+// `buff bench-cold-start` does NOT measure this file directly (it uses
+// the minimal fixture to keep cross-run comparisons stable). Use this
+// example manually to estimate init cost:
+//
+//     time buff run examples/cold_start_with_init.buff
+//     time buff run examples/cold_start_minimal.buff
+//
+// The delta is the module-init cost. For AWS Lambda, this maps to the
+// handler-initialisation phase (billed separately from the request).
+
+func warm_cache(n: Int) -> Int:
+    let mut total = 0
+    let mut i = 1
+    for i <= n:
+        total = total + i * i
+        i = i + 1
+    return total
+
+func main():
+    let warmed = warm_cache(1000)
+    print("ready")
+    print(warmed)
