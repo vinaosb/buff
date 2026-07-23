@@ -1,0 +1,6 @@
+---
+source: crates/buff-science/tests/unit_tests.rs
+assertion_line: 382
+expression: "format!(\"{result:.6}\")"
+---
+2.718282

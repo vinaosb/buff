@@ -1,0 +1,7 @@
+---
+source: crates/buff-science/tests/unit_tests.rs
+assertion_line: 365
+expression: format_tensor(&inv)
+---
+shape: [3, 3]
+data: [0.076923, -0.307692, 1.307692, 0.230769, 0.076923, -1.076923, -0.307692, 0.230769, 0.769231]

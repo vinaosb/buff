@@ -1,0 +1,6 @@
+---
+source: crates/buff-science/tests/unit_tests.rs
+assertion_line: 390
+expression: "format!(\"mean={m:.6}, var={v:.6}\")"
+---
+mean=3.000000, var=2.000000

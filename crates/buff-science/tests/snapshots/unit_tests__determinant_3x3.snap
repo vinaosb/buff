@@ -1,0 +1,6 @@
+---
+source: crates/buff-science/tests/unit_tests.rs
+assertion_line: 376
+expression: "format!(\"{det:.6}\")"
+---
+-306.000000
