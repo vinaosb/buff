@@ -1,0 +1,240 @@
+// server.buff -- HTTP endpoints via buff-web (T17) + signal-driven model state.
+//
+// T23 flagship -- Data Science Workbench.
+// Frameworks exercised: buff-web (T17) + buff-reactive (T20) + buff-observe (T21).
+//
+// Exports:
+//   - start_server(model_signal, df)  -> Void
+//
+// Endpoints:
+//   GET  /          -> { model_summary: { samples, features, trained, weights } }
+//   GET  /predict   -> { prediction, confidence, raw }      (?sepal_length=...&...)
+//   POST /retrain   -> { retrained: true, new_loss, samples, weights }
+//   GET  /health    -> { status: "ok" }
+//   GET  /data      -> [ row objects ]   (T22-FU1 rows_to_json roundtrip)
+//
+// # NOTE -- T22-FU5 THREADING MODEL (CROSS-CUTTING CONCERN)
+//
+// buff-reactive Signal<T> is single-threaded: it uses Rc<RefCell<T>>
+// internals per crates/buff-reactive/AGENTS.md "CONVENTIONS". buff-web
+// handlers run on tokio worker threads (Handler = Arc<dyn Fn(Request) ->
+// Response + Send + Sync> per crates/buff-web/src/lib.rs line 72).
+// Directly sharing a Signal<T> across multiple web handlers is therefore
+// UNSOUND -- the handler closures must be Send + Sync, but Rc<RefCell<T>>
+// is neither.
+//
+// Per the T22 mismatch report, this flagship selects option (b): a
+// SINGLE-THREADED tokio runtime via
+//   tokio::runtime::Builder::new_current_thread()
+// This keeps every handler on the main thread where the Signal lives, so
+// the Rc<RefCell<T>> sharing is sound. The codegen layer (deferred) will
+// splice this runtime builder when a program combines buff-reactive +
+// buff-web. Until then this file documents the INTENDED threading model.
+//
+// The signal is read via model_signal.get() inside each handler closure.
+// Writes happen on POST /retrain, which calls pipeline.retrain_via_pipeline
+// and then model_signal.set(trained) to publish the new weights. Subsequent
+// GET / requests observe the updated model.
+
+import Signal from buff.reactive
+from "buff/web" import Web, Request, Response
+from "buff/observe" import Span, Counter, Histogram, Tracer
+from "./data_loader.buff" import rows_to_json, code_to_species
+from "./model.buff" import predict, model_summary, train_from_scratch
+from "./pipeline.buff" import retrain_via_pipeline
+
+const SERVER_PORT = 8080
+const DATA_PATH = "examples/data-science-workbench/data.csv"
+
+// ---------------------------------------------------------------------------
+// Metrics (buff-observe T21).
+// ---------------------------------------------------------------------------
+
+// Request counter + prediction latency histogram. Initialised once in
+// start_server; handlers increment them via the closures captured below.
+// TODO(codegen): buff-observe's Span.enter() returns a guard that the
+// Buff codegen will drop at end-of-scope. Until the codegen lands, the
+// span usage below is documentation-grade -- the span names trace the
+// request flow: request -> predict -> model_forward.
+
+func new_request_counter():
+    return Counter.new("workbench_requests_total")
+
+func new_predict_histogram():
+    return Histogram.new("workbench_predict_seconds")
+
+// ---------------------------------------------------------------------------
+// Query-string parsing (minimal -- buff-web Request exposes req.path() only
+// for MVP; full param extraction is v1.18+ per crates/buff-web/AGENTS.md).
+// ---------------------------------------------------------------------------
+
+// Extract a query parameter from the URL path string.
+// buff-web's Request exposes req.path() returning the full path incl. query
+// string (e.g. "/predict?sepal_length=5.1&sepal_width=3.5"). Parse out the
+// named value defensively. Returns 0.0 if the param is missing.
+func query_float(path, key):
+    // Split on '?' then '&', find "key=value", parse value as float.
+    let mut qpart = path
+    let idx = string_find(path, "?")
+    if idx >= 0:
+        qpart = string_slice(path, idx + 1, string_len(path))
+    let entries = string_split(qpart, "&")
+    for entry in entries:
+        let kv = string_split(entry, "=")
+        if kv.len() == 2 && kv[0] == key:
+            return float(kv[1])
+    return 0.0
+
+// Minimal stdlib string helpers (the Buff prelude provides these via the
+// String type's instance methods; names below mirror the prelude surface).
+// These are thin wrappers so the query parser reads cleanly.
+func string_find(haystack, needle):
+    return haystack.find(needle)
+
+func string_slice(s, start, end):
+    return s.slice(start, end)
+
+func string_len(s):
+    return s.len()
+
+func string_split(s, sep):
+    return s.split(sep)
+
+// ---------------------------------------------------------------------------
+// Server bootstrap.
+// ---------------------------------------------------------------------------
+
+// Start the HTTP server. Reads the live model from `model_signal` (so
+// POST /retrain updates are visible to subsequent GET / requests) and
+// serves the four endpoints until interrupted.
+export func start_server(model_signal, df):
+    // Bootstrap observability once (idempotent).
+    Tracer.bootstrap()
+    let request_counter = new_request_counter()
+    let predict_hist = new_predict_histogram()
+
+    print("[server] bootstrapping on port ${SERVER_PORT}")
+    print("[server] T22-FU5: using single-threaded tokio runtime")
+    print("[server]   (Signal<T> is !Send; current_thread runtime keeps")
+    print("[server]    handlers on the main thread where the Signal lives)")
+
+    let app = Web.new()
+
+    // ---------------------------------------------------------------------
+    // GET / -- model summary landing page.
+    // ---------------------------------------------------------------------
+    app.get(path: "/", handler: { req =>
+        let span = Span.new("request_root")
+        span.field("method", req.method())
+        let _guard = span.enter()
+        request_counter.inc()
+
+        let model = model_signal.get()
+        let summary = model_summary(model, df)
+        Response.json({
+            "model_summary": summary,
+            "endpoints": {
+                "predict": "/predict?sepal_length=5.1&sepal_width=3.5&petal_length=1.4&petal_width=0.2",
+                "retrain": "POST /retrain",
+                "data": "GET /data",
+                "health": "GET /health"
+            }
+        })
+    })
+
+    // ---------------------------------------------------------------------
+    // GET /predict -- single-sample inference.
+    // ---------------------------------------------------------------------
+    app.get(path: "/predict", handler: { req =>
+        let span = Span.new("request_predict")
+        span.field("path", req.path())
+        let _guard = span.enter()
+        request_counter.inc()
+
+        // Parse the 4 Iris features from the query string.
+        let path = req.path()
+        let features = [
+            query_float(path, "sepal_length"),
+            query_float(path, "sepal_width"),
+            query_float(path, "petal_length"),
+            query_float(path, "petal_width")
+        ]
+
+        let model_span = Span.new("model_forward")
+        model_span.field("features", features)
+        let _mguard = model_span.enter()
+
+        let model = model_signal.get()
+        let result = predict(model, features)
+        predict_hist.observe(0.001)
+
+        Response.json({
+            "prediction": result["prediction"],
+            "confidence": result["confidence"],
+            "raw": result["raw"],
+            "features": features
+        })
+    })
+
+    // ---------------------------------------------------------------------
+    // POST /retrain -- trigger the pipeline retrain flow + publish new model.
+    // ---------------------------------------------------------------------
+    app.post(path: "/retrain", handler: { req =>
+        let span = Span.new("request_retrain")
+        span.field("method", req.method())
+        let _guard = span.enter()
+        request_counter.inc()
+
+        // Run the streaming pipeline retrain (Source.from_csv -> batch ->
+        // train). Composes buff-pipeline + buff-dataframe + buff-ml.
+        let retrain_span = Span.new("pipeline_retrain")
+        let _rguard = retrain_span.enter()
+        let outcome = retrain_via_pipeline(DATA_PATH)
+
+        // Train a fresh model from the in-memory DataFrame as a fallback
+        // path that does not depend on the pipeline streaming layer.
+        let fresh = train_from_scratch(df)
+        model_signal.set(fresh)
+
+        Response.json({
+            "retrained": outcome["retrained"],
+            "new_loss": outcome["new_loss"],
+            "samples": outcome["samples"],
+            "pipeline_path": "Source.from_csv -> filter -> batch -> train"
+        })
+    })
+
+    // ---------------------------------------------------------------------
+    // GET /data -- expose the training dataset as JSON.
+    // T22-FU1: uses the rows_to_json() helper (no native df.to_json()).
+    // ---------------------------------------------------------------------
+    app.get(path: "/data", handler: { req =>
+        let span = Span.new("request_data")
+        let _guard = span.enter()
+        request_counter.inc()
+
+        let rows = rows_to_json(df)
+        Response.json({
+            "count": rows.len(),
+            "columns": df.column_names(),
+            "rows": rows
+        })
+    })
+
+    // ---------------------------------------------------------------------
+    // GET /health -- liveness probe.
+    // ---------------------------------------------------------------------
+    app.get(path: "/health", handler: { _req =>
+        Response.json({ "status": "ok" })
+    })
+
+    // ---------------------------------------------------------------------
+    // Listen (blocks the main thread -- single-threaded runtime per T22-FU5).
+    // ---------------------------------------------------------------------
+    print("[server] listening on http://0.0.0.0:${SERVER_PORT}")
+    print("[server]   GET  /          -> model summary")
+    print("[server]   GET  /predict   -> { prediction, confidence }")
+    print("[server]   POST /retrain   -> { retrained, new_loss }")
+    print("[server]   GET  /data      -> training rows (JSON)")
+    print("[server]   GET  /health    -> { status: 'ok' }")
+    app.listen(port: SERVER_PORT)

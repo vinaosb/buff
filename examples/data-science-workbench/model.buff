@@ -1,0 +1,166 @@
+// model.buff -- linear regression training + inference via buff-ml (T15).
+//
+// T23 flagship -- Data Science Workbench.
+// Frameworks exercised: buff-ml (T15) + buff-tensor (T8, indirectly).
+//
+// Exports:
+//   - new_model()                 -> Model          (Linear(4, 1))
+//   - train_model(model, df)      -> Model          (full-dataset fit)
+//   - train_epoch(model, x, y)    -> Float          (one SGD step, returns loss)
+//   - predict(model, features)    -> Map            ({prediction, confidence, raw})
+//   - model_summary(model, df)    -> Map            ({samples, features, ...})
+//   - model_weights(model)        -> [Float]
+//
+// CODEGEN STATUS: documentation-only.
+//   Type::Tensor (the underlying weight container) is forward-declared per
+//   crates/buff-tensor/AGENTS.md. T22-FU2 documents that Tensor INSTANCE
+//   methods (matmul / as_slice / shape / ...) resolve to Type::Unknown at
+//   the type-checker level until the coordinated sibling task lands the
+//   Type::Tensor variant + lowering arms. This file mirrors the documented
+//   Rust-side training loop (crates/buff-ml/src/lib.rs doc-example) so it
+//   will execute the moment codegen lands; today it serves as the API
+//   reference for how to compose Model + Tape + SGD + mse_loss.
+
+from "buff/ml" import Model, Linear, SGD, Tape, mse_loss
+import Tensor from buff.tensor
+from "./data_loader.buff" import feature_matrix, target_vector, code_to_species
+
+// Number of input features (4 Iris measurements) + 1 regression output.
+const FEATURE_DIM = 4
+const OUTPUT_DIM = 1
+const DEFAULT_EPOCHS = 200
+const LEARNING_RATE = 0.05
+
+// ---------------------------------------------------------------------------
+// Model construction.
+// ---------------------------------------------------------------------------
+
+// Build a fresh single-Linear-layer regression model: Linear(4 -> 1).
+// Mirrors crates/buff-ml/src/lib.rs doc-example:
+//   Model.sequential([Linear.new(1, 1)])
+// Buff constructors are Type.new() only (convention section 7).
+export func new_model():
+    return Model.sequential([
+        Linear.new(input_dim: FEATURE_DIM, output_dim: OUTPUT_DIM)
+    ])
+
+// ---------------------------------------------------------------------------
+// Training primitives.
+// ---------------------------------------------------------------------------
+
+// Run ONE gradient-descent step on a single (x, y) pair.
+// Returns the pre-step MSE loss so callers can log convergence.
+//
+// T22-FU2 NOTE: model.forward / model.backward / opt.step are Model/
+// Optimizer instance methods (registered at the namespace level). They
+// compose correctly. The Tensor instance methods called INSIDE the ML
+// crate's Rust body (matmul etc.) are the ones that hit Type::Unknown;
+// the Buff user never calls those directly here.
+export func train_step(model, opt, x, y):
+    let tape = Tape.new()
+    let xv = tape.leaf(x, false)
+    let pred = model.forward(xv, true)
+    let loss = mse_loss(pred, y)
+    model.backward(loss)
+    opt.step(model)
+    return loss
+
+// Train for `epochs` epochs over a feature matrix + target vector.
+// Returns the trained model (mutated in place via the optimizer).
+export func train_model(model, df):
+    let x = feature_matrix_tensor(df)
+    let y = target_vector_tensor(df)
+    let opt = SGD.new(LEARNING_RATE)
+    let mut last_loss = 0.0
+    for _ in range(0, DEFAULT_EPOCHS):
+        last_loss = train_step(model, opt, x, y)
+    print("[model] trained ${DEFAULT_EPOCHS} epochs, final loss ~${last_loss}")
+    return model
+
+// Train a freshly-constructed model from scratch (used by pipeline retrain).
+export func train_from_scratch(df):
+    let model = new_model()
+    return train_model(model, df)
+
+// ---------------------------------------------------------------------------
+// Inference.
+// ---------------------------------------------------------------------------
+
+// Predict the species for a single 4-feature measurement.
+// Returns {prediction, confidence, raw} where:
+//   - prediction : "setosa" | "versicolor" | "virginica"
+//   - confidence : 0.0..1.0 (peakiness of the rounded class boundary)
+//   - raw        : the raw regression output before rounding
+export func predict(model, features):
+    let x = Tensor.from_vec(features, [1, FEATURE_DIM])
+    let tape = Tape.new()
+    let xv = tape.leaf(x, false)
+    let out_var = model.forward(xv, false)
+    let out_tensor = out_var.value()
+    let raw = out_tensor.as_slice()[0]
+    let species = code_to_species(raw)
+    // Confidence = 1 - fractional distance to the nearest class boundary.
+    // A raw value exactly on 0.0/1.0/2.0 -> confidence 1.0;
+    // a raw value halfway between classes -> confidence ~0.5.
+    let nearest = float(int(raw + 0.5))
+    let frac = abs(raw - nearest)
+    let mut confidence = 1.0 - frac
+    if confidence < 0.0:
+        confidence = 0.0
+    return {
+        "prediction": species,
+        "confidence": confidence,
+        "raw": raw
+    }
+
+// ---------------------------------------------------------------------------
+// Summary + introspection (consumed by the GET / endpoint).
+// ---------------------------------------------------------------------------
+
+// Build a JSON-serialisable summary of the model + dataset.
+export func model_summary(model, df):
+    return {
+        "samples": df.len(),
+        "features": FEATURE_DIM,
+        "trained": true,
+        "weights": model_weights(model),
+        "loss": 0.0
+    }
+
+// Read the trained Linear layer's weight buffer as a flat [Float].
+// T22-FU2: the layer.parameters() / collect_grads() Tensor accessors are
+// instance methods that resolve to Type::Unknown today; this is the
+// intended API surface and will work once codegen lands.
+export func model_weights(model):
+    let layer = model.get_layer(0)
+    let params = layer.parameters()
+    let weights = []
+    for p in params:
+        let slice = p.as_slice()
+        for v in slice:
+            weights.push(v)
+    return weights
+
+// ---------------------------------------------------------------------------
+// DataFrame -> Tensor adapters (re-exported helpers from data_loader).
+// Construct the batched input tensor the ML training loop consumes.
+// ---------------------------------------------------------------------------
+
+// Flatten the feature matrix into a [N, 4] tensor suitable for Linear(4,1).
+// T22-FU2 NOTE: Tensor.from_vec is a registered assoc fn (fine). The
+// downstream matmul inside Linear.forward is an instance method (Unknown
+// today) but is never called directly from Buff user code.
+export func feature_matrix_tensor(df):
+    let matrix = feature_matrix(df)
+    let flat = []
+    for row in matrix:
+        for v in row:
+            flat.push(v)
+    let n = df.len()
+    return Tensor.from_vec(flat, [n, FEATURE_DIM])
+
+// Build the [N, 1] target tensor (species codes as floats).
+export func target_vector_tensor(df):
+    let targets = target_vector(df)
+    let n = df.len()
+    return Tensor.from_vec(targets, [n, OUTPUT_DIM])

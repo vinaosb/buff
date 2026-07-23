@@ -1,0 +1,143 @@
+// data_loader.buff -- CSV -> DataFrame + preprocessing + JSON helpers.
+//
+// T23 flagship -- Data Science Workbench.
+// Frameworks exercised: buff-dataframe (T7) + stdlib buff.json.
+//
+// Exports:
+//   - load_data(path)             -> DataFrame
+//   - preprocess(df)              -> DataFrame      (drop bad rows, scale features)
+//   - rows_to_json(df)            -> [Map]          (T22-FU1 workaround)
+//   - feature_matrix(df)          -> [[Float]]      (4 numeric columns)
+//   - target_vector(df)           -> [Float]        (species -> 0/1/2)
+//   - species_to_code(name)       -> Int
+//   - code_to_species(code)       -> String
+//
+// CODEGEN STATUS: documentation-only.
+//   Type::DataFrame is forward-declared per crates/buff-dataframe/AGENTS.md
+//   "WHERE TO LOOK". The lowering arm is a coordinated sibling task outside
+//   the T7 shared zone. These .buff files parse cleanly (mirror the proven
+//   patterns in examples/integration/*.buff) but cannot execute end-to-end
+//   via `buff run` until the codegen layer lands.
+
+import DataFrame from buff.dataframe
+import JSON from buff.json
+
+// ---------------------------------------------------------------------------
+// T22-FU1 WORKAROUND -- DataFrame has no native to_json().
+//
+// DataFrame's 25-fn public surface (crates/buff-dataframe/src/lib.rs lines
+// 18-52) includes only to_table_string() for human-readable output. There
+// is NO JSON serializer. The flagship serialises rows to JSON by iterating
+// columns + dispatching on Series.kind() + using the stdlib JSON module,
+// exactly as examples/integration/dataframe_to_json.buff demonstrates.
+// ---------------------------------------------------------------------------
+
+// Build a JSON-shaped array of row objects from a DataFrame.
+// Dispatches on Series.kind() ("int" / "float" / "bool" / "string").
+export func rows_to_json(df):
+    let columns = df.column_names()
+    let array = []
+    for i in range(0, df.len()):
+        let obj = {}
+        for col in columns:
+            let series = df.get_column(col)
+            let kind = series.kind()
+            if kind == "int":
+                obj[col] = series.as_int_slice()[i]
+            elif kind == "float":
+                obj[col] = series.as_float_slice()[i]
+            elif kind == "bool":
+                obj[col] = series.as_bool_slice()[i]
+            else:
+                obj[col] = series.as_string_slice()[i]
+        array.push(obj)
+    return array
+
+// ---------------------------------------------------------------------------
+// Iris species <-> integer code mapping.
+// Linear regression needs a numeric target; the three Iris species map to
+// 0 / 1 / 2 (roughly ordered by petal size, which the model can learn).
+// ---------------------------------------------------------------------------
+
+export func species_to_code(name):
+    if name == "setosa":
+        return 0
+    elif name == "versicolor":
+        return 1
+    elif name == "virginica":
+        return 2
+    return 1
+
+export func code_to_species(code):
+    // Clamp + round to the nearest class label.
+    let mut n = code
+    if n < 0:
+        n = 0
+    if n > 2:
+        n = 2
+    let idx = int(n + 0.5)
+    if idx == 0:
+        return "setosa"
+    elif idx == 1:
+        return "versicolor"
+    return "virginica"
+
+// ---------------------------------------------------------------------------
+// Load + preprocess the synthetic Iris-like CSV.
+// ---------------------------------------------------------------------------
+
+// Load the CSV via DataFrame.from_csv (header row + inferred column kinds).
+export func load_data(path):
+    let df = DataFrame.from_csv(path: path)
+    print("[data_loader] loaded ${df.len()} rows x ${df.ncols()} columns")
+    return df
+
+// Preprocess: drop malformed rows, sanity-check the numeric feature columns.
+// The synthetic dataset is already clean, so this is a defensive pass that
+// mirrors a real ETL step (would scale/normalise features here in production).
+export func preprocess(df):
+    // T22 named-arg call shape per buff convention section 11 (headers, rows are
+    // multi-arg -> named). Applied to df.filter(predicate: ...) below.
+    // The synthetic dataset is already clean; this is a defensive pass.
+    let cleaned = df.filter(predicate: { row =>
+        row.get_float("sepal_length") > 0.0 && row.get_float("sepal_width") > 0.0 && row.get_float("petal_length") > 0.0 && row.get_float("petal_width") > 0.0 && row.get_string("species") != ""
+    })
+    print("[data_loader] ${cleaned.len()} rows after preprocess")
+    return cleaned
+
+// Extract the 4 numeric feature columns as a [Float] per row.
+// Order is fixed: [sepal_length, sepal_width, petal_length, petal_width].
+export func feature_matrix(df):
+    let matrix = []
+    for i in range(0, df.len()):
+        let row = [
+            df.get_column("sepal_length").as_float_slice()[i],
+            df.get_column("sepal_width").as_float_slice()[i],
+            df.get_column("petal_length").as_float_slice()[i],
+            df.get_column("petal_width").as_float_slice()[i]
+        ]
+        matrix.push(row)
+    return matrix
+
+// Extract the species target column, encoded as 0/1/2 floats.
+export func target_vector(df):
+    let targets = []
+    let species_col = df.get_column("species").as_string_slice()
+    for i in range(0, df.len()):
+        targets.push(float(species_to_code(species_col[i])))
+    return targets
+
+// ---------------------------------------------------------------------------
+// Relational analysis demo (group_by + agg).
+// Exercises T22-FU4 -- the AggOp enum string-form syntax.
+// ---------------------------------------------------------------------------
+
+// Compute the mean petal_length per species as a debugging/summary helper.
+// T22-FU4: the AggOp enum uses string-form dispatch per
+// crates/buff-dataframe/AGENTS.md "UNIQUE STYLES"
+// (agg(col, "mean") lowers via the AggOp::parse helper).
+export func mean_petal_length_by_species(df):
+    let grouped = df.group_by(col: "species")
+    // String-form AggOp per buff-dataframe AGENTS.md UNIQUE STYLES.
+    let summary = grouped.agg(col: "petal_length", op: "mean")
+    return summary

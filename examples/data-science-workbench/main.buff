@@ -1,0 +1,69 @@
+// main.buff -- entry point for the Buff Data Science Workbench (T23 flagship).
+//
+// Composes FIVE frameworks end-to-end:
+//   1. buff-dataframe  (T7)  -- CSV load + preprocessing
+//   2. buff-ml         (T15) -- linear regression training + inference
+//   3. buff-pipeline   (T14) -- streaming ETL + batched retrain flow
+//   4. buff-web        (T17) -- HTTP endpoints (GET / + /predict, POST /retrain)
+//   5. buff-reactive   (T20) -- Signal-wrapped model for live retrain updates
+//
+// Plus buff-observe (T21) for span-traced request flow (optional, in server.buff).
+//
+// Run (eventually, once codegen lands):
+//   cargo run -p buff-lang-cli -- run examples/data-science-workbench/main.buff
+//
+// CODEGEN STATUS: documentation-only. End-to-end execution via `buff run`
+// is NOT yet possible because the Type::{DataFrame, Tensor, Pipeline,
+// Signal, Computed, Effect, Web} variants in crates/buff-lang-types/src/ty.rs
+// plus their codegen lowering arms in
+// crates/buff-lang-codegen-rust/src/rust_codegen.rs are coordinated sibling
+// tasks outside each framework crate's shared zone (per the T22 mismatch
+// report). These files parse cleanly (mirror the proven patterns in
+// examples/integration/*.buff) but cannot execute end-to-end today.
+//
+// The import statements below are DOCUMENTATION ONLY -- per the T22 report's
+// "Implicit prelude vs explicit import" cross-cutting note, prelude types
+// (DataFrame, Model, Web, Signal, etc) are implicit. The imports make the
+// API surface explicit for readers.
+
+import DataFrame from buff.dataframe
+from "buff/ml" import Model, Linear, SGD, mse_loss
+import Signal from buff.reactive
+from "./data_loader.buff" import load_data, preprocess, mean_petal_length_by_species
+from "./model.buff" import new_model, train_model
+from "./server.buff" import start_server
+
+const DATA_PATH = "examples/data-science-workbench/data.csv"
+
+// Entry point: load -> preprocess -> train initial model -> start server.
+//
+// The trained model is wrapped in a Signal so that POST /retrain can
+// publish a fresh model and subsequent GET / requests observe the update
+// without restarting the process (the reactive+web integration per T22-FU5).
+func main():
+    print("Buff Data Science Workbench v0.1")
+    print("Integrating: dataframe + ml + pipeline + web + reactive")
+    print("--------------------------------------------------------")
+
+    // 1. Load + preprocess the synthetic Iris-like dataset.
+    let df = load_data(DATA_PATH)
+    let cleaned = preprocess(df)
+
+    // 2. Relational sanity check: mean petal_length per species.
+    //    Exercises T22-FU4 (string-form AggOp: agg(col, "mean")).
+    let summary = mean_petal_length_by_species(cleaned)
+    print("[main] mean petal_length by species:")
+    print(summary.to_table_string())
+
+    // 3. Train the initial linear-regression model on the full dataset.
+    //    The model is wrapped in a Signal so the web layer can observe
+    //    retrain updates reactively (T22-FU5 single-threaded runtime).
+    let initial_model = new_model()
+    let trained = train_model(initial_model, cleaned)
+    let model_signal = Signal.new(trained)
+    print("[main] initial model trained + wrapped in Signal<Model>")
+
+    // 4. Start the HTTP server (blocks the main thread).
+    //    server.buff registers GET / + /predict + /data + /health and
+    //    POST /retrain. The Signal<Model> is shared with every handler.
+    start_server(model_signal, cleaned)
