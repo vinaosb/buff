@@ -37,7 +37,7 @@ use crate::compiler::{CompilerPlugin, LintWarning};
 use crate::error::{PluginError, Result};
 use crate::lsp::{LspPlugin, PluginCodeAction, PluginHover, PluginPosition};
 use crate::manifest::{PluginKind, PluginManifest};
-use crate::runtime::{PluginMetric, PluginSpan};
+use crate::runtime::{PluginMetric, PluginSpan, RuntimePlugin};
 
 /// A factory function that constructs a trait object from an
 /// `entry_point` string.

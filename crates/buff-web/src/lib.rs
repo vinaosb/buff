@@ -58,6 +58,7 @@ pub use error::WebError;
 pub use request::Request;
 pub use response::Response;
 
+use axum::response::IntoResponse;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 

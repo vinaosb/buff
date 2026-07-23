@@ -258,7 +258,7 @@ impl EventBus {
                     std::thread::spawn(worker_fn);
                 }
             }
-            id
+            Ok(id)
         }));
         match result {
             Ok(Ok(id)) => Ok(id),

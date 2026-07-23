@@ -194,7 +194,7 @@ fn parse_document(xml: &str) -> Result<XmlDocument, XmlError> {
     use quick_xml::Reader;
 
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
+    reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
     let mut stack: Vec<XmlElement> = Vec::new();
@@ -241,7 +241,7 @@ fn parse_document(xml: &str) -> Result<XmlDocument, XmlError> {
                 }
             }
             Ok(Event::CData(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(text) = e.decode() {
                     current_text.push_str(&text);
                 }
             }
