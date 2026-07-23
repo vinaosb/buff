@@ -2985,7 +2985,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 28. v1.24 Documentation & Codebase Refinement (Iterative Audit Until Convergence)
+- [x] 28. v1.24 Documentation & Codebase Refinement (Iterative Audit Until Convergence)
 
   **Goal** *(added per user request â€” post-v1.23 refinement pass)*: After v1.23.0 ships, run a comprehensive audit pass that finds and fixes everything outdated/incorrect/missing across the entire Buff project. Trivial issues are fixed in-place; non-trivial issues are documented for future iteration planning. **Iterate passes until a full pass finds zero new issues.** This task owns v1.24.0 release.
 
