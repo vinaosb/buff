@@ -1,0 +1,29 @@
+// T14 example: parallel.buff - parallel stage with N workers.
+//
+// Demonstrates the parallel stage:
+//   - p.parallel(workers: N, fn) spawns N worker tasks that each
+//     consume from a round-robin-distributed input Channel<T>.
+//   - Each worker applies fn to its received items and sends the
+//     result to a shared output Channel<U>.
+//   - Output ORDER is not preserved (workers race); output CONTENT is.
+//
+// The expensive_fn here is a CPU-bound computation (Fibonacci). With
+// workers: 4 on a 4-core host, the wall-clock time should be roughly
+// 1/4 of the sequential equivalent.
+
+func expensive(x):
+    # Toy CPU-bound work: naive recursive fib.
+    if x < 2:
+        return x
+    return expensive(x: x - 1) + expensive(x: x - 2)
+
+func main():
+    let inputs = [20, 21, 22, 23, 24, 25, 26, 27]
+
+    let parallel_result = Pipeline.new()
+        .source(inputs)
+        .parallel(workers: 4, fn: { x => expensive(x: x) })
+        .run()
+
+    parallel_result.sort()
+    print("parallel results:", parallel_result)

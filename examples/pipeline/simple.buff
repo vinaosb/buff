@@ -1,0 +1,25 @@
+// T14 example: simple.buff - map + filter on a small list.
+//
+// Demonstrates the EXPERIMENTAL Pipeline prelude-type surface:
+//   - Pipeline.new() creates an empty builder
+//   - p.source(data) fixes the output type from an in-memory Vec<T>
+//   - p.map(fn) adds a transform stage
+//   - p.filter(pred) adds a predicate stage (keeps items where true)
+//   - p.run() drains the pipeline to a Vec<T>
+//
+// Per T14 spec acceptance scenario #1:
+//   [1, 2, 3, 4, 5] -> map(*2) -> filter(>4) -> [6, 8, 10]
+//
+// MVP scope:
+//   - Inter-stage queues: Channel<T> (bounded MPSC from buff-lang-runtime)
+//   - Backpressure: natural (bounded channel buffer)
+//   - Parallel: tokio tasks (NOT rayon — reserved for CSV parsing)
+
+func main():
+    let result = Pipeline.new()
+        .source([1, 2, 3, 4, 5])
+        .map({ x => x * 2 })
+        .filter({ x => x > 4 })
+        .run()
+    print(result)
+    // Expected output: [6, 8, 10]

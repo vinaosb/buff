@@ -1025,9 +1025,7 @@ dependencies = [
 name = "buff-game"
 version = "1.0.0"
 dependencies = [
- "buff-audio",
  "buff-ecs",
- "buff-image",
  "insta",
  "thiserror 1.0.69",
 ]

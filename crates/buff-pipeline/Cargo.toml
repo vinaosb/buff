@@ -1,0 +1,77 @@
+[package]
+name = "buff-pipeline"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+DAG-based ETL pipeline for Buff. \
+Linear chain of stages connected by bounded Channel<T> queues \
+(wraps buff-lang-runtime::Channel). \
+Sources: CSV streaming. Sinks: CSV/JSON/collect. \
+Parallel stage spawns N workers consuming from a shared input Channel \
+via round-robin dispatch. \
+Kafka/Redis Streams sources, exactly-once delivery, and pipeline \
+orchestration deferred to v1.18+ per T14 task spec.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "pipeline", "etl", "streaming", "concurrency"]
+categories = ["concurrency", "asynchronous"]
+
+[lib]
+name = "buff_pipeline"
+path = "src/lib.rs"
+
+[dependencies]
+# T14 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# buff-lang-runtime: provides the T2 `Channel<T>` (MPSC bounded queue
+# backed by tokio::sync::mpsc) that wires inter-stage pipelines. Every
+# stage receives a Receiver<T_in> and sends to a Sender<T_out>; the
+# bounded buffer gives natural backpressure (source blocks on send when
+# downstream is slow).
+buff-lang-runtime.workspace = true
+# tokio: drives the pipeline. Pipeline::run() builds a multi-thread
+# tokio runtime and spawns each stage as a tokio task. The runtime
+# owns the worker threads; stages cooperate via .await yield points.
+# We pull tokio at the workspace level (matches buff-lang-runtime's
+# `features = ["full", "test-util"]` stance — `full` enables rt-multi-
+# thread + sync + time which we depend on directly).
+tokio.workspace = true
+# rayon: parallel CSV row parsing inside Source::from_csv chunks. We
+# parse chunk_size csv::StringRecord values in parallel via rayon's
+# par_iter — gives near-linear speedup on multi-core hosts for the
+# string-to-Vec<String> conversion step. The pipeline-stage fan-out
+# (Pipeline::parallel) still uses tokio tasks (I/O-bound style); rayon
+# is reserved for the CPU-bound parsing step here. Matches the T8
+# buff-tensor + buff-lang-runtime::cpu precedent.
+rayon.workspace = true
+# csv: CSV reader + writer. Reader is used by Source::from_csv
+# (ReaderBuilder + has_headers(false) + into_records() iterator so we
+# stream row-by-row with bounded memory). Writer is used by Sink::to_csv
+# (WriterBuilder + has_headers(false) + write_record). Pure-Rust, no
+# native deps — matches the "no C library" rule.
+csv.workspace = true
+# serde: Serialize trait bound on Sink::to_json (T: serde::Serialize).
+# Feature `derive` is enabled at the workspace level so consumers get
+# `#[derive(Serialize)]` for free.
+serde.workspace = true
+# serde_json: JSON serialization for Sink::to_json (writes Vec<T> as a
+# JSON array via serde_json::to_writer_pretty). Pure-Rust.
+serde_json.workspace = true
+# thiserror: PipelineError derive. Mirrors the workspace-wide error
+# pattern (buff-lang-error / buff-lang-runtime / buff-eval / buff-cache
+# / buff-dataframe all derive thiserror::Error for their error enums).
+thiserror.workspace = true
+
+[dev-dependencies]
+# insta: snapshot tests (5+ required by T14 spec). Mirrors the
+# project-wide snapshot workflow (cargo insta accept / review).
+insta.workspace = true
+# proptest: property tests for stage composition + ordering invariants.
+proptest.workspace = true
+# tempfile: hermetic temp dirs for CSV round-trip integration tests
+# (Source::from_csv → Sink::to_csv). Avoids polluting the repo with
+# fixture files; cleanup is automatic on Drop.
+tempfile.workspace = true

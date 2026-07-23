@@ -1,0 +1,23 @@
+// T14 example: csv_etl.buff - stream a CSV through filter + map to output CSV.
+//
+// Demonstrates the streaming CSV source + sink surface:
+//   - Source.from_csv(path, chunk_size: N) reads the CSV in N-row
+//     chunks, parses in parallel (rayon), and pushes rows into the
+//     pipeline with bounded-memory backpressure (channel buffer caps
+//     in-flight rows at chunk_size).
+//   - Sink.to_csv(path, rows) writes the rows back as a CSV file.
+//
+// Real-world ETL shape: read -> transform -> write without loading the
+// entire input into memory at once.
+
+func main():
+    let rows = Source.from_csv(path: "examples/pipeline/people.csv", chunk_size: 100)
+        .filter({ row => row.len() >= 2 })
+        .map({ row =>
+            # Keep only name + age columns, uppercase the name.
+            [row[0].to_uppercase(), row[1]]
+        })
+        .run()
+
+    Sink.to_csv(path: "examples/pipeline/people_out.csv", rows: rows)
+    print("wrote ${rows.len()} rows to people_out.csv")
