@@ -1,4 +1,4 @@
-# T43 .buff example: Crawler fetch + crawl (robots.txt respected).
+// T43 .buff example: Crawler fetch + crawl (robots.txt respected).
 
 from "scrape" import Crawler
 

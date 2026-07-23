@@ -1,19 +1,19 @@
-# Buff ML — XOR via 2-layer MLP
-#
-# Classic XOR problem: linearly inseparable, requires a hidden layer.
-# Architecture: Linear(2 -> 4) -> Sigmoid -> Linear(4 -> 1) -> Sigmoid
-# Loss: mse_loss. Optimizer: Adam (lr=0.1).
-#
-# Codegen integration is deferred — this file documents the API and
-# parses via `buff check`. Rust reference: cargo run -p buff-ml --example xor
+// Buff ML â€” XOR via 2-layer MLP
+//
+// Classic XOR problem: linearly inseparable, requires a hidden layer.
+// Architecture: Linear(2 -> 4) -> Sigmoid -> Linear(4 -> 1) -> Sigmoid
+// Loss: mse_loss. Optimizer: Adam (lr=0.1).
+//
+// Codegen integration is deferred â€” this file documents the API and
+// parses via `buff check`. Rust reference: cargo run -p buff-ml --example xor
 
 import Tensor from buff.tensor
 import { Model, Linear, Sigmoid, Adam, Tape, mse_loss } from buff.ml
 
 func main():
-    print("Buff ML — XOR via MLP")
+    print("Buff ML â€” XOR via MLP")
 
-    # XOR truth table: 4 input pairs + 4 expected outputs
+    // XOR truth table: 4 input pairs + 4 expected outputs
     let x = Tensor.from_vec(
         vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0],
         vec![4, 2]
@@ -23,7 +23,7 @@ func main():
         vec![4, 1]
     )
 
-    # 2-layer MLP: Linear(2 -> 4) -> Sigmoid -> Linear(4 -> 1) -> Sigmoid
+    // 2-layer MLP: Linear(2 -> 4) -> Sigmoid -> Linear(4 -> 1) -> Sigmoid
     let model = Model.sequential([
         Linear.new(input_dim: 2, output_dim: 4),
         Sigmoid.new(),
@@ -32,7 +32,7 @@ func main():
     ])
     let optimizer = Adam.new(lr: 0.1)
 
-    # Train 500 epochs
+    // Train 500 epochs
     for epoch in range(500):
         let tape = Tape.new()
         let pred = model.forward(tape.leaf(x), training: true)
@@ -43,7 +43,7 @@ func main():
         if epoch % 100 == 0:
             print("epoch", epoch, "loss:", loss.value())
 
-    # Verify: each XOR row should produce ~0 or ~1
+    // Verify: each XOR row should produce ~0 or ~1
     let tape = Tape.new()
     let out = model.forward(tape.leaf(x), training: false)
     print("Predictions:", out.value())

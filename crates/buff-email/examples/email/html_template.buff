@@ -1,11 +1,11 @@
-# T42 .buff example: HTML email via handlebars template (FORWARD-DECL).
-#
-# Requires the coordinated Type::Email + Type::SmtpClient codegen
-# lowering arms (this task, T42 finish). The prelude registry entries
-# `PreludeType::Email` + `PreludeType::SmtpClient` + assoc-fn +
-# instance-fn arms are added in the same T42 finish commit as this
-# example. See crates/buff-email/AGENTS.md "RELATIONSHIP TO OTHER
-# CRATES" for the wiring map.
+// T42 .buff example: HTML email via handlebars template (FORWARD-DECL).
+//
+// Requires the coordinated Type::Email + Type::SmtpClient codegen
+// lowering arms (this task, T42 finish). The prelude registry entries
+// `PreludeType::Email` + `PreludeType::SmtpClient` + assoc-fn +
+// instance-fn arms are added in the same T42 finish commit as this
+// example. See crates/buff-email/AGENTS.md "RELATIONSHIP TO OTHER
+// CRATES" for the wiring map.
 
 from "email" import Email, SmtpClient
 

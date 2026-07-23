@@ -1,11 +1,11 @@
-# T43 .buff example: parse HTML + query headings + links (FORWARD-DECL).
-#
-# Requires the coordinated Type::Document + Type::Crawler codegen
-# lowering arms (this task, T43 finish). The prelude registry entries
-# `PreludeType::Document` + `PreludeType::Crawler` + assoc/instance
-# method arms were added in the same T43 finish commit as this
-# example. See crates/buff-scrape/AGENTS.md "RELATIONSHIP TO OTHER
-# CRATES" for the wiring map.
+// T43 .buff example: parse HTML + query headings + links (FORWARD-DECL).
+//
+// Requires the coordinated Type::Document + Type::Crawler codegen
+// lowering arms (this task, T43 finish). The prelude registry entries
+// `PreludeType::Document` + `PreludeType::Crawler` + assoc/instance
+// method arms were added in the same T43 finish commit as this
+// example. See crates/buff-scrape/AGENTS.md "RELATIONSHIP TO OTHER
+// CRATES" for the wiring map.
 
 from "scrape" import Document
 

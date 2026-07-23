@@ -1,7 +1,7 @@
-# T34 .buff example: RBAC policy (FORWARD-DECL).
-#
-# Requires the coordinated PreludeType::Rbac + PreludeAssocFn::Enforce
-# codegen lowering arms (this task, T34 finish).
+// T34 .buff example: RBAC policy (FORWARD-DECL).
+//
+// Requires the coordinated PreludeType::Rbac + PreludeAssocFn::Enforce
+// codegen lowering arms (this task, T34 finish).
 
 from "auth" import Rbac
 

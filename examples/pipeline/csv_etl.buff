@@ -14,7 +14,7 @@ func main():
     let rows = Source.from_csv(path: "examples/pipeline/people.csv", chunk_size: 100)
         .filter({ row => row.len() >= 2 })
         .map({ row =>
-            # Keep only name + age columns, uppercase the name.
+            // Keep only name + age columns, uppercase the name.
             [row[0].to_uppercase(), row[1]]
         })
         .run()

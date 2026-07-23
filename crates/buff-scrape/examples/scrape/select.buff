@@ -1,4 +1,4 @@
-# T43 .buff example: drill into an HTML tree via nested Element.select.
+// T43 .buff example: drill into an HTML tree via nested Element.select.
 
 from "scrape" import Document
 

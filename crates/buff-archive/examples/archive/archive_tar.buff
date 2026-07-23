@@ -1,7 +1,7 @@
-# T39 .buff example: roundtrip through uncompressed TAR (FORWARD-DECL).
-#
-# See archive_zip.buff for the wiring map. Format auto-detected from
-# the output_path extension (`.tar` → Tar).
+// T39 .buff example: roundtrip through uncompressed TAR (FORWARD-DECL).
+//
+// See archive_zip.buff for the wiring map. Format auto-detected from
+// the output_path extension (`.tar` â†’ Tar).
 
 from "archive" import Archive
 

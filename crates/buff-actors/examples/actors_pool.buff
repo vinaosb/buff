@@ -1,5 +1,5 @@
-# T59 example: actor pool - N workers, fan-out a job batch.
-# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+// T59 example: actor pool - N workers, fan-out a job batch.
+// Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
 
 import std::actors
 

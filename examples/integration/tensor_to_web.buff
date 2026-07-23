@@ -1,36 +1,36 @@
-# T22 integration example: tensor_to_web.buff
-#
-# Exercises: buff-tensor (T8) + buff-web (T17).
-#
-# Computes a tensor result (matmul of two small 2x2 matrices), then
-# exposes the result via a buff-web GET endpoint returning JSON.
-# A second endpoint exposes the per-axis shape so clients can verify
-# the geometry before pulling the data.
-#
-# API surface used:
-#   - Tensor.from_vec(data, shape) -> Tensor
-#   - t.matmul(other) -> Tensor
-#   - t.shape() -> Vec<Int>
-#   - t.rank() -> Int
-#   - t.len() -> Int
-#   - t.as_slice() -> Vec<Float>
-#   - Web.new() -> Web
-#   - web.get(path, handler) -> Result<(), WebError>
-#   - web.listen(port) -> Result<(), WebError>
-#   - Response.json(value) -> Response
-#
-# MISMATCH FOUND (fileed as T22 follow-up #2):
-#   - Tensor instance methods (matmul, as_slice, sum_all, shape, ...)
-#     are registered as namespace-only at the Type level — they all
-#     return Type::Unknown at the Buff type-checker level (per
-#     crates/buff-tensor/AGENTS.md "INTEGRATION WITH BUFF LANGUAGE").
-#     Codegen lowering for these instance methods is DEFERRED to a
-#     coordinated sibling task that adds the Type::Tensor variant.
-#     Examples serve as documentation + parse-validation only — same
-#     status as examples/tensor/*.buff.
-#
-# Codegen status: documentation-only (Type::Tensor + Type::Web are
-# both forward-declared; buff run cannot execute this end-to-end).
+// T22 integration example: tensor_to_web.buff
+//
+// Exercises: buff-tensor (T8) + buff-web (T17).
+//
+// Computes a tensor result (matmul of two small 2x2 matrices), then
+// exposes the result via a buff-web GET endpoint returning JSON.
+// A second endpoint exposes the per-axis shape so clients can verify
+// the geometry before pulling the data.
+//
+// API surface used:
+//   - Tensor.from_vec(data, shape) -> Tensor
+//   - t.matmul(other) -> Tensor
+//   - t.shape() -> Vec<Int>
+//   - t.rank() -> Int
+//   - t.len() -> Int
+//   - t.as_slice() -> Vec<Float>
+//   - Web.new() -> Web
+//   - web.get(path, handler) -> Result<(), WebError>
+//   - web.listen(port) -> Result<(), WebError>
+//   - Response.json(value) -> Response
+//
+// MISMATCH FOUND (fileed as T22 follow-up #2):
+//   - Tensor instance methods (matmul, as_slice, sum_all, shape, ...)
+//     are registered as namespace-only at the Type level Ã¢â‚¬â€ they all
+//     return Type::Unknown at the Buff type-checker level (per
+//     crates/buff-tensor/AGENTS.md "INTEGRATION WITH BUFF LANGUAGE").
+//     Codegen lowering for these instance methods is DEFERRED to a
+//     coordinated sibling task that adds the Type::Tensor variant.
+//     Examples serve as documentation + parse-validation only Ã¢â‚¬â€ same
+//     status as examples/tensor/*.buff.
+//
+// Codegen status: documentation-only (Type::Tensor + Type::Web are
+// both forward-declared; buff run cannot execute this end-to-end).
 
 import Tensor from buff.tensor
 from "buff/web" import Web, Request, Response
@@ -38,8 +38,8 @@ from "buff/web" import Web, Request, Response
 func main():
     print("T22 integration: Tensor -> Web")
 
-    # Build two 2x2 matrices and matmul them.
-    # Expected: [[1,2],[3,4]] x [[5,6],[7,8]] = [[19,22],[43,50]]
+    // Build two 2x2 matrices and matmul them.
+    // Expected: [[1,2],[3,4]] x [[5,6],[7,8]] = [[19,22],[43,50]]
     let a = Tensor.from_vec([1.0, 2.0, 3.0, 4.0], [2, 2])
     let b = Tensor.from_vec([5.0, 6.0, 7.0, 8.0], [2, 2])
     let c = a.matmul(b)
@@ -47,10 +47,10 @@ func main():
     print("result shape: ${c.shape()}")
     print("result data: ${c.as_slice()}")
 
-    # Expose the computed tensor via buff-web.
+    // Expose the computed tensor via buff-web.
     let app = Web.new()
 
-    # GET / — full tensor as JSON.
+    // GET / Ã¢â‚¬â€ full tensor as JSON.
     app.get(path: "/", handler: { _req =>
         Response.json({
             "shape": c.shape(),
@@ -59,12 +59,12 @@ func main():
         })
     })
 
-    # GET /shape — just the per-axis dimensions (cheap probe).
+    // GET /shape Ã¢â‚¬â€ just the per-axis dimensions (cheap probe).
     app.get(path: "/shape", handler: { _req =>
         Response.json({ "shape": c.shape() })
     })
 
-    # GET /health — liveness probe.
+    // GET /health Ã¢â‚¬â€ liveness probe.
     app.get(path: "/health", handler: { _req =>
         Response.json({ "status": "ok" })
     })

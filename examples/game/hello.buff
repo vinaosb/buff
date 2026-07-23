@@ -1,8 +1,8 @@
-# hello.buff — minimal game loop example (T16).
-#
-# Demonstrates the headless game loop: create a Game, add a scene
-# that prints "Hello, Buff Game!" on every update, and run for a
-# few frames. This is the simplest possible buff-game program.
+// hello.buff â€” minimal game loop example (T16).
+//
+// Demonstrates the headless game loop: create a Game, add a scene
+// that prints "Hello, Buff Game!" on every update, and run for a
+// few frames. This is the simplest possible buff-game program.
 
 import buff_game.Game
 import buff_game.GameConfig

@@ -1,8 +1,8 @@
-# T54 example: SIMD math - lane-wise mul/div + horizontal min/max.
-# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_simd::*).
-#
-# Run via:
-#   buff run examples/simd_math.buff
+// T54 example: SIMD math - lane-wise mul/div + horizontal min/max.
+// Buff source (codegen-lowered via buff-lang-codegen-rust to buff_simd::*).
+//
+// Run via:
+//   buff run examples/simd_math.buff
 
 func main():
     let a = Simd.from_array([1.0, 4.0, 9.0, 16.0])

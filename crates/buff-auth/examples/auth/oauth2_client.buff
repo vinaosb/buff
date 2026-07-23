@@ -1,8 +1,8 @@
-# T34 .buff example: OAuth2 authorization-code flow (FORWARD-DECL).
-#
-# Requires the coordinated PreludeType::OAuth2Client + PreludeAssocFn
-# ::AuthorizationUrl / ExchangeCode codegen lowering arms (this task,
-# T34 finish).
+// T34 .buff example: OAuth2 authorization-code flow (FORWARD-DECL).
+//
+// Requires the coordinated PreludeType::OAuth2Client + PreludeAssocFn
+// ::AuthorizationUrl / ExchangeCode codegen lowering arms (this task,
+// T34 finish).
 
 from "auth" import OAuth2Client
 

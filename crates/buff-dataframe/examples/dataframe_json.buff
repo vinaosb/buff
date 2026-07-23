@@ -1,6 +1,6 @@
-# T7 example: load JSON-lines, select, sort, head, pretty-print.
-# The matching dataframe_json.rs mirrors this pipeline using the
-# direct `buff_dataframe::DataFrame` Rust API.
+// T7 example: load JSON-lines, select, sort, head, pretty-print.
+// The matching dataframe_json.rs mirrors this pipeline using the
+// direct `buff_dataframe::DataFrame` Rust API.
 import DataFrame
 
 func main()

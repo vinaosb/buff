@@ -12,7 +12,7 @@
 // 1/4 of the sequential equivalent.
 
 func expensive(x):
-    # Toy CPU-bound work: naive recursive fib.
+    // Toy CPU-bound work: naive recursive fib.
     if x < 2:
         return x
     return expensive(x: x - 1) + expensive(x: x - 2)

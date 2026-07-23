@@ -1,5 +1,5 @@
-# T59 example: supervisor trees + "let it crash".
-# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+// T59 example: supervisor trees + "let it crash".
+// Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
 
 import std::actors
 

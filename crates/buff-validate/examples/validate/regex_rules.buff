@@ -1,10 +1,10 @@
-# T29 .buff example: regex rules (zip code + slug) (FORWARD-DECL).
-#
-# Demonstrates the `with_regex` rule kind. The validator enforces
-# US 5-digit zip codes and URL-safe slug patterns. A bad regex
-# pattern (unbalanced parens) is shown surfacing at rule-registration
-# time (NOT deferred until validate), per the T29 panic-free +
-# fail-fast contract.
+// T29 .buff example: regex rules (zip code + slug) (FORWARD-DECL).
+//
+// Demonstrates the `with_regex` rule kind. The validator enforces
+// US 5-digit zip codes and URL-safe slug patterns. A bad regex
+// pattern (unbalanced parens) is shown surfacing at rule-registration
+// time (NOT deferred until validate), per the T29 panic-free +
+// fail-fast contract.
 
 from "validate" import Validator
 

@@ -1,8 +1,8 @@
-# T59 example: actor basics - spawn + send + shutdown.
-# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
-#
-# Run via:
-#   buff run examples/actors_basic.buff
+// T59 example: actor basics - spawn + send + shutdown.
+// Buff source (codegen-lowered via buff-lang-codegen-rust to buff_actors::*).
+//
+// Run via:
+//   buff run examples/actors_basic.buff
 
 import std::actors
 

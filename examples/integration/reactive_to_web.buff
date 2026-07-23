@@ -1,40 +1,40 @@
-# T22 integration example: reactive_to_web.buff
-#
-# Exercises: buff-reactive (T20) + buff-web (T17).
-#
-# Wires a Signal-driven counter to a buff-web endpoint that returns
-# the current count. A second endpoint increments the counter by
-# mutating the signal; subsequent GET requests observe the new value.
-# A third endpoint resets the counter to zero.
-#
-# API surface used:
-#   - Signal.new(value) -> Signal<T>
-#   - s.get() -> T
-#   - s.set(value) -> Void
-#   - Web.new() -> Web
-#   - web.get(path, handler) -> Result<(), WebError>
-#   - web.post(path, handler) -> Result<(), WebError>
-#   - web.listen(port) -> Result<(), WebError>
-#   - Response.json(value) -> Response
-#
-# MISMATCH FOUND (filed as T22 follow-up #5 — CROSS-CUTTING):
-#   - buff-reactive Signal<T> is single-threaded (Rc<RefCell<T>> per
-#     crates/buff-reactive/AGENTS.md "CONVENTIONS"). buff-web handlers
-#     run on tokio worker threads (Handler = Arc<dyn Fn(Request) ->
-#     Response + Send + Sync> per crates/buff-web/src/lib.rs line 72).
-#     Direct sharing of a Signal<T> across multiple web handlers is
-#     NOT sound — the handler closures must be Send + Sync, but
-#     Rc<RefCell<T>> is neither. This is a CROSS-CUTTING CONCERN for
-#     the flagship (T23): any reactive+web integration needs either
-#     (a) the v1.18+ multi-threaded Signal (Arc<Mutex<T>> / arc-swap),
-#     (b) a thread-local relay that the handler reads from, or
-#     (c) wrapping the Signal in an Arc<Mutex<...>> at the call site.
-#   - This example documents the INTENDED API; it will not actually
-#     link end-to-end until either buff-reactive ships multi-threaded
-#     signals OR buff-web adds a single-threaded runtime mode.
-#
-# Codegen status: documentation-only (Type::Signal + Type::Web are
-# both forward-declared; buff run cannot execute this end-to-end).
+// T22 integration example: reactive_to_web.buff
+//
+// Exercises: buff-reactive (T20) + buff-web (T17).
+//
+// Wires a Signal-driven counter to a buff-web endpoint that returns
+// the current count. A second endpoint increments the counter by
+// mutating the signal; subsequent GET requests observe the new value.
+// A third endpoint resets the counter to zero.
+//
+// API surface used:
+//   - Signal.new(value) -> Signal<T>
+//   - s.get() -> T
+//   - s.set(value) -> Void
+//   - Web.new() -> Web
+//   - web.get(path, handler) -> Result<(), WebError>
+//   - web.post(path, handler) -> Result<(), WebError>
+//   - web.listen(port) -> Result<(), WebError>
+//   - Response.json(value) -> Response
+//
+// MISMATCH FOUND (filed as T22 follow-up #5 Ã¢â‚¬â€ CROSS-CUTTING):
+//   - buff-reactive Signal<T> is single-threaded (Rc<RefCell<T>> per
+//     crates/buff-reactive/AGENTS.md "CONVENTIONS"). buff-web handlers
+//     run on tokio worker threads (Handler = Arc<dyn Fn(Request) ->
+//     Response + Send + Sync> per crates/buff-web/src/lib.rs line 72).
+//     Direct sharing of a Signal<T> across multiple web handlers is
+//     NOT sound Ã¢â‚¬â€ the handler closures must be Send + Sync, but
+//     Rc<RefCell<T>> is neither. This is a CROSS-CUTTING CONCERN for
+//     the flagship (T23): any reactive+web integration needs either
+//     (a) the v1.18+ multi-threaded Signal (Arc<Mutex<T>> / arc-swap),
+//     (b) a thread-local relay that the handler reads from, or
+//     (c) wrapping the Signal in an Arc<Mutex<...>> at the call site.
+//   - This example documents the INTENDED API; it will not actually
+//     link end-to-end until either buff-reactive ships multi-threaded
+//     signals OR buff-web adds a single-threaded runtime mode.
+//
+// Codegen status: documentation-only (Type::Signal + Type::Web are
+// both forward-declared; buff run cannot execute this end-to-end).
 
 import Signal from buff.reactive
 from "buff/web" import Web, Request, Response
@@ -42,34 +42,34 @@ from "buff/web" import Web, Request, Response
 func main():
     print("T22 integration: Reactive -> Web")
 
-    # Create the shared counter signal (single-threaded MVP — see
-    # mismatch note above for the cross-thread sharing concern).
+    // Create the shared counter signal (single-threaded MVP Ã¢â‚¬â€ see
+    // mismatch note above for the cross-thread sharing concern).
     let counter = Signal.new(0)
     print("initial counter: ${counter.get()}")
 
-    # Spin up the web app + register handlers.
+    // Spin up the web app + register handlers.
     let app = Web.new()
 
-    # GET /count — read the current value.
+    // GET /count Ã¢â‚¬â€ read the current value.
     app.get(path: "/count", handler: { _req =>
         let n = counter.get()
         Response.json({ "count": n })
     })
 
-    # POST /increment — bump the counter by 1.
+    // POST /increment Ã¢â‚¬â€ bump the counter by 1.
     app.post(path: "/increment", handler: { _req =>
         let prev = counter.get()
         counter.set(prev + 1)
         Response.json({ "count": counter.get(), "incremented": true })
     })
 
-    # POST /reset — set the counter back to 0.
+    // POST /reset Ã¢â‚¬â€ set the counter back to 0.
     app.post(path: "/reset", handler: { _req =>
         counter.set(0)
         Response.json({ "count": 0, "reset": true })
     })
 
-    # GET /health — liveness probe.
+    // GET /health Ã¢â‚¬â€ liveness probe.
     app.get(path: "/health", handler: { _req =>
         Response.json({ "status": "ok" })
     })

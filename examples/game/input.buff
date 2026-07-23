@@ -1,8 +1,8 @@
-# input.buff — keyboard input example (T16).
-#
-# Demonstrates reading keyboard input via the polled Input state.
-# In the headless MVP, input is injected programmatically — the
-# scene checks for WASD keys and prints which direction is pressed.
+// input.buff â€” keyboard input example (T16).
+//
+// Demonstrates reading keyboard input via the polled Input state.
+// In the headless MVP, input is injected programmatically â€” the
+// scene checks for WASD keys and prints which direction is pressed.
 
 import buff_game.Game
 import buff_game.GameConfig
@@ -34,7 +34,7 @@ func main():
         print("Mouse: " + mx.str() + ", " + my.str())
     }))
 
-    # Simulate some key presses for testing
+    // Simulate some key presses for testing
     game.input_mut().set_key(Key.KeyW, true)
     game.step(1.0 / 60.0)
     game.input_mut().set_key(Key.KeyW, false)

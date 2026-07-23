@@ -1,7 +1,7 @@
-# T29 .buff example: JSON Schema export (FORWARD-DECL).
-#
-# Demonstrates the `to_json_schema()` method serializing a validator's
-# rule set into a JSON Schema (Draft 2020-12) string.
+// T29 .buff example: JSON Schema export (FORWARD-DECL).
+//
+// Demonstrates the `to_json_schema()` method serializing a validator's
+// rule set into a JSON Schema (Draft 2020-12) string.
 
 from "validate" import Validator
 from "serde_json" import parse

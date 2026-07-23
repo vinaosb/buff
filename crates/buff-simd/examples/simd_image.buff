@@ -1,9 +1,9 @@
-# T54 example: SIMD image-pixel channel ops.
-# One RGBA pixel = exactly 4 f32 lanes = one f32x4 register.
-# Buff source (codegen-lowered via buff-lang-codegen-rust to buff_simd::*).
-#
-# Run via:
-#   buff run examples/simd_image.buff
+// T54 example: SIMD image-pixel channel ops.
+// One RGBA pixel = exactly 4 f32 lanes = one f32x4 register.
+// Buff source (codegen-lowered via buff-lang-codegen-rust to buff_simd::*).
+//
+// Run via:
+//   buff run examples/simd_image.buff
 
 func main():
     let rgba = Simd.from_array([0.10, 0.20, 0.30, 1.0])

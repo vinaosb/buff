@@ -1,20 +1,20 @@
-# Buff ML — Linear Regression
-#
-# Train a single Linear(1, 1) layer on synthetic data y = 2x + 3.
-# After 300 epochs of SGD (lr=0.05), learned weights converge to
-# w ≈ 2.0 and bias ≈ 3.0.
-#
-# Codegen integration is deferred (per crates/buff-ml/AGENTS.md) —
-# this file documents the intended Buff API and parses via `buff check`.
-# Run the Rust reference impl via: cargo run -p buff-ml --example linear_regression
+// Buff ML â€” Linear Regression
+//
+// Train a single Linear(1, 1) layer on synthetic data y = 2x + 3.
+// After 300 epochs of SGD (lr=0.05), learned weights converge to
+// w â‰ˆ 2.0 and bias â‰ˆ 3.0.
+//
+// Codegen integration is deferred (per crates/buff-ml/AGENTS.md) â€”
+// this file documents the intended Buff API and parses via `buff check`.
+// Run the Rust reference impl via: cargo run -p buff-ml --example linear_regression
 
 import Tensor from buff.tensor
 import { Model, Linear, SGD, Tape, mse_loss } from buff.ml
 
 func main():
-    print("Buff ML — Linear Regression")
+    print("Buff ML â€” Linear Regression")
 
-    # Synthetic data: y = 2x + 3
+    // Synthetic data: y = 2x + 3
     let x = Tensor.from_vec(
         vec![-2.0, -1.0, 0.0, 1.0, 2.0],
         vec![5, 1]
@@ -24,13 +24,13 @@ func main():
         vec![5, 1]
     )
 
-    # Model: single Linear(1 -> 1)
+    // Model: single Linear(1 -> 1)
     let model = Model.sequential([
         Linear.new(input_dim: 1, output_dim: 1)
     ])
     let optimizer = SGD.new(lr: 0.05)
 
-    # Train 300 epochs
+    // Train 300 epochs
     for epoch in range(300):
         let tape = Tape.new()
         let pred = model.forward(tape.leaf(x), training: true)
@@ -41,7 +41,7 @@ func main():
         if epoch % 50 == 0:
             print("epoch", epoch, "loss:", loss.value())
 
-    # Check learned parameters
+    // Check learned parameters
     let layer = model.get_layer(index: 0)
     let params = layer.parameters()
     print("Learned: y =", params[0][0], "x +", params[1][0])

@@ -1,10 +1,10 @@
-# T9 .buff example: pixel-level access (FORWARD-DECL).
-#
-# Requires the coordinated Type::Image codegen lowering arm (this task,
-# T9 finish). The prelude registry entry `PreludeType::Image` +
-# instance-method arms were added in the same T9 finish commit as this
-# example. See crates/buff-image/AGENTS.md "RELATIONSHIP TO OTHER
-# CRATES" for the wiring map.
+// T9 .buff example: pixel-level access (FORWARD-DECL).
+//
+// Requires the coordinated Type::Image codegen lowering arm (this task,
+// T9 finish). The prelude registry entry `PreludeType::Image` +
+// instance-method arms were added in the same T9 finish commit as this
+// example. See crates/buff-image/AGENTS.md "RELATIONSHIP TO OTHER
+// CRATES" for the wiring map.
 
 from "image" import Image, Color
 

@@ -1,22 +1,22 @@
-# T18 example: connect to in-memory SQLite, run a query, print rows.
-# The matching simple_query.rs mirrors this pipeline using the
-# direct `buff_db::Pool` Rust API.
-#
-# NOTE: T18 ships with forward-declaration only (mirrors the T8 Tensor
-# precedent) — `Database.connect` is wired in this commit but the
-# pool.query / pool.execute instance methods are deferred to a sibling
-# task that adds the coordinated `Type::Pool` variant in
-# `crates/buff-lang-types/src/ty.rs` (outside the T18 shared zone per
-# the MUST NOT in the task brief). The Buff code below illustrates the
-# intended API; today only the first `Database.connect` line compiles.
+// T18 example: connect to in-memory SQLite, run a query, print rows.
+// The matching simple_query.rs mirrors this pipeline using the
+// direct `buff_db::Pool` Rust API.
+//
+// NOTE: T18 ships with forward-declaration only (mirrors the T8 Tensor
+// precedent) â€” `Database.connect` is wired in this commit but the
+// pool.query / pool.execute instance methods are deferred to a sibling
+// task that adds the coordinated `Type::Pool` variant in
+// `crates/buff-lang-types/src/ty.rs` (outside the T18 shared zone per
+// the MUST NOT in the task brief). The Buff code below illustrates the
+// intended API; today only the first `Database.connect` line compiles.
 import Database
 
 func main()
     let pool = Database.connect("sqlite::memory:")
     print("connected")
-    # The following calls will dispatch once the sibling
-    # `Type::Pool` + instance-method wiring lands:
-    # pool.execute("CREATE TABLE users (id INT, name TEXT)", [])
-    # pool.execute("INSERT INTO users VALUES (1, 'Alice')", [])
-    # let rows = pool.query("SELECT * FROM users", [])
-    # print(rows[0])
+    // The following calls will dispatch once the sibling
+    // `Type::Pool` + instance-method wiring lands:
+    // pool.execute("CREATE TABLE users (id INT, name TEXT)", [])
+    // pool.execute("INSERT INTO users VALUES (1, 'Alice')", [])
+    // let rows = pool.query("SELECT * FROM users", [])
+    // print(rows[0])

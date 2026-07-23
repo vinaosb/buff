@@ -1,15 +1,15 @@
-# T10 .buff example: generate a tone + report stats (FORWARD-DECL).
-#
-# Requires the coordinated Type::Audio codegen lowering arm (sibling task).
-# Today `buff check` validates the syntax; `buff run` integration lands
-# when the coordinated sibling task does. See crates/buff-audio/AGENTS.md
-# "INTEGRATION WITH BUFF LANGUAGE" section.
+// T10 .buff example: generate a tone + report stats (FORWARD-DECL).
+//
+// Requires the coordinated Type::Audio codegen lowering arm (sibling task).
+// Today `buff check` validates the syntax; `buff run` integration lands
+// when the coordinated sibling task does. See crates/buff-audio/AGENTS.md
+// "INTEGRATION WITH BUFF LANGUAGE" section.
 
 from "audio" import AudioBuffer
 
 func main():
     sample_rate = 44100
-    # Build a 1-second 440 Hz mono tone.
+    // Build a 1-second 440 Hz mono tone.
     samples = Vector.fill(size: sample_rate, fn: { i =>
         let t = i.to_float() / sample_rate.to_float()
         (t * 440.0 * 2.0 * Math.PI).sin() * 0.3

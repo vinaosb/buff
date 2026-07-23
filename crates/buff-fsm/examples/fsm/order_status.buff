@@ -1,8 +1,8 @@
-# T40 .buff example: order status state machine (FORWARD-DECL).
-#
-# Requires the coordinated Type::Machine codegen lowering arm (future
-# T40 finish commit). See traffic_light.buff header for the wiring
-# rationale.
+// T40 .buff example: order status state machine (FORWARD-DECL).
+//
+// Requires the coordinated Type::Machine codegen lowering arm (future
+// T40 finish commit). See traffic_light.buff header for the wiring
+// rationale.
 
 from "fsm" import Machine
 

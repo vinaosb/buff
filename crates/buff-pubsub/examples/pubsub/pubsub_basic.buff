@@ -1,10 +1,10 @@
-# T41 .buff example: basic subscribe + publish (FORWARD-DECL).
-#
-# Requires the coordinated Type::EventBus codegen lowering arm
-# (separate follow-up commit per the buff-image T9 precedent:
-# MVP crate ships first, prelude+codegen wiring lands next).
-# See crates/buff-pubsub/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
-# for the wiring map (to be added in the follow-up commit).
+// T41 .buff example: basic subscribe + publish (FORWARD-DECL).
+//
+// Requires the coordinated Type::EventBus codegen lowering arm
+// (separate follow-up commit per the buff-image T9 precedent:
+// MVP crate ships first, prelude+codegen wiring lands next).
+// See crates/buff-pubsub/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
+// for the wiring map (to be added in the follow-up commit).
 
 from "pubsub" import EventBus
 

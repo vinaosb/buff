@@ -1,7 +1,7 @@
-# T46 .buff example: stem a list of words in English + Portuguese (FORWARD-DECL).
-#
-# Requires the coordinated PreludeType::Text codegen lowering arm (this
-# task, T46 finish).
+// T46 .buff example: stem a list of words in English + Portuguese (FORWARD-DECL).
+//
+// Requires the coordinated PreludeType::Text codegen lowering arm (this
+// task, T46 finish).
 
 from "nlp" import Text
 

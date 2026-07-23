@@ -13,7 +13,7 @@
 // MVP scope:
 //   - Inter-stage queues: Channel<T> (bounded MPSC from buff-lang-runtime)
 //   - Backpressure: natural (bounded channel buffer)
-//   - Parallel: tokio tasks (NOT rayon — reserved for CSV parsing)
+//   - Parallel: tokio tasks (NOT rayon â€” reserved for CSV parsing)
 
 func main():
     let result = Pipeline.new()

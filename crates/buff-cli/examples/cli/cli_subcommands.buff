@@ -1,9 +1,9 @@
-# T32 example: subcommands (greet + count).
-#
-# The actual Rust implementation lives in `cli_subcommands.rs`. The
-# Buff code below shows the same program with two nested
-# subcommands. Until the prelude+codegen wiring ships, this is a
-# forward declaration only.
+// T32 example: subcommands (greet + count).
+//
+// The actual Rust implementation lives in `cli_subcommands.rs`. The
+// Buff code below shows the same program with two nested
+// subcommands. Until the prelude+codegen wiring ships, this is a
+// forward declaration only.
 
 func main():
     let app = App.new("multi").about("Subcommand demo")

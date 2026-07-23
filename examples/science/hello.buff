@@ -1,9 +1,9 @@
-﻿import Tensor from buff.tensor
+import Tensor from buff.tensor
 
 func main():
     print("Buff Science - Linear Algebra")
     
-    # 3x3 matrix inverse roundtrip.
+    // 3x3 matrix inverse roundtrip.
     let m = Tensor.from_vec(
         vec![4.0, 7.0, 3.0, 2.0, 6.0, 5.0, 1.0, 1.0, 1.0],
         vec![3, 3]

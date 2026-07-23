@@ -1,8 +1,8 @@
-# T10 .buff example: mix two buffers (FORWARD-DECL).
-#
-# Requires the coordinated Type::Audio codegen lowering arm (sibling task).
-# Today `buff check` validates the syntax; `buff run` integration lands
-# when the coordinated sibling task does. See crates/buff-audio/AGENTS.md.
+// T10 .buff example: mix two buffers (FORWARD-DECL).
+//
+// Requires the coordinated Type::Audio codegen lowering arm (sibling task).
+// Today `buff check` validates the syntax; `buff run` integration lands
+// when the coordinated sibling task does. See crates/buff-audio/AGENTS.md.
 
 from "audio" import AudioBuffer
 

@@ -1,8 +1,8 @@
-# T32 example: flags + options + positionals.
-#
-# The actual Rust implementation lives in `cli_flags.rs`. The Buff
-# code below mirrors an ls-style CLI. Until the prelude+codegen
-# wiring ships, this is a forward declaration only.
+// T32 example: flags + options + positionals.
+//
+// The actual Rust implementation lives in `cli_flags.rs`. The Buff
+// code below mirrors an ls-style CLI. Until the prelude+codegen
+// wiring ships, this is a forward declaration only.
 
 func main():
     let app = App.new("ls-like")

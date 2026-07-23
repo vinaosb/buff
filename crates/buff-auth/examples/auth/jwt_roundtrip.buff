@@ -1,9 +1,9 @@
-# T34 .buff example: JWT roundtrip (FORWARD-DECL).
-#
-# Requires the coordinated PreludeType::Jwt + PreludeAssocFn::JwtEncode
-# / JwtDecode codegen lowering arms (this task, T34 finish). See
-# crates/buff-auth/AGENTS.md "RELATIONSHIP TO OTHER CRATES" for the
-# wiring map.
+// T34 .buff example: JWT roundtrip (FORWARD-DECL).
+//
+// Requires the coordinated PreludeType::Jwt + PreludeAssocFn::JwtEncode
+// / JwtDecode codegen lowering arms (this task, T34 finish). See
+// crates/buff-auth/AGENTS.md "RELATIONSHIP TO OTHER CRATES" for the
+// wiring map.
 
 from "auth" import JWT
 

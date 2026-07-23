@@ -1,11 +1,11 @@
-# T36 .buff example: full resilience pipeline (FORWARD-DECL).
-#
-# Requires the coordinated Type::ResiliencePipeline codegen lowering
-# arm (this task, T36 finish). The prelude registry entry
-# `PreludeType::ResiliencePipeline` + instance-method arms will be
-# added in the same T36 finish commit as this example. See
-# crates/buff-resilience/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
-# for the wiring map.
+// T36 .buff example: full resilience pipeline (FORWARD-DECL).
+//
+// Requires the coordinated Type::ResiliencePipeline codegen lowering
+// arm (this task, T36 finish). The prelude registry entry
+// `PreludeType::ResiliencePipeline` + instance-method arms will be
+// added in the same T36 finish commit as this example. See
+// crates/buff-resilience/AGENTS.md "RELATIONSHIP TO OTHER CRATES"
+// for the wiring map.
 
 from "resilience" import RetryPolicy, CircuitBreaker, RateLimiter, Timeout, Pipeline
 

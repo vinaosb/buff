@@ -1,10 +1,10 @@
-# T31 .buff example: basic cache set/get/delete (FORWARD-DECL).
-#
-# Requires the coordinated Type::Cache codegen lowering arm (this task,
-# T31 finish). The prelude registry entry `PreludeType::Cache` +
-# instance-method arms were added in the same T31 finish commit as this
-# example. See crates/buff-cache/AGENTS.md "RELATIONSHIP TO OTHER
-# CRATES" for the wiring map.
+// T31 .buff example: basic cache set/get/delete (FORWARD-DECL).
+//
+// Requires the coordinated Type::Cache codegen lowering arm (this task,
+// T31 finish). The prelude registry entry `PreludeType::Cache` +
+// instance-method arms were added in the same T31 finish commit as this
+// example. See crates/buff-cache/AGENTS.md "RELATIONSHIP TO OTHER
+// CRATES" for the wiring map.
 
 from "cache" import Cache
 

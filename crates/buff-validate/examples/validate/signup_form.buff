@@ -1,10 +1,10 @@
-# T29 .buff example: validate a user-signup form (FORWARD-DECL).
-#
-# Requires the coordinated Type::Validator codegen lowering arm (this
-# task, T29 finish). The prelude registry entry `PreludeType::Validator`
-# + instance-method arms were added in the same T29 finish commit as
-# this example. See crates/buff-validate/AGENTS.md "RELATIONSHIP TO
-# OTHER CRATES" for the wiring map.
+// T29 .buff example: validate a user-signup form (FORWARD-DECL).
+//
+// Requires the coordinated Type::Validator codegen lowering arm (this
+// task, T29 finish). The prelude registry entry `PreludeType::Validator`
+// + instance-method arms were added in the same T29 finish commit as
+// this example. See crates/buff-validate/AGENTS.md "RELATIONSHIP TO
+// OTHER CRATES" for the wiring map.
 
 from "validate" import Validator, ValidationErrors
 
