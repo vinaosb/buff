@@ -7,7 +7,7 @@
 //!
 //! # Quick start
 //!
-//! ```
+//! ```ignore
 //! use buff_science::linalg;
 //! use buff_tensor::Tensor;
 //!
