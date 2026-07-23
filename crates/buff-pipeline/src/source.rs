@@ -104,8 +104,7 @@ impl Source {
                         .from_reader(file);
                     let mut records = reader.into_records();
                     loop {
-                        let mut chunk: Vec<csv::StringRecord> =
-                            Vec::with_capacity(buffer_size);
+                        let mut chunk: Vec<csv::StringRecord> = Vec::with_capacity(buffer_size);
                         for _ in 0..buffer_size {
                             match records.next() {
                                 Some(Ok(record)) => chunk.push(record),
@@ -125,9 +124,7 @@ impl Source {
                         // so par_iter is sound.
                         let rows: Vec<Vec<String>> = chunk
                             .par_iter()
-                            .map(|record| {
-                                record.iter().map(|cell| cell.to_string()).collect()
-                            })
+                            .map(|record| record.iter().map(|cell| cell.to_string()).collect())
                             .collect();
                         for row in rows {
                             // blocking_send parks this worker thread

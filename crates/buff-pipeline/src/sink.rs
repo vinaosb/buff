@@ -75,17 +75,13 @@ impl Sink {
             .has_headers(false)
             .from_writer(file);
         for row in rows {
-            writer
-                .write_record(&row)
-                .map_err(|e| PipelineError::Csv {
-                    detail: e.to_string(),
-                })?;
-        }
-        writer
-            .flush()
-            .map_err(|e| PipelineError::Csv {
+            writer.write_record(&row).map_err(|e| PipelineError::Csv {
                 detail: e.to_string(),
             })?;
+        }
+        writer.flush().map_err(|e| PipelineError::Csv {
+            detail: e.to_string(),
+        })?;
         Ok(())
     }
 

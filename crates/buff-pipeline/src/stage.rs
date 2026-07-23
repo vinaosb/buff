@@ -81,10 +81,8 @@ impl<T: Send + 'static> Pipeline<T> {
                 let _prev_handle = prev_spawner(in_sender);
                 tokio::spawn(async move {
                     while let Some(item) = receiver.recv().await {
-                        if pred(&item) {
-                            if out_sender.send(item).await.is_err() {
-                                break;
-                            }
+                        if pred(&item) && out_sender.send(item).await.is_err() {
+                            break;
                         }
                     }
                 })
@@ -130,7 +128,8 @@ impl<T: Send + 'static> Pipeline<T> {
                     while let Some(item) = receiver.recv().await {
                         buf.push(item);
                         if buf.len() >= batch_size {
-                            let filled = std::mem::replace(&mut buf, Vec::with_capacity(batch_size));
+                            let filled =
+                                std::mem::replace(&mut buf, Vec::with_capacity(batch_size));
                             if out_sender.send(filled).await.is_err() {
                                 return;
                             }
@@ -164,7 +163,7 @@ impl<T: Send + 'static> Pipeline<T> {
     ///
     /// let out = Pipeline::new()
     ///     .source(vec![1, 2, 3, 4, 5])
-    ///     .window(2, |batch: Vec<i32>| batch.iter().sum())
+    ///     .window(2, |batch: Vec<i32>| batch.iter().sum::<i32>())
     ///     .run()
     ///     .expect("run");
     /// assert_eq!(out, vec![3, 7, 5]); // [1+2, 3+4, 5]
@@ -189,7 +188,8 @@ impl<T: Send + 'static> Pipeline<T> {
                     while let Some(item) = receiver.recv().await {
                         buf.push(item);
                         if buf.len() >= window_size {
-                            let filled = std::mem::replace(&mut buf, Vec::with_capacity(window_size));
+                            let filled =
+                                std::mem::replace(&mut buf, Vec::with_capacity(window_size));
                             let reduced = reduce(filled);
                             if out_sender.send(reduced).await.is_err() {
                                 return;
@@ -269,8 +269,10 @@ impl<T: Send + 'static> Pipeline<T> {
                 // Channel each").
                 let worker_pairs: Vec<(Sender<T>, buff_lang_runtime::Receiver<T>)> =
                     (0..n).map(|_| Channel::new(buffer_size)).collect();
-                let worker_senders: Vec<Sender<T>> =
-                    worker_pairs.iter().map(|(s, _)| Sender(s.0.clone())).collect();
+                let worker_senders: Vec<Sender<T>> = worker_pairs
+                    .iter()
+                    .map(|(s, _)| Sender(s.0.clone()))
+                    .collect();
                 let worker_receivers: Vec<buff_lang_runtime::Receiver<T>> =
                     worker_pairs.into_iter().map(|(_, r)| r).collect();
 
@@ -293,7 +295,11 @@ impl<T: Send + 'static> Pipeline<T> {
                 let mut worker_handles: Vec<JoinHandle<()>> = Vec::with_capacity(n);
                 for wr in worker_receivers {
                     let transform = transform.clone();
-                    let sender_clone = out_sender.clone();
+                    // Clone the Sender via the inner tokio mpsc Sender (which
+                    // is Clone without requiring T: Clone — the buff-lang-
+                    // runtime derive-Clone on Sender<T> adds a T: Clone bound
+                    // that is too strict for our generic use case).
+                    let sender_clone = Sender(out_sender.0.clone());
                     worker_handles.push(tokio::spawn(async move {
                         let mut wr = wr;
                         while let Some(item) = wr.recv().await {

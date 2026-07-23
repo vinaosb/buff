@@ -38,7 +38,11 @@ fn simple_map_filter_yields_expected_output() {
 fn source_pushes_via_channel_and_stages_consume() {
     // Verify items survive the source → stage → drain round-trip.
     let result = Pipeline::new()
-        .source(vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()])
+        .source(vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+        ])
         .stage("uppercase", |s: String| s.to_uppercase())
         .run()
         .expect("run");
@@ -125,7 +129,11 @@ fn batch_stage_groups_n_items() {
 
 #[test]
 fn batch_size_larger_than_input_emits_single_partial_batch() {
-    let result = Pipeline::new().source(vec![1, 2, 3]).batch(10).run().expect("run");
+    let result = Pipeline::new()
+        .source(vec![1, 2, 3])
+        .batch(10)
+        .run()
+        .expect("run");
     assert_eq!(result, vec![vec![1, 2, 3]]);
 }
 
@@ -164,9 +172,9 @@ fn chained_stages_compose_in_order() {
     let result = Pipeline::new()
         .source(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         .filter(|x| *x % 2 == 0) // [2, 4, 6, 8, 10]
-        .map(|x| x * 10)        // [20, 40, 60, 80, 100]
-        .filter(|x| *x < 70)    // [20, 40, 60]
-        .map(|x| x / 10)        // [2, 4, 6]
+        .map(|x| x * 10) // [20, 40, 60, 80, 100]
+        .filter(|x| *x < 70) // [20, 40, 60]
+        .map(|x| x / 10) // [2, 4, 6]
         .run()
         .expect("run");
     assert_eq!(result, vec![2, 4, 6]);
@@ -191,11 +199,7 @@ fn with_buffer_override_does_not_break_pipeline() {
 fn csv_source_reads_chunks_correctly() {
     let dir = tempfile::tempdir().expect("tempdir");
     let csv_path = dir.path().join("input.csv");
-    std::fs::write(
-        &csv_path,
-        "alice,30,nyc\nbob,25,la\ncarol,40,sf\n",
-    )
-    .expect("write csv");
+    std::fs::write(&csv_path, "alice,30,nyc\nbob,25,la\ncarol,40,sf\n").expect("write csv");
 
     let rows = Source::from_csv(&csv_path, 2)
         .expect("open csv")
@@ -203,7 +207,10 @@ fn csv_source_reads_chunks_correctly() {
         .expect("run");
 
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0], vec!["alice".to_string(), "30".into(), "nyc".into()]);
+    assert_eq!(
+        rows[0],
+        vec!["alice".to_string(), "30".into(), "nyc".into()]
+    );
     assert_eq!(rows[2], vec!["carol".to_string(), "40".into(), "sf".into()]);
 }
 
@@ -276,7 +283,7 @@ fn snap_pipeline_debug_repr() {
         .filter(|x| *x > 2)
         .parallel(2, |x| x + 1);
     insta::assert_snapshot!(
-        format!("{:?}", p),
+        format!("{:#?}", p),
         @r###"
     Pipeline {
         stages: [
@@ -359,7 +366,7 @@ proptest::proptest! {
             .filter(|x| *x > 100)
             .run()
             .expect("run");
-        prop_assert_eq!(piped, doubled);
+        assert_eq!(piped, doubled);
     }
 
     #[test]
@@ -372,6 +379,6 @@ proptest::proptest! {
             .iter()
             .map(Vec::len)
             .sum();
-        prop_assert_eq!(total, input.len());
+        assert_eq!(total, input.len());
     }
 }

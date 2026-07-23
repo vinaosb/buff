@@ -44,10 +44,10 @@ use crate::{BuffLocation, FunctionAnchor, SourceMap};
 ///
 /// For each function the scan records:
 ///
-/// - A function-level [`FunctionAnchor`] (Buff function name + Buff span
-///   + Rust line range). The Rust line range is computed by scanning
-///   from the `fn <name>` line forward to the closing `}` brace of the
-///   function body.
+/// - A function-level [`FunctionAnchor`] (Buff function name + Buff
+///   span + Rust line range). The Rust line range is computed by
+///   scanning from the `fn <name>` line forward to the closing `}`
+///   brace of the function body.
 /// - A line-level [`BuffLocation`] at the function's Rust start line
 ///   (carrying the function name as its `name` field).
 ///

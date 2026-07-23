@@ -69,7 +69,7 @@ pub fn install_panic_hook() {
 /// validated as a real `.buffmap` file here — that's deferred to the
 /// `format::read_from_file` call inside [`install_panic_hook`].
 pub fn resolve_buff_map_path() -> Option<PathBuf> {
-    if let Some(path_str) = std::env::var("BUFF_MAP_PATH").ok() {
+    if let Ok(path_str) = std::env::var("BUFF_MAP_PATH") {
         let path = PathBuf::from(path_str);
         if path.exists() {
             return Some(path);
@@ -167,7 +167,7 @@ fn buff_panic_handler(info: &std::panic::PanicHookInfo<'_>) {
 /// A remapped Buff stack trace.
 ///
 /// Built by [`remap_panic_backtrace`] from a Rust [`Backtrace`] snapshot
-/// + the loaded [`SourceMap`]. Frames without a Buff mapping are
+/// plus the loaded [`SourceMap`]. Frames without a Buff mapping are
 /// dropped — only Buff-source frames appear in the trace.
 #[derive(Debug, Clone, Default)]
 pub struct BuffTrace {

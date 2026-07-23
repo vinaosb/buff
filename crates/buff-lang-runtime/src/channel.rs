@@ -99,6 +99,7 @@ impl Channel {
     ///
     /// NEVER. `tokio::sync::mpsc::channel` is infallible (returns a
     /// tuple directly, no `Result`).
+    #[allow(clippy::new_ret_no_self)] // Factory by design: returns (Sender, Receiver), not Channel.
     #[must_use]
     pub fn new<T: Send + 'static>(buffer: usize) -> (Sender<T>, Receiver<T>) {
         let (tx, rx) = tokio::sync::mpsc::channel(buffer);

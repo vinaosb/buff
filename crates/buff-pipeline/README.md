@@ -1,74 +1,129 @@
-# buff-pipeline
+﻿# buff-pipeline
 
-DAG-based ETL pipeline framework for Buff. EXPERIMENTAL.
+> DAG-based ETL pipeline for the **Buff** language. Bounded `Channel<T>` queues connect stages; backpressure is natural.
 
-Bounded `Channel<T>` queues connect stages; backpressure is natural. Each
-stage is a Buff closure reading from `Channel<T>` and writing to `Channel<U>`.
+`buff-pipeline` wires a linear chain of stages via the T2 `buff_lang_runtime::Channel<T>` MPSC primitive. Each stage is a `tokio::spawn` task reading from a `Receiver<T>` and writing to a `Sender<U>`. The bounded buffer (default capacity 64) provides natural backpressure: when a downstream stage is slow, the upstream `send().await` parks until a slot opens.
 
-MVP per T14 (`.sisyphus/plans/buff-v1x-frameworks.md#L1975`):
-- **Pipeline** (5 fns): `new`, `stage`, `source`, `sink`, `run`
-- **Source** (1 fn): `from_csv` (chunked)
-- **Sink** (3 fns): `to_csv`, `to_json`, `collect`
-- **Stage helpers** (5 fns): `map`, `filter`, `batch`, `window`, `parallel`
-
-Built on `buff-lang-runtime::Channel<T>` (T2). Does NOT use `Stream<T>`
-(deferred to v1.18+). Does NOT use `select` (workers consume single Channel).
+**Status: experimental** (T14 v1.13 frameworks wave 3).
 
 ## Quick start
 
 ```rust
-use buff_pipeline::{Pipeline, StageExt, SinkExt};
+use buff_pipeline::Pipeline;
 
-let mut p = Pipeline::new(64);
-p.source(vec![1, 2, 3, 4, 5]);
-p.map(|x| x * 2);
-p.filter(|x| *x > 4);
-let out: Vec<i32> = p.run().collect();
-assert_eq!(out, vec![6, 8, 10]);
+fn main() {
+    // [1, 2, 3, 4, 5] -> map(*2) -> filter(>4) -> [6, 8, 10]
+    let result = Pipeline::new()
+        .source(vec![1, 2, 3, 4, 5])
+        .map(|x| x * 2)
+        .filter(|x| *x > 4)
+        .run()
+        .expect("pipeline runs");
+    assert_eq!(result, vec![6, 8, 10]);
+}
 ```
 
-## Public API (14 fns, ≤ 40 cap per T14)
+## CSV streaming ETL
 
-| Category | Function |
-|---|---|
-| Pipeline | `Pipeline::new(buffer_size)`, `p.stage(name, fn)`, `p.source(vec)`, `p.sink(fn)`, `p.run()` |
-| Source | `Source::from_csv(path, chunk_size)` |
-| Sink | `Sink::to_csv(path)`, `Sink::to_json(path)`, `Sink::collect()` |
-| Stages | `p.map(fn)`, `p.filter(pred)`, `p.batch(size)`, `p.window(size, fn)`, `p.parallel(workers, fn)` |
+```rust
+use buff_pipeline::{Source, Sink};
 
-Total: 14 public fns.
+fn main() -> buff_pipeline::PipelineResult<()> {
+    // Stream a CSV through filter + map, bounded memory via Channel backpressure.
+    let rows = Source::from_csv("input.csv", 100)?       // chunk_size = 100 rows
+        .filter(|row: &Vec<String>| row.len() >= 2)      // drop malformed rows
+        .map(|row| row.iter().take(2).cloned().collect::<Vec<String>>())
+        .run()?;                                          // drain to Vec<Vec<String>>
 
-## Conventions
+    Sink::to_csv("output.csv", rows)?;                   // write back as CSV
+    Ok(())
+}
+```
 
-- **Layout**: each stage runs as a `tokio::spawn` task on its own thread.
-- **Backpressure**: bounded Channel buffers; source blocks when downstream is slow.
-- **Order**: items emerge in input order (no shuffling).
-- **Errors**: `Result<_, PipelineError>`. No `unwrap`/`expect`/`panic!` in non-test code (project hard rule; enforced via `#![forbid(clippy::*)]` at crate root).
+## Parallel workers
 
-## Scope caps (T14 spec)
+```rust
+use buff_pipeline::Pipeline;
 
-| Cap | MVP value | v1.18+ target |
+fn main() {
+    // 4 workers consume from a shared input Channel via round-robin dispatch.
+    // Output ORDER is not preserved (workers race); output CONTENT is.
+    let mut result = Pipeline::new()
+        .source(vec![1, 2, 3, 4, 5, 6, 7, 8])
+        .parallel(4, |x| x * x)
+        .run()
+        .expect("run");
+    result.sort(); // restore order for deterministic comparison
+    assert_eq!(result, vec![1, 4, 9, 16, 25, 36, 49, 64]);
+}
+```
+
+## Public API (15 fns, <= 40 cap)
+
+### `Pipeline<T>` (11)
+
+| Method | Signature | Notes |
 |---|---|---|
-| Sources | `from_csv` + `source(Vec<T>)` | Kafka / Redis Streams |
-| Sinks | `to_csv` / `to_json` / `collect` | Parquet / Arrow |
-| Concurrency | per-stage tokio task | multi-source `select` |
-| Delivery | at-least-once (channel close) | exactly-once |
-| Orchestration | NONE (caller-driven) | scheduler + retries + checkpoints |
+| `Pipeline::new` | `() -> Pipeline<()>` | Empty builder. Call `.source()` next. |
+| `Pipeline::source` | `(self, Vec<T>) -> Pipeline<T>` | In-memory source. |
+| `Pipeline::with_buffer` | `(self, usize) -> Self` | Override channel capacity (default 64). |
+| `Pipeline::stage` | `(self, name, Fn(T)->U) -> Pipeline<U>` | Generic named stage. |
+| `Pipeline::sink` | `(self, Fn(&T)) -> Pipeline<T>` | Side-effecting passthrough. |
+| `Pipeline::run` | `(self) -> Result<Vec<T>>` | Drain to Vec (builds tokio runtime). |
+| `Pipeline::map` | `(self, Fn(T)->U) -> Pipeline<U>` | Sugar for `stage("map", fn)`. |
+| `Pipeline::filter` | `(self, Fn(&T)->bool) -> Pipeline<T>` | Keep matching items. |
+| `Pipeline::batch` | `(self, usize) -> Pipeline<Vec<T>>` | Group N items per batch. |
+| `Pipeline::window` | `(self, usize, Fn(Vec<T>)->U) -> Pipeline<U>` | Reduce windows of N items. |
+| `Pipeline::parallel` | `(self, workers, Fn(T)->U) -> Pipeline<U>` | N tokio workers (unordered). |
 
-## Integration with Buff language
+### `Source` (1)
 
-Codegen integration is deferred. The crate is callable from Rust tests/examples today;
-`buff run` integration lands with the coordinated sibling task that adds
-`Type::Pipeline` to `crates/buff-lang-types/src/ty.rs` + the codegen lowering arm in
-`crates/buff-lang-codegen-rust/src/rust_codegen.rs`.
+| Method | Signature | Notes |
+|---|---|---|
+| `Source::from_csv` | `(path, chunk_size) -> Result<Pipeline<Vec<String>>>` | Streaming CSV reader (rayon-parallel chunk parse). |
 
-## Examples
+### `Sink` (3)
 
-Three `.buff` examples at `examples/pipeline/`:
-- `simple.buff` — map/filter on small list ([1,2,3,4,5] → [6,8,10])
-- `csv_etl.buff` — stream CSV through filter+map to output CSV
-- `parallel.buff` — `p.parallel(workers: 4, expensive_fn)`
+| Method | Signature | Notes |
+|---|---|---|
+| `Sink::collect` | `(Pipeline<T>) -> Result<Vec<T>>` | Sugar for `pipeline.run()`. |
+| `Sink::to_csv` | `(path, Vec<Vec<String>>) -> Result<()>` | Write rows to CSV file. |
+| `Sink::to_json` | `(path, &T: Serialize) -> Result<()>` | Write to pretty JSON. |
+
+## Behavior
+
+### Backpressure
+
+Every inter-stage `Channel<T>` has a bounded capacity (default 64, override via `.with_buffer(n)`). When the buffer is full, the upstream `send().await` parks the sending task until a slot opens. This gives end-to-end flow control: a slow sink throttles the source automatically.
+
+### Ordering
+
+`map` / `filter` / `batch` / `window` / `stage` / `sink` preserve input order (single-task per stage). `parallel` does NOT preserve order — workers race and the dispatcher round-robins without tracking completion order. Sort the output `Vec` if you need deterministic ordering after `parallel`.
+
+### Concurrency model
+
+`Pipeline::run` builds a fresh multi-thread tokio runtime, invokes the continuation spawner (which cascades all stage tasks), and drains the final output channel. Each stage is an independent `tokio::spawn` task. Tasks cooperate via `.await` yield points; the runtime schedules them across worker threads.
+
+## Testing
+
+```bash
+cargo test -p buff-pipeline          # 24 integration + 4 unit + 12 doctests
+cargo clippy -p buff-pipeline --all-targets -- -D warnings
+cargo fmt -p buff-pipeline --check
+```
+
+Tests are hermetic: CSV tests use `tempfile::tempdir()` for automatic cleanup. Snapshot tests use inline `insta::assert_snapshot!` (no `.snap` files on disk). Property tests use `proptest`.
+
+## Deferred to v1.18+
+
+Per the T14 task spec, the following are explicitly out of scope for the MVP:
+
+- **`Stream<T>` consumption** (deferred at T2 level — this crate uses `Channel<T>` + sync `Vec<T>`).
+- **Kafka / Redis Streams sources.**
+- **Exactly-once delivery guarantees.**
+- **Pipeline orchestration** (scheduling, retries, checkpointing).
+- **`select` expression** for multi-source fan-in.
 
 ## License
 
-MIT OR Apache-2.0 (same as the rest of the workspace).
+Dual-licensed under [MIT](../../LICENSE) or [Apache-2.0](../../LICENSE), matching the rest of the Buff workspace.
