@@ -179,19 +179,46 @@ impl MultiDispatchTable {
         let Some(methods) = self.groups.get(name) else {
             return Ok(None);
         };
-        // Collect ALL matching impl indices. A match requires equal arity
-        // AND each arg type is equal to OR assignable to (per
-        // `assignable_to`) the corresponding param type. Assignable
-        // covers numeric widening (`Int` -> `Float`) so a call
-        // `add(1, 2.0)` resolves to `add(Int, Float)` even when an
-        // `add(Float, Float)` impl also exists (the latter wouldn't
-        // match the first `Int` arg).
-        let matches: Vec<usize> = methods
+        // T58 specificity (Julia-inspired). Dispatch proceeds in TWO
+        // passes so an EXACT-type match is always preferred over a
+        // widened (assignable) match:
+        //
+        // 1. Collect EXACT matches — every arg type EQUALS the
+        //    corresponding param type. If exactly one exists, it wins.
+        //    If 2+ exist, the call is ambiguous (two impls with the
+        //    identical signature — illegal Buff, surfaced as E1202).
+        // 2. If no exact match, collect ASSIGNABLE matches — every arg
+        //    type is assignable to the param (covers numeric widening
+        //    `Int` -> `Float`, `Int<8>` -> `Int<64>`). If exactly one
+        //    exists, it wins; 2+ is ambiguous.
+        //
+        // This mirrors Julia's method specificity: `combine(Int, Int)`
+        // is MORE SPECIFIC than `combine(Float, Float)` for a call
+        // `combine(1, 2)`, so the exact match wins even though Int is
+        // also assignable to Float. Without specificity, every call
+        // with Int args would be ambiguous whenever both an Int and a
+        // Float impl exist — making multi-dispatch useless for
+        // numerical APIs (the exact use case T58 targets).
+        let exact_matches: Vec<usize> = methods
             .iter()
             .enumerate()
-            .filter(|(_, m)| args_match(&m.param_types, arg_types))
+            .filter(|(_, m)| args_equal(&m.param_types, arg_types))
             .map(|(i, _)| i)
             .collect();
+        let matches = if exact_matches.len() == 1 {
+            exact_matches
+        } else if exact_matches.len() > 1 {
+            // Two impls with IDENTICAL signatures — inherently ambiguous.
+            exact_matches
+        } else {
+            // No exact match: fall back to assignable (widened) matches.
+            methods
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| args_match(&m.param_types, arg_types))
+                .map(|(i, _)| i)
+                .collect()
+        };
         match matches.len() {
             0 => {
                 let arg_list = format_type_list(arg_types);
@@ -240,6 +267,14 @@ impl MultiDispatchTable {
     }
 }
 
+/// Do the call-site `arg_types` EXACTLY equal `param_types` (same arity,
+/// every position `==`)? Used by [`MultiDispatchTable::resolve`] as the
+/// first (specificity) pass — an exact match always wins over a widened
+/// (assignable) match.
+fn args_equal(param_types: &[Type], arg_types: &[Type]) -> bool {
+    param_types.len() == arg_types.len() && param_types == arg_types
+}
+
 /// Are the call-site `arg_types` compatible with `param_types`?
 ///
 /// A match requires equal arity AND each arg type is equal to OR
@@ -275,7 +310,7 @@ fn mangle(buff_name: &str, params: &[&TypeRef]) -> String {
     out.push_str(buff_name);
     for p in params {
         out.push('_');
-        out.push_str(&type_token(*p));
+        out.push_str(&type_token(p));
     }
     out
 }
