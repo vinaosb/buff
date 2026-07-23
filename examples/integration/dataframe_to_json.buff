@@ -1,0 +1,91 @@
+# T22 integration example: dataframe_to_json.buff
+#
+# Exercises: buff-dataframe (T7) + stdlib JSON serialization.
+#
+# Loads a CSV via DataFrame.from_csv, projects + filters a subset, then
+# serializes the rows to JSON via the stdlib JSON module, and saves the
+# result to a file via the stdlib Filesystem module.
+#
+# API surface used:
+#   - DataFrame.from_csv(path) -> Result<DataFrame, DfError>
+#   - df.column_names() -> Vec<String>
+#   - df.len() -> Int
+#   - df.ncols() -> Int
+#   - df.select([cols]) -> Result<DataFrame, DfError>
+#   - df.filter({ row => Bool }) -> Result<DataFrame, DfError>
+#   - df.head(n) -> DataFrame
+#   - df.get_column(name) -> Option<Series>
+#   - df.to_table_string() -> String
+#   - Series.kind() -> ColumnKind
+#   - Series.as_int_slice()   / as_float_slice()
+#     as_string_slice()      / as_bool_slice()
+#
+# MISMATCH FOUND (filed as T22 follow-up #1):
+#   - DataFrame has NO `to_json()` method. Only `to_table_string()`
+#     exists in the public surface (see crates/buff-dataframe/src/lib.rs
+#     line 36 + dataframe.rs line 264). Users must iterate rows + use
+#     the stdlib JSON module to serialize. This is the most material
+#     gap for the flagship (T23) "Data Science Workbench" — every
+#     notebook export will need this roundtrip until either (a) a
+#     DataFrame.to_json() method is added in buff-dataframe, or
+#     (b) the stdlib JSON module grows a `JSON.from_dataframe(df)`
+#     convenience constructor.
+#
+# Codegen status: documentation-only (Type::DataFrame forward-declared
+# per buff-dataframe/AGENTS.md "WHERE TO LOOK" — lowering arm deferred
+# to a coordinated sibling task outside the T7 shared zone).
+
+import DataFrame from buff.dataframe
+import JSON from buff.json
+import Filesystem from buff.filesystem
+
+# Build a JSON array of row-objects from a DataFrame by iterating
+# columns + reading each Series via its kind-tagged slice accessor.
+# This is the workaround for the missing DataFrame.to_json() method
+# (see mismatch note above).
+func rows_to_json(df):
+    let columns = df.column_names()
+    let array = []
+    for i in range(0, df.len()):
+        let obj = {}
+        for col in columns:
+            let series = df.get_column(col)
+            let kind = series.kind()
+            if kind == "int":
+                obj[col] = series.as_int_slice()[i]
+            elif kind == "float":
+                obj[col] = series.as_float_slice()[i]
+            elif kind == "bool":
+                obj[col] = series.as_bool_slice()[i]
+            else:
+                obj[col] = series.as_string_slice()[i]
+        array.push(obj)
+    return array
+
+func main():
+    print("T22 integration: DataFrame -> JSON")
+
+    # Load CSV. people.csv has columns: name, age, city.
+    let df = DataFrame.from_csv(path: "examples/integration/people.csv")
+    print("loaded ${df.len()} rows x ${df.ncols()} columns")
+    print(df.to_table_string())
+
+    # Project to a subset + filter adults, take top 5.
+    let subset = df.select(cols: ["name", "age"])
+        .filter(predicate: { row => row.get_int("age") > 18 })
+        .head(n: 5)
+    print("subset (adults, top 5):")
+    print(subset.to_table_string())
+
+    # Serialize the subset to JSON via the stdlib JSON module.
+    let array = rows_to_json(subset)
+    let json_text = JSON.stringify(array)
+    print("JSON output:")
+    print(json_text)
+
+    # Persist the JSON to disk via the stdlib Filesystem module.
+    Filesystem.write_text(
+        path: "examples/integration/people_adults.json",
+        content: json_text
+    )
+    print("wrote people_adults.json (${json_text.len()} bytes)")

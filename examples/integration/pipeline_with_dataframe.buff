@@ -1,0 +1,95 @@
+# T22 integration example: pipeline_with_dataframe.buff
+#
+# Exercises: buff-pipeline (T14) + buff-dataframe (T7).
+#
+# Streams a CSV via Source.from_csv through a filter stage, batches the
+# rows into Vec<Vec<String>>, then constructs a DataFrame from the
+# flattened batches and runs a group_by + agg relational analysis on
+# it. The aggregated result is persisted via the buff-pipeline Sink.
+#
+# API surface used:
+#   - Source.from_csv(path, chunk_size) -> Pipeline<Vec<String>>
+#   - p.filter(predicate) -> Pipeline<Vec<String>>
+#   - p.batch(size) -> Pipeline<Vec<Vec<String>>>
+#   - p.run() -> Vec<T>
+#   - DataFrame.from_rows(headers, rows) -> DataFrame
+#   - df.len() -> Int
+#   - df.column_names() -> Vec<String>
+#   - df.group_by(col) -> GroupBy
+#   - GroupBy.agg(col, op) -> DataFrame
+#   - df.to_table_string() -> String
+#   - Sink.to_csv(path, rows) -> Result<(), PipelineError>
+#
+# MISMATCH FOUND (filed as T22 follow-up #3):
+#   - DataFrame.from_rows(headers, rows) is a constructor that takes
+#     TWO positional Vec<String> arguments. Buff convention §11
+#     mandates named args for multi-arg calls. The Buff surface should
+#     expose it as DataFrame.from_rows(headers: [...], rows: [[...]]).
+#     Whether the T7 codegen lowering arm honors the named-arg call
+#     shape needs validation in the coordinated sibling task.
+#
+# MISMATCH FOUND (filed as T22 follow-up #4):
+#   - GroupBy.agg(col, op) takes a Rust enum `AggOp` (Sum / Mean / Min
+#     / Max / Count). There is no clear Buff syntax for enum variants
+#     today — examples use either a string ("mean") that the codegen
+#     parses into the enum, or AggOp.Mean dotted access. T7 AGENTS.md
+#     mentions a `parse("mean")` helper that suggests the string-form
+#     is the intended user-facing syntax; the AggOp.Mean dotted form
+#     is used here provisionally and needs confirmation.
+#
+# Codegen status: documentation-only (Type::Pipeline + Type::DataFrame
+# both forward-declared; buff run cannot execute this end-to-end).
+
+import Source from buff.pipeline
+import Sink from buff.pipeline
+import DataFrame from buff.dataframe
+import AggOp from buff.dataframe
+
+func main():
+    print("T22 integration: Pipeline -> DataFrame")
+
+    # Stream + filter + batch CSV rows.
+    # sales.csv has columns: region, product, amount.
+    let batches = Source.from_csv(
+        path: "examples/integration/sales.csv",
+        chunk_size: 100
+    )
+        .filter(predicate: { row => row.len() >= 3 })
+        .batch(size: 50)
+        .run()
+
+    print("loaded ${batches.len()} batches")
+    if batches.is_empty():
+        print("no data; aborting")
+        return
+
+    # Flatten batches. Assume the first row of the first batch is the
+    # header (CSV-with-header convention from buff-dataframe read.rs).
+    let first = batches[0]
+    if first.is_empty():
+        print("empty first batch; aborting")
+        return
+    let header = first[0]
+    let data_rows = []
+    for batch in batches:
+        for row in batch:
+            data_rows.push(row)
+    print("total rows (incl. header): ${data_rows.len()}")
+
+    # Build a DataFrame and run a group-by aggregation.
+    let df = DataFrame.from_rows(headers: header, rows: data_rows)
+    print("DataFrame (${df.len()} rows, cols=${df.column_names().len()}):")
+    print(df.to_table_string())
+
+    # Group by region + aggregate mean amount per group.
+    let by_region = df.group_by(col: "region")
+    let mean_amount = by_region.agg(col: "amount", op: AggOp.Mean)
+    print("mean amount per region:")
+    print(mean_amount.to_table_string())
+
+    # Persist the aggregated result via the buff-pipeline Sink.
+    Sink.to_csv(
+        path: "examples/integration/sales_by_region.csv",
+        rows: mean_amount
+    )
+    print("wrote sales_by_region.csv")
