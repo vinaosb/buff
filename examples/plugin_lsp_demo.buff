@@ -1,0 +1,26 @@
+// plugin_lsp_demo.buff
+//
+// T72 — demo source for an LSP plugin (`math_hover`).
+//
+// This file is consumed by `cargo run -p buff-plugins --example
+// math_hover`. The `math_hover` plugin surfaces hover docs for the
+// `+` operator + a "Replace with saturating_add" code action at the
+// cursor.
+//
+// Expected plugin behaviour for THIS source:
+//
+//   - Hovering on `a + b` (line 21) surfaces:
+//       **+** (add): returns the sum of two numbers.
+//   - The cursor-triggered code-action menu shows:
+//       [refactor] Replace `+` with `saturating_add`
+//
+// Running the plugin:
+//
+//   cargo run -p buff-plugins --example math_hover
+
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+func main():
+    let sum = add(a: 2, b: 3)
+    print(sum)

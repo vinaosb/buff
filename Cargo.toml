@@ -1910,6 +1910,25 @@ buff-simd = { path = "crates/buff-simd" }
 # crate naming convention drops the `-lang` infix per AGENTS.md).
 buff-actors = { path = "crates/buff-actors" }
 
+# T72: `buff-plugins` workspace path dep — plugin extension points
+# for Buff (compiler + LSP + runtime). Pure-Rust trait-object
+# dispatch (NO `dlopen` / `libloading` per the T72 task spec).
+# Defines three plugin traits (`CompilerPlugin` / `LspPlugin` /
+# `RuntimePlugin`), a `buff-plugin.toml` manifest format, and a
+# `PluginRegistry` that loads + dispatches plugin trait objects via
+# virtual calls (no `unsafe`, no FFI shims). Records `buff-plugins`
+# (NOT `buff_lang_plugins` — the framework-crate naming convention
+# drops the `-lang` infix per AGENTS.md). Mirrors the buff-eval /
+# buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
+# buffup / buff-cache / buff-pubsub / buff-scrape / buff-ecs /
+# buff-actors pattern so any future consumer (T73+ runtime plugin
+# dispatch hook, IDE integrations) resolves to the same in-tree
+# version during the v1.x frameworks wave. The crate reuses the
+# existing `serde` + `toml` + `thiserror` + `syn` workspace pins
+# plus `buff-lang-ast` (for `&[Decl]` AST-shaped lint inputs) +
+# `buff-lang-error` (for `Span` re-use in `LintWarning`).
+buff-plugins = { path = "crates/buff-plugins" }
+
 # T60: Binary Size Minimization profile.
 #
 # `cargo build --profile minimal` (selected by `buff build --minimal`)

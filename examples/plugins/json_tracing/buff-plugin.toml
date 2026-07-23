@@ -1,0 +1,21 @@
+# buff-plugin.toml — `json_tracing` example runtime plugin.
+#
+# A runtime plugin that exports tracing spans + metrics as JSON lines
+# to stdout. Each `on_span_enter` call serialises the span; each
+# `on_metric` call serialises the metric.
+#
+# Register this entry_point at host startup via:
+#
+#   buff_plugins::register_static!(
+#       static_reg, runtime,
+#       "json_tracing::JsonTracingPlugin",
+#       || Box::new(json_tracing::JsonTracingPlugin::new())
+#   );
+#
+# See `examples/plugins/json_tracing.rs` for the full plugin source.
+
+name = "json-tracing"
+version = "0.1.0"
+kind = "runtime"
+entry_point = "json_tracing::JsonTracingPlugin"
+description = "Exports tracing spans + metrics as JSON lines to stdout."

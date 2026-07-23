@@ -1,0 +1,20 @@
+# buff-plugin.toml — `no_todo_lint` example compiler plugin.
+#
+# A compiler plugin that surfaces a warning whenever it sees a Buff
+# source file containing `todo!()` or `unwrap()` calls.
+#
+# Register this entry_point at host startup via:
+#
+#   buff_plugins::register_static!(
+#       static_reg, compiler,
+#       "no_todo_lint::NoTodoLint",
+#       || Box::new(no_todo_lint::NoTodoLint)
+#   );
+#
+# See `examples/plugins/no_todo_lint.rs` for the full plugin source.
+
+name = "no-todo-lint"
+version = "0.1.0"
+kind = "compiler"
+entry_point = "no_todo_lint::NoTodoLint"
+description = "Rejects `todo!()` / `unwrap()` calls in Buff source."

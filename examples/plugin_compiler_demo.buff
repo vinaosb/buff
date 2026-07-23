@@ -1,0 +1,27 @@
+// plugin_compiler_demo.buff
+//
+// T72 — demo source for a compiler plugin (`no_todo_lint`).
+//
+// This file is consumed by `cargo run -p buff-plugins --example
+// no_todo_lint` (and by the `tests/core.rs` example-plugin test
+// suite). The `no_todo_lint` plugin walks the AST and surfaces a
+// BUFF001 warning at every `todo()` or `unwrap()` call.
+//
+// Expected plugin output for THIS source:
+//
+//   warning[BUFF001]: forbidden call to `todo` — replace with a real
+//                    implementation
+//     --> plugin_compiler_demo.buff:8:12
+//
+// (the call to `todo()` inside `pending_feature` triggers the lint).
+//
+// Running the plugin:
+//
+//   cargo run -p buff-plugins --example no_todo_lint
+
+func pending_feature():
+    let result = todo()
+    print(result)
+
+func main():
+    print("plugin compiler demo")

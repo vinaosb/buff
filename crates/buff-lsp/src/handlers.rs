@@ -8,9 +8,9 @@
 
 use buff_lang_error::{Diagnostic, Severity};
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionResponse, DocumentSymbol, GotoDefinitionResponse,
-    Hover, HoverContents, InsertTextFormat, Location, MarkupContent, MarkupKind, Position, Range,
-    SymbolKind, TextEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
+    CompletionResponse, DocumentSymbol, GotoDefinitionResponse, Hover, HoverContents,
+    InsertTextFormat, Location, MarkupContent, MarkupKind, Position, Range, SymbolKind, TextEdit,
 };
 
 use crate::analysis::DocumentAnalysis;
@@ -93,6 +93,15 @@ pub fn hover(state: &DocumentState, position: Position) -> Option<Hover> {
         }
     }
 
+    // T72: LSP plugin dispatch. Calls into the global plugin registry
+    // (env-var-loaded via BUFF_PLUGIN_DIR / BUFF_PLUGIN_PATH). Empty
+    // registry → Ok(None) → no-op. When a plugin returns hover
+    // content, it's APPENDED to the built-in lines (so plugin docs
+    // augment, never replace, the built-in type/symbol info).
+    if let Some(plugin_hover) = plugin_hover_for(state, position) {
+        lines.push(plugin_hover);
+    }
+
     if lines.is_empty() {
         None
     } else {
@@ -104,6 +113,58 @@ pub fn hover(state: &DocumentState, position: Position) -> Option<Hover> {
             range: Some(Range::new(position, position)),
         })
     }
+}
+
+/// T72: Call the global plugin registry's `hover` dispatch and
+/// return the content if any plugin provides hover info. Empty
+/// registry → `None` (pure no-op).
+///
+/// Uses a synthetic URI derived from `source_id` because the
+/// hover handler's signature takes `&DocumentState` (no direct
+/// URI). The synthetic form `buff://source-{id}` is stable per
+/// document (source_id is the canonical per-document identifier
+/// in buff-lsp) so a plugin that wants to discriminate per file
+/// can match on the trailing id.
+fn plugin_hover_for(state: &DocumentState, position: Position) -> Option<String> {
+    let uri = format!("buff://source-{}", state.source_id.0);
+    let cursor = buff_plugins::PluginPosition::new(position.line, position.character);
+    match buff_plugins::dispatch_global_lsp_hover(&uri, cursor) {
+        Ok(Some(hover)) => Some(hover.content),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------
+// Code actions (T72 plugin hook)
+// ---------------------------------------------------------------------
+
+/// Compute code actions at `position`. Returns the list of
+/// actions registered by LSP plugins (the global plugin
+/// registry). Empty registry → empty `Vec`.
+///
+/// Buff's v1.2 LSP server does not ship a built-in code-action
+/// handler — this entry point exists specifically to give plugins
+/// a hook. When no plugins are registered, callers receive `None`
+/// (the LSP server falls back to "no code actions" which is the
+/// pre-T72 behaviour).
+pub fn code_actions(state: &DocumentState, position: Position) -> Option<Vec<CodeActionOrCommand>> {
+    let uri = format!("buff://source-{}", state.source_id.0);
+    let cursor = buff_plugins::PluginPosition::new(position.line, position.character);
+    let plugin_actions = buff_plugins::dispatch_global_lsp_code_actions(&uri, cursor);
+    if plugin_actions.is_empty() {
+        return None;
+    }
+    let out: Vec<CodeActionOrCommand> = plugin_actions
+        .into_iter()
+        .map(|a| {
+            CodeActionOrCommand::CodeAction(CodeAction {
+                title: a.title,
+                kind: a.kind.map(CodeActionKind::from),
+                ..Default::default()
+            })
+        })
+        .collect();
+    Some(out)
 }
 
 /// Render a [`buff_lang_types::Type`] for hover. Defaults collapse to their

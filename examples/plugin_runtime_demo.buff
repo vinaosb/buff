@@ -1,0 +1,29 @@
+// plugin_runtime_demo.buff
+//
+// T72 — demo source for a runtime plugin (`json_tracing`).
+//
+// This file is consumed by `cargo run -p buff-plugins --example
+// json_tracing`. The `json_tracing` plugin exports each span-enter
+// + metric event as a JSON line to stdout.
+//
+// Expected plugin behaviour when this program is run with the plugin
+// attached:
+//
+//   {"type":"span","name":"http_request","start_us":...,"attrs":{"http.method":"GET"}}
+//   {"type":"metric","name":"http_requests_total","value":1}
+//   {"type":"metric","name":"http_duration_ms","value":12.5}
+//
+// The Buff source itself does NOT change when a runtime plugin is
+// attached — the plugin receives events via the runtime's span +
+// metric dispatch hooks (T73+ will wire those into buff-lang-runtime
+// transparently).
+//
+// Running the plugin:
+//
+//   cargo run -p buff-plugins --example json_tracing
+
+func handle_request(method: String, path: String):
+    print("handling ${method} ${path}")
+
+func main():
+    handle_request(method: "GET", path: "/users/42")

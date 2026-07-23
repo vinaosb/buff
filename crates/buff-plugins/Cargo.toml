@@ -1,0 +1,49 @@
+[package]
+name = "buff-plugins"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Plugin extension points for Buff (compiler + LSP + runtime). \
+Pure-Rust trait-object dispatch (NO dlopen/libloading). \
+Defines `buff-plugin.toml` manifest format, \
+3 plugin traits (CompilerPlugin / LspPlugin / RuntimePlugin), \
+and a PluginRegistry that loads + dispatches.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "plugins", "extension", "compiler", "lsp"]
+categories = ["development-tools"]
+
+[lib]
+name = "buff_plugins"
+path = "src/lib.rs"
+
+[dependencies]
+# T72 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# The crate's surface area is intentionally MINIMAL: only serde + toml
+# (manifest parsing) + thiserror (error enum) + syn (the compiler-pass
+# trait's run_codegen_pass takes a `&mut syn::File`). All four are
+# already pinned at the workspace level — reusing the workspace pins
+# keeps the conservative-pin philosophy intact (no version drift).
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+syn.workspace = true
+
+# `buff-lang-ast` is a workspace path dep so CompilerPlugin::run_lint
+# can take `&[buff_lang_ast::Decl]` (the SAME AST the parser produces).
+# Keeping the trait signature AST-shaped (not `&[u8]` or `&str`) means
+# a compiler plugin never re-parses — it walks the real parsed tree.
+buff-lang-ast.workspace = true
+
+# `buff-lang-error` is the leaf crate carrying `Span`. LintWarning and
+# the runtime span type both reuse `Span` rather than inventing a
+# plugin-local span newtype (avoid identity-mapping overhead).
+buff-lang-error.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -127,6 +127,15 @@ futures-util.workspace = true
 # Pure-Rust deps (serde + serde_json + thiserror + buff-lang-error) —
 # verified to build on this Windows host (no native C dep).
 buff-dap.workspace = true
+# T72: `buff-plugins` — plugin extension points (compiler + LSP +
+# runtime). `buff check` calls
+# `buff_plugins::dispatch_global_compiler_lint` after the built-in
+# linters when `BUFF_PLUGIN_DIR` / `BUFF_PLUGIN_PATH` is set (no-op
+# otherwise). Pure-Rust trait-object dispatch (NO dlopen) — reuses
+# the existing serde + toml + thiserror + syn + buff-lang-ast +
+# buff-lang-error workspace pins. Minimal hook: 5 lines in
+# `check.rs::check_source`; empty registry is a pure no-op.
+buff-plugins.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

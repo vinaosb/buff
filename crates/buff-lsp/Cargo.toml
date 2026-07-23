@@ -26,6 +26,15 @@ buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-error.workspace = true
 buff-lang-cli.workspace = true
+# T72: `buff-plugins` — LSP plugin extension points. `buff-lsp`
+# calls `buff_plugins::dispatch_global_lsp_code_actions` /
+# `dispatch_global_lsp_hover` after the built-in handlers when
+# `BUFF_PLUGIN_DIR` / `BUFF_PLUGIN_PATH` is set (no-op otherwise).
+# Pure-Rust trait-object dispatch (NO dlopen) — reuses the existing
+# serde + toml + thiserror + syn + buff-lang-ast + buff-lang-error
+# workspace pins. Minimal hook: ~10 lines in `handlers.rs::hover`
+# + `code_actions`; empty registry is a pure no-op.
+buff-plugins.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

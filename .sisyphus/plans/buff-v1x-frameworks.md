@@ -3625,7 +3625,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **What**: Write formal stability contract at `.sisyphus/decisions/stability-promise.md` and `docs.buff-lang.org/stability/`. Defines: what's guaranteed not to break (public APIs, language syntax), exceptions (security fixes), deprecation policy (T0 @deprecated → 1 minor version warning → removal), edition contract (opt-in breaking changes via edition field). Inspired by Rust 1.0 stability promise.
   **LOC budget**: ≤1000 (document). **Deps**: T0 (editions, stability badges). **Acceptance**: Document published. Covers all stability dimensions. Referenced from README. 3 tests (doc validation).
 
-- [ ] 72. Plugin Architecture (Compiler + LSP + Runtime)
+- [x] 72. Plugin Architecture (Compiler + LSP + Runtime)
   **What**: Add plugin extension points: (1) compiler plugins (custom lints, custom codegen passes — via comptime T53), (2) LSP plugins (custom code actions, hover providers), (3) runtime plugins (custom tracing collectors, metric exporters). Define plugin manifest format (`buff-plugin.toml`). Plugin loading via dynamic dispatch (not dlopen — use trait objects).
   **LOC budget**: ≤3000. **Deps**: T0, T1, T53 (comptime for compiler plugins). **Acceptance**: One example plugin per type (lint, code action, tracing). Plugin manifest documented. 6 examples + 15 tests.
 

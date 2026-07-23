@@ -163,6 +163,22 @@ pub fn check_source(src: &str) -> CheckReport {
     let deprecated_warnings = collect_deprecated_call_warnings(&decls);
     diagnostics.extend(deprecated_warnings);
 
+    // 7. T72: Compiler plugin dispatch. Calls into the global plugin
+    //    registry (env-var-loaded via BUFF_PLUGIN_DIR /
+    //    BUFF_PLUGIN_PATH). Empty registry → empty Vec → no-op (no
+    //    diagnostics added, no perf overhead beyond a Mutex lock).
+    //    Each LintWarning is converted to a warning-severity
+    //    Diagnostic; the plugin's `name()` is used as the code when
+    //    the warning's own `code` field is None.
+    let plugin_warnings = buff_plugins::dispatch_global_compiler_lint(&decls);
+    for warning in plugin_warnings {
+        let code = warning.code.unwrap_or_else(|| "plugin".to_string());
+        diagnostics.push(Diagnostic::warning(
+            format!("[{code}] {}", warning.message),
+            warning.span,
+        ));
+    }
+
     let outcome = compute_outcome(&diagnostics);
     CheckReport {
         diagnostics,
