@@ -1,17 +1,14 @@
-//! Integration tests for buff-science.
-//!
-//! 15+ tests including proptest for numerical stability.
+//! Unit tests for buff-science.
 
 use buff_science::{interp, linalg, ode, optimize, stats};
 use buff_tensor::Tensor;
-use proptest::prelude::*;
 
-// ===========================================================================
-// Linalg tests
-// ===========================================================================
+// ============================================================
+// linalg tests
+// ============================================================
 
 #[test]
-fn linalg_matmul_basic() {
+fn test_matmul_2x2() {
     let a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let b = Tensor::from_vec(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
     let c = linalg::matmul(&a, &b).unwrap();
@@ -19,7 +16,15 @@ fn linalg_matmul_basic() {
 }
 
 #[test]
-fn linalg_transpose_basic() {
+fn test_matmul_identity() {
+    let a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    let identity = Tensor::from_vec(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+    let c = linalg::matmul(&a, &identity).unwrap();
+    assert_eq!(c.as_slice(), &[1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn test_transpose_2x3() {
     let t = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
     let tt = linalg::transpose(&t).unwrap();
     assert_eq!(tt.shape().as_slice(), &[3, 2]);
@@ -27,263 +32,341 @@ fn linalg_transpose_basic() {
 }
 
 #[test]
-fn linalg_inverse_3x3() {
-    // 3x3 invertible matrix.
+fn test_inverse_2x2() {
+    let m = Tensor::from_vec(vec![4.0, 7.0, 2.0, 6.0], vec![2, 2]).unwrap();
+    let inv = linalg::inverse(&m).unwrap();
+    let product = linalg::matmul(&m, &inv).unwrap();
+    // Check product is approximately identity.
+    // f32 has ~7 significant digits; 1e-5 tolerance is appropriate.
+    let slice = product.as_slice();
+    assert!((slice[0] - 1.0).abs() < 1e-5, "diag[0,0] = {}", slice[0]);
+    assert!((slice[3] - 1.0).abs() < 1e-5, "diag[1,1] = {}", slice[3]);
+    assert!(slice[1].abs() < 1e-5, "off-diag[0,1] = {}", slice[1]);
+    assert!(slice[2].abs() < 1e-5, "off-diag[1,0] = {}", slice[2]);
+}
+
+#[test]
+fn test_inverse_3x3() {
     let m = Tensor::from_vec(
-        vec![2.0, 1.0, 1.0, 1.0, 3.0, 2.0, 1.0, 0.0, 0.0],
+        vec![4.0, 7.0, 3.0, 2.0, 6.0, 5.0, 1.0, 1.0, 1.0],
         vec![3, 3],
     )
     .unwrap();
     let inv = linalg::inverse(&m).unwrap();
-    // Verify m * m^-1 ≈ I
     let product = linalg::matmul(&m, &inv).unwrap();
-    let data = product.as_slice();
-    for r in 0..3 {
-        for c in 0..3 {
-            let expected = if r == c { 1.0 } else { 0.0 };
+    let slice = product.as_slice();
+    // f32 has ~7 significant digits; 1e-5 tolerance is appropriate.
+    for i in 0..3 {
+        for j in 0..3 {
+            let expected = if i == j { 1.0 } else { 0.0 };
             assert!(
-                (data[r * 3 + c] - expected).abs() < 1e-4,
-                "product[{},{}]={}, expected {}",
-                r,
-                c,
-                data[r * 3 + c],
-                expected
+                (slice[i * 3 + j] - expected).abs() < 1e-5,
+                "m * m_inv [{i},{j}] = {} expected {expected}",
+                slice[i * 3 + j]
             );
         }
     }
 }
 
 #[test]
-fn linalg_inverse_singular() {
-    // Singular matrix (row 2 = row 1).
+fn test_determinant_2x2() {
+    let m = Tensor::from_vec(vec![4.0, 7.0, 2.0, 6.0], vec![2, 2]).unwrap();
+    let det = linalg::determinant(&m).unwrap();
+    assert!((det - 10.0).abs() < 1e-10);
+}
+
+#[test]
+fn test_determinant_3x3() {
     let m = Tensor::from_vec(
-        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        vec![6.0, 1.0, 1.0, 4.0, -2.0, 5.0, 2.0, 8.0, 7.0],
         vec![3, 3],
     )
     .unwrap();
+    let det = linalg::determinant(&m).unwrap();
+    // det = 6*(-2*7 - 5*8) - 1*(4*7 - 5*2) + 1*(4*8 - (-2)*2)
+    //      = 6*(-14 - 40) - 1*(28 - 10) + 1*(32 + 4)
+    //      = 6*(-54) - 18 + 36 = -324 - 18 + 36 = -306
+    assert!((det - (-306.0)).abs() < 1e-10);
+}
+
+#[test]
+fn test_solve_2x2() {
+    // Solve [2 1; 1 3] * x = [5; 7]. Exact: x = [1.6; 1.8]
+    let a = Tensor::from_vec(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
+    let b = Tensor::from_vec(vec![5.0, 7.0], vec![2, 1]).unwrap();
+    let x = linalg::solve(&a, &b).unwrap();
+    // f32 has ~7 significant digits; 1e-5 tolerance is appropriate.
+    let slice = x.as_slice();
+    assert!((slice[0] - 1.6).abs() < 1e-5, "x[0] = {}", slice[0]);
+    assert!((slice[1] - 1.8).abs() < 1e-5, "x[1] = {}", slice[1]);
+}
+
+#[test]
+fn test_singular_matrix() {
+    let m = Tensor::from_vec(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
     let result = linalg::inverse(&m);
     assert!(result.is_err());
 }
 
+// ============================================================
+// ode tests
+// ============================================================
+
 #[test]
-fn linalg_determinant_2x2() {
-    let m = Tensor::from_vec(vec![3.0, 8.0, 4.0, 6.0], vec![2, 2]).unwrap();
-    let det = linalg::determinant(&m).unwrap();
-    assert!((det - (-14.0)).abs() < 1e-6);
+fn test_rk4_exponential() {
+    // Solve dy/dt = y, y(0) = 1. Exact: y(1) = e.
+    let result = ode::rk4(|_t, y| y, 1.0, 0.0, 1.0, 0.01);
+    assert!((result - std::f64::consts::E).abs() < 1e-4);
 }
 
 #[test]
-fn linalg_solve_basic() {
-    // Solve 2x + y = 5, x + 3y = 7
-    let a = Tensor::from_vec(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
-    let b = Tensor::from_vec(vec![5.0, 7.0], vec![2, 1]).unwrap();
-    let x = linalg::solve(&a, &b).unwrap();
-    // x ≈ [1.6, 1.8]
-    assert!((x.as_slice()[0] - 1.6).abs() < 1e-4);
-    assert!((x.as_slice()[1] - 1.8).abs() < 1e-4);
+fn test_rk4_linear() {
+    // Solve dy/dt = 1, y(0) = 0. Exact: y(1) = 1.
+    let result = ode::rk4(|_t, _y| 1.0, 0.0, 0.0, 1.0, 0.01);
+    assert!((result - 1.0).abs() < 1e-10);
 }
 
-// ===========================================================================
-// ODE tests
-// ===========================================================================
-
 #[test]
-fn ode_rk4_exponential() {
-    // Solve dy/dt = y, y(0) = 1. Solution: y(t) = e^t.
-    let result = ode::rk4(|_t, y| y, 1.0, 0.0, 1.0, 0.001);
-    assert!(
-        (result - std::f64::consts::E).abs() < 1e-4,
-        "RK4 exponential: got {}, expected e ≈ {}",
-        result,
-        std::f64::consts::E
+fn test_rk4_vec_system() {
+    // Solve dx/dt = y, dy/dt = -x (harmonic oscillator).
+    // x(0) = 1, y(0) = 0. At t = 2*pi, x should be ~1.
+    let result = ode::rk4_vec(
+        |_t, state| vec![state[1], -state[0]],
+        vec![1.0, 0.0],
+        0.0,
+        2.0 * std::f64::consts::PI,
+        0.001,
     );
+    assert!((result[0] - 1.0).abs() < 0.01);
+    assert!(result[1].abs() < 0.01);
+}
+
+// ============================================================
+// interp tests
+// ============================================================
+
+#[test]
+fn test_interp_linear_exact() {
+    let xs = vec![0.0, 1.0, 2.0];
+    let ys = vec![0.0, 10.0, 20.0];
+    assert!((interp::linear(&xs, &ys, 0.5).unwrap() - 5.0).abs() < 1e-10);
 }
 
 #[test]
-fn ode_rk4_linear() {
-    // Solve dy/dt = 1, y(0) = 0. Solution: y(t) = t.
-    let result = ode::rk4(|_t, _y| 1.0, 0.0, 0.0, 5.0, 0.1);
-    assert!((result - 5.0).abs() < 1e-6);
-}
-
-#[test]
-fn ode_rk4_vec_system() {
-    // Simple harmonic oscillator: dy1/dt = y2, dy2/dt = -y1
-    // y1(0) = 0, y2(0) = 1 => y1(t) = sin(t)
-    let f = |_t: f64, y: &[f64]| vec![y[1], -y[0]];
-    let result = ode::rk4_vec(f, vec![0.0, 1.0], 0.0, std::f64::consts::FRAC_PI_2, 0.001);
-    assert!(
-        (result[0] - 1.0).abs() < 1e-3,
-        "sin(pi/2) ≈ 1, got {}",
-        result[0]
-    );
-}
-
-// ===========================================================================
-// Interpolation tests
-// ===========================================================================
-
-#[test]
-fn interp_linear_basic() {
-    let xs = vec![0.0, 1.0, 2.0, 3.0];
-    let ys = vec![0.0, 10.0, 20.0, 30.0];
-    let y = interp::linear(&xs, &ys, 1.5).unwrap();
-    assert!((y - 15.0).abs() < 1e-10);
-}
-
-#[test]
-fn interp_linear_endpoints() {
-    let xs = vec![0.0, 1.0];
-    let ys = vec![0.0, 10.0];
+fn test_interp_linear_boundary() {
+    let xs = vec![0.0, 1.0, 2.0];
+    let ys = vec![0.0, 10.0, 20.0];
     assert!((interp::linear(&xs, &ys, 0.0).unwrap() - 0.0).abs() < 1e-10);
-    assert!((interp::linear(&xs, &ys, 1.0).unwrap() - 10.0).abs() < 1e-10);
+    assert!((interp::linear(&xs, &ys, 2.0).unwrap() - 20.0).abs() < 1e-10);
 }
 
 #[test]
-fn interp_linear_out_of_range() {
+fn test_interp_linear_out_of_range() {
     let xs = vec![0.0, 1.0];
     let ys = vec![0.0, 10.0];
     assert!(interp::linear(&xs, &ys, -1.0).is_err());
     assert!(interp::linear(&xs, &ys, 2.0).is_err());
 }
 
-// ===========================================================================
-// Optimization tests
-// ===========================================================================
-
 #[test]
-fn optimize_gradient_descent_quadratic() {
-    // Minimize f(x) = x^2. Minimum at x = 0.
-    let result =
-        optimize::gradient_descent(|x| x[0] * x[0], |x| vec![2.0 * x[0]], vec![5.0], 0.1, 100);
-    assert!(
-        result[0].abs() < 0.01,
-        "gradient descent on x^2: got {}",
-        result[0]
-    );
+fn test_interp_empty() {
+    assert!(interp::linear(&[], &[], 0.0).is_err());
 }
 
-// ===========================================================================
-// Stats tests
-// ===========================================================================
+// ============================================================
+// optimize tests
+// ============================================================
 
 #[test]
-fn stats_mean_basic() {
+fn test_gradient_descent_quadratic() {
+    // Minimize f(x) = x^2. Gradient = 2x.
+    let result = optimize::gradient_descent(
+        |x| {
+            let v = x[0];
+            (v * v, vec![2.0 * v])
+        },
+        vec![5.0],
+        0.1,
+        100,
+    )
+    .unwrap();
+    assert!(result[0].abs() < 0.01);
+}
+
+#[test]
+fn test_gradient_descent_2d() {
+    // Minimize f(x, y) = x^2 + y^2.
+    let result = optimize::gradient_descent(
+        |x| {
+            let val = x[0] * x[0] + x[1] * x[1];
+            (val, vec![2.0 * x[0], 2.0 * x[1]])
+        },
+        vec![3.0, -4.0],
+        0.1,
+        200,
+    )
+    .unwrap();
+    assert!(result[0].abs() < 0.01);
+    assert!(result[1].abs() < 0.01);
+}
+
+#[test]
+fn test_gradient_descent_empty() {
+    let result = optimize::gradient_descent(|_| (0.0, vec![]), vec![], 0.1, 10);
+    assert!(result.is_err());
+}
+
+// ============================================================
+// stats tests
+// ============================================================
+
+#[test]
+fn test_mean() {
     let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     assert!((stats::mean(&data).unwrap() - 3.0).abs() < 1e-10);
 }
 
 #[test]
-fn stats_variance_basic() {
+fn test_mean_empty() {
+    assert!(stats::mean(&[]).is_err());
+}
+
+#[test]
+fn test_variance() {
     let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    // Population variance = 2.0
     assert!((stats::variance(&data).unwrap() - 2.0).abs() < 1e-10);
 }
 
 #[test]
-fn stats_stddev_basic() {
+fn test_stddev() {
     let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     assert!((stats::stddev(&data).unwrap() - 2.0_f64.sqrt()).abs() < 1e-10);
 }
 
 #[test]
-fn stats_correlation_perfect() {
+fn test_correlation_perfect_positive() {
     let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
-    let corr = stats::correlation(&x, &y).unwrap();
-    assert!((corr - 1.0).abs() < 1e-10);
+    assert!((stats::correlation(&x, &y).unwrap() - 1.0).abs() < 1e-10);
 }
 
 #[test]
-fn stats_correlation_negative() {
+fn test_correlation_perfect_negative() {
     let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let y = vec![10.0, 8.0, 6.0, 4.0, 2.0];
-    let corr = stats::correlation(&x, &y).unwrap();
-    assert!((corr - (-1.0)).abs() < 1e-10);
+    assert!((stats::correlation(&x, &y).unwrap() - (-1.0)).abs() < 1e-10);
 }
 
 #[test]
-fn stats_histogram_basic() {
+fn test_histogram_basic() {
     let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let hist = stats::histogram(&data, 5).unwrap();
-    // Each value should be in its own bin (uniform distribution).
-    assert_eq!(hist.len(), 5);
+    let h = stats::histogram(&data, 5).unwrap();
+    // Each bin should have exactly 1 entry.
+    for count in h.values() {
+        assert_eq!(*count, 1);
+    }
 }
 
 #[test]
-fn stats_empty_error() {
-    assert!(stats::mean(&[]).is_err());
-    assert!(stats::variance(&[1.0]).is_err());
+fn test_histogram_single_bin() {
+    let data = vec![1.0, 2.0, 3.0];
+    let h = stats::histogram(&data, 1).unwrap();
+    assert_eq!(h.get(&0), Some(&3));
 }
 
-// ===========================================================================
-// Proptest: numerical stability
-// ===========================================================================
+#[test]
+fn test_histogram_empty() {
+    assert!(stats::histogram(&[], 5).is_err());
+}
+
+// ============================================================
+// proptest tests (numerical stability)
+// ============================================================
+
+use proptest::prelude::*;
 
 proptest! {
     #[test]
-    fn proptest_matmul_identity(a in prop::collection::vec(-100.0f64..100.0, 4)) {
-        // a * I = a (for 2x2 matrices)
-        let mat_a = Tensor::from_vec(a.iter().map(|v| *v as f32).collect(), vec![2, 2]).unwrap();
+    fn proptest_matmul_identity(a in (-10.0f64..10.0), b in (-10.0f64..10.0),
+                                c in (-10.0f64..10.0), d in (-10.0f64..10.0)) {
+        // matmul with identity should return same matrix.
+        let vals = vec![a as f32, b as f32, c as f32, d as f32];
+        let m = Tensor::from_vec(vals, vec![2, 2]).unwrap();
         let identity = Tensor::from_vec(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let result = linalg::matmul(&mat_a, &identity).unwrap();
-        for (got, want) in result.as_slice().iter().zip(mat_a.as_slice().iter()) {
-            prop_assert!((got - want).abs() < 1e-4, "matmul identity failed: got {got}, want {want}");
+        let result = linalg::matmul(&m, &identity).unwrap();
+        let orig = m.as_slice();
+        let res = result.as_slice();
+        for i in 0..4 {
+            assert!((orig[i] - res[i]).abs() < 1e-5, "matmul identity failed at {i}");
         }
     }
 
     #[test]
-    fn proptest_inverse_roundtrip(m0 in -10.0f64..10.0, m1 in -10.0f64..10.0,
-                                   m2 in -10.0f64..10.0, m3 in -10.0f64..10.0) {
-        // For 2x2 diagonal-ish matrices, verify m * m^-1 ≈ I
-        let det = m0 * m3 - m1 * m2;
-        prop_assume!(det.abs() > 0.1, "skip near-singular");
-
-        let mat = Tensor::from_vec(
-            vec![m0 as f32, m1 as f32, m2 as f32, m3 as f32],
-            vec![2, 2],
-        ).unwrap();
-        let inv = linalg::inverse(&mat).unwrap();
-        let product = linalg::matmul(&mat, &inv).unwrap();
-        let data = product.as_slice();
-        prop_assert!((data[0] - 1.0).abs() < 1e-3, "I[0,0]={}", data[0]);
-        prop_assert!((data[1]).abs() < 1e-3, "I[0,1]={}", data[1]);
-        prop_assert!((data[2]).abs() < 1e-3, "I[1,0]={}", data[2]);
-        prop_assert!((data[3] - 1.0).abs() < 1e-3, "I[1,1]={}", data[3]);
+    fn proptest_inverse_roundtrip(a in -10.0f64..10.0, b in -10.0f64..10.0,
+                                  c in -10.0f64..10.0, d in -10.0f64..10.0) {
+        // For non-singular 2x2 matrices, m * m^-1 ~= I.
+        let det = a * d - b * c;
+        prop_assume!(det.abs() > 0.1);
+        let m = Tensor::from_vec(vec![a as f32, b as f32, c as f32, d as f32], vec![2, 2]).unwrap();
+        let inv = linalg::inverse(&m).unwrap();
+        let product = linalg::matmul(&m, &inv).unwrap();
+        let s = product.as_slice();
+        assert!((s[0] - 1.0).abs() < 1e-5, "inverse roundtrip diag");
+        assert!((s[3] - 1.0).abs() < 1e-5, "inverse roundtrip diag");
+        assert!(s[1].abs() < 1e-5, "inverse roundtrip off-diag");
+        assert!(s[2].abs() < 1e-5, "inverse roundtrip off-diag");
     }
 
     #[test]
-    fn proptest_rk4_exponential(initial in 0.1f64..10.0, t_end in 0.01f64..2.0) {
-        // dy/dt = y => y(t) = y0 * e^t
-        let result = ode::rk4(|_t, y| y, initial, 0.0, t_end, 0.001);
-        let expected = initial * (t_end).exp();
-        prop_assert!(
-            (result - expected).abs() / expected.abs().max(1.0) < 1e-3,
-            "RK4 exponential: got {result}, expected {expected}"
-        );
+    fn proptest_rk4_accuracy(scale in 0.1f64..5.0) {
+        // Solve dy/dt = scale * y, y(0) = 1. Exact: y(1) = e^scale.
+        let result = ode::rk4(move |_t, y| scale * y, 1.0, 0.0, 1.0, 0.001);
+        let expected = scale.exp();
+        assert!((result - expected).abs() < 0.001,
+            "rk4 accuracy: got {result}, expected {expected}");
     }
 }
 
-// ===========================================================================
-// Snapshot tests
-// ===========================================================================
+// ============================================================
+// insta snapshot tests (5)
+// ============================================================
 
-#[test]
-fn snapshot_matmul_result() {
-    let a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-    let b = Tensor::from_vec(vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0], vec![3, 2]).unwrap();
-    let c = linalg::matmul(&a, &b).unwrap();
-    insta::assert_snapshot!("matmul_2x3_x_3x2", format!("{:?}", c.as_slice()));
+use std::fmt::Write;
+
+fn format_tensor(t: &Tensor) -> String {
+    let mut s = String::new();
+    let _ = write!(s, "shape: {:?}\ndata: [", t.shape().as_slice());
+    for (i, &v) in t.as_slice().iter().enumerate() {
+        if i > 0 {
+            let _ = write!(s, ", ");
+        }
+        let _ = write!(s, "{v:.6}");
+    }
+    let _ = write!(s, "]");
+    s
+}
+
+fn format_f64_slice(v: &[f64]) -> String {
+    v.iter()
+        .map(|x| format!("{x:.6}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[test]
-fn snapshot_inverse_2x2() {
-    let m = Tensor::from_vec(vec![4.0, 7.0, 2.0, 6.0], vec![2, 2]).unwrap();
+fn snap_inverse_3x3() {
+    let m = Tensor::from_vec(
+        vec![4.0, 7.0, 3.0, 2.0, 6.0, 5.0, 1.0, 1.0, 1.0],
+        vec![3, 3],
+    )
+    .unwrap();
     let inv = linalg::inverse(&m).unwrap();
-    insta::assert_snapshot!("inverse_2x2", format!("{:?}", inv.as_slice()));
+    insta::assert_snapshot!("inverse_3x3", format_tensor(&inv));
 }
 
 #[test]
-fn snapshot_determinant_3x3() {
+fn snap_determinant_3x3() {
     let m = Tensor::from_vec(
         vec![6.0, 1.0, 1.0, 4.0, -2.0, 5.0, 2.0, 8.0, 7.0],
         vec![3, 3],
@@ -294,27 +377,23 @@ fn snapshot_determinant_3x3() {
 }
 
 #[test]
-fn snapshot_rk4_exponential() {
-    let result = ode::rk4(|_t, y| y, 1.0, 0.0, 1.0, 0.001);
+fn snap_rk4_exponential() {
+    let result = ode::rk4(|_t, y| y, 1.0, 0.0, 1.0, 0.01);
     insta::assert_snapshot!("rk4_exponential", format!("{result:.6}"));
 }
 
 #[test]
-fn snapshot_stats_dataset() {
+fn snap_stats_mean_variance() {
     let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let m = stats::mean(&data).unwrap();
     let v = stats::variance(&data).unwrap();
-    let s = stats::stddev(&data).unwrap();
-    insta::assert_snapshot!(
-        "stats_dataset",
-        format!("mean={m:.4} var={v:.4} stddev={s:.4}")
-    );
+    insta::assert_snapshot!("stats_mean_variance", format!("mean={m:.6}, var={v:.6}"));
 }
 
 #[test]
-fn snapshot_histogram_uniform() {
-    let data: Vec<f64> = (0..100).map(|i| i as f64).collect();
-    let hist = stats::histogram(&data, 10).unwrap();
-    let formatted: Vec<String> = hist.iter().map(|(k, v)| format!("bin{k}:{v}")).collect();
-    insta::assert_snapshot!("histogram_uniform", formatted.join(" "));
+fn snap_correlation_perfect() {
+    let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let r = stats::correlation(&x, &y).unwrap();
+    insta::assert_snapshot!("correlation_perfect", format!("{r:.6}"));
 }

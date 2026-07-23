@@ -1,7 +1,7 @@
-//! Statistical functions on slices of `f64`.
+﻿//! Descriptive statistics for Buff.
 //!
-//! All functions operate on plain slices (no Tensor dependency) for
-//! maximum flexibility. Returns `f64` values.
+//! Provides fundamental statistical functions operating on `f64` slices.
+//! All functions are pure-Rust implementations.
 
 use crate::error::{ScienceError, ScienceResult};
 use std::collections::BTreeMap;
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 ///
 /// # Errors
 ///
-/// Returns [`ScienceError::Empty`] if the slice is empty.
+/// - [`ScienceError::Empty`] if the slice is empty.
 pub fn mean(data: &[f64]) -> ScienceResult<f64> {
     if data.is_empty() {
         return Err(ScienceError::Empty);
@@ -21,7 +21,7 @@ pub fn mean(data: &[f64]) -> ScienceResult<f64> {
 
 /// Compute the population variance of a dataset.
 ///
-/// Uses the N denominator (not N-1).
+/// Uses the population formula (divides by N, not N-1).
 ///
 /// # Errors
 ///
@@ -47,11 +47,12 @@ pub fn stddev(data: &[f64]) -> ScienceResult<f64> {
 
 /// Compute the Pearson correlation coefficient between two datasets.
 ///
-/// Both slices must have the same length and at least 2 elements.
+/// Returns a value in `[-1, 1]` where 1 is perfect positive correlation,
+/// -1 is perfect negative correlation, and 0 is no correlation.
 ///
 /// # Errors
 ///
-/// - [`ScienceError::LengthMismatch`] if `x.len() != y.len()`.
+/// - [`ScienceError::LengthMismatch`] if the slices have different lengths.
 /// - [`ScienceError::Empty`] if slices have fewer than 2 elements.
 pub fn correlation(x: &[f64], y: &[f64]) -> ScienceResult<f64> {
     if x.len() != y.len() {
@@ -89,8 +90,7 @@ pub fn correlation(x: &[f64], y: &[f64]) -> ScienceResult<f64> {
 ///
 /// # Errors
 ///
-/// - [`ScienceError::Empty`] if the data is empty.
-/// - [`ScienceError::Empty`] if `bins` is 0.
+/// - [`ScienceError::Empty`] if the data is empty or `bins` is 0.
 pub fn histogram(data: &[f64], bins: usize) -> ScienceResult<BTreeMap<usize, usize>> {
     if data.is_empty() {
         return Err(ScienceError::Empty);

@@ -1,9 +1,9 @@
-//! `buff-science` — Linear algebra, numerical methods, and statistics for Buff.
+﻿//! `buff-science` — Linear algebra, numerical methods, and statistics for Buff.
 //!
-//! Builds on [`buff_tensor::Tensor`] for matrix operations and uses
-//! [`nalgebra`] for heavy linear algebra (inverse, determinant, solve).
-//! Provides ODE integration (RK4), interpolation, optimization, and
-//! statistical functions.
+//! Builds on [`buff_tensor::Tensor`] for matrix operations with pure-Rust
+//! implementations of inverse (Gauss-Jordan), determinant (LU), and solve
+//! (Gauss elimination). Provides ODE integration (RK4), interpolation,
+//! optimization, and statistical functions.
 //!
 //! # Quick start
 //!
@@ -25,7 +25,7 @@
 //! - [`optimize`] — optimization (gradient descent)
 //! - [`stats`] — statistics (mean, variance, stddev, correlation, histogram)
 
-// Project hard rule: no `unwrap`/`expect`/`panic!` in NON-TEST code.
+// Project hard rule: no unwrap/expect/panic in non-test code.
 #![cfg_attr(not(test), forbid(clippy::unwrap_used))]
 #![cfg_attr(not(test), forbid(clippy::expect_used))]
 #![cfg_attr(not(test), forbid(clippy::panic))]

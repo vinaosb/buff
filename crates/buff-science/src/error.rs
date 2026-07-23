@@ -1,72 +1,61 @@
-//! Errors raised by `buff-science` operations.
-//!
-//! Single enum [`ScienceError`] wrapping the failure modes the MVP surface
-//! exposes. Mirrors the workspace pattern (`thiserror::Error` derive, no
-//! `unwrap`/`expect`/`panic!` in non-test code).
+﻿//! Error types for buff-science operations.
 
-use thiserror::Error;
+use std::fmt;
 
-/// Error type for all `buff-science` operations.
-#[derive(Debug, Clone, PartialEq, Error)]
+/// The error type for buff-science operations.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScienceError {
-    /// Matrix is singular (non-invertible).
-    #[error("singular matrix: determinant is zero or near-zero")]
-    SingularMatrix,
-
-    /// Shape mismatch for the operation.
-    #[error("shape mismatch: lhs={lhs:?} rhs={rhs:?}")]
-    ShapeMismatch {
-        /// LHS shape.
-        lhs: Vec<usize>,
-        /// RHS shape.
-        rhs: Vec<usize>,
-    },
-
-    /// Matrix must be square for this operation.
-    #[error("matrix must be square: got {rows}x{cols}")]
-    NotSquare {
-        /// Number of rows.
-        rows: usize,
-        /// Number of columns.
-        cols: usize,
-    },
-
-    /// Rank must be 2 for matrix operations.
-    #[error("expected rank 2 (matrix), got rank {0}")]
+    /// The input is not a matrix (wrong rank).
     NotMatrix(usize),
-
-    /// Empty input where at least one element is required.
-    #[error("empty input: operation requires at least one element")]
+    /// The matrix is not square.
+    NotSquare { rows: usize, cols: usize },
+    /// The matrix is singular (non-invertible).
+    SingularMatrix,
+    /// Shape mismatch between operands.
+    ShapeMismatch { lhs: Vec<usize>, rhs: Vec<usize> },
+    /// The input data is empty.
     Empty,
-
-    /// Interpolation x is out of the defined range.
-    #[error("interpolation x={x} out of range [{min}, {max}]")]
-    OutOfRange {
-        /// The x value attempted.
-        x: f64,
-        /// Minimum x in the dataset.
-        min: f64,
-        /// Maximum x in the dataset.
-        max: f64,
-    },
-
-    /// Mismatched input lengths.
-    #[error("length mismatch: expected {expected}, got {got}")]
-    LengthMismatch {
-        /// Expected length.
-        expected: usize,
-        /// Actual length.
-        got: usize,
-    },
-
-    /// Numerical convergence failure.
-    #[error("convergence failed after {steps} steps")]
-    ConvergenceFailed {
-        /// Number of steps attempted.
-        steps: usize,
-    },
+    /// Length mismatch between slices.
+    LengthMismatch { expected: usize, got: usize },
+    /// Value out of interpolation range.
+    OutOfRange { x: f64, min: f64, max: f64 },
+    /// Gradient descent did not converge.
+    ConvergenceFailed { steps: usize },
+    /// Numerical error during computation.
+    NumericalError(String),
 }
 
-/// Convenience alias so callers write `Result<T>` instead of
-/// `Result<T, ScienceError>`.
+impl fmt::Display for ScienceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScienceError::NotMatrix(rank) => {
+                write!(f, "expected rank-2 matrix, got rank {rank}")
+            }
+            ScienceError::NotSquare { rows, cols } => {
+                write!(f, "expected square matrix, got {rows}x{cols}")
+            }
+            ScienceError::SingularMatrix => write!(f, "matrix is singular"),
+            ScienceError::ShapeMismatch { lhs, rhs } => {
+                write!(f, "shape mismatch: {:?} vs {:?}", lhs, rhs)
+            }
+            ScienceError::Empty => write!(f, "input is empty"),
+            ScienceError::LengthMismatch { expected, got } => {
+                write!(f, "length mismatch: expected {expected}, got {got}")
+            }
+            ScienceError::OutOfRange { x, min, max } => {
+                write!(f, "value {x} out of range [{min}, {max}]")
+            }
+            ScienceError::ConvergenceFailed { steps } => {
+                write!(f, "convergence failed after {steps} steps")
+            }
+            ScienceError::NumericalError(msg) => {
+                write!(f, "numerical error: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ScienceError {}
+
+/// A convenience alias for `Result<T, ScienceError>`.
 pub type ScienceResult<T> = Result<T, ScienceError>;

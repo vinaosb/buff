@@ -5,8 +5,10 @@ edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 description = """\
-Linear algebra, numerical methods, and statistics for Buff. \
-Builds on buff-tensor (T8) and nalgebra for heavy matrix ops.\
+Linear algebra + numerical methods + statistics for Buff. \
+Wraps `buff-tensor` (T8) for storage + pure-Rust Gauss-Jordan / LU \
+for matrix inverse / determinant / solve. CPU-only. \
+Symbolic math + PDE solvers deferred to v1.18+.\
 """
 repository = "https://github.com/buff-lang/buff"
 keywords = ["buff", "science", "linalg", "stats", "numerical"]
@@ -17,10 +19,25 @@ name = "buff_science"
 path = "src/lib.rs"
 
 [dependencies]
+# T13: buff-tensor for the primary Tensor<f32> matrix type. The MVP
+# reuses buff-tensor's 2-D tensors as the canonical matrix value, so
+# users pass a `Tensor` between buff-tensor ops (matmul/transpose) and
+# buff-science ops (inverse/determinant/solve). Mirrors the path-dep
+# pattern from buff-dsp / buff-image.
 buff-tensor.workspace = true
+# T13: thiserror for the ScienceError enum. Mirrors the workspace-wide
+# error pattern (buff-tensor::TensorError / buff-lang-runtime::
+# RuntimeError all derive thiserror::Error).
 thiserror.workspace = true
+# T13: rayon for parallel numeric ops where buff-tensor's own rayon
+# surface does not suffice. The MVP keeps rayon use minimal.
 rayon.workspace = true
 
 [dev-dependencies]
+# T13: insta for snapshot tests (linalg roundtrip result, rk4 trajectory,
+# histogram bins, etc.). Mirrors the project-wide snapshot workflow.
 insta.workspace = true
+# T13: proptest for numeric stability tests (matmul correctness, inverse
+# roundtrip m * m^-1 ~= I, rk4 accuracy on e^t ~= 2.71828). Required per
+# T13 spec: "math-heavy -> proptest required for numerical ops".
 proptest.workspace = true

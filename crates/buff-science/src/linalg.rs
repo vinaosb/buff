@@ -3,7 +3,7 @@
 //! Pure-Rust implementations of matrix inverse (Gauss-Jordan),
 //! determinant (LU decomposition), and solve (Gauss elimination
 //! with partial pivoting). Matmul and transpose delegate to
-//! buff-tensor's existing rayon-parallel implementations.
+//! buff-tensor's existing implementations.
 
 use crate::error::{ScienceError, ScienceResult};
 use buff_tensor::Tensor;
@@ -55,8 +55,7 @@ pub fn matmul(a: &Tensor, b: &Tensor) -> ScienceResult<Tensor> {
 ///
 /// Returns [`ScienceError::NotMatrix`] if the tensor is not rank 2.
 pub fn transpose(t: &Tensor) -> ScienceResult<Tensor> {
-    t.transpose()
-        .map_err(|_| ScienceError::NotMatrix(t.rank()))
+    t.transpose().map_err(|_| ScienceError::NotMatrix(t.rank()))
 }
 
 /// Compute the inverse of a square matrix via Gauss-Jordan elimination.
@@ -98,9 +97,7 @@ pub fn inverse(m: &Tensor) -> ScienceResult<Tensor> {
         // Swap rows.
         if max_row != col {
             for j in 0..2 * n {
-                let tmp = aug[col * 2 * n + j];
-                aug[col * 2 * n + j] = aug[max_row * 2 * n + j];
-                aug[max_row * 2 * n + j] = tmp;
+                aug.swap(col * 2 * n + j, max_row * 2 * n + j);
             }
         }
         // Scale pivot row.
@@ -158,9 +155,7 @@ pub fn determinant(m: &Tensor) -> ScienceResult<f64> {
         }
         if max_row != col {
             for j in 0..n {
-                let tmp = lu[col * n + j];
-                lu[col * n + j] = lu[max_row * n + j];
-                lu[max_row * n + j] = tmp;
+                lu.swap(col * n + j, max_row * n + j);
             }
             perm_sign *= -1;
         }
@@ -183,7 +178,7 @@ pub fn determinant(m: &Tensor) -> ScienceResult<f64> {
 /// Solve the linear system `a * x = b` for `x` via Gauss elimination
 /// with partial pivoting.
 ///
-/// Returns `x` such that `a * x ≈ b`.
+/// Returns `x` such that `a * x` is approximately `b`.
 ///
 /// # Errors
 ///
@@ -234,9 +229,7 @@ pub fn solve(a: &Tensor, b: &Tensor) -> ScienceResult<Tensor> {
         }
         if max_row != col {
             for j in 0..(n + n_rhs) {
-                let tmp = aug[col * (n + n_rhs) + j];
-                aug[col * (n + n_rhs) + j] = aug[max_row * (n + n_rhs) + j];
-                aug[max_row * (n + n_rhs) + j] = tmp;
+                aug.swap(col * (n + n_rhs) + j, max_row * (n + n_rhs) + j);
             }
         }
         // Eliminate below.

@@ -1,15 +1,8 @@
-// T13 example: stats.buff - mean, variance, stddev on sample data.
-//
-// Computes statistics on [1, 2, 3, 4, 5]:
-//   mean = 3.0
-//   variance = 2.0
-//   stddev = sqrt(2) ≈ 1.41421
+﻿import mean, variance, stddev from buff.science
 
 func main():
-    let data = [1.0, 2.0, 3.0, 4.0, 5.0]
-    let m = Science.stats.mean(data)
-    let v = Science.stats.variance(data)
-    let s = Science.stats.stddev(data)
-    print("mean:", m)
-    print("variance:", v)
-    print("stddev:", s)
+    let data = vec![1.0, 2.0, 3.0, 4.0, 5.0]
+    print("Data:", data)
+    print("Mean:", mean(data))
+    print("Variance:", variance(data))
+    print("Stddev:", stddev(data))

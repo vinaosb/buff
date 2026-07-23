@@ -22,19 +22,20 @@ pub fn linear(xs: &[f64], ys: &[f64], x: f64) -> ScienceResult<f64> {
             got: ys.len(),
         });
     }
-    if x < xs[0] || x > *xs.last().ok_or(ScienceError::Empty)? {
+    let x_min = xs[0];
+    let x_max = *xs.last().ok_or(ScienceError::Empty)?;
+    if x < x_min || x > x_max {
         return Err(ScienceError::OutOfRange {
             x,
-            min: xs[0],
-            max: *xs.last().ok_or(ScienceError::Empty)?,
+            min: x_min,
+            max: x_max,
         });
     }
-    // Binary search for the interval.
     let n = xs.len();
     if n == 1 {
         return Ok(ys[0]);
     }
-    // Find the right endpoint of the interval containing x.
+    // Binary search for the interval containing x.
     let idx =
         match xs.binary_search_by(|xi| xi.partial_cmp(&x).unwrap_or(std::cmp::Ordering::Equal)) {
             Ok(i) => {

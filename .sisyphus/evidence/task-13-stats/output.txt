@@ -1,35 +1,34 @@
-Task 13 — Statistics Computation Evidence
-==========================================
+﻿cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+At line:1 char:64
++ ... -msvc.ps1"; cargo test -p buff-science -- test_mean test_variance tes ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.25s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running unittests src\lib.rs (target\debug\deps\buff_science-6a5fb6a1c703ada9.exe)
 
-Scenario: Stats compute on dataset
-  Tool: Bash
-  Steps:
-    1. data = [1.0, 2.0, 3.0, 4.0, 5.0]
-    2. Compute mean, variance, stddev
+running 0 tests
 
-Input data: [1.0, 2.0, 3.0, 4.0, 5.0]
-n = 5
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-Mean:
-  sum = 1.0 + 2.0 + 3.0 + 4.0 + 5.0 = 15.0
-  mean = 15.0 / 5 = 3.0
+     Running tests\unit_tests.rs (target\debug\deps\unit_tests-bfa7ca2b17101926.exe)
 
-Variance (population):
-  deviations: [-2.0, -1.0, 0.0, 1.0, 2.0]
-  squared: [4.0, 1.0, 0.0, 1.0, 4.0]
-  sum = 10.0
-  variance = 10.0 / 5 = 2.0
+running 9 tests
+test test_correlation_perfect_negative ... ok
+test test_correlation_perfect_positive ... ok
+test test_histogram_basic ... ok
+test test_histogram_single_bin ... ok
+test test_mean ... ok
+test test_mean_empty ... ok
+test test_stddev ... ok
+test test_histogram_empty ... ok
+test test_variance ... ok
 
-Standard deviation:
-  stddev = sqrt(2.0) ≈ 1.41421356...
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.00s
 
-Verification:
-  mean = 3.0 ✓ (expected 3.0)
-  variance = 2.0 ✓ (expected 2.0)
-  stddev = 1.41421356 ✓ (expected sqrt(2.0))
+   Doc-tests buff_science
 
-Result: PASS — all statistics correct.
+running 0 tests
 
-Evidence generated: 2026-07-23
-Crate: buff-science v1.0.0
-Tests: stats_mean_basic, stats_variance_basic, stats_stddev_basic
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+

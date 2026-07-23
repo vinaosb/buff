@@ -1,34 +1,23 @@
-Task 13 — RK4 ODE Integration Evidence
-=======================================
+﻿cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+At line:1 char:64
++ ... ode\setup-msvc.ps1"; cargo test -p buff-science test_rk4 2>&1 | Out-F ...
++                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.27s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running unittests src\lib.rs (target\debug\deps\buff_science-6a5fb6a1c703ada9.exe)
 
-Scenario: RK4 integrates ODE correctly
-  Tool: Bash
-  Steps:
-    1. Define f(t, y) = y (exponential growth, solution y(t) = e^t)
-    2. Integrate from t=0 to t=1 with step 0.001
-    3. Assert result ≈ e^1 ≈ 2.71828 (within 1e-4)
+running 0 tests
 
-ODE: dy/dt = y, y(0) = 1.0
-Exact solution: y(t) = e^t
-At t=1: y(1) = e^1 ≈ 2.718281828...
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-RK4 parameters:
-  initial = 1.0
-  t_start = 0.0
-  t_end = 1.0
-  step = 0.001
-  n_steps = 1000
+     Running tests\unit_tests.rs (target\debug\deps\unit_tests-bfa7ca2b17101926.exe)
 
-RK4 result at t=1: 2.718281667...
-Expected e^1:       2.718281828...
-Absolute error:     1.61e-07
-Relative error:     5.93e-08
+running 4 tests
+test test_rk4_linear ... ok
+test test_rk4_exponential ... ok
+test test_rk4_vec_system ... ok
+test proptest_rk4_accuracy ... ok
 
-Verification:
-  |result - e| = 1.61e-07 < 1e-4 ✓
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.01s
 
-Result: PASS — RK4 solver is accurate within 1e-4 tolerance.
-
-Evidence generated: 2026-07-23
-Crate: buff-science v1.0.0
-Test: ode_rk4_exponential
