@@ -857,7 +857,17 @@ fn const_int_value(expr: &Expr) -> Option<i128> {
 /// (an unresolvable inner falls back to [`Type::Unknown`] so the Option
 /// wrapper still flows through — this lets `let x: Option<MyEnum> = None`
 /// type-check at the wrapper level even before user-enum resolution lands).
-fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
+///
+/// ## T58 — `pub(crate)` visibility
+///
+/// Exposed at `pub(crate)` so the `multi_dispatch` module can resolve
+/// `FuncDecl` parameter types when building the dispatch table. Kept
+/// crate-local (NOT `pub`) because the function's contract is unstable
+/// — it returns `None` for user-defined types (structs/enums), which is
+/// a v0.5 deferral the multi-dispatch table inherits (multi-dispatch on
+/// user types falls through to `Type::Unknown` and the dispatcher treats
+/// the params as opaque, which is the documented v1.19 scope).
+pub(crate) fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
     match ty {
         TypeRef::Named { name, .. } => match name.name.as_str() {
             "Int" => Some(Type::int_default()),

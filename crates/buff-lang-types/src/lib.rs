@@ -26,6 +26,12 @@ pub mod comptime;
 pub mod env;
 pub mod exhaustiveness;
 pub mod infer;
+// T58: multiple-dispatch (Julia-inspired) registry + resolver. Re-exported
+// at the crate root so the type inferencer + Rust codegen consume the table
+// by short path. Compile-time-only dispatch on ALL argument types; single-
+// dispatch is the special case (group size 1) and bypasses the table
+// entirely, so all pre-T58 code keeps compiling unmangled.
+pub mod multi_dispatch;
 pub mod modules;
 // T33: ownership analysis (Copy classification, Arc-across-spawn detection,
 // CoW mutation detection). Re-exported at crate root so the codegen pass
@@ -78,6 +84,9 @@ pub use exhaustiveness::{
     check_program, EnumRegistry,
 };
 pub use infer::TypeInferencer;
+// T58: multiple-dispatch table (Julia-inspired). Re-exported at crate root
+// so the type inferencer + Rust codegen consume it by short path.
+pub use multi_dispatch::{MultiDispatchMethod, MultiDispatchTable};
 // T29: module-system graph. Re-exported at crate root for the CLI/LSP
 // so callers can `buff_lang_types::build_graph(...)` without a long path.
 pub use modules::{
