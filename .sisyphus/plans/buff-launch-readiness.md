@@ -89,6 +89,8 @@ Make Buff **launch-ready**: (1) compile at near-Go speed, (2) automatically disp
 
 ### QA Policy
 Every task includes agent-executed QA scenarios. Evidence saved to `.sisyphus/evidence/task-{N}-{scenario-slug}.{ext}`.
+
+> **QA format note**: Tasks T7-T12, T22-T27, T31-T35, T37-T53 use an abbreviated one-line QA format with Evidence paths. The executing agent should expand these to full scenario blocks (Tool / Steps / Expected Result / Evidence) before or during execution. The Evidence path is the contract — the format is a guideline.
 - **CLI/compile-speed**: Bash — run `cargo run -p buff-lang-cli -- ...`, time it, assert output + exit code.
 - **Runtime/MOAT**: Bash — `cargo test -p buff-lang-runtime`; drive dispatch via `MockGpuBackend`.
 - **Errors**: Bash — run compiler on fixture, assert rendered diagnostic (snapshot) + `--error-format json`.
@@ -101,7 +103,7 @@ Every task includes agent-executed QA scenarios. Evidence saved to `.sisyphus/ev
 
 ### Parallel Execution Waves
 
-> **Optimized 2026-07-22** (Metis-reviewed, Momus-approved): T13 pulled into Wave 0; Wave 2 split into 2a (independent) + 2b (dependent); Track F long-lead items pulled earlier; T15/T16 ports moved to Wave 2a; T19 separated into Wave 4; T105 split into T105a + T105b; added T108-T118 (AGENTS.md, release runbook, decision record, cross-compile, profiler, race detector, .env loading, buff expand, community health files, playground rebuild, VSCode extension update). **118 tasks across 6 waves + Final Verification.**
+> **Optimized 2026-07-22** (Metis-reviewed, Momus-approved): T13 pulled into Wave 0; Wave 2 split into 2a (independent) + 2b (dependent); Track F long-lead items pulled earlier; T15/T16 ports moved to Wave 2a; T19 separated into Wave 4; T105 split into T105a + T105b; added T108-T118 (AGENTS.md, release runbook, decision record, cross-compile, profiler, race detector, .env loading, buff expand, community health files, playground rebuild, VSCode extension update). **122 tasks across 6 waves + Final Verification.**
 
 ```
 Wave 0 (Foundation — DO FIRST: baselines + generics + audit + time-bombs + critical docs):
@@ -181,8 +183,7 @@ Wave 3 (Showcase — self-host types/codegen ports + The Book):
 ├── T55:  "The Book" tutorial ← BLOCKED BY T54+T23-T25
 ├── T102: buff doc --serve ← BLOCKED BY T56+T97
 └── T117: Playground rebuild for v1.25 features ← needs Wave 2a/2b language features
-├── T121: Benchmark publication page ← uses T22 baseline data
-└── T102: buff doc --serve ← BLOCKED BY T56+T97
+└── T121: Benchmark publication page ← uses T22 baseline data
 
 Wave 4 (Self-host closure):
 └── T19:  Bootstrap determinism gate (Stage 2 == Stage 3) ← BLOCKED BY T15-T18
@@ -241,7 +242,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 - **Track C** → v1.MINOR per crate port, gated on T13+T105, closed by T19
 - **Track D** → v1.MINOR per coherent unit (v1.30 stdlib; v1.31 generics; v1.32 patterns)
 - **Track E** → v1.25 time-bomb patch; v1.33 diag-quality
-- **Track F** → v1.34 launch-infra (announces Buff 1.0)
+- **Track F** → v1.34 launch-infra (announces Buff publicly — v1.0 "Production" already shipped; this is the public launch)
 - **Track G** → v1.MINOR per attribute
 - **Track H** → v1.MINOR per tool
 - **Track I** → v1.25-docs (audit); v1.26-codegen-hygiene; v1.27-broad-hygiene; v1.28-polish
@@ -256,7 +257,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 - **T62 relaxed dep** (wraps v1.2 LSP; extends when T46 lands)
 - **T20/T21 BLOCKED BY T110** (decision record)
 - **Wave 2a = "all independent"** (zero intra-wave deps)
-- **Wave 2b = "dependent layer"** (9 tasks consuming 2a outputs)
+- **Wave 2b = "dependent layer"** (14 tasks consuming 2a outputs)
 
 ---
 
@@ -591,7 +592,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
   **Must NOT do**: Do NOT change codegen output (byte-identical Rust must be produced). Do NOT break codegen determinism.
   **Recommended Agent Profile**: `deep` — the largest port (codegen is the most complex crate).
   **Skills**: none.
-  **Parallelization**: YES (Wave 3). Blocks: T19. Blocked By: T13, T105a, T17 (types port — codegen depends on type definitions).
+  **Parallelization**: YES (Wave 3 — after T17; T18 serializes after T17 within Wave 3 per Concurrency Policy). Blocks: T19. Blocked By: T13, T105a, T17 (types port — codegen depends on type definitions).
   **References**: `crates/buff-lang-codegen-rust/src/{rust_codegen,lib,format,context,atomic_analysis,race_analysis,gpu_alignment,move_analysis}.rs`.
   **Acceptance Criteria**: Buff-written codegen produces byte-identical Rust output. Bootstrap participates in T19 gate.
   **QA**: Compile all fixtures; assert byte-identical emitted Rust. Evidence: task-18-codegen-port.txt
@@ -699,7 +700,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
   - **T30**: serde_yml exact pin — same rationale.
   - **T33**: Version-tier consistency — unify all 64 crate versions from {1.2.0, 1.0.0} to a single tier (or document 3 tiers: 1.2.0 core / 1.0.0 tooling / 0.1.0 experimental). T33 is the heavyweight of this batch (touches ALL Cargo.tomls).
   - **T34**: Workspace `[profile.release]` — add `lto = "thin"` + `opt-level = 3` for release builds.
-  - **T36**: Migrate rand 0.8→0.9 — update `rand = "0.8"` to `rand = "0.9"`; fix breaking API changes.
+  - **T36**: Migrate rand 0.8→0.9 — update `rand = "0.8"` to `rand = "0.9"`; fix breaking API changes. **NOTE**: This overrides AGENTS.md's "Conservative pin philosophy: rand 0.8 NOT 0.9" — the override rationale is that rand 0.9 is now stable and the conservative-pin rule was temporary. Update AGENTS.md (T108) to reflect this change.
 
   **Must NOT do**: Do NOT batch all 6 into one commit (one commit per fix — atomic rollback). Do NOT change functionality.
   **Recommended Agent Profile**: `quick` (one agent, sequential commits).
@@ -761,7 +762,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
   **Must NOT do**: Do NOT implement associated types (T75). Do NOT implement dyn Trait (T68).
   **Recommended Agent Profile**: `deep`. **Skills**: none.
   **Parallelization**: YES (Wave 2a). Blocks: T68, T75. Blocked By: T13.
-  **References**: `crates/buff-lang-ast/src/common.rs:56-60` (Param); `crates/buff-lang-types/src/infer.rs`; `crates/buff-lang-codegen-rust/src/`.
+  **References**: `crates/buff-lang-ast/src/common.rs` (Param struct at ~line 84 — verify at execution time); `crates/buff-lang-types/src/infer.rs`; `crates/buff-lang-codegen-rust/src/`.
   **Acceptance Criteria**: `fn sort<T: Ord>(xs: Vector<T>)` compiles with Vector<Int>, fails E12xx with non-Ord type.
   **QA**: Test bound satisfied (compiles) + bound violated (E12xx error). Evidence: task-38-bounds.txt
   **Commit**: YES — `feat(types): generic bounds/trait constraints + Eq/Hash/Clone/Default/Show preludes`
@@ -794,7 +795,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
   **Must NOT do**: Do NOT change let-pattern behavior.
   **Recommended Agent Profile**: `quick`. **Skills**: none.
   **Parallelization**: YES (Wave 2a). Blocked By: None.
-  **References**: `crates/buff-lang-parser/src/stmt.rs:716-718`; `crates/buff-lang-parser/src/expr.rs:843-847`.
+  **References**: `crates/buff-lang-parser/src/stmt.rs` (struct pattern parsing at ~line 974 — verify); `crates/buff-lang-parser/src/expr.rs` (`parse_match` at ~line 1171 — verify).
   **Acceptance Criteria**: `Point { x, y } => x + y` works in match.
   **QA**: Struct pattern in match arm; assert destructuring works. Evidence: task-41-struct-patterns.txt
   **Commit**: YES — `feat(parser): allow struct patterns in match arms`
@@ -989,6 +990,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 - [ ] 59. Track F — MEMORY_SAFETY.md Statement (Wave 0, writing)
 
   **What to do**: Author `MEMORY_SAFETY.md` in repo root. CISA-aligned memory safety statement: Buff inherits Rust's memory safety (no buffer overflows, use-after-free, null derefs, data races). Explain transpiler architecture. Compare to C/C++ memory unsafety.
+  **Must NOT do**: Do NOT overstate Buff's safety beyond Rust's guarantees (be precise: Buff inherits Rust's safety for generated code; FFI/unsafe blocks are user's responsibility). Do NOT make performance/safety trade-off claims.
   **Recommended Agent Profile**: `writing`. **Skills**: none.
   **Parallelization**: YES (Wave 0). Blocked By: None.
   **References**: CISA memory safety guidance; Rust safety guarantees.
@@ -1499,7 +1501,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 
   **What to do** (collectively for T105a + T105b):
   - **MECHANICAL EXTRACTION ONLY** — move existing fn/impl/mod blocks into new files. NO logic changes. NO new abstractions. NO new traits. NO signature changes.
-  - **T105a: Split `rust_codegen.rs` (17,453 → ≤5,000 LOC)**: LINE NUMBERS BELOW ARE APPROXIMATE — re-discover extraction boundaries at execution time by searching for `fn`/`impl`/section markers. Extract `syn_helpers.rs` (syn-construction helpers, ~900 LOC), `derive_attrs.rs` (attribute builders, ~210 LOC), `dependency_detection.rs` (AST-walking collectors, ~360 LOC), `extern_crate_detection.rs` (the `program_uses_*` family, ~3,400 LOC). PRESERVE exact BTreeSet population order (codegen determinism).
+  - **T105a: Split `rust_codegen.rs` (17,453 → target ≤10,000 LOC)**: LINE NUMBERS BELOW ARE APPROXIMATE — re-discover extraction boundaries at execution time by searching for `fn`/`impl`/section markers. The 4 named extractions below are ILLUSTRATIVE, NOT EXHAUSTIVE — the agent must discover and extract additional cleanly-separable blocks (e.g., `lower_*` families, prelude-call lowering, specific AST-node handlers) to reach the target. Named extractions: `syn_helpers.rs` (syn-construction helpers, ~900 LOC), `derive_attrs.rs` (attribute builders, ~210 LOC), `dependency_detection.rs` (AST-walking collectors, ~360 LOC), `extern_crate_detection.rs` (the `program_uses_*` family, ~3,400 LOC). PRESERVE exact BTreeSet population order (codegen determinism). Target relaxed from ≤5,000 to ≤10,000 after Metis verification showed named extractions sum to ~4,870, leaving ~12,583 — mechanical extraction of 7,500+ additional LOC without behavior change is the realistic scope.
   - **T105b: Split `prelude_types.rs` (9,317 → ≤2,000 LOC)**: LINE NUMBERS BELOW ARE APPROXIMATE — re-discover at execution time via `impl` block boundaries. Keep `pub enum PreludeType` (445 variants) + enum definitions. Extract `prelude_type_metadata.rs` (impl PreludeType, ~1,800 LOC), `prelude_assoc_fn_impl.rs` (~570 LOC), `prelude_assoc_const_impl.rs` (~1,360 LOC), `prelude_instance_fn_impl.rs` (~2,500 LOC).
   - **Pre-refactor baseline (FIRST ACTION)**: `git tag pre-hygiene-v1.25` + capture baseline-hashes.json (build N fixtures, hash emitted .rs).
 
@@ -1509,7 +1511,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 
   **References**: `.sisyphus/audits/code-hygiene-v1.25.md` (T104); `crates/buff-lang-codegen-rust/src/{rust_codegen,lib}.rs`; `crates/buff-lang-types/src/{prelude_types,lib}.rs`; spike-validated extractable blocks (line numbers above).
 
-  **Acceptance Criteria**: `rust_codegen.rs` ≤5,000 LOC; `prelude_types.rs` ≤2,000 LOC; all new files ≤2,000 LOC; `cargo test --workspace` PASS; `cargo clippy --workspace --all-targets -- -D warnings` clean; **codegen-hash diff = 0** (byte-identical output pre/post); zero unexpected insta snapshot churn; no new HashMap in compiler-internal crates; no new unwrap/expect.
+  **Acceptance Criteria**: `rust_codegen.rs` ≤10,000 LOC (relaxed from ≤5K per Metis); `prelude_types.rs` ≤3,000 LOC (relaxed from ≤2K); all new files ≤2,000 LOC; `cargo test --workspace` PASS; `cargo clippy --workspace --all-targets -- -D warnings` clean; **codegen-hash diff = 0** (byte-identical output pre/post); zero unexpected insta snapshot churn; no new HashMap in compiler-internal crates; no new unwrap/expect (baseline captured by T104 audit, not hard-coded).
 
   **QA Scenarios**:
   ```
@@ -1525,7 +1527,7 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
     Evidence: .sisyphus/evidence/task-105-loc-reduction.txt
 
   Scenario: No new violations
-    Steps: grep unwrap/expect count ≤ baseline 1258; grep HashMap in compiler-internal unchanged
+    Steps: grep unwrap/expect count ≤ baseline (captured by T104 audit); grep HashMap in compiler-internal unchanged
     Evidence: .sisyphus/evidence/task-105-no-new-violations.txt
   ```
 
@@ -1555,11 +1557,11 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 
 - [ ] 108. Track F — Update AGENTS.md for 64-Crate Reality (Wave 0, writing) **LAUNCH CREDIBILITY BLOCKER**
 
-  **What to do**: Update AGENTS.md "19-crate" → "64-crate". Update STRUCTURE tree. Distinguish: 19 launch-critical (buff-lang-*, buff-{lsp,eval,repl,jupyter,registry,playground-wasm,ui-dioxus}) vs ~41 framework/experimental (buff-tensor, buff-ecs, etc.) vs tooling (buffup, bufflings, buff-dap). Update WHERE TO LOOK, version tiers (3 tiers: 1.2.0/1.0.0/0.1.0). **LICENSE consistency check**: verify all 62 Cargo.toml `license` = `MIT OR Apache-2.0`. **CONTRIBUTING.md update**: same treatment if it references crate count.
+  **What to do**: Update AGENTS.md "19-crate" → "64-crate". Update STRUCTURE tree. Distinguish: 19 launch-critical (buff-lang-*, buff-{lsp,eval,repl,jupyter,registry,playground-wasm,ui-dioxus}) vs ~41 framework/experimental (buff-tensor, buff-ecs, etc.) vs tooling (buffup, bufflings, buff-dap). Update WHERE TO LOOK, version tiers (3 tiers: 1.2.0/1.0.0/0.1.0). **LICENSE consistency check**: verify all 64 Cargo.toml `license` = `MIT OR Apache-2.0`. **CONTRIBUTING.md update**: same treatment if it references crate count.
   **Must NOT do**: Do NOT document framework APIs in detail (Book's job). Do NOT change code. Do NOT remove ANTI-PATTERNS/UNIQUE STYLES (still accurate).
   **Recommended Agent Profile**: `writing`. **Skills**: none.
   **Parallelization**: YES (Wave 0). Blocked By: None.
-  **References**: `AGENTS.md`; `CONTRIBUTING.md`; `Cargo.toml` (`members = ["crates/*"]`); `(Get-ChildItem crates -Directory).Count` = 62.
+  **References**: `AGENTS.md`; `CONTRIBUTING.md`; `Cargo.toml` (`members = ["crates/*"]`); `(Get-ChildItem crates -Directory).Count` = 64.
   **Acceptance Criteria**: AGENTS.md says "64-crate"; `Select-String '19-crate'` returns ZERO; all 64 licenses identical; CONTRIBUTING.md updated.
   **QA**: `Select-String '19-crate' AGENTS.md` → empty; `(Get-ChildItem crates -Directory).Count` matches. Evidence: task-108-agents-md.txt
   **Commit**: YES — `docs: update AGENTS.md for 64-crate workspace (T108)`
@@ -1742,15 +1744,15 @@ Theoretical Max Concurrent: 42 (Wave 2a); PRACTICAL: 3-6 (hard cap — see Concu
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
 - [ ] F1. **Plan Compliance Audit** — `oracle`
-  Verify each "Must Have" is implemented. For each "Must NOT Have", search codebase for forbidden patterns (`melior`, `mlir`, `Perceus`, `weak<T>`, `HashMap` in compiler-internal crates **excluding codegen-rust type-lowering and prelude_types.rs registry** (T27 exception), `native-tls`, `cc-rs` in core). Confirm evidence files exist for ALL tasks. Verify: Track D stdlib (Json/File/HTTP); Track E diagnostics (color+multi-span+JSON+--explain+LSP); Track F launch infra (Compatibility Doc+Book+registry+binaries+MEMORY_SAFETY); Track G perf control; Track I hygiene (audit exists, LOC targets met, with_exe_extension preserved, codegen-hash zero diffs, fallback marker); Track I optimization (AGENTS.md says "64-crate", RELEASE.md exists, decision record exists, T13 in Wave 0, T105 split, T19 in Wave 4); Track A (cross-compile --target works, buff profile generates flamegraph, --detect-races works on nightly).
-  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [86/86] | VERDICT: APPROVE/REJECT`
+  Verify each "Must Have" is implemented. For each "Must NOT Have", search codebase for forbidden patterns (`melior`, `mlir`, `Perceus`, `weak<T>`, `HashMap` in compiler-internal crates **excluding codegen-rust type-lowering and prelude_types.rs registry** (T27 exception), `native-tls`, `cc-rs` in core).   Confirm evidence files exist for ALL tasks. Verify: Track B (MOAT: data-locality dispatch, dynamic workload inspection, cost model, --explain factors, kernel fusion); Track C (self-host: generics T13, ports T15-T18, bootstrap T19); Track D stdlib (Json/File/HTTP); Track E diagnostics (color+multi-span+JSON+--explain+LSP); Track F launch infra (Compatibility Doc+Book+registry+binaries+MEMORY_SAFETY); Track G perf control (@prefer/@force/@blocking/@workgroup/FAIL_LOUD); Track H DX tooling (buff watch/fix/bench/snapshot/generate); Track I hygiene (audit exists, LOC targets met, with_exe_extension preserved, codegen-hash zero diffs, fallback marker); Track I optimization (AGENTS.md says "64-crate", RELEASE.md exists, decision record exists, T13 in Wave 0, T105 split, T19 in Wave 4); Track A (cross-compile --target works, buff profile generates flamegraph, --detect-races works on nightly, buff expand works, .env loading works).
+  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [122/122] | VERDICT: APPROVE/REJECT`
 
 - [ ] F2. **Code Quality Review** — `unspecified-high`
   Run `cargo check --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` + `cargo fmt --check`. Review for unwrap/expect/panic in non-test, HashMap in compiler-internal crates, AI slop. Verify Edition-2024 unsafe (T28), Dioxus exact pin (T29), serde_yml pin (T30), Cargo.lock (T31), version tiers (T33), rand 0.9 (T36). **Security review**: T57 registry input validation (path traversal), OAuth token storage (not plaintext), rate limiting. Playground no eval(). All 64 crates `license = "MIT OR Apache-2.0"`.
   Output: `Build [PASS/FAIL] | Clippy [PASS/FAIL] | Tests [N/N] | Fmt [PASS/FAIL] | Files [N/N] | VERDICT`
 
 - [ ] F3. **Real Manual QA** — `unspecified-high`
-  Execute every task's QA scenarios from clean state. Run compile-speed benchmarks (assert targets). Run CPU/GPU dispatch via MockGpuBackend + --explain. Run bootstrap (Stage 2 == Stage 3 byte-identical). Run stdlib demos (json_demo, file_io_demo, http_demo). Run `buff check --explain E1201`. Run `buff doc` on example. Run `buff publish` + `buff add` round-trip (staging registry). Install via scoop/brew/cargo. Run `buff profile` on example. Run `buff build --target`. Connect MCP bridge.
+  Execute every task's QA scenarios from clean state. Run compile-speed benchmarks (assert targets). Run CPU/GPU dispatch via MockGpuBackend + --explain. Run bootstrap (Stage 2 == Stage 3 byte-identical). Run stdlib demos (json_demo, file_io_demo, http_demo). Run `buff check --explain E1201`. Run `buff doc` on example. Run `buff publish` + `buff add` round-trip (staging registry). Install via scoop/brew/cargo.   Run `buff profile` on example. Run `buff build --target`. Connect MCP bridge. Test Track G: `@prefer(cpu)` keeps workload on CPU; `@force(gpu)` raises E1401 on GPU-less machine; `@blocking` runs sync in async context; `@workgroup(256)` emits correct WGSL; `BUFF_FAIL_LOUD_GPU=1` surfaces fallbacks. Test Track H: `buff watch` recompiles on save; `buff fix --apply` fixes naming; `buff bench` reports timing; `buff generate struct X` creates file; `assert_snapshot()` round-trips.
   Output: `Speed [N/N] | Dispatch [N/N] | Bootstrap [Y/N] | Launch-Smoke [N/N] | VERDICT`
 
 - [ ] F4. **Scope Fidelity Check** — `deep`
