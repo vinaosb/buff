@@ -1,0 +1,9 @@
+// T66 refactor paired example — BEFORE state.
+// Apply `buff refactor rename helper compute` then compare with refactor_after.buff
+func helper(a: Int, b: Int) -> Int:
+    return a + b
+
+func main():
+    let result = helper(3, 4)
+    let total = helper(result, 1)
+    print(total)

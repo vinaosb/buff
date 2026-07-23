@@ -816,6 +816,114 @@ pub enum Command {
     /// - Writes `benchmarks/cold-start.json` (machine-readable).
     /// - Writes/appends `benchmarks/cold-start.md` (human-readable).
     BenchColdStart,
+
+    /// `buff refactor` — non-interactive refactoring tools (T66).
+    ///
+    /// Three subcommands operate on `.buff` source by parsing it to
+    /// AST, applying a transformation, and writing the canonical
+    /// formatted output back:
+    ///
+    /// - `buff refactor rename <OLD> <NEW> [--files <GLOB>]` — rename
+    ///   an identifier across one file (when `--files` is omitted or
+    ///   points to a single file) or across every `.buff` file under
+    ///   a directory tree (when `--files` points to a directory). The
+    ///   MVP does NOT resolve scopes; it renames every textual match
+    ///   in the AST identifier nodes (function names, struct names,
+    ///   let-binding names, references, etc.). Future work: scope-
+    ///   aware rename that respects shadowing.
+    ///
+    /// - `buff refactor extract-function <FILE> <START>-<END> <NAME>`
+    ///   — lift the contiguous range of statements on lines
+    ///   `[START, END]` (1-indexed, inclusive on both ends) inside
+    ///   the FIRST function in `<FILE>` into a NEW top-level function
+    ///   named `<NAME>` (with no parameters and no return type for
+    ///   MVP — the body is moved verbatim and replaced at the
+    ///   extraction site by a call to the new function). `<START>`/`<END>`
+    ///   must fall inside the same function body; an error is reported
+    ///   otherwise.
+    ///
+    /// - `buff refactor inline-variable <FILE> <NAME>` — find the
+    ///   first `let <NAME> = expr` binding in `<FILE>`, replace
+    ///   every subsequent `Ident(<NAME>)` reference in the same
+    ///   function body with `expr`, and remove the original `let`.
+    ///   MVP scope: the binding's initializer must be a Literal or
+    ///   an Ident (a side-effect-free expression we can safely
+    ///   duplicate); more complex initializers (calls, method
+    ///   chains) are reported with a clear "unsupported initializer
+    ///   shape" error rather than risk changing semantics.
+    ///
+    /// All three subcommands are non-interactive (CLI-only). LSP
+    /// code-action integration is deferred — the spec's "LSP gains
+    /// code actions for interactive versions" is explicitly a
+    /// follow-up.
+    Refactor {
+        /// The subcommand to run.
+        #[command(subcommand)]
+        cmd: RefactorCmd,
+    },
+}
+
+/// Subcommands of `buff refactor` (T66).
+#[derive(Subcommand, Debug)]
+pub enum RefactorCmd {
+    /// `buff refactor rename <OLD> <NEW> [--files <PATH>]` — rename
+    /// an identifier across one file or a directory tree of `.buff`
+    /// files. Rewrites the file(s) in place using the canonical
+    /// Buff formatter.
+    Rename {
+        /// The current identifier name (must be a valid Buff
+        /// identifier, not a keyword).
+        #[arg(value_name = "OLD")]
+        old: String,
+
+        /// The new identifier name (must be a valid Buff identifier,
+        /// not a keyword).
+        #[arg(value_name = "NEW")]
+        new: String,
+
+        /// Path to the file or directory to rewrite. When omitted,
+        /// operates on every `.buff` file under the current working
+        /// directory (recursive walk). When a single file, rewrites
+        /// just that file. When a directory, rewrites every `.buff`
+        /// file under it.
+        #[arg(long, value_name = "PATH")]
+        files: Option<PathBuf>,
+    },
+
+    /// `buff refactor extract-function <FILE> <START>-<END> <NAME>`
+    /// — lift the statements on lines `[START, END]` (1-indexed,
+    /// inclusive) inside the first function of `<FILE>` into a new
+    /// top-level function `<NAME>`, replacing the lifted range with
+    /// a call to the new function.
+    ExtractFunction {
+        /// Input `.buff` source file.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Line range as `<START>-<END>` (1-indexed, inclusive).
+        /// Example: `5-8` extracts lines 5, 6, 7, 8.
+        #[arg(value_name = "RANGE")]
+        range: String,
+
+        /// Name of the new function. Must be a valid Buff identifier
+        /// and not a keyword.
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
+    /// `buff refactor inline-variable <FILE> <NAME>` — inline the
+    /// first `let <NAME> = expr` binding in `<FILE>`: every
+    /// subsequent `Ident(<NAME>)` reference (in the same function
+    /// body) is replaced by `expr`, and the `let` itself is removed.
+    InlineVariable {
+        /// Input `.buff` source file.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Name of the `let` binding to inline.
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 /// Subcommands of `buff ai` (T65).

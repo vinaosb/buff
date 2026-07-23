@@ -1,0 +1,8 @@
+// T66 refactor rename demo — rename `greet` to `hello`.
+// Before: `buff refactor rename greet hello --files examples/refactor_rename_demo.buff`
+func greet(name: String) -> String:
+    return "Hello, " + name
+
+func main():
+    let msg = greet("World")
+    print(msg)

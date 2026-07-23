@@ -1,0 +1,8 @@
+// T66 refactor extract-function demo — extract lines 4-5 into `process_data`.
+// Before: `buff refactor extract-function examples/refactor_extract_demo.buff 4-5 process_data`
+func main():
+    let x = 10
+    let y = 20
+    let result = x + y
+    print(result)
+    print("done")

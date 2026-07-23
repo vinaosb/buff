@@ -1,0 +1,6 @@
+// T66 refactor inline-variable demo — inline `let x = 5`.
+// Before: `buff refactor inline-variable examples/refactor_inline_demo.buff x`
+func main():
+    let x = 5
+    print(x)
+    print(x + 1)

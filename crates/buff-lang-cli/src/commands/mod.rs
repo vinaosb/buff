@@ -25,6 +25,7 @@ pub mod new;
 pub mod outdated;
 pub mod pgo;
 pub mod publish;
+pub mod refactor;
 pub mod registry;
 pub mod release;
 pub mod repl;

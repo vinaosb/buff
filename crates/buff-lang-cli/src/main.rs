@@ -170,5 +170,6 @@ fn main() -> Result<()> {
         }
         Command::BenchCompile => buff_lang_cli::commands::bench_compile::run(),
         Command::BenchColdStart => buff_lang_cli::commands::bench_cold_start::run(),
+        Command::Refactor { cmd } => buff_lang_cli::commands::refactor::run(cmd),
     }
 }

@@ -331,7 +331,7 @@ v1.20.0 (Developer Experience — 7 tasks):
 ├── T63: Error quality         (needs T24) [unspecified-high] ✅
 ├── T64: Hot reload            (needs T16+T17) [unspecified-high]
 ├── T65: AI integration        [unspecified-high] ✅
-├── T66: Refactoring tools     (needs T24) [unspecified-high]
+├── T66: Refactoring tools     (needs T24) [unspecified-high] ✅
 └── T67: Docs site             [unspecified-high] ✅
 
 v1.21.0 (Community & Quality — 5 tasks, depends on v1.20 for T67):
