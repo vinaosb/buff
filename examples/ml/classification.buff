@@ -1,0 +1,57 @@
+# Buff ML — Binary Classification via Cross-Entropy
+#
+# Toy 2-D classification: synthetic Gaussian clusters at (0, 0) and (5, 5).
+# Architecture: Linear(2 -> 8) -> ReLU -> Linear(8 -> 2) -> Softmax
+# Loss: cross_entropy. Optimizer: Adam (lr=0.05).
+#
+# Codegen integration is deferred — this file documents the API and
+# parses via `buff check`. Rust reference: cargo run -p buff-ml --example classification
+
+import Tensor from buff.tensor
+import { Model, Linear, ReLU, Softmax, Adam, Tape, cross_entropy } from buff.ml
+
+func main():
+    print("Buff ML — Binary Classification")
+
+    # Synthetic 2-D points (2 classes, 5 points each).
+    # Class 0 centered at (0, 0); class 1 centered at (5, 5).
+    let x = Tensor.from_vec(
+        vec![
+            0.1, 0.2,  -0.3, 0.4,  0.5, -0.1,
+            4.8, 5.1,  5.3, 4.9,  4.7, 5.2
+        ],
+        vec![10, 2]
+    )
+    # One-hot labels: rows 0..5 are class 0, rows 5..10 are class 1
+    let y = Tensor.from_vec(
+        vec![
+            1.0, 0.0,  1.0, 0.0,  1.0, 0.0,  1.0, 0.0,  1.0, 0.0,
+            0.0, 1.0,  0.0, 1.0,  0.0, 1.0,  0.0, 1.0,  0.0, 1.0
+        ],
+        vec![10, 2]
+    )
+
+    # MLP: Linear(2 -> 8) -> ReLU -> Linear(8 -> 2) -> Softmax
+    let model = Model.sequential([
+        Linear.new(input_dim: 2, output_dim: 8),
+        ReLU.new(),
+        Linear.new(input_dim: 8, output_dim: 2),
+        Softmax.new()
+    ])
+    let optimizer = Adam.new(lr: 0.05)
+
+    # Train 200 epochs
+    for epoch in range(200):
+        let tape = Tape.new()
+        let logits = model.forward(tape.leaf(x), training: true)
+        let loss = cross_entropy(logits, y)
+        model.backward(loss)
+        optimizer.step(model)
+
+        if epoch % 40 == 0:
+            print("epoch", epoch, "loss:", loss.value())
+
+    # Verify: argmax of each row should be 0 for first 5, 1 for last 5
+    let tape = Tape.new()
+    let probs = model.forward(tape.leaf(x), training: false)
+    print("Class probabilities (first row):", probs.value())

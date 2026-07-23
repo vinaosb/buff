@@ -1,0 +1,61 @@
+[package]
+name = "buff-ml"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Neural network layers + reverse-mode autodiff for Buff, \
+built on `buff-tensor`. MVP per T15 \
+(.sisyphus/plans/buff-v1x-frameworks.md#L2068): f32 ONLY, \
+CPU-only via rayon, JSON serialization. CNNs/RNNs/Transformers \
+and distributed training deferred to v1.18+.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "ml", "neural-network", "autodiff", "deep-learning"]
+categories = ["science"]
+
+[lib]
+name = "buff_ml"
+path = "src/lib.rs"
+
+[dependencies]
+# T15: the autodiff `Var` wraps `buff_tensor::Tensor`. The whole crate is a
+# thin layer of NN operations + reverse-mode differentiation on top of the
+# pure-Rust T8 tensor type. NO reimplementation of Tensor — extension only.
+buff-tensor.workspace = true
+# T15: rayon for CPU-parallel elementwise loss / activation ops (mirrors the
+# T8 strategy already in buff-tensor::math). Workspace-pinned (1.10).
+rayon.workspace = true
+# T15: thiserror for the MlError enum. Mirrors the workspace-wide error
+# pattern (buff-tensor / buff-lang-error / buff-plugins all derive
+# thiserror::Error).
+thiserror.workspace = true
+# T15: serde + serde_json for `Model::save` / `Model::load` (JSON only —
+# ONNX/safetensors deferred per T15 spec). The serialized form is a plain
+# JSON object describing each layer's kind + flat weight/bias buffers.
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# T15: insta for snapshot tests of training convergence + serialization
+# roundtrips. Mirrors the project-wide snapshot workflow.
+insta.workspace = true
+# T15: proptest for gradient checks (finite differences vs analytic autodiff
+# grads). Required per T15 spec: "15+ tests (proptest for gradient checks)".
+proptest.workspace = true
+# T15: tempfile for save/load roundtrip tests (write to a temp path, reload,
+# assert predictions match). Workspace-pinned (3.x).
+tempfile.workspace = true
+
+[[example]]
+name = "linear_regression"
+path = "examples/ml/linear_regression.rs"
+
+[[example]]
+name = "xor"
+path = "examples/ml/xor.rs"
+
+[[example]]
+name = "classification"
+path = "examples/ml/classification.rs"

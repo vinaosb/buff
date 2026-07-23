@@ -1,0 +1,6 @@
+---
+source: crates/buff-ml/tests/unit_tests.rs
+assertion_line: 391
+expression: "format!(\"{val:.6}\")"
+---
+0.666667

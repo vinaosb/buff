@@ -1,0 +1,6 @@
+---
+source: crates/buff-ml/tests/unit_tests.rs
+assertion_line: 350
+expression: "vals.join(\", \")"
+---
+0.090031, 0.244728, 0.665241, 0.090031, 0.244728, 0.665241
