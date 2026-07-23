@@ -31,7 +31,9 @@ If that prints the greeting, your environment is set up correctly.
 
 ## Project Structure
 
-Buff is a 9-crate Rust workspace. Each crate has a focused responsibility:
+Buff is a multi-crate Rust workspace (`members = ["crates/*"]` glob — see
+the root `Cargo.toml`). The **core compiler pipeline** is a focused set of
+crates, each with a single responsibility:
 
 | Crate | Purpose |
 |---|---|
@@ -44,6 +46,13 @@ Buff is a 9-crate Rust workspace. Each crate has a focused responsibility:
 | `buff-lang-codegen-wgsl` | AST to WGSL compute shaders |
 | `buff-lang-runtime` | Rayon + wgpu + tokio host runtime |
 | `buff-lang-cli` | Binary and library: pipeline orchestration |
+
+In addition to the core compiler, the workspace hosts the **tooling**
+crates (LSP, REPL, Jupyter, registry, playground-wasm, ui-dioxus, buffup,
+bufflings, buff-dap) and the **framework** crates shipped across
+v1.13–v1.23 (`buff-{dataframe, tensor, image, audio, dsp, ecs, science,
+pipeline, ml, game, web, db, reactive, observe, …}`). See the root
+`AGENTS.md` and `README.md` for the full per-crate breakdown.
 
 The compilation pipeline flows:
 `.buff source` -> lexer -> parser -> AST -> type inference (inside codegen)
@@ -63,9 +72,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Note: the CI workflow runs `clippy` without `--all-targets`, so running it
-locally with `--all-targets` catches additional lint in test code. Run the
-stricter check locally.
+The CI workflow runs clippy **with** `--all-targets`, so local and CI
+checks are identical. (An earlier version of this note said CI omitted
+`--all-targets` — that is outdated; CI line 18 of
+`.github/workflows/ci.yml` includes it.)
 
 ### Running examples
 
@@ -205,6 +215,8 @@ The project follows a phased roadmap tracked in `.sisyphus/plans/`:
 | v0.1 "Ola, Buff" | [`buff-v01-mvp.md`](.sisyphus/plans/buff-v01-mvp.md) |
 | v0.5 "Real Language" | [`buff-v05-language.md`](.sisyphus/plans/buff-v05-language.md) |
 | v1.0 "Production" | [`buff-v10-production.md`](.sisyphus/plans/buff-v10-production.md) |
+| v1.1–v1.12 tooling | [`buff-post-v10-tooling.md`](.sisyphus/plans/buff-post-v10-tooling.md) |
+| v1.13–v1.24 frameworks | [`buff-v1x-frameworks.md`](.sisyphus/plans/buff-v1x-frameworks.md) |
 | Master orchestrator | [`buff-master.md`](.sisyphus/plans/buff-master.md) |
 
 If you are picking up a task from the plan files, note which task ID you are
