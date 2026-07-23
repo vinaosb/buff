@@ -1,0 +1,6 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: format!("{i:?}")
+snapshot_kind: text
+---
+Input { down: {KeyW, Space}, mouse: (320.0, 240.0) }

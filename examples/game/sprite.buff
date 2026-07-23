@@ -1,0 +1,32 @@
+# sprite.buff — draw sprites example (T16).
+#
+# Demonstrates loading a texture and drawing sprites via the
+# Renderer command queue. In the headless MVP, load_texture is
+# a stub — the draw calls are recorded and visible in tests.
+
+import buff_game.Game
+import buff_game.GameConfig
+import buff_game.SimpleScene
+import buff_game.Transform
+
+func main():
+    let config = GameConfig.new(800, 600, "Sprite Demo")
+    let game = Game.new(config)
+
+    game.add_scene(SimpleScene.new("sprites", |game, _dt| {
+        # Draw a sprite at a fixed position
+        let hero_transform = Transform.new()
+            .translate(100.0, 200.0)
+        game.renderer_mut().draw_sprite("hero.png", hero_transform)
+
+        # Draw another sprite at a different position
+        let enemy_transform = Transform.new()
+            .translate(400.0, 300.0)
+            .rotate(3.14159)
+        game.renderer_mut().draw_sprite("enemy.png", enemy_transform)
+
+        # Draw some UI text
+        game.renderer_mut().draw_text("Score: 0", (10.0, 10.0))
+    }))
+
+    game.run()

@@ -1,0 +1,6 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: format!("{t:?}")
+snapshot_kind: text
+---
+Transform { position: (100.0, 200.0), rotation: 1.5707964, scale: (1.0, 1.0) }

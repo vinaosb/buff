@@ -1,0 +1,53 @@
+[package]
+name = "buff-game"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Game loop + asset pipeline + rendering for Buff \
+(T16 v1.22 Wave 10). ECS-based via buff-ecs (T12); \
+headless MVP — windowing deferred (winit NOT workspace-pinned). \
+Pure-Rust: no wgpu on the public surface, no native deps.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "game", "gamedev", "ecs", "loop"]
+categories = ["game-engines"]
+
+[lib]
+name = "buff_game"
+path = "src/lib.rs"
+
+[dependencies]
+# T16 rationale + pin lives in the root `[workspace.dependencies]` per
+# AGENTS.md hard rule ("heavily documented with T-numbered rationale").
+#
+# HEADLESS MVP — minimal dep surface: only buff-ecs (the T12 foundation
+# this crate composes) + thiserror (error enum). Both are pinned at the
+# workspace level — reusing the workspace pins keeps the conservative-pin
+# philosophy intact (no version drift).
+#
+# buff-image (T9) + buff-audio (T10) are NOT pulled in directly because
+# their transitive deps (ahash build-script, crc32fast build-script)
+# require msvcrt.lib which is missing on this Windows MSVC host (same
+# pre-existing env issue documented in buff-image/AGENTS.md). The
+# Asset::load_texture / Asset::load_audio stubs document the deferred
+# wiring. On CI (ubuntu/windows/macos matrix) the full loading pipeline
+# will be wired in a follow-up commit that adds buff-image + buff-audio
+# as optional deps behind a feature flag (deferred to when the MSVC host
+# issue is resolved).
+#
+# winit / wgpu are NOT added here (headless MVP per task spec "Windowing
+# Strategy"). winit is NOT workspace-pinned and adding it would pull
+# native window-system deps. The `Game.run()` method documents the
+# deferred window integration; `Game.step(dt)` is fully headless-
+# testable and drives the entire simulation pipeline.
+buff-ecs.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# T16: snapshot tests for game-loop state + transform math + draw-command
+# list + input state. insta is the workspace-wide snapshot tool (already
+# pinned at the workspace level since v0.1). Each snapshot is a byte-exact
+# assertion that the step/scene/lifecycle produces the expected state.
+insta.workspace = true

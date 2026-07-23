@@ -1,0 +1,6 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: format!("{cmd:?}")
+snapshot_kind: text
+---
+Sprite { texture_path: "hero.png", transform: Transform { position: (100.0, 200.0), rotation: 0.0, scale: (1.0, 1.0) } }

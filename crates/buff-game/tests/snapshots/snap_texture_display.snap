@@ -1,0 +1,6 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: format!("{t}")
+snapshot_kind: text
+---
+Texture(32x32, 4096 bytes)

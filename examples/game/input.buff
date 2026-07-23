@@ -1,0 +1,44 @@
+# input.buff — keyboard input example (T16).
+#
+# Demonstrates reading keyboard input via the polled Input state.
+# In the headless MVP, input is injected programmatically — the
+# scene checks for WASD keys and prints which direction is pressed.
+
+import buff_game.Game
+import buff_game.GameConfig
+import buff_game.Input
+import buff_game.Key
+import buff_game.SimpleScene
+
+func main():
+    let config = GameConfig.new(800, 600, "Input Demo")
+    let game = Game.new(config)
+
+    game.add_scene(SimpleScene.new("input", |game, _dt| {
+        let input = game.input()
+
+        if input.is_key_pressed(Key.KeyW):
+            print("Moving up")
+        if input.is_key_pressed(Key.KeyS):
+            print("Moving down")
+        if input.is_key_pressed(Key.KeyA):
+            print("Moving left")
+        if input.is_key_pressed(Key.KeyD):
+            print("Moving right")
+        if input.is_key_pressed(Key.Space):
+            print("Jump!")
+        if input.is_key_pressed(Key.Escape):
+            game.quit()
+
+        let (mx, my) = input.mouse_position()
+        print("Mouse: " + mx.str() + ", " + my.str())
+    }))
+
+    # Simulate some key presses for testing
+    game.input_mut().set_key(Key.KeyW, true)
+    game.step(1.0 / 60.0)
+    game.input_mut().set_key(Key.KeyW, false)
+    game.input_mut().set_key(Key.KeyD, true)
+    game.step(1.0 / 60.0)
+
+    game.run()

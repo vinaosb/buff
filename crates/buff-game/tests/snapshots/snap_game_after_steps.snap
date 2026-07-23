@@ -1,0 +1,6 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: format!("{g:?}")
+snapshot_kind: text
+---
+Game { config: GameConfig { width: 800, height: 600, title: "Test", max_frames: Some(600), fixed_dt: 0.016666668 }, elapsed: 0.08333334, frame_count: 5, scene_count: 1, running: true, .. }

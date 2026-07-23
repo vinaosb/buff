@@ -1,0 +1,19 @@
+# hello.buff — minimal game loop example (T16).
+#
+# Demonstrates the headless game loop: create a Game, add a scene
+# that prints "Hello, Buff Game!" on every update, and run for a
+# few frames. This is the simplest possible buff-game program.
+
+import buff_game.Game
+import buff_game.GameConfig
+import buff_game.SimpleScene
+
+func main():
+    let config = GameConfig.new(800, 600, "Hello Game")
+    let game = Game.new(config)
+
+    game.add_scene(SimpleScene.new("hello", |_game, _dt| {
+        print("Hello, Buff Game!")
+    }))
+
+    game.run()

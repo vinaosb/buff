@@ -1,0 +1,6 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: format!("{r:?}")
+snapshot_kind: text
+---
+Renderer { commands: [] }
