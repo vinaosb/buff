@@ -3621,7 +3621,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **What**: Extend registry (v1.6 buff-registry) with quality badges beyond T0 stability: "verified publisher" (authenticated author), "maintained" (commits in 6 months), "tested" (coverage %), "documented" (doc comment coverage). Surface in `buff search` results and registry web UI.
   **LOC budget**: ≤2000. **Deps**: T0, T26 (buff-audit for security badge). **Acceptance**: Badges computed per package. Search results show badges. 4 badge types implemented. 10 tests.
 
-- [ ] 71. Stability Promise Document
+- [x] 71. Stability Promise Document
   **What**: Write formal stability contract at `.sisyphus/decisions/stability-promise.md` and `docs.buff-lang.org/stability/`. Defines: what's guaranteed not to break (public APIs, language syntax), exceptions (security fixes), deprecation policy (T0 @deprecated → 1 minor version warning → removal), edition contract (opt-in breaking changes via edition field). Inspired by Rust 1.0 stability promise.
   **LOC budget**: ≤1000 (document). **Deps**: T0 (editions, stability badges). **Acceptance**: Document published. Covers all stability dimensions. Referenced from README. 3 tests (doc validation).
 

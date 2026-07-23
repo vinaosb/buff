@@ -270,6 +270,15 @@ The coding conventions also live in
 [`.sisyphus/plans/buff-conventions.md`](./.sisyphus/plans/buff-conventions.md)
 (18 conventions covering naming, formatting, docs, errors, testing, and APIs).
 
+## Stability promise
+
+Buff follows a formal stability contract (Rust-style): code that compiles on a
+released version keeps compiling on all minor/patch releases of the same
+major, with narrow exceptions for opt-in editions, security fixes, and the
+`@deprecated` cycle. See [`STABILITY`](./.sisyphus/decisions/stability-promise.md)
+(also rendered at `docs.buff-lang.org/stability/`). ErrorCodes
+(`E10xx`/`E11xx`/`E12xx`/`E13xx`) are stable **forever**.
+
 ## License
 
 Licensed under the [MIT License](./LICENSE).
