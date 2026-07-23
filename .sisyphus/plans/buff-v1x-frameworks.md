@@ -1,36 +1,36 @@
-# Buff v1.13-v1.24 — Frameworks Roadmap
+# Buff v1.13-v1.24 â€” Frameworks Roadmap
 
-## Version Mapping (USER-CONFIRMED — COHERENT RELEASE UNITS)
+## Version Mapping (USER-CONFIRMED â€” COHERENT RELEASE UNITS)
 
-This roadmap groups tasks into **coherent shippable releases**. Each task within a release gets its own commit; the release ships as one version tag when all its tasks complete. Releases can be developed **in parallel** (max 10 concurrent tasks) — the dependency graph determines what can start when.
+This roadmap groups tasks into **coherent shippable releases**. Each task within a release gets its own commit; the release ships as one version tag when all its tasks complete. Releases can be developed **in parallel** (max 10 concurrent tasks) â€” the dependency graph determines what can start when.
 
-### Release Map (12 coherent releases, v1.13.0 → v1.24.0)
+### Release Map (12 coherent releases, v1.13.0 â†’ v1.24.0)
 
 | Release | Theme | Tasks | Can start when |
 |---|---|---|---|
-| **v1.13.0** | **Foundations** — SDK, linking, Channel, traces, spikes, comptime | T0, T1, T2, T24, T3, T4, T6, T53 (8 tasks) | Immediately (no deps) |
-| **v1.14.0** | **Compute + Mocking** — dataframe, tensor, image, audio, dsp, ecs, mock | T7-T12, T25 (7 tasks) | v1.13 ships (need T0+T1) |
-| **v1.15.0** | **Production Wrappers + Security** — web, db, template, reactive, observe, audit, fuzz | T17-T21, T26, T27 (7 tasks) | v1.13 ships (need T0+T1) |
-| **v1.16.0** | **Tier 1 Common** — validate, config, cache, cli, http-client, auth, jobs, resilience | T29-T36 (8 tasks) | v1.13 ships (need T0+T1) |
-| **v1.17.0** | **Tier 2 Common** — fake, assertions, archive, fsm, pubsub, email, scrape, i18n | T37-T44 (8 tasks) | v1.13 ships (need T0+T1) |
-| **v1.18.0** | **Tier 3 Specialized** — geo, nlp, chat, web3, crypto-extras, xml, msgpack, protobuf | T45-T52 (8 tasks) | v1.13 ships (need T0+T1+T4) |
-| **v1.19.0** | **Language Evolution** — SIMD, compile-speed, property wrappers, math syntax, multiple dispatch, actors, binary size | T54-T60 (7 tasks) | v1.13 ships (+ T6 for SIMD, T53+T20 for property wrappers, T2+T20 for actors) |
-| **v1.20.0** | **Developer Experience** — cold-start, PGO, error quality, hot reload, AI, refactoring, docs site | T61-T67 (7 tasks) | v1.13 ships (+ T16+T17 for hot reload, T24 for error/refactoring) |
-| **v1.21.0** | **Community & Quality** — cookbook, onboarding, quality signals, stability promise, plugins | T68-T72 (5 tasks) | v1.20 ships (T68/T69 need T67 docs site) |
-| **v1.22.0** | **Domain Frameworks** — science, pipeline, ML, game | T13, T14, T15, T16 (4 tasks) | v1.14 ships (need T8 tensor, T12 ecs) |
-| **v1.23.0** | **Integration + Flagship** — API compat spike + Data Science Workbench | T22, T23 (2 tasks) | v1.14 + v1.15 + v1.22 ship (need frameworks) |
-| **v1.24.0** | **Audit & Polish** — iterative audit until convergence | T28 (1 task) | v1.23 ships (needs everything done) |
+| **v1.13.0** | **Foundations** â€” SDK, linking, Channel, traces, spikes, comptime | T0, T1, T2, T24, T3, T4, T6, T53 (8 tasks) | Immediately (no deps) |
+| **v1.14.0** | **Compute + Mocking** â€” dataframe, tensor, image, audio, dsp, ecs, mock | T7-T12, T25 (7 tasks) | v1.13 ships (need T0+T1) |
+| **v1.15.0** | **Production Wrappers + Security** â€” web, db, template, reactive, observe, audit, fuzz | T17-T21, T26, T27 (7 tasks) | v1.13 ships (need T0+T1) |
+| **v1.16.0** | **Tier 1 Common** â€” validate, config, cache, cli, http-client, auth, jobs, resilience | T29-T36 (8 tasks) | v1.13 ships (need T0+T1) |
+| **v1.17.0** | **Tier 2 Common** â€” fake, assertions, archive, fsm, pubsub, email, scrape, i18n | T37-T44 (8 tasks) | v1.13 ships (need T0+T1) |
+| **v1.18.0** | **Tier 3 Specialized** â€” geo, nlp, chat, web3, crypto-extras, xml, msgpack, protobuf | T45-T52 (8 tasks) | v1.13 ships (need T0+T1+T4) |
+| **v1.19.0** | **Language Evolution** â€” SIMD, compile-speed, property wrappers, math syntax, multiple dispatch, actors, binary size | T54-T60 (7 tasks) | v1.13 ships (+ T6 for SIMD, T53+T20 for property wrappers, T2+T20 for actors) |
+| **v1.20.0** | **Developer Experience** â€” cold-start, PGO, error quality, hot reload, AI, refactoring, docs site | T61-T67 (7 tasks) | v1.13 ships (+ T16+T17 for hot reload, T24 for error/refactoring) |
+| **v1.21.0** | **Community & Quality** â€” cookbook, onboarding, quality signals, stability promise, plugins | T68-T72 (5 tasks) | v1.20 ships (T68/T69 need T67 docs site) |
+| **v1.22.0** | **Domain Frameworks** â€” science, pipeline, ML, game | T13, T14, T15, T16 (4 tasks) | v1.14 ships (need T8 tensor, T12 ecs) |
+| **v1.23.0** | **Integration + Flagship** â€” API compat spike + Data Science Workbench | T22, T23 (2 tasks) | v1.14 + v1.15 + v1.22 ship (need frameworks) |
+| **v1.24.0** | **Audit & Polish** â€” iterative audit until convergence | T28 (1 task) | v1.23 ships (needs everything done) |
 
-**Critical path**: v1.13 → v1.14 → v1.22 → v1.23 → v1.24 → F1-F4
+**Critical path**: v1.13 â†’ v1.14 â†’ v1.22 â†’ v1.23 â†’ v1.24 â†’ F1-F4
 
 **Parallel tracks** (all start after v1.13, run alongside critical path):
-- Track A (critical): v1.14 → v1.22 → v1.23 → v1.24
+- Track A (critical): v1.14 â†’ v1.22 â†’ v1.23 â†’ v1.24
 - Track B (parallel): v1.15, v1.16, v1.17, v1.18 (wrappers + common frameworks)
 - Track C (parallel): v1.19, v1.20, v1.21 (language + DX + community)
 
 ### Execution Batches (Max 10 Concurrent)
 
-Tasks execute in batches of max 10 parallel. Batches overlap — when a task finishes, the next ready task fills the slot.
+Tasks execute in batches of max 10 parallel. Batches overlap â€” when a task finishes, the next ready task fills the slot.
 
 | Batch | Tasks running (max 10) | Notes |
 |---|---|---|
@@ -61,7 +61,7 @@ Tasks execute in batches of max 10 parallel. Batches overlap — when a task fin
 
 ## TL;DR
 
-> **Quick Summary**: Post-v1.12 incremental roadmap (v1.13 → v1.24) focused on making Buff genuinely productive across multiple domains. Establishes the **Buff SDK 2.0 project model & conventions** (single comprehensive foundation), adds language foundations (multi-file linking, Channel<T> primitive, macro decision), then ships MVP-quality framework crates spanning dataframes, tensors, ML, game dev/ECS, scientific computing, image/audio/DSP, data pipelines, plus production wrappers (web, db, template, reactive, observe). Capstoned by a Data Science Workbench flagship app integrating 5 frameworks end-to-end.
+> **Quick Summary**: Post-v1.12 incremental roadmap (v1.13 â†’ v1.24) focused on making Buff genuinely productive across multiple domains. Establishes the **Buff SDK 2.0 project model & conventions** (single comprehensive foundation), adds language foundations (multi-file linking, Channel<T> primitive, macro decision), then ships MVP-quality framework crates spanning dataframes, tensors, ML, game dev/ECS, scientific computing, image/audio/DSP, data pipelines, plus production wrappers (web, db, template, reactive, observe). Capstoned by a Data Science Workbench flagship app integrating 5 frameworks end-to-end.
 >
 > **Deliverables**:
 > - 1 SDK foundation: Buff SDK 2.0 conventions + buff.toml v2 + templates + visibility + versioning + docs + CI/DX + workspace dep inheritance + @feature conditional compilation
@@ -81,14 +81,14 @@ Tasks execute in batches of max 10 parallel. Batches overlap — when a task fin
 >
 > **Estimated Effort**: XL (multi-year)
 > **Parallel Execution**: YES - 3 parallel tracks (A: critical path, B: wrappers+common, C: language+DX), max 10 concurrent
-> **Releases**: 12 coherent shippable units (v1.13.0 → v1.24.0). Each task = own commit; each release = own tag.
-> **Critical Path**: v1.13 (Foundations) → v1.14 (Compute) → v1.22 (Domains) → v1.23 (Flagship) → v1.24 (Audit) → F1-F4
+> **Releases**: 12 coherent shippable units (v1.13.0 â†’ v1.24.0). Each task = own commit; each release = own tag.
+> **Critical Path**: v1.13 (Foundations) â†’ v1.14 (Compute) â†’ v1.22 (Domains) â†’ v1.23 (Flagship) â†’ v1.24 (Audit) â†’ F1-F4
 >
 > **v2.0 Roadmap** (post-v1.24, separate planning): MLIR backend for unified CPU/GPU/TPU/NPU/FPGA codegen (Mojo-inspired).
 >
-> **v1.4 stdlib status**: ✅ VERIFIED SHIPPED via codegen lowering in `crates/buff-lang-codegen-rust/src/rust_codegen.rs` (12,777 lines). DateTime/Log/Regex/Toml/Math/Random/Strings/Args/Env/URL/Base64/Hex/UUID/YAML/CSV/Path/Dir/Tempfile/Hash/HMAC/Process/OS/TCP/UDP/WebSocket all present. Frameworks BUILD ON TOP.
+> **v1.4 stdlib status**: âœ… VERIFIED SHIPPED via codegen lowering in `crates/buff-lang-codegen-rust/src/rust_codegen.rs` (12,777 lines). DateTime/Log/Regex/Toml/Math/Random/Strings/Args/Env/URL/Base64/Hex/UUID/YAML/CSV/Path/Dir/Tempfile/Hash/HMAC/Process/OS/TCP/UDP/WebSocket all present. Frameworks BUILD ON TOP.
 >
-> **Existing async coverage** (re-assessment post-user-feedback): Buff already has `async func` + auto-propagation (no `await` keyword), `spawn expr` → `Task<T>`, `task.result()`, `sleep(duration)`, async TCP/UDP/WebSocket `.recv()`, par_map/par_filter/par_reduce, Arc-shared captures. The only genuinely missing async primitive is in-process `Channel<T>` MPSC for producer/consumer patterns. `Stream<T>` general type and `select` expression are NOT needed for MVP frameworks (network `.recv()` covers external streams; sync `Vector<T>` + `for x in` covers batch; callbacks cover reactive).
+> **Existing async coverage** (re-assessment post-user-feedback): Buff already has `async func` + auto-propagation (no `await` keyword), `spawn expr` â†’ `Task<T>`, `task.result()`, `sleep(duration)`, async TCP/UDP/WebSocket `.recv()`, par_map/par_filter/par_reduce, Arc-shared captures. The only genuinely missing async primitive is in-process `Channel<T>` MPSC for producer/consumer patterns. `Stream<T>` general type and `select` expression are NOT needed for MVP frameworks (network `.recv()` covers external streams; sync `Vector<T>` + `for x in` covers batch; callbacks cover reactive).
 
 ---
 
@@ -99,28 +99,28 @@ User wants to plan the next phase after `buff-post-v10-tooling.md` finishes. Ini
 
 ### Mid-Plan Correction (user feedback after Momus approval)
 User flagged that async streams may already be done "in an alternative way". Direct codebase re-verification (no agents) confirmed Buff already has rich async coverage:
-- **Async core**: `async func` + auto-propagation (no `await` keyword) — production
-- **`spawn expr`** → `Task<T>` (alias for `tokio::task::JoinHandle<T>`)
-- **`task.result()`** — Buff's await equivalent for spawned tasks
-- **`sleep(duration)`** — async sleep via tokio
-- **Async networking**: `TCP.connect().recv()`, `UDP.bind().recv_from()`, `WebSocket.connect().recv()` — all use tokio with auto-await
+- **Async core**: `async func` + auto-propagation (no `await` keyword) â€” production
+- **`spawn expr`** â†’ `Task<T>` (alias for `tokio::task::JoinHandle<T>`)
+- **`task.result()`** â€” Buff's await equivalent for spawned tasks
+- **`sleep(duration)`** â€” async sleep via tokio
+- **Async networking**: `TCP.connect().recv()`, `UDP.bind().recv_from()`, `WebSocket.connect().recv()` â€” all use tokio with auto-await
 - **CPU parallel**: `par_map`, `par_filter`, `par_reduce` (rayon-backed)
 - **Arc-shared captures** across spawn boundaries
 
 Genuinely missing: `Stream<T>` general type, `Channel<T>` MPSC primitive, `select` expression. Of these, only `Channel<T>` is needed for MVP frameworks (producer/consumer in pipelines, internal scheduler queues). `Stream<T>` and `select` deferred to v1.18+.
 
-**Plan consequence**: T2 shrunk to Channel-only scope (no new keywords — exposed as `Channel.new()` method-style). T5 (migration tool) REMOVED entirely — no new keywords means no migration needed. T14 (buff-pipeline) and T20 (buff-reactive) task descriptions updated to use Channel + callbacks respectively.
+**Plan consequence**: T2 shrunk to Channel-only scope (no new keywords â€” exposed as `Channel.new()` method-style). T5 (migration tool) REMOVED entirely â€” no new keywords means no migration needed. T14 (buff-pipeline) and T20 (buff-reactive) task descriptions updated to use Channel + callbacks respectively.
 
 ### Interview Summary
 **Key Decisions**:
-- **Plan timing**: Starts AFTER v1.12 ships (v1.9 RSX, v1.10 debugger/coverage, v1.11 Bufflings, v1.12 distribution are NOT in scope — already planned in tooling plan)
+- **Plan timing**: Starts AFTER v1.12 ships (v1.9 RSX, v1.10 debugger/coverage, v1.11 Bufflings, v1.12 distribution are NOT in scope â€” already planned in tooling plan)
 - **Vision**: Buff = developer productivity; Rust = speed. Leverage Rust ecosystem via `extern` FFI; frameworks build on existing v1.4 stdlib rather than reinventing.
 - **Framework scope (all 4 vectors selected)**:
-  1. Domain frameworks (new) — ALL 6 domains: data pipelines, image/audio/DSP, scientific, game dev/ECS, dataframes, ML/tensors/autodiff
-  2. Production hardening of v1.x — LIMITED to thin idiomatic wrappers (no full reimplementation; deep hardening deferred to v1.18+)
+  1. Domain frameworks (new) â€” ALL 6 domains: data pipelines, image/audio/DSP, scientific, game dev/ECS, dataframes, ML/tensors/autodiff
+  2. Production hardening of v1.x â€” LIMITED to thin idiomatic wrappers (no full reimplementation; deep hardening deferred to v1.18+)
   3. Language-level features enabling frameworks (foundation-first IF truly blocking)
   4. Idiomatic wrappers for Rust ecosystem (axum, sqlx, askama, tracing)
-- **Flagship**: Data Science Workbench (load CSV → dataframe ops → train ML on GPU → visualize in web UI)
+- **Flagship**: Data Science Workbench (load CSV â†’ dataframe ops â†’ train ML on GPU â†’ visualize in web UI)
 - **Quality bar**: MVP across the board (working happy-path, examples, basic tests, doc comments, "experimental" registry badge)
 - **Publishing**: In-repo under `crates/` (e.g., `crates/buff-ml/`)
 
@@ -132,14 +132,14 @@ Genuinely missing: `Stream<T>` general type, `Channel<T>` MPSC primitive, `selec
 
 ### Metis Review
 **Critical Gaps Addressed** (see "Decisions Needed" section for unresolved items):
-- G2 Multi-file linking fallback: classify each Wave 2 framework HARD/SOFT/NONE multi-file dependency — embedded in task descriptions
+- G2 Multi-file linking fallback: classify each Wave 2 framework HARD/SOFT/NONE multi-file dependency â€” embedded in task descriptions
 - G3 Macro spike decision rule: 5-day timebox, output = decision doc committed to `.sisyphus/`, defer to v1.18+ if >1500 LOC or <2 frameworks need it
 - G6 Async abstraction: hide tokio behind `buff-lang-runtime` traits; frameworks depend on traits not tokio directly
 - G7 GPU scope matrix: ML + Science + Tensor USE GPU; Image/DSP CPU-only for MVP (defer GPU); Game uses existing WGSL; others CPU
 - G8 FFI safety: dedicated Wave 1 task to write conventions doc; hard rule = no raw pointers exposed to Buff users
-- G9 Per-framework LOC/API budgets locked: Wave 2 ≤2500 LOC/≤25 fns; Wave 3 ≤4000 LOC/≤40 fns; Wave 4 ≤1500 LOC/≤20 fns; Flagship ≤3000 LOC
+- G9 Per-framework LOC/API budgets locked: Wave 2 â‰¤2500 LOC/â‰¤25 fns; Wave 3 â‰¤4000 LOC/â‰¤40 fns; Wave 4 â‰¤1500 LOC/â‰¤20 fns; Flagship â‰¤3000 LOC
 - G10 API compat spike inserted as Wave 5 T22 before flagship
-- G15 Lexer/parser impact: folded into T1 (multi-file) and T2 (async) — both tasks include syntax assessment substeps
+- G15 Lexer/parser impact: folded into T1 (multi-file) and T2 (async) â€” both tasks include syntax assessment substeps
 - A8 WGSL extensibility: dedicated Wave 1 T6 to assess before tensor/ML commit
 
 ---
@@ -148,7 +148,7 @@ Genuinely missing: `Stream<T>` general type, `Channel<T>` MPSC primitive, `selec
 
 ### Core Objective
 Make Buff genuinely productive across multiple problem domains by:
-1. **Establishing Buff SDK 2.0**: a coherent project model, conventions, and bundled experience — the .NET-Core-style unification of layout, tooling, and documentation that lets frameworks compose consistently and users learn Buff once.
+1. **Establishing Buff SDK 2.0**: a coherent project model, conventions, and bundled experience â€” the .NET-Core-style unification of layout, tooling, and documentation that lets frameworks compose consistently and users learn Buff once.
 2. **Shipping MVP-quality framework crates** that leverage the existing Rust ecosystem via safe `extern` FFI, built on a foundation of multi-file linking and a `Channel<T>` primitive for producer/consumer patterns. The existing async model (auto-propagation without `await` keyword, `spawn`/`Task<T>`, async networking `.recv()`) covers most async needs; only the in-process `Channel<T>` MPSC primitive is added.
 
 ### Concrete Deliverables
@@ -159,7 +159,7 @@ Make Buff genuinely productive across multiple problem domains by:
 - 5 production wrappers: buff-{web, db, template, reactive, observe}
 - 3 security/quality tools: buff-audit + code signing, buff-fuzz, (mocking counted in foundations above)
 - 1 flagship: Data Science Workbench app
-- Per-framework: ≥3 examples, ≥10 unit tests, ≥5 snapshot tests, README, registry entry with "experimental" badge
+- Per-framework: â‰¥3 examples, â‰¥10 unit tests, â‰¥5 snapshot tests, README, registry entry with "experimental" badge
 
 ### Definition of Done
 - [ ] All 25 implementation tasks completed with QA scenarios passing
@@ -182,28 +182,28 @@ Make Buff genuinely productive across multiple problem domains by:
 - Per-framework MVP acceptance checklist satisfied (see Verification Strategy)
 
 ### Must NOT Have (Guardrails)
-- **NO production hardening of frameworks in v1.13-v1.17** — deep optimization, full test matrices, edge case handling deferred to v1.18+. MVP = happy-path + basic tests only.
-- **NO new dependencies outside root `Cargo.toml [workspace.dependencies]`** — every framework crate uses `dep.workspace = true`.
+- **NO production hardening of frameworks in v1.13-v1.17** â€” deep optimization, full test matrices, edge case handling deferred to v1.18+. MVP = happy-path + basic tests only.
+- **NO new dependencies outside root `Cargo.toml [workspace.dependencies]`** â€” every framework crate uses `dep.workspace = true`.
 - **NO `unwrap`/`expect`/`panic!`/`unimplemented!`/`todo!`** in non-test code (AGENTS.md hard rule).
-- **NO raw-string Rust codegen** — all codegen via syn/quote/prettyplease (AGENTS.md hard rule).
-- **NO `_async` suffix** on async functions (Buff language rule §6).
-- **NO positional boolean args** — named args mandatory (§11).
-- **NO `new Person()` / `Person.create()` / `Person.build()`** — constructors are `Type.new()` / `Type.from()` only (§7).
-- **NO tabs** — 4 spaces only (Buff lexer rejects tabs).
-- **NO committing `.snap.new` / `.pending-snap`** — insta pending files (gitignored).
+- **NO raw-string Rust codegen** â€” all codegen via syn/quote/prettyplease (AGENTS.md hard rule).
+- **NO `_async` suffix** on async functions (Buff language rule Â§6).
+- **NO positional boolean args** â€” named args mandatory (Â§11).
+- **NO `new Person()` / `Person.create()` / `Person.build()`** â€” constructors are `Type.new()` / `Type.from()` only (Â§7).
+- **NO tabs** â€” 4 spaces only (Buff lexer rejects tabs).
+- **NO committing `.snap.new` / `.pending-snap`** â€” insta pending files (gitignored).
 - **NO populating `crates-io/`** without coordination (currently empty/reserved).
-- **NO framework exceeding LOC/API budget** — exceeding budget triggers deferral to v1.18+, not "work harder".
-- **NO unsafe Rust exposure to Buff users** — all `extern` FFI must be wrapped in safe Buff API (no raw pointers).
-- **NO breaking changes to consumed compiler APIs** — `buff-lang-{lexer,parser,types,codegen-rust,codegen-wgsl,runtime}` public APIs are stable; extensions only.
-- **NO new keywords without backward-compat lint** — `stream`/`channel`/`select`/`macro` reservations must come with `buff fix --v1-to-v1x` migration tool.
-- **NO GPU work in Wave 2 image/audio/dsp** — those are CPU-only for MVP (GPU deferred). Only ML/Science/Tensor use GPU.
-- **NO scope creep into v1.9 RSX, v1.10 debugger, v1.11 Bufflings, v1.12 distribution** — those are owned by `buff-post-v10-tooling.md`.
+- **NO framework exceeding LOC/API budget** â€” exceeding budget triggers deferral to v1.18+, not "work harder".
+- **NO unsafe Rust exposure to Buff users** â€” all `extern` FFI must be wrapped in safe Buff API (no raw pointers).
+- **NO breaking changes to consumed compiler APIs** â€” `buff-lang-{lexer,parser,types,codegen-rust,codegen-wgsl,runtime}` public APIs are stable; extensions only.
+- **NO new keywords without backward-compat lint** â€” `stream`/`channel`/`select`/`macro` reservations must come with `buff fix --v1-to-v1x` migration tool.
+- **NO GPU work in Wave 2 image/audio/dsp** â€” those are CPU-only for MVP (GPU deferred). Only ML/Science/Tensor use GPU.
+- **NO scope creep into v1.9 RSX, v1.10 debugger, v1.11 Bufflings, v1.12 distribution** â€” those are owned by `buff-post-v10-tooling.md`.
 
 ---
 
 ## Verification Strategy
 
-> **ZERO HUMAN INTERVENTION** — ALL verification is agent-executed. No exceptions.
+> **ZERO HUMAN INTERVENTION** â€” ALL verification is agent-executed. No exceptions.
 > Acceptance criteria requiring "user manually tests/confirms" are FORBIDDEN.
 
 ### Test Decision
@@ -214,30 +214,30 @@ Make Buff genuinely productive across multiple problem domains by:
 ### QA Policy
 Every task MUST include agent-executed QA scenarios. Evidence saved to `.sisyphus/evidence/task-{N}-{scenario-slug}.{ext}`.
 
-- **Frontend/UI**: Use Playwright (playwright skill) — Navigate, interact, assert DOM, screenshot
-- **TUI/CLI**: Use interactive_bash (tmux) — Run command, send keystrokes, validate output
-- **API/Backend**: Use Bash (curl) — Send requests, assert status + response fields
-- **Library/Module**: Use Bash (cargo) — `cargo test`, `cargo run -p buff-lang-cli -- run examples/<framework>/<name>.buff`, compare output
-- **Compiler/Language features**: Use Bash — write small `.buff` test programs, run via `buff run` or `buff check`, assert output / errors
+- **Frontend/UI**: Use Playwright (playwright skill) â€” Navigate, interact, assert DOM, screenshot
+- **TUI/CLI**: Use interactive_bash (tmux) â€” Run command, send keystrokes, validate output
+- **API/Backend**: Use Bash (curl) â€” Send requests, assert status + response fields
+- **Library/Module**: Use Bash (cargo) â€” `cargo test`, `cargo run -p buff-lang-cli -- run examples/<framework>/<name>.buff`, compare output
+- **Compiler/Language features**: Use Bash â€” write small `.buff` test programs, run via `buff run` or `buff check`, assert output / errors
 
 ### Per-Framework MVP Acceptance Checklist (apply to EVERY framework task)
 
 **Code**:
 - [ ] Crate exists at `crates/buff-<name>/` with standard Cargo.toml (workspace deps, edition 2021, MIT OR Apache-2.0, version 2.0.0)
 - [ ] Crate `AGENTS.md` committed (per-crate convention)
-- [ ] LOC within budget (Wave 2: ≤2500, Wave 3: ≤4000, Wave 4: ≤1500)
-- [ ] Public API ≤ budget (Wave 2: ≤25 fns, Wave 3: ≤40 fns, Wave 4: ≤20 fns)
+- [ ] LOC within budget (Wave 2: â‰¤2500, Wave 3: â‰¤4000, Wave 4: â‰¤1500)
+- [ ] Public API â‰¤ budget (Wave 2: â‰¤25 fns, Wave 3: â‰¤40 fns, Wave 4: â‰¤20 fns)
 - [ ] ZERO `unwrap`/`expect`/`panic!`/`todo!` in non-test code
 - [ ] All codegen (if any) via syn/quote/prettyplease (no raw strings)
 
 **Examples**:
-- [ ] ≥3 examples in `examples/<framework>/` (hello-world, core-feature, integration)
+- [ ] â‰¥3 examples in `examples/<framework>/` (hello-world, core-feature, integration)
 - [ ] All examples runnable via `cargo run -p buff-lang-cli -- run examples/<framework>/<name>.buff`
 - [ ] Examples follow naming convention (PT-BR educational ok, EN technical preferred)
 
 **Tests**:
-- [ ] Unit tests in `crates/buff-<name>/tests/` (≥10 test cases)
-- [ ] Snapshot tests committed (≥5, ≤20)
+- [ ] Unit tests in `crates/buff-<name>/tests/` (â‰¥10 test cases)
+- [ ] Snapshot tests committed (â‰¥5, â‰¤20)
 - [ ] Proptest IF math-heavy framework (dataframe, tensor, ml, science)
 - [ ] All tests pass on Linux (Windows/macOS verification in CI)
 
@@ -264,91 +264,91 @@ Every task MUST include agent-executed QA scenarios. Evidence saved to `.sisyphu
 ### Parallel Execution Waves
 
 ```
-v1.13.0 (Foundations — 8 tasks, MAX 10 concurrent):
-├── T0:  Buff SDK 2.0 — Project Model, Conventions, Templates [deep]
-├── T1:  Multi-file linking + Cross-compilation targets [deep]
-├── T2:  Channel<T> MPSC primitive [deep]
-├── T24: Stack traces with Buff spans [deep]
-├── T3:  Macro system spike (5-day decision) [quick]
-├── T4:  FFI safety guide [writing]
-├── T6:  WGSL extensibility assessment [quick]
-└── T53: comptime compile-time execution [deep]
+v1.13.0 (Foundations â€” 8 tasks, MAX 10 concurrent):
+â”œâ”€â”€ T0:  Buff SDK 2.0 â€” Project Model, Conventions, Templates [deep]
+â”œâ”€â”€ T1:  Multi-file linking + Cross-compilation targets [deep]
+â”œâ”€â”€ T2:  Channel<T> MPSC primitive [deep]
+â”œâ”€â”€ T24: Stack traces with Buff spans [deep]
+â”œâ”€â”€ T3:  Macro system spike (5-day decision) [quick]
+â”œâ”€â”€ T4:  FFI safety guide [writing]
+â”œâ”€â”€ T6:  WGSL extensibility assessment [quick]
+â””â”€â”€ T53: comptime compile-time execution [deep]
    Ships as v1.13.0 when all 8 complete. Unblocks ALL downstream releases.
 
-PARALLEL TRACK A (Critical Path — starts when v1.13 ships):
+PARALLEL TRACK A (Critical Path â€” starts when v1.13 ships):
 
-v1.14.0 (Compute + Mocking — 7 tasks):
-├── T7:  buff-dataframe [deep]
-├── T8:  buff-tensor [deep]           (needs T6 from v1.13)
-├── T9:  buff-image [unspecified-high]
-├── T10: buff-audio [unspecified-high]
-├── T11: buff-dsp [unspecified-high]
-├── T12: buff-ecs [deep]
-└── T25: buff-mock [deep]
+v1.14.0 (Compute + Mocking â€” 7 tasks):
+â”œâ”€â”€ T7:  buff-dataframe [deep]
+â”œâ”€â”€ T8:  buff-tensor [deep]           (needs T6 from v1.13)
+â”œâ”€â”€ T9:  buff-image [unspecified-high]
+â”œâ”€â”€ T10: buff-audio [unspecified-high]
+â”œâ”€â”€ T11: buff-dsp [unspecified-high]
+â”œâ”€â”€ T12: buff-ecs [deep]
+â””â”€â”€ T25: buff-mock [deep]
 
-v1.22.0 (Domain Frameworks — 4 tasks, depends on v1.14):
-├── T13: buff-science  (needs T8) [deep]
-├── T14: buff-pipeline (needs T2) [unspecified-high]
-├── T15: buff-ml       (needs T8) [deep]
-└── T16: buff-game     (needs T12) [deep]
+v1.22.0 (Domain Frameworks â€” 4 tasks, depends on v1.14):
+â”œâ”€â”€ T13: buff-science  (needs T8) [deep]
+â”œâ”€â”€ T14: buff-pipeline (needs T2) [unspecified-high]
+â”œâ”€â”€ T15: buff-ml       (needs T8) [deep]
+â””â”€â”€ T16: buff-game     (needs T12) [deep]
 
-v1.23.0 (Integration + Flagship — 2 tasks, depends on v1.14+v1.15+v1.22):
-├── T22: API compatibility spike [deep]
-└── T23: Flagship Data Science Workbench [deep]
+v1.23.0 (Integration + Flagship â€” 2 tasks, depends on v1.14+v1.15+v1.22):
+â”œâ”€â”€ T22: API compatibility spike [deep]
+â””â”€â”€ T23: Flagship Data Science Workbench [deep]
 
-v1.24.0 (Audit — 1 task, depends on v1.23):
-└── T28: Iterative audit until convergence [deep]
+v1.24.0 (Audit â€” 1 task, depends on v1.23):
+â””â”€â”€ T28: Iterative audit until convergence [deep]
 
-PARALLEL TRACK B (Wrappers + Common Frameworks — starts when v1.13 ships):
+PARALLEL TRACK B (Wrappers + Common Frameworks â€” starts when v1.13 ships):
 
-v1.15.0 (Production Wrappers + Security — 8 tasks):
-├── T17: buff-web      [unspecified-high]
-├── T18: buff-db       [unspecified-high]
-├── T19: buff-template [quick]
-├── T20: buff-reactive [deep]          (needs T2)
-├── T21: buff-observe  [quick]
-├── T26: buff-audit    [unspecified-high]
-└── T27: buff-fuzz     [unspecified-high]
+v1.15.0 (Production Wrappers + Security â€” 8 tasks):
+â”œâ”€â”€ T17: buff-web      [unspecified-high]
+â”œâ”€â”€ T18: buff-db       [unspecified-high]
+â”œâ”€â”€ T19: buff-template [quick]
+â”œâ”€â”€ T20: buff-reactive [deep]          (needs T2)
+â”œâ”€â”€ T21: buff-observe  [quick]
+â”œâ”€â”€ T26: buff-audit    [unspecified-high]
+â””â”€â”€ T27: buff-fuzz     [unspecified-high]
 
-v1.16.0 (Tier 1 Common — 8 tasks): T29-T36 (validate/config/cache/cli/http-client/auth/jobs/resilience)
-v1.17.0 (Tier 2 Common — 8 tasks): T37-T44 (fake/assertions/archive/fsm/pubsub/email/scrape/i18n)
-v1.18.0 (Tier 3 Specialized — 8 tasks): T45-T52 (geo/nlp/chat/web3/crypto-extras/xml/msgpack/protobuf)
+v1.16.0 (Tier 1 Common â€” 8 tasks): T29-T36 (validate/config/cache/cli/http-client/auth/jobs/resilience)
+v1.17.0 (Tier 2 Common â€” 8 tasks): T37-T44 (fake/assertions/archive/fsm/pubsub/email/scrape/i18n)
+v1.18.0 (Tier 3 Specialized â€” 8 tasks): T45-T52 (geo/nlp/chat/web3/crypto-extras/xml/msgpack/protobuf)
 
-PARALLEL TRACK C (Language + DX + Community — starts when v1.13 ships):
+PARALLEL TRACK C (Language + DX + Community â€” starts when v1.13 ships):
 
-v1.19.0 (Language Evolution — 7 tasks):
-├── T54: SIMD types        (needs T6) [deep]
-├── T55: Compile-speed     [deep]
-├── T56: Property wrappers (needs T53+T20) [deep]
-├── T57: Math syntax       [deep]
-├── T58: Multiple dispatch [deep]
-├── T59: Actor model       (needs T2+T20) [deep]
-└── T60: Binary size       [deep]
+v1.19.0 (Language Evolution â€” 7 tasks):
+â”œâ”€â”€ T54: SIMD types        (needs T6) [deep]
+â”œâ”€â”€ T55: Compile-speed     [deep]
+â”œâ”€â”€ T56: Property wrappers (needs T53+T20) [deep]
+â”œâ”€â”€ T57: Math syntax       [deep]
+â”œâ”€â”€ T58: Multiple dispatch [deep]
+â”œâ”€â”€ T59: Actor model       (needs T2+T20) [deep]
+â””â”€â”€ T60: Binary size       [deep]
 
-v1.20.0 (Developer Experience — 7 tasks):
-├── T61: Cold-start benchmarks [quick] ✅
-├── T62: PGO support           [quick] ✅
-├── T63: Error quality         (needs T24) [unspecified-high] ✅
-├── T64: Hot reload            (needs T16+T17) [unspecified-high] ✅
-├── T65: AI integration        [unspecified-high] ✅
-├── T66: Refactoring tools     (needs T24) [unspecified-high] ✅
-└── T67: Docs site             [unspecified-high] ✅
+v1.20.0 (Developer Experience â€” 7 tasks):
+â”œâ”€â”€ T61: Cold-start benchmarks [quick] âœ…
+â”œâ”€â”€ T62: PGO support           [quick] âœ…
+â”œâ”€â”€ T63: Error quality         (needs T24) [unspecified-high] âœ…
+â”œâ”€â”€ T64: Hot reload            (needs T16+T17) [unspecified-high] âœ…
+â”œâ”€â”€ T65: AI integration        [unspecified-high] âœ…
+â”œâ”€â”€ T66: Refactoring tools     (needs T24) [unspecified-high] âœ…
+â””â”€â”€ T67: Docs site             [unspecified-high] âœ…
 
-v1.21.0 (Community & Quality — 5 tasks, depends on v1.20 for T67):
-├── T68: Cookbook         (needs T67) [writing] ✅
-├── T69: Onboarding paths (needs T67) [writing] ✅
-├── T70: Quality signals  [unspecified-high]
-├── T71: Stability promise [writing]
-└── T72: Plugin architecture (needs T53) [deep]
+v1.21.0 (Community & Quality â€” 5 tasks, depends on v1.20 for T67):
+â”œâ”€â”€ T68: Cookbook         (needs T67) [writing] âœ…
+â”œâ”€â”€ T69: Onboarding paths (needs T67) [writing] âœ…
+â”œâ”€â”€ T70: Quality signals  [unspecified-high]
+â”œâ”€â”€ T71: Stability promise [writing]
+â””â”€â”€ T72: Plugin architecture (needs T53) [deep]
 
-FINAL (After v1.24 ships — 4 parallel reviews, then user okay):
-├── F1: Plan compliance audit (oracle)
-├── F2: Code quality review (unspecified-high)
-├── F3: Real manual QA (unspecified-high + playwright)
-└── F4: Scope fidelity check (deep)
+FINAL (After v1.24 ships â€” 4 parallel reviews, then user okay):
+â”œâ”€â”€ F1: Plan compliance audit (oracle)
+â”œâ”€â”€ F2: Code quality review (unspecified-high)
+â”œâ”€â”€ F3: Real manual QA (unspecified-high + playwright)
+â””â”€â”€ F4: Scope fidelity check (deep)
 -> Present results -> Get explicit user okay
 
-Critical Path: v1.13 → v1.14 → v1.22 → v1.23 → v1.24 → F1-F4
+Critical Path: v1.13 â†’ v1.14 â†’ v1.22 â†’ v1.23 â†’ v1.24 â†’ F1-F4
 Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 ```
 
@@ -361,7 +361,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 | T2 | - | T14, T20, T23 |
 | T3 | - | (decision only) |
 | T4 | - | T17-T21 (soft) |
-| ~~T5~~ | ~~REMOVED~~ | — |
+| ~~T5~~ | ~~REMOVED~~ | â€” |
 | T6 | - | T8, T13, T15 |
 | T7 | T0, T1 | T22, T23 |
 | T8 | T0, T1, T6 | T13, T15, T22, T23 |
@@ -411,19 +411,19 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ### Agent Dispatch Summary
 
-- **v1.13.0 (8)**: T0 → `deep`, T1 → `deep`, T2 → `deep`, T24 → `deep`, T3 → `quick`, T4 → `writing`, T6 → `quick`, T53 → `deep`
-- **v1.14.0 (7)**: T7 → `deep`, T8 → `deep`, T9-T11 → `unspecified-high`, T12 → `deep`, T25 → `deep`
-- **v1.22.0 (4)**: T13 → `deep`, T14 → `unspecified-high`, T15 → `deep`, T16 → `deep`
-- **v1.15.0 (7)**: T17-T18 → `unspecified-high`, T19 → `quick`, T20 → `deep`, T21 → `quick`, T26 → `unspecified-high`, T27 → `unspecified-high`
-- **v1.23.0 (2)**: T22 → `deep`, T23 → `deep`
-- **v1.24.0 (1)**: T28 → `deep`
-- **v1.16.0 (8)**: T29-T36 → all `unspecified-high`
-- **v1.17.0 (8)**: T37, T41 → `quick`; T38-T40, T42-T44 → `unspecified-high`
-- **v1.18.0 (8)**: T50-T51 → `quick`; T45-T49, T52 → `unspecified-high`
-- **v1.19.0 (7)**: T54-T60 → all `deep`
-- **v1.20.0 (7)**: T61-T63 → `quick`/`unspecified-high`, T64-T67 → `unspecified-high`
-- **v1.21.0 (5)**: T68-T69 → `writing`, T70 → `unspecified-high`, T71 → `writing`, T72 → `deep`
-- **FINAL (4)**: F1 → `oracle`, F2 → `unspecified-high`, F3 → `unspecified-high` + playwright, F4 → `deep`
+- **v1.13.0 (8)**: T0 â†’ `deep`, T1 â†’ `deep`, T2 â†’ `deep`, T24 â†’ `deep`, T3 â†’ `quick`, T4 â†’ `writing`, T6 â†’ `quick`, T53 â†’ `deep`
+- **v1.14.0 (7)**: T7 â†’ `deep`, T8 â†’ `deep`, T9-T11 â†’ `unspecified-high`, T12 â†’ `deep`, T25 â†’ `deep`
+- **v1.22.0 (4)**: T13 â†’ `deep`, T14 â†’ `unspecified-high`, T15 â†’ `deep`, T16 â†’ `deep`
+- **v1.15.0 (7)**: T17-T18 â†’ `unspecified-high`, T19 â†’ `quick`, T20 â†’ `deep`, T21 â†’ `quick`, T26 â†’ `unspecified-high`, T27 â†’ `unspecified-high`
+- **v1.23.0 (2)**: T22 â†’ `deep`, T23 â†’ `deep`
+- **v1.24.0 (1)**: T28 â†’ `deep`
+- **v1.16.0 (8)**: T29-T36 â†’ all `unspecified-high`
+- **v1.17.0 (8)**: T37, T41 â†’ `quick`; T38-T40, T42-T44 â†’ `unspecified-high`
+- **v1.18.0 (8)**: T50-T51 â†’ `quick`; T45-T49, T52 â†’ `unspecified-high`
+- **v1.19.0 (7)**: T54-T60 â†’ all `deep`
+- **v1.20.0 (7)**: T61-T63 â†’ `quick`/`unspecified-high`, T64-T67 â†’ `unspecified-high`
+- **v1.21.0 (5)**: T68-T69 â†’ `writing`, T70 â†’ `unspecified-high`, T71 â†’ `writing`, T72 â†’ `deep`
+- **FINAL (4)**: F1 â†’ `oracle`, F2 â†’ `unspecified-high`, F3 â†’ `unspecified-high` + playwright, F4 â†’ `deep`
 
 ---
 
@@ -434,31 +434,31 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 > Tasks T60-T72 (quality/meta tasks) use COMPACT format: What / LOC budget / Deps / Acceptance + Commit. Full QA scenarios deferred to implementation time.
 > A task WITHOUT QA Scenarios is INCOMPLETE for T0-T59. No exceptions for those.
 
-- [x] 0. **Buff SDK 2.0 — Project Model, Conventions, Templates, and Reference Implementation**
+- [x] 0. **Buff SDK 2.0 â€” Project Model, Conventions, Templates, and Reference Implementation**
 
-  **Goal**: Establish the unified Buff developer experience — the .NET-Core-style evolution that lets frameworks compose consistently and users learn Buff once. Covers all 10 convention categories (A-J). Single comprehensive foundation task; everything in Wave 2-5 follows these conventions.
+  **Goal**: Establish the unified Buff developer experience â€” the .NET-Core-style evolution that lets frameworks compose consistently and users learn Buff once. Covers all 10 convention categories (A-J). Single comprehensive foundation task; everything in Wave 2-5 follows these conventions.
 
   **What to do** (sub-deliverables grouped by category A-J):
 
   **MUST ship** (blocks downstream tasks cleanly):
-  - **(A1) `buff.toml` v2 schema** — extend existing `crates/buff-lang-cli/src/config.rs` (1132 lines, v1 schema) with: `[workspace]`, `[features]`, `[lints]`, `[profile.{dev,release,bench,test}]` (multiple profiles, not just release), `[prelude]` (project-wide implicit imports), `edition = "2026"` field. Backward-compatible with v1 manifests (v1 fields still parse; v2 adds new optional sections).
-  - **(A2) Standard project layout** — document the canonical directory structure in `.sisyphus/decisions/sdk-conventions-v1x.md`:
+  - **(A1) `buff.toml` v2 schema** â€” extend existing `crates/buff-lang-cli/src/config.rs` (1132 lines, v1 schema) with: `[workspace]`, `[features]`, `[lints]`, `[profile.{dev,release,bench,test}]` (multiple profiles, not just release), `[prelude]` (project-wide implicit imports), `edition = "2026"` field. Backward-compatible with v1 manifests (v1 fields still parse; v2 adds new optional sections).
+  - **(A2) Standard project layout** â€” document the canonical directory structure in `.sisyphus/decisions/sdk-conventions-v1x.md`:
     ```
     my_app/
-    ├── buff.toml
-    ├── src/{main.buff, lib.buff, modules/, prelude.buff}
-    ├── tests/{unit, integration, snapshots, fixtures}
-    ├── examples/
-    ├── benches/
-    ├── docs/
-    ├── .github/workflows/ci.yml
-    ├── .buff/vscode/settings.json
-    └── buff.lock   (gitignored)
+    â”œâ”€â”€ buff.toml
+    â”œâ”€â”€ src/{main.buff, lib.buff, modules/, prelude.buff}
+    â”œâ”€â”€ tests/{unit, integration, snapshots, fixtures}
+    â”œâ”€â”€ examples/
+    â”œâ”€â”€ benches/
+    â”œâ”€â”€ docs/
+    â”œâ”€â”€ .github/workflows/ci.yml
+    â”œâ”€â”€ .buff/vscode/settings.json
+    â””â”€â”€ buff.lock   (gitignored)
     ```
-  - **(A3) Workspace support** — `buff.workspace.toml` for multi-crate projects (analogous to Cargo workspaces). Shared `[workspace.dependencies]`, per-crate `buff.toml` inherits.
-  - **(A3b) Workspace dep inheritance** *(added post-comparative-analysis)* — `[workspace.dependencies]` and `[workspace.extern]` sections in `buff.workspace.toml` let monorepos declare deps once. Member crates write `my-dep.workspace = true` instead of repeating version. Prevents version drift across crates. Mirrors Cargo's well-loved pattern.
-  - **(B1) `index.buff` barrel convention** — when a directory contains `index.buff`, importing the directory path re-exports from `index.buff`. Document + implement in T1's resolver.
-  - **(C1) Templates for `buff new --template <name>`** — ship 7 built-in templates in `crates/buff-lang-cli/templates/`:
+  - **(A3) Workspace support** â€” `buff.workspace.toml` for multi-crate projects (analogous to Cargo workspaces). Shared `[workspace.dependencies]`, per-crate `buff.toml` inherits.
+  - **(A3b) Workspace dep inheritance** *(added post-comparative-analysis)* â€” `[workspace.dependencies]` and `[workspace.extern]` sections in `buff.workspace.toml` let monorepos declare deps once. Member crates write `my-dep.workspace = true` instead of repeating version. Prevents version drift across crates. Mirrors Cargo's well-loved pattern.
+  - **(B1) `index.buff` barrel convention** â€” when a directory contains `index.buff`, importing the directory path re-exports from `index.buff`. Document + implement in T1's resolver.
+  - **(C1) Templates for `buff new --template <name>`** â€” ship 7 built-in templates in `crates/buff-lang-cli/templates/`:
     - `console` (default binary)
     - `lib` (library crate)
     - `web` (buff-web + buff-template scaffold)
@@ -467,41 +467,41 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - `pipeline` (buff-pipeline + buff-dataframe project)
     - `workspace` (multi-crate workspace skeleton)
     Each template ships: `buff.toml`, `src/main.buff` (or `src/lib.buff`), `tests/test_hello.buff`, `examples/hello.buff`, `README.md`, `.github/workflows/ci.yml`, `.gitignore`. Existing `--lib`/`--server`/`--gpu`/`--workspace` flags become aliases for the new templates (backward compat).
-  - **(E1) Conventions specification** — commit `.sisyphus/decisions/sdk-conventions-v1x.md` as the canonical reference (target ~3000 words). Covers all 10 categories with examples.
+  - **(E1) Conventions specification** â€” commit `.sisyphus/decisions/sdk-conventions-v1x.md` as the canonical reference (target ~3000 words). Covers all 10 categories with examples.
 
   **SHOULD ship** (improves DX, deferable per item if LOC budget hit):
-  - **(A4) Build profiles** — `[profile.dev]`/`[profile.release]`/`[profile.bench]` with `opt-level`, `lto`, `codegen-units`, `debug`, `panic`. `BUFF_PROFILE=prod buff run` selects non-default profile.
-  - **(B2) `@internal` attribute** — parser accepts `@internal` on `export` decls; LSP / docs surface warning when used outside the declaring crate. Convention only (not enforced at compile time).
-  - **(B3) Project prelude** — `[prelude]` section in `buff.toml` lists module paths whose `export`s become implicitly available in every file of the project. Codegen injects equivalent of `import * from "<path>"` at file head.
-  - **(B4) `@feature(name)` conditional compilation** *(added post-comparative-analysis)* — parser accepts `@feature(name)` attribute on any `export` declaration; codegen emits only if `name` is enabled in buff.toml `[features]`. Mirrors Rust `#[cfg(feature = "...")]` and Go build tags. Required to make the `[features]` section of buff.toml actually useful in source code. Without this, features exist in manifest but cannot gate code.
-  - **(C2) `buff gen` subcommand** — generators: `buff gen module <name>` (creates `src/modules/<name>.buff` + test file), `buff gen test <name>`, `buff gen example <name>`. Reduces boilerplate.
-  - **(D1) `.env` auto-loading** — `env("KEY")` in prelude auto-reads `.env` if present in project root (dev profile only). Use `dotenvy` crate via extern.
-  - **(D2) `.env.example` convention** — templates ship `.env.example` (committed) alongside `.env` (gitignored).
-  - **(E2) Doc comments standard** — formalize `///` for items, `//!` for module-level. Update `buff check` to warn on undocumented `export`.
-  - **(F1) Test layout enforcement** — `buff test` discovers `tests/unit/*.buff`, `tests/integration/*.buff`, `tests/snapshots/*` per convention. Document in spec.
-  - **(F2) Test attribute standards** — parser accepts `@bench`, `@property`, `@should_panic`, `@ignore` alongside existing `@test`. Codegen lowers to appropriate Rust test attributes.
-  - **(G1) SemVer strict validation** — `buff publish` rejects versions not matching SemVer 2.0 regex. Reuses existing v1.6 registry code.
-  - **(G2) Stability badges** — `[package] stability = "experimental"|"beta"|"stable"|"locked"` in buff.toml; surfaced in registry.
-  - **(G3) `@deprecated` attribute** — parser accepts `@deprecated(since = "X", replacement = "Y")`; codegen emits warning at call sites.
-  - **(I1) CI template** — `.github/workflows/ci.yml` in every template: runs `buff fmt --check`, `buff check -D`, `buff test` on ubuntu/windows/macos matrix.
-  - **(I2) `Dockerfile` template** — multi-stage build (builder + slim runtime) in `console` template.
-  - **(J1) "Buff SDK 2.0" bundle definition** — document in spec what ships bundled (stdlib, buff-{web,db,template,reactive,observe} wrappers) vs what's `buff add`-able (buff-{ml,game,dataframe,tensor,etc.}).
+  - **(A4) Build profiles** â€” `[profile.dev]`/`[profile.release]`/`[profile.bench]` with `opt-level`, `lto`, `codegen-units`, `debug`, `panic`. `BUFF_PROFILE=prod buff run` selects non-default profile.
+  - **(B2) `@internal` attribute** â€” parser accepts `@internal` on `export` decls; LSP / docs surface warning when used outside the declaring crate. Convention only (not enforced at compile time).
+  - **(B3) Project prelude** â€” `[prelude]` section in `buff.toml` lists module paths whose `export`s become implicitly available in every file of the project. Codegen injects equivalent of `import * from "<path>"` at file head.
+  - **(B4) `@feature(name)` conditional compilation** *(added post-comparative-analysis)* â€” parser accepts `@feature(name)` attribute on any `export` declaration; codegen emits only if `name` is enabled in buff.toml `[features]`. Mirrors Rust `#[cfg(feature = "...")]` and Go build tags. Required to make the `[features]` section of buff.toml actually useful in source code. Without this, features exist in manifest but cannot gate code.
+  - **(C2) `buff gen` subcommand** â€” generators: `buff gen module <name>` (creates `src/modules/<name>.buff` + test file), `buff gen test <name>`, `buff gen example <name>`. Reduces boilerplate.
+  - **(D1) `.env` auto-loading** â€” `env("KEY")` in prelude auto-reads `.env` if present in project root (dev profile only). Use `dotenvy` crate via extern.
+  - **(D2) `.env.example` convention** â€” templates ship `.env.example` (committed) alongside `.env` (gitignored).
+  - **(E2) Doc comments standard** â€” formalize `///` for items, `//!` for module-level. Update `buff check` to warn on undocumented `export`.
+  - **(F1) Test layout enforcement** â€” `buff test` discovers `tests/unit/*.buff`, `tests/integration/*.buff`, `tests/snapshots/*` per convention. Document in spec.
+  - **(F2) Test attribute standards** â€” parser accepts `@bench`, `@property`, `@should_panic`, `@ignore` alongside existing `@test`. Codegen lowers to appropriate Rust test attributes.
+  - **(G1) SemVer strict validation** â€” `buff publish` rejects versions not matching SemVer 2.0 regex. Reuses existing v1.6 registry code.
+  - **(G2) Stability badges** â€” `[package] stability = "experimental"|"beta"|"stable"|"locked"` in buff.toml; surfaced in registry.
+  - **(G3) `@deprecated` attribute** â€” parser accepts `@deprecated(since = "X", replacement = "Y")`; codegen emits warning at call sites.
+  - **(I1) CI template** â€” `.github/workflows/ci.yml` in every template: runs `buff fmt --check`, `buff check -D`, `buff test` on ubuntu/windows/macos matrix.
+  - **(I2) `Dockerfile` template** â€” multi-stage build (builder + slim runtime) in `console` template.
+  - **(J1) "Buff SDK 2.0" bundle definition** â€” document in spec what ships bundled (stdlib, buff-{web,db,template,reactive,observe} wrappers) vs what's `buff add`-able (buff-{ml,game,dataframe,tensor,etc.}).
 
   **NICE to ship** (scaffold only if time/LOC budget allows; otherwise defer to v1.18+):
-  - **(E3) `buff doc` HTML generator** — scaffold command that emits per-crate HTML API docs (Rustdoc-style). Full rendering can defer to v1.18+; command must exist and produce placeholder.
-  - **(E4) Doc tests** — extract fenced ```buff blocks from doc comments; run as tests via `buff test --doctest`.
-  - **(H1) `.buff/vscode/settings.json` convention** — template writes format-on-save + LSP config. VSCode extension already exists from v1.2; this just standardizes per-project config.
-  - **(H2) Snippet library** — VSCode extension gains snippets for `fn`, `match`, `Result<T,E>`, `Vector<T>`, struct/enum templates.
-  - **(I3) `buff release` command** — bumps version (patch/minor/major), updates CHANGELOG.md, tags git, invokes `buff publish`. Convention: requires clean working tree.
-  - **(D3) `buff.config.buff` programmatic config** — optional build-time Buff script that runs at `buff build` start. Advanced feature; scaffold only.
+  - **(E3) `buff doc` HTML generator** â€” scaffold command that emits per-crate HTML API docs (Rustdoc-style). Full rendering can defer to v1.18+; command must exist and produce placeholder.
+  - **(E4) Doc tests** â€” extract fenced ```buff blocks from doc comments; run as tests via `buff test --doctest`.
+  - **(H1) `.buff/vscode/settings.json` convention** â€” template writes format-on-save + LSP config. VSCode extension already exists from v1.2; this just standardizes per-project config.
+  - **(H2) Snippet library** â€” VSCode extension gains snippets for `fn`, `match`, `Result<T,E>`, `Vector<T>`, struct/enum templates.
+  - **(I3) `buff release` command** â€” bumps version (patch/minor/major), updates CHANGELOG.md, tags git, invokes `buff publish`. Convention: requires clean working tree.
+  - **(D3) `buff.config.buff` programmatic config** â€” optional build-time Buff script that runs at `buff build` start. Advanced feature; scaffold only.
 
   **Must NOT do** (scope locks):
   - Do NOT exceed 6000 LOC + spec doc + template files. If budget hit, defer NICE-to-ship items to v1.18+.
-  - Do NOT break v1.x buff.toml manifests — v2 schema is additive (new optional sections, no removed fields).
-  - Do NOT remove existing `--lib`/`--server`/`--gpu`/`--workspace` flags on `buff new` — alias them to new templates.
+  - Do NOT break v1.x buff.toml manifests â€” v2 schema is additive (new optional sections, no removed fields).
+  - Do NOT remove existing `--lib`/`--server`/`--gpu`/`--workspace` flags on `buff new` â€” alias them to new templates.
   - Do NOT enforce `@internal` at compile time (convention only for v1.13-v1.17; enforcement deferred).
   - Do NOT build full HTML doc renderer (scaffold command only; rendering is v1.18+).
-  - Do NOT change Buff language syntax (no new keywords, no new operators) — T0 is purely additive conventions + tooling.
+  - Do NOT change Buff language syntax (no new keywords, no new operators) â€” T0 is purely additive conventions + tooling.
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
@@ -510,24 +510,24 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - `/git-master`: Many files touched across CLI + templates + spec; atomic commits per sub-deliverable.
 
   **Parallelization**:
-  - **Can Run In Parallel**: PARTIALLY — T0 can start immediately (spec + buff.toml v2 parser). T1 (multi-file linking) consumes buff.toml v2 schema, so T1 starts after T0's A1 deliverable. Other Wave 1 tasks (T2, T3, T4, T6) are independent of T0.
+  - **Can Run In Parallel**: PARTIALLY â€” T0 can start immediately (spec + buff.toml v2 parser). T1 (multi-file linking) consumes buff.toml v2 schema, so T1 starts after T0's A1 deliverable. Other Wave 1 tasks (T2, T3, T4, T6) are independent of T0.
   - **Parallel Group**: Wave 1 (sequential entry: T0 starts first, T1 joins after T0-A1 done, T2/T3/T4/T6 parallel throughout)
   - **Blocks**: T1 (uses buff.toml v2 schema), all Wave 2-5 framework tasks (follow conventions), T23 (flagship uses templates + conventions)
   - **Blocked By**: None
 
-  **References** (CRITICAL — be exhaustive):
+  **References** (CRITICAL â€” be exhaustive):
 
   **Pattern References** (existing code to follow):
-  - `crates/buff-lang-cli/src/config.rs` (1132 lines) — Existing v1 buff.toml parser using `toml::from_str` + serde derives. EXTEND this; do not rewrite. Specifically `BuffConfig`, `Package`, `ProfileOpts` structs.
-  - `crates/buff-lang-cli/src/scaffold.rs` — Existing `buff new` / `buff init` scaffolding logic. Extend with template-selection dispatch.
-  - `crates/buff-lang-cli/templates/desktop/` — Existing Tauri template (8 files); copy structure for new templates.
-  - `crates/buff-lang-cli/src/cli.rs:Command enum` (~655 lines as of v1.9; was 499 in earlier versions — verify in preflight) — Where `buff gen`, `buff doc`, `buff release` subcommands plug in.
-  - `crates/buff-lang-cli/src/commands/{build,run,new,init,fmt,check,add}.rs` — Existing command implementations; new commands follow same structure.
-  - `AGENTS.md` (repo root) — Existing per-crate AGENTS.md convention; formalize as part of E1.
+  - `crates/buff-lang-cli/src/config.rs` (1132 lines) â€” Existing v1 buff.toml parser using `toml::from_str` + serde derives. EXTEND this; do not rewrite. Specifically `BuffConfig`, `Package`, `ProfileOpts` structs.
+  - `crates/buff-lang-cli/src/scaffold.rs` â€” Existing `buff new` / `buff init` scaffolding logic. Extend with template-selection dispatch.
+  - `crates/buff-lang-cli/templates/desktop/` â€” Existing Tauri template (8 files); copy structure for new templates.
+  - `crates/buff-lang-cli/src/cli.rs:Command enum` (~655 lines as of v1.9; was 499 in earlier versions â€” verify in preflight) â€” Where `buff gen`, `buff doc`, `buff release` subcommands plug in.
+  - `crates/buff-lang-cli/src/commands/{build,run,new,init,fmt,check,add}.rs` â€” Existing command implementations; new commands follow same structure.
+  - `AGENTS.md` (repo root) â€” Existing per-crate AGENTS.md convention; formalize as part of E1.
 
   **API/Type References**:
-  - `crates/buff-lang-ast/src/decl.rs:Attribute parsing` — Existing `@test` attribute parser; extend for `@internal`, `@deprecated`, `@bench`, `@property`, `@should_panic`, `@ignore`.
-  - `crates/buff-lang-types/src/prelude.rs:PreludeFn` — Existing prelude registration; `[prelude]` project config weaves into this.
+  - `crates/buff-lang-ast/src/decl.rs:Attribute parsing` â€” Existing `@test` attribute parser; extend for `@internal`, `@deprecated`, `@bench`, `@property`, `@should_panic`, `@ignore`.
+  - `crates/buff-lang-types/src/prelude.rs:PreludeFn` â€” Existing prelude registration; `[prelude]` project config weaves into this.
 
   **External References**:
   - .NET project model: https://learn.microsoft.com/dotnet/core/project-sdk
@@ -548,7 +548,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **Per-sub-deliverable** (each MUST have its own QA scenario below):
   - [ ] A1: buff.toml v2 parses successfully (workspace/features/lints/multi-profile/prelude/edition)
   - [ ] A2: Conventions spec committed at `.sisyphus/decisions/sdk-conventions-v1x.md`
-  - [ ] A3: Workspace support — `buff build` in workspace root builds all member crates
+  - [ ] A3: Workspace support â€” `buff build` in workspace root builds all member crates
   - [ ] B1: `index.buff` barrel files work in T1's import resolver
   - [ ] C1: All 7 templates scaffold via `buff new --template <name> <project>`
   - [ ] E1: Spec document covers all 10 categories with examples
@@ -680,7 +680,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **Commit**: YES (multiple atomic commits per sub-deliverable)
   - Suggested commit sequence:
-    1. `docs(spec): Buff SDK 2.0 conventions specification` — spec doc only
+    1. `docs(spec): Buff SDK 2.0 conventions specification` â€” spec doc only
     2. `feat(config): buff.toml v2 schema (workspace, features, lints, profiles, prelude, edition)`
     3. `feat(cli): workspace support + workspace.dependencies inheritance (buff.workspace.toml)` 
     4. `feat(cli): 7 built-in templates for buff new --template`
@@ -699,20 +699,20 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 - [x] 24. Stack Traces with Buff Spans (Source Map + Panic Hook)
 
-  **What to do** *(added post-comparative-analysis — every scripting language solves this)*:
+  **What to do** *(added post-comparative-analysis â€” every scripting language solves this)*:
   - Create `crates/buff-lang-debug-info/` (new crate).
-  - **Source map emission**: during codegen, emit a sidecar `.buffmap` file alongside each compiled binary. Maps Rust source spans (file:line:col) → Buff source spans (file:line:col). Includes both generated code locations and the original Buff identifiers.
+  - **Source map emission**: during codegen, emit a sidecar `.buffmap` file alongside each compiled binary. Maps Rust source spans (file:line:col) â†’ Buff source spans (file:line:col). Includes both generated code locations and the original Buff identifiers.
   - **Panic hook interceptor**: register a `std::panic::panic_hook` automatically when Buff runtime initializes (transparent to user). On panic, the hook reads the `.buffmap`, walks the Rust panic backtrace, and remaps each frame to its Buff source location. Output is a Buff-stack-trace, not a Rust one.
-  - **`buff backtrace` subcommand** — given a core dump / panic log, post-processes the Rust trace into a Buff trace (for offline debugging).
-  - **Integration with v1.10 debugger (DAP)** — the DAP server (planned in tooling plan) consumes `.buffmap` so users step through Buff source, not Rust.
+  - **`buff backtrace` subcommand** â€” given a core dump / panic log, post-processes the Rust trace into a Buff trace (for offline debugging).
+  - **Integration with v1.10 debugger (DAP)** â€” the DAP server (planned in tooling plan) consumes `.buffmap` so users step through Buff source, not Rust.
   - 3 examples demonstrating: simple panic shows Buff trace, async task panic shows Buff trace, nested calls show full call stack.
   - 10+ unit tests for span mapping correctness.
   - AGENTS.md + README.md.
 
   **Must NOT do**:
-  - Do NOT modify the existing codegen output structure — source map is a SIDE-CAR file, not embedded in binary.
-  - Do NOT require debug builds — release builds also get source maps (small file size, separate from binary).
-  - Do NOT strip Rust traces entirely — always available via `RUST_BACKTRACE=1` env var as escape hatch.
+  - Do NOT modify the existing codegen output structure â€” source map is a SIDE-CAR file, not embedded in binary.
+  - Do NOT require debug builds â€” release builds also get source maps (small file size, separate from binary).
+  - Do NOT strip Rust traces entirely â€” always available via `RUST_BACKTRACE=1` env var as escape hatch.
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
@@ -720,15 +720,15 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T1, T2, T3, T4, T6 — independent foundation work)
+  - **Can Run In Parallel**: YES (with T1, T2, T3, T4, T6 â€” independent foundation work)
   - **Parallel Group**: Wave 1
   - **Blocks**: F3 (manual QA uses Buff traces for evidence), v1.10 debugger integration (out of scope here, just provides the source map)
   - **Blocked By**: None (works with existing codegen; doesn't require multi-file linking)
 
   **References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs` — Where source map emission hooks in (capture spans during codegen).
-  - `crates/buff-lang-error/src/span.rs` — Existing Span type to use.
-  - `crates/buff-lang-runtime/src/lib.rs` — Where panic hook registers at startup.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs` â€” Where source map emission hooks in (capture spans during codegen).
+  - `crates/buff-lang-error/src/span.rs` â€” Existing Span type to use.
+  - `crates/buff-lang-runtime/src/lib.rs` â€” Where panic hook registers at startup.
 
   **External References**:
   - Source-map spec (JS/TS): https://sourcemaps.info/spec.html
@@ -777,22 +777,22 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 25. `buff-mock` — Mocking Framework for Testing
+- [x] 25. `buff-mock` â€” Mocking Framework for Testing
 
-  **What to do** *(added post-comparative-analysis — every major language has one)*:
+  **What to do** *(added post-comparative-analysis â€” every major language has one)*:
   - Create `crates/buff-mock/`.
-  - Implement `Mock<Trait>` generic type — generates a mock impl of any trait for testing.
+  - Implement `Mock<Trait>` generic type â€” generates a mock impl of any trait for testing.
   - Implement API: `Mock.new()`, `mock.expect(method: "name").returning(value)`, `mock.expect(method: "name").times(n)`, `mock.verify()` (asserts all expected calls happened).
-  - Implement `@mock` attribute on `let` bindings: `@mock let m: MyTrait = Mock.new()` — automatically generates mock impl.
+  - Implement `@mock` attribute on `let` bindings: `@mock let m: MyTrait = Mock.new()` â€” automatically generates mock impl.
   - Implement spy patterns: `mock.spy(method: "name")` records all calls + arguments for later inspection.
   - Codegen lowering: at test compile time, expand `Mock<MyTrait>` into a struct with `HashMap<CallSignature, ReturnValue>` + `Mutex<Vec<CallRecord>>` for thread-safe call recording.
   - 3 examples: hello mock, verify interaction, spy on calls.
-  - 15+ tests (must test the mocking framework thoroughly — it's used by other tests).
+  - 15+ tests (must test the mocking framework thoroughly â€” it's used by other tests).
   - AGENTS.md + README.md.
 
   **Must NOT do**:
   - Do NOT exceed 2500 LOC or 25 public functions.
-  - Do NOT support mocking non-trait types (structs, enums) — only trait impls.
+  - Do NOT support mocking non-trait types (structs, enums) â€” only trait impls.
   - Do NOT require procedural macros (use codegen-time expansion only; consistent with T3 spike outcome of likely defer).
   - Do NOT support mocking `extern` functions (out of scope; mock at the Buff trait boundary instead).
 
@@ -802,14 +802,14 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T7-T12 — Wave 2 sibling)
+  - **Can Run In Parallel**: YES (with T7-T12 â€” Wave 2 sibling)
   - **Parallel Group**: Wave 2
   - **Blocks**: T22 (API compat spike uses mocks), T23 (flagship tests use mocks)
-  - **Blocked By**: T0 (conventions + @mock attribute), T1 (multi-file — test files are separate)
+  - **Blocked By**: T0 (conventions + @mock attribute), T1 (multi-file â€” test files are separate)
 
   **References**:
-  - `crates/buff-lang-ast/src/decl.rs:TraitDecl` — Trait declarations that can be mocked.
-  - Existing `@test` attribute pattern — `@mock` follows same parser path.
+  - `crates/buff-lang-ast/src/decl.rs:TraitDecl` â€” Trait declarations that can be mocked.
+  - Existing `@test` attribute pattern â€” `@mock` follows same parser path.
 
   **External References**:
   - mockall (Rust): https://docs.rs/mockall/latest/mockall/
@@ -866,12 +866,12 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Update `buff new --lib` / `buff new --server` / `buff new --gpu` scaffolds to generate multi-file projects (lib + entry + at least one imported module).
   - Update `crates/buff-lang-cli/src/commands/build.rs` and `run.rs` to dispatch between single-file rustc mode (existing, for examples/) and project mode (new).
   - Add tests: circular import detection, missing import error with span, cross-file type inference, multi-file project builds and runs.
-  - **Cross-compilation support** *(added post-comparative-analysis)* — `buff build --target <triple>` (e.g., `arm-unknown-linux-gnueabihf`, `x86_64-pc-windows-gnu`, `wasm32-wasi`). Reuses rustc's `--target` flag; documents which targets are "Buff-supported" (subset of Rust's tier 1/2 targets). Critical for embedded use case (user-mentioned). Initial supported set: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `wasm32-wasi`. Add `buff build --target list` to print available targets.
+  - **Cross-compilation support** *(added post-comparative-analysis)* â€” `buff build --target <triple>` (e.g., `arm-unknown-linux-gnueabihf`, `x86_64-pc-windows-gnu`, `wasm32-wasi`). Reuses rustc's `--target` flag; documents which targets are "Buff-supported" (subset of Rust's tier 1/2 targets). Critical for embedded use case (user-mentioned). Initial supported set: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `wasm32-wasi`. Add `buff build --target list` to print available targets.
 
   **Must NOT do**:
   - Do NOT add a package manager (that's v1.6 territory, already shipped).
   - Do NOT change single-file rustc pipeline behavior (existing examples/ must still work via `buff run file.buff`).
-  - Do NOT implement full Rust-style module visibility (`pub(crate)` etc.) — Buff uses `export` for public, everything else is private to the file.
+  - Do NOT implement full Rust-style module visibility (`pub(crate)` etc.) â€” Buff uses `export` for public, everything else is private to the file.
   - Do NOT introduce new Cargo dependencies outside root `Cargo.toml [workspace.dependencies]`.
 
   **Recommended Agent Profile**:
@@ -884,7 +884,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - `/postgresql-efcore`: No DB in this task.
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T2, T3, T4, T5, T6 — they're independent)
+  - **Can Run In Parallel**: YES (with T2, T3, T4, T5, T6 â€” they're independent)
   - **Parallel Group**: Wave 1
   - **Blocks**: T7, T8, T9, T10, T11, T12, T14, T17-T23 (everything that needs multi-file)
   - **Blocked By**: None
@@ -892,19 +892,19 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References** (existing code to follow):
-  - `crates/buff-lang-ast/src/decl.rs:ImportDecl, ExportDecl, ReexportDecl, ExternCrateDecl` — The AST nodes that already parse but don't link. Use these as-is; add resolution.
-  - `crates/buff-lang-cli/src/pipeline.rs:compile_to_rust, compile_rust_to_exe` — Existing pipeline split; add `compile_project_to_cargo` alongside.
-  - `crates/buff-lang-cli/src/commands/new.rs` — Existing scaffold logic for `buff new`; extend for multi-file templates.
+  - `crates/buff-lang-ast/src/decl.rs:ImportDecl, ExportDecl, ReexportDecl, ExternCrateDecl` â€” The AST nodes that already parse but don't link. Use these as-is; add resolution.
+  - `crates/buff-lang-cli/src/pipeline.rs:compile_to_rust, compile_rust_to_exe` â€” Existing pipeline split; add `compile_project_to_cargo` alongside.
+  - `crates/buff-lang-cli/src/commands/new.rs` â€” Existing scaffold logic for `buff new`; extend for multi-file templates.
 
   **API/Type References**:
-  - `crates/buff-lang-parser/src/lib.rs:parse` — Single-file parse entry; wrap with `parse_project` that returns module graph.
-  - `crates/buff-lang-types/src/lib.rs:TypeInferencer` — Extend to accept module graph for cross-file symbol resolution.
+  - `crates/buff-lang-parser/src/lib.rs:parse` â€” Single-file parse entry; wrap with `parse_project` that returns module graph.
+  - `crates/buff-lang-types/src/lib.rs:TypeInferencer` â€” Extend to accept module graph for cross-file symbol resolution.
 
   **External References**:
-  - Rust modules reference: https://doc.rust-lang.org/cargo/reference/workspaces.html — For generated Cargo workspace structure.
+  - Rust modules reference: https://doc.rust-lang.org/cargo/reference/workspaces.html â€” For generated Cargo workspace structure.
 
   **WHY Each Reference Matters**:
-  - `decl.rs` ImportDecl: existing AST is the contract — DO NOT redefine, just resolve.
+  - `decl.rs` ImportDecl: existing AST is the contract â€” DO NOT redefine, just resolve.
   - `pipeline.rs`: existing compile split lets you insert cargo-build step cleanly without breaking single-file mode.
   - `commands/new.rs`: scaffolds need updating so `buff new` produces multi-file projects by default (single-file is for examples/).
 
@@ -957,7 +957,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Preconditions: Clean repo
     Steps:
       1. Run: cargo run -p buff-lang-cli -- run examples/ola.buff
-      2. Assert stdout contains "Olá, Mundo!"
+      2. Assert stdout contains "OlÃ¡, Mundo!"
       3. Run: cargo run -p buff-lang-cli -- run examples/fibonacci.buff
       4. Assert stdout contains "55"
     Expected Result: All v1.x examples still work unchanged
@@ -972,19 +972,19 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 2. `Channel<T>` MPSC Primitive (REDUCED SCOPE — Stream/select deferred to v1.18+)
+- [x] 2. `Channel<T>` MPSC Primitive (REDUCED SCOPE â€” Stream/select deferred to v1.18+)
 
   **Scope reduction rationale** (post-user-feedback re-assessment):
   Buff already has comprehensive async coverage that eliminates the need for a general `Stream<T>` type or `select` expression in v1.13-v1.17:
-  - `async func` + auto-propagation (no `await` keyword) — production
-  - `spawn expr` → `Task<T>`, `task.result()` — production
-  - TCP/UDP/WebSocket `.recv()` async network streams — production (covers external stream sources)
-  - Sync `Vector<T>` + `for x in` iteration — covers batch streaming within process
-  - Callbacks (e.g., `Effect.new(fn)`) — cover reactive patterns without streams
+  - `async func` + auto-propagation (no `await` keyword) â€” production
+  - `spawn expr` â†’ `Task<T>`, `task.result()` â€” production
+  - TCP/UDP/WebSocket `.recv()` async network streams â€” production (covers external stream sources)
+  - Sync `Vector<T>` + `for x in` iteration â€” covers batch streaming within process
+  - Callbacks (e.g., `Effect.new(fn)`) â€” cover reactive patterns without streams
   The ONLY genuinely missing primitive is in-process `Channel<T>` MPSC for producer/consumer patterns (used by buff-pipeline T14 for inter-stage queues).
 
   **What to do**:
-  - Add `Channel<T>` type to Buff as a prelude namespace module (NO new keyword — exposed as `Channel.new(buf_size)` method-style, consistent with `DateTime.now()` and `Regex.compile()` patterns from v1.4 stdlib).
+  - Add `Channel<T>` type to Buff as a prelude namespace module (NO new keyword â€” exposed as `Channel.new(buf_size)` method-style, consistent with `DateTime.now()` and `Regex.compile()` patterns from v1.4 stdlib).
   - Implement `Channel<T>` as `buff_lang_runtime::Channel<T>` wrapping `tokio::sync::mpsc::{Sender, Receiver}` pair. Hide tokio behind the runtime abstraction per Metis G6.
   - Implement API: `Channel.new(buf_size: Int) -> (Sender<T>, Receiver<T>)`, `sender.send(value: T) -> Result<(), Error>`, `receiver.recv() -> Option<T>` (async via auto-await), `receiver.close()`.
   - Type inference: register `Channel<T>` as generic type in `crates/buff-lang-types/src/prelude.rs` alongside existing prelude types.
@@ -995,10 +995,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Document memory model: Channel<T> is `Send + 'static` (matches tokio mpsc requirements).
 
   **Must NOT do** (v1.13-v1.17 scope lock):
-  - Do NOT add `Stream<T>` general async iterable type — defer to v1.18+.
-  - Do NOT add `select` expression — defer to v1.18+.
-  - Do NOT add `stream`/`channel`/`select` as keywords — Channel is exposed as method-style (`Channel.new()`), no migration tool needed (T5 REMOVED).
-  - Do NOT expose raw `tokio::sync::mpsc::*` paths to Buff users — wrap in `buff_lang_runtime::Channel` per Metis G6.
+  - Do NOT add `Stream<T>` general async iterable type â€” defer to v1.18+.
+  - Do NOT add `select` expression â€” defer to v1.18+.
+  - Do NOT add `stream`/`channel`/`select` as keywords â€” Channel is exposed as method-style (`Channel.new()`), no migration tool needed (T5 REMOVED).
+  - Do NOT expose raw `tokio::sync::mpsc::*` paths to Buff users â€” wrap in `buff_lang_runtime::Channel` per Metis G6.
   - Do NOT implement async-aware locks (`tokio::sync::Mutex`) in MVP (sync `std::sync::Mutex` only).
   - Do NOT implement broadcast channels (single-consumer MPSC only for MVP; broadcast defer to v1.18+).
 
@@ -1016,20 +1016,20 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_spawn` (currently at line ~6860 — verify in preflight; was ~2647 in earlier versions, drift tracked by T28) — Existing `spawn expr` → `tokio::spawn(async move { expr })` lowering. Channel<T> follows similar wrapping pattern.
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_prelude_type_assoc_fn` (currently at line ~3070) — DateTime/Log/Regex/etc. emit-on-demand detection pattern. Channel follows same template.
-  - `crates/buff-lang-types/src/prelude.rs` — Where Channel<T> registers as prelude type.
-  - `crates/buff-lang-runtime/src/lib.rs` — Where `pub struct Channel<T>` wrapper lives.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_spawn` (currently at line ~6860 â€” verify in preflight; was ~2647 in earlier versions, drift tracked by T28) â€” Existing `spawn expr` â†’ `tokio::spawn(async move { expr })` lowering. Channel<T> follows similar wrapping pattern.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs::lower_prelude_type_assoc_fn` (currently at line ~3070) â€” DateTime/Log/Regex/etc. emit-on-demand detection pattern. Channel follows same template.
+  - `crates/buff-lang-types/src/prelude.rs` â€” Where Channel<T> registers as prelude type.
+  - `crates/buff-lang-runtime/src/lib.rs` â€” Where `pub struct Channel<T>` wrapper lives.
 
   **API/Type References**:
-  - `crates/buff-lang-types/src/prelude.rs:PreludeType` — Prelude type registration; add Channel<T> as generic type.
-  - `crates/buff-lang-ast/src/ty.rs:TypeRef` — Type reference for generic param T.
+  - `crates/buff-lang-types/src/prelude.rs:PreludeType` â€” Prelude type registration; add Channel<T> as generic type.
+  - `crates/buff-lang-ast/src/ty.rs:TypeRef` â€” Type reference for generic param T.
 
   **External References**:
-  - Tokio mpsc docs: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html — Underlying primitive being wrapped.
+  - Tokio mpsc docs: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html â€” Underlying primitive being wrapped.
 
   **WHY Each Reference Matters**:
-  - lower_spawn: shows existing pattern for hiding tokio behind Buff syntax — copy this approach for Channel.
+  - lower_spawn: shows existing pattern for hiding tokio behind Buff syntax â€” copy this approach for Channel.
   - v1.4 stdlib pattern: emit-on-demand detection is the template for all new prelude modules.
   - prelude.rs: registration point for Channel<T> as a Buff-visible type.
 
@@ -1067,7 +1067,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Steps:
       1. Create channel
       2. Drop sender (or call close)
-      3. Call receiver.recv() — should return None
+      3. Call receiver.recv() â€” should return None
       4. Assert output: "None"
     Expected Result: Channel close semantics work
     Evidence: .sisyphus/evidence/task-2-channel/close.txt
@@ -1082,7 +1082,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Expected Result: MPSC ordering guarantee holds per-producer
     Evidence: .sisyphus/evidence/task-2-channel/mpsc-order.txt
 
-  Scenario: Backward compat — existing async still works
+  Scenario: Backward compat â€” existing async still works
     Tool: Bash (cargo)
     Steps:
       1. Run: cargo run -p buff-lang-cli -- run examples/async_demo.buff
@@ -1104,14 +1104,14 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Conduct a 5-day timeboxed investigation to DECIDE whether Buff needs a macro system in v1.13-v1.17, or if frameworks can ship without one.
   - Investigate use cases: ORM compile-time SQL validation (buff-db), routing table generation (buff-web), automatic Serialize/Deserialize derives, JSON schema derivation.
   - For each use case, document the NON-MACRO WORKAROUND: runtime route registration (Vec<Route> + match), runtime query building (sqlx::query without macro), manual `impl Serialize for Foo`.
-  - Prototype ONE macro design (recommend declarative `macro_rules!`-style over procedural macros — simpler implementation in hand-rolled parser).
+  - Prototype ONE macro design (recommend declarative `macro_rules!`-style over procedural macros â€” simpler implementation in hand-rolled parser).
   - Estimate implementation cost: LOC, weeks, lexer/parser impact.
   - Write decision document to `.sisyphus/decisions/macro-system-v1x.md` with verdict: SHIP-IN-ROADMAP | DEFER-POST-v1.17.
   - Decision rule (LOCK THIS): DEFER if (implementation > 1500 LOC) OR (< 2 frameworks genuinely require it for MVP) OR (spike exceeds 5 days).
 
   **Must NOT do**:
-  - Do NOT implement the full macro system in this task — spike only.
-  - Do NOT change Buff syntax based on this spike — that's follow-on work if verdict is SHIP.
+  - Do NOT implement the full macro system in this task â€” spike only.
+  - Do NOT change Buff syntax based on this spike â€” that's follow-on work if verdict is SHIP.
   - Do NOT exceed 5-day timebox. If can't decide in 5 days, default is DEFER.
 
   **Recommended Agent Profile**:
@@ -1128,10 +1128,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-parser/src/lib.rs` — Existing hand-rolled parser; assess extensibility for macro syntax.
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:extern_*_handling` — How extern is wired today; macros would extend this pattern.
+  - `crates/buff-lang-parser/src/lib.rs` â€” Existing hand-rolled parser; assess extensibility for macro syntax.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:extern_*_handling` â€” How extern is wired today; macros would extend this pattern.
 
-  **API/Type References**: N/A — decision output.
+  **API/Type References**: N/A â€” decision output.
 
   **External References**:
   - Rust macro_rules! reference: https://doc.rust-lang.org/reference/macros-by-example.html
@@ -1139,7 +1139,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **WHY Each Reference Matters**:
   - Parser internals: spike must assess whether declarative macros can fit the existing recursive-descent approach.
-  - extern handling: macros are conceptually similar to extern FFI (compile-time code generation) — assess if pattern extends.
+  - extern handling: macros are conceptually similar to extern FFI (compile-time code generation) â€” assess if pattern extends.
 
   **Acceptance Criteria**:
 
@@ -1153,7 +1153,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
       1. Assert file exists: .sisyphus/decisions/macro-system-v1x.md
       2. Cat the file and assert it contains:
          - "Verdict:" line followed by "SHIP-IN-ROADMAP" or "DEFER-POST-v1.17"
-         - "Use Cases Analyzed:" section with ≥3 use cases
+         - "Use Cases Analyzed:" section with â‰¥3 use cases
          - "Per-Use-Case Workaround" section
          - "Cost Estimate" with LOC and weeks
          - "Decision Rule Applied" section
@@ -1180,7 +1180,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 - [x] 4. FFI Safety Guide + Conventions Document
 
   **What to do**:
-  - Write `crates/buff-lang-ffi-guide/` as a documentation-only crate (or `docs/ffi-guide.md` — pick one consistent with existing convention; verify `crates/` is preferred location per AGENTS.md).
+  - Write `crates/buff-lang-ffi-guide/` as a documentation-only crate (or `docs/ffi-guide.md` â€” pick one consistent with existing convention; verify `crates/` is preferred location per AGENTS.md).
   - Define hard rules for `extern` FFI usage in Buff frameworks:
     1. **No raw pointer exposure** to Buff users. All `*const T`/`*mut T` must be wrapped in safe Buff types.
     2. **Ownership boundary**: clearly document who owns memory crossing the Buff/Rust boundary. Recommend: Rust owns all heap memory; Buff sees only borrowed views.
@@ -1192,11 +1192,11 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - Example 1: Wrapping a simple function (e.g., `url::Url::parse`)
     - Example 2: Wrapping a stateful struct (e.g., `regex::Regex`)
     - Example 3: Wrapping an async function (e.g., `reqwest::get`)
-    - Example 4: Anti-pattern — what NOT to do (raw pointer exposure)
+    - Example 4: Anti-pattern â€” what NOT to do (raw pointer exposure)
   - Document the wrapper-crate pattern that Wave 4 production wrappers (T17-T21) should follow.
 
   **Must NOT do**:
-  - Do NOT write any production framework code — guide only.
+  - Do NOT write any production framework code â€” guide only.
   - Do NOT mandate a specific FFI pattern without justification (rules must have rationale + example).
   - Do NOT skip anti-patterns (negative examples are critical).
 
@@ -1208,14 +1208,14 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **Parallelization**:
   - **Can Run In Parallel**: YES (with all Wave 1)
   - **Parallel Group**: Wave 1
-  - **Blocks**: T17-T21 (wrappers reference guide) — soft block; wrappers can proceed without but should follow guide
+  - **Blocks**: T17-T21 (wrappers reference guide) â€” soft block; wrappers can proceed without but should follow guide
   - **Blocked By**: None
 
   **References**:
 
   **Pattern References**:
-  - `examples/extern_serde_json.buff`, `examples/extern_tokio.buff`, `examples/extern_reqwest.buff` — Existing extern FFI patterns to document formally.
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:extern_func handling` — How extern is lowered today.
+  - `examples/extern_serde_json.buff`, `examples/extern_tokio.buff`, `examples/extern_reqwest.buff` â€” Existing extern FFI patterns to document formally.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:extern_func handling` â€” How extern is lowered today.
 
   **External References**:
   - Rust FFI guide: https://doc.rust-lang.org/nomicon/ffi.html
@@ -1262,12 +1262,12 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] ~~5. Backward-Compat Lint + `buff fix --v1-to-v1x` Migration Tool~~ — **REMOVED**
+- [x] ~~5. Backward-Compat Lint + `buff fix --v1-to-v1x` Migration Tool~~ â€” **REMOVED**
 
   **Rationale for removal**: This task existed to migrate v1.x Buff source files that used identifiers conflicting with newly-reserved keywords (`stream`, `channel`, `select`, `macro`). After user-feedback-driven re-assessment:
   - T2 was reduced to expose `Channel<T>` as a method-style prelude module (`Channel.new(buf_size)`) consistent with `DateTime.now()` / `Regex.compile()` from v1.4 stdlib. **No new keyword `channel` is reserved.**
   - `stream` and `select` keywords are NOT being added in v1.13-v1.17 (Stream<T> and select expression deferred to v1.18+).
-  - `macro` keyword addition is contingent on T3 spike outcome — IF T3 returns SHIP-IN-ROADMAP and that requires a new keyword, this task should be re-instated at that point with scope limited to the single keyword.
+  - `macro` keyword addition is contingent on T3 spike outcome â€” IF T3 returns SHIP-IN-ROADMAP and that requires a new keyword, this task should be re-instated at that point with scope limited to the single keyword.
   
   **Conclusion**: With no new keywords being added in Wave 1, there is no identifier-migration work to do. v1.x Buff source code remains 100% compatible with v1.13-v1.17 at the syntactic level. Backward compatibility is therefore preserved by *not changing the syntax* rather than by providing a migration tool.
   
@@ -1290,8 +1290,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - buff-dsp: CPU-only (per G7 lock)
 
   **Must NOT do**:
-  - Do NOT implement any WGSL extensions — assessment only.
-  - Do NOT block Wave 2 start — T8 (tensor) can proceed with CPU-only MVP if assessment says GPU is hard.
+  - Do NOT implement any WGSL extensions â€” assessment only.
+  - Do NOT block Wave 2 start â€” T8 (tensor) can proceed with CPU-only MVP if assessment says GPU is hard.
   - Do NOT exceed 3-day timebox.
 
   **Recommended Agent Profile**:
@@ -1302,15 +1302,15 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **Parallelization**:
   - **Can Run In Parallel**: YES (with all Wave 1)
   - **Parallel Group**: Wave 1
-  - **Blocks**: T8 (tensor), T13 (science), T15 (ML) — they consume decision
+  - **Blocks**: T8 (tensor), T13 (science), T15 (ML) â€” they consume decision
   - **Blocked By**: None
 
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-wgsl/src/lib.rs` — All ~478 lines (was ~446 in earlier versions — verify in preflight); the WGSL codegen under assessment.
-  - `crates/buff-lang-runtime/src/gpu.rs, gpu_pipeline.rs` — GPU dispatch host; how WGSL is invoked.
-  - `crates/buff-lang-ast/src/ir.rs` — IR types feeding WGSL codegen.
+  - `crates/buff-lang-codegen-wgsl/src/lib.rs` â€” All ~478 lines (was ~446 in earlier versions â€” verify in preflight); the WGSL codegen under assessment.
+  - `crates/buff-lang-runtime/src/gpu.rs, gpu_pipeline.rs` â€” GPU dispatch host; how WGSL is invoked.
+  - `crates/buff-lang-ast/src/ir.rs` â€” IR types feeding WGSL codegen.
 
   **External References**:
   - WGSL spec: https://www.w3.org/TR/WGSL/
@@ -1355,7 +1355,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 7. `buff-dataframe` — Columnar DataFrames + Lazy Execution
+- [x] 7. `buff-dataframe` â€” Columnar DataFrames + Lazy Execution
 
   **What to do**:
   - Create `crates/buff-dataframe/` with Cargo.toml (workspace deps, edition 2021, MIT OR Apache-2.0, version 2.0.0).
@@ -1364,7 +1364,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Implement lazy execution: build query plan, execute on `df.collect()`. (Defer to v1.18+ if LOC budget exceeded.)
   - Leverage v1.4 stdlib: use `Path.exists()`, existing CSV module where possible.
   - Codegen lowering in `crates/buff-lang-codegen-rust/src/rust_codegen.rs` (emit-on-demand detection like v1.4 stdlib).
-  - Extern FFI to `polars` crate (lazy, via feature-gated dependency) for高性能 ops if needed; otherwise pure Buff+Rust implementation.
+  - Extern FFI to `polars` crate (lazy, via feature-gated dependency) foré«˜æ€§èƒ½ ops if needed; otherwise pure Buff+Rust implementation.
   - Add 3 examples in `examples/dataframe/`: `hello.buff` (load CSV, print head), `analysis.buff` (group_by + agg), `join.buff` (two CSVs joined).
   - Add 10+ unit tests in `crates/buff-dataframe/tests/`.
   - Add 5+ snapshot tests for codegen output.
@@ -1374,10 +1374,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **Must NOT do**:
   - Do NOT exceed 2500 LOC or 25 public functions.
-  - Do NOT implement Parquet reader (defer to v1.18+ — CSV/JSON only for MVP).
+  - Do NOT implement Parquet reader (defer to v1.18+ â€” CSV/JSON only for MVP).
   - Do NOT implement streaming/chunked DataFrames (load entire CSV into memory).
   - Do NOT use GPU (CPU-only per Metis G7).
-  - Do NOT add `polars` as direct dependency if it requires complex build setup — wrap simple parts only.
+  - Do NOT add `polars` as direct dependency if it requires complex build setup â€” wrap simple parts only.
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
@@ -1393,9 +1393,9 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:v1.4 stdlib modules` (e.g., DateTime lowering at line 3129) — Copy this codegen pattern: emit-on-demand detection, fully-qualified Rust paths.
-  - `examples/collections.buff` — Existing Vector<T>/Map usage; DataFrame extends this idiom.
-  - `crates/buff-lang-types/src/prelude.rs` — How prelude types register; DataFrame may or may not be prelude (decide: implicit like DateTime vs `import`-only).
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:v1.4 stdlib modules` (e.g., DateTime lowering at line 3129) â€” Copy this codegen pattern: emit-on-demand detection, fully-qualified Rust paths.
+  - `examples/collections.buff` â€” Existing Vector<T>/Map usage; DataFrame extends this idiom.
+  - `crates/buff-lang-types/src/prelude.rs` â€” How prelude types register; DataFrame may or may not be prelude (decide: implicit like DateTime vs `import`-only).
 
   **API/Type References**:
   - Polars API (if used): https://docs.rs/polars/latest/polars/
@@ -1461,17 +1461,17 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 8. `buff-tensor` — N-dim Arrays + GPU Dispatch
+- [x] 8. `buff-tensor` â€” N-dim Arrays + GPU Dispatch
 
   **What to do**:
   - Create `crates/buff-tensor/` with standard Cargo.toml.
-  - Implement `Tensor<T>` type: N-dimensional array (rank ≤ 4 for MVP), dtype f32 only (defer f64/i64 to v1.18+).
+  - Implement `Tensor<T>` type: N-dimensional array (rank â‰¤ 4 for MVP), dtype f32 only (defer f64/i64 to v1.18+).
   - Implement core ops: `Tensor.zeros(shape)`, `Tensor.from_vec(data, shape)`, `t.shape()`, `t.get(indices)`, `t.set(indices, val)`, `t.reshape(shape)`, `t.transpose()`.
-  - Implement math ops: elementwise (`+`, `-`, `*`, `/`), matmul (2D × 2D), reduce (sum, mean, max along axis).
+  - Implement math ops: elementwise (`+`, `-`, `*`, `/`), matmul (2D Ã— 2D), reduce (sum, mean, max along axis).
   - GPU dispatch: per T6 decision. If YES, extend `crates/buff-lang-codegen-wgsl` for matmul/reduce; if NO, CPU-only via rayon.
   - Codegen lowering: emit-on-demand pattern (like v1.4 stdlib).
   - Add 3 examples: `hello.buff` (create + print), `matmul.buff` (matrix multiply), `reduce.buff` (sum along axis).
-  - Add 15+ unit tests (math-heavy → proptest required for numeric ops).
+  - Add 15+ unit tests (math-heavy â†’ proptest required for numeric ops).
   - Add 5+ snapshot tests for codegen.
   - Write AGENTS.md + README.md.
   - Register with "experimental" badge.
@@ -1497,15 +1497,15 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-runtime/src/cpu.rs:CpuDispatcher` — Existing parallel dispatch for par_map etc.; reuse for tensor elementwise ops.
-  - `crates/buff-lang-runtime/src/gpu.rs, gpu_pipeline.rs` — Existing wgpu dispatch flow.
-  - `crates/buff-lang-codegen-wgsl/src/lib.rs` — WGSL codegen to extend (if T6 says GPU YES).
+  - `crates/buff-lang-runtime/src/cpu.rs:CpuDispatcher` â€” Existing parallel dispatch for par_map etc.; reuse for tensor elementwise ops.
+  - `crates/buff-lang-runtime/src/gpu.rs, gpu_pipeline.rs` â€” Existing wgpu dispatch flow.
+  - `crates/buff-lang-codegen-wgsl/src/lib.rs` â€” WGSL codegen to extend (if T6 says GPU YES).
 
   **API/Type References**:
-  - `crates/buff-lang-types/src/prelude.rs` — Tensor may register here as prelude namespace.
+  - `crates/buff-lang-types/src/prelude.rs` â€” Tensor may register here as prelude namespace.
 
   **External References**:
-  - Candle (HuggingFace): https://github.com/huggingface/candle — reference Rust tensor lib
+  - Candle (HuggingFace): https://github.com/huggingface/candle â€” reference Rust tensor lib
   - NDArray: https://docs.rs/ndarray/latest/ndarray/
   - wgpu compute examples: https://github.com/gfx-rs/wgpu/blob/trunk/wgpu/examples/
 
@@ -1562,7 +1562,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 9. `buff-image` — Image Codecs + Pixel Ops (CPU-only MVP)
+- [x] 9. `buff-image` â€” Image Codecs + Pixel Ops (CPU-only MVP)
 
   **What to do**:
   - Create `crates/buff-image/` with standard Cargo.toml.
@@ -1578,7 +1578,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **Must NOT do**:
   - Do NOT exceed 2500 LOC or 25 public functions.
   - Do NOT use GPU (CPU-only per Metis G7 lock).
-  - Do NOT implement exotic formats (DICOM, RAW, etc.) — PNG/JPEG/GIF/BMP/WebP only via `image` crate.
+  - Do NOT implement exotic formats (DICOM, RAW, etc.) â€” PNG/JPEG/GIF/BMP/WebP only via `image` crate.
   - Do NOT implement custom codecs (use extern).
 
   **Recommended Agent Profile**:
@@ -1590,13 +1590,13 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Can Run In Parallel**: YES (with T7, T8, T10-T12)
   - **Parallel Group**: Wave 2
   - **Blocks**: None directly (image is standalone)
-  - **Blocked By**: T1 (multi-file), T4 (FFI guide — soft)
+  - **Blocked By**: T1 (multi-file), T4 (FFI guide â€” soft)
 
   **References**:
 
   **Pattern References**:
-  - `examples/extern_serde_json.buff` — Extern FFI pattern for wrapping Rust crates; same pattern for `image` crate.
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Process module` — Wrap stateful Rust type (Regex pattern); copy for Image.
+  - `examples/extern_serde_json.buff` â€” Extern FFI pattern for wrapping Rust crates; same pattern for `image` crate.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Process module` â€” Wrap stateful Rust type (Regex pattern); copy for Image.
 
   **External References**:
   - image crate: https://docs.rs/image/latest/image/
@@ -1645,7 +1645,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 10. `buff-audio` — Audio Codecs + Sample Ops (CPU-only MVP)
+- [x] 10. `buff-audio` â€” Audio Codecs + Sample Ops (CPU-only MVP)
 
   **What to do**:
   - Create `crates/buff-audio/`.
@@ -1659,7 +1659,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Do NOT exceed 2500 LOC or 25 public functions.
   - Do NOT use GPU (CPU-only per G7).
   - Do NOT implement real-time playback (defer to v1.18+).
-  - Do NOT implement synthesis (sine/square/noise generators — those go in buff-dsp T11).
+  - Do NOT implement synthesis (sine/square/noise generators â€” those go in buff-dsp T11).
 
   **Recommended Agent Profile**:
   - **Category**: `unspecified-high`
@@ -1674,8 +1674,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Path module` — File-loading pattern.
-  - `examples/extern_*.buff` — Extern FFI pattern for wrapping Rust crates.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Path module` â€” File-loading pattern.
+  - `examples/extern_*.buff` â€” Extern FFI pattern for wrapping Rust crates.
 
   **External References**:
   - rodio: https://docs.rs/rodio/latest/rodio/
@@ -1705,7 +1705,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Steps:
       1. Load audio, find peak sample value
       2. Amplify by 2.0
-      3. Assert new peak ≈ 2x old peak (within tolerance)
+      3. Assert new peak â‰ˆ 2x old peak (within tolerance)
     Expected Result: Amplification mathematically correct
     Evidence: .sisyphus/evidence/task-10-amplify/output.txt
 
@@ -1714,7 +1714,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Steps:
       1. Create buffer A (1 second of 0.5 amplitude)
       2. Create buffer B (1 second of 0.3 amplitude)
-      3. Mix; assert samples ≈ 0.8
+      3. Mix; assert samples â‰ˆ 0.8
     Expected Result: Mix is sample-wise addition
     Evidence: .sisyphus/evidence/task-10-mix/output.txt
   ```
@@ -1724,14 +1724,14 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 11. `buff-dsp` — Signal Processing: FFT, Filters, Windows (CPU-only MVP)
+- [x] 11. `buff-dsp` â€” Signal Processing: FFT, Filters, Windows (CPU-only MVP)
 
   **What to do**:
   - Create `crates/buff-dsp/`.
   - Implement signal primitives: `Signal<T>` (Vec<T> + sample_rate), `Signal.from_vec(data, sample_rate)`.
-  - Implement FFT: `s.fft()` (forward), `s.ifft()` (inverse) — extern to `rustfft` crate.
+  - Implement FFT: `s.fft()` (forward), `s.ifft()` (inverse) â€” extern to `rustfft` crate.
   - Implement filters: `s.lowpass(cutoff_hz)`, `s.highpass(cutoff_hz)`, `s.bandpass(low, high)`.
-  - Implement windows: `Window.hann(n)`, `Window.hamming(n)`, `Window.blackman(n)` — apply via `s.apply_window(window)`.
+  - Implement windows: `Window.hann(n)`, `Window.hamming(n)`, `Window.blackman(n)` â€” apply via `s.apply_window(window)`.
   - Implement spectral ops: `s.spectrogram(window_size)`, `s.magnitude()`, `s.phase()`.
   - Extern FFI to `rustfft`, `apodization` crates per T4 FFI guide.
   - 3 examples, 10+ tests (proptest required for signal math), 5+ snapshots, AGENTS.md, README.md, registry.
@@ -1740,7 +1740,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Do NOT exceed 2500 LOC or 25 public functions.
   - Do NOT use GPU (CPU-only per G7).
   - Do NOT implement real-time streaming (defer to v1.18+; Signal is Vec-backed not Stream-backed).
-  - Do NOT implement adaptive filters (LMS, RLS — defer to v1.18+).
+  - Do NOT implement adaptive filters (LMS, RLS â€” defer to v1.18+).
 
   **Recommended Agent Profile**:
   - **Category**: `unspecified-high`
@@ -1755,7 +1755,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Math/Random module` — Math functions lowering; similar for DSP ops.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Math/Random module` â€” Math functions lowering; similar for DSP ops.
 
   **External References**:
   - rustfft: https://docs.rs/rustfft/latest/rustfft/
@@ -1803,7 +1803,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 12. `buff-ecs` — Entity-Component-System Architecture
+- [x] 12. `buff-ecs` â€” Entity-Component-System Architecture
 
   **What to do**:
   - Create `crates/buff-ecs/`.
@@ -1836,8 +1836,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-types/src/prelude.rs:PreludeType` — How types register for codegen; ECS components follow same pattern.
-  - `crates/buff-lang-ast/src/decl.rs:TraitDecl` — Traits model component contracts; ECS uses traits for component bounds.
+  - `crates/buff-lang-types/src/prelude.rs:PreludeType` â€” How types register for codegen; ECS components follow same pattern.
+  - `crates/buff-lang-ast/src/decl.rs:TraitDecl` â€” Traits model component contracts; ECS uses traits for component bounds.
 
   **External References**:
   - hecs: https://docs.rs/hecs/latest/hecs/
@@ -1890,7 +1890,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 13. `buff-science` — Linear Algebra + FFT + Stats (depends T8)
+- [x] 13. `buff-science` â€” Linear Algebra + FFT + Stats (depends T8)
 
   **What to do**:
   - Create `crates/buff-science/`.
@@ -1912,7 +1912,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T14, T15, T16 — Wave 3 siblings)
+  - **Can Run In Parallel**: YES (with T14, T15, T16 â€” Wave 3 siblings)
   - **Parallel Group**: Wave 3
   - **Blocks**: T22, T23
   - **Blocked By**: T8 (tensor)
@@ -1920,8 +1920,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-types/src/prelude.rs:Math functions (abs, sqrt, etc.)` — Math prelude registration pattern.
-  - buff-tensor (T8) — Tensor type being consumed.
+  - `crates/buff-lang-types/src/prelude.rs:Math functions (abs, sqrt, etc.)` â€” Math prelude registration pattern.
+  - buff-tensor (T8) â€” Tensor type being consumed.
 
   **External References**:
   - nalgebra: https://docs.rs/nalgebra/latest/nalgebra/
@@ -1943,7 +1943,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
       1. Create invertible 3x3 matrix m
       2. Compute m_inv = linalg.inverse(m)
       3. Compute product = linalg.matmul(m, m_inv)
-      4. Assert product ≈ identity (diagonal ≈ 1.0, off-diagonal ≈ 0.0, within 1e-6)
+      4. Assert product â‰ˆ identity (diagonal â‰ˆ 1.0, off-diagonal â‰ˆ 0.0, within 1e-6)
     Expected Result: Inverse is mathematically correct
     Evidence: .sisyphus/evidence/task-13-inverse/output.txt
 
@@ -1952,7 +1952,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Steps:
       1. Define f(t, y) = y (exponential growth, solution y(t) = e^t)
       2. Integrate from t=0 to t=1 with step 0.01
-      3. Assert result ≈ e^1 ≈ 2.71828 (within 1e-4)
+      3. Assert result â‰ˆ e^1 â‰ˆ 2.71828 (within 1e-4)
     Expected Result: ODE solver is accurate
     Evidence: .sisyphus/evidence/task-13-rk4/output.txt
 
@@ -1972,25 +1972,25 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 14. `buff-pipeline` — DAG-based ETL + Bounded Channel Queues (depends T2 Channel)
+- [x] 14. `buff-pipeline` â€” DAG-based ETL + Bounded Channel Queues (depends T2 Channel)
 
   **What to do** (revised post-T2 scope reduction):
   - Create `crates/buff-pipeline/`.
-  - Implement `Pipeline` type: DAG of stages, each stage is a Buff closure taking input → output (or `Option<Output>` to indicate "skip").
-  - Implement core API: `Pipeline.new()`, `p.stage(name, fn)`, `p.source(data: Vector<T>)` (batch source — NOT async streaming source; defer Kafka/Redis Streams to v1.18+), `p.sink(fn)`, `p.run()`.
+  - Implement `Pipeline` type: DAG of stages, each stage is a Buff closure taking input â†’ output (or `Option<Output>` to indicate "skip").
+  - Implement core API: `Pipeline.new()`, `p.stage(name, fn)`, `p.source(data: Vector<T>)` (batch source â€” NOT async streaming source; defer Kafka/Redis Streams to v1.18+), `p.sink(fn)`, `p.run()`.
   - **Inter-stage queues via T2 Channel<T>**: each stage receives input via `Channel<T>`, sends output via `Channel<U>` downstream. Bounded buffers provide backpressure naturally. Producer/consumer pattern is exactly what Channel<T> was designed for.
   - Implement common stages: `p.map(fn)`, `p.filter(pred)`, `p.batch(size)` (groups N items into Vector<T>), `p.window(size, fn)`, `p.parallel(workers, fn)` (spawns N workers each pulling from input Channel via `spawn`).
-  - Implement sources: `Source.from_csv(path, chunk_size)` reads CSV in chunks, pushes rows into Channel<T> for downstream consumption (loads bounded memory window, not entire CSV at once — uses Channel backpressure to throttle file I/O).
+  - Implement sources: `Source.from_csv(path, chunk_size)` reads CSV in chunks, pushes rows into Channel<T> for downstream consumption (loads bounded memory window, not entire CSV at once â€” uses Channel backpressure to throttle file I/O).
   - Implement sinks: `Sink.to_csv(path)`, `Sink.to_json(path)`, `Sink.collect()` returns Vector<T> (terminal drain).
   - 3 examples (one real ETL pipeline), 10+ tests, 5+ snapshots, AGENTS.md, README.md, registry.
 
   **Must NOT do**:
   - Do NOT exceed 4000 LOC or 40 public functions.
-  - Do NOT implement `Stream<T>` consumption (T2 deferred this to v1.18+) — use `Channel<T>` + sync `Vector<T>` batches.
+  - Do NOT implement `Stream<T>` consumption (T2 deferred this to v1.18+) â€” use `Channel<T>` + sync `Vector<T>` batches.
   - Do NOT implement Kafka/Redis Streams sources (defer to v1.18+).
   - Do NOT implement exactly-once delivery guarantees (defer to v1.18+).
-  - Do NOT implement pipeline orchestration (scheduling, retries) — that's a separate concern.
-  - Do NOT use `select` expression (deferred to v1.18+) — workers consume from a single Channel each, no multi-source select needed.
+  - Do NOT implement pipeline orchestration (scheduling, retries) â€” that's a separate concern.
+  - Do NOT use `select` expression (deferred to v1.18+) â€” workers consume from a single Channel each, no multi-source select needed.
 
   **Recommended Agent Profile**:
   - **Category**: `unspecified-high`
@@ -2006,10 +2006,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-runtime/src/cpu.rs:CpuDispatcher par_map` — Existing parallel pattern to extend.
-  - buff-dataframe (T7) — Reuse DataFrame as source/sink where useful.
-  - buff-lang-runtime `Channel<T>` (T2) — The inter-stage queue primitive.
-  - `crates/buff-lang-ast/src/expr.rs:Spawn variant` — Existing `spawn expr` for parallel workers.
+  - `crates/buff-lang-runtime/src/cpu.rs:CpuDispatcher par_map` â€” Existing parallel pattern to extend.
+  - buff-dataframe (T7) â€” Reuse DataFrame as source/sink where useful.
+  - buff-lang-runtime `Channel<T>` (T2) â€” The inter-stage queue primitive.
+  - `crates/buff-lang-ast/src/expr.rs:Spawn variant` â€” Existing `spawn expr` for parallel workers.
 
   **External References**:
   - Apache Arrow (conceptual): https://arrow.apache.org/
@@ -2043,9 +2043,9 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Tool: Bash
     Steps:
       1. CSV with 10K rows
-      2. Pipeline: source.from_csv(chunk_size: 100) → filter → map → sink.to_csv
+      2. Pipeline: source.from_csv(chunk_size: 100) â†’ filter â†’ map â†’ sink.to_csv
       3. Assert output CSV has correct filtered/transformed rows
-      4. Assert memory usage stayed bounded (didn't load all rows at once — verify via Channel backpressure: source blocks when downstream is slow)
+      4. Assert memory usage stayed bounded (didn't load all rows at once â€” verify via Channel backpressure: source blocks when downstream is slow)
     Expected Result: Channel-based streaming works without OOM
     Evidence: .sisyphus/evidence/task-14-stream/{input,output}.csv
 
@@ -2065,7 +2065,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 15. `buff-ml` — Neural Network Layers + Autodiff (depends T8)
+- [x] 15. `buff-ml` â€” Neural Network Layers + Autodiff (depends T8)
 
   **What to do**:
   - Create `crates/buff-ml/`.
@@ -2099,13 +2099,13 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - buff-tensor (T8) — Tensor type being extended.
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Math module` — Math fn registration.
+  - buff-tensor (T8) â€” Tensor type being extended.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Math module` â€” Math fn registration.
 
   **External References**:
-  - Candle (HuggingFace): https://github.com/huggingface/candle — reference for autodiff
+  - Candle (HuggingFace): https://github.com/huggingface/candle â€” reference for autodiff
   - tch-rs (PyTorch bindings): https://docs.rs/tch/latest/tch/
-  - Micrograd (Karpathy): https://github.com/karpathy/micrograd — autodiff reference
+  - Micrograd (Karpathy): https://github.com/karpathy/micrograd â€” autodiff reference
 
   **WHY Each Reference Matters**:
   - Candle: production-quality Rust autodiff; study the design.
@@ -2124,7 +2124,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
       3. Compute MSE loss vs target
       4. Backward pass
       5. Numerically check gradients via finite differences (epsilon=1e-5)
-      6. Assert analytic grad ≈ numeric grad (within 1e-4)
+      6. Assert analytic grad â‰ˆ numeric grad (within 1e-4)
     Expected Result: Autodiff is mathematically correct
     Evidence: .sisyphus/evidence/task-15-gradcheck/output.txt
 
@@ -2134,7 +2134,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
       1. Generate synthetic data: y = 2x + 3 + noise
       2. Build model: Linear(1, 1)
       3. Train 1000 steps with SGD(lr=0.01)
-      4. Assert learned weights ≈ 2.0 (± 0.1) and bias ≈ 3.0 (± 0.1)
+      4. Assert learned weights â‰ˆ 2.0 (Â± 0.1) and bias â‰ˆ 3.0 (Â± 0.1)
     Expected Result: Training converges to correct params
     Evidence: .sisyphus/evidence/task-15-linear/output.txt
 
@@ -2154,7 +2154,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 16. `buff-game` — Game Loop + Asset Pipeline + Rendering (depends T12)
+- [x] 16. `buff-game` â€” Game Loop + Asset Pipeline + Rendering (depends T12)
 
   **What to do**:
   - Create `crates/buff-game/`.
@@ -2168,7 +2168,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **Must NOT do**:
   - Do NOT exceed 4000 LOC or 40 public functions.
-  - Do NOT implement physics engine (defer to v1.18+ — wrap rapier if needed then).
+  - Do NOT implement physics engine (defer to v1.18+ â€” wrap rapier if needed then).
   - Do NOT implement 3D model loading (defer to v1.18+).
   - Do NOT implement audio playback mixing (use buff-audio for loading only).
   - Do NOT implement networking multiplayer (defer to v1.19+).
@@ -2187,11 +2187,11 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-runtime/src/gpu.rs` — Existing wgpu context; reuse for rendering.
-  - `crates/buff-ui-dioxus/` — Existing window setup pattern (may or may not fit game loop; assess).
+  - `crates/buff-lang-runtime/src/gpu.rs` â€” Existing wgpu context; reuse for rendering.
+  - `crates/buff-ui-dioxus/` â€” Existing window setup pattern (may or may not fit game loop; assess).
 
   **External References**:
-  - Bevy: https://bevyengine.org/ — reference architecture
+  - Bevy: https://bevyengine.org/ â€” reference architecture
   - winit: https://docs.rs/winit/latest/winit/
   - wgpu: https://docs.rs/wgpu/latest/wgpu/
 
@@ -2238,7 +2238,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 17. `buff-web` — Production Web Framework (wraps axum)
+- [x] 17. `buff-web` â€” Production Web Framework (wraps axum)
 
   **What to do**:
   - Create `crates/buff-web/`.
@@ -2256,7 +2256,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Do NOT implement WebSocket (use existing stdlib if needed; out of scope here).
   - Do NOT implement template rendering (T19 buff-template handles that).
   - Do NOT implement ORM/database integration (T18 buff-db handles that).
-  - Do NOT use macros for routing (T3 decision pending — use runtime registration).
+  - Do NOT use macros for routing (T3 decision pending â€” use runtime registration).
 
   **Recommended Agent Profile**:
   - **Category**: `unspecified-high`
@@ -2264,16 +2264,16 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T18-T21 — Wave 4)
+  - **Can Run In Parallel**: YES (with T18-T21 â€” Wave 4)
   - **Parallel Group**: Wave 4
   - **Blocks**: T22, T23
-  - **Blocked By**: T1 (multi-file), T4 (FFI guide — soft)
+  - **Blocked By**: T1 (multi-file), T4 (FFI guide â€” soft)
 
   **References**:
 
   **Pattern References**:
-  - `examples/extern_reqwest.buff` — Existing HTTP client extern pattern; mirror for server side.
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Process module` — Wrap stateful Rust type pattern.
+  - `examples/extern_reqwest.buff` â€” Existing HTTP client extern pattern; mirror for server side.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Process module` â€” Wrap stateful Rust type pattern.
 
   **External References**:
   - axum: https://docs.rs/axum/latest/axum/
@@ -2326,7 +2326,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 18. `buff-db` — Database Access (wraps sqlx)
+- [x] 18. `buff-db` â€” Database Access (wraps sqlx)
 
   **What to do**:
   - Create `crates/buff-db/`.
@@ -2357,7 +2357,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `examples/extern_serde_json.buff` — Extern FFI to stateless function; similar for sqlx.
+  - `examples/extern_serde_json.buff` â€” Extern FFI to stateless function; similar for sqlx.
 
   **External References**:
   - sqlx: https://docs.rs/sqlx/latest/sqlx/
@@ -2388,8 +2388,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   Scenario: Transaction commit and rollback
     Tool: Bash
     Steps:
-      1. Begin tx, insert row, rollback — assert row NOT present
-      2. Begin tx, insert row, commit — assert row IS present
+      1. Begin tx, insert row, rollback â€” assert row NOT present
+      2. Begin tx, insert row, commit â€” assert row IS present
     Expected Result: Transactions behave correctly
     Evidence: .sisyphus/evidence/task-18-tx/output.txt
 
@@ -2407,7 +2407,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 19. `buff-template` — HTML Templating (wraps handlebars)
+- [x] 19. `buff-template` â€” HTML Templating (wraps handlebars)
 
   **What to do**:
   - Create `crates/buff-template/`.
@@ -2439,7 +2439,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Log module` — Stateless function wrap pattern.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Log module` â€” Stateless function wrap pattern.
 
   **External References**:
   - handlebars: https://docs.rs/handlebars/latest/handlebars/
@@ -2475,8 +2475,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Tool: Bash
     Steps:
       1. Template: "{% if ok %}yes{% else %}no{% endif %}"
-      2. Context {"ok": true} → "yes"
-      3. Context {"ok": false} → "no"
+      2. Context {"ok": true} â†’ "yes"
+      3. Context {"ok": false} â†’ "no"
     Expected Result: Conditionals work
     Evidence: .sisyphus/evidence/task-19-cond/output.txt
   ```
@@ -2486,21 +2486,21 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 20. `buff-reactive` — Signals + Computed + Effect Callbacks (depends T1; no Stream dependency)
+- [x] 20. `buff-reactive` â€” Signals + Computed + Effect Callbacks (depends T1; no Stream dependency)
 
   **What to do** (revised post-T2 scope reduction):
   - Create `crates/buff-reactive/`.
   - Implement `Signal<T>` type: mutable reactive cell, notifies subscribers on change.
   - Implement core API: `Signal.new(initial)`, `s.get()`, `s.set(value)`, `s.update(fn)` (read-modify-write).
-  - Implement computed: `Computed.new(fn)` — derives from signals, recomputes lazily, caches.
-  - Implement effects: `Effect.new(fn)` — runs when dependencies change. Uses **callback pattern** (fn invoked on dep change), NOT async streams. This is the Vue/Solid.js reactive model — it composes cleanly without Stream<T>.
-  - Implement batching: `batch(fn)` — defers notifications until block exits (prevents cascade).
+  - Implement computed: `Computed.new(fn)` â€” derives from signals, recomputes lazily, caches.
+  - Implement effects: `Effect.new(fn)` â€” runs when dependencies change. Uses **callback pattern** (fn invoked on dep change), NOT async streams. This is the Vue/Solid.js reactive model â€” it composes cleanly without Stream<T>.
+  - Implement batching: `batch(fn)` â€” defers notifications until block exits (prevents cascade).
   - Memory model: signals are `Rc<RefCell<...>>` internally (single-threaded for MVP). Document threading limits.
   - 3 examples, 10+ tests, 5+ snapshots, AGENTS.md, README.md, registry.
 
   **Must NOT do** (v1.13-v1.17 scope lock):
   - Do NOT exceed 1500 LOC or 20 public functions.
-  - Do NOT use `Stream<T>` (deferred to v1.18+) — callbacks via `Effect.new(fn)` are sufficient.
+  - Do NOT use `Stream<T>` (deferred to v1.18+) â€” callbacks via `Effect.new(fn)` are sufficient.
   - Do NOT implement multi-threaded signals (single-threaded `Rc<RefCell>` only for MVP).
   - Do NOT integrate with v1.9 RSX directly (provide primitives; integration is separate task).
   - Do NOT implement time-travel debugging (defer to v1.18+).
@@ -2514,12 +2514,12 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Can Run In Parallel**: YES (with T17-T19, T21)
   - **Parallel Group**: Wave 4
   - **Blocks**: T22, T23
-  - **Blocked By**: T1 (NO LONGER blocked by T2 — callbacks don't need Channel/Stream)
+  - **Blocked By**: T1 (NO LONGER blocked by T2 â€” callbacks don't need Channel/Stream)
 
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-ast/src/expr.rs:Closure variant` — Closures for computed/effects fns.
+  - `crates/buff-lang-ast/src/expr.rs:Closure variant` â€” Closures for computed/effects fns.
 
   **External References**:
   - Solid.js signals (conceptual): https://www.solidjs.com/docs/latest#createsignal
@@ -2551,8 +2551,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
       1. let s = Signal.new(0)
       2. let counter = Signal.new(0)
       3. Effect.new({ || counter.set(counter.get() + 1) })  // tracks s via callback invocation
-      4. s.set(1) → assert counter == 1
-      5. s.set(2) → assert counter == 2
+      4. s.set(1) â†’ assert counter == 1
+      5. s.set(2) â†’ assert counter == 2
     Expected Result: Effect callback fires on dependency change
     Evidence: .sisyphus/evidence/task-20-effect/output.txt
 
@@ -2565,7 +2565,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
       4. let sum = Computed.new({ || call_count.set(call_count.get() + 1); return a.get() + b.get() })
       5. Assert sum.get() == 5 and call_count == 1
       6. Assert sum.get() == 5 and call_count == 1 (cached)
-      7. a.set(10) → sum.get() == 13 and call_count == 2
+      7. a.set(10) â†’ sum.get() == 13 and call_count == 2
     Expected Result: Computed memoizes correctly via dependency tracking
     Evidence: .sisyphus/evidence/task-20-computed/output.txt
   ```
@@ -2575,7 +2575,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 21. `buff-observe` — Structured Observability (wraps tracing + opentelemetry)
+- [x] 21. `buff-observe` â€” Structured Observability (wraps tracing + opentelemetry)
 
   **What to do**:
   - Create `crates/buff-observe/`.
@@ -2605,7 +2605,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Log module` (T124c) — Existing Log to extend.
+  - `crates/buff-lang-codegen-rust/src/rust_codegen.rs:Log module` (T124c) â€” Existing Log to extend.
 
   **External References**:
   - tracing: https://docs.rs/tracing/latest/tracing/
@@ -2658,21 +2658,21 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 22. API Compatibility Spike — Multi-Framework Integration Examples
+- [x] 22. API Compatibility Spike â€” Multi-Framework Integration Examples
 
   **What to do**:
   - BEFORE writing the flagship, write small integration examples that exercise 2-3 frameworks together to validate API compatibility.
-  - Write `examples/integration/dataframe_to_json.buff`: load CSV via buff-dataframe → serialize subset to JSON → save via existing stdlib.
-  - Write `examples/integration/tensor_to_web.buff`: compute tensor result → expose via buff-web endpoint.
-  - Write `examples/integration/pipeline_with_dataframe.buff`: stream CSV via buff-pipeline → batch into buff-dataframe → analyze.
-  - Write `examples/integration/reactive_to_web.buff`: signal-driven counter → buff-web endpoint that returns current count.
+  - Write `examples/integration/dataframe_to_json.buff`: load CSV via buff-dataframe â†’ serialize subset to JSON â†’ save via existing stdlib.
+  - Write `examples/integration/tensor_to_web.buff`: compute tensor result â†’ expose via buff-web endpoint.
+  - Write `examples/integration/pipeline_with_dataframe.buff`: stream CSV via buff-pipeline â†’ batch into buff-dataframe â†’ analyze.
+  - Write `examples/integration/reactive_to_web.buff`: signal-driven counter â†’ buff-web endpoint that returns current count.
   - For each example, document any API mismatches discovered.
-  - If mismatches found that require API changes: file follow-up tasks (do NOT fix in this task — that's separate work).
+  - If mismatches found that require API changes: file follow-up tasks (do NOT fix in this task â€” that's separate work).
   - Output: integration examples + report at `.sisyphus/decisions/api-compat-v20.md`.
 
   **Must NOT do**:
   - Do NOT write the flagship here (T23).
-  - Do NOT fix API mismatches in this task — just document and file follow-ups.
+  - Do NOT fix API mismatches in this task â€” just document and file follow-ups.
   - Do NOT exceed 1000 LOC total across all integration examples.
 
   **Recommended Agent Profile**:
@@ -2690,7 +2690,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **Pattern References**:
   - All framework crates from Waves 2-4.
-  - `examples/extern_*.buff` — Multi-module example pattern.
+  - `examples/extern_*.buff` â€” Multi-module example pattern.
 
   **Acceptance Criteria**:
 
@@ -2725,25 +2725,25 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [ ] 23. Flagship: Data Science Workbench
+- [x] 23. Flagship: Data Science Workbench
 
   **What to do**:
   - Build a complete data science workbench application in Buff that exercises 5 frameworks end-to-end:
-    1. **Load**: CSV via `buff-dataframe` (T7) — synthetic Iris-like dataset
+    1. **Load**: CSV via `buff-dataframe` (T7) â€” synthetic Iris-like dataset
     2. **Analyze**: dataframe ops (filter, group_by, agg)
-    3. **Train**: linear regression via `buff-ml` (T15) — predict target from features
-    4. **Pipeline**: orchestrate via `buff-pipeline` (T14) — streaming data + batched training
-    5. **Visualize**: web UI via `buff-web` (T17) — endpoint returns trained model params as JSON; use buff-reactive (T20) for live updates if model retrains
+    3. **Train**: linear regression via `buff-ml` (T15) â€” predict target from features
+    4. **Pipeline**: orchestrate via `buff-pipeline` (T14) â€” streaming data + batched training
+    5. **Visualize**: web UI via `buff-web` (T17) â€” endpoint returns trained model params as JSON; use buff-reactive (T20) for live updates if model retrains
   - Application structure: `examples/data-science-workbench/` with:
-    - `main.buff` — entry point
-    - `data_loader.buff` — CSV → DataFrame
-    - `model.buff` — training logic
-    - `pipeline.buff` — orchestration
-    - `server.buff` — HTTP endpoints
+    - `main.buff` â€” entry point
+    - `data_loader.buff` â€” CSV â†’ DataFrame
+    - `model.buff` â€” training logic
+    - `pipeline.buff` â€” orchestration
+    - `server.buff` â€” HTTP endpoints
   - Endpoints:
-    - `GET /` — landing page with model summary
-    - `GET /predict?features=...` — returns prediction
-    - `POST /retrain` — triggers retraining via pipeline
+    - `GET /` â€” landing page with model summary
+    - `GET /predict?features=...` â€” returns prediction
+    - `POST /retrain` â€” triggers retraining via pipeline
   - Use `buff-observe` (T21) for span-traced request flow.
   - Test data: synthetic Iris-like dataset (or small public-domain dataset) committed to `examples/data-science-workbench/data.csv`.
   - Demo: `cargo run -p buff-lang-cli -- run examples/data-science-workbench/main.buff` starts server, prints URL.
@@ -2751,10 +2751,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **Must NOT do**:
   - Do NOT exceed 3000 LOC across all flagship files.
-  - Do NOT add new abstractions to underlying frameworks — if framework APIs are insufficient, file follow-up tasks.
+  - Do NOT add new abstractions to underlying frameworks â€” if framework APIs are insufficient, file follow-up tasks.
   - Do NOT implement authentication (out of scope for MVP demo).
   - Do NOT implement production-ready UI (basic JSON endpoints + maybe simple HTML template via buff-template T19).
-  - Do NOT skip the API compat spike (T22) — must run first.
+  - Do NOT skip the API compat spike (T22) â€” must run first.
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
@@ -2770,8 +2770,8 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   **References**:
 
   **Pattern References**:
-  - `examples/dataframe/*.buff`, `examples/tensor/*.buff`, etc. — Smaller demos from each framework.
-  - T22 integration examples — Validate composition before flagship.
+  - `examples/dataframe/*.buff`, `examples/tensor/*.buff`, etc. â€” Smaller demos from each framework.
+  - T22 integration examples â€” Validate composition before flagship.
 
   **External References**:
   - Iris dataset (classic): https://archive.ics.uci.edu/ml/datasets/iris
@@ -2816,7 +2816,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Tool: Bash (logs)
     Steps:
       1. Run flagship with BUFF_LOG=debug
-      2. Assert logs show pipeline stages executing (source → filter → map → batch → train)
+      2. Assert logs show pipeline stages executing (source â†’ filter â†’ map â†’ batch â†’ train)
       3. Assert no errors in pipeline stage transitions
     Expected Result: Pipeline orchestration visible in logs
     Evidence: .sisyphus/evidence/task-23-pipeline/server-log.txt
@@ -2826,7 +2826,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Steps:
       1. Run with buff-observe console exporter
       2. Make a request
-      3. Assert logs contain span: "request" → "predict" → "model_forward"
+      3. Assert logs contain span: "request" â†’ "predict" â†’ "model_forward"
     Expected Result: End-to-end tracing works
     Evidence: .sisyphus/evidence/task-23-spans/server-log.txt
   ```
@@ -2839,12 +2839,12 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 - [x] 26. `buff-audit` Security Scanning + Code Signing
 
-  **What to do** *(added post-comparative-analysis — security baseline for any production ecosystem)*:
+  **What to do** *(added post-comparative-analysis â€” security baseline for any production ecosystem)*:
   - Create `crates/buff-audit/` crate.
-  - **`buff audit` subcommand** — reads `buff.lock`, queries RustSec advisory database (https://rustsec.org/advisories/) for `extern` deps via the `rustsec` crate. For Buff-registry deps, queries Buff advisory DB (new — initially seeded empty, framework authors file advisories via PR). Reports vulnerabilities with: advisory ID, affected versions, patched versions, recommended upgrade.
-  - **`buff audit --fix`** — automatically updates affected deps to patched versions in `buff.toml`.
-  - **Code signing** — `buff publish --sign` uses sigstore (cosign) to sign the tarball. Stores signature in registry alongside package. `buff add` verifies signature by default; `--no-verify` bypasses.
-  - **`buff audit` in CI** — exit code 1 if any vulnerability found, suitable for CI gating.
+  - **`buff audit` subcommand** â€” reads `buff.lock`, queries RustSec advisory database (https://rustsec.org/advisories/) for `extern` deps via the `rustsec` crate. For Buff-registry deps, queries Buff advisory DB (new â€” initially seeded empty, framework authors file advisories via PR). Reports vulnerabilities with: advisory ID, affected versions, patched versions, recommended upgrade.
+  - **`buff audit --fix`** â€” automatically updates affected deps to patched versions in `buff.toml`.
+  - **Code signing** â€” `buff publish --sign` uses sigstore (cosign) to sign the tarball. Stores signature in registry alongside package. `buff add` verifies signature by default; `--no-verify` bypasses.
+  - **`buff audit` in CI** â€” exit code 1 if any vulnerability found, suitable for CI gating.
   - 3 examples: audit clean project, audit finds vulnerable dep, audit --fix upgrades.
   - 10+ tests with mock advisory DB.
   - AGENTS.md + README.md.
@@ -2853,7 +2853,7 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Do NOT exceed 2000 LOC or 15 public functions.
   - Do NOT auto-upgrade across major versions (only patch/minor for security fixes).
   - Do NOT require internet for `buff build` (only `buff audit` and `buff publish` need network).
-  - Do NOT enforce code signing yet — make it opt-in for v1.13-v1.17, mandatory in v1.18+.
+  - Do NOT enforce code signing yet â€” make it opt-in for v1.13-v1.17, mandatory in v1.18+.
 
   **Recommended Agent Profile**:
   - **Category**: `unspecified-high`
@@ -2861,14 +2861,14 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T17-T21 — Wave 4 sibling)
+  - **Can Run In Parallel**: YES (with T17-T21 â€” Wave 4 sibling)
   - **Parallel Group**: Wave 4
   - **Blocks**: None directly
   - **Blocked By**: T0 (uses buff.toml + buff.lock), T1 (workspace resolution)
 
   **References**:
-  - Existing `buff outdated` command (v1.x) — `crates/buff-lang-cli/src/commands/outdated.rs` (if exists) or similar; mirror the registry-query pattern.
-  - Existing `buff publish` (v1.6) — extend with `--sign` flag.
+  - Existing `buff outdated` command (v1.x) â€” `crates/buff-lang-cli/src/commands/outdated.rs` (if exists) or similar; mirror the registry-query pattern.
+  - Existing `buff publish` (v1.6) â€” extend with `--sign` flag.
 
   **External References**:
   - RustSec advisory DB: https://github.com/rustsec/advisory-db
@@ -2918,15 +2918,15 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-- [x] 27. `buff fuzz` — Fuzzing Support via libFuzzer
+- [x] 27. `buff fuzz` â€” Fuzzing Support via libFuzzer
 
-  **What to do** *(added post-comparative-analysis — security-critical frameworks need fuzzing)*:
+  **What to do** *(added post-comparative-analysis â€” security-critical frameworks need fuzzing)*:
   - Create `crates/buff-fuzz/` crate (thin wrapper around libFuzzer via extern).
-  - **`buff fuzz <file>` subcommand** — compiles the target with sanitizers + libFuzzer instrumentation, runs fuzzing loop until crash or timeout.
-  - **`@fuzz` attribute on functions** — marks a function as a fuzz target. Function must accept arbitrary input (Bytes or String) and either crash, panic, or return normally. Codegen lowers to libFuzzer entry point.
-  - **Corpus management** — fuzzing corpus stored in `.buff/fuzz-corpus/<target-name>/`. Crashes saved to `.buff/fuzz-crashes/`. Add `buff fuzz --repro <crash-file>` to reproduce a specific crash.
-  - **Integration with buff-mock** — fuzz targets can use mocks to isolate external dependencies.
-  - 2 examples: fuzz a parser (string → AST, look for panics), fuzz a crypto function (look for edge cases).
+  - **`buff fuzz <file>` subcommand** â€” compiles the target with sanitizers + libFuzzer instrumentation, runs fuzzing loop until crash or timeout.
+  - **`@fuzz` attribute on functions** â€” marks a function as a fuzz target. Function must accept arbitrary input (Bytes or String) and either crash, panic, or return normally. Codegen lowers to libFuzzer entry point.
+  - **Corpus management** â€” fuzzing corpus stored in `.buff/fuzz-corpus/<target-name>/`. Crashes saved to `.buff/fuzz-crashes/`. Add `buff fuzz --repro <crash-file>` to reproduce a specific crash.
+  - **Integration with buff-mock** â€” fuzz targets can use mocks to isolate external dependencies.
+  - 2 examples: fuzz a parser (string â†’ AST, look for panics), fuzz a crypto function (look for edge cases).
   - 8+ tests.
   - AGENTS.md + README.md.
 
@@ -2941,13 +2941,13 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES (with T22, T23 — Wave 5 sibling; fuzzing needs frameworks to exist first)
+  - **Can Run In Parallel**: YES (with T22, T23 â€” Wave 5 sibling; fuzzing needs frameworks to exist first)
   - **Parallel Group**: Wave 5
   - **Blocks**: None
   - **Blocked By**: T0 (uses buff.toml + .buff/ dir convention), Wave 2 frameworks (need something to fuzz)
 
   **References**:
-  - Existing `@test` attribute pattern — `@fuzz` follows same parser path.
+  - Existing `@test` attribute pattern â€” `@fuzz` follows same parser path.
 
   **External References**:
   - libFuzzer: https://llvm.org/docs/LibFuzzer.html
@@ -2987,44 +2987,44 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 - [ ] 28. v1.24 Documentation & Codebase Refinement (Iterative Audit Until Convergence)
 
-  **Goal** *(added per user request — post-v1.23 refinement pass)*: After v1.23.0 ships, run a comprehensive audit pass that finds and fixes everything outdated/incorrect/missing across the entire Buff project. Trivial issues are fixed in-place; non-trivial issues are documented for future iteration planning. **Iterate passes until a full pass finds zero new issues.** This task owns v1.24.0 release.
+  **Goal** *(added per user request â€” post-v1.23 refinement pass)*: After v1.23.0 ships, run a comprehensive audit pass that finds and fixes everything outdated/incorrect/missing across the entire Buff project. Trivial issues are fixed in-place; non-trivial issues are documented for future iteration planning. **Iterate passes until a full pass finds zero new issues.** This task owns v1.24.0 release.
 
   **What to do** (iterative loop):
 
-  **Phase 1 — Discovery scan** (each pass):
+  **Phase 1 â€” Discovery scan** (each pass):
   Run all of the following scans; collect findings into a temporary audit log:
 
   - **Documentation scan**:
-    - `AGENTS.md` (root + every per-crate `crates/*/AGENTS.md`) — verify each reflects current state. Per-crate AGENTS.md MUST exist for new v1.13-v1.24 crates: buff-{dataframe, tensor, image, audio, dsp, ecs, science, pipeline, ml, game, mock, audit, fuzz, web, db, template, reactive, observe}, buff-lang-debug-info. Missing → log. Stale → log.
-    - `README.md` (root) — verify the status table includes v1.3-v1.24 (currently only shows through v1.2). Verify examples table includes new framework examples. Verify quickstart works.
-    - `CHANGELOG.md` — if missing, CREATE with comprehensive entries for v1.0-v1.24. If exists, verify entries for v1.13-v1.24 are present and accurate.
-    - `CONTRIBUTING.md` — verify references current workflow, conventions doc, registry, etc.
-    - `LICENSE` — verify date range includes 2026.
-    - Per-crate `README.md` files (each `crates/*/README.md`) — must exist and reflect current API.
+    - `AGENTS.md` (root + every per-crate `crates/*/AGENTS.md`) â€” verify each reflects current state. Per-crate AGENTS.md MUST exist for new v1.13-v1.24 crates: buff-{dataframe, tensor, image, audio, dsp, ecs, science, pipeline, ml, game, mock, audit, fuzz, web, db, template, reactive, observe}, buff-lang-debug-info. Missing â†’ log. Stale â†’ log.
+    - `README.md` (root) â€” verify the status table includes v1.3-v1.24 (currently only shows through v1.2). Verify examples table includes new framework examples. Verify quickstart works.
+    - `CHANGELOG.md` â€” if missing, CREATE with comprehensive entries for v1.0-v1.24. If exists, verify entries for v1.13-v1.24 are present and accurate.
+    - `CONTRIBUTING.md` â€” verify references current workflow, conventions doc, registry, etc.
+    - `LICENSE` â€” verify date range includes 2026.
+    - Per-crate `README.md` files (each `crates/*/README.md`) â€” must exist and reflect current API.
 
   - **Examples scan**:
-    - Every `examples/*.buff` file — actually run via `buff run` and verify it works. Log failures.
-    - Every `examples/rust-vs-buff/*.buff` — verify still runs.
+    - Every `examples/*.buff` file â€” actually run via `buff run` and verify it works. Log failures.
+    - Every `examples/rust-vs-buff/*.buff` â€” verify still runs.
     - Every example mentioned in `README.md` exists and is correctly described.
     - Every framework example (added in v1.14-v1.24) runs correctly.
 
   - **Code scan**:
-    - `grep -rn 'TODO\|FIXME\|XXX\|HACK\|unimplemented!\|todo!' crates/` — every match is a finding. Classify trivial (fix now) vs non-trivial (log for future).
-    - `grep -rn 'unwrap()\|expect()\|panic!' crates/` in non-test code — AGENTS.md hard rule violation. Fix or log.
-    - `grep -rn 'v0\.1\|v0\.5\|v1\.0\b' crates/` — outdated version references in doc comments or strings.
-    - All `Cargo.toml` files — verify workspace consistency (no version pinned in crate Cargo.toml; all deps at root `[workspace.dependencies]`).
-    - All rustdoc comments — verify accuracy (function signatures, return types, examples compile).
+    - `grep -rn 'TODO\|FIXME\|XXX\|HACK\|unimplemented!\|todo!' crates/` â€” every match is a finding. Classify trivial (fix now) vs non-trivial (log for future).
+    - `grep -rn 'unwrap()\|expect()\|panic!' crates/` in non-test code â€” AGENTS.md hard rule violation. Fix or log.
+    - `grep -rn 'v0\.1\|v0\.5\|v1\.0\b' crates/` â€” outdated version references in doc comments or strings.
+    - All `Cargo.toml` files â€” verify workspace consistency (no version pinned in crate Cargo.toml; all deps at root `[workspace.dependencies]`).
+    - All rustdoc comments â€” verify accuracy (function signatures, return types, examples compile).
 
   - **Plan & decision scan**:
-    - `.sisyphus/plans/*.md` — verify accuracy (some plans reference "v1.x shipped" statuses that may be outdated).
-    - `.sisyphus/decisions/*.md` — verify decision docs reflect actual implementation.
+    - `.sisyphus/plans/*.md` â€” verify accuracy (some plans reference "v1.x shipped" statuses that may be outdated).
+    - `.sisyphus/decisions/*.md` â€” verify decision docs reflect actual implementation.
     - Cross-reference deferred items: search for "deferred to v1.24+" or "deferred to v1.25+" or "post-v1.23" across the entire codebase + plans. Each deferred item is a finding.
 
   - **Structural scan**:
-    - Root `Cargo.toml [workspace.members]` — verify every `crates/*/` directory is listed (or matches the glob).
-    - Root `Cargo.toml [workspace.dependencies]` — verify every dependency used anywhere is declared here.
-    - All `.github/workflows/*.yml` — verify CI runs correct commands on correct matrix.
-    - `rust-toolchain.toml` — verify version is current.
+    - Root `Cargo.toml [workspace.members]` â€” verify every `crates/*/` directory is listed (or matches the glob).
+    - Root `Cargo.toml [workspace.dependencies]` â€” verify every dependency used anywhere is declared here.
+    - All `.github/workflows/*.yml` â€” verify CI runs correct commands on correct matrix.
+    - `rust-toolchain.toml` â€” verify version is current.
 
   - **Tooling integration scan**:
     - Verify `buff-lsp` understands all v1.13-v1.24 language additions (Channel<T>, @feature, @deprecated, @mock, etc.).
@@ -3032,12 +3032,12 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - Verify `buff check` catches violations of new attributes.
     - Verify `buff-vsc` (VSCode extension) highlights new keywords/attributes correctly.
 
-  **Phase 2 — Triage** (after each scan):
+  **Phase 2 â€” Triage** (after each scan):
   For each finding, classify:
   - **TRIVIAL** (fix in this task): typo, outdated version number, missing AGENTS.md, dead link, stale comment, missing CHANGELOG entry, etc. Estimated <50 LOC change per fix.
   - **NON-TRIVIAL** (defer to future): new feature work, architectural change, large refactor, anything >50 LOC. Log to `.sisyphus/decisions/v1.24-followup.md` with: finding, recommended action, rough estimate, suggested target version (v1.25, v1.26, etc.).
 
-  **Phase 3 — Fix TRIVIAL items**:
+  **Phase 3 â€” Fix TRIVIAL items**:
   Apply fixes as atomic commits (one per logical fix or group of related fixes).
   - Update `AGENTS.md` (root + per-crate) to reflect v1.24 current state.
   - Update `README.md` (status table, examples table, quickstart, version references).
@@ -3048,10 +3048,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Add missing per-crate `README.md` for new crates.
   - Fix dead links, typos, stale TODOs where trivial.
 
-  **Phase 4 — Iterate**:
-  Repeat Phases 1-3 until a complete Discovery scan finds ZERO new TRIVIAL issues. May take 3-5 passes for a project this size. **Do NOT stop early** — the user explicitly wants convergence, not "good enough".
+  **Phase 4 â€” Iterate**:
+  Repeat Phases 1-3 until a complete Discovery scan finds ZERO new TRIVIAL issues. May take 3-5 passes for a project this size. **Do NOT stop early** â€” the user explicitly wants convergence, not "good enough".
 
-  **Phase 5 — Final report**:
+  **Phase 5 â€” Final report**:
   Write `.sisyphus/decisions/v1.24-audit-report.md` summarizing:
   - Pass count (how many iterations until convergence)
   - Trivial issues found vs fixed (counts + categories)
@@ -3059,22 +3059,22 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
   - Files touched (summary count)
   - Cross-references to `.sisyphus/decisions/v1.24-followup.md` for non-trivial items
 
-  **Specific known issues to address** *(seed list — Phase 1 will find more)*:
+  **Specific known issues to address** *(seed list â€” Phase 1 will find more)*:
   - Root `README.md` status table stops at v1.2; needs v1.3-v1.24 entries.
   - Root `README.md` examples table omits v1.13-v1.24 framework examples.
-  - `CHANGELOG.md` likely doesn't exist — CREATE covering v1.0-v1.24.
+  - `CHANGELOG.md` likely doesn't exist â€” CREATE covering v1.0-v1.24.
   - `crates/buff-lang-codegen-rust/src/rust_codegen.rs` is 12,777 lines (Momus confirmed); some plan/docs may reference it as ~3000 lines (from earlier v1.0-era references). Hunt and fix.
   - Earlier `Momus` reviews caught minor reference drift (e.g., `lower_spawn` line numbers shifted from ~2647 to ~6860 as the file grew). Hunt for similar drift in all docs.
   - Per-crate AGENTS.md for v1.13-v1.24 new crates may be missing or templated-only.
   - Deferred items scattered throughout plan: search "v1.24+", "v1.25+", "post-v1.23", "defer" to find them all.
 
   **Must NOT do**:
-  - Do NOT exceed 5000 LOC of changes in this task. If more issues exist, log them — don't bloat v1.24.
-  - Do NOT implement non-trivial deferred items in this task — log them for v1.25+ planning.
-  - Do NOT break v1.23 behavior — all examples that worked in v1.23 must still work after v1.24.
-  - Do NOT skip the iteration loop — convergence is the success criterion, not "did one pass".
-  - Do NOT touch `.sisyphus/plans/buff-v1x-frameworks.md` (this file) — it's a historical artifact of the planning conversation; corrections to plan accuracy go in the audit report.
-  - Do NOT rewrite docs from scratch — extend and update existing docs in place.
+  - Do NOT exceed 5000 LOC of changes in this task. If more issues exist, log them â€” don't bloat v1.24.
+  - Do NOT implement non-trivial deferred items in this task â€” log them for v1.25+ planning.
+  - Do NOT break v1.23 behavior â€” all examples that worked in v1.23 must still work after v1.24.
+  - Do NOT skip the iteration loop â€” convergence is the success criterion, not "did one pass".
+  - Do NOT touch `.sisyphus/plans/buff-v1x-frameworks.md` (this file) â€” it's a historical artifact of the planning conversation; corrections to plan accuracy go in the audit report.
+  - Do NOT rewrite docs from scratch â€” extend and update existing docs in place.
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
@@ -3083,20 +3083,20 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     - `/git-master`: Atomic commits per logical fix; many small commits across many files.
 
   **Parallelization**:
-  - **Can Run In Parallel**: NO — sequential after Wave 5 + F1-F4 verification of v1.23.
-  - **Parallel Group**: Wave 6 (solo — owns v1.24.0 release)
+  - **Can Run In Parallel**: NO â€” sequential after Wave 5 + F1-F4 verification of v1.23.
+  - **Parallel Group**: Wave 6 (solo â€” owns v1.24.0 release)
   - **Blocks**: None (this is the last task before final user approval)
-  - **Blocked By**: T23 (flagship complete), F1-F4 (v1.23 verification approved) — T28 starts only after v1.23 is fully shipped
+  - **Blocked By**: T23 (flagship complete), F1-F4 (v1.23 verification approved) â€” T28 starts only after v1.23 is fully shipped
 
-  **References** (CRITICAL — seed list for Phase 1 scan):
+  **References** (CRITICAL â€” seed list for Phase 1 scan):
 
   **Pattern References**:
-  - `AGENTS.md` (repo root) — primary doc to update.
-  - `crates/*/AGENTS.md` (existing 6 per-crate AGENTS.md files) — model for new crate AGENTS.md.
-  - `README.md` (repo root) — primary user-facing doc.
-  - `.sisyphus/plans/buff-master.md` — orchestrator plan; verify accuracy.
-  - `.sisyphus/plans/buff-post-v10-tooling.md` — existing v1.1-v1.12 work; verify status.
-  - `.sisyphus/plans/buff-conventions.md` — Buff language conventions; verify still accurate.
+  - `AGENTS.md` (repo root) â€” primary doc to update.
+  - `crates/*/AGENTS.md` (existing 6 per-crate AGENTS.md files) â€” model for new crate AGENTS.md.
+  - `README.md` (repo root) â€” primary user-facing doc.
+  - `.sisyphus/plans/buff-master.md` â€” orchestrator plan; verify accuracy.
+  - `.sisyphus/plans/buff-post-v10-tooling.md` â€” existing v1.1-v1.12 work; verify status.
+  - `.sisyphus/plans/buff-conventions.md` â€” Buff language conventions; verify still accurate.
 
   **External References**:
   - Keep a Changelog format: https://keepachangelog.com/
@@ -3128,13 +3128,13 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
     Tool: Bash (cargo)
     Preconditions: T28 in progress
     Steps:
-      1. Run discovery scan (Phase 1) — produces findings.log
+      1. Run discovery scan (Phase 1) â€” produces findings.log
       2. Count findings
       3. If findings == 0: pass and exit loop
       4. If findings > 0: triage, fix trivial, log non-trivial, repeat
       5. Assert: after some N passes (target: 3-5), a complete scan finds zero new TRIVIAL findings
-      6. Assert: total passes did not exceed 10 (safety — if exceeded, force-stop and report)
-    Expected Result: Iteration converges naturally; total passes ≤ 10
+      6. Assert: total passes did not exceed 10 (safety â€” if exceeded, force-stop and report)
+    Expected Result: Iteration converges naturally; total passes â‰¤ 10
     Failure Indicators: Pass count exceeds 10 without convergence (indicates a stuck loop)
     Evidence: .sisyphus/evidence/task-28-convergence/pass-log.txt
 
@@ -3244,77 +3244,77 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-## Tasks T29-T36 — Tier 1 Common Frameworks (Release v1.16.0)
+## Tasks T29-T36 â€” Tier 1 Common Frameworks (Release v1.16.0)
 
 > Universal-pain-point frameworks identified by cross-language analysis (each problem has popular libraries in 6+ languages). All wrap mature Rust crates via safe `extern` FFI per T4 guide. All ship at MVP quality: working happy-path, 3 examples, 10+ tests, README, registry entry with "experimental" badge.
 
-- [x] 29. `buff-validate` — Declarative Schema Validation (pydantic-equivalent)
+- [x] 29. `buff-validate` â€” Declarative Schema Validation (pydantic-equivalent)
 
   **What to do**: Wrap Rust `validator` crate (or build derive-based validation on serde). Provide `@validate` attribute on struct fields with rules (email, url, length, range, regex, custom). `Validator.validate(instance) -> Result<(), ValidationErrors>`. Auto-generate JSON Schema from validated structs. Cross-language prevalence: 6/6 (pydantic/Zod/Joi/validator/Hibernate Validator/FluentValidation).
-  - **LOC budget**: ≤2000, ≤20 public fns. **External deps**: `validator`, `serde_json` (for JSON Schema).
+  - **LOC budget**: â‰¤2000, â‰¤20 public fns. **External deps**: `validator`, `serde_json` (for JSON Schema).
   - **Must NOT do**: No compile-time macro validation (defer with T3 outcome); no async validators (v1.22+).
   - **References**: T0 (conventions), T1 (multi-file), T4 (FFI guide). Rust `validator` crate: https://docs.rs/validator/latest/validator/
   - **Acceptance**: Validation passes/fails correctly on test structs. JSON Schema export works. 3 examples + 10 tests.
   - **Commit**: `feat(buff-validate): MVP schema validation + JSON Schema export`
 
-- [x] 30. `buff-config` — Layered Configuration (viper-equivalent)
+- [x] 30. `buff-config` â€” Layered Configuration (viper-equivalent)
 
-  **What to do**: Wrap Rust `figment` crate (or `config` crate). Provide layered config: defaults → file (TOML/YAML/JSON) → env vars → CLI args. Type-safe config structs via existing struct decl. Hot reload via `config.watch(callback)`. Cross-language prevalence: 6/6 (dynaconf/convict/viper/figment/typesafe/Microsoft.Extensions.Configuration).
-  - **LOC budget**: ≤2000, ≤20 fns. **External deps**: `figment`, `notify` (hot reload).
+  **What to do**: Wrap Rust `figment` crate (or `config` crate). Provide layered config: defaults â†’ file (TOML/YAML/JSON) â†’ env vars â†’ CLI args. Type-safe config structs via existing struct decl. Hot reload via `config.watch(callback)`. Cross-language prevalence: 6/6 (dynaconf/convict/viper/figment/typesafe/Microsoft.Extensions.Configuration).
+  - **LOC budget**: â‰¤2000, â‰¤20 fns. **External deps**: `figment`, `notify` (hot reload).
   - **Must NOT do**: No remote config servers (etcd/consul) in MVP; no secret-service integration (v1.22+).
   - **References**: T0 (.env auto-load extension), T1. Rust `figment`: https://docs.rs/figment/latest/figment/
   - **Acceptance**: Layered precedence works. Hot reload callback fires on file change. 3 examples + 10 tests.
   - **Commit**: `feat(buff-config): MVP layered config with hot reload`
 
-- [x] 31. `buff-cache` — In-Memory + Distributed Cache
+- [x] 31. `buff-cache` â€” In-Memory + Distributed Cache
 
   **What to do**: Wrap Rust `moka` crate (in-memory) + `redis` crate (distributed). Provide `Cache.new(max_capacity)`, `cache.get(key)`, `cache.set(key, value, ttl)`, `cache.delete(key)`. TTL eviction. LRU semantics. Redis backend optional via feature flag. Cross-language prevalence: 6/6 (cachetools/lru-cache/go-cache/moka/Caffeine/MemoryCache).
-  - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `moka`, `redis` (optional).
+  - **LOC budget**: â‰¤2000, â‰¤15 fns. **External deps**: `moka`, `redis` (optional).
   - **Must NOT do**: No multi-tier cache orchestration in MVP; no cache invalidation pub/sub (v1.22+).
   - **References**: T0, T1. Rust `moka`: https://docs.rs/moka/latest/moka/
   - **Acceptance**: In-memory LRU works. TTL evicts correctly. Redis path verified with mock. 3 examples + 10 tests.
   - **Commit**: `feat(buff-cache): MVP in-memory LRU + Redis backend`
 
-- [x] 32. `buff-cli` — CLI Framework for User Programs
+- [x] 32. `buff-cli` â€” CLI Framework for User Programs
 
   **What to do**: Wrap Rust `clap` crate with Buff-idiomatic API. Note: clap already powers the `buff` compiler CLI; this task exposes clap to USER programs. Provide `App.new(name)`, `app.command(name, handler)`, `app.flag(name, short, description)`, `app.parse(args) -> ParsedArgs`. Auto-generated help. Subcommand nesting. Cross-language prevalence: 6/6 (Click/Commander/Cobra/clap/Picocli/System.CommandLine).
-  - **LOC budget**: ≤2000, ≤20 fns. **External deps**: `clap` (already in workspace).
+  - **LOC budget**: â‰¤2000, â‰¤20 fns. **External deps**: `clap` (already in workspace).
   - **Must NOT do**: No interactive prompts (Inquirer-style); no shell completion generation (v1.22+).
   - **References**: T0, T1. Existing `crates/buff-lang-cli/src/cli.rs` for clap pattern reference.
   - **Acceptance**: Subcommands parse correctly. Help text generated. 3 examples (hello, subcommands, flags) + 10 tests.
   - **Commit**: `feat(buff-cli): MVP clap-equivalent for user programs`
 
-- [x] 33. `buff-http-client` — Idiomatic HTTP Client
+- [x] 33. `buff-http-client` â€” Idiomatic HTTP Client
 
   **What to do**: Wrap Rust `reqwest` crate (already used via extern). Provide Buff-idiomatic fluent API: `HttpClient.new()`, `client.get(url)`, `client.post(url).json(body).header(name, val).send() -> Response`. Response: `.status()`, `.json<T>()`, `.text()`, `.headers()`. Built-in retry via T36 buff-resilience. Cross-language prevalence: 6/6 (requests/axios/resty/reqwest/OkHttp/RestSharp).
-  - **LOC budget**: ≤2000, ≤20 fns. **External deps**: `reqwest` (existing).
+  - **LOC budget**: â‰¤2000, â‰¤20 fns. **External deps**: `reqwest` (existing).
   - **Must NOT do**: No HTTP/2 push promises; no streaming uploads in MVP (v1.22+).
   - **References**: T0, T1, T4 (FFI guide), existing `examples/extern_reqwest.buff`.
   - **Acceptance**: GET/POST/PUT/DELETE work. JSON body serialization works. Timeout + retry composes with T36. 3 examples + 10 tests.
   - **Commit**: `feat(buff-http-client): MVP reqwest wrapper with fluent API`
 
-- [x] 34. `buff-auth` — JWT + OAuth2 + Password Hashing + RBAC
+- [x] 34. `buff-auth` â€” JWT + OAuth2 + Password Hashing + RBAC
 
   **What to do**: Wrap Rust crates: `jsonwebtoken` (JWT), `oauth2` (OAuth2 client flows), `argon2` (password hashing), `casbin` or custom (RBAC). Provide: `JWT.encode(claims, secret)`, `JWT.decode(token, secret)`, `OAuth2Client.authorization_url()`, `OAuth2Client.exchange_code(code)`, `Password.hash(plain)`, `Password.verify(plain, hash)`, `Rbac.enforce(user, resource, action)`. Cross-language prevalence: 6/6 (Authlib/Passport/golang-jwt/oauth2/Spring Security/IdentityServer4).
-  - **LOC budget**: ≤3000, ≤25 fns. **External deps**: `jsonwebtoken`, `oauth2`, `argon2`, optionally `casbin`.
+  - **LOC budget**: â‰¤3000, â‰¤25 fns. **External deps**: `jsonwebtoken`, `oauth2`, `argon2`, optionally `casbin`.
   - **Must NOT do**: No WebAuthn / passkey support (v1.22+); no SAML (v1.22+); no multi-factor auth in MVP.
   - **References**: T0, T1, T4, existing T124k Hash/HMAC. Rust `jsonwebtoken`: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/
   - **Acceptance**: JWT roundtrip works. OAuth2 auth-code flow works against test provider. Password hash/verify works. RBAC enforces policy. 4 examples + 15 tests.
   - **Commit**: `feat(buff-auth): MVP JWT + OAuth2 + password hashing + RBAC`
 
-- [x] 35. `buff-jobs` — Background Job Queue + Scheduler
+- [x] 35. `buff-jobs` â€” Background Job Queue + Scheduler
 
   **What to do**: Wrap Rust `apalis` crate (or `tokio-cron-scheduler`). Provide: `Queue.new(backend)`, `queue.enqueue(job)`, `queue.worker(handler)`, `Scheduler.cron(expr, job)`, `Scheduler.interval(duration, job)`. Backends: in-memory (MVP), Redis (defer). Job priorities, retries via T36, dead-letter queue. Cross-language prevalence: 6/6 (Celery/Bull/asynq/apalis/Quartz/Hangfire).
-  - **LOC budget**: ≤3000, ≤25 fns. **External deps**: `apalis` or `tokio-cron-scheduler`, `cron`.
+  - **LOC budget**: â‰¤3000, â‰¤25 fns. **External deps**: `apalis` or `tokio-cron-scheduler`, `cron`.
   - **Must NOT do**: No Redis/Postgres backend in MVP (in-memory only); no workflow DAG dependencies (v1.22+).
   - **References**: T0, T1, T2 (Channel<T> for internal queue), T36 (resilience for retries). Rust `apalis`: https://docs.rs/apalis/latest/apalis/
   - **Acceptance**: Enqueue/dequeue works. Cron schedule fires correctly. Retry policy honored. 3 examples (queue, cron, retry) + 12 tests.
   - **Commit**: `feat(buff-jobs): MVP background queue + cron scheduler`
 
-- [x] 36. `buff-resilience` — Retry + Circuit Breaker + Rate Limiter + Timeout
+- [x] 36. `buff-resilience` â€” Retry + Circuit Breaker + Rate Limiter + Timeout
 
-  **What to do**: Wrap Rust `tower` middleware crate (or build standalone). Provide: `Retry.policy(max_attempts, backoff)`, `CircuitBreaker.new(failure_threshold, reset_timeout)`, `RateLimiter.new(requests_per_second)`, `Timeout.duration(secs)`. Composable: `pipeline = Retry → CircuitBreaker → RateLimiter → handler`. Cross-language prevalence: 6/6 (tenacity/cockatiel/failsafe-go/tower/Resilience4j/Polly).
-  - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `tower` (or standalone), `governor` (rate limiting).
+  **What to do**: Wrap Rust `tower` middleware crate (or build standalone). Provide: `Retry.policy(max_attempts, backoff)`, `CircuitBreaker.new(failure_threshold, reset_timeout)`, `RateLimiter.new(requests_per_second)`, `Timeout.duration(secs)`. Composable: `pipeline = Retry â†’ CircuitBreaker â†’ RateLimiter â†’ handler`. Cross-language prevalence: 6/6 (tenacity/cockatiel/failsafe-go/tower/Resilience4j/Polly).
+  - **LOC budget**: â‰¤2500, â‰¤20 fns. **External deps**: `tower` (or standalone), `governor` (rate limiting).
   - **Must NOT do**: No bulkhead pattern (v1.22+); no distributed rate limiting (Redis-based) in MVP.
   - **References**: T0, T1. Rust `tower`: https://docs.rs/tower/latest/tower/
   - **Acceptance**: Retry with exponential backoff works. Circuit breaker opens/closes correctly. Rate limiter throttles. Timeout aborts. Composition works. 4 examples + 15 tests.
@@ -3322,73 +3322,73 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-## Tasks T37-T44 — Tier 2 Common Frameworks (Release v1.17.0)
+## Tasks T37-T44 â€” Tier 2 Common Frameworks (Release v1.17.0)
 
 > Testing + I/O + state frameworks identified by cross-language analysis (4-5 languages prevalence). All wrap mature Rust crates via safe extern FFI per T4 guide. MVP quality.
 
-- [x] 37. `buff-fake` — Fake Data Generation (Faker-equivalent)
+- [x] 37. `buff-fake` â€” Fake Data Generation (Faker-equivalent)
 
   **What to do**: Wrap Rust `fake` crate. Provide: `Fake.name()`, `Fake.email()`, `Fake.address()`, `Fake.phone()`, `Fake.uuid()`, `Fake.lorem(words)`, `Fake.int(min, max)`, `Fake.datetime(range)`. Locales: en-US, pt-BR (matches existing PT-BR example convention). Cross-language prevalence: 6/6 (Faker/Faker.js/gofakeit/fake/EasyRandom/Bogus).
-  - **LOC budget**: ≤1500, ≤15 fns. **External deps**: `fake`.
+  - **LOC budget**: â‰¤1500, â‰¤15 fns. **External deps**: `fake`.
   - **References**: T0, T1, T25 (buff-mock integration for test data). Rust `fake`: https://docs.rs/fake/latest/fake/
   - **Acceptance**: Generates plausible values per category. Locale switching works. Seeded RNG reproduces values. 3 examples + 10 tests.
   - **Commit**: `feat(buff-fake): MVP fake data generation with locales`
 
-- [x] 38. `buff-assertions` — Fluent Test Assertions (assertThat-style)
+- [x] 38. `buff-assertions` â€” Fluent Test Assertions (assertThat-style)
 
   **What to do**: Wrap Rust `claim` crate (or build on existing `assert_eq`). Provide: `assertThat(value).isEqualTo(expected)`, `.isGreaterThan(n)`, `.isInstanceOf(Type)`, `.startsWith(s)`, `.contains(item)`, `.throws(fn)`. Readable failure messages. Cross-language prevalence: 6/6 (Hamcrest/Chai/testify/claim/AssertJ/FluentAssertions).
-  - **LOC budget**: ≤2000, ≤30 fns (fluent API). **External deps**: `claim` (optional).
+  - **LOC budget**: â‰¤2000, â‰¤30 fns (fluent API). **External deps**: `claim` (optional).
   - **References**: T0, T1, existing `assert_eq` prelude function. Rust `claim`: https://docs.rs/claim/latest/claim/
   - **Acceptance**: Fluent chains read naturally. Failure messages descriptive. 5 examples + 15 tests.
   - **Commit**: `feat(buff-assertions): MVP fluent test assertions`
 
-- [x] 39. `buff-archive` — Zip/Tar/Gz/Zstd Compression
+- [x] 39. `buff-archive` â€” Zip/Tar/Gz/Zstd Compression
 
   **What to do**: Wrap Rust crates: `zip` (read/write zip), `tar` (tarballs), `flate2` (gzip), `zstd` (Zstandard). Provide unified API: `Archive.compress_dir(input_dir, output_path, format)`, `Archive.extract(archive_path, output_dir)`, `Format.{Zip,Tar,Gz,Zstd}` enum. Cross-language prevalence: 6/6 (zipfile/zlib/compress/flate2-tar-zstd/java.util.zip/System.IO.Compression).
-  - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `zip`, `tar`, `flate2`, `zstd`.
+  - **LOC budget**: â‰¤2000, â‰¤15 fns. **External deps**: `zip`, `tar`, `flate2`, `zstd`.
   - **Must NOT do**: No 7z, RAR, BZip2 (v1.22+); no encryption-at-rest (combine with T34 if needed).
   - **References**: T0, T1. Rust `zip`: https://docs.rs/zip/latest/zip/
-  - **Acceptance**: Roundtrip compress → extract preserves files. All 4 formats work. 4 examples + 12 tests.
+  - **Acceptance**: Roundtrip compress â†’ extract preserves files. All 4 formats work. 4 examples + 12 tests.
   - **Commit**: `feat(buff-archive): MVP zip/tar/gz/zstd compression`
 
-- [x] 40. `buff-fsm` — State Machine Library
+- [x] 40. `buff-fsm` â€” State Machine Library
 
   **What to do**: Wrap Rust `sfsm` crate (or build standalone). Provide: `Machine.new(initial_state)`, `machine.add_transition(from, event, to, guard, action)`, `machine.fire(event)`, `machine.current_state()`. States as enums, events as enums. Codegen-time transition table validation. Cross-language prevalence: 5/6 (transitions/xstate/looplab-fsm/sfsm/squirrel-foundation/Stateless).
-  - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `sfsm` or standalone.
+  - **LOC budget**: â‰¤2000, â‰¤15 fns. **External deps**: `sfsm` or standalone.
   - **References**: T0, T1. Rust `sfsm`: https://docs.rs/sfsm/latest/sfsm/
   - **Acceptance**: State transitions correctly. Invalid transitions error. Guards block transitions. Actions fire. 3 examples (traffic light, order status, turnstile) + 12 tests.
   - **Commit**: `feat(buff-fsm): MVP state machine library`
 
-- [x] 41. `buff-pubsub` — In-Process Event Bus
+- [x] 41. `buff-pubsub` â€” In-Process Event Bus
 
-  **What to do**: Build standalone on T2 Channel<T> (no extern needed). Provide: `EventBus.new()`, `bus.subscribe(topic, handler)`, `bus.publish(topic, event)`. Topics as strings. Handlers as closures. Optional: typed events via generics. Cross-language prevalence: 5/6 (blinker/EventEmitter/eventbus/EventBus — Go uses channels natively).
-  - **LOC budget**: ≤1500, ≤10 fns. **External deps**: none (uses T2 Channel<T>).
+  **What to do**: Build standalone on T2 Channel<T> (no extern needed). Provide: `EventBus.new()`, `bus.subscribe(topic, handler)`, `bus.publish(topic, event)`. Topics as strings. Handlers as closures. Optional: typed events via generics. Cross-language prevalence: 5/6 (blinker/EventEmitter/eventbus/EventBus â€” Go uses channels natively).
+  - **LOC budget**: â‰¤1500, â‰¤10 fns. **External deps**: none (uses T2 Channel<T>).
   - **References**: T0, T1, T2 (Channel<T>).
   - **Acceptance**: Subscribe/publish delivers events to all subscribers. Multiple subscribers receive same event. 3 examples + 10 tests.
   - **Commit**: `feat(buff-pubsub): MVP in-process event bus`
 
-- [x] 42. `buff-email` — SMTP + Templated Email
+- [x] 42. `buff-email` â€” SMTP + Templated Email
 
   **What to do**: Wrap Rust `lettre` crate. Provide: `Email.new(from, to, subject)`, `email.body(text)`, `email.html(template, context)`, `email.attach(path)`, `SmtpClient.send(email)`. Templating via T19 buff-template (handlebars). Cross-language prevalence: 5/6 (emails/nodemailer/gomail/lettre/JavaMail/MailKit).
-  - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `lettre`, `handlebars` (existing).
+  - **LOC budget**: â‰¤2000, â‰¤15 fns. **External deps**: `lettre`, `handlebars` (existing).
   - **Must NOT do**: No IMAP/POP3 receiving (v1.22+); no calendar integration.
   - **References**: T0, T1, T4, T19 (buff-template). Rust `lettre`: https://docs.rs/lettre/latest/lettre/
   - **Acceptance**: Send plain-text email via SMTP. HTML template renders. Attachments work. 3 examples + 10 tests (use mailtrap or mock SMTP).
   - **Commit**: `feat(buff-email): MVP SMTP client with templates`
 
-- [x] 43. `buff-scrape` — HTML Parsing + Crawling
+- [x] 43. `buff-scrape` â€” HTML Parsing + Crawling
 
   **What to do**: Wrap Rust `scraper` crate (HTML parsing) + `fantoccini` (headless browser via WebDriver). Provide: `Document.from_html(html)`, `doc.select(css) -> Vector<Element>`, `el.text()`, `el.attr(name)`, `Crawler.new(seed_url)`, `crawler.follow_links(policy)`. Cross-language prevalence: 6/6 (BeautifulSoup/cheerio/colly/scraper/Jsoup/HtmlAgilityPack).
-  - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `scraper`, `fantoccini` (optional), `reqwest` (existing via T33).
+  - **LOC budget**: â‰¤2500, â‰¤20 fns. **External deps**: `scraper`, `fantoccini` (optional), `reqwest` (existing via T33).
   - **Must NOT do**: No JS rendering by default (defer to fantoccini optional path); no distributed crawling.
   - **References**: T0, T1, T4, T33 (buff-http-client). Rust `scraper`: https://docs.rs/scraper/latest/scraper/
   - **Acceptance**: Parse static HTML. CSS selector queries work. Crawler respects robots.txt. 3 examples + 12 tests.
   - **Commit**: `feat(buff-scrape): MVP HTML parsing + crawling`
 
-- [x] 44. `buff-i18n` — Internationalization
+- [x] 44. `buff-i18n` â€” Internationalization
 
   **What to do**: Wrap Rust `fluent` crate (Mozilla's i18n system) + `rust-i18n` for simpler workflows. Provide: `t!(key, locale: "en")` macro-like function, `I18n.load(locale)`, `I18n.available_locales()`. Message catalogs in `locales/<locale>.ftl` (Fluent) or `.toml`. Pluralization, gender, ICU MessageFormat. Cross-language prevalence: 6/6 (babel/i18next/gotext/fluent/ICU4J/IStringLocalizer).
-  - **LOC budget**: ≤2500, ≤15 fns. **External deps**: `fluent`, `rust-i18n`, `unic-langid`.
+  - **LOC budget**: â‰¤2500, â‰¤15 fns. **External deps**: `fluent`, `rust-i18n`, `unic-langid`.
   - **Must NOT do**: No machine translation; no RTL layout helpers (UI concern).
   - **References**: T0, T1. Rust `fluent`: https://docs.rs/fluent/latest/fluent/
   - **Acceptance**: Translate keys per locale. Pluralization rules work. Missing key warning. 3 examples (en, pt-BR, es) + 10 tests.
@@ -3396,71 +3396,71 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-## Tasks T45-T52 — Tier 3 Specialized Frameworks (Release v1.18.0)
+## Tasks T45-T52 â€” Tier 3 Specialized Frameworks (Release v1.18.0)
 
 > Rust-ecosystem leverage: specialized frameworks where Buff wraps a mature Rust crate to provide idiomatic API. These address 1-3 language ecosystems but unlock valuable use cases.
 
-- [x] 45. `buff-geo` — Geospatial / GIS
+- [x] 45. `buff-geo` â€” Geospatial / GIS
 
-  **What to do**: Wrap Rust `geo` crate + `geo-types`. Provide: `Point.new(lat, lon)`, `Polygon.from_coords(...)`, `LineString`, distance/area/buffer/intersect ops, `Projection.wgs84_to_web_mercator()`. Cross-language: 4/6 (shapely/turf/geo/JTS — Java/C# have libraries too).
-  - **LOC budget**: ≤2500, ≤25 fns. **External deps**: `geo`, `geo-types`, `proj`.
+  **What to do**: Wrap Rust `geo` crate + `geo-types`. Provide: `Point.new(lat, lon)`, `Polygon.from_coords(...)`, `LineString`, distance/area/buffer/intersect ops, `Projection.wgs84_to_web_mercator()`. Cross-language: 4/6 (shapely/turf/geo/JTS â€” Java/C# have libraries too).
+  - **LOC budget**: â‰¤2500, â‰¤25 fns. **External deps**: `geo`, `geo-types`, `proj`.
   - **References**: T0, T1, T4. Rust `geo`: https://docs.rs/geo/latest/geo/
   - **Acceptance**: Distance/area calculations correct. Intersection detection works. 3 examples + 12 tests.
   - **Commit**: `feat(buff-geo): MVP geospatial operations`
 
-- [x] 46. `buff-nlp` — Text Processing / NLP
+- [x] 46. `buff-nlp` â€” Text Processing / NLP
 
-  **What to do**: Wrap Rust `whatlang` (language detection), `rust-stemmers` (Porter stemmer), `unicode-segmentation` (work/char segmentation). Provide: `Text.detect_language(text)`, `Text.stem(word)`, `Text.tokenize(text)`, `Text.sentences(text)`. Cross-language: 3/6 (spaCy/natural/whatlang — Python dominant).
-  - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `whatlang`, `rust-stemmers`, `unicode-segmentation`.
+  **What to do**: Wrap Rust `whatlang` (language detection), `rust-stemmers` (Porter stemmer), `unicode-segmentation` (work/char segmentation). Provide: `Text.detect_language(text)`, `Text.stem(word)`, `Text.tokenize(text)`, `Text.sentences(text)`. Cross-language: 3/6 (spaCy/natural/whatlang â€” Python dominant).
+  - **LOC budget**: â‰¤2000, â‰¤15 fns. **External deps**: `whatlang`, `rust-stemmers`, `unicode-segmentation`.
   - **References**: T0, T1, T4. Rust `whatlang`: https://docs.rs/whatlang/latest/whatlang/
   - **Acceptance**: Language detection accuracy >90% on test corpus. Stemmer produces correct stems. 3 examples + 10 tests.
   - **Commit**: `feat(buff-nlp): MVP text processing (detection, stemmer, tokenizer)`
 
-- [x] 47. `buff-chat` — Discord/Telegram Bots
+- [x] 47. `buff-chat` â€” Discord/Telegram Bots
 
   **What to do**: Wrap Rust `serenity` (Discord) + `teloxide` (Telegram). Provide unified `Bot.new(platform, token)`, `bot.command(name, handler)`, `bot.on_message(handler)`, `bot.start()`. Cross-platform handler abstraction. Cross-language: 5/6 (discord.py/discord.js/discordgo/serenity/JDA).
-  - **LOC budget**: ≤3000, ≤20 fns. **External deps**: `serenity`, `teloxide`.
+  - **LOC budget**: â‰¤3000, â‰¤20 fns. **External deps**: `serenity`, `teloxide`.
   - **References**: T0, T1, T4. Rust `serenity`: https://docs.rs/serenity/latest/serenity/
   - **Acceptance**: Bot connects to test server (Discord test mode + Telegram bot API). Command dispatch works. 3 examples + 10 tests (mock API).
   - **Commit**: `feat(buff-chat): MVP Discord + Telegram bot framework`
 
-- [x] 48. `buff-web3` — Blockchain RPC + Smart Contracts
+- [x] 48. `buff-web3` â€” Blockchain RPC + Smart Contracts
 
   **What to do**: Wrap Rust `ethers-rs` crate. Provide: `Provider.new(rpc_url)`, `Wallet.from_private_key(key)`, `Contract.new(address, abi, wallet)`, `contract.method(name).call()`, `contract.method(name).send()`. Read/write blockchain. Cross-language: 4/6 (web3.py/ethers.js/ethers-rs/Web3j).
-  - **LOC budget**: ≤3000, ≤25 fns. **External deps**: `ethers`, `ethers-contract`, `ethers-signers`.
+  - **LOC budget**: â‰¤3000, â‰¤25 fns. **External deps**: `ethers`, `ethers-contract`, `ethers-signers`.
   - **References**: T0, T1, T4, T34 (auth - signed transactions). Rust `ethers`: https://docs.rs/ethers/latest/ethers/
   - **Acceptance**: Connect to public RPC. Read contract state. Sign and send transaction (testnet). 3 examples + 12 tests (use local testnet).
   - **Commit**: `feat(buff-web3): MVP Ethereum client + contract interaction`
 
-- [x] 49. `buff-crypto-extras` — AES/RSA/ECC/argon2 (beyond Hash/HMAC)
+- [x] 49. `buff-crypto-extras` â€” AES/RSA/ECC/argon2 (beyond Hash/HMAC)
 
   **What to do**: Extend T124k Hash/HMAC with symmetric/asymmetric encryption. Wrap Rust `aes-gcm` (AES), `rsa`, `p256`/`p384` (ECC), `argon2` (already used in T34). Provide: `AES.encrypt(plaintext, key)`, `AES.decrypt(ciphertext, key)`, `RSA.generate_keypair()`, `RSA.sign(data, private)`, `ECDH.derive_shared(private, public)`. Cross-language: 6/6 (cryptography/pycryptodome/crypto/ring/BouncyCastle/System.Security.Cryptography).
-  - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `aes-gcm`, `rsa`, `p256`, `argon2` (shared with T34).
+  - **LOC budget**: â‰¤2500, â‰¤20 fns. **External deps**: `aes-gcm`, `rsa`, `p256`, `argon2` (shared with T34).
   - **Must NOT do**: No homebrew crypto; no TLS implementation (use rustls).
   - **References**: T0, T1, T4, T34, existing T124k. Rust `aes-gcm`: https://docs.rs/aes-gcm/latest/aes_gcm/
   - **Acceptance**: AES roundtrip works. RSA sign/verify works. ECDH key agreement works. 4 examples + 15 tests (NIST test vectors).
   - **Commit**: `feat(buff-crypto-extras): MVP AES/RSA/ECC/argon2 beyond Hash/HMAC`
 
-- [x] 50. `buff-xml` — XML Parsing
+- [x] 50. `buff-xml` â€” XML Parsing
 
-  **What to do**: Wrap Rust `quick-xml` crate. Provide: `Xml.from_str(xml) -> Document`, `doc.root()`, `doc.find(xpath)`, `el.children()`, `el.attr(name)`, `Xml.to_string(doc)`. Streaming for large XML. Cross-language: 6/6 (lxml/quick-xml/jsoup/SAX — all stdlib or popular).
-  - **LOC budget**: ≤2000, ≤15 fns. **External deps**: `quick-xml`.
+  **What to do**: Wrap Rust `quick-xml` crate. Provide: `Xml.from_str(xml) -> Document`, `doc.root()`, `doc.find(xpath)`, `el.children()`, `el.attr(name)`, `Xml.to_string(doc)`. Streaming for large XML. Cross-language: 6/6 (lxml/quick-xml/jsoup/SAX â€” all stdlib or popular).
+  - **LOC budget**: â‰¤2000, â‰¤15 fns. **External deps**: `quick-xml`.
   - **References**: T0, T1, T4. Rust `quick-xml`: https://docs.rs/quick-xml/latest/quick_xml/
   - **Acceptance**: Parse well-formed XML. XPath queries work. Streaming doesn't OOM on large files. 3 examples + 10 tests.
   - **Commit**: `feat(buff-xml): MVP XML parsing via quick-xml`
 
-- [x] 51. `buff-msgpack` — MessagePack Binary Format
+- [x] 51. `buff-msgpack` â€” MessagePack Binary Format
 
   **What to do**: Wrap Rust `rmp-serde` crate. Provide: `MsgPack.serialize(value) -> Bytes`, `MsgPack.deserialize(bytes) -> Value`. Auto-derive for structs (post-T3 macro). Cross-language: 6/6 (msgpack/python-msgpack/msgpack-lite/rmp-serde/MsgPack-Jackson/MessagePack-CSharp).
-  - **LOC budget**: ≤1500, ≤10 fns. **External deps**: `rmp-serde`, `serde` (existing).
+  - **LOC budget**: â‰¤1500, â‰¤10 fns. **External deps**: `rmp-serde`, `serde` (existing).
   - **References**: T0, T1, T4. Rust `rmp-serde`: https://docs.rs/rmp-serde/latest/rmp_serde/
   - **Acceptance**: Roundtrip serialize/deserialize preserves values. Cross-compatible with Python msgpack. 3 examples + 10 tests.
   - **Commit**: `feat(buff-msgpack): MVP MessagePack binary format`
 
-- [x] 52. `buff-protobuf` — Protocol Buffers
+- [x] 52. `buff-protobuf` â€” Protocol Buffers
 
   **What to do**: Wrap Rust `prost` crate (Rust protobuf compiler). Provide: buff CLI command `buff proto <proto-file> <output-dir>` generates Buff types from `.proto` definitions. Runtime: `Message.encode()`, `Message.decode(bytes)`. gRPC client/server scaffolding (combine with T17 buff-web). Cross-language: 6/6 (protobuf in all 6 languages).
-  - **LOC budget**: ≤3000, ≤20 fns. **External deps**: `prost`, `prost-build`, `prost-types`, `tonic` (gRPC).
+  - **LOC budget**: â‰¤3000, â‰¤20 fns. **External deps**: `prost`, `prost-build`, `prost-types`, `tonic` (gRPC).
   - **Must NOT do**: No gRPC streaming in MVP (unary only); no protobuf reflection API.
   - **References**: T0, T1, T4, T17 (buff-web for gRPC transport). Rust `prost`: https://docs.rs/prost/latest/prost/
   - **Acceptance**: Generate Buff types from .proto. Encode/decode roundtrip. gRPC unary call works. 3 examples + 12 tests.
@@ -3468,59 +3468,59 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-## Tasks T54-T56 — Language Inspirations (Release v1.19.0)
+## Tasks T54-T56 â€” Language Inspirations (Release v1.19.0)
 
 > Features inspired by analysis of Zig, Mojo, V/Go, and Swift. Language-level enhancements that make Buff faster (compile + runtime) and more ergonomic.
 
-- [x] 53. `comptime` — Compile-Time Code Execution (Zig-inspired)
+- [x] 53. `comptime` â€” Compile-Time Code Execution (Zig-inspired)
 
   **What to do**: Add Zig-style `comptime` blocks and function parameters. `comptime { ... }` runs at compile time, producing values or generating code. `fn foo(comptime T: Type, x: T)` runs specialized per type. Use cases: lookup table generation, config validation, type-driven codegen, generic specialization without monomorphization bloat.
   - **Why comptime INSTEAD of just macros**: Simpler mental model (it's just code that runs early), same language (no separate macro syntax), better error messages (no macro expansion confusion), composable (comptime fns call other comptime fns). Investigated alongside T3 macro spike (both kept in parallel per user decision).
-  - **LOC budget**: ≤4000, ≤30 fns. **External deps**: none (compiler-internal).
+  - **LOC budget**: â‰¤4000, â‰¤30 fns. **External deps**: none (compiler-internal).
   - **Must NOT do**: No I/O at comptime (no file reads, network); no reflection beyond type info; comptime errors must be Buff-source-mapped (use T24 source maps).
-  - **References**: T0 (conventions), T1 (compiler integration), T24 (source maps for comptime errors), T3 (parallel macro spike — compare approaches). Zig reference: https://ziglang.org/documentation/master/#comptime
+  - **References**: T0 (conventions), T1 (compiler integration), T24 (source maps for comptime errors), T3 (parallel macro spike â€” compare approaches). Zig reference: https://ziglang.org/documentation/master/#comptime
   - **Acceptance**: Compile-time fibonacci(10) precomputes to constant. Generic `comptime max(Type, T, T)` specializes per type. Lookup table builds at compile time. Comptime errors show Buff source spans. 5 examples + 20 tests.
   - **Commit**: `feat(ast): comptime compile-time execution engine (Zig-inspired)`
 
-- [x] 54. `Simd<T, N>` — First-Class SIMD Types (Mojo-inspired)
+- [x] 54. `Simd<T, N>` â€” First-Class SIMD Types (Mojo-inspired)
 
   **What to do**: Add `Simd<T, N>` type to buff-tensor or new buff-simd crate. Represents N values of type T in a SIMD register (e.g., `Simd<Float, 4>` = 4 floats in 128-bit register). Operations: `Simd.splat(x)`, `simd.add(other)`, `simd.mul(other)`, `simd.sum()`, `simd.min()`/`simd.max()`. Auto-vectorization remains for non-explicit code; `Simd<T,N>` for hand-optimized hot loops. Wraps Rust's `std::simd` (stable since 1.51) or `packed_simd2`.
   - **Why**: 4-8x speedup for compute frameworks (buff-tensor T8, buff-science T13, buff-ml T15, buff-image T9, buff-dsp T11) in hot loops where auto-vectorizer misses.
-  - **LOC budget**: ≤2500, ≤20 fns. **External deps**: `std::simd` (in Rust stdlib) or `packed_simd2`.
+  - **LOC budget**: â‰¤2500, â‰¤20 fns. **External deps**: `std::simd` (in Rust stdlib) or `packed_simd2`.
   - **Must NOT do**: No runtime SIMD detection (use compile-time target features); no GPU SIMD (that's WGSL's job).
-  - **References**: T0, T1, T6 (WGSL assessment — SIMD is CPU-side complement), T8 (buff-tensor). Rust `std::simd`: https://doc.rust-lang.org/std/simd/index.html
-  - **Acceptance**: `Simd<Float, 4>` operations produce correct results vs scalar equivalents. Benchmark shows ≥3x speedup on dot product vs scalar loop. 4 examples + 15 tests.
+  - **References**: T0, T1, T6 (WGSL assessment â€” SIMD is CPU-side complement), T8 (buff-tensor). Rust `std::simd`: https://doc.rust-lang.org/std/simd/index.html
+  - **Acceptance**: `Simd<Float, 4>` operations produce correct results vs scalar equivalents. Benchmark shows â‰¥3x speedup on dot product vs scalar loop. 4 examples + 15 tests.
   - **Commit**: `feat(buff-simd): MVP Simd<T,N> first-class SIMD types (Mojo-inspired)`
 
 - [x] 55. Compile-Speed Optimization Program (V/Go-inspired)
 
   **What to do**: Buff's #1 DX risk is inheriting Rust's slow compiles (30-90s for medium projects). This task owns a multi-pronged compile-speed program:
-  1. **Incremental compilation audit** — verify Cargo incremental is on by default in `buff build`; measure improvement.
-  2. **Generated-Rust caching** — skip re-codegen if `.buff` source unchanged (cache hash → generated `.rs` content). Save 30-50% on repeat builds.
-  3. **`buff check` as fast preview** — type-check + lint in <2s; document as the inner-loop command.
-  4. **Linker selection** — auto-detect and use `mold` (Linux) or `lld` (Windows/macOS) when available; 2-5x link speedup.
-  5. **sccache integration** — wrap rustc invocation with sccache for cross-project crate caching.
-  6. **`buff build --fast` mode** — skip LTO, skip optimization, use debug profile. For dev inner loop.
-  7. **Benchmark suite** — `cargo run -p buff-lang-cli -- bench-compile` measures and records compile times across project sizes; publishes comparison vs Go/Rust baseline.
-  - **LOC budget**: ≤3000 across CLI changes + benchmark harness. **External deps**: `sccache` (optional client), `mold` (system tool).
+  1. **Incremental compilation audit** â€” verify Cargo incremental is on by default in `buff build`; measure improvement.
+  2. **Generated-Rust caching** â€” skip re-codegen if `.buff` source unchanged (cache hash â†’ generated `.rs` content). Save 30-50% on repeat builds.
+  3. **`buff check` as fast preview** â€” type-check + lint in <2s; document as the inner-loop command.
+  4. **Linker selection** â€” auto-detect and use `mold` (Linux) or `lld` (Windows/macOS) when available; 2-5x link speedup.
+  5. **sccache integration** â€” wrap rustc invocation with sccache for cross-project crate caching.
+  6. **`buff build --fast` mode** â€” skip LTO, skip optimization, use debug profile. For dev inner loop.
+  7. **Benchmark suite** â€” `cargo run -p buff-lang-cli -- bench-compile` measures and records compile times across project sizes; publishes comparison vs Go/Rust baseline.
+  - **LOC budget**: â‰¤3000 across CLI changes + benchmark harness. **External deps**: `sccache` (optional client), `mold` (system tool).
   - **Must NOT do**: No custom linker; no LLVM replacement; no JIT compilation (Buff is AOT-first).
   - **References**: T0 (profiles), T1 (build pipeline). Go build speed: https://docs.google.com/document/d/1Sk2TQ3Pr8aT78Po7... V build speed: https://github.com/vlang/v
-  - **Acceptance**: Repeat `buff build` is ≥40% faster than baseline (cache hit). `buff check` completes in <2s on medium project. Benchmark report published. 5 examples + 10 tests.
+  - **Acceptance**: Repeat `buff build` is â‰¥40% faster than baseline (cache hit). `buff check` completes in <2s on medium project. Benchmark report published. 5 examples + 10 tests.
   - **Commit**: `feat(cli): compile-speed optimization program (caching + mold + sccache + bench)`
 
-- [x] 56. Property Wrappers — `@State`, `@Published`, `@Cached` (Swift-inspired)
+- [x] 56. Property Wrappers â€” `@State`, `@Published`, `@Cached` (Swift-inspired)
 
   **What to do**: Add Swift-style property wrappers as attribute-driven codegen. `@State var count = 0` desugars to `let count = Signal.new(0)` + accessors. `@Published var score` desugars to observable signal. `@Cached(compute_fn)` desugars to memoized lazy value. Reduces boilerplate for reactive patterns. Enhances T20 buff-reactive.
   - **Why**: Swift's SwiftUI adoption exploded because property wrappers made reactive state ergonomic. Same opportunity for Buff with buff-reactive + v1.9 RSX UI.
-  - **LOC budget**: ≤2000, ≤15 attribute kinds. **External deps**: depends on T53 comptime OR T3 macro spike (must ship one first).
+  - **LOC budget**: â‰¤2000, â‰¤15 attribute kinds. **External deps**: depends on T53 comptime OR T3 macro spike (must ship one first).
   - **Must NOT do**: No custom user-defined wrappers in MVP (built-in set only); no Objective-C interop (n/a).
-  - **References**: T0, T1, T20 (buff-reactive — direct enhancement), T53 (comptime — codegen engine) OR T3 (macros — alternative). Swift property wrappers: https://docs.swift.org/swift-book/LanguageGuide/Properties.html
+  - **References**: T0, T1, T20 (buff-reactive â€” direct enhancement), T53 (comptime â€” codegen engine) OR T3 (macros â€” alternative). Swift property wrappers: https://docs.swift.org/swift-book/LanguageGuide/Properties.html
   - **Acceptance**: `@State`/`@Published`/`@Cached` desugar correctly. Reactive UI updates fire. Existing `Signal.new()` API still works (additive). 4 examples + 12 tests.
   - **Commit**: `feat(ast): property wrappers @State/@Published/@Cached (Swift-inspired)`
 
 ---
 
-## Tasks T57-T58 — Julia-Inspired Changes (Release v1.19.0)
+## Tasks T57-T58 â€” Julia-Inspired Changes (Release v1.19.0)
 
 > Opt-in language extensions inspired by Julia, targeted at numerical/scientific users. Both features are edition-gated (require `edition = "scientific"` in buff.toml).
 
@@ -3528,44 +3528,44 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
   **What to do**: Add opt-in mathematical syntax activated by `edition = "scientific"` in buff.toml. Features:
   1. **Implicit multiplication**: `2x` parses as `2 * x`; `2(x+y)` parses as `2 * (x+y)`. Lexer change to insert implicit `*` between number and identifier/lparen.
-  2. **Unicode operators**: `∑` (sum), `∏` (product), `∫` (integral — for future), `√` (sqrt), `∈` (in), `∉` (not in), `⊂` (subset), `≤`/`≥` (already common), `≠` (not equal), `≈` (approx equal), `→` (function arrow alternative).
+  2. **Unicode operators**: `âˆ‘` (sum), `âˆ` (product), `âˆ«` (integral â€” for future), `âˆš` (sqrt), `âˆˆ` (in), `âˆ‰` (not in), `âŠ‚` (subset), `â‰¤`/`â‰¥` (already common), `â‰ ` (not equal), `â‰ˆ` (approx equal), `â†’` (function arrow alternative).
   3. **Matrix literals**: `[1 2 3]` (row vector), `[1; 2; 3]` (column vector), `[1 2; 3 4]` (2x2 matrix). Currently Buff uses `[[1, 2], [3, 4]]` (Vec of Vecs); matrix literals are more concise.
   4. **Adjoint operator**: `A'` for matrix transpose (postfix `'`).
   - **Why**: Julia/MATLAB/R users expect this syntax. buff-tensor (T8), buff-science (T13), buff-ml (T15) become more ergonomic.
-  - **LOC budget**: ≤3500 (lexer + parser changes; type system unchanged). **External deps**: none.
-  - **Must NOT do**: No breaking changes to default edition; no new types (just syntax sugar); Unicode operators must have ASCII alternatives (don't force users to type ∑).
+  - **LOC budget**: â‰¤3500 (lexer + parser changes; type system unchanged). **External deps**: none.
+  - **Must NOT do**: No breaking changes to default edition; no new types (just syntax sugar); Unicode operators must have ASCII alternatives (don't force users to type âˆ‘).
   - **References**: T0 (edition concept), T1 (compiler integration). Julia manual: https://docs.julialang.org/en/v1/manual/mathematical-operations/
   - **Acceptance**: Scientific edition parses `2x` correctly. Unicode operators work in editor (LSP completion). Matrix literals produce correct tensors. Default edition unchanged. 6 examples + 20 tests.
   - **Commit**: `feat(ast): mathematical syntax edition (Julia-inspired, opt-in)`
 
 - [x] 58. Multiple Dispatch for Numerical APIs (Julia-inspired)
 
-  **What to do**: Extend Buff's trait system to support multiple dispatch — function dispatch on ALL arguments, not just receiver. `func matmul(a: Matrix, b: Vector)` and `func matmul(a: Vector, b: Matrix)` are different methods, dispatched by both argument types. Currently Buff uses single-dispatch (`a.matmul(b)` dispatches on `a` only).
+  **What to do**: Extend Buff's trait system to support multiple dispatch â€” function dispatch on ALL arguments, not just receiver. `func matmul(a: Matrix, b: Vector)` and `func matmul(a: Vector, b: Matrix)` are different methods, dispatched by both argument types. Currently Buff uses single-dispatch (`a.matmul(b)` dispatches on `a` only).
   - **Why**: Numerical operations are often symmetric (`a + b` vs `b + a` have different impls for different type pairs). Multiple dispatch makes `+(Int, Float)`, `+(Matrix, Vector)`, `+(Vector, Matrix)` all natural top-level functions. Julia's entire stdlib is built on this.
   - **How**: Extend trait/impl system with multi-argument dispatch tables. Codegen lowers to Rust trait impls with explicit type matching. Backward compatible (single dispatch is a special case).
-  - **LOC budget**: ≤4000 (type system + codegen changes). **External deps**: none.
+  - **LOC budget**: â‰¤4000 (type system + codegen changes). **External deps**: none.
   - **Must NOT do**: No breaking changes to single-dispatch trait system; no runtime dispatch (compile-time only); no pattern matching on values (only types).
-  - **References**: T0, T1, T8 (buff-tensor — primary consumer), T13 (buff-science). Julia methods: https://docs.julialang.org/en/v1/manual/methods/
+  - **References**: T0, T1, T8 (buff-tensor â€” primary consumer), T13 (buff-science). Julia methods: https://docs.julialang.org/en/v1/manual/methods/
   - **Acceptance**: `func combine(a: T1, b: T2)` dispatches correctly for all (T1, T2) combinations. Existing single-dispatch methods unchanged. Numerical APIs read naturally as top-level functions. 5 examples + 18 tests.
   - **Commit**: `feat(ast): multiple dispatch for numerical APIs (Julia-inspired)`
 
 ---
 
-## Task T59 — Actor Model (Release v1.19.0)
+## Task T59 â€” Actor Model (Release v1.19.0)
 
 > Actor model and fault-tolerance patterns inspired by Erlang/Elixir/Gleam. Built on top of existing Channel<T> (T2) and spawn primitives.
 
-- [x] 59. `buff-actors` — Actor Model + Supervisor Trees (Gleam/Erlang-inspired)
+- [x] 59. `buff-actors` â€” Actor Model + Supervisor Trees (Gleam/Erlang-inspired)
 
   **What to do**: Build actor abstraction on top of T2 Channel<T> + spawn. Provide:
   1. **Actor trait**: `trait Actor { required func handle(message: Message) -> Action; }`. Each actor runs in its own task, receives messages via Channel, processes via `handle`.
   2. **`ActorSystem.new()`**: manages actor lifecycle. `system.spawn(MyActor.new())` returns `ActorRef`.
   3. **`ActorRef.send(message)`:** type-safe message send (wraps Channel.send).
-  4. **Supervisor trees**: `Supervisor.start_child(spec)` with restart strategies (`:permanent`, `:temporary`, `:transient`). "Let it crash" philosophy — actors crash, supervisors restart them. Mirrors Erlang OTP.
+  4. **Supervisor trees**: `Supervisor.start_child(spec)` with restart strategies (`:permanent`, `:temporary`, `:transient`). "Let it crash" philosophy â€” actors crash, supervisors restart them. Mirrors Erlang OTP.
   5. **Named actors**: `system.register("logger", actor_ref)` + `system.lookup("logger")` for service discovery.
   6. **Graceful shutdown**: `system.shutdown()` sends termination messages, waits for actors to finish.
   - **Why**: Long-running services (buff-web T17, buff-jobs T35) benefit from fault-tolerant actor patterns. Erlang's legendary 99.9999999% uptime comes from this model.
-  - **LOC budget**: ≤3500, ≤25 fns. **External deps**: T2 (Channel<T>), T20 (buff-reactive for state).
+  - **LOC budget**: â‰¤3500, â‰¤25 fns. **External deps**: T2 (Channel<T>), T20 (buff-reactive for state).
   - **Must NOT do**: No distributed actors (single-process only); no hot code swap (defer to v2.0+); no actor persistence.
   - **References**: T0, T1, T2 (Channel<T>), T20 (buff-reactive). Gleam: https://gleam.run/ Erlang OTP: https://www.erlang.org/doc/design_principles/des_princ.html
   - **Acceptance**: Actor system spawns actors. Messages delivered correctly. Supervisor restarts crashed actor. Named lookup works. Graceful shutdown completes. 5 examples + 18 tests.
@@ -3573,85 +3573,85 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 
 ---
 
-## Tasks T60-T72 — Quality, DX & Community (Releases v1.19.0-v1.21.0)
+## Tasks T60-T72 â€” Quality, DX & Community (Releases v1.19.0-v1.21.0)
 
 > 13 tasks addressing performance, productivity, DX, and ecosystem topics the user explicitly selected in earlier discussion rounds but were not yet added as tasks. Per user directive: "don't defer anything we can actually do in this plan unless specified by me."
 
 - [x] 60. Binary Size Minimization
   **What**: Add `[profile.minimal]` with `panic = "abort"`, `strip = true`, `opt-level = "z"`. Add `buff build --minimal` flag. Feature-gate tokio/rayon/wgpu (don't link if unused). Document size budget per template. Target: <5MB for console apps.
-  **LOC budget**: ≤1500. **Deps**: T0 (profiles). **Acceptance**: Console template builds <5MB with --minimal. 3 examples + 10 tests.
+  **LOC budget**: â‰¤1500. **Deps**: T0 (profiles). **Acceptance**: Console template builds <5MB with --minimal. 3 examples + 10 tests.
 
 - [x] 61. Cold-Start Benchmarks
   **What**: Build benchmark suite comparing Buff vs Go/Rust/Java/Python cold-start on AWS Lambda + Cloudflare Workers. Publish results to `benchmarks/` directory. Create `buff bench-cold-start` subcommand.
-  **LOC budget**: ≤1000. **Deps**: T0, T1. **Acceptance**: Benchmark report published. Buff cold-start <50ms (matching Rust). 2 examples + 5 tests.
+  **LOC budget**: â‰¤1000. **Deps**: T0, T1. **Acceptance**: Benchmark report published. Buff cold-start <50ms (matching Rust). 2 examples + 5 tests.
 
 - [x] 62. PGO (Profile-Guided Optimization) Support
-  **What**: Add `[profile.pgo]` to buff.toml. Automate 3-step PGO flow: instrument → run representative workload → rebuild with profile. `buff build --pgo` flag. Wraps rustc PGO flags.
-  **LOC budget**: ≤1500. **Deps**: T0. **Acceptance**: PGO build shows 10%+ speedup on benchmark suite vs regular release. 2 examples + 8 tests.
+  **What**: Add `[profile.pgo]` to buff.toml. Automate 3-step PGO flow: instrument â†’ run representative workload â†’ rebuild with profile. `buff build --pgo` flag. Wraps rustc PGO flags.
+  **LOC budget**: â‰¤1500. **Deps**: T0. **Acceptance**: PGO build shows 10%+ speedup on benchmark suite vs regular release. 2 examples + 8 tests.
 
 - [x] 63. Error Message Quality Enhancement
   **What**: Add suggestion engine to buff-lang-error ("did you mean `print`?"). Build transpilation error mapping (when rustc rejects generated Rust, map back to Buff source spans). Create `errors.buff-lang.org/E12xx` error docs website. Add common-mistake linter patterns to buff check.
-  **LOC budget**: ≤3000. **Deps**: T0, T1, T24 (source maps for error mapping). **Acceptance**: Typo suggestions appear. Rust errors mapped to Buff spans. 5 error doc pages live. 15 tests.
+  **LOC budget**: â‰¤3000. **Deps**: T0, T1, T24 (source maps for error mapping). **Acceptance**: Typo suggestions appear. Rust errors mapped to Buff spans. 5 error doc pages live. 15 tests.
 
 - [x] 64. Hot Reload Beyond UI (Server + Game)
-  **What**: Extend T17 buff-web with route hot-swap (change handler → reload without restart). Extend T16 buff-game with ECS system hot-swap. Build on existing v1.8 ui_dev WebSocket infrastructure. `buff watch` subcommand for non-UI code.
-  **LOC budget**: ≤2500. **Deps**: T0, T1, T16, T17. **Acceptance**: Server route change live-reloads. Game system hot-swaps. `buff watch` detects file changes. 3 examples + 12 tests.
+  **What**: Extend T17 buff-web with route hot-swap (change handler â†’ reload without restart). Extend T16 buff-game with ECS system hot-swap. Build on existing v1.8 ui_dev WebSocket infrastructure. `buff watch` subcommand for non-UI code.
+  **LOC budget**: â‰¤2500. **Deps**: T0, T1, T16, T17. **Acceptance**: Server route change live-reloads. Game system hot-swaps. `buff watch` detects file changes. 3 examples + 12 tests.
 
 - [x] 65. AI Assistant Integration (`buff ai`)
-  **What**: Add `buff ai` subcommand that generates "AI context pack" — types, signatures, available APIs, idioms, current project structure — as a single file users paste into Copilot/Claude. `buff ai --verify <file>` runs buff check on AI-generated code. Playground integration for immediate feedback.
-  **LOC budget**: ≤2000. **Deps**: T0, T1. **Acceptance**: Context pack generated for test project. AI-verify catches syntax errors. 3 examples + 10 tests.
+  **What**: Add `buff ai` subcommand that generates "AI context pack" â€” types, signatures, available APIs, idioms, current project structure â€” as a single file users paste into Copilot/Claude. `buff ai --verify <file>` runs buff check on AI-generated code. Playground integration for immediate feedback.
+  **LOC budget**: â‰¤2000. **Deps**: T0, T1. **Acceptance**: Context pack generated for test project. AI-verify catches syntax errors. 3 examples + 10 tests.
 
 - [x] 66. Refactoring Tools (`buff refactor`)
   **What**: Add `buff refactor` subcommand with non-interactive refactoring: `buff refactor rename <old> <new>`, `buff refactor extract-function <range> <name>`, `buff refactor inline-variable <name>`. Leverages existing buff-lang-ast for AST manipulation. LSP gains code actions for interactive versions.
-  **LOC budget**: ≤3000. **Deps**: T0, T1, T24 (source maps for preserving spans). **Acceptance**: Rename propagates across files. Extract function produces valid code. Inline variable works. 5 examples + 18 tests.
+  **LOC budget**: â‰¤3000. **Deps**: T0, T1, T24 (source maps for preserving spans). **Acceptance**: Rename propagates across files. Extract function produces valid code. Inline variable works. 5 examples + 18 tests.
 
 - [x] 67. Documentation Site (`docs.buff-lang.org`)
   **What**: Build static documentation site with: language reference, API docs per crate (auto-generated by T0 `buff doc`), tutorial/getting started, cookbook recipes (from T68), migration guides. Search across all docs. Built with a static site generator (Zola or mdBook).
-  **LOC budget**: ≤3000 (site + content seed). **Deps**: T0 (buff doc command). **Acceptance**: Site deployed. API docs render for 5+ crates. Search works. Tutorial complete. 10 pages minimum.
+  **LOC budget**: â‰¤3000 (site + content seed). **Deps**: T0 (buff doc command). **Acceptance**: Site deployed. API docs render for 5+ crates. Search works. Tutorial complete. 10 pages minimum.
 
 - [x] 68. Cookbook / Patterns Guide
-  **What**: Create recipe-style documentation at `docs.buff-lang.org/cookbook/` covering common patterns: HTTP request, file I/O, JSON parsing, database query, parallel map, async task, error handling, testing patterns, etc. Each recipe: problem → solution → explanation. Per-framework cookbooks (buff-ml, buff-web, buff-dataframe).
-  **LOC budget**: ≤2000 (content). **Deps**: T67 (docs site). **Acceptance**: 50+ recipes published. Each recipe tested (code blocks compile). Cross-referenced with API docs. 5 tests.
+  **What**: Create recipe-style documentation at `docs.buff-lang.org/cookbook/` covering common patterns: HTTP request, file I/O, JSON parsing, database query, parallel map, async task, error handling, testing patterns, etc. Each recipe: problem â†’ solution â†’ explanation. Per-framework cookbooks (buff-ml, buff-web, buff-dataframe).
+  **LOC budget**: â‰¤2000 (content). **Deps**: T67 (docs site). **Acceptance**: 50+ recipes published. Each recipe tested (code blocks compile). Cross-referenced with API docs. 5 tests.
 
 - [x] 69. Onboarding Paths by Background
   **What**: Create tailored guides: "Buff for Python developers" (show async without await, type hints comparison, DataFrame vs pandas), "Buff for Rust developers" (show borrow-checker-free code, extern FFI, trait system), "Buff for Go developers" (spawn vs goroutines, Channel vs channels, interfaces vs traits), "Buff for JavaScript developers" (async model, callback patterns, web frameworks).
-  **LOC budget**: ≤2500 (content). **Deps**: T67 (docs site). **Acceptance**: 4 guides published. Each covers syntax, tooling, ecosystem mapping. Code examples compile. 4 tests.
+  **LOC budget**: â‰¤2500 (content). **Deps**: T67 (docs site). **Acceptance**: 4 guides published. Each covers syntax, tooling, ecosystem mapping. Code examples compile. 4 tests.
 
 - [x] 70. Package Quality Signals
   **What**: Extend registry (v1.6 buff-registry) with quality badges beyond T0 stability: "verified publisher" (authenticated author), "maintained" (commits in 6 months), "tested" (coverage %), "documented" (doc comment coverage). Surface in `buff search` results and registry web UI.
-  **LOC budget**: ≤2000. **Deps**: T0, T26 (buff-audit for security badge). **Acceptance**: Badges computed per package. Search results show badges. 4 badge types implemented. 10 tests.
+  **LOC budget**: â‰¤2000. **Deps**: T0, T26 (buff-audit for security badge). **Acceptance**: Badges computed per package. Search results show badges. 4 badge types implemented. 10 tests.
 
 - [x] 71. Stability Promise Document
-  **What**: Write formal stability contract at `.sisyphus/decisions/stability-promise.md` and `docs.buff-lang.org/stability/`. Defines: what's guaranteed not to break (public APIs, language syntax), exceptions (security fixes), deprecation policy (T0 @deprecated → 1 minor version warning → removal), edition contract (opt-in breaking changes via edition field). Inspired by Rust 1.0 stability promise.
-  **LOC budget**: ≤1000 (document). **Deps**: T0 (editions, stability badges). **Acceptance**: Document published. Covers all stability dimensions. Referenced from README. 3 tests (doc validation).
+  **What**: Write formal stability contract at `.sisyphus/decisions/stability-promise.md` and `docs.buff-lang.org/stability/`. Defines: what's guaranteed not to break (public APIs, language syntax), exceptions (security fixes), deprecation policy (T0 @deprecated â†’ 1 minor version warning â†’ removal), edition contract (opt-in breaking changes via edition field). Inspired by Rust 1.0 stability promise.
+  **LOC budget**: â‰¤1000 (document). **Deps**: T0 (editions, stability badges). **Acceptance**: Document published. Covers all stability dimensions. Referenced from README. 3 tests (doc validation).
 
 - [x] 72. Plugin Architecture (Compiler + LSP + Runtime)
-  **What**: Add plugin extension points: (1) compiler plugins (custom lints, custom codegen passes — via comptime T53), (2) LSP plugins (custom code actions, hover providers), (3) runtime plugins (custom tracing collectors, metric exporters). Define plugin manifest format (`buff-plugin.toml`). Plugin loading via dynamic dispatch (not dlopen — use trait objects).
-  **LOC budget**: ≤3000. **Deps**: T0, T1, T53 (comptime for compiler plugins). **Acceptance**: One example plugin per type (lint, code action, tracing). Plugin manifest documented. 6 examples + 15 tests.
+  **What**: Add plugin extension points: (1) compiler plugins (custom lints, custom codegen passes â€” via comptime T53), (2) LSP plugins (custom code actions, hover providers), (3) runtime plugins (custom tracing collectors, metric exporters). Define plugin manifest format (`buff-plugin.toml`). Plugin loading via dynamic dispatch (not dlopen â€” use trait objects).
+  **LOC budget**: â‰¤3000. **Deps**: T0, T1, T53 (comptime for compiler plugins). **Acceptance**: One example plugin per type (lint, code action, tracing). Plugin manifest documented. 6 examples + 15 tests.
 
 ---
 
-## Final Verification Wave (MANDATORY — after ALL implementation tasks)
+## Final Verification Wave (MANDATORY â€” after ALL implementation tasks)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 >
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback -> fix -> re-run -> present again -> wait for okay.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
-  Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, cargo run example, cargo test). For each "Must NOT Have": search codebase for forbidden patterns (`unwrap(`, `panic!`, raw-string codegen in codegen-rust) — reject with file:line if found. Check evidence files exist in `.sisyphus/evidence/`. Compare deliverables against plan (3 foundations + 3 decision docs + 10 frameworks + 1 flagship).
+- [ ] F1. **Plan Compliance Audit** â€” `oracle`
+  Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, cargo run example, cargo test). For each "Must NOT Have": search codebase for forbidden patterns (`unwrap(`, `panic!`, raw-string codegen in codegen-rust) â€” reject with file:line if found. Check evidence files exist in `.sisyphus/evidence/`. Compare deliverables against plan (3 foundations + 3 decision docs + 10 frameworks + 1 flagship).
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
-  Run `cargo check --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo fmt --check` + `cargo test --workspace`. Review all new crate files for: `as any`/`@ts-ignore` (n/a, Rust — look for `unwrap`/`expect`/`panic!`), empty catches, `println!` in lib code (only allowed in CLI bins), commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
+- [ ] F2. **Code Quality Review** â€” `unspecified-high`
+  Run `cargo check --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo fmt --check` + `cargo test --workspace`. Review all new crate files for: `as any`/`@ts-ignore` (n/a, Rust â€” look for `unwrap`/`expect`/`panic!`), empty catches, `println!` in lib code (only allowed in CLI bins), commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
   Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill if UI)
-  Start from clean state (`cargo clean`). Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration: load CSV via buff-dataframe → train via buff-ml → visualize via buff-web (flagship flow). Test edge cases: empty state, invalid input, GPU-unavailable host. Save to `.sisyphus/evidence/final-qa/`.
+- [ ] F3. **Real Manual QA** â€” `unspecified-high` (+ `playwright` skill if UI)
+  Start from clean state (`cargo clean`). Execute EVERY QA scenario from EVERY task â€” follow exact steps, capture evidence. Test cross-task integration: load CSV via buff-dataframe â†’ train via buff-ml â†’ visualize via buff-web (flagship flow). Test edge cases: empty state, invalid input, GPU-unavailable host. Save to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
-  For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check LOC budgets per framework (Wave 2 ≤2500, Wave 3 ≤4000, Wave 4 ≤1500). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes. Verify no work leaked into v1.9-v1.12 scope (RSX/debugger/Bufflings/distribution).
+- [ ] F4. **Scope Fidelity Check** â€” `deep`
+  For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 â€” everything in spec was built (no missing), nothing beyond spec was built (no creep). Check LOC budgets per framework (Wave 2 â‰¤2500, Wave 3 â‰¤4000, Wave 4 â‰¤1500). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes. Verify no work leaked into v1.9-v1.12 scope (RSX/debugger/Bufflings/distribution).
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
 ---
@@ -3659,10 +3659,10 @@ Parallel Tracks B + C run alongside Track A (max 10 concurrent total)
 ## Commit Strategy
 
 - **Per-task commits**: Each task produces 1+ atomic commits using Conventional Commits format.
-- **Commit message style**: Per AGENTS.md conventions: `feat(<scope>): <desc>` ≤50 chars subject, body only when "why" isn't obvious.
+- **Commit message style**: Per AGENTS.md conventions: `feat(<scope>): <desc>` â‰¤50 chars subject, body only when "why" isn't obvious.
 - **Scope naming**: `feat(buff-ml): add tensor autodiff backward pass` (use crate name as scope).
 - **Pre-commit hooks**: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p <crate>` must pass.
-- **Per-release tags**: When all tasks in a coherent release group complete, tag the release. See Version Mapping section for the 12-release breakdown (v1.13.0 → v1.24.0):
+- **Per-release tags**: When all tasks in a coherent release group complete, tag the release. See Version Mapping section for the 12-release breakdown (v1.13.0 â†’ v1.24.0):
   - v1.13.0 = Foundations (T0, T1, T2, T24, T3, T4, T6, T53)
   - v1.14.0 = Compute + Mocking (T7-T12, T25)
   - v1.15.0 = Wrappers + Security (T17-T21, T26, T27)
@@ -3692,7 +3692,7 @@ cargo fmt --check                                              # Expected: PASS
 cargo test --workspace                                         # Expected: ALL PASS
 
 # Backward compat: v1.x examples still work
-cargo run -p buff-lang-cli -- run examples/ola.buff            # Expected: "Olá, Mundo!"
+cargo run -p buff-lang-cli -- run examples/ola.buff            # Expected: "OlÃ¡, Mundo!"
 cargo run -p buff-lang-cli -- run examples/fibonacci.buff      # Expected: 55
 cargo run -p buff-lang-cli -- run examples/calculadora.buff    # Expected: functional calculator
 
@@ -3713,7 +3713,7 @@ done
 cargo run -p buff-lang-cli -- new test_sdk --template console   # Expected: scaffolds full project
 cd test_sdk && cargo run -p buff-lang-cli -- run src/main.buff  # Expected: works out of the box
 cargo run -p buff-lang-cli -- doc --scaffold                    # Expected: emits placeholder HTML
-# (buff fix --v1-to-v1x NOT listed — T5 was removed because no new keywords are added in v1.13-v1.17)
+# (buff fix --v1-to-v1x NOT listed â€” T5 was removed because no new keywords are added in v1.13-v1.17)
 ```
 
 ### Final Checklist
