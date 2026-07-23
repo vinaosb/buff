@@ -5,6 +5,180 @@ All notable changes to the Buff transpiler are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Note on v1.13+ versioning:** tags `v1.13.0`–`v1.23.0` mark waves of
+> framework-crate work (the `buff-v1x-frameworks` roadmap). A given tag
+> may bundle several crate MVPs; the entries below attribute work to the
+> wave where it landed. Crate `version` fields in each `Cargo.toml` track
+> the SDK tier (`1.0.0` for tooling/framework crates, `1.2.0`/`2.0.0` for
+> the core compiler crates) and are bumped independently of release tags.
+
+## [1.24.0] - 2026-07-23
+
+### Added
+
+- **T28 iterative audit (Wave 12):** comprehensive documentation & codebase refinement pass that iterates until a full scan finds zero new trivial issues. Owns the v1.24.0 release.
+  - `CHANGELOG.md` backfilled with v1.13.0–v1.23.0 entries (this release).
+  - `README.md` status table extended through v1.24; examples table extended with the v1.14–v1.23 framework examples (tensor, pipeline, science, ml, game, integration, data-science-workbench).
+  - Per-crate `AGENTS.md` added for `buff-observe` (required) plus `buff-msgpack`, `buff-xml`, `buff-http-client`, `buff-dap`, `bufflings`, `buffup`; per-crate `README.md` added for `buff-observe`.
+  - Root `AGENTS.md` + `CONTRIBUTING.md` refreshed to the v1.24 crate count and current conventions.
+
+### Fixed
+
+- `CONTRIBUTING.md` outdated "9-crate workspace" + stale "CI runs clippy without `--all-targets`" note corrected (CI enforces `--all-targets`).
+
+### Decision
+
+- Non-trivial findings (5 T22-FU\* codegen-layer gaps, buff-ml bias-gradient 3x factor, `DataFrame.to_json`, multi-threaded `Signal`, full code-comment version-scoping audit) logged to `.sisyphus/decisions/v1.24-followup.md` for v1.25+ planning — not implemented in this release per the 5000-LOC cap.
+
+## [1.23.0] - 2026-07-23
+
+### Added
+
+- **T23 flagship — Data Science Workbench:** integration example composing `buff-dataframe` + `buff-ml` + `buff-pipeline` + `buff-web` + `buff-reactive` into a single notebook-style app.
+- **T22 API compatibility spike:** 4 integration examples (`dataframe_to_json`, `tensor_to_web`, `pipeline_with_dataframe`, `reactive_to_web`) + mismatch report at `.sisyphus/decisions/api-compat-v20.md` documenting 5 codegen-layer gaps (Type variants + lowering arms).
+
+### Fixed
+
+- **Lexer-compat:** converted `#` line comments to `//` across 64 `.buff` files (Buff lexer only supports `//` and `/* */`).
+- **Antipattern sweep:** `elif` → `else if`, `var` → `let mut`, `Tempfile.create` → `Type.new` across examples.
+- `buff-ml` clippy lints, fmt, example API, proptest assertions (T15 follow-up).
+- `buff-pipeline` clippy lints, snapshot format, `Sender` clone workaround (T14 follow-up).
+
+## [1.22.0] - 2026-07-22
+
+### Added
+
+- **T13 buff-science:** MVP linear algebra, ODE integration, and statistics via extern `nalgebra`.
+- **T14 buff-pipeline:** MVP DAG pipelines with `Channel`-based inter-stage queues + parallel workers.
+- **T15 buff-ml:** MVP reverse-mode autodiff, layers (Linear/ReLU/Sigmoid/Softmax/Dropout), losses, SGD/Adam optimizers, training loop — built on `buff-tensor`.
+- **T16 buff-game:** MVP game loop, asset pipeline, rendering (40-fn cap).
+
+### Fixed
+
+- `buff-lang-runtime`: corrected `Sender<T>` `Clone` bound.
+- `buff-lang-error`: use `.contains()` instead of `.iter().any` (clippy `manual_contains`).
+
+## [1.21.0] - 2026-07-22
+
+### Added
+
+- **T72 buff-plugins:** plugin architecture (compiler + LSP + runtime trait objects).
+- **T70 registry:** package quality signals (verified/maintained/tested/documented badges).
+- **T69 onboarding:** 4 tailored guides by developer background.
+- **T68 cookbook:** 50+ recipe-style patterns guide.
+- **T71 stability:** formal stability promise document (`stability-promise.md`).
+
+## [1.20.0] - 2026-07-22
+
+### Added
+
+- **T64 buff watch:** file watcher + auto-rebuild.
+- **T66 refactoring tools:** `buff refactor rename/extract/inline`.
+- **T63 error:** suggestion engine + rustc→Buff span mapping + error docs.
+- **T67 docs:** documentation site with Zola + 10-page content seed.
+- PGO (profile-guided optimization) support; cold-start benchmark suite (`buff bench-cold-start`).
+- Multiple-dispatch specificity fix (exact match wins over widened).
+
+## [1.19.0] - 2026-07-21
+
+### Added
+
+- **Multiple dispatch** for numerical APIs (Julia-inspired).
+- **Mathematical syntax edition** (Julia-inspired, opt-in).
+- **Property wrappers** `@State`/`@Published`/`@Cached` (Swift-inspired).
+- **buff-actors:** MVP actor model + supervisor trees (Gleam/Erlang-inspired).
+- **buff-simd:** MVP `Simd<T,N>` first-class SIMD types (Mojo-inspired).
+- CLI compile-speed optimization program (caching + mold + sccache + bench).
+- CLI binary size minimization (`--minimal` flag + `profile.minimal`).
+
+## [1.18.0] - 2026-07-21
+
+### Added
+
+Wave 6 — interop / protocol crates (all pure-Rust, FFI-guide compliant):
+- **buff-crypto-extras** (T49): AES/RSA/ECDH/Argon2/RsaKeypair.
+- **buff-web3** (T48): Provider/Wallet/Contract/ContractMethod.
+- **buff-chat** (T47): Bot/Message/Platform.
+- **buff-protobuf** (T52): Protobuf/Message.
+- **buff-xml** (T50): Xml/XmlDocument/XmlElement (wraps `quick-xml`).
+- **buff-nlp** (T46): Text/Language/StemAlgorithm.
+- **buff-geo** (T45): Point/LineString/Polygon.
+- **buff-msgpack** (T51): MessagePack binary format via `rmp-serde`.
+- Prelude + codegen lowering wired for all of the above.
+
+## [1.17.0] - 2026-07-20
+
+### Added
+
+Wave 5 — text / data crates:
+- **buff-scrape:** MVP HTML parsing + crawling via `scraper`+`reqwest`.
+- **buff-i18n:** MVP internationalization via `fluent`.
+- **buff-archive:** MVP zip/tar/gz/zstd compression.
+- **buff-fsm:** MVP state machine library.
+- **buff-pubsub:** MVP in-process event bus.
+- **buff-fake:** MVP fake data generation via the Faker crate.
+- **buff-assertions:** MVP fluent test assertions.
+
+## [1.16.0] - 2026-07-20
+
+### Added
+
+Wave 4 — infrastructure crates:
+- **buff-cache:** MVP in-memory + distributed cache.
+- **buff-auth:** MVP JWT + OAuth2 + password hashing + RBAC.
+- **buff-validate:** MVP declarative schema validation.
+- **buff-resilience:** MVP retry + circuit breaker + rate limiter + timeout.
+- **buff-http-client:** MVP idiomatic HTTP client via `reqwest`.
+- **buff-jobs:** MVP background job queue + scheduler.
+- **buff-cli:** MVP CLI framework for user programs.
+- **buff-config:** MVP layered config with hot reload.
+
+## [1.15.0] - 2026-07-20
+
+### Added
+
+Wave 3 — server / runtime crates:
+- **buff-fuzz:** MVP property-based fuzzing framework.
+- **buff-web:** MVP HTTP server with routing + middleware via extern `axum`.
+- **buff-db:** MVP connection pool + query builder via extern `sqlx`.
+- **buff-reactive:** MVP signals, computed, effect callbacks.
+- **buff-audit:** MVP security scanning + code signing.
+- **buff-observe:** MVP structured spans + metrics via extern `tracing`+OTLP.
+- **buff-template:** MVP HTML templating via extern `handlebars`.
+
+## [1.14.0] - 2026-07-20
+
+### Added
+
+Wave 2 — data / numerical crates:
+- **buff-dataframe:** MVP columnar DataFrame + CSV/JSON load + relational ops.
+- **buff-tensor:** MVP N-dimensional arrays (rank ≤ 4) with matmul + reduce + GPU dispatch.
+- **buff-image:** MVP image framework via extern `image` crate.
+- **buff-audio:** MVP `AudioBuffer` framework.
+- **buff-ecs:** MVP World, spawn, query, systems via extern `hecs`.
+- **buff-dsp:** MVP FFT, filters, windows via extern `rustfft`.
+- **buff-mock:** MVP mocking framework with expect/verify/spy.
+
+## [1.13.0] - 2026-07-20
+
+### Added
+
+- **T53 comptime:** AST + parser skeleton + type-level interpreter + codegen lowering (Zig-inspired); 5 stable error codes + 5 examples + 22 tests.
+- **`Channel<T>` MPSC primitive** (Stream/select deferred to v1.18+).
+- **T1 multi-file project linking** end-to-end (workspace + cross-file `import`/`export`).
+- **Buff-span stack traces** via source map + panic hook (`buff-lang-debug-info`).
+- **buff.toml v2 schema** (workspace, features, lints, profiles, prelude, edition).
+- Workspace support + `workspace.dependencies` inheritance.
+- 7 built-in templates for `buff new --template`; `buff gen` module/test/example generators.
+- Attributes: `@internal`, `@deprecated`, `@bench`, `@property`, `@should_panic`, `@ignore`, `@feature` (conditional compilation).
+- Stability badge + `@deprecated` warning in `buff check`.
+- **Buff SDK 2.0 conventions specification** (`sdk-conventions-v1x.md`).
+
+### Decision
+
+- Macro system (v1.13–v1.17) verdict: **DEFER-POST-v1.17** (`.sisyphus/decisions/macro-system-v1x.md`).
+- WGSL extensibility assessment for v1.13–v1.17 frameworks (`.sisyphus/decisions/wgsl-extensibility-v1x.md`).
+
 ## [1.12.0] - 2026-07-21
 
 ### Added
