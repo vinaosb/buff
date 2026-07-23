@@ -1,4 +1,4 @@
-// Buff T65 example — AI context pack demo.
+// Buff T65 example â€” AI context pack demo.
 //
 // This is a small, deliberately-illustrative program an AI tool might
 // generate after being shown the output of `buff ai context`. It
@@ -32,7 +32,7 @@ func main():
     print("sum is " + String(total))
 
 func sum(xs: Vector<Int>) -> Int:
-    var acc = 0
+    let mut acc = 0
     for x in xs:
         acc = acc + x
     return acc

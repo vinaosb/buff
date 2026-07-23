@@ -1,4 +1,4 @@
-// Channel<T> MPSC primitive — producer/consumer pattern (T2 v1.13 wave 1).
+// Channel<T> MPSC primitive â€” producer/consumer pattern (T2 v1.13 wave 1).
 //
 // Run: `cargo run -p buff-lang-cli -- run examples/channels/producer_consumer.buff`
 //
@@ -14,7 +14,7 @@
 // receiver's next `recv()` returns `None`, terminating the consumer
 // loop.
 //
-// STATUS — CODEGEN-VERIFIED ONLY (mirrors hello.buff's status).
+// STATUS â€” CODEGEN-VERIFIED ONLY (mirrors hello.buff's status).
 
 func main():
     let (sender, receiver) = Channel.new(8)
@@ -23,7 +23,7 @@ func main():
         producer(sender)
     }
 
-    var sum: Int = 0
+    let mut sum: Int = 0
     for let next = receiver.recv() {
         sum = sum + next
     }

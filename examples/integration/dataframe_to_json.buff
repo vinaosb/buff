@@ -25,14 +25,14 @@
 //     exists in the public surface (see crates/buff-dataframe/src/lib.rs
 //     line 36 + dataframe.rs line 264). Users must iterate rows + use
 //     the stdlib JSON module to serialize. This is the most material
-//     gap for the flagship (T23) "Data Science Workbench" Ã¢â‚¬â€ every
+//     gap for the flagship (T23) "Data Science Workbench" ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â every
 //     notebook export will need this roundtrip until either (a) a
 //     DataFrame.to_json() method is added in buff-dataframe, or
 //     (b) the stdlib JSON module grows a `JSON.from_dataframe(df)`
 //     convenience constructor.
 //
 // Codegen status: documentation-only (Type::DataFrame forward-declared
-// per buff-dataframe/AGENTS.md "WHERE TO LOOK" Ã¢â‚¬â€ lowering arm deferred
+// per buff-dataframe/AGENTS.md "WHERE TO LOOK" ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â lowering arm deferred
 // to a coordinated sibling task outside the T7 shared zone).
 
 import DataFrame from buff.dataframe
@@ -53,9 +53,9 @@ func rows_to_json(df):
             let kind = series.kind()
             if kind == "int":
                 obj[col] = series.as_int_slice()[i]
-            elif kind == "float":
+            else if kind == "float":
                 obj[col] = series.as_float_slice()[i]
-            elif kind == "bool":
+            else if kind == "bool":
                 obj[col] = series.as_bool_slice()[i]
             else:
                 obj[col] = series.as_string_slice()[i]

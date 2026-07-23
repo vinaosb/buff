@@ -295,11 +295,10 @@ impl<T: Send + 'static> Pipeline<T> {
                 let mut worker_handles: Vec<JoinHandle<()>> = Vec::with_capacity(n);
                 for wr in worker_receivers {
                     let transform = transform.clone();
-                    // Clone the Sender via the inner tokio mpsc Sender (which
-                    // is Clone without requiring T: Clone — the buff-lang-
-                    // runtime derive-Clone on Sender<T> adds a T: Clone bound
-                    // that is too strict for our generic use case).
-                    let sender_clone = Sender(out_sender.0.clone());
+                    // Sender<T> is Clone for any T (manual impl in buff-lang-runtime
+                    // since v1.22.0 — mirrors tokio upstream). Each worker gets its
+                    // own clone so it can send to the shared output channel.
+                    let sender_clone = out_sender.clone();
                     worker_handles.push(tokio::spawn(async move {
                         let mut wr = wr;
                         while let Some(item) = wr.recv().await {

@@ -11,7 +11,7 @@ from "email" import Email, SmtpClient
 from "filesystem" import Tempfile
 
 func main():
-    tmp = Tempfile.create()
+    tmp = Tempfile.new()
     Filesystem.write_text(path: tmp, content: "Hello from the attached file!")
     print("wrote temp attachment to: ${tmp}")
 

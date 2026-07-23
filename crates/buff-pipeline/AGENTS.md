@@ -90,7 +90,7 @@ Per T14 spec:
 
 | Crate | Relationship |
 |---|---|
-| `buff-lang-runtime` | Provides `Channel<T>` MPSC primitive (T2). All inter-stage queues use it. The `Sender<T>: Clone` derive in buff-lang-runtime requires `T: Clone` (too strict for tokio mpsc); this crate works around it via `Sender(inner.0.clone())`. |
+| `buff-lang-runtime` | Provides `Channel<T>` MPSC primitive (T2). All inter-stage queues use it. `Sender<T>: Clone` is a manual impl in buff-lang-runtime (since v1.22.0) that correctly omits the `T: Clone` bound — mirrors tokio upstream. |
 | `buff-dataframe` (T7) | Potential source/sink for batch ops. Not yet integrated in MVP. |
 | `buff-lang-codegen-rust` | Future codegen layer that lowers `Pipeline.*` / `Source.*` / `Sink.*` Buff calls into `buff_pipeline::*` Rust paths. Deferred to a follow-up task. |
 
@@ -111,7 +111,7 @@ Per T14 spec:
 
 - **MSVC host blocker**: `cargo test -p buff-pipeline` was verified to pass on this Windows host after manually configuring `LIB` / `INCLUDE` environment variables to include the VS 18 Insiders MSVC `lib\onecore\x64` path + Windows SDK 10.0.26100.0 UCRT paths. The pre-existing `LINK : fatal error LNK1104: cannot open file 'msvcrt.lib'` issue (documented in buff-image's AGENTS.md) is caused by empty `LIB`/`INCLUDE` env vars on this host. CI runs on a 3-OS matrix (ubuntu/windows/macos) and does NOT have this issue.
 - **Pre-existing dependency clippy fixes**: `buff-lang-debug-info` (3 doc-comment + 1 `match_result_ok` fixes) and `buff-lang-runtime::Channel::new` (`new_ret_no_self` allow) had pre-existing clippy lints that blocked `cargo clippy -p buff-pipeline --all-targets -- -D warnings` from completing. These were fixed as minimal infrastructure unblocks (no logic changes).
-- **Sender<T> clone workaround**: `buff_lang_runtime::Sender<T>` derives `Clone` which generates `impl<T: Clone> Clone` — too strict for tokio mpsc (which only needs `T: Send`). The `parallel` stage works around this by cloning the inner tokio sender directly: `Sender(out_sender.0.clone())`.
+- **Sender<T> clone**: `buff_lang_runtime::Sender<T>` has a manual `impl<T> Clone for Sender<T>` (since v1.22.0) that correctly omits the `T: Clone` bound — mirrors tokio upstream (`tokio::sync::mpsc::Sender<T>` is Clone for any `T`). The `parallel` stage uses `out_sender.clone()` directly.
 - **Inline snapshots**: The 5 insta snapshots are inline (`assert_snapshot!(value, @"expected")`) — no `.snap` files on disk. See `tests/snapshots/README.md` for the rationale + migration path.
 
 ## LICENSE
