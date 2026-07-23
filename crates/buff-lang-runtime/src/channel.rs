@@ -114,8 +114,22 @@ impl Channel {
 /// multi-producer pattern works directly: `let s2 = sender.clone();`
 /// produces a second sender that shares the channel's queue; dropping
 /// ALL clones is what signals "channel closed" to the receiver.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Sender<T>(pub tokio::sync::mpsc::Sender<T>);
+
+// Manual `Clone` impl (instead of `#[derive(Clone)]`) because Rust's
+// derive macro adds a `T: Clone` bound that is INCORRECT here —
+// `tokio::sync::mpsc::Sender<T>` is `Clone` for ANY `T` (the sender
+// holds an `Arc` internally; the value `T` is never cloned at the
+// sender site). The derive-generated bound broke `buff-pipeline`'s
+// multi-producer `parallel` stage (T14) where the sender's `T` is a
+// stage-output type that is not `Clone`. Mirrors the upstream tokio
+// impl: `impl<T> Clone for tokio::sync::mpsc::Sender<T>`.
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        Sender(self.0.clone())
+    }
+}
 
 impl<T> Sender<T> {
     /// Send a value on the channel.
