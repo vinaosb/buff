@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="{{ config.default_language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ config.title }}{% endblock %}</title>
+  <meta name="description" content="{{ config.description }}">
+  <link rel="stylesheet" href="{{ get_url(path="style.css") }}">
+  {% if config.build_search_index %}
+  <link rel="stylesheet" href="{{ get_url(path="search.css") }}">
+  {% endif %}
+</head>
+<body>
+  <header class="site-header">
+    <a href="{{ config.base_url }}" class="brand">Buff</a>
+    <nav>
+      <a href="{{ get_url(path="@/getting-started/_index.md") }}">Getting Started</a>
+      <a href="{{ get_url(path="@/language/_index.md") }}">Language</a>
+      <a href="{{ get_url(path="@/frameworks/_index.md") }}">Frameworks</a>
+      <a href="{{ get_url(path="@/cookbook/_index.md") }}">Cookbook</a>
+      <a href="{{ config.extra.repository }}">GitHub</a>
+    </nav>
+    {% if config.build_search_index %}
+    <div class="search">
+      <input id="search-input" type="search" placeholder="Search docs…" aria-label="Search docs">
+      <ul id="search-results" hidden></ul>
+    </div>
+    <script type="application/javascript" src="{{ get_url(path="elasticlunr.min.js") }}"></script>
+    <script type="application/javascript" src="{{ get_url(path="search-bootstrap.js") }}"></script>
+    {% endif %}
+  </header>
+
+  <main class="layout">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>Licensed under MIT OR Apache-2.0. Buff is an open-source project.</p>
+    <p><a href="{{ config.extra.repository }}">Source</a> · <a href="{{ get_url(path="@/migration/_index.md") }}">Migration</a></p>
+  </footer>
+</body>
+</html>

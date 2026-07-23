@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} · {{ config.title }}{% endblock %}
+
+{% block content %}
+<section class="section-index">
+  <h1>{{ section.title }}</h1>
+
+  {{ section.content | safe }}
+
+  {% if section.pages %}
+  <ul class="section-list">
+    {% for page in section.pages %}
+    <li>
+      <a href="{{ page.permalink }}"><strong>{{ page.title }}</strong></a>
+      {% if page.description %}<p>{{ page.description }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if section.subsections %}
+  <h2>Subsections</h2>
+  <ul class="section-list">
+    {% for sub in section.subsections %}
+    <li><a href="{{ sub.permalink }}">{{ sub.title }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

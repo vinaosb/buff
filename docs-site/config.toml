@@ -1,0 +1,45 @@
+# Zola configuration for the Buff documentation site.
+#
+# Build:   zola build           # → public/  (static site)
+# Serve:   zola serve           # → http://127.0.0.1:1111
+#
+# Zola reference: https://www.getzola.org/documentation/getting-started/configuration/
+
+base_url = "https://docs.buff-lang.org"
+title = "Buff Language Documentation"
+description = "Buff — a high-level language that transpiles to Rust. Removes the complexity, leaving pure performance."
+
+# Default language of the content.
+default_language = "en"
+
+# Generate a cleaned `public/` directory on every build (Zola deletes the
+# previous output first).
+compile_sass = false
+minify_html = false
+
+# Build a search index that the in-browser search box consumes. Powered by
+# Zola's built-in elasticlunr integration (no external JS deps).
+build_search_index = true
+
+[search]
+# Index the page title + body text. Skip code blocks would require a custom
+# renderer, so the default keeps everything searchable.
+index_format = "elasticlunr"
+include_title = true
+include_description = true
+include_content = true
+
+[markdown]
+# Render Markdown → HTML with the built-in pulldown-cmark renderer.
+highlight_code = true
+# Use Zola's bundled syntect themes; "dracula" gives good contrast on the
+# code-heavy Buff examples (Rust/INI/TOML blocks).
+highlight_theme = "dracula"
+render_emoji = false
+external_links_target_blank = true
+
+[extra]
+# Site-wide values surfaced to templates via `config.extra.*`.
+version = "v1.12"
+repository = "https://github.com/buff-lang/buff"
+edit_root = "https://github.com/buff-lang/buff/edit/master/docs-site/content"
