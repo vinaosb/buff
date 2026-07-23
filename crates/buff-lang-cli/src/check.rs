@@ -52,7 +52,7 @@ use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 use buff_lang_types::{Type, TypeInferencer};
 
-use crate::naming_lint::lint_naming;
+use crate::naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation};
 
 // ---------------------------------------------------------------------------
 // Outcome + report.
@@ -148,7 +148,15 @@ pub fn check_source(src: &str) -> CheckReport {
     let lint_warnings = lint_naming(&decls);
     diagnostics.extend(lint_warnings);
 
-    // 5. T0-G3: @deprecated call-site warnings. Walks the AST to find
+    // 5. T63: common-mistake linter — prelude typos (Print/prin) + tab
+    //    indentation. Runs after parse (needs the AST) and over the raw
+    //    source (tab scan is byte-level). Both emit warnings only.
+    let mistake_warnings = lint_common_mistakes(&decls);
+    diagnostics.extend(mistake_warnings);
+    let tab_warnings = lint_tab_indentation(src);
+    diagnostics.extend(tab_warnings);
+
+    // 6. T0-G3: @deprecated call-site warnings. Walks the AST to find
     //    FuncCalls whose callee resolves to a fn marked `@deprecated`.
     //    Each call site gets a warning naming the fn + the `since` and
     //    `replacement` (when provided).

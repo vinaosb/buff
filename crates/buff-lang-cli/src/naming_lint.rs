@@ -250,6 +250,192 @@ fn warn_pascal(kind: &str, name: &Ident, out: &mut Vec<Diagnostic>) {
 }
 
 // ---------------------------------------------------------------------------
+// T63 — Common-mistake linter patterns.
+// ---------------------------------------------------------------------------
+
+/// Walk `decls` looking for common beginner mistakes and emit warning
+/// diagnostics with `help:` suggestion notes.
+///
+/// Covered patterns (T63 spec):
+///
+/// - **PascalCase prelude call** — `Print(...)` / `Abs(...)` / etc. The
+///   user wrote a builtin with the wrong case. Emits a warning naming the
+///   prelude fn + a `help: function names are lowercase, did you mean
+///   \`print\`?` note.
+/// - **Typo of a prelude fn** — `prin(...)` / `abs(...)`-ish misspelling
+///   of a builtin. Emits a `help: did you mean \`print\`?` note when the
+///   callee is within Levenshtein distance 2 of a prelude name.
+///
+/// Both checks look only at [`Expr::FuncCall`] whose callee is a bare
+/// [`Expr::Ident`] (the shape of a free-fn / prelude call). Method calls
+/// and indirect calls are skipped. Recurses into `let`-binding RHS,
+/// expression statements, returns, and call arguments.
+///
+/// All emitted diagnostics are
+/// [`Severity::Warning`](buff_lang_error::Severity) — they do not fail
+/// `buff check` unless `--deny-warnings` is passed.
+pub fn lint_common_mistakes(decls: &[Decl]) -> Vec<Diagnostic> {
+    let candidates = prelude_candidate_names();
+    let mut out = Vec::new();
+    for d in decls {
+        lint_mistakes_decl(d, &candidates, &mut out);
+    }
+    out
+}
+
+/// Scan raw `src` for leading tab characters and emit one warning per
+/// tab-indented line.
+///
+/// The lexer already rejects tabs as [`E1004`](buff_lang_error::ErrorCode::MixedTabsSpaces),
+/// but that error fires at lex time and aborts parsing — so the user sees
+/// only the *first* tab. This source-level scan complements it: even when
+/// the lexer has already rejected the file, `buff check` can report every
+/// tab-indented line at once with the clearer "Buff uses 4 spaces, not
+/// tabs" message.
+///
+/// Returns one [`Diagnostic::warning`] per offending line, anchored at the
+/// byte offset of the tab on that line (span covers just the leading tab
+/// run so the caret points at the whitespace).
+pub fn lint_tab_indentation(src: &str) -> Vec<Diagnostic> {
+    let source_id = buff_lang_error::SourceId(0);
+    let mut out = Vec::new();
+    for (line_idx, line) in src.lines().enumerate() {
+        // Count leading tabs.
+        let leading_tabs = line.bytes().take_while(|&b| b == b'\t').count();
+        if leading_tabs == 0 {
+            continue;
+        }
+        // Byte offset of the first tab = sum of lengths of prior lines
+        // (including their `\n`) — `lines()` strips the `\n`, so re-add 1.
+        let line_start = src
+            .lines()
+            .take(line_idx)
+            .map(|l| l.len() + 1)
+            .sum::<usize>();
+        let span = buff_lang_error::Span::new(line_start, line_start + leading_tabs, source_id);
+        out.push(Diagnostic::warning("Buff uses 4 spaces, not tabs", span));
+    }
+    out
+}
+
+/// Collect the source names of every prelude free fn + prelude type, for
+/// use as the suggestion candidate set. The prelude is small (~60 names)
+/// so the `Vec` is rebuilt per `lint_common_mistakes` call (an analysis
+/// pass, not a hot path).
+fn prelude_candidate_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = Vec::with_capacity(64);
+    for &pf in buff_lang_types::PreludeFn::ALL {
+        names.push(pf.name());
+    }
+    for &pt in buff_lang_types::prelude_types::PreludeType::ALL {
+        names.push(pt.name());
+    }
+    names
+}
+
+fn lint_mistakes_decl(decl: &Decl, candidates: &[&str], out: &mut Vec<Diagnostic>) {
+    match decl {
+        Decl::FuncDecl(f) => {
+            for stmt in &f.body.stmts {
+                lint_mistakes_stmt(stmt, candidates, out);
+            }
+        }
+        Decl::TraitDecl(t) => {
+            for d in &t.defaults {
+                for stmt in &d.body.stmts {
+                    lint_mistakes_stmt(stmt, candidates, out);
+                }
+            }
+        }
+        Decl::ExtendBlock(b) => {
+            for m in &b.methods {
+                for stmt in &m.body.stmts {
+                    lint_mistakes_stmt(stmt, candidates, out);
+                }
+            }
+        }
+        Decl::ExportDecl(inner) => lint_mistakes_decl(&inner.inner, candidates, out),
+        _ => {}
+    }
+}
+
+fn lint_mistakes_stmt(stmt: &Stmt, candidates: &[&str], out: &mut Vec<Diagnostic>) {
+    match stmt {
+        Stmt::LetDecl { value, .. } => lint_mistakes_expr(value, candidates, out),
+        Stmt::ExprStmt(e, _) | Stmt::Return(Some(e), _) => {
+            lint_mistakes_expr(e, candidates, out);
+        }
+        Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } | Stmt::ForLet { body, .. } => {
+            for s in &body.stmts {
+                lint_mistakes_stmt(s, candidates, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn lint_mistakes_expr(expr: &Expr, candidates: &[&str], out: &mut Vec<Diagnostic>) {
+    if let Expr::FuncCall { callee, args, span } = expr {
+        if let Expr::Ident(ident, _) = callee.as_ref() {
+            let name = &ident.name;
+            // Skip if it IS a valid prelude name already.
+            if buff_lang_types::is_prelude(name) {
+                // Recurse into args and stop here.
+                for a in args {
+                    lint_mistakes_expr(a, candidates, out);
+                }
+                return;
+            }
+            // Check 1: PascalCase variant of a lowercase prelude fn.
+            // e.g. `Print` -> `print`. Only suggest when the lowercase
+            // form is a real prelude fn.
+            let lower = name.to_ascii_lowercase();
+            if lower != name && buff_lang_types::is_prelude(&lower) {
+                out.push(
+                    Diagnostic::warning(
+                        format!("function names are lowercase, not `{name}`"),
+                        *span,
+                    )
+                    .with_note(format!("help: did you mean `{lower}`?")),
+                );
+                for a in args {
+                    lint_mistakes_expr(a, candidates, out);
+                }
+                return;
+            }
+            // Check 2: generic typo near a prelude name.
+            if let Some(msg) = buff_lang_error::suggest_with_message(name, candidates) {
+                out.push(
+                    Diagnostic::warning(format!("unknown function `{name}`"), *span)
+                        .with_note(format!("help: {msg}")),
+                );
+            }
+        }
+        // Recurse into callee + args for nested calls.
+        for a in args {
+            lint_mistakes_expr(a, candidates, out);
+        }
+        lint_mistakes_expr(callee, candidates, out);
+        return;
+    }
+    // Recurse into other expression shapes that may contain calls.
+    match expr {
+        Expr::BinaryOp { lhs, rhs, .. } => {
+            lint_mistakes_expr(lhs, candidates, out);
+            lint_mistakes_expr(rhs, candidates, out);
+        }
+        Expr::UnaryOp { operand, .. } => lint_mistakes_expr(operand, candidates, out),
+        Expr::MethodCall { receiver, args, .. } => {
+            lint_mistakes_expr(receiver, candidates, out);
+            for a in args {
+                lint_mistakes_expr(a, candidates, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

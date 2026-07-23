@@ -327,12 +327,8 @@ v1.19.0 (Language Evolution — 7 tasks):
 
 v1.20.0 (Developer Experience — 7 tasks):
 ├── T61: Cold-start benchmarks [quick] ✅
-<<<<<<< HEAD
 ├── T62: PGO support           [quick] ✅
-=======
-├── T62: PGO support           [quick]
->>>>>>> f50a2afc5e723fca16fa8b4917cfc9a721e92b98
-├── T63: Error quality         (needs T24) [unspecified-high]
+├── T63: Error quality         (needs T24) [unspecified-high] ✅
 ├── T64: Hot reload            (needs T16+T17) [unspecified-high]
 ├── T65: AI integration        [unspecified-high] ✅
 ├── T66: Refactoring tools     (needs T24) [unspecified-high]

@@ -31,8 +31,8 @@ pub mod infer;
 // by short path. Compile-time-only dispatch on ALL argument types; single-
 // dispatch is the special case (group size 1) and bypasses the table
 // entirely, so all pre-T58 code keeps compiling unmangled.
-pub mod multi_dispatch;
 pub mod modules;
+pub mod multi_dispatch;
 // T33: ownership analysis (Copy classification, Arc-across-spawn detection,
 // CoW mutation detection). Re-exported at crate root so the codegen pass
 // can call `buff_lang_types::analyze_ownership(func)` without a long path.
@@ -93,9 +93,7 @@ pub use modules::{
     build_graph, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph, ModuleLoader,
 };
 // T1: project-level parse entry point + span-aware error type.
-pub use project::{
-    parse_project, parse_project_with_loader, ParsedProject, ProjectError,
-};
+pub use project::{parse_project, parse_project_with_loader, ParsedProject, ProjectError};
 // T1: cross-file symbol resolution table.
 pub use cross_file::{CrossFileSymbolTable, SymbolKind, SymbolSignature};
 pub use promote::{assignable_to, promote_binary};

@@ -475,10 +475,19 @@ impl TypeInferencer {
 
     fn lookup_ident(&self, name: &Ident, span: Span) -> Result<Type, TypeError> {
         self.env.lookup(&name.name).cloned().ok_or_else(|| {
-            TypeError::new(
-                Diagnostic::error(format!("undefined variable: {}", name.name), span)
-                    .with_code(ErrorCode::UndefinedVariable),
-            )
+            let mut diag = Diagnostic::error(format!("undefined variable: {}", name.name), span)
+                .with_code(ErrorCode::UndefinedVariable);
+            // T63: attach a "did you mean `X`?" help note when a prelude
+            // fn/type name is close to the unknown identifier. The candidate
+            // list is the implicit prelude (free fns + types) — the most
+            // common cause of an undefined-variable error is a typo of a
+            // builtin the user expected to be in scope.
+            if let Some(msg) =
+                buff_lang_error::suggest_with_message(&name.name, &prelude_suggestion_candidates())
+            {
+                diag = diag.with_note(format!("help: {msg}"));
+            }
+            TypeError::new(diag)
         })
     }
 
@@ -1003,6 +1012,26 @@ fn datetime_arith_result(op: &buff_lang_ast::BinaryOp, lhs: &Type, rhs: &Type) -
         // (numeric promotion or type error).
         _ => None,
     }
+}
+
+/// T63 — Build the candidate list of implicit-prelude names (free fns +
+/// prelude types) used by [`TypeInferencer::lookup_ident`] to attach
+/// "did you mean `X`?" help notes to undefined-variable errors.
+///
+/// The list is the union of [`prelude::PreludeFn::ALL`] and
+/// [`prelude_types::PreludeType::ALL`] source-names. It is rebuilt on each
+/// undefined-variable error (an error path, so the cost is irrelevant) —
+/// keeping it out of a static avoids pulling `lazy_static` / `once_cell`
+/// into the leaf-adjacent types crate.
+fn prelude_suggestion_candidates() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = Vec::with_capacity(64);
+    for &pf in prelude::PreludeFn::ALL {
+        names.push(pf.name());
+    }
+    for &pt in prelude_types::PreludeType::ALL {
+        names.push(pt.name());
+    }
+    names
 }
 
 #[cfg(test)]

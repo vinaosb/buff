@@ -177,6 +177,111 @@ pub fn filter_backtrace(backtrace: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// T63: rustc error-pattern → Buff ErrorCode classification.
+// ---------------------------------------------------------------------------
+
+/// Map a single `rustc` error header line to the closest Buff
+/// [`ErrorCode`], or `None` when no mapping is known.
+///
+/// `rustc` emits diagnostics against the intermediate `.rs` file we generate.
+/// After [`translate_rustc_errors`] / [`translate_buffhtml_rustc_errors`]
+/// rewrite the filename (and, when a [`SourceMap`] / [`SpanMap`] is
+/// available, the line:col) to point at the user's `.buff` / `.buffhtml`
+/// source, the *message text* is still phrased in Rust terms (`cannot find
+/// value`, `mismatched types`, …). This function reads the first line of a
+/// rustc diagnostic and returns the Buff `E1xxx` code that describes the
+/// same class of failure, so the CLI can annotate the translated stderr
+/// with the stable Buff code the user can look up in the error catalog.
+///
+/// Mappings (rustc message prefix → Buff code):
+///
+/// | rustc pattern                       | Buff code                          |
+/// |-------------------------------------|------------------------------------|
+/// | `cannot find value/function/type`   | [`UndefinedVariable`] (E1201)      |
+/// | `mismatched types`                  | [`AssignTypeMismatch`] (E1203)     |
+/// | `cannot multiply/add/...`           | [`BinaryOpTypeMismatch`] (E1202)   |
+/// | `expected bool`                     | [`IfConditionMustBeBool`] (E1205)  |
+/// | `if and else have incompatible types` | [`IfBranchTypeMismatch`] (E1206) |
+/// | `non-exhaustive patterns`           | [`NonExhaustiveMatch`] (E1207)     |
+///
+/// Returns `None` for any rustc message that does not match a known pattern
+/// — the caller leaves the translated stderr unchanged in that case (the
+/// filename/line translation is still an improvement over the raw `.rs`
+/// reference).
+///
+/// [`UndefinedVariable`]: buff_lang_error::ErrorCode::UndefinedVariable
+/// [`AssignTypeMismatch`]: buff_lang_error::ErrorCode::AssignTypeMismatch
+/// [`BinaryOpTypeMismatch`]: buff_lang_error::ErrorCode::BinaryOpTypeMismatch
+/// [`IfConditionMustBeBool`]: buff_lang_error::ErrorCode::IfConditionMustBeBool
+/// [`IfBranchTypeMismatch`]: buff_lang_error::ErrorCode::IfBranchTypeMismatch
+/// [`NonExhaustiveMatch`]: buff_lang_error::ErrorCode::NonExhaustiveMatch
+pub fn classify_rustc_error(rustc_header: &str) -> Option<buff_lang_error::ErrorCode> {
+    use buff_lang_error::ErrorCode;
+    // rustc headers are lowercase; normalise once for prefix matching.
+    let h = rustc_header.trim().to_ascii_lowercase();
+    let starts_with = |prefix: &str| h.starts_with(prefix);
+    if starts_with("cannot find value")
+        || starts_with("cannot find function")
+        || starts_with("cannot find type")
+        || starts_with("cannot find")
+    {
+        return Some(ErrorCode::UndefinedVariable);
+    }
+    if starts_with("mismatched types") {
+        return Some(ErrorCode::AssignTypeMismatch);
+    }
+    // "cannot multiply", "cannot add", "cannot subtract", ... — rustc emits
+    // these for operator/type incompatibilities.
+    if h.starts_with("cannot ") && h.contains(" types") {
+        return Some(ErrorCode::BinaryOpTypeMismatch);
+    }
+    if starts_with("expected bool") || h.contains("boolean condition") {
+        return Some(ErrorCode::IfConditionMustBeBool);
+    }
+    if h.contains("if and else have incompatible types")
+        || h.contains("`if` and `else` have incompatible types")
+    {
+        return Some(ErrorCode::IfBranchTypeMismatch);
+    }
+    if starts_with("non-exhaustive patterns") || starts_with("refutable pattern") {
+        return Some(ErrorCode::NonExhaustiveMatch);
+    }
+    None
+}
+
+/// Annotate a (filename/line-translated) rustc stderr block with the Buff
+/// [`ErrorCode`] for each diagnostic, when a mapping is known.
+///
+/// For every `error[E0xxx]: <message>` line that [`classify_rustc_error`]
+/// recognises, this appends a `help: Buff code: E1xxx — <title>` line so the
+/// user can look the failure up in the Buff error catalog. Unrecognised
+/// rustc codes are left unchanged.
+///
+/// This is the post-translation enrichment step: run after
+/// [`translate_rustc_errors`] (or [`translate_buffhtml_rustc_errors`]) so
+/// the help line lands next to the already-rewritten `.buff` / `.buffhtml`
+/// location reference.
+pub fn annotate_with_buff_codes(translated_stderr: &str) -> String {
+    let mut out = String::with_capacity(translated_stderr.len());
+    for line in translated_stderr.lines() {
+        out.push_str(line);
+        out.push('\n');
+        // rustc error header lines look like `error[E0xxx]: <message>`.
+        if let Some(msg_start) = line.find("]: ") {
+            let header = &line[msg_start + 3..];
+            if let Some(code) = classify_rustc_error(header) {
+                out.push_str(&format!(
+                    "  help: Buff code: {} — {}\n",
+                    code.code_str(),
+                    code.title()
+                ));
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // T133: `.buffhtml` SFC error translation (filename + SpanMap).
 // ---------------------------------------------------------------------------
 
@@ -583,5 +688,70 @@ mod tests {
         assert_eq!(parse_digits("123abc"), Some((123, 3)));
         assert_eq!(parse_digits("0"), Some((0, 1)));
         assert_eq!(parse_digits("abc"), None);
+    }
+
+    // -------------------------------------------------------------------------
+    // T63: rustc error classification.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn classify_rustc_cannot_find_value_maps_to_undefined_variable() {
+        use buff_lang_error::ErrorCode;
+        assert_eq!(
+            classify_rustc_error("cannot find value `pritn` in this scope"),
+            Some(ErrorCode::UndefinedVariable),
+        );
+    }
+
+    #[test]
+    fn classify_rustc_mismatched_types_maps_to_assign_mismatch() {
+        use buff_lang_error::ErrorCode;
+        assert_eq!(
+            classify_rustc_error("mismatched types: expected `i64`, found `String`"),
+            Some(ErrorCode::AssignTypeMismatch),
+        );
+    }
+
+    #[test]
+    fn classify_rustc_cannot_multiply_maps_to_binary_op_mismatch() {
+        use buff_lang_error::ErrorCode;
+        assert_eq!(
+            classify_rustc_error("cannot multiply `i64` by `String`"),
+            Some(ErrorCode::BinaryOpTypeMismatch),
+        );
+    }
+
+    #[test]
+    fn classify_rustc_non_exhaustive_maps_to_non_exhaustive_match() {
+        use buff_lang_error::ErrorCode;
+        assert_eq!(
+            classify_rustc_error("non-exhaustive patterns: `None` not covered"),
+            Some(ErrorCode::NonExhaustiveMatch),
+        );
+    }
+
+    #[test]
+    fn classify_rustc_unknown_pattern_returns_none() {
+        assert_eq!(classify_rustc_error("some unrelated rustc message"), None);
+    }
+
+    #[test]
+    fn annotate_with_buff_codes_inserts_help_line() {
+        let stderr = "error[E0308]: mismatched types\n  --> prog.buff:3:5\n";
+        let annotated = annotate_with_buff_codes(stderr);
+        assert!(
+            annotated.contains("help: Buff code: E1203"),
+            "expected E1203 help line, got: {annotated}"
+        );
+    }
+
+    #[test]
+    fn annotate_with_buff_codes_leaves_unknown_errors_unchanged() {
+        let stderr = "error[E0599]: some unknown rustc thing\n";
+        let annotated = annotate_with_buff_codes(stderr);
+        assert!(
+            !annotated.contains("help: Buff code"),
+            "should not annotate unknown rustc errors: {annotated}"
+        );
     }
 }

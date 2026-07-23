@@ -58,8 +58,8 @@ fn config_toml_exists_and_parses() {
     let toml_str = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
-    let parsed: toml::Value = toml::from_str(&toml_str)
-        .unwrap_or_else(|e| panic!("config.toml is not valid TOML: {e}"));
+    let parsed: toml::Value =
+        toml::from_str(&toml_str).unwrap_or_else(|e| panic!("config.toml is not valid TOML: {e}"));
 
     let title = parsed
         .get("title")
@@ -190,6 +190,12 @@ fn required_pages_exist() {
         "frameworks/overview.md",
         "cookbook/_index.md",
         "migration/_index.md",
+        // T63: error catalog pages (errors.buff-lang.org/E1xxx).
+        "errors/_index.md",
+        "errors/E10xx-lexer.md",
+        "errors/E11xx-parser.md",
+        "errors/E12xx-type.md",
+        "errors/E13xx-codegen.md",
     ];
 
     let content_dir = docs_site_dir().join("content");
