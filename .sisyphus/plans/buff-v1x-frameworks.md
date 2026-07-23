@@ -336,7 +336,7 @@ v1.20.0 (Developer Experience — 7 tasks):
 
 v1.21.0 (Community & Quality — 5 tasks, depends on v1.20 for T67):
 ├── T68: Cookbook         (needs T67) [writing] ✅
-├── T69: Onboarding paths (needs T67) [writing]
+├── T69: Onboarding paths (needs T67) [writing] ✅
 ├── T70: Quality signals  [unspecified-high]
 ├── T71: Stability promise [writing]
 └── T72: Plugin architecture (needs T53) [deep]
