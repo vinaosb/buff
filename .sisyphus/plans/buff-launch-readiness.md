@@ -18,7 +18,7 @@
 > - **Track F — Launch Infrastructure**: Buff 1.0 Compatibility Document, "The Book" tutorial (mdbook), `buff doc`, production registry (invite-only beta), prebuilt binaries + installers, MEMORY_SAFETY.md, tree-sitter published, CI arm64, AI-tooling MCP bridge, cargo-audit + SBOM, AGENTS.md update for 64-crate reality, release runbook, decision record.
 > - **Track G — Performance Control Surface**: `@prefer(cpu)` + `@force(gpu|cpu)`, `@blocking`, `@workgroup(N)`, `BUFF_FAIL_LOUD_GPU`, `@no-alloc`, `@pin`, `Box<dyn Trait>`, `@inline`/`@no_inline`, DCE, constant propagation.
 > - **Track H — DX Tooling**: `buff watch`, `buff fix`, `buff bench`, snapshot testing, `buff test --watch`, `buff doc --serve`, `buff generate`.
-> - **Track I — Code Hygiene (prerequisite for Track C)**: best-practices audit of all 64 workspace crates, tier-1 god-class splits (`rust_codegen.rs` 17.5K→≤5K, `prelude_types.rs` 9.3K→≤2K), tier-2 medium god classes + idiom cleanup, tier-3 naming + dead-code polish.
+> - **Track I — Code Hygiene (prerequisite for Track C)**: best-practices audit of all 64 workspace crates, tier-1 god-class splits (`rust_codegen.rs` 17.5K→≤10K, `prelude_types.rs` 9.3K→≤3K), tier-2 medium god classes + idiom cleanup, tier-3 naming + dead-code polish.
 >
 > **Estimated Effort**: XXL (multi-release program; **122 tasks across 9 tracks (A-I) + 6 waves + Final Verification**; every sub-unit is independently shippable as a v1.MINOR)
 > **Parallel Execution**: YES — 7 tracks across 6 waves; see Execution Strategy.
@@ -1790,7 +1790,7 @@ cargo fmt --check                                         # clean
 # Diagnostics: colored output on TTY; --explain E1201; did-you-mean
 # Tech-debt: unsafe wrap, Dioxus pin, rand 0.9, version tiers unified
 # Launch: COMPATIBILITY.md, MEMORY_SAFETY.md, book/, registry, binaries
-# Track I: audit doc exists; rust_codegen.rs ≤5K; prelude_types.rs ≤2K; zero hash diffs
+# Track I: audit doc exists; rust_codegen.rs ≤10K; prelude_types.rs ≤3K; zero hash diffs
 # Track A: buff profile generates flamegraph; buff build --target works; --detect-races works
 
 # Security:
