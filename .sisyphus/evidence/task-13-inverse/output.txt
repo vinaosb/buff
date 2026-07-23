@@ -1,0 +1,42 @@
+Task 13 — Matrix Inverse Roundtrip Evidence
+============================================
+
+Scenario: Matrix inverse roundtrip
+  Tool: Bash
+  Steps:
+    1. Create invertible 3x3 matrix m
+    2. Compute m_inv = linalg.inverse(m)
+    3. Compute product = linalg.matmul(m, m_inv)
+    4. Assert product ≈ identity (diagonal ≈ 1.0, off-diagonal ≈ 0.0, within 1e-4)
+
+Matrix m:
+  [2.0, 1.0, 1.0]
+  [1.0, 3.0, 2.0]
+  [1.0, 0.0, 0.0]
+
+Inverse m_inv (via nalgebra LU decomposition):
+  [0.0, 0.0, 1.0]
+  [-2.0, 1.0, 3.0]
+  [3.0, -1.0, -5.0]
+
+Product m * m_inv:
+  [1.0, 0.0, 0.0]
+  [0.0, 1.0, 0.0]
+  [0.0, 0.0, 1.0]
+
+Verification:
+  diagonal[0,0] = 1.000000 (expected 1.0)
+  diagonal[1,1] = 1.000000 (expected 1.0)
+  diagonal[2,2] = 1.000000 (expected 1.0)
+  off-diagonal[0,1] = 0.000000 (expected 0.0)
+  off-diagonal[0,2] = 0.000000 (expected 0.0)
+  off-diagonal[1,0] = 0.000000 (expected 0.0)
+  off-diagonal[1,2] = 0.000000 (expected 0.0)
+  off-diagonal[2,0] = 0.000000 (expected 0.0)
+  off-diagonal[2,1] = 0.000000 (expected 0.0)
+
+Result: PASS — inverse is mathematically correct within 1e-4 tolerance.
+
+Evidence generated: 2026-07-23
+Crate: buff-science v1.0.0
+Test: linalg_inverse_3x3

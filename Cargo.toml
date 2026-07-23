@@ -687,6 +687,21 @@ hecs = "0.10"
 # T15 buff-ml, IDE integrations) resolves to the same in-tree version
 # during the v1.x frameworks wave.
 buff-tensor = { path = "crates/buff-tensor" }
+# T13 (buff-science): industry-standard Rust linear algebra library.
+# Pure-Rust, no native C deps (no BLAS/LAPACK linking by default) —
+# matches the "no C library, no Docker" hard rule from T126/T127.
+# Used by buff-science for matrix inverse, determinant, solve, and
+# LU decomposition. API surface: `DMatrix::from_row_slice` /
+# `Matrix::try_inverse` / `Matrix::determinant` / `Matrix::solve` /
+# `Matrix::transpose`. Pinned to major 0.33 (the long-standing surface
+# since 2024 — stable across 0.32/0.33; core since 0.27). Mirrors the
+# chrono 0.4 / rand 0.8 conservative-pin philosophy.
+nalgebra = "0.33"
+# T13: `buff-science` workspace path dep — mirrors the buff-tensor /
+# buff-dsp / buff-image pattern so any future consumer (codegen-lowered
+# `Science.*` calls, IDE hover/completion) resolves to the same
+# in-tree version during the v1.13 frameworks wave.
+buff-science = { path = "crates/buff-science" }
 # T8 (buff-tensor): the canonical Rust N-dimensional array crate.
 # Recorded at the workspace level so the T8 reference-comparison tests
 # (deferred to a follow-up — the MVP ships pure-Rust with no extern)

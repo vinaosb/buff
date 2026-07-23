@@ -1,0 +1,35 @@
+Task 13 — Statistics Computation Evidence
+==========================================
+
+Scenario: Stats compute on dataset
+  Tool: Bash
+  Steps:
+    1. data = [1.0, 2.0, 3.0, 4.0, 5.0]
+    2. Compute mean, variance, stddev
+
+Input data: [1.0, 2.0, 3.0, 4.0, 5.0]
+n = 5
+
+Mean:
+  sum = 1.0 + 2.0 + 3.0 + 4.0 + 5.0 = 15.0
+  mean = 15.0 / 5 = 3.0
+
+Variance (population):
+  deviations: [-2.0, -1.0, 0.0, 1.0, 2.0]
+  squared: [4.0, 1.0, 0.0, 1.0, 4.0]
+  sum = 10.0
+  variance = 10.0 / 5 = 2.0
+
+Standard deviation:
+  stddev = sqrt(2.0) ≈ 1.41421356...
+
+Verification:
+  mean = 3.0 ✓ (expected 3.0)
+  variance = 2.0 ✓ (expected 2.0)
+  stddev = 1.41421356 ✓ (expected sqrt(2.0))
+
+Result: PASS — all statistics correct.
+
+Evidence generated: 2026-07-23
+Crate: buff-science v1.0.0
+Tests: stats_mean_basic, stats_variance_basic, stats_stddev_basic

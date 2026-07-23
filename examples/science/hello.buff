@@ -1,0 +1,13 @@
+// T13 example: hello.buff - matrix inverse roundtrip on 3x3.
+//
+// Demonstrates the buff-science linalg module:
+//   - Create a 3x3 matrix
+//   - Compute its inverse
+//   - Multiply original * inverse to get identity
+
+func main():
+    let m = Tensor.from_vec([2.0, 1.0, 1.0, 1.0, 3.0, 2.0, 1.0, 0.0, 0.0], [3, 3])
+    let m_inv = Science.linalg.inverse(m)
+    let product = Science.linalg.matmul(m, m_inv)
+    print("Original * Inverse ≈ Identity:")
+    print(product)

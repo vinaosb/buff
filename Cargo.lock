@@ -1022,6 +1022,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-game"
+version = "1.0.0"
+dependencies = [
+ "buff-audio",
+ "buff-ecs",
+ "buff-image",
+ "insta",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-geo"
 version = "1.0.0"
 dependencies = [
@@ -1307,6 +1318,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-ml"
+version = "1.0.0"
+dependencies = [
+ "buff-tensor",
+ "insta",
+ "proptest",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-mock"
 version = "1.0.0"
 dependencies = [
@@ -1350,6 +1375,22 @@ dependencies = [
  "opentelemetry-otlp",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "buff-pipeline"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-runtime",
+ "csv",
+ "insta",
+ "proptest",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -1439,6 +1480,17 @@ name = "buff-resilience"
 version = "1.0.0"
 dependencies = [
  "insta",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "buff-science"
+version = "1.0.0"
+dependencies = [
+ "buff-tensor",
+ "insta",
+ "proptest",
+ "rayon",
  "thiserror 1.0.69",
 ]
 

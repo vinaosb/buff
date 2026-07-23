@@ -1,0 +1,26 @@
+[package]
+name = "buff-science"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = """\
+Linear algebra, numerical methods, and statistics for Buff. \
+Builds on buff-tensor (T8) and nalgebra for heavy matrix ops.\
+"""
+repository = "https://github.com/buff-lang/buff"
+keywords = ["buff", "science", "linalg", "stats", "numerical"]
+categories = ["science"]
+
+[lib]
+name = "buff_science"
+path = "src/lib.rs"
+
+[dependencies]
+buff-tensor.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
