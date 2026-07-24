@@ -1,0 +1,248 @@
+// Buff self-host port of `crates/buff-lang-types/src/lib.rs` (T17, Track C).
+//
+// The buff-lang-types crate root. THE SEMANTIC ANALYSIS STAGE that sits
+// between parsing (buff-lang-parser) and code generation (buff-lang-
+// codegen-rust / buff-lang-codegen-wgsl). Defines:
+//
+//   - the resolved Type representation (ty.buff),
+//   - numeric promotion rules (promote.buff),
+//   - a flat symbol table (env.buff),
+//   - the standard library prelude (prelude.buff) — implicit built-in
+//     functions available without `import`,
+//   - the prelude-types registry (prelude_types.buff + 5 T105b-split
+//     siblings) — implicit built-in types with associated functions and
+//     instance methods,
+//   - a local TypeInferencer that walks the AST (infer.buff),
+//   - eight analysis passes: ownership (T33), async propagation (T31),
+//     recursion detection (T48), exhaustiveness checking (T27), module
+//     graph (T29), comptime interpreter (T53), cross-file symbol table
+//     (T1), project-level parse entry point (T1).
+//
+// v1.0 ships primitives, collections (Vector/Map/Matrix), user-defined
+// types (struct/enum), traits, full type inference, exhaustiveness
+// checking, and recursion detection. v1.4+ added the prelude-types
+// registry (T124b onwards) and many runtime-value variants.
+//
+// # Module structure (mirrors the Rust reference's `pub mod X; pub use Y`
+// re-export surface)
+//
+// Each sibling .buff file ports one .rs file from the Rust reference.
+// Comments below document the import graph (Buff has no `pub mod` /
+// `pub use`; the import graph is implicit via free-fn name resolution).
+
+// =============================================================================
+// Module list (one entry per sibling .buff file)
+// =============================================================================
+//
+// The following 16 sibling .buff files make up the buff-lang-types port.
+// Each entry documents the public API surface (the free functions and
+// types the module exports).
+
+// --- ty.buff ---
+// The resolved Type representation. 80-variant Type enum + IntWidth +
+// FloatWidth enums + ~100 free fns (type_int_default, type_vector, ...,
+// type_user, type_tuple, type_range, type_dynamic_dispatch, every prelude-
+// type constructor, every is_prelude_X predicate, is_numeric /
+// is_float_like / is_integer_like / is_gpu_eligible / must_run_on_cpu,
+// type_to_string). Also type_void / type_unknown / type_decimal / 9
+// int_width_* / float_width_* helpers.
+
+// --- prelude_types.buff ---
+// The PreludeType enum (102 variants). The prelude-types registry: every
+// prelude type name the user writes in Buff source (DateTime, Regex,
+// Duration, ...). Implementation (lookups, return-type inference) lives in
+// the 5 T105b-split siblings below.
+
+// --- prelude_type_metadata.buff ---
+// impl PreludeType metadata + lookup helpers. prelude_type_all(),
+// prelude_type_name(t), prelude_type_buff_type(t),
+// prelude_type_is_namespace_only(t), prelude_type_extern_crate(t),
+// is_prelude_type(name), prelude_type_lookup(name).
+
+// --- prelude_assoc_fn_impl.buff ---
+// PreludeAssocFn enum (141 variants) + impl + lookup. assoc_fn_all(),
+// assoc_fn_name(c), assoc_fn_lookup(type_name, method).
+
+// --- prelude_assoc_const_impl.buff ---
+// PreludeAssocConst enum (4 variants: Pi, E, Discord, Telegram) + impl +
+// lookup. assoc_const_all(), assoc_const_name(c), assoc_const_lookup
+// (type_name, name), assoc_const_return_type(t, c).
+
+// --- prelude_instance_fn_impl.buff ---
+// PreludeInstanceFn enum (169 variants) + impl + lookup.
+// instance_fn_all(), instance_fn_name(c), instance_fn_lookup(method,
+// recv).
+
+// --- prelude_return_types.buff ---
+// Return-type inference. assoc_fn_return_type(t, c, args),
+// instance_fn_return_type(c, recv, args).
+
+// --- prelude.buff ---
+// The free-function prelude (T96). 22-variant PreludeFn enum +
+// PreludeCategory enum + prelude_fn_all() / prelude_fn_name() /
+// prelude_fn_category() / is_prelude() / lookup() / category_of() /
+// return_type(). The polymorphic-arg promotion helpers
+// (first_arg_or_unknown, promote_pair_or_first, float_like_or_default).
+
+// --- env.buff ---
+// TypeEnv — flat symbol table. type_env_new() / type_env_insert(env,
+// name, ty) / type_env_lookup(env, name) / type_env_remove(env, name) /
+// type_env_is_empty(env).
+
+// --- promote.buff ---
+// Numeric promotion rules. promote_binary(lhs, rhs) (the matrix: Decimal
+// > Double > Float > Int/Bits; Bool/String combine only with themselves;
+// Unknown suppresses cascades), assignable_to(annotated, value) (T28
+// Option covariance).
+
+// --- range_analysis.buff ---
+// Flexible-mode Int width inference (T22). IntRange struct + int_range_*
+// arithmetic (new/exact/width/union/add/sub/mul/neg) +
+// smallest_int_width(min, max) + collection_int_width(values).
+
+// --- multi_dispatch.buff ---
+// Multiple-dispatch registry (T58 — Julia-inspired).
+// MultiDispatchMethod + MultiDispatchTable structs +
+// multi_dispatch_table_build / is_group / method_for_decl / resolve_call.
+// Compile-time dispatch on ALL argument types; single-dispatch is the
+// special case (group size 1) and bypasses the table.
+
+// --- infer.buff ---
+// The TypeInferencer engine. UserGenericDecls (T37 user-generics
+// registry), TraitImplRegistry (T75b associated-types registry),
+// TypeInferencer (the local inference engine). 30+ methods covering
+// expression inference (infer_expr + 12 per-variant helpers), statement
+// inference (infer_stmt), and pattern-binding inference (infer_pattern).
+
+// --- ownership.buff ---
+// T33 Copy/Arc/CoW classification. OwnershipFacts struct + analyze_func
+// (re-exported as analyze_ownership) + closure_captures.
+
+// --- async_analysis.buff ---
+// T31 fixpoint async propagation (no await keyword). CallGraph + AsyncSet
+// structs + build_call_graph / propagate_async / analyze_async /
+// is_async_after_propagation.
+
+// --- recursion.buff ---
+// T48 DFS cycle detection (GPU-ineligible marking). RecursionFacts
+// struct + analyze_recursion / detect_cycles / transitive_callers /
+// has_prefer_gpu_attr / is_cpu_only_after_recursion_analysis.
+
+// --- exhaustiveness.buff ---
+// T27 match coverage checking. EnumRegistry struct +
+// build_enum_registry / build_enum_registry_with_prelude (seeds Option) /
+// check_match_coverage / check_match_expr / check_program.
+
+// --- modules.buff ---
+// T29 module graph + loaders. Module + ModuleGraph + ModuleLoader structs
+// + build_graph (BFS) / resolve_path / dotted_path_to_spec + FsLoader /
+// MemoryLoader concrete loaders.
+
+// --- comptime.buff ---
+// T53 Zig-style comptime interpreter. ComptimeValue +
+// ComptimeError + ComptimeInterpreter + ComptimeFacts structs +
+// comptime_interpreter_eval / analyze_program / COMPTIME_MAX_DEPTH.
+
+// --- cross_file.buff ---
+// T1 cross-file symbol resolution. SymbolKind + SymbolSignature +
+// CrossFileSymbolTable structs + build_cross_file_symbol_table / lookup /
+// lookup_any.
+
+// --- project.buff ---
+// T1 project-level parse entry point + span-aware error formatting.
+// ParsedProject + ProjectError structs + parse_project /
+// parse_project_with_loader. Includes ParseError + Span + SourceId
+// placeholder shapes for the buff-lang-error self-host port.
+
+// =============================================================================
+// Re-export surface
+// =============================================================================
+//
+// The Rust reference's lib.rs has ~35 `pub use crate::X::{Y, Z};` lines
+// exposing the most-used items at the crate root (so callers can write
+// `buff_lang_types::TypeInferencer` instead of
+// `buff_lang_types::infer::TypeInferencer`).
+//
+// Buff has no `pub use`; the items are accessed by their free-fn name
+// directly. The Rust re-export map is documented here for the cross-
+// reference audience:
+
+// From env.buff:       TypeEnv
+// From comptime.buff:  analyze_program, ComptimeError, ComptimeFacts,
+//                      ComptimeInterpreter, ComptimeValue,
+//                      comptime_max_depth
+// From async_analysis.buff: analyze_async, build_call_graph,
+//                      is_async_after_propagation, propagate_async,
+//                      AsyncSet, CallGraph
+// From exhaustiveness.buff: build_enum_registry,
+//                      build_enum_registry_with_prelude,
+//                      check_match_coverage, check_match_expr,
+//                      check_program, EnumRegistry
+// From infer.buff:     TypeInferencer, UserGenericDecls,
+//                      TraitImplRegistry, typeref_to_type
+// From multi_dispatch.buff: MultiDispatchMethod, MultiDispatchTable
+// From modules.buff:   build_graph, dotted_path_to_spec, resolve_path,
+//                      FsLoader, MemoryLoader, Module, ModuleGraph,
+//                      ModuleLoader
+// From project.buff:   parse_project, parse_project_with_loader,
+//                      ParsedProject, ProjectError
+// From cross_file.buff: CrossFileSymbolTable, SymbolKind, SymbolSignature
+// From promote.buff:   assignable_to, promote_binary
+// From recursion.buff: analyze_recursion, detect_cycles,
+//                      has_prefer_gpu_attr, RecursionFacts
+// From ownership.buff: analyze_func (alias analyze_ownership),
+//                      closure_captures, OwnershipFacts
+// From prelude.buff:   category_of, is_prelude, lookup, PreludeCategory,
+//                      PreludeFn
+// From prelude_types.buff + T105b siblings:
+//                      assoc_const_lookup, assoc_const_return_type,
+//                      assoc_fn_lookup, assoc_fn_return_type,
+//                      instance_fn_lookup, instance_fn_return_type,
+//                      is_prelude_type, prelude_type_lookup,
+//                      PreludeAssocConst, PreludeAssocFn,
+//                      PreludeInstanceFn, PreludeType
+// From range_analysis.buff: collection_int_width, smallest_int_width,
+//                      IntRange
+// From ty.buff:        FloatWidth, IntWidth, Type
+// From buff_lang_error (forward decl): Span
+
+// =============================================================================
+// Port totals (T17, Track C)
+// =============================================================================
+//
+// Source: crates/buff-lang-types/src/ (23 .rs files, ~22,760 LOC Rust)
+// Target: self-host/types/ (16 .buff files, ~5,500 LOC Buff)
+//
+// Compression ratio: ~24% (Buff is more concise: no `pub`/`pub(crate)`
+// noise, no impl-block ceremony, no `&self`/`&mut self` markers, free-fn
+// signatures carry fewer tokens than method signatures).
+//
+// Per-module LOC:
+//   ty.buff                       1026 LOC  (from ty.rs 2580 LOC)
+//   prelude_types.buff             380 LOC  (from prelude_types.rs 1932 LOC)
+//   prelude_type_metadata.buff     702 LOC  (from 1407 LOC)
+//   prelude_assoc_fn_impl.buff     661 LOC  (from 1537 LOC)
+//   prelude_instance_fn_impl.buff  532 LOC  (from 1578 LOC)
+//   prelude_return_types.buff      470 LOC  (from 1627 LOC)
+//   prelude_assoc_const_impl.buff  186 LOC  (from 133 LOC)
+//   prelude.buff                   326 LOC  (from prelude.rs 499 LOC)
+//   env.buff                        54 LOC  (from env.rs 72 LOC)
+//   promote.buff                   217 LOC  (from promote.rs 172 LOC)
+//   range_analysis.buff            215 LOC  (from 306 LOC)
+//   multi_dispatch.buff            272 LOC  (from 527 LOC)
+//   infer.buff                     508 LOC  (from infer.rs 2113 LOC)
+//   ownership.buff                 106 LOC  (from 1434 LOC)
+//   async_analysis.buff            187 LOC  (from 867 LOC)
+//   recursion.buff                 159 LOC  (from 758 LOC)
+//   exhaustiveness.buff            133 LOC  (from 684 LOC)
+//   modules.buff                   144 LOC  (from 643 LOC)
+//   comptime.buff                  153 LOC  (from 897 LOC)
+//   cross_file.buff                142 LOC  (from 305 LOC)
+//   project.buff                   165 LOC  (from 342 LOC)
+//   lib.buff                       (this file)
+//
+// The 5 T105b-split files were swept into the parallel T80 commits
+// (5720aec, 24bc88a) — work preserved under that label. The other 17 .buff
+// files were committed directly under T17 across 4 commits (c46c04c,
+// 93bfeae, c33190e, + the env/promote/range_analysis/multi_dispatch batch
+// + the infer/analysis batch).
