@@ -213,13 +213,22 @@ impl TypeInferencer {
             Expr::ArrayLit { elements, .. } => {
                 Ok(Type::vector(self.infer_collection_element(elements)?))
             }
-            // T23/T24: Indexing `base[i]` (1 index) yields the element type
-            // when `base` is a `Vector<T>`; `base[row, col]` (2 indices)
+            // T23/T24/T82: Indexing `base[i]` (1 index) yields the element
+            // type when `base` is a `Vector<T>` OR the value type when
+            // `base` is a `Map<K, V>` (T82); `base[row, col]` (2 indices)
             // yields the element type when `base` is a `Matrix<T>`. Any
             // other shape yields `Unknown` (a later type check can reject
             // e.g. string indexing). The `indices` vec arity drives the
-            // dispatch — single-index stays the T23 Vector path, two-index
-            // takes the T24 Matrix path.
+            // dispatch — single-index stays the T23 Vector / T82 Map path,
+            // two-index takes the T24 Matrix path.
+            //
+            // T82 map-index semantics: `m[key]` ALWAYS yields a value of
+            // the map's value type `V` (never panics, never `Option<V>`);
+            // the codegen lowers the read to
+            // `m.get(&key).cloned().unwrap_or_default()` so a missing key
+            // returns the default for `V`. This type rule keeps the
+            // surface type simple (the value type, not Option<V>) which
+            // matches Buff's "no panic on missing keys" convention.
             Expr::Index { base, indices, .. } => {
                 let base_ty = self.infer_expr(base)?;
                 if indices.len() == 2 {
@@ -227,11 +236,15 @@ impl TypeInferencer {
                         Type::Matrix(elem) => Ok((*elem).clone()),
                         _ => Ok(Type::Unknown),
                     }
-                } else {
+                } else if indices.len() == 1 {
                     match base_ty {
                         Type::Vector(elem) => Ok((*elem).clone()),
+                        // T82: `m[key]` yields the map's value type V.
+                        Type::Map(_, val) => Ok((*val).clone()),
                         _ => Ok(Type::Unknown),
                     }
+                } else {
+                    Ok(Type::Unknown)
                 }
             }
             // T21: A string interpolation always evaluates to String.

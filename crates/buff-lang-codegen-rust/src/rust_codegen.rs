@@ -2756,6 +2756,32 @@ impl RustCodegen {
                         return Ok(SynStmt::Expr(call, Some(Default::default())));
                     }
                 }
+                // T82: Map-index WRITE path. If the target is
+                // `Expr::Index { base, indices: [key] }` and `base`
+                // infers to `Map<K, V>`, lower `m[key] = value` to
+                // `m.insert(key, value)` (Buff's "no panic on missing
+                // keys" convention applies to WRITES too: insert
+                // creates-or-replaces, never panics). Compound ops
+                // (`+=`, `-=`, ...) on map entries are NOT supported
+                // here — they'd require read-modify-write via
+                // `entry().and_modify().or_insert()` and are deferred.
+                // The check happens BEFORE the bare-Ident fast-path
+                // so an `m[k] = v` is never confused with an Ident
+                // assignment.
+                if *op == buff_lang_ast::op::BinaryOp::Assign {
+                    if let Expr::Index { base, indices, .. } = &target {
+                        if indices.len() == 1 {
+                            let base_ty = self
+                                .type_inferencer
+                                .infer_expr(base)
+                                .unwrap_or(Type::Unknown);
+                            if matches!(base_ty, Type::Map(..)) {
+                                return self
+                                    .lower_map_index_write(base, &indices[0], value);
+                            }
+                        }
+                    }
+                }
                 // The LHS of an assignment is NOT a "use" — it doesn't
                 // consume a move. If the target is a bare Ident, lower it
                 // directly without consulting the move analyzer.
@@ -3231,6 +3257,21 @@ impl RustCodegen {
                 if indices.len() == 2 {
                     self.lower_matrix_index(base, &indices[0], &indices[1])
                 } else if indices.len() == 1 {
+                    // T82: Map indexing READ path. If the base infers to
+                    // `Map<K, V>`, lower `m[key]` to
+                    // `m.get(&key).cloned().unwrap_or_default()` so a
+                    // missing key returns the default for `V` (Buff's
+                    // "no panic on missing keys" convention — the user
+                    // never sees a Rust panic). Inference failure or
+                    // non-Map base falls through to the Vector path
+                    // (`m[key as usize]`).
+                    let base_ty = self
+                        .type_inferencer
+                        .infer_expr(base)
+                        .unwrap_or(Type::Unknown);
+                    if matches!(base_ty, Type::Map(..)) {
+                        return self.lower_map_index_read(base, &indices[0]);
+                    }
                     let base_e = self.lower_expr(base)?;
                     let index_e = cast_to_usize(self.lower_expr(&indices[0])?);
                     Ok(SynExpr::Index(syn::ExprIndex {
@@ -11618,6 +11659,110 @@ impl RustCodegen {
             brace_token: Default::default(),
             arms: arms_syn,
         }))
+    }
+
+    /// T82: lower a Map indexing READ `m[key]` to
+    /// `m.get(&key).cloned().unwrap_or_default()`.
+    ///
+    /// Buff's "no panic on missing keys" convention: a missing key returns
+    /// the default for the map's value type `V`, NEVER a Rust panic.
+    /// Rust's native `m[key]` would panic on missing key (HashMap's
+    /// `Index` impl unwraps the `get` result); we lower to the safe form
+    /// so the user never sees a runtime panic from a map lookup.
+    ///
+    /// The chain is built explicitly (not via `parse_quote!`, which is
+    /// banned in non-test code):
+    ///
+    /// 1. `m.get(&key)` — returns `Option<&V>`. The `&key` borrows the
+    ///    key so the lookup doesn't consume it.
+    /// 2. `.cloned()` — converts `Option<&V>` to `Option<V>` (requires
+    ///    `V: Clone`; Buff's move-by-default codegen already inserts
+    ///    `.clone()` everywhere, so `V: Clone` is satisfied for all
+    ///    types Buff can put in a Map).
+    /// 3. `.unwrap_or_default()` — converts `Option<V>` to `V`, using
+    ///    `Default::default()` when the key was missing. Requires
+    ///    `V: Default`; numeric / bool / String / Vec / HashMap types
+    ///    all impl `Default` in std, and user structs get `#[derive(Default)]`
+    ///    automatically via the codegen derive list (see
+    ///    [`derive_and_repr_attrs`]).
+    ///
+    /// The `&key` reference is built via `syn::ExprReference` so we
+    /// never hand-format a `&` token.
+    fn lower_map_index_read(
+        &mut self,
+        base: &Expr,
+        key: &Expr,
+    ) -> Result<SynExpr, CodegenError> {
+        let base_e = self.lower_expr(base)?;
+        let key_e = self.lower_expr(key)?;
+        // `&key` — borrow the key so the lookup doesn't consume it.
+        let ref_key = SynExpr::Reference(syn::ExprReference {
+            attrs: Vec::new(),
+            and_token: Default::default(),
+            mutability: None,
+            expr: Box::new(key_e),
+        });
+        // `m.get(&key)` — returns Option<&V>.
+        let get_call = method_call_one_arg(base_e, "get", ref_key);
+        // `.cloned()` — Option<&V> -> Option<V>.
+        let cloned = SynExpr::MethodCall(syn::ExprMethodCall {
+            attrs: Vec::new(),
+            receiver: Box::new(get_call),
+            dot_token: Default::default(),
+            method: Ident::new("cloned", ProcSpan::call_site()),
+            turbofish: None,
+            paren_token: Default::default(),
+            args: Punctuated::new(),
+        });
+        // `.unwrap_or_default()` — Option<V> -> V (Default fallback).
+        let unwrapped = SynExpr::MethodCall(syn::ExprMethodCall {
+            attrs: Vec::new(),
+            receiver: Box::new(cloned),
+            dot_token: Default::default(),
+            method: Ident::new("unwrap_or_default", ProcSpan::call_site()),
+            turbofish: None,
+            paren_token: Default::default(),
+            args: Punctuated::new(),
+        });
+        Ok(unwrapped)
+    }
+
+    /// T82: lower a Map indexing WRITE `m[key] = value` to
+    /// `m.insert(key, value)`.
+    ///
+    /// Returns the lowered statement shape (`m.insert(key, value)` as a
+    /// `SynStmt::Expr(_, Some(semi))` method-call statement). Rust's
+    /// `HashMap::insert` returns `Option<V>` (the previous value if the
+    /// key existed); the return is discarded at statement position,
+    /// matching Buff's `m[k] = v` whose result is unit.
+    ///
+    /// The codegen dispatches here from [`Self::lower_stmt`]'s
+    /// `Stmt::Assignment` arm when the target is `Expr::Index { base,
+    /// indices: [key] }` AND `base` infers to `Map<K, V>`. Other shapes
+    /// (Vector indexing, Matrix indexing, simple Ident assignment) take
+    /// the existing paths.
+    fn lower_map_index_write(
+        &mut self,
+        base: &Expr,
+        key: &Expr,
+        value: &Expr,
+    ) -> Result<SynStmt, CodegenError> {
+        let base_e = self.lower_expr(base)?;
+        let key_e = self.lower_expr(key)?;
+        let value_e = self.lower_expr(value)?;
+        let mut args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+        args.push(key_e);
+        args.push(value_e);
+        let insert_call = SynExpr::MethodCall(syn::ExprMethodCall {
+            attrs: Vec::new(),
+            receiver: Box::new(base_e),
+            dot_token: Default::default(),
+            method: Ident::new("insert", ProcSpan::call_site()),
+            turbofish: None,
+            paren_token: Default::default(),
+            args,
+        });
+        Ok(SynStmt::Expr(insert_call, Some(Default::default())))
     }
 
     /// Lower `expr?` to Rust's native `?` operator (T30 REFACTOR step).
