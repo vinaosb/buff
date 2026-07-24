@@ -882,6 +882,59 @@ pub enum Command {
         cmd: RefactorCmd,
     },
 
+    /// `buff bench` — benchmark harness + baseline capture (T22).
+    ///
+    /// Measures compile-time + runtime metrics for the canonical
+    /// fixture set (`ola`, `fibonacci`, `closures`, `collections`,
+    /// `pattern_matching`, `error_handling`) and writes a baseline
+    /// JSON report consumed by F3 (final verification before/after
+    /// comparison) + T105 (codegen-hash comparison for god-class splits).
+    ///
+    /// # Per-fixture metrics
+    ///
+    /// - `lex_ms` / `parse_ms` / `typecheck_ms` / `codegen_ms` —
+    ///   per-phase wall-clock time via `std::time::Instant`.
+    /// - `codegen_hash` — `sha256:` + hex digest of the generated Rust
+    ///   source. Byte-deterministic (project hard rule) → identity
+    ///   signal for T105.
+    /// - `clean_build_ms` / `binary_size_bytes` / `incremental_build_ms`
+    ///   — end-to-end back-end measurements. `None` when rustc
+    ///   invocation fails (e.g. Windows MSVC-blocked host).
+    /// - `prefer_gpu_count` / `prefer_npu_count` — `@prefer(gpu|npu)`
+    ///   attribute counts (static proxy for runtime dispatch routing).
+    /// - `error` — failure mode string when any phase failed (e.g.
+    ///   `"parse_error: ..."`, `"rustc_link_failed"`).
+    ///
+    /// # Host portability
+    ///
+    /// hyperfine is detected on `PATH` (recorded in the report's
+    /// `hyperfine_available` field) but per-phase timings always use
+    /// `Instant` (sub-ms resolution required). End-to-end timing falls
+    /// back to `Instant` when hyperfine is absent.
+    Bench {
+        /// Output JSON path. Default:
+        /// `.sisyphus/evidence/baseline-v1.25.json`. The parent directory
+        /// is created on demand.
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+
+        /// Directory containing the fixture `.buff` files. Default:
+        /// `examples/`. The harness probes the 6 canonical names
+        /// (`ola`, `fibonacci`, `closures`, `collections`,
+        /// `pattern_matching`, `error_handling`) under this dir.
+        #[arg(long, value_name = "DIR")]
+        fixtures_dir: Option<PathBuf>,
+
+        /// Skip the rustc back-end (clean build, incremental build,
+        /// binary size). Useful on hosts where the linker is known to
+        /// be broken (e.g. Windows MSVC LNK1104) — the harness
+        /// completes faster and records `null` for the back-end
+        /// fields. Front-end metrics (lex/parse/typecheck/codegen +
+        /// codegen_hash) are unaffected.
+        #[arg(long)]
+        no_backend: bool,
+    },
+
     /// Watch `.buff` files for changes + rebuild on save. Debounced 500ms.
     ///
     /// Usage: `buff watch <PATH> [--exec <CMD>]`. Recursively watches

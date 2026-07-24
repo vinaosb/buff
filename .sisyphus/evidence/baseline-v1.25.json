@@ -1,0 +1,103 @@
+{
+  "captured_at": "2026-07-24T00:20:52Z",
+  "git_sha": "40ca974",
+  "host": "standalone-capture-binary on windows-x86_64",
+  "hyperfine_available": false,
+  "fixtures": {
+    "closures": {
+      "name": "closures",
+      "lex_ms": 0,
+      "parse_ms": 0,
+      "typecheck_ms": 0,
+      "codegen_ms": 2,
+      "codegen_hash": "sha256:cfb5c6c15d3d6c3eb3dbfe8f01dd45b8d19e73f707f3c2b9ef5d989c4220b8c2",
+      "clean_build_ms": null,
+      "binary_size_bytes": null,
+      "incremental_build_ms": null,
+      "prefer_gpu_count": 0,
+      "prefer_npu_count": 0,
+      "function_count": 1,
+      "error": null
+    },
+    "collections": {
+      "name": "collections",
+      "lex_ms": 0,
+      "parse_ms": 0,
+      "typecheck_ms": 0,
+      "codegen_ms": 1,
+      "codegen_hash": "sha256:88744f51a34bb91437bfc77ea3416987d4e63c0f6dbc6eb3707f775ffdbb5b81",
+      "clean_build_ms": null,
+      "binary_size_bytes": null,
+      "incremental_build_ms": null,
+      "prefer_gpu_count": 0,
+      "prefer_npu_count": 0,
+      "function_count": 1,
+      "error": null
+    },
+    "error_handling": {
+      "name": "error_handling",
+      "lex_ms": 0,
+      "parse_ms": 0,
+      "typecheck_ms": 0,
+      "codegen_ms": 1,
+      "codegen_hash": "sha256:f0471d7b256c6f09f1deb68031fcba5caa218318c76e0a713acf5219fbc7494a",
+      "clean_build_ms": null,
+      "binary_size_bytes": null,
+      "incremental_build_ms": null,
+      "prefer_gpu_count": 0,
+      "prefer_npu_count": 0,
+      "function_count": 3,
+      "error": null
+    },
+    "fibonacci": {
+      "name": "fibonacci",
+      "lex_ms": 0,
+      "parse_ms": 0,
+      "typecheck_ms": 0,
+      "codegen_ms": 0,
+      "codegen_hash": "sha256:615d66cabf858f6bd3c9056d265c340c446285370b04116601eed4355f2c4ec1",
+      "clean_build_ms": null,
+      "binary_size_bytes": null,
+      "incremental_build_ms": null,
+      "prefer_gpu_count": 0,
+      "prefer_npu_count": 0,
+      "function_count": 2,
+      "error": null
+    },
+    "ola": {
+      "name": "ola",
+      "lex_ms": 0,
+      "parse_ms": 0,
+      "typecheck_ms": 0,
+      "codegen_ms": 0,
+      "codegen_hash": "sha256:54840d4d7cc2ba54fa0d14290c6cbee2355455901d384e047a90c2c6f5cd80f2",
+      "clean_build_ms": null,
+      "binary_size_bytes": null,
+      "incremental_build_ms": null,
+      "prefer_gpu_count": 0,
+      "prefer_npu_count": 0,
+      "function_count": 1,
+      "error": null
+    },
+    "pattern_matching": {
+      "name": "pattern_matching",
+      "lex_ms": 0,
+      "parse_ms": 0,
+      "typecheck_ms": 0,
+      "codegen_ms": 2,
+      "codegen_hash": "sha256:fc7053ccbaa7373f1bbaddac22bb0aba4f3b0e26274c870a1e87f89850ee420f",
+      "clean_build_ms": null,
+      "binary_size_bytes": null,
+      "incremental_build_ms": null,
+      "prefer_gpu_count": 0,
+      "prefer_npu_count": 0,
+      "function_count": 3,
+      "error": null
+    }
+  },
+  "binary_sizes_bytes": {},
+  "dispatch_decisions": {
+    "gpu": 0,
+    "npu": 0
+  }
+}

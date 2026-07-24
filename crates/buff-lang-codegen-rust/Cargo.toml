@@ -26,3 +26,17 @@ unicode-segmentation.workspace = true
 insta.workspace = true
 buff-lang-lexer.workspace = true
 buff-lang-parser.workspace = true
+# T22: dev-only standalone baseline-capture binary (`cargo run -p
+# buff-lang-codegen-rust --example capture_t22_baseline`) reuses the
+# workspace-pinned sha2 + serde + serde_json (NO new packages added to
+# the workspace) so we can capture lex/parse/codegen timings + hashes
+# on hosts where the full `buff-lang-cli` binary cannot link (e.g.
+# Windows MSVC LNK1104 ring blocker). The binary is dev-only — it is
+# NOT shipped and is NOT exposed via the buff CLI.
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[example]]
+name = "capture_t22_baseline"
+path = "examples/capture_t22_baseline.rs"

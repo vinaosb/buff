@@ -83,12 +83,18 @@ pub trait PluginFactory: Send + Sync {
 /// resolved.
 #[derive(Default)]
 pub struct StaticPluginRegistry {
-    compiler_builders:
-        std::collections::BTreeMap<String, std::sync::Arc<dyn Fn() -> Box<dyn CompilerPlugin>>>,
-    lsp_builders:
-        std::collections::BTreeMap<String, std::sync::Arc<dyn Fn() -> Box<dyn LspPlugin>>>,
-    runtime_builders:
-        std::collections::BTreeMap<String, std::sync::Arc<dyn Fn() -> Box<dyn RuntimePlugin>>>,
+    compiler_builders: std::collections::BTreeMap<
+        String,
+        std::sync::Arc<dyn Fn() -> Box<dyn CompilerPlugin> + Send + Sync>,
+    >,
+    lsp_builders: std::collections::BTreeMap<
+        String,
+        std::sync::Arc<dyn Fn() -> Box<dyn LspPlugin> + Send + Sync>,
+    >,
+    runtime_builders: std::collections::BTreeMap<
+        String,
+        std::sync::Arc<dyn Fn() -> Box<dyn RuntimePlugin> + Send + Sync>,
+    >,
 }
 
 impl StaticPluginRegistry {

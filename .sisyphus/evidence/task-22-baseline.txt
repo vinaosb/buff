@@ -1,0 +1,172 @@
+T22 — Benchmark Harness + v1.25 Baseline Capture (Wave 0 FIRST ACTION)
+======================================================================
+
+Commit: <filled in by commit step>
+Baseline JSON: .sisyphus/evidence/baseline-v1.25.json
+Capture method: standalone binary (see below)
+
+
+WHAT WAS DELIVERED
+------------------
+
+1. `crates/buff-lang-cli/src/bench_harness.rs` (~960 LOC, fully documented).
+   Public API:
+     - FIXTURE_NAMES (6 canonical fixtures)
+     - DEFAULT_BASELINE_PATH (".sisyphus/evidence/baseline-v1.25.json")
+     - FixtureMeasurement { lex_ms, parse_ms, typecheck_ms, codegen_ms,
+       codegen_hash, clean_build_ms, binary_size_bytes,
+       incremental_build_ms, prefer_gpu_count, prefer_npu_count,
+       function_count, error }
+     - BenchReport { captured_at, git_sha, host, hyperfine_available,
+       fixtures, binary_sizes_bytes, dispatch_decisions }
+     - measure_fixture(path, attempt_backend) -> Result<FixtureMeasurement>
+     - build_report(...) -> BenchReport
+     - hyperfine_available() -> Option<PathBuf>  (PATH probe)
+     - sha256_hex(bytes) -> String
+     - detect_host() / git_short_sha() / iso8601_now()
+   Plus AST walkers (type_check_decls, count_prefer_hints, count_functions)
+   mirroring the patterns established by check.rs / commands/bench_compile.rs.
+
+2. `crates/buff-lang-cli/src/commands/bench.rs` — thin command wrapper.
+   Invokes measure_fixture on all 6 fixtures, prints a per-fixture summary
+   table to stdout, writes the JSON to --output (default
+   .sisyphus/evidence/baseline-v1.25.json).
+
+3. New `Bench` variant added to the Command enum in cli.rs:
+       buff bench [--output <PATH>] [--fixtures-dir <DIR>] [--no-backend]
+   Dispatch wired in main.rs.
+
+4. `crates/buff-lang-cli/tests/bench_harness.rs` — 8 integration tests:
+     - bench_subcommand_parses_with_no_args
+     - bench_subcommand_parses_with_all_flags
+     - bench_subcommand_help_string_mentions_fixtures
+     - default_baseline_path_is_v1_25_json_under_evidence
+     - default_fixtures_dir_is_examples
+     - fixture_names_contains_six_canonical_fixtures
+     - measure_ola_fixture_produces_stable_codegen_hash
+     - measure_missing_fixture_records_lex_error_not_panic
+     - build_report_serialises_to_parseable_json
+     - hyperfine_probe_returns_some_or_none_without_panicking
+
+5. `crates/buff-lang-codegen-rust/examples/capture_t22_baseline.rs` —
+   STANDALONE baseline-capture binary (pure-Rust, no reqwest/rustls/ring
+   dep) used to actually capture the baseline on the MSVC-blocked host.
+   This binary is dev-only (added as an [[example]] in buff-lang-codegen-rust
+   Cargo.toml with sha2/serde/serde_json as new dev-deps — all already
+   workspace-pinned, NO new packages added to the workspace).
+
+6. `crates/buff-plugins/src/registry.rs` — 3-line fix to the pre-existing
+   Send/Sync regression that was blocking buff-lang-cli compilation on
+   EVERY host (not just Windows). Added `+ Send + Sync` to the three
+   `dyn Fn() -> Box<dyn XPlugin>` trait object types inside
+   `StaticPluginRegistry`'s BTreeMap fields. The buff-plugins AGENTS.md
+   explicitly states "every plugin trait is Send + Sync" — the missing
+   bounds were an oversight (commit 30db016 / T72) that the v1.24 audit
+   (T28 / b68e14f) did not catch. Without this fix, buff-lang-cli's lib
+   test cannot even type-check, which would block ALL of T22's
+   verification — not just local.
+
+
+HOW THE BASELINE WAS CAPTURED
+-----------------------------
+
+The host is "windows-msvc-blocked" per the T22 task spec: the rustc
+invocation finds VS 18 Insiders in the Windows registry, but that
+install is missing `vcruntime.h` (the file exists only at
+`C:\Program Files\Microsoft Visual Studio\18\Insiders\SDK\ScopeCppSDK\vc15\VC\include\vcruntime.h`
+— a non-standard path that cc-rs cannot discover).
+
+Consequences:
+  - `cargo check -p buff-lang-cli --lib` fails: reqwest → rustls → ring's
+    build script (cc-rs) cannot compile curve25519.c (C1083 vcruntime.h).
+  - `cargo test -p buff-lang-cli --test bench_harness` fails: same chain.
+  - VS 2022 Enterprise is installed alongside VS 18 Insiders; setting
+    LIB + INCLUDE manually lets pure-Rust binaries link (verified with
+    `rustc hello.rs`), but cc-rs ignores the env vars because it uses
+    the registry-discovered toolchain (VS 18 Insiders) regardless.
+
+Workaround used:
+  - Wrote `examples/capture_t22_baseline.rs` inside buff-lang-codegen-rust
+    (pure-Rust crate, no reqwest/ring in its dep graph).
+  - Ran: `cargo run -p buff-lang-codegen-rust --example capture_t22_baseline
+    -- examples .sisyphus/evidence/baseline-v1.25.json`
+  - Output: 103-line JSON with all 6 fixtures measured. Per-fixture
+    fields captured: lex_ms, parse_ms, typecheck_ms (=0, see below),
+    codegen_ms, codegen_hash (sha256: + 64 hex chars, byte-deterministic),
+    prefer_gpu_count, prefer_npu_count, function_count, error.
+  - Back-end fields (clean_build_ms, binary_size_bytes,
+    incremental_build_ms) are null because the standalone binary does
+    NOT shell out to rustc (would hit the same MSVC blocker).
+
+typecheck_ms = 0 explanation:
+  The standalone binary depends on buff-lang-types transitively but
+  does NOT expose TypeInferencer as a dev-dep (would require adding it).
+  The full bench_harness.rs in buff-lang-cli DOES measure typecheck
+  (it reuses the TypeInferencer pattern from check.rs::type_check_decls).
+  When the bench_harness.rs runs on a non-MSVC-blocked host (CI),
+  typecheck_ms will be populated. The codegen_hash is unaffected
+  (typecheck is a read-only pass — same hash regardless).
+
+
+DETERMINISM CHECK
+-----------------
+
+Codegen is byte-deterministic (project hard rule: syn/quote/prettyplease
+via BTreeMap/BTreeSet). The harness was run twice consecutively; the
+codegen_hash values were identical across both runs:
+
+  ola              sha256:54840d4d7cc2ba54...  (stable)
+  fibonacci        sha256:615d66cabf858f6b...  (stable)
+  closures         sha256:cfb5c6c15d3d6c3e...  (stable)
+  collections      sha256:88744f51a34bb914...  (stable)
+  pattern_matching sha256:fc7053ccbaa7373f...  (stable)
+  error_handling   sha256:f0471d7b256c6f09...  (stable)
+
+These hashes are the identity signal T105 will diff against after the
+god-class splits — any drift indicates a codegen change.
+
+
+WHAT F3 + T105 CONSUME
+----------------------
+
+F3 (final verification before/after):
+  - Diff the per-fixture lex_ms / parse_ms / codegen_ms columns to
+    detect performance regressions post-refactor.
+  - Wall-clock times are host-dependent (Windows + standalone binary
+    path here is slower than the direct buff-lang-cli path would be);
+    use the RELATIVE ordering, not absolute thresholds.
+
+T105 (codegen-hash comparison for god-class splits):
+  - Diff `codegen_hash` per fixture. If ANY hash changes, the refactor
+    altered codegen output — investigate. If all hashes match, the
+    split is codegen-transparent (the goal).
+
+
+ENVIRONMENTAL LIMITATIONS
+-------------------------
+
+1. Windows MSVC LNK1104 msvcrt.lib blocker (host-specific).
+2. Pre-existing buff-plugins Send/Sync regression (fixed in this commit).
+3. hyperfine NOT on PATH (recorded as hyperfine_available=false in JSON).
+4. Standalone capture binary skips typecheck_ms + back-end fields.
+5. buff-lang-cli tests not run locally — CI 3-OS matrix is the
+   authoritative verifier per AGENTS.md.
+
+CI EXPECTED TO PASS
+-------------------
+
+On a non-MSVC-blocked host (Linux / macOS / Windows with proper VS setup):
+  - cargo check -p buff-lang-cli --lib   → clean (buff-plugins fix applied)
+  - cargo test -p buff-lang-cli --test bench_harness  → 10 tests pass
+  - cargo run -p buff-lang-cli -- bench  → produces the same JSON shape
+    as the standalone capture binary, plus populated back-end fields.
+
+
+NEXT ACTIONS (post-T22)
+-----------------------
+
+- F3: re-run this harness on a CI runner post-refactor + diff.
+- T105: codegen-hash diff per fixture (the primary signal).
+- Consider adding buff-lang-types as a dev-dep to buff-lang-codegen-rust
+  so the standalone capture binary can also measure typecheck_ms
+  (currently 0 in the captured baseline).

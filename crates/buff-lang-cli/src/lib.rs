@@ -31,6 +31,7 @@
 //! typecheck pass. v1.0 treats type errors as warnings (standalone typecheck
 //! pass is post-v1.0 work).
 
+pub mod bench_harness;
 pub mod check;
 pub mod cli;
 pub mod commands;

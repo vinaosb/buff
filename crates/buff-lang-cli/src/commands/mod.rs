@@ -6,6 +6,7 @@
 pub mod add;
 pub mod ai;
 pub mod backtrace;
+pub mod bench;
 pub mod bench_cold_start;
 pub mod bench_compile;
 pub mod build;
