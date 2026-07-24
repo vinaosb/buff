@@ -1,0 +1,98 @@
+// comptime_config.buff - v1.26 real-use-case (T15 batch 5).
+//
+// Compile-time configuration: validate tunables, precompute derived
+// constants, and build a lookup table — all before the binary runs. If any
+// invariant is violated the program REFUSES TO COMPILE (E1210). Exercises:
+//   - `comptime:` blocks (Zig-style comptime, T53)
+//   - compile-time validation with early `return <code>` (compile error)
+//   - lookup tables materialised as constants (zero runtime cost)
+//   - `@` attributes (`@internal`, `@feature(...)`)
+//   - comptime constants flowing into runtime `main`
+//
+// Status: PURE BUFF. The comptime block parses + typechecks (T53); the
+// constants it binds are visible to `main` exactly as in the top-level
+// examples/comptime_*.buff. (Const-evaluation lowering of loops/arithmetic
+// inside comptime is codegen-deferred — see BUGS-FOUND.md.)
+
+// ---------------------------------------------------------------------------
+// Block 1 — deployment tunables. These are compile-time constants, not
+// runtime reads. Every invariant below is checked at BUILD time; a bad
+// config aborts the build.
+// ---------------------------------------------------------------------------
+
+comptime:
+    let max_connections = 128
+    let worker_threads = 4
+    let timeout_seconds = 30
+    let read_buffer_kb = 8
+    let enable_tls = true
+
+    // --- invariants (each `return N` is a distinct compile failure code) ---
+    if max_connections < 1:
+        return 1
+    if max_connections > 1024:
+        return 2
+    if worker_threads < 1:
+        return 3
+    if worker_threads > 16:
+        return 4
+    if timeout_seconds < 0:
+        return 5
+    if read_buffer_kb < 1:
+        return 6
+    if enable_tls == false:
+        return 7
+
+// ---------------------------------------------------------------------------
+// Block 2 — a precomputed lookup table. The codegen emits this as a Rust
+// `const` slice, so the runtime pays nothing for table construction.
+// ---------------------------------------------------------------------------
+
+comptime:
+    let well_known_ports = [22, 80, 443, 8080, 8443]
+    let default_port = 8080
+
+// ---------------------------------------------------------------------------
+// Block 3 — derived constants folded at compile time. Buffer-memory budget
+// = connections * (read buffer in bytes). `@feature(...)` tags the fn as
+// belonging to the "memory-budget" capability for downstream tooling.
+// ---------------------------------------------------------------------------
+
+@feature("memory-budget")
+func total_buffer_bytes() -> Int:
+    return read_buffer_kb * 1024 * max_connections
+
+@internal
+func describe_pool() -> String:
+    return "${worker_threads} workers x ${max_connections} conns (tls=${enable_tls})"
+
+// Index into the comptime lookup table. Returns the port or —1 if absent.
+
+func find_port(port: Int) -> Int:
+    for p in well_known_ports:
+        if p == port:
+            return p
+    return —1
+
+// ---------------------------------------------------------------------------
+// Demo driver. Everything printed here was fixed at compile time.
+// ---------------------------------------------------------------------------
+
+func main():
+    print("=== Comptime Config Demo ===")
+    print("max_connections : ${max_connections}")
+    print("worker_threads  : ${worker_threads}")
+    print("timeout_seconds : ${timeout_seconds}")
+    print("read_buffer_kb  : ${read_buffer_kb}")
+    print("enable_tls      : ${enable_tls}")
+    print("")
+    print("--- derived (const-folded) ---")
+    print("pool            : ${describe_pool()}")
+    print("total_buffer    : ${total_buffer_bytes()} bytes")
+    print("")
+    print("--- lookup table (compile-time materialised) ---")
+    print("well_known_ports: ${well_known_ports}")
+    print("default_port    : ${default_port}")
+    print("find 443        : ${find_port(443)}")
+    print("find 9999       : ${find_port(9999)}")
+    print("=== done ===")

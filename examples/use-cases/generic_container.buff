@@ -1,0 +1,180 @@
+// generic_container.buff - v1.26 real-use-case (T15 batch 5).
+//
+// Generic Stack<T> / Queue<T> sharing a `Container<T>` trait, plus bounded
+// generic helpers. Exercises:
+//   - user-defined generic structs: `struct Stack<T>`, `struct Queue<T>`
+//   - generic enums (typed empty-state): `enum Maybe<T>`
+//   - trait declarations: required signatures + default methods + supertraits
+//   - trait bounds on generic params: `<T: Clone>`, `<T: Clone + Container<T>>`
+//   - generic functions: monomorphized per call site (zero-cost static dispatch)
+//
+// Status: PURE BUFF. Lex / parse / typecheck exercised via `buff check`.
+// Trait impl lowering for user structs is codegen-deferred — see BUGS-FOUND.md.
+
+// ---------------------------------------------------------------------------
+// Generic Option-like helper — exercises `<T>` on user-defined enums.
+// ---------------------------------------------------------------------------
+
+enum Maybe<T> {
+    Just(T),
+    Empty,
+}
+
+// ---------------------------------------------------------------------------
+// Core collection trait. Required methods end with `;`; default methods have
+// a body that implementors inherit. `Peekable` extends Container via supertrait.
+// ---------------------------------------------------------------------------
+
+trait Container<T> {
+    func len(self) -> Int;
+    func is_empty(self) -> Bool {
+        return self.len() == 0
+    }
+    func peek(self) -> Maybe<T>;
+}
+
+trait Peekable<T> : Container<T> {
+    func drain_count(self) -> Int {
+        return self.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stack<T> — LIFO container backed by Vector<T>.
+// ---------------------------------------------------------------------------
+
+struct Stack<T>:
+    data: Vector<T>
+
+func Stack.new<T>(items: Vector<T>) -> Stack<T>:
+    return Stack.new(data: items)
+
+func Stack.empty<T>() -> Stack<T>:
+    return Stack.new(items: [])
+
+func Stack.push<T>(self, value: T):
+    self.data.push(value)
+
+func Stack.pop<T>(self) -> Maybe<T>:
+    if self.data.len() == 0:
+        return Maybe.Empty
+    return Maybe.Just(self.data.pop())
+
+func Stack.len(self) -> Int:
+    return self.data.len()
+
+func Stack.peek(self) -> Maybe<T>:
+    if self.data.len() == 0:
+        return Maybe.Empty
+    let last = self.data.len() — 1
+    return Maybe.Just(self.data[last])
+
+// ---------------------------------------------------------------------------
+// Queue<T> — FIFO container backed by Vector<T>.
+// ---------------------------------------------------------------------------
+
+struct Queue<T>:
+    data: Vector<T>
+
+func Queue.new<T>(items: Vector<T>) -> Queue<T>:
+    return Queue.new(data: items)
+
+func Queue.empty<T>() -> Queue<T>:
+    return Queue.new(items: [])
+
+func Queue.enqueue<T>(self, value: T):
+    self.data.push(value)
+
+func Queue.dequeue<T>(self) -> Maybe<T>:
+    if self.data.len() == 0:
+        return Maybe.Empty
+    let front = self.data[0]
+    self.data.remove(index: 0)
+    return Maybe.Just(front)
+
+func Queue.len(self) -> Int:
+    return self.data.len()
+
+func Queue.peek(self) -> Maybe<T>:
+    if self.data.len() == 0:
+        return Maybe.Empty
+    return Maybe.Just(self.data[0])
+
+// ---------------------------------------------------------------------------
+// Bounded generic helpers. Bounds appear after the param name as
+// `: Bound (+ Bound)*`. rustc monomorphizes — zero runtime cost.
+// ---------------------------------------------------------------------------
+
+// Drain a stack into a Vector, preserving LIFO pop order. `T: Clone` gates
+// copying out of the shared backing vector.
+
+func drain_stack<T: Clone>(stack: Stack<T>) -> Vector<T>:
+    let mut out = []
+    let mut i = stack.len() — 1
+    while i >= 0:
+        out.push(stack.data[i])
+        i = i — 1
+    return out
+
+// First element of a vector, or a caller-supplied default. `Clone + Container`
+// demonstrates the `+` bound separator.
+
+func first_or<T: Clone + Container<T>>(items: Vector<T>, default: T) -> T:
+    if items.len() == 0:
+        return default
+    return items[0]
+
+// ---------------------------------------------------------------------------
+// Pretty-print helper (no Debug bound needed).
+// ---------------------------------------------------------------------------
+
+func show_maybe(m) -> String:
+    match m:
+        Maybe.Just(v):
+            return "Just(${v})"
+        Maybe.Empty:
+            return "Empty"
+
+// ---------------------------------------------------------------------------
+// Demo driver.
+// ---------------------------------------------------------------------------
+
+func demo_stack():
+    print("--- Stack<Int> ---")
+    let s = Stack.empty()
+    s.push(10)
+    s.push(20)
+    s.push(30)
+    print("len after 3 pushes: ${s.len()}")
+    print("peek (top): ${show_maybe(s.peek())}")
+    let popped = s.pop()
+    print("pop: ${show_maybe(popped)}")
+    print("is_empty: ${s.is_empty()}")
+
+func demo_queue():
+    print("")
+    print("--- Queue<String> ---")
+    let q = Queue.new(["a", "b", "c"])
+    q.enqueue("d")
+    print("len after enqueue: ${q.len()}")
+    print("dequeue: ${show_maybe(q.dequeue())}")
+    print("dequeue: ${show_maybe(q.dequeue())}")
+    print("peek (front): ${show_maybe(q.peek())}")
+
+func demo_generic_helpers():
+    print("")
+    print("--- bounded generic helpers ---")
+    let s = Stack.new([1, 2, 3])
+    let drained = drain_stack(s)
+    print("drained LIFO: ${drained}")
+    let empty = Stack.empty()
+    let fallback = first_or([], default: 0)
+    print("first_or (empty → default): ${fallback}")
+
+func main():
+    print("=== Generic Container Demo ===")
+    demo_stack()
+    demo_queue()
+    demo_generic_helpers()
+    print("")
+    print("=== done ===")
