@@ -1,0 +1,1061 @@
+// Buff self-host port of `crates/buff-lang-lexer/src/lexer.rs` (T15).
+//
+// THE MAIN SCANNER. `tokenize` converts a Buff source string into a Vector<Token>
+// using a hand-rolled byte-scanner. Single-pass design with full source access
+// for accurate span and indentation tracking.
+//
+// Features mirrored 1:1 from the Rust reference:
+//   * 28 keywords + identifiers
+//   * Integer / float (3.14) / double (3.14d) / byte (0xFF, 0b1010) /
+//     decimal (99.90m) literals
+//   * Single- and multi-char operators
+//   * // line comments and /* /* nested */ */ block comments
+//   * Offside-rule indentation via IndentationTracker
+//   * String interpolation + triple-quoted + raw (r"...", r#"..."#) strings
+//   * \r\n / \r newline normalization (single Newline token)
+//   * UTF-8 identifiers and string bodies
+//   * Regex literal /pattern/ with previous-significant-token disambiguation
+//   * Char literal 'x' vs postfix adjoint ' (T57) disambiguation
+//   * Unicode mathematical operators (∑ ∏ √ ∈ ∉ ⊂ ≈ ≤ ≥ ≠ →)
+//   * All fallible paths return LexerError; no panics.
+//
+// FAITHFULNESS NOTES
+//   * Rust walks `source.as_bytes()`; Buff walks `LexerState.bytes` — a
+//     `Vector<Int>` of byte values (0-255). ASCII byte literals b'x' become
+//     named constants.
+//   * Rust's `&mut usize pos` out-parameters become `LexerState.pos`, mutated
+//     in place by the scan helpers (Buff hides references).
+//   * The `InterpLexer` callback struct + `&mut dyn LexCallback` is folded into
+//     a direct call: when an interpolation is found, `lex_range` is recursed
+//     with `track_indent = false` on the sub-range. This is behaviourally
+//     identical to the Rust trait (whose sole impl did exactly this) and avoids
+//     mutable-capture aliasing across a closure boundary. The standalone
+//     callback-based `scan_string` remains in `string_interp.buff`.
+//   * Rust's `u32::from_str_radix` / `f64::parse` map to manual radix helpers
+//     + `Int.from` / `Float.from` / `Double.from` (Buff convention §7).
+
+// --- ASCII byte constants the scanner reacts to ---
+let NUL_BYTE: Int = 0
+let TAB_BYTE: Int = 9
+let NEWLINE_BYTE: Int = 10
+let CR_BYTE: Int = 13
+let SPACE_BYTE: Int = 32
+let QUOTE_BYTE: Int = 34        // "
+let HASH_BYTE: Int = 35         // #
+let SQUOTE_BYTE: Int = 39       // '
+let STAR_BYTE: Int = 42         // *
+let SLASH_BYTE: Int = 47        // /
+let DIGIT_ZERO: Int = 48
+let DIGIT_NINE: Int = 57
+let COLON_BYTE: Int = 58        // :
+let UPPER_A: Int = 65
+let UPPER_B: Int = 66
+let UPPER_D: Int = 68
+let UPPER_F: Int = 70
+let UPPER_M: Int = 77
+let UPPER_X: Int = 88
+let LOWER_B: Int = 98
+let LOWER_D: Int = 100
+let LOWER_E: Int = 101
+let LOWER_F: Int = 102
+let LOWER_M: Int = 109
+let LOWER_R: Int = 114          // r
+let LOWER_U: Int = 117          // u
+let LOWER_X: Int = 120          // x
+let LBRACE_BYTE: Int = 123      // {
+let RBRACE_BYTE: Int = 125      // }
+let UNDERSCORE_BYTE: Int = 95
+let BACKSLASH_BYTE: Int = 92    // \
+let HIGH_BIT: Int = 128         // bytes >= 128 start a multi-byte UTF-8 seq
+
+// --- Scanner state (the mutable context threaded through every helper) ---
+struct LexerState:
+    bytes: Vector<Int>
+    source: String
+    pos: Int
+    end: Int
+    source_id: SourceId
+    out: Vector<Token>
+
+func lexer_state_new(source: String, source_id: SourceId) -> LexerState:
+    let bytes = string_to_bytes(source)
+    return LexerState.new(
+        bytes: bytes,
+        source: source,
+        pos: 0,
+        end: bytes.len(),
+        source_id: source_id,
+        out: Vector.new(),
+    )
+
+// Convert a Buff String into its UTF-8 byte sequence (Vector<Int> 0-255).
+func string_to_bytes(s: String) -> Vector<Int>:
+    let out = Vector.new()
+    let mut i = 0
+    while i < s.len():
+        out.push(s.byte_at(i))
+        i = i + 1
+    return out
+
+// --- Byte classification predicates (Rust's u8::is_ascii_* helpers) ---
+func is_ascii_digit(b: Int) -> Bool:
+    return b >= DIGIT_ZERO && b <= DIGIT_NINE
+
+func is_ascii_hex_digit(b: Int) -> Bool:
+    return is_ascii_digit(b) || (b >= UPPER_A && b <= UPPER_F) || (b >= LOWER_A && b <= LOWER_F)
+
+func is_ascii_alphabetic(b: Int) -> Bool:
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+
+func is_ascii_alphanumeric(b: Int) -> Bool:
+    return is_ascii_alphabetic(b) || is_ascii_digit(b)
+
+func is_ascii_whitespace(b: Int) -> Bool:
+    return b == SPACE_BYTE || b == TAB_BYTE || b == NEWLINE_BYTE || b == CR_BYTE
+
+// Build a String from a byte sub-range (Rust source[start..end].to_string()).
+func slice_to_string_lx(state: LexerState, start: Int, end: Int) -> String:
+    let mut out = ""
+    let mut i = start
+    while i < end:
+        out = out + Char.to_string(Int.to_char(state.bytes[i]))
+        i = i + 1
+    return out
+
+func lx_span(state: LexerState, a: Int, b: Int) -> Span:
+    return span_new(a, b, state.source_id)
+
+func push_kind(state: LexerState, kind: TokenKind, span: Span):
+    state.out.push(token_new(kind, span))
+
+// ===========================================================================
+// Entry point
+// ===========================================================================
+
+// Tokenize a Buff source string into a vector of tokens.
+//
+// The output always ends with Eof. Synthetic Indent / Dedent tokens are
+// emitted based on leading-whitespace changes between non-blank lines.
+func tokenize(source: String, source_id: SourceId) -> Result<Vector<Token>, LexerError>:
+    let state = lexer_state_new(source, source_id)
+    let tracker = indentation_tracker_new()
+
+    lex_range(state, 0, state.end, tracker, true)?
+
+    let eof_pos = state.end
+    let dedents = finalize(tracker)
+    let mut d = 0
+    while d < dedents.len():
+        push_kind(state, dedents[d], lx_span(state, eof_pos, eof_pos))
+        d = d + 1
+    push_kind(state, TokenKind.Eof, lx_span(state, eof_pos, eof_pos))
+    return Result.Ok(state.out)
+
+// ===========================================================================
+// lex_range — the main scan loop
+// ===========================================================================
+
+// Lex source[start..end], appending tokens to state.out.
+//
+// When called for an interpolation expression (track_indent = false), newlines
+// are skipped and no Indent/Dedent tokens are emitted.
+func lex_range(
+        state: LexerState,
+        start: Int,
+        end: Int,
+        tracker: IndentationTracker,
+        track_indent: Bool,
+    ) -> Result<(), LexerError>:
+    state.pos = start
+
+    // Per-line state. Three distinct flags because comments and tokens affect
+    // them differently (see the Rust reference for the full rationale).
+    let mut seen_token_on_line = false
+    let mut line_lead_ended = false
+    let mut indent_checked_this_line = false
+    // Captured leading-whitespace range for the current line, if any.
+    let mut pending_ws_start = start
+    let mut pending_ws_end = start
+    let mut has_pending_indent = false
+
+    while state.pos < end:
+        let tok_start = state.pos
+        let c = state.bytes[state.pos]
+
+        // --- Newline: \r\n | \n | \r -> single Newline token (CRLF norm) ---
+        if c == NEWLINE_BYTE || c == CR_BYTE:
+            state.pos = state.pos + 1
+            if c == CR_BYTE && state.pos < end && state.bytes[state.pos] == NEWLINE_BYTE:
+                state.pos = state.pos + 1
+            if track_indent && seen_token_on_line:
+                push_kind(state, TokenKind.Newline, lx_span(state, tok_start, state.pos))
+            seen_token_on_line = false
+            line_lead_ended = false
+            indent_checked_this_line = false
+            has_pending_indent = false
+            continue
+
+        // --- Whitespace. Captured as indent only in the leading phase. ---
+        if c == SPACE_BYTE || c == TAB_BYTE:
+            let ws_start = state.pos
+            while state.pos < end && (state.bytes[state.pos] == SPACE_BYTE || state.bytes[state.pos] == TAB_BYTE):
+                state.pos = state.pos + 1
+            if track_indent && not(line_lead_ended):
+                pending_ws_start = ws_start
+                pending_ws_end = state.pos
+                has_pending_indent = true
+            continue
+
+        // --- Line comment //... runs to end-of-line. ---
+        if c == SLASH_BYTE && state.pos + 1 < end && state.bytes[state.pos + 1] == SLASH_BYTE:
+            state.pos = state.pos + 2
+            while state.pos < end && state.bytes[state.pos] != NEWLINE_BYTE && state.bytes[state.pos] != CR_BYTE:
+                state.pos = state.pos + 1
+            // A comment ends the leading-whitespace phase but is NOT a token.
+            line_lead_ended = true
+            continue
+
+        // --- Block comment /* ... */ with nesting. ---
+        if c == SLASH_BYTE && state.pos + 1 < end && state.bytes[state.pos + 1] == STAR_BYTE:
+            let comment_start = state.pos
+            state.pos = state.pos + 2
+            let mut depth = 1
+            while state.pos < end && depth > 0:
+                if state.bytes[state.pos] == SLASH_BYTE && state.pos + 1 < end && state.bytes[state.pos + 1] == STAR_BYTE:
+                    depth = depth + 1
+                    state.pos = state.pos + 2
+                else if state.bytes[state.pos] == STAR_BYTE && state.pos + 1 < end && state.bytes[state.pos + 1] == SLASH_BYTE:
+                    depth = depth - 1
+                    state.pos = state.pos + 2
+                else:
+                    state.pos = state.pos + 1
+            if depth > 0:
+                return Result.Err(lexer_error_new("unterminated block comment", lx_span(state, comment_start, state.pos)))
+            line_lead_ended = true
+            continue
+
+        // --- About to emit a real token. Fire the indent check first. ---
+        if track_indent && not(indent_checked_this_line):
+            let ws_start = pending_ws_start
+            let ws_end = pending_ws_end
+            if not(has_pending_indent):
+                pending_ws_start = tok_start
+                pending_ws_end = tok_start
+            let indent_str = slice_to_string_lx(state, pending_ws_start, pending_ws_end)
+            let kinds = check_line(tracker, indent_str, state.source_id, pending_ws_start)?
+            let mut k = 0
+            while k < kinds.len():
+                push_kind(state, kinds[k], lx_span(state, pending_ws_start, pending_ws_end))
+                k = k + 1
+            indent_checked_this_line = true
+        seen_token_on_line = true
+        line_lead_ended = true
+
+        // --- T79: Regex literal /pattern/ (disambiguated from division). ---
+        if c == SLASH_BYTE
+                && not(state.pos + 1 < end && state.bytes[state.pos + 1] == 61)
+                && regex_context(state.out)
+                && state.pos + 1 < end
+                && not(is_ascii_whitespace(state.bytes[state.pos + 1])):
+            state.pos = scan_regex(state, state.pos)?
+            continue
+
+        // --- String literal / triple-quoted raw string ---
+        if c == QUOTE_BYTE:
+            if state.pos + 2 < end && state.bytes[state.pos + 1] == QUOTE_BYTE && state.bytes[state.pos + 2] == QUOTE_BYTE:
+                state.pos = scan_triple_string(state, state.pos)?
+                continue
+            state.pos = scan_string_tokens(state, state.pos)?
+            continue
+
+        // --- Char literal 'x' vs postfix Adjoint ' (T57) ---
+        if c == SQUOTE_BYTE:
+            if is_expression_context(state.out):
+                push_kind(state, TokenKind.Adjoint, lx_span(state, tok_start, tok_start + 1))
+                state.pos = state.pos + 1
+                continue
+            state.pos = scan_char(state, state.pos)?
+            continue
+
+        // --- T93: Raw string r"..." / r#"..."# ---
+        if c == LOWER_R && state.pos + 1 < end:
+            let mut hash_count = 0
+            let mut j = state.pos + 1
+            while j < end && state.bytes[j] == HASH_BYTE:
+                hash_count = hash_count + 1
+                j = j + 1
+            if j < end && state.bytes[j] == QUOTE_BYTE:
+                state.pos = scan_raw_string(state, state.pos, hash_count)?
+                continue
+
+        // --- Identifiers / keywords ---
+        if is_ascii_alphabetic(c) || c == UNDERSCORE_BYTE:
+            let id_start = state.pos
+            state.pos = state.pos + 1
+            while state.pos < end && (is_ascii_alphanumeric(state.bytes[state.pos]) || state.bytes[state.pos] == UNDERSCORE_BYTE):
+                state.pos = state.pos + 1
+            let s = slice_to_string_lx(state, id_start, state.pos)
+            let kind = match from_keyword(s) {
+                Option.Some(k) => k,
+                Option.None => TokenKind.Ident(s),
+            }
+            push_kind(state, kind, lx_span(state, id_start, state.pos))
+            continue
+
+        // --- Numbers ---
+        if is_ascii_digit(c):
+            let num_start = state.pos
+            let kind = scan_number(state, num_start)?
+            push_kind(state, kind, lx_span(state, num_start, state.pos))
+            continue
+
+        // --- Multi-char operators ---
+        match scan_operator(state, tok_start, end) {
+            Option.Some(kind) => {
+                push_kind(state, kind, lx_span(state, tok_start, state.pos))
+                continue,
+            }
+            Option.None => return (),
+        }
+
+        // --- Single-char delimiters / operators ---
+        match single_char_kind(c) {
+            Option.Some(kind) => {
+                state.pos = state.pos + 1
+                push_kind(state, kind, lx_span(state, tok_start, state.pos))
+                continue,
+            }
+            Option.None => return (),
+        }
+
+        // --- T57: Unicode mathematical operators ---
+        if c >= HIGH_BIT:
+            match scan_unicode_operator(state, state.pos, end) {
+                Option.Some(pair) => {
+                    state.pos = state.pos + pair.len
+                    push_kind(state, pair.kind, lx_span(state, tok_start, state.pos))
+                    continue,
+                }
+                Option.None => return (),
+            }
+        }
+
+        return Result.Err(lexer_error_unexpected_char(Int.to_char(c), lx_span(state, tok_start, tok_start + 1)))
+
+    return Result.Ok(())
+
+// ===========================================================================
+// T93: Raw string r"..." / r#"..."# scanning
+// ===========================================================================
+
+// Scan a raw string r"..." or r#"..."# (T93). No escape processing, no
+// interpolation — every byte is captured verbatim. Closing sequence is a "
+// followed by exactly hash_count # chars. Returns the position after the
+// closing delimiter; pushes StringStart / StringPart(text) / StringEnd.
+func scan_raw_string(state: LexerState, r_pos: Int, hash_count: Int) -> Result<Int, LexerError>:
+    // r_pos is at r, then hash_count # chars, then the opening ".
+    let quote_start = r_pos + 1 + hash_count
+    push_kind(state, TokenKind.StringStart, lx_span(state, r_pos, quote_start + 1))
+
+    let body_start = quote_start + 1
+    let mut i = body_start
+    while i < state.end:
+        if state.bytes[i] == QUOTE_BYTE:
+            // Is this " followed by exactly hash_count # chars?
+            let close_start = i
+            let mut close_end = i + 1
+            let mut matched = true
+            let mut n = 0
+            while n < hash_count:
+                if close_end < state.end && state.bytes[close_end] == HASH_BYTE:
+                    close_end = close_end + 1
+                else:
+                    matched = false
+                    break
+                n = n + 1
+            if matched:
+                let text = slice_to_string_lx(state, body_start, i)
+                if text.len() > 0:
+                    push_kind(state, TokenKind.StringPart(text), lx_span(state, body_start, i))
+                push_kind(state, TokenKind.StringEnd, lx_span(state, close_start, close_end))
+                return Result.Ok(close_end)
+        i = i + 1
+
+    return Result.Err(lexer_error_unterminated_string(lx_span(state, r_pos, state.end)))
+
+// ===========================================================================
+// T79: Regex literal /pattern/ scanning + /-disambiguation
+// ===========================================================================
+
+// Decide whether a / at the current position should begin a regex literal
+// rather than division. Uses the JS/Perl "previous token" heuristic: a regex
+// is valid where an expression primary is expected.
+func regex_context(out: Vector<Token>) -> Bool:
+    if out.len() == 0:
+        return true  // start of input -> expression context
+    let kind = out[out.len() - 1].kind
+    // Layout tokens indicate a statement boundary.
+    if kind == TokenKind.Newline || kind == TokenKind.Indent || kind == TokenKind.Dedent || kind == TokenKind.Eof:
+        return true
+    // Delimiters that open an expression slot.
+    if kind == TokenKind.LParen || kind == TokenKind.LBracket || kind == TokenKind.LBrace:
+        return true
+    if kind == TokenKind.Comma || kind == TokenKind.Colon || kind == TokenKind.Semicolon:
+        return true
+    if kind == TokenKind.InterpStart:
+        return true
+    // Assignment + arrow family.
+    if kind == TokenKind.Assign || kind == TokenKind.FatArrow || kind == TokenKind.Arrow:
+        return true
+    if kind == TokenKind.PlusEq || kind == TokenKind.MinusEq || kind == TokenKind.StarEq:
+        return true
+    if kind == TokenKind.SlashEq || kind == TokenKind.PercentEq:
+        return true
+    // Binary operators.
+    if kind == TokenKind.Plus || kind == TokenKind.Minus || kind == TokenKind.Star || kind == TokenKind.Slash:
+        return true
+    if kind == TokenKind.Percent || kind == TokenKind.EqEq || kind == TokenKind.NotEq:
+        return true
+    if kind == TokenKind.Lt || kind == TokenKind.Gt || kind == TokenKind.LtEq || kind == TokenKind.GtEq:
+        return true
+    if kind == TokenKind.AndAnd || kind == TokenKind.OrOr || kind == TokenKind.Pipe || kind == TokenKind.Amp:
+        return true
+    if kind == TokenKind.Caret || kind == TokenKind.Tilde || kind == TokenKind.Not:
+        return true
+    if kind == TokenKind.Question || kind == TokenKind.QuestionQuestion || kind == TokenKind.QuestionDot:
+        return true
+    if kind == TokenKind.PipeGt || kind == TokenKind.Shl || kind == TokenKind.Shr:
+        return true
+    if kind == TokenKind.DotDot || kind == TokenKind.DotDotEq || kind == TokenKind.Dot:
+        return true
+    // Keywords that introduce an expression next.
+    if kind == TokenKind.KwReturn || kind == TokenKind.KwIf || kind == TokenKind.KwElse:
+        return true
+    if kind == TokenKind.KwFor || kind == TokenKind.KwIn || kind == TokenKind.KwMatch:
+        return true
+    if kind == TokenKind.KwSpawn || kind == TokenKind.KwGuard:
+        return true
+    // Otherwise (after Ident, literal, RParen/RBracket/RBrace, KwTrue/KwFalse,
+    // or name-expecting keywords) -> division context.
+    return false
+
+// Scan a regex literal /pattern/. Captures the raw text BETWEEN the slashes
+// (excluding both delimiters) as RegexLit. A backslash escapes the next byte.
+// Newlines are NOT allowed inside. Returns the position after the closing /.
+func scan_regex(state: LexerState, slash_start: Int) -> Result<Int, LexerError>:
+    let body_start = slash_start + 1
+    let mut i = body_start
+    let mut escaped = false
+    while i < state.end:
+        let b = state.bytes[i]
+        if b == NEWLINE_BYTE || b == CR_BYTE:
+            return Result.Err(lexer_error_new(
+                "unterminated regex literal (no closing `/` before end of line)",
+                lx_span(state, slash_start, i),
+            ))
+        if escaped:
+            escaped = false
+        else if b == BACKSLASH_BYTE:
+            escaped = true
+        else if b == SLASH_BYTE:
+            let pattern = slice_to_string_lx(state, body_start, i)
+            if pattern.len() == 0:
+                return Result.Err(lexer_error_new("empty regex literal", lx_span(state, slash_start, i + 1)))
+            push_kind(state, TokenKind.RegexLit(pattern), lx_span(state, slash_start, i + 1))
+            return Result.Ok(i + 1)
+        i = i + 1
+    return Result.Err(lexer_error_new(
+        "unterminated regex literal (missing closing `/`)",
+        lx_span(state, slash_start, state.end),
+    ))
+
+// ===========================================================================
+// Char + triple-quote string scanning (T21)
+// ===========================================================================
+
+// Parse a Char-escape body (text between \ and the closing ').
+// Recognises: n r t \ ' " 0 and u{XXXX..}. Returns the decoded Char.
+func parse_char_escape(body: String, span: Span) -> Result<Char, LexerError>:
+    if body.len() == 0:
+        return Result.Err(lexer_error_new("empty escape sequence in char literal", span))
+    let first = body[0]
+    if first == 'n':
+        return Result.Ok('\n')
+    if first == 'r':
+        return Result.Ok('\r')
+    if first == 't':
+        return Result.Ok('\t')
+    if first == '\\':
+        return Result.Ok('\\')
+    if first == '\'':
+        return Result.Ok('\'')
+    if first == '"':
+        return Result.Ok('"')
+    if first == '0':
+        return Result.Ok('\0')
+    if first == 'u':
+        // \u{1F680} form. Remainder must be {...} (hex digits).
+        let rest = body.substring(1)
+        let hex = strip_braces(rest)
+        match parse_u32_radix(hex, 16) {
+            Result.Ok(code) => return Result.Ok(Int.to_char(code)),
+            Result.Err(_) => return Result.Err(lexer_error_new("invalid Unicode escape: \\u{" + hex + "}", span)),
+        }
+    return Result.Err(lexer_error_new("unknown char escape: \\" + Char.to_string(first), span))
+
+// Remove a leading '{' and trailing '}' (Rust trim_start_matches/trim_end_matches).
+func strip_braces(s: String) -> String:
+    let mut t = s
+    if t.len() > 0 && t[0] == '{':
+        t = t.substring(1)
+    if t.len() > 0 && t[t.len() - 1] == '}':
+        t = t.substring(0, t.len() - 1)
+    return t
+
+// Scan a Char literal starting at quote_start (position of '). Supports ASCII,
+// multi-byte Unicode scalars, common escapes, and \u{...}. Returns the position
+// after the closing '; pushes a single CharLit.
+func scan_char(state: LexerState, quote_start: Int) -> Result<Int, LexerError>:
+    // Sitting just past the opening '.
+    let i = quote_start + 1
+    if i >= state.end:
+        return Result.Err(lexer_error_new("unterminated char literal", lx_span(state, quote_start, state.end)))
+
+    // Empty literal '' is invalid.
+    if state.bytes[i] == SQUOTE_BYTE:
+        return Result.Err(lexer_error_new("empty char literal", lx_span(state, quote_start, i + 1)))
+
+    if state.bytes[i] == BACKSLASH_BYTE:
+        // Escape: interpret it, then require a closing '.
+        let esc_start = i
+        let after_backslash = i + 1
+        if after_backslash >= state.end:
+            return Result.Err(lexer_error_new("unterminated char literal escape", lx_span(state, esc_start, state.end)))
+        // Determine how many bytes the escape body occupies (excluding \).
+        let body_end = compute_escape_body_end(state, esc_start, after_backslash)
+        match body_end {
+            Result.Err(e) => return Result.Err(e),
+            Result.Ok(be) => {
+                let body = slice_to_string_lx(state, esc_start + 1, be)
+                let scalar = parse_char_escape(body, lx_span(state, esc_start, be))?
+                if be >= state.end || state.bytes[be] != SQUOTE_BYTE:
+                    return Result.Err(lexer_error_new(
+                        "char literal must contain exactly one Unicode scalar value",
+                        lx_span(state, quote_start, int_min(be, state.end)),
+                    ))
+                push_kind(state, TokenKind.CharLit(scalar), lx_span(state, quote_start, be + 1))
+                return Result.Ok(be + 1)
+            }
+        }
+    // Single scalar value (1..=4 bytes UTF-8).
+    let rest = slice_to_string_lx(state, i, state.end)
+    let ch = rest[0]
+    let consumed = Char.utf8_len(ch)
+    let after_scalar = i + consumed
+    if after_scalar >= state.end || state.bytes[after_scalar] != SQUOTE_BYTE:
+        return Result.Err(lexer_error_new(
+            "char literal must contain exactly one Unicode scalar value",
+            lx_span(state, quote_start, int_min(after_scalar, state.end)),
+        ))
+    push_kind(state, TokenKind.CharLit(ch), lx_span(state, quote_start, after_scalar + 1))
+    return Result.Ok(after_scalar + 1)
+
+// Compute the byte end (exclusive) of a char-escape body starting after \.
+// Handles u{...} (scan until }) and single-char escapes.
+func compute_escape_body_end(state: LexerState, esc_start: Int, after_backslash: Int) -> Result<Int, LexerError>:
+    if state.bytes[after_backslash] == LOWER_U:
+        // Expect u{XXXX...} — scan until matching }.
+        let mut j = after_backslash + 1
+        if j >= state.end || state.bytes[j] != LBRACE_BYTE:
+            return Result.Err(lexer_error_new(
+                "Unicode escape must use the form `\\u{XXXX}`",
+                lx_span(state, esc_start, int_min(j, state.end)),
+            ))
+        j = j + 1  // past {
+        while j < state.end && state.bytes[j] != RBRACE_BYTE:
+            j = j + 1
+        if j >= state.end:
+            return Result.Err(lexer_error_new(
+                "unterminated Unicode escape `\\u{...}`",
+                lx_span(state, esc_start, state.end),
+            ))
+        return Result.Ok(j + 1)  // one past }
+    // Single-char escape (n, r, t, \\, ', ", 0).
+    return Result.Ok(after_backslash + 1)
+
+func int_min(a: Int, b: Int) -> Int:
+    if a < b:
+        return a
+    return b
+
+func not(b: Bool) -> Bool:
+    if b:
+        return false
+    return true
+
+// Scan a triple-quoted raw string """...""" (T21). RAW: no escapes, no
+// interpolation. Returns the position after the closing """; pushes
+// StringStart / StringPart(text) / StringEnd.
+func scan_triple_string(state: LexerState, quote_start: Int) -> Result<Int, LexerError>:
+    push_kind(state, TokenKind.StringStart, lx_span(state, quote_start, quote_start + 3))
+    let body_start = quote_start + 3
+    let mut i = body_start
+    while i + 2 < state.end:
+        if state.bytes[i] == QUOTE_BYTE && state.bytes[i + 1] == QUOTE_BYTE && state.bytes[i + 2] == QUOTE_BYTE:
+            let text = slice_to_string_lx(state, body_start, i)
+            if text.len() > 0:
+                push_kind(state, TokenKind.StringPart(text), lx_span(state, body_start, i))
+            push_kind(state, TokenKind.StringEnd, lx_span(state, i, i + 3))
+            return Result.Ok(i + 3)
+        i = i + 1
+    return Result.Err(lexer_error_unterminated_string(lx_span(state, quote_start, state.end)))
+
+// ===========================================================================
+// Number scanning
+// ===========================================================================
+
+// Scan an integer / float / double / byte / decimal literal. Advances
+// state.pos to one past the last consumed digit/suffix; returns the TokenKind.
+func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>:
+    // Hex / binary prefixes.
+    if state.bytes[start] == DIGIT_ZERO && start + 1 < state.end:
+        let p = state.bytes[start + 1]
+        if p == LOWER_X || p == UPPER_X:
+            state.pos = start + 2
+            while state.pos < state.end && is_ascii_hex_digit(state.bytes[state.pos]):
+                state.pos = state.pos + 1
+            let s = slice_to_string_lx(state, start + 2, state.pos)
+            match parse_u32_radix(s, 16) {
+                Result.Ok(v) => return byte_lit(v, lx_span(state, start, state.pos)),
+                Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
+            }
+        if p == LOWER_B || p == UPPER_B:
+            state.pos = start + 2
+            while state.pos < state.end && (state.bytes[state.pos] == DIGIT_ZERO || state.bytes[state.pos] == 49):
+                state.pos = state.pos + 1
+            let s = slice_to_string_lx(state, start + 2, state.pos)
+            match parse_u32_radix(s, 2) {
+                Result.Ok(v) => return byte_lit(v, lx_span(state, start, state.pos)),
+                Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
+            }
+
+    // Integer part.
+    state.pos = start
+    while state.pos < state.end && is_ascii_digit(state.bytes[state.pos]):
+        state.pos = state.pos + 1
+
+    // Decimal point + fractional part?
+    if state.pos + 1 < state.end && state.bytes[state.pos] == 46 && is_ascii_digit(state.bytes[state.pos + 1]):
+        state.pos = state.pos + 1  // dot
+        while state.pos < state.end && is_ascii_digit(state.bytes[state.pos]):
+            state.pos = state.pos + 1
+        if state.pos < state.end && (state.bytes[state.pos] == LOWER_D || state.bytes[state.pos] == UPPER_D):
+            state.pos = state.pos + 1
+            let s = slice_to_string_lx(state, start, state.pos)
+            let trimmed = s.substring(0, s.len() - 1)
+            match Double.from(trimmed) {
+                Result.Ok(v) => return Result.Ok(TokenKind.DoubleLit(v)),
+                Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
+            }
+        if state.pos < state.end && (state.bytes[state.pos] == LOWER_M || state.bytes[state.pos] == UPPER_M):
+            // T20: 128-bit decimal literal. Carry RAW digit text (no suffix).
+            state.pos = state.pos + 1
+            let raw = slice_to_string_lx(state, start, state.pos - 1)
+            return Result.Ok(TokenKind.DecimalLit(raw))
+        let s = slice_to_string_lx(state, start, state.pos)
+        match Float.from(s) {
+            Result.Ok(v) => return Result.Ok(TokenKind.FloatLit(v)),
+            Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
+        }
+
+    // Integer-only with optional m/M suffix -> Decimal (T20).
+    if state.pos < state.end && (state.bytes[state.pos] == LOWER_M || state.bytes[state.pos] == UPPER_M):
+        state.pos = state.pos + 1
+        let raw = slice_to_string_lx(state, start, state.pos - 1)
+        return Result.Ok(TokenKind.DecimalLit(raw))
+
+    let s = slice_to_string_lx(state, start, state.pos)
+    match Int.from(s) {
+        Result.Ok(v) => return Result.Ok(TokenKind.IntLit(v)),
+        Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
+    }
+
+// Coerce a parsed u32 to a Byte (u8), erroring on overflow (> 255).
+func byte_lit(value: Int, span: Span) -> Result<TokenKind, LexerError>:
+    if value > 255:
+        return Result.Err(lexer_error_invalid_number(span))
+    return Result.Ok(TokenKind.ByteLit(Int.to_byte(value)))
+
+// ===========================================================================
+// Operator scanning
+// ===========================================================================
+
+// Scan multi-char operators (3-char then 2-char). Advances state.pos on match;
+// returns Option.Some(kind) or Option.None. High-bit bytes (UTF-8 lead) are
+// skipped here so the Unicode-operator branch handles them.
+func scan_operator(state: LexerState, start: Int, end: Int) -> Option<TokenKind>:
+    if state.bytes[start] >= HIGH_BIT:
+        return Option.None
+    // 3-char operators first (so ..= is not split into .. + =).
+    if start + 3 <= end:
+        let three = slice_to_string_lx(state, start, start + 3)
+        if three == "..=":
+            state.pos = start + 3
+            return Option.Some(TokenKind.DotDotEq)
+    if start + 2 <= end:
+        let two = slice_to_string_lx(state, start, start + 2)
+        let kind = match_operator_two(two)
+        match kind {
+            Option.Some(k) => {
+                state.pos = start + 2
+                return Option.Some(k)
+            }
+            Option.None => return Option.None,
+        }
+    return Option.None
+
+// Map a 2-char operator slice to its TokenKind (T70 ?. and T69 |> are here so
+// they match greedily before the single-char fallback).
+func match_operator_two(two: String) -> Option<TokenKind>:
+    if two == "..":
+        return Option.Some(TokenKind.DotDot)
+    if two == "==":
+        return Option.Some(TokenKind.EqEq)
+    if two == "!=":
+        return Option.Some(TokenKind.NotEq)
+    if two == "<=":
+        return Option.Some(TokenKind.LtEq)
+    if two == ">=":
+        return Option.Some(TokenKind.GtEq)
+    if two == "&&":
+        return Option.Some(TokenKind.AndAnd)
+    if two == "||":
+        return Option.Some(TokenKind.OrOr)
+    if two == "<<":
+        return Option.Some(TokenKind.Shl)
+    if two == ">>":
+        return Option.Some(TokenKind.Shr)
+    if two == "->":
+        return Option.Some(TokenKind.Arrow)
+    if two == "=>":
+        return Option.Some(TokenKind.FatArrow)
+    if two == "+=":
+        return Option.Some(TokenKind.PlusEq)
+    if two == "-=":
+        return Option.Some(TokenKind.MinusEq)
+    if two == "*=":
+        return Option.Some(TokenKind.StarEq)
+    if two == "/=":
+        return Option.Some(TokenKind.SlashEq)
+    if two == "%=":
+        return Option.Some(TokenKind.PercentEq)
+    if two == "??":
+        return Option.Some(TokenKind.QuestionQuestion)
+    // T70: null-conditional ?.
+    if two == "?.":
+        return Option.Some(TokenKind.QuestionDot)
+    // T69: pipeline |>
+    if two == "|>":
+        return Option.Some(TokenKind.PipeGt)
+    return Option.None
+
+// Map a single ASCII delimiter/operator byte to its TokenKind.
+func single_char_kind(c: Int) -> Option<TokenKind>:
+    if c == 43:
+        return Option.Some(TokenKind.Plus)        // +
+    if c == 45:
+        return Option.Some(TokenKind.Minus)       // -
+    if c == STAR_BYTE:
+        return Option.Some(TokenKind.Star)        // *
+    if c == SLASH_BYTE:
+        return Option.Some(TokenKind.Slash)       // /
+    if c == 37:
+        return Option.Some(TokenKind.Percent)     // %
+    if c == 60:
+        return Option.Some(TokenKind.Lt)          // <
+    if c == 62:
+        return Option.Some(TokenKind.Gt)          // >
+    if c == 33:
+        return Option.Some(TokenKind.Not)         // !
+    if c == 63:
+        return Option.Some(TokenKind.Question)    // ?
+    if c == 94:
+        return Option.Some(TokenKind.Caret)       // ^
+    if c == 124:
+        return Option.Some(TokenKind.Pipe)        // |
+    if c == 38:
+        return Option.Some(TokenKind.Amp)         // &
+    if c == 126:
+        return Option.Some(TokenKind.Tilde)       // ~
+    if c == 61:
+        return Option.Some(TokenKind.Assign)      // =
+    if c == 40:
+        return Option.Some(TokenKind.LParen)      // (
+    if c == 41:
+        return Option.Some(TokenKind.RParen)      // )
+    if c == LBRACE_BYTE:
+        return Option.Some(TokenKind.LBrace)      // {
+    if c == RBRACE_BYTE:
+        return Option.Some(TokenKind.RBrace)      // }
+    if c == 91:
+        return Option.Some(TokenKind.LBracket)    // [
+    if c == 93:
+        return Option.Some(TokenKind.RBracket)    // ]
+    if c == COLON_BYTE:
+        return Option.Some(TokenKind.Colon)       // :
+    if c == 44:
+        return Option.Some(TokenKind.Comma)       // ,
+    if c == 46:
+        return Option.Some(TokenKind.Dot)         // .
+    if c == 59:
+        return Option.Some(TokenKind.Semicolon)   // ;
+    if c == 64:
+        return Option.Some(TokenKind.At)          // @
+    return Option.None
+
+// ===========================================================================
+// T57: Unicode mathematical operator scanning
+// ===========================================================================
+
+// A candidate glyph -> token mapping result.
+struct UnicodeOp:
+    kind: TokenKind
+    len: Int
+
+// Pattern-match the source slice against the supported operator glyphs.
+// Pure-alias spellings (≤ ≥ ≠ →) return the EXISTING ASCII token kind so the
+// parser needs no new arms for them. Returns Some((kind, byte_len)) or None.
+func scan_unicode_operator(state: LexerState, pos: Int, end: Int) -> Option<UnicodeOp>:
+    // Each glyph is a 3-byte UTF-8 sequence (U+2200..U+27FF and U+2190..U+21FF).
+    let glyphs = unicode_operator_table()
+    let mut idx = 0
+    while idx < glyphs.len():
+        let entry = glyphs[idx]
+        if matches_glyph(state, pos, end, entry.bytes):
+            return Option.Some(UnicodeOp.new(kind: entry.kind, len: entry.bytes.len()))
+        idx = idx + 1
+    return Option.None
+
+struct GlyphEntry:
+    bytes: Vector<Int>
+    kind: TokenKind
+
+// The (glyph UTF-8 bytes, token) table. Byte sequences for each codepoint:
+//   ∑ U+2211 = [226, 136, 145]    ∏ U+220F = [226, 136, 143]
+//   √ U+221A = [226, 136, 154]    ∈ U+2208 = [226, 136, 136]
+//   ∉ U+2209 = [226, 136, 137]    ⊂ U+2282 = [226, 138, 130]
+//   ≈ U+2248 = [226, 137, 136]    ≤ U+2264 = [226, 137, 164]
+//   ≥ U+2265 = [226, 137, 165]    ≠ U+2260 = [226, 137, 160]
+//   → U+2192 = [226, 134, 146]
+func unicode_operator_table() -> Vector<GlyphEntry>:
+    let table = Vector.new()
+    table.push(GlyphEntry.new(bytes: byte3(226, 136, 145), kind: TokenKind.Sum))
+    table.push(GlyphEntry.new(bytes: byte3(226, 136, 143), kind: TokenKind.Product))
+    table.push(GlyphEntry.new(bytes: byte3(226, 136, 154), kind: TokenKind.Sqrt))
+    table.push(GlyphEntry.new(bytes: byte3(226, 136, 136), kind: TokenKind.InUni))
+    table.push(GlyphEntry.new(bytes: byte3(226, 136, 137), kind: TokenKind.NotInUni))
+    table.push(GlyphEntry.new(bytes: byte3(226, 138, 130), kind: TokenKind.SubsetUni))
+    table.push(GlyphEntry.new(bytes: byte3(226, 137, 136), kind: TokenKind.ApproxUni))
+    table.push(GlyphEntry.new(bytes: byte3(226, 137, 164), kind: TokenKind.LtEq))
+    table.push(GlyphEntry.new(bytes: byte3(226, 137, 165), kind: TokenKind.GtEq))
+    table.push(GlyphEntry.new(bytes: byte3(226, 137, 160), kind: TokenKind.NotEq))
+    table.push(GlyphEntry.new(bytes: byte3(226, 134, 146), kind: TokenKind.Arrow))
+    return table
+
+func byte3(a: Int, b: Int, c: Int) -> Vector<Int>:
+    let v = Vector.new()
+    v.push(a)
+    v.push(b)
+    v.push(c)
+    return v
+
+// Does the source at pos..end begin with the given glyph byte sequence?
+func matches_glyph(state: LexerState, pos: Int, end: Int, glyph: Vector<Int>) -> Bool:
+    if pos + glyph.len() > end:
+        return false
+    let mut i = 0
+    while i < glyph.len():
+        if state.bytes[pos + i] != glyph[i]:
+            return false
+        i = i + 1
+    return true
+
+// ===========================================================================
+// T57: Adjoint ' disambiguator
+// ===========================================================================
+
+// The apostrophe is overloaded between CharLit start and the postfix
+// adjoint/transpose operator. When ' follows an expression-ending token it is
+// the Adjoint operator; otherwise it begins a char literal.
+func is_expression_context(out: Vector<Token>) -> Bool:
+    if out.len() == 0:
+        return false
+    let kind = out[out.len() - 1].kind
+    match kind {
+        TokenKind.Ident(_) => return true,
+        TokenKind.RParen => return true,
+        TokenKind.RBracket => return true,
+        TokenKind.CharLit(_) => return true,
+        TokenKind.ByteLit(_) => return true,
+        TokenKind.IntLit(_) => return true,
+        TokenKind.FloatLit(_) => return true,
+        TokenKind.DoubleLit(_) => return true,
+        TokenKind.DecimalLit(_) => return true,
+        TokenKind.StringEnd => return true,
+        TokenKind.KwTrue => return true,
+        TokenKind.KwFalse => return true,
+        _ => return false,
+    }
+
+// ===========================================================================
+// String interpolation integration
+// ===========================================================================
+
+// Scan a string literal with interpolation starting at quote_start. This is the
+// lexer's integration of the generic scan_string (string_interp.buff): instead
+// of a callback trait, when an interpolation {expr} is found the lexer recurses
+// into `lex_range` with track_indent = false on the sub-range — exactly what
+// the Rust InterpLexer callback did. Returns the position after the closing ".
+func scan_string_tokens(state: LexerState, quote_start: Int) -> Result<Int, LexerError>:
+    push_kind(state, TokenKind.StringStart, lx_span(state, quote_start, quote_start + 1))
+
+    let mut i = quote_start + 1
+    let mut part_start = i
+
+    while i < state.end:
+        let b = state.bytes[i]
+        if b == QUOTE_BYTE:
+            flush_part_lx(state, part_start, i)
+            push_kind(state, TokenKind.StringEnd, lx_span(state, i, i + 1))
+            return Result.Ok(i + 1)
+        if b == BACKSLASH_BYTE:
+            if i + 1 >= state.end:
+                return Result.Err(lexer_error_unterminated_string(lx_span(state, quote_start, state.end)))
+            i = i + 2
+        else if b == LBRACE_BYTE:
+            flush_part_lx(state, part_start, i)
+            push_kind(state, TokenKind.InterpStart, lx_span(state, i, i + 1))
+            let after_brace = i + 1
+            let closing = find_matching_brace_lx(state, after_brace)?
+            // T81: split expr from spec at the first depth-0 ':'.
+            let split = split_interp_spec_lx(state, after_brace, closing)?
+            // Recurse: tokenize the interpolation expression (no indent tracking).
+            let dummy_tracker = indentation_tracker_new()
+            lex_range(state, after_brace, split.expr_end, dummy_tracker, false)?
+            match split.spec {
+                Option.Some(spec) => push_kind(state, TokenKind.InterpSpec(spec), lx_span(state, split.expr_end, closing)),
+                Option.None => return (),
+            }
+            push_kind(state, TokenKind.InterpEnd, lx_span(state, closing, closing + 1))
+            i = closing + 1
+            part_start = i
+        else if b == RBRACE_BYTE:
+            return Result.Err(lexer_error_new("unexpected '}' inside string literal", lx_span(state, i, i + 1)))
+        else:
+            i = i + 1
+
+    return Result.Err(lexer_error_unterminated_string(lx_span(state, quote_start, state.end)))
+
+// Emit a StringPart token for the accumulated raw bytes, if non-empty.
+func flush_part_lx(state: LexerState, start: Int, end: Int):
+    if end > start:
+        let text = slice_to_string_lx(state, start, end)
+        push_kind(state, TokenKind.StringPart(text), lx_span(state, start, end))
+
+// Find the matching } for the { preceding start (string_interp::find_matching_brace).
+func find_matching_brace_lx(state: LexerState, start: Int) -> Result<Int, LexerError>:
+    let mut depth = 1
+    let mut i = start
+    while i < state.end:
+        let b = state.bytes[i]
+        if b == LBRACE_BYTE:
+            depth = depth + 1
+            i = i + 1
+        else if b == RBRACE_BYTE:
+            depth = depth - 1
+            if depth == 0:
+                return Result.Ok(i)
+            i = i + 1
+        else if b == QUOTE_BYTE:
+            i = i + 1
+            while i < state.end && state.bytes[i] != QUOTE_BYTE:
+                if state.bytes[i] == BACKSLASH_BYTE && i + 1 < state.end:
+                    i = i + 2
+                else:
+                    i = i + 1
+            if i < state.end:
+                i = i + 1
+        else:
+            i = i + 1
+    return Result.Err(lexer_error_new(
+        "unterminated interpolation in string literal",
+        lx_span(state, start - 1, state.end),
+    ))
+
+// Split the inner text of ${...} at the first ':' at brace-depth 0
+// (string_interp::split_interp_spec). Returns InterpSplit { expr_end, spec }.
+func split_interp_spec_lx(state: LexerState, start: Int, closing: Int) -> Result<InterpSplit, LexerError>:
+    let mut depth = 0
+    let mut i = start
+    while i < closing:
+        let b = state.bytes[i]
+        if b == LBRACE_BYTE:
+            depth = depth + 1
+            i = i + 1
+        else if b == RBRACE_BYTE:
+            if depth == 0:
+                return Result.Ok(InterpSplit.new(expr_end: closing, spec: Option.None))
+            depth = depth - 1
+            i = i + 1
+        else if b == COLON_BYTE && depth == 0:
+            let spec = slice_to_string_lx(state, i + 1, closing)
+            return Result.Ok(InterpSplit.new(expr_end: i, spec: Option.Some(spec)))
+        else if b == QUOTE_BYTE:
+            i = i + 1
+            while i < closing && state.bytes[i] != QUOTE_BYTE:
+                if state.bytes[i] == BACKSLASH_BYTE && i + 1 < closing:
+                    i = i + 2
+                else:
+                    i = i + 1
+            if i < closing:
+                i = i + 1
+        else:
+            i = i + 1
+    return Result.Ok(InterpSplit.new(expr_end: closing, spec: Option.None))
+
+// ===========================================================================
+// Radix parsing (Rust u32::from_str_radix equivalent)
+// ===========================================================================
+
+// Parse a string of digits in the given base (2 or 16) into an Int.
+// Returns Result.Err on any invalid digit. Uppercase and lowercase hex accepted.
+func parse_u32_radix(digits: String, radix: Int) -> Result<Int, Error>:
+    let mut value = 0
+    let mut idx = 0
+    while idx < digits.len():
+        let d = digit_value(digits[idx], radix)
+        match d {
+            Option.Some(v) => {
+                value = value * radix + v
+                idx = idx + 1
+            }
+            Option.None => return Result.Error(invalid_number_error()),
+        }
+    return Result.Ok(value)
+
+// Numeric value of a hex/binary digit char in `radix`, or None if invalid.
+func digit_value(c: Char, radix: Int) -> Option<Int>:
+    let v = if c >= '0' && c <= '9':
+        Char.to_int(c) - Char.to_int('0')
+    else if c >= 'a' && c <= 'f':
+        Char.to_int(c) - Char.to_int('a') + 10
+    else if c >= 'A' && c <= 'F':
+        Char.to_int(c) - Char.to_int('A') + 10
+    else:
+        -1
+    if v < 0 || v >= radix:
+        return Option.None
+    return Option.Some(v)
+
+func invalid_number_error() -> Error:
+    return Error.new("invalid radix number")
