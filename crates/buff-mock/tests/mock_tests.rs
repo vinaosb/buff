@@ -62,6 +62,7 @@ fn mk_greeter_buff_trait() -> TraitDecl {
     TraitDecl {
         name: Ident::new("Greeter", dummy_span()),
         supertraits: Vec::new(),
+        associated_types: Vec::new(),
         required: vec![
             MethodSig {
                 name: Ident::new("greet", dummy_span()),

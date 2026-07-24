@@ -203,6 +203,12 @@ impl RustCodegen {
             Decl::ExtendBlock(_) => Err(self.unsupported(
                 "extend block codegen — use RustCodegen::generate (which emits trait + impl)",
             )),
+            // T75b: `impl Trait for Type { type X = T; fn ... }` lowers to
+            // a SINGLE Rust `syn::ItemImpl` with `trait_` set (a trait
+            // impl). Unlike `extend`, this variant emits ONE item, so it
+            // goes through the normal `lower_decl` path (no special-case
+            // in `generate()`).
+            Decl::ImplBlock(i) => Ok(Item::Impl(self.lower_impl_block(i)?)),
         }
     }
 
@@ -1090,9 +1096,49 @@ impl RustCodegen {
             }));
         }
 
-        // Build the trait item list: required methods first, then defaults.
-        let mut trait_items: Vec<syn::TraitItem> =
-            Vec::with_capacity(t.required.len() + t.defaults.len());
+        // Build the trait item list: associated types first (T75b), then
+        // required methods, then defaults. The capacity hint covers all
+        // three categories.
+        let mut trait_items: Vec<syn::TraitItem> = Vec::with_capacity(
+            t.associated_types.len() + t.required.len() + t.defaults.len(),
+        );
+
+        // T75b: ASSOCIATED TYPES — `type Item;` (or `type Item: Bound;`).
+        // Each lowers to a `syn::TraitItem::AssocType` (`type Item;`).
+        // Bounds are translated into a `Punctuated<TypeParamBound, +>`
+        // mirroring the supertrait encoding above. An associated type
+        // without bounds (the common case) emits a bare `type Item;`.
+        for at in &t.associated_types {
+            let mut bounds: Punctuated<syn::TypeParamBound, syn::Token![+]> = Punctuated::new();
+            for b in &at.bounds {
+                let b_name = match b {
+                    TypeRef::Named { name, .. } => &name.name,
+                    _ => {
+                        return Err(self.unsupported(
+                            "associated-type bound that is not a simple named type (generic bounds are deferred)",
+                        ));
+                    }
+                };
+                let path = syn::Path::from(Ident::new(b_name, ProcSpan::call_site()));
+                bounds.push(syn::TypeParamBound::Trait(syn::TraitBound {
+                    paren_token: None,
+                    modifier: syn::TraitBoundModifier::None,
+                    lifetimes: None,
+                    path,
+                }));
+            }
+            trait_items.push(syn::TraitItem::Type(syn::TraitItemType {
+                attrs: Vec::new(),
+                type_token: Default::default(),
+                ident: ast_ident_to_syn(&at.name),
+                generics: Default::default(),
+                colon_token: (!bounds.is_empty()).then(Default::default),
+                bounds,
+                // `default: None` → no default type (implementors MUST bind).
+                default: None,
+                semi_token: Default::default(),
+            }));
+        }
 
         // REQUIRED methods — bodyless signatures.
         for req in &t.required {
@@ -1139,6 +1185,125 @@ impl RustCodegen {
             supertraits,
             brace_token: Default::default(),
             items: trait_items,
+        })
+    }
+
+    /// T75b: lower a Buff [`buff_lang_ast::ImplBlock`] to a Rust
+    /// [`syn::ItemImpl`] with `trait_` set — a trait-impl (not an
+    /// inherent impl).
+    ///
+    /// Emits (conceptually):
+    ///
+    /// ```ignore
+    /// // Buff:
+    /// //   trait Container { type Item; fn get(i: Int) -> Item; }
+    /// //   struct Box { value: Int }
+    /// //   impl Container for Box {
+    /// //       type Item = Int;
+    /// //       fn get(i: Int) -> Int { return self.value }
+    /// //   }
+    /// // Rust:
+    /// impl Container for Box {
+    ///     type Item = i64;
+    ///     fn get(&self, i: i64) -> i64 { self.value }
+    /// }
+    /// ```
+    ///
+    /// # Member lowering
+    ///
+    /// - **Associated-type bindings** (`type Item = T;`) become
+    ///   `syn::ImplItem::AssocType` items — one per binding. The
+    ///   `eq_token` and `ty` fields carry the concrete type choice.
+    /// - **Method implementations** (`fn ... { body }`) become
+    ///   `syn::ImplItem::Fn` items via [`Self::lower_func`] (same path as
+    ///   extend-block methods — full move-analysis, signature, body).
+    ///
+    /// # `&self` receiver
+    ///
+    /// Same rewrite as [`Self::lower_extend_block_items`]: a first param
+    /// named `self` is converted to a bare `FnArg::Receiver` so the
+    /// generated Rust reads `fn get(&self, ...)` instead of
+    /// `fn get(self: Box, ...)`. The receiver is borrowed (`&self`) by
+    /// default — same convention as the extend-block path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CodegenError`] (via [`Self::unsupported`]) when:
+    /// - the trait name is not a simple [`TypeRef::Named`] (generic trait
+    ///   impls are deferred),
+    /// - the target type is not a simple [`TypeRef::Named`] (generic
+    ///   targets are deferred),
+    /// - any method body fails to lower.
+    pub(super) fn lower_impl_block(
+        &mut self,
+        i: &buff_lang_ast::ImplBlock,
+    ) -> Result<syn::ItemImpl, CodegenError> {
+        // Trait name — must be a simple named type today. Generic trait
+        // impls (`impl Iterable<Int> for Vec<Int>`) are deferred.
+        let trait_path = match &i.trait_name {
+            TypeRef::Named { name, .. } => {
+                syn::Path::from(Ident::new(&name.name, ProcSpan::call_site()))
+            }
+            _ => {
+                return Err(self.unsupported(
+                    "impl block with non-named trait name (generic trait impls are deferred)",
+                ));
+            }
+        };
+        // Target type — must be a simple named type today.
+        let target_type = self.ast_typeref_to_syn(&i.target)?;
+
+        // Build the impl-items list: associated-type bindings first (T75b),
+        // then method implementations. Capacity hint covers both.
+        let mut impl_items: Vec<syn::ImplItem> =
+            Vec::with_capacity(i.type_bindings.len() + i.methods.len());
+
+        // T75b: ASSOCIATED-TYPE BINDINGS — `type Item = T;`. Each becomes
+        // a `syn::ImplItem::Type` carrying the concrete type choice.
+        for b in &i.type_bindings {
+            let ty = self.ast_typeref_to_syn(&b.target)?;
+            impl_items.push(syn::ImplItem::Type(syn::ImplItemType {
+                attrs: Vec::new(),
+                vis: Visibility::Inherited,
+                defaultness: None,
+                type_token: Default::default(),
+                ident: ast_ident_to_syn(&b.name),
+                generics: Default::default(),
+                eq_token: Default::default(),
+                ty,
+                semi_token: Default::default(),
+            }));
+        }
+
+        // METHOD IMPLEMENTATIONS — `fn ... { body }`. Reuse lower_func
+        // (the same path used by extend-block methods) so move-analysis,
+        // signature rewriting, and async handling all apply uniformly.
+        for method in &i.methods {
+            let item_fn = self.lower_func(method)?;
+            let sig = rewrite_self_receiver(item_fn.sig);
+            impl_items.push(syn::ImplItem::Fn(syn::ImplItemFn {
+                attrs: item_fn.attrs,
+                vis: Visibility::Inherited,
+                defaultness: None,
+                sig,
+                block: *item_fn.block,
+            }));
+        }
+
+        // Assemble the trait-impl. `trait_` set to
+        // `Some((None, path, For))` makes this a trait-impl (vs an
+        // inherent impl when `trait_` is `None`). The `None` for the bang
+        // means "implementing" (vs `!` for negative impls).
+        Ok(syn::ItemImpl {
+            attrs: Vec::new(),
+            defaultness: None,
+            unsafety: None,
+            generics: Default::default(),
+            impl_token: Default::default(),
+            trait_: Some((None, trait_path, Default::default())),
+            self_ty: Box::new(target_type),
+            brace_token: Default::default(),
+            items: impl_items,
         })
     }
 

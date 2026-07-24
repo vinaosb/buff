@@ -590,6 +590,7 @@ mod tests {
         TraitDecl {
             name: Ident::new("Greeter", dummy_span()),
             supertraits: Vec::new(),
+            associated_types: Vec::new(),
             required: vec![
                 MethodSig {
                     name: Ident::new("greet", dummy_span()),

@@ -27,8 +27,9 @@ use buff_lang_lexer::TokenKind;
 use crate::options::Edition;
 use crate::stmt::{
     parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl, parse_extern_crate_decl,
-    parse_extern_func_decl_with_abi, parse_func_decl, parse_import_decl, parse_struct_decl,
-    parse_trait_decl,
+
+    parse_extern_func_decl_with_abi, parse_func_decl, parse_impl_decl, parse_import_decl,
+    parse_struct_decl, parse_trait_decl,
 };
 use crate::stream::TokenStream;
 
@@ -228,6 +229,25 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
             let t = parse_trait_decl(stream)?;
             Ok(Some(Decl::TraitDecl(t)))
         }
+        // T75b: `impl Trait for Type { type X = T; fn ... { } }` — trait
+        // implementation block. Supplies concrete associated-type bindings
+        // and method bodies for a declared trait. Codegen lowers to a
+        // single Rust `syn::ItemImpl` with `trait_` set (a trait-impl, not
+        // an inherent impl).
+        Some(TokenKind::KwImpl) => {
+            if saw_attributes {
+                let span = stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span());
+                return Err(ParseError::new(Diagnostic::error(
+                    "attributes are not supported on `impl` declarations",
+                    span,
+                )));
+            }
+            let i = parse_impl_decl(stream)?;
+            Ok(Some(Decl::ImplBlock(i)))
+        }
         // T35: attributes were present but the next token is not a
         // recognised attribute-attachable declaration. This is a parse
         // error (e.g. `@test let x = 1` or `@test` at EOF).
@@ -280,6 +300,7 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
 /// | `@name ... func`      | [`Decl::FuncDecl`] with `attributes` populated (T35 — `buff test`) |
 /// | `extend TYPE { fn ... }` | [`Decl::ExtendBlock`] (T75 — extension methods) |
 /// | `trait Name [: Super] { fn ...; fn ... { } }` | [`Decl::TraitDecl`] (T93 — traits with defaults + inheritance) |
+/// | `impl Trait for Type { type X = T; fn ... { } }` | [`Decl::ImplBlock`] (T75b — associated types in traits) |
 ///
 /// Any other token at top level is an error — statements such as
 /// `let`/`return`/`if` belong inside a function body, not at module scope.

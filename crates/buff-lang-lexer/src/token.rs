@@ -121,6 +121,24 @@ pub enum TokenKind {
     /// end). A single expression is deferred in v0.5; a deferred BLOCK is a
     /// future extension.
     KwDefer,
+    /// `impl Trait for Type { ... }` trait-implementation block (T75b —
+    /// associated types in traits).
+    ///
+    /// Implements a declared [`buff_lang_ast::TraitDecl`] for a target type,
+    /// supplying bodies for required methods and bindings for associated
+    /// types. The body uses braces (same as `trait`/`extend`) and contains
+    /// a mix of:
+    ///
+    /// - `type Item = T;` — associated-type bindings (one per associated
+    ///   type declared by the trait).
+    /// - `func name(...) -> Ret { body }` — method implementations (one
+    ///   per required method; default methods may be overridden).
+    ///
+    /// Lowers to a Rust `syn::ItemImpl` with `trait_` set to
+    /// `Some((None, Path, For))` so it is a trait-impl (not an inherent
+    /// impl). Associated-type bindings become `syn::ImplItem::AssocType`
+    /// entries; method impls become `syn::ImplItem::Fn`.
+    KwImpl,
 
     // --- Operators ---
     DotDot,
@@ -267,6 +285,7 @@ impl TokenKind {
             "guard" => Some(Self::KwGuard),
             "extend" => Some(Self::KwExtend),
             "defer" => Some(Self::KwDefer),
+            "impl" => Some(Self::KwImpl),
             _ => None,
         }
     }
@@ -303,6 +322,7 @@ impl TokenKind {
                 | Self::KwGuard
                 | Self::KwExtend
                 | Self::KwDefer
+                | Self::KwImpl
         )
     }
 
@@ -311,7 +331,7 @@ impl TokenKind {
         &[
             "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
             "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-            "true", "false", "extern", "unsafe", "guard", "extend", "defer",
+            "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
         ]
     }
 }
@@ -368,6 +388,7 @@ impl fmt::Display for TokenKind {
             Self::KwGuard => write!(f, "guard"),
             Self::KwExtend => write!(f, "extend"),
             Self::KwDefer => write!(f, "defer"),
+            Self::KwImpl => write!(f, "impl"),
             // Operators
             Self::DotDot => write!(f, ".."),
             Self::DotDotEq => write!(f, "..="),

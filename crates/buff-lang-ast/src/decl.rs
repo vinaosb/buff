@@ -108,8 +108,32 @@ pub enum Decl {
     ///
     /// v0.5 single extend-block per target type is the common case.
     /// Multi-block merging (two `extend String { ... }` blocks for the
-    /// same target) and generic targets (`extend Vector<T>`) are deferred.
+    /// same target type) and generic targets (`extend Vector<T>`) are deferred.
     ExtendBlock(ExtendBlock),
+    /// An `impl Trait for Type { ... }` trait-implementation block
+    /// (T75b — associated types in traits).
+    ///
+    /// Implements a declared [`TraitDecl`] for a target type. The body
+    /// supplies:
+    ///
+    /// - **Associated-type bindings**: `type Item = T;` — one per
+    ///   associated type declared by the trait ([`ImplBlock::type_bindings`]).
+    /// - **Method implementations**: `func name(...) -> Ret { body }` —
+    ///   one per required method; default methods may be overridden
+    ///   ([`ImplBlock::methods`]).
+    ///
+    /// Lowers to a single Rust `syn::ItemImpl` with `trait_` set to
+    /// `Some((None, trait_path, For))` — a trait-impl, not an inherent
+    /// impl. The associated-type bindings become `syn::ImplItem::AssocType`
+    /// items; the methods become `syn::ImplItem::Fn` items.
+    ///
+    /// This is the SECOND `Decl` variant that lowers to a Rust `ItemImpl`
+    /// (the first was [`Decl::ExtendBlock`]); however, unlike
+    /// [`Decl::ExtendBlock`], [`Decl::ImplBlock`] lowers to a SINGLE
+    /// top-level item, so it does NOT need the multi-item special-case in
+    /// [`RustCodegen::generate`] — it goes through the normal `lower_decl`
+    /// path.
+    ImplBlock(ImplBlock),
 }
 
 impl fmt::Display for Decl {
@@ -126,6 +150,7 @@ impl fmt::Display for Decl {
             Decl::ExternCrateDecl(d) => write!(f, "{d}"),
             Decl::ExternFuncDecl(d) => write!(f, "{d}"),
             Decl::ExtendBlock(d) => write!(f, "{d}"),
+            Decl::ImplBlock(d) => write!(f, "{d}"),
         }
     }
 }
@@ -831,6 +856,21 @@ pub struct TraitDecl {
     /// supertraits. Stored as [`TypeRef::Named`] (today always a bare name;
     /// generic supertraits like `trait Foo : Bar<Int>` are deferred).
     pub supertraits: Vec<TypeRef>,
+    /// ASSOCIATED TYPES declared inside the trait body via `type Item;`
+    /// (T75b — associated types in traits). Each is a placeholder name
+    /// that implementors of the trait MUST bind via
+    /// `type Item = ConcreteType;` in their [`ImplBlock`]. Methods of the
+    /// trait (both required and default) may reference the associated-type
+    /// name as a [`TypeRef::Named`] in their signatures/bodies; the
+    /// codegen-lowered Rust trait declares them as `type Item;` items
+    /// (`syn::TraitItemType`), and the lowered trait-impl rewrites each
+    /// reference to the bound concrete type at codegen time.
+    ///
+    /// Stored BEFORE [`required`](Self::required) / [`defaults`](Self::defaults)
+    /// in the trait body — the canonical Rust idiom is to list associated
+    /// types first. The parser accepts them in any order (a `type Item;`
+    /// may appear between two `fn` members).
+    pub associated_types: Vec<AssociatedType>,
     /// REQUIRED (bodyless) method signatures — `fn name(params) -> Ret;`.
     /// Implementors of the trait MUST provide a body for each. Stored as
     /// [`MethodSig`] (signature only, no body).
@@ -858,6 +898,13 @@ impl fmt::Display for TraitDecl {
         }
         f.write_str(" { ")?;
         let mut first = true;
+        for at in &self.associated_types {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            write!(f, "{at}")?;
+        }
         for req in &self.required {
             if !first {
                 f.write_str(", ")?;
@@ -908,6 +955,180 @@ impl fmt::Display for MethodSig {
             write!(f, " -> {rt}")?;
         }
         f.write_str(";")
+    }
+}
+
+/// An ASSOCIATED TYPE declaration inside a trait body (T75b — associated
+/// types in traits).
+///
+/// Represents the `type Item;` (or `type Item: Bound;`) form inside a
+/// trait body. Implementors of the trait MUST supply a concrete binding
+/// (`type Item = T;`) in their [`ImplBlock`]. Methods of the trait may
+/// reference the associated-type name as a [`TypeRef::Named`] in their
+/// signatures and bodies.
+///
+/// Stored in [`TraitDecl::associated_types`]; lowered to a
+/// `syn::TraitItemType` (`type Item;`) at codegen time.
+///
+/// # Bounds
+///
+/// The `bounds` field carries optional trait bounds (`type Item: Clone + Debug`
+/// → `bounds = [Clone, Debug]`). The parser accepts but currently does
+/// NOT enforce bounds at type-check time — they are passed through to the
+/// lowered Rust trait item unchanged (rustc enforces them). An empty
+/// `bounds` vec means "any type" (the common case).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssociatedType {
+    /// The associated-type name (`type Item` → `"Item"`).
+    pub name: Ident,
+    /// Optional trait bounds declared after `:` (`type Item: Clone` →
+    /// `[Clone]`). Each bound is a [`TypeRef::Named`] today (the same
+    /// shape used for supertraits). Empty when no bounds are declared.
+    pub bounds: Vec<TypeRef>,
+    pub span: Span,
+}
+
+impl fmt::Display for AssociatedType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "type {}", self.name)?;
+        if !self.bounds.is_empty() {
+            f.write_str(": ")?;
+            for (i, b) in self.bounds.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(" + ")?;
+                }
+                write!(f, "{b}")?;
+            }
+        }
+        f.write_str(";")
+    }
+}
+
+/// An ASSOCIATED-TYPE BINDING inside an [`ImplBlock`] (T75b — associated
+/// types in traits).
+///
+/// Represents the `type Item = ConcreteType;` form inside an impl block.
+/// Each binding MUST match (by name) an [`AssociatedType`] declared in the
+/// trait being implemented. The `target` is the concrete [`TypeRef`] the
+/// implementor chose for that associated type.
+///
+/// Lowered to a `syn::ImplItem::AssocType` (`type Item = T;`) at codegen
+/// time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssociatedTypeBinding {
+    /// The associated-type name being bound (`type Item = T` → `"Item"`).
+    /// MUST match (by name) an [`AssociatedType::name`] in the implemented
+    /// trait.
+    pub name: Ident,
+    /// The concrete type assigned to this associated type
+    /// (`type Item = Int` → `Int`).
+    pub target: TypeRef,
+    pub span: Span,
+}
+
+impl fmt::Display for AssociatedTypeBinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "type {} = {};", self.name, self.target)
+    }
+}
+
+/// An `impl Trait for Type { ... }` trait-implementation block (T75b —
+/// associated types in traits).
+///
+/// Implements a declared [`TraitDecl`] for a target type. The body carries
+/// the concrete associated-type bindings (`type Item = T;`) and method
+/// implementations (`fn ... { body }`) that satisfy the trait's required
+/// surface.
+///
+/// # Codegen target
+///
+/// Lowers to a Rust `syn::ItemImpl` with `trait_` set to
+/// `Some((None, trait_path, For))` so it is a trait-impl (not an inherent
+/// impl). Associated-type bindings become `syn::ImplItem::AssocType` items;
+/// method impls become `syn::ImplItem::Fn` items.
+///
+/// # Example
+///
+/// ```text
+/// // Buff:
+/// trait Container {
+///     type Item;
+///     func get(index: Int) -> Item;
+/// }
+/// struct Box {
+///     value: Int,
+/// }
+/// impl Container for Box {
+///     type Item = Int;
+///     func get(index: Int) -> Int {
+///         return self.value
+///     }
+/// }
+/// // Rust:
+/// trait Container {
+///     type Item;
+///     fn get(&self, index: i64) -> Self::Item;
+/// }
+/// impl Container for Box {
+///     type Item = i64;
+///     fn get(&self, index: i64) -> i64 {
+///         self.value
+///     }
+/// }
+/// ```
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T75b — new Decl variant
+///
+/// `Decl::ImplBlock(ImplBlock)` is **purely additive** (no existing
+/// variant changed). All `match` expressions on [`Decl`] across the
+/// codebase gained a `Decl::ImplBlock { .. }` arm (or fell through an
+/// existing `_ =>` catch-all). The codegen pass emits a SINGLE
+/// `syn::ItemImpl` per block (unlike [`Decl::ExtendBlock`] which emits
+/// two items), so no special multi-item handling is needed in
+/// [`RustCodegen::generate`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplBlock {
+    /// The trait being implemented. Stored as a [`TypeRef::Named`] today
+    /// (always a bare trait name like `Container`; generic trait impls
+    /// like `impl Iterable<Int> for Vec<Int>` are deferred).
+    pub trait_name: TypeRef,
+    /// The target type the trait is being implemented FOR. Stored as a
+    /// [`TypeRef::Named`] today (always a bare type name; generic targets
+    /// like `impl Foo for Vec<Int>` are deferred).
+    pub target: TypeRef,
+    /// Associated-type bindings (`type Item = T;`). Each binding MUST
+    /// match (by name) an [`AssociatedType`] declared in the implemented
+    /// trait. May be empty if the trait declares no associated types.
+    pub type_bindings: Vec<AssociatedTypeBinding>,
+    /// Method implementations (`fn name(...) -> Ret { body }`). Each is
+    /// a full [`FuncDecl`] (parsed via the shared `parse_func_decl`).
+    /// Bodies are required — there is no bodyless form in an impl block
+    /// (unlike trait bodies which support `fn ...;`).
+    pub methods: Vec<FuncDecl>,
+    pub span: Span,
+}
+
+impl fmt::Display for ImplBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ImplBlock({} for {} {{ ", self.trait_name, self.target)?;
+        let mut first = true;
+        for b in &self.type_bindings {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            write!(f, "{b}")?;
+        }
+        for m in &self.methods {
+            if !first {
+                f.write_str(", ")?;
+            }
+            first = false;
+            write!(f, "{m}")?;
+        }
+        f.write_str(" })")
     }
 }
 

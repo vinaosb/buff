@@ -64,6 +64,111 @@ impl UserGenericDecls {
     }
 }
 
+/// A registry of trait implementations (T75b — associated types in traits).
+///
+/// Maps `(trait_name, target_type_name)` pairs to their associated-type
+/// bindings, so that a reference like `Container::Item` (for some target
+/// type known to implement `Container`) can be resolved to the concrete
+/// [`TypeRef`] the implementor chose.
+///
+/// Built by walking the top-level `Decl::ImplBlock`s once; consulted by
+/// [`TypeInferencer::resolve_associated_type`] so a trait method return
+/// type like `Item` (where `Item` is an associated type of the trait being
+/// implemented) can be substituted with the concrete binding. The
+/// codegen-rust pass also consults this registry when lowering trait
+/// method signatures that reference associated types.
+///
+/// # Why names, not TypeRefs
+///
+/// The registry keys on PLAIN STRING names (`"Container"`, `"Box"`) rather
+/// than full [`TypeRef`]s. This keeps the lookup O(1) and avoids the
+/// pattern-matching overhead of destructuring `TypeRef::Named` at every
+/// query site. Generic trait impls (`impl Iterable<Int> for Vec<Int>`)
+/// are deferred — when they arrive, the key shape will widen to include
+/// the generic arguments.
+///
+/// # Migration: purely additive
+///
+/// T75b introduces this registry as a NEW field on [`TypeInferencer`],
+/// defaulting to empty. Existing inferencer behaviour is unchanged when
+/// no `ImplBlock`s are registered (every lookup returns `None`, same as
+/// the pre-T75b "unknown associated type" fallback).
+#[derive(Debug, Clone, Default)]
+pub struct TraitImplRegistry {
+    /// `(trait_name, target_type_name) -> { assoc_type_name -> TypeRef }`.
+    /// A `BTreeMap` of `BTreeMap`s for deterministic iteration order
+    /// (matches the project-wide BTreeMap preference for codegen
+    /// determinism — see the codegen-rust AGENTS.md).
+    inner: BTreeMap<(String, String), BTreeMap<String, TypeRef>>,
+}
+
+impl TraitImplRegistry {
+    /// Build an empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register an `impl Trait for Target` block's associated-type
+    /// bindings. Each `(trait, target)` pair may be registered once;
+    /// re-registration with the same pair overwrites (mirrors Rust's
+    /// "coherence" rule, though we do not enforce it — rustc will).
+    ///
+    /// Trait and target names are extracted from the [`ImplBlock`]'s
+    /// [`TypeRef::Named`] fields; non-named shapes (generic trait impls)
+    /// are silently skipped (deferred feature).
+    pub fn register_impl_block(&mut self, impl_block: &buff_lang_ast::ImplBlock) {
+        let trait_name = match &impl_block.trait_name {
+            TypeRef::Named { name, .. } => name.name.clone(),
+            // Generic trait impls are deferred — skip silently.
+            _ => return,
+        };
+        let target_name = match &impl_block.target {
+            TypeRef::Named { name, .. } => name.name.clone(),
+            // Generic targets are deferred — skip silently.
+            _ => return,
+        };
+        let bindings = self
+            .inner
+            .entry((trait_name, target_name))
+            .or_default();
+        for b in &impl_block.type_bindings {
+            bindings.insert(b.name.name.clone(), b.target.clone());
+        }
+    }
+
+    /// Bulk-register every `Decl::ImplBlock` in `decls`. Convenience for
+    /// drivers that walk the top-level decl list once.
+    pub fn register_from_decls<'a>(&mut self, decls: impl IntoIterator<Item = &'a buff_lang_ast::Decl>) {
+        for decl in decls {
+            if let buff_lang_ast::Decl::ImplBlock(impl_block) = decl {
+                self.register_impl_block(impl_block);
+            }
+        }
+    }
+
+    /// Resolve an associated-type reference. Given a trait name
+    /// (`"Container"`), a target type that is known to implement that
+    /// trait (`"Box"`), and an associated-type name (`"Item"`), returns
+    /// the concrete [`TypeRef`] the implementor chose, or `None` if no
+    /// matching impl is registered.
+    pub fn resolve_associated_type(
+        &self,
+        trait_name: &str,
+        target_name: &str,
+        assoc_name: &str,
+    ) -> Option<&TypeRef> {
+        self.inner
+            .get(&(trait_name.to_string(), target_name.to_string()))
+            .and_then(|bindings| bindings.get(assoc_name))
+    }
+
+    /// Returns `true` if any impl is registered for `(trait_name, target_name)`.
+    pub fn has_impl(&self, trait_name: &str, target_name: &str) -> bool {
+        self.inner
+            .contains_key(&(trait_name.to_string(), target_name.to_string()))
+    }
+}
+
 /// A local type inferencer. Owns a [`TypeEnv`] that accumulates bindings as
 /// `let` declarations are processed.
 pub struct TypeInferencer {
@@ -75,6 +180,15 @@ pub struct TypeInferencer {
     /// calls [`Self::register_user_generics`]). Empty by default — keeps
     /// standalone/test inferencers behaving exactly as before T37.
     user_generic_decls: UserGenericDecls,
+    /// T75b: registry of trait implementations. Consulted by
+    /// [`Self::resolve_associated_type`] so that a trait method's return
+    /// type that names an associated type (`fn get(...) -> Item`) can be
+    /// resolved to the concrete [`TypeRef`] chosen by the implementor of
+    /// that trait for the inferred receiver type. Seeded by the codegen
+    /// driver (which walks the top-level `Decl::ImplBlock`s once and
+    /// calls [`Self::register_trait_impls`]). Empty by default — keeps
+    /// standalone/test inferencers behaving exactly as before T75b.
+    trait_impls: TraitImplRegistry,
 }
 
 impl TypeInferencer {
@@ -83,6 +197,7 @@ impl TypeInferencer {
         Self {
             env: TypeEnv::new(),
             user_generic_decls: UserGenericDecls::new(),
+            trait_impls: TraitImplRegistry::new(),
         }
     }
 
@@ -98,6 +213,52 @@ impl TypeInferencer {
     /// once and install it in one call.
     pub fn set_user_generic_decls(&mut self, decls: UserGenericDecls) {
         self.user_generic_decls = decls;
+    }
+
+    /// T75b: register a single trait implementation block. Records its
+    /// associated-type bindings in the [`TraitImplRegistry`] so subsequent
+    /// calls to [`Self::resolve_associated_type`] can find them.
+    pub fn register_trait_impl(&mut self, impl_block: &buff_lang_ast::ImplBlock) {
+        self.trait_impls.register_impl_block(impl_block);
+    }
+
+    /// T75b: bulk-register every `Decl::ImplBlock` in `decls`. Convenience
+    /// for codegen drivers that walk the top-level decl list once. Mirrors
+    /// the T37 [`Self::set_user_generic_decls`] pattern.
+    pub fn register_trait_impls<'a>(
+        &mut self,
+        decls: impl IntoIterator<Item = &'a buff_lang_ast::Decl>,
+    ) {
+        self.trait_impls.register_from_decls(decls);
+    }
+
+    /// T75b: replace the trait-impl registry wholesale (mirrors
+    /// [`Self::set_user_generic_decls`]).
+    pub fn set_trait_impls(&mut self, registry: TraitImplRegistry) {
+        self.trait_impls = registry;
+    }
+
+    /// T75b: resolve an associated-type reference. Given a trait name, a
+    /// target type name (the type known to implement that trait), and an
+    /// associated-type name, returns the concrete [`TypeRef`] chosen by
+    /// the implementor. Returns `None` when no matching impl is
+    /// registered (the pre-T75b behaviour — the caller falls through to
+    /// `Type::Unknown` and lets rustc catch downstream issues).
+    pub fn resolve_associated_type(
+        &self,
+        trait_name: &str,
+        target_name: &str,
+        assoc_name: &str,
+    ) -> Option<&TypeRef> {
+        self.trait_impls
+            .resolve_associated_type(trait_name, target_name, assoc_name)
+    }
+
+    /// T75b: borrow the trait-impl registry (read-only). Lets codegen-rust
+    /// consult the same registry the inferencer uses, without re-walking
+    /// the decl list.
+    pub fn trait_impls(&self) -> &TraitImplRegistry {
+        &self.trait_impls
     }
 
     /// Pre-binds `name` to `ty` in the environment. Useful for seeding the
@@ -1563,5 +1724,152 @@ mod tests {
             Some(Type::user("Tree", vec![Type::option(Type::int_default())])),
             "user generic with builtin arg resolves recursively"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // T75b: TraitImplRegistry — associated-type resolution.
+    // ---------------------------------------------------------------------------
+
+    fn t75b_named_ty(name: &str) -> TypeRef {
+        TypeRef::Named {
+            name: buff_lang_ast::Ident::new(name, span()),
+            span: span(),
+        }
+    }
+
+    fn t75b_impl_block(
+        trait_name: &str,
+        target_name: &str,
+        bindings: &[(&str, &str)],
+    ) -> buff_lang_ast::ImplBlock {
+        buff_lang_ast::ImplBlock {
+            trait_name: t75b_named_ty(trait_name),
+            target: t75b_named_ty(target_name),
+            type_bindings: bindings
+                .iter()
+                .map(|(n, t)| buff_lang_ast::AssociatedTypeBinding {
+                    name: buff_lang_ast::Ident::new(*n, span()),
+                    target: t75b_named_ty(t),
+                    span: span(),
+                })
+                .collect(),
+            methods: Vec::new(),
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn t75b_empty_registry_resolves_nothing() {
+        let reg = TraitImplRegistry::new();
+        assert!(reg
+            .resolve_associated_type("Container", "Box", "Item")
+            .is_none());
+        assert!(!reg.has_impl("Container", "Box"));
+    }
+
+    #[test]
+    fn t75b_registry_resolves_registered_binding() {
+        let mut reg = TraitImplRegistry::new();
+        reg.register_impl_block(&t75b_impl_block(
+            "Container",
+            "Box",
+            &[("Item", "Int")],
+        ));
+        assert!(reg.has_impl("Container", "Box"));
+        let resolved = reg
+            .resolve_associated_type("Container", "Box", "Item")
+            .expect("registered binding must resolve");
+        assert!(
+            matches!(resolved, TypeRef::Named { name, .. } if name.name == "Int"),
+            "expected Item -> Int, got {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn t75b_registry_multiple_bindings_independent() {
+        let mut reg = TraitImplRegistry::new();
+        reg.register_impl_block(&t75b_impl_block(
+            "Map",
+            "Dict",
+            &[("Key", "String"), ("Value", "Int")],
+        ));
+        let key = reg
+            .resolve_associated_type("Map", "Dict", "Key")
+            .expect("Key binding must resolve");
+        let val = reg
+            .resolve_associated_type("Map", "Dict", "Value")
+            .expect("Value binding must resolve");
+        assert!(
+            matches!(key, TypeRef::Named { name, .. } if name.name == "String"),
+            "Key -> String"
+        );
+        assert!(
+            matches!(val, TypeRef::Named { name, .. } if name.name == "Int"),
+            "Value -> Int"
+        );
+    }
+
+    #[test]
+    fn t75b_registry_unknown_assoc_returns_none() {
+        let mut reg = TraitImplRegistry::new();
+        reg.register_impl_block(&t75b_impl_block(
+            "Container",
+            "Box",
+            &[("Item", "Int")],
+        ));
+        // Assoc name NOT in the registered bindings → None.
+        assert!(reg
+            .resolve_associated_type("Container", "Box", "Other")
+            .is_none());
+    }
+
+    #[test]
+    fn t75b_registry_unknown_target_returns_none() {
+        let mut reg = TraitImplRegistry::new();
+        reg.register_impl_block(&t75b_impl_block(
+            "Container",
+            "Box",
+            &[("Item", "Int")],
+        ));
+        // Different target type that has no registered impl → None.
+        assert!(reg
+            .resolve_associated_type("Container", "Bag", "Item")
+            .is_none());
+        assert!(!reg.has_impl("Container", "Bag"));
+    }
+
+    #[test]
+    fn t75b_register_from_decls_walks_impl_blocks() {
+        use buff_lang_ast::Decl;
+        let decls: Vec<Decl> = vec![
+            Decl::ImplBlock(t75b_impl_block("A", "X", &[("T", "Int")])),
+            Decl::ImplBlock(t75b_impl_block("B", "Y", &[("U", "String")])),
+        ];
+        let mut reg = TraitImplRegistry::new();
+        reg.register_from_decls(decls.iter());
+        assert!(reg.has_impl("A", "X"));
+        assert!(reg.has_impl("B", "Y"));
+        assert!(!reg.has_impl("A", "Y"));
+    }
+
+    #[test]
+    fn t75b_inferencer_delegates_to_registry() {
+        let mut inf = TypeInferencer::new();
+        inf.register_trait_impl(&t75b_impl_block(
+            "Container",
+            "Box",
+            &[("Item", "Int")],
+        ));
+        let resolved = inf
+            .resolve_associated_type("Container", "Box", "Item")
+            .expect("inferencer must consult its registry");
+        assert!(
+            matches!(resolved, TypeRef::Named { name, .. } if name.name == "Int"),
+            "expected Item -> Int via inferencer, got {resolved:?}"
+        );
+        // Unknown reference returns None (the pre-T75b fallback).
+        assert!(inf
+            .resolve_associated_type("Container", "Box", "Other")
+            .is_none());
     }
 }

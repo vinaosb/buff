@@ -88,6 +88,7 @@ fn traits_codegen_required_bodyless() {
     let t = TraitDecl {
         name: ident("Greetable"),
         supertraits: Vec::new(),
+        associated_types: Vec::new(),
         required: vec![MethodSig {
             name: ident("name"),
             params: Vec::new(),
@@ -123,6 +124,7 @@ fn traits_codegen_default_body() {
     let t = TraitDecl {
         name: ident("Greetable"),
         supertraits: Vec::new(),
+        associated_types: Vec::new(),
         required: Vec::new(),
         defaults: vec![FuncDecl {
             name: ident("greet"),
@@ -173,6 +175,7 @@ fn traits_codegen_mixed_required_and_default() {
     let t = TraitDecl {
         name: ident("Greetable"),
         supertraits: Vec::new(),
+        associated_types: Vec::new(),
         required: vec![MethodSig {
             name: ident("name"),
             params: Vec::new(),
@@ -217,6 +220,7 @@ fn traits_codegen_supertrait() {
     let t = TraitDecl {
         name: ident("Pet"),
         supertraits: vec![named_ty("Animal")],
+        associated_types: Vec::new(),
         required: Vec::new(),
         defaults: vec![FuncDecl {
             name: ident("pet"),
@@ -252,6 +256,7 @@ fn traits_codegen_multiple_supertraits() {
     let t = TraitDecl {
         name: ident("A"),
         supertraits: vec![named_ty("B"), named_ty("C")],
+        associated_types: Vec::new(),
         required: Vec::new(),
         defaults: vec![FuncDecl {
             name: ident("m"),
@@ -291,6 +296,7 @@ fn traits_codegen_required_with_self() {
     let t = TraitDecl {
         name: ident("Foo"),
         supertraits: Vec::new(),
+        associated_types: Vec::new(),
         required: vec![MethodSig {
             name: ident("greet"),
             params: vec![param("self", "Self")],
@@ -322,6 +328,7 @@ fn traits_codegen_empty_trait_valid() {
     let t = TraitDecl {
         name: ident("Empty"),
         supertraits: Vec::new(),
+        associated_types: Vec::new(),
         required: Vec::new(),
         defaults: Vec::new(),
         span: span(),
