@@ -1,0 +1,357 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/type_lowering.rs` (T18, Track C).
+//
+// T105a — type mapping: ast_typeref_to_syn + buff_type_to_syn (mechanically
+// extracted from rust_codegen.rs).
+//
+// Verbatim move of `impl RustCodegen` methods into this child module so the
+// parent file shrinks. Methods are `pub(super)`; the parent declares only
+// `mod <name>;` (inherent methods resolve by type, no `use` needed). Child
+// inherits parent imports via `use super::*` and may call the parent private
+// methods (descendant privacy) and the extracted helper modules.
+//
+// The Rust reference is 752 LOC. The Buff port mirrors the public API
+// surface (ast_typeref_to_syn, buff_type_to_syn) and the per-variant type
+// mapping table.
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+
+struct RustCodegen:
+    opaque_handle: Int
+
+struct TypeRef:
+    opaque_handle: Int
+
+struct Type:
+    opaque_handle: Int
+
+struct SynType:
+    opaque_handle: Int
+
+struct CodegenError:
+    opaque_handle: Int
+
+struct Ident:
+    opaque_handle: Int
+
+struct CollectedUnions:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn typeref_kind(ty: TypeRef) -> Int   // variant tag
+    fn typeref_named_name(ty: TypeRef) -> Ident
+    fn ident_name(i: Ident) -> String
+    fn typeref_option_inner(ty: TypeRef) -> TypeRef
+    fn typeref_generic_base(ty: TypeRef) -> TypeRef
+    fn typeref_generic_args(ty: TypeRef) -> Vector<TypeRef>
+    fn typeref_union_members(ty: TypeRef) -> Vector<TypeRef>
+    fn typeref_tuple_members(ty: TypeRef) -> Vector<TypeRef>
+    fn typeref_function_params(ty: TypeRef) -> Vector<TypeRef>
+    fn typeref_function_return(ty: TypeRef) -> TypeRef
+    fn typeref_to_string(ty: TypeRef) -> String
+    fn type_kind(ty: Type) -> Int   // variant tag
+    fn type_vector_elem(ty: Type) -> Type
+    fn type_matrix_elem(ty: Type) -> Type
+    fn type_option_inner(ty: Type) -> Type
+    fn type_map_key(ty: Type) -> Type
+    fn type_map_value(ty: Type) -> Type
+    fn type_result_ok(ty: Type) -> Type
+    fn type_result_err(ty: Type) -> Type
+    fn type_union_members(ty: Type) -> Vector<Type>
+    fn type_tuple_members(ty: Type) -> Vector<Type>
+}
+
+// Variant tags for TypeRef (must match the Rust enum's discriminant order).
+func typeref_kind_named() -> Int:
+    return 0
+
+func typeref_kind_option() -> Int:
+    return 1
+
+func typeref_kind_generic() -> Int:
+    return 2
+
+func typeref_kind_function() -> Int:
+    return 3
+
+func typeref_kind_union() -> Int:
+    return 4
+
+func typeref_kind_tuple() -> Int:
+    return 5
+
+// Variant tags for Type.
+func type_kind_void() -> Int:
+    return 0
+
+func type_kind_unknown() -> Int:
+    return 1
+
+func type_kind_int() -> Int:
+    return 2
+
+func type_kind_float() -> Int:
+    return 3
+
+func type_kind_double() -> Int:
+    return 4
+
+func type_kind_bool() -> Int:
+    return 5
+
+func type_kind_string() -> Int:
+    return 6
+
+func type_kind_char() -> Int:
+    return 7
+
+func type_kind_byte() -> Int:
+    return 8
+
+func type_kind_decimal() -> Int:
+    return 9
+
+func type_kind_vector() -> Int:
+    return 10
+
+func type_kind_matrix() -> Int:
+    return 11
+
+func type_kind_option() -> Int:
+    return 12
+
+func type_kind_map() -> Int:
+    return 13
+
+func type_kind_result() -> Int:
+    return 14
+
+func type_kind_union() -> Int:
+    return 15
+
+func type_kind_tuple() -> Int:
+    return 16
+
+// =============================================================================
+// ast_typeref_to_syn — Buff TypeRef → Rust syn::Type
+// =============================================================================
+//
+// Convert a Buff `TypeRef` to a Rust `syn::Type`. Returns an error for
+// unsupported forms (function types); these will land in T12/T13.
+
+func ast_typeref_to_syn(codegen: RustCodegen, ty: TypeRef) -> Result<SynType, CodegenError>:
+    let kind = typeref_kind(ty)
+    if kind == typeref_kind_named():
+        let name = ident_name(typeref_named_name(ty))
+        // T124b: `DateTime` is the only prelude type that takes a generic
+        // argument (`<chrono::Utc>`). Handle it before the primitive-name
+        // table (which returns the bare path string and would drop the
+        // generic).
+        if name == "DateTime":
+            let args = Vector.new()
+            args.push(rust_path_type("chrono::Utc"))
+            return Result.Ok(make_generic_path_type("chrono::DateTime", args))
+        // T124d: `Regex` source-level annotation lowers to the fully-
+        // qualified `regex::Regex` path. No generic arg (unlike DateTime).
+        if name == "Regex":
+            return Result.Ok(rust_path_type("regex::Regex"))
+        // T84: `Range<T>` source-level annotation lowers to the fully-
+        // qualified `std::ops::Range<T>` path (the lazy iterator Rust std
+        // type). The element type arg flows through the generic lowering
+        // below via the `TypeRef::Generic` arm.
+        if name == "Range":
+            return Result.Ok(rust_path_type("std::ops::Range"))
+        // T32: the Buff→Rust primitive-name mapping is now a single named,
+        // configurable table at `buff_primitive_to_rust_name` (covers all 9
+        // primitive names: Int, Byte, Bits, Float, Double, Bool, String,
+        // Char, Decimal). Unknown names pass through unchanged so user-
+        // defined types (struct/enum names) keep their spelling.
+        let rust_name = buff_primitive_to_rust_name(name)
+        return Result.Ok(rust_path_type(rust_name))
+    if kind == typeref_kind_option():
+        let inner = typeref_option_inner(ty)
+        match ast_typeref_to_syn(codegen, inner):
+            Result.Ok(inner_ty):
+                let args = Vector.new()
+                args.push(inner_ty)
+                return Result.Ok(make_generic_path_type("Option", args))
+            Result.Err(e):
+                return Result.Err(e)
+    if kind == typeref_kind_generic():
+        // Lower the base type to a path string (we only support Named base).
+        let base = typeref_generic_base(ty)
+        if typeref_kind(base) != typeref_kind_named():
+            return Result.Err(unsupported(codegen, "generic with non-named base type"))
+        let base_name = ident_name(typeref_named_name(base))
+        let raw_args = typeref_generic_args(ty)
+        let lowered_args = Vector.new()
+        let mut i = 0
+        for i < raw_args.len():
+            match ast_typeref_to_syn(codegen, raw_args.get(i)):
+                Result.Ok(syn_ty):
+                    lowered_args.push(syn_ty)
+                Result.Err(e):
+                    return Result.Err(e)
+            i = i + 1
+        // T84: `Range<T>` source annotation lowers to the fully-qualified
+        // `std::ops::Range<T>` path. Other base names pass through unchanged
+        // so user-defined generics keep their spelling (Pair<Int, String>
+        // etc.).
+        let path = if base_name == "Range":
+            "std::ops::Range"
+        else:
+            base_name
+        return Result.Ok(make_generic_path_type(path, lowered_args))
+    if kind == typeref_kind_function():
+        return Result.Err(unsupported(codegen, "function-type codegen (T12/T13)"))
+    if kind == typeref_kind_union():
+        // T76: union types `A | B | C`. Compute canonical name (join member
+        // display names with "Or"), collect into `collected_unions`, and
+        // return the wrapper enum name as a SynType::Path.
+        let members = typeref_union_members(ty)
+        let mut union_name = ""
+        let mut i = 0
+        for i < members.len():
+            if i > 0:
+                union_name = union_name + "Or"
+            union_name = union_name + typeref_to_string(members.get(i))
+            i = i + 1
+        codegen_collect_union(codegen, union_name, members)
+        return Result.Ok(rust_path_type(union_name))
+    if kind == typeref_kind_tuple():
+        // T103: tuple types `(T, U, ...)`. Lower each member to a syn::Type
+        // and build a Rust tuple type via `quote!` + `parse2`. The 2+-
+        // element rule lives at parse time, so this always carries 2+
+        // members.
+        let members = typeref_tuple_members(ty)
+        let lowered = Vector.new()
+        let mut i = 0
+        for i < members.len():
+            match ast_typeref_to_syn(codegen, members.get(i)):
+                Result.Ok(syn_ty):
+                    lowered.push(syn_ty)
+                Result.Err(e):
+                    return Result.Err(e)
+            i = i + 1
+        match build_tuple_type(lowered):
+            Result.Ok(ty_out):
+                return Result.Ok(ty_out)
+            Result.Err(e):
+                return Result.Err(unsupported(codegen, "tuple type codegen parse"))
+    return Result.Err(unsupported(codegen, "unknown TypeRef variant"))
+
+// =============================================================================
+// buff_type_to_syn — resolved Buff Type → Rust syn::Type (post-inference)
+// =============================================================================
+//
+// Map a resolved Buff `Type` (post-inference) to a Rust `syn::Type`. Returns
+// `None` for `Type::Unknown` and `Type::Void` — callers (notably `let`
+// lowering) treat `None` as "no annotation emitted". `Type::Decimal` maps to
+// `rust_decimal::Decimal` (the crate is a dependency of
+// `buff-lang-codegen-rust` so generated crates must depend on it as well —
+// the runtime/driver is responsible for that).
+
+func buff_type_to_syn(codegen: RustCodegen, ty: Type) -> Option<SynType>:
+    let kind = type_kind(ty)
+    // Handle generic types (Vector, Matrix, Option, Map, Result, Tuple) first.
+    if kind == type_kind_vector():
+        let inner_opt = buff_type_to_syn(codegen, type_vector_elem(ty))
+        if inner_opt == Option.None:
+            return Option.None
+        let args = Vector.new()
+        args.push(unwrap_syn_type(inner_opt))
+        return Option.Some(make_generic_path_type("Vec", args))
+    if kind == type_kind_matrix():
+        // T24: Matrix<T> maps to the builtin `Matrix<T>` struct that this
+        // codegen emits on-demand. The inner element type uses the standard
+        // mapping; an Unknown element falls back to i64 (Buff's default Int)
+        // so the annotation still compiles.
+        let inner_opt = buff_type_to_syn(codegen, type_matrix_elem(ty))
+        let inner = if inner_opt == Option.None:
+            rust_path_type("i64")
+        else:
+            unwrap_syn_type(inner_opt)
+        let args = Vector.new()
+        args.push(inner)
+        return Option.Some(make_generic_path_type("Matrix", args))
+    if kind == type_kind_option():
+        let inner_opt = buff_type_to_syn(codegen, type_option_inner(ty))
+        if inner_opt == Option.None:
+            return Option.None
+        let args = Vector.new()
+        args.push(unwrap_syn_type(inner_opt))
+        return Option.Some(make_generic_path_type("Option", args))
+    if kind == type_kind_map():
+        // T25: Map<K, V> → Rust `std::collections::HashMap<K, V>`. We use the
+        // fully-qualified path so generated programs do NOT need a
+        // `use std::collections::HashMap;` import.
+        let k_opt = buff_type_to_syn(codegen, type_map_key(ty))
+        let k = if k_opt == Option.None:
+            rust_path_type("i64")
+        else:
+            unwrap_syn_type(k_opt)
+        let v_opt = buff_type_to_syn(codegen, type_map_value(ty))
+        let v = if v_opt == Option.None:
+            rust_path_type("i64")
+        else:
+            unwrap_syn_type(v_opt)
+        let args = Vector.new()
+        args.push(k)
+        args.push(v)
+        return Option.Some(make_qualified_generic_path_type("std::collections::HashMap", args))
+    if kind == type_kind_result():
+        // T30: Result<T, E> → Rust `Result<T, E>` (the std Result is in
+        // scope by default, so no fully-qualified path needed — mirroring
+        // Option<T>'s 1:1 mapping from T28).
+        let ok_opt = buff_type_to_syn(codegen, type_result_ok(ty))
+        if ok_opt == Option.None:
+            return Option.None
+        let err_opt = buff_type_to_syn(codegen, type_result_err(ty))
+        if err_opt == Option.None:
+            return Option.None
+        let args = Vector.new()
+        args.push(unwrap_syn_type(ok_opt))
+        args.push(unwrap_syn_type(err_opt))
+        return Option.Some(make_generic_path_type("Result", args))
+    if kind == type_kind_union():
+        // T76: union types — resolved `Type::Union` is only reached via
+        // `typeref_to_type` for source unions. Return None so Rust inference
+        // handles the annotation.
+        return Option.None
+    if kind == type_kind_tuple():
+        // T103: tuple types. Lower each member; any unresolvable member
+        // makes the whole annotation indeterminate — return None.
+        let members = type_tuple_members(ty)
+        let lowered = Vector.new()
+        let mut i = 0
+        for i < members.len():
+            let m_opt = buff_type_to_syn(codegen, members.get(i))
+            if m_opt == Option.None:
+                return Option.None
+            lowered.push(unwrap_syn_type(m_opt))
+            i = i + 1
+        return build_tuple_type_opt(lowered)
+    // Scalar types — the actual scalar-name mapping is delegated to
+    // `buff_scalar_type_to_syn` (preserves the per-arm logic of the Rust
+    // reference).
+    return buff_scalar_type_to_syn(kind)
+
+// =============================================================================
+// Implementation shims (extern bindings)
+// =============================================================================
+//
+// The actual syn construction is delegated to extern "Rust" bindings.
+
+extern "Rust" {
+    fn rust_path_type(name: String) -> SynType
+    fn make_generic_path_type(name: String, args: Vector<SynType>) -> SynType
+    fn make_qualified_generic_path_type(name: String, args: Vector<SynType>) -> SynType
+    fn buff_primitive_to_rust_name(buff_name: String) -> String
+    fn unsupported(codegen: RustCodegen, msg: String) -> CodegenError
+    fn codegen_collect_union(codegen: RustCodegen, name: String, members: Vector<TypeRef>)
+    fn build_tuple_type(members: Vector<SynType>) -> Result<SynType, CodegenError>
+    fn build_tuple_type_opt(members: Vector<SynType>) -> Option<SynType>
+    fn buff_scalar_type_to_syn(kind: Int) -> Option<SynType>
+    fn unwrap_syn_type(opt: Option<SynType>) -> SynType
+}
