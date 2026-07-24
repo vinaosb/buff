@@ -1,0 +1,1011 @@
+// Buff self-host port of `crates/buff-lang-types/src/ty.rs` (T17, Track C).
+//
+// THE TYPE REPRESENTATION — the *resolved* type of a Buff expression, produced
+// by [`TypeInferencer`] (see infer.buff). Distinct from [`TypeRef`], which is
+// a *reference* written in source annotations (lives in buff-lang-ast).
+//
+// Faithful 1:1 translation of the Rust reference. Where Rust uses `Box<Type>`
+// for recursive payloads (so the enum is finite-size), Buff uses bare `Type`
+// payloads (Buff is GC-backed — there is no `Box` to mirror). Where Rust uses
+// `Vec<Type>`, Buff uses `Vector<Type>`. Buff has no `Copy`/`impl Self` shape,
+// so inherent methods become free functions named `type_<method>` (per the
+// T15/T16 ports: `Type::is_numeric(t)` -> `type_is_numeric(t)`).
+//
+// RUST IDIOM MAPPING:
+//   Box<Type>     -> Type              (Buff is GC-backed)
+//   Vec<Type>     -> Vector<Type>
+//   pub enum Type -> enum Type
+//   impl Type { pub fn x().. } -> func type_x() ..
+//   pub fn x(&self, ..) -> func type_x(t: Type, ..)
+//   matches!(self, A | B)  ->  inline match { A(_) | B(_) => true, _ => false }
+//   write!(f, "Int<{}>", n) -> "Int<" + Int.to_string(n) + ">"  (Buff `+` concat)
+//   fmt::Display::fmt      -> type_to_string(t) -> String  (free fn)
+
+// --- Integer width (Int / Bits width selector) ---
+//
+// Mirrors Rust `IntWidth`. Five widths from 8-bit (`Byte`) to 128-bit
+// (`BigInt`). `Copy + Eq` in Rust becomes structural equality in Buff (default).
+enum IntWidth {
+    W8,
+    W16,
+    W32,
+    W64,
+    W128,
+}
+
+// --- Float width (Float width selector) ---
+//
+// Mirrors Rust `FloatWidth`. Three widths: half (f16, GPU-only), single
+// (f32, the default `Float`), double (f64, also surfaced as the `Double`
+// alias type). Half precision has no Rust surface today; it exists so WGSL
+// codegen can target the GPU-native half-precision scalar.
+enum FloatWidth {
+    W16,
+    W32,
+    W64,
+}
+
+// --- The compile-time type of a Buff expression ---
+//
+// v1.0 ships primitives, collections (Vector/Map/Matrix), user-defined types
+// (struct/enum), traits, full type inference, exhaustiveness checking, and
+// recursion detection. v1.4+ added many prelude runtime-value variants
+// (DateTime, Regex, Url, ...) — each is an opaque value type whose Rust
+// representation lives in the codegen crate.
+//
+// Variants are grouped:
+//   1. Primitive scalars (Int, Bits, Float, Double, Bool, String, Char, Decimal)
+//   2. Error/void markers (Unknown, Void)
+//   3. Generic collections (Vector, Matrix, Option, Map, Result, Union, Tuple)
+//   4. Prelude datetime family (DateTime, Date, Time, Duration, Instant)
+//   5. Prelude regex / URL / path / process / networking types
+//   6. Prelude media / data / ECS / template / validate types
+//   7. Prelude email / scrape / markup / geo / NLP types
+//   8. Prelude interop (MsgPack, Protobuf, Xml, XmlElement)
+//   9. Prelude chat / web3 / crypto types
+//  10. Prelude actors / SIMD types
+//  11. User-defined (User(String, Vector<Type>)) + dynamic dispatch + Range
+enum Type {
+    // === 1. PRIMITIVE SCALARS ===
+    // A signed integer, `Int<W>` (defaults to `Int<64>`).
+    Int(IntWidth),
+    // An unsigned integer (`Bits<W>`, defaults to `Bits<8>`).
+    Bits(IntWidth),
+    // A floating-point type, `Float<W>` (defaults to `Float<32>`).
+    Float(FloatWidth),
+    // A 64-bit float (`Double`, i.e. `Float<64>`).
+    Double,
+    // A boolean (`Bool`).
+    Bool,
+    // A UTF-8 string (`String`).
+    String,
+    // A single Unicode scalar value (`Char`). T21 — additive. Maps to Rust
+    // `char`. Distinct from `String`: `'A'` is `Char`, `"A"` is `String`.
+    // Not GPU-eligible.
+    Char,
+    // A 128-bit fixed-point decimal (`Decimal`). Maps to `rust_decimal`.
+    Decimal,
+
+    // === 2. ERROR / VOID MARKERS ===
+    // Unknown — placeholder emitted after a type error to suppress cascading
+    // diagnostics.
+    Unknown,
+    // The absence of a value (for functions without a return, or `if`
+    // expressions without an `else` branch).
+    Void,
+
+    // === 3. GENERIC COLLECTIONS ===
+    // A generic vector/array type: `Vector<T>`. T99 — prelude `args()`.
+    // Maps to Rust `Vec<T>`.
+    Vector(Type),
+    // A 2-D matrix type: `Matrix<T>` (T24). Flat contiguous storage
+    // (`Vec<T>` row-major) so the buffer is GPU-transferable verbatim.
+    Matrix(Type),
+    // An optional value: `Option<T>` (T99). Maps to Rust `Option<T>`.
+    Option(Type),
+    // A hash-map type: `Map<K, V>` (T25). Maps to Rust `HashMap<K, V>`.
+    // Both type params inferred from the first entry of a literal.
+    Map(Type, Type),
+    // A result type: `Result<T, E>` (T30). Built-in prelude enum whose
+    // variants `Ok(T)` and `Err(E)` resolve WITHOUT a user declaration.
+    Result(Type, Type),
+    // A union (sum) type: `A | B | C` (T76). Codegen lowers to a named enum
+    // wrapper. Neither numeric nor GPU-eligible.
+    Union(Vector<Type>),
+    // A tuple type: `(T, U, ...)`, e.g. `(String, Int)` (T103). Always
+    // carries 2+ members — no single-element tuple in Buff.
+    Tuple(Vector<Type>),
+
+    // === 4. PRELUDE DATETIME FAMILY (T124b) ===
+    // All opaque value types whose canonical Rust representation lives in
+    // the codegen crate (chrono / std::time). All non-numeric, non-GPU.
+    // A timezone-aware date+time, mapped to `chrono::DateTime<chrono::Utc>`.
+    DateTime,
+    // A calendar date (year, month, day), mapped to `chrono::NaiveDate`.
+    Date,
+    // A clock time (hour, minute, second, subsecond), mapped to
+    // `chrono::NaiveTime`.
+    Time,
+    // A span of time, mapped to `chrono::TimeDelta`.
+    Duration,
+    // A monotonic instant suitable for measuring elapsed time, mapped to
+    // `std::time::Instant`. Distinct from DateTime (wall clock vs monotonic).
+    Instant,
+
+    // === 5. PRELUDE REGEX / URL / PATH / PROCESS / NETWORKING ===
+    // A compiled regular expression, mapped to `regex::Regex` (T124d).
+    // FIRST prelude-type variant that is BOTH a runtime value AND supports
+    // INSTANCE methods (`recv.method(args)` shape).
+    Regex,
+    // A parsed URL value, mapped to `url::Url` (T124h). Instance accessors
+    // `.scheme`, `.host`, `.path`, `.query(key)`.
+    Url,
+    // A filesystem path, mapped to `std::path::PathBuf` (T124j).
+    Path,
+    // A spawned subprocess handle, mapped to `Option<std::process::Child>`
+    // (T124l). The Option wrapper lets `spawn` be panic-free.
+    Process,
+    // A TCP-connection handle, mapped to `Option<tokio::net::TcpStream>`
+    // (T124m).
+    Connection,
+    // A UDP-socket handle, mapped to `Option<tokio::net::UdpSocket>` (T124m).
+    Socket,
+    // A WebSocket-connection handle, mapped to
+    // `Option<tokio_tungstenite::WebSocketStream<...>>` (T124m).
+    WsConnection,
+    // Channel sender (MPSC). Maps to `buff_lang_runtime::Sender<T>` (T2).
+    Sender,
+    // Channel receiver (MPSC). Maps to `buff_lang_runtime::Receiver<T>` (T2).
+    Receiver,
+
+    // === 6. PRELUDE MEDIA / DATA / ECS / TEMPLATE / VALIDATE ===
+    // An image buffer, mapped to `buff_image::Image` (T9).
+    Image,
+    // A fake-data generator, mapped to `buff_fake::Faker` (T37).
+    Faker,
+    // An in-memory cache, mapped to `buff_cache::Cache` (T31).
+    Cache,
+    // An i18n bundle, mapped to `buff_i18n::I18n`.
+    I18n,
+    // A dataframe, mapped to `buff_dataframe::DataFrame`.
+    DataFrame,
+    // An audio buffer, mapped to `buff_audio::AudioBuffer` (T8).
+    Audio,
+    // An ECS world, mapped to `buff_ecs::World` (T12).
+    World,
+    // An ECS entity handle, mapped to `buff_ecs::Entity` (T12).
+    Entity,
+    // A renderable template, mapped to `buff_template::Template`.
+    Template,
+    // An HTTP client, mapped to `buff_http_client::HttpClient` (T33).
+    HttpClient,
+    // A validator, mapped to `buff_validate::Validator` (T29).
+    Validator,
+
+    // === 7. PRELUDE EMAIL / SCRAPE / MARKUP / GEO / NLP ===
+    // An email message, mapped to `buff_email::Email` (T42).
+    Email,
+    // An SMTP client, mapped to `buff_email::SmtpClient` (T42).
+    SmtpClient,
+    // A parsed HTML document, mapped to `buff_scrape::Document` (T43).
+    Document,
+    // A DOM element, mapped to `buff_scrape::Element` (T43).
+    Element,
+    // A web crawler, mapped to `buff_scrape::Crawler` (T43).
+    Crawler,
+    // A geo point, mapped to `buff_geo::Point` (T45).
+    Point,
+    // A geo line string, mapped to `buff_geo::LineString` (T45).
+    LineString,
+    // A geo polygon, mapped to `buff_geo::Polygon` (T45).
+    Polygon,
+    // A natural-language text wrapper, mapped to `buff_nlp::Text` (T46).
+    Text,
+    // A detected natural language, mapped to `buff_nlp::Language` (T46).
+    Language,
+    // A Snowball stemming algorithm selector, mapped to
+    // `buff_nlp::StemAlgorithm` (T46). Opaque enum — only passed as an arg.
+    StemAlgorithm,
+
+    // === 8. PRELUDE INTEROP (MsgPack / Protobuf / Xml) ===
+    // A MsgPack namespace (T51). Namespace-only — no runtime value (like
+    // Log / Toml / Base64 / Hex / Yaml / Csv).
+    MsgPack,
+    // A Protocol Buffers namespace type. Maps to `buff_protobuf::Protobuf`.
+    Protobuf,
+    // A Protobuf message runtime value. Maps to `buff_protobuf::Message`.
+    Message,
+    // An XML document, mapped to `buff_xml::XmlDocument` (T50).
+    Xml,
+    // An XML element, mapped to `buff_xml::XmlElement` (T50).
+    XmlElement,
+
+    // === 9. PRELUDE CHAT / WEB3 / CRYPTO ===
+    // A cross-platform chat bot, mapped to `buff_chat::Bot` (T47).
+    Bot,
+    // A chat message, mapped to `buff_chat::Message` (T47). Named
+    // ChatMessage (T52 collision with buff_lang_ast::Message).
+    ChatMessage,
+    // A chat platform enum, mapped to `buff_chat::Platform` (T47).
+    Platform,
+    // An Ethereum JSON-RPC provider, mapped to `buff_web3::Provider` (T48).
+    Provider,
+    // A secp256k1 private-key wallet, mapped to `buff_web3::Wallet` (T48).
+    Wallet,
+    // A Wallet+Provider pair (signing client), mapped to
+    // `buff_web3::ConnectedWallet` (T48).
+    ConnectedWallet,
+    // A deployed smart contract, mapped to `buff_web3::Contract` (T48).
+    Contract,
+    // A chainable ABI method call-builder, mapped to
+    // `buff_web3::ContractMethod` (T48).
+    ContractMethod,
+    // AES namespace, mapped to `buff_crypto_extras::AES` (T49).
+    // Namespace-only — never instantiated as a runtime value.
+    AES,
+    // RSA namespace, mapped to `buff_crypto_extras::RSA` (T49).
+    RSA,
+    // ECDH namespace, mapped to `buff_crypto_extras::ECDH` (T49).
+    ECDH,
+    // Argon2 namespace, mapped to `buff_crypto_extras::Argon2` (T49).
+    Argon2,
+    // RSA keypair runtime value, mapped to `buff_crypto_extras::RsaKeypair`
+    // (T49). Constructed ONLY via `RSA.generate_keypair(bits)`.
+    RsaKeypair,
+
+    // === 10. PRELUDE SIMD / ACTOR TYPES ===
+    // A 4-lane f32x4 SIMD register, mapped to `buff_simd::Simd` (T54).
+    Simd,
+    // An actor system, mapped to `buff_actors::ActorSystem` (T59).
+    ActorSystem,
+    // An actor reference, mapped to `buff_actors::ActorRef` (T59).
+    ActorRef,
+    // A supervisor, mapped to `buff_actors::Supervisor` (T59).
+    Supervisor,
+    // A child spec, mapped to `buff_actors::supervisor::ChildSpec` (T59).
+    ChildSpec,
+    // A restart strategy, mapped to `buff_actors::supervisor::RestartStrategy`
+    // (T59).
+    RestartStrategy,
+
+    // === 11. USER-DEFINED + DYNAMIC DISPATCH + RANGE ===
+    // A user-defined type (struct/enum/trait/alias). First payload is the
+    // type identifier (`Point`, `Pair`, ...). Second payload is the generic
+    // type arguments vector (`Int`, `String`, ...). Codegen emits the name
+    // verbatim with a turbofish when args is non-empty.
+    User(String, Vector<Type>),
+    // A trait object: `Box<dyn Trait>` for runtime polymorphism (T68).
+    // Carries the trait as a resolved Type — conventionally a Type.User
+    // whose name is the trait identifier.
+    DynamicDispatch(Type),
+    // A lazy integer range: `Range<T>` produced by `start..end` (exclusive)
+    // or `start..=end` (inclusive) (T84). LAZY, not a Vec — mirrors Rust's
+    // `std::ops::Range<T>`.
+    Range(Type),
+}
+
+// =============================================================================
+// IntWidth helpers
+// =============================================================================
+
+// Returns the bit-width of this integer width (8 / 16 / 32 / 64 / 128).
+func int_width_bits(w: IntWidth) -> Int:
+    match w {
+        IntWidth.W8 => return 8,
+        IntWidth.W16 => return 16,
+        IntWidth.W32 => return 32,
+        IntWidth.W64 => return 64,
+        IntWidth.W128 => return 128,
+    }
+
+// =============================================================================
+// FloatWidth helpers
+// =============================================================================
+
+// Returns the bit-width of this float width (16 / 32 / 64).
+func float_width_bits(w: FloatWidth) -> Int:
+    match w {
+        FloatWidth.W16 => return 16,
+        FloatWidth.W32 => return 32,
+        FloatWidth.W64 => return 64,
+    }
+
+// =============================================================================
+// Type — constructors (Rust inherent `Type::x()` static methods)
+// =============================================================================
+
+// The default integer type: `Int<64>`.
+func type_int_default() -> Type:
+    return Type.Int(IntWidth.W64)
+
+// The default float type: `Float<32>`.
+func type_float_default() -> Type:
+    return Type.Float(FloatWidth.W32)
+
+// The 64-bit float type: `Double`.
+func type_double() -> Type:
+    return Type.Double
+
+// The byte type: `Bits<8>`.
+func type_byte() -> Type:
+    return Type.Bits(IntWidth.W8)
+
+// The boolean type: `Bool`.
+func type_bool() -> Type:
+    return Type.Bool
+
+// The string type: `String`.
+func type_string() -> Type:
+    return Type.String
+
+// The char type: `Char` (a single Unicode scalar value). T21.
+func type_char() -> Type:
+    return Type.Char
+
+// Create a `Vector<T>` type.
+func type_vector(elem: Type) -> Type:
+    return Type.Vector(elem)
+
+// Create a `Matrix<T>` type (T24). Storage is a flat `Vec<T>` row-major.
+func type_matrix(elem: Type) -> Type:
+    return Type.Matrix(elem)
+
+// Create an `Option<T>` type.
+func type_option(inner: Type) -> Type:
+    return Type.Option(inner)
+
+// Create a `Map<K, V>` type.
+func type_map(key: Type, value: Type) -> Type:
+    return Type.Map(key, value)
+
+// Create a `Result<T, E>` type.
+func type_result(ok: Type, err: Type) -> Type:
+    return Type.Result(ok, err)
+
+// Create a `User(name, args)` type. The `name` is the type identifier;
+// `args` carries generic type arguments (empty for non-generic types).
+func type_user(name: String, args: Vector<Type>) -> Type:
+    return Type.User(name, args)
+
+// Create a `Tuple` type from a vector of member types. Caller is responsible
+// for ensuring 2+ members (parse-time rule: `(T)` is grouping, not a tuple).
+func type_tuple(members: Vector<Type>) -> Type:
+    return Type.Tuple(members)
+
+// Create a `Range<T>` type (T84). LAZY iterator, not a Vec.
+func type_range(elem: Type) -> Type:
+    return Type.Range(elem)
+
+// Create a `DynamicDispatch(T)` trait-object type (T68). Carries the trait as
+// a resolved Type (conventionally a Type.User whose name is the trait id).
+func type_dynamic_dispatch(trait_ty: Type) -> Type:
+    return Type.DynamicDispatch(trait_ty)
+
+// The DateTime type (T124b).
+func type_datetime() -> Type:
+    return Type.DateTime
+
+// The Date type (T124b).
+func type_date() -> Type:
+    return Type.Date
+
+// The Time type (T124b).
+func type_time() -> Type:
+    return Type.Time
+
+// The Duration type (T124b).
+func type_duration() -> Type:
+    return Type.Duration
+
+// The Instant type (T124b).
+func type_instant() -> Type:
+    return Type.Instant
+
+// The Regex type (T124d).
+func type_regex() -> Type:
+    return Type.Regex
+
+// The URL type (T124h).
+func type_url() -> Type:
+    return Type.Url
+
+// The Path type (T124j).
+func type_path() -> Type:
+    return Type.Path
+
+// The Process type (T124l).
+func type_process() -> Type:
+    return Type.Process
+
+// The Connection type (T124m).
+func type_connection() -> Type:
+    return Type.Connection
+
+// The Socket type (T124m).
+func type_socket() -> Type:
+    return Type.Socket
+
+// The WsConnection type (T124m).
+func type_ws_connection() -> Type:
+    return Type.WsConnection
+
+// The Sender type (T2).
+func type_sender() -> Type:
+    return Type.Sender
+
+// The Receiver type (T2).
+func type_receiver() -> Type:
+    return Type.Receiver
+
+// The Image type (T9).
+func type_image() -> Type:
+    return Type.Image
+
+// The Faker type (T37).
+func type_faker() -> Type:
+    return Type.Faker
+
+// The Cache type (T31).
+func type_cache() -> Type:
+    return Type.Cache
+
+// The I18n type.
+func type_i18n() -> Type:
+    return Type.I18n
+
+// The DataFrame type.
+func type_dataframe() -> Type:
+    return Type.DataFrame
+
+// The Audio type (T8).
+func type_audio() -> Type:
+    return Type.Audio
+
+// The World type (T12).
+func type_world() -> Type:
+    return Type.World
+
+// The Entity type (T12).
+func type_entity() -> Type:
+    return Type.Entity
+
+// The Template type.
+func type_template() -> Type:
+    return Type.Template
+
+// The HttpClient type (T33).
+func type_http_client() -> Type:
+    return Type.HttpClient
+
+// The Validator type (T29).
+func type_validator() -> Type:
+    return Type.Validator
+
+// The Email type (T42).
+func type_email() -> Type:
+    return Type.Email
+
+// The SmtpClient type (T42).
+func type_smtp_client() -> Type:
+    return Type.SmtpClient
+
+// The Document type (T43).
+func type_document() -> Type:
+    return Type.Document
+
+// The Element type (T43).
+func type_element() -> Type:
+    return Type.Element
+
+// The Crawler type (T43).
+func type_crawler() -> Type:
+    return Type.Crawler
+
+// The Xml type (T50).
+func type_xml() -> Type:
+    return Type.Xml
+
+// The XmlElement type (T50).
+func type_xml_element() -> Type:
+    return Type.XmlElement
+
+// The Point type (T45).
+func type_point() -> Type:
+    return Type.Point
+
+// The LineString type (T45).
+func type_line_string() -> Type:
+    return Type.LineString
+
+// The Polygon type (T45).
+func type_polygon() -> Type:
+    return Type.Polygon
+
+// The Text type (T46).
+func type_text() -> Type:
+    return Type.Text
+
+// The Language type (T46).
+func type_language() -> Type:
+    return Type.Language
+
+// The StemAlgorithm type (T46).
+func type_stem_algorithm() -> Type:
+    return Type.StemAlgorithm
+
+// The Protobuf type.
+func type_protobuf() -> Type:
+    return Type.Protobuf
+
+// The Protobuf Message type.
+func type_message() -> Type:
+    return Type.Message
+
+// The Bot type (T47).
+func type_bot() -> Type:
+    return Type.Bot
+
+// The ChatMessage type (T47).
+func type_chat_message() -> Type:
+    return Type.ChatMessage
+
+// The Platform type (T47).
+func type_platform() -> Type:
+    return Type.Platform
+
+// The Provider type (T48).
+func type_provider() -> Type:
+    return Type.Provider
+
+// The Wallet type (T48).
+func type_wallet() -> Type:
+    return Type.Wallet
+
+// The ConnectedWallet type (T48).
+func type_connected_wallet() -> Type:
+    return Type.ConnectedWallet
+
+// The Contract type (T48).
+func type_contract() -> Type:
+    return Type.Contract
+
+// The ContractMethod type (T48).
+func type_contract_method() -> Type:
+    return Type.ContractMethod
+
+// The AES namespace type (T49).
+func type_aes() -> Type:
+    return Type.AES
+
+// The RSA namespace type (T49).
+func type_rsa() -> Type:
+    return Type.RSA
+
+// The ECDH namespace type (T49).
+func type_ecdh() -> Type:
+    return Type.ECDH
+
+// The Argon2 namespace type (T49).
+func type_argon2() -> Type:
+    return Type.Argon2
+
+// The RsaKeypair runtime-value type (T49).
+func type_rsa_keypair() -> Type:
+    return Type.RsaKeypair
+
+// The Simd type (T54).
+func type_simd() -> Type:
+    return Type.Simd
+
+// The ActorSystem type (T59).
+func type_actor_system() -> Type:
+    return Type.ActorSystem
+
+// The ActorRef type (T59).
+func type_actor_ref() -> Type:
+    return Type.ActorRef
+
+// The Supervisor type (T59).
+func type_supervisor() -> Type:
+    return Type.Supervisor
+
+// The ChildSpec type (T59).
+func type_child_spec() -> Type:
+    return Type.ChildSpec
+
+// The RestartStrategy type (T59).
+func type_restart_strategy() -> Type:
+    return Type.RestartStrategy
+
+// =============================================================================
+// Type — predicates (Rust inherent `t.is_x()` methods)
+// =============================================================================
+//
+// Each predicate uses an inline match with `_` wildcard rather than enumerating
+// every variant — the Rust reference uses `matches!(self, A | B)` which is
+// shape-identical to a guarded match arm here.
+
+// Returns true if this type is numeric (integer, byte, float, double, decimal).
+func type_is_numeric(t: Type) -> Bool:
+    match t {
+        Type.Int(_) => return true,
+        Type.Bits(_) => return true,
+        Type.Float(_) => return true,
+        Type.Double => return true,
+        Type.Decimal => return true,
+        _ => return false,
+    }
+
+// Returns true if this type is floating-point-like
+// (`Float`, `Double`, or `Decimal`).
+func type_is_float_like(t: Type) -> Bool:
+    match t {
+        Type.Float(_) => return true,
+        Type.Double => return true,
+        Type.Decimal => return true,
+        _ => return false,
+    }
+
+// Returns true if this type is integer-like (`Int` or `Bits`).
+func type_is_integer_like(t: Type) -> Bool:
+    match t {
+        Type.Int(_) => return true,
+        Type.Bits(_) => return true,
+        _ => return false,
+    }
+
+// Returns true if this type is eligible for GPU (WGSL) dispatch.
+//
+// Only the WGSL-native 32-bit scalar primitives are eligible:
+// `Float<32>`, `Int<32>`, `Bits<32>`, and `Bool`. Wider widths, `Double`
+// (f64 has no WGSL scalar), and especially `Decimal` (128-bit fixed-point,
+// no GPU representation) are NOT GPU-eligible and must run on the CPU path.
+func type_is_gpu_eligible(t: Type) -> Bool:
+    match t {
+        Type.Float(FloatWidth.W32) => return true,
+        Type.Int(IntWidth.W32) => return true,
+        Type.Bits(IntWidth.W32) => return true,
+        Type.Bool => return true,
+        _ => return false,
+    }
+
+// Returns true if this type MUST run on the CPU (never GPU).
+// This is the complement of `type_is_gpu_eligible`.
+func type_must_run_on_cpu(t: Type) -> Bool:
+    return not type_is_gpu_eligible(t)
+
+// =============================================================================
+// Type — prelude variant predicates
+//
+// Each prelude runtime-value type has an `is_prelude_X(t)` predicate that
+// returns true iff `t` is that variant. Used by the inferencer + codegen
+// to dispatch instance method calls and constructor lowering to the right
+// Rust crate. Each is a single `t == Type.X` test (Buff enum equality is
+// structural and ignores payloads for unit variants).
+// =============================================================================
+
+func type_is_prelude_datetime(t: Type) -> Bool:
+    return t == Type.DateTime || t == Type.Date || t == Type.Time || t == Type.Duration || t == Type.Instant
+
+func type_is_prelude_regex(t: Type) -> Bool:
+    return t == Type.Regex
+
+func type_is_prelude_url(t: Type) -> Bool:
+    return t == Type.Url
+
+func type_is_prelude_path(t: Type) -> Bool:
+    return t == Type.Path
+
+func type_is_prelude_process(t: Type) -> Bool:
+    return t == Type.Process
+
+func type_is_prelude_connection(t: Type) -> Bool:
+    return t == Type.Connection
+
+func type_is_prelude_socket(t: Type) -> Bool:
+    return t == Type.Socket
+
+func type_is_prelude_ws_connection(t: Type) -> Bool:
+    return t == Type.WsConnection
+
+func type_is_prelude_sender(t: Type) -> Bool:
+    return t == Type.Sender
+
+func type_is_prelude_receiver(t: Type) -> Bool:
+    return t == Type.Receiver
+
+func type_is_prelude_image(t: Type) -> Bool:
+    return t == Type.Image
+
+func type_is_prelude_faker(t: Type) -> Bool:
+    return t == Type.Faker
+
+func type_is_prelude_cache(t: Type) -> Bool:
+    return t == Type.Cache
+
+func type_is_prelude_i18n(t: Type) -> Bool:
+    return t == Type.I18n
+
+func type_is_prelude_dataframe(t: Type) -> Bool:
+    return t == Type.DataFrame
+
+func type_is_prelude_audio(t: Type) -> Bool:
+    return t == Type.Audio
+
+func type_is_prelude_world(t: Type) -> Bool:
+    return t == Type.World
+
+func type_is_prelude_entity(t: Type) -> Bool:
+    return t == Type.Entity
+
+func type_is_prelude_http_client(t: Type) -> Bool:
+    return t == Type.HttpClient
+
+func type_is_prelude_validator(t: Type) -> Bool:
+    return t == Type.Validator
+
+func type_is_prelude_email(t: Type) -> Bool:
+    return t == Type.Email
+
+func type_is_prelude_smtp_client(t: Type) -> Bool:
+    return t == Type.SmtpClient
+
+func type_is_prelude_document(t: Type) -> Bool:
+    return t == Type.Document
+
+func type_is_prelude_element(t: Type) -> Bool:
+    return t == Type.Element
+
+func type_is_prelude_crawler(t: Type) -> Bool:
+    return t == Type.Crawler
+
+func type_is_prelude_xml(t: Type) -> Bool:
+    return t == Type.Xml
+
+func type_is_prelude_xml_element(t: Type) -> Bool:
+    return t == Type.XmlElement
+
+func type_is_prelude_msgpack(t: Type) -> Bool:
+    return t == Type.MsgPack
+
+func type_is_prelude_protobuf(t: Type) -> Bool:
+    return t == Type.Protobuf
+
+func type_is_prelude_message(t: Type) -> Bool:
+    return t == Type.Message
+
+func type_is_prelude_point(t: Type) -> Bool:
+    return t == Type.Point
+
+func type_is_prelude_line_string(t: Type) -> Bool:
+    return t == Type.LineString
+
+func type_is_prelude_polygon(t: Type) -> Bool:
+    return t == Type.Polygon
+
+func type_is_prelude_text(t: Type) -> Bool:
+    return t == Type.Text
+
+func type_is_prelude_language(t: Type) -> Bool:
+    return t == Type.Language
+
+func type_is_prelude_stem_algorithm(t: Type) -> Bool:
+    return t == Type.StemAlgorithm
+
+func type_is_prelude_bot(t: Type) -> Bool:
+    return t == Type.Bot
+
+func type_is_prelude_chat_message(t: Type) -> Bool:
+    return t == Type.ChatMessage
+
+func type_is_prelude_platform(t: Type) -> Bool:
+    return t == Type.Platform
+
+func type_is_prelude_provider(t: Type) -> Bool:
+    return t == Type.Provider
+
+func type_is_prelude_wallet(t: Type) -> Bool:
+    return t == Type.Wallet
+
+func type_is_prelude_connected_wallet(t: Type) -> Bool:
+    return t == Type.ConnectedWallet
+
+func type_is_prelude_contract(t: Type) -> Bool:
+    return t == Type.Contract
+
+func type_is_prelude_contract_method(t: Type) -> Bool:
+    return t == Type.ContractMethod
+
+func type_is_prelude_aes(t: Type) -> Bool:
+    return t == Type.AES
+
+func type_is_prelude_rsa(t: Type) -> Bool:
+    return t == Type.RSA
+
+func type_is_prelude_ecdh(t: Type) -> Bool:
+    return t == Type.ECDH
+
+func type_is_prelude_argon2(t: Type) -> Bool:
+    return t == Type.Argon2
+
+func type_is_prelude_rsa_keypair(t: Type) -> Bool:
+    return t == Type.RsaKeypair
+
+func type_is_prelude_simd(t: Type) -> Bool:
+    return t == Type.Simd
+
+func type_is_prelude_actor_system(t: Type) -> Bool:
+    return t == Type.ActorSystem
+
+func type_is_prelude_actor_ref(t: Type) -> Bool:
+    return t == Type.ActorRef
+
+func type_is_prelude_supervisor(t: Type) -> Bool:
+    return t == Type.Supervisor
+
+func type_is_prelude_child_spec(t: Type) -> Bool:
+    return t == Type.ChildSpec
+
+func type_is_prelude_restart_strategy(t: Type) -> Bool:
+    return t == Type.RestartStrategy
+
+// =============================================================================
+// Convenience width constructors (the Rust reference uses `IntWidth::W64`
+// enum literals directly; these thin wrappers exist so callers in the wider
+// self-host port don't repeat the enum qualifier when building match arms).
+// =============================================================================
+
+func int_width_w8() -> IntWidth:
+    return IntWidth.W8
+
+func int_width_w16() -> IntWidth:
+    return IntWidth.W16
+
+func int_width_w32() -> IntWidth:
+    return IntWidth.W32
+
+func int_width_w64() -> IntWidth:
+    return IntWidth.W64
+
+func int_width_w128() -> IntWidth:
+    return IntWidth.W128
+
+func float_width_w16() -> FloatWidth:
+    return FloatWidth.W16
+
+func float_width_w32() -> FloatWidth:
+    return FloatWidth.W32
+
+func float_width_w64() -> FloatWidth:
+    return FloatWidth.W64
+
+// =============================================================================
+// fmt::Display for Type — render as the Buff surface name.
+//
+// Rust uses `fmt::Display`; Buff uses a free function `type_to_string` that
+// returns a `String`. The rendering mirrors the Buff source surface (so
+// diagnostics read naturally): `Int<64>`, `Vector<Float<32>>`, `DateTime`,
+// etc. Nested types recurse via the same function.
+// =============================================================================
+
+func type_to_string(t: Type) -> String:
+    match t {
+        // --- Singletons (no payload) ---
+        Type.Bool => return "Bool",
+        Type.Double => return "Double",
+        Type.String => return "String",
+        Type.Char => return "Char",
+        Type.Decimal => return "Decimal",
+        Type.Unknown => return "Unknown",
+        Type.Void => return "Void",
+        Type.DateTime => return "DateTime",
+        Type.Date => return "Date",
+        Type.Time => return "Time",
+        Type.Duration => return "Duration",
+        Type.Instant => return "Instant",
+        Type.Regex => return "Regex",
+        Type.Url => return "URL",
+        Type.Path => return "Path",
+        Type.Process => return "Process",
+        Type.Connection => return "Connection",
+        Type.Socket => return "Socket",
+        Type.WsConnection => return "WsConnection",
+        Type.Sender => return "Sender",
+        Type.Receiver => return "Receiver",
+        Type.Image => return "Image",
+        Type.Faker => return "Faker",
+        Type.Cache => return "Cache",
+        Type.I18n => return "I18n",
+        Type.DataFrame => return "DataFrame",
+        Type.Audio => return "AudioBuffer",
+        Type.World => return "World",
+        Type.Entity => return "Entity",
+        Type.Template => return "Template",
+        Type.HttpClient => return "HttpClient",
+        Type.Validator => return "Validator",
+        Type.Email => return "Email",
+        Type.SmtpClient => return "SmtpClient",
+        Type.Document => return "Document",
+        Type.Element => return "Element",
+        Type.Crawler => return "Crawler",
+        Type.MsgPack => return "MsgPack",
+        Type.Xml => return "Xml",
+        Type.XmlElement => return "XmlElement",
+        Type.Point => return "Point",
+        Type.LineString => return "LineString",
+        Type.Polygon => return "Polygon",
+        Type.Text => return "Text",
+        Type.Language => return "Language",
+        Type.StemAlgorithm => return "StemAlgorithm",
+        Type.Protobuf => return "Protobuf",
+        Type.Message => return "Message",
+        Type.Bot => return "Bot",
+        Type.ChatMessage => return "ChatMessage",
+        Type.Platform => return "Platform",
+        Type.Provider => return "Provider",
+        Type.Wallet => return "Wallet",
+        Type.ConnectedWallet => return "ConnectedWallet",
+        Type.Contract => return "Contract",
+        Type.ContractMethod => return "ContractMethod",
+        Type.AES => return "AES",
+        Type.RSA => return "RSA",
+        Type.ECDH => return "ECDH",
+        Type.Argon2 => return "Argon2",
+        Type.RsaKeypair => return "RsaKeypair",
+        Type.Simd => return "Simd",
+        Type.ActorSystem => return "ActorSystem",
+        Type.ActorRef => return "ActorRef",
+        Type.Supervisor => return "Supervisor",
+        Type.ChildSpec => return "ChildSpec",
+        Type.RestartStrategy => return "RestartStrategy",
+        // --- Parameterised variants ---
+        Type.Int(w) => return "Int<" + Int.to_string(int_width_bits(w)) + ">",
+        Type.Bits(w) => return "Bits<" + Int.to_string(int_width_bits(w)) + ">",
+        Type.Float(w) => return "Float<" + Int.to_string(float_width_bits(w)) + ">",
+        Type.Vector(elem) => return "Vector<" + type_to_string(elem) + ">",
+        Type.Matrix(elem) => return "Matrix<" + type_to_string(elem) + ">",
+        Type.Option(inner) => return "Option<" + type_to_string(inner) + ">",
+        Type.Map(key, value) => return "Map<" + type_to_string(key) + ", " + type_to_string(value) + ">",
+        Type.Result(ok, err) => return "Result<" + type_to_string(ok) + ", " + type_to_string(err) + ">",
+        Type.User(name, args) => return type_user_to_string(name, args),
+        Type.DynamicDispatch(inner) => return "Box<dyn " + type_to_string(inner) + ">",
+        Type.Range(elem) => return "Range<" + type_to_string(elem) + ">",
+        Type.Union(members) => return type_union_to_string(members),
+        Type.Tuple(members) => return type_tuple_to_string(members),
+    }
+
+// Render `User(name, args)` — bare name when args is empty, name<args...>
+// when args is non-empty (mirrors `ast_typeref_to_syn` byte-identically).
+func type_user_to_string(name: String, args: Vector<Type>) -> String:
+    if args.len() == 0:
+        return name
+    let mut out = name + "<"
+    let mut i = 0
+    for i < args.len():
+        if i > 0:
+            out = out + ", "
+        out = out + type_to_string(args.get(i))
+        i = i + 1
+    return out + ">"
+
+// Render `A | B | C` for a union (T76).
+func type_union_to_string(members: Vector<Type>) -> String:
+    let mut out = ""
+    let mut i = 0
+    for i < members.len():
+        if i > 0:
+            out = out + " | "
+        out = out + type_to_string(members.get(i))
+        i = i + 1
+    return out
+
+// Render `(T, U, ...)` for a tuple (T103). Always 2+ members.
+func type_tuple_to_string(members: Vector<Type>) -> String:
+    let mut out = "("
+    let mut i = 0
+    for i < members.len():
+        if i > 0:
+            out = out + ", "
+        out = out + type_to_string(members.get(i))
+        i = i + 1
+    return out + ")"
