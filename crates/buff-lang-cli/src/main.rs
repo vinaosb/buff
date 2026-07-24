@@ -142,8 +142,8 @@ fn main() -> Result<()> {
             })?;
             buff_lang_cli::commands::gen::run(k, &name)
         }
-        Command::Test { file, pattern } => {
-            buff_lang_cli::commands::test::run(file.as_deref(), pattern.as_deref())
+        Command::Test { path, filter, update } => {
+            buff_lang_cli::commands::test::run(&path, filter.as_deref(), update)
         }
         Command::Fmt { file, check } => {
             use buff_lang_cli::commands::fmt::FmtOutcome;

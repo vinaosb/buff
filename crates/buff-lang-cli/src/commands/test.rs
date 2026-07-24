@@ -1,117 +1,353 @@
-//! `buff test` — run tests for a `.buff` file OR a whole project (T123).
+//! `buff test` — snapshot testing runner (T100).
 //!
-//! Two modes:
+//! Discovers test files by convention (files ending in `.test.buff` or
+//! files inside a `test/` directory), compiles + runs each, and compares
+//! stdout against a stored `.snap` snapshot file (insta-style).
 //!
-//! 1. **Single-file mode** (T35): `buff test <FILE> [--pattern <PATTERN>]`
-//!    discovers `@test` functions in a `.buff` file via the Buff test runner
-//!    (parse → discover → harness → rustc → run). See [`test_runner`].
+//! # Snapshot format
 //!
-//! 2. **Project / workspace mode** (T123): `buff test` (no file argument)
-//!    reads `buff.toml` from the current directory and shells out to
-//!    `cargo test`. In workspace mode (`[workspace]` present) cargo fans
-//!    out to all members automatically; in single-package mode cargo
-//!    tests the one crate. This is a strict passthrough — Buff does NOT
-//!    reinvent test discovery at the project level.
+//! Snapshot files are stored alongside the test file with a `.snap`
+//! extension. The format is the raw expected stdout of the test binary:
+//!
+//! ```text
+//! ---
+//! source: tests/test_foo.test.buff
+//! ---
+//! expected output line 1
+//! expected output line 2
+//! ```
+//!
+//! The `---` header is optional — the snapshot content is everything
+//! after the second `---` line (or the entire file if no header).
+//!
+//! # Flags
+//!
+//! - `--update`: accept new/changed snapshots (writes current output as
+//!   the new `.snap` file). Missing snapshots are created automatically.
+//! - `--filter <PATTERN>`: only run tests whose file name matches the
+//!   given glob pattern (simple `*` glob, same as `--pattern` in T35).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use crate::config::BuffConfig;
-use crate::test_runner;
+use crate::pipeline;
 
-/// Entry point for `buff test [<FILE>] [--pattern <PATTERN>]`.
-///
-/// - `file = Some(f)` → single-file mode (T35 behaviour).
-/// - `file = None` → project / workspace mode (T123). Reads `buff.toml`
-///   from cwd, shells out to `cargo test`.
-///
-/// Returns `Ok(())` if all tests pass (exit 0). If any test fails, the
-/// process exits with code `1` directly (via [`std::process::exit`]) in
-/// single-file mode so the exit code is preserved; in project mode a
-/// cargo failure surfaces as an `Err` (anyhow::bail!) with the cargo
-/// exit status.
-///
-/// # Errors
-///
-/// Propagates any pipeline error (file-not-found, lex/parse/codegen
-/// failure, rustc invocation failure, missing `buff.toml`). A failing
-/// TEST (assertion panic inside a `@test` fn in single-file mode) is NOT
-/// an `Err` here — it's reflected in the [`test_runner::TestReport`]
-/// counts and triggers an `exit(1)`.
-pub fn run(file: Option<&Path>, pattern: Option<&str>) -> Result<()> {
-    match file {
-        Some(f) => run_single_file(f, pattern),
-        None => run_project(),
+/// Entry point for `buff test <PATH> [--filter <PATTERN>] [--update]`.
+pub fn run(path: &Path, filter: Option<&str>, update: bool) -> Result<()> {
+    // 1. Discover test files.
+    let test_files = discover_test_files(path, filter)?;
+
+    if test_files.is_empty() {
+        let filter_msg = filter
+            .map(|p| format!(" matching filter `{p}`"))
+            .unwrap_or_default();
+        eprintln!("no test files found{filter_msg} in `{}`", path.display());
+        return Ok(());
     }
-}
 
-/// Single-file mode (T35): discover and run `@test` functions in a `.buff`
-/// file via the Buff test runner.
-fn run_single_file(file: &Path, pattern: Option<&str>) -> Result<()> {
-    let pat = pattern.unwrap_or("");
-    let report = test_runner::run_tests(file, pat)?;
+    // 2. Run each test file.
+    let total = test_files.len();
+    let mut passed: usize = 0;
+    let mut failed: usize = 0;
+    let mut failures: Vec<String> = Vec::new();
 
-    eprintln!("{}", report.summary_line());
+    for test_file in &test_files {
+        let test_name = test_file
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| test_file.to_string_lossy().to_string());
 
-    if report.failed > 0 {
-        std::process::exit(report.exit_code());
+        eprint!("test {test_name} ... ");
+
+        match run_single_test(test_file, update) {
+            Ok(true) => {
+                eprintln!("ok");
+                passed += 1;
+            }
+            Ok(false) => {
+                eprintln!("FAILED");
+                failed += 1;
+                failures.push(test_name);
+            }
+            Err(e) => {
+                eprintln!("ERROR: {e:#}");
+                failed += 1;
+                failures.push(test_name);
+            }
+        }
+    }
+
+    // 3. Print summary.
+    eprintln!();
+    eprintln!("{total} test(s): {passed} passed, {failed} failed");
+
+    if failed > 0 {
+        std::process::exit(1);
     }
     Ok(())
 }
 
-/// Project / workspace mode (T123): shell out to `cargo test` at the
-/// project root (single-package) or workspace root (workspace mode).
+/// Discover test files under `path` matching the optional `filter` glob.
 ///
-/// In workspace mode, [`commands::build`](crate::commands::build) handles
-/// generating the virtual `Cargo.toml` + transpiling members on the
-/// preceding `buff build`. For test-only invocations we still emit the
-/// virtual `Cargo.toml` (idempotent) so cargo knows the workspace shape,
-/// but we do NOT transpile here — the user is expected to have run
-/// `buff build` first OR the `.rs` files are already present. (cargo will
-/// error loudly if a member's `src/main.rs` is missing.)
-fn run_project() -> Result<()> {
-    let cwd = std::env::current_dir().context("failed to read current directory")?;
-    let manifest_path = cwd.join("buff.toml");
-    let cfg = BuffConfig::load_from_file(&manifest_path)
-        .with_context(|| format!("failed to load `{}`", manifest_path.display()))?;
+/// Convention:
+/// - If `path` is a file, it's the single test file.
+/// - If `path` is a directory, recursively finds files ending in
+///   `.test.buff` OR files inside a `test/` subdirectory.
+/// - `filter` is a simple `*` glob applied to the file name (stem).
+fn discover_test_files(path: &Path, filter: Option<&str>) -> Result<Vec<PathBuf>> {
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
 
-    // Emit Cargo.toml (virtual workspace form OR single-package form).
-    // generate_cargo_toml is idempotent so this is safe even if `buff build`
-    // already wrote it.
-    let cargo_toml = crate::config::generate_cargo_toml(&cfg);
-    let cargo_path = cwd.join("Cargo.toml");
-    std::fs::write(&cargo_path, &cargo_toml)
-        .with_context(|| format!("failed to write `{}`", cargo_path.display()))?;
+    if !path.is_dir() {
+        anyhow::bail!(
+            "`{}` is neither a file nor a directory",
+            path.display()
+        );
+    }
 
-    // cargo test at the project / workspace root. cargo handles fan-out.
-    invoke_cargo_test(&cwd)
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_test_files(path, &mut files);
+
+    // Apply filter to file stems.
+    if let Some(pattern) = filter {
+        let pattern = pattern.to_string();
+        files.retain(|f| {
+            let stem = f
+                .file_stem()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_default();
+            crate::test_runner::matches_pattern(&stem, &pattern)
+        });
+    }
+
+    // Sort for deterministic order.
+    files.sort();
+    Ok(files)
 }
 
-/// Invoke `cargo test` at `root`, forwarding stdout/stderr and mapping
-/// non-zero exit to an `Err`.
-fn invoke_cargo_test(root: &PathBuf) -> Result<()> {
-    let result = Command::new("cargo")
-        .arg("test")
-        .current_dir(root)
+/// Recursively collect test files from `dir`.
+fn collect_test_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+
+        if entry_path.is_dir() {
+            // Recurse into subdirectories.
+            collect_test_files(&entry_path, files);
+        } else if entry_path.is_file() {
+            let file_name = entry_path.file_name().map(|n| n.to_string_lossy());
+            let Some(file_name) = file_name else {
+                continue;
+            };
+
+            // Convention: files ending in `.test.buff` or inside a `test/` dir.
+            let is_test_suffix = file_name.ends_with(".test.buff");
+            let is_in_test_dir = entry_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n == "test")
+                .unwrap_or(false);
+
+            if is_test_suffix || is_in_test_dir {
+                files.push(entry_path);
+            }
+        }
+    }
+}
+
+/// Run a single test file: compile, execute, compare stdout to snapshot.
+///
+/// Returns `Ok(true)` if the output matches the snapshot (or if `--update`
+/// wrote a new snapshot). Returns `Ok(false)` if the output differs.
+fn run_single_test(test_file: &Path, update: bool) -> Result<bool> {
+    // 1. Compile the test file to a temporary executable.
+    let source = std::fs::read_to_string(test_file)
+        .with_context(|| format!("failed to read `{}`", test_file.display()))?;
+
+    let source_id = buff_lang_error::SourceId(0);
+    let source_file = buff_lang_error::SourceFile::new(test_file.to_path_buf(), source.clone());
+    let tokens = buff_lang_lexer::tokenize(&source, source_id).map_err(|e| {
+        pipeline::format_diagnostic_error("lex", &e.inner.diagnostic, &source_file, test_file)
+    })?;
+    let decls = buff_lang_parser::parse(&tokens, source_id).map_err(|e| {
+        pipeline::format_diagnostic_error("parse", &e.diagnostic, &source_file, test_file)
+    })?;
+
+    let rust_source = buff_lang_codegen_rust::generate_rust(&decls, source_id).map_err(|e| {
+        pipeline::format_diagnostic_error("codegen", &e.diagnostic, &source_file, test_file)
+    })?;
+
+    // Write generated Rust to a temp dir.
+    let temp_dir = std::env::temp_dir().join("buff-test-snap");
+    std::fs::create_dir_all(&temp_dir)
+        .with_context(|| format!("failed to create temp dir `{}`", temp_dir.display()))?;
+
+    let stem = test_file
+        .file_stem()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| std::ffi::OsString::from("buff_test"));
+    let rust_file = temp_dir.join(format!("{}_test.rs", stem.to_string_lossy()));
+    std::fs::write(&rust_file, &rust_source)
+        .with_context(|| format!("failed to write `{}`", rust_file.display()))?;
+
+    // Compile with rustc (debug mode for fast iteration).
+    let exe_stem = pipeline::with_exe_extension(
+        &temp_dir.join(format!("{}_test", stem.to_string_lossy())),
+    );
+    let exe_path = pipeline::compile_rust_to_exe(
+        &rust_file,
+        &exe_stem,
+        test_file,
+        pipeline::BuildMode::Debug,
+    )?;
+
+    // 2. Execute, capturing stdout.
+    let output = Command::new(&exe_path)
         .output()
-        .context("failed to invoke `cargo` — is it installed and on your PATH?")?;
+        .with_context(|| format!("failed to execute `{}`", exe_path.display()))?;
 
-    // Forward cargo's stdout (test results) and stderr (progress / warnings).
-    if !result.stdout.is_empty() {
-        let stdout = String::from_utf8_lossy(&result.stdout);
-        print!("{stdout}");
-    }
-    if !result.stderr.is_empty() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        eprint!("{stderr}");
+    let actual_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    // 3. Clean up temp files (best-effort).
+    let _ = std::fs::remove_file(&exe_path);
+    let _ = std::fs::remove_file(&rust_file);
+
+    // 4. Determine the snapshot path.
+    let snap_path = test_file.with_extension("snap");
+
+    // 5. Compare or update.
+    if update || !snap_path.exists() {
+        let is_new = !snap_path.exists();
+
+        // Write (or overwrite) the snapshot file.
+        let snap_content = format!(
+            "---\nsource: {}\n---\n{}",
+            test_file.display(),
+            actual_stdout
+        );
+        std::fs::write(&snap_path, &snap_content)
+            .with_context(|| format!("failed to write snapshot `{}`", snap_path.display()))?;
+
+        if is_new {
+            eprintln!("(new snapshot written)");
+        } else {
+            eprintln!("(snapshot updated)");
+        }
+        return Ok(true);
     }
 
-    if !result.status.success() {
-        anyhow::bail!("cargo test exited with status {}", result.status);
+    // 6. Read the existing snapshot.
+    let snap_content = std::fs::read_to_string(&snap_path)
+        .with_context(|| format!("failed to read snapshot `{}`", snap_path.display()))?;
+
+    // Extract the expected output (everything after the second `---` line).
+    let expected = extract_snapshot_body(&snap_content);
+
+    // 7. Compare.
+    if actual_stdout == expected {
+        Ok(true)
+    } else {
+        // Print diff.
+        print_diff(&expected, &actual_stdout, test_file);
+        Ok(false)
+    }
+}
+
+/// Extract the snapshot body from a `.snap` file.
+///
+/// The format is:
+/// ```text
+/// ---
+/// source: <path>
+/// ---
+/// <body>
+/// ```
+///
+/// Returns everything after the second `---` line. If there's no header
+/// (no `---` lines), returns the entire content.
+fn extract_snapshot_body(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Find the second `---` line.
+    let mut dash_count = 0;
+    let mut body_start = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() == "---" {
+            dash_count += 1;
+            if dash_count == 2 {
+                body_start = i + 1;
+                break;
+            }
+        }
     }
 
-    eprintln!("Ran tests");
-    Ok(())
+    // If we found the second `---`, take everything after it.
+    // Otherwise, the entire content is the body.
+    if dash_count >= 2 {
+        lines[body_start..].join("\n")
+    } else {
+        content.to_string()
+    }
+}
+
+/// Print a simple diff between expected and actual output.
+fn print_diff(expected: &str, actual: &str, test_file: &Path) {
+    let expected_lines: Vec<&str> = expected.lines().collect();
+    let actual_lines: Vec<&str> = actual.lines().collect();
+
+    eprintln!(
+        "snapshot mismatch in `{}`:",
+        test_file.file_name().unwrap_or_default().to_string_lossy()
+    );
+
+    // Simple line-by-line diff.
+    let max_lines = expected_lines.len().max(actual_lines.len());
+    for i in 0..max_lines {
+        let exp = expected_lines.get(i).copied().unwrap_or("");
+        let act = actual_lines.get(i).copied().unwrap_or("");
+        if exp != act {
+            if exp.is_empty() {
+                eprintln!("  +{act}");
+            } else if act.is_empty() {
+                eprintln!("  -{exp}");
+            } else {
+                eprintln!("  -{exp}");
+                eprintln!("  +{act}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_snapshot_body_with_header() {
+        let content = "---\nsource: tests/foo.test.buff\n---\nhello\nworld\n";
+        assert_eq!(extract_snapshot_body(content), "hello\nworld\n");
+    }
+
+    #[test]
+    fn extract_snapshot_body_no_header() {
+        let content = "hello\nworld\n";
+        assert_eq!(extract_snapshot_body(content), "hello\nworld\n");
+    }
+
+    #[test]
+    fn extract_snapshot_body_empty() {
+        assert_eq!(extract_snapshot_body(""), "");
+    }
+
+    #[test]
+    fn extract_snapshot_body_only_header() {
+        let content = "---\nsource: foo\n---\n";
+        assert_eq!(extract_snapshot_body(content), "");
+    }
 }

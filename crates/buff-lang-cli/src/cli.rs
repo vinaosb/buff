@@ -464,24 +464,33 @@ pub enum Command {
     /// Initialize a Buff project in the current directory.
     Init,
 
-    /// Discover and run `@test` functions in a `.buff` file (T35), OR
-    /// run all tests in a project / workspace via `cargo test` (T123).
+    /// Discover and run snapshot tests in a Buff project (T100).
     ///
-    /// When `<FILE>` is provided, discovers `@test` functions via the Buff
-    /// test runner. When omitted, reads `buff.toml` from the current
-    /// directory and shells out to `cargo test` (workspace mode fans out
-    /// to all members automatically).
+    /// Discovers test files by convention: files ending in `.test.buff`
+    /// or files inside a `test/` directory. Each test file is compiled
+    /// and executed; its stdout is compared against a stored `.snap`
+    /// snapshot file (insta-style). On mismatch, a diff is printed.
+    ///
+    /// Use `--update` to accept new or changed snapshots (mirrors
+    /// `cargo insta accept`). Use `--filter <PATTERN>` to run only
+    /// tests whose file name matches the given glob pattern.
     Test {
-        /// Input `.buff` source file containing `@test` functions. Omit
-        /// to run `cargo test` at the project / workspace root (T123).
-        #[arg(value_name = "FILE")]
-        file: Option<PathBuf>,
+        /// Path to a `.buff` file or directory containing test files.
+        /// When a directory is given, discovers `*.test.buff` files and
+        /// files in `test/` subdirectories recursively.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
 
-        /// Only run tests whose name matches this glob pattern (e.g.
-        /// `test_*`). When omitted, all `@test` functions run. Only
-        /// meaningful in single-file mode (ignored by `cargo test`).
+        /// Only run tests whose file name matches this glob pattern
+        /// (e.g. `test_*`). When omitted, all discovered tests run.
         #[arg(long)]
-        pattern: Option<String>,
+        filter: Option<String>,
+
+        /// Accept new or changed snapshots. Writes the current output
+        /// as the new `.snap` file (mirrors `cargo insta accept`).
+        /// Without this flag, missing or mismatched snapshots fail.
+        #[arg(long)]
+        update: bool,
     },
 
     /// Format a `.buff` file into canonical form (T54).
