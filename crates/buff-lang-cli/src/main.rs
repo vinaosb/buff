@@ -76,6 +76,7 @@ fn main() -> Result<()> {
             debuginfo,
             backend,
             target,
+            sccache,
             explain,
         } => {
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
@@ -86,7 +87,7 @@ fn main() -> Result<()> {
                 // runtime can emit dispatch diagnostics.
                 std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
             }
-            buff_lang_cli::commands::run::run(&file, &args, release, incremental, no_incremental, linker_choice, debuginfo_choice, backend_choice, target.as_deref())
+            buff_lang_cli::commands::run::run(&file, &args, release, incremental, no_incremental, sccache, linker_choice, debuginfo_choice, backend_choice, target.as_deref())
         }
         Command::New {
             name,

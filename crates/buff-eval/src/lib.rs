@@ -142,6 +142,16 @@ fn on_path(name: &str) -> bool {
 // Kept inline to avoid pulling clap/tokio transitively into the eval crate.
 // ---------------------------------------------------------------------------
 
+/// Returns `true` when `sccache` is installed and on `PATH` (T9).
+///
+/// Mirrors `buff_lang_cli::compile_speed::sccache_available` without
+/// depending on the CLI crate. sccache wraps rustc invocations to cache
+/// compiled artefacts across projects. Opt-in via `BUFF_EVAL_SCCACHE=1`
+/// env var (no CLI surface in eval).
+fn sccache_available() -> bool {
+    on_path("sccache")
+}
+
 /// Probe whether the Cranelift codegen backend is available (T4).
 ///
 /// Mirrors `buff_lang_cli::pipeline::cranelift_available`. Runs
@@ -651,10 +661,17 @@ fn run_full_program(source: &str) -> EvalResult {
     // T4: opt-in Cranelift dev backend via BUFF_EVAL_BACKEND=cranelift
     // (probe + set CARGO_PROFILE_DEV_CODEGEN_BACKEND env var on the
     // child rustc process — scoped to the subprocess, no parent leak).
+    // T9: opt-in sccache via BUFF_EVAL_SCCACHE=1 env var. When set AND
+    // sccache is on PATH, sets RUSTC_WRAPPER=sccache on the child rustc
+    // process. Falls back silently when sccache is missing.
     // T112: cross-compilation target via BUFF_EVAL_TARGET env var.
     // When set, verifies the target is installed via `rustup target list
     // --installed` and passes `--target <triple>` to rustc.
     let mut rustc_cmd = Command::new("rustc");
+    // T9: sccache wrapper — opt-in via BUFF_EVAL_SCCACHE=1 env var.
+    if std::env::var("BUFF_EVAL_SCCACHE").as_deref() == Ok("1") && sccache_available() {
+        rustc_cmd.env("RUSTC_WRAPPER", "sccache");
+    }
     rustc_cmd.arg("--edition").arg("2021");
     rustc_cmd.arg("-O");
     rustc_cmd.arg("-C").arg("debuginfo=1");
@@ -666,7 +683,7 @@ fn run_full_program(source: &str) -> EvalResult {
     }
     // T112: cross-compilation target via env var (no CLI surface in eval).
     if let Some(triple) = eval_target() {
-        if !eval_target_is_installed(triple) {
+        if !eval_target_is_installed(&triple) {
             let _ = std::fs::remove_file(&rust_path);
             return EvalResult::err(Diagnostic::error(
                 format!(

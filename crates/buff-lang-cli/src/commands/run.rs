@@ -20,7 +20,8 @@ use anyhow::{Context, Result};
 use crate::pipeline;
 
 /// Entry point for `buff run <FILE> [-- ARGS]... [--release]
-/// [--incremental] [--no-incremental] [--linker <auto|mold|lld|system>]
+/// [--incremental] [--no-incremental] [--sccache]
+/// [--linker <auto|mold|lld|system>]
 /// [--debuginfo <line-tables-only|full|none>] [--backend <llvm|cranelift>]
 /// [--target <TRIPLE>]`.
 ///
@@ -56,13 +57,14 @@ use crate::pipeline;
 /// Propagates pipeline errors. A non-zero program exit code is *not* an
 /// `Err` from this function — instead the process exits directly so the exit
 /// code is preserved.
-#[allow(clippy::too_many_arguments)] // T7: incremental flags add 2 params
+#[allow(clippy::too_many_arguments)] // T7: incremental flags add 2 params; T9: sccache
 pub fn run(
     file: &Path,
     args: &[String],
     release: bool,
     incremental: bool,
     no_incremental: bool,
+    sccache: bool,
     linker: pipeline::LinkerChoice,
     debuginfo: pipeline::DebugInfoChoice,
     backend: pipeline::BackendChoice,
@@ -128,7 +130,7 @@ pub fn run(
             &exe_stem,
             file,
             mode,
-            false,
+            sccache,
             linker,
             debuginfo,
             backend,
@@ -142,7 +144,7 @@ pub fn run(
             &exe_stem,
             file,
             mode,
-            false,
+            sccache,
             linker,
             debuginfo,
             backend,

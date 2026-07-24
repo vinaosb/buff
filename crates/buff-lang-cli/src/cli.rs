@@ -342,6 +342,18 @@ pub enum Command {
         #[arg(long, value_name = "TRIPLE")]
         target: Option<String>,
 
+        /// T9: Wrap the rustc invocation in `sccache` for cross-project crate
+        /// caching. When sccache is on `PATH`, sets `RUSTC_WRAPPER=sccache`
+        /// on the spawned rustc process so compiled crates are shared across
+        /// projects. When sccache is requested but NOT installed, falls back
+        /// to bare `rustc` with a stderr note (never fails the build).
+        ///
+        /// Opt-in: default (omitted) does NOT use sccache (it has side
+        /// effects — runs a background server, writes to
+        /// `~/.cache/sccache/`).
+        #[arg(long)]
+        sccache: bool,
+
         /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
         /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the
         /// compiled binary's runtime can emit the explain output.
