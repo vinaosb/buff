@@ -1,0 +1,61 @@
+// Buff self-host port of `crates/buff-lang-lexer/src/error.rs` (T15).
+//
+// Lexer error type. The Rust reference wraps `buff_lang_error::LexError`
+// (carrying a `Diagnostic` + stable `ErrorCode`). Buff has no `std::error`
+// machinery, so this port models a lexer error as a plain struct carrying a
+// human-readable message and the offending `Span`.
+//
+// The named constructors (`unexpected_char`, `unterminated_string`, ...) mirror
+// the Rust ones so call sites read identically; the stable `ErrorCode` each
+// Rust constructor attaches is preserved as a string tag (`code`) so a future
+// diagnostic renderer can still emit `error[E1001]`.
+
+enum ErrorCode:
+    UnexpectedChar
+    UnterminatedString
+    InvalidNumber
+    MixedTabsSpaces
+    Other
+
+struct LexerError:
+    message: String
+    span: Span
+    code: ErrorCode
+
+func lexer_error_new(message: String, span: Span) -> LexerError:
+    return LexerError.new(message: message, span: span, code: ErrorCode.Other)
+
+func lexer_error_unexpected_char(ch: Char, span: Span) -> LexerError:
+    return LexerError.new(
+        message: "unexpected character: " + char_debug(ch),
+        span: span,
+        code: ErrorCode.UnexpectedChar,
+    )
+
+func lexer_error_unterminated_string(span: Span) -> LexerError:
+    return LexerError.new(
+        message: "unterminated string literal",
+        span: span,
+        code: ErrorCode.UnterminatedString,
+    )
+
+func lexer_error_invalid_number(span: Span) -> LexerError:
+    return LexerError.new(
+        message: "invalid numeric literal",
+        span: span,
+        code: ErrorCode.InvalidNumber,
+    )
+
+func lexer_error_mixed_tabs_spaces(span: Span) -> LexerError:
+    return LexerError.new(
+        message: "mixed tabs and spaces in indentation",
+        span: span,
+        code: ErrorCode.MixedTabsSpaces,
+    )
+
+func lexer_error_to_string(err: LexerError) -> String:
+    return err.message
+
+// Debug-quote a char the way Rust's {:?} does for single characters.
+func char_debug(ch: Char) -> String:
+    return "'" + Char.to_string(ch) + "'"

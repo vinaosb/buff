@@ -1,0 +1,189 @@
+// Buff self-host port of `crates/buff-lang-lexer/src/string_interp.rs` (T15).
+//
+// Hand-rolled state machine that scans Buff string literals with interpolation.
+//
+// Input fragment:   "valor {x + 1} fim"
+// Output tokens:    StringStart, StringPart("valor "), InterpStart, Ident("x"),
+//                   Plus, IntLit(1), InterpEnd, StringPart(" fim"), StringEnd
+//
+// The scanner operates on the ENTIRE source using absolute byte positions so
+// spans refer back to the original input. When an interpolation expression is
+// hit, the inner expression is tokenized via a caller-supplied CALLBACK closure
+// so nested string literals (and recursively nested interpolations) are handled
+// by the main lexer.
+//
+// FAITHFULNESS NOTES
+//   * Rust walks `source.as_bytes()`; Buff walks a `Vector<Int>` of byte values
+//     (0-255). Byte literals b'"' / b'\\' / b'{' / b'}' / b':' become named
+//     constants.
+//   * Rust's `(usize, Option<String>)` tuple return becomes the `InterpSplit`
+//     struct (Buff tuple support is secondary; a named record is unambiguous).
+//   * The `LexCallback` trait + `&mut dyn` becomes a first-class Buff closure
+//     `callback: (Int, Int) -> Result<(), LexerError>` (Buff hides `dyn`).
+
+// --- ASCII byte constants the scanner reacts to ---
+let QUOTE_BYTE: Int = 34      // "
+let BACKSLASH_BYTE: Int = 92  // \
+let LBRACE_BYTE: Int = 123    // {
+let RBRACE_BYTE: Int = 125    // }
+let COLON_BYTE: Int = 58      // :
+
+// Result of splitting an interpolation at the first depth-0 `:`.
+struct InterpSplit:
+    expr_end: Int
+    spec: Option<String>
+
+// Build a String from a byte sub-range (Rust `source[start..end].to_string()`).
+func slice_to_string(bytes: Vector<Int>, start: Int, end: Int) -> String:
+    let mut out = ""
+    let mut i = start
+    while i < end:
+        out = out + Char.to_string(Int.to_char(bytes[i]))
+        i = i + 1
+    return out
+
+// Scan a string literal starting at `quote_start` (position of the opening ").
+//
+// Returns the absolute byte position immediately AFTER the closing ".
+// Pushes StringStart, StringPart, InterpStart, ... StringEnd tokens into `out`.
+//
+// `callback` tokenizes an interpolation expression: given the absolute byte
+// range (start, end) it pushes its tokens into `out` and returns Ok(()) on
+// success.
+func scan_string(
+        bytes: Vector<Int>,
+        quote_start: Int,
+        source_id: SourceId,
+        out: Vector<Token>,
+        callback: (Int, Int) -> Result<(), LexerError>,
+    ) -> Result<Int, LexerError>:
+    out.push(token_new(TokenKind.StringStart, span_new(quote_start, quote_start + 1, source_id)))
+
+    let mut i = quote_start + 1
+    let mut part_start = i
+
+    while i < bytes.len():
+        let b = bytes[i]
+        if b == QUOTE_BYTE:
+            flush_part(bytes, part_start, i, source_id, out)
+            out.push(token_new(TokenKind.StringEnd, span_new(i, i + 1, source_id)))
+            return Ok(i + 1)
+        if b == BACKSLASH_BYTE:
+            // Keep the raw escape bytes in the StringPart; escape interpretation
+            // is the codegen/parser's job. Skip one extra byte (the escaped
+            // char) if present.
+            if i + 1 >= bytes.len():
+                return Result.Err(lexer_error_unterminated_string(span_new(quote_start, bytes.len(), source_id)))
+            i = i + 2
+        else if b == LBRACE_BYTE:
+            flush_part(bytes, part_start, i, source_id, out)
+            out.push(token_new(TokenKind.InterpStart, span_new(i, i + 1, source_id)))
+            let after_brace = i + 1
+            let closing = find_matching_brace(bytes, after_brace, source_id)?
+            // T81: scan for `:` at brace-depth 0 to split expr from spec.
+            let split = split_interp_spec(bytes, after_brace, closing, source_id)?
+            callback(after_brace, split.expr_end)?
+            match split.spec {
+                Option.Some(spec) => out.push(token_new(TokenKind.InterpSpec(spec), span_new(split.expr_end, closing, source_id))),
+                Option.None => return (),
+            }
+            out.push(token_new(TokenKind.InterpEnd, span_new(closing, closing + 1, source_id)))
+            i = closing + 1
+            part_start = i
+        else if b == RBRACE_BYTE:
+            return Result.Err(lexer_error_new("unexpected '}' inside string literal", span_new(i, i + 1, source_id)))
+        else:
+            // Multi-byte UTF-8 sequences are handled implicitly: we walk one
+            // byte at a time but never split a UTF-8 boundary because we only
+            // react to ASCII bytes above.
+            i = i + 1
+
+    return Result.Err(lexer_error_unterminated_string(span_new(quote_start, bytes.len(), source_id)))
+
+// Emit a StringPart token for the accumulated raw bytes, if non-empty.
+func flush_part(bytes: Vector<Int>, start: Int, end: Int, source_id: SourceId, out: Vector<Token>):
+    if end > start:
+        let text = slice_to_string(bytes, start, end)
+        out.push(token_new(TokenKind.StringPart(text), span_new(start, end, source_id)))
+
+// Find the matching `}` for the `{` that precedes `start`.
+//
+// `start` is the position immediately after the opening `{`. Returns the index
+// of the matching `}`. Brace depth is tracked so nested `{ ... { ... } ... }`
+// works. String literals inside the interpolation are skipped so their `{`/`}`
+// characters do not affect brace depth.
+func find_matching_brace(bytes: Vector<Int>, start: Int, source_id: SourceId) -> Result<Int, LexerError>:
+    let mut depth = 1
+    let mut i = start
+    while i < bytes.len():
+        let b = bytes[i]
+        if b == LBRACE_BYTE:
+            depth = depth + 1
+            i = i + 1
+        else if b == RBRACE_BYTE:
+            depth = depth - 1
+            if depth == 0:
+                return Ok(i)
+            i = i + 1
+        else if b == QUOTE_BYTE:
+            // Skip a nested string literal: walk to the next unescaped ".
+            i = i + 1
+            while i < bytes.len() && bytes[i] != QUOTE_BYTE:
+                if bytes[i] == BACKSLASH_BYTE && i + 1 < bytes.len():
+                    i = i + 2
+                else:
+                    i = i + 1
+            if i < bytes.len():
+                i = i + 1  // consume closing "
+        else:
+            i = i + 1
+    return Result.Err(lexer_error_new(
+        "unterminated interpolation in string literal",
+        span_new(start - 1, bytes.len(), source_id),
+    ))
+
+// Split the inner text of ${...} at the first `:` at brace-depth 0.
+//
+// Returns InterpSplit { expr_end, Option.Some(spec_text) } when a `:` is found,
+// or InterpSplit { expr_end: closing, spec: Option.None } when there is no spec.
+//
+// The `:` is NOT included in the spec text — ${x:.2} yields expr_end = colon,
+// spec = Some(".2"). Nested braces are tracked so `:` inside nested braces does
+// NOT count as a separator; string literals inside are skipped too.
+func split_interp_spec(
+        bytes: Vector<Int>,
+        start: Int,
+        closing: Int,
+        source_id: SourceId,
+    ) -> Result<InterpSplit, LexerError>:
+    let mut depth = 0
+    let mut i = start
+    while i < closing:
+        let b = bytes[i]
+        if b == LBRACE_BYTE:
+            depth = depth + 1
+            i = i + 1
+        else if b == RBRACE_BYTE:
+            if depth == 0:
+                // Reached the closing `}` — no spec found.
+                return Ok(InterpSplit.new(expr_end: closing, spec: Option.None))
+            depth = depth - 1
+            i = i + 1
+        else if b == COLON_BYTE && depth == 0:
+            // Found the spec separator at brace-depth 0.
+            let spec = slice_to_string(bytes, i + 1, closing)
+            return Ok(InterpSplit.new(expr_end: i, spec: Option.Some(spec)))
+        else if b == QUOTE_BYTE:
+            // Skip a nested string literal so its `:` doesn't confuse us.
+            i = i + 1
+            while i < closing && bytes[i] != QUOTE_BYTE:
+                if bytes[i] == BACKSLASH_BYTE && i + 1 < closing:
+                    i = i + 2
+                else:
+                    i = i + 1
+            if i < closing:
+                i = i + 1
+        else:
+            i = i + 1
+    // Reached `closing` without finding `:` at depth 0.
+    return Ok(InterpSplit.new(expr_end: closing, spec: Option.None))
