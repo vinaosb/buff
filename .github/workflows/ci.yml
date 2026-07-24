@@ -5,8 +5,17 @@ on: [push, pull_request]
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # x64 targets (existing)
+        os:
+          - ubuntu-latest       # x64
+          - windows-latest      # x64
+          - macos-latest        # x64
+          # arm64 targets (T61)
+          - ubuntu-24.04-arm    # arm64 — GitHub-hosted, GA 2025
+          - macos-14            # arm64 — Apple Silicon M1, GA 2024
+          # windows-11-arm not yet GA; add when available
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
