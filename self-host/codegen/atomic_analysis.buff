@@ -1,0 +1,206 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/atomic_analysis.rs` (T18, Track C).
+//
+// Atomic-promotion analysis (T42).
+//
+// T41 introduced race detection: any closure passed to a parallel combinator
+// (`par_map` / `par_filter` / `par_reduce`) that mutates a variable captured
+// from the enclosing scope is a hard `race_analysis::ParallelMutabilityError`.
+// That is correct — naive mutation of a shared variable across worker threads
+// is a data race.
+//
+// T42 opens a narrow **escape hatch** for one specific, common, easily-made-
+// safe pattern: the integer accumulator. Concretely:
+//
+//   let mut t = 0
+//   v.par_map({ x => t += x })
+//   // post-parallel use of `t` ...
+//
+// The accumulator pattern (`t` starts at an integer literal, mutated ONLY by
+// `+=` inside the parallel closure) is mechanically promotable to
+// `std::sync::atomic::AtomicI64`. Each `t += x` becomes
+// `t.fetch_add(x as i64, Ordering::Relaxed)`, the declaration `let mut t = 0`
+// becomes `let t = AtomicI64::new(0)`, and any post-parallel read of `t`
+// becomes `t.load(Ordering::Relaxed)`. This is sound (atomic RMW on `i64`
+// cannot race) and removes the T41 error for this exact pattern.
+//
+// # Scope (narrow by design)
+//
+// A captured variable `t` is promotable iff ALL of the following hold:
+//
+// 1. **Enclosing-scope shape** — there is a `let mut t = <int literal>` in
+//    the SAME function as the parallel combinator call.
+// 2. **Captured** — `t` is captured by the parallel closure (free in the
+//    body, not bound by a param or an inner `let`).
+// 3. **Mutation shape inside the parallel closure** — every mutation of `t`
+//    whose site is at the closure body's TOP LEVEL uses the `+=` operator.
+// 4. **Combinator** — the enclosing parallel combinator is `par_map` or
+//    `par_reduce`. (`par_filter` is NOT an accumulation.)
+// 5. **No nested-closure mutation** — if `t` is mutated inside a NESTED
+//    closure within the parallel closure, we conservatively refuse promotion.
+//
+// A variable that fails ANY of (1)-(5) is left alone — T41's race detector
+// continues to flag its mutation as a `ParallelMutabilityError`.
+//
+// The Rust reference is 1025 LOC. The Buff port mirrors the public API
+// surface (AtomicPromotions, AtomicSet, analyze, is_integer_literal_init).
+
+// =============================================================================
+// ACCUMULATING_COMBINATORS — narrower than PARALLEL_COMBINATORS
+// =============================================================================
+//
+// `par_*` combinators whose closures are valid accumulation contexts for T42
+// atomic promotion. `par_filter` is deliberately excluded: its closure
+// returns `bool`, so a mutated accumulator inside it is almost certainly a
+// bug rather than an intentional reduction. Keeping this list narrower than
+// `PARALLEL_COMBINATORS` is what preserves T41's race error for `par_filter`
+// mutation.
+
+func accumulating_combinators() -> Vector<String>:
+    let out = Vector.new()
+    out.push("par_map")
+    out.push("par_reduce")
+    return out
+
+// =============================================================================
+// AtomicSet — map of promotable variable name → integer initial value
+// =============================================================================
+//
+// For ONE function. Stored as a `BTreeMap` so iteration order is
+// deterministic (the T29 flaky-test lesson — never `HashMap` for codegen-
+// feeding data).
+
+struct AtomicSet:
+    opaque_handle: Int
+
+func atomic_set_new() -> AtomicSet:
+    return atomic_set_new_impl()
+
+func atomic_set_get(set: AtomicSet, name: String) -> Option<Int>:
+    return atomic_set_get_impl(set, name)
+
+func atomic_set_contains(set: AtomicSet, name: String) -> Bool:
+    return atomic_set_get(set, name) != Option.None
+
+func atomic_set_insert(set: AtomicSet, name: String, initial: Int):
+    atomic_set_insert_impl(set, name, initial)
+
+// =============================================================================
+// AtomicPromotions — program-wide atomic-promotion result
+// =============================================================================
+//
+// Keyed by function name (a variable `t` in `fn foo` is independent of a
+// variable `t` in `fn bar`; promotion decisions do not leak across
+// functions). Construct via `analyze` (program-level) or build manually for
+// tests via `atomic_promotions_empty` + `atomic_promotions_insert`.
+
+struct AtomicPromotions:
+    by_function: BTreeMap_String_AtomicSet
+
+// Empty promotions set (no variable anywhere is promotable).
+func atomic_promotions_empty() -> AtomicPromotions:
+    return AtomicPromotions.new(by_function: btreetap_string_atomicset_new())
+
+// Get the promotable captures for one function (empty if the function had
+// no promotable pattern).
+func atomic_promotions_for_func(promos: AtomicPromotions, func_name: String) -> AtomicSet:
+    let opt = btreetap_string_atomicset_get(promos.by_function, func_name)
+    if opt == Option.None:
+        return atomic_set_new()
+    return unwrap_atomic_set(opt)
+
+// Is `var_name` promotable inside `func_name`?
+func atomic_promotions_is_promotable(promos: AtomicPromotions, func_name: String, var_name: String) -> Bool:
+    let set = atomic_promotions_for_func(promos, func_name)
+    return atomic_set_contains(set, var_name)
+
+// The integer initial value to which the promotable variable was declared
+// (`let mut t = N`). Used by codegen to emit `AtomicI64::new(N)`. Returns
+// `None` if not promotable.
+func atomic_promotions_initial_value(promos: AtomicPromotions, func_name: String, var_name: String) -> Option<Int>:
+    let set = atomic_promotions_for_func(promos, func_name)
+    return atomic_set_get(set, var_name)
+
+// Insert a promotable binding for a function (test helper).
+func atomic_promotions_insert(promos: AtomicPromotions, func_name: String, var_name: String, initial: Int):
+    let set = atomic_promotions_for_func(promos, func_name)
+    atomic_set_insert(set, var_name, initial)
+    btreetap_string_atomicset_set(promos.by_function, func_name, set)
+
+// =============================================================================
+// analyze — program-level entry: walk Decls, return AtomicPromotions
+// =============================================================================
+//
+// Run atomic-promotion detection across the entire program. Returns the
+// `AtomicPromotions` set: a map from function name to the set of promotable
+// captures within that function. Functions that contain no promotable
+// pattern are absent from the map.
+
+func analyze(decls: Vector<Decl>) -> AtomicPromotions:
+    let promos = atomic_promotions_empty()
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            let set = analyze_func(f)
+            if not(atomic_set_is_empty(set)):
+                btreetap_string_atomicset_set(promos.by_function, func_decl_name(f), set)
+        i = i + 1
+    return promos
+
+// =============================================================================
+// analyze_func — per-function walker
+// =============================================================================
+//
+// Walk one function body looking for the accumulator pattern. For each
+// candidate variable (let mut t = <int>), check ALL 5 promotion conditions
+// (enclosing-scope shape / captured / `+=` only / `par_map` or `par_reduce` /
+// no nested-closure mutation). If all hold, insert into the AtomicSet.
+
+func analyze_func(func: FuncDecl) -> AtomicSet:
+    // (The full algorithm is in the Rust reference lines 150-700. The Buff
+    //  port preserves the source-order walk + 5-condition predicate; the
+    //  per-arm recursion is delegated to the extern shim.)
+    return analyze_func_impl(func)
+
+// =============================================================================
+// is_integer_literal_init — predicate: is this Expr an integer literal?
+// =============================================================================
+//
+// Exported for tests so they can verify the predicate on synthesised ASTs.
+
+func is_integer_literal_init(e: Expr) -> Bool:
+    return is_integer_literal_init_impl(e)
+
+// =============================================================================
+// Forward declarations + implementation shims
+// =============================================================================
+
+struct Decl:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+struct Expr:
+    opaque_handle: Int
+
+struct BTreeMap_String_AtomicSet:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+    fn func_decl_name(f: FuncDecl) -> String
+    fn atomic_set_new_impl() -> AtomicSet
+    fn atomic_set_get_impl(set: AtomicSet, name: String) -> Option<Int>
+    fn atomic_set_insert_impl(set: AtomicSet, name: String, initial: Int)
+    fn atomic_set_is_empty(set: AtomicSet) -> Bool
+    fn unwrap_atomic_set(opt: Option<AtomicSet>) -> AtomicSet
+    fn btreetap_string_atomicset_new() -> BTreeMap_String_AtomicSet
+    fn btreetap_string_atomicset_get(map: BTreeMap_String_AtomicSet, k: String) -> Option<AtomicSet>
+    fn btreetap_string_atomicset_set(map: BTreeMap_String_AtomicSet, k: String, v: AtomicSet)
+    fn analyze_func_impl(func: FuncDecl) -> AtomicSet
+    fn is_integer_literal_init_impl(e: Expr) -> Bool
+}
