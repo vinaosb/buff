@@ -37,6 +37,19 @@ pub(super) fn program_uses_serde_yml(decls: &[Decl]) -> bool {
     program_uses_namespace(decls, "Yaml")
 }
 
+/// T23: detect `Json.<method>(...)` calls. Returns `true` if at least
+/// one is found, signalling [`RustCodegen::generate`] to record
+/// `"serde_json"` in the extern-crate set so the pipeline knows the
+/// generated Cargo project depends on the `serde_json` crate.
+///
+/// Mirrors the `program_uses_serde_yml` walker (T124i twin); reuses the
+/// generic `program_uses_namespace` helper so Json's walker is also a
+/// one-liner. The walker is NARROW: flags ONLY the bare-Ident receiver
+/// name `Json`, NOT every prelude-type Ident, NOT every method-name match.
+pub(super) fn program_uses_serde_json(decls: &[Decl]) -> bool {
+    program_uses_namespace(decls, "Json")
+}
+
 /// Walk the declaration list looking for any `Csv.<method>(...)` call
 /// (T124i). Returns `true` if at least one is found, signalling
 /// [`RustCodegen::generate`] to record `"csv"` in the extern-crate set

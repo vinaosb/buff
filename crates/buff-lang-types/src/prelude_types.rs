@@ -332,6 +332,27 @@ pub enum PreludeType {
     /// recorded in codegen `extern_crates` when a Buff program uses
     /// `Yaml`.
     Yaml,
+    /// `Json` - the JSON serialization namespace (T23). Wraps the
+    /// `serde_json` Rust crate. Like [`Self::Toml`] / [`Self::Yaml`],
+    /// `Json` is **never a runtime value** - it's a NAMESPACE exposing
+    /// two associated functions:
+    /// - `Json.parse(string)` - parse a JSON document into a Buff `Map`
+    ///   (heterogeneous values); lowers to
+    ///   `serde_json::from_str::<std::collections::HashMap<String,
+    ///   serde_json::Value>>(s).unwrap_or_default()` (empty Map on
+    ///   parse failure - NEVER panics, mirroring the Toml.parse
+    ///   panic-free stance from T124e).
+    /// - `Json.stringify(value)` - serialize a Map/value back to JSON
+    ///   text; lowers to `serde_json::to_string(&v).unwrap_or_default()`
+    ///   (empty String on serialization failure - NEVER panics).
+    ///
+    /// `buff_type()` returns [`Type::Void`] (Json has no value
+    /// representation, exactly like Toml/Yaml); `is_namespace_only()`
+    /// returns `true`. Mirrors the Toml/Yaml namespace-only shape
+    /// exactly (parse + stringify a heterogeneous Map). The `serde_json`
+    /// crate is recorded in codegen `extern_crates` when a Buff program
+    /// uses `Json`.
+    Json,
     /// `Csv` - the CSV serialization namespace (T124i). Wraps the
     /// `csv` Rust crate (burntsushi/rust-csv). Like [`Self::Yaml`] /
     /// [`Self::Toml`], `Csv` is **never a runtime value** - it's a

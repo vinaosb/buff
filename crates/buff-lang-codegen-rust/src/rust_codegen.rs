@@ -712,6 +712,21 @@ impl RustCodegen {
         if program_uses_serde_yml(decls) {
             self.extern_crates.insert("serde_yml".to_string());
         }
+        // T23: register the `serde_json` crate as an external dependency
+        // when the program references the `Json` prelude namespace
+        // (`Json.parse(s)` / `Json.stringify(v)`). Generated code uses
+        // fully-qualified `serde_json::from_str` / `serde_json::to_string`
+        // paths so no `use` import is emitted - but the recorded name
+        // signals to the pipeline / build-driver that the generated
+        // Cargo project must declare `serde_json` in `[dependencies]`.
+        //
+        // Mirrors the serde_yml / csv registration pattern (T124i):
+        // single-file `buff run` rustc path does NOT link these crates;
+        // the codegen-only linking boundary is the accepted acceptance
+        // criterion for v1.4+ prelude modules.
+        if program_uses_serde_json(decls) {
+            self.extern_crates.insert("serde_json".to_string());
+        }
         if program_uses_csv(decls) {
             self.extern_crates.insert("csv".to_string());
         }
@@ -3562,6 +3577,38 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Yaml.stringify codegen parse: {e}")))
+            }
+            // T23: Json.parse(s) -> Map<String, Unknown>. Mirrors the
+            // Yaml.parse / Toml.parse codegen arms exactly, swapping
+            // `serde_yml::from_str` / `toml::from_str` for
+            // `serde_json::from_str`. The turbofish pins the concrete
+            // `HashMap<String, serde_json::Value>` so the generated
+            // Rust is fully typed. `.unwrap_or_default()` is the
+            // panic-free fallback (empty Map on parse failure).
+            (T::Json, A::Parse) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(#arg)
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Json.parse codegen parse: {e}")))
+            }
+            // T23: Json.stringify(v) -> String. Mirrors the
+            // Yaml.stringify / Toml.stringify codegen arms exactly,
+            // swapping `serde_yml::to_string` / `toml::to_string` for
+            // `serde_json::to_string`. The arg is borrowed via `&v`
+            // so Rust's serde-Serialize bound is satisfied.
+            // `.unwrap_or_default()` is the panic-free fallback
+            // (empty String on serialization failure).
+            (T::Json, A::Stringify) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    serde_json::to_string(&#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Json.stringify codegen parse: {e}")))
             }
             // T124i: Csv.parse(s) -> Vector<Vector<String>>. Differs
             // from Yaml/Toml in surface type (uniform rows of Strings

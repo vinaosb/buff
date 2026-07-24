@@ -51,7 +51,10 @@ impl PreludeType {
         // Log / Toml's namespace-only shape exactly (parse + stringify
         // a heterogeneous Map for Yaml; parse + stringify a uniform
         // Vector<Vector<String>> for Csv). NO runtime value type.
+        // T23: Json - JSON serialization namespace wrapping serde_json.
+        // Mirrors Yaml / Toml exactly (parse + stringify).
         PreludeType::Yaml,
+        PreludeType::Json,
         PreludeType::Csv,
         // T124j: Path / Dir / Tempfile - three filesystem modules.
         // Path is the third runtime-value-with-rich-instance-methods
@@ -522,6 +525,11 @@ impl PreludeType {
             // `yaml` - the lowering maps Buff's `Yaml` namespace to
             // the `serde_yml` Rust crate paths directly).
             PreludeType::Yaml => "Yaml",
+            // T23: the Json prelude type name. Mirrors the Rust crate
+            // name (`serde_json`) so the codegen can splice
+            // `serde_json::from_str` / `serde_json::to_string` paths
+            // without rewriting. PascalCase mirrors Yaml / Toml / Csv.
+            PreludeType::Json => "Json",
             // T124i: the Csv prelude type name. Mirrors the Rust
             // crate name (`csv`) so the codegen can splice
             // `csv::ReaderBuilder` / `csv::Writer` paths without
@@ -911,6 +919,11 @@ impl PreludeType {
             // `Yaml.stringify`) are callable. Same surface as Toml
             // (parse + stringify a heterogeneous Map).
             PreludeType::Yaml => Type::Void,
+            // T23: namespace-only - Json has no value representation.
+            // Mirrors Yaml / Toml exactly: the namespace itself is
+            // never a value, only its associated functions
+            // (`Json.parse` / `Json.stringify`) are callable.
+            PreludeType::Json => Type::Void,
             // T124i: namespace-only - Csv has no value representation.
             // Mirrors Yaml / Toml: the namespace itself is never a
             // value, only its associated functions (`Csv.parse` /
@@ -1269,6 +1282,7 @@ impl PreludeType {
                 | PreludeType::URLEncode
                 | PreludeType::UUID
                 | PreludeType::Yaml
+                | PreludeType::Json
                 | PreludeType::Csv
                 | PreludeType::Dir
                 | PreludeType::Tempfile

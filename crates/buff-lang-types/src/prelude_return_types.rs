@@ -221,6 +221,12 @@ pub fn assoc_fn_return_type(
         (PreludeType::Yaml, PreludeAssocFn::Parse) => {
             Some(Type::map(Type::string(), Type::Unknown))
         }
+        // T23: Json module - mirrors Yaml / Toml exactly.
+        // `Json.parse(s)` returns a Buff `Map<String, Unknown>`.
+        // The codegen emits `HashMap<String, serde_json::Value>`.
+        (PreludeType::Json, PreludeAssocFn::Parse) => {
+            Some(Type::map(Type::string(), Type::Unknown))
+        }
         // T124i: Yaml module - `Yaml.stringify(v)` returns a YAML-
         // formatted String. Mirrors Toml.stringify exactly (the
         // `serde_yml::to_string` API is structurally identical to
@@ -228,6 +234,12 @@ pub fn assoc_fn_return_type(
         // `Result<String, _>`). The codegen borrows the arg via `&v`
         // so Rust's serde-Serialize bound is satisfied.
         (PreludeType::Yaml, PreludeAssocFn::Stringify) => Some(Type::string()),
+        // T23: Json module - `Json.stringify(v)` returns a JSON-
+        // formatted String. Mirrors Yaml.stringify / Toml.stringify
+        // exactly (serde_json::to_string takes `&impl Serialize` and
+        // returns `Result<String, _>`). The codegen borrows the arg
+        // via `&v` so Rust's serde-Serialize bound is satisfied.
+        (PreludeType::Json, PreludeAssocFn::Stringify) => Some(Type::string()),
         // T124i: Csv module - differs from Yaml / Toml in the surface
         // type but mirrors the parse + stringify shape. `Csv.parse(s)`
         // returns a `Vector<Vector<String>>` (uniform rows, NO header
