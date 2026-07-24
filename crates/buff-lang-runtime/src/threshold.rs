@@ -213,6 +213,381 @@ pub(crate) fn fits_vram(
     }
 }
 
+// ===========================================================================
+// T5: Dynamic workload-aware dispatch (v1.25 Wave 0, Track B MOAT)
+// ===========================================================================
+//
+// T40's [`decide`] uses static element-count thresholds alone: `< 1000` →
+// `SingleThread`, `1000..=50_000` → `CpuParallel`, `> 50_000` → `GpuCompute`
+// (if a GPU exists). That is correct on average but cannot adapt to the
+// ACTUAL runtime conditions of a specific dispatch site:
+//
+// * A 60 000-element memory-bound copy (`x => x`, intensity ~0.25 FLOPs/byte)
+//   would be routed to the GPU — but the GPU's memory-bandwidth ceiling is
+//   no higher than a multi-core CPU's, so the dispatch + transfer overhead
+//   makes the GPU *slower*. [`decide`] has no way to know this.
+//
+// * A 5 000-element compute-heavy fused-multiply-add kernel
+//   (`x => x * x + x`, intensity ~6 FLOPs/byte) would be routed to
+//   `CpuParallel` — but a GPU with hundreds of ALUs would crush it.
+//   [`decide`] has no way to promote it.
+//
+// T5 fixes both by introducing [`WorkloadContext`] + [`decide_dynamic`]: a
+// NEW pure decision function that inspects the real runtime element count,
+// GPU availability, AND an optional arithmetic-intensity estimate. The old
+// [`decide`] is preserved verbatim for backwards compatibility (it remains
+// the static-only path used by existing callers and T49's [`decide`]-based
+// hint layering).
+//
+// # Key invariants (preserved from T40)
+//
+// * **`DispatchKind` variant ordering is untouched** — `SingleThread` <
+//   `CpuParallel` < `GpuCompute` (see [`crate::DispatchKind`]).
+// * **"GPU failure invisible; CPU fallback always correct"** — when no GPU
+//   is available, [`decide_dynamic`] NEVER returns `GpuCompute`; it falls
+//   back to `CpuParallel` for all medium/large inputs.
+// * **Pure + deterministic + sub-microsecond** — [`decide_dynamic`] does
+//   integer comparisons and at most one `f64` comparison. No I/O, no
+//   allocation, no hashing, no thread-local state. The [`WorkloadContext`]
+//   is passed by reference (`&WorkloadContext`) so callers pay zero copy.
+
+/// Empirical GPU arithmetic-intensity break-even point, in FLOPs per byte
+/// of data transferred.
+///
+/// Workloads at or above this intensity are **compute-bound** — the GPU's
+/// massively parallel ALU array delivers a clear win over CPU rayon.
+/// Workloads below it are **memory-bound** — both the GPU and a multi-core
+/// CPU are bottlenecked by memory bandwidth, so the GPU's dispatch +
+/// PCIe-transfer overhead makes it *slower* than rayon.
+///
+/// # Why 4.0
+///
+/// The roofline model gives the GPU-vs-CPU break-even at roughly:
+///
+/// ```text
+///   intensity_break_even = (GPU_peak_FLOPs / GPU_peak_BW)
+///                         / (CPU_peak_FLOPs / CPU_peak_BW)
+/// ```
+///
+/// For a modern discrete GPU (~15 TFLOPS, ~500 GB/s) vs a 16-core CPU
+/// (~500 GFLOPS, ~100 GB/s):
+///
+/// ```text
+///   GPU operational intensity = 15_000 / 500 = 30 FLOPs/byte
+///   CPU operational intensity = 500 / 100     = 5 FLOPs/byte
+///   break_even ratio ≈ 30 / 5                 ≈ 6 (conservative)
+/// ```
+///
+/// 4.0 is a deliberately GPU-favorable threshold (lower than the
+/// theoretical 6) so that [`decide_dynamic`] promotes to the GPU whenever
+/// the workload is *plausibly* compute-bound, erring on the side of using
+/// the accelerator. Downstream callers that want a stricter bar can read
+/// this constant and apply their own multiplier.
+///
+/// # Used by
+///
+/// [`decide_dynamic`] compares `WorkloadContext::arithmetic_intensity`
+/// against this constant. [`decide_with_prefer_dynamic`] inherits the
+/// same bar through delegation.
+///
+/// # Examples
+///
+/// ```
+/// use buff_lang_runtime::threshold::GPU_ARITHMETIC_INTENSITY_THRESHOLD;
+/// assert_eq!(GPU_ARITHMETIC_INTENSITY_THRESHOLD, 4.0);
+/// ```
+pub const GPU_ARITHMETIC_INTENSITY_THRESHOLD: f64 = 4.0;
+
+/// T5: Runtime workload context for dynamic dispatch decisions.
+///
+/// Captures the actual runtime inputs that [`decide_dynamic`] uses to make
+/// a workload-aware CPU/GPU dispatch choice. Unlike T40's [`decide`] (which
+/// uses static element-count thresholds alone), [`decide_dynamic`] inspects
+/// the REAL runtime data size, GPU availability, and an optional
+/// arithmetic-intensity estimate to route work optimally.
+///
+/// # Construction
+///
+/// Use [`WorkloadContext::new`] for the common case (count + GPU flag),
+/// then `.with_intensity(ai)` to attach an arithmetic-intensity estimate:
+///
+/// ```
+/// use buff_lang_runtime::WorkloadContext;
+///
+/// let ctx = WorkloadContext::new(100_000, true)
+///     .with_intensity(8.0); // 8 FLOPs/byte — compute-bound
+/// ```
+///
+/// When `arithmetic_intensity` is left as `None` (unknown), [`decide_dynamic`]
+/// treats the workload as GPU-favorable — matching the convention where
+/// `available_vram_bytes: None` in [`decide`] means "assume fits". This keeps
+/// the dynamic path consistent with the static path for the GPU decision
+/// when intensity data is unavailable.
+///
+/// # Fields
+///
+/// * `element_count` — actual number of elements in the buffer at dispatch
+///   time. Compared against [`SINGLE_THREAD_MAX`] and [`CPU_PARALLEL_MAX`].
+/// * `gpu_available` — whether a GPU adapter is present on this host at
+///   dispatch time. When `false`, [`decide_dynamic`] always falls back to
+///   a CPU path (never `GpuCompute`).
+/// * `arithmetic_intensity` — optional FLOPs-per-byte estimate. `None`
+///   means "unknown — treat as GPU-favorable". `Some(v)` where
+///   `v < `[`GPU_ARITHMETIC_INTENSITY_THRESHOLD`] means "memory-bound —
+///   demote GPU-eligible work to `CpuParallel`".
+///
+/// # Determinism
+///
+/// `WorkloadContext` is a pure data struct (no interior mutability, no
+/// I/O, no clocks). [`decide_dynamic`] is a pure function of
+/// `&WorkloadContext` — same inputs → same output, every host, every run.
+///
+/// # Cost
+///
+/// [`decide_dynamic`] performs only integer comparisons and at most one
+/// `f64` comparison — O(1), allocation-free, sub-microsecond. The
+/// `WorkloadContext` is passed by reference so the caller pays zero copy.
+///
+/// # `PartialEq` but not `Eq`
+///
+/// `arithmetic_intensity: Option<f64>` cannot implement `Eq` (`f64` has
+/// NaN), so this struct derives `PartialEq` only. Two contexts with NaN
+/// intensity are never equal (even to themselves), but NaN intensity is
+/// treated as "not high" by [`decide_dynamic`] (any comparison with NaN
+/// returns `false`), so the dispatch decision is still deterministic for
+/// a given NaN payload.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct WorkloadContext {
+    /// Actual number of elements in the buffer being dispatched.
+    ///
+    /// This is the REAL runtime length (e.g. `slice.len()`), not a static
+    /// estimate. [`decide_dynamic`] compares it against [`SINGLE_THREAD_MAX`]
+    /// and [`CPU_PARALLEL_MAX`] to pick the routing band.
+    pub element_count: usize,
+    /// Whether a GPU adapter is available on this host at dispatch time.
+    ///
+    /// When `false`, [`decide_dynamic`] never returns
+    /// [`DispatchKind::GpuCompute`] — the "GPU failure invisible; CPU
+    /// fallback always correct" guarantee is preserved.
+    pub gpu_available: bool,
+    /// Optional arithmetic-intensity estimate (FLOPs per byte of data
+    /// transferred).
+    ///
+    /// `None` means "unknown — treat as GPU-favorable" (matches
+    /// `available_vram_bytes: None` in [`decide`]). `Some(v)` where
+    /// `v >= `[`GPU_ARITHMETIC_INTENSITY_THRESHOLD`] means "compute-bound
+    /// — GPU wins". `Some(v)` where
+    /// `v < GPU_ARITHMETIC_INTENSITY_THRESHOLD` means "memory-bound —
+    /// CPU wins (GPU's bandwidth ceiling is no higher)".
+    pub arithmetic_intensity: Option<f64>,
+}
+
+impl WorkloadContext {
+    /// Construct a workload context with `element_count` + `gpu_available`,
+    /// leaving `arithmetic_intensity` as `None` (unknown — treated as
+    /// GPU-favorable by [`decide_dynamic`]).
+    ///
+    /// Available in `const` contexts (no `Default` trait bound required).
+    /// Use [`.with_intensity(ai)`](Self::with_intensity) to attach an
+    /// intensity estimate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use buff_lang_runtime::{WorkloadContext, threshold::decide_dynamic, DispatchKind};
+    ///
+    /// const CTX: WorkloadContext = WorkloadContext::new(100_000, true);
+    /// assert_eq!(decide_dynamic(&CTX), DispatchKind::GpuCompute);
+    /// ```
+    #[must_use]
+    pub const fn new(element_count: usize, gpu_available: bool) -> Self {
+        Self {
+            element_count,
+            gpu_available,
+            arithmetic_intensity: None,
+        }
+    }
+
+    /// Chainable builder to set the arithmetic-intensity estimate.
+    ///
+    /// Consumes and returns `self` (builder pattern). Pass the estimated
+    /// FLOPs-per-byte of the dispatch kernel:
+    ///
+    /// * `x => x * x` → ~1 FLOP / 4 bytes = 0.25 (memory-bound).
+    /// * `x => x * x + x` → ~2 FLOPs / 4 bytes = 0.5 (still memory-bound).
+    /// * A 16-term dot-product per element → ~16 FLOPs / 4 bytes = 4.0
+    ///   (compute-bound — at the break-even).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use buff_lang_runtime::{WorkloadContext, threshold::decide_dynamic, DispatchKind};
+    ///
+    /// // Memory-bound: intensity below threshold → CPU even with GPU.
+    /// let ctx = WorkloadContext::new(100_000, true).with_intensity(0.5);
+    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::CpuParallel);
+    ///
+    /// // Compute-bound: intensity above threshold → GPU.
+    /// let ctx = WorkloadContext::new(100_000, true).with_intensity(8.0);
+    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
+    /// ```
+    #[must_use]
+    pub fn with_intensity(mut self, arithmetic_intensity: f64) -> Self {
+        self.arithmetic_intensity = Some(arithmetic_intensity);
+        self
+    }
+}
+
+/// Whether `arithmetic_intensity` is "high" enough for the GPU to win.
+///
+/// `None` (unknown) → `true` (GPU-favorable) — matches the convention
+/// where `available_vram_bytes: None` in [`decide`] means "assume fits".
+/// This keeps [`decide_dynamic`] consistent with [`decide`] for the GPU
+/// decision when intensity data is unavailable: if [`decide`] would pick
+/// `GpuCompute`, [`decide_dynamic`] with `None` intensity does too.
+///
+/// `Some(v)` → `v >= `[`GPU_ARITHMETIC_INTENSITY_THRESHOLD`]. NaN
+/// compares `false` against any threshold, so `Some(f64::NAN)` → `false`
+/// (treated as memory-bound — the conservative choice for garbage input).
+fn is_gpu_favorable_intensity(arithmetic_intensity: Option<f64>) -> bool {
+    arithmetic_intensity.is_none_or(|ai| ai >= GPU_ARITHMETIC_INTENSITY_THRESHOLD)
+}
+
+/// T5: Decide which [`DispatchKind`] to use, inspecting ACTUAL runtime
+/// workload context (element count + GPU availability + arithmetic
+/// intensity).
+///
+/// This is the **dynamic** counterpart to T40's static [`decide`]. It uses
+/// the same [`SINGLE_THREAD_MAX`] / [`CPU_PARALLEL_MAX`] band boundaries,
+/// but adds two runtime-aware refinements that [`decide`] cannot make:
+///
+/// # Routing rules (the 4 spec branches)
+///
+/// | condition | result |
+/// |-----------|--------|
+/// | `element_count <= `[`SINGLE_THREAD_MAX`] | [`DispatchKind::SingleThread`] |
+/// | `element_count <= `[`CPU_PARALLEL_MAX`] AND (no GPU OR low intensity) | [`DispatchKind::CpuParallel`] |
+/// | `element_count > `[`CPU_PARALLEL_MAX`] AND `gpu_available` AND high intensity | [`DispatchKind::GpuCompute`] |
+/// | `element_count > `[`CPU_PARALLEL_MAX`] AND no GPU | [`DispatchKind::CpuParallel`] |
+///
+/// Where "high intensity" means `arithmetic_intensity` is `None` (unknown —
+/// treated as GPU-favorable) OR `Some(v)` where
+/// `v >= `[`GPU_ARITHMETIC_INTENSITY_THRESHOLD`].
+///
+/// # Dynamic refinements over [`decide`]
+///
+/// Two additional behaviors emerge from the spec's 4 branches that [`decide`]
+/// cannot replicate:
+///
+/// 1. **Promotion** (medium band → GPU): when `gpu_available` AND intensity
+///    is high AND `SINGLE_THREAD_MAX < element_count <= CPU_PARALLEL_MAX`,
+///    [`decide_dynamic`] returns [`DispatchKind::GpuCompute`]. Static
+///    [`decide`] always returns [`DispatchKind::CpuParallel`] in this band.
+///    This is the MOAT: a compute-heavy 5 000-element kernel hits the GPU
+///    instead of waiting on rayon.
+///
+/// 2. **Demotion** (large band → CPU): when `gpu_available` BUT intensity
+///    is low (memory-bound) AND `element_count > CPU_PARALLEL_MAX`,
+///    [`decide_dynamic`] returns [`DispatchKind::CpuParallel`]. Static
+///    [`decide`] returns [`DispatchKind::GpuCompute`] here. A memory-bound
+///    100 000-element copy stays on the CPU where rayon's bandwidth is
+///    just as good and there's no dispatch overhead.
+///
+/// # Backwards compatibility
+///
+/// [`decide`] is **unchanged** — existing callers (T49's
+/// [`decide_with_prefer`], the codegen-emitted dispatch sites, all T40
+/// tests) keep their exact behavior. [`decide_dynamic`] is a NEW function;
+/// callers opt in by constructing a [`WorkloadContext`].
+///
+/// When `arithmetic_intensity` is `None`, [`decide_dynamic`] with a GPU
+/// produces the same `GpuCompute` decision as [`decide`] for large inputs —
+/// so callers that don't yet compute intensity see no behavior change
+/// beyond the medium-band promotion (which is strictly an improvement).
+///
+/// # Cost
+///
+/// Pure O(1) integer + at most one `f64` comparison. No I/O, no
+/// allocation, no hashing. Sub-microsecond on any modern CPU. The
+/// [`WorkloadContext`] is passed by reference.
+///
+/// # Determinism
+///
+/// Pure function of `&WorkloadContext`. No [`std::collections::HashMap`] /
+/// [`std::collections::HashSet`], no clocks, no thread-locals. Same inputs
+/// → same output, every host, every run.
+///
+/// # GPU-fallback guarantee
+///
+/// When `gpu_available == false`, this function NEVER returns
+/// [`DispatchKind::GpuCompute`] — the "GPU failure invisible; CPU fallback
+/// always correct" invariant from T40 is preserved.
+///
+/// # Examples
+///
+/// ```
+/// use buff_lang_runtime::{WorkloadContext, threshold::decide_dynamic, DispatchKind};
+///
+/// // Branch 1: tiny work → SingleThread.
+/// let ctx = WorkloadContext::new(500, true);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::SingleThread);
+///
+/// // Branch 2: medium + no GPU → CpuParallel.
+/// let ctx = WorkloadContext::new(10_000, false);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::CpuParallel);
+///
+/// // Branch 3: large + GPU + high intensity → GpuCompute.
+/// let ctx = WorkloadContext::new(100_000, true).with_intensity(8.0);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
+///
+/// // Branch 4: large + no GPU → CpuParallel.
+/// let ctx = WorkloadContext::new(100_000, false);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::CpuParallel);
+///
+/// // Dynamic demotion: large + GPU + LOW intensity → CpuParallel.
+/// let ctx = WorkloadContext::new(100_000, true).with_intensity(0.5);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::CpuParallel);
+/// ```
+#[must_use]
+pub fn decide_dynamic(ctx: &WorkloadContext) -> DispatchKind {
+    // Branch 1: element_count ≤ SINGLE_THREAD_MAX → SingleThread.
+    // Tiny work: parallel/GPU setup overhead dominates at this size.
+    // GPU availability and intensity are irrelevant here.
+    if ctx.element_count <= SINGLE_THREAD_MAX {
+        return DispatchKind::SingleThread;
+    }
+
+    // Precompute intensity favorability. None (unknown) → true (GPU-favorable),
+    // matching decide()'s convention where unknown VRAM means "assume fits".
+    // NaN compares false → treated as "not high" (conservative for garbage input).
+    let intensity_high = is_gpu_favorable_intensity(ctx.arithmetic_intensity);
+
+    // Branches 2 + 3: GPU-eligible work.
+    //
+    // When a GPU is available AND the workload is compute-bound (high or
+    // unknown intensity), route to GpuCompute. This covers:
+    //   * Branch 3: large band (> CPU_PARALLEL_MAX) + GPU + high → GpuCompute.
+    //   * Dynamic PROMOTION: medium band (≤ CPU_PARALLEL_MAX) + GPU + high →
+    //     GpuCompute. Static decide() cannot do this — it always picks
+    //     CpuParallel in the medium band. decide_dynamic promotes when the
+    //     workload is compute-intensive enough to benefit.
+    if ctx.gpu_available && intensity_high {
+        return DispatchKind::GpuCompute;
+    }
+
+    // Branches 2 + 4: CpuParallel fallback.
+    //
+    // This covers:
+    //   * Branch 2: medium band + (no GPU OR low intensity) → CpuParallel.
+    //   * Branch 4: large band + no GPU → CpuParallel.
+    //   * Dynamic DEMOTION: large band + GPU + low intensity → CpuParallel.
+    //     Memory-bound work doesn't benefit from the GPU; rayon's bandwidth
+    //     is just as good and there's no dispatch overhead.
+    //
+    // Never SingleThread — medium/large data still benefits from rayon.
+    DispatchKind::CpuParallel
+}
+
 #[cfg(test)]
 mod tests {
     //! Smoke tests at the module level — full behavioral coverage lives in

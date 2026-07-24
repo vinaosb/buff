@@ -82,7 +82,7 @@
 //! [`decide`]: crate::threshold::decide
 
 use crate::mock_gpu::GpuBackend;
-use crate::threshold::{decide, fits_vram};
+use crate::threshold::{decide, decide_dynamic, fits_vram, WorkloadContext};
 use crate::DispatchKind;
 
 /// Inclusive lower bound on `element_count` for honoring `@prefer(gpu)`
@@ -360,6 +360,136 @@ pub fn decide_with_prefer(
         available_vram_bytes,
         bytes_per_element,
     )
+}
+
+/// T5: Layer a [`Prefer`] hint on top of [`decide_dynamic`] (the
+/// workload-aware dynamic dispatcher) and produce the final
+/// [`DispatchKind`] for one dispatch site.
+///
+/// This is the **dynamic** counterpart to [`decide_with_prefer`]. Instead
+/// of delegating to T40's static [`decide`] for the no-hint / cost-override
+/// / fallback paths, it delegates to [`decide_dynamic`] — which inspects
+/// the real runtime [`WorkloadContext`] (element count + GPU availability +
+/// arithmetic intensity) to make a workload-aware choice.
+///
+/// # Rules (applied in order — mirror [`decide_with_prefer`])
+///
+/// 1. **No hint** ([`Prefer::None`]) → delegate to [`decide_dynamic`].
+///    The dynamic dispatcher picks based on workload context: tiny →
+///    `SingleThread`, GPU-eligible → `GpuCompute`, else `CpuParallel`.
+/// 2. **Cost-model override**: `prefer` is `Gpu`/`Npu` AND
+///    `ctx.element_count < `[`PREFER_GPU_MIN_ELEMENTS`] → delegate to
+///    [`decide_dynamic`] (the GPU dispatch overhead would exceed the
+///    compute savings at this size; the QA "10 elements → CPU" case lands
+///    here).
+/// 3. **Hint honored**: `prefer` is `Gpu`/`Npu` AND
+///    `ctx.element_count >= PREFER_GPU_MIN_ELEMENTS` AND
+///    `ctx.gpu_available` AND the data fits VRAM →
+///    [`DispatchKind::GpuCompute`]. The user explicitly asked for GPU;
+///    intensity is ignored on this path (the hint is an override).
+/// 4. **Graceful fallback**: hint cannot be honored (no GPU, or VRAM
+///    exceeded) → delegate to [`decide_dynamic`] (which will pick
+///    `CpuParallel` for medium/large, or demote GPU-eligible-but-
+///    memory-bound work to `CpuParallel`).
+///
+/// # Difference from [`decide_with_prefer`]
+///
+/// | Scenario | `decide_with_prefer` (static) | `decide_with_prefer_dynamic` |
+/// |----------|-------------------------------|------------------------------|
+/// | No hint, medium + GPU + high intensity | `CpuParallel` (static band) | `GpuCompute` (promotion) |
+/// | No hint, large + GPU + low intensity | `GpuCompute` (static band) | `CpuParallel` (demotion) |
+/// | `@prefer(gpu)` honored | `GpuCompute` | `GpuCompute` (same) |
+/// | `@prefer(gpu)` + tiny input | `SingleThread`/`CpuParallel` | same (cost override → dynamic) |
+///
+/// # Cost
+///
+/// Pure O(1) — same cost profile as [`decide_with_prefer`] +
+/// [`decide_dynamic`]. No I/O, no allocation.
+///
+/// # Determinism
+///
+/// Pure function of `(&WorkloadContext, Prefer, Option<u64>, u64)`. No
+/// hashing, no clocks, no thread-locals.
+///
+/// # GPU-fallback guarantee
+///
+/// When `ctx.gpu_available == false`, this function NEVER returns
+/// [`DispatchKind::GpuCompute`] — both the hint-honoring path (rule 3)
+/// and [`decide_dynamic`] check `gpu_available` first.
+///
+/// # Examples
+///
+/// ```
+/// use buff_lang_runtime::{
+///     decide_with_prefer_dynamic, DispatchKind, Prefer, WorkloadContext,
+/// };
+///
+/// // No hint + large + GPU + high intensity → GpuCompute (dynamic).
+/// let ctx = WorkloadContext::new(100_000, true).with_intensity(8.0);
+/// assert_eq!(
+///     decide_with_prefer_dynamic(&ctx, Prefer::None, None, 4),
+///     DispatchKind::GpuCompute,
+/// );
+///
+/// // @prefer(gpu) + 10 elements → SingleThread (cost override → dynamic).
+/// let ctx = WorkloadContext::new(10, true);
+/// assert_eq!(
+///     decide_with_prefer_dynamic(&ctx, Prefer::Gpu, None, 4),
+///     DispatchKind::SingleThread,
+/// );
+///
+/// // @prefer(gpu) + large + GPU → GpuCompute (hint honored).
+/// let ctx = WorkloadContext::new(100_000, true);
+/// assert_eq!(
+///     decide_with_prefer_dynamic(&ctx, Prefer::Gpu, None, 4),
+///     DispatchKind::GpuCompute,
+/// );
+///
+/// // @prefer(gpu) + large + NO GPU → CpuParallel (graceful fallback → dynamic).
+/// let ctx = WorkloadContext::new(100_000, false);
+/// assert_eq!(
+///     decide_with_prefer_dynamic(&ctx, Prefer::Gpu, None, 4),
+///     DispatchKind::CpuParallel,
+/// );
+/// ```
+#[must_use]
+pub fn decide_with_prefer_dynamic(
+    ctx: &WorkloadContext,
+    prefer: Prefer,
+    available_vram_bytes: Option<u64>,
+    bytes_per_element: u64,
+) -> DispatchKind {
+    // Rule 1: no hint — pure dynamic delegation. The workload context
+    // (element count + GPU availability + intensity) drives the decision.
+    if prefer == Prefer::None {
+        return decide_dynamic(ctx);
+    }
+
+    // From here on, prefer is Gpu or Npu. NPU maps to "prefer accelerator"
+    // in v1.0 (no NPU backend yet) → identical routing to Gpu.
+
+    // Rule 2: cost-model override. Small inputs stay on CPU — the GPU
+    // dispatch overhead would dominate. Delegating to decide_dynamic
+    // preserves the SingleThread (< 1000) and CpuParallel (1000..=50_000)
+    // bands, PLUS the dynamic refinements (intensity-based promote/demote).
+    if ctx.element_count < PREFER_GPU_MIN_ELEMENTS {
+        return decide_dynamic(ctx);
+    }
+
+    // Rule 3: hint honored. Above the cost-override threshold AND a GPU
+    // is available AND the data fits VRAM → GpuCompute. The user's
+    // @prefer(gpu) is an explicit override — intensity is NOT consulted
+    // here (unlike the no-hint dynamic path). If they ask for GPU and
+    // it's viable, they get GPU.
+    if ctx.gpu_available && fits_vram(ctx.element_count, bytes_per_element, available_vram_bytes) {
+        return DispatchKind::GpuCompute;
+    }
+
+    // Rule 4: graceful fallback. The hint cannot be honored — either no
+    // GPU adapter is available, or the data exceeds VRAM. Delegate to
+    // decide_dynamic (which handles both cases via its CpuParallel
+    // fallback, plus intensity-aware demotion for memory-bound work).
+    decide_dynamic(ctx)
 }
 
 /// Top-level dispatch entry that runs the chosen path end-to-end.

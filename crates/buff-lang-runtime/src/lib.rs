@@ -102,11 +102,14 @@ pub use error::RuntimeError;
 pub use gpu::{AdapterInfoSnapshot, GpuContext, GpuContextError};
 pub use gpu_pipeline::{workgroup_count, WgpuBackend, WORKGROUP_SIZE};
 pub use hints::{
-    decide_with_prefer, dispatch_with_prefer, prefer_from_name_args, Prefer,
-    PREFER_GPU_MIN_ELEMENTS,
+    decide_with_prefer, decide_with_prefer_dynamic, dispatch_with_prefer, prefer_from_name_args,
+    Prefer, PREFER_GPU_MIN_ELEMENTS,
 };
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
-pub use threshold::{decide, DispatchPlanner, CPU_PARALLEL_MAX, SINGLE_THREAD_MAX};
+pub use threshold::{
+    decide, decide_dynamic, DispatchPlanner, WorkloadContext, CPU_PARALLEL_MAX,
+    GPU_ARITHMETIC_INTENSITY_THRESHOLD, SINGLE_THREAD_MAX,
+};
 pub use tiling::{
     dispatch_map_with_tiling, dispatch_tiled, max_elements_per_tile, tile_ranges,
     vram_budget_from_device, TiledDispatcher,
