@@ -29,7 +29,7 @@ use anyhow::Result;
 use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 
 /// Library entry point for `buff check <FILE> [--deny-warnings/-D]
-/// [--error-format <human|json>] [--target <TRIPLE>]`.
+/// [--error-format <human|json>] [--target <TRIPLE>] [--no-color]`.
 ///
 /// Returns the outcome directly (no process::exit) so tests can inspect it
 /// and the CLI binary can translate it to an exit code.
@@ -40,13 +40,21 @@ use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 /// to perform. The flag is parsed and validated but has no effect on the
 /// check outcome.
 ///
+/// T43: `--no-color` disables ANSI color in human-readable output.
+///
 /// # Errors
 ///
 /// Propagates file-read errors. Compile diagnostics are NOT errors at this
 /// layer — they are returned as part of the [`CheckReport`] inside the
 /// outcome.
-pub fn run(file: &Path, deny_warnings: bool, format: ErrorFormat, _target: Option<&str>) -> Result<CheckOutcome> {
-    let report = run_check_file_with_format(file, format)?;
+pub fn run(
+    file: &Path,
+    deny_warnings: bool,
+    format: ErrorFormat,
+    _target: Option<&str>,
+    no_color: bool,
+) -> Result<CheckOutcome> {
+    let report = run_check_file_with_format(file, format, no_color)?;
     let outcome = if deny_warnings && matches!(report.outcome, CheckOutcome::HasWarnings) {
         CheckOutcome::HasErrors
     } else {

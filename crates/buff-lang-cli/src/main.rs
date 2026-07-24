@@ -87,7 +87,18 @@ fn main() -> Result<()> {
                 // runtime can emit dispatch diagnostics.
                 std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
             }
-            buff_lang_cli::commands::run::run(&file, &args, release, incremental, no_incremental, sccache, linker_choice, debuginfo_choice, backend_choice, target.as_deref())
+            buff_lang_cli::commands::run::run(
+                &file,
+                &args,
+                release,
+                incremental,
+                no_incremental,
+                sccache,
+                linker_choice,
+                debuginfo_choice,
+                backend_choice,
+                target.as_deref(),
+            )
         }
         Command::New {
             name,
@@ -145,10 +156,17 @@ fn main() -> Result<()> {
             deny_warnings,
             error_format,
             target,
+            no_color,
         } => {
             use buff_lang_cli::check::{CheckOutcome, ErrorFormat};
             let format = ErrorFormat::from_str(&error_format);
-            let outcome = buff_lang_cli::commands::check::run(&file, deny_warnings, format, target.as_deref())?;
+            let outcome = buff_lang_cli::commands::check::run(
+                &file,
+                deny_warnings,
+                format,
+                target.as_deref(),
+                no_color,
+            )?;
             if matches!(outcome, CheckOutcome::HasErrors) {
                 std::process::exit(1);
             }
@@ -225,8 +243,8 @@ fn main() -> Result<()> {
             no_backend,
         ),
         Command::Refactor { cmd } => buff_lang_cli::commands::refactor::run(cmd),
-        Command::Watch { path, exec } => {
-            buff_lang_cli::commands::watch::run(&path, exec.as_deref())
+        Command::Watch { file, interval } => {
+            buff_lang_cli::commands::watch::run(&file, Some(interval))
         }
     }
 }

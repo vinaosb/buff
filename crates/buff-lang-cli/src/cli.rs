@@ -525,6 +525,13 @@ pub enum Command {
         /// with the `rustup target add` command.
         #[arg(long, value_name = "TRIPLE")]
         target: Option<String>,
+
+        /// T43: Disable ANSI color codes in human-readable diagnostic
+        /// output. Overrides the default auto-detection (based on
+        /// `NO_COLOR` env var and stderr terminal check). Has no effect
+        /// in JSON output mode.
+        #[arg(long)]
+        no_color: bool,
     },
 
     /// Remove the `target/` build directory (wraps `cargo clean`).
@@ -1114,34 +1121,25 @@ pub enum Command {
         no_backend: bool,
     },
 
-    /// Watch `.buff` files for changes + rebuild on save. Debounced 500ms.
+    /// `buff watch <FILE> [--interval <MS>]` — file watcher with
+    /// auto-recompile (T97).
     ///
-    /// Usage: `buff watch <PATH> [--exec <CMD>]`. Recursively watches
-    /// the file or directory at `<PATH>` (default: `.`) and on each
-    /// `.buff` change runs [`commands::build::run`] with the changed
-    /// file. When `--exec <CMD>` is set, the command runs after each
-    /// rebuild (e.g. `--exec "buff test"` or `--exec "./serve.sh"`);
-    /// CMD is interpreted via `sh -c` on Unix + `cmd /c` on Windows.
+    /// Like `cargo watch` / `nodemon` for Buff: polls the `.buff` file's
+    /// mtime every N ms (default 500), recompiles + reruns on change.
+    /// Simple polling via `std::fs::metadata` — no platform-specific
+    /// file watcher APIs, no `notify` dependency.
     ///
-    /// Loop until Ctrl-C / SIGINT. **T64 SIMPLIFIED SCOPE**: this
-    /// commit ships the standalone file-watcher + rebuild loop only.
-    /// Server route hot-swap (the original T64 spec) is deferred to a
-    /// later commit — `buff watch` does NOT touch `buff-web`.
+    /// Loop until Ctrl-C / SIGINT.
     Watch {
-        /// File or directory to watch (recursive). Default: current
-        /// working directory. A single `.buff` file is also accepted
-        /// (the watcher then observes its containing directory so
-        /// sibling module edits also trigger rebuilds).
-        #[arg(value_name = "PATH", default_value = ".")]
-        path: PathBuf,
+        /// Input `.buff` source file to watch.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
 
-        /// Optional command to run after each successful rebuild. The
-        /// command runs via `sh -c <CMD>` on Unix + `cmd /c <CMD>` on
-        /// Windows. Failures are surfaced as stderr notes but do NOT
-        /// exit the watch loop (you typically want to keep iterating
-        /// even when the post-build hook fails).
-        #[arg(long, value_name = "CMD")]
-        exec: Option<String>,
+        /// Poll interval in milliseconds (default: 500). Lower values
+        /// detect changes faster but burn more CPU; higher values are
+        /// lighter on battery but less responsive.
+        #[arg(long, value_name = "MS", default_value_t = 500)]
+        interval: u64,
     },
 }
 

@@ -7,6 +7,13 @@
 //! line (`^^^`) pointing at the byte span. For multi-error files,
 //! [`render_diagnostics`] concatenates several diagnostics.
 //!
+//! # Colored output (T43)
+//!
+//! [`Diagnostic::render_with_color`] and [`render_diagnostics_with_color`] add
+//! ANSI escape codes: red for errors, yellow for warnings, cyan for notes,
+//! green for `help:` suggestions. Use [`should_use_color`] to detect terminal
+//! capability (respects `NO_COLOR` env var and piped stderr).
+//!
 //! # "Did you mean?" suggestions (T36)
 //!
 //! When the user mistypes an identifier (e.g. `pritn` instead of `print`),
@@ -16,6 +23,65 @@
 
 use crate::code::ErrorCode;
 use crate::span::Span;
+use std::io::IsTerminal;
+
+// ---------------------------------------------------------------------------
+// T43: ANSI color constants + terminal detection
+// ---------------------------------------------------------------------------
+
+/// ANSI escape: reset all attributes.
+const RESET: &str = "\x1b[0m";
+/// ANSI escape: foreground red (errors).
+const RED: &str = "\x1b[31m";
+/// ANSI escape: foreground yellow (warnings).
+const YELLOW: &str = "\x1b[33m";
+/// ANSI escape: foreground cyan (notes/info).
+const CYAN: &str = "\x1b[36m";
+/// ANSI escape: foreground green (suggestions/help).
+const GREEN: &str = "\x1b[32m";
+
+/// Return the ANSI escape for the given severity's color.
+const fn severity_color(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => RED,
+        Severity::Warning => YELLOW,
+        Severity::Info => CYAN,
+    }
+}
+
+/// Wrap `text` in ANSI `color` + reset, returning `color text reset`.
+fn color_text(color: &str, text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + RESET.len() + color.len());
+    out.push_str(color);
+    out.push_str(text);
+    out.push_str(RESET);
+    out
+}
+
+/// Detect whether ANSI color should be emitted.
+///
+/// Returns `false` when:
+/// - `NO_COLOR` environment variable is set (per https://no-color.org/)
+/// - `stderr` is not a terminal (piped / redirected)
+///
+/// Callers can override this with an explicit `--no-color` flag (see
+/// [`Diagnostic::render_with_color`]).
+pub fn should_use_color() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    // Use the stable `IsTerminal` trait (Rust 1.70+, no atty dep).
+    std::io::stderr().is_terminal()
+}
+
+/// Wrap `text` in the ANSI color for `severity`, returning the colored
+/// string. Used by the CLI's [`render_diagnostic`] to color the severity
+/// tag in the `<path>:<line>:<col>: [Severity]` prefix.
+///
+/// This is a convenience wrapper around [`color_text`] + [`severity_color`].
+pub fn color_severity(text: &str, severity: Severity) -> String {
+    color_text(severity_color(severity), text)
+}
 
 /// The severity of a diagnostic message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -439,6 +505,65 @@ impl Diagnostic {
         }
         out
     }
+
+    /// Like [`render`](Self::render) but with ANSI color codes.
+    ///
+    /// When `use_color` is `false`, output is identical to [`render`].
+    /// Callers should compute `use_color` via [`should_use_color`] and
+    /// allow a `--no-color` CLI flag to force-disable.
+    pub fn render_with_color(&self, source: &str, use_color: bool) -> String {
+        if !use_color {
+            return self.render(source);
+        }
+        let mut out = String::new();
+        match self.code {
+            Some(code) => {
+                let severity_tag = format!("[{:?}]", self.severity);
+                let colored_severity = color_text(severity_color(self.severity), &severity_tag);
+                out.push_str(&format!(
+                    "{} error[{}]: {}\n",
+                    colored_severity,
+                    code.code_str(),
+                    self.message
+                ));
+            }
+            None => {
+                let severity_tag = format!("[{:?}]", self.severity);
+                let colored_severity = color_text(severity_color(self.severity), &severity_tag);
+                out.push_str(&format!("{} {}\n", colored_severity, self.message));
+            }
+        }
+        if let Some(rendered_line) =
+            render_span_in_source_with_color(&self.span, source, self.severity)
+        {
+            out.push_str(&rendered_line);
+        }
+        for label in &self.labels {
+            if let Some(rendered_label) = render_span_label_in_source_with_color(
+                &label.span,
+                source,
+                label.style,
+                &label.label,
+                self.severity,
+            ) {
+                out.push_str(&rendered_label);
+            } else if !label.label.is_empty() {
+                out.push_str(&format!("  = {}\n", label.label));
+            }
+        }
+        for note in &self.notes {
+            out.push_str(&format!("  {}note: {}{}\n", CYAN, note, RESET));
+        }
+        for suggestion in &self.suggestions {
+            let help_line = suggestion.render_help_line();
+            // Wrap the "help:" prefix and the backtick-quoted replacement in green.
+            // The original line is "  help: replace with `...`" or "  help: label: replace with `...`"
+            out.push_str(&GREEN);
+            out.push_str(&help_line);
+            out.push_str(RESET);
+        }
+        out
+    }
 }
 
 /// Render the source line containing `span.start` plus a caret underline.
@@ -513,6 +638,53 @@ fn render_span_in_source(span: &Span, source: &str) -> Option<String> {
     Some(out)
 }
 
+/// Like [`render_span_in_source`] but with ANSI color on the caret line,
+/// using `severity` to choose the color (red for errors, yellow for warnings,
+/// cyan for info/notes).
+fn render_span_in_source_with_color(
+    span: &Span,
+    source: &str,
+    severity: Severity,
+) -> Option<String> {
+    let start = span.start;
+    let raw_end = span.end;
+
+    if start > source.len() {
+        return None;
+    }
+
+    let line_start = source[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|i| line_start + i)
+        .unwrap_or(source.len());
+    let line_text = &source[line_start..line_end];
+
+    let line_no = source[..line_start].matches('\n').count() + 1;
+    let line_no_str = line_no.to_string();
+    let col = source[line_start..start].chars().count();
+    let span_end_in_line = raw_end.min(line_end);
+    let width = if span_end_in_line <= start {
+        1
+    } else {
+        source[start..span_end_in_line].chars().count().max(1)
+    };
+
+    let gutter_pad: String = " ".repeat(line_no_str.len() + 1);
+    let caret_pad: String = " ".repeat(col);
+    let carets: String = "^".repeat(width);
+    let color = severity_color(severity);
+
+    let mut out = String::new();
+    out.push_str(&format!("{gutter_pad}|\n"));
+    out.push_str(&format!("{line_no_str} | {line_text}\n"));
+    out.push_str(&format!(
+        "{gutter_pad}| {caret_pad}{color}{carets}{RESET}\n"
+    ));
+    out.push_str(&format!("{gutter_pad}|\n"));
+    Some(out)
+}
+
 /// Render a labeled span (multi-span diagnostics) — same shape as
 /// [`render_span_in_source`] but with the caret char chosen by `style`
 /// (`^` for [`LabelStyle::Primary`], `~` for [`LabelStyle::Secondary`])
@@ -583,6 +755,66 @@ fn render_span_label_in_source(
     Some(out)
 }
 
+/// Like [`render_span_label_in_source`] but with ANSI color on the caret line,
+/// using the diagnostic's `severity` color for primary labels. The label text
+/// is also wrapped in color.
+fn render_span_label_in_source_with_color(
+    span: &Span,
+    source: &str,
+    style: LabelStyle,
+    label: &str,
+    severity: Severity,
+) -> Option<String> {
+    let start = span.start;
+    let raw_end = span.end;
+
+    if start > source.len() {
+        return None;
+    }
+
+    let line_start = source[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|i| line_start + i)
+        .unwrap_or(source.len());
+    let line_text = &source[line_start..line_end];
+
+    let line_no = source[..line_start].matches('\n').count() + 1;
+    let line_no_str = line_no.to_string();
+    let col = source[line_start..start].chars().count();
+    let span_end_in_line = raw_end.min(line_end);
+    let width = if span_end_in_line <= start {
+        1
+    } else {
+        source[start..span_end_in_line].chars().count().max(1)
+    };
+
+    let gutter_pad: String = " ".repeat(line_no_str.len() + 1);
+    let caret_pad: String = " ".repeat(col);
+    let caret_char = match style {
+        LabelStyle::Primary => '^',
+        LabelStyle::Secondary => '~',
+    };
+    let carets: String = std::iter::repeat(caret_char)
+        .take(width)
+        .collect::<String>();
+    let color = severity_color(severity);
+    let trailing = if label.is_empty() {
+        String::new()
+    } else {
+        format!(" {color}{label}{RESET}")
+    };
+
+    let mut out = String::new();
+    out.push_str(&format!("{gutter_pad}|\n"));
+    out.push_str(&format!("{line_no_str} | {line_text}\n"));
+    out.push_str(&format!(
+        "{gutter_pad}| {caret_pad}{color}{carets}{RESET}{trailing}\n"
+    ));
+    out.push_str(&format!("{gutter_pad}|\n"));
+    Some(out)
+}
+
 /// Render multiple diagnostics against the same `source`, separated by a
 /// blank line. Useful for parser-error-recovery output where several errors
 /// are collected in one pass.
@@ -595,6 +827,28 @@ pub fn render_diagnostics(diagnostics: &[Diagnostic], source: &str) -> String {
             out.push('\n');
         }
         out.push_str(&d.render(source));
+    }
+    out
+}
+
+/// Like [`render_diagnostics`] but with ANSI color codes.
+///
+/// Delegates to [`Diagnostic::render_with_color`] for each diagnostic.
+/// When `use_color` is `false`, output is identical to [`render_diagnostics`].
+pub fn render_diagnostics_with_color(
+    diagnostics: &[Diagnostic],
+    source: &str,
+    use_color: bool,
+) -> String {
+    if !use_color {
+        return render_diagnostics(diagnostics, source);
+    }
+    let mut out = String::new();
+    for (i, d) in diagnostics.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&d.render_with_color(source, true));
     }
     out
 }

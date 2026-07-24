@@ -257,7 +257,7 @@ pub fn check_source(src: &str) -> CheckReport {
 /// Returns `Err` only when the file cannot be read. Compile diagnostics
 /// are NOT errors here — they become the returned [`CheckReport`].
 pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
-    run_check_file_with_format(file, ErrorFormat::Human)
+    run_check_file_with_format(file, ErrorFormat::Human, false)
 }
 
 /// Run the full check pipeline on a `.buff` or `.buffhtml` file and emit
@@ -275,6 +275,8 @@ pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
 /// reporters, future `buff fix`). See `crates/buff-lang-error/src/json.rs`
 /// for the shape contract.
 ///
+/// T43: `no_color` forces human-readable output without ANSI escape codes.
+///
 /// # Errors
 ///
 /// Returns `Err` only when the file cannot be read. Compile diagnostics
@@ -282,18 +284,19 @@ pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
 pub fn run_check_file_with_format(
     file: &Path,
     format: ErrorFormat,
+    no_color: bool,
 ) -> anyhow::Result<CheckReport> {
     let is_buffhtml = file
         .extension()
         .is_some_and(|e| e == crate::pipeline::BUFFHTML_EXT);
     if is_buffhtml {
-        return run_check_buffhtml_file_with_format(file, format);
+        return run_check_buffhtml_file_with_format(file, format, no_color);
     }
     let src = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to read `{}`: {e}", file.display()))?;
     let report = check_source(&src);
 
-    emit_diagnostics(&report.diagnostics, &src, file, format);
+    emit_diagnostics(&report.diagnostics, &src, file, format, no_color);
 
     if matches!(report.outcome, CheckOutcome::Clean) && !format.is_json() {
         eprintln!("{}: no issues found", file.display());
@@ -307,11 +310,14 @@ pub fn run_check_file_with_format(
 /// the `.buff` and `.buffhtml` check paths without duplication. `source`
 /// is the raw file content (the same `&str` you'd pass to
 /// [`Diagnostic::render`]).
+///
+/// T43: `no_color` controls ANSI escape codes in human-readable output.
 fn emit_diagnostics(
     diagnostics: &[Diagnostic],
     source: &str,
     file: &Path,
     format: ErrorFormat,
+    no_color: bool,
 ) {
     match format {
         ErrorFormat::Json => {
@@ -320,10 +326,11 @@ fn emit_diagnostics(
             println!("{json}");
         }
         ErrorFormat::Human => {
-            // Human-readable render to stderr — byte-identical to pre-T1.
+            // Human-readable render to stderr.
+            let use_color = !no_color && buff_lang_error::should_use_color();
             let source_file = SourceFile::new(file.to_path_buf(), source.to_string());
             for d in diagnostics {
-                let rendered = render_diagnostic(d, &source_file);
+                let rendered = render_diagnostic(d, &source_file, use_color);
                 // Pre-T1 behavior: both Error and Warning go to stderr.
                 eprint!("{rendered}");
             }
@@ -332,9 +339,10 @@ fn emit_diagnostics(
 }
 
 /// T133: run the `.buffhtml` check pipeline on a file. Thin wrapper around
-/// [`run_check_buffhtml_file_with_format`] with [`ErrorFormat::Human`].
+/// [`run_check_buffhtml_file_with_format`] with [`ErrorFormat::Human`] and
+/// no color.
 fn run_check_buffhtml_file(file: &Path) -> anyhow::Result<CheckReport> {
-    run_check_buffhtml_file_with_format(file, ErrorFormat::Human)
+    run_check_buffhtml_file_with_format(file, ErrorFormat::Human, false)
 }
 
 /// T133 + T1: run the `.buffhtml` check pipeline on a file with a
@@ -342,11 +350,12 @@ fn run_check_buffhtml_file(file: &Path) -> anyhow::Result<CheckReport> {
 fn run_check_buffhtml_file_with_format(
     file: &Path,
     format: ErrorFormat,
+    no_color: bool,
 ) -> anyhow::Result<CheckReport> {
     let src = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to read `{}`: {e}", file.display()))?;
     let report = check_buffhtml_source(&src, file);
-    emit_diagnostics(&report.diagnostics, &src, file, format);
+    emit_diagnostics(&report.diagnostics, &src, file, format, no_color);
     if matches!(report.outcome, CheckOutcome::Clean) && !format.is_json() {
         eprintln!("{}: no issues found", file.display());
     }
@@ -519,30 +528,66 @@ fn compute_outcome(diagnostics: &[Diagnostic]) -> CheckOutcome {
 
 /// Render a diagnostic against the source file, prepended with the file
 /// path so the user sees `<path>: line:col` rustc-style.
-fn render_diagnostic(d: &Diagnostic, source_file: &SourceFile) -> String {
+///
+/// T43: when `use_color` is true, the severity tag and diagnostic body
+/// are rendered with ANSI escape codes.
+fn render_diagnostic(d: &Diagnostic, source_file: &SourceFile, use_color: bool) -> String {
     let header = match source_file.lookup(d.span.start) {
-        Some((line, col)) => format!(
-            "{}:{}:{}: [{:?}] {}",
-            source_file.path.display(),
-            line,
-            col,
-            d.severity,
-            d.message
-        ),
-        None => format!(
-            "{}: [{:?}] {}",
-            source_file.path.display(),
-            d.severity,
-            d.message
-        ),
+        Some((line, col)) => {
+            if use_color {
+                let sev = format!("[{:?}]", d.severity);
+                let colored_sev = buff_lang_error::color_severity(sev.as_str(), d.severity);
+                format!(
+                    "{}:{}:{}: {} {}",
+                    source_file.path.display(),
+                    line,
+                    col,
+                    colored_sev,
+                    d.message
+                )
+            } else {
+                format!(
+                    "{}:{}:{}: [{:?}] {}",
+                    source_file.path.display(),
+                    line,
+                    col,
+                    d.severity,
+                    d.message
+                )
+            }
+        }
+        None => {
+            if use_color {
+                let sev = format!("[{:?}]", d.severity);
+                let colored_sev = buff_lang_error::color_severity(sev.as_str(), d.severity);
+                format!(
+                    "{}: {} {}",
+                    source_file.path.display(),
+                    colored_sev,
+                    d.message
+                )
+            } else {
+                format!(
+                    "{}: [{:?}] {}",
+                    source_file.path.display(),
+                    d.severity,
+                    d.message
+                )
+            }
+        }
     };
     let mut out = header;
     out.push('\n');
     // The body of the render (source line + caret) — reuse the diagnostic's
-    // render-in-source helper from buff_lang_error.
-    let body = d.render(&source_file.content);
+    // render helper from buff_lang_error.
+    let body = if use_color {
+        d.render_with_color(&source_file.content, true)
+    } else {
+        d.render(&source_file.content)
+    };
     // d.render already includes the header line too; strip it so we don't
-    // duplicate. The header always starts with `[{severity:?}]` on line 1.
+    // duplicate. The header always starts with `[{severity:?}]` (uncolored)
+    // or `\x1b[3Xm[{severity:?}]\x1b[0m` (colored) on line 1.
     if let Some(rest_start) = body.find('\n') {
         let body_rest = &body[rest_start + 1..];
         out.push_str(body_rest);
