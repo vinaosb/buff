@@ -1,0 +1,51 @@
+// Buff v1.25 example — generics + monomorphization (T13).
+//
+// Demonstrates user-defined generic types and functions. The codegen emits
+// Rust generics `<T, U>` directly; rustc monomorphizes each call site
+// (zero-cost static dispatch — NO dynamic dispatch, NO type erasure).
+//
+// This is the HIGHEST-LEVERAGE feature in the v1.25 launch-readiness plan:
+// it gates 8+ downstream tasks (T15-T18 self-host ports, T37 user generics,
+// T38 bounds, T68 Box<dyn Trait>, T71 lazy iterators, T75 associated types).
+//
+// Run: `buff run examples/generics.buff` (once Cargo-project wiring lands)
+
+// --- Generic struct (layout-sensitive form) ---
+// `struct Pair<T, U>:` + indented fields. The parser also accepts the
+// brace form: `struct Pair<T, U> { x: T, y: U }`.
+struct Pair<T, U>:
+    x: T
+    y: U
+
+// --- Generic function ---
+// `func id<T>(x: T) -> T` — the identity function. Each call site is
+// monomorphized by rustc: `id(42)` becomes `id::<i64>(42)`,
+// `id("hello")` becomes `id::<&str>("hello")`. Zero-cost.
+func id<T>(x: T) -> T:
+    return x
+
+// --- Generic enum (brace form, matching T27 convention) ---
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+// --- Main ---
+func main():
+    // Instantiate a generic struct. rustc infers Pair<Int, String> from
+    // the field values (no explicit turbofish needed).
+    let p = Pair.new(x: 42, y: "hello")
+
+    // Call a generic function at two different types. rustc generates
+    // two monomorphized copies (static dispatch).
+    let n = id(42)
+    let s = id("hello")
+
+    // Use the generic enum. Option<Int> via Some(42).
+    let maybe = Option.Some(42)
+
+    print(p.x)
+    print(p.y)
+    print(n)
+    print(s)
+    print(maybe)
