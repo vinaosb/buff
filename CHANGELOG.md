@@ -17,34 +17,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Generics + monomorphization** (T13): user-defined generic types and functions — `struct Pair<T, U>`, `func id<T>(x: T) -> T`. Full pipeline support across AST type-param lists, lexer/parser, type-inference resolution, and codegen lowering to Rust generics.
-- **`buff bench` subcommand** (T22): benchmark harness with baseline capture for tracking compile-time and runtime regressions across releases.
-- **Multi-span diagnostics** (T1): `SpanLabel` with secondary spans — a single diagnostic can now annotate multiple source locations (e.g. "borrowed here" / "used here").
-- **Fix suggestions** (T1): `CodeSuggestion` with `Applicability` rating — diagnostics propose machine-applicable fixes, surfaced to editors as LSP `CodeAction`s.
-- **`--error-format json`** (T1): machine-readable diagnostic output mode for editor and tooling integration.
-- **Dynamic workload-aware dispatch** (T5): runtime `WorkloadContext` + `decide_dynamic` selects CPU vs GPU at execution time based on live workload characteristics, extending the static `@prefer` hint.
-- **`--explain` flag** (T6): emits human-readable dispatch diagnostics explaining why a function ran on CPU or GPU.
-- **`--linker {auto,mold,lld,system}` flag** (T2): fast-linker defaults (rust-lld / mold) with graceful fallback to the system linker for faster dev link times.
-- **Code-hygiene audit** (T104): inventory published at `.sisyphus/audits/code-hygiene-v1.25.md`.
-- **AGENTS.md refresh** (T108): root knowledge base updated for the 69-crate workspace.
-- **Direction decision record** (T110): strategic moat analysis at `.sisyphus/decisions/buff-direction-speed-moat-selfhost.md`.
-- **Error doc pages** (T52): missing catalog pages added for E1110, E1210, E1211, E1212, E1304.
-- **Memory-safety statement** (T59): `MEMORY_SAFETY.md` added documenting Buff's memory-safety guarantees.
-- **CI arm64 matrix** (T61): continuous integration now builds and tests `aarch64` targets across the 3-OS matrix.
-- **Community health files** (T116): `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue/PR templates, and Dependabot configuration added.
+- **Generic bounds** (T38): `func sort<T: Comparable>(items: Vec<T>)` constrains type parameters with trait bounds.
+- **Associated types in traits** (T75): traits can declare `type Item` and implementations provide concrete types, enabling return-position type abstraction.
+- **Trait objects** (T68): `Box<dyn Trait>` support for dynamic dispatch when concrete types aren't known at compile time.
+- **Pattern matching extensions:** or-patterns `A | B` (T39), pattern guards `if condition` on match arms (T40), struct patterns in match (T41), and complex pattern type inference (T42).
+- **Range syntax** (T84): `a..b` (exclusive) and `a..=b` (inclusive) ranges.
+- **Raw strings** (T93): `r"..."` and `r#"..."#` for strings that don't need escape sequences.
+- **Type aliases** (T95): `type Name = String` for convenience and readability.
+- **Tuple types** (T96): `let p: (Int, String) = (1, "hello")` with positional access.
+- **Lazy iterators** (T71): `Iterator` trait with associated types, enabling chained operations over lazy sequences.
+- **Comptime type introspection** (T74): `Type.of(x)` and `Type.fields(MyStruct)` for compile-time type queries.
+- **Cross-file modules** (T72): `import`/`export` now resolve symbols across files in a project.
+- **String operations** (T73): `split`, `join`, `trim`, `replace`, `upper`, `lower`, `contains` methods on strings.
+- **String format specifiers** (T81): interpolated strings support format specs like `"{x:.2}"`.
+- **Map indexing** (T82): `m[key]` syntax for map/dict access.
+- **Decimal type** (T89): `Decimal` prelude type for precise decimal arithmetic without floating-point rounding.
+- **Defer statements** (T90): `defer { cleanup() }` runs at end of scope, like Go.
+- **`defer` blocks** (T90): guaranteed cleanup at scope exit.
+- **Self-host ports (Wave 2a):** lexer (T15) and parser (T16) transpiled to Buff, proving the compiler can compile its own front-end.
+- **Self-host ports (Wave 3):** type system (T17) and codegen (T18) transpiled to Buff, bringing bootstrap coverage to the majority of the compiler.
+- **Bootstrap determinism gate** (T19): Stage 2 output verified equal to Stage 3, confirming reproducible builds (7 of 56 compiler modules proxy-verified).
+- **Multi-crate emission** (T8): `buff build` can emit separate Rust crates per Buff module.
+- **Salsa incremental compilation** (T7): front-end reuse across repeated builds, avoiding redundant lex/parse/typecheck work.
+- **Production registry** (T57): package registry with tarball storage, download endpoint, usage stats, rate limiting, invite-only beta, scoped packages (`@org/pkg`), GitHub OAuth login, and SQLite persistence.
+- **Prebuilt binaries** (T58): release binaries for 6 targets plus installer manifests.
+- **Json prelude type** (T23): `Json.parse()` and `Json.stringify()` for JSON handling.
+- **File prelude type** (T24): `File.read()`, `File.write()`, `File.exists()` for file I/O.
+- **Http prelude type** (T25): `Http.get()`, `Http.post()` and related methods for HTTP requests.
+- **Assert prelude type** (T26): `Assert.equal()`, `Assert.true()` and more for test assertions.
+- **Expanded collection methods** (T27): additional `Vector` and `Map` operations.
+- **Env.load()** (T114): loads `.env` files into environment variables.
+- **Data-locality-aware dispatch** (T10): runtime considers data location when choosing CPU vs GPU.
+- **Refined cost model** (T11): multi-factor heuristic for dispatch decisions.
+- **Dispatch profile cache** (T12): caches dispatch profiling results across runs.
+- **Colored diagnostics** (T43): terminal error messages with color for readability.
+- **Did-you-mean suggestions** (T53): typo correction hints on unknown names in parse and module errors.
+- **E14xx runtime error codes** (T47) and **E15xx warning codes** (T48): stable error code ranges for runtime failures and lints.
+- **LSP capabilities** (T45/T46): hover shows dispatch info, code actions from fix suggestions, code lenses, inlay hints, and semantic token highlighting.
+- **MCP bridge** (T62): Model Context Protocol server wrapping buff-lsp for AI editor integration.
+- **VSCode extension v1.3** (T118): code actions, inlay hints, semantic tokens, and updated grammar.
+- **Performance attributes:** `@inline`/`@no_inline` (T76), `@no_alloc` (T69), `@pin` (T70), `@workgroup(N)` (T66), `@blocking` (T65), `@prefer(cpu)`/`@force(gpu)` (T64).
+- **Optimization passes:** dead code elimination (T77) and constant propagation (T78).
+- **`buff bench`** (T22): compile-time and runtime benchmark harness with baseline capture.
+- **`buff bench-program`** (T99): benchmark user programs, not just the compiler.
+- **`buff profile`** (T111): CPU and allocation profiler for user programs.
+- **`buff test`** (T100): snapshot testing runner for `.buff` test files.
+- **`buff fix`** (T98): auto-apply diagnostic suggestions from the compiler.
+- **`buff doc`** (T56): rustdoc-quality API documentation generation.
+- **`buff doc --serve`** (T102): local documentation server with live reload.
+- **`buff expand`** (T115): inspect the generated Rust source before compilation.
+- **`buff generate`** (T103): boilerplate template generator for common patterns.
+- **`--detect-races`** (T113): ThreadSanitizer passthrough for data-race detection.
+- **`--target` flag** (T112): cross-compilation to arbitrary Rust targets.
+- **`--error-format json`** (T1): machine-readable diagnostic output for tooling integration.
+- **`--explain` flag** (T6): human-readable explanation of CPU/GPU dispatch decisions.
+- **`--linker {auto,mold,lld,system}`** (T2): fast linker defaults with graceful fallback.
+- **Multi-span diagnostics** (T1): a single diagnostic can annotate multiple source locations.
+- **Fix suggestions** (T1): diagnostics propose machine-applicable fixes, surfaced as LSP code actions.
+- **Dynamic workload-aware dispatch** (T5): runtime selects CPU vs GPU based on live workload characteristics.
+- **Runtime span preservation** (T50): runtime errors map back to original `.buff` source locations.
+- **The Book** (T55): mdbook documentation with 9 chapters covering the language.
+- **Playground rebuild** (T117): browser playground updated with v1.25 language features.
+- **tree-sitter npm package** (T60): prepared for npm publish with Node bindings.
+- **Cranelift dev backend** (T4): optional Cranelift codegen for faster debug builds.
+- **sccache integration** (T9): distributed compilation caching for faster rebuilds.
+- **Release profile** (T34): thin LTO + opt-level 3 in release mode.
+- **CI cargo-audit + SBOM** (T63): supply-chain auditing and software bill of materials in CI.
+- **Code-hygiene audit** (T104): inventory at `.sisyphus/audits/code-hygiene-v1.25.md`.
+- **AGENTS.md refresh** (T108): root knowledge base updated for the 70-crate workspace.
+- **Direction decision record** (T110): strategic moat analysis.
+- **Error doc pages** (T52): catalog pages for E1110, E1210, E1211, E1212, E1304.
+- **Memory-safety statement** (T59): `MEMORY_SAFETY.md` documenting Buff's memory-safety guarantees.
+- **Stability tiers doc** (T91): formal stability tier definitions.
+- **Editions design doc** (T92): edition evolution plan.
+- **Compatibility doc** (T54): Go go1compat-style compatibility promise.
+- **Release runbook** (T109): step-by-step release process documentation.
+- **CI arm64 matrix** (T61): 3-OS CI matrix now includes `aarch64` targets.
+- **Community health files** (T116): `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue/PR templates, Dependabot config.
 
 ### Changed
 
-- **Dev debuginfo default** (T3): dev builds now default to `--debuginfo=line-tables-only` for faster incremental builds; full debuginfo remains available via an explicit flag.
-- **Unified generics representation:** `EnumDecl` migrated from `generics: Vec<Ident>` to `type_params: Vec<TypeParam>`, aligning enums with structs and functions under a single type-parameter model.
+- **Dev debuginfo default** (T3): dev builds default to `--debuginfo=line-tables-only` for faster incremental builds.
+- **Unified generics representation:** `EnumDecl` uses `type_params: Vec<TypeParam>`, aligning enums with structs and functions.
+- **Version tier unification** (T33): all 69 crates now use consistent `1.2.0`/`1.0.0`/`2.0.0` version tiers.
+- **God-class splits** (T105a/b): `rust_codegen.rs` (17k lines) split into focused modules; `prelude_types.rs` (4.5k lines) split into metadata, assoc-fn, instance-fn, and assoc-const modules.
+- **Hygiene pass** (T106): replaced `unwrap`/`expect` with proper error handling across parser, CLI, Jupyter, and codegen crates.
 
 ### Fixed
 
-- `buff-plugins`: restored `Send`/`Sync` bounds on trait objects (pre-existing regression).
-- `buff-game`: corrected `AudioBuffer` public-function visibility to respect the 40-fn cap (F2 M2 finding).
-- `buff-pubsub`: closure return-type mismatch (F3 finding, fixed in v1.24.0).
-- `buff-web`: missing `IntoResponse` import (F3 finding, fixed in v1.24.0).
-- `buff-xml`: `quick-xml` 0.37 API drift (F3 finding, fixed in v1.24.0).
-- `buff-plugins`: missing `RuntimePlugin` import (F3 finding, fixed in v1.24.0).
+- Enum variant qualification: user-defined enum variants now emit `Color::Red` instead of bare `Red` (T85).
+- Match in return position: `match` expressions work as the last expression in a function body without a trailing semicolon (T86).
+- Nested collection literal type inference now resolves correctly (T83).
+- Edition-2024 `unsafe` wrapping on `Env.set` (T28).
+- `buff new` scaffolds now generate a `Cargo.lock` (T31).
+- RSX lowering preserves comments from `.buffhtml` templates (T32).
+- rand migrated from 0.8 to 0.9 (T36), Dioxus 0.7 exact-pinned (T29), serde_yml exact-pinned (T30).
+- `buff-plugins`: restored `Send`/`Sync` bounds on trait objects.
+- `buff-game`: corrected `AudioBuffer` visibility to respect the 40-fn cap.
 
 ## [1.24.0] - 2026-07-23
 
