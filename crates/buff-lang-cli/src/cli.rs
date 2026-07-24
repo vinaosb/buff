@@ -427,13 +427,26 @@ pub enum Command {
         name: String,
     },
 
-    /// `buff doc` — emit placeholder per-crate HTML API docs (T0-E3).
+    /// `buff doc` — generate rustdoc-quality HTML API docs (T56).
     ///
-    /// Walks `src/` for `.buff` files and emits `docs/<package>/index.html`
-    /// per crate, plus a top-level `docs/index.html` linking them.
-    /// **Rendering is scaffold-only in v1.13** — full Rustdoc-quality
-    /// rendering arrives in v1.18+.
-    Doc,
+    /// Walks `src/` for `.buff` files, parses each, extracts `///` doc
+    /// comments attached to public declarations (func/struct/enum/trait),
+    /// and emits an HTML documentation tree: one page per module with
+    /// signatures + rendered doc text + cross-references between types,
+    /// plus a JSON search index and a top-level `index.html`.
+    ///
+    /// Use `--open` to launch the generated docs in the default browser.
+    Doc {
+        /// Output directory (default: `doc/`). Idempotent: re-running
+        /// overwrites the previous output (matches `cargo doc`).
+        #[arg(short, long, value_name = "DIR")]
+        output: Option<PathBuf>,
+
+        /// Open the generated `index.html` in the default browser after
+        /// writing the docs (mirrors `cargo doc --open`).
+        #[arg(long)]
+        open: bool,
+    },
 
     /// `buff release <patch|minor|major>` — bump version, update
     /// CHANGELOG, tag git (T0-I3 scaffold).

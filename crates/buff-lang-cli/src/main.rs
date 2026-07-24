@@ -121,7 +121,9 @@ fn main() -> Result<()> {
             buff_lang_cli::commands::new::run(&name, kind)
         }
         Command::Init => buff_lang_cli::commands::init::run(),
-        Command::Doc => buff_lang_cli::commands::doc::run(std::path::Path::new(".")),
+        Command::Doc { output, open } => {
+            buff_lang_cli::commands::doc::run(std::path::Path::new("."), output.as_deref(), open)
+        }
         Command::Release { level } => {
             let lvl =
                 buff_lang_cli::commands::release::BumpLevel::from_str(&level).ok_or_else(|| {

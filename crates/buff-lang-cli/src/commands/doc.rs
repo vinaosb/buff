@@ -1,26 +1,41 @@
-//! `buff doc` — placeholder per-crate HTML API docs (T0-E3 scaffold).
+//! `buff doc` — rustdoc-quality HTML API docs (T56).
 //!
-//! v1.13 ships only the command scaffold so users can wire it into CI
-//! today. The command:
+//! Replaces the v1.13 placeholder. The generator:
 //!
-//! 1. Reads `buff.toml` from the current directory for `[package].name`.
-//! 2. Walks `src/` for `.buff` files (recursive).
-//! 3. Emits `docs/<package>/index.html` per crate with a placeholder
-//!    page listing every `.buff` file + every top-level `export` decl
-//!    (parsed; not yet type-resolved).
-//! 4. Emits a top-level `docs/index.html` with links to each crate's
-//!    page (workspace mode — single-crate projects get just one page).
+//! 1. Reads `buff.toml` from the target directory for `[package].name`
+//!    (single-package mode) or walks `[workspace].members` (workspace mode).
+//! 2. Walks `src/` for `.buff` files (recursive) and parses each via the
+//!    standard lex + parse pipeline.
+//! 3. Extracts `///` doc comments attached to top-level declarations
+//!    (`func` / `struct` / `enum` / `trait`). Doc comments are located by
+//!    scanning the raw source: the maximal contiguous run of `///` lines
+//!    immediately preceding a declaration (skipping any leading `@attr`
+//!    attribute lines that belong to the decl). The Buff lexer strips
+//!    comments before tokenisation, so the doc text is recovered from the
+//!    source bytes rather than the token stream.
+//! 4. Emits an HTML documentation tree:
+//!    - one page per `.buff` module with rendered signatures + doc text +
+//!      cross-references between user-defined type names,
+//!    - a per-package `index.html` listing every documented module,
+//!    - a top-level workspace `index.html` linking to each package,
+//!    - a `search-index.json` describing every documented item (name +
+//!      kind + description + URL) for client-side search.
+//! 5. `--open` launches the generated top-level `index.html` in the
+//!    default browser (mirrors `cargo doc --open`).
 //!
-//! **Full rendering is deferred to v1.18+.** The scaffold produces
-//! minimal but valid HTML so links resolve and the file structure is
-//! stable. Rustdoc-quality rendering (cross-refs, type signatures,
-//! search) is out of scope.
+//! The output is pure HTML + inline CSS — no JS framework, no external
+//! tools, no dependency on rustdoc. `buff doc` is best-effort: lex/parse
+//! errors on a single file are skipped (that's `buff check`'s job), never
+//! fatal to the whole run.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use buff_lang_ast::{
+    Decl, EnumDecl, FuncDecl, StructDecl, TraitDecl, TypeParam,
+};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 
@@ -28,19 +43,33 @@ use crate::config::BuffConfig;
 
 /// Entry point for `buff doc`.
 ///
-/// Reads `buff.toml` from `dir`, walks `src/` for `.buff` files, emits
-/// HTML to `docs/`. Idempotent: re-running overwrites the previous
-/// output (matches `cargo doc` behaviour).
-pub fn run(dir: &Path) -> Result<()> {
+/// Reads `buff.toml` from `dir`, walks `src/` for `.buff` files, parses each,
+/// extracts `///` doc comments, and emits HTML to `output` (default `doc/`).
+/// Idempotent: re-running overwrites the previous output (matches `cargo doc`).
+/// When `open` is set, launches the generated top-level `index.html` in the
+/// default browser.
+pub fn run(dir: &Path, output: Option<&Path>, open: bool) -> Result<()> {
     let manifest_path = dir.join("buff.toml");
-    let cfg = BuffConfig::load_from_file(&manifest_path)
-        .with_context(|| format!("failed to read manifest at {}", manifest_path.display()))?;
+    let cfg = BuffConfig::load_from_file(&manifest_path).with_context(|| {
+        format!("failed to read manifest at {}", manifest_path.display())
+    })?;
 
-    let docs_root = dir.join("docs");
+    let docs_root: PathBuf = match output {
+        Some(o) => {
+            // An explicit `--output` may be relative (to CWD) or absolute.
+            let p = PathBuf::from(o);
+            if p.is_absolute() {
+                p
+            } else {
+                dir.join(o)
+            }
+        }
+        None => dir.join("doc"),
+    };
     fs::create_dir_all(&docs_root)
         .with_context(|| format!("failed to create {}", docs_root.display()))?;
 
-    // Single-package vs workspace mode.
+    // Single-package vs workspace mode. Each entry is (package name, package dir).
     let packages: Vec<(String, PathBuf)> = if let Some(p) = &cfg.package {
         vec![(p.name.clone(), dir.to_path_buf())]
     } else if let Some(ws) = &cfg.workspace {
@@ -60,125 +89,1070 @@ pub fn run(dir: &Path) -> Result<()> {
         ));
     };
 
-    let mut crate_indexes: Vec<(String, String)> = Vec::new();
+    // Phase 1: parse every package into structured docs.
+    let mut package_docs: Vec<PackageDoc> = Vec::with_capacity(packages.len());
     for (pkg_name, pkg_dir) in &packages {
-        let crate_docs_dir = docs_root.join(pkg_name);
-        fs::create_dir_all(&crate_docs_dir)
-            .with_context(|| format!("failed to create {}", crate_docs_dir.display()))?;
-        let html = render_crate_page(pkg_name, pkg_dir);
-        let out = crate_docs_dir.join("index.html");
-        fs::write(&out, &html).with_context(|| format!("failed to write {}", out.display()))?;
-        crate_indexes.push((pkg_name.clone(), format!("{pkg_name}/index.html")));
+        let modules = collect_package_modules(pkg_dir);
+        package_docs.push(PackageDoc {
+            name: pkg_name.clone(),
+            modules,
+        });
     }
 
-    // Top-level index linking to each crate page.
-    let index_html = render_workspace_index(&crate_indexes);
+    // Phase 2: build a global symbol index (type name -> URL) for
+    // cross-references. First definition wins on duplicate names.
+    let symbols = build_symbol_index(&package_docs);
+
+    // Phase 3: render. One subdirectory per package; pages flat inside it.
+    let mut search_entries: Vec<SearchEntry> = Vec::new();
+    let mut package_index_links: Vec<(String, String)> = Vec::new();
+
+    for pkg in &package_docs {
+        let pkg_dir = docs_root.join(&pkg.name);
+        fs::create_dir_all(&pkg_dir)
+            .with_context(|| format!("failed to create {}", pkg_dir.display()))?;
+
+        for module in &pkg.modules {
+            let html = render_module_html(&pkg.name, module, &pkg.modules, &symbols);
+            let out = pkg_dir.join(&module.page);
+            fs::write(&out, html)
+                .with_context(|| format!("failed to write {}", out.display()))?;
+
+            for item in &module.items {
+                search_entries.push(SearchEntry {
+                    name: item.name.clone(),
+                    kind: item.kind.label().to_string(),
+                    description: first_doc_paragraph(&item.doc),
+                    package: pkg.name.clone(),
+                    module: module.rel.clone(),
+                    url: format!("{}/{}#{}", pkg.name, module.page, item.anchor),
+                });
+            }
+        }
+
+        // Per-package index.
+        let pkg_index_html = render_package_index(pkg);
+        let pkg_index_path = pkg_dir.join("index.html");
+        fs::write(&pkg_index_path, pkg_index_html)
+            .with_context(|| format!("failed to write {}", pkg_index_path.display()))?;
+        package_index_links
+            .push((pkg.name.clone(), format!("{}/index.html", pkg.name)));
+    }
+
+    // Top-level workspace index linking to each package page.
+    let index_html = render_workspace_index(&package_index_links, &package_docs);
     let index_path = docs_root.join("index.html");
-    fs::write(&index_path, &index_html)
+    fs::write(&index_path, index_html)
         .with_context(|| format!("failed to write {}", index_path.display()))?;
 
+    // Search index (JSON) at the docs root.
+    let search_json = render_search_json(&search_entries);
+    let search_path = docs_root.join("search-index.json");
+    fs::write(&search_path, search_json)
+        .with_context(|| format!("failed to write {}", search_path.display()))?;
+
+    let total_items: usize = package_docs.iter().map(|p| p.item_count()).sum();
+    let total_modules: usize = package_docs.iter().map(|p| p.modules.len()).sum();
     eprintln!(
-        "Generated placeholder docs for {} crate(s) under {}/",
-        packages.len(),
+        "Generated API docs for {} package(s), {} module(s), {} documented item(s) under {}",
+        package_docs.len(),
+        total_modules,
+        total_items,
         docs_root.display()
     );
     eprintln!("Open {}/index.html to browse.", docs_root.display());
+
+    if open {
+        if let Err(e) = open_in_browser(&index_path) {
+            eprintln!("warning: failed to open browser: {e}");
+        }
+    }
     Ok(())
 }
 
-/// Render a single crate's placeholder page. Walks `src/` for `.buff`
-/// files and lists every top-level `export` decl found via the parser.
-fn render_crate_page(pkg_name: &str, pkg_dir: &Path) -> String {
-    let mut sections: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let src_dir = pkg_dir.join("src");
-    if src_dir.is_dir() {
-        walk_buff_files(&src_dir, &src_dir, &mut sections);
-    }
+// ---------------------------------------------------------------------------
+// Data model
+// ---------------------------------------------------------------------------
 
-    let mut html = format!(
-        "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  \
-         <title>{pkg_name} — Buff docs</title>\n</head>\n<body>\n\
-         <h1>{pkg_name}</h1>\n\
-         <p><em>Placeholder page generated by <code>buff doc</code>. \
-         Full rendering arrives in v1.18+.</em></p>\n"
-    );
-    if sections.is_empty() {
-        html.push_str("<p>No .buff source files found under <code>src/</code>.</p>\n");
-    } else {
-        for (file, exports) in &sections {
-            html.push_str(&format!("<h2><code>{file}</code></h2>\n<ul>\n"));
-            if exports.is_empty() {
-                html.push_str("  <li><em>(no top-level exports)</em></li>\n");
-            } else {
-                for exp in exports {
-                    html.push_str(&format!("  <li>{exp}</li>\n"));
-                }
-            }
-            html.push_str("</ul>\n");
-        }
-    }
-    html.push_str("</body>\n</html>\n");
-    html
+/// Documentation for a single package (one entry per `[package]`).
+struct PackageDoc {
+    name: String,
+    modules: Vec<ModuleDoc>,
 }
 
-/// Recursive walker: discover every `.buff` file under `root`, parse
-/// it, collect its top-level `export` decl names into `sections`.
-fn walk_buff_files(current: &Path, root: &Path, sections: &mut BTreeMap<String, Vec<String>>) {
+impl PackageDoc {
+    fn item_count(&self) -> usize {
+        self.modules.iter().map(|m| m.items.len()).sum()
+    }
+}
+
+/// Documentation extracted from a single `.buff` source file.
+struct ModuleDoc {
+    /// Human-readable relative path (e.g. `math/vector.buff`).
+    rel: String,
+    /// Flat page filename inside the package docs dir (e.g. `vector.html`).
+    page: String,
+    /// Documented top-level items, in source order.
+    items: Vec<DocItem>,
+}
+
+/// A single documented declaration.
+struct DocItem {
+    kind: ItemKind,
+    name: String,
+    is_pub: bool,
+    /// Rendered Buff signature (e.g. `func greet(name: String) -> String`).
+    signature: String,
+    /// Joined `///` doc text (raw, unescaped — escaping happens at render).
+    doc: String,
+    /// HTML anchor id on the module page (e.g. `func-greet`).
+    anchor: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ItemKind {
+    Function,
+    Struct,
+    Enum,
+    Trait,
+}
+
+impl ItemKind {
+    fn label(self) -> &'static str {
+        match self {
+            ItemKind::Function => "function",
+            ItemKind::Struct => "struct",
+            ItemKind::Enum => "enum",
+            ItemKind::Trait => "trait",
+        }
+    }
+
+    fn badge(self) -> &'static str {
+        match self {
+            ItemKind::Function => "fn",
+            ItemKind::Struct => "struct",
+            ItemKind::Enum => "enum",
+            ItemKind::Trait => "trait",
+        }
+    }
+}
+
+/// One row of the generated `search-index.json`.
+struct SearchEntry {
+    name: String,
+    kind: String,
+    description: String,
+    package: String,
+    module: String,
+    url: String,
+}
+
+// ---------------------------------------------------------------------------
+// Parsing: .buff source -> ModuleDoc
+// ---------------------------------------------------------------------------
+
+/// Walk `src/` under `pkg_dir`, parse every `.buff` file, return its docs.
+fn collect_package_modules(pkg_dir: &Path) -> Vec<ModuleDoc> {
+    let src_dir = pkg_dir.join("src");
+    let mut files: Vec<PathBuf> = Vec::new();
+    if src_dir.is_dir() {
+        walk_buff_files(&src_dir, &mut files);
+    }
+    files.sort();
+    files
+        .into_iter()
+        .filter_map(|path| {
+            let rel = path
+                .strip_prefix(&src_dir)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| path.display().to_string());
+            parse_module(&path, &rel)
+        })
+        .collect()
+}
+
+/// Recursive walker: collect every `.buff` file path under `root`.
+fn walk_buff_files(current: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(current) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            walk_buff_files(&path, root, sections);
+            walk_buff_files(&path, out);
         } else if path.extension().is_some_and(|e| e == "buff") {
-            let rel = path
-                .strip_prefix(root)
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| path.display().to_string());
-            let exports = collect_exports(&path);
-            sections.insert(rel, exports);
+            out.push(path);
         }
     }
 }
 
-/// Parse `path` and collect the names of every top-level `export` decl.
-/// Failures (lex/parse errors) yield an empty Vec — `buff doc` is
-/// best-effort and does NOT surface compile errors (that's `buff check`'s
-/// job). The user sees the file listed but with no exports.
-fn collect_exports(path: &Path) -> Vec<String> {
-    let Ok(src) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let Ok(tokens) = tokenize(&src, buff_lang_error::SourceId(0)) else {
-        return Vec::new();
-    };
-    let Ok(decls) = parse(&tokens, buff_lang_error::SourceId(0)) else {
-        return Vec::new();
-    };
-    let mut exports = Vec::new();
+/// Parse a single `.buff` file into a [`ModuleDoc`]. Returns `None` on read,
+/// lex, or parse failure — `buff doc` is best-effort and never surfaces
+/// compile errors (that's `buff check`'s job).
+fn parse_module(path: &Path, rel: &str) -> Option<ModuleDoc> {
+    let src = fs::read_to_string(path).ok()?;
+    let tokens = tokenize(&src, buff_lang_error::SourceId(0)).ok()?;
+    let decls = parse(&tokens, buff_lang_error::SourceId(0)).ok()?;
+    let lines = LineTable::new(&src);
+    let items = extract_items(&decls, &src, &lines);
+    let page = page_name_for(rel);
+    Some(ModuleDoc {
+        rel: rel.to_string(),
+        page,
+        items,
+    })
+}
+
+/// Convert a relative source path into a flat HTML page filename.
+/// `math/vector.buff` -> `math_vector.html`. Path separators become `_`.
+fn page_name_for(rel: &str) -> String {
+    let stem = rel.strip_suffix(".buff").unwrap_or(rel);
+    let flat: String = stem
+        .chars()
+        .map(|c| {
+            if c == '/' || c == '\\' {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    format!("{flat}.html")
+}
+
+/// Walk the top-level declarations of a file and produce [`DocItem`]s for
+/// each documented kind (`func` / `struct` / `enum` / `trait`). `export`
+/// wrappers are unwrapped and the inner item is marked public.
+fn extract_items(decls: &[Decl], src: &str, lines: &LineTable) -> Vec<DocItem> {
+    let mut out = Vec::new();
     for decl in decls {
-        if let buff_lang_ast::Decl::ExportDecl(e) = decl {
-            exports.push(format!("{}", e.inner));
+        match decl {
+            Decl::ExportDecl(export) => {
+                // Unwrap the export and document the inner item as public.
+                if let Some(item) = item_from_decl(&export.inner, src, lines, true) {
+                    out.push(item);
+                }
+            }
+            other => {
+                if let Some(item) = item_from_decl(other, src, lines, false) {
+                    out.push(item);
+                }
+            }
         }
     }
-    exports
+    out
 }
 
-/// Render the top-level workspace index linking to each crate page.
-fn render_workspace_index(crate_indexes: &[(String, String)]) -> String {
-    let mut html = String::from(
-        "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  \
-         <title>Buff docs — workspace index</title>\n</head>\n<body>\n\
-         <h1>Buff docs</h1>\n<ul>\n",
-    );
-    if crate_indexes.is_empty() {
-        html.push_str("  <li><em>No crates documented.</em></li>\n");
-    } else {
-        for (name, href) in crate_indexes {
-            html.push_str(&format!("  <li><a href=\"{href}\">{name}</a></li>\n"));
+/// Build a [`DocItem`] from a declaration node (public if `is_pub`).
+/// Returns `None` for non-documented decl kinds (imports, modules, etc.).
+fn item_from_decl(decl: &Decl, src: &str, lines: &LineTable, is_pub: bool) -> Option<DocItem> {
+    let (kind, name, signature, span) = match decl {
+        Decl::FuncDecl(f) => (
+            ItemKind::Function,
+            f.name.name.clone(),
+            render_func_sig(f),
+            f.span,
+        ),
+        Decl::StructDecl(s) => (
+            ItemKind::Struct,
+            s.name.name.clone(),
+            render_struct_sig(s),
+            s.span,
+        ),
+        Decl::EnumDecl(e) => (
+            ItemKind::Enum,
+            e.name.name.clone(),
+            render_enum_sig(e),
+            e.span,
+        ),
+        Decl::TraitDecl(t) => (
+            ItemKind::Trait,
+            t.name.name.clone(),
+            render_trait_sig(t),
+            t.span,
+        ),
+        // Non-documented top-level kinds.
+        Decl::ImportDecl(_)
+        | Decl::ModuleDecl(_)
+        | Decl::ReexportDecl(_)
+        | Decl::ExternCrateDecl(_)
+        | Decl::ExternFuncDecl(_)
+        | Decl::ExtendBlock(_)
+        | Decl::ExportDecl(_) => return None,
+    };
+    let anchor = format!("{}-{}", kind.label(), name);
+    let doc = doc_comment_for(src, lines, span.start);
+    Some(DocItem {
+        kind,
+        name,
+        is_pub,
+        signature,
+        doc,
+        anchor,
+    })
+}
+
+/// Extract the `///` doc-comment block immediately preceding the declaration
+/// that starts at byte `decl_start`.
+///
+/// Walks UP from the line before the decl's first line, collecting contiguous
+/// `///` lines. Attribute lines (`@name ...`) that belong to the decl are
+/// skipped (so `doc / @attr / func` still attaches the doc). The first line
+/// that is neither a `///` doc line nor an `@attr` line stops the search.
+///
+/// Each collected doc line has its leading `///` (and one optional space)
+/// stripped; lines are joined with `\n`.
+fn doc_comment_for(src: &str, lines: &LineTable, decl_start: usize) -> String {
+    let decl_line = lines.line_of(decl_start);
+    let mut collected: Vec<String> = Vec::new();
+    let mut i = decl_line;
+    while i > 0 {
+        i -= 1;
+        let text = lines.line_text(src, i);
+        let trimmed = text.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("///") {
+            // Strip exactly one leading space if present (the common
+            // `/// text` form). A bare `///` yields an empty line.
+            let body = rest.strip_prefix(' ').unwrap_or(rest);
+            collected.push(body.to_string());
+        } else if trimmed.starts_with('@') {
+            // Attribute line belonging to this decl — skip, keep climbing.
+            continue;
+        } else {
+            break;
         }
     }
-    html.push_str("</ul>\n</body>\n</html>\n");
+    collected.reverse();
+    collected.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Signature rendering (Buff surface syntax, not the Debug Display)
+// ---------------------------------------------------------------------------
+
+fn render_type_params(tps: &[TypeParam]) -> String {
+    if tps.is_empty() {
+        return String::new();
+    }
+    let inner: Vec<String> = tps
+        .iter()
+        .map(|tp| {
+            if tp.bounds.is_empty() {
+                tp.name.name.clone()
+            } else {
+                let bounds: Vec<String> = tp.bounds.iter().map(|b| b.to_string()).collect();
+                format!("{}: {}", tp.name.name, bounds.join(" + "))
+            }
+        })
+        .collect();
+    format!("<{}>", inner.join(", "))
+}
+
+fn render_func_sig(f: &FuncDecl) -> String {
+    let mut s = String::new();
+    for a in &f.attributes {
+        s.push_str(&format!("{a} "));
+    }
+    if f.is_extern {
+        s.push_str("extern ");
+    }
+    if f.is_async {
+        s.push_str("async ");
+    }
+    if f.is_unsafe {
+        s.push_str("unsafe ");
+    }
+    s.push_str("func ");
+    s.push_str(&f.name.name);
+    s.push_str(&render_type_params(&f.type_params));
+    s.push('(');
+    let params: Vec<String> = f.params.iter().map(|p| p.to_string()).collect();
+    s.push_str(&params.join(", "));
+    s.push(')');
+    if let Some(rt) = &f.return_type {
+        s.push_str(&format!(" -> {rt}"));
+    }
+    s
+}
+
+fn render_struct_sig(s: &StructDecl) -> String {
+    let mut out = format!("struct {}{}", s.name.name, render_type_params(&s.type_params));
+    if !s.traits.is_empty() {
+        out.push_str(": ");
+        out.push_str(&s.traits.iter().map(|t| t.name.clone()).collect::<Vec<_>>().join(" + "));
+    }
+    out.push_str(" { ");
+    let fields: Vec<String> = s
+        .fields
+        .iter()
+        .map(|(n, t)| format!("{n}: {t}"))
+        .collect();
+    out.push_str(&fields.join(", "));
+    out.push_str(" }");
+    out
+}
+
+fn render_enum_sig(e: &EnumDecl) -> String {
+    let mut out = format!("enum {}{} {{ ", e.name.name, render_type_params(&e.type_params));
+    let variants: Vec<String> = e.variants.iter().map(|v| v.to_string()).collect();
+    out.push_str(&variants.join(", "));
+    out.push_str(" }");
+    out
+}
+
+fn render_trait_sig(t: &TraitDecl) -> String {
+    let mut out = format!("trait {}", t.name.name);
+    if !t.supertraits.is_empty() {
+        out.push_str(": ");
+        let sups: Vec<String> = t.supertraits.iter().map(|s| s.to_string()).collect();
+        out.push_str(&sups.join(", "));
+    }
+    let required_count = t.required.len();
+    let default_count = t.defaults.len();
+    out.push_str(&format!(
+        " {{ /* {} required, {} default method(s) */ }}",
+        required_count, default_count
+    ));
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Symbol index + cross-references
+// ---------------------------------------------------------------------------
+
+/// Map user-defined symbol names to their documentation URL (relative to the
+/// docs root). First definition wins on duplicate names.
+fn build_symbol_index(packages: &[PackageDoc]) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for pkg in packages {
+        for module in &pkg.modules {
+            for item in &module.items {
+                let url = format!("{}/{}#{}", pkg.name, module.page, item.anchor);
+                map.entry(item.name.clone()).or_insert(url);
+            }
+        }
+    }
+    map
+}
+
+// ---------------------------------------------------------------------------
+// HTML rendering
+// ---------------------------------------------------------------------------
+
+/// Escape `&`, `<`, `>`, `"` for safe HTML text content.
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Render plain `text` as safe HTML, linkifying any identifier that matches a
+/// known symbol in `symbols`. The text is tokenised into identifier runs
+/// (`[A-Za-z0-9_]+`) and non-identifier runs; identifier runs that exactly
+/// match a symbol name become `<a>` links. Both runs are HTML-escaped.
+fn linkify(text: &str, symbols: &BTreeMap<String, String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_alphanumeric() || b == b'_' {
+            // identifier run
+            let start = i;
+            while i < bytes.len()
+                && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
+            {
+                i += 1;
+            }
+            let word = &text[start..i];
+            if let Some(url) = symbols.get(word) {
+                out.push_str(&format!(
+                    "<a href=\"{}\">{}</a>",
+                    html_escape(url),
+                    html_escape(word)
+                ));
+            } else {
+                out.push_str(&html_escape(word));
+            }
+        } else {
+            // non-identifier run
+            let start = i;
+            while i < bytes.len()
+                && !(bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
+            {
+                i += 1;
+            }
+            out.push_str(&html_escape(&text[start..i]));
+        }
+    }
+    out
+}
+
+/// Render doc text into HTML paragraphs. Blank-line-separated blocks become
+/// `<p>` elements; identifiers are linkified. Preserves single newlines as
+/// `<br>` within a paragraph for list-like content.
+fn render_doc_html(doc: &str, symbols: &BTreeMap<String, String>) -> String {
+    let trimmed = doc.trim();
+    if trimmed.is_empty() {
+        return String::from("<p class=\"nodoc\"><em>No documentation.</em></p>");
+    }
+    let mut html = String::new();
+    for paragraph in trimmed.split("\n\n") {
+        let ptrimmed = paragraph.trim();
+        if ptrimmed.is_empty() {
+            continue;
+        }
+        let lines: Vec<&str> = ptrimmed.lines().collect();
+        let joined = lines.join("\n");
+        // Linkify per-line then join with <br> to keep line structure.
+        let rendered: Vec<String> = joined
+            .split('\n')
+            .map(|line| linkify(line, symbols))
+            .collect();
+        html.push_str("<p>");
+        html.push_str(&rendered.join("<br>"));
+        html.push_str("</p>\n");
+    }
     html
+}
+
+/// The shared inline `<style>` block for every page. Clean, readable, no JS.
+fn stylesheet() -> &'static str {
+    r#"
+:root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #57606a;
+    --accent: #0969da;
+    --border: #d0d7de;
+    --code-bg: #f6f8fa;
+    --pub: #1a7f37;
+    --priv: #6e7681;
+    --badge-bg: #ddf4ff;
+}
+* { box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    margin: 0;
+    line-height: 1.6;
+}
+.container { max-width: 980px; margin: 0 auto; padding: 2rem 1.5rem; }
+header { border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 2rem; }
+header h1 { margin: 0 0 .25rem; font-size: 1.8rem; }
+header .crumbs { color: var(--muted); font-size: .9rem; }
+header a { color: var(--accent); text-decoration: none; }
+header a:hover { text-decoration: underline; }
+main h2 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: .3rem;
+    margin-top: 2.5rem;
+}
+.item { margin: 1.5rem 0; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+.item:last-child { border-bottom: none; }
+.item-header { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.item-name { font-size: 1.15rem; font-weight: 600; }
+.item-name a { color: var(--fg); text-decoration: none; }
+.item-name a:hover { text-decoration: underline; color: var(--accent); }
+.badge {
+    display: inline-block;
+    font-size: .72rem;
+    font-weight: 600;
+    padding: .05rem .4rem;
+    border-radius: 4px;
+    background: var(--badge-bg);
+    color: var(--accent);
+    text-transform: lowercase;
+}
+.vis {
+    display: inline-block;
+    font-size: .72rem;
+    font-weight: 600;
+    padding: .05rem .35rem;
+    border-radius: 4px;
+}
+.vis.pub { background: #dafbe1; color: var(--pub); }
+.vis.priv { background: #f6f8fa; color: var(--priv); }
+pre.sig {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .75rem 1rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: .9rem;
+    margin: .5rem 0;
+}
+.doc p { margin: .4rem 0; }
+.doc .nodoc { color: var(--muted); }
+ul.module-list, ul.pkg-list { list-style: none; padding-left: 0; }
+ul.module-list li, ul.pkg-list li { padding: .35rem 0; }
+ul.module-list a, ul.pkg-list a { color: var(--accent); text-decoration: none; font-weight: 500; }
+ul.module-list a:hover, ul.pkg-list a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: .85rem; }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .8rem; }
+"#
+}
+
+fn html_document(title: &str, body: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  \
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  \
+         <title>{title}</title>\n  <style>{css}</style>\n</head>\n<body>\n\
+         <div class=\"container\">\n{body}\n<footer>Generated by <code>buff doc</code>.</footer>\n\
+         </div>\n</body>\n</html>\n",
+        title = html_escape(title),
+        css = stylesheet(),
+        body = body,
+    )
+}
+
+/// Render one module page.
+fn render_module_html(
+    pkg_name: &str,
+    module: &ModuleDoc,
+    all_modules: &[ModuleDoc],
+    symbols: &BTreeMap<String, String>,
+) -> String {
+    let mut body = String::new();
+
+    // Header with breadcrumbs + sidebar link to package index.
+    body.push_str(&format!(
+        "<header>\n  <h1>{name}</h1>\n  \
+         <div class=\"crumbs\"><a href=\"../index.html\">docs</a> \
+         &rsaquo; <a href=\"index.html\">{pkg}</a> \
+         &rsaquo; <code>{rel}</code></div>\n</header>\n",
+        name = html_escape(&module.page),
+        pkg = html_escape(pkg_name),
+        rel = html_escape(&module.rel),
+    ));
+
+    if module.items.is_empty() {
+        body.push_str("<p class=\"meta\">No documented declarations \
+                       (func / struct / enum / trait) found in this module.</p>\n");
+    }
+
+    // Group items by kind for a rustdoc-like layout.
+    let groups: [(ItemKind, &str); 4] = [
+        (ItemKind::Struct, "Structs"),
+        (ItemKind::Enum, "Enums"),
+        (ItemKind::Trait, "Traits"),
+        (ItemKind::Function, "Functions"),
+    ];
+    for (kind, heading) in groups {
+        let items: Vec<&DocItem> = module.items.iter().filter(|it| it.kind == kind).collect();
+        if items.is_empty() {
+            continue;
+        }
+        body.push_str(&format!("<main>\n<h2>{heading}</h2>\n"));
+        for item in items {
+            body.push_str(&render_item_html(item, symbols));
+        }
+        body.push_str("</main>\n");
+    }
+
+    // Cross-links to sibling modules in this package.
+    let siblings: Vec<&ModuleDoc> = all_modules.iter().filter(|m| m.rel != module.rel).collect();
+    if !siblings.is_empty() {
+        body.push_str("<h2>Modules</h2>\n<ul class=\"module-list\">\n");
+        for sib in siblings {
+            body.push_str(&format!(
+                "  <li><a href=\"{page}\">{name}</a> <span class=\"meta\">&mdash; \
+                 {rel}</span></li>\n",
+                page = html_escape(&sib.page),
+                name = html_escape(sib.page.trim_end_matches(".html")),
+                rel = html_escape(&sib.rel),
+            ));
+        }
+        body.push_str("</ul>\n");
+    }
+
+    html_document(
+        &format!("{} — {} — Buff docs", module.rel, pkg_name),
+        &body,
+    )
+}
+
+/// Render a single documented item.
+fn render_item_html(item: &DocItem, symbols: &BTreeMap<String, String>) -> String {
+    let vis_label = if item.is_pub { "pub" } else { "private" };
+    let vis_class = if item.is_pub { "pub" } else { "priv" };
+    format!(
+        "<section class=\"item\" id=\"{anchor}\">\n  \
+         <div class=\"item-header\">\n    \
+         <span class=\"item-name\"><a href=\"#{anchor}\">{name}</a></span>\n    \
+         <span class=\"badge\">{badge}</span>\n    \
+         <span class=\"vis {vis_class}\">{vis_label}</span>\n  \
+         </div>\n  \
+         <pre class=\"sig\">{sig}</pre>\n  \
+         <div class=\"doc\">\n{doc}  </div>\n\
+         </section>\n",
+        anchor = html_escape(&item.anchor),
+        name = html_escape(&item.name),
+        badge = item.kind.badge(),
+        vis_class = vis_class,
+        vis_label = vis_label,
+        sig = linkify(&item.signature, symbols),
+        doc = render_doc_html(&item.doc, symbols),
+    )
+}
+
+/// Render the per-package `index.html`.
+fn render_package_index(pkg: &PackageDoc) -> String {
+    let mut body = String::new();
+    body.push_str(&format!(
+        "<header>\n  <h1>{pkg}</h1>\n  \
+         <div class=\"crumbs\"><a href=\"../index.html\">docs</a> \
+         &rsaquo; {pkg}</div>\n</header>\n",
+        pkg = html_escape(&pkg.name),
+    ));
+
+    if pkg.modules.is_empty() {
+        body.push_str("<p class=\"meta\">No <code>.buff</code> source files found \
+                       under <code>src/</code>.</p>\n");
+    } else {
+        body.push_str("<h2>Modules</h2>\n<ul class=\"module-list\">\n");
+        for module in &pkg.modules {
+            let count = module.items.len();
+            body.push_str(&format!(
+                "  <li><a href=\"{page}\">{stem}</a> \
+                 <span class=\"meta\">&mdash; {rel} ({count} item{s})</span></li>\n",
+                page = html_escape(&module.page),
+                stem = html_escape(module.page.trim_end_matches(".html")),
+                rel = html_escape(&module.rel),
+                count = count,
+                s = if count == 1 { "" } else { "s" },
+            ));
+        }
+        body.push_str("</ul>\n");
+    }
+
+    // Quick symbol overview (all documented names in this package).
+    let mut names: Vec<&DocItem> = Vec::new();
+    for m in &pkg.modules {
+        names.extend(m.items.iter());
+    }
+    if !names.is_empty() {
+        body.push_str("<h2>All items</h2>\n<ul class=\"module-list\">\n");
+        // Stable order: kind, then name.
+        names.sort_by(|a, b| a.kind.label().cmp(b.kind.label()).then(a.name.cmp(&b.name)));
+        for item in names {
+            let module = pkg
+                .modules
+                .iter()
+                .find(|m| m.items.iter().any(|it| it.anchor == item.anchor))
+                .map(|m| m.page.as_str())
+                .unwrap_or("");
+            body.push_str(&format!(
+                "  <li><a href=\"{page}#{anchor}\">{name}</a> \
+                 <span class=\"badge\">{badge}</span> \
+                 <span class=\"meta\">{sig}</span></li>\n",
+                page = html_escape(module),
+                anchor = html_escape(&item.anchor),
+                name = html_escape(&item.name),
+                badge = item.kind.badge(),
+                sig = html_escape(item.signature.split('\n').next().unwrap_or("")),
+            ));
+        }
+        body.push_str("</ul>\n");
+    }
+
+    html_document(&format!("{pkg} — Buff docs", pkg = pkg.name), &body)
+}
+
+/// Render the top-level workspace `index.html`.
+fn render_workspace_index(
+    package_links: &[(String, String)],
+    packages: &[PackageDoc],
+) -> String {
+    let mut body = String::new();
+    body.push_str("<header>\n  <h1>Buff docs</h1>\n  <div class=\"crumbs\">workspace</div>\n</header>\n");
+    if package_links.is_empty() {
+        body.push_str("<p class=\"meta\">No packages documented.</p>\n");
+    } else {
+        body.push_str("<h2>Packages</h2>\n<ul class=\"pkg-list\">\n");
+        for (name, href) in package_links {
+            let modules = packages
+                .iter()
+                .find(|p| &p.name == name)
+                .map(|p| p.modules.len())
+                .unwrap_or(0);
+            let items = packages
+                .iter()
+                .find(|p| &p.name == name)
+                .map(|p| p.item_count())
+                .unwrap_or(0);
+            body.push_str(&format!(
+                "  <li><a href=\"{href}\">{name}</a> \
+                 <span class=\"meta\">&mdash; {modules} module{s1}, {items} item{s2}</span></li>\n",
+                href = html_escape(href),
+                name = html_escape(name),
+                modules = modules,
+                s1 = if modules == 1 { "" } else { "s" },
+                items = items,
+                s2 = if items == 1 { "" } else { "s" },
+            ));
+        }
+        body.push_str("</ul>\n");
+        body.push_str(
+            "<p class=\"meta\">A <code>search-index.json</code> was also generated for \
+             client-side search integration.</p>\n",
+        );
+    }
+    html_document("Buff docs — workspace index", &body)
+}
+
+/// Render `search-index.json` as pretty JSON.
+fn render_search_json(entries: &[SearchEntry]) -> String {
+    // serde_json is already a workspace dep of this crate — use it for
+    // robust, escaping-correct JSON (no hand-rolling strings).
+    let arr: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "name": e.name,
+                "kind": e.kind,
+                "description": e.description,
+                "package": e.package,
+                "module": e.module,
+                "url": e.url,
+            })
+        })
+        .collect();
+    // Pretty-print for readability / diff-friendliness.
+    serde_json::to_string_pretty(&serde_json::Value::Array(arr))
+        .unwrap_or_else(|_| String::from("[]\n"))
+}
+
+/// First non-empty line of a doc block, trimmed, for the search description.
+fn first_doc_paragraph(doc: &str) -> String {
+    for line in doc.lines() {
+        let t = line.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    String::new()
+}
+
+// ---------------------------------------------------------------------------
+// Line table: byte offset <-> line index
+// ---------------------------------------------------------------------------
+
+/// Precomputed line-start byte offsets for a source string. Lets `doc_comment_for`
+/// map a declaration's span.start byte to its line in O(log n).
+struct LineTable {
+    /// Byte offset of the start of each line (line 0 starts at byte 0).
+    starts: Vec<usize>,
+}
+
+impl LineTable {
+    fn new(src: &str) -> Self {
+        let mut starts = vec![0usize];
+        for (i, b) in src.bytes().enumerate() {
+            if b == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        Self { starts }
+    }
+
+    /// 0-based index of the line containing `byte`.
+    fn line_of(&self, byte: usize) -> usize {
+        // Largest i with starts[i] <= byte.
+        self.starts.partition_point(|&s| s <= byte).saturating_sub(1)
+    }
+
+    /// Text of line `idx` (without the trailing newline), borrowed from `src`.
+    fn line_text<'a>(&self, src: &'a str, idx: usize) -> &'a str {
+        let start = self.starts[idx];
+        let end = if idx + 1 < self.starts.len() {
+            // Exclude the trailing newline.
+            self.starts[idx + 1] - 1
+        } else {
+            src.len()
+        };
+        // Also strip a trailing '\r' (CRLF) for clean trimming.
+        let slice = &src[start..end.min(src.len())];
+        slice.strip_suffix('\r').unwrap_or(slice)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Browser launch (--open)
+// ---------------------------------------------------------------------------
+
+/// Open `path` in the default browser, platform-specific. Mirrors
+/// `cargo doc --open`. Errors are non-fatal (the docs are already written).
+fn open_in_browser(path: &Path) -> Result<()> {
+    let abs = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+    let display = abs.display().to_string();
+    match std::env::consts::OS {
+        "windows" => {
+            // `start` is a cmd builtin; invoke via cmd /C. The empty title
+            // arg `""` is required when the path contains spaces.
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &display])
+                .spawn()
+                .with_context(|| format!("failed to open browser for {display}"))?;
+        }
+        "macos" => {
+            std::process::Command::new("open")
+                .arg(&display)
+                .spawn()
+                .with_context(|| format!("failed to open browser for {display}"))?;
+        }
+        _ => {
+            // Linux / *BSD / others: xdg-open.
+            std::process::Command::new("xdg-open")
+                .arg(&display)
+                .spawn()
+                .with_context(|| format!("failed to open browser for {display}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_name_flattens_separators() {
+        assert_eq!(page_name_for("vector.buff"), "vector.html");
+        assert_eq!(page_name_for("math/vector.buff"), "math_vector.html");
+        assert_eq!(page_name_for("a/b/c.buff"), "a_b_c.html");
+        assert_eq!(page_name_for("noext"), "noext.html");
+    }
+
+    #[test]
+    fn line_table_maps_offsets() {
+        let src = "abc\ndef\nghi";
+        let t = LineTable::new(src);
+        assert_eq!(t.line_of(0), 0);
+        assert_eq!(t.line_of(3), 0); // 'c'
+        assert_eq!(t.line_of(4), 1); // start of "def"
+        assert_eq!(t.line_of(8), 2); // 'h'
+        assert_eq!(t.line_text(src, 0), "abc");
+        assert_eq!(t.line_text(src, 1), "def");
+        assert_eq!(t.line_text(src, 2), "ghi");
+    }
+
+    #[test]
+    fn line_table_handles_crlf() {
+        let src = "a\r\nb\r\nc";
+        let t = LineTable::new(src);
+        assert_eq!(t.line_text(src, 0), "a");
+        assert_eq!(t.line_text(src, 1), "b");
+        assert_eq!(t.line_text(src, 2), "c");
+    }
+
+    #[test]
+    fn doc_comment_directly_above() {
+        let src = "/// Hello.\n/// World.\nfunc greet() {}\n";
+        let t = LineTable::new(src);
+        // decl starts at byte of 'func' (line index 2).
+        let func_byte = src.find("func").unwrap();
+        let doc = doc_comment_for(src, &t, func_byte);
+        assert_eq!(doc, "Hello.\nWorld.");
+    }
+
+    #[test]
+    fn doc_comment_skips_attribute_lines() {
+        let src = "/// Doc.\n@test\nfunc tagged() {}\n";
+        let t = LineTable::new(src);
+        let func_byte = src.find("func").unwrap();
+        let doc = doc_comment_for(src, &t, func_byte);
+        assert_eq!(doc, "Doc.");
+    }
+
+    #[test]
+    fn doc_comment_stops_at_blank_line() {
+        let src = "/// First.\n\n/// Second.\nfunc f() {}\n";
+        let t = LineTable::new(src);
+        let func_byte = src.find("func").unwrap();
+        let doc = doc_comment_for(src, &t, func_byte);
+        assert_eq!(doc, "Second.");
+    }
+
+    #[test]
+    fn doc_comment_empty_when_none() {
+        let src = "func nodoc() {}\n";
+        let t = LineTable::new(src);
+        let func_byte = src.find("func").unwrap();
+        let doc = doc_comment_for(src, &t, func_byte);
+        assert_eq!(doc, "");
+    }
+
+    #[test]
+    fn html_escape_replaces_special_chars() {
+        assert_eq!(html_escape("a < b & c > d \" e"), "a &lt; b &amp; c &gt; d &quot; e");
+    }
+
+    #[test]
+    fn linkify_links_known_symbols() {
+        let mut syms = BTreeMap::new();
+        syms.insert("Foo".to_string(), "pkg/foo.html#struct-Foo".to_string());
+        let out = linkify("returns Foo or Bar", &syms);
+        assert!(out.contains("<a href=\"pkg/foo.html#struct-Foo\">Foo</a>"));
+        // Unknown symbol Bar stays plain (escaped but no link).
+        assert!(out.contains("Bar"));
+        assert!(!out.contains("<a href=\"Bar"));
+    }
+
+    #[test]
+    fn render_doc_html_splits_paragraphs() {
+        let doc = "First para.\n\nSecond para.";
+        let syms = BTreeMap::new();
+        let html = render_doc_html(doc, &syms);
+        assert!(html.contains("<p>First para.</p>"));
+        assert!(html.contains("<p>Second para.</p>"));
+    }
+
+    #[test]
+    fn render_doc_html_nodoc_marker() {
+        let syms = BTreeMap::new();
+        let html = render_doc_html("", &syms);
+        assert!(html.contains("No documentation"));
+    }
+
+    #[test]
+    fn first_doc_paragraph_skips_blanks() {
+        assert_eq!(first_doc_paragraph("\n\nHello.\nMore."), "Hello.");
+        assert_eq!(first_doc_paragraph(""), "");
+    }
+
+    #[test]
+    fn parse_module_extracts_documented_items() {
+        let tmp = std::env::temp_dir().join("buff_doc_test_item.buff");
+        let src = "/// A greeting.\nexport func greet(name: String) -> String {\n    name\n}\n\n\
+                   struct Point {\n    x: Int,\n    y: Int,\n}\n";
+        std::fs::write(&tmp, src).unwrap();
+        let module = parse_module(&tmp, "test.buff").expect("parse should succeed");
+        assert_eq!(module.page, "test.html");
+        // greet (exported) + Point (private struct).
+        assert_eq!(module.items.len(), 2);
+        let greet = module.items.iter().find(|i| i.name == "greet").unwrap();
+        assert_eq!(greet.kind, ItemKind::Function);
+        assert!(greet.is_pub);
+        assert_eq!(greet.doc, "A greeting.");
+        assert!(greet.signature.contains("func greet(name: String) -> String"));
+        let point = module.items.iter().find(|i| i.name == "Point").unwrap();
+        assert_eq!(point.kind, ItemKind::Struct);
+        assert!(!point.is_pub);
+        assert!(point.signature.contains("struct Point"));
+        assert!(point.signature.contains("x: Int"));
+        let _ = std::fs::remove_file(&tmp);
+    }
 }
