@@ -2,9 +2,178 @@
 
 **Date:** 2026-07-24
 **Latest batch:** T17 Full App (cli_file_manager.buff)
-**Previous batches:** T15 Batch 5 (generic_container, exhaustive_matching, comptime_config), T18 (data_pipeline), T14 (hash_verify, structured_logger, error_recovery), T16 (rest_api_server), T12 (file_processor, csv_analyzer, cli_tool), T13 (concurrent_workers, auth_flow, test_runner), T11 (http_server, tcp_echo, http_client_retry)
+**Previous batches:** T15 Batch 5 (generic_container, exhaustive_matching, comptime_config), T18 (data_pipeline), T14 (hash_verify, structured_logger, error_recovery), T16 (rest_api_server — VERIFIED 2026-07-24, see top section), T12 (file_processor, csv_analyzer, cli_tool), T13 (concurrent_workers, auth_flow, test_runner), T11 (http_server, tcp_echo, http_client_retry)
 
 ---
+
+# T16 Full App: rest_api_server.buff — VERIFIED findings (2026-07-24)
+
+**File:** `examples/use-cases/apps/rest_api_server.buff` (554 lines)
+**Scope:** Full REST API server — CRUD `/tasks`, JSON I/O, error envelopes
+(400/404/500), request logging, graceful shutdown. Uses `buff-web` only (1 of
+the 2-crate cap). `TaskStore` + `ShutdownState` structs with `extend` methods.
+
+**Verification method (authoritative — supersedes the unverified T16 section
+further down, which analysed an earlier 918-line draft that was replaced):**
+`buff check` itself cannot BUILD on this host (see "Build Environment Issue"
+below — `buff-lang-cli` pulls `reqwest → rustls → ring`, which needs
+`vcruntime.h`; and the MSVC install ships **zero** `.lib` files). The front-end
+crates (`buff-lang-{error,ast,lexer,parser,types}`) have no such dependency, so
+the check pipeline (lex → parse → `TypeInferencer`, mirroring
+`crates/buff-lang-cli/src/check.rs::check_source`) was driven via a throwaway
+front-end-only binary (`buffcheck`). Every bug below is backed by the real
+error text that binary emitted. **This is the first rest_api_server analysis
+actually executed against the compiler rather than speculated.**
+
+**Headline result:** after rewriting the file to use only parser-supported
+syntax, it reaches **`parse OK (51 decls); type errors: 12`**. The 13 bugs
+below are the parse-tier gaps that had to be worked around to get there, plus 1
+confirmed type-tier bug. Several of these gaps also break the OTHER "exemplary"
+files cited in the repo (called out per bug).
+
+---
+
+## Parse-tier bugs (each blocks the file from parsing until worked around)
+
+### BUG-1: `from "path" import x` is NOT valid Buff syntax
+- **Severity:** HIGH (silent: looks fine, fails to parse)
+- **Evidence:** `[parse] [Error] only function declarations are allowed at top level, found `from`` — caret on the `from` keyword.
+- **Root cause:** `crates/buff-lang-parser/src/stmt/stmt_decl.rs::parse_import_decl` requires the `import` keyword FIRST. Supported shapes are `import x from "p"`, `import { a, b } from "p"`, `import * from "p"`. There is no Python/JS-style `from "p" import x` arm; `from` is tokenised as an identifier and rejected at file scope.
+- **Also breaks:** `crates/buff-web/examples/hello_web.buff`, every `examples/integration/*.buff`, `examples/data-science-workbench/server.buff`, sibling `examples/use-cases/http_server.buff` — all use `from "buff/web" import ...`.
+- **Workaround used:** `import { Web, Request, Response } from "buff/web"`.
+
+### BUG-2: no top-level `const` (and `const` is not even a reserved keyword)
+- **Severity:** HIGH
+- **Evidence:** `[parse] [Error] only function declarations are allowed at top level, found `ident(const)``
+- **Root cause:** `const` is absent from the 25 reserved keywords, so the lexer tokenises it as a plain identifier; the top-level dispatch table (`crates/buff-lang-parser/src/parser.rs`, `parse_one_decl`) has no const arm, and `Decl` has no `ConstDecl` variant.
+- **Also breaks:** `examples/use-cases/error_recovery.buff`, `examples/data-science-workbench/server.buff` — both declare top-level `const`.
+- **Workaround used:** inlined the literals at their use sites.
+
+### BUG-3: layout-sensitive struct form is rejected (`struct Name:\n    field: T`)
+- **Severity:** HIGH
+- **Evidence:** `[parse] [Error] expected newline after `struct Name:` ` — caret on the first field, even with clean LF + 4-space indent (byte-verified). Reproduces in isolation.
+- **Root cause:** `parse_struct_decl` consumes `:` then expects `Newline` + `Indent` offside tokens; the lexer does not emit the `Newline` token between `struct Name:` and the first field line, so the parser errors. Only the brace form `struct Name { f: T, ... }` parses.
+- **Also breaks:** `examples/use-cases/error_recovery.buff` (`struct CircuitBreaker:`).
+- **Workaround used:** brace form for all 3 structs.
+
+### BUG-4: word operators `and` / `or` / `not` are rejected (only `&&` / `||` / `!`)
+- **Severity:** HIGH
+- **Evidence:** `[parse] [Error] expected `,`, `{`, or `else` in if-chain, found `ident(and)`` (and sym. for `or`/`not`).
+- **Root cause:** `and`/`or`/`not` are not reserved keywords → tokenised as identifiers. The only supported boolean operators are symbolic (`&&`, `||`, `!`).
+- **Also breaks:** `examples/use-cases/error_recovery.buff` (uses `and` on lines 14/23, `not` on 120).
+- **Probe matrix (all `parse OK; type errors: 0`):** `&&` ✓, `||` ✓, `!x` ✓; `and`/`or`/`not` ✗.
+
+### BUG-5: diagnostic renderer PANICS on a UTF-8 BOM
+- **Severity:** HIGH (robustness — any BOM-prefixed `.buff` file crashes the error path)
+- **Evidence:** `thread 'main' panicked at crates/buff-lang-error/src/diagnostic.rs:622:15: end byte index 1 is not a char boundary; it is inside '\u{feff}'`
+- **Root cause:** `Diagnostic::render` slices `source[1..]` (or similar byte index) without skipping/ stripping a leading BOM, so byte index 1 lands inside the 3-byte BOM.
+- **Note:** triggered here by `Set-Content -Encoding UTF8` adding a BOM to a probe; real users hit this whenever an editor saves `.buff` as "UTF-8 with BOM".
+
+### BUG-6: layout-sensitive enum form is rejected (`enum Name:\n    Variant`)
+- **Severity:** HIGH (same family as BUG-3)
+- **Evidence:** `[parse] [Error] error[E1101]: expected `{`, found `:` ` — caret on the colon after the enum name.
+- **Root cause:** `parse_enum_decl` requires the brace form; no layout-sensitive arm. Only `enum Name { V1, V2, ... }` parses.
+- **Workaround used:** brace form for `TaskStatus`.
+
+### BUG-7: `func TypeName.method(self, ...)` dotted method syntax is rejected
+- **Severity:** HIGH
+- **Evidence:** `[parse] [Error] error[E1101]: expected `(`, found `.` ` — caret on the dot.
+- **Root cause:** the function-name parser expects `(` immediately after the name; there is no `Type.method` dotted-name form. Methods on a struct must live in an `extend Type { func ... }` block (`Decl::ExtendBlock`).
+- **Also breaks:** `examples/use-cases/error_recovery.buff` — ALL of `CircuitBreaker.new/record_success/record_failure/allow_request` use this form.
+- **Workaround used:** moved all `TaskStore`/`ShutdownState` methods into `extend Type { func name(self, ...) }` blocks.
+
+### BUG-8: `extend Type:` colon form rejected; methods use `func` not `fn`
+- **Severity:** MEDIUM
+- **Evidence:** `[parse] [Error] expected `{`, found `:` ` for `extend Counter:`; and `extend block must contain at least one `fn` declaration` when methods are written `fn name()`.
+- **Root cause:** `parse_extend_decl` hard-requires `{` after the target; its method loop peeks for `TokenKind::KwFunc | KwAsync | KwExtern` (i.e. the `func` keyword), so `fn`-prefixed methods are invisible (and `fn` is not even a reserved keyword → parsed as an identifier, leaving the method list empty).
+- **Note:** the error message "extend block must contain at least one `fn` declaration" is misleading — it should say `func`.
+
+### BUG-9: no `while` loop (not a reserved keyword → confusing error)
+- **Severity:** HIGH
+- **Evidence:** `[parse] [Error] expected an expression, found `:` ` — caret on the colon of `while i < count:`.
+- **Root cause:** `while` is not a reserved keyword, so it tokenises as an identifier; the parser then tries to parse `while i < count` as an expression and chokes on the `:`. Buff only has `for` loops (`for x in iter:`, `for i in 0..n:`).
+- **Workaround used:** converted all 5 indexed loops to `for i in 0..bound:`.
+
+### BUG-10: function parameters MUST have type annotations
+- **Severity:** MEDIUM (contradicts README "types rarely written")
+- **Evidence:** `[parse] [Error] error[E1101]: expected `:`, found `)` ` for `func handle_root(store) -> Response:`.
+- **Root cause:** `parse_params` requires `name: Type` for every parameter; there is no inferred-param-type form.
+- **Also breaks:** `examples/use-cases/error_recovery.buff` and `examples/data-science-workbench/server.buff`, which omit param types throughout (`func query_float(path, key):`, `func handle_root(req)`).
+- **Workaround used:** annotated every handler/helper param (`store: TaskStore`, `req: Request`, JSON-derived params as `: JSON`).
+
+### BUG-11: `match` only supports the brace form with single-expression arms
+- **Severity:** HIGH
+- **Evidence:** `[parse] [Error] error[E1101]: expected `{`, found `:` ` for `match body:`; and `expected closure parameter name, found `let`` / `expected `=>`, found `:` `` for block-arm variants.
+- **Root cause:** (a) the layout-sensitive `match x:` colon form is not supported — only `match x { ... }`; (b) every arm must be `pattern => expr` — colon-block arms (`pat:`) are rejected; (c) a `{ }` block after `=>` is parsed as a **lambda** (`{ params => body }`), not a statement block, so multi-statement arm bodies are impossible. README confirms braces are reserved for "struct literals, maps, lambdas, interpolation".
+- **Also breaks:** `examples/use-cases/error_recovery.buff` (colon-block `match` throughout) and `examples/data-science-workbench/server.buff`.
+- **Workaround used:** converted every multi-arm match to brace form with single-expression arms, extracting multi-statement bodies into helper functions (e.g. `create_task_from_value`, `apply_done_override`).
+
+### BUG-13: lambda/closure bodies must be a single expression
+- **Severity:** MEDIUM
+- **Evidence:** `[parse] [Error] expected `}`, found `let`` — caret on the second statement inside `{ req => log_request(...); let r = ...; ... }`.
+- **Root cause:** the lambda body grammar allows exactly one expression after `params =>`; newline-separated statements are rejected (consistent with BUG-11c — `{ }` is data/lambda territory).
+- **Also breaks:** `examples/data-science-workbench/server.buff` (multi-statement handler closures).
+- **Workaround used:** made every route-registration closure a single expression (`{ req => with_cors(handle_x(store, req)) }`) and moved per-route logging into the handler bodies.
+
+### BUG-12: a literal `{` inside a string is misread as interpolation-start
+- **Severity:** MEDIUM
+- **Evidence:** `[parse] [Error] error[E1101]: expected `interp_end`, found `,`` — caret on the `{` of `print("... -> { status, tasks, requests }")`.
+- **Root cause:** the lexer enters interpolation mode on `{` inside a string even without the `$` prefix that the documented `${...}` form uses; a comma then fails `interp_end`. Any string documenting a JSON/struct shape (`{ a, b }`) breaks.
+- **Also breaks:** `examples/data-science-workbench/server.buff` (`print("  GET  /count      -> { count: N }")`).
+- **Workaround used:** rephrased the route-table print strings to avoid literal braces.
+
+---
+
+## Type-tier bugs (after the file parses)
+
+Final check state: **`parse OK (51 decls); type errors: 12`**. The detailed
+per-error renderer could not be built on this host (MSVC blocker), so errors
+were isolated by minimised probes through `buffcheck`. One root cause is
+confirmed; the rest are characterised below.
+
+### BUG-14: equality on a user-defined enum value is a type error (CONFIRMED)
+- **Severity:** MEDIUM
+- **Evidence (isolated probe, `parse OK; type errors: 3`):**
+  ```
+  enum TaskStatus { Pending, InProgress, Done, Cancelled }
+  func status_to_string(status: TaskStatus) -> String:
+      if status == Pending:        # 1 type error
+          return "pending"
+      if status == InProgress:     # 1 type error
+          return "in_progress"
+      if status == Done:           # 1 type error
+          return "done"
+      return "cancelled"
+  ```
+  Three `==` comparisons → exactly 3 type errors (1 each). The `TypeInferencer`
+  does not equip user-defined enum types with an equality operator.
+- **Impact on this file:** accounts for 3 of the 12 type errors.
+
+### Remaining 9 type errors (characterised, not individually rendered)
+The detailed driver could not be linked (MSVC blocker, see Build Environment
+Issue). Probe-isolated constructs that parse clean and typecheck clean — i.e.
+NOT the cause: `let x = match n { ... }` (match-in-value-position ✓ at check;
+the documented gap is codegen-only), `Error("m")` + `?` in `Result` fns ✓,
+`v[i] = x` index-assign ✓, `v.remove(i)` ✓, `s[i]` string index ✓, `a < b` on
+two `String`s ✓, `${n}` interpolation ✓, `self.f = ...` field mutation ✓.
+Most likely remaining contributors (each a `task.id == id` / `t.id == id` or a
+char-vs-string comparison in `parse_int`): user-typed field equality and the
+`ch < "0"` comparison where `ch` comes from string indexing. Precise per-error
+attribution deferred until a build with a working MSVC toolchain.
+
+---
+
+## Surface gaps shaped the file (not bugs — documented for context)
+- `Type::Web` and its assoc-fn/instance lowering arms are forward-declared
+  (per `crates/buff-web/AGENTS.md`); end-to-end `buff run` is codegen-deferred.
+  This file is a parse/typecheck stress vehicle, same tier as
+  `examples/integration/*.buff`.
+- `req.param("id")` / `req.query()` are deferred to v1.18+ (buff-web T17 scope);
+  the file parses `{id}` manually via `extract_task_id` (mirrors
+  `data-science-workbench/server.buff`).
+
+---
+
 
 ## Build Environment Issue
 
@@ -135,6 +304,13 @@ These are documented compiler gaps that affect these examples:
 ---
 
 # T16 Batch 3: rest_api_server.buff (918 lines)
+
+> **⚠ SUPERSEDED — see the VERIFIED "T16 Full App" section near the top of this
+> file.** This section analysed an earlier 918-line draft of the file that has
+> since been replaced by a 554-line idiomatic rewrite. The findings below were
+> UNVERIFIED speculation (every item is "may" / "verify"); the top section
+> contains the real `buffcheck` output for the file as it actually ships. Kept
+> only for historical cross-reference.
 
 **Date:** 2026-07-24
 **File:** `examples/use-cases/apps/rest_api_server.buff`
