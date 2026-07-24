@@ -29,17 +29,23 @@ use anyhow::Result;
 use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 
 /// Library entry point for `buff check <FILE> [--deny-warnings/-D]
-/// [--error-format <human|json>]`.
+/// [--error-format <human|json>] [--target <TRIPLE>]`.
 ///
 /// Returns the outcome directly (no process::exit) so tests can inspect it
 /// and the CLI binary can translate it to an exit code.
+///
+/// T112: `--target <TRIPLE>` is accepted for CLI compatibility but is a
+/// no-op in check mode — `buff check` runs the standalone typechecker
+/// (T55) which does NOT invoke rustc, so there is no cross-compilation
+/// to perform. The flag is parsed and validated but has no effect on the
+/// check outcome.
 ///
 /// # Errors
 ///
 /// Propagates file-read errors. Compile diagnostics are NOT errors at this
 /// layer — they are returned as part of the [`CheckReport`] inside the
 /// outcome.
-pub fn run(file: &Path, deny_warnings: bool, format: ErrorFormat) -> Result<CheckOutcome> {
+pub fn run(file: &Path, deny_warnings: bool, format: ErrorFormat, _target: Option<&str>) -> Result<CheckOutcome> {
     let report = run_check_file_with_format(file, format)?;
     let outcome = if deny_warnings && matches!(report.outcome, CheckOutcome::HasWarnings) {
         CheckOutcome::HasErrors

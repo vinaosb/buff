@@ -194,6 +194,39 @@ fn should_eval_use_cranelift() -> bool {
     }
 }
 
+/// Read the cross-compilation target from the `BUFF_EVAL_TARGET` env var
+/// (T112).
+///
+/// Returns `None` when unset or empty (native compilation). The env var
+/// is read fresh on every `run_full_program` call so a user can toggle it
+/// mid-session.
+fn eval_target() -> Option<String> {
+    let val = std::env::var("BUFF_EVAL_TARGET").ok()?;
+    if val.trim().is_empty() {
+        return None;
+    }
+    Some(val.trim().to_string())
+}
+
+/// Probe whether a rustc target triple is installed (T112).
+///
+/// Mirrors `buff_lang_cli::pipeline::target_is_installed`. Runs
+/// `rustup target list --installed` and checks if `<triple>` appears
+/// in the output. Returns `true` when the target is listed, `false` on
+/// any failure (rustup not on PATH, probe error, target not found).
+fn eval_target_is_installed(triple: &str) -> bool {
+    let probe = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output();
+    match probe {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.lines().any(|line| line.trim() == triple)
+        }
+        _ => false,
+    }
+}
+
 /// Re-export of the resolved [`Type`] so consumers can refer to it as
 /// `buff_eval::Type` without depending on `buff-lang-types` directly.
 pub use buff_lang_types::Type as ResolvedType;
@@ -618,6 +651,9 @@ fn run_full_program(source: &str) -> EvalResult {
     // T4: opt-in Cranelift dev backend via BUFF_EVAL_BACKEND=cranelift
     // (probe + set CARGO_PROFILE_DEV_CODEGEN_BACKEND env var on the
     // child rustc process — scoped to the subprocess, no parent leak).
+    // T112: cross-compilation target via BUFF_EVAL_TARGET env var.
+    // When set, verifies the target is installed via `rustup target list
+    // --installed` and passes `--target <triple>` to rustc.
     let mut rustc_cmd = Command::new("rustc");
     rustc_cmd.arg("--edition").arg("2021");
     rustc_cmd.arg("-O");
@@ -627,6 +663,21 @@ fn run_full_program(source: &str) -> EvalResult {
     }
     if should_eval_use_cranelift() {
         rustc_cmd.env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift");
+    }
+    // T112: cross-compilation target via env var (no CLI surface in eval).
+    if let Some(triple) = eval_target() {
+        if !eval_target_is_installed(triple) {
+            let _ = std::fs::remove_file(&rust_path);
+            return EvalResult::err(Diagnostic::error(
+                format!(
+                    "Target `{triple}` is not installed.\n\
+                     Run: rustup target add {triple}"
+                ),
+                Span::dummy(),
+            ));
+        }
+        rustc_cmd.arg("--target");
+        rustc_cmd.arg(triple);
     }
     rustc_cmd.arg(&rust_path).arg("-o").arg(&exe_path);
     let compile_out = match rustc_cmd.output()

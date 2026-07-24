@@ -800,7 +800,7 @@ pub fn compile_rust_to_exe(
     buff_file: &Path,
     mode: BuildMode,
 ) -> Result<PathBuf> {
-    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default(), DebugInfoChoice::default(), BackendChoice::default())
+    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default(), DebugInfoChoice::default(), BackendChoice::default(), None)
 }
 
 /// sccache-aware variant of [`compile_rust_to_exe`] (T55).
@@ -826,6 +826,11 @@ pub fn compile_rust_to_exe(
 ///   (the env-var gate is the safety rail — a `--release --backend=cranelift`
 ///   invocation silently uses LLVM rather than risking a non-LLVM
 ///   shipped binary).
+/// - The cross-compilation target is selected via `target` (T112). When
+///   `Some(triple)`, passes `--target <triple>` to rustc. Before invoking
+///   rustc, probes `rustup target list --installed` to verify the target
+///   is installed; if not, returns a clear error with the install command.
+///   When `None` (default), no `--target` flag is passed (native compilation).
 pub fn compile_rust_to_exe_with_speed(
     rust_file: &Path,
     output: &Path,
@@ -835,6 +840,7 @@ pub fn compile_rust_to_exe_with_speed(
     linker: LinkerChoice,
     debuginfo: DebugInfoChoice,
     backend: BackendChoice,
+    target: Option<&str>,
 ) -> Result<PathBuf> {
     let sccache_on = use_sccache && compile_speed::sccache_available();
     if use_sccache && !sccache_on {
@@ -918,6 +924,26 @@ pub fn compile_rust_to_exe_with_speed(
     // The user's explicit --debuginfo flag always wins.
     cmd.arg("-C");
     cmd.arg(debuginfo.to_rustc_arg());
+
+    // T112: cross-compilation target. When set, verify the target is
+    // installed via `rustup target list --installed` before passing
+    // `--target <triple>` to rustc. If not installed, surface a clear
+    // error with the install command.
+    if let Some(triple) = target {
+        if !target_is_installed(triple) {
+            bail!(
+                "Target `{triple}` is not installed.\n\
+                 Run: rustup target add {triple}\n\n\
+                 Common targets:\n\
+                   x86_64-unknown-linux-gnu   (Linux x86_64)\n\
+                   aarch64-apple-darwin        (Apple Silicon macOS)\n\
+                   x86_64-pc-windows-msvc     (Windows x86_64)\n\
+                   wasm32-unknown-unknown      (WebAssembly)"
+            );
+        }
+        cmd.arg("--target");
+        cmd.arg(triple);
+    }
 
     cmd.arg(rust_file).arg("-o").arg(output);
 
@@ -1182,6 +1208,27 @@ pub fn release_profile_toml() -> String {
 /// every call, no environment dependence, no side effects.
 pub fn minimal_profile_toml() -> String {
     "[profile.minimal]\ninherits = \"release\"\npanic = \"abort\"\nstrip = true\nopt-level = \"z\"\nlto = true\ncodegen-units = 1\n".to_string()
+}
+
+/// Probe whether a rustc target triple is installed (T112).
+///
+/// Runs `rustup target list --installed` and checks if `<triple>` appears
+/// in the output. Returns `true` when the target is listed, `false` on
+/// any failure (rustup not on PATH, probe error, target not found).
+///
+/// The probe is cheap (sub-second) and runs at most once per
+/// `compile_rust_to_exe_with_speed` call when `--target` is set.
+fn target_is_installed(triple: &str) -> bool {
+    let probe = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output();
+    match probe {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.lines().any(|line| line.trim() == triple)
+        }
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------

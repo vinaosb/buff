@@ -188,6 +188,7 @@ fn build_single_file(
         linker,
         debuginfo,
         backend,
+        None, // single-file mode does not support --target
     )?;
     eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());

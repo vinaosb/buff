@@ -69,6 +69,7 @@ fn main() -> Result<()> {
             linker,
             debuginfo,
             backend,
+            target,
             explain,
         } => {
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
@@ -79,7 +80,7 @@ fn main() -> Result<()> {
                 // runtime can emit dispatch diagnostics.
                 std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
             }
-            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice, debuginfo_choice, backend_choice)
+            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice, debuginfo_choice, backend_choice, target.as_deref())
         }
         Command::New {
             name,
@@ -136,10 +137,11 @@ fn main() -> Result<()> {
             file,
             deny_warnings,
             error_format,
+            target,
         } => {
             use buff_lang_cli::check::{CheckOutcome, ErrorFormat};
             let format = ErrorFormat::from_str(&error_format);
-            let outcome = buff_lang_cli::commands::check::run(&file, deny_warnings, format)?;
+            let outcome = buff_lang_cli::commands::check::run(&file, deny_warnings, format, target.as_deref())?;
             if matches!(outcome, CheckOutcome::HasErrors) {
                 std::process::exit(1);
             }

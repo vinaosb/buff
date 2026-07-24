@@ -286,6 +286,14 @@ pub enum Command {
         #[arg(long, value_name = "BACKEND", default_value = "llvm")]
         backend: String,
 
+        /// T112: cross-compile for `<TRIPLE>` (e.g.
+        /// `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`,
+        /// `wasm32-unknown-unknown`). Forwards to rustc's `--target`
+        /// flag. When the target is not installed, prints an error
+        /// with the `rustup target add` command.
+        #[arg(long, value_name = "TRIPLE")]
+        target: Option<String>,
+
         /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
         /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the
         /// compiled binary's runtime can emit the explain output.
@@ -449,6 +457,14 @@ pub enum Command {
         /// [`buff_lang_cli::check::ErrorFormat`] for details.
         #[arg(long, value_name = "FORMAT", default_value = "human")]
         error_format: String,
+
+        /// T112: cross-compile for `<TRIPLE>` (e.g.
+        /// `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`,
+        /// `wasm32-unknown-unknown`). Forwards to rustc's `--target`
+        /// flag. When the target is not installed, prints an error
+        /// with the `rustup target add` command.
+        #[arg(long, value_name = "TRIPLE")]
+        target: Option<String>,
     },
 
     /// Remove the `target/` build directory (wraps `cargo clean`).
