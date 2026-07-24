@@ -1,8 +1,8 @@
 {
   "name": "buff-vscode",
   "displayName": "Buff",
-  "description": "Language support for Buff — the high-level language that transpiles to Rust. Syntax highlighting, LSP intelligence (hover/completion/goto-def/diagnostics/formatting), and run/build/check commands.",
-  "version": "1.2.0",
+  "description": "Language support for Buff — the high-level language that transpiles to Rust. Syntax highlighting, LSP intelligence (hover/completion/goto-def/diagnostics/formatting/codeActions/inlayHints/semanticTokens/codeLens), and run/build/check commands.",
+  "version": "1.3.0",
   "publisher": "buff-lang",
   "license": "MIT",
   "author": "Buff Lang Project",
@@ -164,6 +164,16 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "When enabled, the extension sets `editor.formatOnSave` for Buff documents so the language server formats the file before each save. The formatting itself is performed by `buff fmt` (via `buff-lsp`)."
+        },
+        "buff.inlayHints.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When enabled (default), the extension sets `editor.inlayHints.enabled` for Buff documents so the language server can render inline type hints at `let` bindings (T46). Disable to hide inlay hints in Buff files without affecting other languages."
+        },
+        "buff.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When enabled (default), the extension sets `editor.codeLens` for Buff documents so the language server can render CodeLens annotations (one per top-level function — T46). Disable to hide CodeLens in Buff files without affecting other languages."
         },
         "buff.trace.server": {
           "type": "string",

@@ -7,6 +7,14 @@
         ],
         "description": "Function declaration (layout-based body)"
     },
+    "Generic Function": {
+        "prefix": "func<",
+        "body": [
+            "func ${1:name}<${2:T}>(${3:params})${4: -> ${5:ReturnType}}:",
+            "    ${0:body}"
+        ],
+        "description": "Generic function declaration (T13/T24 type params)"
+    },
     "Async Function": {
         "prefix": "async func",
         "body": [
@@ -21,6 +29,20 @@
             "let ${1:name} = ${0:value}"
         ],
         "description": "Immutable let binding"
+    },
+    "Let binding (typed)": {
+        "prefix": "let:",
+        "body": [
+            "let ${1:name}: ${2:Type} = ${0:value}"
+        ],
+        "description": "Immutable let binding with an explicit type annotation"
+    },
+    "Let binding (generic type)": {
+        "prefix": "let vector",
+        "body": [
+            "let ${1:name}: Vector<${2:Int}> = ${0:[]}"
+        ],
+        "description": "Let binding with a generic Vector<T> type annotation (T13/T24)"
     },
     "Let mutable": {
         "prefix": "let mut",
@@ -79,6 +101,61 @@
         ],
         "description": "Single match arm"
     },
+    "Match Option": {
+        "prefix": "match option",
+        "body": [
+            "match ${1:expr}:",
+            "    Some(${2:value}) => ${3:handle_some}",
+            "    None => ${0:handle_none}"
+        ],
+        "description": "Match over an Option<T> (Some / None)"
+    },
+    "Match Result": {
+        "prefix": "match result",
+        "body": [
+            "match ${1:expr}:",
+            "    Ok(${2:value}) => ${3:handle_ok}",
+            "    Err(${4:err}) => ${0:handle_err}"
+        ],
+        "description": "Match over a Result<T, E> (Ok / Err)"
+    },
+    "Or-pattern arm": {
+        "prefix": "or pattern",
+        "body": [
+            "${1:First} | ${2:Second} => ${0:value}"
+        ],
+        "description": "Match arm with an or-pattern (T13: A | B binds both to the same body)"
+    },
+    "Range for-loop (exclusive)": {
+        "prefix": "for range",
+        "body": [
+            "for ${1:i} in ${2:0}..${3:n}:",
+            "    ${0:body}"
+        ],
+        "description": "for-in over an exclusive range a..b (T84)"
+    },
+    "Range for-loop (inclusive)": {
+        "prefix": "for range=",
+        "body": [
+            "for ${1:i} in ${2:0}..=${3:n}:",
+            "    ${0:body}"
+        ],
+        "description": "for-in over an inclusive range a..=b (T84)"
+    },
+    "Range expression": {
+        "prefix": "range",
+        "body": [
+            "${1:start}..${2:end}"
+        ],
+        "description": "Exclusive range expression a..b (T84)"
+    },
+    "Range expression (inclusive)": {
+        "prefix": "range=",
+        "body": [
+            "${1:start}..=${2:end}"
+        ],
+        "description": "Inclusive range expression a..=b (T84)"
+    },
     "Return": {
         "prefix": "return",
         "body": [
@@ -122,5 +199,21 @@
             "spawn ${0:task}"
         ],
         "description": "Spawn an async task (no await needed)"
+    },
+    "Defer": {
+        "prefix": "defer",
+        "body": [
+            "defer:",
+            "    ${0:cleanup}"
+        ],
+        "description": "Defer a cleanup block to run LIFO at scope exit (commit 2b12f75)"
+    },
+    "Generic Struct": {
+        "prefix": "struct<",
+        "body": [
+            "struct ${1:Name}<${2:T}>:",
+            "    ${0:field}"
+        ],
+        "description": "Generic struct declaration (T13/T24 type params)"
     }
 }

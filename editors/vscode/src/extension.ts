@@ -13,7 +13,24 @@ import {
 /**
  * VSCode extension for the Buff language.
  *
- * Wires three already-shipped components:
+ * v1.3 (T118 update) wires four additional LSP capabilities that buff-lsp
+ * began advertising in T46 (Wave 2a). The vscode-languageclient 9.x library
+ * auto-registers handlers for any capability the server declares in its
+ * `initialize` response, so the client-side wiring for these is implicit —
+ * but each capability is mirrored here through a `buff.*` config toggle so
+ * users can opt out without affecting other languages:
+ *
+ *   - **codeAction**       (T46) — quick fixes + T72 plugin actions, surfaced
+ *     via VSCode's lightbulb. Auto-handled by the LanguageClient.
+ *   - **codeLens**         (T46) — one lens per top-level function. Toggled
+ *     via `buff.codeLens.enabled` → `editor.codeLens` for `[buff]`.
+ *   - **inlayHint**        (T46) — type hints at `let` bindings. Toggled
+ *     via `buff.inlayHints.enabled` → `editor.inlayHints.enabled` for `[buff]`.
+ *   - **semanticTokens**   (T46) — syntax-colouring data, layered ON TOP of
+ *     the TextMate grammar (TextMate is the fallback; semantic tokens win
+ *     where the server can resolve them). Auto-handled by LanguageClient.
+ *
+ * The three already-shipped components from v1.2 remain:
  *   - tree-sitter-buff (T115)  -> consumed via the TextMate grammar in
  *     syntaxes/buff.tmLanguage.json (VSCode's native TextMate highlighting is
  *     the standard, lighter path; tree-sitter would require the proposed API
@@ -71,6 +88,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (e.affectsConfiguration('buff.formatOnSave')) {
                 applyFormatOnSave().catch(err => {
                     outputChannel?.appendLine(`[buff] failed to apply formatOnSave: ${err}`);
+                });
+            }
+        }),
+    );
+
+    // v1.3 (T46): mirror buff.inlayHints.enabled and buff.codeLens.enabled
+    // into the per-language VSCode settings. The LanguageClient itself
+    // auto-registers the handlers for inlayHint / codeLens / codeAction /
+    // semanticTokens requests based on the server's declared capabilities;
+    // these mirrors only control whether VSCode *renders* the results for
+    // Buff documents. Default is `true` for both (the server is the source
+    // of truth — disabling here is the opt-out for users who find them
+    // noisy).
+    await applyInlayHintsSetting();
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('buff.inlayHints.enabled')) {
+                applyInlayHintsSetting().catch(err => {
+                    outputChannel?.appendLine(`[buff] failed to apply inlayHints.enabled: ${err}`);
+                });
+            }
+        }),
+    );
+    await applyCodeLensSetting();
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('buff.codeLens.enabled')) {
+                applyCodeLensSetting().catch(err => {
+                    outputChannel?.appendLine(`[buff] failed to apply codeLens.enabled: ${err}`);
                 });
             }
         }),
@@ -446,6 +492,52 @@ async function applyFormatOnSave(): Promise<void> {
     if (current !== enabled) {
         await editorCfg.update(
             'formatOnSave',
+            enabled,
+            vscode.ConfigurationTarget.Global,
+            true,
+        );
+    }
+}
+
+/**
+ * Mirror `buff.inlayHints.enabled` into the per-language VSCode setting
+ * `editor.inlayHints.enabled` for `[buff]`. buff-lsp advertises the
+ * `inlayHintProvider` capability (T46); the LanguageClient auto-wires the
+ * request handler, but VSCode still needs `editor.inlayHints.enabled` to be
+ * truthy before it asks the client for hints. Default is `true`.
+ */
+async function applyInlayHintsSetting(): Promise<void> {
+    const buffConfig = vscode.workspace.getConfiguration('buff');
+    const enabled = buffConfig.get<boolean>('inlayHints.enabled', true);
+
+    const editorCfg = vscode.workspace.getConfiguration('editor', { languageId: 'buff' });
+    const current = editorCfg.inspect('inlayHints.enabled')?.globalLanguageValue;
+    if (current !== enabled) {
+        await editorCfg.update(
+            'inlayHints.enabled',
+            enabled,
+            vscode.ConfigurationTarget.Global,
+            true,
+        );
+    }
+}
+
+/**
+ * Mirror `buff.codeLens.enabled` into the per-language VSCode setting
+ * `editor.codeLens` for `[buff]`. buff-lsp advertises the `codeLensProvider`
+ * capability (T46); the LanguageClient auto-wires the request handler, but
+ * VSCode still needs `editor.codeLens` to be truthy before it renders the
+ * lenses. Default is `true`.
+ */
+async function applyCodeLensSetting(): Promise<void> {
+    const buffConfig = vscode.workspace.getConfiguration('buff');
+    const enabled = buffConfig.get<boolean>('codeLens.enabled', true);
+
+    const editorCfg = vscode.workspace.getConfiguration('editor', { languageId: 'buff' });
+    const current = editorCfg.inspect('codeLens')?.globalLanguageValue;
+    if (current !== enabled) {
+        await editorCfg.update(
+            'codeLens',
             enabled,
             vscode.ConfigurationTarget.Global,
             true,

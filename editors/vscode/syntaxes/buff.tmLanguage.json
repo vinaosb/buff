@@ -111,6 +111,23 @@
         "strings": {
             "patterns": [
                 {
+                    "comment": "T93: Raw string literal r\"...\" and r#\"...\"# (Rust-style).",
+                    "name": "string.quoted.other.buff",
+                    "match": "br#*\"(?:[^\"\"]|(?!\"#*\"))*\"#*"
+                },
+                {
+                    "comment": "T21: Triple-quoted raw string \"\"\"...\"\"\" (no escapes, no interpolation).",
+                    "name": "string.quoted.triple.buff",
+                    "begin": "\"\"\"",
+                    "beginCaptures": {
+                        "0": {"name": "punctuation.definition.string.begin.buff"}
+                    },
+                    "end": "\"\"\"",
+                    "endCaptures": {
+                        "0": {"name": "punctuation.definition.string.end.buff"}
+                    }
+                },
+                {
                     "comment": "String literal with interpolation",
                     "name": "string.quoted.double.buff",
                     "begin": "\"",
@@ -148,6 +165,42 @@
         "types": {
             "patterns": [
                 {
+                    "comment": "T13/T24: Generic type parameter list <T, U> — captures the angle brackets as generic punctuation and the inner PascalCase identifiers as types. Must run before the catch-all PascalCase rule and before the operator rule so < and > are not styled as comparison operators inside a type position.",
+                    "name": "meta.generic.buff",
+                    "begin": "(?<=\\b(?:Vector|Map|Set|Option|Result|Tensor|Matrix|Channel|Range|Tuple|Buffer|Stream|Iter|Iterator|Box|Arc|Rc|Cell|RefCell|HashMap|HashSet|BTreeMap|BTreeSet|VecDeque|LinkedList)\\s*)\\<",
+                    "beginCaptures": {
+                        "0": {"name": "punctuation.definition.generic.begin.buff"}
+                    },
+                    "end": "\\>",
+                    "endCaptures": {
+                        "0": {"name": "punctuation.definition.generic.end.buff"}
+                    },
+                    "patterns": [
+                        {"include": "#comments"},
+                        {"include": "#keywords"},
+                        {"include": "#literals"},
+                        {"include": "#strings"},
+                        {
+                            "comment": "PascalCase identifiers are types",
+                            "name": "entity.name.type.buff",
+                            "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+                        },
+                        {
+                            "comment": "lowercase identifiers used as type-variable names (T, U, V are uppercase so they hit the rule above; e, k, v inside Map<k,v> would too only if upper — otherwise style as variable)",
+                            "name": "variable.parameter.type.buff",
+                            "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+                        },
+                        {
+                            "name": "punctuation.separator.buff",
+                            "match": ","
+                        },
+                        {
+                            "name": "keyword.operator.buff",
+                            "match": "\\="
+                        }
+                    ]
+                },
+                {
                     "comment": "PascalCase identifiers are types",
                     "name": "entity.name.type.buff",
                     "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
@@ -182,9 +235,9 @@
         "punctuation": {
             "patterns": [
                 {
-                    "comment": "Operators",
+                    "comment": "Operators (longest-match-first within each run: ..= before .., .= before ., etc.). T84 ranges .. and ..= appear here so they are scoped as operators (not punctuation) and colour consistently with other arithmetic.",
                     "name": "keyword.operator.buff",
-                    "match": "(\\+|\\-|\\*|/|%|==|!=|<|>|<=|>=|&&|\\|\\||!|&|\\||\\^|~|<<|>>|->|=>|=|\\+=|\\-=|\\*=|/=|%=|\\.\\.|\\.\\.=|\\|>|\\?\\.|\\?|\\.\\.)"
+                    "match": "(\\.\\.=|\\.\\.|->|=>|\\+=|\\-=|\\*=|/=|%=|<<|>>|<=|>=|==|!=|&&|\\|\\||\\|>|\\?\\.|\\+|\\-|\\*|/|%|<|>|!|&|\\||\\^|~|=|\\?)"
                 },
                 {
                     "comment": "Punctuation: delimiters",
