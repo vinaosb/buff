@@ -225,6 +225,60 @@ pub enum ErrorCode {
     /// underlying I/O fault codes (E1401/E1403) — timeout is a deadline
     /// miss, not a hard failure.
     RuntimeTimeout,
+
+    // -----------------------------------------------------------------------
+    // E15xx — Warnings (lints) [T48]
+    //
+    // Stable across releases — see the [module docs](self) for the policy.
+    // Warning-level codes for static-analysis lints surfaced by `buff check`
+    // and codegen. These do NOT fail compilation; they advise the user of
+    // suspicious or dead code. Severity is `Warning` for all variants here.
+    // -----------------------------------------------------------------------
+    /// E1501 — A call site used a function or method marked `@deprecated`
+    /// (T0-G3 attribute form). The `@deprecated(since = "2.0",
+    /// replacement = "new_fn")` form carries version + replacement
+    /// metadata surfaced in the warning message.
+    DeprecatedApiUsed,
+    /// E1502 — A `let` binding is never read in its scope. The variable
+    /// is computed and immediately discarded — a likely typo or leftover.
+    UnusedVariable,
+    /// E1503 — A function parameter is never used in the function body.
+    /// Distinct from E1502 because parameters are part of the function's
+    /// public signature — the fix may be renaming or removing the param
+    /// from BOTH signature and call sites.
+    UnusedParameter,
+    /// E1504 — Code appears after a `return`, `break`, or `continue`
+    /// statement in the same block. Such code can never execute.
+    UnreachableCode,
+    /// E1505 — An `import` declaration brings in names that are never
+    /// referenced in the file. Buff's module system does NOT
+    /// tree-shake, so unused imports are pure dead weight.
+    UnusedImport,
+    /// E1506 — A branch of an `if`, `match`, or `for` can never execute
+    /// because its condition is statically `false` (e.g. `if false`,
+    /// `match x { 1 if false => … }`). Distinct from E1504 (which is
+    /// syntactically after a terminator); E1506 fires on a structurally
+    /// reachable branch that's logically unreachable.
+    DeadCode,
+    /// E1507 — A `let` binding shadows an outer binding of the same
+    /// name. Buff allows shadowing, but it's a common source of bugs
+    /// (the inner binding accidentally captures references to the outer
+    /// binding's type). The warning names both bindings' locations.
+    ShadowedBinding,
+    /// E1508 — An enum variant is never constructed anywhere in the
+    /// program. The variant contributes to exhaustiveness checks but
+    /// has no producers — likely dead code or a missing construction
+    /// site.
+    UnusedEnumVariant,
+    /// E1509 — The two branches of an `if`/`else` expression produce
+    /// byte-identical values, making the conditional redundant. Usually
+    /// a copy-paste typo.
+    RedundantIfBranch,
+    /// E1510 — A `match` arm `_` (wildcard) appears BEFORE the last
+    /// explicit arm. Arms below the wildcard are unreachable — the
+    /// wildcard already matches everything. Fix: move `_` to the end
+    /// or remove the unreachable arms.
+    TrailingWildArm,
 }
 
 impl ErrorCode {
@@ -288,6 +342,17 @@ impl ErrorCode {
             ErrorCode::ChannelDisconnected => "E1408",
             ErrorCode::AsyncTaskPanicked => "E1409",
             ErrorCode::RuntimeTimeout => "E1410",
+            // E15xx — Warnings (T48)
+            ErrorCode::DeprecatedApiUsed => "E1501",
+            ErrorCode::UnusedVariable => "E1502",
+            ErrorCode::UnusedParameter => "E1503",
+            ErrorCode::UnreachableCode => "E1504",
+            ErrorCode::UnusedImport => "E1505",
+            ErrorCode::DeadCode => "E1506",
+            ErrorCode::ShadowedBinding => "E1507",
+            ErrorCode::UnusedEnumVariant => "E1508",
+            ErrorCode::RedundantIfBranch => "E1509",
+            ErrorCode::TrailingWildArm => "E1510",
         }
     }
 
@@ -357,6 +422,17 @@ impl ErrorCode {
             }
             ErrorCode::AsyncTaskPanicked => "spawned async task panicked before completing",
             ErrorCode::RuntimeTimeout => "runtime operation exceeded its deadline",
+            // E15xx — Warnings (T48)
+            ErrorCode::DeprecatedApiUsed => "use of a deprecated API",
+            ErrorCode::UnusedVariable => "unused variable",
+            ErrorCode::UnusedParameter => "unused function parameter",
+            ErrorCode::UnreachableCode => "unreachable code after a terminator",
+            ErrorCode::UnusedImport => "unused import",
+            ErrorCode::DeadCode => "branch can never execute (dead code)",
+            ErrorCode::ShadowedBinding => "`let` binding shadows an outer binding",
+            ErrorCode::UnusedEnumVariant => "enum variant is never constructed",
+            ErrorCode::RedundantIfBranch => "`if`/`else` branches produce identical values",
+            ErrorCode::TrailingWildArm => "`_` wildcard appears before the last explicit arm",
         }
     }
 
@@ -416,6 +492,17 @@ impl ErrorCode {
             ErrorCode::ChannelDisconnected => "A `Channel<T>.receive()` call returned `None` because all senders were dropped AND the channel buffer is empty. This is the normal end-of-stream signal for T2 MPSC channels — distinct from E1407 (which fires on `send` when the receiver is gone). Fix: in most cases this is NOT a bug — `receive` returning `None` is the idiomatic way to detect producer shutdown. If the producer exited unexpectedly early, inspect its task for a panic (E1409) or a logic error.",
             ErrorCode::AsyncTaskPanicked => "A task spawned via `spawn { ... }` panicked before completing. The Buff runtime captures the panic payload via `tokio::task::JoinError` and surfaces its message as the diagnostic detail. Common causes: an `unwrap`/`expect`/`panic!` in user code (Buff codegen forbids these in user-written code, but FFI calls into Rust crates can still panic), an integer overflow in release mode, or an index-out-of-bounds. Fix: read the panic message; the captured backtrace (when `RUST_BACKTRACE=1` is set) shows the originating frame.",
             ErrorCode::RuntimeTimeout => "A runtime operation exceeded its deadline. Three sub-cases share this code: (1) `Channel.receive(timeout: Duration)` returned `Err` because no message arrived within the deadline; (2) a GPU dispatch's `map_async` + `device.poll(Wait)` exceeded the internal readback deadline; (3) the cold-start `wait_ready(deadline)` deadline expired before the GPU device finished initializing. Fix: increase the deadline (if the operation is expected to be slow), or investigate why the operation is slow (GPU readback latency, channel starvation, slow driver init on first use).",
+            // E15xx — Warnings (T48)
+            ErrorCode::DeprecatedApiUsed => "A call site referenced a function or method marked `@deprecated` (T0-G3). The Buff compiler surfaces the deprecation so the user knows to migrate before a future release removes the API entirely. When the attribute carries `since = \"2.0\"` and `replacement = \"new_fn\"` metadata, the message includes both. Fix: switch the call to the named replacement, or — if no replacement is given — read the deprecation note in the API's docstring and pick the modern equivalent.",
+            ErrorCode::UnusedVariable => "A `let` binding is never read in its scope — the value is computed and immediately discarded. This is usually a typo (the user meant to use `x` but wrote `y`) or a leftover from a refactor. Fix: either use the variable, prefix it with `_` (`let _x = …`) to signal intentional discard, or remove the binding entirely.",
+            ErrorCode::UnusedParameter => "A function parameter is never used in the function body. Distinct from an unused variable (E1502) because the parameter is part of the public signature — the fix may be renaming (`_param`), removing the parameter from BOTH signature and call sites, or actually using it (which might indicate a missing code path). Fix: if the parameter is genuinely unused, rename to `_name` or remove it; if it SHOULD be used, find the missing branch.",
+            ErrorCode::UnreachableCode => "Code appears after a `return`, `break`, or `continue` statement in the same block. Such code can never execute — the terminator unconditionally transfers control elsewhere. Fix: delete the unreachable code, or — if the terminator itself is the bug — fix the terminator (e.g. a stray `return` in the middle of a function).",
+            ErrorCode::UnusedImport => "An `import` declaration brings in names that are never referenced in the file. Buff's module system does NOT tree-shake, so unused imports are pure dead weight in the module graph (and slow down compilation slightly). Fix: delete the import line, or — if you intend to re-export it — add an explicit `export import` form.",
+            ErrorCode::DeadCode => "A branch of an `if`, `match`, or `for` can never execute because its condition is statically known to be `false`. Common shapes: `if false`, `match x { 1 if false => … }`, or a `for` over an empty literal range. Distinct from E1504 (which is syntactically unreachable, after a terminator); E1506 fires on a structurally reachable branch that's logically unreachable. Fix: delete the branch, or — if the static analysis is wrong — adjust the condition so the analyzer can prove it might be `true`.",
+            ErrorCode::ShadowedBinding => "A `let` binding shadows an outer binding of the same name. Buff allows shadowing (it's idiomatic for `let x = parse(s)` followed by `let x = x.normalize()`), but accidental shadowing is a common source of bugs. The warning names both bindings' locations so you can confirm the shadowing is intentional. Fix: rename the inner binding, or — if intentional — add a `# noqa` comment once that directive is implemented (tracked as T48b).",
+            ErrorCode::UnusedEnumVariant => "An enum variant is never constructed anywhere in the program. The variant contributes to exhaustiveness checks (every `match` must cover it) but has no producers — likely dead code, or a missing construction site that should be calling it. Fix: delete the variant, or find the missing construction site (often a parser / deserializer that should produce it).",
+            ErrorCode::RedundantIfBranch => "The two branches of an `if`/`else` expression produce byte-identical values, making the conditional redundant. This is almost always a copy-paste typo — the user duplicated one branch to start writing the other, then forgot to change the duplicated body. Fix: delete the redundant branch (or merge the two), or change the duplicated body to actually differ.",
+            ErrorCode::TrailingWildArm => "A `match` arm `_` (wildcard) appears BEFORE the last explicit arm. Arms below the wildcard are unreachable — the wildcard already matches everything, so subsequent arms can never fire. Fix: move the `_` arm to the end of the match (the conventional position), or remove the unreachable arms below it.",
         }
     }
 
@@ -480,6 +567,17 @@ impl ErrorCode {
             ErrorCode::ChannelDisconnected,
             ErrorCode::AsyncTaskPanicked,
             ErrorCode::RuntimeTimeout,
+            // E15xx — Warnings (T48)
+            ErrorCode::DeprecatedApiUsed,
+            ErrorCode::UnusedVariable,
+            ErrorCode::UnusedParameter,
+            ErrorCode::UnreachableCode,
+            ErrorCode::UnusedImport,
+            ErrorCode::DeadCode,
+            ErrorCode::ShadowedBinding,
+            ErrorCode::UnusedEnumVariant,
+            ErrorCode::RedundantIfBranch,
+            ErrorCode::TrailingWildArm,
         ]
     }
 }
