@@ -54,6 +54,8 @@ pub mod prelude_assoc_fn_impl;
 pub mod prelude_assoc_const_impl;
 // T105b: PreludeInstanceFn + impl + lookup extracted from prelude_types.rs.
 pub mod prelude_instance_fn_impl;
+// T105b: return-type inference functions extracted from prelude_types.rs.
+pub mod prelude_return_types;
 // T1: project-level parse entry point + span-aware error formatting.
 pub mod project;
 // T1: cross-file symbol resolution table.
