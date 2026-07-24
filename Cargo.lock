@@ -837,7 +837,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "insta",
- "rand 0.8.7",
+ "rand 0.9.5",
  "sha2",
  "thiserror 1.0.69",
 ]
@@ -908,7 +908,7 @@ dependencies = [
  "insta",
  "p256",
  "p384",
- "rand 0.8.7",
+ "rand 0.9.5",
  "rsa",
  "sha2",
  "signature",
@@ -996,7 +996,7 @@ dependencies = [
  "chrono",
  "fake",
  "insta",
- "rand 0.8.7",
+ "rand 0.9.5",
 ]
 
 [[package]]
@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-cli"
-version = "1.2.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lang-debug-info"
-version = "1.2.0"
+version = "1.0.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "buff-lsp"
-version = "1.2.0"
+version = "1.0.0"
 dependencies = [
  "buff-lang-ast",
  "buff-lang-cli",
@@ -1398,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "buff-playground-wasm"
-version = "1.2.0"
+version = "1.0.0"
 dependencies = [
  "buff-lang-codegen-rust",
  "buff-lang-error",
