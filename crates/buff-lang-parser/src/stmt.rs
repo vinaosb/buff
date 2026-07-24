@@ -41,7 +41,7 @@ use buff_lang_ast::{
     FuncDecl, GuardCondition, Ident, ImportDecl, MethodSig, Param, Pattern, ReexportDecl, Stmt,
     StructDecl, TraitDecl, TypeParam, TypeRef,
 };
-use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
+use buff_lang_error::{suggest_with_message, Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
 use crate::expr::{parse_expression, parse_pattern};
@@ -724,15 +724,18 @@ fn parse_statement_with_property_wrappers(
     for a in &attrs {
         let name = a.name.name.as_str();
         if !PROPERTY_WRAPPER_ATTRS.contains(&name) {
-            return Err(ParseError::new(
-                Diagnostic::error(
-                    format!(
-                        "unknown property wrapper `@{name}`; recognised wrappers are: State, Published, Cached"
-                    ),
-                    a.span,
-                )
-                .with_code(ErrorCode::UnexpectedToken),
-            ));
+            let mut diag = Diagnostic::error(
+                format!(
+                    "unknown property wrapper `@{name}`; recognised wrappers are: State, Published, Cached"
+                ),
+                a.span,
+            )
+            .with_code(ErrorCode::UnexpectedToken);
+            // T53: suggest the closest recognised wrapper name.
+            if let Some(msg) = suggest_with_message(name, PROPERTY_WRAPPER_ATTRS) {
+                diag = diag.with_note(format!("help: {msg}"));
+            }
+            return Err(ParseError::new(diag));
         }
         if let Some(prev) = wrapper {
             return Err(ParseError::new(

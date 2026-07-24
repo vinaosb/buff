@@ -46,7 +46,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use buff_lang_ast::{Decl, ImportDecl, ReexportDecl};
-use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
+use buff_lang_error::{suggest_with_message, Diagnostic, ErrorCode, Span, TypeError};
 
 /// A parsed module: its canonical file path, top-level decls, computed
 /// exports set, declared imports, and declared re-exports.
@@ -519,13 +519,18 @@ fn resolve_reexports(ctx: &mut BuildCtx<'_>) -> Result<(), TypeError> {
                 // Named re-export: each name must be in target's exports.
                 for n in &r.names {
                     if !target_exports.contains(&n.name) {
-                        return Err(TypeError::new(
-                            Diagnostic::error(
-                                format!("`{}` is not exported from `{}`", n.name, target.display()),
-                                Span::dummy(),
-                            )
-                            .with_code(ErrorCode::ModuleError),
-                        ));
+                        let mut diag = Diagnostic::error(
+                            format!("`{}` is not exported from `{}`", n.name, target.display()),
+                            Span::dummy(),
+                        )
+                        .with_code(ErrorCode::ModuleError);
+                        // T53: suggest the closest matching export name.
+                        let export_names: Vec<&str> =
+                            target_exports.iter().map(|s| s.as_str()).collect();
+                        if let Some(msg) = suggest_with_message(&n.name, &export_names) {
+                            diag = diag.with_note(format!("help: {msg}"));
+                        }
+                        return Err(TypeError::new(diag));
                     }
                 }
                 // Already inserted into this module's exports during the
@@ -567,13 +572,18 @@ fn check_visibility(ctx: &BuildCtx<'_>) -> Result<(), TypeError> {
             };
             for n in &imp.imports {
                 if !target_mod.exports.contains(&n.name) {
-                    return Err(TypeError::new(
-                        Diagnostic::error(
-                            format!("`{}` is not exported from `{}`", n.name, target.display()),
-                            Span::dummy(),
-                        )
-                        .with_code(ErrorCode::ModuleError),
-                    ));
+                    let mut diag = Diagnostic::error(
+                        format!("`{}` is not exported from `{}`", n.name, target.display()),
+                        Span::dummy(),
+                    )
+                    .with_code(ErrorCode::ModuleError);
+                    // T53: suggest the closest matching export name.
+                    let export_names: Vec<&str> =
+                        target_mod.exports.iter().map(|s| s.as_str()).collect();
+                    if let Some(msg) = suggest_with_message(&n.name, &export_names) {
+                        diag = diag.with_note(format!("help: {msg}"));
+                    }
+                    return Err(TypeError::new(diag));
                 }
             }
         }
