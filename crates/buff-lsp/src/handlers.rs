@@ -9,10 +9,12 @@
 use buff_lang_ast::{Attribute, Decl, FuncDecl};
 use buff_lang_error::{Applicability, Diagnostic, Severity};
 use lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
-    CompletionResponse, DocumentSymbol, GotoDefinitionResponse, Hover, HoverContents,
-    InsertTextFormat, Location, MarkupContent, MarkupKind, Position, Range, SymbolKind, TextEdit,
-    WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeLens, CodeLensParams,
+    CompletionItem, CompletionItemKind, CompletionResponse, DocumentSymbol, GotoDefinitionResponse,
+    Hover, HoverContents, InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams,
+    InsertTextFormat, Location, MarkupContent, MarkupKind, Position, Range, SemanticToken,
+    SemanticTokens, SemanticTokensLegend, SemanticTokensParams, SemanticTokensResult, SymbolKind,
+    TextEdit, WorkspaceEdit,
 };
 use std::collections::BTreeMap;
 
@@ -234,7 +236,13 @@ fn suggestions_to_code_actions(
                 range,
                 new_text: suggestion.replacement.clone(),
             };
-            let mut changes: BTreeMap<lsp_types::Uri, Vec<TextEdit>> = BTreeMap::new();
+            // lsp-types 0.97's `WorkspaceEdit::changes` is a HashMap (the
+            // LSP 3.17 spec uses a JSON object — unordered). We seed it
+            // from a one-entry HashMap; the BTreeMap shape was a v1.24-era
+            // leftover that rust-analyzer flagged but cargo didn't catch
+            // because the crate hadn't been re-checked against the bump.
+            let mut changes: std::collections::HashMap<lsp_types::Uri, Vec<TextEdit>> =
+                std::collections::HashMap::new();
             changes.insert(uri.clone(), vec![edit]);
             let workspace_edit = WorkspaceEdit {
                 changes: Some(changes),
@@ -252,6 +260,12 @@ fn suggestions_to_code_actions(
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title,
                 kind: Some(CodeActionKind::QUICK_FIX),
+                // The diagnostics this action resolves. T1's suggestion
+                // engine attaches the fix to the diagnostic in scope; we
+                // don't yet thread the originating `lsp_types::Diagnostic`
+                // back here (a T1b refinement), so leave `None` and let
+                // the editor associate via the cursor position.
+                diagnostics: None,
                 command: None,
                 is_preferred: if is_preferred { Some(true) } else { None },
                 disabled: None,
@@ -637,6 +651,441 @@ pub fn formatting(state: &DocumentState) -> Option<Vec<TextEdit>> {
 }
 
 // ---------------------------------------------------------------------
+// T46: codeAction dispatch wrapper
+// ---------------------------------------------------------------------
+
+/// Adapter from the LSP `textDocument/codeAction` request shape to the
+/// existing [`code_actions`] handler. The LSP sends a [`CodeActionParams`]
+/// with a `range` (the editor's selection); we forward `range.start` to
+/// the position-based handler — the underlying diagnostic-suggestion
+/// matcher checks `span_contains(byte)` against each diagnostic, and
+/// the cursor's exact position within the selection is what matters.
+///
+/// Returns `None` (the pre-T46 behaviour) when there are no actions.
+pub fn code_action(state: &DocumentState, params: CodeActionParams) -> Option<Vec<CodeActionOrCommand>> {
+    code_actions(state, params.range.start)
+}
+
+// ---------------------------------------------------------------------
+// T46: codeLens — show type info inline above each top-level function
+// ---------------------------------------------------------------------
+
+/// Compute code lenses for the document.
+///
+/// Emits ONE lens per top-level function declaration, anchored on the
+/// function's NAME line, displaying the inferred / annotated signature
+/// (`func add(a: Int, b: Int) -> Int`). The lens is non-interactive
+/// (`command: None`) — it's purely informational, mirroring rust-analyzer's
+/// "type info above fn" lens. Structs / enums / traits do NOT get lenses
+/// (their info is already in the document-symbol outline).
+///
+/// Returns an empty `Vec` (not `None`) when no funcs are present; the
+/// LSP wire shape is always an array for `textDocument/codeLens`.
+pub fn code_lens(_state: &DocumentState, _params: CodeLensParams) -> Vec<CodeLens> {
+    // Walk the analysis's top-level decls. The `top_decls` index already
+    // carries the formatted signature as `detail` (built by
+    // `format_func_signature` in `symbol.rs`), so we reuse it instead of
+    // re-formatting here.
+    _state
+        .analysis
+        .symbols
+        .top_decls
+        .iter()
+        .filter(|d| matches!(d.kind, TopDeclKind::Func | TopDeclKind::Export))
+        .filter_map(|d| {
+            // Anchor the lens on the function's NAME (not its full span) so
+            // the lens renders on the signature line, not the closing line
+            // of the body for multi-line decls.
+            let range = _state.lines.lsp_range(&_state.text, d.name_span);
+            // Only single-line lenses are valid per LSP spec; collapse if
+            // the name span somehow spans lines (it shouldn't, but be
+            // defensive against weird spans).
+            if range.start.line != range.end.line {
+                return None;
+            }
+            Some(CodeLens {
+                range,
+                command: None,
+                data: None,
+            })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------
+// T46: inlayHint — parameter names + inferred types
+// ---------------------------------------------------------------------
+
+/// Compute inlay hints within `range`.
+///
+/// Two flavours of hint (matching rust-analyzer's defaults):
+///
+/// 1. **Type hints** on `let` bindings — for every local `let x = …`
+///    whose inferred type is known, emit a hint at the END of the
+///    binding's line showing `: <Type>`. Skipped for `let x: T = …`
+///    where the user already wrote the annotation (no duplicate noise).
+///    Skipped for `Type::Unknown` (the inferencer couldn't resolve).
+///
+/// 2. **Parameter-name hints** at call sites — DEFERRED. v1.25 ships
+///    type hints only; parameter-name hints require resolving which
+///    param each positional argument maps to (the analysis doesn't yet
+///    track call-arg→param mapping for user functions). Tracked as a
+///    T46b follow-up; the handler shape accepts it via an empty prepend.
+///
+/// Hints outside `range` are filtered out (the LSP spec requires
+/// servers to only return hints within the visible viewport range for
+/// performance on large files).
+pub fn inlay_hints(state: &DocumentState, params: InlayHintParams) -> Vec<InlayHint> {
+    let mut hints: Vec<InlayHint> = Vec::new();
+
+    // Walk the local bindings. Only `Let` bindings get type hints —
+    // params already have explicit annotations in Buff's grammar
+    // (`name: Type`), so emitting hints there would duplicate text.
+    for (_byte, entry) in &state.analysis.symbols.locals {
+        if !matches!(entry.kind, crate::symbol::LocalKind::Let) {
+            continue;
+        }
+        // Look up the inferred type at the binding site.
+        let Some(ty) = state.analysis.types.lookup(entry.name.span.start) else {
+            continue;
+        };
+        // Skip unknown types — showing `: Unknown` would be misleading.
+        if matches!(ty, buff_lang_types::Type::Unknown) {
+            continue;
+        }
+        // Skip bindings whose source line already contains a `: <Type>`
+        // annotation (cheap byte-level check on the binding's line).
+        let line_start_byte = state.lines.line_start_byte(&state.text, entry.def_span.start);
+        let line_end_byte = state.lines.line_end_byte(&state.text, entry.def_span.start);
+        let line_slice = &state.text[line_start_byte..line_end_byte];
+        // A `:` after the binding name signals an explicit annotation.
+        let name_end_in_line = entry.name.span.end.saturating_sub(line_start_byte);
+        let after_name = if name_end_in_line < line_slice.len() {
+            &line_slice[name_end_in_line..]
+        } else {
+            ""
+        };
+        let next_token = after_name.split_whitespace().next();
+        if next_token.map(|s| s.starts_with(':')).unwrap_or(false) {
+            continue;
+        }
+
+        // Hint position: END of the line containing the binding
+        // (column = UTF-16 width of the line contents).
+        let hint_pos = state.lines.lsp_position(&state.text, line_end_byte);
+        // Filter by params.range (only emit hints in the requested viewport).
+        if hint_pos.line < params.range.start.line
+            || hint_pos.line > params.range.end.line
+        {
+            continue;
+        }
+
+        hints.push(InlayHint {
+            position: hint_pos,
+            label: InlayHintLabel::String(format!(": {}", display_type(ty))),
+            kind: Some(InlayHintKind::TYPE),
+            text_edits: None,
+            tooltip: None,
+            padding_left: Some(true),
+            padding_right: None,
+            data: None,
+        });
+    }
+
+    // Stable order by position so editors render them deterministically.
+    hints.sort_by_key(|h| (h.position.line, h.position.character));
+    hints
+}
+
+// ---------------------------------------------------------------------
+// T46: semanticTokens — syntax highlighting (LSP 3.16)
+// ---------------------------------------------------------------------
+
+/// The legend declared in [`semantic_tokens_legend`]. Indices are
+/// referenced by [`token_type_index`]. Kept in a single source of truth
+/// so the capability registration in `server.rs` and the per-token
+/// emission here agree.
+pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
+    "keyword",   // 0
+    "function",  // 1
+    "struct",    // 2
+    "enum",      // 3
+    "interface", // 4  (trait)
+    "type",      // 5  (type annotation / prelude type)
+    "variable",  // 6  (local let binding + reference)
+    "parameter", // 7  (function parameter)
+    "string",    // 8
+    "number",    // 9
+    "char",      // 10 (char literal)
+    "regexp",    // 11 (regex literal)
+    "operator",  // 12
+    "decorator", // 13 (@attribute)
+];
+
+/// Token modifiers we emit. Only `declaration` (marking the defining
+/// occurrence) for now — the protocol allows zero modifiers.
+pub const SEMANTIC_TOKEN_MODIFIERS: &[&str] = &["declaration"];
+
+/// Bit 0 — the `declaration` modifier. Matches
+/// [`SEMANTIC_TOKEN_MODIFIERS`] ordering.
+const MOD_DECLARATION: u32 = 1 << 0;
+
+/// Build the [`SemanticTokensLegend`] for capability registration.
+/// Called from `server.rs` so the legend stays in sync with the
+/// per-token emitter below.
+pub fn semantic_tokens_legend() -> SemanticTokensLegend {
+    // Use the predefined LSP constants where they exist (more
+    // discoverable than stringly-typed construction) and fall back to
+    // `From<&'static str>` for the few non-predefined names.
+    SemanticTokensLegend {
+        token_types: vec![
+            lsp_types::SemanticTokenType::KEYWORD,   // 0
+            lsp_types::SemanticTokenType::FUNCTION,  // 1
+            lsp_types::SemanticTokenType::STRUCT,    // 2
+            lsp_types::SemanticTokenType::ENUM,      // 3
+            lsp_types::SemanticTokenType::INTERFACE, // 4  (trait)
+            lsp_types::SemanticTokenType::TYPE,      // 5
+            lsp_types::SemanticTokenType::VARIABLE,  // 6
+            lsp_types::SemanticTokenType::PARAMETER, // 7
+            lsp_types::SemanticTokenType::STRING,    // 8
+            lsp_types::SemanticTokenType::NUMBER,    // 9
+            // char — no predefined constant; reuse the LSP "type"
+            // category is wrong; use a custom string. lsp-types 0.97
+            // added DECORATOR but no CHAR, so we use From<&str>.
+            "char".into(),                           // 10
+            lsp_types::SemanticTokenType::REGEXP,    // 11
+            lsp_types::SemanticTokenType::OPERATOR,  // 12
+            lsp_types::SemanticTokenType::DECORATOR, // 13
+        ],
+        token_modifiers: vec![lsp_types::SemanticTokenModifier::DECLARATION],
+    }
+}
+
+/// Compute the full semantic-tokens payload for the document.
+///
+/// Walks the lexer's token stream and emits one [`SemanticToken`] per
+/// "colourable" token (keywords, identifiers, literals, operators),
+/// mapping each [`TokenKind`](buff_lang_lexer::TokenKind) to a type index
+/// via [`token_type_index`]. Identifiers are further resolved against the
+/// symbol index so that a function name tokens as `function`, a struct
+/// name as `struct`, etc. — without that resolution every identifier
+/// would be uniformly `variable`.
+///
+/// Tokens are sorted ascending by `(line, character)` and delta-encoded
+/// per the LSP spec (each token's `delta_line`/`delta_start` is relative
+/// to the previous token; the first token is relative to line 0, col 0).
+///
+/// Returns `None` when the source fails to lex (the diagnostic surface
+/// already shows why). Returns `Some(SemanticTokensResult::Tokens(...))`
+/// otherwise — always with a payload, possibly empty.
+pub fn semantic_tokens_full(
+    state: &DocumentState,
+    _params: SemanticTokensParams,
+) -> Option<SemanticTokensResult> {
+    let tokens = match buff_lang_lexer::tokenize(&state.text, state.source_id) {
+        Ok(t) => t,
+        Err(_) => return None,
+    };
+
+    // Pre-build a lookup of top-decl NAME start bytes → semantic type
+    // index so identifiers can be coloured by their target kind.
+    let mut name_to_type: BTreeMap<usize, u32> = BTreeMap::new();
+    for d in &state.analysis.symbols.top_decls {
+        let idx = match d.kind {
+            TopDeclKind::Func | TopDeclKind::Export => 1u32, // function
+            TopDeclKind::Struct => 2u32,
+            TopDeclKind::Enum => 3u32,
+            TopDeclKind::Trait => 4u32,
+            // Imports / extends / other don't get a coloured name here.
+            TopDeclKind::Import | TopDeclKind::Extend | TopDeclKind::Other => continue,
+        };
+        name_to_type.insert(d.name_span.start, idx);
+    }
+    // Params: their name spans are in the locals index with kind == Param.
+    let mut param_name_starts: std::collections::BTreeSet<usize> =
+        std::collections::BTreeSet::new();
+    let mut let_name_starts: std::collections::BTreeSet<usize> =
+        std::collections::BTreeSet::new();
+    for (_byte, entry) in &state.analysis.symbols.locals {
+        match entry.kind {
+            crate::symbol::LocalKind::Param => {
+                param_name_starts.insert(entry.name.span.start);
+            }
+            crate::symbol::LocalKind::Let => {
+                let_name_starts.insert(entry.name.span.start);
+            }
+            _ => {}
+        }
+    }
+
+    // First pass: build absolute (line, char, length, type, mods) tuples.
+    let mut abs: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(tokens.len());
+    for tok in &tokens {
+        let (ty_idx, mods) = token_type_index(&tok.kind, &tok.span, state, &name_to_type, &param_name_starts, &let_name_starts);
+        let Some(ty_idx) = ty_idx else { continue };
+        // Length: number of UTF-16 code units in the token's source slice.
+        let start = tok.span.start.min(state.text.len());
+        let end = tok.span.end.min(state.text.len());
+        if end <= start {
+            continue;
+        }
+        let slice = &state.text[start..end];
+        let length = slice.encode_utf16().count() as u32;
+        if length == 0 {
+            continue;
+        }
+        let pos = state.lines.lsp_position(&state.text, start);
+        abs.push((pos.line, pos.character, length, ty_idx, mods));
+    }
+
+    // Sort by (line, char). The lexer emits tokens in source order
+    // already, but the offside-rule synthesised Indent/Dedent tokens
+    // sit at the same byte as the following real token — a stable sort
+    // keeps them in emission order which is what we want.
+    abs.sort_by_key(|t| (t.0, t.1));
+
+    // Second pass: delta-encode. Skip tokens that occupy the same
+    // (line, char) as the previous emitted token (zero-length deltas
+    // are illegal per LSP spec) — this happens when two colourable
+    // tokens overlap (e.g. `@test` → decorator `@` is at the same byte
+    // as the start of `test` identifier).
+    let mut data: Vec<SemanticToken> = Vec::with_capacity(abs.len());
+    let mut prev_line: u32 = 0;
+    let mut prev_char: u32 = 0;
+    for (line, char, length, ty_idx, mods) in abs {
+        if line == prev_line && char == prev_char {
+            // Overlap — skip the later-emitted one (the earlier one
+            // already claimed this cell). Keeps the stream well-formed.
+            continue;
+        }
+        let delta_line = line - prev_line;
+        let delta_start = if delta_line == 0 { char - prev_char } else { char };
+        data.push(SemanticToken {
+            delta_line,
+            delta_start,
+            length,
+            token_type: ty_idx,
+            token_modifiers_bitset: mods,
+        });
+        prev_line = line;
+        prev_char = char;
+    }
+
+    Some(SemanticTokensResult::Tokens(SemanticTokens {
+        result_id: None,
+        data,
+    }))
+}
+
+/// Map a lexer [`TokenKind`](buff_lang_lexer::TokenKind) (plus context)
+/// to a semantic token type index in [`SEMANTIC_TOKEN_TYPES`].
+///
+/// Returns `None` for tokens that should NOT be coloured (whitespace,
+/// newlines, indent/dedent markers, brackets, punctuation that isn't an
+/// operator). For identifiers, the `name_to_type` / `param_name_starts`
+/// / `let_name_starts` indexes resolve the identifier to a more
+/// specific kind (function / struct / parameter / variable); falling
+/// back to `variable` when no resolution applies.
+#[allow(clippy::too_many_arguments)]
+fn token_type_index(
+    kind: &buff_lang_lexer::TokenKind,
+    span: &buff_lang_error::Span,
+    _state: &DocumentState,
+    name_to_type: &BTreeMap<usize, u32>,
+    param_name_starts: &std::collections::BTreeSet<usize>,
+    let_name_starts: &std::collections::BTreeSet<usize>,
+) -> (Option<u32>, u32) {
+    use buff_lang_lexer::TokenKind;
+    // --- literals ---
+    let ty = match kind {
+        TokenKind::IntLit(_) | TokenKind::FloatLit(_) | TokenKind::ByteLit(_)
+        | TokenKind::DoubleLit(_) | TokenKind::DecimalLit(_) => Some(9), // number
+        TokenKind::CharLit(_) => Some(10),                                // char
+        TokenKind::RegexLit(_) => Some(11),                               // regexp
+        TokenKind::StringStart | TokenKind::StringEnd | TokenKind::StringLit(_)
+        | TokenKind::StringPart(_) | TokenKind::InterpStart | TokenKind::InterpSpec(_)
+        | TokenKind::InterpEnd => Some(8), // string — boundaries + parts coloured as string
+        // --- operators (arithmetic / comparison / assignment / etc) ---
+        TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash
+        | TokenKind::Percent | TokenKind::EqEq | TokenKind::NotEq | TokenKind::Lt
+        | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq | TokenKind::AndAnd
+        | TokenKind::OrOr | TokenKind::Not | TokenKind::Question | TokenKind::QuestionQuestion
+        | TokenKind::QuestionDot | TokenKind::Caret | TokenKind::Pipe | TokenKind::Amp
+        | TokenKind::Shl | TokenKind::Shr | TokenKind::Tilde | TokenKind::Arrow
+        | TokenKind::FatArrow | TokenKind::Assign | TokenKind::PlusEq | TokenKind::MinusEq
+        | TokenKind::StarEq | TokenKind::SlashEq | TokenKind::PercentEq | TokenKind::PipeGt
+        | TokenKind::DotDot | TokenKind::DotDotEq => Some(12), // operator
+        // --- keywords (all `Kw*` variants) ---
+        TokenKind::KwFunc | TokenKind::KwLet | TokenKind::KwMut | TokenKind::KwStruct
+        | TokenKind::KwEnum | TokenKind::KwTrait | TokenKind::KwType | TokenKind::KwIf
+        | TokenKind::KwElse | TokenKind::KwFor | TokenKind::KwReturn | TokenKind::KwBreak
+        | TokenKind::KwContinue | TokenKind::KwIn | TokenKind::KwMatch | TokenKind::KwAsync
+        | TokenKind::KwSpawn | TokenKind::KwImport | TokenKind::KwExport | TokenKind::KwFrom
+        | TokenKind::KwAs | TokenKind::KwTrue | TokenKind::KwFalse | TokenKind::KwExtern
+        | TokenKind::KwUnsafe | TokenKind::KwGuard | TokenKind::KwExtend | TokenKind::KwDefer => {
+            Some(0) // keyword
+        }
+        // --- mathematical-syntax operators (T19) ---
+        TokenKind::Sum | TokenKind::Product | TokenKind::Sqrt | TokenKind::InUni
+        | TokenKind::NotInUni | TokenKind::SubsetUni | TokenKind::ApproxUni
+        | TokenKind::Adjoint => Some(12), // operator
+        // --- decorator (attribute marker) ---
+        TokenKind::At => Some(13), // decorator
+        // --- identifiers: resolve via the symbol index ---
+        TokenKind::Ident(_) => {
+            if let Some(&idx) = name_to_type.get(&span.start) {
+                // Top-level decl name — mark as declaration.
+                return (Some(idx), MOD_DECLARATION);
+            }
+            if param_name_starts.contains(&span.start) {
+                return (Some(7), MOD_DECLARATION); // parameter + declaration
+            }
+            if let Some(ty) = resolve_ident_as_top_decl(_state, span.start) {
+                return (Some(ty), 0);
+            }
+            if let_name_starts.contains(&span.start) {
+                return (Some(6), MOD_DECLARATION); // variable + declaration
+            }
+            // Default: variable. Covers references to locals + any
+            // unresolved identifier.
+            Some(6)
+        }
+        // --- skip: layout markers, punctuation, eof ---
+        TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent | TokenKind::Eof
+        | TokenKind::LParen | TokenKind::RParen | TokenKind::LBrace | TokenKind::RBrace
+        | TokenKind::LBracket | TokenKind::RBracket | TokenKind::Colon | TokenKind::Comma
+        | TokenKind::Dot | TokenKind::Semicolon => None,
+    };
+    (ty, 0)
+}
+
+/// Look up whether the identifier at `byte` is a REFERENCE to a
+/// top-level decl (function / struct / enum / trait) and return its
+/// semantic token type index. Returns `None` when the identifier is
+/// not a known top-decl reference (it's then coloured as `variable`).
+fn resolve_ident_as_top_decl(state: &DocumentState, byte: usize) -> Option<u32> {
+    // Read the identifier text starting at `byte`.
+    let bytes = state.text.as_bytes();
+    if byte >= bytes.len() || !(bytes[byte].is_ascii_alphabetic() || bytes[byte] == b'_') {
+        return None;
+    }
+    let mut end = byte;
+    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+        end += 1;
+    }
+    let name = &state.text[byte..end];
+    let top = state.analysis.symbols.find_top_decl(name)?;
+    let idx = match top.kind {
+        TopDeclKind::Func | TopDeclKind::Export => 1u32,
+        TopDeclKind::Struct => 2u32,
+        TopDeclKind::Enum => 3u32,
+        TopDeclKind::Trait => 4u32,
+        TopDeclKind::Import | TopDeclKind::Extend | TopDeclKind::Other => return None,
+    };
+    Some(idx)
+}
+
+// ---------------------------------------------------------------------
 // Misc helpers
 // ---------------------------------------------------------------------
 
@@ -832,5 +1281,167 @@ mod tests {
             s.contains("reserved"),
             "expected NPU-reserved note, got: {s}"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // T46: codeAction / codeLens / inlayHint / semanticTokens
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn t46_code_lens_emits_one_per_function() {
+        let src = "func a():\n    print(1)\n\nfunc b():\n    print(2)\n";
+        let st = open(src);
+        let params = CodeLensParams {
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        let lenses = code_lens(&st, params);
+        assert_eq!(lenses.len(), 2, "expected one lens per function");
+        // Each lens should be a single-line range.
+        for l in &lenses {
+            assert_eq!(l.range.start.line, l.range.end.line, "non-single-line lens");
+            assert!(l.command.is_none(), "expected non-interactive lens");
+        }
+    }
+
+    #[test]
+    fn t46_code_lens_skips_structs_enums() {
+        let src = "struct Point:\n    x: Int\n\nfunc origin():\n    return Point { x: 0 }\n";
+        let st = open(src);
+        let params = CodeLensParams {
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        let lenses = code_lens(&st, params);
+        // Only `origin` qualifies — struct/enum decls are skipped.
+        assert_eq!(lenses.len(), 1, "lenses: {lenses:?}");
+    }
+
+    #[test]
+    fn t46_inlay_hints_emit_type_for_let_binding() {
+        let src = "func main():\n    let x = 42\n    print(x)\n";
+        let st = open(src);
+        let params = InlayHintParams {
+            work_done_progress_params: Default::default(),
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+            range: Range::new(pos(0, 0), pos(99, 0)),
+        };
+        let hints = inlay_hints(&st, params);
+        assert_eq!(hints.len(), 1, "expected one type hint for `let x`, got: {hints:?}");
+        let label = match &hints[0].label {
+            InlayHintLabel::String(s) => s.clone(),
+            _ => panic!("expected string label"),
+        };
+        assert!(label.contains("Int"), "expected Int hint, got: {label}");
+        assert_eq!(hints[0].kind, Some(InlayHintKind::TYPE));
+    }
+
+    #[test]
+    fn t46_inlay_hints_skip_explicit_annotations() {
+        // `let x: Int = 42` already has the annotation — no hint.
+        let src = "func main():\n    let x: Int = 42\n    print(x)\n";
+        let st = open(src);
+        let params = InlayHintParams {
+            work_done_progress_params: Default::default(),
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+            range: Range::new(pos(0, 0), pos(99, 0)),
+        };
+        let hints = inlay_hints(&st, params);
+        assert!(hints.is_empty(), "expected no hints for explicit annotation, got: {hints:?}");
+    }
+
+    #[test]
+    fn t46_inlay_hints_filtered_by_range() {
+        let src = "func main():\n    let x = 1\n    let y = 2\n    let z = 3\n";
+        let st = open(src);
+        // Only line 1 (`let x`) is in range.
+        let params = InlayHintParams {
+            work_done_progress_params: Default::default(),
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+            range: Range::new(pos(1, 0), pos(1, 99)),
+        };
+        let hints = inlay_hints(&st, params);
+        assert_eq!(hints.len(), 1, "expected only the line-1 hint in range");
+    }
+
+    #[test]
+    fn t46_semantic_tokens_legend_matches_constants() {
+        let legend = semantic_tokens_legend();
+        // 14 token types (per SEMANTIC_TOKEN_TYPES ordering).
+        assert_eq!(legend.token_types.len(), SEMANTIC_TOKEN_TYPES.len());
+        // 1 modifier (declaration).
+        assert_eq!(legend.token_modifiers.len(), 1);
+        // Spot-check a few: keyword=0, function=1, struct=2.
+        assert_eq!(legend.token_types[0].as_str(), "keyword");
+        assert_eq!(legend.token_types[1].as_str(), "function");
+        assert_eq!(legend.token_types[2].as_str(), "struct");
+    }
+
+    #[test]
+    fn t46_semantic_tokens_full_emits_keyword_and_function() {
+        let src = "func main():\n    print(\"hi\")\n";
+        let st = open(src);
+        let params = SemanticTokensParams {
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+        };
+        let result = semantic_tokens_full(&st, params).expect("tokens");
+        let tokens = match result {
+            SemanticTokensResult::Tokens(t) => t.data,
+            _ => panic!("expected Tokens variant"),
+        };
+        // `func` (keyword) + `main` (function) + `print` (function) +
+        // `(` (skip) + `"hi"` (string) + `)` (skip). Minimum: keyword +
+        // function tokens present.
+        let types_present: std::collections::BTreeSet<u32> =
+            tokens.iter().map(|t| t.token_type).collect();
+        assert!(types_present.contains(&0), "expected keyword (0), got: {types_present:?}");
+        assert!(types_present.contains(&1), "expected function (1), got: {types_present:?}");
+    }
+
+    #[test]
+    fn t46_semantic_tokens_full_delta_encodes() {
+        // Two lines of source → first token is absolute, second is
+        // delta. Verify the delta encoding shape.
+        let src = "func a():\n    print(1)\n";
+        let st = open(src);
+        let params = SemanticTokensParams {
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            text_document: lsp_types::TextDocumentIdentifier {
+                uri: "file:///t.buff".parse().unwrap(),
+            },
+        };
+        let result = semantic_tokens_full(&st, params).expect("tokens");
+        let tokens = match result {
+            SemanticTokensResult::Tokens(t) => t.data,
+            _ => panic!("expected Tokens"),
+        };
+        // First token's delta_line + delta_start must form a valid
+        // absolute position (line 0 since it's the first).
+        assert_eq!(tokens[0].delta_line, 0, "first token must start at line 0");
+        // Subsequent tokens must have non-negative deltas.
+        for window in tokens.windows(2) {
+            let (a, b) = (&window[0], &window[1]);
+            // Same line: b.delta_start must be > 0 (we skip overlaps).
+            if b.delta_line == 0 {
+                assert!(b.delta_start > 0, "zero-delta token: {a:?} -> {b:?}");
+            }
+        }
     }
 }

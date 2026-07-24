@@ -42,11 +42,13 @@ use buff_lang_error::SourceId;
 use crossbeam_channel::{RecvTimeoutError, Select};
 use lsp_server::{Connection, Message, Response};
 use lsp_types::{
+    CodeActionParams, CodeActionProviderCapability, CodeLensOptions, CodeLensParams,
     CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
-    GotoDefinitionParams, HoverParams, HoverProviderCapability, InitializeParams, OneOf,
-    PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, Uri,
+    GotoDefinitionParams, HoverParams, HoverProviderCapability, InlayHintParams, InitializeParams,
+    OneOf, PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, Uri,
 };
 use thiserror::Error;
 
@@ -126,6 +128,32 @@ pub fn run_stdio() -> Result<(), LspError> {
         definition_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        // T46: four new LSP capabilities (v1.25 Wave 2a). All four are
+        // pure handlers on `&DocumentState` — they reuse the already-cached
+        // `DocumentAnalysis` from `didOpen` / `didChange`, so they cost
+        // ZERO extra front-end work per request.
+        //
+        // - **codeAction** — surfaces T1 diagnostic suggestions as
+        //   `quickfix` CodeActions + T72 plugin code-actions. The handler
+        //   (`handlers::code_action`) was already implemented in T1/T72;
+        //   T46 only wires the capability + dispatch arm.
+        // - **codeLens** — one lens per top-level function (T46).
+        // - **inlayHint** — type hints at `let` bindings (T46).
+        // - **semanticTokens** — syntax highlighting via the legend
+        //   declared in `handlers::semantic_tokens_legend` (T46).
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+        code_lens_provider: Some(CodeLensOptions {
+            resolve_provider: Some(false),
+        }),
+        inlay_hint_provider: Some(OneOf::Left(true)),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                legend: handlers::semantic_tokens_legend(),
+                range: Some(false),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                ..Default::default()
+            },
+        )),
         ..Default::default()
     };
     let caps_value = serde_json::to_value(&server_capabilities)?;
@@ -399,6 +427,48 @@ fn dispatch_request(
             };
             let edits = handlers::formatting(state);
             Ok(Some(serde_json::to_value(edits)?))
+        }
+        // T46 dispatch arms. All four reuse the cached DocumentState —
+        // no extra analysis work per request.
+        "textDocument/codeAction" => {
+            let p: CodeActionParams = serde_json::from_value(params)?;
+            let uri = &p.text_document.uri;
+            let state = match server.documents.get(&uri_key(uri)) {
+                Some(s) => s,
+                None => return Ok(None),
+            };
+            let actions = handlers::code_action(state, p);
+            Ok(Some(serde_json::to_value(actions)?))
+        }
+        "textDocument/codeLens" => {
+            let p: CodeLensParams = serde_json::from_value(params)?;
+            let uri = &p.text_document.uri;
+            let state = match server.documents.get(&uri_key(uri)) {
+                Some(s) => s,
+                None => return Ok(None),
+            };
+            let lenses = handlers::code_lens(state, p);
+            Ok(Some(serde_json::to_value(lenses)?))
+        }
+        "textDocument/inlayHint" => {
+            let p: InlayHintParams = serde_json::from_value(params)?;
+            let uri = &p.text_document.uri;
+            let state = match server.documents.get(&uri_key(uri)) {
+                Some(s) => s,
+                None => return Ok(None),
+            };
+            let hints = handlers::inlay_hints(state, p);
+            Ok(Some(serde_json::to_value(hints)?))
+        }
+        "textDocument/semanticTokens/full" => {
+            let p: SemanticTokensParams = serde_json::from_value(params)?;
+            let uri = &p.text_document.uri;
+            let state = match server.documents.get(&uri_key(uri)) {
+                Some(s) => s,
+                None => return Ok(None),
+            };
+            let tokens = handlers::semantic_tokens_full(state, p);
+            Ok(Some(serde_json::to_value(tokens)?))
         }
         _ => Ok(None),
     }

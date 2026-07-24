@@ -79,7 +79,7 @@ impl LineIndex {
     /// Find the line index (0-based) containing `byte_offset`. Clamped to
     /// `[0, line_count-1]`. `byte_offset` values past EOF map to the last
     /// line.
-    fn line_of(&self, byte_offset: usize) -> usize {
+    pub fn line_of(&self, byte_offset: usize) -> usize {
         match self.line_starts.binary_search(&byte_offset) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1).min(self.line_starts.len() - 1),
@@ -88,9 +88,23 @@ impl LineIndex {
 
     /// The byte offset where `line` (0-based) begins. Clamped to the last
     /// line if out of range.
-    fn line_start(&self, line: usize) -> usize {
+    pub fn line_start(&self, line: usize) -> usize {
         let idx = line.min(self.line_starts.len() - 1);
         self.line_starts[idx]
+    }
+
+    /// Convenience: the byte offset where the line containing `byte_offset`
+    /// begins. Used by inlay-hint computation to slice a line out of the
+    /// source for cheap text checks (T46).
+    pub fn line_start_byte(&self, src: &str, byte_offset: usize) -> usize {
+        let _ = src;
+        self.line_start(self.line_of(byte_offset))
+    }
+
+    /// Convenience: the byte offset just past the end of the line
+    /// containing `byte_offset` (exclusive of the trailing newline).
+    pub fn line_end_byte(&self, src: &str, byte_offset: usize) -> usize {
+        self.line_end(src, self.line_of(byte_offset))
     }
 
     /// The byte offset just past the end of `line` (exclusive): the next
