@@ -4165,26 +4165,25 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Env.get codegen parse: {e}")))
             }
-            // `Env.set("KEY", "value")` -> `std::env::set_var(k, v)`.
+            // `Env.set("KEY", "value")` -> `unsafe { std::env::set_var(k, v); }`.
             // Two String args. Returns Void. NOTE: `std::env::set_var`
-            // is `unsafe` in Rust 2024 edition; Buff emits 2021 so the
-            // call is safe today. A future edition bump will need an
-            // `unsafe { ... }` wrapper here (tracked in
-            // `.sisyphus/notepads/buff-post-v10-tooling/decisions.md`).
+            // is `unsafe` in Rust Edition 2024 (the edition the generated
+            // code targets). The `unsafe { ... }` wrapper satisfies the
+            // edition requirement.
             //
             // Both args are borrowed via `&` so Rust's Deref coercion
             // turns `&String` into `&str` (the type `set_var` takes).
-            // The result is wrapped in a block `{ std::env::set_var(k,
-            // v); }` so the expression yields `()` (the call itself
-            // returns `()` so the block is technically redundant, but
-            // uniform with other Void-returning prelude calls avoids
-            // special-case handling in expression-statement position).
+            // The result is wrapped in a block `{ unsafe { ... }; }` so
+            // the expression yields `()` (the call itself returns `()`
+            // so the block is technically redundant, but uniform with
+            // other Void-returning prelude calls avoids special-case
+            // handling in expression-statement position).
             (T::Env, A::Set) => {
                 let lowered = n_args(self, 2)?;
                 let k = coerce_str_arg_to_ref(lowered[0].clone(), &args[0]);
                 let v = coerce_str_arg_to_ref(lowered[1].clone(), &args[1]);
                 let tokens: proc_macro2::TokenStream = quote::quote! {
-                    std::env::set_var(#k, #v)
+                    unsafe { std::env::set_var(#k, #v); }
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Env.set codegen parse: {e}")))
