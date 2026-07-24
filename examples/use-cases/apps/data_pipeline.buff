@@ -1,0 +1,1295 @@
+// data_pipeline.buff - v1.26 real-use-case (T18).
+//
+// Full ETL (Extract → Transform → Load) data processing pipeline for
+// tabular sales/order data. Exercises:
+//   - Extract:  parse CSV from a file, a raw string, or stdin into a
+//                header + row structure, with per-row validation that
+//                skips malformed records (emitting warnings, not aborting).
+//   - Transform: filter by threshold, enrich with derived columns
+//                (bucketed size, normalised totals), aggregate by category
+//                via group-by, compute per-column statistics, join datasets,
+//                rolling window averages, multi-metric timeseries analysis.
+//   - Load:     emit results as formatted ASCII table, CSV, or a
+//                JSON-lines stream written to stdout (or a sink path).
+//   - Streaming: a chunked streaming pass over raw rows via the
+//                buff-pipeline DAG (Source → map → filter → Sink) so the
+//                full input is never resident in memory at once.
+//   - Error handling: per-row validation with warning collection; bad rows
+//                are skipped (not aborting) and logged for operator review.
+//   - Demos:    12 demo scenarios covering core ETL, stats, regional
+//                comparison, product leaderboard, join, timeseries,
+//                multi-format output, pipeline streaming, error stress
+//                test, enrichment, threshold sweep, framework path.
+//
+// Framework crates (≤2, per task guardrail):
+//   - buff-dataframe  → DataFrame.from_csv / filter / select / sort / head /
+//                        group_by(...).agg(...) / to_table_string / len
+//   - buff-pipeline   → Pipeline.new / .source / .map / .filter / .batch /
+//                        .window / .parallel / .run, Source.from_csv,
+//                        Sink.to_csv / Sink.to_json
+//
+// ⚠ FORWARD-DECLARED: `Type::DataFrame` exists in the prelude registry
+// (crates/buff-lang-types/src/ty.rs) with codegen lowering arms for its
+// instance methods; `Type::Pipeline` / `Source` / `Sink` are NOT yet
+// registered (see buff-pipeline/AGENTS.md "Deferred"). `buff check`
+// therefore cannot yet resolve `Pipeline.*` calls; `buff run` cannot
+// execute the framework path end-to-end. The deterministic core (CSV
+// parsing, validation, stats, formatting, table rendering) is exercised
+// directly in `demo()` so the logic is observable + testable today. This
+// file is a faithful specification of the intended user surface and feeds
+// the T8 + T9 framework-codegen tasks.
+
+import DataFrame from buff.dataframe
+import AggOp from buff.dataframe
+import Pipeline from buff.pipeline
+import Source from buff.pipeline
+import Sink from buff.pipeline
+
+// ---------------------------------------------------------------------------
+// Configuration + domain types
+// ---------------------------------------------------------------------------
+
+// Where the pipeline reads its input from.
+enum InputSource:
+    File(path: String)
+    Stdin
+    Embedded(blob: String)
+
+// How the Load stage renders its output.
+enum OutputFormat:
+    Table
+    Csv
+    Json
+
+// Bucketed size label for an order amount (used by the enrich transform).
+enum SizeBucket:
+    Tiny
+    Small
+    Medium
+    Large
+    Huge
+
+// Reason a single raw row was rejected during validation. Carried in the
+// warning log so an operator can trace why N rows were dropped.
+enum RowError:
+    EmptyRow
+    WrongArity(expected: Int, found: Int)
+    MissingField(field: String)
+    BadNumber(field: String, raw: String)
+
+// One entry in the run's warning log. Kept as a struct so the report can
+// summarise "skipped K rows for J reasons" without losing the detail.
+struct Warning:
+    line: Int
+    reason: RowError
+    raw: String
+
+// Summary statistics for a single numeric column. Plain struct so it can
+// be returned from a pure helper and rendered by the table formatter.
+struct ColumnStats:
+    count: Int
+    sum: Double
+    mean: Double
+    min: Double
+    max: Double
+
+// Everything an operator wants to know after a run: how many rows in,
+// how many passed, how many skipped, plus the warning log.
+struct ETLReport:
+    rows_read: Int
+    rows_valid: Int
+    rows_skipped: Int
+    warnings: Vector<Warning>
+
+// ---------------------------------------------------------------------------
+// Pure CSV parsing primitives  (deterministic — runnable today)
+// ---------------------------------------------------------------------------
+
+// Split a single CSV line into fields, honouring double-quoted values that
+// may themselves contain commas. No escape handling beyond the quote toggle
+// — deliberately minimal so the core is easy to audit. A trailing newline
+// is tolerated.
+func parse_csv_line(line: String) -> Vector<String>:
+    let fields = []
+    let mut current = ""
+    let mut in_quotes = false
+    let chars = line.chars()
+    for ch in chars:
+        if in_quotes:
+            if ch == "\"":
+                in_quotes = false
+            else:
+                current = current + ch
+        else:
+            if ch == "\"":
+                in_quotes = true
+            elif ch == ",":
+                fields.push(current)
+                current = ""
+            else:
+                current = current + ch
+    // The final field (even if empty) is always emitted.
+    fields.push(current)
+    return fields
+
+// Split a whole CSV blob into (headers, rows). Blank lines are dropped so
+// a trailing newline does not invent a phantom empty row. The first
+// non-blank line is treated as the header.
+func parse_csv_blob(blob: String) -> (Vector<String>, Vector<Vector<String>>):
+    let headers = []
+    let rows = []
+    let raw_lines = blob.split(separator: "\n")
+    let mut seen_header = false
+    for raw in raw_lines:
+        let trimmed = raw.trim()
+        if trimmed.len() == 0:
+            continue
+        if not seen_header:
+            headers = parse_csv_line(trimmed)
+            seen_header = true
+        else:
+            rows.push(parse_csv_line(trimmed))
+    return (headers, rows)
+
+// Parse text into a Double. Returns Err with the offending text so the
+// validator can attach the field name and log a precise warning.
+func parse_number(text: String) -> Result<Double, String>:
+    let trimmed = text.trim()
+    if trimmed.len() == 0:
+        return Err("empty")
+    // Reject obvious garbage early: a leading sign or digit is required.
+    let first = trimmed[0]
+    if not is_digit_or_sign(first):
+        return Err(trimmed)
+    let mut seen_dot = false
+    let mut idx = 1
+    let chars = trimmed.chars()
+    for ch in chars:
+        if idx > 1:
+            // body char check (skip the already-validated first char)
+            pass
+        idx = idx + 1
+    // The actual parse: rely on the built-in Double.from converter and
+    // downgrade any failure to a descriptive Err string.
+    let parsed = Double.from(trimmed)
+    match parsed:
+        Ok(value):
+            return Ok(value)
+        Err(_):
+            return Err(trimmed)
+
+// Predicate: is this character a digit or a leading sign?
+func is_digit_or_sign(ch: String) -> Bool:
+    if ch == "-":
+        return true
+    if ch == "+":
+        return true
+    if ch >= "0" and ch <= "9":
+        return true
+    return false
+
+// ---------------------------------------------------------------------------
+// Validation  (deterministic — runnable today)
+// ---------------------------------------------------------------------------
+
+// Validate one raw field-list against the header schema. Returns either a
+// name→value map (the canonical row shape every downstream transform
+// consumes) or a RowError explaining why the row was rejected.
+func validate_row(headers: Vector<String>, fields: Vector<String>) -> Result<Map<String, String>, RowError>:
+    if fields.len() == 0:
+        return Err(EmptyRow)
+    // A row that is all-empty strings is treated as an empty row too — this
+    // is the common "blank line that snuck through" case.
+    let mut all_empty = true
+    for f in fields:
+        if f.trim().len() > 0:
+            all_empty = false
+    if all_empty:
+        return Err(EmptyRow)
+    if fields.len() != headers.len():
+        return Err(WrongArity(expected: headers.len(), found: fields.len()))
+    let row = {String: ""}
+    let mut idx = 0
+    for h in headers:
+        let value = fields[idx]
+        row[h] = value
+        // Required-numeric fields are validated eagerly so a bad row is
+        // rejected at the gate rather than producing NaN downstream.
+        if is_numeric_header(h):
+            match parse_number(value):
+                Ok(_):
+                    pass
+                Err(raw):
+                    return Err(BadNumber(field: h, raw: raw))
+        idx = idx + 1
+    return Ok(row)
+
+// Heuristic: a header names a numeric column if it ends with one of the
+// known numeric suffixes. Keeps the validator dependency-free.
+func is_numeric_header(header: String) -> Bool:
+    let lower = header.lower()
+    let numeric_suffixes = ["amount", "units", "price", "total", "qty", "count", "score", "age"]
+    for suffix in numeric_suffixes:
+        if lower.contains(suffix):
+            return true
+    return false
+
+// Render a RowError into a single human-readable line for the warning log.
+func describe_error(err: RowError) -> String:
+    match err:
+        EmptyRow:
+            return "empty row"
+        WrongArity(expected, found):
+            return "wrong field count: expected {expected}, found {found}"
+        MissingField(field):
+            return "missing required field: {field}"
+        BadNumber(field, raw):
+            return "bad number in '{field}': '{raw}'"
+
+// ---------------------------------------------------------------------------
+// Statistics  (deterministic — runnable today)
+// ---------------------------------------------------------------------------
+
+// Compute count/sum/mean/min/max over a vector of doubles. An empty input
+// yields a zeroed stats struct (mean 0, min/max 0) so the caller never has
+// to special-case division-by-zero.
+func compute_stats(values: Vector<Double>) -> ColumnStats:
+    let n = values.len()
+    if n == 0:
+        return ColumnStats { count: 0, sum: 0.0, mean: 0.0, min: 0.0, max: 0.0 }
+    let mut total = 0.0
+    let mut lo = values[0]
+    let mut hi = values[0]
+    for v in values:
+        total = total + v
+        if v < lo:
+            lo = v
+        if v > hi:
+            hi = v
+    let mean = total / n
+    return ColumnStats { count: n, sum: total, mean: mean, min: lo, max: hi }
+
+// Extract the numeric values of a named column from a list of validated
+// rows. Non-numeric cells (which the validator already rejected, but be
+// defensive) are silently skipped with a running count.
+func column_values(rows: Vector<Map<String, String>>, name: String) -> Vector<Double>:
+    let out = []
+    for row in rows:
+        let raw = row.get_or(name, default: "")
+        match parse_number(raw):
+            Ok(v):
+                out.push(v)
+            Err(_):
+                pass
+    return out
+
+// ---------------------------------------------------------------------------
+// Enrichment  (deterministic — runnable today)
+// ---------------------------------------------------------------------------
+
+// Bucket an order amount into a coarse size label. The thresholds are
+// deliberately round so the buckets are easy to reason about in a report.
+func bucket_amount(amount: Double) -> SizeBucket:
+    if amount < 10.0:
+        return Tiny
+    if amount < 50.0:
+        return Small
+    if amount < 100.0:
+        return Medium
+    if amount < 500.0:
+        return Large
+    return Huge
+
+// Render a SizeBucket as a lowercase label string for display/CSV/JSON.
+func bucket_label(bucket: SizeBucket) -> String:
+    match bucket:
+        Tiny:
+            return "tiny"
+        Small:
+            return "small"
+        Medium:
+            return "medium"
+        Large:
+            return "large"
+        Huge:
+            return "huge"
+
+// Build a single enriched row: copy the originals and add a derived
+// `size_bucket` + `amount_norm` (amount rounded to 2dp as a string). The
+// return is a NEW map so the input is never mutated (pure transform).
+func enrich_row(row: Map<String, String>) -> Map<String, String>:
+    let out = {String: ""}
+    // Copy existing fields.
+    for key in row.keys():
+        out[key] = row[key]
+    // Derive the amount-based fields if the column is present.
+    let amount_raw = row.get_or("amount", default: "0")
+    match parse_number(amount_raw):
+        Ok(amount):
+            out["size_bucket"] = bucket_label(bucket_amount(amount))
+            out["amount_norm"] = format_number(amount, decimals: 2)
+        Err(_):
+            out["size_bucket"] = "unknown"
+            out["amount_norm"] = "0.00"
+    return out
+
+// ---------------------------------------------------------------------------
+// Formatting  (deterministic — runnable today)
+// ---------------------------------------------------------------------------
+
+// Format a double to a fixed number of decimals as a string. Falls back to
+// the raw value if the precision is nonsensical.
+func format_number(value: Double, decimals: Int) -> String:
+    if decimals < 0:
+        return "{value}"
+    return "{value:." + "{decimals}" + "f}"
+
+// Pad/truncate a string to an exact width, right-filling with spaces.
+// Used to build aligned table columns.
+func pad_right(text: String, width: Int) -> String:
+    let n = text.len()
+    if n >= width:
+        return text
+    let mut out = text
+    let mut i = 0
+    let need = width - n
+    while i < need:
+        out = out + " "
+        i = i + 1
+    return out
+
+// Repeat a single character N times. Used for rule lines in tables.
+func repeat_char(ch: String, count: Int) -> String:
+    if count <= 0:
+        return ""
+    let mut out = ""
+    let mut i = 0
+    while i < count:
+        out = out + ch
+        i = i + 1
+    return out
+
+// Escape a string for safe embedding inside a JSON string literal: quotes
+// and backslashes get a backslash, newlines become \n.
+func json_escape(text: String) -> String:
+    let mut out = ""
+    let chars = text.chars()
+    for ch in chars:
+        if ch == "\"":
+            out = out + "\\\""
+        elif ch == "\\":
+            out = out + "\\\\"
+        elif ch == "\n":
+            out = out + "\\n"
+        elif ch == "\t":
+            out = out + "\\t"
+        else:
+            out = out + ch
+    return out
+
+// Render one validated+enriched row as a JSON object line (JSON-lines /
+// NDJSON). Keys are emitted in sorted order (BTreeMap iteration is sorted)
+// so the output is deterministic and snapshot-stable.
+func row_to_json(row: Map<String, String>) -> String:
+    let parts = []
+    for key in row.keys():
+        let value = row.get_or(key, default: "")
+        parts.push("\"" + json_escape(key) + "\": \"" + json_escape(value) + "\"")
+    let body = parts.join(separator: ", ")
+    return "{" + body + "}"
+
+// Render a column of stats as a single aligned line for the summary table.
+func stats_line(name: String, stats: ColumnStats) -> String:
+    let col = pad_right(name, width: 14)
+    return "{col} | n={stats.count} | sum={stats.sum:.2} | mean={stats.mean:.2} | min={stats.min:.2} | max={stats.max:.2}"
+
+// Render a full ASCII table from headers + rows. Computes per-column widths
+// from the data so columns line up regardless of content length.
+func render_table(headers: Vector<String>, rows: Vector<Vector<String>>) -> String:
+    if headers.len() == 0:
+        return "(empty table)"
+    // Column widths: start from the header label length.
+    let mut widths = []
+    let mut i = 0
+    while i < headers.len():
+        widths.push(headers[i].len())
+        i = i + 1
+    // Grow to fit the widest cell in each column.
+    for row in rows:
+        let mut j = 0
+        while j < row.len() and j < widths.len():
+            if row[j].len() > widths[j]:
+                widths[j] = row[j].len()
+            j = j + 1
+    // Rule line: +---+---+ ... (2 padding spaces + width).
+    let rule_parts = []
+    for w in widths:
+        rule_parts.push(repeat_char("-", count: w + 2))
+    let rule = "+" + rule_parts.join(separator: "+") + "+"
+    // Header row.
+    let header_cells = []
+    let mut k = 0
+    while k < headers.len():
+        header_cells.push(" " + pad_right(headers[k], width: widths[k]) + " ")
+        k = k + 1
+    let header_line = "| " + headers.join(separator: " | ") + " |"
+    // Body rows.
+    let body_lines = []
+    body_lines.push(rule)
+    body_lines.push(header_line)
+    body_lines.push(rule)
+    for row in rows:
+        let cells = []
+        let mut m = 0
+        while m < headers.len():
+            let cell = row[m]
+            cells.push(pad_right(cell, width: widths[m]))
+            m = m + 1
+        body_lines.push("| " + cells.join(separator: " | ") + " |")
+    body_lines.push(rule)
+    return body_lines.join(separator: "\n")
+
+// Render validated+enriched rows as a CSV blob (header + lines). No
+// quoting is applied — this mirrors the simple CSV the extractor accepts.
+func rows_to_csv(headers: Vector<String>, rows: Vector<Map<String, String>>) -> String:
+    let lines = []
+    lines.push(headers.join(separator: ","))
+    for row in rows:
+        let cells = []
+        for h in headers:
+            cells.push(row.get_or(h, default: ""))
+        lines.push(cells.join(separator: ","))
+    return lines.join(separator: "\n")
+
+// Render validated+enriched rows as a JSON-lines blob (one object/line).
+func rows_to_json(rows: Vector<Map<String, String>>) -> String:
+    let lines = []
+    for row in rows:
+        lines.push(row_to_json(row))
+    return lines.join(separator: "\n")
+
+// ---------------------------------------------------------------------------
+// Extract  (framework-backed: DataFrame + Source — forward-declared)
+// ---------------------------------------------------------------------------
+
+// Load a CSV into a DataFrame via the buff-dataframe constructor. The
+// codegen lowers `DataFrame.from_csv(path:)` to
+// `buff_dataframe::DataFrame::from_csv(#path).unwrap_or_default()`, so a
+// missing file degrades to an empty frame rather than panicking.
+func extract_from_csv(path: String) -> DataFrame:
+    return DataFrame.from_csv(path: path)
+
+// Streaming extract: Source.from_csv reads the file in fixed-size chunks
+// and pushes each chunk as a Vector<String> row into the pipeline with
+// bounded-memory backpressure (channel buffer caps in-flight rows).
+func extract_stream(path: String, chunk_size: Int) -> Pipeline<Vector<String>>:
+    return Source.from_csv(path: path, chunk_size: chunk_size)
+
+// ---------------------------------------------------------------------------
+// Transform  (framework-backed: DataFrame — forward-declared)
+// ---------------------------------------------------------------------------
+
+// Keep only rows whose `amount` column is at least `min_amount`. The
+// closure receives a RowView and reads the numeric value directly.
+func transform_filter(df: DataFrame, min_amount: Double) -> DataFrame:
+    return df.filter(predicate: { row =>
+        row.get_float("amount") >= min_amount
+    })
+
+// Project to the columns the report cares about. select takes a list of
+// column names and returns a frame containing only those columns.
+func transform_select(df: DataFrame, cols: Vector<String>) -> DataFrame:
+    return df.select(cols: cols)
+
+// Sort descending by the named column then keep the top N.
+func transform_top_n(df: DataFrame, col: String, n: Int) -> DataFrame:
+    return df.sort(by: col, descending: true).head(n: n)
+
+// Group by a category column and aggregate a value column with an op.
+// group_by(...).agg(col, op) returns a new frame whose rows are one per
+// distinct group key.
+func transform_aggregate(df: DataFrame, group_col: String, value_col: String, op: String) -> DataFrame:
+    let grouped = df.group_by(col: group_col)
+    return grouped.agg(col: value_col, op: op)
+
+// ---------------------------------------------------------------------------
+// Streaming transform  (framework-backed: Pipeline — forward-declared)
+// ---------------------------------------------------------------------------
+
+// A streaming map+filter over raw String rows: drop rows shorter than the
+// header width, then normalise each surviving row. Output order is
+// preserved (no parallel stage) so the result is deterministic.
+func stream_transform(pipe: Pipeline<Vector<String>>, min_fields: Int) -> Pipeline<Vector<String>>:
+    return pipe
+        .filter(predicate: { row => row.len() >= min_fields })
+        .map(stage: { row =>
+            let out = []
+            for cell in row:
+                out.push(cell.trim())
+            out
+        })
+
+// Batch raw rows into fixed-size windows and reduce each window to a
+// summary line "window K: N rows". Demonstrates the window stage.
+func stream_batch_summary(pipe: Pipeline<Vector<String>>, size: Int) -> Pipeline<String>:
+    return pipe.batch(size: size).map(stage: { batch =>
+        "window: {batch.len()} rows"
+    })
+
+// Parallel CPU-bound stage: classify each row's amount bucket across N
+// workers. Order is NOT preserved (workers race) — callers sort afterward.
+func stream_parallel_bucket(pipe: Pipeline<Vector<String>>, workers: Int) -> Pipeline<String>:
+    return pipe.parallel(workers: workers, fn: { row =>
+        bucket_label(bucket_amount_from_row(row))
+    })
+
+// Helper: pull the amount field out of a raw String row (amount assumed
+// to be the 3rd column, index 2) and bucket it. Defensive against short
+// rows so the parallel stage never panics.
+func bucket_amount_from_row(row: Vector<String>) -> SizeBucket:
+    if row.len() < 3:
+        return Tiny
+    match parse_number(row[2]):
+        Ok(v):
+            return bucket_amount(v)
+        Err(_):
+            return Tiny
+
+// ---------------------------------------------------------------------------
+// Load  (framework-backed: Sink — forward-declared)
+// ---------------------------------------------------------------------------
+
+// Write a vector of String rows back to a CSV file via Sink.to_csv.
+func load_to_csv(path: String, rows: Vector<Vector<String>>) -> Void:
+    Sink.to_csv(path: path, rows: rows)
+
+// Serialize an arbitrary serde-serialisable value to a JSON file. In
+// practice this is the aggregated DataFrame or the report struct.
+func load_to_json(path: String, value: DataFrame) -> Void:
+    Sink.to_json(path: path, rows: value)
+
+// Render a DataFrame as a pretty ASCII table string for stdout.
+func load_to_table(df: DataFrame) -> String:
+    return df.to_table_string()
+
+// ---------------------------------------------------------------------------
+// Orchestration: pure ETL over in-memory validated rows (runs today)
+// ---------------------------------------------------------------------------
+
+// Run the full Extract → Transform → Load over a raw CSV blob using ONLY
+// the deterministic pure helpers. This is the testable core: given the
+// same blob it always produces the same report + rendered output.
+//
+// Stages:
+//   1. parse the blob into (headers, raw_rows)
+//   2. validate each row, collecting warnings for bad ones
+//   3. enrich the surviving rows (add size_bucket + amount_norm)
+//   4. compute per-column stats for the numeric columns
+//   5. render the chosen output format
+func run_etl_pure(blob: String, min_amount: Double, format: OutputFormat) -> (ETLReport, String):
+    let (headers, raw_rows) = parse_csv_blob(blob)
+    let warnings = []
+    let valid_rows = []
+    let mut line_no = 1
+    for raw in raw_rows:
+        line_no = line_no + 1
+        match validate_row(headers, raw):
+            Ok(row):
+                // Apply the amount threshold here too so the pure path
+                // mirrors the DataFrame.filter transform below.
+                let amount_raw = row.get_or("amount", default: "0")
+                match parse_number(amount_raw):
+                    Ok(amount):
+                        if amount >= min_amount:
+                            valid_rows.push(enrich_row(row))
+                    Err(_):
+                        // Already caught by validate_row in practice;
+                        // kept defensive so logic never crashes.
+                        warnings.push(Warning {
+                            line: line_no,
+                            reason: BadNumber(field: "amount", raw: amount_raw),
+                            raw: raw.join(separator: ","),
+                        })
+            Err(reason):
+                warnings.push(Warning {
+                    line: line_no,
+                    reason: reason,
+                    raw: raw.join(separator: ","),
+                })
+    let report = ETLReport {
+        rows_read: raw_rows.len(),
+        rows_valid: valid_rows.len(),
+        rows_skipped: warnings.len(),
+        warnings: warnings,
+    }
+    // Render the requested output format.
+    let output = render_output(headers, valid_rows, format)
+    return (report, output)
+
+// Render the validated+enriched rows in the chosen format. Shared by the
+// pure path and the framework path so both produce identical output.
+func render_output(headers: Vector<String>, rows: Vector<Map<String, String>>, format: OutputFormat) -> String:
+    // Extend the header set with the derived columns the enrich stage adds.
+    let enriched_headers = extend_headers(headers)
+    match format:
+        Table:
+            let table_rows = []
+            for row in rows:
+                let cells = []
+                for h in enriched_headers:
+                    cells.push(row.get_or(h, default: ""))
+                table_rows.push(cells)
+            return render_table(enriched_headers, table_rows)
+        Csv:
+            return rows_to_csv(enriched_headers, rows)
+        Json:
+            return rows_to_json(rows)
+
+// Append the derived column names to the original header list so every
+// output format exposes the enriched fields consistently.
+func extend_headers(headers: Vector<String>) -> Vector<String>:
+    let out = []
+    for h in headers:
+        out.push(h)
+    if not out.contains("size_bucket"):
+        out.push("size_bucket")
+    if not out.contains("amount_norm"):
+        out.push("amount_norm")
+    return out
+
+// Build the numeric-column statistics block from the validated rows.
+// Returns a vector of (column_name, stats) rendered as aligned lines.
+func render_stats_block(headers: Vector<String>, rows: Vector<Map<String, String>>) -> String:
+    let lines = []
+    for h in headers:
+        if is_numeric_header(h):
+            let values = column_values(rows, h)
+            let stats = compute_stats(values)
+            lines.push(stats_line(h, stats))
+    return lines.join(separator: "\n")
+
+// Render the warning log: one line per skipped row with the line number
+// and the human-readable reason.
+func render_warnings(warnings: Vector<Warning>) -> String:
+    if warnings.len() == 0:
+        return "(no warnings — all rows valid)"
+    let lines = []
+    for w in warnings:
+        lines.push("  line {w.line}: {describe_error(w.reason)}  [{w.raw}]")
+    return lines.join(separator: "\n")
+
+// ---------------------------------------------------------------------------
+// Orchestration: framework-backed ETL (forward-declared — feeds T8/T9)
+// ---------------------------------------------------------------------------
+
+// The framework-path mirror of run_etl_pure. Same logical stages, but
+// expressed against the DataFrame + Pipeline APIs so the codegen tasks
+// (T8 type variants, T9 instance-method lowering) have a concrete target.
+func run_etl_framework(path: String, min_amount: Double) -> String:
+    // Extract.
+    let df = extract_from_csv(path: path)
+    // Transform: filter → select → enrich-by-aggregate → top-N.
+    let filtered = transform_filter(df, min_amount: min_amount)
+    let projected = transform_select(filtered, cols: ["region", "product", "amount", "units"])
+    let top = transform_top_n(projected, col: "amount", n: 10)
+    // Aggregate: mean amount per region.
+    let by_region = transform_aggregate(df, group_col: "region", value_col: "amount", op: "mean")
+    // Load: render both as a table.
+    let body = load_to_table(top)
+    let agg_block = load_to_table(by_region)
+    return body + "\n\n--- mean amount per region ---\n" + agg_block
+
+// ---------------------------------------------------------------------------
+// Join, timeseries, and multi-source (deterministic — runnable today)
+// ---------------------------------------------------------------------------
+
+// Inner join two sets of rows on a shared key column. Returns a new
+// vector of rows where each row contains the merged fields from both
+// sides. Demonstrates the join pattern that DataFrame.join wraps.
+func join_rows(
+    left_rows: Vector<Map<String, String>>,
+    right_rows: Vector<Map<String, String>>,
+    left_headers: Vector<String>,
+    right_headers: Vector<String>,
+    key: String
+) -> (Vector<String>, Vector<Map<String, String>>):
+    // Build the merged header: left fields first, then right fields
+    // that are NOT the join key (to avoid duplication).
+    let merged_headers = []
+    for h in left_headers:
+        merged_headers.push(h)
+    for h in right_headers:
+        if h != key:
+            let is_dup = false
+            for lh in left_headers:
+                if h == lh:
+                    is_dup = true
+            if not is_dup:
+                merged_headers.push(h)
+    // Build a right-side index for O(n*m) inner join.
+    let result = []
+    for lrow in left_rows:
+        let lkey = lrow.get_or(key, default: "")
+        for rrow in right_rows:
+            let rkey = rrow.get_or(key, default: "")
+            if lkey == rkey:
+                let merged = {String: ""}
+                for h in left_headers:
+                    merged[h] = lrow.get_or(h, default: "")
+                for h in right_headers:
+                    if h != key:
+                        merged[h] = rrow.get_or(h, default: "")
+                result.push(merged)
+    return (merged_headers, result)
+
+// Compute a rolling window average over a vector of Doubles. The
+// window slides by one element at a time. Returns a vector of Doubles
+// of the same length (NaN replaced by 0.0 at the edges).
+func rolling_average(values: Vector<Double>, window_size: Int) -> Vector<Double>:
+    let result = []
+    let mut i = 0
+    while i < values.len():
+        let mut sum = 0.0
+        let mut count = 0
+        let mut j = i - window_size + 1
+        if j < 0:
+            j = 0
+        while j <= i:
+            sum = sum + values[j]
+            count = count + 1
+            j = j + 1
+        if count > 0:
+            result.push(sum / count)
+        else:
+            result.push(0.0)
+        i = i + 1
+    return result
+
+// Build a timeseries dataset for windowed analysis. Returns rows with
+// columns: timestamp, metric_name, value.
+func build_timeseries_data() -> (Vector<String>, Vector<Map<String, String>>):
+    let headers = ["timestamp", "metric_name", "value"]
+    let rows = []
+    // 10 CPU usage readings.
+    let cpu_values = ["45", "52", "61", "48", "73", "55", "42", "67", "58", "44"]
+    let mut i = 0
+    while i < cpu_values.len():
+        let hour = 10 + (i / 2)
+        let minute = (i % 2) * 30
+        let ts = "2026-01-15T{hour}:{minute}:00"
+        let row = {String: ""}
+        row["timestamp"] = ts
+        row["metric_name"] = "cpu_usage"
+        row["value"] = cpu_values[i]
+        rows.push(row)
+        i = i + 1
+    // 10 memory usage readings.
+    let mem_values = ["620", "635", "650", "642", "680", "665", "615", "690", "655", "625"]
+    i = 0
+    while i < mem_values.len():
+        let hour = 10 + (i / 2)
+        let minute = (i % 2) * 30
+        let ts = "2026-01-15T{hour}:{minute}:00"
+        let row = {String: ""}
+        row["timestamp"] = ts
+        row["metric_name"] = "mem_usage"
+        row["value"] = mem_values[i]
+        rows.push(row)
+        i = i + 1
+    return (headers, rows)
+
+// Compute per-metric summary: min, max, mean, total over all readings.
+func metric_summary(rows: Vector<Map<String, String>>, metric: String) -> ColumnStats:
+    let values = []
+    for row in rows:
+        let name = row.get_or("metric_name", default: "")
+        if name == metric:
+            let raw = row.get_or("value", default: "0")
+            match parse_number(raw):
+                Ok(v):
+                    values.push(v)
+                Err(_):
+                    pass
+    return compute_stats(values)
+
+// Build a customer table for join demos.
+func build_customer_data() -> (Vector<String>, Vector<Map<String, String>>):
+    let headers = ["region", "customer_name", "tier"]
+    let rows = []
+    let data = [
+        ["north", "Acme Corp", "platinum"],
+        ["south", "Globex Inc", "gold"],
+        ["east", "Initech", "silver"],
+        ["west", "Umbrella Co", "platinum"],
+        ["north", "Stark Ind", "gold"],
+    ]
+    for entry in data:
+        let row = {String: ""}
+        row["region"] = entry[0]
+        row["customer_name"] = entry[1]
+        row["tier"] = entry[2]
+        rows.push(row)
+    return (headers, rows)
+
+// ---------------------------------------------------------------------------
+// Multi-format output orchestration
+// ---------------------------------------------------------------------------
+
+// Render a report in all three formats (table, CSV, JSON) and return
+// them as a single multi-section string for printing.
+func render_all_formats(
+    headers: Vector<String>,
+    rows: Vector<Map<String, String>>,
+    title: String
+) -> String:
+    let sections = []
+    // Table format.
+    let table_rows = []
+    for row in rows:
+        let cells = []
+        for h in headers:
+            cells.push(row.get_or(h, default: ""))
+        table_rows.push(cells)
+    sections.push("--- {title} (TABLE) ---")
+    sections.push(render_table(headers, table_rows))
+    // CSV format.
+    sections.push("")
+    sections.push("--- {title} (CSV) ---")
+    sections.push(rows_to_csv(headers, rows))
+    // JSON format.
+    sections.push("")
+    sections.push("--- {title} (JSON) ---")
+    sections.push(rows_to_json(rows))
+    return sections.join(separator: "\n")
+
+// Compute a full regional comparison: total amount, mean amount, count,
+// min, max — and render it as a summary table.
+func regional_comparison(rows: Vector<Map<String, String>>) -> String:
+    let headers = ["region", "total_amount", "mean_amount", "count", "min_amount", "max_amount"]
+    // Group by region.
+    let groups = {String: []}
+    for row in rows:
+        let region = row.get_or("region", default: "unknown")
+        let amount_raw = row.get_or("amount", default: "0")
+        match parse_number(amount_raw):
+            Ok(amount):
+                let current = groups.get_or(region, default: [])
+                current.push(amount)
+                groups[region] = current
+            Err(_):
+                pass
+    let table_rows = []
+    for region in groups.keys():
+        let values = groups.get_or(region, default: [])
+        let stats = compute_stats(values)
+        let rrow = {String: ""}
+        rrow["region"] = region
+        rrow["total_amount"] = format_number(stats.sum, decimals: 2)
+        rrow["mean_amount"] = format_number(stats.mean, decimals: 2)
+        rrow["count"] = "{stats.count}"
+        rrow["min_amount"] = format_number(stats.min, decimals: 2)
+        rrow["max_amount"] = format_number(stats.max, decimals: 2)
+        table_rows.push(rrow)
+    return render_table(headers, table_rows)
+
+// Compute a product leaderboard: total units sold, total revenue,
+// average order value, order count — sorted by total revenue desc.
+func product_leaderboard(rows: Vector<Map<String, String>>) -> String:
+    let headers = ["product", "total_units", "total_revenue", "avg_order", "orders"]
+    let groups = {String: {"units": 0.0, "revenue": 0.0, "count": 0.0}}
+    for row in rows:
+        let product = row.get_or("product", default: "unknown")
+        let amount_raw = row.get_or("amount", default: "0")
+        let units_raw = row.get_or("units", default: "0")
+        let amount = match parse_number(amount_raw):
+            Ok(v): v
+            Err(_): 0.0
+        let units = match parse_number(units_raw):
+            Ok(v): v
+            Err(_): 0.0
+        let current = groups.get_or(product, default: {"units": 0.0, "revenue": 0.0, "count": 0.0})
+        current["units"] = current["units"] + units
+        current["revenue"] = current["revenue"] + amount
+        current["count"] = current["count"] + 1
+        groups[product] = current
+    let table_rows = []
+    for product in groups.keys():
+        let g = groups.get_or(product, default: {"units": 0.0, "revenue": 0.0, "count": 0.0})
+        let count = g["count"]
+        let avg = if count > 0: g["revenue"] / count else: 0.0
+        let rrow = {String: ""}
+        rrow["product"] = product
+        rrow["total_units"] = format_number(g["units"], decimals: 0)
+        rrow["total_revenue"] = format_number(g["revenue"], decimals: 2)
+        rrow["avg_order"] = format_number(avg, decimals: 2)
+        rrow["orders"] = "{count}"
+        table_rows.push(rrow)
+    return render_table(headers, table_rows)
+
+// ---------------------------------------------------------------------------
+// Demo: deterministic, observable today
+// ---------------------------------------------------------------------------
+
+// A tiny embedded dataset so `demo()` produces real output without a file
+// on disk. Columns: region, product, amount, units. Includes one bad row
+// (non-numeric amount) and one short row to exercise the warning path.
+func sample_blob() -> String:
+    let lines = []
+    lines.push("region,product,amount,units")
+    lines.push("north,widget,120.50,3")
+    lines.push("south,gadget,45.00,1")
+    lines.push("north,widget,8.25,2")
+    lines.push("east,gizmo,300.00,12")
+    lines.push("south,widget,broken,4")
+    lines.push("west,doohickey,75.10,5")
+    lines.push("east,gizmo,210.75,8")
+    lines.push("north,gadget")
+    lines.push("west,widget,99.99,2")
+    return lines.join(separator: "\n")
+
+// Run the pure ETL on the embedded sample at three thresholds and three
+// output formats, printing the report + rendered output for each. This is
+// the observable, testable surface — it exercises every deterministic
+// helper above and produces stable stdout for golden comparison.
+// Demo 1: Core ETL — parse, validate, enrich, render.
+func demo_core_etl():
+    print("--- Demo 1: Core ETL pipeline ---")
+    let blob = sample_blob()
+    let (headers, raw_rows) = parse_csv_blob(blob)
+    print("input: {raw_rows.len()} raw data rows, {headers.len()} columns")
+    print("headers: {headers.join(separator: \", \")}")
+    print("")
+
+    // Pass 1: table output, threshold 0 (keep everything that validates).
+    print("--- pass 1: format=Table, min_amount=0.0 ---")
+    let (report1, table1) = run_etl_pure(blob, min_amount: 0.0, format: Table)
+    print(report_line(report1))
+    print(table1)
+    print("")
+
+    // Pass 2: CSV output, threshold 50 (drop small orders).
+    print("--- pass 2: format=Csv, min_amount=50.0 ---")
+    let (report2, csv2) = run_etl_pure(blob, min_amount: 50.0, format: Csv)
+    print(report_line(report2))
+    print(csv2)
+    print("")
+
+    // Pass 3: JSON output, threshold 100 (only large orders).
+    print("--- pass 3: format=Json, min_amount=100.0 ---")
+    let (report3, json2) = run_etl_pure(blob, min_amount: 100.0, format: Json)
+    print(report_line(report3))
+    print(json2)
+    print("")
+
+// Demo 2: Statistics and warning log.
+func demo_stats_and_warnings():
+    print("--- Demo 2: Statistics + warnings ---")
+    let blob = sample_blob()
+    let (headers, _) = parse_csv_blob(blob)
+    let (_, all_rows_raw) = parse_csv_blob(blob)
+    let all_valid = []
+    for raw in all_rows_raw:
+        match validate_row(headers, raw):
+            Ok(row):
+                all_valid.push(enrich_row(row))
+            Err(_):
+                pass
+
+    // Numeric stats over the full (unfiltered) valid set.
+    print("numeric column statistics (all valid rows):")
+    print(render_stats_block(headers, all_valid))
+    print("")
+
+    // Warning log from pass 1 (most permissive → fewest skipped).
+    print("warning log (pass 1, min_amount=0.0):")
+    let (report1, _) = run_etl_pure(blob, min_amount: 0.0, format: Table)
+    print(render_warnings(report1.warnings))
+    print("")
+
+    // Bucket distribution: count rows per size bucket.
+    print("size bucket distribution:")
+    let buckets = {String: 0}
+    for bucket_name in ["tiny", "small", "medium", "large", "huge", "unknown"]:
+        buckets[bucket_name] = 0
+    for row in all_valid:
+        let label = row.get_or("size_bucket", default: "unknown")
+        let prev = buckets.get_or(label, default: 0)
+        buckets[label] = prev + 1
+    for label in ["tiny", "small", "medium", "large", "huge", "unknown"]:
+        let n = buckets.get_or(label, default: 0)
+        if n > 0:
+            print("  {label:>8}: {n}")
+    print("")
+
+// Demo 3: Regional comparison report.
+func demo_regional_comparison():
+    print("--- Demo 3: Regional comparison ---")
+    let blob = sample_blob()
+    let (_, all_rows_raw) = parse_csv_blob(blob)
+    let (_, headers) = parse_csv_blob(blob)
+    let all_valid = []
+    for raw in all_rows_raw:
+        match validate_row(headers, raw):
+            Ok(row):
+                all_valid.push(enrich_row(row))
+            Err(_):
+                pass
+    print("regional comparison (all valid rows):")
+    print(regional_comparison(all_valid))
+    print("")
+
+// Demo 4: Product leaderboard.
+func demo_product_leaderboard():
+    print("--- Demo 4: Product leaderboard ---")
+    let blob = sample_blob()
+    let (_, all_rows_raw) = parse_csv_blob(blob)
+    let (_, headers) = parse_csv_blob(blob)
+    let all_valid = []
+    for raw in all_rows_raw:
+        match validate_row(headers, raw):
+            Ok(row):
+                all_valid.push(enrich_row(row))
+            Err(_):
+                pass
+    print("product leaderboard (all valid rows):")
+    print(product_leaderboard(all_valid))
+    print("")
+
+// Demo 5: Join — merge sales with customer data.
+func demo_join():
+    print("--- Demo 5: Join sales + customers ---")
+    let blob = sample_blob()
+    let (_, raw_rows) = parse_csv_blob(blob)
+    let (_, sales_headers) = parse_csv_blob(blob)
+    let sales = []
+    for raw in raw_rows:
+        match validate_row(sales_headers, raw):
+            Ok(row):
+                sales.push(row)
+            Err(_):
+                pass
+
+    let (cust_headers, cust_rows) = build_customer_data()
+    let (merged_headers, merged) = join_rows(sales, cust_rows, sales_headers, cust_headers, "region")
+    print("sales rows: {sales.len()}")
+    print("customer rows: {cust_rows.len()}")
+    print("joined rows: {merged.len()}")
+    print("")
+    // Show first 5 joined rows.
+    let preview = []
+    let mut i = 0
+    while i < merged.len() and i < 5:
+        preview.push(merged[i])
+        i = i + 1
+    let preview_rows = []
+    for row in preview:
+        let cells = []
+        for h in merged_headers:
+            cells.push(row.get_or(h, default: ""))
+        preview_rows.push(cells)
+    print("joined preview (first 5):")
+    print(render_table(merged_headers, preview_rows))
+    print("")
+
+// Demo 6: Timeseries windowed analysis.
+func demo_timeseries():
+    print("--- Demo 6: Timeseries windowed analysis ---")
+    let (ts_headers, ts_rows) = build_timeseries_data()
+    print("timeseries data: {ts_rows.len()} readings")
+    print("")
+
+    // Filter to CPU readings.
+    let cpu_rows = []
+    for row in ts_rows:
+        if row.get_or("metric_name", default: "") == "cpu_usage":
+            cpu_rows.push(row)
+    let cpu_values = []
+    for row in cpu_rows:
+        match parse_number(row.get_or("value", default: "0")):
+            Ok(v):
+                cpu_values.push(v)
+            Err(_):
+                pass
+    print("cpu_usage values: {cpu_values}")
+
+    // Rolling average (window=3).
+    let rolling = rolling_average(cpu_values, window_size: 3)
+    print("rolling avg (window=3):")
+    let mut i = 0
+    while i < rolling.len():
+        print("  [{i}] = {rolling[i]:.2}")
+        i = i + 1
+    print("")
+
+    // Metric summaries.
+    print("cpu_usage summary:")
+    let cpu_stats = metric_summary(ts_rows, "cpu_usage")
+    print(stats_line("cpu_usage", cpu_stats))
+    print("")
+    print("mem_usage summary:")
+    let mem_stats = metric_summary(ts_rows, "mem_usage")
+    print(stats_line("mem_usage", mem_stats))
+    print("")
+
+// Demo 7: Multi-format rendering.
+func demo_multi_format():
+    print("--- Demo 7: Multi-format output ---")
+    let blob = sample_blob()
+    let (_, raw_rows) = parse_csv_blob(blob)
+    let (_, headers) = parse_csv_blob(blob)
+    let valid = []
+    for raw in raw_rows:
+        match validate_row(headers, raw):
+            Ok(row):
+                valid.push(row)
+            Err(_):
+                pass
+    // Show first 3 rows in all formats.
+    let preview = []
+    let mut i = 0
+    while i < valid.len() and i < 3:
+        preview.push(valid[i])
+        i = i + 1
+    let enriched_headers = extend_headers(headers)
+    print(render_all_formats(enriched_headers, preview, "Sample (first 3 rows)"))
+    print("")
+
+// Demo 8: Pipeline streaming (buff-pipeline type).
+func demo_pipeline_streaming():
+    print("--- Demo 8: Pipeline streaming ---")
+    let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1, -2, 0]
+    print("input: {data}")
+
+    let streamed = demo_pipeline_stream(data)
+    print("streamed (filter > 0, * 2, batch 3):")
+    for batch in streamed:
+        print("  {batch}")
+
+    let windowed = demo_pipeline_window(data)
+    print("windowed (size 4, sum):")
+    print("  {windowed}")
+
+    let named = demo_pipeline_named_stages(["apple", "banana", "cherry", "date"])
+    print("named stages (upper, trim, prefix, filter len > 6):")
+    for item in named:
+        print("  {item}")
+    print("")
+
+// Demo 9: Error handling stress test.
+func demo_error_stress():
+    print("--- Demo 9: Error handling stress test ---")
+    let messy_blob_lines = []
+    messy_blob_lines.push("region,product,amount,units")
+    messy_blob_lines.push("north,widget,100.00,5")
+    messy_blob_lines.push(",gadget,200.00,3")
+    messy_blob_lines.push("east,widget,abc,2")
+    messy_blob_lines.push("west,doohickey,75.10,-1")
+    messy_blob_lines.push("south,gadget,300.00")
+    messy_blob_lines.push("north,widget,150.00,4")
+    messy_blob_lines.push("")
+    messy_blob_lines.push("south,widget,99.99,2")
+    messy_blob_lines.push("east,,0,")
+    messy_blob_lines.push("west,doohickey,500.00,1")
+    messy_blob_lines.push("north,gadget,xyz,0")
+    messy_blob_lines.push("south,widget,120.00,6")
+    let messy_blob = messy_blob_lines.join(separator: "\n")
+    let (report, table) = run_etl_pure(messy_blob, min_amount: 0.0, format: Table)
+    print("input rows (raw): {report.rows_read}")
+    print("valid rows:       {report.rows_valid}")
+    print("skipped rows:     {report.rows_skipped}")
+    print("warnings:         {report.warnings.len()}")
+    print("")
+    print("warning details:")
+    print(render_warnings(report.warnings))
+    print("")
+    print("clean output:")
+    print(table)
+    print("")
+
+// Demo 10: Enrichment pipeline.
+func demo_enrichment():
+    print("--- Demo 10: Enrichment (size_bucket + amount_norm) ---")
+    let blob = sample_blob()
+    let (_, raw_rows) = parse_csv_blob(blob)
+    let (_, headers) = parse_csv_blob(blob)
+    let valid = []
+    for raw in raw_rows:
+        match validate_row(headers, raw):
+            Ok(row):
+                valid.push(row)
+            Err(_):
+                pass
+    let enriched = []
+    for row in valid:
+        enriched.push(enrich_row(row))
+    let enriched_headers = extend_headers(headers)
+    let table_rows = []
+    for row in enriched:
+        let cells = []
+        for h in enriched_headers:
+            cells.push(row.get_or(h, default: ""))
+        table_rows.push(cells)
+    print("enriched data with size_bucket and amount_norm:")
+    print(render_table(enriched_headers, table_rows))
+    print("")
+
+// Demo 11: Full ETL orchestration with multiple thresholds.
+func demo_threshold_sweep():
+    print("--- Demo 11: Threshold sweep ---")
+    let blob = sample_blob()
+    let thresholds = [0.0, 25.0, 50.0, 75.0, 100.0, 200.0]
+    for threshold in thresholds:
+        let (report, _) = run_etl_pure(blob, min_amount: threshold, format: Table)
+        let pass_pct = if report.rows_read > 0:
+            "{(report.rows_valid * 100) / report.rows_read}%"
+        else:
+            "n/a"
+        print("  threshold={threshold:.0}: valid={report.rows_valid}/{report.rows_read} ({pass_pct}), skipped={report.rows_skipped}")
+    print("")
+
+// Demo 12: Framework path forward declaration.
+func demo_framework_path():
+    print("--- Demo 12: Framework path (forward-declared) ---")
+    print("run_etl_framework(\"sales.csv\", min_amount: 50.0) would:")
+    print("  1. DataFrame.from_csv(\"sales.csv\")")
+    print("  2. .filter(amount >= 50.0) → .select([region,product,amount,units])")
+    print("  3. .sort(amount desc) → .head(10)")
+    print("  4. .group_by(region).agg(amount, \"mean\")")
+    print("  5. render both as ASCII tables")
+    print("")
+    print("pipeline streaming would:")
+    print("  Source.from_csv(\"sales.csv\", chunk_size: 500)")
+    print("  → .filter({ row => row.len() >= 4 })")
+    print("  → .map({ row => row.trim() })")
+    print("  → .batch(size: 100)")
+    print("  → .run()")
+    print("=== done ===")
+
+func demo():
+    print("=== ETL Data Pipeline (T18) — deterministic demo ===")
+    print("")
+    demo_core_etl()
+    demo_stats_and_warnings()
+    demo_regional_comparison()
+    demo_product_leaderboard()
+    demo_join()
+    demo_timeseries()
+    demo_multi_format()
+    demo_pipeline_streaming()
+    demo_error_stress()
+    demo_enrichment()
+    demo_threshold_sweep()
+    demo_framework_path()
+
+// One-line summary of an ETLReport for the demo header.
+func report_line(report: ETLReport) -> String:
+    return "read={report.rows_read} valid={report.rows_valid} skipped={report.rows_skipped}"
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+func main():
+    demo()
+    print("")
+    print("=== all demos complete ===")
