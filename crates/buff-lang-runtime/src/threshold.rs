@@ -588,6 +588,122 @@ pub fn decide_dynamic(ctx: &WorkloadContext) -> DispatchKind {
     DispatchKind::CpuParallel
 }
 
+/// T6: Explain WHY a dispatch decision was made — human-readable diagnostic.
+///
+/// Zero-overhead when not called: the `String` is only allocated when this
+/// function is invoked. Callers MUST gate on a user-facing `--explain` flag
+/// and never construct the string on the hot path.
+///
+/// # Output format
+///
+/// Multi-line, one field per line, with branch-trace annotations:
+///
+/// ```text
+/// Dispatch: GpuCompute
+///   element_count: 100000
+///   gpu_available: true
+///   arithmetic_intensity: 8.0 (>= 4.0 threshold → GPU-favorable)
+///   SINGLE_THREAD_MAX: 999 (branch not taken: count > 999)
+///   CPU_PARALLEL_MAX: 50000 (branch not taken: count > 50000)
+///   Decision: GPU available + high intensity → GpuCompute
+/// ```
+///
+/// # Coverage
+///
+/// All 4 [`DispatchKind`] branches are documented:
+///
+/// | Branch | Decision line |
+/// |--------|---------------|
+/// | `SingleThread` | `count <= SINGLE_THREAD_MAX → SingleThread` |
+/// | `CpuParallel` (medium, no GPU) | `count <= CPU_PARALLEL_MAX + (no GPU OR low intensity) → CpuParallel` |
+/// | `GpuCompute` | `GPU available + high intensity → GpuCompute` |
+/// | `CpuParallel` (large, no GPU) | `count > CPU_PARALLEL_MAX + no GPU → CpuParallel` |
+#[must_use]
+pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String {
+    let intensity_line = match ctx.arithmetic_intensity {
+        Some(ai) => {
+            let favorable = if ai >= GPU_ARITHMETIC_INTENSITY_THRESHOLD {
+                "GPU-favorable"
+            } else {
+                "memory-bound"
+            };
+            format!(
+                "  arithmetic_intensity: {ai} (>= {threshold} threshold → {favorable})",
+                threshold = GPU_ARITHMETIC_INTENSITY_THRESHOLD,
+            )
+        }
+        None => {
+            "  arithmetic_intensity: unknown (treated as GPU-favorable)".to_string()
+        }
+    };
+
+    let st_line = if ctx.element_count <= SINGLE_THREAD_MAX {
+        format!(
+            "  SINGLE_THREAD_MAX: {max} (branch TAKEN: count <= {max})",
+            max = SINGLE_THREAD_MAX
+        )
+    } else {
+        format!(
+            "  SINGLE_THREAD_MAX: {max} (branch not taken: count > {max})",
+            max = SINGLE_THREAD_MAX
+        )
+    };
+
+    let cpu_parallel_line = if ctx.element_count <= CPU_PARALLEL_MAX {
+        format!(
+            "  CPU_PARALLEL_MAX: {max} (branch TAKEN: count <= {max})",
+            max = CPU_PARALLEL_MAX
+        )
+    } else {
+        format!(
+            "  CPU_PARALLEL_MAX: {max} (branch not taken: count > {max})",
+            max = CPU_PARALLEL_MAX
+        )
+    };
+
+    let decision_line = match decision {
+        DispatchKind::SingleThread => {
+            "  Decision: count <= SINGLE_THREAD_MAX → SingleThread".to_string()
+        }
+        DispatchKind::CpuParallel => {
+            if ctx.element_count > CPU_PARALLEL_MAX {
+                if ctx.gpu_available {
+                    "  Decision: count > CPU_PARALLEL_MAX + GPU available + low intensity → CpuParallel (demotion)".to_string()
+                } else {
+                    "  Decision: count > CPU_PARALLEL_MAX + no GPU → CpuParallel (fallback)".to_string()
+                }
+            } else if ctx.element_count > SINGLE_THREAD_MAX {
+                if ctx.gpu_available && ctx.arithmetic_intensity.is_none_or(|ai| ai >= GPU_ARITHMETIC_INTENSITY_THRESHOLD) {
+                    // This shouldn't happen in practice (decide_dynamic would return GpuCompute),
+                    // but we handle it defensively for the explain function.
+                    "  Decision: medium band + GPU + high intensity → CpuParallel (unexpected — see GpuCompute path)".to_string()
+                } else if !ctx.gpu_available {
+                    "  Decision: medium band + no GPU → CpuParallel".to_string()
+                } else {
+                    "  Decision: medium band + low intensity → CpuParallel".to_string()
+                }
+            } else {
+                "  Decision: count <= SINGLE_THREAD_MAX → SingleThread (CpuParallel not reached)".to_string()
+            }
+        }
+        DispatchKind::GpuCompute => {
+            "  Decision: GPU available + high intensity → GpuCompute".to_string()
+        }
+    };
+
+    format!(
+        "Dispatch: {decision:?}\n\
+         element_count: {count}\n\
+         gpu_available: {gpu}\n\
+         {intensity_line}\n\
+         {st_line}\n\
+         {cpu_parallel_line}\n\
+         {decision_line}",
+        count = ctx.element_count,
+        gpu = ctx.gpu_available,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     //! Smoke tests at the module level — full behavioral coverage lives in
@@ -595,6 +711,66 @@ mod tests {
     //! `cargo test -p buff-lang-runtime dispatch_threshold` matches.
 
     use super::*;
+
+    #[test]
+    fn explain_dispatch_single_thread() {
+        let ctx = WorkloadContext::new(500, true);
+        let decision = decide_dynamic(&ctx);
+        let explain = explain_dispatch(&ctx, decision);
+        assert_eq!(decision, DispatchKind::SingleThread);
+        assert!(explain.contains("Dispatch: SingleThread"));
+        assert!(explain.contains("element_count: 500"));
+        assert!(explain.contains("SINGLE_THREAD_MAX: 999 (branch TAKEN: count <= 999)"));
+        assert!(explain.contains("Decision: count <= SINGLE_THREAD_MAX → SingleThread"));
+    }
+
+    #[test]
+    fn explain_dispatch_cpu_parallel_medium_no_gpu() {
+        let ctx = WorkloadContext::new(10_000, false);
+        let decision = decide_dynamic(&ctx);
+        let explain = explain_dispatch(&ctx, decision);
+        assert_eq!(decision, DispatchKind::CpuParallel);
+        assert!(explain.contains("Dispatch: CpuParallel"));
+        assert!(explain.contains("element_count: 10000"));
+        assert!(explain.contains("CPU_PARALLEL_MAX: 50000 (branch TAKEN: count <= 50000)"));
+        assert!(explain.contains("Decision: medium band + no GPU → CpuParallel"));
+    }
+
+    #[test]
+    fn explain_dispatch_gpu_compute() {
+        let ctx = WorkloadContext::new(100_000, true).with_intensity(8.0);
+        let decision = decide_dynamic(&ctx);
+        let explain = explain_dispatch(&ctx, decision);
+        assert_eq!(decision, DispatchKind::GpuCompute);
+        assert!(explain.contains("Dispatch: GpuCompute"));
+        assert!(explain.contains("element_count: 100000"));
+        assert!(explain.contains("gpu_available: true"));
+        assert!(explain.contains("arithmetic_intensity: 8"));
+        assert!(explain.contains("GPU-favorable"));
+        assert!(explain.contains("Decision: GPU available + high intensity → GpuCompute"));
+    }
+
+    #[test]
+    fn explain_dispatch_cpu_parallel_large_no_gpu() {
+        let ctx = WorkloadContext::new(100_000, false);
+        let decision = decide_dynamic(&ctx);
+        let explain = explain_dispatch(&ctx, decision);
+        assert_eq!(decision, DispatchKind::CpuParallel);
+        assert!(explain.contains("Dispatch: CpuParallel"));
+        assert!(explain.contains("element_count: 100000"));
+        assert!(explain.contains("gpu_available: false"));
+        assert!(explain.contains("CPU_PARALLEL_MAX: 50000 (branch not taken: count > 50000)"));
+        assert!(explain.contains("Decision: count > CPU_PARALLEL_MAX + no GPU → CpuParallel (fallback)"));
+    }
+
+    #[test]
+    fn explain_dispatch_unknown_intensity_treated_as_gpu_favorable() {
+        let ctx = WorkloadContext::new(100_000, true);
+        let decision = decide_dynamic(&ctx);
+        let explain = explain_dispatch(&ctx, decision);
+        assert_eq!(decision, DispatchKind::GpuCompute);
+        assert!(explain.contains("arithmetic_intensity: unknown (treated as GPU-favorable)"));
+    }
 
     #[test]
     fn dispatch_threshold_module_smoke_qa_boundaries() {

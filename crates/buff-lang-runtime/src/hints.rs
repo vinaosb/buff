@@ -612,6 +612,88 @@ where
     cpu_oracle(input)
 }
 
+/// T6: Explain WHY a dispatch decision was made, including `@prefer` hint info.
+///
+/// Extends [`explain_dispatch`] with the hint override details. Zero-overhead
+/// when not called — the `String` is only allocated on invocation.
+///
+/// # Output format
+///
+/// ```text
+/// Dispatch: GpuCompute
+///   element_count: 100000
+///   gpu_available: true
+///   arithmetic_intensity: 8.0 (>= 4.0 threshold → GPU-favorable)
+///   SINGLE_THREAD_MAX: 999 (branch not taken: count > 999)
+///   CPU_PARALLEL_MAX: 50000 (branch not taken: count > 50000)
+///   @prefer(gpu): honored (GPU available + count >= PREFER_GPU_MIN_ELEMENTS=1024)
+///   Decision: GPU available + high intensity → GpuCompute
+/// ```
+///
+/// The `@prefer` line is omitted when `prefer == Prefer::None`.
+#[must_use]
+pub fn explain_dispatch_with_prefer(
+    ctx: &WorkloadContext,
+    prefer: Prefer,
+    available_vram_bytes: Option<u64>,
+    bytes_per_element: u64,
+    decision: DispatchKind,
+) -> String {
+    let base = crate::threshold::explain_dispatch(ctx, decision);
+
+    if prefer == Prefer::None {
+        return base;
+    }
+
+    let prefer_line = if decision == DispatchKind::GpuCompute {
+        format!(
+            "  @prefer({target}): honored (GPU available + count >= PREFER_GPU_MIN_ELEMENTS={min})",
+            target = prefer_label(prefer),
+            min = PREFER_GPU_MIN_ELEMENTS,
+        )
+    } else if ctx.element_count < PREFER_GPU_MIN_ELEMENTS {
+        format!(
+            "  @prefer({target}): cost-model override (count < PREFER_GPU_MIN_ELEMENTS={min})",
+            target = prefer_label(prefer),
+            min = PREFER_GPU_MIN_ELEMENTS,
+        )
+    } else if !ctx.gpu_available {
+        format!(
+            "  @prefer({target}): not honored (no GPU available)",
+            target = prefer_label(prefer),
+        )
+    } else if !crate::threshold::fits_vram(ctx.element_count, bytes_per_element, available_vram_bytes)
+    {
+        format!(
+            "  @prefer({target}): not honored (data exceeds VRAM)",
+            target = prefer_label(prefer),
+        )
+    } else {
+        format!(
+            "  @prefer({target}): not honored (unknown reason)",
+            target = prefer_label(prefer),
+        )
+    };
+
+    // Insert the prefer line before the Decision line.
+    if let Some(pos) = base.rfind("\n  Decision:") {
+        let (before, after) = base.split_at(pos);
+        format!("{before}\n{prefer_line}{after}")
+    } else {
+        // Fallback: append at the end (shouldn't happen in practice).
+        format!("{base}\n{prefer_line}")
+    }
+}
+
+/// Render a [`Prefer`] variant as a lowercase label for explain output.
+fn prefer_label(prefer: Prefer) -> &'static str {
+    match prefer {
+        Prefer::None => "none",
+        Prefer::Gpu => "gpu",
+        Prefer::Npu => "npu",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Inline smoke tests for [`Prefer`], [`prefer_from_name_args`], and
@@ -668,6 +750,47 @@ mod tests {
                 "Prefer::None must match decide() verbatim for (count={count}, gpu={gpu}, vram={vram:?}, bpe={bpe})"
             );
         }
+    }
+
+    #[test]
+    fn explain_dispatch_with_prefer_none_omits_prefer_line() {
+        let ctx = WorkloadContext::new(100_000, true).with_intensity(8.0);
+        let decision = decide_with_prefer_dynamic(&ctx, Prefer::None, None, 4);
+        let explain = explain_dispatch_with_prefer(&ctx, Prefer::None, None, 4, decision);
+        assert_eq!(decision, DispatchKind::GpuCompute);
+        // Prefer::None should produce the same output as explain_dispatch.
+        let base = crate::threshold::explain_dispatch(&ctx, decision);
+        assert_eq!(explain, base);
+        assert!(!explain.contains("@prefer"));
+    }
+
+    #[test]
+    fn explain_dispatch_with_prefer_gpu_honored() {
+        let ctx = WorkloadContext::new(100_000, true);
+        let decision = decide_with_prefer_dynamic(&ctx, Prefer::Gpu, None, 4);
+        let explain = explain_dispatch_with_prefer(&ctx, Prefer::Gpu, None, 4, decision);
+        assert_eq!(decision, DispatchKind::GpuCompute);
+        assert!(explain.contains("@prefer(gpu): honored"));
+        assert!(explain.contains("PREFER_GPU_MIN_ELEMENTS=1024"));
+    }
+
+    #[test]
+    fn explain_dispatch_with_prefer_gpu_cost_override() {
+        let ctx = WorkloadContext::new(10, true);
+        let decision = decide_with_prefer_dynamic(&ctx, Prefer::Gpu, None, 4);
+        let explain = explain_dispatch_with_prefer(&ctx, Prefer::Gpu, None, 4, decision);
+        assert_eq!(decision, DispatchKind::SingleThread);
+        assert!(explain.contains("@prefer(gpu): cost-model override"));
+        assert!(explain.contains("count < PREFER_GPU_MIN_ELEMENTS=1024"));
+    }
+
+    #[test]
+    fn explain_dispatch_with_prefer_gpu_no_gpu_available() {
+        let ctx = WorkloadContext::new(100_000, false);
+        let decision = decide_with_prefer_dynamic(&ctx, Prefer::Gpu, None, 4);
+        let explain = explain_dispatch_with_prefer(&ctx, Prefer::Gpu, None, 4, decision);
+        assert_eq!(decision, DispatchKind::CpuParallel);
+        assert!(explain.contains("@prefer(gpu): not honored (no GPU available)"));
     }
 
     #[test]
