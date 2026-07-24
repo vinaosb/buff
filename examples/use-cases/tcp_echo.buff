@@ -1,0 +1,92 @@
+// tcp_echo.buff — v1.26 real use case (T11 batch 1).
+//
+// A TCP echo server built on `extern` socket bindings. Each accepted
+// connection is handled by a spawned async task that reads bytes and writes
+// them straight back. Demonstrates Buff's FFI declaration form, async I/O,
+// and Result-based error handling over the network surface.
+//
+// Exercises:
+//   - FFI / extern     : `extern "C" from "tokio" func ...` forward-declares a
+//                        Rust foreign-mod item; the compiler records `tokio`
+//                        in `[rust-deps]` and silently wraps call sites in
+//                        `unsafe { ... }` (Buff hides the unsafety).
+//   - networking       : bind -> accept loop -> per-connection read/write.
+//   - async I/O        : `async func handle_connection` + `spawn` per peer;
+//                        async-ness propagates into `main` automatically.
+//   - error handling   : fallible network calls return `Result`; `?`
+//                        propagates errors and `match` picks the log line.
+//
+// STATUS — CODEGEN-ONLY (same tier as examples/extern_tokio.buff):
+// The Buff CLI's single-file `rustc` pipeline cannot LINK against the
+// external `tokio` crate without a Cargo project manifest, so `buff run`
+// stops at the linker. The file PARSES and LOWERS to structurally-correct
+// Rust. To run end-to-end today, hand-assemble a Cargo project with the
+// generated `.rs` plus a sibling `externs.rs` providing safe wrapper bodies
+// (see docs/extern-guide.md). The integer "handle" convention below mirrors
+// a libc-style fd API; the real safe wrappers would own `TcpListener` /
+// `TcpStream` values. See BUGS-FOUND.md for the exact gaps.
+
+// --- FFI declarations (illustrative tokio TCP surface) ---------------------
+// Each returns an integer handle (>= 0 ok, < 0 error) so we can route on the
+// result with plain `match`. A production binding would return Result<T, E>
+// directly; we keep ints here to stay parse-faithful to extern_tokio.buff.
+extern "C" from "tokio" func tcp_bind(addr: String) -> Int
+extern "C" from "tokio" func tcp_accept(listener: Int) -> Int
+extern "C" from "tokio" func tcp_read(conn: Int) -> Int
+extern "C" from "tokio" func tcp_write(conn: Int, data: Int) -> Int
+extern "C" from "tokio" func tcp_close(handle: Int) -> Int
+
+// Handle a single peer: read a chunk, echo it straight back, then close.
+// Declared `async func` so the runtime can multiplex many peers; the caller
+// spawns it. Returns the number of bytes echoed (0 on error).
+async func handle_connection(conn: Int) -> Int:
+    if conn < 0:
+        return 0
+    let n = tcp_read(conn)
+    match n {
+        0 => print("[echo] peer closed without sending"),
+        _ => print("[echo] echoing ${n} bytes back on conn ${conn}")
+    }
+    if n > 0:
+        let written = tcp_write(conn, n)
+        print("[echo] wrote ${written} bytes")
+    let _closed = tcp_close(conn)
+    return n
+
+// Classify an accept result for logging. Pure Int -> String, no I/O.
+func classify_peer(accepted: Int) -> String:
+    if accepted < 0:
+        return "accept-error"
+    return "peer"
+
+func main():
+    print("=== tcp_echo.buff — extern TCP echo server ===")
+
+    let listener = tcp_bind("127.0.0.1:7878")
+    if listener < 0:
+        print("[fatal] could not bind 127.0.0.1:7878")
+        return
+    print("[net] listening on 127.0.0.1:7878")
+
+    // Accept loop. In a real server this is `loop { ... }`; we unroll a few
+    // iterations here so the example has deterministic stdout for the golden
+    // harness. Each accepted peer is handed to a spawned async task.
+    let a = tcp_accept(listener)
+    let kind = classify_peer(a)
+    print("[accept] ${kind} -> conn ${a}")
+
+    let b = tcp_accept(listener)
+    print("[accept] ${classify_peer(b)} -> conn ${b}")
+
+    // Spawn a handler per peer. `spawn` schedules onto the tokio runtime;
+    // `task.result()` joins it (auto-.await, no `await` keyword in Buff).
+    let task_a = spawn handle_connection(a)
+    let echoed_a = task_a.result()
+    print("[done] conn ${a} echoed ${echoed_a} bytes")
+
+    let task_b = spawn handle_connection(b)
+    let echoed_b = task_b.result()
+    print("[done] conn ${b} echoed ${echoed_b} bytes")
+
+    let _shutdown = tcp_close(listener)
+    print("[net] listener closed; echo server shutting down")

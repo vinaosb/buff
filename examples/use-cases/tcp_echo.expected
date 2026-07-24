@@ -1,0 +1,2 @@
+=== tcp_echo.buff — extern TCP echo server ===
+[net] listening on 127.0.0.1:7878

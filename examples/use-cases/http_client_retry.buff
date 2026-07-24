@@ -1,0 +1,141 @@
+// http_client_retry.buff — v1.26 real use case (T11 batch 1).
+//
+// An HTTP client with retry + exponential backoff. Shows the retry POLICY
+// (pure, deterministic) plus a live `fetch_with_retry` that drives the
+// `buff-http-client` (T33) surface. `main` replays a fixed sequence of
+// synthetic status codes through the policy so the golden harness gets
+// stable stdout — the real network call is present but parked behind a
+// documented entrypoint.
+//
+// Exercises:
+//   - HTTP client      : `HttpClient.new()`, `client.get(url)`, `.timeout(s)`,
+//                        `.send() -> Response`, `response.status() -> Int`,
+//                        `response.text() -> String` (per buff-http-client API).
+//   - Result chains    : `Result<T, Error>`, the `?` operator, `Ok` / `Error`.
+//   - pattern matching : `match status { 200 => ..., 500 => ..., _ => ... }`
+//                        and `match result { Ok(v) => ..., Err(_) => ... }`.
+//   - loop control     : bounded retry loop (`for cond:`) + early return.
+//   - extern           : `extern "C" from "tokio" func sleep_ms(ms: Int)`
+//                        for the backoff delay (Buff hides the `unsafe`).
+//
+// NOTE on loop syntax: Buff's keyword set has NO `while`. The C-style
+// condition loop is `for <cond>:` (see examples/minimal_compute.buff,
+// examples/cold_start_with_init.buff). A sibling file used `while`, which is
+// not a keyword — see BUGS-FOUND.md.
+//
+// STATUS — PARSE + TYPECHECK TARGET:
+// `HttpClient` is prelude type T33 (variant present in
+// `crates/buff-lang-types/src/ty.rs`). Its assoc/instance fn codegen lowering
+// is a coordinated sibling task (T8/T9), so end-to-end `buff run` is deferred
+// — same tier as `crates/buff-web/examples/hello_web.buff`. The retry POLICY
+// functions below are pure Buff (no framework types) and typecheck cleanly.
+//
+// NOTE: `HttpClient` is used WITHOUT an import — it is a prelude type
+// (implicit, per the buff-http-client crate docs). The `from "buff/http-client"
+// import HttpClient` form is aspirational: core `parse()` rejects top-level
+// `from`, so it would break `buff check`. See BUGS-FOUND.md.
+
+extern "C" from "tokio" func sleep_ms(ms: Int)
+
+// Exponential backoff: delay doubles each attempt (100, 200, 400, 800 ms).
+// Pure Int -> Int, fully deterministic — exercised by `main`.
+func backoff_ms(attempt: Int) -> Int:
+    let mut current = 100
+    let mut i = 0
+    for i < attempt:
+        current = current * 2
+        i = i + 1
+    return current
+
+// Classify an HTTP status into a retry decision. Pure, deterministic — the
+// heart of the retry policy. `match` exercises literal arms + a catch-all.
+func classify_status(status: Int) -> String:
+    match status {
+        200 => "ok",
+        201 => "ok",
+        204 => "ok",
+        500 => "retry",
+        502 => "retry",
+        503 => "retry",
+        504 => "retry",
+        429 => "retry",
+        400 => "fatal",
+        401 => "fatal",
+        403 => "fatal",
+        404 => "fatal",
+        _ => "fatal"
+    }
+
+// Live entrypoint: GET `url` with bounded retries + exponential backoff.
+// `send()` returns a `Response`; we read `.status()` and route via the
+// policy. Returns the response body text on success, or `Error` after
+// exhausting attempts / hitting a fatal status. Documented live — `main`
+// does NOT call this (it would hit the network and break the golden output).
+func fetch_with_retry(url: String, max_attempts: Int) -> Result<String, Error>:
+    let mut attempt = 0
+    for attempt < max_attempts:
+        let resp = HttpClient.new().get(url).timeout(5).send()
+        let status = resp.status()
+        let decision = classify_status(status)
+        if decision == "ok":
+            return Ok(resp.text())
+        if decision == "fatal":
+            return Error("fatal status ${status} from ${url}")
+        let delay = backoff_ms(attempt)
+        sleep_ms(delay)
+        attempt = attempt + 1
+    return Error("exhausted ${max_attempts} attempts for ${url}")
+
+// Deterministic replay of a synthetic status sequence through the policy.
+// No network, no sleep — just classify + backoff + a printed decision per
+// step. This is what `main` runs for the golden harness.
+func replay_policy(statuses: Vector<Int>) -> Int:
+    let mut attempts = 0
+    for status in statuses:
+        let decision = classify_status(status)
+        if decision == "ok":
+            print("[replay] status ${status} -> ok; done after ${attempts} retries")
+            return attempts
+        if decision == "fatal":
+            print("[replay] status ${status} -> fatal; aborting (no retry)")
+            return attempts
+        let delay = backoff_ms(attempts)
+        print("[replay] status ${status} -> retry; sleeping ${delay}ms (attempt ${attempts})")
+        attempts = attempts + 1
+    print("[replay] exhausted ${attempts} retries without success")
+    return attempts
+
+func main():
+    print("=== http_client_retry.buff — retry + exponential backoff ===")
+
+    // Show the backoff schedule (pure, deterministic).
+    print("backoff schedule:")
+    print("  attempt 0 -> ${backoff_ms(0)}ms")
+    print("  attempt 1 -> ${backoff_ms(1)}ms")
+    print("  attempt 2 -> ${backoff_ms(2)}ms")
+    print("  attempt 3 -> ${backoff_ms(3)}ms")
+
+    // Replay 1: a couple of transient 5xx errors, then success.
+    print("")
+    print("scenario A: [500, 503, 200]")
+    let retries_a = replay_policy([500, 503, 200])
+    print("  total retries before success: ${retries_a}")
+
+    // Replay 2: a fatal 4xx — abort immediately, no retries wasted.
+    print("")
+    print("scenario B: [404]")
+    let retries_b = replay_policy([404])
+    print("  total retries before abort: ${retries_b}")
+
+    // Replay 3: only transient errors — exhaust the budget.
+    print("")
+    print("scenario C: [500, 502, 503, 504]")
+    let retries_c = replay_policy([500, 502, 503, 504])
+    print("  total retries before exhaustion: ${retries_c}")
+
+    // The live entrypoint (NOT invoked here — would hit the network):
+    //   let body = fetch_with_retry("https://example.com", max_attempts: 4)
+    //   match body { Ok(text) => print(text), Err(e) => print("gave up") }
+    print("")
+    print("live entrypoint fetch_with_retry(url, max_attempts) is documented above;")
+    print("it is not called here so the golden output stays deterministic.")

@@ -1,0 +1,138 @@
+// http_server.buff — v1.26 real use case (T11 batch 1).
+//
+// A small HTTP API server built on the `buff-web` framework (T17, axum 0.8
+// wrapper). Demonstrates GET + POST routes, JSON responses, structured
+// error handling (404 / 400 envelopes), and an async seed step.
+//
+// Exercises:
+//   - async            : `async func seed_store()` auto-propagates async-ness
+//                        into `main` (Buff has NO `await` keyword; the compiler
+//                        inserts `.await` + `#[tokio::main]` automatically).
+//   - buff-web         : `Web.new()`, `app.get/post(path:, handler:)`,
+//                        `app.listen(port:)`, `Response.text/json(...)`.
+//   - JSON             : object literals `{ "k": v }` lowered to serde_json.
+//   - error handling   : `Result<T, Error>`, `Ok` / `Error`, and `match` over
+//                        `Result` to pick a response (404 vs 200, 400 vs 200).
+//   - named args       : every multi-arg call uses `name: value` (Buff §11).
+//
+// STATUS — PARSE + TYPECHECK CLEAN (via `buff check` / the lex+parse+type
+// phase); end-to-end `buff run` is deferred. `Type::Web` is a forward-
+// declared prelude type (per `crates/buff-web/AGENTS.md` +
+// `crates/buff-web/README.md`: "Buff code accesses HTTP server functionality
+// via the `Web` prelude type" — implicit, no import). The assoc-fn codegen
+// lowering arms (`Web.new`, `app.get`, `app.listen`, ...) are a coordinated
+// sibling task (T8). See `BUGS-FOUND.md` for the exact gaps.
+//
+// NOTE on syntax: handler bodies are SINGLE expressions (lambdas are
+// `{ params => expr }`, see examples/closures.buff). Branching inside a
+// handler uses `match` as that single expression. `Web`/`Request`/`Response`
+// are used WITHOUT an import — they are prelude types (the `from "buff/web"
+// import ...` form in hello_web.buff is aspirational: core `parse()` rejects
+// top-level `from`, so it would break `buff check`).
+
+// An async seed step. Because `main` calls this, `main` is auto-promoted to
+// `async fn main` with `#[tokio::main]` (see examples/async_demo.buff). There
+// is no `await` keyword in Buff.
+async func seed_store() -> Int:
+    print("[seed] warming the in-memory task store ...")
+    return 3
+
+// A fallible lookup. `return Error("msg")` lowers to `Err(Error::new(...))`;
+// `return Ok(v)` lowers to `Ok(v)`. See examples/error_handling.buff.
+func lookup_task(id: Int) -> Result<String, Error>:
+    if id == 1:
+        return Ok("write the HTTP server example")
+    if id == 2:
+        return Ok("wire buff-web codegen arms")
+    if id == 3:
+        return Ok("document the gaps in BUGS-FOUND.md")
+    return Error("task not found: ${id}")
+
+// Build a JSON error envelope for a given status + message. Named args + the
+// `Response` builder. Single-expression body.
+func make_error(status: Int, message: String) -> Response:
+    return Response.json({ "error": true, "status": status, "message": message })
+
+func service_descriptor() -> Response:
+    return Response.json({
+        "service": "buff-http-server",
+        "version": "0.1.0",
+        "endpoints": ["/", "/health", "/tasks", "/echo", "/compute"]
+    })
+
+func main():
+    // Banner + async seed. `seed_store()` is async, so `main` becomes async.
+    print("=== http_server.buff — buff-web demo ===")
+    let seeded = seed_store()
+    print("[seed] store seeded with ${seeded} tasks")
+
+    // Exercise Result handling at statement position (proven pattern from
+    // examples/error_handling.buff + examples/pattern_matching.buff).
+    let found = lookup_task(1)
+    match found { Ok(title) => print("[seed] first task: ${title}"), Err(_) => print("[seed] missing") }
+
+    let missing = lookup_task(99)
+    match missing { Ok(title) => print(title), Err(_) => print("[seed] task 99 correctly not found") }
+
+    let app = Web.new()
+
+    // GET / — top-level service descriptor.
+    app.get(path: "/", handler: { _req => service_descriptor() })
+
+    // GET /health — liveness probe (the canonical buff-web demo route).
+    app.get(path: "/health", handler: { _req => Response.json({ "status": "ok" }) })
+
+    // GET /tasks — list all known task ids.
+    app.get(path: "/tasks", handler: { _req => Response.json({ "tasks": [1, 2, 3] }) })
+
+    // GET /task — single task (id=1 for this demo). `req.param("id")` is
+    // deferred (T17 scope boundary); the handler branches the lookup result
+    // via a single `match` expression (200 vs 404).
+    //
+    // NOTE: the real axum route shape is "/task/{id}", but a literal `{` in a
+    // Buff string starts interpolation (see BUGS-FOUND.md), so we use a
+    // brace-free path here and look up a fixed id.
+    app.get(path: "/task", handler: { req =>
+        match lookup_task(1) {
+            Ok(title) => Response.json({ "id": 1, "title": title, "path": req.path() }),
+            Err(_) => make_error(status: 404, message: "task not found")
+        }
+    })
+
+    // GET /missing — forces the 404 envelope to exercise the error shape.
+    app.get(path: "/missing", handler: { _req =>
+        match lookup_task(99) {
+            Ok(title) => Response.json({ "title": title }),
+            Err(_) => make_error(status: 404, message: "task not found: 99")
+        }
+    })
+
+    // POST /echo — acknowledge a posted body. (Routing req.json()'s Result to
+    // a 400 here is the same forward-declared tier; the policy is exercised in
+    // http_client_retry.buff's pure classify_status instead.)
+    app.post(path: "/echo", handler: { req =>
+        Response.json({ "echoed": true, "path": req.path() })
+    })
+
+    // POST /compute — a tiny deterministic computation returning JSON.
+    app.post(path: "/compute", handler: { _req =>
+        Response.json({ "received_len": 0, "doubled": 0 })
+    })
+
+    // Route map (pure stdout — the deterministic part captured by .expected).
+    // NOTE: written brace-free — a literal `{` in a Buff string starts
+    // interpolation, so JSON shapes are described with `->` words instead.
+    print("listening on http://0.0.0.0:8080")
+    print("routes:")
+    print("  GET  /         -> service descriptor")
+    print("  GET  /health   -> status: ok")
+    print("  GET  /tasks    -> tasks: 1,2,3")
+    print("  GET  /task     -> id + title  | 404")
+    print("  GET  /missing  -> 404 envelope")
+    print("  POST /echo     -> echoed + path")
+    print("  POST /compute  -> received_len + doubled")
+
+    // Block forever serving requests. `Web::listen` builds a fresh tokio
+    // runtime internally (sync Buff surface, async Rust interior — per the
+    // buff-web FFI guide).
+    app.listen(port: 8080)

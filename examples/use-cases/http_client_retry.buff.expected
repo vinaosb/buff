@@ -1,0 +1,27 @@
+=== http_client_retry.buff — retry + exponential backoff ===
+backoff schedule:
+  attempt 0 -> 100ms
+  attempt 1 -> 200ms
+  attempt 2 -> 400ms
+  attempt 3 -> 800ms
+
+scenario A: [500, 503, 200]
+[replay] status 500 -> retry; sleeping 100ms (attempt 0)
+[replay] status 503 -> retry; sleeping 200ms (attempt 1)
+[replay] status 200 -> ok; done after 2 retries
+  total retries before success: 2
+
+scenario B: [404]
+[replay] status 404 -> fatal; aborting (no retry)
+  total retries before abort: 0
+
+scenario C: [500, 502, 503, 504]
+[replay] status 500 -> retry; sleeping 100ms (attempt 0)
+[replay] status 502 -> retry; sleeping 200ms (attempt 1)
+[replay] status 503 -> retry; sleeping 400ms (attempt 2)
+[replay] status 504 -> retry; sleeping 800ms (attempt 3)
+[replay] exhausted 4 retries without success
+  total retries before exhaustion: 4
+
+live entrypoint fetch_with_retry(url, max_attempts) is documented above;
+it is not called here so the golden output stays deterministic.

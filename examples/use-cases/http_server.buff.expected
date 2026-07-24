@@ -1,0 +1,15 @@
+=== http_server.buff — buff-web demo ===
+[seed] warming the in-memory task store ...
+[seed] store seeded with 3 tasks
+[seed] first task: write the HTTP server example
+[seed] task 99 correctly not found
+listening on http://0.0.0.0:8080
+routes:
+  GET  /             -> service descriptor
+  GET  /health       -> { status: 'ok' }
+  GET  /tasks        -> { tasks: [1,2,3] }
+  GET  /tasks/{id}   -> { id, title } | 404
+  GET  /missing      -> 404 envelope
+  POST /echo         -> { echoed, path }
+  POST /compute      -> { received_len, doubled }
+
