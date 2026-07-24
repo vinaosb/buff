@@ -458,7 +458,32 @@ impl TypeInferencer {
     ///   that kind (the first element's).
     /// - Empty or mixed: `Int<64>` (Buff's default Int width) so a bare
     ///   `let v = []` type-checks against a plain Int element.
-    fn infer_collection_element(&self, elements: &[Expr]) -> Result<Type, TypeError> {
+    fn infer_collection_element(&mut self, elements: &[Expr]) -> Result<Type, TypeError> {
+        // T83: NESTED collection literal preservation. If the first
+        // element is itself an `ArrayLit` or `MapLit`, recurse via
+        // [`Self::infer_expr`] so the FULLY-NESTED type is preserved
+        // (inner-first). Without this short-circuit, `[[1, 2], [3, 4]]`
+        // fell through to the default-Int fallback and inferred as
+        // `Vector<Int<64>>` (flattened) instead of the correct
+        // `Vector<Vector<Int>>`. Similarly `{"a": {"b": 1}}` now
+        // correctly infers as `Map<String, Map<String, Int>>`.
+        //
+        // We check ONLY the first element (consistent with the existing
+        // first-element-wins policy for non-nested literals below).
+        // Heterogeneous mixes like `[1, [2, 3]]` continue to fall
+        // through to the default-Int fallback — surfacing a type
+        // mismatch downstream rather than guessing.
+        //
+        // The signature is `&mut self` (changed from `&self` in T83)
+        // specifically to allow this recursive `infer_expr` call.
+        // Both existing callers (`ArrayLit` and `MapLit` arms of
+        // [`Self::infer_expr`]) already have `&mut self`, so the
+        // signature change is backward-compatible at the call sites.
+        if let Some(first) = elements.first() {
+            if matches!(first, Expr::ArrayLit { .. } | Expr::MapLit { .. }) {
+                return self.infer_expr(first);
+            }
+        }
         // Collect integer literal values for auto-width detection. We
         // recognise both `Literal::Int(v)` and `UnaryOp(Neg, Literal::Int(v))`
         // (the parser-realistic form for negative numbers, since `-200` lexes

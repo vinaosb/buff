@@ -948,3 +948,167 @@ mod decimal_type {
         assert_eq!(inf.lookup("value"), Some(&expected));
     }
 }
+
+// ---------------------------------------------------------------------------
+// T83 — Nested collection literal type inference.
+// ---------------------------------------------------------------------------
+
+/// Build an `Expr::ArrayLit` from a list of elements.
+fn array_lit(elements: Vec<Expr>) -> Expr {
+    Expr::ArrayLit {
+        elements,
+        span: sp(),
+    }
+}
+
+/// Build an `Expr::MapLit` from a list of `(key, value)` entry pairs.
+fn map_lit(entries: Vec<(Expr, Expr)>) -> Expr {
+    Expr::MapLit {
+        entries,
+        span: sp(),
+    }
+}
+
+/// T83: `[[1, 2], [3, 4]]` must infer `Vector<Vector<Int>>`, NOT flatten
+/// to `Vector<Int>` (the pre-T83 default-Int fallback).
+///
+/// Pre-T83 bug: the outer literal's `infer_collection_element` saw
+/// ArrayLit elements (not int literals), fell through to the default-
+/// Int fallback, and produced `Vector<Int<64>>` — losing the nesting
+/// depth. T83 short-circuits when the first element is itself an
+/// ArrayLit/MapLit, recursing via `infer_expr` to preserve depth.
+#[test]
+fn t83_nested_vector_literal_preserves_nesting_depth() {
+    let inner1 = array_lit(vec![int_lit(1), int_lit(2)]);
+    let inner2 = array_lit(vec![int_lit(3), int_lit(4)]);
+    let outer = array_lit(vec![inner1, inner2]);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&outer).unwrap();
+    // Expected: Vector<Vector<Int<64>>> (i64 is the default int width
+    // for small positive literals via range analysis).
+    match ty {
+        Type::Vector(inner) => match *inner {
+            Type::Vector(innermost) => match *innermost {
+                Type::Int { .. } => {}
+                other => panic!(
+                    "T83: innermost type must be Int, got {other:?}"
+                ),
+            },
+            other => panic!("T83: inner type must be Vector, got {other:?}"),
+        },
+        other => panic!("T83: outer type must be Vector, got {other:?}"),
+    }
+}
+
+/// T83: 3-deep nesting `[[[1]]]` → `Vector<Vector<Vector<Int>>>`.
+/// Ensures recursion is unbounded (not just one level deep).
+#[test]
+fn t83_deeply_nested_vector_literal_preserves_all_depths() {
+    let deepest = array_lit(vec![int_lit(1)]);
+    let middle = array_lit(vec![deepest]);
+    let outer = array_lit(vec![middle]);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&outer).unwrap();
+    // Walk three levels deep.
+    let level1 = match ty {
+        Type::Vector(inner) => *inner,
+        other => panic!("T83: level 1 must be Vector, got {other:?}"),
+    };
+    let level2 = match level1 {
+        Type::Vector(inner) => *inner,
+        other => panic!("T83: level 2 must be Vector, got {other:?}"),
+    };
+    match level2 {
+        Type::Vector(inner) => match *inner {
+            Type::Int { .. } => {}
+            other => panic!("T83: innermost must be Int, got {other:?}"),
+        },
+        other => panic!("T83: level 3 must be Vector, got {other:?}"),
+    }
+}
+
+/// T83: nested MAP `{"a": {"b": 1}}` → `Map<String, Map<String, Int>>`.
+/// Before the fix, the outer map's value type fell through to the
+/// default Int fallback, producing `Map<String, Int<64>>` (lost the
+/// inner Map).
+#[test]
+fn t83_nested_map_literal_preserves_value_nesting() {
+    let inner_map = map_lit(vec![(str_lit("b"), int_lit(1))]);
+    let outer = map_lit(vec![(str_lit("a"), inner_map)]);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&outer).unwrap();
+    match ty {
+        Type::Map(_key_ty, val_ty) => match *val_ty {
+            Type::Map(_inner_k, inner_v) => match *inner_v {
+                Type::Int { .. } => {}
+                other => panic!(
+                    "T83: innermost value must be Int, got {other:?}"
+                ),
+            },
+            other => panic!("T83: value must be Map, got {other:?}"),
+        },
+        other => panic!("T83: outer must be Map, got {other:?}"),
+    }
+}
+
+/// T83: flat collection behavior is UNCHANGED. `[1, 2, 3]` still
+/// infers `Vector<Int>` (auto-width via range analysis). This guards
+/// against T83's nested-recursion path accidentally catching flat
+/// literals.
+#[test]
+fn t83_flat_vector_literal_is_unchanged() {
+    let flat = array_lit(vec![int_lit(1), int_lit(2), int_lit(3)]);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&flat).unwrap();
+    match ty {
+        Type::Vector(inner) => match *inner {
+            Type::Int { .. } => {}
+            other => panic!("T83: flat element must be Int, got {other:?}"),
+        },
+        other => panic!("T83: flat literal must be Vector, got {other:?}"),
+    }
+}
+
+/// T83: flat map behavior is UNCHANGED. `{"k": 1}` still infers
+/// `Map<String, Int>` (the pre-T83 behavior).
+#[test]
+fn t83_flat_map_literal_is_unchanged() {
+    let flat = map_lit(vec![(str_lit("k"), int_lit(1))]);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&flat).unwrap();
+    match ty {
+        Type::Map(k, v) => {
+            match *k {
+                Type::String => {}
+                other => panic!("T83: flat map key must be String, got {other:?}"),
+            }
+            match *v {
+                Type::Int { .. } => {}
+                other => panic!("T83: flat map value must be Int, got {other:?}"),
+            }
+        }
+        other => panic!("T83: flat literal must be Map, got {other:?}"),
+    }
+}
+
+/// T83: mixed vector-of-vectors with different int widths still works
+/// (uses the first element's nested type). `[[1, 2, 3], [4, 5]]` →
+/// `Vector<Vector<Int>>`.
+#[test]
+fn t83_nested_vector_with_varying_lengths_preserves_nesting() {
+    let inner1 = array_lit(vec![int_lit(1), int_lit(2), int_lit(3)]);
+    let inner2 = array_lit(vec![int_lit(4), int_lit(5)]);
+    let outer = array_lit(vec![inner1, inner2]);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&outer).unwrap();
+    match ty {
+        Type::Vector(inner) => match *inner {
+            Type::Vector(innermost) => match *innermost {
+                Type::Int { .. } => {}
+                other => panic!("T83: innermost must be Int, got {other:?}"),
+            },
+            other => panic!("T83: inner must be Vector, got {other:?}"),
+        },
+        other => panic!("T83: outer must be Vector, got {other:?}"),
+    }
+}
