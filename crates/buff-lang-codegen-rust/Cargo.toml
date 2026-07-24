@@ -40,3 +40,12 @@ serde_json.workspace = true
 [[example]]
 name = "capture_t22_baseline"
 path = "examples/capture_t22_baseline.rs"
+
+# T19: bootstrap determinism gate driver. Pure-Rust (no ring/rustls), so it
+# links on hosts where the full buff-lang-cli binary cannot (Windows MSVC
+# LNK1104 vcruntime.h blocker — see self-host/msvc-env.ps1). Reuses the
+# workspace-pinned sha2 + serde + serde_json already pulled in by the T22
+# example; NO new deps added.
+[[example]]
+name = "bootstrap_t19"
+path = "examples/bootstrap_t19.rs"
