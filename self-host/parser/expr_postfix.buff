@@ -1,0 +1,332 @@
+// Buff self-host port of `crates/buff-lang-parser/src/expr/expr_postfix.rs` (T16).
+//
+// Postfix expression parsers — extracted from expr.rs by T106. Level 13:
+// function call `(...)`, method call `.method(...)`, indexing `[...]`, field
+// access `.field`, the `?` error-propagation operator, struct-init
+// `Type { .. }`, the T57 adjoint `'` desugar, and the T70 null-conditional
+// `?.` desugar. Plus the call-argument helpers parse_call_args /
+// parse_one_call_arg (T105 named args).
+//
+// SYNTAX MAPPING NOTES (Buff grammar differs from the Rust it lowers to):
+//   * The Rust `loop { match peek { LBrace => {..}, LParen => {..}, ...,
+//     _ => break } }` becomes a `for true:` loop where each arm is an `if`
+//     block ending in `continue` (re-loop with a fresh peek) or `break`
+//     (fallthrough / not-applicable sub-case). Buff `if` blocks may contain
+//     statements (unlike match arms), so the multi-statement per-arm logic
+//     ports directly.
+//   * `if let Expr::Ident(..) = expr` / `Expr::Literal(Literal::String(_), _)`
+//     → option-returning extractors (expr_as_ident, expr_is_string_literal).
+//   * No `{`/`}` in string literals -> brace-mentioning diagnostics reworded.
+
+// Parse a postfix expression: a primary followed by zero-or-more of
+// `(...)` call, `.method(...)` call, `[...]` index, `?`, `'` (adjoint),
+// `?.` (null-conditional), or `Type { .. }` struct-init.
+func parse_postfix(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut expr = parse_primary(s)?
+    for true:
+        let pk = stream_peek_kind(s)
+        // T26: struct-init `Type { field: value, ... }`.
+        if pk == Option.Some(TokenKind.LBrace):
+            if expr_is_ident(expr):
+                if cursor_at_struct_init_body(s):
+                    let type_span = expr_span(expr)
+                    let type_name = unwrap_ident_parts(expr_as_ident(expr))
+                    stream_expect(s, TokenKind.LBrace)?
+                    let fields = parse_struct_init_fields(s)?
+                    let rb = stream_expect(s, TokenKind.RBrace)?
+                    let span = span_new(type_span.start, rb.span.end, stream_source_id(s))
+                    expr = Expr.StructInit(type_name, fields, span)
+                    continue
+                // Not a struct-init body — stop (let the outer parser handle
+                // the `{` as a block).
+                break
+            // Receiver is not an Ident — stop.
+            break
+        // Function call `(...)`.
+        if pk == Option.Some(TokenKind.LParen):
+            // T57: in the scientific edition, `<number>(...)` is implicit
+            // multiplication, not a call — break so parse_multiplicative
+            // synthesises the `*`.
+            if edition_is_scientific(stream_edition(s)):
+                if is_numeric_primary(expr):
+                    break
+            let _lp = stream_advance(s)
+            let args = parse_call_args(s)?
+            let rparen = stream_expect(s, TokenKind.RParen)?
+            let span = span_new(expr_span(expr).start, rparen.span.end, stream_source_id(s))
+            expr = Expr.FuncCall(expr, args, span)
+            continue
+        // Indexing `[...]` (T23/T24, multi-index).
+        if pk == Option.Some(TokenKind.LBracket):
+            // T21: string-literal receivers rejected at parse time.
+            if expr_is_string_literal(expr):
+                let lb = stream_advance_after_peek(s)
+                return Result.Err(err_with("direct indexing `expr[...]` is not supported on strings; use .chars() or .first() instead", lb.span, ErrorCode.UnexpectedToken))
+            let _lb = stream_advance(s)
+            let indices = Vector.new()
+            indices.push(expr_parse_expression(s)?)
+            for stream_peek_kind(s) == Option.Some(TokenKind.Comma):
+                let _c = stream_advance(s)
+                if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
+                    break
+                indices.push(expr_parse_expression(s)?)
+            let rb = stream_expect(s, TokenKind.RBracket)?
+            let span = span_new(expr_span(expr).start, rb.span.end, stream_source_id(s))
+            expr = Expr.Index(expr, indices, span)
+            continue
+        // Method call `.method(...)` (or bare field access `.field`).
+        if pk == Option.Some(TokenKind.Dot):
+            let _dot = stream_advance(s)
+            let method_tok = opt_advance_or_err(s, "expected method name after `.`, found end of input")?
+            if is_any_ident_kind(method_tok.kind) == false:
+                let found = token_kind_to_string(method_tok.kind)
+                return Result.Err(err_with("expected method name after `.`, found `" + found + "`", method_tok.span, ErrorCode.UnexpectedToken))
+            let method = ident_new(ident_kind_value(method_tok.kind), method_tok.span)
+            // Optional arg list `(...)`.
+            let mut args = Vector.new()
+            let mut end_off = method_tok.span.end
+            if stream_peek_kind(s) == Option.Some(TokenKind.LParen):
+                let _lp = stream_advance(s)
+                args = parse_call_args(s)?
+                let rparen = stream_expect(s, TokenKind.RParen)?
+                end_off = rparen.span.end
+            let span = span_new(expr_span(expr).start, end_off, stream_source_id(s))
+            expr = Expr.MethodCall(expr, method, args, span)
+            continue
+        // T30: `?` error-propagation postfix.
+        if pk == Option.Some(TokenKind.Question):
+            let q = stream_advance_after_peek(s)
+            let span = span_new(expr_span(expr).start, q.span.end, stream_source_id(s))
+            expr = Expr.Try(expr, span)
+            continue
+        // T57: postfix adjoint/transpose `'` -> `.transpose()` (scientific ed.).
+        if pk == Option.Some(TokenKind.Adjoint):
+            let req = edition_require_for(stream_edition(s), TokenKind.Adjoint)
+            if req != Option.None:
+                return Result.Err(err_with(unwrap_opt_str(req), peek_span_or_eof(s), ErrorCode.UnexpectedToken))
+            let adj = stream_advance_after_peek(s)
+            let span = span_new(expr_span(expr).start, adj.span.end, stream_source_id(s))
+            expr = Expr.MethodCall(expr, ident_new("transpose", adj.span), Vector.new(), span)
+            continue
+        // T70: null-conditional `?.` -> `receiver.and_then(|x| x.<name>(args))`.
+        if pk == Option.Some(TokenKind.QuestionDot):
+            let res = parse_null_conditional(s, expr)
+            if result_is_ok_expr(res) == false:
+                return res
+            expr = unwrap_expr_opt(result_ok_expr_opt(res))
+            continue
+        // No matching postfix token — stop.
+        break
+    return Result.Ok(expr)
+
+// Parse the T70 null-conditional `?.name` / `?.method(args)` desugar, building
+// `receiver.and_then(|x| x.<name>(args))`. Returns the new receiver expr.
+func parse_null_conditional(s: TokenStream, receiver: Expr) -> Result<Expr, ParseError>:
+    let qd = stream_advance_after_peek(s)
+    let name_tok = opt_advance_or_err(s, "expected field or method name after `?.`, found end of input")?
+    if is_any_ident_kind(name_tok.kind) == false:
+        let found = token_kind_to_string(name_tok.kind)
+        return Result.Err(err_with("expected field or method name after `?.`, found `" + found + "`", name_tok.span, ErrorCode.UnexpectedToken))
+    let field_ident = ident_new(ident_kind_value(name_tok.kind), name_tok.span)
+    // Method-call form: `u?.m(args...)`; field form: `u?.name` (zero args).
+    let mut field_args = Vector.new()
+    let mut end_off = name_tok.span.end
+    if stream_peek_kind(s) == Option.Some(TokenKind.LParen):
+        let _lp = stream_advance(s)
+        field_args = parse_call_args(s)?
+        let rparen = stream_expect(s, TokenKind.RParen)?
+        end_off = rparen.span.end
+    // Build the closure body `x.name(args)` (a MethodCall on the closure's x).
+    let x_ident = ident_new("x", qd.span)
+    let x_expr = Expr.Ident(x_ident, qd.span)
+    let body_inner = Expr.MethodCall(x_expr, field_ident, field_args, span_new(name_tok.span.start, end_off, stream_source_id(s)))
+    let param = Param.new(name: ident_new("x", qd.span), ty: TypeRef.Named(ident_new("_", qd.span), qd.span), default_value: Option.None, is_comptime: false, span: qd.span)
+    let lambda = Expr.Lambda([param], Block.new(stmts: [Stmt.ExprStmt(body_inner, qd.span)], span: span_new(qd.span.start, end_off, stream_source_id(s))), Option.None, span_new(qd.span.start, end_off, stream_source_id(s)))
+    let outer_span = span_new(expr_span(receiver).start, end_off, stream_source_id(s))
+    return Result.Ok(Expr.MethodCall(receiver, ident_new("and_then", qd.span), [lambda], outer_span))
+
+// Parse a comma-separated argument list (excluding the surrounding parens;
+// the opening `(` must already be consumed). Each arg may be positional or a
+// T105 named arg `name: value`.
+func parse_call_args(s: TokenStream) -> Result<Vector<Expr>, ParseError>:
+    let args = Vector.new()
+    if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
+        return Result.Ok(args)
+    args.push(parse_one_call_arg(s)?)
+    for stream_peek_kind(s) == Option.Some(TokenKind.Comma):
+        let _c = stream_advance(s)
+        if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
+            break
+        args.push(parse_one_call_arg(s)?)
+    return Result.Ok(args)
+
+// Parse ONE call argument — positional expression OR `name: value` named arg.
+// Disambiguation is lexical: `Ident Colon` (two-token peek) signals a named arg.
+func parse_one_call_arg(s: TokenStream) -> Result<Expr, ParseError>:
+    let is_named = is_named_arg_shape(stream_peek_kind(s), stream_peek_second_kind(s))
+    if is_named == false:
+        return expr_parse_expression(s)
+    let name_tok = stream_advance_after_peek(s)
+    let name_span = name_tok.span
+    let name = ident_new(ident_kind_value(name_tok.kind), name_span)
+    stream_expect(s, TokenKind.Colon)?
+    let value = expr_parse_expression(s)?
+    let span = span_new(name_span.start, expr_span(value).end, stream_source_id(s))
+    return Result.Ok(Expr.NamedArg(name, value, span))
+
+// True when (peek, second_peek) is `Ident Colon` — the named-arg shape.
+func is_named_arg_shape(pk: Option<TokenKind>, sk: Option<TokenKind>) -> Bool:
+    if sk != Option.Some(TokenKind.Colon):
+        return false
+    return is_any_ident_kind(stream_unwrap_kind(pk))
+
+// ---------------------------------------------------------------------------
+// Expr-inspection helpers (replace Rust `if let Expr::..` / `matches!`)
+// ---------------------------------------------------------------------------
+
+// True when expr is `Expr.Ident(..)`.
+func expr_is_ident(e: Expr) -> Bool:
+    return match e {
+        Ident(_, _) => true,
+        _ => false,
+    }
+
+// True when expr is a string literal `Expr.Literal(Literal::String(_), _)`.
+func expr_is_string_literal(e: Expr) -> Bool:
+    return match e {
+        Literal(lit, _) => is_string_literal_kind(lit),
+        _ => false,
+    }
+
+// Classify a Literal as the String variant.
+func is_string_literal_kind(lit: Literal) -> Bool:
+    return match lit {
+        String(_) => true,
+        _ => false,
+    }
+
+func expr_span(e: Expr) -> Span:
+    return match e {
+        Literal(_, sp) => sp,
+        Ident(_, sp) => sp,
+        BinaryOp(_, _, _, sp) => sp,
+        UnaryOp(_, _, sp) => sp,
+        IfExpr(_, _, _, sp) => sp,
+        FuncCall(_, _, sp) => sp,
+        MethodCall(_, _, _, sp) => sp,
+        Lambda(_, _, _, sp) => sp,
+        StructInit(_, _, sp) => sp,
+        MatchExpr(_, _, sp) => sp,
+        SuspendExpr(_, sp) => sp,
+        ArrayLit(_, sp) => sp,
+        Index(_, _, sp) => sp,
+        StringInterp(_, sp) => sp,
+        MapLit(_, sp) => sp,
+        Try(_, sp) => sp,
+        Spawn(_, sp) => sp,
+        Range(_, _, _, sp) => sp,
+        IfLet(_, _, _, _, sp) => sp,
+        TupleLit(_, sp) => sp,
+        NamedArg(_, _, sp) => sp,
+    }
+
+func expr_as_ident(e: Expr) -> Option<Ident>:
+    return match e {
+        Ident(name, _) => Option.Some(name),
+        _ => Option.None,
+    }
+
+func unwrap_ident_parts(opt: Option<Ident>) -> Ident:
+    return match opt {
+        Some(i) => i,
+        None => ident_new("", span_dummy()),
+    }
+
+func is_numeric_primary(e: Expr) -> Bool:
+    return match e {
+        Literal(lit, _) => number_or_char_lit_classify(lit) != Option.None,
+        _ => false,
+    }
+
+func number_or_char_lit_classify(lit: Literal) -> Option<Int>:
+    return match lit {
+        Int(_) => Option.Some(0),
+        Float(_) => Option.Some(0),
+        Double(_) => Option.Some(0),
+        Byte(_) => Option.Some(0),
+        Decimal(_) => Option.Some(0),
+        Char(_) => Option.Some(0),
+        _ => Option.None,
+    }
+
+func expr_sentinel() -> Expr:
+    return Expr.Literal(Literal.Int(0), span_dummy())
+
+// Result<Expr, ParseError> accessors.
+func result_is_ok_expr(r: Result<Expr, ParseError>) -> Bool:
+    return match r {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+
+func result_ok_expr_opt(r: Result<Expr, ParseError>) -> Option<Expr>:
+    return match r {
+        Ok(e) => Option.Some(e),
+        Err(_) => Option.None,
+    }
+
+func unwrap_expr_opt(opt: Option<Expr>) -> Expr:
+    return match opt {
+        Some(e) => e,
+        None => expr_sentinel(),
+    }
+
+// ---------------------------------------------------------------------------
+// Shared helpers (re-declared so this file is self-contained for the parse
+// path)
+// ---------------------------------------------------------------------------
+
+func opt_advance_or_err(s: TokenStream, msg: String) -> Result<Token, ParseError>:
+    let opt = stream_advance(s)
+    if opt == Option.None:
+        return Result.Err(err_with(msg, stream_eof_span(s), ErrorCode.UnexpectedToken))
+    return Result.Ok(stream_unwrap(opt))
+
+func peek_span_or_eof(s: TokenStream) -> Span:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        return stream_eof_span(s)
+    return stream_unwrap(opt).span
+
+func stream_unwrap(opt: Option<Token>) -> Token:
+    return match opt {
+        Some(t) => t,
+        None => Token.new(kind: TokenKind.Eof, span: span_dummy()),
+    }
+
+func stream_unwrap_kind(opt: Option<TokenKind>) -> TokenKind:
+    return match opt {
+        Some(k) => k,
+        None => TokenKind.Eof,
+    }
+
+func err_with(msg: String, span: Span, code: ErrorCode) -> ParseError:
+    return parse_error_new(diagnostic_error(msg, span), code)
+
+func is_any_ident_kind(k: TokenKind) -> Bool:
+    return match k {
+        Ident(_) => true,
+        _ => false,
+    }
+
+func ident_kind_value(k: TokenKind) -> String:
+    return match k {
+        Ident(s) => s,
+        _ => "",
+    }
+
+func unwrap_opt_str(opt: Option<String>) -> String:
+    return match opt {
+        Some(s) => s,
+        None => "",
+    }

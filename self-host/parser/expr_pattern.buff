@@ -1,0 +1,401 @@
+// Buff self-host port of `crates/buff-lang-parser/src/expr/expr_pattern.rs` (T16).
+//
+// Pattern + match + closure parsers — extracted from expr.rs by T106. Contains
+// parse_match (T27 match-expression, with T40 pattern guards), parse_pattern
+// (T27 + T71 tuple/struct destructuring + T39 or-patterns), parse_pattern_atom
+// (the recursive atomic-pattern helper), and parse_closure (the minimal
+// `{ params => expr }` lambda, T23).
+//
+// SYNTAX MAPPING NOTES (Buff grammar differs from the Rust it lowers to):
+//   * `loop { match peek { Comma => {..}, RParen => break, other => err } }`
+//     -> `for true:` with `if/elif` + `break`/`continue`.
+//   * `if let TokenKind::Ident(name) = peek_kind()` -> a small
+//     `peek_ident_name(s) -> Option<String>` helper + an `!= Option.None` test.
+//   * `if let Expr::Literal(lit, span) = expr` -> `expr_as_literal(expr)`
+//     returning Option<(Literal, Span)>.
+//   * `let TokenKind::Ident(name) = tok.kind.clone() else { unreachable!() }`
+//     -> `ident_kind_value(tok.kind)` (the caller already verified Ident via
+//     is_any_ident_kind, so no else-branch is needed).
+//   * No `{`/`}` in string literals -> brace-mentioning diagnostics reworded.
+
+// ---------------------------------------------------------------------------
+// T27 — match expression
+// ---------------------------------------------------------------------------
+
+// Parse `match scrutinee { arm, arm, ... }`. Each arm is `Pattern => expr`
+// (optionally with a T40 `if <guard>` between pattern and `=>`). Trailing
+// comma allowed; empty body allowed.
+func parse_match(s: TokenStream) -> Result<Expr, ParseError>:
+    let kw = stream_expect(s, TokenKind.KwMatch)?
+    let start = kw.span.start
+    let source_id = stream_source_id(s)
+    let scrutinee = expr_parse_expression(s)?
+    stream_expect(s, TokenKind.LBrace)?
+    let arms = Vector.new()
+    // Empty body `match e { }`.
+    if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
+        let rb = stream_expect(s, TokenKind.RBrace)?
+        return Result.Ok(Expr.MatchExpr(scrutinee, arms, span_new(start, rb.span.end, source_id)))
+    for true:
+        let pat = parse_pattern(s)?
+        // T40: optional `if <cond>` pattern guard. (`guard` is a Buff keyword,
+        // so the local + the MatchArm field are spelled guard_opt /
+        // guard_expr respectively.)
+        let mut guard_opt = Option.None
+        if stream_peek_kind(s) == Option.Some(TokenKind.KwIf):
+            let _i = stream_advance(s)
+            let g = expr_parse_expression(s)?
+            guard_opt = Option.Some(g)
+        stream_expect(s, TokenKind.FatArrow)?
+        let body_expr = expr_parse_expression(s)?
+        let arm_tok_span = pattern_span(pat)
+        let arm_end = expr_span(body_expr).end
+        let body = Block.new(stmts: [Stmt.ExprStmt(body_expr, arm_tok_span)], span: span_new(arm_tok_span.start, arm_end, source_id))
+        arms.push(MatchArm.new(pattern: pat, guard_expr: guard_opt, body: body, span: span_new(arm_tok_span.start, arm_end, source_id)))
+        // Comma separator or end of list.
+        let pk = stream_peek_kind(s)
+        if pk == Option.Some(TokenKind.Comma):
+            let _c = stream_advance(s)
+            if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
+                break
+        if pk == Option.Some(TokenKind.RBrace):
+            break
+        if pk == Option.None:
+            return Result.Err(err_with("unterminated match expression (missing closing-brace)", stream_eof_span(s), ErrorCode.UnexpectedToken))
+        let span = peek_span_or_eof(s)
+        let found = peek_kind_display(s)
+        return Result.Err(err_with("expected comma or closing-brace after match arm, found `" + found + "`", span, ErrorCode.UnexpectedToken))
+    let rb = stream_expect(s, TokenKind.RBrace)?
+    return Result.Ok(Expr.MatchExpr(scrutinee, arms, span_new(start, rb.span.end, source_id)))
+
+// ---------------------------------------------------------------------------
+// T27 / T71 / T39 — patterns
+// ---------------------------------------------------------------------------
+
+// Public entry point shared by match arms and let-destructuring. Parses ONE
+// atomic pattern, then — when a `|` follows (T39 or-patterns) — greedily
+// consumes `| atom | atom | ...` and wraps the result in a Pattern.Or.
+func parse_pattern(s: TokenStream) -> Result<Pattern, ParseError>:
+    let source_id = stream_source_id(s)
+    let first = parse_pattern_atom(s)?
+    if stream_peek_kind(s) != Option.Some(TokenKind.Pipe):
+        return Result.Ok(first)
+    let start = pattern_span(first).start
+    let alts = Vector.new()
+    alts.push(first)
+    for stream_peek_kind(s) == Option.Some(TokenKind.Pipe):
+        let _pipe = stream_advance(s)
+        alts.push(parse_pattern_atom(s)?)
+    let end = vec_last_pattern_end(alts, stream_eof_span(s).end)
+    return Result.Ok(Pattern.Or(alts, span_new(start, end, source_id)))
+
+// Parse a single ATOMIC pattern (no trailing `|` chain). Shapes: `_` wildcard,
+// `Ident` binding, `Ident(subpat, ...)` variant, `Ident { field: pat, ... }`
+// struct, `(pat, ...)` tuple, and literal patterns (`-N`, `42`, `"hi"`, `true`,
+// `'a'`).
+func parse_pattern_atom(s: TokenStream) -> Result<Pattern, ParseError>:
+    let source_id = stream_source_id(s)
+    // Wildcard `_` (lexed as Ident("_")).
+    if peek_kind_is_ident_named(s, "_"):
+        let tok = stream_advance_after_peek(s)
+        return Result.Ok(Pattern.Wildcard(tok.span))
+    // Identifier-starting OR literal OR tuple patterns: peek + classify.
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        return Result.Err(pattern_expected_error(s))
+    let tok = stream_unwrap(opt)
+    let k = tok.kind
+    // Literal pattern: route through the primary expr parser, then collapse
+    // the resulting Expr.Literal back into Pattern.Literal.
+    if is_pattern_literal_kind(k):
+        let expr = parse_primary(s)?
+        let lit_opt = expr_as_literal(expr)
+        if lit_opt != Option.None:
+            let lp = unwrap_literal_parts(lit_opt)
+            return Result.Ok(Pattern.Literal(lp.lit, lp.span))
+        return Result.Err(err_with("expected a literal pattern, found an expression", expr_span(expr), ErrorCode.UnexpectedToken))
+    // Negative literal `-N` (collapse Minus + IntLit into Literal::Int(-N)).
+    if k == TokenKind.Minus:
+        let saved = stream_save(s)
+        let _m = stream_advance(s)
+        let next_opt = stream_peek(s)
+        if next_opt != Option.None:
+            let next = stream_unwrap(next_opt)
+            let nv = int_lit_value(next.kind)
+            if nv != int_lit_none_sentinel():
+                let _v = stream_advance(s)
+                return Result.Ok(Pattern.Literal(Literal.Int(int_neg(nv)), span_new(tok.span.start, next.span.end, source_id)))
+        // Not a negative literal — roll back.
+        stream_restore(s, saved)
+    // Tuple pattern `(subpat, subpat, ...)`.
+    if k == TokenKind.LParen:
+        let lp = stream_expect(s, TokenKind.LParen)?
+        let subs = Vector.new()
+        if stream_peek_kind(s) != Option.Some(TokenKind.RParen):
+            let _ = parse_pattern_sublist(s, subs, "tuple")?
+        let rp = stream_expect(s, TokenKind.RParen)?
+        return Result.Ok(Pattern.Tuple(subs, span_new(lp.span.start, rp.span.end, source_id)))
+    // Identifier-starting: bare ident, `Ident(subpats)`, or `Ident { fields }`.
+    if is_any_ident_kind(k):
+        let _i = stream_advance(s)
+        let name = ident_kind_value(k)
+        let ident = ident_new(name, tok.span)
+        // Variant tuple: `Ident ( subpat, ... )`.
+        if stream_peek_kind(s) == Option.Some(TokenKind.LParen):
+            let _lp = stream_advance(s)
+            let subpats = Vector.new()
+            if stream_peek_kind(s) != Option.Some(TokenKind.RParen):
+                let _ = parse_pattern_sublist(s, subpats, "variant")?
+            let rparen = stream_expect(s, TokenKind.RParen)?
+            // enum_name placeholder "" — codegen/exhaustiveness resolve by name.
+            return Result.Ok(Pattern.Variant(ident_new("", tok.span), ident, subpats, span_new(tok.span.start, rparen.span.end, source_id)))
+        // Struct destructuring `Name { field: pat, ... }`.
+        if stream_peek_kind(s) == Option.Some(TokenKind.LBrace):
+            let _lb = stream_expect(s, TokenKind.LBrace)?
+            let fields = Vector.new()
+            if stream_peek_kind(s) != Option.Some(TokenKind.RBrace):
+                let _ = parse_struct_pattern_fields(s, fields, source_id)?
+            let rb = stream_expect(s, TokenKind.RBrace)?
+            return Result.Ok(Pattern.Struct(ident, fields, span_new(tok.span.start, rb.span.end, source_id)))
+        // Bare unit variant / binding.
+        return Result.Ok(Pattern.Ident(ident, tok.span))
+    // Fall-through: unexpected token at pattern position.
+    return Result.Err(pattern_expected_error(s))
+
+// Parse comma-separated subpatterns inside `(` ... `)`, appending to `subs`.
+// `what` labels the construct for error messages. Stops at `)`.
+func parse_pattern_sublist(s: TokenStream, subs: Vector<Pattern>, what: String) -> Result<Int, ParseError>:
+    for true:
+        subs.push(parse_pattern(s)?)
+        let pk = stream_peek_kind(s)
+        if pk == Option.Some(TokenKind.Comma):
+            let _c = stream_advance(s)
+            if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
+                return Result.Ok(0)
+        if pk == Option.Some(TokenKind.RParen):
+            return Result.Ok(0)
+        let span = peek_span_or_eof(s)
+        let found = peek_kind_display(s)
+        return Result.Err(err_with("expected comma or closing-paren in " + what + " pattern, found `" + found + "`", span, ErrorCode.UnexpectedToken))
+
+// Parse `field: subpattern` (or shorthand `field`) entries of a struct
+// destructuring pattern, appending to `fields`. Stops at `}`.
+func parse_struct_pattern_fields(s: TokenStream, fields: Vector<(Ident, Pattern)>, source_id: SourceId) -> Result<Int, ParseError>:
+    for true:
+        let ftok = opt_advance_or_err(s, "expected struct field name, found end of input")?
+        if is_any_ident_kind(ftok.kind) == false:
+            let found = token_kind_to_string(ftok.kind)
+            return Result.Err(err_with("expected struct field name (identifier), found `" + found + "`", ftok.span, ErrorCode.UnexpectedToken))
+        let field_ident = ident_new(ident_kind_value(ftok.kind), ftok.span)
+        // Explicit `field: subpattern` OR shorthand `field` (binds to a
+        // pattern of the same name).
+        let mut subpat = Pattern.Ident(field_ident, ftok.span)
+        if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
+            let _c = stream_advance(s)
+            subpat = parse_pattern(s)?
+        fields.push((field_ident, subpat))
+        let pk = stream_peek_kind(s)
+        if pk == Option.Some(TokenKind.Comma):
+            let _c = stream_advance(s)
+            if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
+                return Result.Ok(0)
+        if pk == Option.Some(TokenKind.RBrace):
+            return Result.Ok(0)
+        let span = peek_span_or_eof(s)
+        let found = peek_kind_display(s)
+        return Result.Err(err_with("expected comma or closing-brace in struct pattern, found `" + found + "`", span, ErrorCode.UnexpectedToken))
+
+// ---------------------------------------------------------------------------
+// T23 — minimal closure `{ params => expr }`
+// ---------------------------------------------------------------------------
+
+// Parse a minimal closure `{ ident (, ident)* => expr }`. Param types are
+// inferred (placeholder TypeRef stored; codegen emits `|name|`).
+func parse_closure(s: TokenStream) -> Result<Expr, ParseError>:
+    let lb = stream_expect(s, TokenKind.LBrace)?
+    let params = Vector.new()
+    for true:
+        let ptok = opt_advance_or_err(s, "expected closure parameter name, found end of input")?
+        if is_any_ident_kind(ptok.kind) == false:
+            let found = token_kind_to_string(ptok.kind)
+            return Result.Err(err_with("expected closure parameter name, found `" + found + "`", ptok.span, ErrorCode.UnexpectedToken))
+        params.push(Param.new(name: ident_new(ident_kind_value(ptok.kind), ptok.span), ty: TypeRef.Named(ident_new("_", ptok.span), ptok.span), default_value: Option.None, is_comptime: false, span: ptok.span))
+        if stream_peek_kind(s) == Option.Some(TokenKind.Comma):
+            let _c = stream_advance(s)
+            continue
+        break
+    let arrow = stream_expect(s, TokenKind.FatArrow)?
+    let body_expr = expr_parse_expression(s)?
+    let rb = stream_expect(s, TokenKind.RBrace)?
+    let body = Block.new(stmts: [Stmt.ExprStmt(body_expr, arrow.span)], span: span_new(lb.span.start, rb.span.end, stream_source_id(s)))
+    let span = span_new(lb.span.start, rb.span.end, stream_source_id(s))
+    return Result.Ok(Expr.Lambda(params, body, Option.None, span))
+
+// ---------------------------------------------------------------------------
+// Pattern / token-kind classification helpers
+// ---------------------------------------------------------------------------
+
+// The Span carried by a Pattern (mirrors Rust Pattern::span()).
+func pattern_span(p: Pattern) -> Span:
+    return match p {
+        Wildcard(sp) => sp,
+        Literal(_, sp) => sp,
+        Ident(_, sp) => sp,
+        Variant(_, _, _, sp) => sp,
+        Tuple(_, sp) => sp,
+        Struct(_, _, sp) => sp,
+        Or(_, sp) => sp,
+    }
+
+// True when the next peek kind is `Ident(name)` with the given name.
+func peek_kind_is_ident_named(s: TokenStream, name: String) -> Bool:
+    return stream_peek_kind(s) == Option.Some(TokenKind.Ident(name))
+
+// True when the token kind is one of the literal-pattern kinds.
+func is_pattern_literal_kind(k: TokenKind) -> Bool:
+    if is_numeric_lit_kind(k):
+        return true
+    if is_char_lit_kind(k):
+        return true
+    if k == TokenKind.KwTrue:
+        return true
+    if k == TokenKind.KwFalse:
+        return true
+    if k == TokenKind.StringStart:
+        return true
+    return false
+
+func is_numeric_lit_kind(k: TokenKind) -> Bool:
+    return match k {
+        IntLit(_) => true,
+        FloatLit(_) => true,
+        DoubleLit(_) => true,
+        ByteLit(_) => true,
+        DecimalLit(_) => true,
+        _ => false,
+    }
+
+func is_char_lit_kind(k: TokenKind) -> Bool:
+    return match k {
+        CharLit(_) => true,
+        _ => false,
+    }
+
+// Extract the Int payload from an IntLit(_) kind. Returns a sentinel when the
+// kind is not IntLit (the caller checks via int_lit_none_sentinel()).
+func int_lit_value(k: TokenKind) -> Int:
+    return match k {
+        IntLit(v) => v,
+        _ => int_lit_none_sentinel(),
+    }
+
+func int_lit_none_sentinel() -> Int:
+    return 0
+
+func int_neg(n: Int) -> Int:
+    return 0 - n
+
+// If expr is Expr.Literal(lit, span), return the parts; else Option.None.
+struct LiteralParts {
+    lit: Literal,
+    span: Span,
+}
+
+func expr_as_literal(e: Expr) -> Option<LiteralParts>:
+    return match e {
+        Literal(lit, sp) => Option.Some(LiteralParts.new(lit: lit, span: sp)),
+        _ => Option.None,
+    }
+
+func unwrap_literal_parts(opt: Option<LiteralParts>) -> LiteralParts:
+    return match opt {
+        Some(p) => p,
+        None => LiteralParts.new(lit: Literal.Int(0), span: span_dummy()),
+    }
+
+func expr_span(e: Expr) -> Span:
+    return match e {
+        Literal(_, sp) => sp,
+        Ident(_, sp) => sp,
+        BinaryOp(_, _, _, sp) => sp,
+        UnaryOp(_, _, sp) => sp,
+        IfExpr(_, _, _, sp) => sp,
+        FuncCall(_, _, sp) => sp,
+        MethodCall(_, _, _, sp) => sp,
+        Lambda(_, _, _, sp) => sp,
+        StructInit(_, _, sp) => sp,
+        MatchExpr(_, _, sp) => sp,
+        SuspendExpr(_, sp) => sp,
+        ArrayLit(_, sp) => sp,
+        Index(_, _, sp) => sp,
+        StringInterp(_, sp) => sp,
+        MapLit(_, sp) => sp,
+        Try(_, sp) => sp,
+        Spawn(_, sp) => sp,
+        Range(_, _, _, sp) => sp,
+        IfLet(_, _, _, _, sp) => sp,
+        TupleLit(_, sp) => sp,
+        NamedArg(_, _, sp) => sp,
+    }
+
+// Span end of the last pattern in a vector, or `fallback` when empty.
+func vec_last_pattern_end(v: Vector<Pattern>, fallback: Int) -> Int:
+    if v.is_empty():
+        return fallback
+    return pattern_span(v[v.len() - 1]).end
+
+// "expected a match pattern, found `<kind>`" error at the current position.
+func pattern_expected_error(s: TokenStream) -> ParseError:
+    let span = peek_span_or_eof(s)
+    let found = peek_kind_display(s)
+    return err_with("expected a match pattern, found `" + found + "`", span, ErrorCode.UnexpectedToken)
+
+// ---------------------------------------------------------------------------
+// Shared helpers (re-declared so this file is self-contained for the parse
+// path)
+// ---------------------------------------------------------------------------
+
+func opt_advance_or_err(s: TokenStream, msg: String) -> Result<Token, ParseError>:
+    let opt = stream_advance(s)
+    if opt == Option.None:
+        return Result.Err(err_with(msg, stream_eof_span(s), ErrorCode.UnexpectedToken))
+    return Result.Ok(stream_unwrap(opt))
+
+func peek_span_or_eof(s: TokenStream) -> Span:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        return stream_eof_span(s)
+    return stream_unwrap(opt).span
+
+func peek_kind_display(s: TokenStream) -> String:
+    let opt = stream_peek_kind(s)
+    if opt == Option.None:
+        return "end of input"
+    return token_kind_to_string(stream_unwrap_kind(opt))
+
+func stream_unwrap(opt: Option<Token>) -> Token:
+    return match opt {
+        Some(t) => t,
+        None => Token.new(kind: TokenKind.Eof, span: span_dummy()),
+    }
+
+func stream_unwrap_kind(opt: Option<TokenKind>) -> TokenKind:
+    return match opt {
+        Some(k) => k,
+        None => TokenKind.Eof,
+    }
+
+func err_with(msg: String, span: Span, code: ErrorCode) -> ParseError:
+    return parse_error_new(diagnostic_error(msg, span), code)
+
+func is_any_ident_kind(k: TokenKind) -> Bool:
+    return match k {
+        Ident(_) => true,
+        _ => false,
+    }
+
+func ident_kind_value(k: TokenKind) -> String:
+    return match k {
+        Ident(s) => s,
+        _ => "",
+    }
