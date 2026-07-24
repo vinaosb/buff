@@ -48,6 +48,8 @@ pub mod prelude_types;
 // (God Class split). Re-exported via prelude_types so the public API
 // is unchanged.
 pub mod prelude_type_metadata;
+// T105b: PreludeAssocFn enum + impl + lookup extracted from prelude_types.rs.
+pub mod prelude_assoc_fn_impl;
 // T1: project-level parse entry point + span-aware error formatting.
 pub mod project;
 // T1: cross-file symbol resolution table.
