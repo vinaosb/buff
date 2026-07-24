@@ -1,0 +1,214 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/derive_attrs.rs` (T18, Track C).
+//
+// T105a — derive/repr attribute builders (mechanically extracted from
+// rust_codegen.rs).
+//
+// Verbatim move from the parent — no logic changes. Child module of
+// rust_codegen so it inherits the parent imports via `use super::*` (zero
+// per-module import lists). Functions are `pub(super)` so the parent reaches
+// them through the glob below.
+//
+// The Rust reference is 257 LOC. The Buff port mirrors the public API
+// surface (derive_and_repr_attrs, struct_derive_attrs, push_repr_c_attr,
+// gpu_struct_derive_attrs, type_is_hash_safe).
+
+// =============================================================================
+// Opaque handles (forward declarations)
+// =============================================================================
+
+struct SynAttribute:
+    opaque_handle: Int
+
+struct TypeRef:
+    opaque_handle: Int
+
+// =============================================================================
+// derive_and_repr_attrs — T26 helper: `#[derive(Clone, Debug)]` + optional repr(C)
+// =============================================================================
+//
+// Build the attribute list for a generated struct: always
+// `#[derive(Clone, Debug)]`, plus an optional `#[repr(C)]` when `emit_repr_c`
+// is true (T26 hook).
+//
+// Ordering: derive attribute first, then `#[repr(C)]` (matching the layout
+// the T26 snapshot asserts). Both attributes use `syn::Attribute` construction
+// (meta list / path) so they survive `prettyplease` formatting without
+// round-tripping through strings.
+//
+// This is the shared derive-attribute helper extracted during the T26
+// REFACTOR step: future struct-like decls (enum repr hints, future trait
+// derives) reuse this function. The signature is `(emit_repr_c: bool) -> Vec<Attribute>`
+// so callers stay in control of whether repr(C) applies.
+
+func derive_and_repr_attrs(emit_repr_c: Bool) -> Vector<SynAttribute>:
+    let derive_attr = build_derive_attr_with_traits(Vector.from_list(["Clone", "Debug"]))
+    let attrs = Vector.new()
+    attrs.push(derive_attr)
+    if emit_repr_c:
+        push_repr_c_attr(attrs)
+    return attrs
+
+// =============================================================================
+// struct_derive_attrs — T107 helper for STRUCTS
+// =============================================================================
+//
+// Structs ALWAYS derive `Clone`, `PartialEq`, `Debug` (T107 extends T26's
+// `Clone + Debug` baseline). The `Hash` derive is added CONDITIONALLY — only
+// when `type_is_hash_safe` reports that ALL the struct's field types
+// (recursively, across user struct references) impl `Hash`.
+//
+// Emits one of:
+//   #[derive(Clone, PartialEq, Hash, Debug)]   // all fields Hash-safe
+//   #[derive(Clone, PartialEq, Debug)]         // some field non-Hash
+//
+// followed by an optional `#[repr(C)]` (between derive and `pub struct`) when
+// `emit_repr_c` is true — identical ordering to the T26 helper.
+//
+// # Why `PartialEq` is unconditional
+//
+// Every Rust primitive Buff maps to (`i64`, `f32`, `String`, `bool`,
+// `rust_decimal::Decimal`, …) impls `PartialEq`, including floats (which impl
+// `PartialEq` but NOT `Eq`/`Hash`). So `PartialEq` is always safe.
+//
+// # Why `Hash` is conditional
+//
+// Rust's derived `Hash` impl requires every field type to impl `Hash`. `f32`
+// and `f64` do NOT impl `Hash` (NaN isn't hashable). `Vec<T>` and
+// `HashMap<K,V>` do NOT impl `Hash` in std either. So a struct with a
+// float/Vec/Map field cannot derive `Hash` — the caller must precompute
+// field-Hash-safety (see `compute_hash_safe_structs`) and pass the result via
+// `include_hash`.
+
+func struct_derive_attrs(emit_repr_c: Bool, include_hash: Bool) -> Vector<SynAttribute>:
+    // Build the trait list: Clone, PartialEq, [Hash,] Debug — Debug always last.
+    let traits = Vector.new()
+    traits.push("Clone")
+    traits.push("PartialEq")
+    if include_hash:
+        traits.push("Hash")
+    traits.push("Debug")
+    let derive_attr = build_derive_attr_with_traits(traits)
+    let attrs = Vector.new()
+    attrs.push(derive_attr)
+    if emit_repr_c:
+        push_repr_c_attr(attrs)
+    return attrs
+
+// =============================================================================
+// push_repr_c_attr — T107 helper: append `#[repr(C)]` to the attribute list
+// =============================================================================
+
+func push_repr_c_attr(attrs: Vector<SynAttribute>):
+    attrs.push(build_repr_c_attr())
+
+// =============================================================================
+// gpu_struct_derive_attrs — T50 helper: GPU-bound struct derives
+// =============================================================================
+//
+// GPU-bound structs (those that flow through a `par_map` / `par_filter` /
+// `par_reduce` combinator — see gpu_alignment.buff) must have a stable C
+// layout so their byte representation is well-defined for `wgpu`
+// storage-buffer upload / readback via `bytemuck::cast_slice`. This helper
+// emits:
+//
+//   #[derive(Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+//   #[repr(C)]
+//
+// # Why `Copy` is unconditional
+//
+// `bytemuck::Pod` REQUIRES `Copy` (it's part of the unsafe contract — Pod
+// types must be freely bit-copyable). So every GPU-bound struct must be
+// `Copy`. For v1.0 we assume GPU-bound structs have only primitive Pod fields
+// (Int / Float / Bool / Byte / nested Pod structs / arrays-of-Pod) — if a
+// field is NOT Pod-compatible (e.g. `String`, `Vec`, `Map`), the generated
+// `#[derive(... bytemuck::Pod ...)]` will fail to compile and rustc surfaces
+// the error at build time. This is an acceptable v1.0 limitation: GPU kernels
+// over collections-of-collections are out of scope.
+//
+// # Why `Hash` is omitted
+//
+// `Hash` requires every field to impl `Hash`. `f32` / `f64` (the most common
+// GPU-struct field types — coordinates, colours, intensities) do NOT impl
+// `Hash` (NaN is not hashable). So a GPU-bound struct CANNOT generally derive
+// `Hash`. We omit it unconditionally from the GPU derive path; users who need
+// Hash on a GPU-bound struct can implement it manually (a v1.0+ concern).
+//
+// # Why `PartialEq` is kept
+//
+// `f32` / `f64` DO impl `PartialEq` (bit-equality, with the usual NaN
+// caveat). So a GPU-bound struct with Float fields CAN derive `PartialEq`,
+// and it's useful for testing (asserting CPU-vs-GPU parity in dispatch
+// tests). Kept unconditional.
+//
+// # Ordering
+//
+// Derive attribute first (with the bytemuck paths LAST so users reading
+// generated source see the familiar std derives first), then `#[repr(C)]`
+// between the derive and `pub struct` — identical ordering to
+// `struct_derive_attrs`.
+
+func gpu_struct_derive_attrs() -> Vector<SynAttribute>:
+    let traits = Vector.new()
+    traits.push("Clone")
+    traits.push("Copy")
+    traits.push("PartialEq")
+    traits.push("Debug")
+    traits.push("bytemuck::Pod")
+    traits.push("bytemuck::Zeroable")
+    let derive_attr = build_derive_attr_with_traits(traits)
+    let attrs = Vector.new()
+    attrs.push(derive_attr)
+    push_repr_c_attr(attrs)
+    return attrs
+
+// =============================================================================
+// type_is_hash_safe — T107 recursive Hash-safety check
+// =============================================================================
+//
+// Is the given `TypeRef` "Hash-safe" — i.e. would the corresponding Rust type
+// impl `Hash`?
+//
+// Used by `struct_derive_attrs` (via `RustCodegen.lower_struct_decl`) to
+// decide whether a struct can carry the `Hash` derive. The check is RECURSIVE
+// across composite types:
+//
+// - **Named primitives**: `Int`/`Byte`/`Bits`/`Bool`/`String`/`Char`/
+//   `Decimal` → `true` (all map to Hash-impl'ing Rust types). `Float`/
+//   `Double` → `false` (f32/f64 don't impl Hash).
+// - **Named user types** (struct/enum): `true` iff the type name is in
+//   `hash_safe_user_structs` — a precomputed set built by
+//   `compute_hash_safe_structs` that does a fixpoint pass over all struct
+//   decls (so `struct A { b: B }` is Hash-safe iff `B` is too). Enums are
+//   conservatively assumed Hash-safe.
+// - **`Option<T>`**: `true` iff `T` is Hash-safe (Option<T>: Hash when T: Hash).
+// - **`Tuple<T,U,…>` / `Union<A,B,…>`**: `true` iff EVERY member is Hash-safe.
+// - **`Generic { base, args }`**: `false` — collections (`Vector<T>` →
+//   `Vec<T>`, `Map<K,V>` → `HashMap<K,V>`) don't impl Hash in std.
+// - **`Function { .. }`**: `false` — Buff closures lower to boxed `Fn` types
+//   which don't reliably impl Hash.
+
+func type_is_hash_safe(ty: TypeRef, hash_safe_user_structs: BTreeSet<String>) -> Bool:
+    // (Recursive match — see the doc comment above for the full case table.)
+    return type_is_hash_safe_impl(ty, hash_safe_user_structs)
+
+// =============================================================================
+// Implementation shims (extern bindings to syn::Attribute constructors)
+// =============================================================================
+//
+// The actual syn construction is delegated to extern "Rust" bindings. The
+// `build_derive_attr_with_traits` and `build_repr_c_attr` shims wrap the
+// quote!-based token assembly the Rust reference uses.
+
+struct BTreeSet_String:
+    opaque_handle: Int
+
+// Type alias for readability — Buff has no `type` alias in v1.x surface, so
+// we use the underlying struct name directly in signatures above.
+func btreeset_string_new() -> BTreeSet_String:
+    return BTreeSet_String.new(opaque_handle: 0)
+
+extern "Rust" {
+    fn build_derive_attr_with_traits(traits: Vector<String>) -> SynAttribute
+    fn build_repr_c_attr() -> SynAttribute
+    fn type_is_hash_safe_impl(ty: TypeRef, set: BTreeSet_String) -> Bool
+}

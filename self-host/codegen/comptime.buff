@@ -1,0 +1,176 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/comptime.rs` (T18, Track C).
+//
+// T53 — Rust codegen lowering for `comptime` blocks.
+//
+// Consumes a `ComptimeFacts` produced by `analyze_program` (see
+// self-host/types/comptime.buff) and emits a `syn::Item::Const` for each
+// successfully evaluated comptime block. The `const` item carries the
+// evaluated value as a Rust literal, so the runtime never re-evaluates the
+// comptime body.
+//
+// # Naming
+//
+// Each `const` item gets a deterministic name: `__BUFF_COMPTIME_<offset>`
+// where `<offset>` is the byte-offset of the original `comptime` block's
+// source span. The offset is unique per source file, so two comptime blocks
+// never collide. The name is intentionally ugly — the user references
+// comptime values via their original `let` bindings, not the synthesised
+// `const` (the binding-vs-const rewiring is post-v1.x work).
+//
+// # Determinism
+//
+// Items are emitted in source-span order (BTreeMap iteration order). Same
+// comptime facts → byte-identical Rust source.
+//
+// # Errors
+//
+// Returns `CodegenError` with code E1304 if a `ComptimeValue` cannot be
+// lowered (the interpreter produced a value shape codegen doesn't support —
+// currently only `Unit`, which has no Rust literal form).
+//
+// The Rust reference is 143 LOC. The Buff port mirrors the public API
+// surface (lower_comptime_facts) and the private helpers
+// (lower_one, format_const_name, rust_type_for, rust_expr_for).
+
+// =============================================================================
+// Opaque handles (forward declarations — see syn_helpers.buff + lib.buff)
+// =============================================================================
+
+struct Item:
+    opaque_handle: Int
+
+struct SynExpr:    // re-exported from conv_helpers.buff
+    opaque_handle: Int
+
+struct SynType:
+    opaque_handle: Int
+
+struct ComptimeFacts:
+    values: Map<Int, ComptimeValue>
+
+struct ComptimeValueKind:
+    opaque_handle: Int
+
+// The ComptimeValue variant payload is opaque (matches the buff-lang-types
+// port). The codegen port only needs to dispatch on the variant tag.
+struct ComptimeValue:
+    kind: ComptimeValueKind
+    payload_int: Int
+    payload_bool: Bool
+    payload_string: String
+    payload_array: Vector<ComptimeValue>
+
+struct CodegenError:
+    opaque_handle: Int
+
+struct BuffSpan:
+    opaque_handle: Int
+
+// =============================================================================
+// lower_comptime_facts — public entry point
+// =============================================================================
+//
+// Lower every value in `facts` to a top-level Rust `const` item. Returns the
+// items in source-span order (smallest offset first). The caller
+// (`RustCodegen.generate`) prepends them to the items Vec BEFORE user
+// declarations, so user code can reference the consts (though typically the
+// user references the original `let` bindings instead — name rewiring is
+// deferred).
+
+func lower_comptime_facts(facts: ComptimeFacts) -> Result<Vector<Item>, CodegenError>:
+    let items = Vector.new()
+    // Iterate facts.values in BTreeMap order (source-span offset ascending).
+    // For each (&offset, value), call lower_one(offset, value) and push on Ok,
+    // propagate on Err.
+    let offsets = facts_values_offsets(facts)
+    let mut i = 0
+    for i < offsets.len():
+        let offset = offsets.get(i)
+        let value = facts_values_get(facts, offset)
+        match lower_one(offset, value):
+            Result.Ok(item):
+                items.push(item)
+            Result.Err(e):
+                return Result.Err(e)
+        i = i + 1
+    return Result.Ok(items)
+
+// =============================================================================
+// lower_one — emit one `const __BUFF_COMPTIME_<offset>: T = expr;` item
+// =============================================================================
+
+func lower_one(offset: Int, value: ComptimeValue) -> Result<Item, CodegenError>:
+    let name = format_const_name(offset)
+    let ty = rust_type_for(value)
+    match rust_expr_for(value, span_for(offset)):
+        Result.Ok(expr):
+            return Result.Ok(build_item_const(name, ty, expr))
+        Result.Err(e):
+            return Result.Err(e)
+
+// =============================================================================
+// format_const_name — `__BUFF_COMPTIME_<offset>`
+// =============================================================================
+
+func format_const_name(offset: Int) -> String:
+    return "__BUFF_COMPTIME_" + int_to_string(offset)
+
+// =============================================================================
+// span_for — placeholder span (always BuffSpan::dummy in v1.x)
+// =============================================================================
+
+func span_for(offset: Int) -> BuffSpan:
+    return buff_span_dummy()
+
+// =============================================================================
+// rust_type_for — pick the Rust type for a ComptimeValue
+// =============================================================================
+//
+// Int → `i64`, Bool → `bool`, String → `String`, Unit → `()` (error path),
+// Array(els) → `Vec<E>` where E is the first element's type (or `()` if empty).
+
+func rust_type_for(value: ComptimeValue) -> SynType:
+    // (match value:
+    //   Int(_) → parse_simple_type("i64")
+    //   Bool(_) → parse_simple_type("bool")
+    //   String(_) → parse_simple_type("String")
+    //   Unit → parse_simple_type("()")
+    //   Array(els) → { let elem = els.first().map(rust_type_for)
+    //                                     .unwrap_or(parse_simple_type("()"));
+    //                  parse_simple_type("Vec<" + type_to_source(elem) + ">") })
+    return rust_type_for_impl(value)
+
+// =============================================================================
+// rust_expr_for — pick the Rust literal expression for a ComptimeValue
+// =============================================================================
+//
+// Returns `CodegenError` (E1304) for `Unit` (no Rust literal form). Array
+// variants produce `ExprArray` with comma-separated element literals.
+
+func rust_expr_for(value: ComptimeValue, span: BuffSpan) -> Result<SynExpr, CodegenError>:
+    // (match value:
+    //   Int(i) → Ok(SynExpr::Lit(Lit::Int(LitInt::new("{i}i64"))))
+    //   Bool(b) → Ok(SynExpr::Lit(Lit::Bool(LitBool { value: b })))
+    //   String(s) → Ok(SynExpr::Lit(Lit::Str(LitStr::new(s))))
+    //   Unit → Err(CodegenError::new(Diagnostic::error(
+    //                "cannot lower comptime `()` as a Rust const", span)
+    //                .with_code(ErrorCode::ComptimeLoweringFailed)))
+    //   Array(els) → { let elems = Punctuated::new();
+    //                  for v in els { elems.push(rust_expr_for(v, span)?);
+    //                                  elems.push_punct(Comma) }
+    //                  Ok(SynExpr::Array(ExprArray { elems })) })
+    return rust_expr_for_impl(value, span)
+
+// =============================================================================
+// Implementation shims (extern bindings)
+// =============================================================================
+
+extern "Rust" {
+    fn int_to_string(n: Int) -> String
+    fn buff_span_dummy() -> BuffSpan
+    fn build_item_const(name: String, ty: SynType, expr: SynExpr) -> Item
+    fn rust_type_for_impl(value: ComptimeValue) -> SynType
+    fn rust_expr_for_impl(value: ComptimeValue, span: BuffSpan) -> Result<SynExpr, CodegenError>
+    fn facts_values_offsets(facts: ComptimeFacts) -> Vector<Int>
+    fn facts_values_get(facts: ComptimeFacts, offset: Int) -> ComptimeValue
+}
