@@ -71,12 +71,12 @@ struct CircuitBreaker:
     threshold: Int
     is_open: Bool
 
-func CircuitBreaker.new(threshold: Int) -> CircuitBreaker:
-    return CircuitBreaker.new(
+func create_circuit_breaker(threshold: Int) -> CircuitBreaker:
+    return CircuitBreaker {
         failure_count: 0,
         threshold: threshold,
         is_open: false
-    )
+    }
 
 func CircuitBreaker.record_failure(self):
     self.failure_count = self.failure_count + 1
@@ -152,7 +152,7 @@ func demo_retry():
 func demo_circuit_breaker():
     print("")
     print("--- circuit breaker ---")
-    let cb = CircuitBreaker.new(threshold: 3)
+    let cb = create_circuit_breaker(threshold: 3)
     print("allowed=${cb.allow_request()}")
     cb.record_failure()
     cb.record_failure()

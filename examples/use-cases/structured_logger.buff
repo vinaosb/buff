@@ -62,8 +62,12 @@ struct Logger:
     entries: Vector<LogEntry>
 
 // Create a new logger that only emits entries at or above `min_level`.
-func Logger.new(module: String, min_level: LogLevel) -> Logger:
-    return Logger.new(module: module, min_level: min_level, entries: [])
+func create_logger(module: String, min_level: LogLevel) -> Logger:
+    return Logger {
+        module: module,
+        min_level: min_level,
+        entries: []
+    }
 
 // Check if a level passes the logger's filter.
 func Logger.should_log(self, level: LogLevel) -> Bool:
@@ -71,11 +75,11 @@ func Logger.should_log(self, level: LogLevel) -> Bool:
 
 // Record a log entry (always stored, filtered on output).
 func Logger.log(self, level: LogLevel, message: String) -> String:
-    let entry = LogEntry.new(
+    let entry = LogEntry {
         level: level,
         module: self.module,
         message: message
-    )
+    }
     self.entries.push(entry)
     if self.should_log(level):
         return format_plain(entry)
@@ -117,7 +121,7 @@ func count_by_level(entries: Vector<LogEntry>) -> Map<String, Int>:
 
 func demo_basic_logging():
     print("--- basic logging (min=Info) ---")
-    let log = Logger.new("app.main", min_level: LogLevel.Info)
+    let log = create_logger("app.main", min_level: LogLevel.Info)
     log.debug("initializing subsystems")   // filtered out
     let out1 = log.info("server started on port 8080")
     let out2 = log.warn("memory usage at 82%")
@@ -133,7 +137,7 @@ func demo_basic_logging():
 func demo_debug_mode():
     print("")
     print("--- debug logging (min=Debug) ---")
-    let log = Logger.new("app.debug", min_level: LogLevel.Debug)
+    let log = create_logger("app.debug", min_level: LogLevel.Debug)
     let d = log.debug("entering handle_request()")
     let i = log.info("processing 42 items")
     let w = log.warn("retry attempt 2/3")
@@ -150,7 +154,7 @@ func demo_debug_mode():
 func demo_json_output():
     print("")
     print("--- JSON output ---")
-    let log = Logger.new("app.json", min_level: LogLevel.Debug)
+    let log = create_logger("app.json", min_level: LogLevel.Debug)
     log.info("user login")
     log.warn("deprecated API call")
     log.error("payment failed")
@@ -160,7 +164,7 @@ func demo_json_output():
 func demo_level_counts():
     print("")
     print("--- level counts ---")
-    let log = Logger.new("app.counts", min_level: LogLevel.Debug)
+    let log = create_logger("app.counts", min_level: LogLevel.Debug)
     log.debug("trace A")
     log.debug("trace B")
     log.info("startup")

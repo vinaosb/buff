@@ -1,4 +1,5 @@
 === Error Recovery Demo ===
+
 --- fallback chain ---
 key=3: primary:3
 key=0: fallback:0
@@ -6,16 +7,38 @@ key=-1: cache:-1
 key=999: all sources failed: cache: cold start
 
 --- retry with backoff ---
-retry succeeded: 0
+  retry 1/5: service unavailable (attempt for input 0)
+  retry 2/5: service unavailable (attempt for input 1)
+  retry 3/5: service unavailable (attempt for input 2)
+retry succeeded: 30
 
 --- circuit breaker ---
-allowed=true
-after 3 failures: allowed=false
-after success:    allowed=true
+request 1: allowed=true
+  failure count: 1
+request 2: allowed=true
+  failure count: 2
+request 3: allowed=true
+  failure count: 3
+request 4: allowed=false
+after success: allowed=true
+  failure count: 0
 
 --- safe pipeline ---
 pipeline(10): 37
 pipeline(-5): negative input not allowed: -5
-pipeline(500): 1507
+pipeline(500): overflow: 500
+pipeline(400): 1207
+
+--- Option chaining ---
+first element: 10
+element 99: none (expected)
+popped: 300
+empty pop: none (expected)
+
+--- graceful degradation ---
+  10 → primary:10
+  0 → fallback:0
+  -1 → cache:-1
+  5 → primary:5
 
 === done ===

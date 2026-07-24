@@ -31,21 +31,21 @@ func verify_integrity(data: String, expected_hex: String) -> Result<Bool, Error>
 
 func build_registry() -> Vector<FileRecord>:
     let registry = []
-    registry.push(FileRecord.new(
+    registry.push(FileRecord {
         path: "src/main.buff",
         size: 1024,
         digest: "a1b2c3d4e5f6"
-    ))
-    registry.push(FileRecord.new(
+    })
+    registry.push(FileRecord {
         path: "src/lib.buff",
         size: 2048,
         digest: "deadbeef1234"
-    ))
-    registry.push(FileRecord.new(
+    })
+    registry.push(FileRecord {
         path: "config.toml",
         size: 256,
         digest: "cafebabe5678"
-    ))
+    })
     return registry
 
 // Verify a single file against its expected digest.

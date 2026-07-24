@@ -1,44 +1,45 @@
 # Expected output from `buff check examples/use-cases/cli_tool.buff`
 #
-# Analysis based on reading the check.rs pipeline (lex → parse → TypeInferencer → naming_lint)
-# and prelude_types.rs registrations (4527 lines, only DateTime/Regex/URL/Path/Process registered).
+# Analysis based on the check.rs pipeline (lex → parse → TypeInferencer → naming_lint)
+# and prelude_types.rs / import resolution.
 #
-# STATUS: PASS (with Unknown type warnings)
+# STATUS: FAIL — import cannot be resolved (App is a framework crate, not a prelude type)
 #
-# The file uses:
-# - App API: new, version, about, command, flag, option, arg, parse
-# - ParsedArgs API: subcommand, subcommand_args, flag, option, arg
-# - String methods: upper, lower, reverse, len, split, pad_end (NOT registered in prelude_types.rs)
-# - Option<T> with or(default:) (registered in prelude)
+# What the file exercises:
+#   - `import App from buff.cli` (framework crate import)
+#   - App builder API: App.new("name"), .version(), .about(), .command(), .flag(), .option(), .arg(), .parse()
+#   - ParsedArgs accessors: .subcommand(), .subcommand_args(), .flag(), .option(), .arg()
+#   - Command dispatch via match on subcommand name (Some("parse"), Some("transform"), etc.)
+#   - Option-returning getters: .or(default:) for defaults
+#   - String methods: .upper(), .lower(), .reverse(), .split(separator:), .pad_end(width:, fill:)
+#   - String interpolation: "{text!r}" (repr), "{label}: {body}"
+#   - match on string literals (Some("parse"), _, etc.)
 #
 # What buff check would report:
-# - Lex: OK (all tokens valid)
-# - Parse: OK (all syntax valid)
-# - Type inference: Many Unknown types from unregistered types/methods, but NO hard errors
-#   - App.new(...) → Unknown (App NOT in prelude registry)
-#   - app.version(...) → Unknown
-#   - app.about(...) → Unknown
-#   - app.command(...) → Unknown
-#   - parse_cmd.arg(...) → Unknown
-#   - transform_cmd.flag(...) → Unknown
-#   - transform_cmd.option(...) → Unknown
-#   - app.parse(...) → Unknown
-#   - parsed.subcommand() → Unknown
-#   - parsed.subcommand_args() → Unknown
-#   - parsed.flag(...) → Unknown
-#   - parsed.option(...) → Unknown
-#   - parsed.arg(...) → Unknown
-#   - text.upper() → Unknown
-#   - text.lower() → Unknown
-#   - text.reverse() → Unknown
-#   - text.len() → Unknown
-#   - text.split(...) → Unknown
-#   - "".pad_end(...) → Unknown
-# - naming_lint: May flag unused variables or shadowing
-# - Overall: PASS (permissive type inference allows Unknown types)
+#   Lex:     OK (all tokens valid)
+#   Parse:   OK (all syntax valid)
+#   Modules: FAIL — "import App from buff.cli" cannot resolve
+#            (buff-cli is a framework crate, not registered as an import target)
+#   Types:   Skipped (module resolution failed)
+#   Lint:    Skipped (module resolution failed)
+#   Overall: FAIL (import resolution error)
 #
-# Note: buff check cannot verify end-to-end execution because:
-# 1. App is NOT registered in prelude_types.rs (only documented in cli AGENTS.md)
-# 2. All App/ParsedArgs instance methods are unregistered
-# 3. String instance methods (upper, lower, reverse, etc.) are NOT registered
-# 4. This is a FORWARD-DECLARED example (see file header comment)
+# If imports were resolved, the type-level analysis would report:
+#   - App.new("textool") → App (associated function)
+#   - .command("parse", about:) → Command (builder)
+#   - .flag("verbose", short:, description:) → Builder (fluent)
+#   - .option("op", short:, description:) → Builder
+#   - .arg("input", description:) → Builder
+#   - app.parse(Args.all()) → ParsedArgs
+#   - parsed.subcommand() → Option<String>
+#   - parsed.flag("verbose") → Bool
+#   - parsed.option("op") → Option<String>
+#   - parsed.arg("input") → Option<String>
+#   - .or(default:) → T (resolves the Option)
+#
+# Pure functions (to_upper, to_lower, reverse, apply_transform) are
+# independently testable and would pass buff check in isolation.
+#
+# This file is a FORWARD-DECLARED specification of the intended user surface.
+# It feeds the T8 codegen task and is NOT expected to pass buff check until
+# buff-cli's import path is registered.
