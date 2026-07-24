@@ -35,6 +35,7 @@ impl From<CpuDispatcherError> for RuntimeError {
     fn from(err: CpuDispatcherError) -> Self {
         Self::Unsupported {
             detail: err.to_string(),
+            span: None,
         }
     }
 }

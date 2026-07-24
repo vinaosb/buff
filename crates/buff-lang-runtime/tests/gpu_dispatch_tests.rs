@@ -129,7 +129,7 @@ fn x_squared_plus_one_lambda() -> Expr {
 fn try_get_real_backend() -> Option<WgpuBackend> {
     match WgpuBackend::new() {
         Ok(backend) => Some(backend),
-        Err(RuntimeError::GpuUnavailable) => None,
+        Err(RuntimeError::GpuUnavailable { .. }) => None,
         Err(other) => panic!("unexpected error constructing WgpuBackend: {other:?}"),
     }
 }
@@ -223,7 +223,7 @@ fn test_gpu_dispatch_no_gpu_returns_unavailable_error() {
     let wgsl = generate_wgsl(&lambda).expect("codegen");
     let input = vec![1.0_f32, 2.0, 3.0];
     match backend.dispatch_map(&wgsl, &input) {
-        Err(RuntimeError::GpuUnavailable) => {
+        Err(RuntimeError::GpuUnavailable { .. }) => {
             // expected — graceful no-GPU path
         }
         Err(other) => panic!(
@@ -402,7 +402,7 @@ fn test_gpu_dispatch_usable_as_box_dyn_gpu_backend() {
     // its Send + Sync bounds, this would fail to compile.
     let backend: Box<dyn GpuBackend> = match WgpuBackend::new() {
         Ok(b) => Box::new(b),
-        Err(RuntimeError::GpuUnavailable) => Box::new(unavailable_backend()),
+        Err(RuntimeError::GpuUnavailable { .. }) => Box::new(unavailable_backend()),
         Err(other) => panic!("unexpected error: {other:?}"),
     };
     // Empty input works through the trait object on any host.
@@ -443,7 +443,7 @@ fn test_gpu_dispatch_new_result_shape_is_runtime_error() {
         Ok(backend) => {
             assert!(backend.context().has_adapter());
         }
-        Err(RuntimeError::GpuUnavailable) => {
+        Err(RuntimeError::GpuUnavailable { .. }) => {
             // expected on no-GPU hosts
         }
         Err(other) => panic!("unexpected error variant: {other:?}"),
@@ -578,7 +578,7 @@ fn test_gpu_dispatch_wgpu_backend_is_send_sync() {
     // Also usable across threads via Arc (mirrors the mock test pattern).
     let backend = match WgpuBackend::new() {
         Ok(b) => std::sync::Arc::new(b),
-        Err(RuntimeError::GpuUnavailable) => std::sync::Arc::new(unavailable_backend()),
+        Err(RuntimeError::GpuUnavailable { .. }) => std::sync::Arc::new(unavailable_backend()),
         Err(other) => panic!("unexpected: {other:?}"),
     };
     let backend_clone = std::sync::Arc::clone(&backend);

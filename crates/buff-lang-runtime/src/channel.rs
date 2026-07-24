@@ -170,6 +170,7 @@ impl<T> Sender<T> {
             .await
             .map_err(|_| RuntimeError::Unsupported {
                 detail: "channel send failed (receiver dropped)".to_string(),
+                span: None,
             })
     }
 }

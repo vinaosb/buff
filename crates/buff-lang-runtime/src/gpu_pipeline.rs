@@ -102,9 +102,10 @@ use crate::mock_gpu::GpuBackend;
 /// match.
 pub(crate) fn gpu_ctx_err_to_runtime(e: &GpuContextError) -> RuntimeError {
     match e {
-        GpuContextError::NoAdapter => RuntimeError::GpuUnavailable,
+        GpuContextError::NoAdapter => RuntimeError::GpuUnavailable { span: None },
         GpuContextError::DeviceRequest(detail) => RuntimeError::GpuInit {
             detail: detail.clone(),
+            span: None,
         },
     }
 }
@@ -419,6 +420,7 @@ fn run_dispatch(
     if let Err(e) = device.poll(wgpu::PollType::Wait) {
         return Err(RuntimeError::GpuInit {
             detail: format!("device.poll(Wait) failed: {e:?}"),
+            span: None,
         });
     }
 
@@ -446,6 +448,7 @@ fn run_dispatch(
     if let Err(e) = device.poll(wgpu::PollType::Wait) {
         return Err(RuntimeError::GpuInit {
             detail: format!("device.poll(Wait) for map_async failed: {e:?}"),
+            span: None,
         });
     }
 
@@ -453,9 +456,11 @@ fn run_dispatch(
     // fires or is dropped — both lead to a deterministic outcome.
     let map_result = rx.recv().map_err(|e| RuntimeError::GpuInit {
         detail: format!("map_async callback did not fire (sender dropped): {e}"),
+        span: None,
     })?;
     map_result.map_err(|e| RuntimeError::GpuInit {
         detail: format!("map_async(BufferAsyncError): {e:?}"),
+        span: None,
     })?;
 
     // ----- 11. Read mapped range → Vec<f32> --------------------------------

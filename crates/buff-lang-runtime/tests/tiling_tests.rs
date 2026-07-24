@@ -88,7 +88,7 @@ fn x_times_two_lambda() -> Expr {
 fn try_get_real_backend() -> Option<WgpuBackend> {
     match WgpuBackend::new() {
         Ok(backend) => Some(backend),
-        Err(RuntimeError::GpuUnavailable) => None,
+        Err(RuntimeError::GpuUnavailable { .. }) => None,
         Err(other) => panic!("unexpected error constructing WgpuBackend: {other:?}"),
     }
 }
@@ -439,7 +439,7 @@ fn test_tiling_real_gpu_dispatch_map_with_tiling_uses_gpu_path() {
     // element-wise map).
     let backend = match WgpuBackend::new() {
         Ok(b) => b,
-        Err(RuntimeError::GpuUnavailable) => return,
+        Err(RuntimeError::GpuUnavailable { .. }) => return,
         Err(other) => panic!("unexpected: {other:?}"),
     };
     let lambda = x_times_two_lambda();

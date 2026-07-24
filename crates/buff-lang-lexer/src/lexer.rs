@@ -249,12 +249,20 @@ fn lex_range(
             continue;
         }
 
-        // T104: Raw string literal `r"..."` — no escape processing, no
-        // interpolation. Check BEFORE the identifier branch so `r"` is
-        // consumed as a raw string, not as identifier `r` followed by `"`.
-        if c == b'r' && pos + 1 < end && bytes[pos + 1] == b'"' {
-            pos = scan_raw_string(source, pos, source_id, out)?;
-            continue;
+        // T93: Raw string literal `r"..."` and `r#"..."#` (Rust-style).
+        // Check BEFORE the identifier branch so `r"` / `r#"` is consumed as
+        // a raw string, not as identifier `r` followed by `"` / `#"`.
+        if c == b'r' && pos + 1 < end {
+            let mut hash_count: usize = 0;
+            let mut j = pos + 1;
+            while j < end && bytes[j] == b'#' {
+                hash_count += 1;
+                j += 1;
+            }
+            if j < end && bytes[j] == b'"' {
+                pos = scan_raw_string(source, pos, source_id, out, hash_count)?;
+                continue;
+            }
         }
 
         // Identifiers / keywords.
@@ -318,55 +326,75 @@ fn lex_range(
 }
 
 // ---------------------------------------------------------------------------
-// T104: Raw string literal `r"..."` scanning.
+// T93: Raw string literal `r"..."` and `r#"..."#` scanning.
 // ---------------------------------------------------------------------------
 
-/// Scan a raw string literal `r"..."` (T104).
+/// Scan a raw string literal `r"..."` or `r#"...N hashes..."#` (T93).
 ///
 /// Raw strings have NO escape processing and NO interpolation — every byte
-/// between the opening `"` and the next `"` is captured verbatim. This lets
-/// backslashes, braces, and other special characters appear literally.
+/// between the opening `"` and the matching closing delimiter is captured
+/// verbatim. This lets backslashes, braces, quotes (with hash-delimited
+/// form), and other special characters appear literally.
 ///
-/// Returns the absolute byte position immediately after the closing `"`.
+/// Mirrors Rust's raw string syntax exactly:
+/// - `r"..."` — no `"` allowed inside (simple form).
+/// - `r#"..."#` — one `#` hash delimiter, allows `"` inside.
+/// - `r##"..."##` — two `#` hash delimiters, allows `"#` inside.
+/// - etc.
+///
+/// The closing sequence is the reverse of the opening: a `"` followed
+/// by exactly `hash_count` `#` characters.
+///
+/// Returns the absolute byte position immediately after the closing delimiter.
 /// Pushes `StringStart`, `StringPart(text)`, `StringEnd` into `out` — the
 /// same token sequence as a plain (non-interpolated) string, so the parser
 /// and codegen handle it without changes.
-///
-/// # Limitations (v0.5)
-///
-/// - A raw string cannot contain a literal `"` character (no `r#"..."#`
-///   hash-delimited form). This is deferred to a future version.
-/// - Multi-line raw strings use the existing `"""..."""` triple-quote form
-///   (T21), not `r"..."`.
 fn scan_raw_string(
     source: &str,
     r_pos: usize,
     source_id: SourceId,
     out: &mut Vec<Token>,
+    hash_count: usize,
 ) -> Result<usize, LexerError> {
     let bytes = source.as_bytes();
     let span = |a, b| Span::new(a, b, source_id);
 
-    // `r_pos` is at `r`, the opening `"` is at `r_pos + 1`.
-    let quote_start = r_pos + 1;
+    // `r_pos` is at `r`, then `hash_count` `#` chars, then the opening `"`.
+    let quote_start = r_pos + 1 + hash_count;
 
     out.push(Token::new(
         TokenKind::StringStart,
         span(r_pos, quote_start + 1),
     ));
 
-    // Body starts right after the opening `"`. Scan verbatim until the next
-    // `"` — no escape processing, no interpolation.
+    // Body starts right after the opening `"`. Scan verbatim until we find
+    // a `"` followed by exactly `hash_count` `#` chars — no escape processing,
+    // no interpolation.
     let body_start = quote_start + 1;
     let mut i = body_start;
     while i < bytes.len() {
         if bytes[i] == b'"' {
-            let text = source[body_start..i].to_string();
-            if !text.is_empty() {
-                out.push(Token::new(TokenKind::StringPart(text), span(body_start, i)));
+            // Check if this `"` is followed by exactly `hash_count` `#` chars
+            // (or if hash_count == 0, just the `"` alone closes it).
+            let close_start = i;
+            let mut close_end = i + 1;
+            let mut matched = true;
+            for _ in 0..hash_count {
+                if close_end < bytes.len() && bytes[close_end] == b'#' {
+                    close_end += 1;
+                } else {
+                    matched = false;
+                    break;
+                }
             }
-            out.push(Token::new(TokenKind::StringEnd, span(i, i + 1)));
-            return Ok(i + 1);
+            if matched {
+                let text = source[body_start..i].to_string();
+                if !text.is_empty() {
+                    out.push(Token::new(TokenKind::StringPart(text), span(body_start, i)));
+                }
+                out.push(Token::new(TokenKind::StringEnd, span(close_start, close_end)));
+                return Ok(close_end);
+            }
         }
         i += 1;
     }
@@ -1268,6 +1296,127 @@ mod tests {
                     TokenKind::CharLit('x'),
                     TokenKind::Eof,
                 ]
+            );
+        }
+    }
+
+    // T93: Raw string literals `r"..."` and `r#"..."#`.
+    mod raw_strings {
+        use super::*;
+
+        #[test]
+        fn raw_string_simple() {
+            let tokens = kinds(r#"r"hello""#).unwrap();
+            assert_eq!(
+                tokens,
+                vec![
+                    TokenKind::StringStart,
+                    TokenKind::StringPart("hello".into()),
+                    TokenKind::StringEnd,
+                    TokenKind::Eof,
+                ]
+            );
+        }
+
+        #[test]
+        fn raw_string_with_backslashes() {
+            // Backslashes are literal — no escape processing.
+            let src = r#"r"\n\t\\""#;
+            let tokens = kinds(src).unwrap();
+            match &tokens[..] {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                    assert_eq!(s, "\\n\\t\\\\");
+                }
+                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn raw_string_with_interp_like_text() {
+            // Braces are literal — no interpolation.
+            let src = r#"r"x {y} z""#;
+            let tokens = kinds(src).unwrap();
+            match &tokens[..] {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                    assert_eq!(s, "x {y} z");
+                }
+                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn raw_string_with_quotes() {
+            // r#"..."# allows embedded `"`.
+            let src = r##"r#"say "hello""#"##;
+            let tokens = kinds(src).unwrap();
+            match &tokens[..] {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                    assert_eq!(s, r##"say "hello""##);
+                }
+                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn raw_string_multi_hash() {
+            // r##"..."## with two hashes.
+            let src = r#####"r##"hello "# world"##"#####;
+            let tokens = kinds(src).unwrap();
+            match &tokens[..] {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                    assert_eq!(s, r##"hello "# world"##);
+                }
+                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn raw_string_empty() {
+            let tokens = kinds(r#"r"""#).unwrap();
+            assert_eq!(
+                tokens,
+                vec![TokenKind::StringStart, TokenKind::StringEnd, TokenKind::Eof]
+            );
+        }
+
+        #[test]
+        fn raw_string_empty_hashed() {
+            let tokens = kinds(r##"r#""#"##).unwrap();
+            assert_eq!(
+                tokens,
+                vec![TokenKind::StringStart, TokenKind::StringEnd, TokenKind::Eof]
+            );
+        }
+
+        #[test]
+        fn raw_string_unterminated_errors() {
+            assert!(kinds(r#"r"hello"#).is_err());
+        }
+
+        #[test]
+        fn raw_string_unterminated_hashed_errors() {
+            assert!(kinds(r##"r#"hello"##).is_err());
+        }
+
+        #[test]
+        fn raw_string_multiline() {
+            let src = "r\"line1\nline2\"";
+            let tokens = kinds(src).unwrap();
+            match &tokens[..] {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                    assert_eq!(s, "line1\nline2");
+                }
+                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn raw_string_identifier_not_confused() {
+            // `r` followed by non-quote/non-hash chars is an identifier.
+            let tokens = kinds("result").unwrap();
+            assert_eq!(
+                tokens,
+                vec![TokenKind::Ident("result".into()), TokenKind::Eof]
             );
         }
     }

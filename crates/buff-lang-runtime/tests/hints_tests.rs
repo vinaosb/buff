@@ -83,7 +83,7 @@ fn prefer_from_attributes(attrs: &[buff_lang_ast::Attribute]) -> Prefer {
 fn try_get_real_backend() -> Option<WgpuBackend> {
     match WgpuBackend::new() {
         Ok(backend) => Some(backend),
-        Err(RuntimeError::GpuUnavailable) => None,
+        Err(RuntimeError::GpuUnavailable { .. }) => None,
         Err(other) => panic!("unexpected error constructing WgpuBackend: {other:?}"),
     }
 }

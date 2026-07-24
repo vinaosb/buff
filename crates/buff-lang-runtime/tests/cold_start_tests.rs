@@ -103,7 +103,7 @@ fn x_plus_one_lambda() -> Expr {
 fn try_get_real_backend() -> Option<ColdStartBackend> {
     match ColdStartBackend::new() {
         Ok(backend) => Some(backend),
-        Err(RuntimeError::GpuUnavailable) => None,
+        Err(RuntimeError::GpuUnavailable { .. }) => None,
         Err(other) => panic!("unexpected error constructing ColdStartBackend: {other:?}"),
     }
 }
@@ -455,7 +455,7 @@ fn test_cold_start_no_gpu_returns_unavailable_error() {
     let wgsl = generate_wgsl(&x_times_two_lambda()).expect("codegen");
     let input = vec![1.0_f32, 2.0, 3.0];
     match backend.dispatch_map(&wgsl, &input) {
-        Err(RuntimeError::GpuUnavailable) => {
+        Err(RuntimeError::GpuUnavailable { .. }) => {
             // expected
         }
         Err(other) => panic!("expected GpuUnavailable, got: {other:?}"),
@@ -488,7 +488,7 @@ fn test_cold_start_usable_as_box_dyn_gpu_backend() {
     // the T46/T49 dispatch-site pattern.
     let backend: Box<dyn GpuBackend> = match ColdStartBackend::new() {
         Ok(b) => Box::new(b),
-        Err(RuntimeError::GpuUnavailable) => Box::new(unavailable_backend()),
+        Err(RuntimeError::GpuUnavailable { .. }) => Box::new(unavailable_backend()),
         Err(other) => panic!("unexpected: {other:?}"),
     };
     let out = backend
@@ -508,7 +508,7 @@ fn test_cold_start_send_sync_across_threads() {
     // Also usable via Arc across threads.
     let backend = match ColdStartBackend::new() {
         Ok(b) => std::sync::Arc::new(b),
-        Err(RuntimeError::GpuUnavailable) => std::sync::Arc::new(unavailable_backend()),
+        Err(RuntimeError::GpuUnavailable { .. }) => std::sync::Arc::new(unavailable_backend()),
         Err(other) => panic!("unexpected: {other:?}"),
     };
     let backend_clone = std::sync::Arc::clone(&backend);

@@ -254,6 +254,7 @@ pub fn dispatch_tiled(
                     tile_out.len(),
                     tile.len()
                 ),
+                span: None,
             });
         }
         output.extend(tile_out);
