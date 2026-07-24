@@ -25,14 +25,75 @@ pub enum Severity {
     Info,
 }
 
-/// A diagnostic message with severity, message text, source span, notes, and
-/// an optional stable [`ErrorCode`] (T124).
+/// Style of a labeled span, mirroring rustc's `rustc_span::LabelStyle`.
 ///
-/// The `code` field is [`Option`]al and defaults to `None` at every
-/// existing construction site, so adding it does not change any existing
-/// diagnostic output. Use [`Diagnostic::with_code`] to attach a code, and
-/// [`Diagnostic::render`] / [`Diagnostic::fmt`] will then emit it as
-/// `error[E1xxx]: <message>` (rustc-style).
+/// [`Primary`] labels point at the **main** offending location (rendered with
+/// `^` carets). [`Secondary`] labels point at additional context such as the
+/// declaration of the symbol involved in the error (rendered with `~` tildes).
+///
+/// A [`Diagnostic`] always carries one implicit primary span ([`Diagnostic::span`]);
+/// entries in [`Diagnostic::labels`] can be either style to extend the render
+/// with more locations (rustc-style multi-span diagnostics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelStyle {
+    /// Primary — `^^^` carets under the offending source.
+    Primary,
+    /// Secondary — `~~~` tildes under context (a declaration site, a related
+    /// span, etc.). Mirrors rustc's secondary-label visual style.
+    Secondary,
+}
+
+/// A labeled span attached to a [`Diagnostic`], used for multi-span rendering
+/// (rustc-style). Each entry contributes its own source-line + caret block to
+/// [`Diagnostic::render`], with the message shown after the caret.
+///
+/// Construct via [`Diagnostic::with_label`] (primary) or
+/// [`Diagnostic::with_secondary_label`] (secondary).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanLabel {
+    /// The byte span this label points at.
+    pub span: Span,
+    /// The label message shown alongside the caret block (e.g.
+    /// `"declared here"`, `"expected `Int`"`).
+    pub label: String,
+    /// Primary vs. Secondary — controls caret char (`^` vs `~`).
+    pub style: LabelStyle,
+}
+
+impl SpanLabel {
+    /// Build a primary-style label pointing at `span` with `label` text.
+    pub fn primary(span: Span, label: impl Into<String>) -> Self {
+        Self {
+            span,
+            label: label.into(),
+            style: LabelStyle::Primary,
+        }
+    }
+
+    /// Build a secondary-style label pointing at `span` with `label` text.
+    pub fn secondary(span: Span, label: impl Into<String>) -> Self {
+        Self {
+            span,
+            label: label.into(),
+            style: LabelStyle::Secondary,
+        }
+    }
+}
+
+/// A diagnostic message with severity, message text, source span, notes,
+/// optional secondary labels (multi-span), and an optional stable
+/// [`ErrorCode`] (T124).
+///
+/// The `code`, `labels`, and `suggestions` fields are [`Option`]al /
+/// empty-by-default at every existing construction site, so adding them did
+/// not change any existing diagnostic output (single-span render stays
+/// byte-identical when `labels` and `suggestions` are both empty).
+///
+/// Use [`Diagnostic::with_code`] / [`Diagnostic::with_label`] /
+/// [`Diagnostic::with_suggestion`] to attach the corresponding pieces, and
+/// [`Diagnostic::render`] / [`Diagnostic::fmt`] will then emit them in
+/// rustc-style: `error[E1xxx]: <message>` plus per-label source-line blocks
+/// plus suggestion `help:` lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -42,6 +103,17 @@ pub struct Diagnostic {
     /// Optional stable error code (e.g. `E1001`). `None` for diagnostics
     /// that do not yet have a code, or for ad-hoc / uncategorised messages.
     pub code: Option<ErrorCode>,
+    /// Additional labeled spans (multi-span diagnostics). Each entry renders
+    /// as its own source-line + caret block below the primary span. Empty by
+    /// default → existing single-span render output is unchanged.
+    ///
+    /// Added in v1.25 Wave 0 (T1) — see `.sisyphus/plans/buff-launch-readiness.md`.
+    pub labels: Vec<SpanLabel>,
+    /// Machine-readable fix suggestions. Each entry renders as a `help:`
+    /// line below the notes. Empty by default → no change to existing output.
+    ///
+    /// Added in v1.25 Wave 0 (T1) — see `.sisyphus/plans/buff-launch-readiness.md`.
+    pub suggestions: Vec<CodeSuggestion>,
 }
 
 impl Diagnostic {
@@ -53,6 +125,8 @@ impl Diagnostic {
             span,
             notes: Vec::new(),
             code: None,
+            labels: Vec::new(),
+            suggestions: Vec::new(),
         }
     }
 
@@ -64,6 +138,8 @@ impl Diagnostic {
             span,
             notes: Vec::new(),
             code: None,
+            labels: Vec::new(),
+            suggestions: Vec::new(),
         }
     }
 
@@ -75,6 +151,8 @@ impl Diagnostic {
             span,
             notes: Vec::new(),
             code: None,
+            labels: Vec::new(),
+            suggestions: Vec::new(),
         }
     }
 
@@ -93,6 +171,177 @@ impl Diagnostic {
     pub fn with_code(mut self, code: ErrorCode) -> Self {
         self.code = Some(code);
         self
+    }
+
+    /// Attach a [`LabelStyle::Primary`] labeled span (multi-span diagnostic).
+    ///
+    /// Renders as an additional source-line + `^^^` caret block below the
+    /// primary span, with `label` shown after the carets. Mirrors rustc's
+    /// primary label rendering.
+    pub fn with_label(mut self, span: Span, label: impl Into<String>) -> Self {
+        self.labels.push(SpanLabel::primary(span, label));
+        self
+    }
+
+    /// Attach a [`LabelStyle::Secondary`] labeled span (multi-span diagnostic).
+    ///
+    /// Renders as an additional source-line + `~~~` tilde block below the
+    /// primary span, with `label` shown after the tildes. Mirrors rustc's
+    /// secondary-label rendering (typically used for declaration sites or
+    /// related spans that give context for the primary error).
+    pub fn with_secondary_label(mut self, span: Span, label: impl Into<String>) -> Self {
+        self.labels.push(SpanLabel::secondary(span, label));
+        self
+    }
+
+    /// Attach a pre-built [`SpanLabel`] (useful when the style is decided at
+    /// runtime; for the common cases prefer [`with_label`](Self::with_label) /
+    /// [`with_secondary_label`](Self::with_secondary_label)).
+    pub fn with_span_label(mut self, label: SpanLabel) -> Self {
+        self.labels.push(label);
+        self
+    }
+
+    /// Attach a machine-readable fix suggestion.
+    ///
+    /// Renders as a `help: ` line below the notes, with the replacement text
+    /// shown. When the suggestion is [`Applicability::MachineApplicable`],
+    /// tooling (LSP CodeAction, `buff check --error-format json`) can apply
+    /// it without user review.
+    pub fn with_suggestion(
+        mut self,
+        span: Span,
+        replacement: impl Into<String>,
+        applicability: Applicability,
+    ) -> Self {
+        self.suggestions.push(CodeSuggestion {
+            span,
+            replacement: replacement.into(),
+            applicability,
+            label: None,
+        });
+        self
+    }
+
+    /// Like [`with_suggestion`](Self::with_suggestion) but also attaches a
+    /// human-readable `label` (e.g. `"change `pritn` to `print`"`) that
+    /// renders alongside the replacement text in the `help:` line.
+    pub fn with_labeled_suggestion(
+        mut self,
+        span: Span,
+        replacement: impl Into<String>,
+        applicability: Applicability,
+        label: impl Into<String>,
+    ) -> Self {
+        self.suggestions.push(CodeSuggestion {
+            span,
+            replacement: replacement.into(),
+            applicability,
+            label: Some(label.into()),
+        });
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T1 (v1.25 Wave 0): Suggestion API — Applicability + CodeSuggestion
+// ---------------------------------------------------------------------------
+
+/// How confidently a [`CodeSuggestion`] can be auto-applied by tooling
+/// (LSP CodeAction, `buff check --error-format json` consumers, future
+/// `buff fix` rewriter). Mirrors rustc's `Applicability` enum verbatim.
+///
+/// Tooling SHOULD treat the variant as a hint, not a hard rule: an
+/// `Unspecified` suggestion is still legal to surface as a CodeAction — it
+/// just means the user must review the change before applying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applicability {
+    /// Always correct — safe to apply without user review. The canonical
+    /// example is fixing a typo: `pritn` → `print`.
+    MachineApplicable,
+    /// Probably correct but not certain. Tooling SHOULD show the suggestion
+    /// for manual review rather than auto-applying. Example: suggesting a
+    /// field name that may shadow an existing binding.
+    MaybeIncorrect,
+    /// Contains placeholders (e.g. `<>`, `<name>`) that the user must fill
+    /// in. Renders with the placeholders visible; tooling MAY apply but MUST
+    /// leave the cursor on the first placeholder.
+    HasPlaceholders,
+    /// No applicability hint. Tooling should let the user decide. Use when
+    /// the suggestion is intentionally vague (e.g. an example fix that may
+    /// not apply to the specific case).
+    Unspecified,
+}
+
+impl Applicability {
+    /// `true` for [`MachineApplicable`](Self::MachineApplicable) — the
+    /// convenience predicate tooling uses to decide "auto-apply or not".
+    pub fn is_machine_applicable(self) -> bool {
+        matches!(self, Applicability::MachineApplicable)
+    }
+}
+
+impl std::fmt::Display for Applicability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Applicability::MachineApplicable => "MachineApplicable",
+            Applicability::MaybeIncorrect => "MaybeIncorrect",
+            Applicability::HasPlaceholders => "HasPlaceholders",
+            Applicability::Unspecified => "Unspecified",
+        };
+        f.write_str(s)
+    }
+}
+
+/// A machine-readable fix suggestion attached to a [`Diagnostic`].
+///
+/// Says: "the bytes at [`span`] should be replaced with `replacement`, and
+/// the change is `applicability`-confident". Mirrors rustc's `CodeSuggestion`
+/// (simplified — single replacement string per suggestion; rustc's
+/// `Substitution` enum supports fragments we don't need yet).
+///
+/// Attach via [`Diagnostic::with_suggestion`] /
+/// [`Diagnostic::with_labeled_suggestion`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeSuggestion {
+    /// The byte range whose text should be replaced.
+    pub span: Span,
+    /// The replacement text (the new bytes that go in place of `span`).
+    pub replacement: String,
+    /// How confidently tooling can auto-apply this suggestion.
+    pub applicability: Applicability,
+    /// Optional human-readable label shown alongside the replacement in the
+    /// `help:` line (e.g. `"change `pritn` to `print`"`).
+    pub label: Option<String>,
+}
+
+impl CodeSuggestion {
+    /// Render this suggestion as a single `help:` line (no source-line
+    /// block — that's the caller's job; this just formats the payload).
+    ///
+    /// Format:
+    ///
+    /// ```text
+    ///   help: <label>: replace with `<replacement>` (<applicability>)
+    /// ```
+    ///
+    /// When `label` is `None`, the leading "`<label>:` " is dropped:
+    ///
+    /// ```text
+    ///   help: replace with `<replacement>` (<applicability>)
+    /// ```
+    pub fn render_help_line(&self) -> String {
+        let applicability = self.applicability;
+        match &self.label {
+            Some(label) => format!(
+                "  help: {}: replace with `{}` ({})\n",
+                label, self.replacement, applicability
+            ),
+            None => format!(
+                "  help: replace with `{}` ({})\n",
+                self.replacement, applicability
+            ),
+        }
     }
 }
 
@@ -135,7 +384,11 @@ impl Diagnostic {
     ///
     /// The first line is always `[<severity>] <message>`. If the diagnostic's
     /// [`Span`] lies within `source`, the offending source line plus a caret
-    /// line follow. Notes are appended last, one per line.
+    /// line follow. **Multi-span** labels ([`Diagnostic::labels`]) each
+    /// render as their own source-line + caret block below the primary span,
+    /// with their label message appended after the caret chars. **Notes**
+    /// ([`Diagnostic::notes`]) and **suggestions**
+    /// ([`Diagnostic::suggestions`]) appear last as `note:` / `help:` lines.
     ///
     /// **Column accounting** is char-based (not byte-based), so multi-byte
     /// UTF-8 sequences align correctly under a single caret column — this
@@ -145,6 +398,10 @@ impl Diagnostic {
     ///
     /// Out-of-bounds spans (e.g. EOF errors with synthetic spans past the end
     /// of source) render only the header + notes, without any caret line.
+    ///
+    /// **Backward compatibility**: when `labels` and `suggestions` are both
+    /// empty (the default for all pre-T1 construction sites), the output is
+    /// byte-identical to the pre-T1 single-span render.
     pub fn render(&self, source: &str) -> String {
         let mut out = String::new();
         match self.code {
@@ -159,8 +416,26 @@ impl Diagnostic {
         if let Some(rendered_line) = render_span_in_source(&self.span, source) {
             out.push_str(&rendered_line);
         }
+        // Multi-span labels: each contributes its own source-line + caret
+        // block, with the label message appended after the caret chars.
+        // Caret char is `^` for Primary (matches the primary span's carets)
+        // and `~` for Secondary (rustc convention).
+        for label in &self.labels {
+            if let Some(rendered_label) =
+                render_span_label_in_source(&label.span, source, label.style, &label.label)
+            {
+                out.push_str(&rendered_label);
+            } else if !label.label.is_empty() {
+                // Span is out of bounds; still surface the label as a
+                // note-style line so the user sees the context.
+                out.push_str(&format!("  = {}\n", label.label));
+            }
+        }
         for note in &self.notes {
             out.push_str(&format!("  note: {}\n", note));
+        }
+        for suggestion in &self.suggestions {
+            out.push_str(&suggestion.render_help_line());
         }
         out
     }
@@ -234,6 +509,76 @@ fn render_span_in_source(span: &Span, source: &str) -> Option<String> {
     out.push_str(&format!("{gutter_pad}|\n"));
     out.push_str(&format!("{line_no_str} | {line_text}\n"));
     out.push_str(&format!("{gutter_pad}| {caret_pad}{carets}\n"));
+    out.push_str(&format!("{gutter_pad}|\n"));
+    Some(out)
+}
+
+/// Render a labeled span (multi-span diagnostics) — same shape as
+/// [`render_span_in_source`] but with the caret char chosen by `style`
+/// (`^` for [`LabelStyle::Primary`], `~` for [`LabelStyle::Secondary`])
+/// and the label message appended after the caret chars.
+///
+/// Format when the label is non-empty:
+///
+/// ```text
+///   |
+/// N | <source line>
+///   |   <padding>^^^^ <label>
+///   |
+/// ```
+///
+/// When the label is empty, the caret line has no trailing message (matches
+/// the primary span's caret-only shape). Returns `None` when `span.start`
+/// lies past the end of `source`.
+fn render_span_label_in_source(
+    span: &Span,
+    source: &str,
+    style: LabelStyle,
+    label: &str,
+) -> Option<String> {
+    let start = span.start;
+    let raw_end = span.end;
+
+    if start > source.len() {
+        return None;
+    }
+
+    let line_start = source[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|i| line_start + i)
+        .unwrap_or(source.len());
+    let line_text = &source[line_start..line_end];
+
+    let line_no = source[..line_start].matches('\n').count() + 1;
+    let line_no_str = line_no.to_string();
+    let col = source[line_start..start].chars().count();
+    let span_end_in_line = raw_end.min(line_end);
+    let width = if span_end_in_line <= start {
+        1
+    } else {
+        source[start..span_end_in_line].chars().count().max(1)
+    };
+
+    let gutter_pad: String = " ".repeat(line_no_str.len() + 1);
+    let caret_pad: String = " ".repeat(col);
+    let caret_char = match style {
+        LabelStyle::Primary => '^',
+        LabelStyle::Secondary => '~',
+    };
+    let carets: String = std::iter::repeat(caret_char)
+        .take(width)
+        .collect::<String>();
+    let trailing = if label.is_empty() {
+        String::new()
+    } else {
+        format!(" {label}")
+    };
+
+    let mut out = String::new();
+    out.push_str(&format!("{gutter_pad}|\n"));
+    out.push_str(&format!("{line_no_str} | {line_text}\n"));
+    out.push_str(&format!("{gutter_pad}| {caret_pad}{carets}{trailing}\n"));
     out.push_str(&format!("{gutter_pad}|\n"));
     Some(out)
 }
