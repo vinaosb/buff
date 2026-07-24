@@ -1,0 +1,37 @@
+[book]
+title        = "The Buff Book"
+authors      = ["Vinicius Schwinden Berkenbrock"]
+description  = "The official guide to the Buff programming language — Rust performance with Go productivity."
+language     = "en"
+multilingual = false
+src          = "src"
+
+[rust]
+edition = "2021"
+
+[output.html]
+default-theme     = "ayu"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/buff-lang/buff"
+git-repository-icon = "fa-github"
+edit-url-template  = "https://github.com/buff-lang/buff/edit/v1x-frameworks/book/src/{path}"
+no-section-label   = false
+
+[output.html.search]
+enable            = true
+limit-results     = 30
+use-boolean-and   = true
+boost-title       = 2
+boost-hierarchy   = 1
+expand            = true
+heading-split-level = 3
+
+[output.html.fold]
+enable = true
+level  = 0
+
+# NOTE: This book is rendered with mdBook (https://rust-lang.github.io/mdBook/).
+# mdBook is NOT required to read or edit these source files — every
+# `book/src/chapter-N.md` is plain CommonMark that renders on GitHub, in any
+# Markdown viewer, or via `mdbook build book/` when the author wants the
+# rendered HTML site. See `book/README.md` for the full workflow.
