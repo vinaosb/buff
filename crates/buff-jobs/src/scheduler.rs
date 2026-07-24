@@ -34,7 +34,7 @@ pub struct ScheduledJob {
 
 pub struct Scheduler {
     scheduled: Arc<Mutex<Vec<ScheduledJob>>>,
-    running: Arc<tokio::sync::atomic::AtomicBool>,
+    running: Arc<std::sync::atomic::AtomicBool>,
     shutdown: tokio::sync::watch::Sender<bool>,
 }
 
@@ -43,7 +43,7 @@ impl Scheduler {
         let (shutdown_tx, _) = tokio::sync::watch::channel(false);
         Scheduler {
             scheduled: Arc::new(Mutex::new(Vec::new())),
-            running: Arc::new(tokio::sync::atomic::AtomicBool::new(false)),
+            running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown: shutdown_tx,
         }
     }
@@ -77,7 +77,7 @@ impl Scheduler {
     }
 
     pub async fn start(&self) {
-        use tokio::sync::atomic::Ordering;
+        use std::sync::atomic::Ordering;
         self.running.store(true, Ordering::SeqCst);
 
         let scheduled = self.scheduled.clone();
@@ -126,7 +126,7 @@ impl Scheduler {
     }
 
     pub async fn stop(&self) {
-        use tokio::sync::atomic::Ordering;
+        use std::sync::atomic::Ordering;
         self.running.store(false, Ordering::SeqCst);
         let _ = self.shutdown.send(true);
     }
