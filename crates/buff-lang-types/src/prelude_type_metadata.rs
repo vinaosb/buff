@@ -463,6 +463,12 @@ impl PreludeType {
         // exists so `is_prelude_type("Range")` resolves and source
         // annotations like `let r: Range<Int> = 0..10` typecheck.
         PreludeType::Range,
+        // T89: Decimal — fixed-point decimal type wrapping
+        // `rust_decimal::Decimal`. Runtime-value type (like Regex /
+        // URL / Path). Constructed via `Decimal.new(str)` /
+        // `Decimal.from_float(f)`. Instance methods: `.add(d)`,
+        // `.mul(d)`, `.to_string()`.
+        PreludeType::Decimal,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -865,6 +871,8 @@ impl PreludeType {
             // rewriting; the Buff user sees `Range<Int>` (mirroring
             // Vector<Int> / Matrix<Int>).
             PreludeType::Range => "Range",
+            // T89: Decimal — fixed-point decimal type.
+            PreludeType::Decimal => "Decimal",
         }
     }
 
@@ -1321,6 +1329,9 @@ impl PreludeType {
             // Toml / Math (which return Void): Range IS a value, not a
             // namespace.
             PreludeType::Range => Type::range(Type::int_default()),
+            // T89: Decimal IS a runtime value — returns the fixed-point
+            // decimal type wrapping `rust_decimal::Decimal`.
+            PreludeType::Decimal => Type::Decimal,
         }
     }
 

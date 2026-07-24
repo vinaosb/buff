@@ -461,6 +461,12 @@ pub enum PreludeAssocFn {
     /// of opaque Sender/Receiver; Rust infers T from subsequent
     /// `sender.send(value)` / `receiver.recv()` usage).
     New,
+    // ---- Decimal constructors (T89) ------------------------------------
+    /// `Decimal.from_float(f)` — construct a Decimal from an f64 value.
+    /// One arg (Float). Returns Decimal. Wraps
+    /// `rust_decimal::Decimal::from_f64(f).unwrap_or_default()` (panic-
+    /// free — NaN/Inf collapse to Decimal::ZERO).
+    FromFloat,
     // ---- Tensor constructors (T8) ------------------------------------
     // Each variant lowers to the matching `buff_tensor::Tensor`
     // constructor in codegen. Returns `Type::Unknown` at the Buff
@@ -996,6 +1002,8 @@ impl PreludeAssocFn {
         // T2: Channel.new - constructs a bounded MPSC channel pair.
         // Channel-only. Returns (Sender<T>, Receiver<T>) tuple.
         PreludeAssocFn::New,
+        // T89: Decimal.from_float(f) — construct a Decimal from f64.
+        PreludeAssocFn::FromFloat,
         // T8: Tensor constructor assoc fns (4 distinct names):
         // zeros / ones / from_vec / filled. All Tensor-only. Each
         // returns a runtime `buff_tensor::Tensor` value (modeled as
@@ -1197,6 +1205,8 @@ impl PreludeAssocFn {
             // T2 stub: Channel.new — placeholder name; T2 owns the full
             // associated-function surface for the Channel prelude type.
             PreludeAssocFn::New => "new",
+            // T89: Decimal.from_float(f) — construct from f64.
+            PreludeAssocFn::FromFloat => "from_float",
             // T8: Tensor constructor names. Mirror the Rust
             // `buff_tensor::Tensor` method names so codegen can splice
             // `buff_tensor::Tensor::<f32>::zeros(shape)?` /

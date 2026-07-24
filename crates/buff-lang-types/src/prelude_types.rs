@@ -1867,6 +1867,16 @@ pub enum PreludeType {
     /// returns `true`. Assert uses only Rust `std` (NO extern crate
     /// needed — the `assert_eq!` / `assert!` macros are built-in).
     Assert,
+    /// T89: `Decimal` — a fixed-point decimal type for precise arithmetic
+    /// (no floating-point errors). Wraps `rust_decimal::Decimal`.
+    /// Constructed via the associated functions `Decimal.new(str)` (parse
+    /// from string) and `Decimal.from_float(f)` (from f64). Supports
+    /// instance methods `.add(d)`, `.mul(d)`, `.to_string()`.
+    ///
+    /// This is a runtime-value type (like Regex / URL / Path). The
+    /// `rust_decimal` crate is recorded in codegen `extern_crates` when
+    /// a Buff program uses `Decimal`.
+    Decimal,
     /// T84: `Range` — the lazy integer-range type (v1.25 Wave 2a).
     /// `Range<T>` is the type of `start..end` (exclusive) and
     /// `start..=end` (inclusive) expressions. It is a LAZY iterator

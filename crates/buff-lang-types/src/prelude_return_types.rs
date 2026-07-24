@@ -919,6 +919,11 @@ pub fn assoc_fn_return_type(
         // panics).
         (PreludeType::Argon2, PreludeAssocFn::GenerateSalt) => Some(Type::vector(Type::byte())),
         (PreludeType::Argon2, PreludeAssocFn::DeriveKey) => Some(Type::vector(Type::byte())),
+        // T89: Decimal constructors. `Decimal.new(str)` parses a string
+        // representation; `Decimal.from_float(f)` converts from f64.
+        // Both return Type::Decimal (the fixed-point decimal type).
+        (PreludeType::Decimal, PreludeAssocFn::New) => Some(Type::Decimal),
+        (PreludeType::Decimal, PreludeAssocFn::FromFloat) => Some(Type::Decimal),
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path so a
         // future extension doesn't silently swallow unrecognised calls.
@@ -1646,6 +1651,14 @@ pub fn instance_fn_return_type(
         // populated when constructed via RSA.generate_keypair).
         (Type::RsaKeypair, PreludeInstanceFn::PublicPem) => Some(Type::String),
         (Type::RsaKeypair, PreludeInstanceFn::PrivatePem) => Some(Type::String),
+
+        // T89: Decimal instance methods. `d.add(other)` -> Decimal;
+        // `d.mul(other)` -> Decimal; `d.to_string()` -> String.
+        // Reuses the existing Add / Mul / ToString variants (shared
+        // with Simd / XmlDocument / etc. — dispatched on receiver type).
+        (Type::Decimal, PreludeInstanceFn::Add) => Some(Type::Decimal),
+        (Type::Decimal, PreludeInstanceFn::Mul) => Some(Type::Decimal),
+        (Type::Decimal, PreludeInstanceFn::ToString) => Some(Type::string()),
 
         // Every other (type, method) pair is invalid. Returning None lets
         // the caller fall back to the default "user method" path.

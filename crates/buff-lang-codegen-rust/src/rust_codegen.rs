@@ -686,6 +686,18 @@ impl RustCodegen {
         if program_uses_url(decls) {
             self.extern_crates.insert("url".to_string());
         }
+        // T89: register the `rust_decimal` crate as an external dependency
+        // when the program references the prelude `Decimal` type
+        // (`Decimal.new(s)` / `Decimal.from_float(f)` / `d.add(other)` /
+        // `d.mul(other)` / `d.to_string()`). Generated code uses fully-
+        // qualified `rust_decimal::Decimal::from_str` /
+        // `rust_decimal::Decimal::from_f64` paths so no `use` import is
+        // emitted — but the recorded name signals to the pipeline /
+        // build-driver that the generated Cargo project must declare
+        // `rust_decimal` in `[dependencies]`.
+        if program_uses_namespace(decls, "Decimal") {
+            self.extern_crates.insert("rust_decimal".to_string());
+        }
         // T124i: register the `serde_yml` and `csv` crates as external
         // dependencies when the program references the corresponding
         // prelude modules (`Yaml.parse(s)` / `Yaml.stringify(v)` /
@@ -6046,6 +6058,30 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Argon2.derive_key codegen parse: {e}")))
             }
+            // T89: Decimal constructors.
+            // `Decimal.new(str)` -> Decimal. One arg (String). Wraps
+            // `rust_decimal::Decimal::from_str(&s).unwrap_or_default()`
+            // (panic-free — invalid input collapses to Decimal::ZERO).
+            (T::Decimal, A::New) => {
+                let s = one_arg(self)?;
+                let s_ref = coerce_str_arg_to_ref(s, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    rust_decimal::Decimal::from_str(#s_ref).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Decimal.new codegen parse: {e}")))
+            }
+            // `Decimal.from_float(f)` -> Decimal. One arg (Float). Wraps
+            // `rust_decimal::Decimal::from_f64(f).unwrap_or_default()`
+            // (panic-free — NaN/Inf collapse to Decimal::ZERO).
+            (T::Decimal, A::FromFloat) => {
+                let f = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    rust_decimal::Decimal::from_f64(#f).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Decimal.from_float codegen parse: {e}")))
+            }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
             // required for exhaustiveness.
@@ -7410,6 +7446,53 @@ impl RustCodegen {
             // `buff-simd` + `wide` in extern_crates via the
             // `program_uses_namespace("Simd")` walker.
             //
+            // T89: Decimal instance methods. Dispatched on
+            // (Type::Decimal, variant) pairs. Reuses the existing
+            // Add / Mul / ToString variants (shared with Simd / Xml).
+            //
+            // `d.add(other)` -> Decimal. One arg (Decimal). Wraps
+            // `recv + other` (Rust's `Add` trait on `rust_decimal::Decimal`).
+            M::Add if matches!(recv_ty, Type::Decimal) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "add() expects exactly 1 arg (other Decimal), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv + #other
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Decimal.add codegen parse: {e}")))
+            }
+            // `d.mul(other)` -> Decimal. One arg (Decimal). Wraps
+            // `recv * other` (Rust's `Mul` trait on `rust_decimal::Decimal`).
+            M::Mul if matches!(recv_ty, Type::Decimal) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "mul() expects exactly 1 arg (other Decimal), got {}",
+                        args.len()
+                    )));
+                }
+                let other = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv * #other
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Decimal.mul codegen parse: {e}")))
+            }
+            // `d.to_string()` -> String. Zero args. Wraps
+            // `recv.to_string()` (rust_decimal::Decimal implements Display).
+            M::ToString if matches!(recv_ty, Type::Decimal) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_string() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                Ok(method_call_no_args(recv, "to_string"))
+            }
             // `simd.add(other)` -> Simd. One arg (Simd). Wraps
             // `recv.add(other)`.
             M::Add if matches!(recv_ty, Type::Simd) => {
