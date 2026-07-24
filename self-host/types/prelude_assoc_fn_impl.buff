@@ -1,0 +1,661 @@
+// Buff self-host port of `crates/buff-lang-types/src/prelude_assoc_fn_impl.rs`
+// (T17, Track C).
+//
+// T105b: PreludeAssocFn enum + impl + lookup helper.
+// MECHANICAL EXTRACTION from prelude_types.rs (T105b God Class split) — no
+// logic changes, moved verbatim. Mirrored 1:1 here.
+//
+// A recognised **associated function** on a prelude type — the
+// `Type.method(args)` shape. Distinct from associated CONSTANTS
+// (`Type.NAME` without parens — see prelude_assoc_const_impl.buff) and
+// instance methods (`recv.method(args)` on a value of the type — see
+// prelude_instance_fn_impl.buff).
+//
+// The Rust reference's PreludeAssocFn enum has 141 variants. The full set
+// is enumerated below, grouped by category. The impl block has two methods:
+//   - `name()` — the source identifier (DateTime.now -> "now")
+//   - `ALL`    — the full variant list
+// Plus one free function:
+//   - `assoc_fn_lookup(type_name, method)` — returns the matching variant
+//     or Option.None
+//
+// RUST IDIOM MAPPING:
+//   pub enum PreludeAssocFn { ... } -> enum PreludeAssocFn { ... }
+//   pub const ALL &[...]            -> func assoc_fn_all() -> Vector<PreludeAssocFn>
+//   pub fn name(self)               -> func assoc_fn_name(c) -> String
+//   pub fn assoc_fn_lookup(..)      -> func assoc_fn_lookup(..)
+
+// =============================================================================
+// PreludeAssocFn — the associated-function registry (141 variants)
+// =============================================================================
+//
+// Variants are grouped by the prelude type that owns them:
+//   1. DateTime / Date / Time family (Now / Today / Parse / Format)
+//   2. Duration constructors (Days / Hours / Minutes / Seconds / Millis)
+//   3. Log namespace (Debug / Info / Warn / Error)
+//   4. Regex (Compile)
+//   5. Toml / Yaml / Json / Csv (Stringify / Parse variants)
+//   6. Math (Sqrt / Sin / Cos / Tan / Abs / Floor / Ceil / Round / Pow /
+//      Min / Max / Int / Float)
+//   7. Random (Choice / Shuffle)
+//   8. Strings (Split / Join / Trim / Replace / Contains / StartsWith /
+//      ToUppercase / ToLowercase)
+//   9. Args / Env (List / Get / Set / Has / Load)
+//  10. Base64 / Hex / URLEncode (Encode / Decode)
+//  11. UUID (V4 / V7)
+//  12. Path / Dir / Tempfile (Create / Remove / Walk / Dir)
+//  13. Hash / HMAC (Sha256 / Sha512 / Md5)
+//  14. OS / Process (Spawn / Exit / Name / Arch / Hostname / Cpus)
+//  15. TCP / UDP / WebSocket / Channel (Connect / Bind / New)
+//  16. Tensor / DataFrame / Image / Cache / I18n / Faker / Audio / DSP
+//      (Zeros / Ones / FromVec / Filled / FromCsv / FromJson / FromPath /
+//      FromBytes / WithLocale / WithSeed / FromSamples / Hann / Hamming /
+//      Blackman)
+//  17. Config / Observe (SetDefault / LoadFile / LoadEnv / LoadArgs /
+//      GetInt / GetFloat / GetBool / Watch / Span / Counter / Histogram /
+//      Gauge)
+//  18. Audit / Fuzz / Validator / Archive (Bootstrap / Scan / Sign /
+//      Verify / Keypair / Run / Bool / String / Bytes / CompressDir /
+//      Extract)
+//  19. Auth (PasswordHash / PasswordVerify / AuthorizationUrl /
+//      ExchangeCode / Enforce)
+//  20. NLP (DetectLanguage / Stem / Tokenize / Sentences)
+//  21. I18n (WithFallback)
+//  22. Scrape / Markup (FromHtml / FromStr / Serialize / Deserialize /
+//      Roundtrip)
+//  23. Geo (FromCoords)
+//  24. Crypto-2 (FromPrivateKey / GenerateKey / GenerateNonce / Encrypt /
+//      Decrypt / GenerateKeypair / GeneratePrivate / PublicFromPrivate /
+//      DeriveShared / GenerateSalt / DeriveKey)
+//  25. SIMD (Splat / FromSlice / FromArray)
+//  26. Stdlib batch (Read / Write / Exists / Append / HttpGet / HttpPost /
+//      AssertEqual / AssertNotEqual / AssertTrue / AssertFalse /
+//      AssertContains)
+enum PreludeAssocFn {
+    // === 1. DATETIME FAMILY ===
+    Now, Today, Parse, Format,
+    Days, Hours, Minutes, Seconds, Millis,
+    // === 3. LOG ===
+    Debug, Info, Warn, Error,
+    // === 4. REGEX ===
+    Compile,
+    // === 5. STRUCTURED DATA ===
+    Stringify,
+    // === 6. MATH ===
+    Sqrt, Sin, Cos, Tan, Abs, Floor, Ceil, Round, Pow, Min, Max, Int, Float,
+    // === 7. RANDOM ===
+    Choice, Shuffle,
+    // === 8. STRINGS ===
+    Split, Join, Trim, Replace, Contains, StartsWith, ToUppercase, ToLowercase,
+    // === 9. ARGS / ENV ===
+    List, Get, Set, Has, Load,
+    // === 10. ENCODING ===
+    Encode, Decode,
+    // === 11. UUID ===
+    V4, V7,
+    // === 12. FILESYSTEM ===
+    Create, Remove, Walk, Dir,
+    // === 13. HASH / HMAC ===
+    Sha256, Sha512, Md5,
+    // === 14. OS / PROCESS ===
+    Spawn, Exit, Name, Arch, Hostname, Cpus,
+    // === 15. NETWORKING ===
+    Connect, Bind,
+    // === 16. CHANNEL ===
+    New,
+    // === 17. DATA / MEDIA ===
+    FromFloat, Zeros, Ones, FromVec, Filled, FromCsv, FromJson, FromPath,
+    FromBytes, WithLocale, WithSeed, FromSamples, Hann, Hamming, Blackman,
+    // === 18. CONFIG / OBSERVE ===
+    SetDefault, LoadFile, LoadEnv, LoadArgs, GetInt, GetFloat, GetBool,
+    Watch, Span, Counter, Histogram, Gauge,
+    // === 19. AUDIT / FUZZ / VALIDATE / ARCHIVE ===
+    Bootstrap, Scan, Sign, Verify, Keypair, Run, Bool, String, Bytes,
+    CompressDir, Extract,
+    // === 20. AUTH ===
+    PasswordHash, PasswordVerify, AuthorizationUrl, ExchangeCode, Enforce,
+    // === 21. NLP ===
+    DetectLanguage, Stem, Tokenize, Sentences,
+    // === 22. I18N ===
+    WithFallback,
+    // === 23. SCRAPE / MARKUP ===
+    FromHtml, FromStr, Serialize, Deserialize, Roundtrip,
+    // === 24. GEO ===
+    FromCoords,
+    // === 25. CRYPTO-2 ===
+    FromPrivateKey, GenerateKey, GenerateNonce, Encrypt, Decrypt,
+    GenerateKeypair, GeneratePrivate, PublicFromPrivate, DeriveShared,
+    GenerateSalt, DeriveKey,
+    // === 26. SIMD ===
+    Splat, FromSlice, FromArray,
+    // === 27. FILE / HTTP / ASSERT (stdlib batch) ===
+    Read, Write, Exists, Append, HttpGet, HttpPost,
+    AssertEqual, AssertNotEqual, AssertTrue, AssertFalse, AssertContains,
+}
+
+// =============================================================================
+// impl PreludeAssocFn — name + ALL list
+// =============================================================================
+
+// All recognised associated-function variants, in declared order. Used by
+// `assoc_fn_lookup` to do a name-based scan.
+func assoc_fn_all() -> Vector<PreludeAssocFn>:
+    let out = Vector.new()
+    // DateTime family
+    out.push(PreludeAssocFn.Now)
+    out.push(PreludeAssocFn.Today)
+    out.push(PreludeAssocFn.Parse)
+    out.push(PreludeAssocFn.Format)
+    // Duration constructors
+    out.push(PreludeAssocFn.Days)
+    out.push(PreludeAssocFn.Hours)
+    out.push(PreludeAssocFn.Minutes)
+    out.push(PreludeAssocFn.Seconds)
+    out.push(PreludeAssocFn.Millis)
+    // Log
+    out.push(PreludeAssocFn.Debug)
+    out.push(PreludeAssocFn.Info)
+    out.push(PreludeAssocFn.Warn)
+    out.push(PreludeAssocFn.Error)
+    // Regex
+    out.push(PreludeAssocFn.Compile)
+    // Structured data
+    out.push(PreludeAssocFn.Stringify)
+    // Math
+    out.push(PreludeAssocFn.Sqrt)
+    out.push(PreludeAssocFn.Sin)
+    out.push(PreludeAssocFn.Cos)
+    out.push(PreludeAssocFn.Tan)
+    out.push(PreludeAssocFn.Abs)
+    out.push(PreludeAssocFn.Floor)
+    out.push(PreludeAssocFn.Ceil)
+    out.push(PreludeAssocFn.Round)
+    out.push(PreludeAssocFn.Pow)
+    out.push(PreludeAssocFn.Min)
+    out.push(PreludeAssocFn.Max)
+    out.push(PreludeAssocFn.Int)
+    out.push(PreludeAssocFn.Float)
+    // Random
+    out.push(PreludeAssocFn.Choice)
+    out.push(PreludeAssocFn.Shuffle)
+    // Strings
+    out.push(PreludeAssocFn.Split)
+    out.push(PreludeAssocFn.Join)
+    out.push(PreludeAssocFn.Trim)
+    out.push(PreludeAssocFn.Replace)
+    out.push(PreludeAssocFn.Contains)
+    out.push(PreludeAssocFn.StartsWith)
+    out.push(PreludeAssocFn.ToUppercase)
+    out.push(PreludeAssocFn.ToLowercase)
+    // Args / Env
+    out.push(PreludeAssocFn.List)
+    out.push(PreludeAssocFn.Get)
+    out.push(PreludeAssocFn.Set)
+    out.push(PreludeAssocFn.Has)
+    out.push(PreludeAssocFn.Load)
+    // Encoding
+    out.push(PreludeAssocFn.Encode)
+    out.push(PreludeAssocFn.Decode)
+    // UUID
+    out.push(PreludeAssocFn.V4)
+    out.push(PreludeAssocFn.V7)
+    // Filesystem
+    out.push(PreludeAssocFn.Create)
+    out.push(PreludeAssocFn.Remove)
+    out.push(PreludeAssocFn.Walk)
+    out.push(PreludeAssocFn.Dir)
+    // Hash / HMAC
+    out.push(PreludeAssocFn.Sha256)
+    out.push(PreludeAssocFn.Sha512)
+    out.push(PreludeAssocFn.Md5)
+    // OS / Process
+    out.push(PreludeAssocFn.Spawn)
+    out.push(PreludeAssocFn.Exit)
+    out.push(PreludeAssocFn.Name)
+    out.push(PreludeAssocFn.Arch)
+    out.push(PreludeAssocFn.Hostname)
+    out.push(PreludeAssocFn.Cpus)
+    // Networking
+    out.push(PreludeAssocFn.Connect)
+    out.push(PreludeAssocFn.Bind)
+    // Channel
+    out.push(PreludeAssocFn.New)
+    // Data / media
+    out.push(PreludeAssocFn.FromFloat)
+    out.push(PreludeAssocFn.Zeros)
+    out.push(PreludeAssocFn.Ones)
+    out.push(PreludeAssocFn.FromVec)
+    out.push(PreludeAssocFn.Filled)
+    out.push(PreludeAssocFn.FromCsv)
+    out.push(PreludeAssocFn.FromJson)
+    out.push(PreludeAssocFn.FromPath)
+    out.push(PreludeAssocFn.FromBytes)
+    out.push(PreludeAssocFn.WithLocale)
+    out.push(PreludeAssocFn.WithSeed)
+    out.push(PreludeAssocFn.FromSamples)
+    out.push(PreludeAssocFn.Hann)
+    out.push(PreludeAssocFn.Hamming)
+    out.push(PreludeAssocFn.Blackman)
+    // Config / Observe
+    out.push(PreludeAssocFn.SetDefault)
+    out.push(PreludeAssocFn.LoadFile)
+    out.push(PreludeAssocFn.LoadEnv)
+    out.push(PreludeAssocFn.LoadArgs)
+    out.push(PreludeAssocFn.GetInt)
+    out.push(PreludeAssocFn.GetFloat)
+    out.push(PreludeAssocFn.GetBool)
+    out.push(PreludeAssocFn.Watch)
+    out.push(PreludeAssocFn.Span)
+    out.push(PreludeAssocFn.Counter)
+    out.push(PreludeAssocFn.Histogram)
+    out.push(PreludeAssocFn.Gauge)
+    // Audit / Fuzz / Validate / Archive
+    out.push(PreludeAssocFn.Bootstrap)
+    out.push(PreludeAssocFn.Scan)
+    out.push(PreludeAssocFn.Sign)
+    out.push(PreludeAssocFn.Verify)
+    out.push(PreludeAssocFn.Keypair)
+    out.push(PreludeAssocFn.Run)
+    out.push(PreludeAssocFn.Bool)
+    out.push(PreludeAssocFn.String)
+    out.push(PreludeAssocFn.Bytes)
+    out.push(PreludeAssocFn.CompressDir)
+    out.push(PreludeAssocFn.Extract)
+    // Auth
+    out.push(PreludeAssocFn.PasswordHash)
+    out.push(PreludeAssocFn.PasswordVerify)
+    out.push(PreludeAssocFn.AuthorizationUrl)
+    out.push(PreludeAssocFn.ExchangeCode)
+    out.push(PreludeAssocFn.Enforce)
+    // NLP
+    out.push(PreludeAssocFn.DetectLanguage)
+    out.push(PreludeAssocFn.Stem)
+    out.push(PreludeAssocFn.Tokenize)
+    out.push(PreludeAssocFn.Sentences)
+    // I18n
+    out.push(PreludeAssocFn.WithFallback)
+    // Scrape / Markup
+    out.push(PreludeAssocFn.FromHtml)
+    out.push(PreludeAssocFn.FromStr)
+    out.push(PreludeAssocFn.Serialize)
+    out.push(PreludeAssocFn.Deserialize)
+    out.push(PreludeAssocFn.Roundtrip)
+    // Geo
+    out.push(PreludeAssocFn.FromCoords)
+    // Crypto-2
+    out.push(PreludeAssocFn.FromPrivateKey)
+    out.push(PreludeAssocFn.GenerateKey)
+    out.push(PreludeAssocFn.GenerateNonce)
+    out.push(PreludeAssocFn.Encrypt)
+    out.push(PreludeAssocFn.Decrypt)
+    out.push(PreludeAssocFn.GenerateKeypair)
+    out.push(PreludeAssocFn.GeneratePrivate)
+    out.push(PreludeAssocFn.PublicFromPrivate)
+    out.push(PreludeAssocFn.DeriveShared)
+    out.push(PreludeAssocFn.GenerateSalt)
+    out.push(PreludeAssocFn.DeriveKey)
+    // SIMD
+    out.push(PreludeAssocFn.Splat)
+    out.push(PreludeAssocFn.FromSlice)
+    out.push(PreludeAssocFn.FromArray)
+    // File / Http / Assert
+    out.push(PreludeAssocFn.Read)
+    out.push(PreludeAssocFn.Write)
+    out.push(PreludeAssocFn.Exists)
+    out.push(PreludeAssocFn.Append)
+    out.push(PreludeAssocFn.HttpGet)
+    out.push(PreludeAssocFn.HttpPost)
+    out.push(PreludeAssocFn.AssertEqual)
+    out.push(PreludeAssocFn.AssertNotEqual)
+    out.push(PreludeAssocFn.AssertTrue)
+    out.push(PreludeAssocFn.AssertFalse)
+    out.push(PreludeAssocFn.AssertContains)
+    return out
+
+// The source name of this associated function (the identifier the user
+// writes after the dot). The full Rust reference has 141 match arms (one
+// per variant) — for compactness the dispatch is grouped: variant-name to
+// lowercase first token, with hyphenation handled inline.
+//
+// NOTE: most variants map 1:1 to their snake_case source name (with the
+// initial capital lowercased). A few need rewriting (e.g. ToUppercase ->
+// "to_uppercase", Sha256 -> "sha256", V4 -> "v4", HttpGet -> "http_get").
+// The full mapping is one arm per variant in the Rust reference; here we
+// implement the same dispatch as a chain of if/else for the irregular
+// cases plus a default that lowercases the first letter.
+func assoc_fn_name(c: PreludeAssocFn) -> String:
+    // --- irregular mappings (capitalisation / abbreviation expansion) ---
+    if c == PreludeAssocFn.ToUppercase:
+        return "to_uppercase"
+    if c == PreludeAssocFn.ToLowercase:
+        return "to_lowercase"
+    if c == PreludeAssocFn.StartsWith:
+        return "starts_with"
+    if c == PreludeAssocFn.FromVec:
+        return "from_vec"
+    if c == PreludeAssocFn.FromCsv:
+        return "from_csv"
+    if c == PreludeAssocFn.FromJson:
+        return "from_json"
+    if c == PreludeAssocFn.FromPath:
+        return "from_path"
+    if c == PreludeAssocFn.FromBytes:
+        return "from_bytes"
+    if c == PreludeAssocFn.FromFloat:
+        return "from_float"
+    if c == PreludeAssocFn.FromHtml:
+        return "from_html"
+    if c == PreludeAssocFn.FromStr:
+        return "from_str"
+    if c == PreludeAssocFn.FromCoords:
+        return "from_coords"
+    if c == PreludeAssocFn.FromPrivateKey:
+        return "from_private_key"
+    if c == PreludeAssocFn.FromSlice:
+        return "from_slice"
+    if c == PreludeAssocFn.FromArray:
+        return "from_array"
+    if c == PreludeAssocFn.FromSamples:
+        return "from_samples"
+    if c == PreludeAssocFn.WithLocale:
+        return "with_locale"
+    if c == PreludeAssocFn.WithSeed:
+        return "with_seed"
+    if c == PreludeAssocFn.WithFallback:
+        return "with_fallback"
+    if c == PreludeAssocFn.LoadFile:
+        return "load_file"
+    if c == PreludeAssocFn.LoadEnv:
+        return "load_env"
+    if c == PreludeAssocFn.LoadArgs:
+        return "load_args"
+    if c == PreludeAssocFn.SetInt:
+        return "set_int"
+    if c == PreludeAssocFn.GetInt:
+        return "get_int"
+    if c == PreludeAssocFn.GetFloat:
+        return "get_float"
+    if c == PreludeAssocFn.GetBool:
+        return "get_bool"
+    if c == PreludeAssocFn.SetDefault:
+        return "set_default"
+    if c == PreludeAssocFn.GenerateKey:
+        return "generate_key"
+    if c == PreludeAssocFn.GenerateNonce:
+        return "generate_nonce"
+    if c == PreludeAssocFn.GenerateKeypair:
+        return "generate_keypair"
+    if c == PreludeAssocFn.GeneratePrivate:
+        return "generate_private"
+    if c == PreludeAssocFn.PublicFromPrivate:
+        return "public_from_private"
+    if c == PreludeAssocFn.DeriveShared:
+        return "derive_shared"
+    if c == PreludeAssocFn.DeriveKey:
+        return "derive_key"
+    if c == PreludeAssocFn.GenerateSalt:
+        return "generate_salt"
+    if c == PreludeAssocFn.PasswordHash:
+        return "password_hash"
+    if c == PreludeAssocFn.PasswordVerify:
+        return "password_verify"
+    if c == PreludeAssocFn.AuthorizationUrl:
+        return "authorization_url"
+    if c == PreludeAssocFn.ExchangeCode:
+        return "exchange_code"
+    if c == PreludeAssocFn.DetectLanguage:
+        return "detect_language"
+    if c == PreludeAssocFn.HttpGet:
+        return "http_get"
+    if c == PreludeAssocFn.HttpPost:
+        return "http_post"
+    if c == PreludeAssocFn.AssertEqual:
+        return "assert_equal"
+    if c == PreludeAssocFn.AssertNotEqual:
+        return "assert_not_equal"
+    if c == PreludeAssocFn.AssertTrue:
+        return "assert_true"
+    if c == PreludeAssocFn.AssertFalse:
+        return "assert_false"
+    if c == PreludeAssocFn.AssertContains:
+        return "assert_contains"
+    if c == PreludeAssocFn.CompressDir:
+        return "compress_dir"
+    if c == PreludeAssocFn.Sha256:
+        return "sha256"
+    if c == PreludeAssocFn.Sha512:
+        return "sha512"
+    // --- regular 1:1 mappings (PascalCase name == source name) ---
+    // The remaining ~85 variants map 1:1 (Now -> "now", Today -> "today",
+    // Parse -> "parse", Format -> "format", Days -> "days", ..., Read ->
+    // "read", Write -> "write", Exists -> "exists", Append -> "append",
+    // Splat -> "splat", ...). Each is a single-line match arm in the Rust
+    // reference; here a chain of if/else covers the same set.
+    if c == PreludeAssocFn.Now:
+        return "now"
+    if c == PreludeAssocFn.Today:
+        return "today"
+    if c == PreludeAssocFn.Parse:
+        return "parse"
+    if c == PreludeAssocFn.Format:
+        return "format"
+    if c == PreludeAssocFn.Days:
+        return "days"
+    if c == PreludeAssocFn.Hours:
+        return "hours"
+    if c == PreludeAssocFn.Minutes:
+        return "minutes"
+    if c == PreludeAssocFn.Seconds:
+        return "seconds"
+    if c == PreludeAssocFn.Millis:
+        return "millis"
+    if c == PreludeAssocFn.Debug:
+        return "debug"
+    if c == PreludeAssocFn.Info:
+        return "info"
+    if c == PreludeAssocFn.Warn:
+        return "warn"
+    if c == PreludeAssocFn.Error:
+        return "error"
+    if c == PreludeAssocFn.Compile:
+        return "compile"
+    if c == PreludeAssocFn.Stringify:
+        return "stringify"
+    if c == PreludeAssocFn.Sqrt:
+        return "sqrt"
+    if c == PreludeAssocFn.Sin:
+        return "sin"
+    if c == PreludeAssocFn.Cos:
+        return "cos"
+    if c == PreludeAssocFn.Tan:
+        return "tan"
+    if c == PreludeAssocFn.Abs:
+        return "abs"
+    if c == PreludeAssocFn.Floor:
+        return "floor"
+    if c == PreludeAssocFn.Ceil:
+        return "ceil"
+    if c == PreludeAssocFn.Round:
+        return "round"
+    if c == PreludeAssocFn.Pow:
+        return "pow"
+    if c == PreludeAssocFn.Min:
+        return "min"
+    if c == PreludeAssocFn.Max:
+        return "max"
+    if c == PreludeAssocFn.Int:
+        return "int"
+    if c == PreludeAssocFn.Float:
+        return "float"
+    if c == PreludeAssocFn.Choice:
+        return "choice"
+    if c == PreludeAssocFn.Shuffle:
+        return "shuffle"
+    if c == PreludeAssocFn.Split:
+        return "split"
+    if c == PreludeAssocFn.Join:
+        return "join"
+    if c == PreludeAssocFn.Trim:
+        return "trim"
+    if c == PreludeAssocFn.Replace:
+        return "replace"
+    if c == PreludeAssocFn.Contains:
+        return "contains"
+    if c == PreludeAssocFn.List:
+        return "list"
+    if c == PreludeAssocFn.Get:
+        return "get"
+    if c == PreludeAssocFn.Set:
+        return "set"
+    if c == PreludeAssocFn.Has:
+        return "has"
+    if c == PreludeAssocFn.Load:
+        return "load"
+    if c == PreludeAssocFn.Encode:
+        return "encode"
+    if c == PreludeAssocFn.Decode:
+        return "decode"
+    if c == PreludeAssocFn.V4:
+        return "v4"
+    if c == PreludeAssocFn.V7:
+        return "v7"
+    if c == PreludeAssocFn.Create:
+        return "create"
+    if c == PreludeAssocFn.Remove:
+        return "remove"
+    if c == PreludeAssocFn.Walk:
+        return "walk"
+    if c == PreludeAssocFn.Dir:
+        return "dir"
+    if c == PreludeAssocFn.Md5:
+        return "md5"
+    if c == PreludeAssocFn.Spawn:
+        return "spawn"
+    if c == PreludeAssocFn.Exit:
+        return "exit"
+    if c == PreludeAssocFn.Name:
+        return "name"
+    if c == PreludeAssocFn.Arch:
+        return "arch"
+    if c == PreludeAssocFn.Hostname:
+        return "hostname"
+    if c == PreludeAssocFn.Cpus:
+        return "cpus"
+    if c == PreludeAssocFn.Connect:
+        return "connect"
+    if c == PreludeAssocFn.Bind:
+        return "bind"
+    if c == PreludeAssocFn.New:
+        return "new"
+    if c == PreludeAssocFn.Zeros:
+        return "zeros"
+    if c == PreludeAssocFn.Ones:
+        return "ones"
+    if c == PreludeAssocFn.Filled:
+        return "filled"
+    if c == PreludeAssocFn.Hann:
+        return "hann"
+    if c == PreludeAssocFn.Hamming:
+        return "hamming"
+    if c == PreludeAssocFn.Blackman:
+        return "blackman"
+    if c == PreludeAssocFn.Watch:
+        return "watch"
+    if c == PreludeAssocFn.Span:
+        return "span"
+    if c == PreludeAssocFn.Counter:
+        return "counter"
+    if c == PreludeAssocFn.Histogram:
+        return "histogram"
+    if c == PreludeAssocFn.Gauge:
+        return "gauge"
+    if c == PreludeAssocFn.Bootstrap:
+        return "bootstrap"
+    if c == PreludeAssocFn.Scan:
+        return "scan"
+    if c == PreludeAssocFn.Sign:
+        return "sign"
+    if c == PreludeAssocFn.Verify:
+        return "verify"
+    if c == PreludeAssocFn.Keypair:
+        return "keypair"
+    if c == PreludeAssocFn.Run:
+        return "run"
+    if c == PreludeAssocFn.Bool:
+        return "bool"
+    if c == PreludeAssocFn.String:
+        return "string"
+    if c == PreludeAssocFn.Bytes:
+        return "bytes"
+    if c == PreludeAssocFn.Extract:
+        return "extract"
+    if c == PreludeAssocFn.Enforce:
+        return "enforce"
+    if c == PreludeAssocFn.Stem:
+        return "stem"
+    if c == PreludeAssocFn.Tokenize:
+        return "tokenize"
+    if c == PreludeAssocFn.Sentences:
+        return "sentences"
+    if c == PreludeAssocFn.Serialize:
+        return "serialize"
+    if c == PreludeAssocFn.Deserialize:
+        return "deserialize"
+    if c == PreludeAssocFn.Roundtrip:
+        return "roundtrip"
+    if c == PreludeAssocFn.Encrypt:
+        return "encrypt"
+    if c == PreludeAssocFn.Decrypt:
+        return "decrypt"
+    if c == PreludeAssocFn.Splat:
+        return "splat"
+    if c == PreludeAssocFn.Read:
+        return "read"
+    if c == PreludeAssocFn.Write:
+        return "write"
+    if c == PreludeAssocFn.Exists:
+        return "exists"
+    if c == PreludeAssocFn.Append:
+        return "append"
+    return "<unknown>"
+
+// =============================================================================
+// Lookup
+// =============================================================================
+
+// Look up a prelude associated function by the (type, method) pair.
+//
+// Returns Option.None when the combination is not a recognised prelude
+// associated-function call (e.g. `DateTime.sha256()` is invalid — DateTime
+// has no sha256 method). This is the function the type inferencer + codegen
+// consult to decide whether a `Type.method(args)` AST node is a prelude
+// associated-function call.
+//
+// The Rust reference validates the (type, fn) pair against the
+// `assoc_fn_return_type` match (a None return means invalid). The full
+// return-type match lives in prelude_return_types.buff; this lookup returns
+// Option.None when that match returns None.
+func assoc_fn_lookup(type_name: String, method: String) -> Option<PreludeAssocFn>:
+    let t = prelude_type_lookup(type_name)
+    if t == Option.None:
+        return Option.None
+    let pt = unwrap_prelude_type(t)
+    let all = assoc_fn_all()
+    let mut i = 0
+    for i < all.len():
+        let c = all.get(i)
+        if assoc_fn_name(c) == method:
+            // Validate the (type, fn) pair is recognised by consulting the
+            // return-type matcher (None means invalid combination).
+            let rt = assoc_fn_return_type(pt, c, Vector.new())
+            if rt != type_unknown():
+                return Option.Some(c)
+        i = i + 1
+    return Option.None
+
+// Unwrap helper — see prelude_assoc_const_impl.buff for the same shape.
+func unwrap_prelude_type(opt: Option<PreludeType>) -> PreludeType:
+    return match opt {
+        Some(t) => t,
+        None => PreludeType.DateTime,
+    }

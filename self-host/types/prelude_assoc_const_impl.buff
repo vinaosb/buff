@@ -1,0 +1,186 @@
+// Buff self-host port of `crates/buff-lang-types/src/prelude_assoc_const_impl.rs`
+// (T17, Track C).
+//
+// T105b: PreludeAssocConst enum + impl + lookup helpers.
+// MECHANICAL EXTRACTION from prelude_types.rs (T105b God Class split) — no
+// logic changes, moved verbatim. Mirrored 1:1 here.
+//
+// A recognised **associated constant** on a prelude type — the `Type.CONST`
+// access shape. The receiver is the type name itself (a bare `Expr.Ident`),
+// and the constant is accessed as a zero-arg "method call" `Type.NAME`
+// (Buff's parser produces `MethodCall` with `args == []` for both
+// `obj.field` and `obj.field()`; the codegen consults this registry to
+// decide whether `Math.PI` is a prelude constant access vs. a field access
+// on a user struct named `Math`).
+//
+// WHY A SEPARATE REGISTRY
+//   The associated-FUNCTION registry (PreludeAssocFn, see
+//   prelude_assoc_fn_impl.buff) dispatches CALLS (`Type.method(args)`);
+//   associated CONSTANTS are accessed WITHOUT parens (`Math.PI`). The
+//   codegen consults this registry in the `lower_method_call` zero-arg arm
+//   BEFORE the T26 field-access heuristic so a prelude constant access is
+//   rewritten to the Rust path (`std::f64::consts::PI`) rather than the
+//   literal Rust field access `Math.PI` (which would not compile).
+//
+// NAMING CONVENTION
+//   Variants are named after the constant's surface identifier (the
+//   user-facing name). Dispatch on `(PreludeType, PreludeAssocConst)` pairs
+//   is exhaustive in `assoc_const_return_type`.
+//
+// T124f SCOPE
+//   Currently only the Math namespace has scalar constants (`PI`, `E`) and
+//   the chat Platform namespace has enum-variant constants (`Discord`,
+//   `Telegram`). Future prelude modules with constants extend this enum +
+//   the lookup/return-type matches.
+
+// =============================================================================
+// PreludeAssocConst — the associated-constant registry
+// =============================================================================
+
+enum PreludeAssocConst {
+    // `Math.PI` (pi) — the ratio of a circle's circumference to its
+    // diameter. Returns Float (lowers to `std::f64::consts::PI`).
+    Pi,
+    // `Math.E` (Euler's number) — the base of the natural logarithm.
+    // Returns Float (lowers to `std::f64::consts::E`).
+    E,
+    // T47: `Platform.Discord` — the Discord variant of the chat `Platform`
+    // enum. Returns Type.Platform (lowers to
+    // `buff_chat::Platform::Discord`). Used as the `platform:` arg to
+    // `Bot.new(...)` and surfaced by `msg.platform()`. Mirrors the T124f
+    // Math assoc-const shape (zero-arg `Type.NAME` access); the variant
+    // name `Discord` is PascalCase (NOT UPPERCASE like PI/E — Rust enum-
+    // variant convention) and matches the source surface `Platform.Discord`
+    // 1:1 so the codegen can splice the canonical Rust path without
+    // rewriting.
+    Discord,
+    // T47: `Platform.Telegram` — the Telegram variant of the chat
+    // `Platform` enum. Returns Type.Platform (lowers to
+    // `buff_chat::Platform::Telegram`). Mirrors Discord.
+    Telegram,
+}
+
+// =============================================================================
+// impl PreludeAssocConst — name + ALL list
+// =============================================================================
+//
+// The Rust reference has `impl PreludeAssocConst { pub const ALL: ...; pub
+// const fn name(self) -> &'static str { ... } }`. Buff has no `impl` block
+// and no `const` items, so these become two free functions.
+
+// All recognised associated-constant names, in declared order (PI, E,
+// Discord, Telegram).
+func assoc_const_all() -> Vector<PreludeAssocConst>:
+    let out = Vector.new()
+    out.push(PreludeAssocConst.Pi)
+    out.push(PreludeAssocConst.E)
+    out.push(PreludeAssocConst.Discord)
+    out.push(PreludeAssocConst.Telegram)
+    return out
+
+// The source name of this associated constant (the identifier the user
+// writes after the dot). Note `PI` / `E` are UPPERCASE per the Rust/Buff
+// convention for consts; `Discord` / `Telegram` are PascalCase per the
+// Rust enum-variant convention.
+func assoc_const_name(c: PreludeAssocConst) -> String:
+    match c {
+        // `PI` / `E` match Rust's `std::f64::consts::PI` / `E` exactly so
+        // the codegen can splice `std::f64::consts::PI` without rewriting.
+        PreludeAssocConst.Pi => return "PI",
+        PreludeAssocConst.E => return "E",
+        // T47: PascalCase Rust enum-variant naming for the two Platform
+        // variants — matches `buff_chat::Platform::Discord` /
+        // `buff_chat::Platform::Telegram` 1:1 so the codegen can splice the
+        // canonical Rust path without rewriting.
+        PreludeAssocConst.Discord => return "Discord",
+        PreludeAssocConst.Telegram => return "Telegram",
+    }
+
+// =============================================================================
+// Lookups
+// =============================================================================
+
+// Look up a prelude associated constant by the (type, name) pair.
+//
+// Returns Option.None when the combination is not a recognised prelude
+// constant access (e.g. `Math.TAU` is invalid — TAU is not in the T124f
+// surface; `DateTime.PI` is invalid — PI belongs to Math). This is the
+// function the type inferencer + codegen consult to decide whether a
+// `Type.NAME` AST node (zero-arg method call) is a prelude constant access.
+func assoc_const_lookup(type_name: String, name: String) -> Option<PreludeAssocConst>:
+    let t = prelude_type_lookup(type_name)
+    if t == Option.None:
+        return Option.None
+    let pt = unwrap_prelude_type(t)
+    let c = assoc_const_find_by_name(name)
+    if c == Option.None:
+        return Option.None
+    let pc = unwrap_assoc_const(c)
+    // Validate the (type, const) pair is a recognised combination: a non-
+    // Option.None return from assoc_const_return_type means it is.
+    let rt = assoc_const_return_type(pt, pc)
+    if rt == Option.None:
+        return Option.None
+    return Option.Some(pc)
+
+// Find a PreludeAssocConst by its source name (linear scan of ALL). Helper
+// for assoc_const_lookup; replaces Rust's `ALL.iter().copied().find(...)`.
+func assoc_const_find_by_name(name: String) -> Option<PreludeAssocConst>:
+    if name == "PI":
+        return Option.Some(PreludeAssocConst.Pi)
+    if name == "E":
+        return Option.Some(PreludeAssocConst.E)
+    if name == "Discord":
+        return Option.Some(PreludeAssocConst.Discord)
+    if name == "Telegram":
+        return Option.Some(PreludeAssocConst.Telegram)
+    return Option.None
+
+// Infer the resolved Buff Type of a prelude associated constant.
+//
+// Returns Option.None for invalid `(type, const)` combinations. Currently
+// every Math-associated constant is Float (Math.PI / Math.E both lower to
+// `std::f64::consts::PI` / `E` which are `f64`), and the Platform variants
+// Discord/Telegram both return Type.Platform. Future associated constants
+// of other types (e.g. Int) extend this match.
+//
+// The Rust reference uses a tuple-pattern match `(PreludeType::Math,
+// PreludeAssocConst::Pi) => Some(...)`. Buff match arms cannot destructure
+// tuples, so the dispatch is a chained if/else over equality on each axis.
+func assoc_const_return_type(t: PreludeType, c: PreludeAssocConst) -> Option<Type>:
+    // Math.PI / Math.E -> Float (f64).
+    if t == PreludeType.Math:
+        if c == PreludeAssocConst.Pi:
+            return Option.Some(type_float_default())
+        if c == PreludeAssocConst.E:
+            return Option.Some(type_float_default())
+    // T47: Platform.Discord / Platform.Telegram -> Platform. Lowers to
+    // `buff_chat::Platform::Discord` / `::Telegram` at codegen time. Both
+    // variants carry the same Buff type (Platform); the codegen dispatches
+    // on the (Platform, Discord) / (Platform, Telegram) pair to splice the
+    // matching Rust path.
+    if t == PreludeType.Platform:
+        if c == PreludeAssocConst.Discord:
+            return Option.Some(type_platform())
+        if c == PreludeAssocConst.Telegram:
+            return Option.Some(type_platform())
+    // Every other (type, const) pair is invalid.
+    return Option.None
+
+// =============================================================================
+// Unwrap helpers (replace Rust's `Option::unwrap` — Buff has no infallible
+// unwrap on Option). Sentinel-on-violation contract: callers MUST have
+// checked for Option.Some first.
+// =============================================================================
+
+func unwrap_prelude_type(opt: Option<PreludeType>) -> PreludeType:
+    return match opt {
+        Some(t) => t,
+        None => PreludeType.DateTime,
+    }
+
+func unwrap_assoc_const(opt: Option<PreludeAssocConst>) -> PreludeAssocConst:
+    return match opt {
+        Some(c) => c,
+        None => PreludeAssocConst.Pi,
+    }

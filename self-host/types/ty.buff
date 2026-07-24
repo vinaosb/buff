@@ -314,6 +314,21 @@ func float_width_bits(w: FloatWidth) -> Int:
 // Type — constructors (Rust inherent `Type::x()` static methods)
 // =============================================================================
 
+// The void type: `Void`. Absence of a value (functions without a return,
+// `if` without `else`). Used as the buff_type for namespace-only prelude
+// types (Log, Toml, Math, ...).
+func type_void() -> Type:
+    return Type.Void
+
+// The unknown type: `Unknown`. Placeholder emitted after a type error to
+// suppress cascading diagnostics.
+func type_unknown() -> Type:
+    return Type.Unknown
+
+// The 128-bit fixed-point decimal type: `Decimal`. Maps to `rust_decimal`.
+func type_decimal() -> Type:
+    return Type.Decimal
+
 // The default integer type: `Int<64>`.
 func type_int_default() -> Type:
     return Type.Int(IntWidth.W64)

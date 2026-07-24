@@ -1,0 +1,702 @@
+// Buff self-host port of `crates/buff-lang-types/src/prelude_type_metadata.rs`
+// (T17, Track C).
+//
+// T105b: PreludeType metadata impl + lookup helpers.
+// MECHANICAL EXTRACTION from prelude_types.rs (T105b God Class split) — no
+// logic changes, moved verbatim. The `impl PreludeType` block + the
+// `is_prelude_type` / `prelude_type_lookup` free functions live here; the
+// `pub enum PreludeType` definition stays in prelude_types.buff.
+//
+// RUST IDIOM MAPPING:
+//   impl PreludeType { pub fn x(self).. } -> func prelude_type_x(t) ..
+//   pub const ALL: &[PreludeType]       -> func prelude_type_all() -> Vector<PreludeType>
+//   match self { A => Type::X, ... }    -> inline match { A => return type_x(), ... }
+//   &str                                 -> String
+
+// =============================================================================
+// ALL — every prelude type in declared order
+// =============================================================================
+//
+// Future v1.4+ tasks append variants here. The Rust reference uses a static
+// slice; Buff uses a function that returns a fresh Vector each call (Buff
+// has no static slices).
+
+func prelude_type_all() -> Vector<PreludeType>:
+    let out = Vector.new()
+    // 1. DateTime family (T124b)
+    out.push(PreludeType.DateTime)
+    out.push(PreludeType.Date)
+    out.push(PreludeType.Time)
+    out.push(PreludeType.Duration)
+    out.push(PreludeType.Instant)
+    // 2. Free-fn namespaces (T124c-T124g)
+    out.push(PreludeType.Log)
+    out.push(PreludeType.Regex)
+    out.push(PreludeType.Toml)
+    out.push(PreludeType.Math)
+    out.push(PreludeType.Random)
+    out.push(PreludeType.Strings)
+    out.push(PreludeType.Args)
+    out.push(PreludeType.Env)
+    // 3. Encoding namespaces (T124h)
+    out.push(PreludeType.Base64)
+    out.push(PreludeType.Hex)
+    out.push(PreludeType.URLEncode)
+    out.push(PreludeType.UUID)
+    out.push(PreludeType.URL)
+    // 4. URL + structured-data (T124i, T23)
+    out.push(PreludeType.Yaml)
+    out.push(PreludeType.Json)
+    out.push(PreludeType.Csv)
+    // 5. Filesystem (T124j)
+    out.push(PreludeType.Path)
+    out.push(PreludeType.Dir)
+    out.push(PreludeType.Tempfile)
+    // 6. Crypto (T124k)
+    out.push(PreludeType.Hash)
+    out.push(PreludeType.HMAC)
+    // 7. System / networking (T124l, T124m, T2)
+    out.push(PreludeType.OS)
+    out.push(PreludeType.Process)
+    out.push(PreludeType.TCP)
+    out.push(PreludeType.UDP)
+    out.push(PreludeType.WebSocket)
+    out.push(PreludeType.Channel)
+    // 8. Data / media (T8, T11, T7, T9, T37, T31, T44)
+    out.push(PreludeType.Tensor)
+    out.push(PreludeType.Signal)
+    out.push(PreludeType.Window)
+    out.push(PreludeType.Spectrum)
+    out.push(PreludeType.DataFrame)
+    out.push(PreludeType.Image)
+    out.push(PreludeType.Faker)
+    out.push(PreludeType.Cache)
+    out.push(PreludeType.I18n)
+    // 9. ECS (T12)
+    out.push(PreludeType.World)
+    out.push(PreludeType.Entity)
+    // 10. Audit / reactive / web (T30, T56)
+    out.push(PreludeType.Audit)
+    out.push(PreludeType.Signature)
+    out.push(PreludeType.ReactiveSignal)
+    out.push(PreludeType.ReactiveComputed)
+    out.push(PreludeType.ReactiveEffect)
+    out.push(PreludeType.Web)
+    // 11. Server types (T13, T33, T14)
+    out.push(PreludeType.Database)
+    out.push(PreludeType.HttpClient)
+    out.push(PreludeType.Config)
+    out.push(PreludeType.Observe)
+    out.push(PreludeType.Fuzz)
+    out.push(PreludeType.Strategy)
+    out.push(PreludeType.Validator)
+    out.push(PreludeType.Archive)
+    // 12. Text / auth (T46, T15)
+    out.push(PreludeType.Text)
+    out.push(PreludeType.Jwt)
+    out.push(PreludeType.OAuth2Client)
+    out.push(PreludeType.Password)
+    out.push(PreludeType.Rbac)
+    out.push(PreludeType.Email)
+    out.push(PreludeType.SmtpClient)
+    // 13. Scrape / markup (T43, T50, T51)
+    out.push(PreludeType.Document)
+    out.push(PreludeType.Element)
+    out.push(PreludeType.Crawler)
+    out.push(PreludeType.Xml)
+    out.push(PreludeType.XmlElement)
+    out.push(PreludeType.MsgPack)
+    // 14. Geo (T45)
+    out.push(PreludeType.Point)
+    out.push(PreludeType.LineString)
+    out.push(PreludeType.Polygon)
+    // 15. NLP (T46)
+    out.push(PreludeType.Language)
+    out.push(PreludeType.StemAlgorithm)
+    // 16. Interop
+    out.push(PreludeType.Protobuf)
+    out.push(PreludeType.Message)
+    // 17. Chat (T47)
+    out.push(PreludeType.Bot)
+    out.push(PreludeType.ChatMessage)
+    out.push(PreludeType.Platform)
+    // 18. Web3 (T48)
+    out.push(PreludeType.Provider)
+    out.push(PreludeType.Wallet)
+    out.push(PreludeType.ConnectedWallet)
+    out.push(PreludeType.Contract)
+    out.push(PreludeType.ContractMethod)
+    // 19. Crypto-2 (T49)
+    out.push(PreludeType.AES)
+    out.push(PreludeType.RSA)
+    out.push(PreludeType.ECDH)
+    out.push(PreludeType.Argon2)
+    out.push(PreludeType.RsaKeypair)
+    // 20. SIMD + actors (T54, T59)
+    out.push(PreludeType.Simd)
+    out.push(PreludeType.ActorSystem)
+    out.push(PreludeType.ActorRef)
+    out.push(PreludeType.Supervisor)
+    out.push(PreludeType.ChildSpec)
+    out.push(PreludeType.RestartStrategy)
+    // 21. Stdlib batch (T25, T26, T89, T84)
+    out.push(PreludeType.File)
+    out.push(PreludeType.Http)
+    out.push(PreludeType.Assert)
+    out.push(PreludeType.Decimal)
+    out.push(PreludeType.Range)
+    return out
+
+// =============================================================================
+// name — the source-name of a prelude type (the identifier the user writes)
+// =============================================================================
+
+func prelude_type_name(t: PreludeType) -> String:
+    match t {
+        PreludeType.DateTime => return "DateTime",
+        PreludeType.Date => return "Date",
+        PreludeType.Time => return "Time",
+        PreludeType.Duration => return "Duration",
+        PreludeType.Instant => return "Instant",
+        PreludeType.Log => return "Log",
+        PreludeType.Regex => return "Regex",
+        PreludeType.Toml => return "Toml",
+        PreludeType.Math => return "Math",
+        PreludeType.Random => return "Random",
+        PreludeType.Strings => return "Strings",
+        PreludeType.Args => return "Args",
+        PreludeType.Env => return "Env",
+        PreludeType.Base64 => return "Base64",
+        PreludeType.Hex => return "Hex",
+        PreludeType.URLEncode => return "URLEncode",
+        PreludeType.UUID => return "UUID",
+        PreludeType.URL => return "URL",
+        PreludeType.Yaml => return "Yaml",
+        PreludeType.Json => return "Json",
+        PreludeType.Csv => return "Csv",
+        PreludeType.Path => return "Path",
+        PreludeType.Dir => return "Dir",
+        PreludeType.Tempfile => return "Tempfile",
+        PreludeType.Hash => return "Hash",
+        PreludeType.HMAC => return "HMAC",
+        PreludeType.OS => return "OS",
+        PreludeType.Process => return "Process",
+        PreludeType.TCP => return "TCP",
+        PreludeType.UDP => return "UDP",
+        PreludeType.WebSocket => return "WebSocket",
+        PreludeType.Channel => return "Channel",
+        PreludeType.Tensor => return "Tensor",
+        PreludeType.Signal => return "Signal",
+        PreludeType.Window => return "Window",
+        PreludeType.Spectrum => return "Spectrum",
+        PreludeType.DataFrame => return "DataFrame",
+        PreludeType.Image => return "Image",
+        PreludeType.Faker => return "Faker",
+        PreludeType.Cache => return "Cache",
+        PreludeType.I18n => return "I18n",
+        PreludeType.World => return "World",
+        PreludeType.Entity => return "Entity",
+        PreludeType.Audit => return "Audit",
+        PreludeType.Signature => return "Signature",
+        PreludeType.ReactiveSignal => return "ReactiveSignal",
+        PreludeType.ReactiveComputed => return "ReactiveComputed",
+        PreludeType.ReactiveEffect => return "ReactiveEffect",
+        PreludeType.Web => return "Web",
+        PreludeType.Database => return "Database",
+        PreludeType.HttpClient => return "HttpClient",
+        PreludeType.Config => return "Config",
+        PreludeType.Observe => return "Observe",
+        PreludeType.Fuzz => return "Fuzz",
+        PreludeType.Strategy => return "Strategy",
+        PreludeType.Validator => return "Validator",
+        PreludeType.Archive => return "Archive",
+        PreludeType.Text => return "Text",
+        PreludeType.Jwt => return "Jwt",
+        PreludeType.OAuth2Client => return "OAuth2Client",
+        PreludeType.Password => return "Password",
+        PreludeType.Rbac => return "Rbac",
+        PreludeType.Email => return "Email",
+        PreludeType.SmtpClient => return "SmtpClient",
+        PreludeType.Document => return "Document",
+        PreludeType.Element => return "Element",
+        PreludeType.Crawler => return "Crawler",
+        PreludeType.Xml => return "Xml",
+        PreludeType.XmlElement => return "XmlElement",
+        PreludeType.MsgPack => return "MsgPack",
+        PreludeType.Point => return "Point",
+        PreludeType.LineString => return "LineString",
+        PreludeType.Polygon => return "Polygon",
+        PreludeType.Language => return "Language",
+        PreludeType.StemAlgorithm => return "StemAlgorithm",
+        PreludeType.Protobuf => return "Protobuf",
+        PreludeType.Message => return "Message",
+        PreludeType.Bot => return "Bot",
+        PreludeType.ChatMessage => return "ChatMessage",
+        PreludeType.Platform => return "Platform",
+        PreludeType.Provider => return "Provider",
+        PreludeType.Wallet => return "Wallet",
+        PreludeType.ConnectedWallet => return "ConnectedWallet",
+        PreludeType.Contract => return "Contract",
+        PreludeType.ContractMethod => return "ContractMethod",
+        PreludeType.AES => return "AES",
+        PreludeType.RSA => return "RSA",
+        PreludeType.ECDH => return "ECDH",
+        PreludeType.Argon2 => return "Argon2",
+        PreludeType.RsaKeypair => return "RsaKeypair",
+        PreludeType.Simd => return "Simd",
+        PreludeType.ActorSystem => return "ActorSystem",
+        PreludeType.ActorRef => return "ActorRef",
+        PreludeType.Supervisor => return "Supervisor",
+        PreludeType.ChildSpec => return "ChildSpec",
+        PreludeType.RestartStrategy => return "RestartStrategy",
+        PreludeType.File => return "File",
+        PreludeType.Http => return "Http",
+        PreludeType.Assert => return "Assert",
+        PreludeType.Decimal => return "Decimal",
+        PreludeType.Range => return "Range",
+    }
+
+// =============================================================================
+// buff_type — the resolved Buff Type of a prelude type
+// =============================================================================
+//
+// NAMESPACE-ONLY types return Type.Void (Log / Toml / Math / Random / Strings /
+// Args / Env / Base64 / Hex / URLEncode / UUID / Yaml / Json / Csv / Dir /
+// Tempfile / Hash / HMAC / OS / TCP / UDP / WebSocket / Channel / Tensor /
+// Signal / Window / Spectrum / Audit / Config / Observe / Fuzz / Archive /
+// Jwt / Password / Rbac / MsgPack / Protobuf / AES / RSA / ECDH / Argon2 /
+// File / Http / Assert — the namespace itself is never a value, only its
+// associated functions are callable).
+//
+// RUNTIME-VALUE types return their matching Type variant (DateTime / Date /
+// Time / Duration / Instant / Regex / URL / Path / Process / DataFrame /
+// Image / Faker / Cache / I18n / World / Entity / Signature / ReactiveSignal
+// / ReactiveComputed / ReactiveEffect / Web / Database / HttpClient /
+// Strategy / Validator / Text / OAuth2Client / Email / SmtpClient / Document
+// / Element / Crawler / Xml / XmlElement / Point / LineString / Polygon /
+// Language / StemAlgorithm / Message / Bot / ChatMessage / Platform /
+// Provider / Wallet / ConnectedWallet / Contract / ContractMethod /
+// RsaKeypair / Simd / ActorSystem / ActorRef / Supervisor / ChildSpec /
+// RestartStrategy / Decimal / Range).
+
+func prelude_type_buff_type(t: PreludeType) -> Type:
+    match t {
+        // 1. DateTime family — all runtime-value types
+        PreludeType.DateTime => return type_datetime(),
+        PreludeType.Date => return type_date(),
+        PreludeType.Time => return type_time(),
+        PreludeType.Duration => return type_duration(),
+        PreludeType.Instant => return type_instant(),
+        // 2. Free-fn namespaces — Log / Toml / Math / Random / Strings /
+        // Args / Env are namespace-only (Void). Regex IS a runtime value.
+        PreludeType.Log => return type_void(),
+        PreludeType.Regex => return type_regex(),
+        PreludeType.Toml => return type_void(),
+        PreludeType.Math => return type_void(),
+        PreludeType.Random => return type_void(),
+        PreludeType.Strings => return type_void(),
+        PreludeType.Args => return type_void(),
+        PreludeType.Env => return type_void(),
+        // 3. Encoding namespaces — Base64 / Hex / URLEncode / UUID are
+        // namespace-only. URL IS a runtime value.
+        PreludeType.Base64 => return type_void(),
+        PreludeType.Hex => return type_void(),
+        PreludeType.URLEncode => return type_void(),
+        PreludeType.UUID => return type_void(),
+        PreludeType.URL => return type_url(),
+        // 4. Structured-data — Yaml / Json / Csv are namespace-only.
+        PreludeType.Yaml => return type_void(),
+        PreludeType.Json => return type_void(),
+        PreludeType.Csv => return type_void(),
+        // 5. Filesystem — Path IS a runtime value. Dir / Tempfile are
+        // namespace-only.
+        PreludeType.Path => return type_path(),
+        PreludeType.Dir => return type_void(),
+        PreludeType.Tempfile => return type_void(),
+        // 6. Crypto namespaces — Hash / HMAC are namespace-only.
+        PreludeType.Hash => return type_void(),
+        PreludeType.HMAC => return type_void(),
+        // 7. System / networking — OS is namespace-only. Process IS a
+        // runtime value. TCP / UDP / WebSocket / Channel are namespace-only.
+        PreludeType.OS => return type_void(),
+        PreludeType.Process => return type_process(),
+        PreludeType.TCP => return type_void(),
+        PreludeType.UDP => return type_void(),
+        PreludeType.WebSocket => return type_void(),
+        PreludeType.Channel => return type_void(),
+        // 8. Data / media — Tensor / Signal / Window / Spectrum are
+        // namespace-only at the Buff Type level for MVP. DataFrame / Image
+        // / Faker / Cache / I18n ARE runtime values.
+        PreludeType.Tensor => return type_void(),
+        PreludeType.Signal => return type_void(),
+        PreludeType.Window => return type_void(),
+        PreludeType.Spectrum => return type_void(),
+        PreludeType.DataFrame => return type_dataframe(),
+        PreludeType.Image => return type_image(),
+        PreludeType.Faker => return type_faker(),
+        PreludeType.Cache => return type_cache(),
+        PreludeType.I18n => return type_i18n(),
+        // 9. ECS — World / Entity are runtime values.
+        PreludeType.World => return type_world(),
+        PreludeType.Entity => return type_entity(),
+        // 10. Audit / reactive / web — Signature / ReactiveSignal /
+        // ReactiveComputed / ReactiveEffect / Web are runtime values.
+        // Audit is namespace-only.
+        PreludeType.Audit => return type_void(),
+        PreludeType.Signature => return type_user("Signature", Vector.new()),
+        PreludeType.ReactiveSignal => return type_user("ReactiveSignal", Vector.new()),
+        PreludeType.ReactiveComputed => return type_user("ReactiveComputed", Vector.new()),
+        PreludeType.ReactiveEffect => return type_user("ReactiveEffect", Vector.new()),
+        PreludeType.Web => return type_user("Web", Vector.new()),
+        // 11. Server types — Database / HttpClient / Strategy / Validator
+        // are runtime values. Config / Observe / Fuzz / Archive are
+        // namespace-only.
+        PreludeType.Database => return type_user("Database", Vector.new()),
+        PreludeType.HttpClient => return type_http_client(),
+        PreludeType.Config => return type_void(),
+        PreludeType.Observe => return type_void(),
+        PreludeType.Fuzz => return type_void(),
+        PreludeType.Strategy => return type_user("Strategy", Vector.new()),
+        PreludeType.Validator => return type_validator(),
+        PreludeType.Archive => return type_void(),
+        // 12. Text / auth — Text / OAuth2Client / Email / SmtpClient are
+        // runtime values. Jwt / Password / Rbac are namespace-only.
+        PreludeType.Text => return type_text(),
+        PreludeType.Jwt => return type_void(),
+        PreludeType.OAuth2Client => return type_user("OAuth2Client", Vector.new()),
+        PreludeType.Password => return type_void(),
+        PreludeType.Rbac => return type_void(),
+        PreludeType.Email => return type_email(),
+        PreludeType.SmtpClient => return type_smtp_client(),
+        // 13. Scrape / markup — Document / Element / Crawler / Xml /
+        // XmlElement are runtime values. MsgPack is namespace-only.
+        PreludeType.Document => return type_document(),
+        PreludeType.Element => return type_element(),
+        PreludeType.Crawler => return type_crawler(),
+        PreludeType.Xml => return type_xml(),
+        PreludeType.XmlElement => return type_xml_element(),
+        PreludeType.MsgPack => return type_void(),
+        // 14. Geo — Point / LineString / Polygon are runtime values.
+        PreludeType.Point => return type_point(),
+        PreludeType.LineString => return type_line_string(),
+        PreludeType.Polygon => return type_polygon(),
+        // 15. NLP — Language / StemAlgorithm are runtime values.
+        PreludeType.Language => return type_language(),
+        PreludeType.StemAlgorithm => return type_stem_algorithm(),
+        // 16. Interop — Protobuf is namespace-only. Message is runtime.
+        PreludeType.Protobuf => return type_void(),
+        PreludeType.Message => return type_message(),
+        // 17. Chat — Bot / ChatMessage / Platform are runtime values.
+        PreludeType.Bot => return type_bot(),
+        PreludeType.ChatMessage => return type_chat_message(),
+        PreludeType.Platform => return type_platform(),
+        // 18. Web3 — all five are runtime values.
+        PreludeType.Provider => return type_provider(),
+        PreludeType.Wallet => return type_wallet(),
+        PreludeType.ConnectedWallet => return type_connected_wallet(),
+        PreludeType.Contract => return type_contract(),
+        PreludeType.ContractMethod => return type_contract_method(),
+        // 19. Crypto-2 — AES / RSA / ECDH / Argon2 are namespace-only.
+        // RsaKeypair is a runtime value.
+        PreludeType.AES => return type_void(),
+        PreludeType.RSA => return type_void(),
+        PreludeType.ECDH => return type_void(),
+        PreludeType.Argon2 => return type_void(),
+        PreludeType.RsaKeypair => return type_rsa_keypair(),
+        // 20. SIMD + actors — all six are runtime values.
+        PreludeType.Simd => return type_simd(),
+        PreludeType.ActorSystem => return type_actor_system(),
+        PreludeType.ActorRef => return type_actor_ref(),
+        PreludeType.Supervisor => return type_supervisor(),
+        PreludeType.ChildSpec => return type_child_spec(),
+        PreludeType.RestartStrategy => return type_restart_strategy(),
+        // 21. Stdlib batch — File / Http / Assert are namespace-only.
+        // Decimal / Range are runtime values.
+        PreludeType.File => return type_void(),
+        PreludeType.Http => return type_void(),
+        PreludeType.Assert => return type_void(),
+        PreludeType.Decimal => return type_decimal(),
+        PreludeType.Range => return type_range(type_int_default()),
+    }
+
+// =============================================================================
+// is_namespace_only — true iff buff_type() returns Type.Void
+// =============================================================================
+//
+// The complement of "is runtime value". Used by codegen to decide whether
+// to lower `Type.method(args)` as an associated-function call (namespace-
+// only) or as an instance-method call on a real runtime value.
+
+func prelude_type_is_namespace_only(t: PreludeType) -> Bool:
+    let bt = prelude_type_buff_type(t)
+    return bt == type_void()
+
+// =============================================================================
+// extern_crate — the Cargo crate name to record in codegen extern_crates
+// =============================================================================
+//
+// Returns Option.Some(crate_name) for prelude types backed by a Rust crate
+// (chrono, regex, url, etc), Option.None for std-only types (File / Assert /
+// Math / Strings / Args / Env / Range / OS / Process use only std). The
+// codegen layer records these so the generated Cargo.toml includes the
+// matching dep.
+//
+// The Rust reference's full match has 102 arms (one per PreludeType variant).
+// The full set is enumerated below — grouped by crate for readability.
+
+func prelude_type_extern_crate(t: PreludeType) -> Option<String>:
+    // --- chrono (datetime family) ---
+    if t == PreludeType.DateTime:
+        return Option.Some("chrono")
+    if t == PreludeType.Date:
+        return Option.Some("chrono")
+    if t == PreludeType.Time:
+        return Option.Some("chrono")
+    if t == PreludeType.Duration:
+        return Option.Some("chrono")
+    // --- std-only (Instant / OS / Process / Args / Env / Math / Strings /
+    // File / Assert / Range) ---
+    if t == PreludeType.Instant:
+        return Option.None
+    if t == PreludeType.OS:
+        return Option.None
+    if t == PreludeType.Process:
+        return Option.None
+    if t == PreludeType.Args:
+        return Option.None
+    if t == PreludeType.Env:
+        return Option.None
+    if t == PreludeType.Math:
+        return Option.None
+    if t == PreludeType.Strings:
+        return Option.None
+    if t == PreludeType.File:
+        return Option.None
+    if t == PreludeType.Assert:
+        return Option.None
+    if t == PreludeType.Range:
+        return Option.None
+    // --- tracing ---
+    if t == PreludeType.Log:
+        return Option.Some("tracing")
+    // --- regex ---
+    if t == PreludeType.Regex:
+        return Option.Some("regex")
+    // --- toml / serde_yml / serde_json / csv ---
+    if t == PreludeType.Toml:
+        return Option.Some("toml")
+    if t == PreludeType.Yaml:
+        return Option.Some("serde_yml")
+    if t == PreludeType.Json:
+        return Option.Some("serde_json")
+    if t == PreludeType.Csv:
+        return Option.Some("csv")
+    // --- rand ---
+    if t == PreludeType.Random:
+        return Option.Some("rand")
+    // --- encoding (base64 / hex / urlencoding / uuid) ---
+    if t == PreludeType.Base64:
+        return Option.Some("base64")
+    if t == PreludeType.Hex:
+        return Option.Some("hex")
+    if t == PreludeType.URLEncode:
+        return Option.Some("urlencoding")
+    if t == PreludeType.UUID:
+        return Option.Some("uuid")
+    if t == PreludeType.URL:
+        return Option.Some("url")
+    // --- filesystem ---
+    if t == PreludeType.Path:
+        return Option.None
+    if t == PreludeType.Dir:
+        return Option.None
+    if t == PreludeType.Tempfile:
+        return Option.Some("tempfile")
+    // --- crypto (sha2 / hmac / md5) ---
+    if t == PreludeType.Hash:
+        return Option.Some("sha2")
+    if t == PreludeType.HMAC:
+        return Option.Some("hmac")
+    // --- networking (tokio / tokio-tungstenite) ---
+    if t == PreludeType.TCP:
+        return Option.Some("tokio")
+    if t == PreludeType.UDP:
+        return Option.Some("tokio")
+    if t == PreludeType.WebSocket:
+        return Option.Some("tokio-tungstenite")
+    if t == PreludeType.Channel:
+        return Option.None
+    // --- data / media (buff-* framework crates) ---
+    if t == PreludeType.Tensor:
+        return Option.Some("buff-tensor")
+    if t == PreludeType.Signal:
+        return Option.Some("buff-dsp")
+    if t == PreludeType.Window:
+        return Option.Some("buff-dsp")
+    if t == PreludeType.Spectrum:
+        return Option.Some("buff-dsp")
+    if t == PreludeType.DataFrame:
+        return Option.Some("buff-dataframe")
+    if t == PreludeType.Image:
+        return Option.Some("buff-image")
+    if t == PreludeType.Faker:
+        return Option.Some("buff-fake")
+    if t == PreludeType.Cache:
+        return Option.Some("buff-cache")
+    if t == PreludeType.I18n:
+        return Option.Some("buff-i18n")
+    // --- ECS ---
+    if t == PreludeType.World:
+        return Option.Some("buff-ecs")
+    if t == PreludeType.Entity:
+        return Option.Some("buff-ecs")
+    // --- audit / reactive / web ---
+    if t == PreludeType.Audit:
+        return Option.Some("buff-audit")
+    if t == PreludeType.Signature:
+        return Option.Some("buff-audit")
+    if t == PreludeType.ReactiveSignal:
+        return Option.Some("buff-reactive")
+    if t == PreludeType.ReactiveComputed:
+        return Option.Some("buff-reactive")
+    if t == PreludeType.ReactiveEffect:
+        return Option.Some("buff-reactive")
+    if t == PreludeType.Web:
+        return Option.Some("buff-web")
+    // --- server types ---
+    if t == PreludeType.Database:
+        return Option.Some("buff-db")
+    if t == PreludeType.HttpClient:
+        return Option.Some("buff-http-client")
+    if t == PreludeType.Config:
+        return Option.Some("buff-config")
+    if t == PreludeType.Observe:
+        return Option.Some("buff-observe")
+    if t == PreludeType.Fuzz:
+        return Option.Some("buff-fuzz")
+    if t == PreludeType.Strategy:
+        return Option.Some("buff-fuzz")
+    if t == PreludeType.Validator:
+        return Option.Some("buff-validate")
+    if t == PreludeType.Archive:
+        return Option.Some("buff-archive")
+    // --- text / auth ---
+    if t == PreludeType.Text:
+        return Option.Some("buff-nlp")
+    if t == PreludeType.Jwt:
+        return Option.Some("jsonwebtoken")
+    if t == PreludeType.OAuth2Client:
+        return Option.Some("buff-auth")
+    if t == PreludeType.Password:
+        return Option.Some("buff-auth")
+    if t == PreludeType.Rbac:
+        return Option.Some("buff-auth")
+    if t == PreludeType.Email:
+        return Option.Some("buff-email")
+    if t == PreludeType.SmtpClient:
+        return Option.Some("buff-email")
+    // --- scrape / markup ---
+    if t == PreludeType.Document:
+        return Option.Some("buff-scrape")
+    if t == PreludeType.Element:
+        return Option.Some("buff-scrape")
+    if t == PreludeType.Crawler:
+        return Option.Some("buff-scrape")
+    if t == PreludeType.Xml:
+        return Option.Some("buff-xml")
+    if t == PreludeType.XmlElement:
+        return Option.Some("buff-xml")
+    if t == PreludeType.MsgPack:
+        return Option.Some("rmp")
+    // --- geo ---
+    if t == PreludeType.Point:
+        return Option.Some("buff-geo")
+    if t == PreludeType.LineString:
+        return Option.Some("buff-geo")
+    if t == PreludeType.Polygon:
+        return Option.Some("buff-geo")
+    // --- NLP ---
+    if t == PreludeType.Language:
+        return Option.Some("buff-nlp")
+    if t == PreludeType.StemAlgorithm:
+        return Option.Some("buff-nlp")
+    // --- interop ---
+    if t == PreludeType.Protobuf:
+        return Option.Some("buff-protobuf")
+    if t == PreludeType.Message:
+        return Option.Some("buff-protobuf")
+    // --- chat ---
+    if t == PreludeType.Bot:
+        return Option.Some("buff-chat")
+    if t == PreludeType.ChatMessage:
+        return Option.Some("buff-chat")
+    if t == PreludeType.Platform:
+        return Option.Some("buff-chat")
+    // --- web3 ---
+    if t == PreludeType.Provider:
+        return Option.Some("buff-web3")
+    if t == PreludeType.Wallet:
+        return Option.Some("buff-web3")
+    if t == PreludeType.ConnectedWallet:
+        return Option.Some("buff-web3")
+    if t == PreludeType.Contract:
+        return Option.Some("buff-web3")
+    if t == PreludeType.ContractMethod:
+        return Option.Some("buff-web3")
+    // --- crypto-2 ---
+    if t == PreludeType.AES:
+        return Option.Some("buff-crypto-extras")
+    if t == PreludeType.RSA:
+        return Option.Some("buff-crypto-extras")
+    if t == PreludeType.ECDH:
+        return Option.Some("buff-crypto-extras")
+    if t == PreludeType.Argon2:
+        return Option.Some("buff-crypto-extras")
+    if t == PreludeType.RsaKeypair:
+        return Option.Some("buff-crypto-extras")
+    // --- SIMD + actors ---
+    if t == PreludeType.Simd:
+        return Option.Some("buff-simd")
+    if t == PreludeType.ActorSystem:
+        return Option.Some("buff-actors")
+    if t == PreludeType.ActorRef:
+        return Option.Some("buff-actors")
+    if t == PreludeType.Supervisor:
+        return Option.Some("buff-actors")
+    if t == PreludeType.ChildSpec:
+        return Option.Some("buff-actors")
+    if t == PreludeType.RestartStrategy:
+        return Option.Some("buff-actors")
+    // --- stdlib batch (Http uses reqwest; Decimal uses rust_decimal) ---
+    if t == PreludeType.Http:
+        return Option.Some("reqwest")
+    if t == PreludeType.Decimal:
+        return Option.Some("rust_decimal")
+    return Option.None
+
+// =============================================================================
+// Lookups (the public free functions)
+// =============================================================================
+
+// True iff `name` is a recognised prelude-type identifier (case-sensitive).
+// Replaces Rust's `ALL.iter().any(|t| t.name() == name)`.
+func is_prelude_type(name: String) -> Bool:
+    let all = prelude_type_all()
+    let mut i = 0
+    for i < all.len():
+        if prelude_type_name(all.get(i)) == name:
+            return true
+        i = i + 1
+    return false
+
+// Look up a prelude type by its source name. Returns Option.None when the
+// name is not a recognised prelude type.
+func prelude_type_lookup(name: String) -> Option<PreludeType>:
+    let all = prelude_type_all()
+    let mut i = 0
+    for i < all.len():
+        let t = all.get(i)
+        if prelude_type_name(t) == name:
+            return Option.Some(t)
+        i = i + 1
+    return Option.None

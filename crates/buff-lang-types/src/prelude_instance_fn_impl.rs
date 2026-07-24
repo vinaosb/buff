@@ -873,6 +873,11 @@ pub enum PreludeInstanceFn {
     /// `s.to_lower() -> String` — lowercase. Zero args. Wraps
     /// `s.to_lowercase().to_string()`.
     ToLowercase,
+    // ---- T80: Http response instance methods --------------------------
+    ResponseStatus,
+    ResponseBody,
+    ResponseJson,
+    ResponseHeaders,
 }
 
 impl PreludeInstanceFn {
@@ -1545,6 +1550,12 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::EndsWith => "ends_with",
             PreludeInstanceFn::ToUppercase => "to_upper",
             PreludeInstanceFn::ToLowercase => "to_lower",
+            // T80: Http response instance methods. Names mirror the
+            // canonical HTTP response surface.
+            PreludeInstanceFn::ResponseStatus => "status",
+            PreludeInstanceFn::ResponseBody => "body",
+            PreludeInstanceFn::ResponseJson => "json",
+            PreludeInstanceFn::ResponseHeaders => "headers",
         }
     }
 }
