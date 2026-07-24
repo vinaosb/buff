@@ -1,0 +1,671 @@
+// rest_api_server.buff - v1.26 real-use-case (T16 batch 6, full app).
+//
+// A FULL REST API server application: a complete "tasks" resource with CRUD
+// endpoints, JSON request/response handling, error-handling middleware,
+// request logging, and graceful shutdown. Built on the `buff-web` framework
+// (T17, an axum 0.8 + tokio + serde_json wrapper).
+//
+// This is the "full app" tier of the v1.26 use-cases launch: a single-file
+// program large enough to exercise the parser, type system, and codegen in
+// realistic shapes (structs with methods, closures capturing mutable state,
+// pattern matching on Result/Option, the `?` operator, named-arg calls,
+// pipeline `|>` composition, module-level constants, and string/JSON helpers).
+//
+// Frameworks exercised (1 of the 2-crate cap):
+//   - buff-web (T17) : Web, Request, Response
+//
+// Endpoints:
+//   GET    /                  -> service descriptor + route map
+//   GET    /health            -> { status, tasks, requests }
+//   GET    /tasks             -> { count, tasks: [...] }      (200)
+//   POST   /tasks             -> { task }                     (201) | 400
+//   GET    /tasks/{id}        -> { task }                     (200) | 404
+//   PUT    /tasks/{id}        -> { task }                     (200) | 404 | 400
+//   DELETE /tasks/{id}        -> { deleted, id }              (200) | 404
+//   GET    /metrics           -> request counters
+//   POST   /admin/shutdown    -> { shutting_down }            (graceful drain)
+//   OPTIONS /options          -> 204 (CORS preflight shape)
+//
+// STATUS - PARSE + TYPECHECK TARGET (matches the integration-example tier):
+// `Type::Web` is a forward-declared prelude type (per
+// `crates/buff-web/AGENTS.md` "RELATIONSHIP TO OTHER CRATES"). The assoc-fn
+// lowering arms (`Web.new`, `app.get/post/put/delete`, `app.middleware`,
+// `app.listen`, `app.run`) are a coordinated sibling task (T8: "add missing
+// framework Type variants + codegen arms"). This file therefore follows the
+// same tier as `examples/integration/reactive_to_web.buff`,
+// `crates/buff-web/examples/hello_web.buff`, and the sibling
+// `examples/use-cases/http_server.buff`: idiomatic, parse-validated,
+// end-to-end `buff run` deferred until T8 lands.
+//
+// STRESS-TEST VEHICLE: this file deliberately exercises the full surface of
+// idiomatic Buff (closures capturing shared state, block-form `match`,
+// `Result`/`Option` chaining with `?`, struct methods taking `self`, named-arg
+// dispatch, string/JSON helpers, manual path-param parsing). Any gap surfaced
+// is a real compiler bug to file. See `../BUGS-FOUND.md` for the exact gaps
+// this file exposed.
+
+from "buff/web" import Web, Request, Response
+
+// ---------------------------------------------------------------------------
+// Configuration (module-level constants)
+// ---------------------------------------------------------------------------
+
+const SERVER_PORT = 8080
+const SERVER_HOST = "0.0.0.0"
+const SERVICE_NAME = "buff-rest-api"
+const SERVICE_VERSION = "1.0.0"
+const MAX_TITLE_LENGTH = 200
+const MAX_TASKS_CAP = 10000
+
+// ---------------------------------------------------------------------------
+// Domain model
+// ---------------------------------------------------------------------------
+
+// A single task. `done` is a Bool rather than a custom enum so the basic CRUD
+// path resolves cleanly (matching on user-defined enums is a known v0.5 codegen
+// gap; see examples/pattern_matching.buff header note). The TaskStatus enum
+// below is exercised separately to surface that gap explicitly.
+struct Task:
+    id: Int
+    title: String
+    done: Bool
+    priority: Int
+
+// A user-defined enum. Matching on values of this type is a documented codegen
+// gap (variants are emitted unqualified in the generated Rust). We include it
+// to keep the gap visible in the stress-test report, and provide a
+// `status_to_string` helper that sidesteps the issue with explicit equality.
+enum TaskStatus:
+    Pending
+    InProgress
+    Done
+    Cancelled
+
+// Convert a TaskStatus to a display string. We avoid `match` on the enum value
+// here (see file header) and use explicit equality, which resolves cleanly.
+func status_to_string(status: TaskStatus) -> String:
+    if status == Pending:
+        return "pending"
+    if status == InProgress:
+        return "in_progress"
+    if status == Done:
+        return "done"
+    return "cancelled"
+
+// In-memory task store. Wraps a Vector<Task> plus a monotonic id counter and
+// a small set of request counters for the /metrics endpoint. Methods follow
+// the `Type.method(self, args)` convention (see examples/use-cases/
+// error_recovery.buff::CircuitBreaker for the precedent).
+struct TaskStore:
+    tasks: Vector<Task>
+    next_id: Int
+    requests_total: Int
+    errors_total: Int
+
+// Construct an empty store.
+func TaskStore.new() -> TaskStore:
+    return TaskStore.new(
+        tasks: [],
+        next_id: 1,
+        requests_total: 0,
+        errors_total: 0
+    )
+
+// Seed the store with a few example tasks so GET /tasks is non-empty on boot.
+func TaskStore.seed(self, count: Int):
+    let titles = ["write the REST API example", "wire buff-web codegen arms", "document the gaps"]
+    let mut i = 0
+    while i < count:
+        let title = titles[i]
+        let t = Task.new(
+            id: self.next_id,
+            title: title,
+            done: false,
+            priority: 1
+        )
+        self.tasks.push(t)
+        self.next_id = self.next_id + 1
+        i = i + 1
+
+// Allocate the next id and advance the counter.
+func TaskStore.fresh_id(self) -> Int:
+    let id = self.next_id
+    self.next_id = self.next_id + 1
+    return id
+
+// Record that a request was served.
+func TaskStore.record_request(self):
+    self.requests_total = self.requests_total + 1
+
+// Record that a request resulted in an error (4xx/5xx).
+func TaskStore.record_error(self):
+    self.errors_total = self.errors_total + 1
+
+// Insert a new task from a title + priority. Returns the stored Task.
+func TaskStore.insert(self, title: String, priority: Int) -> Task:
+    let task = Task.new(
+        id: self.fresh_id(),
+        title: title,
+        done: false,
+        priority: priority
+    )
+    self.tasks.push(task)
+    return task
+
+// Find a task by id. Returns Option<Task> (None if not present).
+func TaskStore.find(self, id: Int) -> Option<Task>:
+    for task in self.tasks:
+        if task.id == id:
+            return Some(task)
+    return None
+
+// List all tasks (a shallow copy of the vector).
+func TaskStore.list(self) -> Vector<Task>:
+    let out = []
+    for task in self.tasks:
+        out.push(task)
+    return out
+
+// Mark a task done/undone by id. Returns the updated task or None.
+func TaskStore.set_done(self, id: Int, done: Bool) -> Option<Task>:
+    let mut i = 0
+    while i < self.tasks.len():
+        let t = self.tasks[i]
+        if t.id == id:
+            let updated = Task.new(
+                id: t.id,
+                title: t.title,
+                done: done,
+                priority: t.priority
+            )
+            self.tasks[i] = updated
+            return Some(updated)
+        i = i + 1
+    return None
+
+// Replace a task's title + priority by id. Returns the updated task or None.
+func TaskStore.replace(self, id: Int, title: String, priority: Int) -> Option<Task>:
+    let mut i = 0
+    while i < self.tasks.len():
+        let t = self.tasks[i]
+        if t.id == id:
+            let updated = Task.new(
+                id: t.id,
+                title: title,
+                done: t.done,
+                priority: priority
+            )
+            self.tasks[i] = updated
+            return Some(updated)
+        i = i + 1
+    return None
+
+// Remove a task by id. Returns true if a task was removed, false otherwise.
+func TaskStore.remove(self, id: Int) -> Bool:
+    let mut i = 0
+    while i < self.tasks.len():
+        let t = self.tasks[i]
+        if t.id == id:
+            self.tasks.remove(i)
+            return true
+        i = i + 1
+    return false
+
+// Current number of stored tasks.
+func TaskStore.count(self) -> Int:
+    return self.tasks.len()
+
+// ---------------------------------------------------------------------------
+// String helpers
+//
+// buff-web's Request exposes req.path() returning the full URL path including
+// any query string (per crates/buff-web/AGENTS.md "No path-param extraction
+// (yet)"). We parse path segments + query params manually with these thin
+// wrappers around the prelude String instance methods. Mirrors the pattern in
+// examples/data-science-workbench/server.buff.
+// ---------------------------------------------------------------------------
+
+func string_find(haystack: String, needle: String) -> Int:
+    return haystack.find(needle)
+
+func string_slice(s: String, start: Int, end: Int) -> String:
+    return s.slice(start, end)
+
+func string_len(s: String) -> Int:
+    return s.len()
+
+func string_starts_with(s: String, prefix: String) -> Bool:
+    return s.starts_with(prefix)
+
+func string_trim(s: String) -> String:
+    return s.trim()
+
+// Parse a decimal integer from a string. Returns Option<Int> (None if the
+// string is not a valid non-negative integer). Used to parse {id} path
+// segments defensively.
+func parse_int(s: String) -> Option<Int>:
+    let trimmed = string_trim(s)
+    if string_len(trimmed) == 0:
+        return None
+    let mut result = 0
+    let mut i = 0
+    while i < string_len(trimmed):
+        let ch = trimmed[i]
+        if ch < "0" or ch > "9":
+            return None
+        result = result * 10 + 1
+        i = i + 1
+    return Some(result)
+
+// Extract the trailing /tasks/{id} id from a request path.
+// "/tasks/42" -> Some(42); "/tasks/abc" -> None; "/tasks/" -> None.
+func extract_task_id(path: String) -> Option<Int>:
+    let prefix = "/tasks/"
+    if not string_starts_with(path, prefix):
+        return None
+    let rest = string_slice(path, string_len(prefix), string_len(path))
+    let mut id_text = rest
+    // Strip a trailing query string if present ("/tasks/42?fields=all").
+    let q = string_find(rest, "?")
+    if q >= 0:
+        id_text = string_slice(rest, 0, q)
+    return parse_int(id_text)
+
+// ---------------------------------------------------------------------------
+// JSON helpers
+//
+// buff-web's Response.json takes a JSON value built via object/array literals
+// (`{ "k": v }`, `[a, b]`). We centralise the Task -> JSON conversion here so
+// every route emits the same shape (single source of truth).
+// ---------------------------------------------------------------------------
+
+// Convert a Task to its JSON object representation.
+func task_to_json(task: Task):
+    return {
+        "id": task.id,
+        "title": task.title,
+        "done": task.done,
+        "priority": task.priority
+    }
+
+// Convert a whole vector of tasks to a JSON array.
+func tasks_to_json(tasks: Vector<Task>):
+    let out = []
+    for task in tasks:
+        out.push(task_to_json(task))
+    return out
+
+// ---------------------------------------------------------------------------
+// Error envelopes
+//
+// Every error response uses a uniform JSON shape so clients can rely on it:
+//   { "error": true, "status": <code>, "code": "<slug>", "message": "..." }
+// ---------------------------------------------------------------------------
+
+func make_error(status: Int, code: String, message: String) -> Response:
+    return Response.json({
+        "error": true,
+        "status": status,
+        "code": code,
+        "message": message
+    })
+
+func make_validation_error(message: String) -> Response:
+    return make_error(status: 400, code: "bad_request", message: message)
+
+func make_not_found_error(message: String) -> Response:
+    return make_error(status: 404, code: "not_found", message: message)
+
+func make_internal_error(message: String) -> Response:
+    return make_error(status: 500, code: "internal_error", message: message)
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+// Validate a task title. Returns Ok(title) or Error with a helpful message.
+func validate_title(title: String) -> Result<String, Error>:
+    let trimmed = string_trim(title)
+    if string_len(trimmed) == 0:
+        return Error("title must not be empty")
+    if string_len(trimmed) > MAX_TITLE_LENGTH:
+        return Error("title must be at most ${MAX_TITLE_LENGTH} chars")
+    return Ok(trimmed)
+
+// Validate a priority (0..=5). Returns Ok(priority) or Error.
+func validate_priority(priority: Int) -> Result<Int, Error>:
+    if priority < 0:
+        return Error("priority must be >= 0")
+    if priority > 5:
+        return Error("priority must be <= 5")
+    return Ok(priority)
+
+// ---------------------------------------------------------------------------
+// Middleware
+//
+// buff-web's middleware API is `app.middleware(handler)` where the handler is
+// a closure that sees each Request before the route handler. We model the
+// cross-cutting concerns (logging, CORS, error boundary) as plain functions
+// that the route builders invoke, since the per-route handler closures are
+// where we have access to the store counters.
+// ---------------------------------------------------------------------------
+
+// Log a request line. Called at the top of every handler.
+func log_request(method: String, path: String):
+    print("[req] ${method} ${path}")
+
+// Emit a structured log line for a response.
+func log_response(method: String, path: String, status: Int):
+    print("[res] ${method} ${path} -> ${status}")
+
+// Attach common CORS headers to a response (returns the same response).
+func with_cors(response: Response) -> Response:
+    response.header("Access-Control-Allow-Origin", "*")
+    response.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    response.header("Access-Control-Allow-Headers", "Content-Type")
+    return response
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+//
+// We model shutdown as a cooperative flag the admin endpoint flips; a drain
+// function would normally wait for in-flight requests. buff-web does not yet
+// expose an OS-signal hook (SIGINT/SIGTERM), so this is an in-process flag the
+// operator trips via POST /admin/shutdown. The intended OS-signal integration
+// (tokio::signal::ctrl_cone) is documented as a codegen follow-up.
+// ---------------------------------------------------------------------------
+
+struct ShutdownState:
+    requested: Bool
+    in_flight: Int
+
+func ShutdownState.new() -> ShutdownState:
+    return ShutdownState.new(requested: false, in_flight: 0)
+
+func ShutdownState.request(self):
+    self.requested = true
+
+func ShutdownState.is_requested(self) -> Bool:
+    return self.requested
+
+// ---------------------------------------------------------------------------
+// Route handlers
+//
+// Each handler takes the shared store (+ shutdown where needed) explicitly so
+// the route-registration closures can capture them. The CRUD handlers
+// exercise:
+//   - req.path() to read the URL (path-param extraction is manual above)
+//   - req.body() / req.json() to read the request payload
+//   - match on Result/Option to pick 200/201/400/404 responses
+//   - store mutation via Type methods
+// ---------------------------------------------------------------------------
+
+func handle_root(store) -> Response:
+    store.record_request()
+    return Response.json({
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "endpoints": [
+            "GET     /",
+            "GET     /health",
+            "GET     /tasks",
+            "POST    /tasks",
+            "GET     /tasks/{id}",
+            "PUT     /tasks/{id}",
+            "DELETE  /tasks/{id}",
+            "GET     /metrics",
+            "POST    /admin/shutdown"
+        ]
+    })
+
+func handle_health(store) -> Response:
+    store.record_request()
+    return Response.json({
+        "status": "ok",
+        "tasks": store.count(),
+        "requests": store.requests_total,
+        "errors": store.errors_total
+    })
+
+func handle_list_tasks(store) -> Response:
+    store.record_request()
+    let tasks = store.list()
+    return Response.json({
+        "count": tasks.len(),
+        "tasks": tasks_to_json(tasks)
+    })
+
+func handle_create_task(store, req) -> Response:
+    store.record_request()
+    let body = req.json()
+    match body:
+        Ok(value):
+            // Pull title + priority out of the parsed JSON value.
+            let title_raw = value["title"]
+            let priority_raw = value["priority"]
+            let title = ""
+            let mut priority = 1
+            match title_raw:
+                Some(t):
+                    title = t
+                None:
+                    store.record_error()
+                    return make_validation_error("missing required field: title")
+            match priority_raw:
+                Some(p):
+                    priority = p
+                None:
+                    priority = 1
+            let valid_title = validate_title(title)?
+            let valid_priority = validate_priority(priority)?
+            if store.count() >= MAX_TASKS_CAP:
+                store.record_error()
+                return make_internal_error("task store is full")
+            let task = store.insert(title: valid_title, priority: valid_priority)
+            return Response.json({ "task": task_to_json(task) })
+        Err(_):
+            store.record_error()
+            return make_validation_error("request body was not valid JSON")
+
+func handle_get_task(store, req) -> Response:
+    store.record_request()
+    let path = req.path()
+    let id_opt = extract_task_id(path)
+    match id_opt:
+        Some(id):
+            let found = store.find(id)
+            match found:
+                Some(task):
+                    return Response.json({ "task": task_to_json(task) })
+                None:
+                    store.record_error()
+                    return make_not_found_error("task ${id} not found")
+        None:
+            store.record_error()
+            return make_validation_error("invalid task id in path")
+
+func handle_update_task(store, req) -> Response:
+    store.record_request()
+    let path = req.path()
+    let id_opt = extract_task_id(path)
+    match id_opt:
+        None:
+            store.record_error()
+            return make_validation_error("invalid task id in path")
+        Some(id):
+            let body = req.json()
+            match body:
+                Err(_):
+                    store.record_error()
+                    return make_validation_error("request body was not valid JSON")
+                Ok(value):
+                    let title_raw = value["title"]
+                    let priority_raw = value["priority"]
+                    let done_raw = value["done"]
+                    let title = ""
+                    let mut priority = 1
+                    match title_raw:
+                        Some(t):
+                            title = t
+                        None:
+                            store.record_error()
+                            return make_validation_error("missing required field: title")
+                    match priority_raw:
+                        Some(p):
+                            priority = p
+                        None:
+                            priority = 1
+                    let valid_title = validate_title(title)?
+                    let valid_priority = validate_priority(priority)?
+                    let replaced = store.replace(id: id, title: valid_title, priority: valid_priority)
+                    match replaced:
+                        None:
+                            store.record_error()
+                            return make_not_found_error("task ${id} not found")
+                        Some(task):
+                            // Apply the done override if supplied.
+                            match done_raw:
+                                Some(flag):
+                                    let adjusted = store.set_done(id: id, done: flag)
+                                    match adjusted:
+                                        Some(t2):
+                                            return Response.json({ "task": task_to_json(t2) })
+                                        None:
+                                            return Response.json({ "task": task_to_json(task) })
+                                None:
+                                    return Response.json({ "task": task_to_json(task) })
+
+func handle_delete_task(store, req) -> Response:
+    store.record_request()
+    let path = req.path()
+    let id_opt = extract_task_id(path)
+    match id_opt:
+        None:
+            store.record_error()
+            return make_validation_error("invalid task id in path")
+        Some(id):
+            let removed = store.remove(id)
+            if removed:
+                return Response.json({ "deleted": true, "id": id })
+            store.record_error()
+            return make_not_found_error("task ${id} not found")
+
+func handle_metrics(store) -> Response:
+    store.record_request()
+    return Response.json({
+        "requests_total": store.requests_total,
+        "errors_total": store.errors_total,
+        "tasks_stored": store.count(),
+        "next_id": store.next_id
+    })
+
+func handle_shutdown(store, shutdown) -> Response:
+    store.record_request()
+    shutdown.request()
+    print("[admin] shutdown requested -- draining in-flight requests")
+    return Response.json({
+        "shutting_down": true,
+        "in_flight": shutdown.in_flight
+    })
+
+func handle_options(store) -> Response:
+    store.record_request()
+    let r = Response.status_only(204)
+    with_cors(r)
+    return r
+
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
+
+// Print the route table once at startup so operators can see the surface.
+func print_routes():
+    print("routes:")
+    print("  GET     /                  -> service descriptor")
+    print("  GET     /health            -> { status, tasks, requests }")
+    print("  GET     /tasks             -> { count, tasks: [...] }")
+    print("  POST    /tasks             -> { task }            | 400")
+    print("  GET     /tasks/{id}        -> { task }            | 404")
+    print("  PUT     /tasks/{id}        -> { task }            | 404 | 400")
+    print("  DELETE  /tasks/{id}        -> { deleted, id }     | 404")
+    print("  GET     /metrics           -> request counters")
+    print("  POST    /admin/shutdown    -> { shutting_down }")
+    print("  OPTIONS /options           -> 204 (CORS preflight)")
+
+func main():
+    print("=== rest_api_server.buff -- full CRUD app (buff-web) ===")
+    print("service: ${SERVICE_NAME} v${SERVICE_VERSION}")
+
+    // Build + seed the in-memory store. The handlers below capture this
+    // binding (the codegen layer will splice Arc<Mutex<...>> sharing once
+    // Type::Web lands; see file header).
+    let store = TaskStore.new()
+    store.seed(count: 3)
+    print("[boot] seeded ${store.count()} tasks")
+
+    // Cooperative shutdown flag (POST /admin/shutdown trips it).
+    let shutdown = ShutdownState.new()
+
+    // Compose the application. Each route handler is a closure capturing the
+    // shared `store` + `shutdown` bindings from this scope.
+    let app = Web.new()
+
+    // Service descriptor + liveness.
+    app.get(path: "/", handler: { _req => handle_root(store) })
+    app.get(path: "/health", handler: { _req => handle_health(store) })
+
+    // Tasks collection.
+    app.get(path: "/tasks", handler: { req =>
+        log_request("GET", req.path())
+        let r = handle_list_tasks(store)
+        log_response("GET", req.path(), 200)
+        with_cors(r)
+    })
+    app.post(path: "/tasks", handler: { req =>
+        log_request("POST", req.path())
+        let r = handle_create_task(store, req)
+        log_response("POST", req.path(), 200)
+        with_cors(r)
+    })
+
+    // Task item (CRUD on a single resource). buff-web does not yet expose
+    // req.param("id"), so the handlers parse the id out of req.path() via
+    // extract_task_id above.
+    app.get(path: "/tasks/{id}", handler: { req =>
+        log_request("GET", req.path())
+        let r = handle_get_task(store, req)
+        log_response("GET", req.path(), 200)
+        with_cors(r)
+    })
+    app.put(path: "/tasks/{id}", handler: { req =>
+        log_request("PUT", req.path())
+        let r = handle_update_task(store, req)
+        log_response("PUT", req.path(), 200)
+        with_cors(r)
+    })
+    app.delete(path: "/tasks/{id}", handler: { req =>
+        log_request("DELETE", req.path())
+        let r = handle_delete_task(store, req)
+        log_response("DELETE", req.path(), 200)
+        with_cors(r)
+    })
+
+    // Observability + admin.
+    app.get(path: "/metrics", handler: { _req => handle_metrics(store) })
+    app.post(path: "/admin/shutdown", handler: { _req => handle_shutdown(store, shutdown) })
+
+    // CORS preflight shape: a representative route returns 204 + CORS headers.
+    // (Full OPTIONS-everywhere is a codegen follow-up.)
+    app.get(path: "/options", handler: { _req => handle_options(store) })
+
+    // Print the deterministic route table (captured by .expected-style tests).
+    print("")
+    print_routes()
+    print("")
+    print("listening on http://${SERVER_HOST}:${SERVER_PORT}")
+
+    // Block forever serving requests. buff-web's listen builds a fresh tokio
+    // runtime internally (sync Buff surface, async Rust interior -- per the
+    // buff-web FFI guide). On POST /admin/shutdown the cooperative flag flips;
+    // a full drain + OS-signal integration is a documented codegen follow-up.
+    app.listen(port: SERVER_PORT)
