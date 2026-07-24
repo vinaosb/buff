@@ -31,8 +31,8 @@ If that prints the greeting, your environment is set up correctly.
 
 ## Project Structure
 
-Buff is a multi-crate Rust workspace (`members = ["crates/*"]` glob — see
-the root `Cargo.toml`). The **core compiler pipeline** is a focused set of
+Buff is a **69-crate** Rust workspace (`members = ["crates/*"]` glob — see
+the root `Cargo.toml`). The **core compiler pipeline** is a focused set of 14
 crates, each with a single responsibility:
 
 | Crate | Purpose |
@@ -47,9 +47,9 @@ crates, each with a single responsibility:
 | `buff-lang-runtime` | Rayon + wgpu + tokio host runtime |
 | `buff-lang-cli` | Binary and library: pipeline orchestration |
 
-In addition to the core compiler, the workspace hosts the **tooling**
+In addition to the core compiler, the workspace hosts 11 **tooling**
 crates (LSP, REPL, Jupyter, registry, playground-wasm, ui-dioxus, buffup,
-bufflings, buff-dap) and the **framework** crates shipped across
+bufflings, buff-dap, buff-cli) and 44 **framework** crates shipped across
 v1.13–v1.23 (`buff-{dataframe, tensor, image, audio, dsp, ecs, science,
 pipeline, ml, game, web, db, reactive, observe, …}`). See the root
 `AGENTS.md` and `README.md` for the full per-crate breakdown.

@@ -1,18 +1,18 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-23 (v1.24 audit refresh by T28; originally v0.1 → v1.0 → v1.9 → v1.24)
-**Commit:** 0bc3f17 (`v1x-frameworks`, T28 v1.24 audit in progress; v1.0-v1.23 shipped)
-**Branch:** `v1x-frameworks` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.23.0; v0.1-dev preserved as historical marker; v1.24.0 tagged at T28 completion)
+**Generated:** 2026-07-23 (T108 crate-count audit; v1.24 audit refresh by T28; originally v0.1 → v1.0 → v1.9 → v1.24)
+**Commit:** fdc653b (`v1x-frameworks`, T108 v1.25 launch readiness; v1.0-v1.24 shipped)
+**Branch:** `v1x-frameworks` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.24.0; v0.1-dev preserved as historical marker)
 
 ## OVERVIEW
 
-Buff — high-level language that transpiles `.buff` → Rust → native via rustc/LLVM (and `.buffhtml` SFC → Dioxus 0.7 component → wasm32-unknown-unknown). Implemented as a **60+-crate** Rust workspace (`members = ["crates/*"]` glob): the **core compiler** (~10 `buff-lang-*` crates), the **tooling** crates (LSP/REPL/Jupyter/registry/playground-wasm/ui-dioxus/buffup/bufflings/buff-dap), and the **framework** crates shipped across v1.13–v1.23 (`buff-{dataframe, tensor, image, audio, dsp, ecs, science, pipeline, ml, game, web, db, reactive, observe, …}`). Hides borrow-checker pain from users; compiler emits only "easy" Rust. v1.0–v1.12 shipped (production compiler + Try/Use Buff + stdlib + REPL + registry + Jupyter + UI/RSX + education + distribution). v1.13–v1.24 shipped (Buff SDK 2.0 foundations + framework-crate waves 2–11 + this v1.24 audit/polish release). Next: v1.25+ launch readiness (see `.sisyphus/plans/buff-launch-readiness.md`).
+Buff — high-level language that transpiles `.buff` → Rust → native via rustc/LLVM (and `.buffhtml` SFC → Dioxus 0.7 component → wasm32-unknown-unknown). Implemented as a **69-crate** Rust workspace (`members = ["crates/*"]` glob): the **core compiler** (14 `buff-lang-*` crates), the **tooling** crates (11: LSP/REPL/Jupyter/registry/playground-wasm/ui-dioxus/buffup/bufflings/buff-dap/buff-cli), and the **framework** crates shipped across v1.13–v1.23 (44: `buff-{dataframe, tensor, image, audio, dsp, ecs, science, pipeline, ml, game, web, db, template, reactive, observe, …}`). Hides borrow-checker pain from users; compiler emits only "easy" Rust. v1.0–v1.12 shipped (production compiler + Try/Use Buff + stdlib + REPL + registry + Jupyter + UI/RSX + education + distribution). v1.13–v1.24 shipped (Buff SDK 2.0 foundations + framework-crate waves 2–11 + v1.24 audit/polish). Next: v1.25+ launch readiness (see `.sisyphus/plans/buff-launch-readiness.md`).
 
 ## STRUCTURE
 
 ```
 buff/
-├── crates/                              # 60+ workspace members via `members = ["crates/*"]` glob
+├── crates/                              # 69 workspace members via `members = ["crates/*"]` glob
 │   ├── buff-lang-error/                 # LEAF: Span + Diagnostic + SourceMap + ErrorCode (depended on by all)
 │   ├── buff-lang-ast/                   # Pure AST data nodes (decl/expr/stmt/ty/op/ir/lossless) + T57 byte-exact roundtrip
 │   ├── buff-lang-lexer/                 # Hand-rolled byte-scanner + offside-rule indent tracker
@@ -38,7 +38,7 @@ buff/
 │   ├── buff-dap/                        # T60/T136 Debug Adapter Protocol translation proxy (v1.10)
 │   ├── buff-cli/                        # CLI framework for user programs (Wave 4)
 │   ├── buff-lang-ffi-guide/             # GUIDE.md: 6 hard rules for all extern wrapper crates
-│   └── buff-{framework crates}/         # v1.13–v1.23 framework MVPs (50+ crates): dataframe, tensor, image, audio,
+│   └── buff-{framework crates}/         # v1.13–v1.23 framework MVPs (44 crates): dataframe, tensor, image, audio,
 │                                        #   dsp, ecs, science, pipeline, ml, game, mock, audit, fuzz, web, db, template,
 │                                        #   reactive, observe, cache, auth, validate, resilience, http-client, jobs,
 │                                        #   config, scrape, i18n, archive, fsm, pubsub, fake, assertions, crypto-extras,
@@ -129,7 +129,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 ## CONVENTIONS
 
 - **Workspace dependency resolution**: every crate uses `dep.workspace = true`. NEVER pin a version in a crate `Cargo.toml` — add to root `[workspace.dependencies]` first (heavily documented with T-numbered rationale).
-- **Edition 2021, license `MIT OR Apache-2.0`**. Two version tiers: `1.2.0` (10 core compiler crates), `1.0.0` (9 tooling crates: eval/repl/jupyter/registry/lsp/playground-wasm/ui-dioxus/ast-rsx/buffhtml-parser/codegen-buffhtml).
+- **Edition 2021, license `MIT OR Apache-2.0`**. Three version tiers: `1.2.0` (14 core compiler crates), `1.0.0` (11 tooling crates: eval/repl/jupyter/registry/lsp/playground-wasm/ui-dioxus/ast-rsx/buffhtml-parser/codegen-buffhtml/buff-cli) + 44 framework crates. `buff-dataframe` is pinned at `2.0.0` (API-bumped during its MVP).
 - **Rust crate naming**: `buff-lang-<thing>` (compiler crates, hyphen) → `buff_lang_<thing>` (underscore) → import `buff_lang_<thing>::...`. Tooling crates use `buff-<thing>` (no `lang` infix) → `buff_<thing>`.
 - **Derive defaults**: `Debug, Clone, PartialEq` (+ `Eq, Hash` when used in maps/sets).
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants. ErrorCodes (E10xx lex / E11xx parse / E12xx type / E13xx codegen) are STABLE FOREVER — never renumber/reuse/silently-remove.
