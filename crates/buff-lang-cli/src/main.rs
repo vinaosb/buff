@@ -268,5 +268,9 @@ fn main() -> Result<()> {
         Command::Profile { file, alloc, output } => {
             buff_lang_cli::commands::profile::run(&file, alloc, output.as_deref())
         }
+        Command::Fix { file, dry_run } => {
+            buff_lang_cli::commands::fix::run(&file, dry_run)?;
+            Ok(())
+        }
     }
 }

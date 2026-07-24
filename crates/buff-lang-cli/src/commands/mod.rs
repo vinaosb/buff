@@ -17,6 +17,7 @@ pub mod coverage;
 pub mod debug;
 pub mod deps;
 pub mod expand;
+pub mod fix;
 pub mod doc;
 pub mod fmt;
 pub mod gen;

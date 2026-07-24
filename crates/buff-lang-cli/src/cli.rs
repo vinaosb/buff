@@ -509,6 +509,26 @@ pub enum Command {
         check: bool,
     },
 
+    /// Auto-apply machine-applicable fix suggestions from diagnostics (T98).
+    ///
+    /// Like `cargo fix` / `rustfix` — runs `buff check` on the file, collects
+    /// diagnostics with `MachineApplicable` suggestions, applies the suggested
+    /// text replacements, and writes the fixed file.
+    ///
+    /// Only suggestions marked `MachineApplicable` are applied (not
+    /// `MaybeIncorrect` or `HasPlaceholders`). Use `--dry-run` to preview
+    /// changes without modifying the file.
+    Fix {
+        /// Input `.buff` source file to fix.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Preview changes without modifying the file. Prints a diff-like
+        /// report showing what would change.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Type-check and lint a `.buff` file WITHOUT running codegen (T55).
     ///
     /// Faster than `buff build` because it skips the syn/quote/prettyplease
