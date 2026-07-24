@@ -1353,6 +1353,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-mcp"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-cli",
+ "buff-lang-error",
+ "buff-lsp",
+ "insta",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-ml"
 version = "1.0.0"
 dependencies = [

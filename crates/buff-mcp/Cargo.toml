@@ -1,0 +1,51 @@
+[package]
+name = "buff-mcp"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "buff-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "buff_mcp"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# T62: buff-lsp provides the pure handlers (`hover`, `completion`,
+# `goto_definition`, `document_symbols`, `formatting`) + the
+# `DocumentState` / `analysis::analyze` entry point the MCP server
+# wraps. NO buff-lsp code is reimplemented — every MCP tool delegates
+# to the matching `buff_lsp::handlers::*` fn (or to the CLI's
+# `check_source` / `pipeline::compile_to_rust` / `fmt::format_source`
+# for the tools that the LSP itself delegates to).
+buff-lsp.workspace = true
+# T62: buff-lang-cli provides `check::check_source` (T55 standalone
+# typecheck, lex->parse->TypeInferencer->naming_lint, NO codegen) for
+# the `buff_check` tool, `pipeline::compile_to_rust` (T115 `buff
+# expand`) for the `buff_expand` tool, and `fmt::format_source` (T54)
+# for the `buff_format` tool. All three are already reused by
+# `buff-lsp` itself (the LSP `formatting` handler calls
+# `format_source`), so this mirrors the existing T117 dependency.
+buff-lang-cli.workspace = true
+# T62: buff-lang-error provides `render_diagnostics_json`
+# (`DiagnosticJson` shape: code/severity/message/spans/notes/
+# suggestions with byte offsets + 1-based line/col) so the
+# `buff_check` MCP tool can return structured diagnostics the AI
+# assistant can reason about (rather than just a human-readable
+# stderr blob). Reused from buff-lang-cli's own `--error-format json`
+# path (T1).
+buff-lang-error.workspace = true
+# T62: `lsp-types` is reused for the `Position` / `Location` /
+# `Hover` / `CompletionResponse` / `GotoDefinitionResponse` types
+# the `buff_lsp::handlers::*` fns consume/produce — the MCP server
+# translates between MCP tool arguments (plain `line` / `character`
+# JSON fields) and these LSP types at the boundary.
+lsp-types.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -2019,6 +2019,26 @@ axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
 # are required by salsa's own internal plumbing and the modern API
 # surface we depend on.
 salsa = "0.28"
+# T62: `buff-mcp` workspace path dep — MCP (Model Context Protocol)
+# bridge server wrapping `buff-lsp` (T117). The MCP server exposes
+# Buff's compiler intelligence to AI assistants (Claude, GPT, etc.)
+# via JSON-RPC 2.0 over stdio. It wraps buff-lsp's existing pure
+# handlers (`hover`, `completion`, `goto_definition`, `formatting`)
+# AND the CLI's `check_source` (T55 standalone typecheck) +
+# `pipeline::compile_to_rust` (T115 `buff expand`) — NO logic is
+# reimplemented, every tool delegates to an existing entry point.
+# Mirrors the buff-eval / buff-repl / buff-lsp / buff-registry /
+# buff-jupyter / buff-dap / buffup pattern so any future consumer
+# (IDE integrations, CI tooling, future `buff mcp` CLI subcommand)
+# resolves to the same in-tree version during the v1.25 tooling wave.
+# Records `buff-mcp` (NOT `buff_lang_mcp` — the tooling-crate naming
+# convention drops the `-lang` infix per AGENTS.md). Pure-Rust: NO
+# external MCP SDK, NO HTTP server, NO WebSocket — the MCP JSON-RPC
+# protocol is implemented directly over stdin/stdout (newline-
+# delimited) so there is zero added native dep surface (matches the
+# "no C library, no Docker" hard rule from T126/T127 and the wider
+# workspace stance that killed chumsky/logos/zmq).
+buff-mcp = { path = "crates/buff-mcp" }
 
 # T60: Binary Size Minimization profile.
 #
