@@ -627,6 +627,13 @@ impl RustCodegen {
                     let doc = format!("@workgroup({n})");
                     attrs.push(syn::parse_quote!(#[doc = #doc]));
                 }
+                // T76: `@inline` hints to rustc/LLVM to inline this function
+                // at call sites. Rust's `#[inline]` is the direct equivalent.
+                "inline" => attrs.push(syn::parse_quote!(#[inline])),
+                // T76: `@no_inline` hints to rustc/LLVM to NEVER inline this
+                // function (useful for cold paths or to reduce code bloat).
+                // Rust's `#[inline(never)]` is the direct equivalent.
+                "no_inline" => attrs.push(syn::parse_quote!(#[inline(never)])),
                 // Unknown attribute — surface as a codegen error so the
                 // user knows it was not applied (rather than silently
                 // dropping it). Future tasks can add recognised attributes
@@ -636,7 +643,7 @@ impl RustCodegen {
                         "unrecognised attribute `@{other}` \
                          (supported: @test, @feature, @internal, @deprecated, \
                          @should_panic, @ignore, @bench, @property, @blocking, \
-                         @workgroup)"
+                         @workgroup, @inline, @no_inline)"
                     )));
                 }
             }
