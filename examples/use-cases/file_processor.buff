@@ -49,7 +49,7 @@ func split_lines(text: String) -> Vector<String>:
 // with numbered lines, length classification, and a summary footer.
 func build_report(lines: Vector<String>) -> String:
     let body = []
-    let counts = {String: 0}
+    let counts = {:}
     let mut index = 1
     for line in lines:
         let bucket = classify(line.len())
@@ -94,8 +94,7 @@ func main():
         input_path: "examples/use-cases/sample_input.txt",
         output_path: "examples/use-cases/sample_output.txt"
     )
-    match outcome:
-        Ok(n):
-            print("wrote report for {n} lines")
-        Err(e):
-            print("skipped file round-trip: {e}")
+    match outcome {
+        Ok(n) => print("wrote report for {n} lines"),
+        Err(e) => print("skipped file round-trip: {e}")
+    }

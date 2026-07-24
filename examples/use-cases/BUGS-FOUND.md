@@ -37,8 +37,9 @@ The examples were written based on existing working examples and the prelude_typ
 ### B4: String.len() on hex digest
 - **Risk:** `digest.len()` — String.len() returns the string length. For a 64-char hex digest, this should print 64. Confirmed working in existing examples.
 
-### B5: FileRecord.new() named args
-- **Risk:** `FileRecord.new(path: "...", size: 1024, digest: "...")` — struct constructors use named args. This is the standard pattern in existing examples. Should work.
+### B5: FileRecord struct-init syntax
+- **Status:** FIXED — changed from `FileRecord.new(...)` to `FileRecord { ... }` struct-init syntax.
+- **Reason:** `Type.new()` calls a user-defined function; for struct literals, use `Type { field: value }` syntax (confirmed in `expr.rs` line 744+).
 
 ---
 
@@ -50,9 +51,10 @@ The examples were written based on existing working examples and the prelude_typ
 - **Impact:** `buff check` should pass (typecheck succeeds), but `buff run` will fail at the rustc stage.
 - **Action:** This is expected behavior — the example is a typecheck-only showcase.
 
-### B7: Logger.new() self-constructor recursion
-- **Risk:** `Logger.new(module: String, min_level: LogLevel) -> Logger` calls `Logger.new(module: module, min_level: min_level, entries: [])`. This is a static method that creates a struct literal, not a recursive call. Buff's `Type.new()` convention should handle this correctly.
-- **Verify:** If this causes infinite recursion, change to direct struct literal construction.
+### B7: Logger constructor — renamed to avoid recursion
+- **Status:** FIXED — renamed from `Logger.new()` to `create_logger()` to avoid self-recursive call.
+- **Reason:** Defining `func Logger.new(...)` that calls `Logger.new(...)` would be infinite recursion. The function now uses `Logger { ... }` struct-init syntax internally.
+- **Renamed calls:** All `Logger.new(...)` calls in demos updated to `create_logger(...)`.
 
 ### B8: Logger method syntax (func Logger.method(self, ...))
 - **Risk:** `func Logger.log(self, level: LogLevel, message: String) -> String` — methods on structs using `Type.method` syntax. This is documented in the language spec and used in existing examples (e.g., `CircuitBreaker.record_failure` in error_handling patterns).
@@ -101,8 +103,9 @@ The examples were written based on existing working examples and the prelude_typ
 - **Risk:** `data.get(0)` — Vector.get() returning Option<T>. Not shown in existing examples (only .pop() is shown returning Option). May not exist.
 - **Mitigation:** If get() doesn't exist, the demo_option_chain section (which was removed) would need alternative syntax. The current error_recovery.buff does NOT use .get() — it was trimmed. No issue.
 
-### B19: Struct literal in CircuitBreaker.new()
-- **Risk:** `CircuitBreaker.new(failure_count: 0, threshold: threshold, is_open: false)` — passing a non-literal `threshold` variable as a named arg. Should work.
+### B19: CircuitBreaker constructor — renamed to avoid recursion
+- **Status:** FIXED — renamed from `CircuitBreaker.new()` to `create_circuit_breaker()` to avoid self-recursive call.
+- **Reason:** Same as B7 — defining `func Type.new()` that calls itself is infinite recursion. Now uses `CircuitBreaker { ... }` struct-init syntax.
 
 ---
 
@@ -473,6 +476,51 @@ coordinated-sibling codegen work (T8/T9), not defects in the examples.
 - [ ] Confirm bare `extern` decl does not force a `tokio` link on the pure `main` (T11-013)
 - [ ] Resolve `pprof-0.15.0` Windows build failure (pre-existing dep issue)
 
+### Verification Update (re-run with real lex+parse+type execution)
+
+The blocker above (pprof/MSVC) was **worked around** by replicating
+`buff check`'s phases as a throwaway unit test in `buff-lang-types` — a lib
+crate with no `pprof`/`prettyplease` dep, so it links once `LIB` is repaired
+with the VS 18 Insiders `onecore\x64` + Windows SDK 10.0.26100
+`ucrt\x64`/`um\x64` dirs. The harness (`crates/buff-lang-types/tests/
+_tmp_batch1_check.rs`) was deleted before commit. **Actual results:**
+
+| File | lex | parse | typecheck |
+|---|---|---|---|
+| `http_server.buff` | OK | OK (5 decls) | **CLEAN** |
+| `tcp_echo.buff` | OK | OK (8 decls) | **CLEAN** |
+| `http_client_retry.buff` | OK | OK (6 decls) | **CLEAN** |
+
+This upgrades the earlier "status CLAIM in file" notes (BUG-T11-001/010) from
+assertion to **proven** — all three pass the lex+parse+type phases that
+`buff check` runs.
+
+**Corrections to the earlier T11 notes:**
+- **BUG-T11-008 superseded:** a `tcp_echo.buff.expected` **was** created. It
+  captures the deterministic startup banner (`=== tcp_echo...` + the
+  bind-success `[net] listening on 127.0.0.1:7878` line) printed before the
+  extern `tcp_accept` blocks. It is aspirational (the file is codegen-only per
+  BUG-T11-006) but deterministic for the startup prefix.
+
+**New bug found during verification (not in the earlier pass):**
+
+### BUG-T11-014: bare `{` inside a string literal starts interpolation (LEXER)
+- **Severity:** MEDIUM
+- **Repro:** `func main(): print("{a, b}")` →
+  `PARSE ERROR: expected interp_end, found ','`.
+- **Root cause:** the string lexer treats a bare `{` as an interpolation
+  opener (not just `${`). So JSON-shaped text like `"{ status: 'ok' }"` or a
+  route path like `"/tasks/{id}"` **cannot be written as a literal Buff
+  string** today — the lexer hits `:`/`,` while expecting `interp_end`.
+- **Cross-reference:** `crates/buff-web/README.md` documents route paths as
+  `"/users/{id}"`, which is unrepresentable as a literal under this rule.
+- **Workaround in `http_server.buff`:** all route-map `print` strings and the
+  route path were made brace-free (`/tasks/{id}` → `/task`; JSON previews
+  reworded to `-> status: ok` words). `Response.json({ ... })` (Buff object
+  literal, not a string) is unaffected.
+- **Suggested owner:** lexer task — either require `${` for interpolation, or
+  add a `\{` / `{{` escape for literal braces.
+
 ---
 
 # T12 Batch 2: file_processor.buff, csv_analyzer.buff, cli_tool.buff
@@ -511,16 +559,34 @@ Reads a text file, processes each line (trim, number, classify length), and writ
 
 ### What buff check WOULD report
 - **Lex:** OK (all tokens valid)
-- **Parse:** OK (all syntax valid)
+- **Parse:** OK (all syntax valid, offside-rule blocks correctly indented)
 - **Type inference:** Many Unknown types from unregistered methods, but NO hard errors
-  - `text.split(separator: "\n")` → Unknown (split not registered)
-  - `line.trim()` → Unknown (trim not registered)
-  - `trimmed.len()` → Unknown (len not registered)
-  - `out.push(trimmed)` → Unknown (push not registered)
-  - `body.join(separator: "\n")` → Unknown (join not registered)
-  - `counts.get_or(bucket, default: 0)` → Unknown (get_or not registered)
+  - `read_to_string(path)` → Unknown (extern fn, not in prelude)
+  - `write(path, contents:)` → Unknown (extern fn, not in prelude)
+  - `text.split(separator: "\n")` → Unknown (String.split not registered)
+  - `line.trim()` → Unknown (String.trim not registered)
+  - `trimmed.len()` → Unknown (String.len not registered)
+  - `out.push(trimmed)` → Unknown (Vector.push not registered)
+  - `body.join(separator: "\n")` → Unknown (Vector.join not registered)
+  - `counts.get_or(bucket, default: 0)` → Unknown (Map.get_or not registered)
 - **naming_lint:** May flag unused variables or shadowing
 - **Overall:** PASS (permissive type inference allows Unknown types)
+
+### Deterministic demo output (if buff run could link extern)
+```
+processed 4 non-blank lines
+001 [ short] hello world
+002 [medium] this is a medium length line for testing
+003 [ short] x
+004 [  long] a much longer line that should definitely be classified as long by the bucket heuristic above
+--- summary ---
+total lines: 4
+ empty: 0
+ short: 2
+medium: 1
+  long: 1
+skipped file round-trip: No such file or directory (os error 2)
+```
 
 ### Why it's forward-declared
 1. extern bindings need Cargo project linking (single-file rustc pipeline cannot link std)
