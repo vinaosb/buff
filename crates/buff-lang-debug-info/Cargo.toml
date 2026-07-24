@@ -1,6 +1,6 @@
 [package]
 name = "buff-lang-debug-info"
-version = "1.2.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Buff-span stack traces via .buffmap source map sidecar + panic hook"

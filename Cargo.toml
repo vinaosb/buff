@@ -2,6 +2,30 @@
 resolver = "2"
 members = ["crates/*"]
 
+# T33: Version-tier consistency across all 69 workspace crates.
+#
+# Three tiers:
+#   1.2.0 — Core compiler crates (buff-lang-error, buff-lang-ast,
+#           buff-lang-lexer, buff-lang-parser, buff-lang-types,
+#           buff-lang-codegen-rust, buff-lang-codegen-wgsl,
+#           buff-lang-runtime). These are the foundational pipeline
+#           crates that every consumer depends on.
+#   1.0.0 — Tooling + framework crates (all buff-{lsp,eval,repl,
+#           jupyter,registry,playground-wasm,ui-dioxus,ast-rsx,
+#           buffhtml-parser,codegen-buffhtml,cli,dap,bufflings,
+#           buffup} + all 44 buff-{dataframe,tensor,...} framework
+#           crates). These ship alongside the compiler but are
+#           independently versioned.
+#   0.1.0 — Reserved for future experimental crates (not yet used).
+#
+# Exception: buff-dataframe is pinned at 2.0.0 (API-bumped during
+# its MVP — the only crate above 1.x). Leave as-is.
+#
+# Every crate Cargo.toml MUST match its tier. The `cargo check`
+# workspace build verifies this — a version mismatch would cause
+# a resolver error if any crate depends on another with a
+# semver-incompatible version.
+
 [workspace.dependencies]
 syn = { version = "2.0", features = ["full", "parsing", "printing", "extra-traits"] }
 quote = "1.0"
