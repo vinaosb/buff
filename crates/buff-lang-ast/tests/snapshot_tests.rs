@@ -55,17 +55,13 @@ fn snapshot_main_func() {
         stmts: vec![Stmt::Return(Some(int_lit(0)), span())],
         span: span(),
     };
-    let f = FuncDecl {
-        name: Ident::new("main", span()),
-        params: Vec::new(),
-        return_type: None,
-        body,
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    };
+    let f = FuncDecl { name: Ident::new("main", span()),
+    params: Vec::new(),
+    return_type: None,
+    body,
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let d = Decl::FuncDecl(f);
     insta::assert_snapshot!(d.to_string(), @"FuncDecl(fn main() { Return(Lit(Int(0))) })");
 }

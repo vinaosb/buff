@@ -171,8 +171,8 @@ fn lint_struct(s: &StructDecl, out: &mut Vec<Diagnostic>) {
 fn lint_enum(e: &EnumDecl, out: &mut Vec<Diagnostic>) {
     warn_pascal("enum", &e.name, out);
     // Generic type params are conventionally PascalCase (single letter OK).
-    for g in &e.generics {
-        warn_pascal("type parameter", g, out);
+    for tp in &e.type_params {
+        warn_pascal("type parameter", &tp.name, out);
     }
     for v in &e.variants {
         warn_pascal("enum variant", &v.name, out);

@@ -446,18 +446,14 @@ fn t119_direct_externfuncdecl_construction_lowers_correctly() {
         .expect("codegen must succeed");
     assert!(codegen.extern_crates().contains("serde_json"));
     let _ = generate_rust; // silence unused import warning
-    let _ = FuncDecl {
-        name: ident("_unused"),
-        params: vec![],
-        return_type: None,
-        body: Block {
-            stmts: vec![],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: vec![],
+    let _ = FuncDecl { name: ident("_unused"),
+    params: vec![],
+    return_type: None,
+    body: Block {
+        stmts: vec![],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: vec![], type_params: Vec::new(), span: span(), };
 }

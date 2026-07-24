@@ -87,12 +87,8 @@ fn string_return_body(text: &str) -> Block {
 
 /// Build a `struct Name { fields... }` declaration.
 fn struct_decl(name: &str, fields: Vec<(&str, TypeRef)>) -> StructDecl {
-    StructDecl {
-        name: ident(name),
-        fields: fields.into_iter().map(|(n, t)| (ident(n), t)).collect(),
-        traits: Vec::new(),
-        span: span(),
-    }
+    StructDecl { name: ident(name),
+    fields: fields.into_iter().map(|(n, t)| (ident(n), t)).collect(), traits: Vec::new(), type_params: Vec::new(), span: span(), }
 }
 
 /// Build a single-method `extend Target { fn name(self) -> Ret {...} }`.
@@ -354,42 +350,38 @@ fn embedding_end_to_end_with_caller() {
         "Employee",
         vec![("person", named_ty("Person"))],
     ));
-    let caller = Decl::FuncDecl(FuncDecl {
-        name: ident("caller"),
-        params: Vec::new(),
-        return_type: Some(named_ty("String")),
-        body: Block {
-            stmts: vec![Stmt::Return(
-                Some(Expr::MethodCall {
-                    receiver: Box::new(Expr::StructInit {
-                        type_name: ident("Employee"),
-                        fields: vec![(
-                            ident("person"),
-                            Expr::StructInit {
-                                type_name: ident("Person"),
-                                fields: vec![(
-                                    ident("name"),
-                                    Expr::Literal(Literal::String("zoe".to_string()), span()),
-                                )],
-                                span: span(),
-                            },
-                        )],
-                        span: span(),
-                    }),
-                    method: ident("name"),
-                    args: Vec::new(),
+    let caller = Decl::FuncDecl(FuncDecl { name: ident("caller"),
+    params: Vec::new(),
+    return_type: Some(named_ty("String")),
+    body: Block {
+        stmts: vec![Stmt::Return(
+            Some(Expr::MethodCall {
+                receiver: Box::new(Expr::StructInit {
+                    type_name: ident("Employee"),
+                    fields: vec![(
+                        ident("person"),
+                        Expr::StructInit {
+                            type_name: ident("Person"),
+                            fields: vec![(
+                                ident("name"),
+                                Expr::Literal(Literal::String("zoe".to_string()), span()),
+                            )],
+                            span: span(),
+                        },
+                    )],
                     span: span(),
                 }),
-                span(),
-            )],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+                method: ident("name"),
+                args: Vec::new(),
+                span: span(),
+            }),
+            span(),
+        )],
         span: span(),
-    });
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
     let src = generate_rust(&[person, extend, employee, caller]).expect("codegen must succeed");
     assert!(src.contains("impl Employee"));
     assert!(src.contains("self.person.name()"));

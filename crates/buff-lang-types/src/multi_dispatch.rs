@@ -384,17 +384,13 @@ mod tests {
     }
 
     fn func(name: &str, params: &[(&str, &str)]) -> Decl {
-        Decl::FuncDecl(FuncDecl {
-            name: Ident::new(name, sp()),
-            params: params.iter().map(|(n, t)| param(n, t)).collect(),
-            return_type: Some(named_ty("Int")),
-            body: Block::empty(sp()),
-            is_async: false,
-            is_unsafe: false,
-            is_extern: false,
-            attributes: Vec::new(),
-            span: sp(),
-        })
+        Decl::FuncDecl(FuncDecl { name: Ident::new(name, sp()),
+        params: params.iter().map(|(n, t)| param(n, t)).collect(),
+        return_type: Some(named_ty("Int")),
+        body: Block::empty(sp()),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: sp(), })
     }
 
     #[test]

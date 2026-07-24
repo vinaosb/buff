@@ -121,17 +121,13 @@ fn prefer_cpu_attr() -> Attribute {
 }
 
 fn func(name: &str, body_stmts: Vec<Stmt>) -> FuncDecl {
-    FuncDecl {
-        name: ident(name),
-        params: Vec::new(),
-        return_type: None,
-        body: block(body_stmts),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    }
+    FuncDecl { name: ident(name),
+    params: Vec::new(),
+    return_type: None,
+    body: block(body_stmts),
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), }
 }
 
 fn func_with_attrs(name: &str, attrs: Vec<Attribute>, body_stmts: Vec<Stmt>) -> FuncDecl {

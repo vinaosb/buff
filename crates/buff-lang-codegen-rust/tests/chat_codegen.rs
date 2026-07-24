@@ -95,29 +95,25 @@ fn placeholder_ty() -> TypeRef {
 
 /// Build a `func <name>(<params...>) { <body> }` decl.
 fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident(name),
-        params: params
-            .iter()
-            .map(|(n, t)| Param {
-                name: ident(n),
-                ty: named_type(t),
-                default_value: None,
-                is_comptime: false,
-                span: span(),
-            })
-            .collect(),
-        return_type: None,
-        body: Block {
-            stmts: body_stmts,
+    Decl::FuncDecl(FuncDecl { name: ident(name),
+    params: params
+        .iter()
+        .map(|(n, t)| Param {
+            name: ident(n),
+            ty: named_type(t),
+            default_value: None,
+            is_comptime: false,
             span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+        })
+        .collect(),
+    return_type: None,
+    body: Block {
+        stmts: body_stmts,
         span: span(),
-    })
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 fn expr_stmt(e: Expr) -> Stmt {

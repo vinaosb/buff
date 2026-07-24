@@ -42,23 +42,19 @@ fn some_x_pattern() -> Pattern {
 
 /// Wrap a list of statements in a zero-arg `fn f() -> Void { ... }` declaration.
 fn func_with_stmts(stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident("f"),
-        params: Vec::<Param>::new(),
-        return_type: Some(TypeRef::Named {
-            name: ident("Void"),
-            span: span(),
-        }),
-        body: Block {
-            stmts,
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    Decl::FuncDecl(FuncDecl { name: ident("f"),
+    params: Vec::<Param>::new(),
+    return_type: Some(TypeRef::Named {
+        name: ident("Void"),
         span: span(),
-    })
+    }),
+    body: Block {
+        stmts,
+        span: span(),
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 /// Assert the generated source re-parses as a valid Rust file.

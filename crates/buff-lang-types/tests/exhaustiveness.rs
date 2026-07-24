@@ -31,7 +31,7 @@
 
 use buff_lang_ast::{
     common::{Block, Ident},
-    Decl, EnumDecl, EnumVariant, MatchArm, Pattern,
+    Decl, EnumDecl, EnumVariant, MatchArm, Pattern, TypeParam,
 };
 use buff_lang_error::Span;
 use buff_lang_types::{build_enum_registry, check_match_coverage, check_program};
@@ -46,19 +46,15 @@ fn ident(name: &str) -> Ident {
 
 /// Build a unit-variant-only enum decl with the given name + variants.
 fn unit_enum_decl(name: &str, variants: &[&str]) -> EnumDecl {
-    EnumDecl {
-        name: ident(name),
-        generics: Vec::new(),
-        variants: variants
-            .iter()
-            .map(|v| EnumVariant {
-                name: ident(v),
-                data: None,
-                span: span(),
-            })
-            .collect(),
-        span: span(),
-    }
+    EnumDecl { name: ident(name), type_params: Vec::new(), variants: variants
+        .iter()
+        .map(|v| EnumVariant {
+            name: ident(v),
+            data: None,
+            span: span(),
+        })
+        .collect(),
+    span: span(), }
 }
 
 /// Build a `match` arm with the given pattern and an empty body.
@@ -269,7 +265,18 @@ fn exhaustiveness_generic_enum_registry_uses_base_name() {
     // the base enum name.
     let decl = EnumDecl {
         name: ident("Result"),
-        generics: vec![ident("T"), ident("E")],
+        type_params: vec![
+            TypeParam {
+                name: ident("T"),
+                bounds: Vec::new(),
+                span: span(),
+            },
+            TypeParam {
+                name: ident("E"),
+                bounds: Vec::new(),
+                span: span(),
+            },
+        ],
         variants: vec![
             EnumVariant {
                 name: ident("Ok"),
@@ -368,17 +375,13 @@ fn exhaustiveness_check_program_skips_unknown_scrutinee_type() {
         )],
         span: span(),
     };
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body,
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    };
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body,
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let _ = Param {
         name: ident("_"),
         ty: TypeRef::Named {

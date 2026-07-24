@@ -656,13 +656,13 @@ impl<'a> Formatter<'a> {
     fn write_enum(&mut self, e: &EnumDecl) {
         self.write_indent();
         let _ = write!(self.buf, "enum {}", e.name);
-        if !e.generics.is_empty() {
+        if !e.type_params.is_empty() {
             self.raw("<");
-            for (i, g) in e.generics.iter().enumerate() {
+            for (i, tp) in e.type_params.iter().enumerate() {
                 if i > 0 {
                     self.raw(", ");
                 }
-                let _ = write!(self.buf, "{g}");
+                let _ = write!(self.buf, "{}", tp.name);
             }
             self.raw(">");
         }

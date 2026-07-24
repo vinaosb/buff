@@ -53,17 +53,13 @@ fn func_with_return(
     params: &[(&str, buff_lang_ast::TypeRef)],
     return_ty: buff_lang_ast::TypeRef,
 ) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: Ident::new(name, sp()),
-        params: params.iter().map(|(n, t)| param(n, t.clone())).collect(),
-        return_type: Some(return_ty),
-        body: Block::empty(sp()),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: sp(),
-    })
+    Decl::FuncDecl(FuncDecl { name: Ident::new(name, sp()),
+    params: params.iter().map(|(n, t)| param(n, t.clone())).collect(),
+    return_type: Some(return_ty),
+    body: Block::empty(sp()),
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: sp(), })
 }
 
 fn func(name: &str, params: &[(&str, buff_lang_ast::TypeRef)]) -> Decl {

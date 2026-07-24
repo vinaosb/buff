@@ -140,8 +140,8 @@ impl RenameWalker {
             }
             Decl::EnumDecl(e) => {
                 self.maybe_rename(&mut e.name);
-                for g in &mut e.generics {
-                    self.maybe_rename(g);
+                for tp in &mut e.type_params {
+                    self.maybe_rename(&mut tp.name);
                 }
                 for v in &mut e.variants {
                     self.maybe_rename(&mut v.name);
@@ -869,6 +869,7 @@ pub fn apply_extract_to_source(
         is_unsafe: false,
         is_extern: false,
         attributes: Vec::new(),
+        type_params: Vec::new(),
         span: placeholder_span,
     };
     decls.insert(func_idx + 1, Decl::FuncDecl(new_func));

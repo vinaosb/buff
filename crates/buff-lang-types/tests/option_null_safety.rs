@@ -415,10 +415,14 @@ fn pure_registry_does_not_include_option_unless_declared() {
 fn user_option_decl_overrides_prelude_seed() {
     // If a program declares its own `enum Option`, the user's variant list
     // wins over the prelude seed (user decls insert AFTER the seed).
-    use buff_lang_ast::{Decl, EnumDecl, EnumVariant};
+    use buff_lang_ast::{Decl, EnumDecl, EnumVariant, TypeParam};
     let user_option = EnumDecl {
         name: ident("Option"),
-        generics: vec![ident("T")],
+        type_params: vec![TypeParam {
+            name: ident("T"),
+            bounds: Vec::new(),
+            span: span(),
+        }],
         variants: vec![
             EnumVariant {
                 name: ident("Just"),

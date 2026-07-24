@@ -30,20 +30,16 @@ fn ident_expr(name: &str) -> Expr {
 /// Wrap a list of statements into a single `fn test_fn() { ... }` declaration
 /// so the lowerer can process it as a function body.
 fn wrap_fn(stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: Ident::new("test_fn", span()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    Decl::FuncDecl(FuncDecl { name: Ident::new("test_fn", span()),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts,
         span: span(),
-    })
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 fn lower(stmts: Vec<Stmt>) -> IrGraph {
@@ -478,45 +474,37 @@ fn test_dependencies_and_dependents_accessors() {
 #[test]
 fn test_async_registration_and_display_of_ionode() {
     // async fn producer() { return 0; }
-    let producer = Decl::FuncDecl(FuncDecl {
-        name: Ident::new("producer", span()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![Stmt::Return(Some(int_lit(0)), span())],
-            span: span(),
-        },
-        is_async: true,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let producer = Decl::FuncDecl(FuncDecl { name: Ident::new("producer", span()),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![Stmt::Return(Some(int_lit(0)), span())],
         span: span(),
-    });
+    },
+    is_async: true,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
     // fn caller() { let r = producer(); }
-    let caller = Decl::FuncDecl(FuncDecl {
-        name: Ident::new("caller", span()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![Stmt::LetDecl {
-                name: Ident::new("r", span()),
-                value: Expr::FuncCall {
-                    callee: Box::new(ident_expr("producer")),
-                    args: Vec::new(),
-                    span: span(),
-                },
-                mutable: false,
-                ty: None,
+    let caller = Decl::FuncDecl(FuncDecl { name: Ident::new("caller", span()),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![Stmt::LetDecl {
+            name: Ident::new("r", span()),
+            value: Expr::FuncCall {
+                callee: Box::new(ident_expr("producer")),
+                args: Vec::new(),
                 span: span(),
-            }],
+            },
+            mutable: false,
+            ty: None,
             span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+        }],
         span: span(),
-    });
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
     let mut lowerer = AstLowerer::new();
     let g = lowerer.lower(&[producer, caller]);
 

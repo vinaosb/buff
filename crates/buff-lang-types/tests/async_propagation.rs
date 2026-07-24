@@ -80,17 +80,13 @@ fn block(stmts: Vec<Stmt>) -> Block {
 
 /// Build a FuncDecl with the given body and async flag.
 fn func(name: &str, is_async: bool, body_stmts: Vec<Stmt>) -> FuncDecl {
-    FuncDecl {
-        name: ident(name),
-        params: Vec::new(),
-        return_type: None,
-        body: block(body_stmts),
-        is_async,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    }
+    FuncDecl { name: ident(name),
+    params: Vec::new(),
+    return_type: None,
+    body: block(body_stmts),
+    is_async,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), }
 }
 
 fn func_decl(name: &str, is_async: bool, body_stmts: Vec<Stmt>) -> Decl {

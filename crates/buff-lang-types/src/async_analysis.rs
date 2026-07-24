@@ -515,20 +515,16 @@ mod tests {
 
     /// Build a FuncDecl with the given body and async flag.
     fn func(name: &str, is_async: bool, body_stmts: Vec<Stmt>) -> FuncDecl {
-        FuncDecl {
-            name: Ident::new(name, dummy()),
-            params: Vec::new(),
-            return_type: None,
-            body: Block {
-                stmts: body_stmts,
-                span: dummy(),
-            },
-            is_async,
-            is_unsafe: false,
-            is_extern: false,
-            attributes: Vec::new(),
+        FuncDecl { name: Ident::new(name, dummy()),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts: body_stmts,
             span: dummy(),
-        }
+        },
+        is_async,
+        is_unsafe: false,
+        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: dummy(), }
     }
 
     fn ret_call(name: &str) -> Stmt {

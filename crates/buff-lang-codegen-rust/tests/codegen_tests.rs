@@ -37,17 +37,13 @@ fn named_type(s: &str) -> TypeRef {
 }
 
 fn empty_func(name: &str) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident(name),
-        params: Vec::new(),
-        return_type: None,
-        body: Block::empty(span()),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    })
+    Decl::FuncDecl(FuncDecl { name: ident(name),
+    params: Vec::new(),
+    return_type: None,
+    body: Block::empty(span()),
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 // ---------------------------------------------------------------------------
@@ -78,26 +74,22 @@ fn empty() {}
 
 #[test]
 fn test_codegen_let_int() {
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![Stmt::LetDecl {
-                name: ident("x"),
-                value: int_expr(42),
-                mutable: false,
-                ty: None,
-                span: span(),
-            }],
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![Stmt::LetDecl {
+            name: ident("x"),
+            value: int_expr(42),
+            mutable: false,
+            ty: None,
             span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+        }],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("fn f()"));
     // T12: type annotations are inferred; `let x = 42` → `let x: i64 = 42`.
@@ -110,28 +102,24 @@ fn test_codegen_let_int() {
 
 #[test]
 fn test_codegen_binary_op() {
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![Stmt::ExprStmt(
-                Expr::BinaryOp {
-                    op: BinaryOp::Add,
-                    lhs: Box::new(int_expr(1)),
-                    rhs: Box::new(int_expr(2)),
-                    span: span(),
-                },
-                span(),
-            )],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![Stmt::ExprStmt(
+            Expr::BinaryOp {
+                op: BinaryOp::Add,
+                lhs: Box::new(int_expr(1)),
+                rhs: Box::new(int_expr(2)),
+                span: span(),
+            },
+            span(),
+        )],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("1 + 2"), "src = {src}");
 }
@@ -142,20 +130,16 @@ fn test_codegen_binary_op() {
 
 #[test]
 fn test_codegen_func_with_return_snapshot() {
-    let func = FuncDecl {
-        name: ident("foo"),
-        params: Vec::new(),
-        return_type: Some(named_type("Int")),
-        body: Block {
-            stmts: vec![Stmt::Return(Some(int_expr(42)), span())],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("foo"),
+    params: Vec::new(),
+    return_type: Some(named_type("Int")),
+    body: Block {
+        stmts: vec![Stmt::Return(Some(int_expr(42)), span())],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     insta::assert_snapshot!(src, @"
 fn foo() -> i64 {
@@ -170,34 +154,30 @@ fn foo() -> i64 {
 
 #[test]
 fn test_format_passes_rustfmt() {
-    let func = FuncDecl {
-        name: ident("g"),
-        params: vec![Param {
-            name: ident("a"),
-            ty: named_type("Int"),
-            default_value: None,
-            is_comptime: false,
-            span: span(),
-        }],
-        return_type: Some(named_type("Int")),
-        body: Block {
-            stmts: vec![Stmt::Return(
-                Some(Expr::BinaryOp {
-                    op: BinaryOp::Mul,
-                    lhs: Box::new(ident_expr("a")),
-                    rhs: Box::new(int_expr(2)),
-                    span: span(),
-                }),
-                span(),
-            )],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("g"),
+    params: vec![Param {
+        name: ident("a"),
+        ty: named_type("Int"),
+        default_value: None,
+        is_comptime: false,
         span: span(),
-    };
+    }],
+    return_type: Some(named_type("Int")),
+    body: Block {
+        stmts: vec![Stmt::Return(
+            Some(Expr::BinaryOp {
+                op: BinaryOp::Mul,
+                lhs: Box::new(ident_expr("a")),
+                rhs: Box::new(int_expr(2)),
+                span: span(),
+            }),
+            span(),
+        )],
+        span: span(),
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let mut codegen = RustCodegen::new();
     let file = codegen.generate(&[Decl::FuncDecl(func)]).unwrap();
     let src = format(&file);
@@ -213,27 +193,23 @@ fn test_format_passes_rustfmt() {
 
 #[test]
 fn test_codegen_func_call() {
-    let func = FuncDecl {
-        name: ident("caller"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![Stmt::ExprStmt(
-                Expr::FuncCall {
-                    callee: Box::new(ident_expr("foo")),
-                    args: vec![ident_expr("a"), ident_expr("b")],
-                    span: span(),
-                },
-                span(),
-            )],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("caller"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![Stmt::ExprStmt(
+            Expr::FuncCall {
+                callee: Box::new(ident_expr("foo")),
+                args: vec![ident_expr("a"), ident_expr("b")],
+                span: span(),
+            },
+            span(),
+        )],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("foo(a, b)"), "src = {src}");
 }
@@ -250,17 +226,13 @@ fn test_codegen_async_unsafe_extern_modifiers() {
     // other two modifiers (`async` + `unsafe`) on a normal body-having fn.
     // (`is_extern` stays `false` so the fn keeps its body and goes through
     // the regular `ItemFn` lowering path.)
-    let func = FuncDecl {
-        name: ident("fancy"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block::empty(span()),
-        is_async: true,
-        is_unsafe: true,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    };
+    let func = FuncDecl { name: ident("fancy"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block::empty(span()),
+    is_async: true,
+    is_unsafe: true,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("unsafe"), "src = {src}");
     assert!(src.contains("async"), "src = {src}");
@@ -275,43 +247,39 @@ fn test_codegen_async_unsafe_extern_modifiers() {
 
 #[test]
 fn test_codegen_func_with_params_snapshot() {
-    let func = FuncDecl {
-        name: ident("add"),
-        params: vec![
-            Param {
-                name: ident("a"),
-                ty: named_type("Int"),
-                default_value: None,
-                is_comptime: false,
-                span: span(),
-            },
-            Param {
-                name: ident("b"),
-                ty: named_type("Int"),
-                default_value: None,
-                is_comptime: false,
-                span: span(),
-            },
-        ],
-        return_type: Some(named_type("Int")),
-        body: Block {
-            stmts: vec![Stmt::Return(
-                Some(Expr::BinaryOp {
-                    op: BinaryOp::Add,
-                    lhs: Box::new(ident_expr("a")),
-                    rhs: Box::new(ident_expr("b")),
-                    span: span(),
-                }),
-                span(),
-            )],
+    let func = FuncDecl { name: ident("add"),
+    params: vec![
+        Param {
+            name: ident("a"),
+            ty: named_type("Int"),
+            default_value: None,
+            is_comptime: false,
             span: span(),
         },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+        Param {
+            name: ident("b"),
+            ty: named_type("Int"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        },
+    ],
+    return_type: Some(named_type("Int")),
+    body: Block {
+        stmts: vec![Stmt::Return(
+            Some(Expr::BinaryOp {
+                op: BinaryOp::Add,
+                lhs: Box::new(ident_expr("a")),
+                rhs: Box::new(ident_expr("b")),
+                span: span(),
+            }),
+            span(),
+        )],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     insta::assert_snapshot!(src, @"
 fn add(a: i64, b: i64) -> i64 {
@@ -326,35 +294,31 @@ fn add(a: i64, b: i64) -> i64 {
 
 #[test]
 fn test_codegen_string_and_bool_literals() {
-    let func = FuncDecl {
-        name: ident("lit"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![
-                Stmt::LetDecl {
-                    name: ident("s"),
-                    value: Expr::Literal(Literal::String("hi".to_string()), span()),
-                    mutable: false,
-                    ty: None,
-                    span: span(),
-                },
-                Stmt::LetDecl {
-                    name: ident("b"),
-                    value: Expr::Literal(Literal::Bool(true), span()),
-                    mutable: false,
-                    ty: None,
-                    span: span(),
-                },
-            ],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("lit"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![
+            Stmt::LetDecl {
+                name: ident("s"),
+                value: Expr::Literal(Literal::String("hi".to_string()), span()),
+                mutable: false,
+                ty: None,
+                span: span(),
+            },
+            Stmt::LetDecl {
+                name: ident("b"),
+                value: Expr::Literal(Literal::Bool(true), span()),
+                mutable: false,
+                ty: None,
+                span: span(),
+            },
+        ],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     // T12: type annotations inferred — `let s = "hi"` → `let s: String = "hi"`,
     // `let b = true` → `let b: bool = true`.
@@ -369,26 +333,22 @@ fn test_codegen_string_and_bool_literals() {
 
 #[test]
 fn test_codegen_let_with_type_annotation() {
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: vec![Stmt::LetDecl {
-                name: ident("x"),
-                value: int_expr(0),
-                mutable: true,
-                ty: Some(named_type("Int")),
-                span: span(),
-            }],
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts: vec![Stmt::LetDecl {
+            name: ident("x"),
+            value: int_expr(0),
+            mutable: true,
+            ty: Some(named_type("Int")),
             span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+        }],
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("let mut x: i64 = 0"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("let-with-type must re-parse");
@@ -416,34 +376,30 @@ fn test_codegen_expr_function_shorthand() {
     // `func f(x: Int) -> Int => x + 1` should produce a Rust fn returning
     // `x + 1`. We build the AST directly (same shape the parser produces
     // for `=>`), then verify the generated Rust.
-    let func = FuncDecl {
-        name: ident("f"),
-        params: vec![Param {
-            name: ident("x"),
-            ty: named_type("Int"),
-            default_value: None,
-            is_comptime: false,
-            span: span(),
-        }],
-        return_type: Some(named_type("Int")),
-        body: Block {
-            stmts: vec![Stmt::Return(
-                Some(Expr::BinaryOp {
-                    op: BinaryOp::Add,
-                    lhs: Box::new(ident_expr("x")),
-                    rhs: Box::new(int_expr(1)),
-                    span: span(),
-                }),
-                span(),
-            )],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("f"),
+    params: vec![Param {
+        name: ident("x"),
+        ty: named_type("Int"),
+        default_value: None,
+        is_comptime: false,
         span: span(),
-    };
+    }],
+    return_type: Some(named_type("Int")),
+    body: Block {
+        stmts: vec![Stmt::Return(
+            Some(Expr::BinaryOp {
+                op: BinaryOp::Add,
+                lhs: Box::new(ident_expr("x")),
+                rhs: Box::new(int_expr(1)),
+                span: span(),
+            }),
+            span(),
+        )],
+        span: span(),
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     assert!(src.contains("fn f(x: i64) -> i64"), "src = {src}");
     assert!(src.contains("x + 1"), "src = {src}");

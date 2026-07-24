@@ -164,20 +164,16 @@ fn binary_op(op: BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
 /// Wrap `stmts` in a 0-arg function `f` and run codegen. Returns the
 /// `Result<String, CodegenError>` so tests can assert on either side.
 fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, CodegenError> {
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts,
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     generate_rust(&[Decl::FuncDecl(func)])
 }
 
@@ -557,12 +553,8 @@ fn race_detection_immutable_capture_in_nested_closure_ok() {
 fn race_detection_analyze_decls_skips_non_func_decls() {
     // A program with NO FuncDecl (only a struct decl) cannot contain
     // a race — codegen must succeed.
-    let s = StructDecl {
-        name: ident("P"),
-        fields: Vec::new(),
-        traits: Vec::new(),
-        span: span(),
-    };
+    let s = StructDecl { name: ident("P"),
+    fields: Vec::new(), traits: Vec::new(), type_params: Vec::new(), span: span(), };
     let result = generate_rust(&[Decl::StructDecl(s)]);
     assert!(
         result.is_ok(),

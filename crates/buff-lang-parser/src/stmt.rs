@@ -39,7 +39,7 @@
 use buff_lang_ast::{
     Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, ExtendBlock,
     FuncDecl, GuardCondition, Ident, ImportDecl, MethodSig, Param, Pattern, ReexportDecl, Stmt,
-    TraitDecl, TypeRef,
+    TraitDecl, TypeParam, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -384,6 +384,7 @@ pub fn parse_func_decl(
         is_unsafe: false,
         is_extern,
         attributes,
+        type_params: Vec::new(),
         span,
     })
 }
@@ -1659,7 +1660,11 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
     // `>>` as a single token in type-arg position via `parse_type_ref`; here we
     // only need to recognise a single `>` to close the param list (since the
     // params themselves are idents, not nested type refs).
-    let mut generics: Vec<Ident> = Vec::new();
+    //
+    // T13: the params are stored as `TypeParam` (with empty bounds — bounds
+    // are T38). Pre-T13 these were bare `Ident`s (`EnumDecl.generics`);
+    // the T13 migration unified all three decl kinds on `type_params: Vec<TypeParam>`.
+    let mut type_params: Vec<TypeParam> = Vec::new();
     if matches!(stream.peek_kind(), Some(TokenKind::Lt)) {
         stream.advance(); // consume `<`
         loop {
@@ -1669,8 +1674,13 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
                     stream.eof_span(),
                 ))
             })?;
+            let g_span = gtok.span;
             let g = extract_ident(gtok)?;
-            generics.push(g);
+            type_params.push(TypeParam {
+                name: g,
+                bounds: Vec::new(),
+                span: g_span,
+            });
             match stream.peek_kind() {
                 Some(TokenKind::Comma) => {
                     stream.advance();
@@ -1711,7 +1721,7 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
         let rb = stream.expect(TokenKind::RBrace)?;
         return Ok(EnumDecl {
             name,
-            generics,
+            type_params,
             variants,
             span: Span::new(start, rb.span.end, source_id),
         });
@@ -1815,7 +1825,7 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
     let rb = stream.expect(TokenKind::RBrace)?;
     Ok(EnumDecl {
         name,
-        generics,
+        type_params,
         variants,
         span: Span::new(start, rb.span.end, source_id),
     })
@@ -2537,6 +2547,7 @@ pub fn parse_trait_decl(stream: &mut TokenStream<'_>) -> Result<TraitDecl, Parse
                 is_unsafe: false,
                 is_extern,
                 attributes: Vec::new(),
+                type_params: Vec::new(),
                 span: Span::new(member_start, body_end.max(sig_end), source_id),
             });
         }

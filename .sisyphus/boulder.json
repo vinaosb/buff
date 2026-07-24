@@ -1,14 +1,14 @@
 {
-  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/buff-v1x-frameworks.md",
-  "started_at": "2026-07-21T00:00:00.0000000-03:00",
+  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/buff-launch-readiness.md",
+  "started_at": "2026-07-23T00:00:00.0000000-03:00",
   "session_ids": [
-    "ses_current_atlas_v1x_frameworks"
+    "ses_current_atlas_launch_readiness"
   ],
-  "plan_name": "buff-v1x-frameworks",
+  "plan_name": "buff-launch-readiness",
   "worktree_path": null,
   "task_sessions": {},
-  "previous_active_plan": "buff-master",
-  "previous_session_count": 78,
+  "previous_active_plan": "buff-v1x-frameworks",
+  "previous_session_count": 79,
   "master_preserved_session_ids": [
     "ses_current_atlas_buff_master",
     "ses_087555ce0ffeNOqNTee60G0RhT",
@@ -17,5 +17,13 @@
     "ses_0874b116dffewisCL82uEL1OqZ",
     "ses_08737d8d3ffeJYnRh5pd06160t"
   ],
-  "notes": "Switched from buff-master to buff-v1x-frameworks plan. Master plan paused at v1.9/v1.12 done (per README + commits 60b2950 F-wave complete, 2afc86a CHANGELOG). v1x-frameworks starts Batch 1 = v1.13.0 Foundations (8 tasks: T0, T1, T2, T24, T3, T4, T6, T53). Long-lived v1x-frameworks branch off master. Per-release tags v1.13.0 → v1.24.0."
+  "v1x_frameworks_preserved_session_ids": [
+    "ses_current_atlas_v1x_frameworks",
+    "ses_0702b090bffeVWMjzlansxoAbp",
+    "ses_0702b06d2ffesyVz8Gu9rQEJ7u",
+    "ses_0702b04cfffePbBNzrJTHvVeNE",
+    "ses_0702b04baffeUnLphfW2q3EHJe",
+    "ses_06ff0be57ffe6mdxhjOfO2Ec4r"
+  ],
+  "notes": "Switched from buff-v1x-frameworks (COMPLETE: v1.13.0-v1.24.0 all shipped + tagged, F1-F4 all APPROVE post-fix, 4 F3 lib compile bugs fixed in b68e14f, v1.24.0 tag force-updated to 0c83da5). User confirmed acceptance by moving on to launch-readiness plan. Now starting buff-launch-readiness (v1.25+): 122 tasks across 9 tracks (A-I) + 6 waves + Final Verification. Wave 0 SEQUENTIAL START: T22 (benchmark baseline) → T13 (generics) → T104 (code-hygiene audit)."
 }

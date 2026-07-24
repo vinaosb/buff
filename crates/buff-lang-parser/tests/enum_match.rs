@@ -515,14 +515,10 @@ fn enum_match_ast_node_constructors_are_public() {
     assert_eq!(variant_pat.variant_name_key(), Some("Ok"));
 
     // EnumDecl with empty generics field (the migration shape).
-    let _enum_decl = EnumDecl {
-        name: Ident::new("Color", span),
-        generics: Vec::new(),
-        variants: vec![EnumVariant {
-            name: Ident::new("Red", span),
-            data: None,
-            span,
-        }],
+    let _enum_decl = EnumDecl { name: Ident::new("Color", span), type_params: Vec::new(), variants: vec![EnumVariant {
+        name: Ident::new("Red", span),
+        data: None,
         span,
-    };
+    }],
+    span, };
 }

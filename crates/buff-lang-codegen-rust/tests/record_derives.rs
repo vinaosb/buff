@@ -83,12 +83,8 @@ fn generic_ty(base: &str, args: Vec<TypeRef>) -> TypeRef {
 
 /// Build a `struct` declaration AST node with the given name + fields.
 fn struct_decl(name: &str, fields: Vec<(&str, TypeRef)>) -> StructDecl {
-    StructDecl {
-        name: ident(name),
-        fields: fields.into_iter().map(|(n, t)| (ident(n), t)).collect(),
-        traits: Vec::new(),
-        span: span(),
-    }
+    StructDecl { name: ident(name),
+    fields: fields.into_iter().map(|(n, t)| (ident(n), t)).collect(), traits: Vec::new(), type_params: Vec::new(), span: span(), }
 }
 
 /// Generate Rust source from a slice of struct declarations.

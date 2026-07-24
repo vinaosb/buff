@@ -97,32 +97,24 @@ fn block(stmts: Vec<Stmt>) -> Block {
 }
 
 fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident(name),
-        params: Vec::new(),
-        return_type: None,
-        body: block(stmts),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    })
+    Decl::FuncDecl(FuncDecl { name: ident(name),
+    params: Vec::new(),
+    return_type: None,
+    body: block(stmts),
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 /// Build a function with an explicit return type.
 fn func_typed(name: &str, ret_ty: TypeRef, stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident(name),
-        params: Vec::new(),
-        return_type: Some(ret_ty),
-        body: block(stmts),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
-        span: span(),
-    })
+    Decl::FuncDecl(FuncDecl { name: ident(name),
+    params: Vec::new(),
+    return_type: Some(ret_ty),
+    body: block(stmts),
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 fn codegen_stmts(stmts: Vec<Stmt>) -> String {
@@ -446,15 +438,11 @@ fn error_handling_custom_error_enum_codegen_snapshot() {
     // shape (reuses the T27 EnumDecl codegen). Full `std::error::Error`
     // trait derivation is deferred to a later task (documented in
     // decisions.md); the enum still compiles via `#[derive(Clone, Debug)]`.
-    let e = EnumDecl {
-        name: ident("MyError"),
-        generics: Vec::new(),
-        variants: vec![
-            unit_variant("NotFound"),
-            tuple_variant("Invalid", &["String"]),
-        ],
-        span: span(),
-    };
+    let e = EnumDecl { name: ident("MyError"), type_params: Vec::new(), variants: vec![
+        unit_variant("NotFound"),
+        tuple_variant("Invalid", &["String"]),
+    ],
+    span: span(), };
     let src = generate_rust(&[Decl::EnumDecl(e)]).expect("codegen");
     insta::assert_snapshot!(src, @r###"
     #[derive(Clone, Debug)]
@@ -470,12 +458,8 @@ fn error_handling_custom_error_enum_codegen_snapshot() {
 fn error_handling_custom_error_enum_then_function_reparse() {
     // A custom error enum followed by a function returning it must re-parse
     // as valid Rust. This exercises the T27 path end-to-end for error types.
-    let e = EnumDecl {
-        name: ident("MyErr"),
-        generics: Vec::new(),
-        variants: vec![unit_variant("NotFound"), tuple_variant("Bad", &["String"])],
-        span: span(),
-    };
+    let e = EnumDecl { name: ident("MyErr"), type_params: Vec::new(), variants: vec![unit_variant("NotFound"), tuple_variant("Bad", &["String"])],
+    span: span(), };
     let f = func_typed(
         "lookup",
         named_ty("MyErr"),

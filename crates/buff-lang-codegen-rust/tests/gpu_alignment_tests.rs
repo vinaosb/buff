@@ -63,44 +63,32 @@ fn float_expr(n: f32) -> Expr {
 }
 
 fn struct_decl(name: &str, fields: Vec<(&str, &str)>) -> Decl {
-    Decl::StructDecl(StructDecl {
-        name: ident(name),
-        fields: fields
-            .into_iter()
-            .map(|(n, t)| (ident(n), named_ty(t)))
-            .collect(),
-        traits: Vec::new(),
-        span: span(),
-    })
+    Decl::StructDecl(StructDecl { name: ident(name),
+    fields: fields
+        .into_iter()
+        .map(|(n, t)| (ident(n), named_ty(t)))
+        .collect(), traits: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 fn struct_decl_decl(name: &str, fields: Vec<(&str, &str)>) -> StructDecl {
-    StructDecl {
-        name: ident(name),
-        fields: fields
-            .into_iter()
-            .map(|(n, t)| (ident(n), named_ty(t)))
-            .collect(),
-        traits: Vec::new(),
-        span: span(),
-    }
+    StructDecl { name: ident(name),
+    fields: fields
+        .into_iter()
+        .map(|(n, t)| (ident(n), named_ty(t)))
+        .collect(), traits: Vec::new(), type_params: Vec::new(), span: span(), }
 }
 
 fn empty_func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident(name),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    Decl::FuncDecl(FuncDecl { name: ident(name),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts,
         span: span(),
-    })
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 fn method_call(receiver: Expr, method: &str, args: Vec<Expr>) -> Expr {

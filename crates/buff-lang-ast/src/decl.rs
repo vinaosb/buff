@@ -130,6 +130,43 @@ impl fmt::Display for Decl {
     }
 }
 
+/// A generic type parameter declaration (T13).
+///
+/// Represents a single `<T>` or `<T: Bound>` in a generic parameter list.
+/// In T13 the `bounds` field is always empty — generic bounds (trait
+/// constraints like `<T: Clone>`) are T38. The field exists now so the
+/// AST shape is stable when T38 adds bound parsing (no second migration).
+///
+/// Stored in [`FuncDecl::type_params`], [`StructDecl::type_params`], and
+/// [`EnumDecl::type_params`]. The codegen emits each as a Rust type param
+/// (`T` or `T: Bound`) on the generated `fn`/`struct`/`enum` item.
+/// Monomorphization happens in rustc (zero-cost static dispatch).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeParam {
+    /// The parameter name (e.g. `"T"`, `"U"`, `"Key"`).
+    pub name: Ident,
+    /// Trait bounds on the parameter (e.g. `[Clone, Debug]` for `<T: Clone + Debug>`).
+    /// **Always empty in T13.** Populated by T38 (generic bounds).
+    pub bounds: Vec<TypeRef>,
+    pub span: Span,
+}
+
+impl fmt::Display for TypeParam {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)?;
+        if !self.bounds.is_empty() {
+            f.write_str(": ")?;
+            for (i, b) in self.bounds.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(" + ")?;
+                }
+                write!(f, "{b}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A function declaration.
 ///
 /// # Migration notes (additive AST changes)
@@ -147,6 +184,18 @@ impl fmt::Display for Decl {
 /// pass emits the corresponding Rust attribute (`#[test]`, etc.) when the
 /// attribute is recognised; unknown attributes are a codegen error (so we
 /// don't silently drop user intent).
+///
+/// ## T13 — `type_params` field
+///
+/// A `type_params: Vec<TypeParam>` field was **added** in T13 (v1.25) to
+/// carry generic type parameters declared on the function (e.g.
+/// `func id<T>(x: T) -> T` carries `[T]`). This is a **migration** (a new
+/// field was inserted) — every construction site was updated to pass
+/// `type_params: Vec::new()` for non-generic funcs. The field sits just
+/// after `attributes` and before `span` (keeping `span` as the trailing
+/// anchor). The Display impl renders `<T, U>` after the function name.
+/// The codegen emits Rust generics on the function signature; rustc
+/// performs monomorphization (zero-cost static dispatch).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncDecl {
     pub name: Ident,
@@ -161,6 +210,11 @@ pub struct FuncDecl {
     /// (→ `#[test]` at codegen); the design generalises to any future
     /// attribute without another AST migration.
     pub attributes: Vec<Attribute>,
+    /// Generic type parameters (T13). Empty for non-generic funcs. When
+    /// non-empty, the codegen emits `<T, U, ...>` on the Rust `fn` signature
+    /// and rustc monomorphizes each call site. Bounds are always empty in
+    /// T13 (populated by T38).
+    pub type_params: Vec<TypeParam>,
     pub span: Span,
 }
 
@@ -245,6 +299,17 @@ impl fmt::Display for FuncDecl {
             f.write_str("unsafe ")?;
         }
         write!(f, "fn {}", self.name)?;
+        // T13: render `<T, U>` when generic params are present.
+        if !self.type_params.is_empty() {
+            f.write_str("<")?;
+            for (i, tp) in self.type_params.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{tp}")?;
+            }
+            f.write_str(">")?;
+        }
         f.write_str("(")?;
         for (i, p) in self.params.iter().enumerate() {
             if i > 0 {
@@ -261,17 +326,41 @@ impl fmt::Display for FuncDecl {
 }
 
 /// A struct declaration: `struct Name { field: Ty, ... }`.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T13 — `type_params` field
+///
+/// A `type_params: Vec<TypeParam>` field was **added** in T13 (v1.25) to
+/// carry generic type parameters (e.g. `struct Pair<T, U>` carries `[T, U]`).
+/// This is a **migration** — every construction site was updated to pass
+/// `type_params: Vec::new()` for non-generic structs. The Display impl
+/// renders `<T, U>` after the name. The codegen emits Rust generics on the
+/// `struct` item; rustc monomorphizes each instantiation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDecl {
     pub name: Ident,
     pub fields: Vec<(Ident, TypeRef)>,
     pub traits: Vec<Ident>,
+    /// Generic type parameters (T13). Empty for non-generic structs.
+    pub type_params: Vec<TypeParam>,
     pub span: Span,
 }
 
 impl fmt::Display for StructDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "StructDecl({}", self.name)?;
+        // T13: render `<T, U>` when generic params are present.
+        if !self.type_params.is_empty() {
+            f.write_str("<")?;
+            for (i, tp) in self.type_params.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                write!(f, "{tp}")?;
+            }
+            f.write_str(">")?;
+        }
         if !self.traits.is_empty() {
             f.write_str(": ")?;
             for (i, t) in self.traits.iter().enumerate() {
@@ -296,26 +385,30 @@ impl fmt::Display for StructDecl {
 ///
 /// # Migration notes (additive AST changes)
 ///
-/// ## T27 — `generics` field
+/// ## T27 — `generics` field (superseded by T13)
 ///
 /// A `generics: Vec<Ident>` field was **added** in T27 (v0.5) to carry the
-/// list of type parameters declared on the enum (e.g. `Result<T, E>` carries
-/// `["T", "E"]`). This is a **migration** (not purely additive — a new field
-/// was inserted), so every construction site was updated to pass
-/// `generics: Vec::new()` for non-generic enums. The Display impl renders
-/// `<T, E>` after the name when the list is non-empty, matching Rust syntax.
-/// The new field is the LAST field before `span` to keep `span` as the
-/// trailing anchor (consistent with the other decl structs). Internal
-/// construction sites in this crate's `#[cfg(test)]` blocks build
-/// `EnumVariant` (not `EnumDecl`), so no test fixture needed updating; the
-/// only external `Decl::EnumDecl` consumer is the Rust codegen, which was
-/// upgraded from `Err(unsupported)` to a real `lower_enum_decl` in lockstep.
+/// list of type parameter names on the enum (e.g. `Result<T, E>` carried
+/// `["T", "E"]`). This was a bare-name representation with no bounds.
+///
+/// ## T13 — `type_params` field (replaces `generics`)
+///
+/// The T27 `generics: Vec<Ident>` field was **replaced** in T13 (v1.25) by
+/// `type_params: Vec<TypeParam>`, unifying the generic-param representation
+/// across [`FuncDecl`], [`StructDecl`], and [`EnumDecl`]. This is a
+/// **migration** (the field name and type changed) — every construction site
+/// and every access site was updated: the parser, the codegen (which now
+/// emits bounds via the richer [`TypeParam`] struct), the naming linter, the
+/// formatter, and the rename refactoring. The Display impl renders `<T, E>`
+/// after the name (unchanged from T27 for the bounds-empty case). The
+/// `bounds` field inside each [`TypeParam`] is always empty in T13
+/// (populated by T38).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDecl {
     pub name: Ident,
-    /// Type parameters declared on the enum, e.g. `[T, E]` for `Result<T, E>`.
-    /// Empty for non-generic enums. T27 (additive).
-    pub generics: Vec<Ident>,
+    /// Generic type parameters (T13, replacing T27's `generics: Vec<Ident>`).
+    /// Empty for non-generic enums.
+    pub type_params: Vec<TypeParam>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
 }
@@ -323,14 +416,14 @@ pub struct EnumDecl {
 impl fmt::Display for EnumDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "EnumDecl({}", self.name)?;
-        // T27: render `<T, E>` when generic params are present.
-        if !self.generics.is_empty() {
+        // T13: render `<T, E>` when generic params are present (was `generics` in T27).
+        if !self.type_params.is_empty() {
             f.write_str("<")?;
-            for (i, g) in self.generics.iter().enumerate() {
+            for (i, tp) in self.type_params.iter().enumerate() {
                 if i > 0 {
                     f.write_str(", ")?;
                 }
-                write!(f, "{g}")?;
+                write!(f, "{tp}")?;
             }
             f.write_str(">")?;
         }
@@ -904,6 +997,7 @@ mod tests {
             name: Ident::new("Foo", Span::dummy()),
             fields: Vec::new(),
             traits: Vec::new(),
+            type_params: Vec::new(),
             span: Span::dummy(),
         };
         assert_eq!(s.to_string(), "StructDecl(Foo {  })");

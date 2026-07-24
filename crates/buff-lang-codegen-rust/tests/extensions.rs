@@ -275,28 +275,24 @@ fn extensions_end_to_end_with_caller() {
         string_return_body("SHOUT"),
         named_ty("String"),
     ));
-    let caller = Decl::FuncDecl(FuncDecl {
-        name: ident("caller"),
-        params: Vec::new(),
-        return_type: Some(named_ty("String")),
-        body: Block {
-            stmts: vec![Stmt::Return(
-                Some(Expr::MethodCall {
-                    receiver: Box::new(Expr::Literal(Literal::String("x".to_string()), span())),
-                    method: ident("shout"),
-                    args: Vec::new(),
-                    span: span(),
-                }),
-                span(),
-            )],
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let caller = Decl::FuncDecl(FuncDecl { name: ident("caller"),
+    params: Vec::new(),
+    return_type: Some(named_ty("String")),
+    body: Block {
+        stmts: vec![Stmt::Return(
+            Some(Expr::MethodCall {
+                receiver: Box::new(Expr::Literal(Literal::String("x".to_string()), span())),
+                method: ident("shout"),
+                args: Vec::new(),
+                span: span(),
+            }),
+            span(),
+        )],
         span: span(),
-    });
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
     let src = generate_rust(&[extend, caller]).expect("codegen must succeed");
     assert!(src.contains("trait BuffExtString"));
     assert!(src.contains("impl BuffExtString for String"));

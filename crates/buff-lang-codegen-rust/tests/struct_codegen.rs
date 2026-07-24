@@ -70,12 +70,8 @@ fn named_ty(name: &str) -> TypeRef {
 
 /// Build a `struct` declaration AST node with the given name + fields.
 fn struct_decl(name: &str, fields: Vec<(&str, TypeRef)>) -> StructDecl {
-    StructDecl {
-        name: ident(name),
-        fields: fields.into_iter().map(|(n, t)| (ident(n), t)).collect(),
-        traits: Vec::new(),
-        span: span(),
-    }
+    StructDecl { name: ident(name),
+    fields: fields.into_iter().map(|(n, t)| (ident(n), t)).collect(), traits: Vec::new(), type_params: Vec::new(), span: span(), }
 }
 
 /// Build `receiver.method(args...)` as an AST node.
@@ -99,20 +95,16 @@ fn struct_init(type_name: &str, fields: Vec<(&str, Expr)>) -> Expr {
 
 /// Wrap a list of statements in a no-arg function called `f`.
 fn codegen_stmts(stmts: Vec<Stmt>) -> String {
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts,
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
 }
 
@@ -130,20 +122,16 @@ fn codegen_struct(d: StructDecl) -> String {
 /// given statements. Used for tests that exercise both the type definition
 /// and an expression that constructs / uses it.
 fn codegen_struct_and_func(d: StructDecl, stmts: Vec<Stmt>) -> String {
-    let func = FuncDecl {
-        name: ident("f"),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: Vec::new(),
+    let func = FuncDecl { name: ident("f"),
+    params: Vec::new(),
+    return_type: None,
+    body: Block {
+        stmts,
         span: span(),
-    };
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
     generate_rust(&[Decl::StructDecl(d), Decl::FuncDecl(func)])
         .expect("struct + fn codegen must succeed")
 }

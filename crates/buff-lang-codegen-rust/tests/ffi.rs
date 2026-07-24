@@ -58,20 +58,16 @@ fn named_ty(s: &str) -> TypeRef {
 }
 
 fn empty_body_func(name: &str, params: Vec<Param>, ret: Option<TypeRef>, is_extern: bool) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: ident(name),
-        params,
-        return_type: ret,
-        body: Block {
-            stmts: Vec::new(),
-            span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern,
-        attributes: Vec::new(),
+    Decl::FuncDecl(FuncDecl { name: ident(name),
+    params,
+    return_type: ret,
+    body: Block {
+        stmts: Vec::new(),
         span: span(),
-    })
+    },
+    is_async: false,
+    is_unsafe: false,
+    is_extern, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
 }
 
 fn extern_crate_decl(name: &str) -> Decl {

@@ -14,17 +14,13 @@ use buff_lang_error::Span;
 use std::collections::BTreeMap;
 
 fn fn_with_attrs(name: &str, attrs: Vec<Attribute>) -> Decl {
-    Decl::FuncDecl(FuncDecl {
-        name: Ident::new(name, Span::dummy()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block::empty(Span::dummy()),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false,
-        attributes: attrs,
-        span: Span::dummy(),
-    })
+    Decl::FuncDecl(FuncDecl { name: Ident::new(name, Span::dummy()),
+    params: Vec::new(),
+    return_type: None,
+    body: Block::empty(Span::dummy()),
+    is_async: false,
+    is_unsafe: false,
+    is_extern: false, attributes: attrs, type_params: Vec::new(), span: Span::dummy(), })
 }
 
 fn attr(name: &str) -> Attribute {

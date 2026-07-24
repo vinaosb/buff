@@ -1641,15 +1641,17 @@ impl RustCodegen {
         }
 
         // Generic params: build a `syn::Generics` with one type param per
-        // declared generic on the enum. No bounds, no defaults (v0.5 minimal).
-        let generics = if e.generics.is_empty() {
+        // declared generic on the enum. Bounds (from TypeParam.bounds) are
+        // always empty in T13 — T38 will populate them. (T27 originally used
+        // bare `Vec<Ident>`; T13 unified on `Vec<TypeParam>` across all decl kinds.)
+        let generics = if e.type_params.is_empty() {
             syn::Generics::default()
         } else {
             let mut params: Punctuated<syn::GenericParam, syn::Token![,]> = Punctuated::new();
-            for g in &e.generics {
+            for tp in &e.type_params {
                 params.push(syn::GenericParam::Type(syn::TypeParam {
                     attrs: Vec::new(),
-                    ident: ast_ident_to_syn(g),
+                    ident: ast_ident_to_syn(&tp.name),
                     colon_token: None,
                     bounds: Default::default(),
                     eq_token: None,
@@ -17529,17 +17531,13 @@ mod tests {
 
     #[test]
     fn empty_func_generates_syn_file() {
-        let func = FuncDecl {
-            name: AstIdent::new("empty", dummy_span()),
-            params: Vec::new(),
-            return_type: None,
-            body: Block::empty(dummy_span()),
-            is_async: false,
-            is_unsafe: false,
-            is_extern: false,
-            attributes: Vec::new(),
-            span: dummy_span(),
-        };
+        let func = FuncDecl { name: AstIdent::new("empty", dummy_span()),
+        params: Vec::new(),
+        return_type: None,
+        body: Block::empty(dummy_span()),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: dummy_span(), };
         let mut codegen = RustCodegen::new();
         let file = codegen
             .generate(&[Decl::FuncDecl(func)])

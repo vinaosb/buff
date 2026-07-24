@@ -207,20 +207,16 @@ mod tests {
     }
 
     fn func_with_stmts(stmts: Vec<Stmt>) -> FuncDecl {
-        FuncDecl {
-            name: Ident::new("f", span()),
-            params: Vec::new(),
-            return_type: None,
-            body: Block {
-                stmts,
-                span: span(),
-            },
-            is_async: false,
-            is_unsafe: false,
-            is_extern: false,
-            attributes: Vec::new(),
+        FuncDecl { name: Ident::new("f", span()),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts,
             span: span(),
-        }
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), }
     }
 
     fn named_type(s: &str) -> TypeRef {
