@@ -199,6 +199,13 @@ pub enum PreludeAssocFn {
     /// `Env.has("KEY")` - test whether an env var is set. One arg
     /// (String). Returns `Bool`. Wraps `std::env::var(k).is_ok()`.
     Has,
+    /// `Env.load(path)` - load a `.env` file (KEY=VALUE per line) into
+    /// the process environment. One optional arg (String, defaults to
+    /// `".env"`). Returns `Map<String, String>` of loaded vars. Does
+    /// NOT override existing env vars (only sets if absent). Simple
+    /// parsing: one KEY=VALUE per line, skip `#` comments, skip blank
+    /// lines. No complex .env syntax (multiline, quotes).
+    Load,
     // ---- Web modules (T124h) ------------------------------------------
     // These variants follow the precedent set by `Parse` (shared by
     // DateTime / Date / Toml / URL / UUID) and `Get` (shared by
@@ -932,6 +939,10 @@ impl PreludeAssocFn {
         PreludeAssocFn::Get,
         PreludeAssocFn::Set,
         PreludeAssocFn::Has,
+        // T114: Env.load — load .env file into process environment.
+        // One optional arg (path, defaults to ".env"). Returns
+        // Map<String, String>. Simple KEY=VALUE parsing only.
+        PreludeAssocFn::Load,
         // T124h: Web modules assoc fns (4 distinct names):
         // encode/decode/v4/v7. `Encode` and `Decode` are each shared
         // between Base64 / Hex / URLEncode (mirrors `Parse` being
@@ -1400,6 +1411,8 @@ impl PreludeAssocFn {
             PreludeAssocFn::Get => "get",
             PreludeAssocFn::Set => "set",
             PreludeAssocFn::Has => "has",
+            // T114: Env.load — load .env file into process environment.
+            PreludeAssocFn::Load => "load",
             // T124h: Web modules assoc fn names. `encode` / `decode`
             // are the canonical codec verbs (mirrors the `serde::Serialize`
             // / `Deserialize` derive CRATE names + the `hex::encode` /

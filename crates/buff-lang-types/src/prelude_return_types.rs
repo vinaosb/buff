@@ -156,6 +156,14 @@ pub fn assoc_fn_return_type(
         // `Env.has("KEY")` -> Bool. Wraps
         // `std::env::var(k).is_ok()`.
         (PreludeType::Env, PreludeAssocFn::Has) => Some(Type::bool()),
+        // T114: Env.load(path) -> Map<String, String>. Loads a .env
+        // file (KEY=VALUE per line) into the process environment and
+        // returns the loaded key-value pairs. Does NOT override existing
+        // env vars (only sets if absent). Simple parsing: one KEY=VALUE
+        // per line, skip `#` comments, skip blank lines.
+        (PreludeType::Env, PreludeAssocFn::Load) => {
+            Some(Type::map(Type::string(), Type::string()))
+        }
         // T124h: Base64 module.
         // `Base64.encode(bytes)` -> String. Wraps
         // `base64::Engine::encode(&general_purpose::STANDARD, bytes)`

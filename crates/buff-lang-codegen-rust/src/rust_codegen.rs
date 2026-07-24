@@ -3343,6 +3343,59 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Env.has codegen parse: {e}")))
             }
+            // T114: Env.load(path) -> Map<String, String>. Load a .env
+            // file (KEY=VALUE per line) into the process environment.
+            // One optional arg (path, defaults to ".env"). Returns the
+            // loaded key-value pairs. Does NOT override existing env vars
+            // (only sets if absent). Simple parsing: one KEY=VALUE per
+            // line, skip `#` comments, skip blank lines. No complex .env
+            // syntax (multiline, quotes).
+            //
+            // Lowers to a helper block that:
+            //   1. Reads the file via std::fs::read_to_string
+            //   2. Parses KEY=VALUE lines (skip # comments, blank lines)
+            //   3. Sets each var via unsafe { std::env::set_var } only
+            //      when std::env::var(k).is_err() (not already set)
+            //   4. Returns the loaded HashMap
+            (T::Env, A::Load) => {
+                let path = if args.is_empty() {
+                    syn::parse2::<SynExpr>(quote::quote! { ".env" })
+                        .map_err(|e| self.unsupported(&format!("Env.load default path parse: {e}")))?
+                } else if args.len() == 1 {
+                    let p = self.lower_expr(&args[0])?;
+                    coerce_str_arg_to_ref(p, &args[0])
+                } else {
+                    return Err(self.unsupported(&format!(
+                        "Env.load() expects 0 or 1 arg, got {}",
+                        args.len()
+                    )));
+                };
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let __buff_env_path: &str = #path;
+                        let mut __buff_map = std::collections::HashMap::<String, String>::new();
+                        if let Ok(__buff_contents) = std::fs::read_to_string(__buff_env_path) {
+                            for __buff_line in __buff_contents.lines() {
+                                let __buff_line = __buff_line.trim();
+                                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                                    continue;
+                                }
+                                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                                    let __buff_k = __buff_key.trim().to_string();
+                                    let __buff_v = __buff_val.trim().to_string();
+                                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                                        unsafe { std::env::set_var(&__buff_k, &__buff_v); }
+                                    }
+                                    __buff_map.insert(__buff_k, __buff_v);
+                                }
+                            }
+                        }
+                        __buff_map
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Env.load codegen parse: {e}")))
+            }
             // T124h: Base64 module - 2 assoc fns wrapping the `base64`
             // Rust crate (STANDARD engine via the `Engine` trait).
             //

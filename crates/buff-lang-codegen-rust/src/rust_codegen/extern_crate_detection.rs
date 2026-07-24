@@ -765,6 +765,34 @@ pub(super) fn tracing_subscriber_init_stmt() -> Option<SynStmt> {
     syn::parse2::<SynStmt>(tokens).ok()
 }
 
+/// T114: auto-load `.env` at program start (like Bun/Deno/Node.js dotenv).
+/// Emitted at the top of `main` to load KEY=VALUE pairs from `.env` into
+/// the process environment. Does NOT override existing env vars (only sets
+/// if absent). Simple parsing: one KEY=VALUE per line, skip `#` comments,
+/// skip blank lines. No complex .env syntax (multiline, quotes).
+pub(super) fn dotenv_auto_load_stmt() -> Option<SynStmt> {
+    let tokens: proc_macro2::TokenStream = quote::quote! {
+        {
+            if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+                for __buff_line in __buff_contents.lines() {
+                    let __buff_line = __buff_line.trim();
+                    if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                        let __buff_k = __buff_key.trim().to_string();
+                        let __buff_v = __buff_val.trim().to_string();
+                        if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                            unsafe { std::env::set_var(&__buff_k, &__buff_v); }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    syn::parse2::<SynStmt>(tokens).ok()
+}
+
 // ---------------------------------------------------------------------------
 // T124d — regex emit-on-demand detection (Regex module).
 // ---------------------------------------------------------------------------

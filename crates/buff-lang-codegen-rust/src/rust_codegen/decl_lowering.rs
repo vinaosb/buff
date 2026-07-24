@@ -414,6 +414,21 @@ impl RustCodegen {
             }
         }
 
+        // T114: auto-load `.env` at the top of `main` (like Bun/Deno/Node.js
+        // dotenv). Emitted unconditionally for `main` — reads KEY=VALUE pairs
+        // from `.env` into the process environment. Does NOT override existing
+        // env vars (only sets if absent). Simple parsing: one KEY=VALUE per
+        // line, skip `#` comments, skip blank lines. No complex .env syntax.
+        //
+        // Emitted AFTER the tracing subscriber init (if any) so the subscriber
+        // can read env vars from `.env` for its own configuration (e.g.
+        // `BUFF_LOG` filter).
+        if f.name.name == "main" {
+            if let Some(init_stmt) = dotenv_auto_load_stmt() {
+                block.stmts.push(init_stmt);
+            }
+        }
+
         // T100: fall-through tail. Any defers still in the accumulator at
         // this point were NOT drained by an explicit `return` inside the
         // body — they fire at the implicit function exit (the body's last
