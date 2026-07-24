@@ -209,6 +209,13 @@ pub enum Command {
         #[arg(long, value_name = "LINKER", default_value = "auto")]
         linker: String,
 
+        /// T3: debug-info level. `line-tables-only` (default) — `-C
+        /// debuginfo=1`, enough for backtraces and basic debugging.
+        /// `full` — `-C debuginfo=2`, full DWARF for gdb/lldb. `none` —
+        /// `-C debuginfo=0`, smallest binary, fastest compile.
+        #[arg(long, value_name = "DEBUGINFO", default_value = "line-tables-only")]
+        debuginfo: String,
+
         /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
         /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the
         /// compiled binary's runtime can emit the explain output.
@@ -243,6 +250,13 @@ pub enum Command {
         /// default linker (no `-C link-arg=-fuse-ld` flag).
         #[arg(long, value_name = "LINKER", default_value = "auto")]
         linker: String,
+
+        /// T3: debug-info level. `line-tables-only` (default) — `-C
+        /// debuginfo=1`, enough for backtraces and basic debugging.
+        /// `full` — `-C debuginfo=2`, full DWARF for gdb/lldb. `none` —
+        /// `-C debuginfo=0`, smallest binary, fastest compile.
+        #[arg(long, value_name = "DEBUGINFO", default_value = "line-tables-only")]
+        debuginfo: String,
 
         /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
         /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the

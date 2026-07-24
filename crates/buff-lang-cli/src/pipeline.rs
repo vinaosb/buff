@@ -157,6 +157,51 @@ impl BuildMode {
     }
 }
 
+/// User-facing debug-info selection for `buff build` / `buff run`.
+///
+/// Mirrors the `--debuginfo <line-tables-only|full|none>` CLI flag.
+/// The pipeline passes the corresponding `-C debuginfo=N` flag to rustc.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DebugInfoChoice {
+    /// `-C debuginfo=1` — line numbers only. Fast to compile, enough for
+    /// backtraces and basic debugging. Default for dev builds.
+    #[default]
+    LineTablesOnly,
+    /// `-C debuginfo=2` — full debug info (DWARF, etc.). Use when you
+    /// need to step through code in gdb/lldb.
+    Full,
+    /// `-C debuginfo=0` — no debug info. Smallest binary, fastest
+    /// compile. Use for production when you don't need backtraces.
+    None,
+}
+
+/// Parse a `--debuginfo` CLI flag value into a [`DebugInfoChoice`].
+///
+/// Valid values: `line-tables-only`, `full`, `none`. Case-insensitive.
+/// Returns an error for unknown values.
+pub fn debuginfo_from_str(s: &str) -> Result<DebugInfoChoice> {
+    match s.to_ascii_lowercase().as_str() {
+        "line-tables-only" => Ok(DebugInfoChoice::LineTablesOnly),
+        "full" => Ok(DebugInfoChoice::Full),
+        "none" => Ok(DebugInfoChoice::None),
+        other => bail!(
+            "unknown debuginfo `{other}` (valid: line-tables-only, full, none)"
+        ),
+    }
+}
+
+impl DebugInfoChoice {
+    /// Return the rustc `-C debuginfo=N` value for this choice.
+    /// The caller should pass `-C` as a separate arg before this value.
+    pub fn to_rustc_arg(&self) -> &'static str {
+        match self {
+            DebugInfoChoice::LineTablesOnly => "debuginfo=1",
+            DebugInfoChoice::Full => "debuginfo=2",
+            DebugInfoChoice::None => "debuginfo=0",
+        }
+    }
+}
+
 /// User-facing linker selection for `buff build` / `buff run`.
 ///
 /// Mirrors the `--linker <auto|mold|lld|system>` CLI flag. The pipeline
@@ -675,7 +720,7 @@ pub fn compile_rust_to_exe(
     buff_file: &Path,
     mode: BuildMode,
 ) -> Result<PathBuf> {
-    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default())
+    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default(), DebugInfoChoice::default())
 }
 
 /// sccache-aware variant of [`compile_rust_to_exe`] (T55).
@@ -698,6 +743,7 @@ pub fn compile_rust_to_exe_with_speed(
     mode: BuildMode,
     use_sccache: bool,
     linker: LinkerChoice,
+    debuginfo: DebugInfoChoice,
 ) -> Result<PathBuf> {
     let sccache_on = use_sccache && compile_speed::sccache_available();
     if use_sccache && !sccache_on {
@@ -746,6 +792,13 @@ pub fn compile_rust_to_exe_with_speed(
         }
         eprintln!("note: using fast linker `{}`", resolved.name());
     }
+
+    // T3: debug-info control. For Debug/Fast builds, default to
+    // LineTablesOnly (-C debuginfo=1). For Release/Minimal, keep the
+    // existing behavior (don't force debuginfo unless explicitly set).
+    // The user's explicit --debuginfo flag always wins.
+    cmd.arg("-C");
+    cmd.arg(debuginfo.to_rustc_arg());
 
     cmd.arg(rust_file).arg("-o").arg(output);
 

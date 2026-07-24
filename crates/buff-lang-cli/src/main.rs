@@ -25,6 +25,7 @@ fn main() -> Result<()> {
             pgo,
             pgo_use,
             linker,
+            debuginfo,
             explain,
         } => {
             // T62: --pgo intercepts the normal build path and dispatches
@@ -34,6 +35,7 @@ fn main() -> Result<()> {
             // is set. When --pgo is absent, the normal build path runs
             // unchanged (backward compat).
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
+            let debuginfo_choice = buff_lang_cli::pipeline::debuginfo_from_str(&debuginfo)?;
             if explain {
                 // T6: --explain sets the env var so the compiled binary's
                 // runtime can emit dispatch diagnostics. The env var is
@@ -53,6 +55,7 @@ fn main() -> Result<()> {
                     sccache,
                     target.as_deref(),
                     linker_choice,
+                    debuginfo_choice,
                 )
             }
         }
@@ -61,15 +64,17 @@ fn main() -> Result<()> {
             args,
             release,
             linker,
+            debuginfo,
             explain,
         } => {
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
+            let debuginfo_choice = buff_lang_cli::pipeline::debuginfo_from_str(&debuginfo)?;
             if explain {
                 // T6: --explain sets the env var so the compiled binary's
                 // runtime can emit dispatch diagnostics.
                 std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
             }
-            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice)
+            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice, debuginfo_choice)
         }
         Command::New {
             name,

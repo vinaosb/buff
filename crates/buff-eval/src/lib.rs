@@ -557,9 +557,11 @@ fn run_full_program(source: &str) -> EvalResult {
     // rustc invocation: edition 2021 + -O (debug mode = fast compile, no
     // LTO). Mirrors pipeline.rs `BuildMode::Debug` exactly.
     // T2: auto-detect fast linker (mold → rust-lld → system default).
+    // T3: line-tables-only debuginfo (-C debuginfo=1) for backtraces.
     let mut rustc_cmd = Command::new("rustc");
     rustc_cmd.arg("--edition").arg("2021");
     rustc_cmd.arg("-O");
+    rustc_cmd.arg("-C").arg("debuginfo=1");
     for flag in resolve_eval_linker_flags(EvalLinker::Auto) {
         rustc_cmd.arg(flag);
     }

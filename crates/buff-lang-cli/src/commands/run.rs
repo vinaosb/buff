@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use crate::pipeline;
 
 /// Entry point for `buff run <FILE> [-- ARGS]... [--release]
-/// [--linker <auto|mold|lld|system>]`.
+/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]`.
 ///
 /// - Compiles `file` to Rust + executable (the executable goes into
 ///   `std::env::temp_dir().join("buff-run")` so it never pollutes the
@@ -39,7 +39,7 @@ use crate::pipeline;
 /// Propagates pipeline errors. A non-zero program exit code is *not* an
 /// `Err` from this function — instead the process exits directly so the exit
 /// code is preserved.
-pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::LinkerChoice) -> Result<()> {
+pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::LinkerChoice, debuginfo: pipeline::DebugInfoChoice) -> Result<()> {
     // T133: dispatch on file extension. `.buffhtml` uses the span-aware
     // pipeline so runtime panics can be reverse-mapped to .buffhtml spans.
     let is_buffhtml = file
@@ -91,6 +91,7 @@ pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::Linker
             mode,
             false,
             linker,
+            debuginfo,
         )?;
         (compile_out.rust_file_path, None, String::new())
     };
