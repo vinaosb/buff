@@ -2088,6 +2088,33 @@ impl RustCodegen {
                 // prelude AND tightens the string-literal case so
                 // `print("hello")` now emits `println!("hello")` (no `{}`).
                 if let Expr::Ident(name, _) = callee.as_ref() {
+                    // T70: `__buff_pin` is the `@pin` desugar sentinel. The
+                    // parser rewrites `@pin let x = expr` into
+                    // `let x = __buff_pin(expr)`; we lower this to
+                    // `std::hint::black_box(expr)`, which prevents rustc/LLVM
+                    // from eliminating, moving, or reordering the binding
+                    // (useful for memory-mapped I/O and hardware registers).
+                    // The sentinel is intercepted BEFORE the prelude lookup
+                    // so it never reaches the normal function-call path
+                    // (where it would emit a call to a non-existent
+                    // `__buff_pin` fn). `std::hint::black_box` is in std —
+                    // no extern crate dependency.
+                    if name.name == "__buff_pin" && args_ref.len() == 1 {
+                        let inner = self.lower_expr(&args_ref[0])?;
+                        let mut call_args: Punctuated<SynExpr, syn::Token![,]> =
+                            Punctuated::new();
+                        call_args.push(inner);
+                        return Ok(SynExpr::Call(syn::ExprCall {
+                            attrs: Vec::new(),
+                            func: Box::new(SynExpr::Path(syn::ExprPath {
+                                attrs: Vec::new(),
+                                qself: None,
+                                path: rust_path("std::hint::black_box"),
+                            })),
+                            paren_token: Default::default(),
+                            args: call_args,
+                        }));
+                    }
                     if let Some(fn_) = buff_lang_types::prelude::lookup(&name.name) {
                         return self.lower_prelude_call(fn_, args_ref);
                     }

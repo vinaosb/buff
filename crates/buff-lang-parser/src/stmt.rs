@@ -302,6 +302,27 @@ fn parse_statement_with_property_wrappers(
         "parse_statement_with_property_wrappers called without leading `@`"
     );
 
+    // T70: `@pin` is a statement-level perf attribute (NOT a property
+    // wrapper). Route it to a dedicated desugar before the property-wrapper
+    // validation loop rejects it as "unknown property wrapper". This keeps
+    // `@pin` orthogonal to the reactive property wrappers (`@State`/
+    // `@Published`/`@Cached`) and follows the same parse-time-desugar
+    // precedent.
+    if attrs.len() == 1 && attrs[0].name.name == "pin" {
+        let attr_span = attrs[0].span;
+        // `@pin` takes no arguments.
+        if !attrs[0].args.is_empty() || !attrs[0].named_args.is_empty() {
+            return Err(ParseError::new(
+                Diagnostic::error(
+                    "`@pin` takes no arguments (use plain `@pin let x = expr`)",
+                    attr_span,
+                )
+                .with_code(ErrorCode::UnexpectedToken),
+            ));
+        }
+        return desugar_pin_statement(stream, attr_span);
+    }
+
     // Validate the attribute list: exactly ONE recognised wrapper, no extras.
     let mut wrapper: Option<&str> = None;
     for a in &attrs {
@@ -500,6 +521,107 @@ fn parse_statement_with_property_wrappers(
         span: let_span,
     };
     Ok(let_stmt)
+}
+
+/// T70: desugar `@pin let x = expr` into a normal `Stmt::LetDecl` whose
+/// value is wrapped in `__buff_pin(expr)` — a sentinel function call that
+/// the codegen lowers to `std::hint::black_box(expr)`.
+///
+/// This is a **pure parse-time desugar** (no new AST nodes, no AST field
+/// changes) — mirroring the T56 property-wrapper pattern. The codegen's
+/// `lower_expr` `Expr::FuncCall` arm intercepts the `__buff_pin` sentinel
+/// name and emits `std::hint::black_box(#inner)`, which prevents rustc/LLVM
+/// from eliminating, moving, or reordering the binding (useful for
+/// memory-mapped I/O and hardware register access).
+///
+/// # Behaviour
+///
+/// - Expects the next token to be `let` (errors otherwise).
+/// - Parses the underlying `let` via [`parse_let`].
+/// - Rejects destructuring `let` targets (`@pin let (x, y) = ...`) for MVP
+///   simplicity — pin applies to a single named binding.
+/// - Rewrites the `let`'s `value` to `__buff_pin(original_value)`.
+/// - Preserves the `mutable` flag and type annotation (unlike property
+///   wrappers which drop them — a pinned binding keeps its original
+///   mutability and type).
+///
+/// # Errors
+///
+/// Returns [`ParseError`] (using `ErrorCode::UnexpectedToken` — no new
+/// ErrorCode per the stability promise) when:
+/// - the next token is not `let`,
+/// - the underlying `let` parses as a destructuring `Stmt::LetPattern`.
+fn desugar_pin_statement(
+    stream: &mut TokenStream<'_>,
+    attr_span: Span,
+) -> Result<Stmt, ParseError> {
+    // The next significant token MUST be `let`.
+    if !matches!(stream.peek_kind(), Some(TokenKind::KwLet)) {
+        let span = stream
+            .peek()
+            .map(|t| t.span)
+            .unwrap_or_else(|| stream.eof_span());
+        let found = stream
+            .peek_kind()
+            .map(|k| k.to_string())
+            .unwrap_or_else(|| "end of input".into());
+        return Err(ParseError::new(
+            Diagnostic::error(
+                format!("`@pin` must precede a `let` binding, found `{found}`"),
+                span,
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    }
+
+    // Parse the underlying let.
+    let let_stmt = parse_let(stream)?;
+
+    // Reject destructuring patterns for MVP — pin applies to a single
+    // named binding.
+    if !matches!(let_stmt, Stmt::LetDecl { .. }) {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "`@pin` does not support destructuring `let` targets (use a plain `let` and apply `@pin` to each binding)",
+                attr_span,
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    }
+
+    let Stmt::LetDecl {
+        name,
+        value: original_value,
+        mutable,
+        ty,
+        span: let_span,
+    } = let_stmt
+    else {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "internal: parse_let returned non-LetDecl after guard",
+                attr_span,
+            )
+            .with_code(ErrorCode::UnexpectedToken),
+        ));
+    };
+
+    // Wrap the original value in `__buff_pin(original_value)`. The
+    // codegen intercepts this sentinel name and emits
+    // `std::hint::black_box(original_value)`.
+    let pinned_value = Expr::FuncCall {
+        callee: Box::new(Expr::Ident(Ident::new("__buff_pin", attr_span), attr_span)),
+        args: vec![original_value],
+        span: let_span,
+    };
+
+    Ok(Stmt::LetDecl {
+        name,
+        value: pinned_value,
+        mutable,
+        ty,
+        span: let_span,
+    })
 }
 
 /// T56 helper: build the AST Expr for `ReactiveSignal.new(value)`.
