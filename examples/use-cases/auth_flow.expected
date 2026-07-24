@@ -1,0 +1,13 @@
+=== JWT-like auth flow (HMAC-SHA256 signed) ===
+issuing token for subject=user-42 ttl=3600s
+signing input: user-42|admin|1700000000|1800000000
+signature: 64 hex chars
+--- validate: valid token ---
+valid; subject=user-42
+--- validate: tampered signature ---
+rejected: invalid signature
+--- validate: expired token ---
+rejected: token expired
+--- validate: wrong role (exercises ? propagation) ---
+rejected: role is not admin
+done

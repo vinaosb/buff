@@ -1,0 +1,9 @@
+running 4 tests
+test_addition ... PASS
+test_subtract ... PASS
+test_multiply ... PASS
+test_off_by_one ... FAIL
+---
+passed: 3
+failed: 1
+result: FAIL

@@ -1,0 +1,9 @@
+spawning 4 workers...
+partial 1: 55
+partial 2: 155
+partial 3: 255
+partial 4: 355
+---
+workers reported: 4
+grand total: 820
+OK: total matches sum(1..=40)

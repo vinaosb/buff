@@ -1,0 +1,126 @@
+// Use-case batch 3 (T13) — a tiny test framework in 60 lines of Buff.
+//
+// Run:    `cargo run -p buff-lang-cli -- run examples/use-cases/test_runner.buff`
+// Check:  `cargo run -p buff-lang-cli -- check examples/use-cases/test_runner.buff`
+//
+// Implements the bones of a unit-test runner: register named tests, run each
+// one, collect pass/fail outcomes, and print a structured report. Intentional
+// non-dependency on `buff test` (the built-in `@test` harness) — this is a
+// from-scratch framework to exercise the language features a real test
+// library needs.
+//
+// Exercises:
+//   * Closures / lambdas — the `{ x => body }` syntax, passed to and
+//     returned from `.map()`.
+//   * Higher-order functions — `.map({ ok => status(ok) })` transforms a
+//     `Vector<Bool>` of raw outcomes into a `Vector<String>` of labels.
+//   * Collections — `Vector<T>` literals, `.push()`, `.len()`, indexing,
+//     `for x in vec` iteration, and the `.map()` combinator.
+//   * String interpolation — `${expr}` inside string literals.
+//
+// Codegen-aware choices (these dodge known v0.5 gaps, see
+// examples/pattern_matching.buff + examples/closures.buff notes):
+//   * Dispatch is an `if`/`else` ladder, NOT `match` on strings — match in
+//     value position is a documented codegen gap.
+//   * Aggregation is an explicit `for` loop, NOT `.reduce()` — `.reduce()`
+//     yields `Option<T>` and is codegen-only today.
+//   * No user-defined `enum` is matched on — variants are emitted
+//     unqualified today, so we model pass/fail as `Bool` instead.
+
+// The assertion primitives every test framework exposes. Returning `Bool`
+// (not panicking) keeps the runner in control of reporting.
+func assert_eq(actual: Int, expected: Int) -> Bool:
+    return actual == expected
+
+func assert_true(condition: Bool) -> Bool:
+    return condition
+
+// --- The test suite -------------------------------------------------------
+// Each test is a plain zero-arg function returning `Bool` (`true` = pass).
+// Three genuine passes plus one intentionally-wrong assertion so the report
+// has a failure to show.
+
+func test_addition() -> Bool:
+    return assert_eq(2 + 3, 5)
+
+func test_subtract() -> Bool:
+    return assert_eq(10 - 4, 6)
+
+func test_multiply() -> Bool:
+    return assert_eq(6 * 7, 42)
+
+// Deliberately wrong: 10 / 3 is 3, not 4 — exercises the FAIL path.
+func test_off_by_one() -> Bool:
+    return assert_eq(10 / 3, 4)
+
+// Map a raw `Bool` outcome to a fixed status label via an if/else ladder
+// (returning a `String` from `if`/`else` with explicit `return` is the
+// proven shape from examples/pattern_matching.buff::classify).
+func status(ok: Bool) -> String:
+    if ok:
+        return "PASS"
+    return "FAIL"
+
+// Higher-order dispatch: look a test up by name and run it. The if/else
+// ladder avoids `match`-on-string (a documented codegen gap).
+func run(name: String) -> Bool:
+    if name == "test_addition":
+        return test_addition()
+    if name == "test_subtract":
+        return test_subtract()
+    if name == "test_multiply":
+        return test_multiply()
+    if name == "test_off_by_one":
+        return test_off_by_one()
+    return assert_true(false)
+
+func main():
+    // Registry built imperatively — `.push()` mutates, so the binding is
+    // `mut`. Order is deterministic (insertion order), so the report is
+    // reproducible run-to-run.
+    let mut names = []
+    names.push("test_addition")
+    names.push("test_subtract")
+    names.push("test_multiply")
+    names.push("test_off_by_one")
+
+    let total = names.len()
+    print("running ${total} tests")
+
+    // Run every test, capturing raw Bool outcomes into a parallel vector.
+    // We index into `names` (borrowing via the Index trait) rather than
+    // `.map()`-ing it, because `.map()` CONSUMES the vector (Buff is
+    // move-by-default — see examples/closures.buff) and we still need
+    // `names` for the report below.
+    let mut outcomes = []
+    for i in 0..total:
+        outcomes.push(run(names[i]))
+
+    // Tally passes by INDEX. An explicit `for ok in outcomes` would also
+    // consume the vector (IntoIterator), so we borrow element-wise too —
+    // `outcomes` must survive so we can `.map()` it into labels next.
+    let mut passed: Int = 0
+    for i in 0..total:
+        if outcomes[i]:
+            passed = passed + 1
+    let failed = total - passed
+
+    // Higher-order transform: Bool outcome -> human-readable label. This is
+    // the canonical `.map()` + lambda shape from examples/closures.buff:
+    // `{ ok => status(ok) }` is a one-parameter closure. `.map()` consumes
+    // `outcomes` (move-by-default), which is fine — we're done with it.
+    let labels = outcomes.map({ ok => status(ok) })
+
+    // Per-test report lines. Index walk pairs each name with its label
+    // without needing `.zip()` (not in the MVP surface). Both `names` and
+    // `labels` are still alive here.
+    for i in 0..total:
+        print("${names[i]} ... ${labels[i]}")
+
+    print("---")
+    print("passed: ${passed}")
+    print("failed: ${failed}")
+    if failed == 0:
+        print("result: PASS")
+    else:
+        print("result: FAIL")

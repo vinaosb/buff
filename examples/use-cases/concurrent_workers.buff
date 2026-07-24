@@ -1,0 +1,83 @@
+// Use-case batch 3 (T13) — concurrent workers via Channel<T>.
+//
+// Run:    `cargo run -p buff-lang-cli -- run examples/use-cases/concurrent_workers.buff`
+// Check:  `cargo run -p buff-lang-cli -- check examples/use-cases/concurrent_workers.buff`
+//
+// Spawns N concurrent "workers" that each compute a partial result and feed
+// it back to the main task through a single MPSC channel. The main task acts
+// as the gatherer: it drains the receiver until every worker has reported,
+// then folds the partials into a grand total.
+//
+// Exercises:
+//   * Channel<T> MPSC primitive — `Channel.new(buf)`, `sender.send(v)`,
+//     `receiver.recv()` returning `Option<T>` (None once every sender drops).
+//   * `spawn` — fire-and-forget task on the async runtime (Buff hides the
+//     `await` keyword; async-ness propagates automatically, so `main`
+//     becomes `async fn` under the hood and gets `#[tokio::main]`).
+//   * Pure compute partitioned across logical workers (the parallelism model
+//     Buff targets: the compiler, not the human, argues with the runtime).
+//
+// MVP note (faithful to the documented surface):
+//   `Channel<T>` is single-sender MPSC for v1.13 (T2 spec, REDUCED SCOPE).
+//   There is no `Sender.clone()` yet, so true N-spawned-tasks-fan-in is
+//   deferred to v1.18+. This example therefore uses the idiomatic MVP shape:
+//   ONE spawned "foreman" task owns the single sender and runs the N worker
+//   computations, sending each partial; `main` owns the receiver and
+//   gathers. The concurrency between foreman (producer) and main (consumer)
+//   is real; per-worker task parallelism lands with `Sender.clone()`.
+
+// A single worker: sums a 10-wide slice of the integer line.
+// worker(1) -> 1..=10  = 55
+// worker(2) -> 11..=20 = 155
+// worker(3) -> 21..=30 = 255
+// worker(4) -> 31..=40 = 355
+// Sum of all four partials == sum(1..=40) == 820 (a cheap correctness check).
+func worker(id: Int) -> Int:
+    let start = (id - 1) * 10 + 1
+    let mut sum: Int = 0
+    for x in start..=start + 9:
+        sum = sum + x
+    return sum
+
+// The foreman owns the single sender and runs `count` workers in sequence,
+// forwarding each partial result onto the channel. When it returns the
+// sender is dropped, so the receiver's next `recv()` yields `None` — the
+// signal the gatherer uses to stop draining.
+func foreman(sender: Sender<Int>, count: Int):
+    for id in 1..=count:
+        let partial = worker(id)
+        sender.send(partial)
+
+func main():
+    let worker_count = 4
+    let (sender, receiver) = Channel.new(8)
+
+    print("spawning ${worker_count} workers...")
+
+    // Hand the sender to the foreman and run it concurrently with main.
+    // The sender is MOVED into the spawned task (Buff's move-by-default
+    // semantics); main keeps the receiver.
+    spawn foreman(sender, worker_count)
+
+    // Drain the channel. `for let next = receiver.recv()` loops until
+    // `recv()` returns `None`, which happens exactly once the foreman
+    // finishes and its sender drops. (This brace-form drain loop mirrors
+    // examples/channels/producer_consumer.buff — the one proven instance
+    // of the `for let ... = recv()` idiom.)
+    let mut total: Int = 0
+    let mut received: Int = 0
+    for let partial = receiver.recv() {
+        received = received + 1
+        print("partial ${received}: ${partial}")
+        total = total + partial
+    }
+
+    print("---")
+    print("workers reported: ${received}")
+    print("grand total: ${total}")
+
+    // Cheap correctness assertion: the four 10-wide slices cover 1..=40.
+    if total == 820:
+        print("OK: total matches sum(1..=40)")
+    else:
+        print("MISMATCH: expected 820")

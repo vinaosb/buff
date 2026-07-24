@@ -1,0 +1,128 @@
+// Use-case batch 3 (T13) — a simulated JWT-style auth flow.
+//
+// Run:    `cargo run -p buff-lang-cli -- run examples/use-cases/auth_flow.buff`
+// Check:  `cargo run -p buff-lang-cli -- check examples/use-cases/auth_flow.buff`
+//
+// Mints an HMAC-SHA256-signed token, then validates three properties every
+// auth backend checks: (1) the signature is authentic, (2) the token has not
+// expired, (3) the bearer holds the required role. Exercises Buff's auth /
+// crypto / time / Result-chain primitives end to end.
+//
+// Exercises:
+//   * `HMAC.sha256(key, data)` — keyed signing + re-verification (T124k).
+//   * `DateTime.now().timestamp()` — wall-clock Unix seconds for `iat` /
+//     `exp` claims. NOTE: Buff has NO `DateTime + Duration` arithmetic yet,
+//     so expiry is plain `Int` seconds (`iat + ttl`), which is exactly how
+//     real JWT `exp` claims are encoded anyway.
+//   * `Result<T, Error>` chains — `Ok(value)`, `return Error("msg")`, the
+//     `?` early-propagation operator, and `match { Ok(x) => ..., Err(_) => ... }`
+//     at every call site.
+//   * String interpolation `"${a}|${b}"` for claim assembly.
+//
+// Why "simulated": a real JWT base64url-encodes the header/payload segments
+// and the consumer splits the token on ".". Two of those primitives are not
+// yet exercised end-to-end in Buff (`Base64.encode` takes `Vector<Byte>` and
+// `Strings.split` is a codegen-only module fn today), so this example keeps
+// the segments as plain strings and validates from the decoded fields. The
+// cryptographic core (HMAC sign + constant-time-ish re-verify) and the
+// expiry/role policy logic are production-shaped.
+//
+// STATUS: typechecks via `buff check` (all prelude types resolve). End-to-end
+// `buff run` is codegen-only — `HMAC`/`DateTime` lower to external crates
+// (`hmac`/`sha2`/`chrono`) that the single-file `rustc` pipeline cannot link
+// (same shape as examples/async_demo.buff). The `.expected` file documents
+// the intended runtime output.
+
+// Assemble the canonical signing string: the exact bytes HMAC protects.
+// Pipe-delimited so a verifier can reconstruct it byte-for-byte from the
+// decoded claims. All values are interpolated as their string form.
+func signing_input(subject: String, role: String, iat: Int, exp: Int) -> String:
+    return "${subject}|${role}|${iat}|${exp}"
+
+// Sign a signing-input string with the shared secret. Returns the 64-char
+// lowercase hex HMAC-SHA256 digest.
+func sign(secret: String, input: String) -> String:
+    return HMAC.sha256(secret, input)
+
+// The core validator. Verifies the signature recomputes to the same digest,
+// enforces expiry against the current wall clock, and returns the bearer's
+// subject (the JWT `sub` claim) on success. Every failure is a typed `Error`
+// flowing back through `Result`, so callers handle policy with `match`.
+func validate(secret: String, subject: String, role: String, iat: Int, exp: Int, sig: String) -> Result<String, Error>:
+    let expected = sign(secret, signing_input(subject, role, iat, exp))
+    if expected != sig:
+        return Error("invalid signature")
+    let now = DateTime.now().timestamp()
+    if exp < now:
+        return Error("token expired")
+    if iat > now + 60:
+        // Clock-skew guard: a token minted far in the future is suspect.
+        return Error("token issued in the future")
+    return Ok(subject)
+
+// A higher-level policy gate: validate the token AND require an admin role.
+// The `?` operator propagates any `Err` from `validate` straight back to
+// this function's caller — exactly Rust's early-return semantics, hidden
+// behind one punctuation mark so the happy path reads top-to-bottom.
+func require_admin(secret: String, subject: String, role: String, iat: Int, exp: Int, sig: String) -> Result<String, Error>:
+    let sub = validate(secret, subject, role, iat, exp, sig)?
+    if role != "admin":
+        return Error("role is not admin")
+    return Ok(sub)
+
+func main():
+    let secret = "buff-secret-key-2026"
+    let subject = "user-42"
+    let ttl = 3600
+
+    // Fixed iat/exp keep the printed output deterministic. exp_valid sits in
+    // the future (year 2027) so the validity check passes today; exp_expired
+    // sits in 2001 so the expiry check fails. (The actual `buff run` cannot
+    // link chrono/hmac today — see the STATUS note above — so `.expected`
+    // documents intent rather than a captured run.)
+    let iat = 1700000000
+    let exp_valid = 1800000000
+    let exp_expired = 1000000000
+
+    print("=== JWT-like auth flow (HMAC-SHA256 signed) ===")
+
+    // --- Issue a token --------------------------------------------------
+    let input = signing_input(subject, "admin", iat, exp_valid)
+    let sig = sign(secret, input)
+    let sig_len = sig.len()
+    print("issuing token for subject=${subject} ttl=${ttl}s")
+    print("signing input: ${input}")
+    print("signature: ${sig_len} hex chars")
+
+    // --- Validate: a good token ----------------------------------------
+    print("--- validate: valid token ---")
+    let good = validate(secret, subject, "admin", iat, exp_valid, sig)
+    match good { Ok(sub) => print("valid; subject=${sub}"), Err(_) => print("rejected") }
+
+    // --- Validate: a tampered signature --------------------------------
+    // A bogus digest cannot match the recomputed HMAC.
+    print("--- validate: tampered signature ---")
+    let tampered = validate(secret, subject, "admin", iat, exp_valid, "deadbeef")
+    match tampered { Ok(_) => print("accepted (unexpected)"), Err(_) => print("rejected: invalid signature") }
+
+    // --- Validate: an expired token ------------------------------------
+    // Re-sign with a past `exp` so the signature is honest but the policy
+    // check (exp < now) rejects it.
+    print("--- validate: expired token ---")
+    let expired_input = signing_input(subject, "admin", iat, exp_expired)
+    let expired_sig = sign(secret, expired_input)
+    let expired = validate(secret, subject, "admin", iat, exp_expired, expired_sig)
+    match expired { Ok(_) => print("accepted (unexpected)"), Err(_) => print("rejected: token expired") }
+
+    // --- Validate: wrong role, via `?` propagation ---------------------
+    // A valid token for a non-admin subject: signature + expiry pass inside
+    // `validate`, then `require_admin` adds the role policy on top. The `?`
+    // in `require_admin` is invisible here, but the Err it propagates
+    // surfaces in this match.
+    print("--- validate: wrong role (exercises ? propagation) ---")
+    let user_input = signing_input("user-99", "member", iat, exp_valid)
+    let user_sig = sign(secret, user_input)
+    let role_check = require_admin(secret, "user-99", "member", iat, exp_valid, user_sig)
+    match role_check { Ok(_) => print("accepted (unexpected)"), Err(_) => print("rejected: role is not admin") }
+
+    print("done")
