@@ -3,23 +3,43 @@
   "version": "0.1.0",
   "description": "Buff grammar for tree-sitter (offside-rule; layout-sensitive language that transpiles to Rust).",
   "license": "MIT OR Apache-2.0",
-  "main": "grammar.js",
+  "main": "bindings/node/index.js",
+  "types": "bindings/node/index.d.ts",
   "author": "Buff Lang Project",
   "keywords": [
     "tree-sitter",
-    "grammars",
+    "grammar",
     "buff",
-    "lexer",
-    "parser"
+    "parser",
+    "highlighting"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/buff-lang/buff.git",
     "directory": "tree-sitter-buff"
   },
+  "dependencies": {
+    "nan": "^2.20.0",
+    "node-gyp-build": "^4.8.0"
+  },
   "devDependencies": {
     "tree-sitter-cli": "^0.26.0"
   },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "install": "node-gyp-build",
+    "prebuildify": "prebuildify --napi --strip"
+  },
+  "files": [
+    "grammar.js",
+    "binding.gyp",
+    "bindings/node/*",
+    "queries/*",
+    "src/parser.c",
+    "src/scanner.c",
+    "src/tree_sitter/*"
+  ],
   "tree-sitter": [
     {
       "scope": "source.buff",
