@@ -1,0 +1,414 @@
+// Buff self-host port of `crates/buff-lang-types/src/prelude.rs` (T17, Track C).
+//
+// The Buff **standard library prelude** (T96). The set of FUNCTION names that
+// are **implicitly in scope** in every Buff program — no `import` is
+// required. They are recognised as built-in call targets during type
+// inference and Rust codegen.
+//
+// Distinct from prelude_types.buff which registers TYPES WITH ASSOCIATED
+// FUNCTIONS AND INSTANCE METHODS (`Type.method()` / `recv.method()`). This
+// module registers FREE FUNCTIONS callable by bare identifier (`print(x)`,
+// `abs(-5)`).
+//
+// ## Categories
+//   Math      — abs, min, max, sqrt, floor, ceil, round, pow
+//   Convert   — Int, Float, String, Bool
+//   Io        — print, println, read_line, input
+//   System    — args, env, exit, sleep
+//   Test      — assert_eq, assertThat
+//
+// RUST IDIOM MAPPING:
+//   pub enum PreludeCategory  -> enum PreludeCategory
+//   pub enum PreludeFn        -> enum PreludeFn
+//   pub const ALL &[...]      -> func prelude_fn_all() -> Vector<PreludeFn>
+//   pub fn name(self)         -> func prelude_fn_name(f) -> String
+//   pub fn category(self)     -> func prelude_fn_category(f) -> PreludeCategory
+//   pub fn is_prelude(name)   -> func is_prelude(name) -> Bool
+//   pub fn lookup(name)       -> func lookup(name) -> Option<PreludeFn>
+//   pub fn category_of(name)  -> func category_of(name) -> Option<PreludeCategory>
+//   pub fn return_type(f, a)  -> func return_type(f, args) -> Type
+
+// =============================================================================
+// PreludeCategory — the four+two category labels
+// =============================================================================
+
+enum PreludeCategory {
+    // `abs`, `min`, `max`, `sqrt`, `floor`, `ceil`, `round`, `pow`.
+    Math,
+    // `Int`, `Float`, `String`, `Bool` (type-conversion constructors).
+    Convert,
+    // `print`, `println`, `read_line`, `input`.
+    Io,
+    // `args`, `env`, `exit`, `sleep` (T99/T124g — process environment access).
+    System,
+    // Reserved for the collection-prelude (T23/T67). Empty today.
+    Collection,
+    // `assert_eq`, `assertThat` — testing assertions (T35/T38).
+    Test,
+}
+
+// =============================================================================
+// PreludeFn — recognised prelude function names (22 variants)
+// =============================================================================
+
+enum PreludeFn {
+    // --- Math ---
+    // abs(x) — absolute value, polymorphic over numeric arg type.
+    Abs,
+    // min(a, b) — minimum; returns promoted type of the pair.
+    Min,
+    // max(a, b) — maximum; returns promoted type of the pair.
+    Max,
+    // sqrt(x) — square root; always returns Float.
+    Sqrt,
+    // floor(x) — round towards -inf.
+    Floor,
+    // ceil(x) — round towards +inf.
+    Ceil,
+    // round(x) — round to nearest, ties away from zero.
+    Round,
+    // pow(base, exp) — exponentiation; returns type of base.
+    Pow,
+    // --- Type conversions ---
+    // Int(x) — convert anything reasonable to Int<64>.
+    Int,
+    // Float(x) — convert anything reasonable to Float<32>.
+    Float,
+    // String(x) — convert anything reasonable to String.
+    String,
+    // Bool(x) — convert anything reasonable to Bool.
+    Bool,
+    // --- I/O ---
+    // print(x) — print without trailing newline.
+    Print,
+    // println(x) — print with trailing newline.
+    Println,
+    // read_line() — read a line of stdin, returns String.
+    ReadLine,
+    // --- System / environment (T99) ---
+    // args() — command-line arguments, returns Vector<String>.
+    Args,
+    // env("NAME") — environment variable lookup, returns Option<String>.
+    Env,
+    // exit(code) — terminate the process with the given exit code.
+    Exit,
+    // --- System I/O / async (T124g) ---
+    // input() / input(prompt) — read one line from stdin. Returns String.
+    Input,
+    // sleep(duration) — async-transparent sleep. Returns Void.
+    Sleep,
+    // --- Testing (T35) ---
+    // assert_eq(a, b) — assert two values are equal. Returns Void.
+    AssertEq,
+    // --- Testing (T38) ---
+    // assertThat(value) — fluent test assertion entry point. Returns
+    // AssertThat<T> wrapper.
+    AssertThat,
+}
+
+// =============================================================================
+// impl PreludeFn — ALL + name + category
+// =============================================================================
+
+// All prelude functions, in declared order (Math, Convert, Io, System, Test).
+func prelude_fn_all() -> Vector<PreludeFn>:
+    let out = Vector.new()
+    // Math
+    out.push(PreludeFn.Abs)
+    out.push(PreludeFn.Min)
+    out.push(PreludeFn.Max)
+    out.push(PreludeFn.Sqrt)
+    out.push(PreludeFn.Floor)
+    out.push(PreludeFn.Ceil)
+    out.push(PreludeFn.Round)
+    out.push(PreludeFn.Pow)
+    // Convert
+    out.push(PreludeFn.Int)
+    out.push(PreludeFn.Float)
+    out.push(PreludeFn.String)
+    out.push(PreludeFn.Bool)
+    // Io
+    out.push(PreludeFn.Print)
+    out.push(PreludeFn.Println)
+    out.push(PreludeFn.ReadLine)
+    // System
+    out.push(PreludeFn.Args)
+    out.push(PreludeFn.Env)
+    out.push(PreludeFn.Exit)
+    // T124g: System I/O / async
+    out.push(PreludeFn.Input)
+    out.push(PreludeFn.Sleep)
+    // Testing
+    out.push(PreludeFn.AssertEq)
+    // T38: Fluent test assertions
+    out.push(PreludeFn.AssertThat)
+    return out
+
+// The source-name of this prelude function (the identifier the user writes
+// in Buff source).
+func prelude_fn_name(f: PreludeFn) -> String:
+    match f {
+        PreludeFn.Abs => return "abs",
+        PreludeFn.Min => return "min",
+        PreludeFn.Max => return "max",
+        PreludeFn.Sqrt => return "sqrt",
+        PreludeFn.Floor => return "floor",
+        PreludeFn.Ceil => return "ceil",
+        PreludeFn.Round => return "round",
+        PreludeFn.Pow => return "pow",
+        PreludeFn.Int => return "Int",
+        PreludeFn.Float => return "Float",
+        PreludeFn.String => return "String",
+        PreludeFn.Bool => return "Bool",
+        PreludeFn.Print => return "print",
+        PreludeFn.Println => return "println",
+        PreludeFn.ReadLine => return "read_line",
+        PreludeFn.Args => return "args",
+        PreludeFn.Env => return "env",
+        PreludeFn.Exit => return "exit",
+        PreludeFn.Input => return "input",
+        PreludeFn.Sleep => return "sleep",
+        PreludeFn.AssertEq => return "assert_eq",
+        PreludeFn.AssertThat => return "assertThat",
+    }
+
+// The category label for diagnostics/docs.
+func prelude_fn_category(f: PreludeFn) -> PreludeCategory:
+    // Math: abs/min/max/sqrt/floor/ceil/round/pow
+    if f == PreludeFn.Abs:
+        return PreludeCategory.Math
+    if f == PreludeFn.Min:
+        return PreludeCategory.Math
+    if f == PreludeFn.Max:
+        return PreludeCategory.Math
+    if f == PreludeFn.Sqrt:
+        return PreludeCategory.Math
+    if f == PreludeFn.Floor:
+        return PreludeCategory.Math
+    if f == PreludeFn.Ceil:
+        return PreludeCategory.Math
+    if f == PreludeFn.Round:
+        return PreludeCategory.Math
+    if f == PreludeFn.Pow:
+        return PreludeCategory.Math
+    // Convert: Int/Float/String/Bool
+    if f == PreludeFn.Int:
+        return PreludeCategory.Convert
+    if f == PreludeFn.Float:
+        return PreludeCategory.Convert
+    if f == PreludeFn.String:
+        return PreludeCategory.Convert
+    if f == PreludeFn.Bool:
+        return PreludeCategory.Convert
+    // Io: print/println/read_line/input (T124g: input is Io)
+    if f == PreludeFn.Print:
+        return PreludeCategory.Io
+    if f == PreludeFn.Println:
+        return PreludeCategory.Io
+    if f == PreludeFn.ReadLine:
+        return PreludeCategory.Io
+    if f == PreludeFn.Input:
+        return PreludeCategory.Io
+    // System: args/env/exit/sleep (T124g: sleep is System)
+    if f == PreludeFn.Args:
+        return PreludeCategory.System
+    if f == PreludeFn.Env:
+        return PreludeCategory.System
+    if f == PreludeFn.Exit:
+        return PreludeCategory.System
+    if f == PreludeFn.Sleep:
+        return PreludeCategory.System
+    // Test: assert_eq/assertThat
+    if f == PreludeFn.AssertEq:
+        return PreludeCategory.Test
+    // AssertThat
+    return PreludeCategory.Test
+
+// =============================================================================
+// Lookups
+// =============================================================================
+
+// True iff `name` is a recognised prelude function name.
+//
+// This is the predicate the type inferencer uses to decide whether a
+// `FuncCall` with a bare-ident callee is a prelude call (and therefore
+// resolvable WITHOUT an `import`).
+func is_prelude(name: String) -> Bool:
+    let opt = lookup(name)
+    return opt != Option.None
+
+// Look up a prelude function by its source name. Returns Option.None for
+// unrecognised names (including user-defined functions and the future
+// collection-prelude names, which aren't defined yet).
+//
+// Linear scan over 22 entries — the prelude is small and the lookup is
+// only hit once per `FuncCall`. A HashMap would be over-engineering.
+func lookup(name: String) -> Option<PreludeFn>:
+    let all = prelude_fn_all()
+    let mut i = 0
+    for i < all.len():
+        let f = all.get(i)
+        if prelude_fn_name(f) == name:
+            return Option.Some(f)
+        i = i + 1
+    return Option.None
+
+// The category label of a prelude name, or Option.None if the name is not
+// in the prelude. Convenience wrapper over `lookup` + `prelude_fn_category`.
+func category_of(name: String) -> Option<PreludeCategory>:
+    let opt = lookup(name)
+    if opt == Option.None:
+        return Option.None
+    return Option.Some(prelude_fn_category(unwrap_prelude_fn(opt)))
+
+// =============================================================================
+// Return-type inference
+// =============================================================================
+//
+// Infer the return type of a prelude call given the *resolved* argument
+// types. The caller (the type inferencer) is responsible for first inferring
+// the type of each argument expression; this function only consumes the
+// resulting Type vector. Type.Unknown arguments are tolerated — they
+// propagate as Type.Unknown rather than producing a type error, mirroring
+// the inferencer's general "report once, suppress cascades" philosophy.
+//
+// ## Rules
+// - Math (abs/min/max/pow): polymorphic — see per-fn comments.
+// - Float-returning math (sqrt/floor/ceil/round): the result is Float<32>
+//   if any arg is integer-like (Rust's `.sqrt()` etc. only exist on
+//   floats); otherwise it is the float-promotion of the arg.
+// - Convert: each constructor returns its target type regardless of the
+//   arg type (Int(..) -> Int<64>, String(..) -> String, etc.).
+// - I/O: print/println return Void; read_line returns String.
+func return_type(fn_: PreludeFn, arg_tys: Vector<Type>) -> Type:
+    // --- Math (polymorphic) ---
+    // abs(x) returns the type of x.
+    if fn_ == PreludeFn.Abs:
+        return first_arg_or_unknown(arg_tys)
+    // min(a, b) / max(a, b) return the promoted type of the pair.
+    if fn_ == PreludeFn.Min:
+        return promote_pair_or_first(arg_tys)
+    if fn_ == PreludeFn.Max:
+        return promote_pair_or_first(arg_tys)
+    // pow(base, exp) returns the type of base.
+    if fn_ == PreludeFn.Pow:
+        return first_arg_or_unknown(arg_tys)
+
+    // --- Float-returning math ---
+    if fn_ == PreludeFn.Sqrt:
+        return type_float_default()
+    if fn_ == PreludeFn.Floor:
+        return float_like_or_default(arg_tys)
+    if fn_ == PreludeFn.Ceil:
+        return float_like_or_default(arg_tys)
+    if fn_ == PreludeFn.Round:
+        return float_like_or_default(arg_tys)
+
+    // --- Conversions (fixed target type) ---
+    if fn_ == PreludeFn.Int:
+        return type_int_default()
+    if fn_ == PreludeFn.Float:
+        return type_float_default()
+    if fn_ == PreludeFn.String:
+        return type_string()
+    if fn_ == PreludeFn.Bool:
+        return type_bool()
+
+    // --- I/O ---
+    if fn_ == PreludeFn.Print:
+        return type_void()
+    if fn_ == PreludeFn.Println:
+        return type_void()
+    if fn_ == PreludeFn.ReadLine:
+        return type_string()
+    // T124g: input() / input(prompt) -> String
+    if fn_ == PreludeFn.Input:
+        return type_string()
+
+    // --- System / environment (T99) ---
+    // args() -> Vector<String>
+    if fn_ == PreludeFn.Args:
+        return type_vector(type_string())
+    // env("NAME") -> Option<String>
+    if fn_ == PreludeFn.Env:
+        return type_option(type_string())
+    // exit(code) -> Void (never returns)
+    if fn_ == PreludeFn.Exit:
+        return type_void()
+    // sleep(duration) -> Void. Async-transparent.
+    if fn_ == PreludeFn.Sleep:
+        return type_void()
+
+    // --- Testing ---
+    // assert_eq(a, b) -> Void
+    if fn_ == PreludeFn.AssertEq:
+        return type_void()
+    // assertThat(value) -> AssertThat<T> (returns the value's type for the
+    // MVP; the Rust reference uses the same shape).
+    if fn_ == PreludeFn.AssertThat:
+        return first_arg_or_unknown(arg_tys)
+    return type_unknown()
+
+// =============================================================================
+// Helpers (the Rust reference uses slice-pattern matching + unwrap_or;
+// Buff has neither, so small helpers replace them).
+// =============================================================================
+
+// Unwrap an Option<PreludeFn> (contract: Some). Sentinel-on-violation.
+func unwrap_prelude_fn(opt: Option<PreludeFn>) -> PreludeFn:
+    return match opt {
+        Some(f) => f,
+        None => PreludeFn.Abs,
+    }
+
+// First argument's type, or Type.Unknown when no args. Mirrors Rust's
+// `arg_tys.first().cloned().unwrap_or(Type::Unknown)`.
+func first_arg_or_unknown(arg_tys: Vector<Type>) -> Type:
+    if arg_tys.len() == 0:
+        return type_unknown()
+    return arg_tys.get(0)
+
+// Promote a 2-arg pair via promote_binary; for a single-arg call return
+// that arg; for any other arity return Type.Unknown. Mirrors Rust's
+// slice-pattern `match arg_tys { [a, b] => promote_binary(a, b),
+// [single] => single.clone(), _ => Type::Unknown }`.
+func promote_pair_or_first(arg_tys: Vector<Type>) -> Type:
+    if arg_tys.len() == 2:
+        let a = arg_tys.get(0)
+        let b = arg_tys.get(1)
+        let promoted = promote_binary(a, b)
+        if promoted != type_unknown():
+            return promoted
+        // Fall back to first arg if promotion fails (preserves width).
+        return a
+    if arg_tys.len() == 1:
+        return arg_tys.get(0)
+    return type_unknown()
+
+// For floor/ceil/round: if first arg is float-like, keep its width; if
+// numeric (int), coerce up to Float<32>; otherwise propagate Unknown.
+// Mirrors Rust's `match arg_tys.first() { Some(t) if t.is_float_like() =>
+// t.clone(), Some(t) if t.is_numeric() => Type::float_default(), _ =>
+// Type::Unknown }`.
+func float_like_or_default(arg_tys: Vector<Type>) -> Type:
+    if arg_tys.len() == 0:
+        return type_unknown()
+    let t = arg_tys.get(0)
+    if type_is_float_like(t):
+        return t
+    if type_is_numeric(t):
+        return type_float_default()
+    return type_unknown()
+
+// =============================================================================
+// Tests (mirrors the `mod tests` block in the Rust reference)
+// =============================================================================
+//
+// The Rust reference has a `#[cfg(test)] mod tests` block with 6 test fns
+// (prelude_lookup_known_names, prelude_lookup_rejects_unknown,
+// prelude_categories_are_partitioned, prelude_return_type_abs_is_polymorphic,
+// prelude_return_type_min_max_promotes, prelude_return_type_conversions_fixed,
+// prelude_return_type_sqrt_is_float, prelude_return_type_io,
+// prelude_return_type_floor_ceil_round_float). The test module is OUT OF
+// SCOPE for this self-host port — the tests verify Rust-side behaviour;
+// the .buff port is parse-documentation only (T15/T16 precedent).
