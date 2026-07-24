@@ -107,6 +107,12 @@ pub use storage::{
 };
 pub use storage_sqlite::SqliteStorage;
 
+/// The env-var name used to disable the invite-only beta allowlist
+/// (default: enabled — the registry is invite-only). Set to `false`
+/// or `0` to disable allowlist enforcement (NOT recommended for
+/// production — allows open registration via OAuth).
+pub const ALLOWLIST_ENABLED_ENV: &str = "BUFF_REGISTRY_ALLOWLIST_ENABLED";
+
 /// The default bind address when `BUFF_REGISTRY_ADDR` is unset.
 ///
 /// Loopback only — the registry does NOT listen on `0.0.0.0` by default
@@ -141,6 +147,12 @@ pub struct AppState {
     /// T57: GitHub OAuth configuration. `None` when OAuth env vars are
     /// not set (login endpoints return 503; static-token auth still works).
     pub oauth_config: Option<OAuthConfig>,
+    /// T57: Whether the invite-only beta allowlist is enforced. When
+    /// `true` (default), OAuth logins are rejected unless the GitHub
+    /// login is on the allowlist. Set to `false` via
+    /// `BUFF_REGISTRY_ALLOWLIST_ENABLED=false` for open registration
+    /// (NOT recommended for production).
+    pub allowlist_enabled: bool,
 }
 
 impl AppState {
@@ -153,6 +165,7 @@ impl AppState {
             rate_limit_window: DEFAULT_RATE_LIMIT_WINDOW,
             rate_limit_max: DEFAULT_RATE_LIMIT_MAX,
             oauth_config: OAuthConfig::from_env(),
+            allowlist_enabled: parse_allowlist_enabled(),
         }
     }
 
@@ -171,6 +184,24 @@ impl AppState {
     pub fn with_oauth_config(mut self, config: Option<OAuthConfig>) -> Self {
         self.oauth_config = config;
         self
+    }
+
+    /// T57: Override the allowlist enforcement (for tests that want
+    /// to bypass the invite-only gate).
+    #[must_use]
+    pub fn with_allowlist_enabled(mut self, enabled: bool) -> Self {
+        self.allowlist_enabled = enabled;
+        self
+    }
+}
+
+/// Parse the `BUFF_REGISTRY_ALLOWLIST_ENABLED` env var. Returns `true`
+/// (allowlist enforced) unless the env var is explicitly set to `false`
+/// or `0`.
+fn parse_allowlist_enabled() -> bool {
+    match std::env::var(ALLOWLIST_ENABLED_ENV) {
+        Ok(v) => !v.eq_ignore_ascii_case("false") && v != "0",
+        Err(_) => true, // default: allowlist enforced
     }
 }
 

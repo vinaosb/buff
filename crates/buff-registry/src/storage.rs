@@ -361,6 +361,28 @@ pub trait Storage: Send + Sync {
             "orgs not supported by this backend".to_string(),
         ))
     }
+
+    /// T57: Check whether `github_login` is on the invite-only beta
+    /// allowlist. Called by the OAuth callback handler BEFORE creating
+    /// a session — non-allowlisted users get `403 Forbidden`.
+    ///
+    /// Default impl: returns `false` (allowlist not supported — all
+    /// OAuth logins rejected). This is the SECURE default: production
+    /// deployments MUST seed the allowlist via [`Self::add_to_allowlist`]
+    /// before users can log in.
+    fn is_allowlisted(&self, _github_login: &str) -> Result<bool, StorageError> {
+        Ok(false)
+    }
+
+    /// T57: Add `github_login` to the invite-only beta allowlist.
+    /// Idempotent. Used by admin tooling / tests.
+    ///
+    /// Default impl: returns an error (allowlist not supported).
+    fn add_to_allowlist(&self, _github_login: &str) -> Result<(), StorageError> {
+        Err(StorageError::Failure(
+            "allowlist not supported by this backend".to_string(),
+        ))
+    }
 }
 
 /// T57: User identity resolved from a valid session token.

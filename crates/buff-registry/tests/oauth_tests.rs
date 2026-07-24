@@ -27,6 +27,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 /// Build an app backed by SQLite with OAuth pointing at `mock_server`.
+/// Allowlist is disabled (tested separately in allowlist_tests.rs).
 fn oauth_app(storage: Arc<dyn Storage>, mock_server: &MockServer) -> AppState {
     let config = OAuthConfig {
         client_id: "test-client-id".to_string(),
@@ -36,7 +37,9 @@ fn oauth_app(storage: Arc<dyn Storage>, mock_server: &MockServer) -> AppState {
         token_url: format!("{}/login/oauth/access_token", mock_server.base_url()),
         user_url: format!("{}/user", mock_server.base_url()),
     };
-    AppState::new(storage).with_oauth_config(Some(config))
+    AppState::new(storage)
+        .with_oauth_config(Some(config))
+        .with_allowlist_enabled(false)
 }
 
 /// Issue a GET and return (status, body-bytes, headers).

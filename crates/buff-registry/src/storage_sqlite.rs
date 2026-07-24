@@ -117,6 +117,10 @@ CREATE TABLE IF NOT EXISTS org_members (\
     user_id  INTEGER NOT NULL REFERENCES users(id),\
     PRIMARY KEY (org_name, user_id)\
 );\
+CREATE TABLE IF NOT EXISTS allowlist (\
+    github_login TEXT PRIMARY KEY,\
+    added_at     INTEGER NOT NULL\
+);\
 ";
 
 /// SQLite-backed registry storage.
@@ -647,6 +651,34 @@ impl crate::storage::Storage for SqliteStorage {
         .map_err(|e| StorageError::Failure(format!("add_org_member insert member: {e}")))?;
         Ok(())
     }
+
+    fn is_allowlisted(&self, github_login: &str) -> Result<bool, StorageError> {
+        let conn = self.lock_conn()?;
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM allowlist WHERE github_login = ?1",
+                params![github_login],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| StorageError::Failure(format!("is_allowlisted: {e}")))?
+            .is_some();
+        Ok(exists)
+    }
+
+    fn add_to_allowlist(&self, github_login: &str) -> Result<(), StorageError> {
+        let conn = self.lock_conn()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        conn.execute(
+            "INSERT OR IGNORE INTO allowlist (github_login, added_at) VALUES (?1, ?2)",
+            params![github_login, now],
+        )
+        .map_err(|e| StorageError::Failure(format!("add_to_allowlist: {e}")))?;
+        Ok(())
+    }
 }
 
 impl Default for SqliteStorage {
@@ -963,5 +995,33 @@ mod tests {
             .expect("present");
         assert_eq!(meta.name, "@buff/core");
         assert_eq!(meta.versions.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_allowlisted_user_found() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_to_allowlist("vipuser").expect("add");
+        assert!(storage.is_allowlisted("vipuser").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_non_allowlisted_user_not_found() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_to_allowlist("vipuser").expect("add");
+        assert!(!storage.is_allowlisted("randomuser").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_add_to_allowlist_idempotent() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_to_allowlist("user1").expect("first");
+        storage.add_to_allowlist("user1").expect("second");
+        assert!(storage.is_allowlisted("user1").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_allowlist_empty_by_default() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        assert!(!storage.is_allowlisted("anyone").expect("check"));
     }
 }

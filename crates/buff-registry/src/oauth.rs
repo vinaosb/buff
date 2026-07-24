@@ -216,6 +216,21 @@ pub(crate) async fn callback(
         .await
         .map_err(|e| RegistryError::OAuthUserFetchFailed(e.to_string()))?;
 
+    // --- 2b. T57: Invite-only beta allowlist enforcement ---
+    // The registry is invite-only: only allowlisted GitHub users can
+    // register / log in. Non-allowlisted users get 403 Forbidden with
+    // an explanatory message. Static-token auth (no OAuth) bypasses
+    // this check — it's for local dev / CI only.
+    if state.allowlist_enabled {
+        let allowed = state
+            .storage
+            .is_allowlisted(&user.login)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        if !allowed {
+            return Err(RegistryError::NotAllowlisted);
+        }
+    }
+
     // --- 3. Create session ---
     let session_token = state
         .storage
