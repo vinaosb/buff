@@ -12,6 +12,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > the SDK tier (`1.0.0` for tooling/framework crates, `1.2.0`/`2.0.0` for
 > the core compiler crates) and are bumped independently of release tags.
 
+## [1.25.0] - 2026-07-23
+
+### Added
+
+- **Generics + monomorphization** (T13): user-defined generic types and functions — `struct Pair<T, U>`, `func id<T>(x: T) -> T`. Full pipeline support across AST type-param lists, lexer/parser, type-inference resolution, and codegen lowering to Rust generics.
+- **`buff bench` subcommand** (T22): benchmark harness with baseline capture for tracking compile-time and runtime regressions across releases.
+- **Multi-span diagnostics** (T1): `SpanLabel` with secondary spans — a single diagnostic can now annotate multiple source locations (e.g. "borrowed here" / "used here").
+- **Fix suggestions** (T1): `CodeSuggestion` with `Applicability` rating — diagnostics propose machine-applicable fixes, surfaced to editors as LSP `CodeAction`s.
+- **`--error-format json`** (T1): machine-readable diagnostic output mode for editor and tooling integration.
+- **Dynamic workload-aware dispatch** (T5): runtime `WorkloadContext` + `decide_dynamic` selects CPU vs GPU at execution time based on live workload characteristics, extending the static `@prefer` hint.
+- **`--explain` flag** (T6): emits human-readable dispatch diagnostics explaining why a function ran on CPU or GPU.
+- **`--linker {auto,mold,lld,system}` flag** (T2): fast-linker defaults (rust-lld / mold) with graceful fallback to the system linker for faster dev link times.
+- **Code-hygiene audit** (T104): inventory published at `.sisyphus/audits/code-hygiene-v1.25.md`.
+- **AGENTS.md refresh** (T108): root knowledge base updated for the 69-crate workspace.
+- **Direction decision record** (T110): strategic moat analysis at `.sisyphus/decisions/buff-direction-speed-moat-selfhost.md`.
+- **Error doc pages** (T52): missing catalog pages added for E1110, E1210, E1211, E1212, E1304.
+- **Memory-safety statement** (T59): `MEMORY_SAFETY.md` added documenting Buff's memory-safety guarantees.
+- **CI arm64 matrix** (T61): continuous integration now builds and tests `aarch64` targets across the 3-OS matrix.
+- **Community health files** (T116): `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue/PR templates, and Dependabot configuration added.
+
+### Changed
+
+- **Dev debuginfo default** (T3): dev builds now default to `--debuginfo=line-tables-only` for faster incremental builds; full debuginfo remains available via an explicit flag.
+- **Unified generics representation:** `EnumDecl` migrated from `generics: Vec<Ident>` to `type_params: Vec<TypeParam>`, aligning enums with structs and functions under a single type-parameter model.
+
+### Fixed
+
+- `buff-plugins`: restored `Send`/`Sync` bounds on trait objects (pre-existing regression).
+- `buff-game`: corrected `AudioBuffer` public-function visibility to respect the 40-fn cap (F2 M2 finding).
+- `buff-pubsub`: closure return-type mismatch (F3 finding, fixed in v1.24.0).
+- `buff-web`: missing `IntoResponse` import (F3 finding, fixed in v1.24.0).
+- `buff-xml`: `quick-xml` 0.37 API drift (F3 finding, fixed in v1.24.0).
+- `buff-plugins`: missing `RuntimePlugin` import (F3 finding, fixed in v1.24.0).
+
 ## [1.24.0] - 2026-07-23
 
 ### Added
