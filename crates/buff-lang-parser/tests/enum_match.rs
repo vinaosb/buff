@@ -80,7 +80,7 @@ fn enum_match_simple_unit_enum_parses() {
     match &decls[0] {
         Decl::EnumDecl(e) => {
             assert_eq!(e.name.name, "Color", "enum name");
-            assert!(e.generics.is_empty(), "non-generic enum has no generics");
+            assert!(e.type_params.is_empty(), "non-generic enum has no generics");
             assert_eq!(e.variants.len(), 3, "three variants");
             let names: Vec<&str> = e.variants.iter().map(|v| v.name.name.as_str()).collect();
             assert_eq!(
@@ -135,9 +135,9 @@ fn enum_match_generic_enum_parses() {
     assert_eq!(e.name.name, "Result");
     // Two generic params: T and E.
     assert_eq!(
-        e.generics
+        e.type_params
             .iter()
-            .map(|g| g.name.as_str())
+            .map(|g| g.name.name.as_str())
             .collect::<Vec<_>>(),
         vec!["T", "E"],
         "generic param names"
@@ -163,9 +163,9 @@ fn enum_match_single_generic_enum_parses() {
     };
     assert_eq!(e.name.name, "Option");
     assert_eq!(
-        e.generics
+        e.type_params
             .iter()
-            .map(|g| g.name.as_str())
+            .map(|g| g.name.name.as_str())
             .collect::<Vec<_>>(),
         vec!["T"],
         "one generic param"
@@ -208,7 +208,7 @@ fn enum_match_trailing_comma_in_generics_parses() {
         Decl::EnumDecl(e) => e,
         _ => panic!("expected EnumDecl"),
     };
-    assert_eq!(e.generics.len(), 2, "trailing comma in generics tolerated");
+    assert_eq!(e.type_params.len(), 2, "trailing comma in generics tolerated");
 }
 
 #[test]

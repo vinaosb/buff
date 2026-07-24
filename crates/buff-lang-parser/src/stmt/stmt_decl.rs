@@ -525,9 +525,28 @@ pub fn parse_type_params(stream: &mut TokenStream<'_>) -> Result<Vec<TypeParam>,
         })?;
         let g_span = gtok.span;
         let g = extract_ident(gtok)?;
+        // T38: optional trait bounds `: Bound (+ Bound)*`. Each bound is a
+        // `TypeRef` (parsed via the shared `parse_type_ref` so `Clone`,
+        // `Debug`, `Ord`, and generic bounds like `Iterator<Item=T>` all
+        // parse uniformly). Multiple bounds are `+`-separated, mirroring
+        // Rust's `<T: Clone + Debug>` syntax. When no `:` follows the name,
+        // `bounds` stays empty (the T13 shape — fully backward-compatible).
+        let mut bounds: Vec<TypeRef> = Vec::new();
+        if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+            let colon_tok = stream.advance(); // consume `:`
+            let _ = colon_tok;
+            loop {
+                bounds.push(parse_type_ref(stream)?);
+                if matches!(stream.peek_kind(), Some(TokenKind::Plus)) {
+                    stream.advance(); // consume `+`
+                    continue;
+                }
+                break;
+            }
+        }
         params.push(TypeParam {
             name: g,
-            bounds: Vec::new(),
+            bounds,
             span: g_span,
         });
         match stream.peek_kind() {

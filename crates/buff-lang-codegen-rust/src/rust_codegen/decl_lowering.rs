@@ -10,27 +10,55 @@ use super::*;
 
 impl RustCodegen {
 
-    /// Build a `syn::Generics` from a slice of Buff [`TypeParam`]s (T13).
+    /// Build a `syn::Generics` from a slice of Buff [`TypeParam`]s (T13 +
+    /// T38 trait bounds).
     ///
     /// Each TypeParam becomes a `syn::GenericParam::Type` with the param's
-    /// name as the ident and (in T13) NO bounds. When T38 adds trait bounds,
-    /// the `bounds` vector on each [`TypeParam`] will be lowered into the
-    /// `syn::TypeParam::bounds` Punctuated list here.
+    /// name as the ident. **T38**: when `tp.bounds` is non-empty, each bound
+    /// [`TypeRef`] is lowered to a `syn::TypeParamBound::Trait` and the
+    /// `colon_token` + `bounds` Punctuated list are populated, producing
+    /// Rust `<T: Clone + Debug>` syntax. rustc enforces the bounds at every
+    /// monomorphization call site (the actual "does type X implement trait
+    /// Y" check is delegated to rustc — Buff's type checker records the
+    /// bounds and emits them; it does not maintain a trait-impl registry).
+    ///
+    /// Bound lowering supports:
+    /// - `Named` bounds (`Clone`, `Debug`) → single-segment trait path.
+    /// - `Generic` bounds (`Iterator<Item=T>`) → single-segment path with
+    ///   angle-bracketed generic arguments (each arg lowered via
+    ///   [`Self::ast_typeref_to_syn`]).
     ///
     /// Returns `syn::Generics::default()` when the slice is empty (the common
     /// case — non-generic decls). The lt_token/gt_token are `Some` only when
     /// the param list is non-empty (matching Rust's prettyplease formatting).
-    pub(super) fn type_params_to_generics(&self, type_params: &[TypeParam]) -> syn::Generics {
+    pub(super) fn type_params_to_generics(
+        &mut self,
+        type_params: &[TypeParam],
+    ) -> syn::Generics {
         if type_params.is_empty() {
             return syn::Generics::default();
         }
         let mut params: Punctuated<syn::GenericParam, syn::Token![,]> = Punctuated::new();
         for tp in type_params {
+            // T38: lower each bound TypeRef to a syn::TypeParamBound::Trait.
+            let mut bound_list: Punctuated<syn::TypeParamBound, syn::Token![+]> =
+                Punctuated::new();
+            let has_bounds = !tp.bounds.is_empty();
+            for bound in &tp.bounds {
+                if let Some(path) = self.typeref_to_trait_path(bound) {
+                    bound_list.push(syn::TypeParamBound::Trait(syn::TraitBound {
+                        paren_token: None,
+                        modifier: syn::TraitBoundModifier::None,
+                        lifetimes: None,
+                        path,
+                    }));
+                }
+            }
             params.push(syn::GenericParam::Type(syn::TypeParam {
                 attrs: Vec::new(),
                 ident: ast_ident_to_syn(&tp.name),
-                colon_token: None,
-                bounds: Default::default(),
+                colon_token: has_bounds.then(Default::default),
+                bounds: bound_list,
                 eq_token: None,
                 default: None,
             }));
@@ -40,6 +68,71 @@ impl RustCodegen {
             params,
             gt_token: Some(Default::default()),
             where_clause: None,
+        }
+    }
+
+    /// T38: convert a bound [`TypeRef`] to a `syn::Path` suitable for a
+    /// `syn::TypeParamBound::Trait`. Returns `None` for shapes that cannot
+    /// form a trait path (function/union/tuple bounds — a parse error in
+    /// practice, since the parser only produces Named/Generic bounds here).
+    ///
+    /// - `Named{name}` → single-segment path `Clone`.
+    /// - `Generic{base: Named{name}, args}` → single-segment path `Iterator`
+    ///   with angle-bracketed generic args (each arg lowered via
+    ///   [`Self::ast_typeref_to_syn`]; an unlowerable arg drops the whole
+    ///   bound via the `None` return so rustc — not prettyplease — reports
+    ///   the malformed bound).
+    fn typeref_to_trait_path(&mut self, bound: &TypeRef) -> Option<syn::Path> {
+        match bound {
+            TypeRef::Named { name, .. } => {
+                let segment = syn::PathSegment {
+                    ident: Ident::new(&name.name, ProcSpan::call_site()),
+                    arguments: syn::PathArguments::None,
+                };
+                let mut segments: Punctuated<syn::PathSegment, syn::Token![::]> = Punctuated::new();
+                segments.push(segment);
+                Some(syn::Path {
+                    leading_colon: None,
+                    segments,
+                })
+            }
+            TypeRef::Generic { base, args, .. } => {
+                let name = match base.as_ref() {
+                    TypeRef::Named { name, .. } => &name.name,
+                    _ => return None,
+                };
+                // Lower each generic arg to a syn::Type; if any fails, drop
+                // the whole bound (return None) so rustc reports the issue
+                // rather than prettyplease panicking on a malformed path.
+                let lowered_args: Vec<SynType> = args
+                    .iter()
+                    .map(|a| self.ast_typeref_to_syn(a).ok())
+                    .collect::<Option<Vec<_>>>()?;
+                let mut path_args: Punctuated<syn::GenericArgument, syn::Token![,]> =
+                    Punctuated::new();
+                for a in lowered_args {
+                    path_args.push(syn::GenericArgument::Type(a));
+                }
+                let segment = syn::PathSegment {
+                    ident: Ident::new(name, ProcSpan::call_site()),
+                    arguments: syn::PathArguments::AngleBracketed(
+                        syn::AngleBracketedGenericArguments {
+                            colon2_token: None,
+                            lt_token: Default::default(),
+                            args: path_args,
+                            gt_token: Default::default(),
+                        },
+                    ),
+                };
+                let mut segments: Punctuated<syn::PathSegment, syn::Token![::]> = Punctuated::new();
+                segments.push(segment);
+                Some(syn::Path {
+                    leading_colon: None,
+                    segments,
+                })
+            }
+            // Function/Option/Union/Tuple bounds are not valid trait paths.
+            _ => None,
         }
     }
 
