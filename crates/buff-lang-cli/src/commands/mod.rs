@@ -28,6 +28,7 @@ pub mod login;
 pub mod new;
 pub mod outdated;
 pub mod pgo;
+pub mod profile;
 pub mod publish;
 pub mod refactor;
 pub mod registry;

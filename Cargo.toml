@@ -2040,6 +2040,39 @@ salsa = "0.28"
 # workspace stance that killed chumsky/logos/zmq).
 buff-mcp = { path = "crates/buff-mcp" }
 
+# T111: `buff profile` — CPU/allocation profiler. Three crates are
+# pinned at the workspace level so the CLI (`buff-lang-cli`) and any
+# future consumer (LSP hover, CI tooling, `bufflings` profiling
+# tutorial) resolve to the same versions. The CLI's `profile` subcommand
+# generates a temporary Cargo project that depends on these crates,
+# injects profiler-init code into the user's `fn main()` via syn transform,
+# then builds + runs the instrumented binary. The binary writes the
+# profile artifacts (`profile.flamegraph.svg` for CPU, `dhat-heap.json`
+# for allocation) which the CLI copies to the user's `--output` path.
+#
+# - `pprof` 0.15: the canonical Rust CPU profiler (pprof-rs). Uses
+#   SIGPROF sampling on Unix / thread-based sampling on Windows. API
+#   surface: `pprof::ProfilerGuard::new(freq_hz)` → `guard.report()
+#   .build()` → `report.flamegraph(writer)` (the `flamegraph` feature
+#   pulls in the flamegraph crate transitively). Pinned to major 0.15
+#   (current stable). Pure-Rust via `nix` (Unix) / `windows-sys` —
+#   matches the "no C library" hard rule from T126/T127.
+# - `flamegraph` 0.6: SVG flamegraph renderer (by llogiq). Consumed
+#   transitively by pprof's `flamegraph` feature for in-process SVG
+#   rendering. Pinned explicitly at the workspace level so version
+#   drift in pprof's transitive dep doesn't surprise us (the
+#   `flamegraph` crate's API has been stable across 0.5→0.6). Pure-Rust.
+# - `dhat` 0.3: the canonical Rust heap profiler (by njn). Replaces the
+#   global allocator with a tracking shim that records every
+#   allocation. On drop, writes a `dhat-heap.json` report viewable in
+#   `dh_view.html`. API: `#[global_allocator] static ALLOC:
+#   dhat::DhatAlloc = dhat::DhatAlloc;` + `let _d = dhat::Dhat::
+#   new_heap();` at the top of `fn main()`. Pinned to 0.3 (the
+#   long-standing surface). Pure-Rust, no native deps.
+pprof = { version = "0.15", features = ["flamegraph"] }
+flamegraph = "0.6"
+dhat = "0.3"
+
 # T60: Binary Size Minimization profile.
 #
 # `cargo build --profile minimal` (selected by `buff build --minimal`)

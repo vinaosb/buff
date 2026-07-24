@@ -265,5 +265,8 @@ fn main() -> Result<()> {
         Command::Watch { file, interval } => {
             buff_lang_cli::commands::watch::run(&file, Some(interval))
         }
+        Command::Profile { file, alloc, output } => {
+            buff_lang_cli::commands::profile::run(&file, alloc, output.as_deref())
+        }
     }
 }

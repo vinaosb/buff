@@ -963,6 +963,191 @@ fn inline_script_block(rust_source: String) -> Result<String> {
     Ok(prettyplease::unparse(&file))
 }
 
+// ---------------------------------------------------------------------------
+// T111: Profiling instrumentation injection (`buff profile`).
+// ---------------------------------------------------------------------------
+
+/// Which profiling mode to inject into the user binary's `fn main()`.
+///
+/// Selected by `buff profile` flags: CPU (default) or allocation
+/// (`--alloc`). See [`commands::profile`](crate::commands::profile) for
+/// the CLI surface + [`inject_profiling`] for the codegen transform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileMode {
+    /// CPU profiling via `pprof-rs` (SIGPROF sampling on Unix /
+    /// thread-based sampling on Windows at 100 Hz). Writes
+    /// `profile.flamegraph.svg` on exit.
+    Cpu,
+    /// Allocation profiling via `dhat` (global-allocator replacement).
+    /// Writes `dhat-heap.json` on exit.
+    Alloc,
+}
+
+/// Inject profiling instrumentation into the generated Rust source (T111).
+///
+/// Re-parses `rust_source` as a [`syn::File`], finds `fn main()`, and
+/// wraps its body in profiling guards so the resulting binary writes
+/// profile artifacts on exit:
+///
+/// - [`ProfileMode::Cpu`]: wraps the body in a closure guarded by
+///   `std::panic::catch_unwind`, starts `pprof::ProfilerGuard::new(100)`
+///   (100 Hz SIGPROF sampling) before the closure runs, and on exit
+///   builds the report + writes `profile.flamegraph.svg` via
+///   `report.flamegraph(File)`.
+/// - [`ProfileMode::Alloc`]: ALSO injects a top-level
+///   `#[global_allocator] static __BUFF_DHAT_ALLOC: dhat::DhatAlloc`
+///   item (required — global allocators must be `static`, not locals),
+///   wraps the body in `catch_unwind`, starts `dhat::Dhat::new_heap()`
+///   before the closure runs, and on exit drops the `Dhat` handle so
+///   `dhat-heap.json` is written.
+///
+/// Panics from the user code are caught by `catch_unwind` so the
+/// profiling dump ALWAYS runs (even on panic) — the binary then re-exits
+/// with code 1 to preserve the user program's exit semantics.
+///
+/// **Zero overhead when off**: this function is ONLY called by
+/// [`commands::profile`](crate::commands::profile) — normal
+/// `buff build` / `buff run` never invoke it, so their generated Rust is
+/// byte-identical to pre-T111 (no env-var gate, no runtime check — the
+/// instrumentation simply isn't there).
+///
+/// # Errors
+///
+/// Returns an error when:
+/// - `rust_source` cannot be parsed as a valid `syn::File` (defensive —
+///   the caller passes freshly-codegen'd Rust that is always parseable).
+/// - No `fn main()` is found in the source (the user program has no
+///   entry point to instrument).
+/// - The injected instrumentation cannot be parsed back by syn (defensive
+///   — the injected token streams are hand-audited to be valid Rust).
+pub fn inject_profiling(rust_source: &str, mode: ProfileMode) -> Result<String> {
+    let mut file: syn::File =
+        syn::parse_str(rust_source).context("failed to parse generated Rust as a syn::File")?;
+
+    // Locate fn main() — capture its stmts + replace the block.
+    let mut main_found = false;
+    for item in &mut file.items {
+        if let syn::Item::Fn(fn_item) = item {
+            if fn_item.sig.ident == "main" && fn_item.sig.inputs.is_empty() {
+                let original_stmts = std::mem::take(&mut fn_item.block.stmts);
+                let new_block = build_instrumented_block(&original_stmts, mode)?;
+                fn_item.block = Box::new(new_block);
+                main_found = true;
+                break;
+            }
+        }
+    }
+    if !main_found {
+        bail!(
+            "`buff profile` requires the .buff program to have a `fn main()` \
+             entry point to instrument — none was found in the generated Rust"
+        );
+    }
+
+    // For Alloc mode: prepend the global-allocator item at the TOP of
+    // the file (it must come before any fn that allocates — which is
+    // effectively "before everything"). We use Box::new to build the
+    // Item::Static via quote!+parse2 (the `parse_quote!` macro is
+    // banned per AGENTS.md).
+    if mode == ProfileMode::Alloc {
+        let alloc_item: syn::ItemStatic = syn::parse2(quote::quote! {
+            #[global_allocator]
+            static __BUFF_DHAT_ALLOC: dhat::DhatAlloc = dhat::DhatAlloc;
+        })
+        .context("failed to synthesise dhat #[global_allocator] item")?;
+        file.items.insert(0, syn::Item::Static(alloc_item));
+    }
+
+    Ok(prettyplease::unparse(&file))
+}
+
+/// Build the instrumented `syn::Block` for `fn main()` (T111).
+///
+/// Wraps `original_stmts` (the user's main body) in profiling guards
+/// selected by `mode`. Returns a `syn::Block` ready to swap into the
+/// `fn main()` Item::Fn.
+fn build_instrumented_block(
+    original_stmts: &[syn::Stmt],
+    mode: ProfileMode,
+) -> Result<syn::Block> {
+    // Interpolate the original stmts into the profiling wrapper.
+    // `syn::Stmt` implements `quote::ToTokens`, so `#(#original_stmts)*`
+    // faithfully reproduces the user's main body inside the closure.
+    let body_tokens: proc_macro2::TokenStream = match mode {
+        ProfileMode::Cpu => quote::quote! {{
+            // T111: start pprof CPU profiler at 100 Hz (SIGPROF on Unix,
+            // thread-based on Windows). The guard MUST live until after
+            // the user code finishes so sampling covers the full run.
+            let __buff_pprof_guard: pprof::ProfilerGuard =
+                match pprof::ProfilerGuard::new(100) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        eprintln!("buff profile: pprof init failed: {e}");
+                        std::process::exit(1);
+                    }
+                };
+            // Catch panics so the profiling dump ALWAYS runs, then
+            // re-exit with code 1 to preserve the user's exit semantics.
+            let __buff_result = std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| {
+                    #(#original_stmts)*
+                }),
+            );
+            // Build + dump the flamegraph SVG.
+            match __buff_pprof_guard.report().build() {
+                Ok(__buff_report) => {
+                    match std::fs::File::create("profile.flamegraph.svg") {
+                        Ok(__buff_f) => {
+                            if let Err(__buff_e) = __buff_report.flamegraph(__buff_f) {
+                                eprintln!(
+                                    "buff profile: failed to write flamegraph SVG: {__buff_e}"
+                                );
+                            }
+                        }
+                        Err(__buff_e) => eprintln!(
+                            "buff profile: failed to create profile.flamegraph.svg: {__buff_e}"
+                        ),
+                    }
+                }
+                Err(__buff_e) => {
+                    eprintln!("buff profile: failed to build pprof report: {__buff_e}");
+                }
+            }
+            if __buff_result.is_err() {
+                std::process::exit(1);
+            }
+        }},
+        ProfileMode::Alloc => quote::quote! {{
+            // T111: start dhat heap tracker. The #[global_allocator]
+            // static is injected at the top of the file (see
+            // inject_profiling); Dhat::new_heap() initialises the
+            // tracking state. On drop, dhat writes dhat-heap.json.
+            let __buff_dhat = dhat::Dhat::new_heap();
+            let __buff_result = std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| {
+                    #(#original_stmts)*
+                }),
+            );
+            // Drop the Dhat handle explicitly so the dhat-heap.json
+            // report is written deterministically (before we re-exit
+            // on panic). The Drop impl writes the file + prints a
+            // one-line summary to stderr.
+            drop(__buff_dhat);
+            if __buff_result.is_err() {
+                std::process::exit(1);
+            }
+        }},
+    };
+
+    let block: syn::Block = syn::parse2(body_tokens).with_context(|| {
+        format!(
+            "failed to parse instrumented fn main() block (mode = {:?})",
+            mode
+        )
+    })?;
+    Ok(block)
+}
+
 /// Format a `BuffHtmlParseError` as a user-facing anyhow error with
 /// line/column context (mirrors [`format_diagnostic_error`] for `.buff`
 /// errors, but consumes the buffhtml-parser-specific error type).

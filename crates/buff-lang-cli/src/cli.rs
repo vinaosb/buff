@@ -1249,6 +1249,72 @@ pub enum Command {
         #[arg(long, value_name = "MS", default_value_t = 500)]
         interval: u64,
     },
+
+    /// `buff profile <FILE> [--alloc] [--output <PATH>]` — CPU /
+    /// allocation profiler (T111).
+    ///
+    /// Compiles the `.buff` file WITH profiling instrumentation injected
+    /// into the generated `fn main()` via a syn transform, then runs the
+    /// resulting binary. Two modes are supported:
+    ///
+    /// - **CPU mode** (default): links `pprof-rs` (SIGPROF sampling on
+    ///   Unix / thread-based sampling on Windows at 100 Hz) into the
+    ///   user binary. On exit, the binary writes `profile.flamegraph.svg`
+    ///   (an interactive SVG flamegraph visualising where CPU time was
+    ///   spent). The CLI copies this to `--output` (default:
+    ///   `profile.flamegraph.svg` in the current directory).
+    ///
+    /// - **Allocation mode** (`--alloc`): links `dhat` (a global
+    ///   allocator replacement that records every heap allocation) into
+    ///   the user binary. On exit, the binary writes `dhat-heap.json`
+    ///   (viewable in `dh_view.html`). The CLI parses the JSON + renders
+    ///   a human-readable `alloc-report.txt` (top allocation sites by
+    ///   bytes + count) + copies the raw JSON to `--output` (default:
+    ///   `alloc-report.txt` in the current directory).
+    ///
+    /// # Zero overhead when off
+    ///
+    /// Normal `buff build` / `buff run` are completely unaffected — the
+    /// profiling instrumentation is injected ONLY by this subcommand.
+    /// There is no env-var gate on the user binary; the binary is either
+    /// instrumented (built via `buff profile`) or not (built via
+    /// `buff build` / `buff run`). This is the same pattern as PGO
+    /// (T62) — instrumentation is a build-time decision, not a runtime
+    /// one.
+    ///
+    /// # Build-host requirement
+    ///
+    /// Requires `cargo` on `PATH` (the subcommand generates a temporary
+    /// Cargo project so the profiling crates can be linked — the
+    /// single-file `rustc` path cannot resolve `extern crate` deps).
+    /// Cargo is always available when the Buff toolchain is installed.
+    ///
+    /// # Output
+    ///
+    /// - CPU mode: `<output or profile.flamegraph.svg>` — the SVG.
+    /// - Alloc mode: `<output or alloc-report.txt>` — human-readable
+    ///   summary; `dhat-heap.json` is written alongside as a raw data
+    ///   sidecar for `dh_view.html`.
+    Profile {
+        /// Input `.buff` source file to profile.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Allocation profiling mode (dhat heap tracker). When omitted,
+        /// CPU profiling (pprof-rs) is used.
+        #[arg(long)]
+        alloc: bool,
+
+        /// Output artifact path.
+        ///
+        /// - CPU mode (default): the flamegraph SVG path (default:
+        ///   `profile.flamegraph.svg`).
+        /// - Alloc mode (`--alloc`): the human-readable report path
+        ///   (default: `alloc-report.txt`). The raw `dhat-heap.json` is
+        ///   always written alongside for `dh_view.html` consumption.
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
 }
 
 /// Subcommands of `buff refactor` (T66).
