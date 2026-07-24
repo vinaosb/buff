@@ -1158,6 +1158,23 @@ pub enum Type {
     /// landed earlier (T68 shipped the expression form; T84 closes the
     /// loop by giving it a real `Type`).
     Range(Box<Type>),
+    /// T71: a lazy iterator `Iterator<T>` — the result of
+    /// `vector.lazy()`. Maps to Rust's iterator adapters
+    /// (`.iter().map().filter().take()...`). Each adapter
+    /// method returns a new `Iterator` (no allocation until
+    /// `.collect()`). The element type `T` is boxed so the
+    /// variant carries any inner type (mirrors `Vector<T>`).
+    ///
+    /// This is **additive** (T71): no existing variant was
+    /// renamed, reordered, or had its payload altered. All
+    /// exhaustive `match`es on `Type` were extended with an
+    /// arm for the new variant: `Display`, `buff_type_to_syn`
+    /// (codegen), `typeref_to_type` (inferencer +
+    /// exhaustiveness). The `is_numeric` / `is_float_like` /
+    /// `is_integer_like` / `is_gpu_eligible` predicates all
+    /// return `false` for `Iterator` — it is a lazy adapter
+    /// type that participates in no numeric promotion.
+    Iterator(Box<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1327,6 +1344,14 @@ impl Type {
     /// [`Type::matrix`]).
     pub fn range(elem: Type) -> Self {
         Type::Range(Box::new(elem))
+    }
+
+    /// T71: Create a lazy `Iterator<T>` type. Maps to Rust's iterator
+    /// adapters (`.iter().map().filter()...`). The element type is boxed
+    /// so the variant carries it inline (mirrors [`Type::vector`] /
+    /// [`Type::range`]).
+    pub fn iterator(elem: Type) -> Self {
+        Type::Iterator(Box::new(elem))
     }
 
     /// Create a `Box<dyn Trait>` trait-object type (T68). Maps 1:1 to
@@ -2230,6 +2255,14 @@ impl Type {
         matches!(self, Type::RsaKeypair)
     }
 
+    /// T71: Returns `true` if this type is the lazy `Iterator<T>` type.
+    /// Used by the type inferencer + codegen to dispatch lazy iterator
+    /// method calls (`.map()`, `.filter()`, `.take()`, ...) to Rust's
+    /// iterator adapter chain.
+    pub fn is_prelude_iterator(&self) -> bool {
+        matches!(self, Type::Iterator(..))
+    }
+
     /// Returns `true` if this type **must** run on the CPU (never GPU).
     ///
     /// [`Type::Decimal`] is the canonical case: 128-bit fixed-point decimals
@@ -2500,6 +2533,10 @@ impl fmt::Display for Type {
             // (mirrors Vector<T> / Matrix<T>). The element is the
             // inferred bound type (`Range<Int<64>>` for `0..10`).
             Type::Range(elem) => write!(f, "Range<{elem}>"),
+            // T71: lazy iterator `Iterator<T>`. Renders the Buff
+            // surface form `Iterator<elem>` so diagnostics read
+            // naturally (mirrors Vector<T> / Range<T>).
+            Type::Iterator(elem) => write!(f, "Iterator<{elem}>"),
             // T68: trait object `Box<dyn Trait>`. Renders the Rust surface
             // form verbatim so diagnostics read naturally and the codegen
             // output matches 1:1. The inner type is the trait (conventionally

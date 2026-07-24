@@ -667,6 +667,78 @@ impl RustCodegen {
             // We lower the two integer arguments and emit the chain. If `b`
             // is not provided, we use `s.chars().skip(a).collect::<String>()`.
             "slice" => self.lower_slice_call(recv, args)?,
+            // T71: Lazy iterator support. `vector.lazy()` → `vector.iter()`
+            // (returns a Rust iterator, NOT `.into_iter()` which would
+            // consume the vector). Each adapter method stays lazy (no
+            // `.collect()`) until `.collect()` materialises the result.
+            //
+            // We gate on the receiver's inferred type being `Iterator<T>`
+            // (for adapter methods) or `Vector<T>` (for `.lazy()`).
+            "lazy" if args.is_empty() => {
+                // `vector.lazy()` → `vector.iter()`
+                self.method_chain(recv, &["iter"], None)?
+            }
+            "map" if args.len() == 1
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                let f = self.lower_expr(&args[0])?;
+                method_call_one_arg(recv, "map", f)
+            }
+            "filter" if args.len() == 1
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                let f = self.lower_expr(&args[0])?;
+                method_call_one_arg(recv, "filter", f)
+            }
+            "take" if args.len() == 1
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                let n = self.lower_expr(&args[0])?;
+                method_call_one_arg(recv, "take", n)
+            }
+            "skip" if args.len() == 1
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                let n = self.lower_expr(&args[0])?;
+                method_call_one_arg(recv, "skip", n)
+            }
+            "collect" if args.is_empty()
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                // `iter.collect()` → `iter.collect::<Vec<_>>()`
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.collect::<Vec<_>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("collect codegen parse: {e}")))?
+            }
+            "fold" if args.len() == 2
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                let init = self.lower_expr(&args[0])?;
+                let f = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.fold(#init, #f)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("fold codegen parse: {e}")))?
+            }
+            "count" if args.is_empty()
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                // `iter.count()` → `iter.count() as i64`
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.count() as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("count codegen parse: {e}")))?
+            }
+            "for_each" if args.len() == 1
+                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            {
+                let f = self.lower_expr(&args[0])?;
+                method_call_one_arg(recv, "for_each", f)
+            }
             // T23: Vector iteration methods. `.map` / `.filter` take a single
             // closure and return a new `Vec`; `.reduce` takes a 2-arg closure
             // and returns `Option<T>`. We use `.into_iter()` so the closure

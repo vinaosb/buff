@@ -970,4 +970,11 @@ pub(super) const KNOWN_ZERO_ARG_METHODS: &[&str] = &[
     "frames",
     "duration_secs",
     "summarize",
+    // T71: Lazy iterator zero-arg methods (`lazy` / `collect` / `count`).
+    // Without these entries the T26 field-access heuristic would rewrite
+    // `vec.lazy()` / `iter.collect()` / `iter.count()` as Rust field
+    // accesses (which don't exist on Vec / iterator adapters).
+    "lazy",
+    "collect",
+    "count",
 ];

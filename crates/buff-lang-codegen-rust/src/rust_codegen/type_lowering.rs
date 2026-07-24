@@ -438,6 +438,19 @@ impl RustCodegen {
             // distinct types). Mirrors Unknown / Void / Sender /
             // Receiver: let Rust infer from context.
             | Type::Range(_) => return None,
+            // T71: lazy iterator `Iterator<T>`. Maps to Rust's iterator
+            // adapters (`.iter().map().filter()...`). The codegen lowers
+            // the AST directly via `lower_method_call` (which emits
+            // `recv.iter().map(f).filter(p)...`), so a `Type::Iterator`
+            // flowing through `buff_type_to_syn` is only consulted when
+            // the user writes an explicit annotation like
+            // `let it: Iterator<Int> = vec.lazy()`. We return None so
+            // Rust infers the type from the initializer — this avoids
+            // the concrete-iterator-type mismatch (Buff surfaces a
+            // single `Iterator<T>` abstraction; Rust has many distinct
+            // adapter types). Mirrors Range / Unknown / Void: let Rust
+            // infer from context.
+            | Type::Iterator(_) => return None,
             // T68: trait object `Box<dyn Trait>` is handled by the
             // early-return match above (lowers to `Box<dyn Trait>` via
             // `quote!`); unreachable here but required for exhaustiveness.

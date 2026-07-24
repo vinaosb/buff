@@ -430,6 +430,75 @@ impl TypeInferencer {
                         }
                     }
                 }
+                // T71: Lazy iterator support. `vector.lazy()` returns an
+                // `Iterator<T>` (lazy adapter, no allocation). Each adapter
+                // method returns a new `Iterator` (chainable, lazy) until
+                // `.collect()` materialises the result.
+                //
+                // - `vector.lazy()` -> `Iterator<T>`
+                // - `iter.map(f)` -> `Iterator<R>` (element type from body)
+                // - `iter.filter(pred)` -> `Iterator<T>` (element preserved)
+                // - `iter.take(n)` / `iter.skip(n)` -> `Iterator<T>`
+                // - `iter.collect()` -> `Vector<T>`
+                // - `iter.fold(init, f)` -> `T` (the accumulator type)
+                // - `iter.count()` -> `Int`
+                // - `iter.for_each(f)` -> `Void`
+                if method.name == "lazy" && args.is_empty() {
+                    let recv_ty = self.infer_expr(receiver)?;
+                    if let Type::Vector(elem_ty) = &recv_ty {
+                        return Ok(Type::iterator((**elem_ty).clone()));
+                    }
+                }
+                // Lazy iterator adapter methods (receiver is Iterator<T>).
+                if matches!(
+                    method.name.as_str(),
+                    "map" | "filter" | "take" | "skip"
+                ) && args.len() == 1
+                {
+                    let recv_ty = self.infer_expr(receiver)?;
+                    if let Type::Iterator(elem_ty) = &recv_ty {
+                        if method.name == "map" {
+                            if let Expr::Lambda { .. } = &args[0] {
+                                let body_ty =
+                                    self.infer_expr_expected(&args[0], Some(elem_ty))?;
+                                return Ok(Type::iterator(body_ty));
+                            }
+                            // Non-lambda map arg: element type unknown.
+                            return Ok(Type::iterator(Type::Unknown));
+                        }
+                        // filter / take / skip preserve the element type.
+                        return Ok(Type::iterator((**elem_ty).clone()));
+                    }
+                }
+                // `iter.collect()` -> `Vector<T>`
+                if method.name == "collect" && args.is_empty() {
+                    let recv_ty = self.infer_expr(receiver)?;
+                    if let Type::Iterator(elem_ty) = &recv_ty {
+                        return Ok(Type::vector((**elem_ty).clone()));
+                    }
+                }
+                // `iter.fold(init, f)` -> `T` (accumulator type = init type)
+                if method.name == "fold" && args.len() == 2 {
+                    let recv_ty = self.infer_expr(receiver)?;
+                    if let Type::Iterator(_) = &recv_ty {
+                        let init_ty = self.infer_expr(&args[0])?;
+                        return Ok(init_ty);
+                    }
+                }
+                // `iter.count()` -> `Int`
+                if method.name == "count" && args.is_empty() {
+                    let recv_ty = self.infer_expr(receiver)?;
+                    if let Type::Iterator(_) = &recv_ty {
+                        return Ok(Type::int_default());
+                    }
+                }
+                // `iter.for_each(f)` -> `Void`
+                if method.name == "for_each" && args.len() == 1 {
+                    let recv_ty = self.infer_expr(receiver)?;
+                    if let Type::Iterator(_) = &recv_ty {
+                        return Ok(Type::Void);
+                    }
+                }
                 Ok(Type::Unknown)
             }
             Expr::SuspendExpr { inner, .. } => self.infer_expr(inner),
