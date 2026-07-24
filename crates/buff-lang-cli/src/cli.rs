@@ -201,6 +201,21 @@ pub enum Command {
         /// Buff-supported target set and exit (no build performed).
         #[arg(long, value_name = "TRIPLE")]
         target: Option<String>,
+
+        /// T2: linker selection. `auto` (default) probes PATH for mold
+        /// (Linux) → rust-lld → system default. `mold` and `lld` request
+        /// a specific linker (errors if not found). `system` uses rustc's
+        /// default linker (no `-C link-arg=-fuse-ld` flag).
+        #[arg(long, value_name = "LINKER", default_value = "auto")]
+        linker: String,
+
+        /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
+        /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the
+        /// compiled binary's runtime can emit the explain output.
+        /// Zero-overhead when omitted — the explain string is never
+        /// constructed unless this flag is set.
+        #[arg(long)]
+        explain: bool,
     },
 
     /// Compile a `.buff` file and immediately execute it.
@@ -221,6 +236,21 @@ pub enum Command {
         /// for `buff run`'s tight edit-run loop than the runtime speedup.
         #[arg(long)]
         release: bool,
+
+        /// T2: linker selection. `auto` (default) probes PATH for mold
+        /// (Linux) → rust-lld → system default. `mold` and `lld` request
+        /// a specific linker (errors if not found). `system` uses rustc's
+        /// default linker (no `-C link-arg=-fuse-ld` flag).
+        #[arg(long, value_name = "LINKER", default_value = "auto")]
+        linker: String,
+
+        /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
+        /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the
+        /// compiled binary's runtime can emit the explain output.
+        /// Zero-overhead when omitted — the explain string is never
+        /// constructed unless this flag is set.
+        #[arg(long)]
+        explain: bool,
     },
 
     /// Create a new Buff project in a fresh `<NAME>/` directory.

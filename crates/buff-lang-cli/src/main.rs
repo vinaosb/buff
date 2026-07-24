@@ -24,6 +24,8 @@ fn main() -> Result<()> {
             target,
             pgo,
             pgo_use,
+            linker,
+            explain,
         } => {
             // T62: --pgo intercepts the normal build path and dispatches
             // to commands::pgo (3-phase PGO orchestrator). PGO is
@@ -31,6 +33,13 @@ fn main() -> Result<()> {
             // consumes a profile), so those flags are ignored when --pgo
             // is set. When --pgo is absent, the normal build path runs
             // unchanged (backward compat).
+            let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
+            if explain {
+                // T6: --explain sets the env var so the compiled binary's
+                // runtime can emit dispatch diagnostics. The env var is
+                // inherited by the rustc-compiled binary.
+                std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
+            }
             if pgo {
                 buff_lang_cli::commands::pgo::run(file.as_deref(), output.as_deref(), pgo_use, None)
             } else {
@@ -43,6 +52,7 @@ fn main() -> Result<()> {
                     no_cache,
                     sccache,
                     target.as_deref(),
+                    linker_choice,
                 )
             }
         }
@@ -50,7 +60,17 @@ fn main() -> Result<()> {
             file,
             args,
             release,
-        } => buff_lang_cli::commands::run::run(&file, &args, release),
+            linker,
+            explain,
+        } => {
+            let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
+            if explain {
+                // T6: --explain sets the env var so the compiled binary's
+                // runtime can emit dispatch diagnostics.
+                std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
+            }
+            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice)
+        }
         Command::New {
             name,
             lib,

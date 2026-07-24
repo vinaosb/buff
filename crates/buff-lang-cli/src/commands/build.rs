@@ -44,7 +44,8 @@ use crate::project_pipeline::{
 };
 
 /// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]
-/// [--minimal] [--fast] [--no-cache] [--sccache] [--target <TRIPLE>]`.
+/// [--minimal] [--fast] [--no-cache] [--sccache] [--target <TRIPLE>]
+/// [--linker <auto|mold|lld|system>]`.
 ///
 /// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior;
 /// the `--target` flag is ignored in this mode).
@@ -65,6 +66,7 @@ pub fn run(
     no_cache: bool,
     sccache: bool,
     target: Option<&str>,
+    linker: pipeline::LinkerChoice,
 ) -> Result<()> {
     // T55: when --sccache is requested, write the .cargo/config.toml
     // snippet so bare `cargo build`/`cargo test` also pick up sccache.
@@ -85,7 +87,7 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release, minimal, fast, no_cache, sccache)
+            build_single_file(f, output, release, minimal, fast, no_cache, sccache, linker)
         }
         None => build_project(release, minimal, fast, target),
     }
@@ -136,6 +138,7 @@ fn build_single_file(
     fast: bool,
     no_cache: bool,
     sccache: bool,
+    linker: pipeline::LinkerChoice,
 ) -> Result<()> {
     let stem_output: PathBuf = match output {
         Some(p) => pipeline::with_exe_extension(p),
@@ -171,6 +174,7 @@ fn build_single_file(
         file,
         mode,
         sccache,
+        linker,
     )?;
     eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());

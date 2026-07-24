@@ -342,7 +342,7 @@ pub fn synthetic_buff_program(tier: BenchTier) -> String {
 ///
 /// Mirrors the logic of `which`/`where` without shelling out. Returns
 /// `false` when `PATH` is unset or empty.
-fn on_path(name: &str) -> bool {
+pub(crate) fn on_path(name: &str) -> bool {
     let path_var = match std::env::var_os("PATH") {
         Some(p) => p,
         None => return false,

@@ -75,6 +75,68 @@ use buff_lang_lexer::tokenize;
 use buff_lang_parser::{parse, parse_expression};
 use buff_lang_types::{Type, TypeInferencer};
 
+// ---------------------------------------------------------------------------
+// T2: Fast-linker selection (mirrors buff_lang_cli::pipeline::LinkerChoice).
+// Kept inline to avoid pulling clap/tokio transitively into the eval crate.
+// ---------------------------------------------------------------------------
+
+/// Fast-linker selection for the eval crate's rustc invocation.
+///
+/// Mirrors `buff_lang_cli::pipeline::LinkerChoice` without depending on the
+/// CLI crate. See AGENTS.md: "Keep the two copies in sync manually."
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum EvalLinker {
+    /// Auto-detect: probe PATH for mold (Linux) → rust-lld → system default.
+    #[default]
+    Auto,
+    /// Use rustc's default system linker (no `-C link-arg=-fuse-ld` flag).
+    System,
+}
+
+/// Resolve an [`EvalLinker`] to rustc `-C link-arg=-fuse-ld` flags.
+///
+/// Returns an empty vec for [`EvalLinker::System`] (let rustc pick its
+/// default). For [`EvalLinker::Auto`], probes PATH for mold (Linux) →
+/// rust-lld → lld → system default (silent fallback).
+fn resolve_eval_linker_flags(linker: EvalLinker) -> Vec<&'static str> {
+    match linker {
+        EvalLinker::Auto => {
+            // mold is Linux-only in practice.
+            if cfg!(target_os = "linux") && on_path("mold") {
+                vec!["-C", "link-arg=-fuse-ld=mold"]
+            } else if on_path("rust-lld") || on_path("lld") {
+                vec!["-C", "link-arg=-fuse-ld=lld"]
+            } else {
+                Vec::new()
+            }
+        }
+        EvalLinker::System => Vec::new(),
+    }
+}
+
+/// Returns `true` when `name` (an executable basename) is found on `PATH`.
+/// Mirrors `buff_lang_cli::compile_speed::on_path` without depending on the
+/// CLI crate.
+fn on_path(name: &str) -> bool {
+    let path_var = match std::env::var_os("PATH") {
+        Some(p) => p,
+        None => return false,
+    };
+    let candidates: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
+    for dir in candidates {
+        let full = dir.join(name);
+        if full.is_file() {
+            return true;
+        }
+        if cfg!(windows) {
+            if dir.join(format!("{name}.exe")).is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Re-export of the resolved [`Type`] so consumers can refer to it as
 /// `buff_eval::Type` without depending on `buff-lang-types` directly.
 pub use buff_lang_types::Type as ResolvedType;
@@ -494,14 +556,15 @@ fn run_full_program(source: &str) -> EvalResult {
 
     // rustc invocation: edition 2021 + -O (debug mode = fast compile, no
     // LTO). Mirrors pipeline.rs `BuildMode::Debug` exactly.
-    let compile_out = match Command::new("rustc")
-        .arg("--edition")
-        .arg("2021")
-        .arg("-O")
-        .arg(&rust_path)
-        .arg("-o")
-        .arg(&exe_path)
-        .output()
+    // T2: auto-detect fast linker (mold → rust-lld → system default).
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd.arg("--edition").arg("2021");
+    rustc_cmd.arg("-O");
+    for flag in resolve_eval_linker_flags(EvalLinker::Auto) {
+        rustc_cmd.arg(flag);
+    }
+    rustc_cmd.arg(&rust_path).arg("-o").arg(&exe_path);
+    let compile_out = match rustc_cmd.output()
     {
         Ok(o) => o,
         Err(e) => {

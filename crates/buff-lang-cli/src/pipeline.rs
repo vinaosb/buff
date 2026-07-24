@@ -157,6 +157,85 @@ impl BuildMode {
     }
 }
 
+/// User-facing linker selection for `buff build` / `buff run`.
+///
+/// Mirrors the `--linker <auto|mold|lld|system>` CLI flag. The pipeline
+/// resolves this to a concrete [`compile_speed::FastLinker`] via
+/// [`resolve_linker`] before passing flags to rustc.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LinkerChoice {
+    /// Auto-detect: probe PATH for mold (Linux) → rust-lld → system default.
+    #[default]
+    Auto,
+    /// Explicitly use the `mold` linker. Errors if mold is not on PATH.
+    Mold,
+    /// Explicitly use the `lld` linker (rust-lld or bare lld). Errors if
+    /// neither is on PATH.
+    Lld,
+    /// Use rustc's default system linker (no `-C link-arg=-fuse-ld` flag).
+    System,
+}
+
+/// Parse a `--linker` CLI flag value into a [`LinkerChoice`].
+///
+/// Valid values: `auto`, `mold`, `lld`, `system`. Case-insensitive.
+/// Returns an error for unknown values.
+pub fn linker_from_str(s: &str) -> Result<LinkerChoice> {
+    match s.to_ascii_lowercase().as_str() {
+        "auto" => Ok(LinkerChoice::Auto),
+        "mold" => Ok(LinkerChoice::Mold),
+        "lld" => Ok(LinkerChoice::Lld),
+        "system" => Ok(LinkerChoice::System),
+        other => bail!(
+            "unknown linker `{other}` (valid: auto, mold, lld, system)"
+        ),
+    }
+}
+
+/// Resolve a [`LinkerChoice`] to a concrete [`compile_speed::FastLinker`],
+/// probing PATH as needed.
+///
+/// - [`LinkerChoice::Auto`] → [`compile_speed::FastLinker::detect()`]
+///   (mold → rust-lld → lld → None).
+/// - [`LinkerChoice::Mold`] → [`compile_speed::FastLinker::Mold`] if mold
+///   is on PATH, else an error.
+/// - [`LinkerChoice::Lld`] → [`compile_speed::FastLinker::Lld`] if rust-lld
+///   or lld is on PATH, else an error.
+/// - [`LinkerChoice::System`] → [`compile_speed::FastLinker::None`].
+///
+/// # Errors
+///
+/// Returns an error when an explicit linker (`Mold` or `Lld`) is requested
+/// but not found on PATH. [`LinkerChoice::Auto`] and [`LinkerChoice::System`]
+/// never error.
+pub fn resolve_linker(choice: LinkerChoice) -> Result<compile_speed::FastLinker> {
+    match choice {
+        LinkerChoice::Auto => Ok(compile_speed::FastLinker::detect()),
+        LinkerChoice::Mold => {
+            if compile_speed::on_path("mold") {
+                Ok(compile_speed::FastLinker::Mold)
+            } else {
+                bail!(
+                    "`--linker=mold` requested but `mold` was not found on PATH. \
+                     Install mold (https://github.com/rui314/mold) or use \
+                     `--linker=auto` / `--linker=system`."
+                );
+            }
+        }
+        LinkerChoice::Lld => {
+            if compile_speed::on_path("rust-lld") || compile_speed::on_path("lld") {
+                Ok(compile_speed::FastLinker::Lld)
+            } else {
+                bail!(
+                    "`--linker=lld` requested but neither `rust-lld` nor `lld` \
+                     was found on PATH. Use `--linker=auto` / `--linker=system`."
+                );
+            }
+        }
+        LinkerChoice::System => Ok(compile_speed::FastLinker::None),
+    }
+}
+
 /// Output of the [`compile_to_rust`] phase: the generated Rust source plus the
 /// path it was written to.
 #[derive(Debug, Clone)]
@@ -564,13 +643,10 @@ fn format_buffhtml_parse_error(
 /// - [`BuildMode::Release`] (T56): [`rustc_release_flags()`] — `opt-level=3`
 ///   + `lto=fat` + `codegen-units=1`. Slower compilation, faster runtime.
 ///
-/// **T55 linker auto-detection**: this entry point probes
-/// [`compile_speed::FastLinker::detect`] and appends the matching
-/// `-C link-arg=-fuse-ld=<mold|lld>` flags when a fast linker is found.
-/// The detection is always-on (a fast linker is a pure speed win with no
-/// behaviour change) and falls back silently to the default linker when
-/// none is available. Override-free: callers who need a specific linker
-/// can still set it via `RUSTFLAGS`.
+/// **Linker selection**: uses [`LinkerChoice::default()`] (Auto) which
+/// probes PATH for mold (Linux) → rust-lld → system default. Callers that
+/// need explicit control should use [`compile_rust_to_exe_with_speed`]
+/// with a [`LinkerChoice`] argument.
 ///
 /// The `output` path is passed verbatim to rustc — callers should pre-append
 /// the platform executable extension (see [`with_exe_extension`]) if they
@@ -582,38 +658,46 @@ fn format_buffhtml_parse_error(
 /// [`error_mapper::translate_rustc_errors`].
 ///
 /// Equivalent to [`compile_rust_to_exe_with_speed`] with `use_sccache =
-/// false` (sccache is opt-in via `buff build --sccache`).
+/// false` and `linker = LinkerChoice::default()` (sccache is opt-in via
+/// `buff build --sccache`).
 ///
 /// # Errors
 ///
 /// - Fails if `rustc` cannot be invoked (not installed / not in `PATH`).
 /// - Fails if `rustc` exits with a non-zero status. Translated `rustc`
 ///   diagnostics are forwarded to the caller's stderr before bailing.
+/// - Fails if an explicit linker is requested but not found on PATH
+///   (only when called via [`compile_rust_to_exe_with_speed`] with
+///   [`LinkerChoice::Mold`] or [`LinkerChoice::Lld`]).
 pub fn compile_rust_to_exe(
     rust_file: &Path,
     output: &Path,
     buff_file: &Path,
     mode: BuildMode,
 ) -> Result<PathBuf> {
-    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false)
+    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default())
 }
 
 /// sccache-aware variant of [`compile_rust_to_exe`] (T55).
 ///
-/// Identical to [`compile_rust_to_exe`] except the rustc invocation is
-/// wrapped in `sccache` when `use_sccache` is `true` AND sccache is
-/// available on `PATH` (see [`compile_speed::rustc_command`]). When sccache
-/// is requested but missing, the build falls back to bare `rustc` with a
-/// stderr note rather than failing.
+/// Identical to [`compile_rust_to_exe`] except:
 ///
-/// The linker auto-detection (mold/lld) applies identically to this and
-/// the default entry point — it is always-on, not gated by `use_sccache`.
+/// - The rustc invocation is wrapped in `sccache` when `use_sccache` is
+///   `true` AND sccache is available on `PATH` (see
+///   [`compile_speed::rustc_command`]). When sccache is requested but
+///   missing, the build falls back to bare `rustc` with a stderr note
+///   rather than failing.
+/// - The linker is selected via the `linker` parameter (see [`LinkerChoice`]
+///   and [`resolve_linker`]) instead of the hardcoded auto-detect. Pass
+///   [`LinkerChoice::default()`] for the same behaviour as
+///   [`compile_rust_to_exe`].
 pub fn compile_rust_to_exe_with_speed(
     rust_file: &Path,
     output: &Path,
     buff_file: &Path,
     mode: BuildMode,
     use_sccache: bool,
+    linker: LinkerChoice,
 ) -> Result<PathBuf> {
     let sccache_on = use_sccache && compile_speed::sccache_available();
     if use_sccache && !sccache_on {
@@ -652,14 +736,15 @@ pub fn compile_rust_to_exe_with_speed(
         }
     }
 
-    // T55: auto-detect a fast linker (mold on Linux, lld elsewhere) and
-    // pass the -fuse-ld flag. No-op when none is found (silent fallback).
-    let linker = compile_speed::FastLinker::detect();
-    if linker.is_fast() {
-        for flag in linker.rustc_flags() {
+    // T2: resolve the linker choice (auto-detect or explicit) and pass
+    // the -fuse-ld flag. No-op when the resolved linker is None (system
+    // default). Errors when an explicit linker is requested but missing.
+    let resolved = resolve_linker(linker)?;
+    if resolved.is_fast() {
+        for flag in resolved.rustc_flags() {
             cmd.arg(flag);
         }
-        eprintln!("note: using fast linker `{}`", linker.name());
+        eprintln!("note: using fast linker `{}`", resolved.name());
     }
 
     cmd.arg(rust_file).arg("-o").arg(output);
@@ -1399,5 +1484,46 @@ fn Counter() -> Element {\n    rsx! { \"hi\" }\n}\n";
         assert!(out.rust_file_path.exists());
 
         cleanup_buffhtml_fixture(&path);
+    }
+
+    // -------------------------------------------------------------------------
+    // T2: LinkerChoice resolution tests.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn linker_choice_default_is_auto() {
+        assert_eq!(LinkerChoice::default(), LinkerChoice::Auto);
+    }
+
+    #[test]
+    fn linker_from_str_parses_valid_values() {
+        assert_eq!(linker_from_str("auto").unwrap(), LinkerChoice::Auto);
+        assert_eq!(linker_from_str("mold").unwrap(), LinkerChoice::Mold);
+        assert_eq!(linker_from_str("lld").unwrap(), LinkerChoice::Lld);
+        assert_eq!(linker_from_str("system").unwrap(), LinkerChoice::System);
+        // Case-insensitive.
+        assert_eq!(linker_from_str("AUTO").unwrap(), LinkerChoice::Auto);
+        assert_eq!(linker_from_str("Mold").unwrap(), LinkerChoice::Mold);
+    }
+
+    #[test]
+    fn linker_from_str_rejects_unknown() {
+        assert!(linker_from_str("garbage").is_err());
+        assert!(linker_from_str("").is_err());
+    }
+
+    #[test]
+    fn resolve_linker_system_returns_none() {
+        let resolved = resolve_linker(LinkerChoice::System).unwrap();
+        assert!(!resolved.is_fast());
+        assert!(resolved.rustc_flags().is_empty());
+    }
+
+    #[test]
+    fn resolve_linker_auto_never_errors() {
+        // Auto must always resolve without error (may be None on any host).
+        let resolved = resolve_linker(LinkerChoice::Auto).unwrap();
+        // No assertion on is_fast — it depends on what's on PATH.
+        // The important thing is it doesn't panic or error.
     }
 }
