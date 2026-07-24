@@ -361,6 +361,9 @@ major, with narrow exceptions for opt-in editions, security fixes, and the
 (also rendered at `docs.buff-lang.org/stability/`). ErrorCodes
 (`E10xx`/`E11xx`/`E12xx`/`E13xx`) are stable **forever**.
 
+For the governing v1.25+ direction decisions (Speed + MOAT + Self-host-frontend),
+see the [decision record](./.sisyphus/decisions/buff-direction-speed-moat-selfhost.md).
+
 ## License
 
 Licensed under the [MIT License](./LICENSE).

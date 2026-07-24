@@ -1,3 +1,7 @@
+<!-- SUPERSEDED: This plan is SUPERSEDED by `.sisyphus/plans/buff-launch-readiness.md` (T110 decision record).
+     The MLIR migration, custom memory model, and rustc-dropping goals have been demoted to optional V3.
+     See `.sisyphus/decisions/buff-direction-speed-moat-selfhost.md` for the governing direction decisions. -->
+
 # Buff V2 — MLIR Backend + Self-Hosting (Rust+WGSL → MLIR)
 
 ## TL;DR
