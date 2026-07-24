@@ -50,6 +50,8 @@ pub mod prelude_types;
 pub mod prelude_type_metadata;
 // T105b: PreludeAssocFn enum + impl + lookup extracted from prelude_types.rs.
 pub mod prelude_assoc_fn_impl;
+// T105b: PreludeAssocConst + impl + lookups extracted from prelude_types.rs.
+pub mod prelude_assoc_const_impl;
 // T1: project-level parse entry point + span-aware error formatting.
 pub mod project;
 // T1: cross-file symbol resolution table.
