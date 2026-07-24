@@ -4,6 +4,7 @@ worker_threads  : 4
 timeout_seconds : 30
 read_buffer_kb  : 8
 enable_tls      : true
+config_ok       : true
 
 --- derived (const-folded) ---
 pool            : 4 workers x 128 conns (tls=true)

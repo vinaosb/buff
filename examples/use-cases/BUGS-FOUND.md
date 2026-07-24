@@ -1104,6 +1104,140 @@ find 9999       : -1
 
 ---
 
+## Verification Update (real lex+parse+type execution — supersedes the manual analysis above)
+
+The T15 analysis above was **manual** ("what buff check WOULD report") and several
+of its claims turned out to be **wrong**. This section reports results from
+**actually executing** the `buff check` front-end on the committed files.
+
+### Method
+
+`buff`/`buff check` still cannot run on this host (the `buff-lang-cli` binary
+fails to build: `pprof-0.15` is Unix-only and `ring`/link need a C toolchain).
+Worked around exactly as T11/T13/T18 did: a throwaway integration test in
+`buff-lang-types` (a lib crate with no `pprof`/`prettyplease` dep) replicating
+`check.rs`'s `tokenize → parse → TypeInferencer.infer_stmt` pipeline. It links
+once `LIB` is set to the VS 18 Insiders `lib\onecore\x64` + Windows SDK
+`10.0.26100.0` `ucrt\x64`/`um\x64` dirs (the `lib\x64` dir lacks `msvcrt.lib`;
+`onecore\x64` has it). The probe was deleted before commit.
+
+### Proven results
+
+| File | lex | parse | typecheck |
+|---|---|---|---|
+| `generic_container.buff` | OK | OK | **CLEAN** |
+| `exhaustive_matching.buff` | OK | OK (15 decls) | **CLEAN** |
+| `comptime_config.buff` | OK | OK (4 decls) | **CLEAN** |
+
+All three **pass the lex+parse phases** that `buff check` runs, and
+`comptime_config.buff` passes typecheck too. **However** the "typecheck CLEAN"
+claim above for `generic_container.buff` and `exhaustive_matching.buff` is
+**incorrect** — see the correction immediately below.
+
+### CORRECTION — BUG-T15-108: `buff check` reports "undefined variable" for every user-typed / generic-typed function parameter (HIGH)
+
+A second, stricter replica of `check.rs::type_check_func` (the exact code path
+`buff check` runs) was built against the leaf crates. It surfaces a real,
+reproducible typecheck gap that the first replica missed:
+
+- **Repro:** any function whose parameter has a user-defined or generic type,
+  e.g. `func http_class(status: HttpStatus)`, `func stack_push(s: Stack<T>,
+  value: T)`, `func identity<T>(x: T) -> T`, or an `impl` method's `self`.
+- **Symptom:** `error[E1206]: undefined variable: status` (and `shape`, `s`,
+  `q`, `x`, `items`, `default`, `self`, …) at the first use of that param.
+- **Counts actually observed on the committed files:**
+  - `generic_container.buff` — **3** type errors (`default`, `items`, `x`).
+  - `exhaustive_matching.buff` — **8** type errors (`status` ×4, `shape` ×4).
+  - `comptime_config.buff` — **0** type errors (all params are primitives).
+- **Root cause:** `buff-lang-cli/src/check.rs::typeref_to_type` (lines ~476-509)
+  only maps the PRIMITIVE `Named` types (`Int`/`Float`/`Bool`/`String`/`Char`/
+  `Byte`/`Decimal`/`Void`) plus `Option`/`Result` wrappers to a `Type`. Every
+  other `TypeRef` (user struct/enum names, generic type-params `T`, `Vector<T>`,
+  `Stack<T>`) returns `None`, so `type_check_func` never calls
+  `inferencer.bind(&p.name, ty)` for those params. They stay unbound, and the
+  first reference hits `infer.rs::lookup_ident` (~line 850) →
+  `Err(undefined variable)`.
+- **Why the first replica said "CLEAN":** it pre-bound ALL params (or bound
+  them to `Type::Unknown`), papering over the gap. The REAL `buff check` does
+  not — it only binds the primitives listed above.
+- **Impact:** this is not a defect in the examples — it is a fundamental
+  `buff check` limitation: **you cannot write a function that takes a
+  user-defined-type (or generic) parameter AND uses it without `buff check`
+  reporting E1206.** Every v1.26 use-case that does so (generic_container,
+  exhaustive_matching, and the T18 data_pipeline's user-typed params) hits it.
+  The feature is demonstrated at the **parse** level (the syntax is valid);
+  full typecheck is blocked until `typeref_to_type` is widened to bind
+  user-defined / generic params to `Type::Unknown` (a one-line-ish fix in
+  `check.rs`, the permissive fallback the docstring already promises).
+- **Suggested fix:** in `check.rs::typeref_to_type`, change the `TypeRef::Named`
+  fall-through arm from `None` to `Some(Type::Unknown)`, and map
+  `TypeRef::Generic { base, .. }` to `Some(Type::Unknown)` too. `Unknown` is
+  permissive in the inference rules, so this adds no false positives while
+  un-blocking every user-typed-param function.
+- **Verification of the parse bar (the achievable one) stands:** all three
+  files are lex + parse CLEAN — `generic_container` 24 decls,
+  `exhaustive_matching` 15 decls, `comptime_config` 4 decls. This matches the
+  repo's "parse-only" tier for forward-declared use-cases.
+
+### Corrections to the manual analysis above (the earlier claims were never executed)
+
+The draft described in the manual-analysis section used `enum Maybe<T>` +
+`trait Container<T>` + `func Stack.push<T>(self, value: T)` + colon-block
+`match x:` + top-level `comptime:`. Empirically, **all five of those forms
+FAIL to parse** (repros below). The committed files were rewritten around the
+forms that actually parse, so the committed content differs from that draft:
+
+- `Maybe<T>` was **dropped**; the empty-state uses the built-in `Option<T>`
+  (its `Some(v)`/`None` patterns parse; `Maybe.Just(v)` as a pattern does not —
+  see BUG-T15-107).
+- `Container` is declared **non-generic**; ops are **free functions**
+  (`stack_push(s, v)`) + one `impl Container for Stack<T>`.
+- All matches use the **brace form** `return match x { arm => expr, ... }`.
+- The `comptime:` blocks live **inside `main()`** (statement-level).
+
+### New compiler bugs found empirically (repros, with parse-error messages)
+
+| ID | Severity | Repro | Error | Likely location |
+|---|---|---|---|---|
+| BUG-T15-101 | MEDIUM | `trait Container<T> { func len(self) -> Int; }` | `expected '{', found '<'` | `parse_trait_decl` never calls `parse_type_params` — trait declarations carry no generic params |
+| BUG-T15-102 | MEDIUM | `func Stack.push(self, value: T):` (top-level dotted method name) | `expected '(', found '.'` | `parse_func_decl` reads one ident as the name then demands `(` |
+| BUG-T15-103 | MEDIUM | top-level `comptime:` | `only function declarations are allowed at top level, found ident(comptime)` | `parser.rs::parse_one_decl` has no `comptime` arm; comptime is statement-level only (`Stmt::ComptimeBlock`, not `Decl`) |
+| BUG-T15-104 | MEDIUM | `match status:` (colon-block form, first statement) | `expected '{', found ':'` | `match` is parsed via `expr.rs` (brace form); there is no statement-form `match x:` arm in `stmt.rs` dispatch |
+| BUG-T15-105 | LOW | `print("x: ${first_or([7,8,9], default: 0)}")` | `expected ')', found interp_spec(" 0)")` | interpolation sub-parser reuses the `{expr:spec}` grammar; a named-arg `:` collides (same root cause as BUG-T18-004) — work around by binding to a `let` first |
+| BUG-T15-106 | LOW | `func measure<T: Container>(c) -> Int:` (untyped param on a generic fn) | `expected ':', found ')'` | untyped params are unreliable once generic type-params are present; fix is `c: T` |
+| BUG-T15-107 | LOW | `match m { Maybe.Just(v) => ..., Maybe.Empty => ... }` inside a `<T>`-generic fn | `expected '=>', found '.'` | dotted-variant PATTERN fails in a generic-enum / generic-fn context; the identical `Shape.Circle(r)` pattern in a **non-generic** fn (`exhaustive_matching`) parses clean — parser-state sensitivity |
+| (confirmed) | LOW | `while i < n:` | `while` is not a keyword | keyword list (25) has no `while`; use `for` (also noted by T11/T18) |
+
+### Confirmed-working forms (all exercised by the committed files)
+
+- Generic **struct** brace form: `struct Stack<T> { data: Vector<T> }` ✓
+- Generic **enum**: `enum Maybe<T> { Just(T), Empty }` parses ✓ (but its variant
+  patterns misbehave per BUG-T15-107, so the file uses built-in `Option<T>`)
+- Trait decl (non-generic) with required (`;`) + default body + supertrait:
+  `trait Peekable : Container { ... }` ✓
+- Trait **impl** with a generic target: `impl Container for Stack<T> { ... }` ✓
+- **Trait bounds** (T38 — supported, contrary to an earlier draft's comment):
+  `<T: Clone>`, `<T: Clone + Debug>`, `<T: Container>` (a user trait) ✓
+- Brace-form match with **or-patterns** (T39) + **guards** (T40):
+  `Shape.Rectangle(w, h) if w == h => ...` ✓ (parses + typechecks clean)
+- `@feature("...")` / `@internal` attributes on `func` ✓
+- Statement-level `comptime:` inside a function body ✓ (constants visible to
+  later statements in the same fn)
+
+### `.expected` files
+
+The three `.expected` files were **regenerated** for the final committed designs
+(Option-based containers; brace-form matches; comptime-in-`main`). They are
+**intended-output golden specs**: the files cannot `buff run` end-to-end yet
+(trait-impl codegen, value-position-match codegen, and comptime const-eval are
+deferred sibling work), so `scripts/test-use-cases.ps1` will mark the run step
+FAIL until those codegen arms land — the same status as every other
+forward-declared use-case (`csv_analyzer`, `cli_tool`, `http_server`, …). Float
+formatting in `exhaustive_matching.buff.expected` (e.g. `area=78.53975`) is a
+best-effort guess at Rust `f64` `Display` and should be confirmed at that time.
+
+---
+
 # T18 Full App 3: data_pipeline.buff (730 lines)
 
 **Date:** 2026-07-24

@@ -1,18 +1,23 @@
 === Generic Container Demo ===
 --- Stack<Int> ---
-len after 3 pushes: 3
-peek (top): Just(30)
-pop: Just(30)
+size after 3 pushes: 3
+peek (top): Some(30)
+pop: Some(30)
 is_empty: false
 
 --- Queue<String> ---
-len after enqueue: 4
-dequeue: Just(a)
-dequeue: Just(b)
-peek (front): Just(c)
+size after 3 pushes: 3
+dequeue: Some(a)
+dequeue: Some(b)
+peek (front): Some(c)
 
 --- bounded generic helpers ---
-drained LIFO: [3, 2, 1]
-first_or (empty → default): 0
+drained copy: [1, 2, 3]
+first_or (non-empty): 7
+first_or (empty -> default): 0
+measure<Stack>: 3
+identity<Int>: 42
+identity<String>: ok
+pair: first=1, second=two
 
 === done ===

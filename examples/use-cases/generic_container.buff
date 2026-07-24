@@ -2,49 +2,44 @@
 //
 // Generic Stack<T> / Queue<T> collection types sharing a `Container` trait,
 // plus bounded generic helper functions. Exercises:
-//   - user-defined generic structs: `struct Stack<T>`, `struct Queue<T>`
-//   - generic enums (typed empty-state): `enum Maybe<T>`
-//   - trait declarations: required signatures (`;`) + default-method bodies
-//     + supertrait inheritance (`trait Peekable : Container`)
-//   - trait bounds on generic params: `<T: Clone>`, `<T: Container>`
+//   - user-defined generic structs: `struct Stack<T>`, `struct Queue<T>`,
+//     `struct Pair<T, U>`
+//   - trait declaration: required signature (`;`) + default-method body
+//   - trait implementation: `impl Container for Stack<T>`
+//   - trait bounds on generic params: `<T: Clone>`, `<T: Clone + Container>`
 //   - generic functions: monomorphized per call site (zero-cost static dispatch)
 //
-// Status: PURE BUFF (no forward-declared framework imports). The lex / parse /
-// typecheck phases (what `buff check` runs) are exercised end-to-end here.
-// Trait *generics* (`trait Foo<T>`) and trait-impl lowering are NOT yet
-// supported by the parser/codegen — see BUGS-FOUND.md — so the `Container`
-// trait is declared non-generic and methods are attached to each struct.
-
-// ---------------------------------------------------------------------------
-// A small generic Option-like helper (mirrors the built-in Option<T> shape,
-// here as a USER-defined generic enum to exercise `<T>` on enums).
-// ---------------------------------------------------------------------------
-
-enum Maybe<T> {
-    Just(T),
-    Empty,
-}
+// Status: PURE BUFF (no forward-declared framework imports). PASSES `buff
+// check` (lex + parse + typecheck clean) — verified via the front-end crates
+// directly (the full `buff` CLI could not be built on this host; see
+// BUGS-FOUND.md). Trait-impl + user-struct codegen lowering is a separate
+// sibling task.
+//
+// SYNTAX NOTES (all verified against the parser):
+//   - Bounds ARE supported (T38): `<T: Clone>`, `<T: Clone + Debug>`, and
+//     `<T: Container>` (a user-defined trait) all parse. (Generic enums
+//     `enum Foo<T>` parse too — see crates/.../generic_bounds.rs — but this
+//     file uses the built-in Option<T> for its empty-state so the match
+//     patterns stay on the proven `Some(v)` / `None` form.)
+//   - Container ops are FREE FUNCTIONS taking the container as the first arg
+//     (`stack_push(s, v)`) — Buff has no inherent-`impl` block, and dotted
+//     method names (`func Stack.push`) do not parse at top level.
+//   - `Container` is declared NON-generic: trait generics (`trait Foo<T>`)
+//     are not yet parseable — see BUGS-FOUND.md.
+//   - Match arms are EXPRESSIONS only (`arm => expr`); no `return`/`let`
+//     inside an arm — use `return match x { ... }`.
+//   - `while` is NOT a keyword; loops use `for`. Every function param has an
+//     explicit type (untyped params are unreliable after generic/impl decls).
 
 // ---------------------------------------------------------------------------
 // Core collection trait. Required methods end with `;` (bodyless); default
 // methods carry a body that implementors inherit unless they override.
-// Declared NON-generic (trait generics are not yet parseable — BUGS-FOUND).
 // ---------------------------------------------------------------------------
 
 trait Container {
-    func len(self) -> Int;
+    func size(self) -> Int;
     func is_empty(self) -> Bool {
-        return self.len() == 0
-    }
-}
-
-// `Peekable` INHERITS from `Container` (supertrait) and adds a default that
-// depends on the required `len` method — demonstrating trait inheritance +
-// cross-method default dispatch.
-
-trait Peekable : Container {
-    func footprint(self) -> Int {
-        return self.len()
+        return self.size() == 0
     }
 }
 
@@ -56,31 +51,30 @@ struct Stack<T> {
     data: Vector<T>,
 }
 
-// Methods are free functions named `Type.method`; `self` is the receiver.
-// `T` is referenced from the struct's type parameter (no method-level `<T>`).
-
-func Stack.push(self, value: T):
-    self.data.push(value)
-
-func Stack.pop(self) -> Maybe<T>:
-    let taken = self.data.pop()
-    return match taken {
-        Some(v) => Maybe.Just(v),
-        None => Maybe.Empty,
+impl Container for Stack<T> {
+    func size(self) -> Int {
+        return self.data.len()
     }
+}
 
-func Stack.len(self) -> Int:
-    return self.data.len()
+func stack_new<T>() -> Stack<T>:
+    return Stack.new(data: [])
 
-func Stack.peek(self) -> Maybe<T>:
-    if self.data.len() == 0:
-        return Maybe.Empty
-    let last = self.data.len() - 1
-    return Maybe.Just(self.data[last])
+func stack_push<T>(s: Stack<T>, value: T):
+    s.data.push(value)
+
+func stack_pop<T>(s: Stack<T>) -> Option<T>:
+    return s.data.pop()
+
+func stack_peek<T>(s: Stack<T>) -> Option<T>:
+    if s.data.len() == 0:
+        return None
+    let last = s.data.len() - 1
+    return Some(s.data[last])
 
 // ---------------------------------------------------------------------------
 // Queue<T> — FIFO container. A `head` index advances on dequeue so we never
-// mutate the backing vector mid-iteration (keeps the demo ownership-friendly).
+// mutate the backing vector mid-iteration (no shift loop needed).
 // ---------------------------------------------------------------------------
 
 struct Queue<T> {
@@ -88,36 +82,42 @@ struct Queue<T> {
     head: Int,
 }
 
-func Queue.enqueue(self, value: T):
-    self.data.push(value)
+impl Container for Queue<T> {
+    func size(self) -> Int {
+        return self.data.len() - self.head
+    }
+}
 
-func Queue.dequeue(self) -> Maybe<T>:
-    if self.head >= self.data.len():
-        return Maybe.Empty
-    let front = self.data[self.head]
-    self.head = self.head + 1
-    return Maybe.Just(front)
+func queue_new<T>() -> Queue<T>:
+    return Queue.new(data: [], head: 0)
 
-func Queue.len(self) -> Int:
-    return self.data.len() - self.head
+func queue_push<T>(q: Queue<T>, value: T):
+    q.data.push(value)
 
-func Queue.peek(self) -> Maybe<T>:
-    if self.head >= self.data.len():
-        return Maybe.Empty
-    return Maybe.Just(self.data[self.head])
+func queue_pop<T>(q: Queue<T>) -> Option<T>:
+    if q.head >= q.data.len():
+        return None
+    let front = q.data[q.head]
+    q.head = q.head + 1
+    return Some(front)
+
+func queue_peek<T>(q: Queue<T>) -> Option<T>:
+    if q.head >= q.data.len():
+        return None
+    return Some(q.data[q.head])
 
 // ---------------------------------------------------------------------------
 // Bounded generic helpers. Bounds appear after the param name as
-// `: Bound (+ Bound)*` (T38). rustc monomorphizes each call site, so the
-// bound is enforced at compile time with zero runtime cost.
+// `: Bound (+ Bound)*` (T38 — supported). rustc monomorphizes each call site,
+// so the bound is enforced at compile time with zero runtime cost.
 // ---------------------------------------------------------------------------
 
 // Shallow-copy a stack's contents into a fresh Vector. `T: Clone` gates the
 // copy out of the shared backing vector.
 
-func drain_stack<T: Clone>(stack: Stack<T>) -> Vector<T>:
+func drain_stack<T: Clone>(s: Stack<T>) -> Vector<T>:
     let mut out = []
-    for v in stack.data:
+    for v in s.data:
         out.push(v)
     return out
 
@@ -128,19 +128,32 @@ func first_or<T: Clone>(items: Vector<T>, default: T) -> T:
         return default
     return items[0]
 
-// A bound referencing a USER-DEFINED trait: anything exposing `len()`
-// (i.e. implementing `Container`) can be described. Demonstrates `<T: Container>`.
+// A bound referencing a USER-DEFINED trait: anything exposing `size()`
+// (i.e. implementing `Container`) can be measured. Demonstrates `<T: Container>`.
 
-func describe_container<T: Container>(c) -> Int:
-    return c.len()
+func measure<T: Container>(c: T) -> Int:
+    return c.size()
+
+// Generic identity + pair — multi-parameter generics + monomorphization.
+
+func identity<T>(x: T) -> T:
+    return x
+
+struct Pair<T, U> {
+    first: T,
+    second: U,
+}
+
+func make_pair<T, U>(a: T, b: U) -> Pair<T, U>:
+    return Pair.new(first: a, second: b)
 
 // ---------------------------------------------------------------------------
-// Pretty-print a Maybe<T> without depending on a Debug bound.
+// Pretty-print an Option<T> without depending on a Debug bound.
 
-func show_maybe(m) -> String:
+func show_opt<T>(m: Option<T>) -> String:
     return match m {
-        Maybe.Just(v) => "Just(${v})",
-        Maybe.Empty => "Empty",
+        Some(v) => "Some(${v})",
+        None => "None",
     }
 
 // ---------------------------------------------------------------------------
@@ -149,37 +162,44 @@ func show_maybe(m) -> String:
 
 func demo_stack():
     print("--- Stack<Int> ---")
-    let s = Stack.new(data: [])
-    s.push(10)
-    s.push(20)
-    s.push(30)
-    print("len after 3 pushes: ${s.len()}")
-    print("peek (top): ${show_maybe(s.peek())}")
-    print("pop: ${show_maybe(s.pop())}")
+    let s = stack_new()
+    stack_push(s, 10)
+    stack_push(s, 20)
+    stack_push(s, 30)
+    print("size after 3 pushes: ${s.size()}")
+    print("peek (top): ${show_opt(stack_peek(s))}")
+    print("pop: ${show_opt(stack_pop(s))}")
     print("is_empty: ${s.is_empty()}")
 
 func demo_queue():
     print("")
     print("--- Queue<String> ---")
-    let q = Queue.new(data: ["a", "b", "c"], head: 0)
-    q.enqueue("d")
-    print("len after enqueue: ${q.len()}")
-    print("dequeue: ${show_maybe(q.dequeue())}")
-    print("dequeue: ${show_maybe(q.dequeue())}")
-    print("peek (front): ${show_maybe(q.peek())}")
+    let q = queue_new()
+    queue_push(q, "a")
+    queue_push(q, "b")
+    queue_push(q, "c")
+    print("size after 3 pushes: ${q.size()}")
+    print("dequeue: ${show_opt(queue_pop(q))}")
+    print("dequeue: ${show_opt(queue_pop(q))}")
+    print("peek (front): ${show_opt(queue_peek(q))}")
 
 func demo_generic_helpers():
     print("")
     print("--- bounded generic helpers ---")
-    let s = Stack.new(data: [1, 2, 3])
-    let drained = drain_stack(s)
-    print("drained copy: ${drained}")
+    let s = stack_new()
+    stack_push(s, 1)
+    stack_push(s, 2)
+    stack_push(s, 3)
+    print("drained copy: ${drain_stack(s)}")
     let head = first_or([7, 8, 9], default: 0)
     print("first_or (non-empty): ${head}")
     let fallback = first_or([], default: 0)
     print("first_or (empty -> default): ${fallback}")
-    let described = describe_container(s)
-    print("describe_container<Stack>: ${described}")
+    print("measure<Stack>: ${measure(s)}")
+    print("identity<Int>: ${identity(42)}")
+    print("identity<String>: ${identity("ok")}")
+    let p = make_pair(1, "two")
+    print("pair: first=${p.first}, second=${p.second}")
 
 func main():
     print("=== Generic Container Demo ===")

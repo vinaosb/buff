@@ -12,7 +12,7 @@
 --- Shape (destructuring + guards) ---
 point: area=0, perimeter=0, largest=0
 circle: area=78.53975, perimeter=31.4159, largest=10
-circle: area=50.26544, perimeter=25.13272, largest=8
+square: area=16, perimeter=16, largest=4
 rectangle: area=12, perimeter=14, largest=4
 square (degenerate rectangle): area=25, perimeter=20, largest=5
 triangle: area=6, perimeter=12, largest=5
