@@ -142,6 +142,10 @@ impl From<ComptimeError> for TypeError {
 pub struct ComptimeInterpreter {
     env: BTreeMap<String, ComptimeValue>,
     depth: u32,
+    /// Struct field names keyed by struct name (T74). Populated by
+    /// [`analyze_program`] so that `comptime { Type.fields(T) }` can
+    /// look up the field names of a user-defined struct.
+    struct_fields: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for ComptimeInterpreter {
@@ -156,6 +160,26 @@ impl ComptimeInterpreter {
         Self {
             env: BTreeMap::new(),
             depth: 0,
+            struct_fields: BTreeMap::new(),
+        }
+    }
+
+    /// Construct an interpreter pre-populated with struct field names
+    /// (T74: `Type.fields(T)` introspection). Collects field names from
+    /// the given top-level declarations.
+    pub fn with_decls(decls: &[buff_lang_ast::Decl]) -> Self {
+        let mut struct_fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for decl in decls {
+            if let buff_lang_ast::Decl::StructDecl(s) = decl {
+                let field_names: Vec<String> =
+                    s.fields.iter().map(|(n, _)| n.name.clone()).collect();
+                struct_fields.insert(s.name.name.clone(), field_names);
+            }
+        }
+        Self {
+            env: BTreeMap::new(),
+            depth: 0,
+            struct_fields,
         }
     }
 
@@ -289,13 +313,101 @@ impl ComptimeInterpreter {
                     span,
                 ))
             }
-            Expr::MethodCall { method, .. } => Err(ComptimeError::failed(
-                format!(
-                    "comptime cannot evaluate method call `.{}` (only literals and operators)",
-                    method
-                ),
-                span,
-            )),
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                // T74: `Type.of(x)` — returns the type name of x as a string.
+                // `Type.fields(T)` — returns the field names of struct T as
+                // an array of strings. Both work at comptime.
+                if let Expr::Ident(type_ident, _) = receiver.as_ref() {
+                    if type_ident.name == "Type" {
+                        match method.name.as_str() {
+                            "of" => {
+                                if args.len() != 1 {
+                                    return Err(ComptimeError::failed(
+                                        "Type.of() expects exactly 1 arg",
+                                        span,
+                                    ));
+                                }
+                                let arg = &args[0];
+                                // Infer the type name of the argument at comptime.
+                                // For comptime-bound values, we can look up the name.
+                                // For comptime-bound let bindings, we use their name.
+                                // Otherwise we return the literal type name string.
+                                match arg {
+                                    Expr::Ident(ident, _) => {
+                                        // Check if it's a comptime binding with a known value
+                                        if let Some(val) = self.env.get(&ident.name) {
+                                            let type_name = val.buff_type().to_string();
+                                            Ok(ComptimeValue::String(type_name))
+                                        } else {
+                                            // Treat the identifier itself as the type name
+                                            Ok(ComptimeValue::String(ident.name.clone()))
+                                        }
+                                    }
+                                    _ => {
+                                        Ok(ComptimeValue::String("Unknown".to_string()))
+                                    }
+                                }
+                            }
+                            "fields" => {
+                                if args.len() != 1 {
+                                    return Err(ComptimeError::failed(
+                                        "Type.fields() expects exactly 1 arg (a type name)",
+                                        span,
+                                    ));
+                                }
+                                let type_name = match &args[0] {
+                                    Expr::Ident(ident, _) => &ident.name,
+                                    other => return Err(ComptimeError::failed(
+                                        format!("Type.fields() expected a type name, got `{}`",
+                                            expr_kind(other)),
+                                        span,
+                                    )),
+                                };
+                                match self.struct_fields.get(type_name) {
+                                    Some(fields) => {
+                                        let field_values: Vec<ComptimeValue> = fields
+                                            .iter()
+                                            .map(|f| ComptimeValue::String(f.clone()))
+                                            .collect();
+                                        Ok(ComptimeValue::Array(field_values))
+                                    }
+                                    None => {
+                                        // Unknown type - return empty array (mirrors
+                                        // the "no panicking" stance and lets programs
+                                        // use Type.fields on prelude types gracefully).
+                                        Ok(ComptimeValue::Array(Vec::new()))
+                                    }
+                                }
+                            }
+                            _ => Err(ComptimeError::failed(
+                                format!("comptime `Type.{}()` is not supported", method.name),
+                                span,
+                            )),
+                        }
+                    } else {
+                        Err(ComptimeError::failed(
+                            format!(
+                                "comptime cannot evaluate method call `.{}` (only literals and operators)",
+                                method
+                            ),
+                            span,
+                        ))
+                    }
+                } else {
+                    Err(ComptimeError::failed(
+                        format!(
+                            "comptime cannot evaluate method call `.{}` (only literals and operators)",
+                            method
+                        ),
+                        span,
+                    ))
+                }
+            }
             Expr::Spawn { .. } => Err(ComptimeError::io_forbidden(
                 "`spawn` performs I/O (task scheduling) and cannot run at comptime",
                 span,
@@ -494,7 +606,7 @@ fn is_reflection_function(name: &str) -> bool {
 /// mistake does not hide subsequent ones.
 pub fn analyze_program(decls: &[buff_lang_ast::Decl]) -> ComptimeFacts {
     let mut facts = ComptimeFacts::default();
-    let mut interp = ComptimeInterpreter::new();
+    let mut interp = ComptimeInterpreter::with_decls(decls);
     for decl in decls {
         walk_decl(decl, &mut interp, &mut facts);
     }
