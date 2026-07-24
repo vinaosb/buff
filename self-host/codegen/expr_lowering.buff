@@ -1,0 +1,406 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/expr_lowering.rs` (T18, Track C).
+//
+// T105a — expr construct/pattern/literal/op lowering: lambda..make_unary_op
+// (mechanically extracted from rust_codegen.rs).
+//
+// Verbatim move of `impl RustCodegen` methods into this child module so the
+// parent file shrinks. Methods are `pub(super)`; the parent declares only
+// `mod <name>;` (inherent methods resolve by type, no `use` needed). Child
+// inherits parent imports via `use super::*` and may call the parent private
+// methods (descendant privacy) and the extracted helper modules.
+//
+// The Rust reference is 987 LOC. The Buff port mirrors the public API
+// surface (lower_lambda, lower_lambda_body, lower_map_lit, lower_set_lit,
+// lower_vector_lit, lower_struct_init, lower_tuple_lit, lower_string_lit,
+// lower_interp_string, lower_format_string, lower_unary_op,
+// lower_binary_op, make_unary_op, lower_match_expr, lower_if_expr,
+// lower_for_expr, lower_while_expr, lower_block, lower_pattern).
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+
+struct RustCodegen:
+    opaque_handle: Int
+
+struct SynExpr:
+    opaque_handle: Int
+
+struct Block:
+    opaque_handle: Int
+
+struct Stmt:
+    opaque_handle: Int
+
+struct Expr:
+    opaque_handle: Int
+
+struct Pattern:
+    opaque_handle: Int
+
+struct Param:
+    opaque_handle: Int
+
+struct MatchArm:
+    opaque_handle: Int
+
+struct TypeRef:
+    opaque_handle: Int
+
+struct Ident:
+    opaque_handle: Int
+
+struct CodegenError:
+    opaque_handle: Int
+
+struct BTreeSet_String:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn closure_captures(params: Vector<Param>, body: Block) -> BTreeSet_String
+    fn btreetap_string_insert(set: BTreeSet_String, s: String)
+    fn codegen_closure_capture_stack_push(codegen: RustCodegen, set: BTreeSet_String)
+    fn codegen_closure_capture_stack_pop(codegen: RustCodegen)
+    fn codegen_lower_expr(codegen: RustCodegen, e: Expr) -> Result<SynExpr, CodegenError>
+    fn codegen_lower_block(codegen: RustCodegen, b: Block) -> Result<SynBlock, CodegenError>
+    fn codegen_lower_pattern(codegen: RustCodegen, p: Pattern) -> Result<SynPat, CodegenError>
+    fn param_name(p: Param) -> String
+    fn block_stmts(b: Block) -> Vector<Stmt>
+    fn stmt_as_expr_stmt(stmt: Stmt) -> Option<Expr>
+}
+
+struct SynBlock:
+    opaque_handle: Int
+
+struct SynPat:
+    opaque_handle: Int
+
+// =============================================================================
+// lower_lambda — `{ params => body }` → Rust `|p1, p2| body`
+// =============================================================================
+//
+// Lower a minimal closure `{ params => expr }` to a Rust closure
+// `|p1, p2| body` (T23 + T34 capture analysis).
+//
+// Param types are inferred by Rust — we emit no annotations (matching Buff's
+// "hide the types" philosophy). The body is a single expression in T23's
+// minimal shape; if the parser produced a multi-statement block, it is
+// lowered as a block expression.
+//
+// # T34: variable capture
+//
+// Before lowering the body, we compute the set of variables CAPTURED by this
+// closure (free vars of body minus params minus closure-local lets) via
+// `closure_captures` — the shared capture analysis extracted from T33's
+// spawn free-var walker. The capture set is pushed onto
+// `Self.closure_capture_stack` so that `Self.lower_expr`'s `Expr::Ident` arm
+// can emit captured variables plainly WITHOUT calling
+// `MoveAnalyzer.needs_clone`.
+//
+// Rust closures handle capture automatically (by ref or by move based on how
+// the body uses the variable). Buff's job is only to AVOID inserting
+// spurious `.clone()` calls for captured-variable uses INSIDE the closure
+// body — without the capture stack, a non-Copy captured var used twice in a
+// closure would get a wrong `.clone()` on its second use (MoveAnalyzer would
+// see it as "use after move").
+
+func lower_lambda(codegen: RustCodegen, params: Vector<Param>, body: Block) -> Result<SynExpr, CodegenError>:
+    // Build the closure parameter patterns: `|p1, p2, ...|`.
+    let pats = Vector.new()  // Vector<SynPat>
+    let mut i = 0
+    for i < params.len():
+        let p = params.get(i)
+        pats.push(make_pat_ident(param_name(p)))
+        i = i + 1
+    // T34: compute captures and push onto the stack so the body-lowering
+    // path knows which idents are captured (and should bypass needs_clone).
+    // Popped after the body is lowered so the stack correctly reflects the
+    // enclosing scope on exit.
+    //
+    // We ALSO insert the closure's own PARAM names into the pushed set:
+    // closure params are fresh bindings owned by the closure body, and Rust
+    // handles their ownership within the body. Without this, a param used
+    // multiple times in the body (e.g. `|x| x * x + x`) would get a spurious
+    // `.clone()` from the MoveAnalyzer on its second+ use.
+    let bypass_set = closure_captures(params, body)
+    let mut j = 0
+    for j < params.len():
+        btreetap_string_insert(bypass_set, param_name(params.get(j)))
+        j = j + 1
+    codegen_closure_capture_stack_push(codegen, bypass_set)
+    // Body: a single ExprStmt lowers to a bare expression; otherwise a block
+    // expression.
+    let body_result = lower_lambda_body(codegen, body)
+    // Always pop, even if body lowering errored, so the stack stays balanced
+    // across error recovery paths.
+    codegen_closure_capture_stack_pop(codegen)
+    match body_result:
+        Result.Ok(body_expr):
+            return Result.Ok(make_closure_expr(pats, body_expr))
+        Result.Err(e):
+            return Result.Err(e)
+
+// =============================================================================
+// lower_lambda_body — single ExprStmt → bare expr; otherwise ExprBlock
+// =============================================================================
+
+func lower_lambda_body(codegen: RustCodegen, body: Block) -> Result<SynExpr, CodegenError>:
+    let stmts = block_stmts(body)
+    if stmts.len() == 1:
+        let opt_e = stmt_as_expr_stmt(stmts.get(0))
+        if opt_e != Option.None:
+            return codegen_lower_expr(codegen, unwrap_expr(opt_e))
+    match codegen_lower_block(codegen, body):
+        Result.Ok(block):
+            return Result.Ok(make_block_expr(block))
+        Result.Err(e):
+            return Result.Err(e)
+
+// =============================================================================
+// lower_map_lit — `{"k": v, ...}` → `HashMap::from([("k", v), ...])` (T25)
+// =============================================================================
+//
+// Lower a map literal `{"k": v, ...}` (or empty `{:}`) to Rust's
+// `std::collections::HashMap::from([("k", v), ...])`.
+//
+// Each entry's key and value are lowered independently and spliced into the
+// outer array as Rust tuples. The fully-qualified path
+// `std::collections::HashMap::from` is used (not a bare `HashMap::from` with
+// a `use` import) so generated programs need NO import wiring.
+//
+// For an empty literal `{:}` we emit `HashMap::from([])` (Rust infers the
+// key/value types from the `let`-binding annotation, which the codegen's
+// type inferencer drives).
+
+func lower_map_lit(codegen: RustCodegen, entries: Vector<Pair_Expr_Expr>) -> Result<SynExpr, CodegenError>:
+    // Lower each (key, value) pair into a Rust tuple expression. We build
+    // the tuple via `syn::ExprTuple` so it's a real AST node.
+    let lowered_entries = Vector.new()  // Vector<SynExpr>
+    let mut i = 0
+    for i < entries.len():
+        let pair = entries.get(i)
+        let k = pair_expr_expr_first(pair)
+        let v = pair_expr_expr_second(pair)
+        match codegen_lower_expr(codegen, k):
+            Result.Ok(k_e):
+                match codegen_lower_expr(codegen, v):
+                    Result.Ok(v_e):
+                        lowered_entries.push(make_tuple_expr(k_e, v_e))
+                    Result.Err(e):
+                        return Result.Err(e)
+            Result.Err(e):
+                return Result.Err(e)
+        i = i + 1
+    return Result.Ok(build_hashmap_from_expr(lowered_entries))
+
+// =============================================================================
+// lower_vector_lit — `[a, b, c]` → `vec![a, b, c]` (T23)
+// =============================================================================
+//
+// Lower a vector literal to a Rust `vec![...]` expression. Built via
+// `quote!` so the macro call + comma-separated entries are constructed
+// without hand-formatted Rust strings.
+
+func lower_vector_lit(codegen: RustCodegen, elements: Vector<Expr>) -> Result<SynExpr, CodegenError>:
+    let lowered = Vector.new()
+    let mut i = 0
+    for i < elements.len():
+        match codegen_lower_expr(codegen, elements.get(i)):
+            Result.Ok(e):
+                lowered.push(e)
+            Result.Err(err):
+                return Result.Err(err)
+        i = i + 1
+    return Result.Ok(build_vec_macro_expr(lowered))
+
+// =============================================================================
+// lower_set_lit — `{a, b, c}` (set literal) → `HashSet::from([a, b, c])`
+// =============================================================================
+//
+// T23b: set literals lower to `std::collections::HashSet::from([...])`. Same
+// shape as the empty-literal `HashMap::from` lowering; the empty case emits
+// `HashSet::from([])`.
+
+func lower_set_lit(codegen: RustCodegen, elements: Vector<Expr>) -> Result<SynExpr, CodegenError>:
+    let lowered = Vector.new()
+    let mut i = 0
+    for i < elements.len():
+        match codegen_lower_expr(codegen, elements.get(i)):
+            Result.Ok(e):
+                lowered.push(e)
+            Result.Err(err):
+                return Result.Err(err)
+        i = i + 1
+    return Result.Ok(build_hashset_from_expr(lowered))
+
+// =============================================================================
+// lower_struct_init — `Point { x: 1, y: 2 }` → `Point { x: 1, y: 2 }`
+// =============================================================================
+//
+// Lower a struct-construction expression. Each field's name becomes a Rust
+// ident, the value is lowered recursively. Built via `syn::ExprStruct`.
+
+func lower_struct_init(codegen: RustCodegen, type_name: String, fields: Vector<Pair_String_Expr>) -> Result<SynExpr, CodegenError>:
+    let lowered_fields = Vector.new()
+    let mut i = 0
+    for i < fields.len():
+        let pair = fields.get(i)
+        let fname = pair_string_expr_first(pair)
+        let fval = pair_string_expr_second(pair)
+        match codegen_lower_expr(codegen, fval):
+            Result.Ok(v):
+                lowered_fields.push(make_field_value(fname, v))
+            Result.Err(e):
+                return Result.Err(e)
+        i = i + 1
+    return Result.Ok(build_struct_init_expr(type_name, lowered_fields))
+
+// =============================================================================
+// lower_tuple_lit — `(a, b, c)` → Rust tuple expression (T103)
+// =============================================================================
+
+func lower_tuple_lit(codegen: RustCodegen, elements: Vector<Expr>) -> Result<SynExpr, CodegenError>:
+    let lowered = Vector.new()
+    let mut i = 0
+    for i < elements.len():
+        match codegen_lower_expr(codegen, elements.get(i)):
+            Result.Ok(e):
+                lowered.push(e)
+            Result.Err(err):
+                return Result.Err(err)
+        i = i + 1
+    return Result.Ok(build_tuple_n_expr(lowered))
+
+// =============================================================================
+// lower_string_lit / lower_interp_string / lower_format_string
+// =============================================================================
+//
+// Plain string literals lower to `syn::Lit::Str`. Interpolation literals
+// (`"Hello {name}"`) lower to `format!("Hello {}", name)` via quote!.
+// Format strings (`"{a} + {b} = {c}"`) lower to `format!("{} + {} = {}", a, b, c)`.
+
+func lower_string_lit(s: String) -> SynExpr:
+    return str_lit_expr(s)
+
+func lower_interp_string(codegen: RustCodegen, parts: Vector<String>, exprs: Vector<Expr>) -> Result<SynExpr, CodegenError>:
+    // Build `format!(<parts joined>, <exprs lowered>)` via quote!.
+    let lowered_exprs = Vector.new()
+    let mut i = 0
+    for i < exprs.len():
+        match codegen_lower_expr(codegen, exprs.get(i)):
+            Result.Ok(e):
+                lowered_exprs.push(e)
+            Result.Err(err):
+                return Result.Err(err)
+        i = i + 1
+    return Result.Ok(build_format_expr(parts, lowered_exprs))
+
+// =============================================================================
+// lower_binary_op / lower_unary_op / make_unary_op
+// =============================================================================
+
+func lower_binary_op(op: BinaryOp, lhs: SynExpr, rhs: SynExpr) -> Result<SynExpr, CodegenError>:
+    // (match op {
+    //   Add → make_binary_expr(BinOp::Add, lhs, rhs),
+    //   Sub → make_binary_expr(BinOp::Sub, lhs, rhs),
+    //   Mul → make_binary_expr(BinOp::Mul, lhs, rhs),
+    //   Div → make_binary_expr(BinOp::Div, lhs, rhs),
+    //   Mod → make_binary_expr(BinOp::Rem, lhs, rhs),
+    //   Eq/Ne/Lt/Le/Gt/Ge/And/Or → ...,
+    //   Assign/AddAssign/.../ModAssign → make_assign_expr(...),
+    // })
+    return lower_binary_op_impl(op, lhs, rhs)
+
+func lower_unary_op(op: UnaryOp, e: SynExpr) -> Result<SynExpr, CodegenError>:
+    // (match op {
+    //   Neg → SynExpr::Unary(UnOp::Neg, e),
+    //   Not → SynExpr::Unary(UnOp::Not, e),
+    // })
+    return lower_unary_op_impl(op, e)
+
+// =============================================================================
+// lower_match_expr / lower_if_expr / lower_for_expr / lower_while_expr
+// =============================================================================
+//
+// Each control-flow construct lowers to the corresponding `syn::ExprMatch` /
+// `syn::ExprIf` / `syn::ExprForLoop` / `syn::ExprWhile` node. The arm bodies
+// are lowered recursively; the T86 tail-expression-stripping helper is
+// applied to match arms in return position.
+
+func lower_match_expr(codegen: RustCodegen, scrut: Expr, arms: Vector<MatchArm>) -> Result<SynExpr, CodegenError>:
+    return lower_match_expr_impl(codegen, scrut, arms)
+
+func lower_if_expr(codegen: RustCodegen, cond: Expr, then_block: Block, else_block_opt: Option<Block>) -> Result<SynExpr, CodegenError>:
+    return lower_if_expr_impl(codegen, cond, then_block, else_block_opt)
+
+func lower_for_expr(codegen: RustCodegen, pat: Pattern, iter: Expr, body: Block) -> Result<SynExpr, CodegenError>:
+    return lower_for_expr_impl(codegen, pat, iter, body)
+
+func lower_while_expr(codegen: RustCodegen, cond: Expr, body: Block) -> Result<SynExpr, CodegenError>:
+    return lower_while_expr_impl(codegen, cond, body)
+
+// =============================================================================
+// lower_block — `Block` → `syn::Block`
+// =============================================================================
+//
+// Lower a Buff Block to a Rust `syn::Block`. Each statement is lowered via
+// `codegen_lower_stmt` (declared in decl_lowering.buff); the resulting Vec
+// becomes the block's `stmts` field.
+
+func lower_block(codegen: RustCodegen, block: Block) -> Result<SynBlock, CodegenError>:
+    return codegen_lower_block(codegen, block)
+
+// =============================================================================
+// lower_pattern — Pattern → syn::Pat
+// =============================================================================
+//
+// Lower a Buff match-pattern to a Rust `syn::Pat`. Used by `lower_match_expr`
+// for arm patterns and by `lower_let_pattern` for let-pattern bindings.
+
+func lower_pattern(codegen: RustCodegen, pat: Pattern) -> Result<SynPat, CodegenError>:
+    return codegen_lower_pattern(codegen, pat)
+
+// =============================================================================
+// Implementation shims (extern bindings to syn constructors)
+// =============================================================================
+
+struct BinaryOp:
+    opaque_handle: Int
+
+struct UnaryOp:
+    opaque_handle: Int
+
+struct Pair_Expr_Expr:
+    opaque_handle: Int
+
+struct Pair_String_Expr:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn unwrap_expr(opt: Option<Expr>) -> Expr
+    fn make_pat_ident(name: String) -> SynPat
+    fn make_closure_expr(pats: Vector<SynPat>, body: SynExpr) -> SynExpr
+    fn make_block_expr(block: SynBlock) -> SynExpr
+    fn make_tuple_expr(k_e: SynExpr, v_e: SynExpr) -> SynExpr
+    fn build_hashmap_from_expr(entries: Vector<SynExpr>) -> SynExpr
+    fn build_vec_macro_expr(elements: Vector<SynExpr>) -> SynExpr
+    fn build_hashset_from_expr(elements: Vector<SynExpr>) -> SynExpr
+    fn make_field_value(name: String, value: SynExpr) -> FieldValue
+    fn build_struct_init_expr(type_name: String, fields: Vector<FieldValue>) -> SynExpr
+    fn build_tuple_n_expr(elements: Vector<SynExpr>) -> SynExpr
+    fn str_lit_expr(s: String) -> SynExpr
+    fn build_format_expr(parts: Vector<String>, exprs: Vector<SynExpr>) -> SynExpr
+    fn lower_binary_op_impl(op: BinaryOp, lhs: SynExpr, rhs: SynExpr) -> Result<SynExpr, CodegenError>
+    fn lower_unary_op_impl(op: UnaryOp, e: SynExpr) -> Result<SynExpr, CodegenError>
+    fn lower_match_expr_impl(codegen: RustCodegen, scrut: Expr, arms: Vector<MatchArm>) -> Result<SynExpr, CodegenError>
+    fn lower_if_expr_impl(codegen: RustCodegen, cond: Expr, then_block: Block, else_block_opt: Option<Block>) -> Result<SynExpr, CodegenError>
+    fn lower_for_expr_impl(codegen: RustCodegen, pat: Pattern, iter: Expr, body: Block) -> Result<SynExpr, CodegenError>
+    fn lower_while_expr_impl(codegen: RustCodegen, cond: Expr, body: Block) -> Result<SynExpr, CodegenError>
+    fn pair_expr_expr_first(p: Pair_Expr_Expr) -> Expr
+    fn pair_expr_expr_second(p: Pair_Expr_Expr) -> Expr
+    fn pair_string_expr_first(p: Pair_String_Expr) -> String
+    fn pair_string_expr_second(p: Pair_String_Expr) -> Expr
+}
+
+struct FieldValue:
+    opaque_handle: Int

@@ -1,0 +1,285 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/syn_helpers.rs` (T18, Track C).
+//
+// T105a — syn-construction helpers (mechanically extracted from
+// rust_codegen.rs).
+//
+// Leaf helpers that build syn AST fragments: identifiers, two-segment enum
+// paths, method-call expressions, attribute wrappers, atomic/Arc scaffolding,
+// and the KNOWN_ZERO_ARG_METHODS table. Verbatim move from the parent — no
+// logic changes. Child module of rust_codegen so it inherits the parent
+// imports via `use super::*` (zero per-module import lists).
+//
+// The Rust reference is 980 LOC. The Buff port mirrors the public API
+// surface (ast_ident_to_syn, two_segment_path, two_segment_path_expr,
+// strip_trailing_semi_on_last_expr_stmt, rewrite_self_receiver,
+// rust_path / rust_path_type / wrap_in_parens / make_int_lit_expr_impl /
+// make_bool_lit_expr / method_call / etc).
+
+// =============================================================================
+// ast_ident_to_syn — Buff Ident → syn::Ident
+// =============================================================================
+//
+// Convert a Buff `Ident` into a `syn::Ident`. The byte offsets in the Buff
+// span don't carry over (proc-macro2 spans are opaque), so we just use
+// `call_site` here. The source-map mapping (Buff span → Rust line/col) is
+// recorded separately in `CodegenContext`.
+
+func ast_ident_to_syn(ident: BuffIdent) -> SynIdent:
+    return syn_ident_new(buff_ident_name(ident), proc_macro2_span_call_site())
+
+// =============================================================================
+// two_segment_path — T85: `EnumName::VariantName` syn::Path
+// =============================================================================
+//
+// Build a two-segment `EnumName::VariantName` `syn::Path`.
+//
+// Used by `RustCodegen.lower_expr` (the `Expr::Ident` arm) and
+// `RustCodegen.lower_pattern` (the `Pattern::Ident` / `Pattern::Variant`
+// arms) to qualify bare user-defined enum variant references. The path is
+// built explicitly (not via `parse_quote!`, which is banned in non-test code
+// per the crate's hard rules).
+//
+// Determinism: the path is built from two `Ident`s joined by a single `::`
+// separator — byte-identical for the same `(enum, variant)` pair.
+
+func two_segment_path(enum_name: String, variant_name: String) -> SynPath:
+    // (Build a Path with two PathSegments, each PathArguments::None, joined
+    //  by a single :: separator. Constructed explicitly — no parse_quote!.)
+    return two_segment_path_impl(enum_name, variant_name)
+
+// =============================================================================
+// two_segment_path_expr — T85: wrapper for expr position
+// =============================================================================
+//
+// Thin wrapper around `two_segment_path` that wraps the path in an
+// `syn::ExprPath` for use as a Rust expression. Used by `RustCodegen.lower_
+// expr`'s `Expr::Ident` arm.
+
+func two_segment_path_expr(enum_name: String, variant_name: String) -> SynExpr:
+    // (SynExpr::Path(syn::ExprPath { attrs: vec![], qself: None,
+    //  path: two_segment_path(enum_name, variant_name) }))
+    return two_segment_path_expr_impl(enum_name, variant_name)
+
+// =============================================================================
+// strip_trailing_semi_on_last_expr_stmt — T86 match-yield helper
+// =============================================================================
+//
+// Strip the trailing `;` on the LAST statement of a `syn::Block` iff that
+// statement is a `SynStmt::Expr` with `Some(semi)`.
+//
+// Used by `RustCodegen.lower_match_expr` when the match is in return
+// position: the parser wraps each arm body as a one-statement
+// `Block { stmts: [Stmt::ExprStmt(e)] }`, which `Self.lower_block` (correctly,
+// for general blocks) emits as `{ e; }` (statement with semi → block type
+// `()`). For an arm body that must YIELD a value (so the surrounding `return
+// match n { ... }` typechecks against the function's declared return type),
+// we strip the trailing `;` on the last expression-statement so it becomes a
+// tail expression (`{ e }` → block yields the value of `e`).
+//
+// NO-OP when:
+// - the block is empty (`{}`),
+// - the last statement is not a `SynStmt::Expr`,
+// - the last statement is already a tail expression (`None` semi).
+//
+// Only the LAST statement is touched.
+
+func strip_trailing_semi_on_last_expr_stmt(block: SynBlock):
+    strip_trailing_semi_on_last_expr_stmt_impl(block)
+
+// =============================================================================
+// rewrite_self_receiver — T75: typed-self → bare-self canonicalisation
+// =============================================================================
+//
+// T75: rewrite the first parameter of a `syn::Signature` from a typed
+// `FnArg::Typed { ident: "self", ty }` into a bare `syn::FnArg::Receiver` so
+// the generated Rust reads `fn name(self, ...) -> ...` instead of the (valid
+// but verbose) `fn name(self: Type, ...) -> ...`.
+//
+// This is the canonical Rust extension-method shape: the trait declaration
+// and impl body both spell the receiver as bare `self`, and Rust infers the
+// receiver type from the `impl Trait for Type` header.
+//
+// The rewrite is a NO-OP when the first input is NOT named `self`. Mutability
+// is preserved: a param named `self` with `mut` becomes `mut self`.
+
+func rewrite_self_receiver(sig: SynSignature) -> SynSignature:
+    return rewrite_self_receiver_impl(sig)
+
+// =============================================================================
+// rust_path / rust_path_type — single-segment path builders
+// =============================================================================
+//
+// Build a single-segment `syn::Path` / `syn::Type::Path` from a `::`-
+// separated string. The string is split on `::` and each segment becomes a
+// `PathSegment` with `PathArguments::None`. Used throughout the codegen to
+// build type references (`i64`, `String`, `chrono::Utc`, etc.).
+
+func rust_path(name: String) -> SynPath:
+    return rust_path_impl(name)
+
+func rust_path_type(name: String) -> SynType:
+    return rust_path_type_impl(name)
+
+// =============================================================================
+// wrap_in_parens — wrap a SynExpr in `(e)`
+// =============================================================================
+
+func wrap_in_parens(e: SynExpr) -> SynExpr:
+    return wrap_in_parens_impl(e)
+
+// =============================================================================
+// make_int_lit_expr_impl / make_bool_lit_expr — literal expression builders
+// =============================================================================
+
+func make_int_lit_expr_impl(n: Int) -> SynExpr:
+    return make_int_lit_expr_impl_external(n)
+
+func make_bool_lit_expr(b: Bool) -> SynExpr:
+    return make_bool_lit_expr_impl_external(b)
+
+// =============================================================================
+// method_call_one_arg / method_call — method-call expression builders
+// =============================================================================
+//
+// Build `recv.method(args)` SynExpr::MethodCall nodes. The `method_call_one_
+// arg` variant is the common single-arg case (used by string-method codegen
+// helpers). The `method_call` variant takes a `Punctuated<SynExpr, ,>` of
+// args (zero, one, or many).
+
+func method_call_one_arg(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr:
+    return method_call_one_arg_impl_external(recv, method, arg)
+
+// =============================================================================
+// KNOWN_ZERO_ARG_METHODS — the no-arg method name set
+// =============================================================================
+//
+// The set of method names that the codegen can emit as `recv.method()` (no
+// args, no turbofish). Used by the MoveAnalyzer's clone-skipping logic and
+// by the MethodCall-lowering path: a zero-arg call whose name is in this set
+// is emitted as a bare `recv.method()` (Rust's no-arg method-call syntax);
+// other zero-arg names get the same treatment but are NOT in this set (the
+// set is the SUBSET that is also safe to skip clone-insertion on).
+//
+// Today's set (8 entries): len, is_empty, to_string, clone, iter, into_iter,
+// chars, keys.
+
+func known_zero_arg_methods() -> Vector<String>:
+    let out = Vector.new()
+    out.push("len")
+    out.push("is_empty")
+    out.push("to_string")
+    out.push("clone")
+    out.push("iter")
+    out.push("into_iter")
+    out.push("chars")
+    out.push("keys")
+    return out
+
+func is_known_zero_arg_method(name: String) -> Bool:
+    return string_vector_contains(known_zero_arg_methods(), name)
+
+// =============================================================================
+// Atomic / Arc scaffolding helpers
+// =============================================================================
+//
+// Build `Arc::new(e)` / `Arc::clone(&e)` / `Arc::make_mut(&mut e)` /
+// `AtomicI64::new(e)` / `atomic.load(Ordering::Relaxed)` /
+// `atomic.fetch_add(e, Ordering::Relaxed)` SynExpr nodes. Used by the
+// spawn-capture + atomic-promotion lowering paths (T33 + T42).
+
+func arc_new_expr(e: SynExpr) -> SynExpr:
+    let args = Vector.new()
+    args.push(e)
+    return rust_call_expr("Arc::new", args)
+
+func arc_clone_expr(e: SynExpr) -> SynExpr:
+    return rust_call_expr("Arc::clone", Vector.from_list([make_borrow_expr(e)]))
+
+func arc_make_mut_expr(e: SynExpr) -> SynExpr:
+    return rust_call_expr("Arc::make_mut", Vector.from_list([make_mut_borrow_expr(e)]))
+
+func atomic_i64_new_expr(e: SynExpr) -> SynExpr:
+    let args = Vector.new()
+    args.push(e)
+    return rust_call_expr("AtomicI64::new", args)
+
+func atomic_load_relaxed_expr(e: SynExpr) -> SynExpr:
+    return method_call_one_arg(e, "load", ordering_relaxed_expr())
+
+func atomic_fetch_add_relaxed_expr(atomic: SynExpr, rhs: SynExpr) -> SynExpr:
+    let args = Vector.new()
+    args.push(rhs)
+    args.push(ordering_relaxed_expr())
+    return method_call_n_args(atomic, "fetch_add", args)
+
+func ordering_relaxed_expr() -> SynExpr:
+    return rust_path_expr("std::sync::atomic::Ordering::Relaxed")
+
+// =============================================================================
+// Attribute wrappers
+// =============================================================================
+//
+// Build `#[derive(...)]`, `#[repr(C)]`, `#[cfg(...)]`, `#[test]`,
+// `#[tokio::main]`, etc. `syn::Attribute` nodes. The trait-list and meta-list
+// forms are constructed explicitly (no `parse_quote!` in non-test code).
+
+func derive_attr_with_traits(traits: Vector<String>) -> SynAttribute:
+    return build_derive_attr_with_traits_external(traits)
+
+func repr_c_attr() -> SynAttribute:
+    return build_repr_c_attr_external()
+
+// =============================================================================
+// Forward declarations + implementation shims
+// =============================================================================
+
+struct BuffIdent:
+    opaque_handle: Int
+
+struct SynIdent:
+    opaque_handle: Int
+
+struct SynPath:
+    opaque_handle: Int
+
+struct SynType:
+    opaque_handle: Int
+
+struct SynExpr:
+    opaque_handle: Int
+
+struct SynBlock:
+    opaque_handle: Int
+
+struct SynSignature:
+    opaque_handle: Int
+
+struct SynAttribute:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn buff_ident_name(ident: BuffIdent) -> String
+    fn syn_ident_new(name: String, span: ProcSpan2) -> SynIdent
+    fn proc_macro2_span_call_site() -> ProcSpan2
+    fn string_vector_contains(vec: Vector<String>, s: String) -> Bool
+    fn rust_call_expr(path: String, args: Vector<SynExpr>) -> SynExpr
+    fn rust_path_expr(path: String) -> SynExpr
+    fn make_borrow_expr(inner: SynExpr) -> SynExpr
+    fn make_mut_borrow_expr(inner: SynExpr) -> SynExpr
+    fn method_call_n_args(recv: SynExpr, method: String, args: Vector<SynExpr>) -> SynExpr
+    fn two_segment_path_impl(enum_name: String, variant_name: String) -> SynPath
+    fn two_segment_path_expr_impl(enum_name: String, variant_name: String) -> SynExpr
+    fn strip_trailing_semi_on_last_expr_stmt_impl(block: SynBlock)
+    fn rewrite_self_receiver_impl(sig: SynSignature) -> SynSignature
+    fn rust_path_impl(name: String) -> SynPath
+    fn rust_path_type_impl(name: String) -> SynType
+    fn wrap_in_parens_impl(e: SynExpr) -> SynExpr
+    fn make_int_lit_expr_impl_external(n: Int) -> SynExpr
+    fn make_bool_lit_expr_impl_external(b: Bool) -> SynExpr
+    fn method_call_one_arg_impl_external(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
+    fn build_derive_attr_with_traits_external(traits: Vector<String>) -> SynAttribute
+    fn build_repr_c_attr_external() -> SynAttribute
+}
+
+struct ProcSpan2:
+    opaque_handle: Int
