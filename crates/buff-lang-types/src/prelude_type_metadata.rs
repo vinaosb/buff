@@ -453,6 +453,16 @@ impl PreludeType {
         // T26: Assert — namespace-only test-assertion module.
         // NO extern crate needed (assert_eq! / assert! are built-in).
         PreludeType::Assert,
+        // T84: Range — the lazy integer-range runtime-value type
+        // (`Range<T>` from `start..end` / `start..=end`). NOT
+        // namespace-only (it IS a runtime value — a lazy iterator
+        // handle wrapping `std::ops::Range<T>` /
+        // `std::ops::RangeInclusive<T>`). NO extern crate needed
+        // (std-only). Constructed only by the `..` / `..=` operator
+        // (no associated fn — there is no `Range.new`); this entry
+        // exists so `is_prelude_type("Range")` resolves and source
+        // annotations like `let r: Range<Int> = 0..10` typecheck.
+        PreludeType::Range,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -849,6 +859,12 @@ impl PreludeType {
             PreludeType::Http => "Http",
             // T26: Assert — namespace-only test-assertion module.
             PreludeType::Assert => "Assert",
+            // T84: Range — the lazy integer-range runtime-value type.
+            // The surface name mirrors Rust's `std::ops::Range<T>` so
+            // codegen can splice `std::ops::Range<i64>` paths without
+            // rewriting; the Buff user sees `Range<Int>` (mirroring
+            // Vector<Int> / Matrix<Int>).
+            PreludeType::Range => "Range",
         }
     }
 
@@ -860,7 +876,14 @@ impl PreludeType {
     /// never a value, only its associated functions are callable. For
     /// other runtime-value prelude types like `Regex` (T124d) it returns
     /// the matching opaque `Type` variant.
-    pub const fn buff_type(self) -> Type {
+    //
+    // NOTE (T84): this was previously `const fn`. It is now a regular
+    // `fn` because [`PreludeType::Range`] returns
+    // `Type::Range(Box::new(...))`, and `Box::new` is not `const` in
+    // stable Rust. The two existing call sites (both in non-const
+    // runtime context — `extern_crate_detection.rs` and `ai.rs`) are
+    // unaffected; no caller used `buff_type()` in a const context.
+    pub fn buff_type(self) -> Type {
         match self {
             PreludeType::DateTime => Type::DateTime,
             PreludeType::Date => Type::Date,
@@ -1289,6 +1312,15 @@ impl PreludeType {
             // — the namespace itself is never a value, only its
             // associated functions are callable.
             PreludeType::Assert => Type::Void,
+            // T84: Range IS a runtime value — returns the lazy
+            // integer-range type wrapping `std::ops::Range<T>` /
+            // `std::ops::RangeInclusive<T>`. The element type defaults
+            // to `Int<64>` (Buff's default integer width); inference
+            // overrides this per-call-site when the bounds carry a
+            // more specific type. Distinct from Assert / Http / Log /
+            // Toml / Math (which return Void): Range IS a value, not a
+            // namespace.
+            PreludeType::Range => Type::range(Type::int_default()),
         }
     }
 

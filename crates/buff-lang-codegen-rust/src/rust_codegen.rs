@@ -8157,6 +8157,26 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Cache.contains codegen parse: {e}")))
             }
+            // T84: `(0..10).contains(5)` -> Bool. One arg. Wraps
+            // `recv.contains(&item)` — Rust's `std::ops::Range` /
+            // `RangeInclusive` both implement `RangeBounds<T>` whose
+            // `contains` takes `&T`. The receiver type is `Type::Range`
+            // (the lazy integer range produced by `..` / `..=`). O(1)
+            // — never materialises the range.
+            M::Contains if matches!(recv_ty, Type::Range(_)) => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "contains() expects exactly 1 arg (item), got {}",
+                        args.len()
+                    )));
+                }
+                let item = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.contains(&#item)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Range.contains codegen parse: {e}")))
+            }
             // `cache.clear()` -> Void. Zero args. Wraps
             // `recv.clear()`.
             M::Clear if matches!(recv_ty, Type::Cache) => {

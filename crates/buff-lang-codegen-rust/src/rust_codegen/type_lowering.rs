@@ -35,6 +35,19 @@ impl RustCodegen {
                 if name.name == "Regex" {
                     return Ok(rust_path_type("regex::Regex"));
                 }
+                // T84: `Range<T>` source-level annotation lowers to the
+                // fully-qualified `std::ops::Range<T>` path (the lazy
+                // iterator Rust std type). The element type arg flows
+                // through the generic lowering below via the
+                // `TypeRef::Generic` arm (a `Range<Int>` annotation
+                // parses as `TypeRef::Generic { base: "Range", args:
+                // [Int] }`, so this Named-path fast-path only fires for
+                // the bare `Range` form without args — rare, but
+                // handled for completeness). The Generic arm emits
+                // `std::ops::Range<i64>` directly via the helper below.
+                if name.name == "Range" {
+                    return Ok(rust_path_type("std::ops::Range"));
+                }
                 // T32: the Buff→Rust primitive-name mapping is now a
                 // single named, configurable table at
                 // [`buff_primitive_to_rust_name`] (covers all 9 primitive
@@ -57,7 +70,20 @@ impl RustCodegen {
                 let lowered_args: Result<Vec<SynType>, CodegenError> =
                     args.iter().map(|a| self.ast_typeref_to_syn(a)).collect();
                 let lowered_args = lowered_args?;
-                Ok(make_generic_path_type(&base_name, lowered_args))
+                // T84: `Range<T>` source annotation lowers to the
+                // fully-qualified `std::ops::Range<T>` path (the lazy
+                // iterator Rust std type — NOT a `Range` user struct).
+                // Without this rewrite, the generic lowering below
+                // would emit `Range<i64>` (a user-type-shaped path),
+                // which Rust cannot resolve. Other base names pass
+                // through unchanged so user-defined generics keep
+                // their spelling (Pair<Int, String> etc.).
+                let path = if base_name == "Range" {
+                    "std::ops::Range"
+                } else {
+                    &base_name
+                };
+                Ok(make_generic_path_type(path, lowered_args))
             }
             TypeRef::Function { .. } => Err(self.unsupported("function-type codegen (T12/T13)")),
             // T76: union types `A | B | C`. Compute canonical name
@@ -379,7 +405,19 @@ impl RustCodegen {
             // T37: User is handled by the early-return match above
             // (turbofish-or-bare-path emission); unreachable here but
             // required for exhaustiveness.
-            | Type::User { .. } => return None,
+            | Type::User { .. }
+            // T84: Range<T> is a lazy iterator produced by the `..` /
+            // `..=` operator. The codegen lowers the AST directly via
+            // `lower_range` (which emits `start..end` / `start..=end`),
+            // so a `Type::Range` flowing through `buff_type_to_syn` is
+            // only consulted when the user writes an explicit
+            // annotation like `let r: Range<Int> = 0..10`. We return
+            // None so Rust infers the type from the initializer — this
+            // avoids the Range-vs-RangeInclusive mismatch (Buff
+            // surfaces a single `Range<T>` abstraction; Rust has two
+            // distinct types). Mirrors Unknown / Void / Sender /
+            // Receiver: let Rust infer from context.
+            | Type::Range(_) => return None,
             // T2: channel sender / receiver. Opaque runtime-value types
             // mapped to `buff_lang_runtime::Sender<T>` /
             // `buff_lang_runtime::Receiver<T>`. The element type T is

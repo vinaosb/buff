@@ -1,0 +1,28 @@
+// T84 — Range syntax demo (`a..b` exclusive, `a..=b` inclusive).
+//
+// Ranges are LAZY iterators (Rust's std::ops::Range / RangeInclusive),
+// NOT Vectors — values are produced on demand, never materialised in
+// memory. `for i in 0..5` iterates 5 times; `for i in 0..=5` iterates
+// 6 times. `(0..10).contains(5)` returns `true` in O(1).
+
+func main():
+    // Exclusive range `0..5` — iterates 5 times (0, 1, 2, 3, 4).
+    print("exclusive 0..5:")
+    for i in 0..5:
+        print(i)
+
+    // Inclusive range `0..=5` — iterates 6 times (0, 1, 2, 3, 4, 5).
+    print("inclusive 0..=5:")
+    for i in 0..=5:
+        print(i)
+
+    // Range `contains` check — O(1), no allocation.
+    if (0..10).contains(5):
+        print("5 is in 0..10")
+    if not (0..10).contains(15):
+        print("15 is NOT in 0..10")
+
+    // Expression bounds — full expressions on both sides.
+    let n = 3
+    for i in 0..n * 2:
+        print(i)

@@ -1867,6 +1867,32 @@ pub enum PreludeType {
     /// returns `true`. Assert uses only Rust `std` (NO extern crate
     /// needed — the `assert_eq!` / `assert!` macros are built-in).
     Assert,
+    /// T84: `Range` — the lazy integer-range type (v1.25 Wave 2a).
+    /// `Range<T>` is the type of `start..end` (exclusive) and
+    /// `start..=end` (inclusive) expressions. It is a LAZY iterator
+    /// (Rust's `std::ops::Range<T>` / `std::ops::RangeInclusive<T>`),
+    /// NOT a `Vector<T>` — values are produced on demand, never
+    /// materialised in memory. `for i in 0..10` iterates 10 times
+    /// without allocating; `(0..10).contains(5)` returns `true` in
+    /// O(1).
+    ///
+    /// Unlike most other prelude types, `Range` is **never constructed
+    /// by an associated function** — there is no `Range.new(...)`. The
+    /// only way to produce a `Range<T>` value is the `..` / `..=`
+    /// operator (parsed by T68's `parse_range`, lowered by T68's
+    /// `lower_range`). This `PreludeType` entry exists so the type
+    /// inferencer + codegen can resolve a source annotation like
+    /// `let r: Range<Int> = 0..10` and so `is_prelude_type("Range")`
+    /// returns `true` (mirroring `Option` / `Result`).
+    ///
+    /// `buff_type()` returns [`Type::Range`] of `Int<64>` (the default
+    /// integer width — the actual element type flows from inference at
+    /// each call site, so this default is only consulted when the
+    /// inferencer has no other evidence). `is_namespace_only()` returns
+    /// `false` — `Range` IS a runtime value (a lazy iterator handle),
+    /// not a namespace. NO extern crate needed (std-only — `std::ops`
+    /// is in the prelude).
+    Range,
 }
 
 

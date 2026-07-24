@@ -382,13 +382,40 @@ impl TypeInferencer {
                 let _ = self.infer_expr(task)?;
                 Ok(Type::Unknown)
             }
-            // T68: `start..end` — infer both bounds, return Unknown (range
-            // is an expression-level construct; the type system doesn't
-            // track range types in v0.5).
+            // T84: `start..end` — infer both bounds, return `Range<T>`
+            // where `T` is the element type. The element type is taken
+            // from the first non-`Unknown` bound (start preferred, end
+            // as fallback); when both are `Unknown` we fall back to
+            // `Int<64>` (Buff's default Int) so a `Range<Int>` always
+            // has a concrete element type. The `inclusive` flag is
+            // preserved in the AST (`Expr::Range { inclusive }`) so
+            // codegen can pick `..` vs `..=`; the TYPE layer treats
+            // both shapes uniformly as `Range<T>` (Rust's
+            // `Range<T>` / `RangeInclusive<T>` are distinct types but
+            // Buff surfaces a single `Range<T>` abstraction — the
+            // user-facing difference is purely syntactic).
+            //
+            // This replaces the T68 stub (`Ok(Type::Unknown)`). The
+            // earlier stub was correct for codegen (which lowers the
+            // AST directly via `lower_range`, ignoring the inferred
+            // type) but lost the range-ness at the type layer, so
+            // `:type 0..10` in the REPL printed `Unknown`. With a real
+            // `Range<T>` variant, the type system is now range-aware.
             Expr::Range { start, end, .. } => {
-                let _ = self.infer_expr(start)?;
-                let _ = self.infer_expr(end)?;
-                Ok(Type::Unknown)
+                let start_ty = self.infer_expr(start)?;
+                let end_ty = self.infer_expr(end)?;
+                let elem = if !matches!(start_ty, Type::Unknown) {
+                    start_ty
+                } else if !matches!(end_ty, Type::Unknown) {
+                    end_ty
+                } else {
+                    // Both bounds indeterminate — default to Int<64>
+                    // (Buff's default integer width). This keeps the
+                    // range element type concrete even when the bounds
+                    // are themselves unannotated identifiers.
+                    Type::int_default()
+                };
+                Ok(Type::range(elem))
             }
             // T72: `if let PAT = EXPR { then } else { else }` — infer the
             // value for side effects (binding the pattern's names to Unknown

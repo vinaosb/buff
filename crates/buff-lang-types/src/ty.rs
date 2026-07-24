@@ -1098,6 +1098,35 @@ pub enum Type {
     /// the user generic so the null-safety / assignment checks can
     /// compare annotations like `let p: Pair<Int, String>`.
     User { name: String, args: Vec<Type> },
+    /// A lazy integer range: `Range<T>` produced by `start..end`
+    /// (exclusive) or `start..=end` (inclusive) (T84 — v1.25 Wave 2a).
+    ///
+    /// Maps to Rust's `std::ops::Range<T>` (exclusive) or
+    /// `std::ops::RangeInclusive<T>` (inclusive) at codegen time. Both
+    /// bounds are full expressions in the AST ([`Expr::Range`]); the
+    /// `inclusive` flag is preserved through the AST so codegen can pick
+    /// the right Rust operator. The element type `T` is inferred from
+    /// the bounds (`0..10` → `Range<Int<64>>`; both bounds are visited
+    /// and the first non-`Unknown` one wins, falling back to
+    /// `Int<64>` if both are indeterminate).
+    ///
+    /// **LAZY, not a Vec.** A `Range<Int>` is an iterator — it produces
+    /// values on demand and never materialises the full sequence in
+    /// memory. `for i in 0..10` iterates 10 times without allocating;
+    /// `(0..10).contains(5)` returns `true` in O(1). This mirrors
+    /// Rust's `Range` exactly (Buff surfaces Rust's semantics
+    /// verbatim — no copy, no Vec, no eager evaluation).
+    ///
+    /// This is **additive** (T84): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `Range` — it's a lazy
+    /// iterator, not a scalar value, so it participates in no numeric
+    /// promotion. See the T68 `Expr::Range` entry on
+    /// [`buff_lang_ast::Expr`] for the AST/parser/codegen wiring that
+    /// landed earlier (T68 shipped the expression form; T84 closes the
+    /// loop by giving it a real `Type`).
+    Range(Box<Type>),
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1257,6 +1286,16 @@ impl Type {
     /// constructible here for testing; downstream code treats it the same).
     pub fn tuple(members: Vec<Type>) -> Self {
         Type::Tuple(members)
+    }
+
+    /// Create a `Range<T>` type (T84). Maps to Rust's
+    /// `std::ops::Range<T>` (exclusive) or `std::ops::RangeInclusive<T>`
+    /// (inclusive); the AST's `Expr::Range { inclusive }` flag picks the
+    /// variant at codegen time. The element type is boxed so the enum
+    /// variant carries it inline (mirrors [`Type::vector`] /
+    /// [`Type::matrix`]).
+    pub fn range(elem: Type) -> Self {
+        Type::Range(Box::new(elem))
     }
 
     /// T124b: the timezone-aware datetime type. Maps to
@@ -2415,6 +2454,11 @@ impl fmt::Display for Type {
                     f.write_str(">")
                 }
             }
+            // T84: lazy integer range `Range<T>`. Renders the Buff
+            // surface form `Range<elem>` so diagnostics read naturally
+            // (mirrors Vector<T> / Matrix<T>). The element is the
+            // inferred bound type (`Range<Int<64>>` for `0..10`).
+            Type::Range(elem) => write!(f, "Range<{elem}>"),
         }
     }
 }

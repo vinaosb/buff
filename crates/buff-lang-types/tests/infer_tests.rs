@@ -1112,3 +1112,133 @@ fn t83_nested_vector_with_varying_lengths_preserves_nesting() {
         other => panic!("T83: outer must be Vector, got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// T84 — Range expression type inference (`start..end` → `Range<T>`)
+// ---------------------------------------------------------------------------
+//
+// T68 shipped the AST/parser/codegen for ranges but the type inferencer
+// returned `Type::Unknown`. T84 closes the loop: `0..10` now infers
+// `Range<Int<64>>` (a lazy iterator, NOT a Vector).
+
+fn range_expr(start: Expr, end: Expr, inclusive: bool) -> Expr {
+    Expr::Range {
+        start: Box::new(start),
+        end: Box::new(end),
+        inclusive,
+        span: sp(),
+    }
+}
+
+/// T84: `0..10` (exclusive) infers `Range<Int<64>>`. The element type
+/// is taken from the start bound (an `Int` literal → `Int<64>` via
+/// range-analysis default-width).
+#[test]
+fn t84_exclusive_range_infers_range_of_int() {
+    let e = range_expr(int_lit(0), int_lit(10), false);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&e).unwrap();
+    match ty {
+        Type::Range(elem) => match *elem {
+            Type::Int { .. } => {}
+            other => panic!("T84: range element must be Int, got {other:?}"),
+        },
+        other => panic!("T84: `0..10` must infer Range<Int>, got {other:?}"),
+    }
+}
+
+/// T84: `0..=10` (inclusive) infers `Range<Int<64>>` — the same type as
+/// the exclusive form. Buff surfaces a single `Range<T>` abstraction;
+/// the inclusive/exclusive distinction lives in the AST
+/// (`Expr::Range { inclusive }`), not the type layer.
+#[test]
+fn t84_inclusive_range_infers_range_of_int() {
+    let e = range_expr(int_lit(0), int_lit(10), true);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&e).unwrap();
+    assert!(
+        matches!(ty, Type::Range(ref elem) if matches!(**elem, Type::Int { .. })),
+        "T84: `0..=10` must infer Range<Int>, got {ty:?}"
+    );
+}
+
+/// T84: range with float bounds infers `Range<Float<...>>` — the
+/// element type flows from the bound type, not hardcoded to Int.
+#[test]
+fn t84_range_with_float_bounds_infers_range_of_float() {
+    let e = range_expr(float_lit(0.0), float_lit(1.0), false);
+    let mut inf = TypeInferencer::new();
+    let ty = inf.infer_expr(&e).unwrap();
+    assert!(
+        matches!(ty, Type::Range(ref elem) if matches!(**elem, Type::Float { .. })),
+        "T84: `0.0..1.0` must infer Range<Float>, got {ty:?}"
+    );
+}
+
+/// T84: range with two unknown bounds (idents explicitly bound to
+/// `Unknown` in the environment) falls back to `Range<Int<64>>` —
+/// Buff's default integer width. This keeps the range element type
+/// concrete even when the bounds are themselves indeterminate (e.g.
+/// a function parameter whose type couldn't be resolved). Note: a
+/// truly undefined variable returns a `TypeError` at inference time
+/// (not `Unknown`), so we pre-bind the idents here to exercise the
+/// fallback path.
+#[test]
+fn t84_range_with_unknown_bounds_falls_back_to_int() {
+    let e = range_expr(ident("a"), ident("b"), false);
+    let mut inf = TypeInferencer::new();
+    // Pre-bind both idents to Unknown so inference doesn't error.
+    inf.bind("a", Type::Unknown);
+    inf.bind("b", Type::Unknown);
+    let ty = inf.infer_expr(&e).unwrap();
+    assert!(
+        matches!(ty, Type::Range(ref elem) if matches!(**elem, Type::Int { .. })),
+        "T84: unknown-bounds range must fall back to Range<Int>, got {ty:?}"
+    );
+}
+
+/// T84: `Range<Int>` is NOT numeric — it's a lazy iterator, so it
+/// participates in no numeric promotion. Mirrors Vector/Map/Option
+/// (collection types are never numeric).
+#[test]
+fn t84_range_is_not_numeric() {
+    let r = Type::range(Type::int_default());
+    assert!(!r.is_numeric(), "Range must not be numeric");
+    assert!(!r.is_float_like(), "Range must not be float-like");
+    assert!(!r.is_integer_like(), "Range must not be integer-like");
+    assert!(!r.is_gpu_eligible(), "Range must not be GPU-eligible");
+}
+
+/// T84: `Type::range(elem)` constructor produces the expected shape
+/// and `Display` renders `Range<elem>`.
+#[test]
+fn t84_range_constructor_and_display() {
+    let r = Type::range(Type::int_default());
+    assert!(matches!(r, Type::Range(_)));
+    assert_eq!(r.to_string(), "Range<Int<64>>");
+
+    let r2 = Type::range(Type::Double);
+    assert_eq!(r2.to_string(), "Range<Double>");
+}
+
+/// T84: `Range` is registered as a prelude type — `is_prelude_type`
+/// resolves the surface name, `prelude_type_lookup` returns the
+/// variant, and `buff_type()` returns a `Type::Range` (NOT Void —
+/// Range IS a runtime value, unlike namespace-only modules).
+#[test]
+fn t84_range_registered_as_prelude_type() {
+    use buff_lang_types::{is_prelude_type, prelude_type_lookup, PreludeType};
+    assert!(is_prelude_type("Range"), "`Range` must be a prelude type");
+    let pt = prelude_type_lookup("Range").expect("Range must resolve");
+    assert_eq!(pt, PreludeType::Range);
+    assert_eq!(pt.name(), "Range");
+    // Range IS a runtime value (a lazy iterator handle), NOT a
+    // namespace-only module like Log/Toml/Math.
+    assert!(!pt.is_namespace_only(), "Range must NOT be namespace-only");
+    // buff_type returns Type::Range (not Void).
+    let ty = pt.buff_type();
+    assert!(
+        matches!(ty, Type::Range(_)),
+        "Range.buff_type() must return Type::Range, got {ty:?}"
+    );
+}
