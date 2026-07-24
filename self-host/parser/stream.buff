@@ -1,0 +1,400 @@
+// Buff self-host port of `crates/buff-lang-parser/src/stream.rs` (T16).
+//
+// This is the SECOND self-host port: [`TokenStream`] — the cursor over a slice
+// of lexer-produced tokens — rewritten in Buff.
+//
+// Faithful 1:1 translation of the Rust reference. Where Rust holds a borrowed
+// `&'a [Token]` slice and returns `&Token`/`&TokenKind`, Buff owns a
+// `Vector<Token>` (Buff hides references). `peek`/`peek_kind` therefore return
+// owned `Option<Token>` / `Option<TokenKind>` clones; every call site that did
+// `self.peek().map(|t| &t.kind)` becomes a direct `stream_peek_kind(s)`.
+//
+// The `impl TokenStream<'a> { ... }` block becomes a family of free functions
+// taking the cursor as the first parameter (`s: TokenStream`). Buff mutates
+// struct fields in place via `s.pos = ...`, so `&mut self` is implicit.
+//
+// Numeric widths map to the natural Buff primitive: `usize`/`i64` -> `Int`.
+//
+// SYNTAX MAPPING NOTES (Buff grammar differs from the Rust it transpiles to):
+//   * `while` is NOT a Buff keyword — Buff spells conditional loops `for cond:`
+//     and iterator loops `for x in iter:`. Every Rust `while` becomes `for`.
+//   * Buff `match` rejects or-patterns (`A | B`), qualified patterns
+//     (`TokenKind.X`), pattern guards, statement bodies, and `{ }` block arms
+//     (a `{` after `=>` starts a closure). So the Rust layout-skip
+//     `match self.tokens[i].kind { Newline | Indent | Dedent => .., .. }`
+//     becomes an `if/else if` chain comparing `==` on enum values (enums
+//     derive structural equality in Buff). Match is reserved for simple
+//     value-extraction arms whose bodies are single expressions.
+
+// --- Parser edition selection (mirrors `options.rs` + `lib.rs` re-export) ---
+//
+// An [`Edition`] selects which language extensions the parser accepts. The
+// default ([`Edition::Standard`]) is the historical Buff language. Scientific
+// opts into the Julia-inspired mathematical syntax extensions (T57). The
+// parser consults the edition to decide whether to accept the extensions.
+enum Edition {
+    Standard,
+    Scientific,
+}
+
+func edition_default() -> Edition:
+    return Edition.Standard
+
+func edition_is_scientific(e: Edition) -> Bool:
+    return e == Edition.Scientific
+
+// True when `kind` is a token that only the scientific edition accepts (T57).
+func is_scientific_only(kind: TokenKind) -> Bool:
+    if kind == TokenKind.Sum:
+        return true
+    if kind == TokenKind.Product:
+        return true
+    if kind == TokenKind.Sqrt:
+        return true
+    if kind == TokenKind.InUni:
+        return true
+    if kind == TokenKind.NotInUni:
+        return true
+    if kind == TokenKind.SubsetUni:
+        return true
+    if kind == TokenKind.ApproxUni:
+        return true
+    if kind == TokenKind.Adjoint:
+        return true
+    return false
+
+// Returns None if `kind` is acceptable under this edition, else a
+// human-readable error message naming the missing edition opt-in. (The Rust
+// reference returns Result<(), &str>; Buff has no `()` unit type, so this port
+// uses Option<String>: None == accepted, Some(msg) == rejected.)
+func edition_require_for(e: Edition, kind: TokenKind) -> Option<String>:
+    if is_scientific_only(kind):
+        if edition_is_scientific(e) == false:
+            return Option.Some("this syntax requires edition = \"scientific\" in buff.toml (T57 mathematical syntax edition)")
+    return Option.None
+
+// --- A read-only cursor over a slice of tokens ---
+//
+// Tracks the current position and the source id used to fabricate spans for
+// synthetic nodes or unexpected-EOF errors. Layout tokens (Newline, Indent,
+// Dedent) are skipped automatically by peek/advance.
+struct TokenStream {
+    tokens: Vector<Token>,
+    pos: Int,
+    source_id: SourceId,
+    edition: Edition,
+    matrix_row_depth: Int,
+}
+
+// Construct a new cursor over `tokens` with the default Edition::Standard.
+func stream_new(tokens: Vector<Token>, source_id: SourceId) -> TokenStream:
+    return stream_with_edition(tokens, source_id, edition_default())
+
+// Construct a new cursor over `tokens` with a specific Edition (T57).
+func stream_with_edition(tokens: Vector<Token>, source_id: SourceId, edition: Edition) -> TokenStream:
+    return TokenStream.new(
+        tokens: tokens,
+        pos: 0,
+        source_id: source_id,
+        edition: edition,
+        matrix_row_depth: 0,
+    )
+
+// The SourceId associated with this stream.
+func stream_source_id(s: TokenStream) -> SourceId:
+    return s.source_id
+
+// The Edition this stream was constructed with (T57).
+func stream_edition(s: TokenStream) -> Edition:
+    return s.edition
+
+// Returns true while the cursor is inside a scientific-edition matrix row
+// parse (T57). Used by parse_multiplicative to suppress implicit
+// multiplication inside [1 2 3]. The depth is a counter so nested matrix
+// literals parse correctly.
+func stream_in_matrix_row(s: TokenStream) -> Bool:
+    return s.matrix_row_depth > 0
+
+// Increment the matrix-row nesting counter (T57).
+func stream_enter_matrix_row(s: TokenStream):
+    s.matrix_row_depth = s.matrix_row_depth + 1
+
+// Decrement the matrix-row nesting counter (T57).
+func stream_exit_matrix_row(s: TokenStream):
+    if s.matrix_row_depth > 0:
+        s.matrix_row_depth = s.matrix_row_depth - 1
+
+// --- is_layout_kind helper (mirrors the implicit match skip) ---
+//
+// True for the three layout tokens (Newline / Indent / Dedent) that peek and
+// advance transparently skip over.
+func is_layout_kind(k: TokenKind) -> Bool:
+    if k == TokenKind.Newline:
+        return true
+    if k == TokenKind.Indent:
+        return true
+    if k == TokenKind.Dedent:
+        return true
+    return false
+
+// Look at the current token (skipping any layout tokens). Returns None at
+// end-of-input or when an explicit TokenKind::Eof is reached.
+func stream_peek(s: TokenStream) -> Option<Token>:
+    let mut i = s.pos
+    for i < s.tokens.len():
+        let k = s.tokens[i].kind
+        if is_layout_kind(k):
+            i = i + 1
+        else if k == TokenKind.Eof:
+            return Option.None
+        else:
+            return Option.Some(s.tokens[i])
+    return Option.None
+
+// Convenience: just the TokenKind of the next significant token.
+func stream_peek_kind(s: TokenStream) -> Option<TokenKind>:
+    let t = stream_peek(s)
+    return match t {
+        Some(tok) => Option.Some(tok.kind),
+        None => Option.None,
+    }
+
+// Look at the token AFTER the current one (skipping layout). Used to
+// disambiguate `obj.method` vs `obj.method(...)` without committing.
+func stream_peek_second_kind(s: TokenStream) -> Option<TokenKind>:
+    let mut i = s.pos
+    let mut saw_real = false
+    for i < s.tokens.len():
+        let k = s.tokens[i].kind
+        if is_layout_kind(k):
+            i = i + 1
+        else if k == TokenKind.Eof:
+            return Option.None
+        else:
+            if saw_real == false:
+                saw_real = true
+                i = i + 1
+            else:
+                return Option.Some(s.tokens[i].kind)
+    return Option.None
+
+// Advance past the current significant token and return an owned clone of it.
+// Returns None at EOF. Named `advance` (rather than `next`) so it is not
+// confused with the Iterator::next trait method.
+func stream_advance(s: TokenStream) -> Option<Token>:
+    // Skip any layout tokens first.
+    for s.pos < s.tokens.len():
+        let k = s.tokens[s.pos].kind
+        if is_layout_kind(k):
+            s.pos = s.pos + 1
+        else:
+            break
+    if s.pos < s.tokens.len():
+        // Don't return Eof as a real token.
+        if s.tokens[s.pos].kind == TokenKind.Eof:
+            return Option.None
+        let tok = s.tokens[s.pos]
+        s.pos = s.pos + 1
+        return Option.Some(tok)
+    return Option.None
+
+// Infallible companion to advance: consume and return the next significant
+// token, assuming the caller already verified via peek/peek_kind that a token
+// is present (T106 idiom fix). CONTRACT: caller MUST have observed Some(...)
+// from peek/peek_kind for the same cursor position before calling this.
+//
+// When the contract is violated (should never happen), a zero-span Eof sentinel
+// is returned rather than panicking — Buff has no infallible unwrap.
+func stream_advance_after_peek(s: TokenStream) -> Token:
+    let opt = stream_advance(s)
+    return stream_unwrap(opt)
+
+// Sentinel returned when advance_after_peek's contract is violated. A real
+// panic/expect is unavailable in Buff, so a synthetic zero-span Eof token is
+// returned; the contract violation is a programmer error, not a user-facing
+// path.
+func tok_missing_sentinel() -> Token:
+    return Token.new(kind: TokenKind.Eof, span: span_dummy())
+
+// True when the next significant token is `kind` (by structural match).
+func stream_check(s: TokenStream, kind: TokenKind) -> Bool:
+    return stream_peek_kind(s) == Option.Some(kind)
+
+// True when no more significant tokens remain.
+func stream_is_at_end(s: TokenStream) -> Bool:
+    return stream_peek(s) == Option.None
+
+// Consume the next token if its kind matches `expected_kind`. On success
+// returns an owned clone of the consumed token; on failure returns a ParseError
+// pointing at the offending (or EOF) position.
+func stream_expect(s: TokenStream, expected_kind: TokenKind) -> Result<Token, ParseError>:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        let msg = "expected `" + token_kind_to_string(expected_kind) + "`, found end of input"
+        return Result.Err(parse_error_new(diagnostic_error(msg, stream_eof_span(s)), ErrorCode.ExpectedToken))
+    let tok = stream_unwrap(opt)
+    if tok.kind == expected_kind:
+        return Result.Ok(stream_advance_after_peek(s))
+    let msg = "expected `" + token_kind_to_string(expected_kind) + "`, found `" + token_kind_to_string(tok.kind) + "`"
+    return Result.Err(parse_error_new(diagnostic_error(msg, tok.span), ErrorCode.ExpectedToken))
+
+// Build an "unexpected token" error pointing at the current position.
+func stream_unexpected(s: TokenStream, what: String) -> ParseError:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        let msg = "unexpected end of input: " + what
+        return parse_error_new(diagnostic_error(msg, stream_eof_span(s)), ErrorCode.UnexpectedToken)
+    let tok = stream_unwrap(opt)
+    let msg = "unexpected `" + token_kind_to_string(tok.kind) + "`: " + what
+    return parse_error_new(diagnostic_error(msg, tok.span), ErrorCode.UnexpectedToken)
+
+// Span for a synthetic "end of file" position. If we have any tokens, use the
+// last token's end offset; otherwise a dummy at offset 0.
+func stream_eof_span(s: TokenStream) -> Span:
+    let last = s.tokens.last()
+    return match last {
+        Some(tok) => span_new(tok.span.end, tok.span.end, s.source_id),
+        None => span_dummy(),
+    }
+
+// Build a span covering start_tok.span.start .. end_tok.span.end, using the
+// given SourceId. Used to compute parent-node spans from their children.
+func stream_span_between(start_tok: Token, end_tok: Token, source_id: SourceId) -> Span:
+    return span_new(start_tok.span.start, end_tok.span.end, source_id)
+
+// -----------------------------------------------------------------------
+// T25: speculative parsing — save / restore the cursor position.
+// -----------------------------------------------------------------------
+
+// Snapshot the current cursor position (T25). Pass the returned value to
+// stream_restore to roll the cursor back to this point.
+func stream_save(s: TokenStream) -> Int:
+    return s.pos
+
+// Restore the cursor to a previously-snapshotted position (T25).
+func stream_restore(s: TokenStream, pos: Int):
+    s.pos = pos
+
+// -----------------------------------------------------------------------
+// T9: layout-sensitive (offside-rule) helpers.
+// -----------------------------------------------------------------------
+
+// Vector::get equivalent returning Option<Token>. Returns None past the end
+// or for a negative index. (Buff's prelude Vector does not surface a get/Option
+// accessor, so this helper provides the Rust `slice.get(i)` shape.)
+func stream_vec_get(tokens: Vector<Token>, i: Int) -> Option<Token>:
+    if i < 0:
+        return Option.None
+    if i < tokens.len():
+        return Option.Some(tokens[i])
+    return Option.None
+
+// Peek at the next RAW token, including layout tokens. Returns None past the
+// end of the slice. Unlike peek, this does not skip layout tokens and does
+// not treat Eof specially (the caller can observe it).
+func stream_peek_raw(s: TokenStream) -> Option<Token>:
+    return stream_vec_get(s.tokens, s.pos)
+
+// Convenience: just the TokenKind of the next raw token.
+func stream_peek_raw_kind(s: TokenStream) -> Option<TokenKind>:
+    let t = stream_peek_raw(s)
+    return match t {
+        Some(tok) => Option.Some(tok.kind),
+        None => Option.None,
+    }
+
+// Advance past a single RAW token (does NOT skip layout tokens). Returns an
+// owned clone of the consumed token, or None at the end of the slice.
+func stream_advance_raw(s: TokenStream) -> Option<Token>:
+    let t = stream_vec_get(s.tokens, s.pos)
+    if t == Option.None:
+        return Option.None
+    s.pos = s.pos + 1
+    return t
+
+// True when the next raw token has kind `kind`. Use this for layout detection
+// without accidentally skipping past it like check would.
+func stream_check_raw(s: TokenStream, kind: TokenKind) -> Bool:
+    return stream_peek_raw_kind(s) == Option.Some(kind)
+
+// Consume an Indent token if the next raw token is one. Returns true if
+// consumed, false otherwise.
+func stream_consume_indent(s: TokenStream) -> Bool:
+    if stream_check_raw(s, TokenKind.Indent):
+        let _consumed = stream_advance_raw(s)
+        return true
+    return false
+
+// Consume a Dedent token if the next raw token is one.
+func stream_consume_dedent(s: TokenStream) -> Bool:
+    if stream_check_raw(s, TokenKind.Dedent):
+        let _consumed = stream_advance_raw(s)
+        return true
+    return false
+
+// Consume a Newline token if the next raw token is one. Useful for skipping
+// the trailing newline that precedes an Indent in a layout block.
+func stream_consume_newline(s: TokenStream) -> Bool:
+    if stream_check_raw(s, TokenKind.Newline):
+        let _consumed = stream_advance_raw(s)
+        return true
+    return false
+
+// Build a synthetic span anchored at the current raw position. Used for error
+// messages emitted by the layout parser when the cursor sits on a layout token.
+func stream_span_here(s: TokenStream) -> Span:
+    let opt = stream_vec_get(s.tokens, s.pos)
+    return match opt {
+        Some(tok) => tok.span,
+        None => stream_eof_span(s),
+    }
+
+// -----------------------------------------------------------------------
+// T36: error-recovery sync helper.
+// -----------------------------------------------------------------------
+
+// Skip tokens until the cursor sits on a sync point — a token that could
+// begin a fresh top-level declaration. Used by parse_recovering to resume
+// after a parse error.
+//
+// The cursor stops on (does NOT consume) any of: func, async, enum, import,
+// export, extern, extend, trait keywords (the top-level declaration
+// starters), `@` (attribute prefix), or end of input. Everything else is
+// consumed.
+//
+// Returns true if a sync token was found, false at end of input.
+func stream_sync_to_recovery_point(s: TokenStream) -> Bool:
+    for stream_is_at_end(s) == false:
+        let tok = stream_unwrap(stream_peek(s))
+        let k = tok.kind
+        if k == TokenKind.KwFunc:
+            return true
+        if k == TokenKind.KwAsync:
+            return true
+        if k == TokenKind.KwEnum:
+            return true
+        if k == TokenKind.KwImport:
+            return true
+        if k == TokenKind.KwExport:
+            return true
+        if k == TokenKind.KwExtern:
+            return true
+        if k == TokenKind.KwExtend:
+            return true
+        if k == TokenKind.KwTrait:
+            return true
+        if k == TokenKind.At:
+            return true
+        let _advanced = stream_advance(s)
+    return false
+
+// --- unwrap helper (Option<Token> -> Token) ---
+//
+// The Rust code relies on the caller having verified Some via peek. Buff has
+// no infallible unwrap, so this returns the inner token when present and a
+// zero-span Eof sentinel otherwise (contract: caller verified Some first).
+func stream_unwrap(opt: Option<Token>) -> Token:
+    return match opt {
+        Some(tok) => tok,
+        None => tok_missing_sentinel(),
+    }
