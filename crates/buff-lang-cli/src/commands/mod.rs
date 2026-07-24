@@ -9,6 +9,7 @@ pub mod backtrace;
 pub mod bench;
 pub mod bench_cold_start;
 pub mod bench_compile;
+pub mod bench_program;
 pub mod build;
 pub mod check;
 pub mod clean;

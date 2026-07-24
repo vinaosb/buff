@@ -245,6 +245,11 @@ fn main() -> Result<()> {
             no_backend,
         ),
         Command::Refactor { cmd } => buff_lang_cli::commands::refactor::run(cmd),
+        Command::BenchProgram {
+            file,
+            iterations,
+            warmup,
+        } => buff_lang_cli::commands::bench_program::run(&file, iterations, warmup),
         Command::Watch { file, interval } => {
             buff_lang_cli::commands::watch::run(&file, Some(interval))
         }

@@ -1134,6 +1134,50 @@ pub enum Command {
         no_backend: bool,
     },
 
+    /// `buff bench-program <FILE> [--iterations <N>] [--warmup <N>]` —
+    /// benchmark a Buff program's runtime performance (T99).
+    ///
+    /// Compiles the `.buff` file to a native binary once, then runs it N
+    /// times (default: 100) measuring wall-clock latency per run. Reports
+    /// min, avg (mean), max, p50, p99, and standard deviation in a
+    /// human-readable table.
+    ///
+    /// Warmup iterations (default: 10) run before measurement begins so
+    /// the OS caches / JIT warmup don't skew the first measured runs.
+    ///
+    /// # Output
+    ///
+    /// Prints a table to stdout:
+    ///
+    /// ```text
+    /// buff bench-program (T99) — 100 iterations + 10 warmup
+    ///
+    /// metric          value   unit
+    /// ------          -----   ----
+    /// min             1.23    ms
+    /// avg (mean)      1.45    ms
+    /// max             2.10    ms
+    /// p50             1.40    ms
+    /// p99             1.98    ms
+    /// stddev          0.12    ms
+    /// ```
+    ///
+    /// Exits with the program's exit code if compilation fails or the
+    /// binary exits non-zero on any iteration.
+    BenchProgram {
+        /// Input `.buff` source file to benchmark.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Number of measured iterations (default: 100).
+        #[arg(long, value_name = "N", default_value_t = 100)]
+        iterations: u32,
+
+        /// Number of warmup iterations before measurement (default: 10).
+        #[arg(long, value_name = "N", default_value_t = 10)]
+        warmup: u32,
+    },
+
     /// `buff watch <FILE> [--interval <MS>]` — file watcher with
     /// auto-recompile (T97).
     ///
