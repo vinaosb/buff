@@ -1,0 +1,380 @@
+// Buff self-host port of `crates/buff-lang-types/src/prelude_types.rs` (T17, Track C).
+//
+// The Buff **prelude-types** registry (T124b). The general, extensible
+// companion to prelude.buff (the free-fn registry): where prelude.buff
+// registers free functions (`abs`, `print`, ...), this module registers
+// TYPES WITH ASSOCIATED FUNCTIONS AND INSTANCE METHODS — the
+// `Type.method()` / `recv.method()` shape.
+//
+// The Rust reference splits the registry across SEVEN sibling files (the
+// T105b God-Class refactor): prelude_types.rs holds the PreludeType enum
+// + thin re-exports, and five other files hold the actual implementation:
+//   prelude_type_metadata.rs       — impl PreludeType + name + lookups
+//   prelude_assoc_fn_impl.rs       — PreludeAssocFn enum + assoc_fn_lookup
+//   prelude_assoc_const_impl.rs    — PreludeAssocConst + const lookups
+//   prelude_instance_fn_impl.rs    — PreludeInstanceFn + instance_fn_lookup
+//   prelude_return_types.rs        — assoc_fn_return_type / instance_fn_return_type
+//
+// This Buff port mirrors that split 1:1 (one .buff per .rs). The impl
+// blocks become free functions in the corresponding sibling .buff file
+// (the T15/T16 precedent — Buff has no `impl`).
+//
+// This file ports ONLY the PreludeType enum (102 variants). Each variant
+// is a prelude type name the user writes in Buff source (`DateTime`,
+// `Duration`, `Regex`, ...). They are NOT reserved keywords — like
+// `Option` and `Result`, they resolve as built-in prelude types via name
+// lookup, and shadowing them with a user-defined type is the user's
+// responsibility (a documented footgun, identical to shadowing `print`
+// with a user `print` function).
+
+// =============================================================================
+// PreludeType — the prelude type registry
+// =============================================================================
+//
+// Members are grouped by category (mirroring the order they were added to
+// the registry across v1.4+ stdlib waves):
+//   1. DateTime family (T124b)
+//   2. Free-fn namespaces (Log, Regex, Toml, Math, Random, Strings, Args, Env)
+//   3. Encoding namespaces (Base64, Hex, URLEncode, UUID)
+//   4. URL + structured-data namespaces (URL, Yaml, Json, Csv)
+//   5. Filesystem types (Path, Dir, Tempfile)
+//   6. Crypto namespaces (Hash, HMAC)
+//   7. System / networking (OS, Process, TCP, UDP, WebSocket, Channel)
+//   8. Data / media types (Tensor, Image, Faker, Cache, I18n, Signal,
+//      Window, Spectrum, DataFrame, Audio)
+//   9. ECS types (World, Entity)
+//  10. Audit / reactive / web types (Audit, Signature, ReactiveSignal,
+//      ReactiveComputed, ReactiveEffect, Web)
+//  11. Server types (Database, HttpClient, Config, Observe, Fuzz, Strategy,
+//      Validator, Archive)
+//  12. Text / auth types (Text, Jwt, OAuth2Client, Password, Rbac, Email,
+//      SmtpClient)
+//  13. Scrape / markup types (Document, Element, Crawler, Xml, XmlElement,
+//      MsgPack)
+//  14. Geo types (Point, LineString, Polygon)
+//  15. NLP types (Text, Language, StemAlgorithm)
+//  16. Interop types (Protobuf, Message)
+//  17. Chat types (Bot, ChatMessage, Platform)
+//  18. Web3 types (Provider, Wallet, ConnectedWallet, Contract, ContractMethod)
+//  19. Crypto-2 namespaces (AES, RSA, ECDH, Argon2, RsaKeypair)
+//  20. SIMD + actor types (Simd, ActorSystem, ActorRef, Supervisor,
+//      ChildSpec, RestartStrategy)
+//  21. Stdlib batch (File, Http, Assert, Decimal, Range)
+enum PreludeType {
+    // === 1. DATETIME FAMILY (T124b) ===
+    // A timezone-aware date+time. Wraps `chrono::DateTime<chrono::Utc>`.
+    DateTime,
+    // A calendar date without time or timezone. Wraps `chrono::NaiveDate`.
+    Date,
+    // A clock time without date or timezone. Wraps `chrono::NaiveTime`.
+    Time,
+    // A span of time. Wraps `chrono::TimeDelta`.
+    Duration,
+    // A monotonic instant for elapsed-time measurement. Wraps
+    // `std::time::Instant`. Distinct from DateTime (wall-clock).
+    Instant,
+
+    // === 2. FREE-FN NAMESPACES ===
+    // The structured-logging namespace (T124c). Wraps `tracing` +
+    // `tracing-subscriber`. Namespace-only — never a runtime value.
+    Log,
+    // The compiled-regex type (T124d). Wraps `regex::Regex`. Runtime value
+    // with instance methods.
+    Regex,
+    // The TOML namespace. Wraps `toml`. Namespace-only.
+    Toml,
+    // The math-utilities namespace. Wraps native std + a few constants.
+    // Namespace-only — exposes `Math.PI`, `Math.E`, `Math.floor`, etc.
+    Math,
+    // The random-number namespace. Wraps `rand`. Namespace-only.
+    Random,
+    // The string-utilities namespace. Wraps native String methods.
+    // Namespace-only.
+    Strings,
+    // The command-line-args namespace (T99). Namespace-only — `Args.all()`.
+    Args,
+    // The environment-variable namespace (T99). Namespace-only — `Env.get`.
+    Env,
+
+    // === 3. ENCODING NAMESPACES ===
+    // The Base64 encoding namespace. Wraps `base64`. Namespace-only.
+    Base64,
+    // The hex encoding namespace. Wraps `hex`. Namespace-only.
+    Hex,
+    // The URL-percentage-encoding namespace. Wraps
+    // `urlencoding`/`percent_encoding`. Namespace-only.
+    URLEncode,
+    // The UUID namespace. Wraps `uuid`. Namespace-only.
+    UUID,
+
+    // === 4. URL + STRUCTURED-DATA NAMESPACES ===
+    // The parsed-URL runtime-value type (T124h). Wraps `url::Url`. Runtime
+    // value with instance accessors.
+    URL,
+    // The YAML namespace. Wraps `serde_yaml`. Namespace-only.
+    Yaml,
+    // The JSON namespace. Wraps `serde_json`. Namespace-only.
+    Json,
+    // The CSV namespace. Wraps `csv`. Namespace-only.
+    Csv,
+
+    // === 5. FILESYSTEM TYPES ===
+    // The filesystem-path runtime-value type (T124j). Wraps
+    // `std::path::PathBuf`. Runtime value with instance methods.
+    Path,
+    // The directory-iterator type. Wraps `std::fs::ReadDir`.
+    Dir,
+    // The temp-file handle type. Wraps `tempfile::NamedTempFile`.
+    Tempfile,
+
+    // === 6. CRYPTO NAMESPACES ===
+    // The hashing namespace (SHA-2 family). Wraps `sha2`. Namespace-only.
+    Hash,
+    // The HMAC namespace. Wraps `hmac`. Namespace-only.
+    HMAC,
+
+    // === 7. SYSTEM / NETWORKING ===
+    // The operating-system namespace. Wraps `std::env::consts`. Namespace-only.
+    OS,
+    // The spawned-process runtime-value type (T124l). Wraps
+    // `Option<std::process::Child>`. The Option wrapper lets spawn be
+    // panic-free.
+    Process,
+    // The TCP listener namespace. Wraps `tokio::net::TcpListener`. Mixed
+    // namespace + runtime value (Listener is runtime, bind is assoc fn).
+    TCP,
+    // The UDP socket type. Wraps `tokio::net::UdpSocket`.
+    UDP,
+    // The WebSocket type. Wraps `tokio_tungstenite::WebSocketStream`.
+    WebSocket,
+    // The MPSC channel constructor namespace (T2). Wraps
+    // `buff_lang_runtime::channel`. Namespace-only — `Channel.new(buf)`.
+    Channel,
+
+    // === 8. DATA / MEDIA TYPES ===
+    // The n-dimensional tensor type (v1.14 Wave 2). Wraps `buff_tensor`.
+    Tensor,
+    // The image-buffer type (T9). Wraps `buff_image::Image`.
+    Image,
+    // The fake-data generator type (T37). Wraps `buff_fake::Faker`.
+    Faker,
+    // The in-memory cache type (T31). Wraps `buff_cache::Cache`.
+    Cache,
+    // The internationalisation bundle type. Wraps `buff_i18n::I18n`.
+    I18n,
+    // The reactive-signal cell type (T56). Wraps `buff_reactive::Signal`.
+    Signal,
+    // The game-window type. Wraps `buff_game::Window`.
+    Window,
+    // The DSP spectrum type (T10). Wraps `buff_dsp::Spectrum`.
+    Spectrum,
+    // The dataframe type (v1.14 Wave 2). Wraps `buff_dataframe::DataFrame`.
+    DataFrame,
+    // The audio-buffer type (T8). Wraps `buff_audio::AudioBuffer`.
+    Audio,
+
+    // === 9. ECS TYPES ===
+    // The ECS world type (T12). Wraps `buff_ecs::World`.
+    World,
+    // The ECS entity handle (T12). Wraps `buff_ecs::Entity`.
+    Entity,
+
+    // === 10. AUDIT / REACTIVE / WEB TYPES ===
+    // The audit-log namespace. Wraps `buff_audit`. Namespace-only.
+    Audit,
+    // The signature type for audit entries. Wraps `buff_audit::Signature`.
+    Signature,
+    // The reactive-signal cell type (T56). Wraps
+    // `buff_reactive::ReactiveSignal`. Distinct from `Signal` (legacy).
+    ReactiveSignal,
+    // The reactive-computed type (T56). Wraps
+    // `buff_reactive::ReactiveComputed`.
+    ReactiveComputed,
+    // The reactive-effect type (T56). Wraps `buff_reactive::ReactiveEffect`.
+    ReactiveEffect,
+    // The web-app type. Wraps `buff_web::Web`.
+    Web,
+
+    // === 11. SERVER TYPES ===
+    // The database type. Wraps `buff_db::Database`.
+    Database,
+    // The HTTP client type (T33). Wraps `buff_http_client::HttpClient`.
+    HttpClient,
+    // The config namespace. Wraps `buff_config`. Namespace-only.
+    Config,
+    // The observability namespace. Wraps `buff_observe`. Namespace-only.
+    Observe,
+    // The fuzz-testing namespace. Wraps `buff_fuzz`. Namespace-only.
+    Fuzz,
+    // The fuzz-strategy type. Wraps `buff_fuzz::Strategy`.
+    Strategy,
+    // The validator type (T29). Wraps `buff_validate::Validator`.
+    Validator,
+    // The archive namespace. Wraps `buff_archive`. Namespace-only.
+    Archive,
+
+    // === 12. TEXT / AUTH TYPES ===
+    // The natural-language text type (T46). Wraps `buff_nlp::Text`.
+    Text,
+    // The JWT namespace. Wraps `jsonwebtoken`. Namespace-only.
+    Jwt,
+    // The OAuth2 client type. Wraps `buff_auth::OAuth2Client`.
+    OAuth2Client,
+    // The password-hashing namespace. Wraps `buff_auth::Password`.
+    Password,
+    // The RBAC namespace. Wraps `buff_auth::Rbac`. Namespace-only.
+    Rbac,
+    // The email-message type (T42). Wraps `buff_email::Email`.
+    Email,
+    // The SMTP-client type (T42). Wraps `buff_email::SmtpClient`.
+    SmtpClient,
+
+    // === 13. SCRAPE / MARKUP TYPES ===
+    // The parsed-HTML document type (T43). Wraps `buff_scrape::Document`.
+    Document,
+    // The DOM element type (T43). Wraps `buff_scrape::Element`.
+    Element,
+    // The web-crawler type (T43). Wraps `buff_scrape::Crawler`.
+    Crawler,
+    // The XML document type (T50). Wraps `buff_xml::XmlDocument`.
+    Xml,
+    // The XML element type (T50). Wraps `buff_xml::XmlElement`.
+    XmlElement,
+    // The MsgPack namespace (T51). Wraps `rmp`. Namespace-only.
+    MsgPack,
+
+    // === 14. GEO TYPES ===
+    // The geo point type (T45). Wraps `buff_geo::Point`.
+    Point,
+    // The geo line-string type (T45). Wraps `buff_geo::LineString`.
+    LineString,
+    // The geo polygon type (T45). Wraps `buff_geo::Polygon`.
+    Polygon,
+
+    // === 15. NLP TYPES ===
+    // The detected-natural-language type (T46). Wraps `buff_nlp::Language`.
+    Language,
+    // The Snowball stemming-algorithm selector (T46). Wraps
+    // `buff_nlp::StemAlgorithm`. Opaque enum — passed as an arg only.
+    StemAlgorithm,
+
+    // === 16. INTEROP TYPES ===
+    // The Protocol-Buffers namespace type. Wraps `buff_protobuf::Protobuf`.
+    Protobuf,
+    // The Protobuf message runtime-value type. Wraps
+    // `buff_protobuf::Message`.
+    Message,
+
+    // === 17. CHAT TYPES ===
+    // The cross-platform chat-bot type (T47). Wraps `buff_chat::Bot`.
+    Bot,
+    // The chat-message runtime-value type (T47). Wraps
+    // `buff_chat::Message`. Named ChatMessage (T52 collision with
+    // buff_lang_ast::Message).
+    ChatMessage,
+    // The chat-platform enum (T47). Wraps `buff_chat::Platform`.
+    Platform,
+
+    // === 18. WEB3 TYPES ===
+    // The Ethereum JSON-RPC provider type (T48). Wraps `buff_web3::Provider`.
+    Provider,
+    // The secp256k1 private-key wallet type (T48). Wraps `buff_web3::Wallet`.
+    Wallet,
+    // The Wallet+Provider pair signing-client type (T48). Wraps
+    // `buff_web3::ConnectedWallet`.
+    ConnectedWallet,
+    // The deployed smart-contract type (T48). Wraps `buff_web3::Contract`.
+    Contract,
+    // The chainable ABI method call-builder (T48). Wraps
+    // `buff_web3::ContractMethod`.
+    ContractMethod,
+
+    // === 19. CRYPTO-2 NAMESPACES ===
+    // The AES namespace (T49). Wraps `buff_crypto_extras::AES`.
+    // Namespace-only — never a runtime value.
+    AES,
+    // The RSA namespace (T49). Wraps `buff_crypto_extras::RSA`.
+    // Namespace-only.
+    RSA,
+    // The ECDH namespace (T49). Wraps `buff_crypto_extras::ECDH`.
+    // Namespace-only.
+    ECDH,
+    // The Argon2 namespace (T49). Wraps `buff_crypto_extras::Argon2`.
+    // Namespace-only.
+    Argon2,
+    // The RSA keypair runtime-value type (T49). Wraps
+    // `buff_crypto_extras::RsaKeypair`. Constructed ONLY via
+    // `RSA.generate_keypair(bits)`.
+    RsaKeypair,
+
+    // === 20. SIMD + ACTOR TYPES ===
+    // The 4-lane f32x4 SIMD register type (T54). Wraps `buff_simd::Simd`.
+    Simd,
+    // The actor-system type (T59). Wraps `buff_actors::ActorSystem`.
+    ActorSystem,
+    // The actor-reference type (T59). Wraps `buff_actors::ActorRef`.
+    ActorRef,
+    // The supervisor type (T59). Wraps `buff_actors::Supervisor`.
+    Supervisor,
+    // The child-spec type (T59). Wraps
+    // `buff_actors::supervisor::ChildSpec`.
+    ChildSpec,
+    // The restart-strategy enum (T59). Wraps
+    // `buff_actors::supervisor::RestartStrategy`.
+    RestartStrategy,
+
+    // === 21. STDLIB BATCH (T25/T26/T89/T84) ===
+    // The file-IO namespace (T25). Wraps `std::fs`. Namespace-only —
+    // `File.read`, `File.write`, `File.exists`, `File.append`.
+    File,
+    // The HTTP-client namespace (T25). Wraps `reqwest::blocking`.
+    // Namespace-only — `Http.get(url)`, `Http.post(url, body)`.
+    Http,
+    // The test-assertion namespace (T26). Namespace-only — `Assert.equal`,
+    // `Assert.not_equal`, `Assert.true_`, `Assert.false_`, `Assert.contains`.
+    Assert,
+    // The fixed-point decimal type (T89). Wraps `rust_decimal::Decimal`.
+    // Constructed via `Decimal.new(str)` / `Decimal.from_float(f)`.
+    Decimal,
+    // The lazy integer-range type (T84). `Range<T>` is the type of
+    // `start..end` (exclusive) and `start..=end` (inclusive). LAZY iterator
+    // (Rust `std::ops::Range`), NOT a `Vector<T>`. Never constructed by an
+    // associated function — only by the `..`/`..=` operator.
+    Range,
+}
+
+// =============================================================================
+// Re-export surface (mirrors the T105b split re-exports at the bottom of
+// the Rust reference). The actual implementations live in sibling .buff
+// files; this section documents the import graph.
+// =============================================================================
+//
+// From prelude_type_metadata.buff:
+//   func is_prelude_type(name: String) -> Bool
+//   func prelude_type_lookup(name: String) -> Option<PreludeType>
+//
+// From prelude_assoc_fn_impl.buff:
+//   enum PreludeAssocFn { ... }            // ~400 variants
+//   func assoc_fn_lookup(type_name: String, method: String) -> Option<PreludeAssocFn>
+//
+// From prelude_assoc_const_impl.buff:
+//   enum PreludeAssocConst { ... }         // PI, E, ...
+//   func assoc_const_lookup(type_name: String, const_name: String) -> Option<PreludeAssocConst>
+//   func assoc_const_return_type(c: PreludeAssocConst) -> Type
+//
+// From prelude_return_types.buff:
+//   func assoc_fn_return_type(call: PreludeAssocFn, args: Vector<Type>) -> Type
+//   func instance_fn_return_type(call: PreludeInstanceFn, recv: Type, args: Vector<Type>) -> Type
+//
+// From prelude_instance_fn_impl.buff:
+//   enum PreludeInstanceFn { ... }         // ~190 variants
+//   func instance_fn_lookup(method: String, recv: Type) -> Option<PreludeInstanceFn>
+
+// =============================================================================
+// Tests (mirrors the `mod tests;` declaration in the Rust reference)
+// =============================================================================
+//
+// The Rust reference has `#[cfg(test)] mod tests;` pointing at
+// `prelude_types/tests.rs`. The test module is OUT OF SCOPE for this
+// self-host port (the tests verify Rust-side behaviour; the .buff port
+// is parse-documentation only — see the T15/T16 precedent).
