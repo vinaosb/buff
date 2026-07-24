@@ -488,21 +488,19 @@ buff-jupyter = { path = "crates/buff-jupyter" }
 # was a one-shot throwaway; the decision doc mandates v1.8 use the
 # caret pin `dioxus = "0.7"` at the workspace level and re-test on
 # every minor bump — the dioxus-rsx proc-macro internals are NOT
-# covered by semver guarantees. Cargo resolved the sub-crates
-# (dioxus-core / -hooks / -signals / -html / -web / ...) to 0.7.9
-# transitively during the spike; the umbrella's minor bump range keeps
-# them moving in lockstep.
-dioxus = "0.7"
+# covered by semver guarantees. T29 (v1.25 tech-debt batch) upgraded
+# to exact pin `=0.7.9` (the resolved version in Cargo.lock) to
+# prevent surprise breakage from dioxus-rsx proc-macro changes.
+# Cargo resolved the sub-crates (dioxus-core / -hooks / -signals /
+# -html / -web / ...) to 0.7.9 transitively.
+dioxus = "=0.7.9"
 # T135: Dioxus 0.7 Server-Side Rendering crate. Pinned at the workspace
 # level alongside the `dioxus` umbrella so the SSR version tracks the
 # dioxus-core / dioxus-signals minor bump in lockstep (the dioxus-rsx +
 # VirtualDom internals are NOT covered by semver guarantees — same
-# rationale as the umbrella pin at line 441). The crate exposes the
-# canonical `dioxus_ssr::render(&VirtualDom) -> String` convenience used
-# by `buff-ui-dioxus::render_to_string` (T135) and the `buff ssr` CLI
-# subcommand. No feature flags required — pure-Rust, no native deps,
-# matches the "no C library, no Docker" hard rule.
-dioxus-ssr = "0.7"
+# rationale as the umbrella pin). Exact pin `=0.7.9` matches the
+# umbrella (T29 v1.25 tech-debt batch).
+dioxus-ssr = "=0.7.9"
 # T130: `buff-ui-dioxus` workspace path dep — mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter pattern so any
 # future consumer (T133 RSX-for-Buff syntax surface, T138c Bufflings UI
