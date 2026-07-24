@@ -182,7 +182,7 @@ impl Input {
     /// hook exists so a future v1.18+ enhancement can add
     /// "just-pressed" / "just-released" edge detection without
     /// changing the call sites.
-    pub fn begin_frame(&mut self) {
+    pub(crate) fn begin_frame(&mut self) {
         // MVP: no per-frame distinction. Future: snapshot `down` into
         // `down_prev` and derive `just_pressed = down - down_prev`.
     }

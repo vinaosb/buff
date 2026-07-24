@@ -117,7 +117,7 @@ impl Renderer {
     /// Drop every pending command. Called by [`Game::step`](crate::Game::step)
     /// at the start of each frame to ensure the command list only
     /// contains draw calls from the current frame.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.commands.clear();
     }
 }

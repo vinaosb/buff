@@ -52,16 +52,16 @@
 //!
 //! | Type | Functions |
 //! |------|-----------|
-//! | [`Game`] | `new`, `add_scene`, `run`, `quit`, `step`, `is_running`, `elapsed`, `scene_count`, `world`, `world_mut`, `input`, `input_mut`, `renderer_mut` |
+//! | [`Game`] | `new`, `add_scene`, `run`, `quit`, `step`, `is_running`, `elapsed`, `scene_count`, `world`, `world_mut`, `input`, `input_mut`, `renderer_mut`, `asset_mut`, `config` |
 //! | [`GameConfig`] | `new`, `default` |
 //! | [`Scene`] trait | `on_enter`, `on_update` |
-//! | [`SimpleScene`] | `new` |
+//! | [`SimpleScene`] | `new`, `with_enter` |
 //! | [`Asset`] | `load_texture`, `load_audio`, `cache_get` |
-//! | [`Renderer`] | `draw_sprite`, `draw_text`, `new`, `commands`, `clear` |
-//! | [`Input`] | `is_key_pressed`, `mouse_position`, `new`, `set_key`, `set_mouse_position`, `begin_frame` |
+//! | [`Renderer`] | `draw_sprite`, `draw_text`, `new`, `commands` |
+//! | [`Input`] | `is_key_pressed`, `mouse_position`, `new`, `set_key`, `set_mouse_position` |
 //! | [`Transform`] | `new`, `translate`, `rotate` |
 //! | [`Texture`] | `width`, `height` |
-//! | [`Key`] | `from_str` (FromStr impl) |
+//! | [`Key`] | `as_str` |
 //!
 //! Total: 40 public functions — exactly at the T16 40-fn cap.
 //!

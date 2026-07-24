@@ -91,7 +91,7 @@ CI runs `cargo test -p buff-game` on all 3 OSes. On Windows MSVC hosts, the `aha
 
 ## PUBLIC API SURFACE (40 public functions, 40-fn cap — at limit)
 
-**Game (14):** `new`, `add_scene`, `run`, `quit`, `step`, `is_running`, `elapsed`, `scene_count`, `world`, `world_mut`, `input`, `input_mut`, `renderer_mut`, `config`
+**Game (15):** `new`, `add_scene`, `run`, `quit`, `step`, `is_running`, `elapsed`, `scene_count`, `world`, `world_mut`, `input`, `input_mut`, `renderer_mut`, `asset_mut`, `config`
 
 **GameConfig (2):** `new`, `default`
 
@@ -101,9 +101,9 @@ CI runs `cargo test -p buff-game` on all 3 OSes. On Windows MSVC hosts, the `aha
 
 **Asset (3):** `load_texture`, `load_audio`, `cache_get`
 
-**Renderer (5):** `new`, `draw_sprite`, `draw_text`, `commands`, `clear`
+**Renderer (4):** `new`, `draw_sprite`, `draw_text`, `commands`
 
-**Input (6):** `new`, `is_key_pressed`, `mouse_position`, `set_key`, `set_mouse_position`, `begin_frame`
+**Input (5):** `new`, `is_key_pressed`, `mouse_position`, `set_key`, `set_mouse_position`
 
 **Transform (3):** `new`, `translate`, `rotate`
 

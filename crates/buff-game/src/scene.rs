@@ -109,7 +109,7 @@ impl SimpleScene {
     }
 
     /// The scene's name (diagnostic / debug output).
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
