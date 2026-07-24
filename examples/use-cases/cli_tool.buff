@@ -1,0 +1,110 @@
+// cli_tool.buff - v1.26 real-use-case (T12 batch 2).
+//
+// A text-processing CLI with three subcommands (parse / transform / output)
+// built on the `buff-cli` framework (clap-equivalent). Exercises:
+//   - CLI builder API: App.new, .about, .version, .flag, .option, .arg,
+//     .command (subcommands), .parse
+//   - ParsedArgs accessors: .subcommand(), .subcommand_args(), .flag(),
+//     .option(), .arg()
+//   - command dispatch via `match` on the subcommand name
+//   - stdin/stdout shaping (Option-returning getters + `or(default:)`)
+//
+// ⚠ FORWARD-DECLARED: `App` / `ParsedArgs` prelude-type registration +
+// codegen lowering arms are deferred to a coordinated sibling commit
+// (see buff-cli/AGENTS.md "RELATIONSHIP TO OTHER CRATES"). `buff check`
+// therefore cannot yet resolve `App.new(...)`; `buff run` cannot execute.
+// This file mirrors the exact surface already exercised by
+// crates/buff-cli/examples/cli/*.buff and feeds the T8 codegen task.
+
+import App from buff.cli
+
+// --- transform primitives (pure, deterministic, testable today) ---
+
+func to_upper(text: String) -> String:
+    return text.upper()
+
+func to_lower(text: String) -> String:
+    return text.lower()
+
+func reverse(text: String) -> String:
+    return text.reverse()
+
+// Apply a named transform. Unknown names pass through unchanged so a
+// typo degrades to identity rather than crashing the pipeline.
+func apply_transform(text: String, name: String) -> String:
+    match name:
+        "upper":
+            return to_upper(text)
+        "lower":
+            return to_lower(text)
+        "reverse":
+            return reverse(text)
+        _:
+            return text
+
+// `parse` subcommand: read a blob, report token + line counts.
+func run_parse(parsed):
+    let text = parsed.arg("input").or(default: "")
+    if text.len() == 0:
+        print("(nothing to parse)")
+        return
+    let lines = text.split(separator: "\n")
+    let words = text.split(separator: " ")
+    print("parse: {lines.len()} line(s), {words.len()} token(s)")
+
+// `transform` subcommand: apply --op to the input string.
+func run_transform(parsed):
+    let verbose = parsed.flag("verbose")
+    let op = parsed.option("op").or(default: "upper")
+    let text = parsed.arg("input").or(default: "")
+    let out = apply_transform(text, name: op)
+    if verbose:
+        print("[transform:{op}] {text!r} -> {out!r}")
+    else:
+        print(out)
+
+// `output` subcommand: emit a labelled header line + the body, honouring
+// the --format flag (plain | boxed). Demonstrates option-driven dispatch.
+func run_output(parsed):
+    let format = parsed.option("format").or(default: "plain")
+    let label = parsed.option("label").or(default: "result")
+    let body = parsed.arg("input").or(default: "")
+    match format:
+        "boxed":
+            print("+- {label} ".pad_end(width: 40, fill: "-"))
+            print("| {body}")
+            print("+" + "".pad_end(width: 39, fill: "-"))
+        _:
+            print("{label}: {body}")
+
+func main():
+    // Build the root app + three subcommands.
+    let app = App.new("textool")
+        .version("0.1.0")
+        .about("Tiny text-processing CLI (parse / transform / output)")
+
+    let parse_cmd = app.command("parse", about: "report line + token counts")
+    parse_cmd.arg("input", description: "text blob to inspect")
+
+    let transform_cmd = app.command("transform", about: "apply a transform to the input")
+    transform_cmd.flag("verbose", short: "v", description: "emit before/after repr")
+    transform_cmd.option("op", short: "o", description: "transform: upper | lower | reverse")
+    transform_cmd.arg("input", description: "text to transform")
+
+    let output_cmd = app.command("output", about: "emit a labelled result line")
+    output_cmd.option("format", short: "f", description: "plain | boxed")
+    output_cmd.option("label", short: "l", description: "result label")
+    output_cmd.arg("input", description: "body text")
+
+    // Parse argv and dispatch. `parse_or_exit` prints clap errors + exits.
+    let parsed = app.parse(Args.all())
+    match parsed.subcommand():
+        Some("parse"):
+            run_parse(parsed.subcommand_args())
+        Some("transform"):
+            run_transform(parsed.subcommand_args())
+        Some("output"):
+            run_output(parsed.subcommand_args())
+        _:
+            print("textool v0.1.0 — usage: textool <parse|transform|output> [args]")
+            print("try: textool --help")

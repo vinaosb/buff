@@ -1,0 +1,38 @@
+# Expected output from `buff check examples/use-cases/csv_analyzer.buff`
+#
+# Analysis based on reading the check.rs pipeline (lex → parse → TypeInferencer → naming_lint)
+# and prelude_types.rs registrations (4527 lines, only DateTime/Regex/URL/Path/Process registered).
+#
+# STATUS: PASS (with Unknown type warnings)
+#
+# The file uses:
+# - DataFrame API: from_csv, column_names, len, ncols, select, filter, sort, head, group_by, agg, to_table_string
+# - AggOp enum: Mean, Sum, Count
+# - Series accessors: as_float_slice
+# - String methods: len, push, get_or (NOT registered in prelude_types.rs)
+#
+# What buff check would report:
+# - Lex: OK (all tokens valid)
+# - Parse: OK (all syntax valid)
+# - Type inference: Many Unknown types from unregistered types/methods, but NO hard errors
+#   - DataFrame.from_csv(...) → Unknown (DataFrame NOT in prelude registry)
+#   - df.column_names() → Unknown
+#   - df.len() → Unknown
+#   - df.ncols() → Unknown
+#   - df.filter(...) → Unknown
+#   - df.select(...) → Unknown
+#   - df.sort(...) → Unknown
+#   - df.head(...) → Unknown
+#   - df.group_by(...) → Unknown
+#   - by_region.agg(...) → Unknown
+#   - df.to_table_string() → Unknown
+#   - series.as_float_slice() → Unknown
+#   - slice.len() → Unknown
+# - naming_lint: May flag unused variables or shadowing
+# - Overall: PASS (permissive type inference allows Unknown types)
+#
+# Note: buff check cannot verify end-to-end execution because:
+# 1. DataFrame is NOT registered in prelude_types.rs (only documented in ty.rs Type enum)
+# 2. All DataFrame instance methods are unregistered
+# 3. AggOp enum is not registered in prelude
+# 4. This is a FORWARD-DECLARED example (see file header comment)

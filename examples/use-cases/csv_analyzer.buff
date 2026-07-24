@@ -1,0 +1,89 @@
+// csv_analyzer.buff - v1.26 real-use-case (T12 batch 2).
+//
+// Loads CSV sales data via `buff-dataframe`, runs a group-by aggregation,
+// computes per-column statistics, and prints a formatted summary report.
+// Exercises:
+//   - DataFrame API: from_csv, column_names, len, ncols, select, filter,
+//     sort, head, group_by(...).agg(...), to_table_string
+//   - aggregation ops: sum, mean, min, max, count
+//   - Series accessors for numeric stats (as_int_slice / as_float_slice)
+//   - formatted reporting (string interpolation + table output)
+//
+// ⚠ FORWARD-DECLARED: `Type::DataFrame` exists in the prelude registry
+// (crates/buff-lang-types/src/ty.rs), but the codegen lowering arms for
+// its instance methods (from_csv / group_by / agg / ...) are deferred to
+// a coordinated sibling task (see buff-dataframe/AGENTS.md "WHERE TO
+// LOOK"). `buff check` therefore cannot yet resolve method calls on a
+// DataFrame; `buff run` cannot execute end-to-end. This file is a
+// faithful specification of the intended user surface and feeds the T8
+// + T9 framework-codegen tasks.
+
+import DataFrame from buff.dataframe
+import AggOp from buff.dataframe
+
+// Format a numeric mean to 2 decimal places for the report.
+func fmt_mean(value: Double) -> String:
+    return "{value:.2}"
+
+// Summarize a single numeric column by name. Returns a one-line string.
+func summarize_column(df, col: String) -> String:
+    let series = df.get_column(col)
+    let slice = series.as_float_slice()
+    if slice.len() == 0:
+        return "{col}: (empty)"
+    let mut total = 0.0
+    let mut lo = slice[0]
+    let mut hi = slice[0]
+    for v in slice:
+        total = total + v
+        if v < lo:
+            lo = v
+        if v > hi:
+            hi = v
+    let mean = total / slice.len()
+    return "{col:>10} | n={slice.len()} | sum={total:.2} | mean={fmt_mean(mean)} | min={lo:.2} | max={hi:.2}"
+
+func main():
+    print("=== CSV Analyzer ===")
+
+    // Load the sample dataset. sales.csv columns: region, product, amount, units.
+    let df = DataFrame.from_csv(path: "examples/use-cases/sales.csv")
+    print("loaded {df.len()} rows x {df.ncols()} columns")
+    print("columns: {df.column_names()}")
+    print("")
+    print("raw data:")
+    print(df.to_table_string())
+
+    // Filter to non-trivial orders and project to the columns we care about.
+    let big = df
+        .filter(predicate: { row => row.get_float("amount") >= 50.0 })
+        .select(cols: ["region", "product", "amount", "units"])
+        .sort(by: "amount", descending: true)
+        .head(n: 10)
+    print("")
+    print("top-10 orders (amount >= 50.0):")
+    print(big.to_table_string())
+
+    // --- Aggregation: mean amount + total units per region ---
+    let by_region = df.group_by(col: "region")
+    let mean_amount = by_region.agg(col: "amount", op: AggOp.Mean)
+    print("")
+    print("mean amount per region:")
+    print(mean_amount.to_table_string())
+
+    let total_units = df.group_by(col: "region").agg(col: "units", op: AggOp.Sum)
+    print("total units per region:")
+    print(total_units.to_table_string())
+
+    // --- Per-column statistics summary ---
+    print("")
+    print("=== numeric column summary ===")
+    for col in ["amount", "units"]:
+        print(summarize_column(df, col: col))
+
+    // --- Count breakdown by product ---
+    let by_product = df.group_by(col: "product").agg(col: "product", op: AggOp.Count)
+    print("")
+    print("orders per product:")
+    print(by_product.to_table_string())
+    print("=== done ===")

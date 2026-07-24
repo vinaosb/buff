@@ -1,0 +1,101 @@
+// file_processor.buff - v1.26 real-use-case (T12 batch 2).
+//
+// Reads a text file, processes each line (trim, number, classify length),
+// and writes a report back to disk. Exercises:
+//   - file I/O via `extern std::fs` (read_to_string / write)
+//   - string processing (split on newlines, trim, interpolation)
+//   - Result<T, Error> handling with the `?` operator and `match`
+//   - iteration over Vector<T> + accumulation into a Map<K, V>
+//
+// ⚠ CODEGEN-ONLY: `extern` bindings need a Cargo project to LINK against
+// the named crate (the single-file `rustc` pipeline cannot link `std` as
+// an extern crate — see examples/extern_serde_json.buff for the same
+// limitation). `buff check` (typecheck, no codegen) is the supported
+// verification path. The deterministic core (`process_text`) is exercised
+// directly in `main` so the logic is testable today.
+
+// --- FFI bindings to std::fs (see docs/extern-guide.md) ---
+
+// read_to_string: read an entire file into a String, or fail.
+extern "C" from "std::fs" func read_to_string(path: String) -> Result<String, Error>
+
+// write: atomically write a String to a path, or fail.
+extern "C" from "std::fs" func write(path: String, contents: String) -> Result<Void, Error>
+
+// Classify a single line's length into a human bucket.
+func classify(length: Int) -> String:
+    if length == 0:
+        return "empty"
+    if length < 20:
+        return "short"
+    if length < 60:
+        return "medium"
+    return "long"
+
+// Split a blob into trimmed, non-empty lines. Pure + deterministic so it
+// can be unit-tested without touching the filesystem.
+func split_lines(text: String) -> Vector<String>:
+    let out = []
+    // NOTE: `.split(separator: ...)` on String is the prelude string API.
+    // Each piece is trimmed; blank lines are skipped.
+    let raw = text.split(separator: "\n")
+    for line in raw:
+        let trimmed = line.trim()
+        if trimmed.len() > 0:
+            out.push(trimmed)
+    return out
+
+// Build the report body from a list of lines. Returns a formatted string
+// with numbered lines, length classification, and a summary footer.
+func build_report(lines: Vector<String>) -> String:
+    let body = []
+    let counts = {String: 0}
+    let mut index = 1
+    for line in lines:
+        let bucket = classify(line.len())
+        body.push("{index:03d} [{bucket:>6}] {line}")
+        let prev = counts.get_or(bucket, default: 0)
+        counts[bucket] = prev + 1
+        index = index + 1
+    // Render a summary footer.
+    let total = lines.len()
+    let footer = []
+    footer.push("--- summary ---")
+    footer.push("total lines: {total}")
+    for bucket in ["empty", "short", "medium", "long"]:
+        let n = counts.get_or(bucket, default: 0)
+        footer.push("{bucket:>6}: {n}")
+    let joined_body = body.join(separator: "\n")
+    let joined_footer = footer.join(separator: "\n")
+    return joined_body + "\n" + joined_footer
+
+// Fallible end-to-end: read -> process -> write. Propagates IO errors via `?`.
+func process_file(input_path: String, output_path: String) -> Result<Int, Error>:
+    let text = read_to_string(input_path)?
+    let lines = split_lines(text)
+    let report = build_report(lines)
+    let _ = write(output_path, contents: report)?
+    return Ok(lines.len())
+
+func main():
+    // --- Deterministic demo (runs without touching the FS) ---
+    // Mirror the file-shaped pipeline on an embedded sample so the core
+    // logic is observable even before the extern linker path lands.
+    let sample = "hello world\n\nthis is a medium length line for testing\nx\na much longer line that should definitely be classified as long by the bucket heuristic above"
+    let lines = split_lines(sample)
+    print("processed {lines.len()} non-blank lines")
+    print(build_report(lines))
+
+    // --- End-to-end path (codegen-only today) ---
+    // Demonstrates the Result + `?` + match shape that production callers
+    // use. Wrapped in a match so a missing sample file degrades to a
+    // printed note instead of aborting the demo.
+    let outcome = process_file(
+        input_path: "examples/use-cases/sample_input.txt",
+        output_path: "examples/use-cases/sample_output.txt"
+    )
+    match outcome:
+        Ok(n):
+            print("wrote report for {n} lines")
+        Err(e):
+            print("skipped file round-trip: {e}")

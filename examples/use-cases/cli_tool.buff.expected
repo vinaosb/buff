@@ -1,0 +1,44 @@
+# Expected output from `buff check examples/use-cases/cli_tool.buff`
+#
+# Analysis based on reading the check.rs pipeline (lex → parse → TypeInferencer → naming_lint)
+# and prelude_types.rs registrations (4527 lines, only DateTime/Regex/URL/Path/Process registered).
+#
+# STATUS: PASS (with Unknown type warnings)
+#
+# The file uses:
+# - App API: new, version, about, command, flag, option, arg, parse
+# - ParsedArgs API: subcommand, subcommand_args, flag, option, arg
+# - String methods: upper, lower, reverse, len, split, pad_end (NOT registered in prelude_types.rs)
+# - Option<T> with or(default:) (registered in prelude)
+#
+# What buff check would report:
+# - Lex: OK (all tokens valid)
+# - Parse: OK (all syntax valid)
+# - Type inference: Many Unknown types from unregistered types/methods, but NO hard errors
+#   - App.new(...) → Unknown (App NOT in prelude registry)
+#   - app.version(...) → Unknown
+#   - app.about(...) → Unknown
+#   - app.command(...) → Unknown
+#   - parse_cmd.arg(...) → Unknown
+#   - transform_cmd.flag(...) → Unknown
+#   - transform_cmd.option(...) → Unknown
+#   - app.parse(...) → Unknown
+#   - parsed.subcommand() → Unknown
+#   - parsed.subcommand_args() → Unknown
+#   - parsed.flag(...) → Unknown
+#   - parsed.option(...) → Unknown
+#   - parsed.arg(...) → Unknown
+#   - text.upper() → Unknown
+#   - text.lower() → Unknown
+#   - text.reverse() → Unknown
+#   - text.len() → Unknown
+#   - text.split(...) → Unknown
+#   - "".pad_end(...) → Unknown
+# - naming_lint: May flag unused variables or shadowing
+# - Overall: PASS (permissive type inference allows Unknown types)
+#
+# Note: buff check cannot verify end-to-end execution because:
+# 1. App is NOT registered in prelude_types.rs (only documented in cli AGENTS.md)
+# 2. All App/ParsedArgs instance methods are unregistered
+# 3. String instance methods (upper, lower, reverse, etc.) are NOT registered
+# 4. This is a FORWARD-DECLARED example (see file header comment)

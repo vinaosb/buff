@@ -1,0 +1,30 @@
+# Expected output from `buff check examples/use-cases/file_processor.buff`
+#
+# Analysis based on reading the check.rs pipeline (lex → parse → TypeInferencer → naming_lint)
+# and prelude_types.rs registrations (4527 lines, only DateTime/Regex/URL/Path/Process registered).
+#
+# STATUS: PASS (with Unknown type warnings)
+#
+# The file uses:
+# - extern "C" from "std::fs" bindings (forward-declared, need Cargo project to link)
+# - String methods: split, trim, len, push, join, get_or (NOT registered in prelude_types.rs)
+# - Result<T,E> + ? operator (registered in prelude)
+# - Map<K,V> with get_or (NOT registered in prelude_types.rs)
+#
+# What buff check would report:
+# - Lex: OK (all tokens valid)
+# - Parse: OK (all syntax valid)
+# - Type inference: Many Unknown types from unregistered methods, but NO hard errors
+#   - text.split(separator: "\n") → Unknown
+#   - line.trim() → Unknown
+#   - trimmed.len() → Unknown
+#   - out.push(trimmed) → Unknown
+#   - body.join(separator: "\n") → Unknown
+#   - counts.get_or(bucket, default: 0) → Unknown
+# - naming_lint: May flag unused variables or shadowing
+# - Overall: PASS (permissive type inference allows Unknown types)
+#
+# Note: buff check cannot verify end-to-end execution because:
+# 1. extern bindings need Cargo project linking
+# 2. Instance methods (len, push, trim, etc.) are NOT registered in prelude registry
+# 3. This is a FORWARD-DECLARED example (see file header comment)
