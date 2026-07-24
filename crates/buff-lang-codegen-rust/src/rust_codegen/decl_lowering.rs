@@ -640,6 +640,44 @@ impl RustCodegen {
                 // function (useful for cold paths or to reduce code bloat).
                 // Rust's `#[inline(never)]` is the direct equivalent.
                 "no_inline" => attrs.push(syn::parse_quote!(#[inline(never)])),
+                // T64: `@prefer(cpu)` / `@prefer(gpu)` / `@prefer(npu)` —
+                // dispatch hint overrides. The arg selects the target
+                // backend the user wants the runtime to favour. Emitted
+                // as a `#[doc]` marker (mirrors the T65 `@blocking` and
+                // T66 `@workgroup` pattern) so the runtime dispatch layer
+                // (`buff_lang_runtime::hints`) can read the user's
+                // override from the generated source metadata, without
+                // requiring a custom Rust attribute (which rustc would
+                // reject). `@prefer(cpu)` is new in T64: it pins the
+                // function to the CPU path, defeating the arithmetic-
+                // intensity GPU promotion that the automatic dispatcher
+                // would otherwise apply. `@prefer(gpu)`/`@prefer(npu)`
+                // are the v1.0 accelerator hints (honored subject to the
+                // cost-model override in `decide_with_prefer`). Pure
+                // metadata — the generated Rust is semantically unchanged
+                // and always compiles; the marker only influences runtime
+                // dispatch at call sites.
+                "prefer" => {
+                    let target = attr.args.first().map(|s| s.as_str()).unwrap_or("cpu");
+                    let doc = format!("@prefer({target})");
+                    attrs.push(syn::parse_quote!(#[doc = #doc]));
+                }
+                // T64: `@force(gpu)` — unconditional dispatch override.
+                // Unlike `@prefer(gpu)`, `@force(gpu)` bypasses the cost
+                // model entirely: the runtime routes to `GpuCompute`
+                // whenever a GPU adapter is available, regardless of
+                // element count (no `PREFER_GPU_MIN_ELEMENTS` gate) or
+                // arithmetic intensity. Emitted as a `#[doc]` marker for
+                // the runtime dispatch layer (same shape as `@prefer`).
+                // Falls back to CPU only when no GPU is present — graceful
+                // degradation, never panics on GPU-less hosts. The arg is
+                // carried verbatim so future targets (`@force(npu)`) need
+                // no codegen change.
+                "force" => {
+                    let target = attr.args.first().map(|s| s.as_str()).unwrap_or("gpu");
+                    let doc = format!("@force({target})");
+                    attrs.push(syn::parse_quote!(#[doc = #doc]));
+                }
                 // Unknown attribute — surface as a codegen error so the
                 // user knows it was not applied (rather than silently
                 // dropping it). Future tasks can add recognised attributes
@@ -649,7 +687,7 @@ impl RustCodegen {
                         "unrecognised attribute `@{other}` \
                          (supported: @test, @feature, @internal, @deprecated, \
                          @should_panic, @ignore, @bench, @property, @blocking, \
-                         @workgroup, @inline, @no_inline)"
+                         @workgroup, @inline, @no_inline, @prefer, @force)"
                     )));
                 }
             }
