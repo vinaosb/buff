@@ -1,0 +1,424 @@
+// Buff self-host port of `crates/buff-lang-lexer/src/token.rs` (T15).
+//
+// This is THE FIRST self-host port: the Buff lexer written in Buff. It defines
+// [`TokenKind`] (every token variant the scanner can emit), the spanned
+// [`Token`] struct, keyword lookup, and rendering.
+//
+// Faithful 1:1 translation of the Rust reference. Where Rust uses `&str` /
+// `&[u8]` / `fmt::Display`, Buff uses owned `String` / `Vector<Int>` byte
+// arrays / `to_string` functions (Buff hides references and has no
+// `fmt::Display` trait — the closest idiom is a free function returning
+// `String`).
+//
+// Numeric widths map to the natural Buff primitives:
+//   i64 / usize  -> Int
+//   f32          -> Float
+//   f64          -> Double
+//   u8           -> Byte
+//   char         -> Char
+
+// --- Source span (mirrors buff_lang_error::Span + SourceId) ---
+//
+// Carried verbatim by every Token so diagnostics can point back at the
+// original `.buff` source. `start`/`end` are absolute byte offsets.
+struct SourceId:
+    value: Int
+
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+func source_id_default() -> SourceId:
+    return SourceId.new(value: 0)
+
+// --- All token kinds produced by the Buff lexer ---
+//
+// NOTE: Rust does not derive `Eq` here because FloatLit/DoubleLit carry f32/f64.
+// Buff has no derive attribute, so the same caveat is documented in place.
+enum TokenKind {
+    // --- Literals ---
+    IntLit(Int),
+    FloatLit(Float),
+    DoubleLit(Double),
+    StringLit(String),
+    ByteLit(Byte),
+    // A single Unicode scalar value literal, e.g. 'A', 'e', 'rocket' (T21).
+    CharLit(Char),
+    // A 128-bit fixed-point decimal literal, e.g. 99.90m (T20). Stores the raw
+    // source text of the digits (incl. the decimal point, excl. the trailing
+    // m/M suffix) so the exact value survives to codegen.
+    DecimalLit(String),
+    // A regex literal, e.g. /\d+/, /\d{3}-\d{4}/ (T79). Stores the raw source
+    // text BETWEEN the slashes so backslash classes survive verbatim.
+    RegexLit(String),
+
+    // --- String interpolation tokens ---
+    StringStart,
+    StringPart(String),
+    InterpStart,
+    // A format specifier inside ${expr:spec} (T81). The payload is the raw spec
+    // text (everything between : and }), e.g. .2, ?, >10, x, b, o, e, 05.
+    InterpSpec(String),
+    InterpEnd,
+    StringEnd,
+
+    // --- Identifiers and keywords ---
+    Ident(String),
+
+    // 28 keywords
+    KwFunc,
+    KwLet,
+    KwMut,
+    KwStruct,
+    KwEnum,
+    KwTrait,
+    KwType,
+    KwIf,
+    KwElse,
+    KwFor,
+    KwReturn,
+    KwBreak,
+    KwContinue,
+    KwIn,
+    KwMatch,
+    KwAsync,
+    KwSpawn,
+    KwImport,
+    KwExport,
+    KwFrom,
+    KwAs,
+    KwTrue,
+    KwFalse,
+    KwExtern,
+    KwUnsafe,
+    // guard early-return statement (T73).
+    KwGuard,
+    // extend TYPE { fn ...; ... } extension-method block (T75).
+    KwExtend,
+    // defer EXPR deferred-execution statement (T100).
+    KwDefer,
+
+    // --- Operators ---
+    DotDot,
+    DotDotEq,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    AndAnd,
+    OrOr,
+    Not,
+    Question,
+    QuestionQuestion,
+    // The null-conditional operator ?. (T70).
+    QuestionDot,
+    Caret,
+    Pipe,
+    Amp,
+    Shl,
+    Shr,
+    Tilde,
+    Arrow,
+    FatArrow,
+    Assign,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    PercentEq,
+    // The pipeline operator |> (T69).
+    PipeGt,
+
+    // --- T57: Unicode mathematical operators (scientific edition) ---
+    // Always lexed; the parser accepts them only in the scientific edition.
+    Sum,
+    Product,
+    Sqrt,
+    InUni,
+    NotInUni,
+    SubsetUni,
+    ApproxUni,
+    // Postfix adjoint/transpose operator ' (T57).
+    Adjoint,
+
+    // --- Delimiters ---
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    Colon,
+    Comma,
+    Dot,
+    Semicolon,
+    At,
+
+    // --- Layout tokens ---
+    Newline,
+    Indent,
+    Dedent,
+    Eof,
+}
+
+// Returns Option.Some(keyword_token) if `s` is a reserved keyword, else None.
+func from_keyword(s: String) -> Option<TokenKind>:
+    if s == "func":
+        return Option.Some(TokenKind.KwFunc)
+    if s == "let":
+        return Option.Some(TokenKind.KwLet)
+    if s == "mut":
+        return Option.Some(TokenKind.KwMut)
+    if s == "struct":
+        return Option.Some(TokenKind.KwStruct)
+    if s == "enum":
+        return Option.Some(TokenKind.KwEnum)
+    if s == "trait":
+        return Option.Some(TokenKind.KwTrait)
+    if s == "type":
+        return Option.Some(TokenKind.KwType)
+    if s == "if":
+        return Option.Some(TokenKind.KwIf)
+    if s == "else":
+        return Option.Some(TokenKind.KwElse)
+    if s == "for":
+        return Option.Some(TokenKind.KwFor)
+    if s == "return":
+        return Option.Some(TokenKind.KwReturn)
+    if s == "break":
+        return Option.Some(TokenKind.KwBreak)
+    if s == "continue":
+        return Option.Some(TokenKind.KwContinue)
+    if s == "in":
+        return Option.Some(TokenKind.KwIn)
+    if s == "match":
+        return Option.Some(TokenKind.KwMatch)
+    if s == "async":
+        return Option.Some(TokenKind.KwAsync)
+    if s == "spawn":
+        return Option.Some(TokenKind.KwSpawn)
+    if s == "import":
+        return Option.Some(TokenKind.KwImport)
+    if s == "export":
+        return Option.Some(TokenKind.KwExport)
+    if s == "from":
+        return Option.Some(TokenKind.KwFrom)
+    if s == "as":
+        return Option.Some(TokenKind.KwAs)
+    if s == "true":
+        return Option.Some(TokenKind.KwTrue)
+    if s == "false":
+        return Option.Some(TokenKind.KwFalse)
+    if s == "extern":
+        return Option.Some(TokenKind.KwExtern)
+    if s == "unsafe":
+        return Option.Some(TokenKind.KwUnsafe)
+    if s == "guard":
+        return Option.Some(TokenKind.KwGuard)
+    if s == "extend":
+        return Option.Some(TokenKind.KwExtend)
+    if s == "defer":
+        return Option.Some(TokenKind.KwDefer)
+    return None
+
+// Is this a reserved keyword token?
+func is_keyword(kind: TokenKind) -> Bool:
+    match kind {
+        TokenKind.KwFunc => return true,
+        TokenKind.KwLet => return true,
+        TokenKind.KwMut => return true,
+        TokenKind.KwStruct => return true,
+        TokenKind.KwEnum => return true,
+        TokenKind.KwTrait => return true,
+        TokenKind.KwType => return true,
+        TokenKind.KwIf => return true,
+        TokenKind.KwElse => return true,
+        TokenKind.KwFor => return true,
+        TokenKind.KwReturn => return true,
+        TokenKind.KwBreak => return true,
+        TokenKind.KwContinue => return true,
+        TokenKind.KwIn => return true,
+        TokenKind.KwMatch => return true,
+        TokenKind.KwAsync => return true,
+        TokenKind.KwSpawn => return true,
+        TokenKind.KwImport => return true,
+        TokenKind.KwExport => return true,
+        TokenKind.KwFrom => return true,
+        TokenKind.KwAs => return true,
+        TokenKind.KwTrue => return true,
+        TokenKind.KwFalse => return true,
+        TokenKind.KwExtern => return true,
+        TokenKind.KwUnsafe => return true,
+        TokenKind.KwGuard => return true,
+        TokenKind.KwExtend => return true,
+        TokenKind.KwDefer => return true,
+        _ => return false,
+    }
+
+// All reserved keywords as a vector of string literals.
+func all_keywords() -> Vector<String>:
+    return [
+        "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else",
+        "for", "return", "break", "continue", "in", "match", "async", "spawn",
+        "import", "export", "from", "as", "true", "false", "extern", "unsafe",
+        "guard", "extend", "defer",
+    ]
+
+// Render a TokenKind as its diagnostic string (Rust fmt::Display equivalent).
+// String payloads are debug-quoted (e.g. string("hi")) to match Rust's {:?}.
+func debug_quote(s: String) -> String:
+    return "\"" + s + "\""
+
+func token_kind_to_string(kind: TokenKind) -> String:
+    match kind {
+        // Literals
+        TokenKind.IntLit(v) => return "int(" + int_to_string(v) + ")",
+        TokenKind.FloatLit(v) => return "float(" + float_to_string(v) + ")",
+        TokenKind.DoubleLit(v) => return "double(" + double_to_string(v) + ")",
+        TokenKind.StringLit(v) => return "string(" + debug_quote(v) + ")",
+        TokenKind.ByteLit(v) => return "byte(" + byte_to_string(v) + ")",
+        TokenKind.CharLit(c) => return "char(" + debug_quote(char_to_string(c)) + ")",
+        TokenKind.DecimalLit(v) => return "decimal(" + debug_quote(v) + ")",
+        TokenKind.RegexLit(v) => return "regex(" + debug_quote(v) + ")",
+        // String interpolation
+        TokenKind.StringStart => return "string_start",
+        TokenKind.StringPart(v) => return "string_part(" + debug_quote(v) + ")",
+        TokenKind.InterpStart => return "interp_start",
+        TokenKind.InterpSpec(v) => return "interp_spec(" + debug_quote(v) + ")",
+        TokenKind.InterpEnd => return "interp_end",
+        TokenKind.StringEnd => return "string_end",
+        // Identifiers
+        TokenKind.Ident(v) => return "ident(" + v + ")",
+        // Keywords
+        TokenKind.KwFunc => return "func",
+        TokenKind.KwLet => return "let",
+        TokenKind.KwMut => return "mut",
+        TokenKind.KwStruct => return "struct",
+        TokenKind.KwEnum => return "enum",
+        TokenKind.KwTrait => return "trait",
+        TokenKind.KwType => return "type",
+        TokenKind.KwIf => return "if",
+        TokenKind.KwElse => return "else",
+        TokenKind.KwFor => return "for",
+        TokenKind.KwReturn => return "return",
+        TokenKind.KwBreak => return "break",
+        TokenKind.KwContinue => return "continue",
+        TokenKind.KwIn => return "in",
+        TokenKind.KwMatch => return "match",
+        TokenKind.KwAsync => return "async",
+        TokenKind.KwSpawn => return "spawn",
+        TokenKind.KwImport => return "import",
+        TokenKind.KwExport => return "export",
+        TokenKind.KwFrom => return "from",
+        TokenKind.KwAs => return "as",
+        TokenKind.KwTrue => return "true",
+        TokenKind.KwFalse => return "false",
+        TokenKind.KwExtern => return "extern",
+        TokenKind.KwUnsafe => return "unsafe",
+        TokenKind.KwGuard => return "guard",
+        TokenKind.KwExtend => return "extend",
+        TokenKind.KwDefer => return "defer",
+        // Operators
+        TokenKind.DotDot => return "..",
+        TokenKind.DotDotEq => return "..=",
+        TokenKind.Plus => return "+",
+        TokenKind.Minus => return "-",
+        TokenKind.Star => return "*",
+        TokenKind.Slash => return "/",
+        TokenKind.Percent => return "%",
+        TokenKind.EqEq => return "==",
+        TokenKind.NotEq => return "!=",
+        TokenKind.Lt => return "<",
+        TokenKind.Gt => return ">",
+        TokenKind.LtEq => return "<=",
+        TokenKind.GtEq => return ">=",
+        TokenKind.AndAnd => return "&&",
+        TokenKind.OrOr => return "||",
+        TokenKind.Not => return "!",
+        TokenKind.Question => return "?",
+        TokenKind.QuestionQuestion => return "??",
+        TokenKind.QuestionDot => return "?.",
+        TokenKind.Caret => return "^",
+        TokenKind.Pipe => return "|",
+        TokenKind.Amp => return "&",
+        TokenKind.Shl => return "<<",
+        TokenKind.Shr => return ">>",
+        TokenKind.Tilde => return "~",
+        TokenKind.Arrow => return "->",
+        TokenKind.FatArrow => return "=>",
+        TokenKind.Assign => return "=",
+        TokenKind.PlusEq => return "+=",
+        TokenKind.MinusEq => return "-=",
+        TokenKind.StarEq => return "*=",
+        TokenKind.SlashEq => return "/=",
+        TokenKind.PercentEq => return "%=",
+        TokenKind.PipeGt => return "|>",
+        // T57: Unicode mathematical operators.
+        TokenKind.Sum => return "sum-symbol",
+        TokenKind.Product => return "product-symbol",
+        TokenKind.Sqrt => return "sqrt-symbol",
+        TokenKind.InUni => return "in-symbol",
+        TokenKind.NotInUni => return "notin-symbol",
+        TokenKind.SubsetUni => return "subset-symbol",
+        TokenKind.ApproxUni => return "approx-symbol",
+        TokenKind.Adjoint => return "'",
+        // Delimiters
+        TokenKind.LParen => return "(",
+        TokenKind.RParen => return ")",
+        TokenKind.LBrace => return "brace-open",
+        TokenKind.RBrace => return "brace-close",
+        TokenKind.LBracket => return "[",
+        TokenKind.RBracket => return "]",
+        TokenKind.Colon => return ":",
+        TokenKind.Comma => return ",",
+        TokenKind.Dot => return ".",
+        TokenKind.Semicolon => return ";",
+        TokenKind.At => return "@",
+        // Layout
+        TokenKind.Newline => return "newline",
+        TokenKind.Indent => return "indent",
+        TokenKind.Dedent => return "dedent",
+        TokenKind.Eof => return "eof",
+    }
+
+// --- A single token produced by the lexer ---
+struct Token:
+    kind: TokenKind
+    span: Span
+
+func token_new(kind: TokenKind, span: Span) -> Token:
+    return Token.new(kind: kind, span: span)
+
+func token_to_string(tok: Token) -> String:
+    return token_kind_to_string(tok.kind)
+
+// --- Primitive render helpers ---
+//
+// Buff prelude provides print/Int.from; these mirror the number->string
+// coercion Rust gets for free via fmt::Display. Kept explicit so the lexer
+// has zero hidden trait dispatch.
+func int_to_string(n: Int) -> String:
+    return Int.to_string(n)
+
+func float_to_string(n: Float) -> String:
+    return Float.to_string(n)
+
+func double_to_string(n: Double) -> String:
+    return Double.to_string(n)
+
+func byte_to_string(b: Byte) -> String:
+    return Int.to_string(Byte.to_int(b))
+
+func char_to_string(c: Char) -> String:
+    return Char.to_string(c)
