@@ -442,6 +442,10 @@ impl PreludeType {
         PreludeType::Supervisor,
         PreludeType::ChildSpec,
         PreludeType::RestartStrategy,
+        // T24: File — namespace-only file I/O module wrapping
+        // std::fs. NO extern crate needed (std-only, mirroring
+        // Math / Strings / Args / Env).
+        PreludeType::File,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -832,6 +836,8 @@ impl PreludeType {
             PreludeType::ECDH => "ECDH",
             PreludeType::Argon2 => "Argon2",
             PreludeType::RsaKeypair => "RsaKeypair",
+            // T24: File — namespace-only file I/O module.
+            PreludeType::File => "File",
         }
     }
 
@@ -1258,6 +1264,10 @@ impl PreludeType {
             // Image / Point / Bot / Wallet as runtime-value-with-instance-
             // methods types.
             PreludeType::RsaKeypair => Type::RsaKeypair,
+            // T24: File — namespace-only file I/O module (mirrors
+            // Log / Toml / Math). Returns Void — the namespace itself
+            // is never a value, only its associated functions are callable.
+            PreludeType::File => Type::Void,
         }
     }
 
@@ -1316,6 +1326,7 @@ impl PreludeType {
                 | PreludeType::Argon2
                 | PreludeType::Simd
                 | PreludeType::RestartStrategy
+                | PreludeType::File
         )
     }
 }

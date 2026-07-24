@@ -1808,6 +1808,30 @@ pub enum PreludeType {
     /// `.transient`. Maps to
     /// `buff_actors::supervisor::RestartStrategy`.
     RestartStrategy,
+    /// T24: `File` — the file I/O namespace (v1.25 stdlib batch).
+    /// Wraps `std::fs` (NO extern crate needed — std-only, mirroring
+    /// the Math / Strings / Args / Env stance from T124f/T124g).
+    /// Like [`Self::Log`] / [`Self::Toml`], `File` is **never a
+    /// runtime value** — it's a NAMESPACE exposing four associated
+    /// functions:
+    /// - `File.read(path)` — read a file's contents as a String.
+    ///   Returns `String`. Lowers to
+    ///   `std::fs::read_to_string(p).unwrap_or_default()`.
+    /// - `File.write(path, content)` — write a String to a file
+    ///   (overwrites). Returns `Void`. Lowers to
+    ///   `std::fs::write(p, c).unwrap_or_default()`.
+    /// - `File.exists(path)` — test whether a path exists on disk.
+    ///   Returns `Bool`. Lowers to `std::path::Path::new(p).exists()`.
+    /// - `File.append(path, content)` — append a String to a file.
+    ///   Returns `Void`. Lowers to
+    ///   `std::fs::OpenOptions::new().append(true).open(p)
+    ///   .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
+    ///   .unwrap_or_default()`.
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. File uses only Rust `std` (NO extern crate
+    /// needed — mirroring Math / Strings / Args / Env).
+    File,
 }
 
 

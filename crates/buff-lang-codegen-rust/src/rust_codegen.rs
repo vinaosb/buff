@@ -3735,6 +3735,67 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Csv.stringify codegen parse: {e}")))
             }
+            // T24: File I/O assoc fns. File is namespace-only (mirrors
+            // Log / Toml / Math). All four fns lower to std::fs::* with
+            // `.unwrap_or_default()` so the Buff surface is always
+            // infallible — NEVER panics, matching Buff's "no panicking
+            // generated code" rule. NO extern crate needed (std-only,
+            // mirroring Math / Strings / Args / Env).
+            //
+            // `File.read(path)` -> String. Wraps
+            // `std::fs::read_to_string(p).unwrap_or_default()`.
+            (T::File, A::Read) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::fs::read_to_string(#arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("File.read codegen parse: {e}")))
+            }
+            // `File.write(path, content)` -> Void. Wraps
+            // `std::fs::write(p, c).unwrap_or_default()`.
+            (T::File, A::Write) => {
+                let path_arg = self.lower_expr(&args[0])?;
+                let path_arg = coerce_str_arg_to_ref(path_arg, &args[0]);
+                let content_arg = self.lower_expr(&args[1])?;
+                let content_arg = coerce_str_arg_to_ref(content_arg, &args[1]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::fs::write(#path_arg, #content_arg).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("File.write codegen parse: {e}")))
+            }
+            // `File.exists(path)` -> Bool. Wraps
+            // `std::path::Path::new(p).exists()`.
+            (T::File, A::Exists) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::path::Path::new(#arg).exists()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("File.exists codegen parse: {e}")))
+            }
+            // `File.append(path, content)` -> Void. Wraps
+            // `std::fs::OpenOptions::new().append(true).open(p)
+            // .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
+            // .unwrap_or_default()`.
+            (T::File, A::Append) => {
+                let path_arg = self.lower_expr(&args[0])?;
+                let path_arg = coerce_str_arg_to_ref(path_arg, &args[0]);
+                let content_arg = self.lower_expr(&args[1])?;
+                let content_arg = coerce_str_arg_to_ref(content_arg, &args[1]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(#path_arg)
+                        .and_then(|mut f| std::io::Write::write_all(&mut f, #content_arg.as_bytes()))
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("File.append codegen parse: {e}")))
+            }
             // T124j: Path module - 1 assoc fn (join) wrapping
             // `std::path::PathBuf` (std-only - NO extern crate
             // needed). Path is a runtime-value type (NOT namespace-

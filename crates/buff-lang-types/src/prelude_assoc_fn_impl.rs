@@ -823,6 +823,25 @@ pub enum PreludeAssocFn {
     /// (infallible). Simd-only. Buff §7 ctor naming convention permits
     /// `Type.from_*()`.
     FromArray,
+    // ---- T24: File I/O -------------------------------------------------
+    /// `File.read(path)` — read a file's contents as a String. One arg
+    /// (String path). Returns `String`. Lowers to
+    /// `std::fs::read_to_string(p).unwrap_or_default()`. File-only.
+    Read,
+    /// `File.write(path, content)` — write a String to a file (overwrites).
+    /// Two args (String path, String content). Returns `Void`. Lowers to
+    /// `std::fs::write(p, c).unwrap_or_default()`. File-only.
+    Write,
+    /// `File.exists(path)` — test whether a path exists on disk. One arg
+    /// (String path). Returns `Bool`. Lowers to
+    /// `std::path::Path::new(p).exists()`. File-only.
+    Exists,
+    /// `File.append(path, content)` — append a String to a file. Two args
+    /// (String path, String content). Returns `Void`. Lowers to
+    /// `std::fs::OpenOptions::new().append(true).open(p)
+    /// .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
+    /// .unwrap_or_default()`. File-only.
+    Append,
 }
 
 impl PreludeAssocFn {
@@ -1081,6 +1100,15 @@ impl PreludeAssocFn {
         PreludeAssocFn::Splat,
         PreludeAssocFn::FromSlice,
         PreludeAssocFn::FromArray,
+        // T24: File I/O assoc fns (4 distinct names): read / write /
+        // exists / append. All File-only — dispatched on the (File, Read)
+        // / (File, Write) / (File, Exists) / (File, Append) pairs in
+        // `assoc_fn_return_type`. No other prelude type today exposes
+        // these verbs (if a future type adds them, dispatch on the pair).
+        PreludeAssocFn::Read,
+        PreludeAssocFn::Write,
+        PreludeAssocFn::Exists,
+        PreludeAssocFn::Append,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1387,6 +1415,12 @@ impl PreludeAssocFn {
             PreludeAssocFn::Hann => "hann",
             PreludeAssocFn::Hamming => "hamming",
             PreludeAssocFn::Blackman => "blackman",
+            // T24: File I/O assoc fn names. `read` / `write` / `exists` /
+            // `append` mirror the canonical std::fs surface intent.
+            PreludeAssocFn::Read => "read",
+            PreludeAssocFn::Write => "write",
+            PreludeAssocFn::Exists => "exists",
+            PreludeAssocFn::Append => "append",
         }
     }
 }

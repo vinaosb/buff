@@ -743,6 +743,27 @@ pub fn assoc_fn_return_type(
         (PreludeType::Simd, PreludeAssocFn::Splat) => Some(Type::Simd),
         (PreludeType::Simd, PreludeAssocFn::FromSlice) => Some(Type::Simd),
         (PreludeType::Simd, PreludeAssocFn::FromArray) => Some(Type::Simd),
+        // T24: File I/O assoc fns. File is namespace-only (returns Void
+        // for the type itself). The assoc fns return String (read),
+        // Void (write/append), or Bool (exists). The codegen lowers to
+        // std::fs::* with `.unwrap_or_default()` so the Buff surface is
+        // always infallible — NEVER panics, matching Buff's "no panicking
+        // generated code" rule.
+        //
+        // `File.read(path)` -> String. Wraps
+        // `std::fs::read_to_string(p).unwrap_or_default()`.
+        (PreludeType::File, PreludeAssocFn::Read) => Some(Type::string()),
+        // `File.write(path, content)` -> Void. Wraps
+        // `std::fs::write(p, c).unwrap_or_default()`.
+        (PreludeType::File, PreludeAssocFn::Write) => Some(Type::Void),
+        // `File.exists(path)` -> Bool. Wraps
+        // `std::path::Path::new(p).exists()`.
+        (PreludeType::File, PreludeAssocFn::Exists) => Some(Type::Bool),
+        // `File.append(path, content)` -> Void. Wraps
+        // `std::fs::OpenOptions::new().append(true).open(p)
+        // .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
+        // .unwrap_or_default()`.
+        (PreludeType::File, PreludeAssocFn::Append) => Some(Type::Void),
         // T52: Protobuf assoc fns. `Protobuf.serialize(value)` -> Bytes
         // (Vector<Byte>). Wraps `buff_protobuf::serialize(&value)
         // .unwrap_or_default()` (empty Vec on failure — NEVER panics).
