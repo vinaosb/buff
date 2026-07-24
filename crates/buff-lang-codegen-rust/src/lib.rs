@@ -51,6 +51,10 @@ pub mod gpu_alignment;
 // programs use the existing [`generate_rust`] path unchanged.
 pub mod multi_crate;
 pub mod move_analysis;
+// T77/T78: AST-level optimization passes (dead code elimination + constant
+// propagation). Applied via [`generate_rust_optimized`] so the default
+// [`generate_rust`] path is unchanged (backwards compatibility).
+pub mod passes;
 pub mod race_analysis;
 pub mod rust_codegen;
 
@@ -65,6 +69,10 @@ pub use context::CodegenContext;
 pub use format::format;
 pub use gpu_alignment::gpu_bound_structs as analyze_gpu_alignment;
 pub use move_analysis::MoveAnalyzer;
+// T77: re-export the DCE pass so external callers can refer to it as
+// `buff_lang_codegen_rust::dead_code_elimination`. T78 adds
+// `constant_propagation`.
+pub use passes::dead_code_elimination;
 // T8: re-export the multi-crate entry points + types so the pipeline
 // (and tests) can refer to them as `buff_lang_codegen_rust::*` without
 // reaching into the private module path.
