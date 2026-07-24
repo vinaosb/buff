@@ -1,0 +1,49 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/format.rs` (T18, Track C).
+//
+// Pretty-printing for `syn::File` via `prettyplease`.
+//
+// Every Rust codegen path in this crate terminates by calling `format` to
+// turn the constructed `syn::File` into valid Rust source text. We never
+// hand-format Rust — `prettyplease` produces output equivalent to a `rustfmt`
+// pass.
+//
+// The Rust reference is 47 LOC. The Buff port mirrors the public API
+// surface (the single `format` free function).
+//
+// # Hard rule (T18 anti-pattern §1)
+//
+// This file is the SINGLE string producer for Rust codegen. The Buff port
+// preserves that contract: `format` is the only function in the codegen
+// port that yields a Rust source string. All other modules build syn::File
+// trees; only this module unparses them.
+
+// =============================================================================
+// Extern bindings to the Rust prettyplease crate
+// =============================================================================
+//
+// `prettyplease::unparse(file: &syn::File) -> String` is the upstream entry
+// point. The Buff port calls it via an `extern "Rust"` binding — the
+// transpiled Buff code links against the same `prettyplease` crate the Rust
+// reference uses, so the output is byte-identical.
+
+extern "Rust" {
+    fn prettyplease_unparse(file: syn_File) -> String
+}
+
+// Opaque handle for `syn::File`. The syn/quote/proc-macro2 types appear
+// throughout the codegen port as opaque extern handles — the Buff code
+// never inspects their interior, only threads them through the syn API.
+struct syn_File:
+    opaque_handle: Int
+
+// =============================================================================
+// format — the single string producer
+// =============================================================================
+//
+// Format a `syn::File` into Rust source code using `prettyplease`.
+//
+// The returned string is parseable Rust (passes `rustfmt --check` modulo
+// prettyplease's own style decisions, which closely mirror the default
+// `rustfmt` style).
+func format(file: syn_File) -> String:
+    return prettyplease_unparse(file)
