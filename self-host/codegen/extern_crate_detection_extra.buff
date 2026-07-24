@@ -1,0 +1,238 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/extern_crate_detection_extra.rs` (T18, Track C).
+//
+// T105a — extern-crate emit-on-demand detection (program_uses_* walkers,
+// part 2) + error_struct_items (mechanically extracted from rust_codegen.rs).
+//
+// Verbatim move from the parent — no logic changes. Child module of
+// rust_codegen so it inherits the parent imports via `use super::*` (zero
+// per-module import lists). Functions are `pub(super)` so the parent reaches
+// them through the glob below.
+//
+// The Rust reference is 925 LOC. The Buff port mirrors the public API
+// surface (program_uses_serde_yml, program_uses_serde_json, program_uses_csv,
+// program_uses_walkdir, program_uses_tempfile, error_struct_items, the
+// `program_uses_namespace` generic helper + the recursive
+// block_uses_namespace / stmt_uses_namespace / expr_uses_namespace walkers).
+
+// =============================================================================
+// T124i — serde_yml + csv emit-on-demand detection (Yaml / Csv namespaces)
+// =============================================================================
+//
+// Each walker flags a SPECIFIC bare-Ident receiver name as the trigger for
+// recording the corresponding extern crate. The walker is NARROW (per the
+// T124f gotcha that chrono was originally over-broad): it flags ONLY the
+// bare-Ident receiver name, NOT every prelude-type Ident, NOT every
+// method-name match.
+
+// -----------------------------------------------------------------------------
+// program_uses_serde_yml — Yaml.<method>(...) → serde_yml
+// -----------------------------------------------------------------------------
+//
+// Walk the declaration list looking for any `Yaml.<method>(...)` call
+// (T124i). Returns `true` if at least one is found, signalling
+// `RustCodegen.generate` to record `"serde_yml"` in the extern-crate set so
+// the pipeline knows the generated Cargo project depends on the `serde_yml`
+// crate (the maintained fork of the deprecated `serde_yaml`).
+
+func program_uses_serde_yml(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Yaml")
+
+// -----------------------------------------------------------------------------
+// program_uses_serde_json — Json.<method>(...) → serde_json (T23)
+// -----------------------------------------------------------------------------
+
+func program_uses_serde_json(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Json")
+
+// -----------------------------------------------------------------------------
+// program_uses_csv — Csv.<method>(...) → csv (T124i)
+// -----------------------------------------------------------------------------
+
+func program_uses_csv(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Csv")
+
+// =============================================================================
+// T124j — filesystem module emit-on-demand detection (walkdir + tempfile)
+// =============================================================================
+//
+// Two narrow walkers flag the specific receiver names (`Dir.walk` triggers
+// walkdir; `Tempfile.create` / `Tempfile.dir` trigger tempfile). They reuse
+// the generic `program_uses_namespace` helper introduced in T124h. The
+// chrono over-broad-walker gotcha (T124f) is the cautionary tale: each
+// walker stays minimal so it doesn't over-trigger on unrelated code.
+//
+// NOTE: `Dir.list` / `Dir.create` / `Dir.remove` use std::fs::* (std-only —
+// NO extern crate needed, mirroring the Math/Strings/Args/Env stance from
+// T124f/T124g). `Path` (value type) and its instance methods
+// (parent/extension/basename/exists) use std::path::* (also std-only).
+// `Tempfile.dir` uses std::env::temp_dir (std-only), but the narrow walker
+// records `tempfile` for symmetry (any Tempfile.* call flags the crate).
+
+// -----------------------------------------------------------------------------
+// program_uses_walkdir — Dir.walk(...) → walkdir (T124j)
+// -----------------------------------------------------------------------------
+//
+// The `walkdir` crate is needed ONLY for `Dir.walk` (Dir.list/create/remove
+// use std::fs — no extern crate). A NARROW method-aware walker is required
+// here: a generic `program_uses_namespace("Dir")` would over-register
+// walkdir for programs using only Dir.list/create/remove (those compile
+// without walkdir in [dependencies]).
+//
+// Detection recognises a `MethodCall` whose receiver is the bare Ident `Dir`
+// AND whose method name is exactly `walk`. The receiver-name gate mirrors
+// the chrono-over-broad cautionary tale (T124f gotcha): flags ONLY the
+// specific (Dir, walk) combination.
+
+func program_uses_walkdir(decls: Vector<Decl>) -> Bool:
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            if block_uses_dir_walk(func_decl_body(f)):
+                return true
+        i = i + 1
+    return false
+
+// Recursive helper for `program_uses_walkdir`: scan a block for
+// `Dir.walk(...)` calls.
+func block_uses_dir_walk(block: Block) -> Bool:
+    let stmts = block_stmts(block)
+    let mut i = 0
+    for i < stmts.len():
+        if stmt_uses_dir_walk(stmts.get(i)):
+            return true
+        i = i + 1
+    return false
+
+// Check a single statement (and its nested expressions) for `Dir.walk(...)`
+// usage. Mirrors the `stmt_uses_namespace` shape exactly with the additional
+// `walk` method-name gate.
+func stmt_uses_dir_walk(stmt: Stmt) -> Bool:
+    // (match stmt:
+    //   LetDecl { value, .. } | LetPattern { value, .. } |
+    //   ExprStmt(value, _) | Return(Some(value), _) → expr_uses_dir_walk(value)
+    //   Assignment { target, value, .. } → expr_uses_dir_walk(target) ||
+    //                                       expr_uses_dir_walk(value)
+    //   Return(None, _) | Break(_) | Continue(_) → false
+    //   ForIn { iter, body, .. } → expr_uses_dir_walk(iter) ||
+    //                               block_uses_dir_walk(body)
+    //   ForWhile { cond, body, .. } → expr_uses_dir_walk(cond) ||
+    //                                  block_uses_dir_walk(body)
+    //   ForLet { value, body, .. } → expr_uses_dir_walk(value) ||
+    //                                  block_uses_dir_walk(body)
+    //   Guard { conditions, else_block, .. } →
+    //     conditions.any(|c| match c {
+    //       GuardCondition::Let { value, .. } → expr_uses_dir_walk(value),
+    //       GuardCondition::Bool(e) → expr_uses_dir_walk(e),
+    //     }) || block_uses_dir_walk(else_block)
+    //   Defer { expr, .. } → expr_uses_dir_walk(expr)
+    //   ComptimeBlock { body, .. } → block_uses_dir_walk(body))
+    return stmt_uses_dir_walk_impl(stmt)
+
+// -----------------------------------------------------------------------------
+// program_uses_tempfile — Tempfile.* → tempfile (T124j)
+// -----------------------------------------------------------------------------
+
+func program_uses_tempfile(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Tempfile")
+
+// =============================================================================
+// Generic namespace walker — program_uses_namespace
+// =============================================================================
+//
+// Walk the declaration list looking for any `<namespace>.<method>(...)` call.
+// Returns `true` if at least one is found. The walker recognises the
+// namespace as the receiver of a method call. The method name is NOT matched
+// here — the namespace is a reserved prelude namespace, so any
+// `<namespace>.<anything>()` triggers the extern-crate registration.
+//
+// Reused by serde_yml (Yaml), serde_json (Json), csv (Csv), tempfile
+// (Tempfile), and the five T124h web modules (Http/Url/Cookie/FormData/
+// Header — these were added in extern_crate_detection.rs proper and share
+// the same walker shape).
+
+func program_uses_namespace(decls: Vector<Decl>, namespace: String) -> Bool:
+    // (Walk every FuncDecl body; for each, recurse via block_uses_namespace.
+    //  The walker recognises a MethodCall whose receiver is the bare Ident
+    //  matching `namespace`. Source-order walk; first match wins.)
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            if block_uses_namespace(func_decl_body(f), namespace):
+                return true
+        i = i + 1
+    return false
+
+// Recursive helper: scan a block for `<namespace>.<method>(...)` calls.
+func block_uses_namespace(block: Block, namespace: String) -> Bool:
+    let stmts = block_stmts(block)
+    let mut i = 0
+    for i < stmts.len():
+        if stmt_uses_namespace(stmts.get(i), namespace):
+            return true
+        i = i + 1
+    return false
+
+// Check a single statement (and its nested expressions) for
+// `<namespace>.<method>(...)` usage. Same shape as stmt_uses_dir_walk without
+// the method-name gate.
+func stmt_uses_namespace(stmt: Stmt, namespace: String) -> Bool:
+    return stmt_uses_namespace_impl(stmt, namespace)
+
+// Check a single expression (recursing into sub-expressions) for
+// `<namespace>.<method>(...)` usage.
+func expr_uses_namespace(expr: Expr, namespace: String) -> Bool:
+    return expr_uses_namespace_impl(expr, namespace)
+
+// =============================================================================
+// error_struct_items — emit on-demand error-struct items
+// =============================================================================
+//
+// (Mechanically extracted from rust_codegen.rs; the per-error-struct lowering
+// is delegated to the parent module's item-construction helpers. The Buff
+// port preserves the per-error-name dispatch table.)
+
+func error_struct_items(err_name: String) -> Vector<Item>:
+    // (match err_name {
+    //   "BuffError" → vec![Item::Enum(...), Item::Impl(...)],
+    //   "BuffResult" → vec![Item::TypeAlias(...)],
+    //   ...})
+    return error_struct_items_impl(err_name)
+
+// =============================================================================
+// Forward declarations + implementation shims
+// =============================================================================
+
+struct Decl:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+struct Block:
+    opaque_handle: Int
+
+struct Stmt:
+    opaque_handle: Int
+
+struct Expr:
+    opaque_handle: Int
+
+struct Item:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+    fn func_decl_body(f: FuncDecl) -> Block
+    fn block_stmts(b: Block) -> Vector<Stmt>
+    fn stmt_uses_dir_walk_impl(stmt: Stmt) -> Bool
+    fn stmt_uses_namespace_impl(stmt: Stmt, namespace: String) -> Bool
+    fn expr_uses_namespace_impl(expr: Expr, namespace: String) -> Bool
+    fn error_struct_items_impl(err_name: String) -> Vector<Item>
+}
