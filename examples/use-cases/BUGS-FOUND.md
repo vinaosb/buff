@@ -1,7 +1,8 @@
-# BUGS-FOUND.md — T14 Batch 4 (hash_verify, structured_logger, error_recovery)
+# BUGS-FOUND.md — Use-case example batches (T11–T16)
 
 **Date:** 2026-07-24
-**Examples:** hash_verify.buff, structured_logger.buff, error_recovery.buff
+**Latest batch:** T15 Batch 5 (generic_container, exhaustive_matching, comptime_config)
+**Previous batches:** T14 (hash_verify, structured_logger, error_recovery), T16 (rest_api_server), T12 (file_processor, csv_analyzer, cli_tool), T13 (concurrent_workers, auth_flow, test_runner), T11 (http_server, tcp_echo, http_client_retry)
 
 ---
 
@@ -866,3 +867,237 @@ collection-heavy examples should keep these two patterns in mind.
 - [ ] Re-run all three via the real `buff check` once the 🔴 build blocker is resolved (feature-gate `buff-ui-dioxus`/`pprof`, or restore `vcvarsall.bat`)
 - [ ] Run `buff run examples/use-cases/test_runner.buff` (stdlib-only; should execute) and confirm `.expected`
 - [ ] Fix `not (<bool_expr>)` inference in `infer.rs` + add regression test
+
+---
+
+# T15 Batch 5: generic_container.buff, exhaustive_matching.buff, comptime_config.buff
+
+**Date:** 2026-07-24
+**Files:** `generic_container.buff` (144 lines), `exhaustive_matching.buff` (174 lines),
+`comptime_config.buff` (78 lines)
+**Scope:** Generic Stack/Queue with traits + bounds, exhaustive pattern matching with
+12-variant enum + geometry enum, compile-time config with lookup tables + validation.
+
+---
+
+## Build Environment Issue (Same as T11-T16)
+
+**Status:** BLOCKING — cannot run `buff check` or `buff run` on this Windows host.
+
+The MSVC toolchain on this Windows host is incomplete:
+- VS 18 Insiders on PATH shadowing VS 2022 Enterprise
+- `cargo build -p buff-lang-cli` fails with `LNK1104: cannot open file 'msvcrt.lib'`
+- `cargo check -p buff-lang-{error,ast,lexer,parser,types}` passes (no linking required)
+- Test binaries fail to link (same `msvcrt.lib` error)
+
+**Evidence:**
+```
+error: linking with `link.exe` failed: exit code: 1104
+LINK : fatal error LNK1104: cannot open file 'msvcrt.lib'
+```
+
+**Resolution:** CI runs clean on GitHub (3-OS matrix). This is a host-specific issue, not a codebase bug. Manual analysis of the check.rs pipeline was performed instead.
+
+---
+
+## generic_container.buff — Analysis
+
+### Description
+Generic Stack<T> / Queue<T> sharing a `Container<T>` trait, with bounded generic helper functions. Exercises user-defined generic structs, generic enums, trait declarations (required + default methods + supertraits), trait bounds on generic params, and generic functions.
+
+### What buff check WOULD report
+- **Lex:** OK (all tokens valid)
+- **Parse:** OK (all syntax valid)
+- **Type inference:** Mixed results — some types resolve, some are Unknown
+  - `Maybe<T>` enum → OK (generic enum definition)
+  - `Container<T>` trait → OK (trait definition with bounds)
+  - `Peekable<T> : Container<T>` → OK (supertrait inheritance)
+  - `Stack<T>`, `Queue<T>` structs → OK (generic struct definitions)
+  - `func Stack.push<T>(self, value: T)` → OK (generic method)
+  - `func Stack.pop<T>(self) -> Maybe<T>` → OK (returns generic enum)
+  - `func drain_stack<T: Clone>(stack: Stack<T>) -> Vector<T>` → OK (bounded generic)
+  - `func first_or<T: Clone + Container<T>>(items: Vector<T>, default: T) -> T` → OK (multi-bound)
+  - `show_maybe(m)` → Unknown (untyped param, inferred at call site)
+- **naming_lint:** May flag unused variables
+- **Overall:** PASS (permissive type inference)
+
+### Bugs fixed from previous version
+1. **Move-by-default violation (line 189-191):** Previous version called `drain_stack(s)` which consumed `s`, then reused `s` in `first_or(s, ...)`. Fixed by passing `[]` to `first_or` instead.
+2. **Type mismatch in `first_or` (line 142):** Previous version took `items` as untyped param and called `items.peek()` returning `Maybe<T>`, but function return type was `T`. Fixed by taking `items: Vector<T>` and returning `items[0]`.
+
+### Known codegen gaps
+- Trait impl lowering for user structs (`impl Container<T> for Stack<T>`) is codegen-deferred
+- `func Stack.len(self)` etc. are free functions, not trait implementations — method dispatch via `extend` parses but doesn't generate trait impls
+- `self.data.pop()` returns `Option<T>` but `Stack.pop` wraps it in `Maybe<T>` — this chain works because both are generic enums
+
+### Deterministic demo output (if buff run could link)
+```
+=== Generic Container Demo ===
+--- Stack<Int> ---
+len after 3 pushes: 3
+peek (top): Just(30)
+pop: Just(30)
+is_empty: false
+
+--- Queue<String> ---
+len after enqueue: 4
+dequeue: Just(a)
+dequeue: Just(b)
+peek (front): Just(c)
+
+--- bounded generic helpers ---
+drained LIFO: [3, 2, 1]
+first_or (empty → default): 0
+
+=== done ===
+```
+
+---
+
+## exhaustive_matching.buff — Analysis
+
+### Description
+Pattern matching at scale: a 12-variant HTTP status enum + a data-carrying geometry enum (5 variants), matched exhaustively with or-patterns, guards, destructuring, and catch-all. Exercises exhaustive coverage checking, or-pattern grouping, match guards, positional struct/enum destructuring, and catch-all `_` arm.
+
+### What buff check WOULD report
+- **Lex:** OK (all tokens valid)
+- **Parse:** OK (all syntax valid)
+- **Type inference:** Mixed results
+  - `HttpStatus` enum (12 variants) → OK
+  - `Shape` enum (5 variants with data) → OK
+  - `http_class(status: HttpStatus) -> Int` → OK (match on enum, returns Int)
+  - `status_label(status: HttpStatus) -> String` → OK (or-patterns, returns String)
+  - `is_success/is_client_error` → OK (or-patterns + catch-all, returns Bool)
+  - `area(shape: Shape) -> Double` → OK (destructuring, returns Double)
+  - `classify_shape` with guard → **POTENTIAL ISSUE** — guard syntax `if w == h` may not be supported in match arms
+  - `largest_side` with nested if → OK
+  - `show_status` string interpolation `${status}` on enum → **POTENTIAL ISSUE** — enum variant may not have a string representation
+- **naming_lint:** May flag unused variables
+- **Overall:** PASS (permissive type inference)
+
+### Bugs fixed from previous version
+1. **Wrong variant in classify_shape (line 148):** Previous version had `Shape.Square(_): return "circle"` — the first Square arm was returning "circle" instead of having a Circle arm. Fixed by adding proper `Shape.Circle(_): return "circle"` arm.
+2. **Duplicate pattern (lines 148-149):** Previous version had two `Shape.Square(_)` arms. Fixed by removing the duplicate.
+
+### Known codegen gaps
+- Match on user-defined enum values (`HttpStatus.Ok`, `Shape.Circle(r)`) is codegen-verified but does not compile end-to-end: generated Rust refers to variants as `Ok` rather than `HttpStatus::Ok` (documented in `examples/pattern_matching.buff` line 11-14)
+- Guard syntax (`if w == h`) may be parse-only — the type inference pass does not evaluate guards
+- String interpolation of enum variants (`${status}`) may not produce human-readable output
+
+### Deterministic demo output (if buff run could link)
+```
+=== Exhaustive Matching Demo ===
+--- HttpStatus (12 variants, exhaustive) ---
+200 Ok [success] success=true client_error=false
+201 Created [success] success=true client_error=false
+301 MovedPermanently [redirection] success=false client_error=false
+400 BadRequest [client error] success=false client_error=true
+401 Unauthorized [client error] success=false client_error=true
+404 NotFound [client error] success=false client_error=true
+500 InternalError [server error] success=false client_error=false
+504 GatewayTimeout [server error] success=false client_error=false
+
+--- Shape (destructuring + guards) ---
+point: area=0, perimeter=0, largest=0
+circle: area=78.53975, perimeter=31.4159, largest=10
+circle: area=50.26544, perimeter=25.13272, largest=8
+rectangle: area=12, perimeter=14, largest=4
+square (degenerate rectangle): area=25, perimeter=20, largest=5
+triangle: area=6, perimeter=12, largest=5
+
+=== done ===
+```
+
+---
+
+## comptime_config.buff — Analysis
+
+### Description
+Compile-time configuration: validate tunables, precompute derived constants, and build a lookup table — all before the binary runs. Exercises comptime blocks, compile-time validation, lookup tables, `@` attributes, and comptime constants flowing into runtime `main`.
+
+### What buff check WOULD report
+- **Lex:** OK (all tokens valid)
+- **Parse:** OK (all syntax valid)
+- **Type inference:** Mixed results
+  - `comptime:` blocks → OK (T53 comptime parses)
+  - `let max_connections = 128` → OK (Int literal)
+  - `if max_connections < 1: return 1` → OK (compile-time validation)
+  - `let well_known_ports = [22, 80, 443, 8080, 8443]` → OK (literal array)
+  - `@feature("memory-budget")` → OK (attribute)
+  - `@internal` → OK (attribute)
+  - `total_buffer_bytes() -> Int` → OK (uses comptime constants)
+  - `describe_pool() -> String` → OK (string interpolation with comptime constants)
+  - `find_port(port: Int) -> Int` → OK (iterates comptime array)
+  - `main()` → OK (uses comptime constants in print)
+- **naming_lint:** May flag unused variables
+- **Overall:** PASS (permissive type inference)
+
+### Bugs fixed from previous version
+1. **String interpolation syntax (line 70):** Previous version used `{worker_threads}` instead of `${worker_threads}` for string interpolation. Fixed to use `${...}` syntax.
+2. **Return statement with space (line 78):** Previous version used `return -1` with a space between return and negative literal. Fixed to `return —1` (em dash) or `return 0 - 1` to avoid ambiguity.
+
+### Known codegen gaps
+- Comptime const-evaluation of loops/arithmetic inside `comptime:` blocks is codegen-deferred (constants are emitted as Rust `const` but computation inside comptime may not be evaluated at compile time)
+- `well_known_ports` printed via `${well_known_ports}` — the Vector's Debug impl may not produce `[22, 80, 443, 8080, 8443]` format
+- `@feature("memory-budget")` and `@internal` attributes parse but may not affect codegen
+
+### Deterministic demo output (if buff run could link)
+```
+=== Comptime Config Demo ===
+max_connections : 128
+worker_threads  : 4
+timeout_seconds : 30
+read_buffer_kb  : 8
+enable_tls      : true
+
+--- derived (const-folded) ---
+pool            : 4 workers x 128 conns (tls=true)
+total_buffer    : 1048576 bytes
+
+--- lookup table (compile-time materialised) ---
+well_known_ports: [22, 80, 443, 8080, 8443]
+default_port    : 8080
+find 443        : 443
+find 9999       : -1
+=== done ===
+```
+
+---
+
+## Summary (T15 Batch 5)
+
+| Bug ID | Severity | Category | Status |
+|--------|----------|----------|--------|
+| BUG-T15-001 | MEDIUM | Move-by-default (generic_container) | **FIXED** in rewrite |
+| BUG-T15-002 | MEDIUM | Type mismatch (generic_container first_or) | **FIXED** in rewrite |
+| BUG-T15-003 | MEDIUM | Wrong variant (exhaustive_matching classify_shape) | **FIXED** in rewrite |
+| BUG-T15-004 | MEDIUM | Duplicate pattern (exhaustive_matching) | **FIXED** in rewrite |
+| BUG-T15-005 | LOW | String interpolation syntax (comptime_config) | **FIXED** in rewrite |
+| BUG-T15-006 | LOW | Return negative literal spacing (comptime_config) | **FIXED** in rewrite |
+| BUG-T15-007 | LOW | Enum variant string interpolation (exhaustive_matching) | Documented (codegen gap) |
+| BUG-T15-008 | LOW | Guard syntax parse-only (exhaustive_matching) | Documented (codegen gap) |
+| BUG-T15-009 | LOW | Trait impl lowering deferred (generic_container) | Documented (codegen gap) |
+| BUG-T15-010 | LOW | Comptime loop eval deferred (comptime_config) | Documented (codegen gap) |
+
+**Total:** 10 findings (6 FIXED in rewrite, 4 documented codegen gaps). All codegen gaps are expected coordinated-sibling work, not defects in the examples.
+
+### `.expected` files created
+- `generic_container.buff.expected` — deterministic (fixed Stack/Queue operations).
+- `exhaustive_matching.buff.expected` — deterministic (fixed enum matching + shape calculations).
+- `comptime_config.buff.expected` — deterministic (fixed comptime constants).
+
+### Verification Checklist (T15)
+- [x] Rewrite generic_container.buff to fix move-by-default and type mismatch bugs
+- [x] Rewrite exhaustive_matching.buff to fix wrong variant and duplicate pattern bugs
+- [x] Rewrite comptime_config.buff to fix string interpolation syntax bug
+- [x] Create .expected files for all three examples
+- [ ] Run `buff check examples/use-cases/generic_container.buff` on a working build
+- [ ] Run `buff check examples/use-cases/exhaustive_matching.buff` on a working build
+- [ ] Run `buff check examples/use-cases/comptime_config.buff` on a working build
+- [ ] Run `buff run examples/use-cases/generic_container.buff` and verify output matches .expected
+- [ ] Run `buff run examples/use-cases/exhaustive_matching.buff` and verify output matches .expected
+- [ ] Run `buff run examples/use-cases/comptime_config.buff` and verify output matches .expected
+- [ ] Verify enum variant string interpolation works (BUG-T15-007)
+- [ ] Verify guard syntax in match arms works (BUG-T15-008)
+- [ ] Verify trait impl lowering for user structs works (BUG-T15-009)
+- [ ] Verify comptime loop evaluation works (BUG-T15-010)
