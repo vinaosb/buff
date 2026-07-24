@@ -26,6 +26,7 @@ fn main() -> Result<()> {
             pgo_use,
             linker,
             debuginfo,
+            backend,
             explain,
         } => {
             // T62: --pgo intercepts the normal build path and dispatches
@@ -36,6 +37,7 @@ fn main() -> Result<()> {
             // unchanged (backward compat).
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
             let debuginfo_choice = buff_lang_cli::pipeline::debuginfo_from_str(&debuginfo)?;
+            let backend_choice = buff_lang_cli::pipeline::backend_from_str(&backend)?;
             if explain {
                 // T6: --explain sets the env var so the compiled binary's
                 // runtime can emit dispatch diagnostics. The env var is
@@ -56,6 +58,7 @@ fn main() -> Result<()> {
                     target.as_deref(),
                     linker_choice,
                     debuginfo_choice,
+                    backend_choice,
                 )
             }
         }
@@ -65,16 +68,18 @@ fn main() -> Result<()> {
             release,
             linker,
             debuginfo,
+            backend,
             explain,
         } => {
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
             let debuginfo_choice = buff_lang_cli::pipeline::debuginfo_from_str(&debuginfo)?;
+            let backend_choice = buff_lang_cli::pipeline::backend_from_str(&backend)?;
             if explain {
                 // T6: --explain sets the env var so the compiled binary's
                 // runtime can emit dispatch diagnostics.
                 std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
             }
-            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice, debuginfo_choice)
+            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice, debuginfo_choice, backend_choice)
         }
         Command::New {
             name,

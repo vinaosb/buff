@@ -20,7 +20,8 @@ use anyhow::{Context, Result};
 use crate::pipeline;
 
 /// Entry point for `buff run <FILE> [-- ARGS]... [--release]
-/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]`.
+/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]
+/// [--backend <llvm|cranelift>]`.
 ///
 /// - Compiles `file` to Rust + executable (the executable goes into
 ///   `std::env::temp_dir().join("buff-run")` so it never pollutes the
@@ -34,12 +35,17 @@ use crate::pipeline;
 /// - If the program exits non-zero, exits the `buff` process with the same
 ///   code (or 1 if no code is available).
 ///
+/// T4: `--backend=cranelift` is honoured ONLY for debug builds (the
+/// default `buff run` mode). When `--release` is also set, the pipeline
+/// gate silently uses LLVM regardless of the `--backend` flag (release
+/// binaries must always ship via LLVM).
+///
 /// # Errors
 ///
 /// Propagates pipeline errors. A non-zero program exit code is *not* an
 /// `Err` from this function — instead the process exits directly so the exit
 /// code is preserved.
-pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::LinkerChoice, debuginfo: pipeline::DebugInfoChoice) -> Result<()> {
+pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::LinkerChoice, debuginfo: pipeline::DebugInfoChoice, backend: pipeline::BackendChoice) -> Result<()> {
     // T133: dispatch on file extension. `.buffhtml` uses the span-aware
     // pipeline so runtime panics can be reverse-mapped to .buffhtml spans.
     let is_buffhtml = file
@@ -92,6 +98,7 @@ pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::Linker
             false,
             linker,
             debuginfo,
+            backend,
         )?;
         (compile_out.rust_file_path, None, String::new())
     };

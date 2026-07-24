@@ -45,7 +45,8 @@ use crate::project_pipeline::{
 
 /// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]
 /// [--minimal] [--fast] [--no-cache] [--sccache] [--target <TRIPLE>]
-/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]`.
+/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]
+/// [--backend <llvm|cranelift>]`.
 ///
 /// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior;
 /// the `--target` flag is ignored in this mode).
@@ -56,6 +57,12 @@ use crate::project_pipeline::{
 ///
 /// Precedence: `minimal` (T60) > `release` (T56) > `fast` (T55) > debug —
 /// mirrors cargo's `--profile` semantics (a more-specific profile wins).
+///
+/// T4: `--backend=cranelift` is honoured ONLY for Debug builds — the
+/// pipeline gate enforces LLVM for release/minimal/fast regardless of
+/// the flag. The project-mode path (cargo build) does NOT honour
+/// `--backend` (cargo's own `[profile.dev] codegen-backend` controls
+/// that; buff does not rewrite the user's `Cargo.toml`).
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     file: Option<&Path>,
@@ -68,6 +75,7 @@ pub fn run(
     target: Option<&str>,
     linker: pipeline::LinkerChoice,
     debuginfo: pipeline::DebugInfoChoice,
+    backend: pipeline::BackendChoice,
 ) -> Result<()> {
     // T55: when --sccache is requested, write the .cargo/config.toml
     // snippet so bare `cargo build`/`cargo test` also pick up sccache.
@@ -88,7 +96,7 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release, minimal, fast, no_cache, sccache, linker, debuginfo)
+            build_single_file(f, output, release, minimal, fast, no_cache, sccache, linker, debuginfo, backend)
         }
         None => build_project(release, minimal, fast, target),
     }
@@ -141,6 +149,7 @@ fn build_single_file(
     sccache: bool,
     linker: pipeline::LinkerChoice,
     debuginfo: pipeline::DebugInfoChoice,
+    backend: pipeline::BackendChoice,
 ) -> Result<()> {
     let stem_output: PathBuf = match output {
         Some(p) => pipeline::with_exe_extension(p),
@@ -178,6 +187,7 @@ fn build_single_file(
         sccache,
         linker,
         debuginfo,
+        backend,
     )?;
     eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());

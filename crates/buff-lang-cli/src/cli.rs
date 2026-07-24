@@ -216,6 +216,24 @@ pub enum Command {
         #[arg(long, value_name = "DEBUGINFO", default_value = "line-tables-only")]
         debuginfo: String,
 
+        /// T4: codegen backend selection. `llvm` (default) — rustc's
+        /// default LLVM backend (the only backend used for release
+        /// builds). `cranelift` — the Cranelift codegen backend,
+        /// optimised for fast dev compiles (typically 2-3x faster
+        /// compile, slower runtime). Cranelift is honoured ONLY for
+        /// debug builds; release/minimal/fast always use LLVM.
+        ///
+        /// Requires nightly rustc + the
+        /// `rustc-codegen-cranelift-preview` component. When
+        /// unavailable, falls back to LLVM with a stderr warning (the
+        /// build never fails — correctness is identical between
+        /// backends).
+        ///
+        /// Install via: `rustup component add rustc-codegen-cranelift-preview
+        /// --toolchain nightly`.
+        #[arg(long, value_name = "BACKEND", default_value = "llvm")]
+        backend: String,
+
         /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
         /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the
         /// compiled binary's runtime can emit the explain output.
@@ -257,6 +275,16 @@ pub enum Command {
         /// `-C debuginfo=0`, smallest binary, fastest compile.
         #[arg(long, value_name = "DEBUGINFO", default_value = "line-tables-only")]
         debuginfo: String,
+
+        /// T4: codegen backend selection. `llvm` (default) — rustc's
+        /// default LLVM backend. `cranelift` — the Cranelift codegen
+        /// backend, optimised for fast dev compiles. Cranelift is
+        /// honoured ONLY for debug builds; release always uses LLVM.
+        /// Falls back to LLVM with a warning when unavailable (nightly
+        /// + `rustc-codegen-cranelift-preview` component required).
+        /// See `buff build --help` for full details.
+        #[arg(long, value_name = "BACKEND", default_value = "llvm")]
+        backend: String,
 
         /// T6: Print dispatch decision diagnostics to stderr (CPU vs GPU
         /// routing explanation). Sets `BUFF_EXPLAIN_DISPATCH=1` so the

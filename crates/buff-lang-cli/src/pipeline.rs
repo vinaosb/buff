@@ -202,6 +202,84 @@ impl DebugInfoChoice {
     }
 }
 
+/// User-facing codegen backend selection for `buff build` / `buff run` (T4).
+///
+/// Mirrors the `--backend <llvm|cranelift>` CLI flag. The pipeline sets
+/// the `CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift` env var on the
+/// spawned rustc process when [`BackendChoice::Cranelift`] is selected
+/// AND the build mode is [`BuildMode::Debug`]. Release builds always
+/// use LLVM (no exception — Cranelift output is for dev inner-loop
+/// speed only, never for shipped binaries).
+///
+/// When `Cranelift` is requested but not available (probe via
+/// [`cranelift_available`] fails), the pipeline falls back to LLVM with
+/// an `eprintln!` warning. Correctness is NEVER affected by the backend
+/// choice — Cranelift output is behaviorally identical to LLVM output,
+/// just (sometimes) faster to produce and slower to run.
+///
+/// # Stability
+///
+/// This enum is additive — future backends (`Cranelift`, others) are
+/// appended as new variants. The `llvm` default never changes so the
+/// absence of `--backend` always means "rustc's default backend".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BackendChoice {
+    /// LLVM backend (rustc default). The only backend used for release
+    /// builds. Default for dev builds too — Cranelift is opt-in.
+    #[default]
+    Llvm,
+    /// Cranelift backend (dev only). Faster compile, slower runtime.
+    /// Requires nightly rustc + the `rustc-codegen-cranelift-preview`
+    /// component. Falls back to LLVM with a warning when unavailable.
+    Cranelift,
+}
+
+/// Parse a `--backend` CLI flag value into a [`BackendChoice`] (T4).
+///
+/// Valid values: `llvm`, `cranelift`. Case-insensitive.
+/// Returns an error for unknown values.
+pub fn backend_from_str(s: &str) -> Result<BackendChoice> {
+    match s.to_ascii_lowercase().as_str() {
+        "llvm" => Ok(BackendChoice::Llvm),
+        "cranelift" => Ok(BackendChoice::Cranelift),
+        other => bail!(
+            "unknown backend `{other}` (valid: llvm, cranelift)"
+        ),
+    }
+}
+
+/// Probe whether the Cranelift codegen backend is available (T4).
+///
+/// Runs `rustc +nightly -C codegen-backend=cranelift --version` (silent
+/// — output is discarded). Returns `true` when the probe succeeds (exit
+/// 0), `false` on any failure (missing nightly, missing component,
+/// rustc not on PATH, etc.).
+///
+/// This is the single source of truth for "is Cranelift usable on this
+/// host?" — both the CLI pipeline and `buff-eval` consult it before
+/// setting `CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift` on the spawned
+/// rustc process. The probe is cheap (sub-second) and runs at most once
+/// per `compile_rust_to_exe_with_speed` call.
+///
+/// # Why `+nightly`
+///
+/// `rustc-codegen-cranelift-preview` is currently nightly-only on
+/// stable rustup channels. The probe therefore uses `+nightly` to
+/// exercise the actual toolchain that would be used. A future stable
+/// promotion would simplify this to bare `rustc`.
+pub fn cranelift_available() -> bool {
+    let probe = Command::new("rustc")
+        .arg("+nightly")
+        .arg("-C")
+        .arg("codegen-backend=cranelift")
+        .arg("--version")
+        .output();
+    match probe {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
+}
+
 /// User-facing linker selection for `buff build` / `buff run`.
 ///
 /// Mirrors the `--linker <auto|mold|lld|system>` CLI flag. The pipeline
@@ -703,7 +781,9 @@ fn format_buffhtml_parse_error(
 /// [`error_mapper::translate_rustc_errors`].
 ///
 /// Equivalent to [`compile_rust_to_exe_with_speed`] with `use_sccache =
-/// false` and `linker = LinkerChoice::default()` (sccache is opt-in via
+/// false`, `linker = LinkerChoice::default()`,
+/// `debuginfo = DebugInfoChoice::default()`, and
+/// `backend = BackendChoice::default()` (sccache is opt-in via
 /// `buff build --sccache`).
 ///
 /// # Errors
@@ -720,7 +800,7 @@ pub fn compile_rust_to_exe(
     buff_file: &Path,
     mode: BuildMode,
 ) -> Result<PathBuf> {
-    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default(), DebugInfoChoice::default())
+    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default(), DebugInfoChoice::default(), BackendChoice::default())
 }
 
 /// sccache-aware variant of [`compile_rust_to_exe`] (T55).
@@ -736,6 +816,16 @@ pub fn compile_rust_to_exe(
 ///   and [`resolve_linker`]) instead of the hardcoded auto-detect. Pass
 ///   [`LinkerChoice::default()`] for the same behaviour as
 ///   [`compile_rust_to_exe`].
+/// - The debug-info level is selected via `debuginfo` (T3). Pass
+///   [`DebugInfoChoice::default()`] for the same behaviour as
+///   [`compile_rust_to_exe`].
+/// - The codegen backend is selected via `backend` (T4). Pass
+///   [`BackendChoice::default()`] for the same behaviour as
+///   [`compile_rust_to_exe`]. `Cranelift` is honoured ONLY for
+///   [`BuildMode::Debug`]; release/minimal/fast builds always use LLVM
+///   (the env-var gate is the safety rail — a `--release --backend=cranelift`
+///   invocation silently uses LLVM rather than risking a non-LLVM
+///   shipped binary).
 pub fn compile_rust_to_exe_with_speed(
     rust_file: &Path,
     output: &Path,
@@ -744,6 +834,7 @@ pub fn compile_rust_to_exe_with_speed(
     use_sccache: bool,
     linker: LinkerChoice,
     debuginfo: DebugInfoChoice,
+    backend: BackendChoice,
 ) -> Result<PathBuf> {
     let sccache_on = use_sccache && compile_speed::sccache_available();
     if use_sccache && !sccache_on {
@@ -791,6 +882,34 @@ pub fn compile_rust_to_exe_with_speed(
             cmd.arg(flag);
         }
         eprintln!("note: using fast linker `{}`", resolved.name());
+    }
+
+    // T4: Cranelift dev backend. ONLY honoured for Debug builds —
+    // release/minimal/fast always use LLVM (the env-var gate is the
+    // safety rail that prevents a non-LLVM shipped binary even when the
+    // user passes `--release --backend=cranelift`). When Cranelift is
+    // requested but unavailable (probe fails), fall back to LLVM with
+    // a warning — correctness is never affected, only compile speed.
+    //
+    // The env var is set on the child `Command` (not via
+    // `std::env::set_var`) so it is scoped to the rustc subprocess and
+    // does not leak into the parent `buff` process or any subsequent
+    // `Command::new` call in the same session.
+    if matches!(backend, BackendChoice::Cranelift) && matches!(mode, BuildMode::Debug) {
+        if cranelift_available() {
+            cmd.env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift");
+            eprintln!(
+                "note: using Cranelift dev backend (T4) — faster compile, \
+                 slower runtime; release builds always use LLVM"
+            );
+        } else {
+            eprintln!(
+                "warning: --backend=cranelift requested but Cranelift is not \
+                 available (install via `rustup component add \
+                 rustc-codegen-cranelift-preview` on nightly); falling back \
+                 to LLVM"
+            );
+        }
     }
 
     // T3: debug-info control. For Debug/Fast builds, default to

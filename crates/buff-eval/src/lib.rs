@@ -137,6 +137,63 @@ fn on_path(name: &str) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// T4: Cranelift dev backend (mirrors buff_lang_cli::pipeline::BackendChoice).
+// Kept inline to avoid pulling clap/tokio transitively into the eval crate.
+// ---------------------------------------------------------------------------
+
+/// Probe whether the Cranelift codegen backend is available (T4).
+///
+/// Mirrors `buff_lang_cli::pipeline::cranelift_available`. Runs
+/// `rustc +nightly -C codegen-backend=cranelift --version` (silent —
+/// output is discarded). Returns `true` when the probe succeeds (exit
+/// 0), `false` on any failure (missing nightly, missing component,
+/// rustc not on PATH, etc.).
+///
+/// `buff-eval` always runs in debug mode (`rustc -O`), so the only gate
+/// is "is Cranelift usable on this host?" — there is no release-mode
+/// safety rail to consult (the eval crate never ships binaries).
+fn cranelift_available() -> bool {
+    let probe = Command::new("rustc")
+        .arg("+nightly")
+        .arg("-C")
+        .arg("codegen-backend=cranelift")
+        .arg("--version")
+        .output();
+    match probe {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Decide whether to set `CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift` on
+/// the spawned rustc process for an eval call (T4).
+///
+/// `buff-eval` has no CLI surface (it is consumed in-process by REPL /
+/// Jupyter / Bufflings), so the backend choice is driven by an env var
+/// instead of a flag:
+///
+/// - `BUFF_EVAL_BACKEND=cranelift` → opt in. Probes via
+///   [`cranelift_available`]; sets the env var on the rustc `Command`
+///   when the probe succeeds, falls back silently to LLVM otherwise.
+/// - Any other value (or unset) → LLVM (rustc default). No probe, no
+///   env var, no overhead.
+///
+/// This mirrors the CLI's `--backend=cranelift` opt-in nature without
+/// requiring a plumbing change through REPL/Jupyter/Bufflings. The env
+/// var is read fresh on every `run_full_program` call so a user can
+/// toggle it mid-session (`:set`-style commands in a future REPL
+/// revision would just `set_var("BUFF_EVAL_BACKEND", ...)`).
+///
+/// Returns `true` when the caller should set the env var on the rustc
+/// `Command`.
+fn should_eval_use_cranelift() -> bool {
+    match std::env::var("BUFF_EVAL_BACKEND") {
+        Ok(v) if v.eq_ignore_ascii_case("cranelift") => cranelift_available(),
+        _ => false,
+    }
+}
+
 /// Re-export of the resolved [`Type`] so consumers can refer to it as
 /// `buff_eval::Type` without depending on `buff-lang-types` directly.
 pub use buff_lang_types::Type as ResolvedType;
@@ -558,12 +615,18 @@ fn run_full_program(source: &str) -> EvalResult {
     // LTO). Mirrors pipeline.rs `BuildMode::Debug` exactly.
     // T2: auto-detect fast linker (mold → rust-lld → system default).
     // T3: line-tables-only debuginfo (-C debuginfo=1) for backtraces.
+    // T4: opt-in Cranelift dev backend via BUFF_EVAL_BACKEND=cranelift
+    // (probe + set CARGO_PROFILE_DEV_CODEGEN_BACKEND env var on the
+    // child rustc process — scoped to the subprocess, no parent leak).
     let mut rustc_cmd = Command::new("rustc");
     rustc_cmd.arg("--edition").arg("2021");
     rustc_cmd.arg("-O");
     rustc_cmd.arg("-C").arg("debuginfo=1");
     for flag in resolve_eval_linker_flags(EvalLinker::Auto) {
         rustc_cmd.arg(flag);
+    }
+    if should_eval_use_cranelift() {
+        rustc_cmd.env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift");
     }
     rustc_cmd.arg(&rust_path).arg("-o").arg(&exe_path);
     let compile_out = match rustc_cmd.output()
