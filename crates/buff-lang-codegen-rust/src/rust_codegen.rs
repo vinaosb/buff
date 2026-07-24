@@ -79,7 +79,7 @@ use syn::{
 use buff_lang_ast::{
     op::{BinaryOp, UnaryOp},
     Block, Decl, EnumDecl as AstEnumDecl, Expr, FuncDecl, InterpPart, Literal, MatchArm, Pattern,
-    Stmt, StructDecl as AstStructDecl, TypeRef,
+    Stmt, StructDecl as AstStructDecl, TypeParam, TypeRef,
 };
 use buff_lang_error::{CodegenError, Diagnostic, ErrorCode, Span as BuffSpan};
 use buff_lang_types::{prelude::PreludeFn, FloatWidth, IntWidth, Type, TypeInferencer};
@@ -1395,6 +1395,39 @@ impl RustCodegen {
         })
     }
 
+    /// Build a `syn::Generics` from a slice of Buff [`TypeParam`]s (T13).
+    ///
+    /// Each TypeParam becomes a `syn::GenericParam::Type` with the param's
+    /// name as the ident and (in T13) NO bounds. When T38 adds trait bounds,
+    /// the `bounds` vector on each [`TypeParam`] will be lowered into the
+    /// `syn::TypeParam::bounds` Punctuated list here.
+    ///
+    /// Returns `syn::Generics::default()` when the slice is empty (the common
+    /// case — non-generic decls). The lt_token/gt_token are `Some` only when
+    /// the param list is non-empty (matching Rust's prettyplease formatting).
+    fn type_params_to_generics(&self, type_params: &[TypeParam]) -> syn::Generics {
+        if type_params.is_empty() {
+            return syn::Generics::default();
+        }
+        let mut params: Punctuated<syn::GenericParam, syn::Token![,]> = Punctuated::new();
+        for tp in type_params {
+            params.push(syn::GenericParam::Type(syn::TypeParam {
+                attrs: Vec::new(),
+                ident: ast_ident_to_syn(&tp.name),
+                colon_token: None,
+                bounds: Default::default(),
+                eq_token: None,
+                default: None,
+            }));
+        }
+        syn::Generics {
+            lt_token: Some(Default::default()),
+            params,
+            gt_token: Some(Default::default()),
+            where_clause: None,
+        }
+    }
+
     fn lower_decl(&mut self, decl: &Decl) -> Result<Item, CodegenError> {
         match decl {
             // T32: an `extern func ...` declaration is a foreign-function
@@ -1562,7 +1595,7 @@ impl RustCodegen {
             vis: Visibility::Public(Default::default()),
             struct_token: Default::default(),
             ident: ast_ident_to_syn(&s.name),
-            generics: syn::Generics::default(),
+            generics: self.type_params_to_generics(&s.type_params),
             fields: SynFields::Named(syn::FieldsNamed {
                 brace_token: Default::default(),
                 named: named_fields,
@@ -1640,31 +1673,9 @@ impl RustCodegen {
             });
         }
 
-        // Generic params: build a `syn::Generics` with one type param per
-        // declared generic on the enum. Bounds (from TypeParam.bounds) are
-        // always empty in T13 — T38 will populate them. (T27 originally used
-        // bare `Vec<Ident>`; T13 unified on `Vec<TypeParam>` across all decl kinds.)
-        let generics = if e.type_params.is_empty() {
-            syn::Generics::default()
-        } else {
-            let mut params: Punctuated<syn::GenericParam, syn::Token![,]> = Punctuated::new();
-            for tp in &e.type_params {
-                params.push(syn::GenericParam::Type(syn::TypeParam {
-                    attrs: Vec::new(),
-                    ident: ast_ident_to_syn(&tp.name),
-                    colon_token: None,
-                    bounds: Default::default(),
-                    eq_token: None,
-                    default: None,
-                }));
-            }
-            syn::Generics {
-                lt_token: Some(Default::default()),
-                params,
-                gt_token: Some(Default::default()),
-                where_clause: None,
-            }
-        };
+        // T13: Generic params are now built via the shared `type_params_to_generics`
+        // helper (same as struct + func). Bounds always empty in T13 (T38 populates).
+        let generics = self.type_params_to_generics(&e.type_params);
 
         Ok(ItemEnum {
             attrs: derive_and_repr_attrs(false),
@@ -1756,7 +1767,7 @@ impl RustCodegen {
             }),
             fn_token: Default::default(),
             ident: name,
-            generics: Default::default(),
+            generics: self.type_params_to_generics(&f.type_params),
             paren_token: Default::default(),
             inputs,
             variadic: None,
