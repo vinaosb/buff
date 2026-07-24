@@ -89,18 +89,23 @@ mod error;
 mod handlers;
 mod oauth;
 mod quality;
+mod rate_limit;
 mod storage;
 mod storage_sqlite;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
 use axum::Router;
 
 pub use error::{RegistryError, StorageError};
 pub use oauth::OAuthConfig;
 pub use quality::{compute_badges, AuditResult, Package, QualityBadges, MAINTAINED_WINDOW};
+pub use rate_limit::{
+    ip_rate_limit_middleware, IpRateLimiter, DEFAULT_IP_RATE_LIMIT_MAX, IP_RATE_LIMIT_MAX_ENV,
+};
 pub use storage::{
     DepSpec, InMemoryStorage, PackageMetadata, PackageSummary, PublishRequest, PublishResponse,
     QualityAttachment, ResolveResponse, SessionUser, Storage, StorageResult, VersionInfo,
@@ -153,6 +158,15 @@ pub struct AppState {
     /// `BUFF_REGISTRY_ALLOWLIST_ENABLED=false` for open registration
     /// (NOT recommended for production).
     pub allowlist_enabled: bool,
+    /// T57: Directory for filesystem tarball storage. `None` = store
+    /// tarballs in the SQLite BLOB (default). When set, the new
+    /// multipart upload endpoint writes tarballs to this directory.
+    pub tarball_dir: Option<std::path::PathBuf>,
+    /// T57: Per-IP rate limiter (applies to ALL endpoints). Shared
+    /// across handler tasks.
+    pub ip_rate_limiter: Arc<IpRateLimiter>,
+    /// T57: Per-IP rate limit budget (requests per window).
+    pub ip_rate_limit_max: usize,
 }
 
 impl AppState {
@@ -166,6 +180,9 @@ impl AppState {
             rate_limit_max: DEFAULT_RATE_LIMIT_MAX,
             oauth_config: OAuthConfig::from_env(),
             allowlist_enabled: parse_allowlist_enabled(),
+            tarball_dir: parse_tarball_dir(),
+            ip_rate_limiter: Arc::new(IpRateLimiter::new()),
+            ip_rate_limit_max: parse_ip_rate_limit_max(),
         }
     }
 
@@ -193,6 +210,14 @@ impl AppState {
         self.allowlist_enabled = enabled;
         self
     }
+
+    /// T57: Override the tarball directory (for tests that want a
+    /// tempdir).
+    #[must_use]
+    pub fn with_tarball_dir(mut self, dir: Option<impl AsRef<std::path::Path>>) -> Self {
+        self.tarball_dir = dir.map(|d| d.as_ref().to_path_buf());
+        self
+    }
 }
 
 /// Parse the `BUFF_REGISTRY_ALLOWLIST_ENABLED` env var. Returns `true`
@@ -203,6 +228,24 @@ fn parse_allowlist_enabled() -> bool {
         Ok(v) => !v.eq_ignore_ascii_case("false") && v != "0",
         Err(_) => true, // default: allowlist enforced
     }
+}
+
+/// Parse the `BUFF_REGISTRY_TARBALL_DIR` env var. Returns `None` when
+/// unset (tarballs stored in SQLite BLOB).
+fn parse_tarball_dir() -> Option<std::path::PathBuf> {
+    std::env::var("BUFF_REGISTRY_TARBALL_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+/// Parse the `BUFF_REGISTRY_IP_RATE_LIMIT_MAX` env var. Returns the
+/// default (1000) when unset.
+fn parse_ip_rate_limit_max() -> usize {
+    std::env::var(IP_RATE_LIMIT_MAX_ENV)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_IP_RATE_LIMIT_MAX)
 }
 
 /// Build the axum [`Router`] for the registry.
@@ -221,12 +264,29 @@ pub fn app(state: AppState) -> Router {
             "/api/v1/packages/{name}/badges",
             get(handlers::get_badges),
         )
+        .route("/api/v1/packages/{name}/stats", get(handlers::get_stats))
         .route("/api/v1/search", get(handlers::search))
+        // T57: New multipart upload + download endpoints (parallel to the
+        // legacy JSON publish/download — the new endpoints use the
+        // multipart tarball format and filesystem storage).
+        .route(
+            "/api/v1/packages/{name}",
+            post(handlers::multipart_publish),
+        )
+        .route(
+            "/api/v1/packages/{name}/{version}/download",
+            get(handlers::multipart_download),
+        )
         // T57: GitHub OAuth login flow.
         .route("/auth/github/login", get(oauth::login))
         .route("/auth/github/callback", get(oauth::callback))
         .route("/auth/logout", post(oauth::logout))
         .route("/auth/whoami", get(oauth::whoami))
+        // T57: IP-based rate limiting on ALL endpoints.
+        .layer(from_fn_with_state(
+            state.clone(),
+            ip_rate_limit_middleware,
+        ))
         .with_state(state)
 }
 

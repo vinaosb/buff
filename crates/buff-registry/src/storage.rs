@@ -383,6 +383,24 @@ pub trait Storage: Send + Sync {
             "allowlist not supported by this backend".to_string(),
         ))
     }
+
+    /// T57: Record a download event for `(name, version)`. Called by
+    /// the download handler before serving the tarball. Idempotent in
+    /// the sense that multiple calls increment the counter each time
+    /// (each download is a distinct event).
+    ///
+    /// Default impl: no-op (download stats not tracked by this backend).
+    fn record_download(&self, _name: &str, _version: &Version) -> Result<(), StorageError> {
+        Ok(())
+    }
+
+    /// T57: Return the total download count for `name` (across all
+    /// versions). Used by the stats endpoint + search ranking.
+    ///
+    /// Default impl: returns 0 (no stats tracked).
+    fn download_count(&self, _name: &str) -> Result<u64, StorageError> {
+        Ok(0)
+    }
 }
 
 /// T57: User identity resolved from a valid session token.

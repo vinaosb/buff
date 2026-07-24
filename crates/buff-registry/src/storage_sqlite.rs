@@ -121,6 +121,12 @@ CREATE TABLE IF NOT EXISTS allowlist (\
     github_login TEXT PRIMARY KEY,\
     added_at     INTEGER NOT NULL\
 );\
+CREATE TABLE IF NOT EXISTS downloads (\
+    name    TEXT NOT NULL,\
+    version TEXT NOT NULL,\
+    count   INTEGER NOT NULL DEFAULT 0,\
+    PRIMARY KEY (name, version)\
+);\
 ";
 
 /// SQLite-backed registry storage.
@@ -678,6 +684,32 @@ impl crate::storage::Storage for SqliteStorage {
         )
         .map_err(|e| StorageError::Failure(format!("add_to_allowlist: {e}")))?;
         Ok(())
+    }
+
+    fn record_download(&self, name: &str, version: &Version) -> Result<(), StorageError> {
+        let conn = self.lock_conn()?;
+        // Upsert: increment count if exists, insert with count=1 if not.
+        conn.execute(
+            "INSERT INTO downloads (name, version, count) VALUES (?1, ?2, 1) \
+             ON CONFLICT(name, version) DO UPDATE SET count = count + 1",
+            params![name, version.to_string()],
+        )
+        .map_err(|e| StorageError::Failure(format!("record_download: {e}")))?;
+        Ok(())
+    }
+
+    fn download_count(&self, name: &str) -> Result<u64, StorageError> {
+        let conn = self.lock_conn()?;
+        let total: Option<i64> = conn
+            .query_row(
+                "SELECT SUM(count) FROM downloads WHERE name = ?1",
+                params![name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| StorageError::Failure(format!("download_count: {e}")))?
+            .flatten();
+        Ok(total.unwrap_or(0) as u64)
     }
 }
 

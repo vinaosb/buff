@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -215,10 +215,14 @@ pub(crate) async fn download(
         Version::parse(&version).map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
     let tarball = state.storage.get_tarball(&name, &version)?;
     match tarball {
-        Some(bytes) => Ok((
-            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
-            bytes,
-        )),
+        Some(bytes) => {
+            // T57: record the download for stats tracking.
+            let _ = state.storage.record_download(&name, &version);
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+                bytes,
+            ))
+        }
         None => Err(RegistryError::VersionNotFound),
     }
 }
@@ -393,6 +397,224 @@ fn has_cycle(
         }
     }
     Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// T57 Production endpoints: multipart upload, new download, stats
+// ---------------------------------------------------------------------------
+
+/// Metadata carried in the `metadata` part of the multipart upload.
+#[derive(Debug, Deserialize)]
+struct MultipartMetadata {
+    version: String,
+    #[serde(default)]
+    deps: Vec<DepSpec>,
+}
+
+/// T57: `POST /api/v1/packages/{name}` — multipart tarball upload.
+///
+/// Accepts a multipart/form-data body with two parts:
+/// - `metadata`: JSON `{ "version": "1.0.0", "deps": [...] }`.
+/// - `tarball`: binary tarball bytes.
+///
+/// Auth required (Bearer token OR OAuth session — same as legacy publish).
+/// Validates name + version + scope ownership, then stores the tarball
+/// to the filesystem (if `tarball_dir` is configured) AND to the storage
+/// backend (for metadata + backwards-compat download).
+pub(crate) async fn multipart_publish(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, RegistryError> {
+    // --- 1. Auth (same logic as legacy publish) ---
+    let token = extract_bearer(&headers).ok_or(RegistryError::Unauthorized)?;
+    let session_user = state.storage.validate_session(token)?;
+    let is_valid = state.storage.validate_token(token)? || session_user.is_some();
+    if !is_valid {
+        return Err(RegistryError::Unauthorized);
+    }
+
+    // --- 2. Validate name ---
+    crate::validate_package_name(&name)?;
+
+    // --- 3. Parse multipart body ---
+    let mut metadata: Option<MultipartMetadata> = None;
+    let mut tarball: Option<Vec<u8>> = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| RegistryError::InvalidBody(format!("multipart parse: {e}")))?
+    {
+        let field_name = field.name().unwrap_or("").to_string();
+        match field_name.as_str() {
+            "metadata" => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| RegistryError::InvalidBody(format!("metadata read: {e}")))?;
+                metadata = Some(
+                    serde_json::from_slice(&bytes)
+                        .map_err(|e| RegistryError::InvalidBody(format!("metadata JSON: {e}")))?,
+                );
+            }
+            "tarball" => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| RegistryError::InvalidTarball(format!("tarball read: {e}")))?;
+                tarball = Some(bytes.to_vec());
+            }
+            _ => {
+                // Unknown field — ignore (forward-compat).
+            }
+        }
+    }
+    let meta = metadata.ok_or_else(|| {
+        RegistryError::InvalidBody("missing 'metadata' part".to_string())
+    })?;
+    let tarball_bytes = tarball.ok_or_else(|| {
+        RegistryError::InvalidTarball("missing 'tarball' part".to_string())
+    })?;
+
+    // --- 4. Validate version ---
+    let version = Version::parse(&meta.version)
+        .map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
+
+    // --- 5. Scope ownership (same as legacy publish) ---
+    if let Some(org) = crate::scope_of(&name) {
+        let identity = session_user
+            .as_ref()
+            .map(|u| u.github_login.as_str())
+            .unwrap_or(token);
+        if !state.storage.is_org_member(org, identity)? {
+            return Err(RegistryError::ScopeForbidden);
+        }
+    }
+
+    // --- 6. Store tarball to filesystem (if configured) ---
+    if let Some(dir) = &state.tarball_dir {
+        write_tarball_to_fs(dir, &name, &version, &tarball_bytes)?;
+    }
+
+    // --- 7. Store metadata + tarball to storage backend ---
+    let author = session_user
+        .as_ref()
+        .map(|u| u.github_login.clone())
+        .or_else(|| Some(token.to_string()));
+    let published_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .ok();
+    let deps = meta.deps.clone();
+    state.storage.put_version(
+        &name,
+        version.clone(),
+        meta.deps,
+        tarball_bytes,
+        author,
+        published_at,
+        QualityAttachment::default(),
+    )?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(serde_json::json!({
+            "name": name,
+            "version": version.to_string(),
+            "deps": deps,
+        })),
+    ))
+}
+
+/// T57: `GET /api/v1/packages/{name}/{version}/download` — serve tarball.
+///
+/// Reads the tarball from the filesystem (if `tarball_dir` is configured
+/// and the file exists) or falls back to the storage backend (BLOB).
+/// Records a download event for stats tracking.
+pub(crate) async fn multipart_download(
+    State(state): State<AppState>,
+    Path((name, version_str)): Path<(String, String)>,
+) -> Result<impl IntoResponse, RegistryError> {
+    let version = Version::parse(&version_str)
+        .map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
+
+    // Record the download for stats.
+    let _ = state.storage.record_download(&name, &version);
+
+    // Try filesystem first (if configured).
+    if let Some(dir) = &state.tarball_dir {
+        if let Some(bytes) = read_tarball_from_fs(dir, &name, &version) {
+            return Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+                bytes,
+            )
+                .into_response());
+        }
+    }
+
+    // Fall back to storage backend (BLOB).
+    let tarball = state.storage.get_tarball(&name, &version)?;
+    match tarball {
+        Some(bytes) => Ok((
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            bytes,
+        )
+            .into_response()),
+        None => Err(RegistryError::VersionNotFound),
+    }
+}
+
+/// T57: `GET /api/v1/packages/{name}/stats` — download statistics.
+///
+/// Returns the total download count for `name` across all versions.
+pub(crate) async fn get_stats(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, RegistryError> {
+    let count = state.storage.download_count(&name)?;
+    Ok(Json(serde_json::json!({
+        "name": name,
+        "downloads": count,
+    })))
+}
+
+// --- Filesystem tarball helpers ---
+
+/// Sanitize a package name for use as a filesystem path component.
+/// Replaces `/` with `__` so `@org/pkg` becomes `@org__pkg` (no
+/// subdirectory traversal).
+fn sanitize_name_for_fs(name: &str) -> String {
+    name.replace('/', "__")
+}
+
+/// Write a tarball to the filesystem under `tarball_dir`.
+fn write_tarball_to_fs(
+    tarball_dir: &std::path::Path,
+    name: &str,
+    version: &Version,
+    bytes: &[u8],
+) -> Result<(), RegistryError> {
+    let sanitized = sanitize_name_for_fs(name);
+    let dir = tarball_dir.join(&sanitized);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| RegistryError::Storage(format!("create tarball dir: {e}")))?;
+    let path = dir.join(format!("{}.tar", version));
+    std::fs::write(&path, bytes)
+        .map_err(|e| RegistryError::Storage(format!("write tarball: {e}")))?;
+    Ok(())
+}
+
+/// Read a tarball from the filesystem. Returns `None` if the file
+/// doesn't exist.
+fn read_tarball_from_fs(
+    tarball_dir: &std::path::Path,
+    name: &str,
+    version: &Version,
+) -> Option<Vec<u8>> {
+    let sanitized = sanitize_name_for_fs(name);
+    let path = tarball_dir.join(sanitized).join(format!("{}.tar", version));
+    std::fs::read(&path).ok()
 }
 
 #[cfg(test)]
