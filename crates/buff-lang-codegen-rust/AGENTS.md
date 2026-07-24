@@ -8,6 +8,7 @@ Lowers Buff AST → Rust source via `syn`/`quote`/`prettyplease`. ~16,004 LOC ac
 src/
 ├── lib.rs                # 197 lines — generate_rust(), generate_test_rust(), format_file() + re-exports
 ├── rust_codegen.rs       # 12,777 lines — RustCodegen visitor: ALL AST→syn lowering (see below)
+├── multi_crate.rs        # T8 — multi-crate emission (one .rs per Buff module when imports present)
 ├── atomic_analysis.rs    # 1025 lines — T42 atomic promotion (let mut → AtomicI64 fetch_add)
 ├── race_analysis.rs      # 856 lines — T41 race detection in parallel closures
 ├── gpu_alignment.rs     # 649 lines — T50 GPU-bound struct #[repr(C)] + bytemuck derives
@@ -61,3 +62,4 @@ In `generate()`: atomic analysis → race analysis (with exemption hook from ato
 | Change GPU struct alignment | `gpu_alignment.rs` |
 | Track new per-function state | `context.rs::CodegenContext` |
 | Change output formatting | `format.rs` (only prettyplease wrapper) |
+| Emit multi-module program as multiple .rs files (T8) | `multi_crate.rs` + `pipeline.rs::compile_to_rust_multi` in buff-lang-cli |

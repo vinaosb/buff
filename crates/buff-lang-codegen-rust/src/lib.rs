@@ -44,6 +44,12 @@ pub mod comptime;
 pub mod context;
 pub mod format;
 pub mod gpu_alignment;
+// T8: multi-crate emission mode — splits a multi-module Buff program
+// into one `.rs` file per module (with `mod` + `use` wiring) for rustc
+// parallelism + better incremental rebuilds. Activates ONLY when the
+// root has ES6 `import ... from "..."` declarations; single-file
+// programs use the existing [`generate_rust`] path unchanged.
+pub mod multi_crate;
 pub mod move_analysis;
 pub mod race_analysis;
 pub mod rust_codegen;
@@ -59,6 +65,13 @@ pub use context::CodegenContext;
 pub use format::format;
 pub use gpu_alignment::gpu_bound_structs as analyze_gpu_alignment;
 pub use move_analysis::MoveAnalyzer;
+// T8: re-export the multi-crate entry points + types so the pipeline
+// (and tests) can refer to them as `buff_lang_codegen_rust::*` without
+// reaching into the private module path.
+pub use multi_crate::{
+    generate_multi_crate, generate_module_source, module_ident_from_path, uses_multi_crate,
+    MultiCrateOutput, ParsedModule,
+};
 pub use race_analysis::{
     analyze as analyze_parallel_races,
     analyze_with_exemptions as analyze_parallel_races_with_exemptions, is_assignment_op,

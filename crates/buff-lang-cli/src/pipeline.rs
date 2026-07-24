@@ -18,7 +18,10 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use buff_lang_codegen_buffhtml::{self as buffhtml_codegen, CodegenResult, SpanMap};
-use buff_lang_codegen_rust::generate_rust;
+use buff_lang_codegen_rust::{
+    generate_multi_crate, generate_rust, module_ident_from_path, uses_multi_crate,
+    MultiCrateOutput, ParsedModule,
+};
 use buff_lang_error::{SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
@@ -446,6 +449,201 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
         rust_source,
         rust_file_path,
     })
+}
+
+// ---------------------------------------------------------------------------
+// T8: Multi-crate emission (multi-module Buff programs).
+// ---------------------------------------------------------------------------
+
+/// Output of the multi-crate compile phase (T8): the root `.rs` path +
+/// the set of sibling module `.rs` files written alongside it.
+///
+/// When the root Buff program has ES6-form `import { ... } from
+/// "./path.buff"` declarations, the pipeline emits one `.rs` file per
+/// module (root + one per transitively-imported `.buff` file). The
+/// caller invokes `rustc <root_rust_path>` and rustc parallel-compiles
+/// each `mod`-declared sibling.
+#[derive(Debug, Clone)]
+pub struct MultiCrateCompileOutput {
+    /// Path of the root `.rs` file (rustc entry point). Lives in the
+    /// directory selected by the caller (typically alongside the source
+    /// for `buff build`, or in a temp dir for `buff run`).
+    pub root_rust_path: PathBuf,
+    /// Paths of the sibling module `.rs` files (one per imported
+    /// module). Empty when the program turned out to be single-file
+    /// after parsing (the function fell back to the single-file path).
+    pub module_rust_paths: Vec<PathBuf>,
+    /// Aggregated extern-crate deps across root + all modules. Populated
+    /// for future Cargo-project wiring (the single-file rustc path does
+    /// NOT link these — same codegen-only boundary as
+    /// [`RustCodegen::extern_crates`]).
+    pub extern_crates: std::collections::BTreeSet<String>,
+    /// The generated root Rust source (also written to
+    /// `root_rust_path`). Exposed for snapshot tests + the `--emit rust`
+    /// inspection path.
+    pub root_source: String,
+}
+
+/// Dispatch helper: detect whether `file` is a multi-module Buff program
+/// and call the matching compile path (T8).
+///
+/// - Reads + parses `file`.
+/// - If [`uses_multi_crate`] returns `false` → falls back to
+///   [`compile_to_rust`] (single-file codegen, full backwards compat).
+/// - Otherwise walks the import graph (BFS, de-duplicating on
+///   `from_path`), reads + parses each referenced `.buff` file, calls
+///   [`generate_multi_crate`], and writes root + each module `.rs` to
+///   `out_dir`.
+///
+/// `out_dir` is the directory where the `.rs` files are written. For
+/// `buff build` this is the source directory (so the `.rs` files sit
+/// alongside the `.buff` sources, matching the single-file behaviour).
+/// For `buff run` this is a temp dir (so the workspace isn't polluted).
+///
+/// # Errors
+///
+/// Propagates file-read / lex / parse / codegen errors. A missing
+/// imported file is surfaced as a clear "cannot resolve import" error
+/// pointing at the importing source location.
+pub fn compile_to_rust_multi(file: &Path, out_dir: &Path) -> Result<MultiCrateCompileOutput> {
+    // 1. Read + parse the root.
+    let root_source = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read source file `{}`", file.display()))?;
+    let root_decls = parse_source(&root_source, file)?;
+
+    // 2. Single-file fast path: no ES6 imports → existing codegen path.
+    if !uses_multi_crate(&root_decls) {
+        let single = compile_to_rust(file)?;
+        return Ok(MultiCrateCompileOutput {
+            root_rust_path: single.rust_file_path,
+            module_rust_paths: Vec::new(),
+            extern_crates: std::collections::BTreeSet::new(),
+            root_source: single.rust_source,
+        });
+    }
+
+    // 3. Multi-module path: walk the import graph (BFS over `from_path`
+    //    strings). For each imported file, read + parse + push to the
+    //    flat `modules` list. De-duplicate on `from_path` so a module
+    //    imported from multiple files is emitted once.
+    let mut modules: Vec<ParsedModule> = Vec::new();
+    let mut visited: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // The BFS queue holds `(from_path_string, importer_path)` pairs so
+    // relative-path resolution can find the imported file.
+    let mut queue: std::collections::VecDeque<(String, PathBuf)> = root_es6_imports(&root_decls)
+        .into_iter()
+        .map(|s| (s, file.to_path_buf()))
+        .collect();
+    while let Some((from_path, importer)) = queue.pop_front() {
+        // De-dup on the raw from_path string (NOT the sanitised ident —
+        // `./greet.buff` and `./greet.v2.buff` produce distinct idents).
+        if !visited.insert(from_path.clone()) {
+            continue;
+        }
+        // Resolve the from_path relative to the importer's directory.
+        let importer_dir = importer
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let resolved = importer_dir.join(&from_path);
+        // Read + parse the imported file. Missing file is a clear error.
+        let mod_source = std::fs::read_to_string(&resolved).with_context(|| {
+            format!(
+                "failed to resolve import `from {from_path:?}` — cannot read `{}`",
+                resolved.display()
+            )
+        })?;
+        let mod_decls = parse_source(&mod_source, &resolved)?;
+        // Compute the sanitised module ident for this file.
+        let ident = module_ident_from_path(&from_path);
+        // Enqueue this module's own ES6 imports (transitive resolution).
+        for transitive in root_es6_imports(&mod_decls) {
+            queue.push_back((transitive, resolved.clone()));
+        }
+        modules.push(ParsedModule {
+            ident,
+            from_path,
+            decls: mod_decls,
+        });
+    }
+
+    // 4. Generate multi-crate Rust output.
+    let multi_out: MultiCrateOutput = generate_multi_crate(&root_decls, &modules).map_err(|e| {
+        format_diagnostic_error("codegen", &e.diagnostic, &empty_source_file(file), file)
+    })?;
+
+    // 5. Write root + each module .rs file to out_dir.
+    std::fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed to create output dir `{}`", out_dir.display()))?;
+    let root_stem = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("buff_program");
+    let root_rust_path = out_dir.join(format!("{root_stem}.rs"));
+    std::fs::write(&root_rust_path, &multi_out.root_source)
+        .with_context(|| format!("failed to write `{}`", root_rust_path.display()))?;
+    let mut module_rust_paths = Vec::with_capacity(modules.len());
+    for (ident, src) in &multi_out.modules {
+        let path = out_dir.join(format!("{ident}.rs"));
+        std::fs::write(&path, src)
+            .with_context(|| format!("failed to write `{}`", path.display()))?;
+        module_rust_paths.push(path);
+    }
+
+    Ok(MultiCrateCompileOutput {
+        root_rust_path,
+        module_rust_paths,
+        extern_crates: multi_out.extern_crates,
+        root_source: multi_out.root_source,
+    })
+}
+
+/// Read + lex + parse a single `.buff` source file into `Vec<Decl>`.
+///
+/// Helper shared by the multi-crate pipeline (root + each imported
+/// module). Returns an anyhow error with line/col context on lex/parse
+/// failure, mirroring [`compile_to_rust_with_cache`]'s error path.
+fn parse_source(source: &str, file: &Path) -> Result<Vec<buff_lang_ast::Decl>> {
+    let source_id = SourceId(0);
+    let source_file = SourceFile::new(file.to_path_buf(), source.to_string());
+    let tokens = tokenize(source, source_id)
+        .map_err(|e| format_diagnostic_error("lex", &e.inner.diagnostic, &source_file, file))?;
+    let decls = parse(&tokens, source_id)
+        .map_err(|e| format_diagnostic_error("parse", &e.diagnostic, &source_file, file))?;
+    Ok(decls)
+}
+
+/// Collect the unique ES6 `from "..."` import paths from `decls`,
+/// preserving first-encounter order.
+///
+/// Used by [`compile_to_rust_multi`] to seed the BFS walk over the
+/// import graph. The legacy `import a.b.c as alias` form (no
+/// `from_path`) is skipped — it has no file to link.
+fn root_es6_imports(decls: &[buff_lang_ast::Decl]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for d in decls {
+        if let buff_lang_ast::Decl::ImportDecl(imp) = d {
+            if let Some(from) = &imp.from_path {
+                if seen.insert(from.clone()) {
+                    out.push(from.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Build a near-empty [`SourceFile`] for error-formatting fallbacks.
+///
+/// The multi-crate pipeline operates on already-parsed decls at the
+/// codegen stage, so there's no `SourceFile` in scope. We construct a
+/// minimal one (path + empty content) so the error formatter's
+/// `lookup()` returns `None` and the error falls through to the
+/// "in <file>" branch — losing line/col context but keeping the
+/// filename.
+fn empty_source_file(file: &Path) -> SourceFile {
+    SourceFile::new(file.to_path_buf(), String::new())
 }
 
 /// T7: Incremental variant of [`compile_to_rust`] that consults a
