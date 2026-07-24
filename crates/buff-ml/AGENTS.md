@@ -78,7 +78,7 @@ Doc-tests: 1 (linear regression example in lib.rs).
 
 ## KNOWN ISSUES
 
-- **Bias gradient 3x factor**: Autodiff bias gradient is ~3x analytical for batch>1 (likely `sum_axis` shape issue in buff-tensor). Training convergence tests pass despite this.
+- **Bias gradient 3x factor** — RESOLVED (T7). Autodiff bias gradient was ~3x / scrambled for `batch > 1` AND `output_dim > 1`. Root cause was `Tensor::sum_axis` decomposing the flat index with axes in the wrong order (forward instead of last-axis-first for row-major), so the `add_row_bias` backward's `sum_axis(0)` over the batch axis scrambled the bias grad. The bug was masked in existing tests because `proptest_linear_bias_gradient_matches_numerical` used `Linear(1, 1)` (`output_dim == 1`, where the wrong-axis reduction coincidentally lands every contribution in the single output cell). Fixed in `buff-tensor/src/math.rs` (`sum_axis` + `max_axis` now iterate axes in reverse); regression test in `tests/bias_gradient_batch.rs` (analytical + finite-difference check, batch=3, out=2). Training convergence tests passed before and after.
 - **`model.layers` is `pub(crate)`**: Optimizers access via `layers_mut()`. External code uses `get_layer(i)`.
 
 ## REFERENCES

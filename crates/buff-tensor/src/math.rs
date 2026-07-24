@@ -194,7 +194,14 @@ impl Tensor {
         for (in_flat, &v) in in_data.iter().enumerate() {
             let mut remaining = in_flat;
             let mut out_flat = 0usize;
-            for (ax, &dim) in in_dims.iter().enumerate() {
+            // Decompose the flat index LAST-axis-first: row-major layout means
+            // the LAST axis varies fastest, so `remaining % dim` must peel the
+            // last axis first. Iterating forward (axis 0 first) would treat
+            // axis 0 as fastest and scramble the reduction (the T7 root cause
+            // of the buff-ml bias-gradient bug). The `out_ax` mapping below
+            // depends only on `ax` vs `abs_axis`, so reversing iteration order
+            // fixes the decomposition without changing the output mapping.
+            for (ax, &dim) in in_dims.iter().enumerate().rev() {
                 let idx = remaining % dim;
                 remaining /= dim;
                 if ax == abs_axis {
@@ -251,7 +258,8 @@ impl Tensor {
         for (in_flat, &v) in in_data.iter().enumerate() {
             let mut remaining = in_flat;
             let mut out_flat = 0usize;
-            for (ax, &dim) in in_dims.iter().enumerate() {
+            // Same last-axis-first decomposition as `sum_axis` (row-major).
+            for (ax, &dim) in in_dims.iter().enumerate().rev() {
                 let idx = remaining % dim;
                 remaining /= dim;
                 if ax == abs_axis {
