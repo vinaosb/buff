@@ -17,7 +17,9 @@
 //     scanner hot loop; a tiny helper reads clearer).
 
 // The number of columns represented by a single tab character.
-let TAB_WIDTH: Int = 4
+// (Defined as the local `tab_width` inside `compute_level` — Buff has no
+// module-level `let`; only func/enum/struct/import/export/extern/extend/trait
+// are valid top-level declarations.)
 
 // Tracks indentation levels and emits synthetic Indent/Dedent tokens.
 struct IndentationTracker:
@@ -92,6 +94,7 @@ func adjust_to_level(
 //
 // Tabs count as TAB_WIDTH columns each. Mixing tabs and spaces is rejected.
 func compute_level(indent: String, source_id: SourceId, span_start: Int) -> Result<Int, LexerError>:
+    let tab_width = 4
     if indent.len() == 0:
         return Result.Ok(0)
     let mut has_tab = false
@@ -107,5 +110,5 @@ func compute_level(indent: String, source_id: SourceId, span_start: Int) -> Resu
     if has_tab && has_space:
         return Result.Err(lexer_error_mixed_tabs_spaces(span_new(span_start, span_start + indent.len(), source_id)))
     if has_tab:
-        return Result.Ok(indent.len() * TAB_WIDTH)
+        return Result.Ok(indent.len() * tab_width)
     return Result.Ok(indent.len())

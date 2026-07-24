@@ -10,12 +10,13 @@
 // Rust constructor attaches is preserved as a string tag (`code`) so a future
 // diagnostic renderer can still emit `error[E1001]`.
 
-enum ErrorCode:
-    UnexpectedChar
-    UnterminatedString
-    InvalidNumber
-    MixedTabsSpaces
-    Other
+enum ErrorCode {
+    UnexpectedChar,
+    UnterminatedString,
+    InvalidNumber,
+    MixedTabsSpaces,
+    Other,
+}
 
 struct LexerError:
     message: String

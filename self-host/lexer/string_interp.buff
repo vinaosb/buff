@@ -22,11 +22,14 @@
 //     `callback: (Int, Int) -> Result<(), LexerError>` (Buff hides `dyn`).
 
 // --- ASCII byte constants the scanner reacts to ---
-let QUOTE_BYTE: Int = 34      // "
-let BACKSLASH_BYTE: Int = 92  // \
-let LBRACE_BYTE: Int = 123    // {
-let RBRACE_BYTE: Int = 125    // }
-let COLON_BYTE: Int = 58      // :
+// (Defined as locals inside each scanner function — Buff has no module-level
+// `let`; only func/enum/struct/import/export/extern/extend/trait are valid
+// top-level declarations.)
+//   QUOTE_BYTE     = 34   "
+//   BACKSLASH_BYTE = 92   \
+//   LBRACE_BYTE    = 123  {
+//   RBRACE_BYTE    = 125  }
+//   COLON_BYTE     = 58   :
 
 // Result of splitting an interpolation at the first depth-0 `:`.
 struct InterpSplit:
@@ -57,6 +60,10 @@ func scan_string(
         out: Vector<Token>,
         callback: (Int, Int) -> Result<(), LexerError>,
     ) -> Result<Int, LexerError>:
+    let quote_byte = 34
+    let backslash_byte = 92
+    let lbrace_byte = 123
+    let rbrace_byte = 125
     out.push(token_new(TokenKind.StringStart, span_new(quote_start, quote_start + 1, source_id)))
 
     let mut i = quote_start + 1
@@ -64,18 +71,18 @@ func scan_string(
 
     while i < bytes.len():
         let b = bytes[i]
-        if b == QUOTE_BYTE:
+        if b == quote_byte:
             flush_part(bytes, part_start, i, source_id, out)
             out.push(token_new(TokenKind.StringEnd, span_new(i, i + 1, source_id)))
             return Ok(i + 1)
-        if b == BACKSLASH_BYTE:
+        if b == backslash_byte:
             // Keep the raw escape bytes in the StringPart; escape interpretation
             // is the codegen/parser's job. Skip one extra byte (the escaped
             // char) if present.
             if i + 1 >= bytes.len():
                 return Result.Err(lexer_error_unterminated_string(span_new(quote_start, bytes.len(), source_id)))
             i = i + 2
-        else if b == LBRACE_BYTE:
+        else if b == lbrace_byte:
             flush_part(bytes, part_start, i, source_id, out)
             out.push(token_new(TokenKind.InterpStart, span_new(i, i + 1, source_id)))
             let after_brace = i + 1
@@ -90,7 +97,7 @@ func scan_string(
             out.push(token_new(TokenKind.InterpEnd, span_new(closing, closing + 1, source_id)))
             i = closing + 1
             part_start = i
-        else if b == RBRACE_BYTE:
+        else if b == rbrace_byte:
             return Result.Err(lexer_error_new("unexpected '}' inside string literal", span_new(i, i + 1, source_id)))
         else:
             // Multi-byte UTF-8 sequences are handled implicitly: we walk one
@@ -113,23 +120,27 @@ func flush_part(bytes: Vector<Int>, start: Int, end: Int, source_id: SourceId, o
 // works. String literals inside the interpolation are skipped so their `{`/`}`
 // characters do not affect brace depth.
 func find_matching_brace(bytes: Vector<Int>, start: Int, source_id: SourceId) -> Result<Int, LexerError>:
+    let lbrace_byte = 123
+    let rbrace_byte = 125
+    let quote_byte = 34
+    let backslash_byte = 92
     let mut depth = 1
     let mut i = start
     while i < bytes.len():
         let b = bytes[i]
-        if b == LBRACE_BYTE:
+        if b == lbrace_byte:
             depth = depth + 1
             i = i + 1
-        else if b == RBRACE_BYTE:
+        else if b == rbrace_byte:
             depth = depth - 1
             if depth == 0:
                 return Ok(i)
             i = i + 1
-        else if b == QUOTE_BYTE:
+        else if b == quote_byte:
             // Skip a nested string literal: walk to the next unescaped ".
             i = i + 1
-            while i < bytes.len() && bytes[i] != QUOTE_BYTE:
-                if bytes[i] == BACKSLASH_BYTE && i + 1 < bytes.len():
+            while i < bytes.len() && bytes[i] != quote_byte:
+                if bytes[i] == backslash_byte && i + 1 < bytes.len():
                     i = i + 2
                 else:
                     i = i + 1
@@ -156,28 +167,33 @@ func split_interp_spec(
         closing: Int,
         source_id: SourceId,
     ) -> Result<InterpSplit, LexerError>:
+    let lbrace_byte = 123
+    let rbrace_byte = 125
+    let colon_byte = 58
+    let quote_byte = 34
+    let backslash_byte = 92
     let mut depth = 0
     let mut i = start
     while i < closing:
         let b = bytes[i]
-        if b == LBRACE_BYTE:
+        if b == lbrace_byte:
             depth = depth + 1
             i = i + 1
-        else if b == RBRACE_BYTE:
+        else if b == rbrace_byte:
             if depth == 0:
                 // Reached the closing `}` — no spec found.
                 return Ok(InterpSplit.new(expr_end: closing, spec: Option.None))
             depth = depth - 1
             i = i + 1
-        else if b == COLON_BYTE && depth == 0:
+        else if b == colon_byte && depth == 0:
             // Found the spec separator at brace-depth 0.
             let spec = slice_to_string(bytes, i + 1, closing)
             return Ok(InterpSplit.new(expr_end: i, spec: Option.Some(spec)))
-        else if b == QUOTE_BYTE:
+        else if b == quote_byte:
             // Skip a nested string literal so its `:` doesn't confuse us.
             i = i + 1
-            while i < closing && bytes[i] != QUOTE_BYTE:
-                if bytes[i] == BACKSLASH_BYTE && i + 1 < closing:
+            while i < closing && bytes[i] != quote_byte:
+                if bytes[i] == backslash_byte && i + 1 < closing:
                     i = i + 2
                 else:
                     i = i + 1
