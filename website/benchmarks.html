@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Benchmarks — Buff</title>
+    <meta name="description" content="Buff compiler benchmark results: compile times, codegen hashes, binary sizes, and dispatch decisions." />
+    <meta name="color-scheme" content="dark" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+        /* ── Benchmarks page extras ──────────────────────────────────────── */
+        .benchmarks {
+            padding: var(--space-16) var(--space-8) var(--space-20);
+        }
+        .benchmarks-inner {
+            max-width: var(--max-w);
+            margin: 0 auto;
+        }
+        .benchmarks .section-sub {
+            margin-bottom: var(--space-6);
+        }
+        .benchmark-meta {
+            font-family: var(--font-code);
+            font-size: var(--text-xs);
+            color: var(--color-text-mute);
+            margin-bottom: var(--space-10);
+            padding: var(--space-3) var(--space-4);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm);
+            display: inline-block;
+        }
+        .benchmark-meta span {
+            color: var(--color-accent);
+        }
+
+        /* ── Table ────────────────────────────────────────────────────────── */
+        .table-wrap {
+            overflow-x: auto;
+            margin-bottom: var(--space-12);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            background: var(--color-surface);
+            box-shadow: var(--shadow-lg);
+        }
+        .table-wrap table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-code);
+            font-size: var(--text-sm);
+        }
+        .table-wrap thead {
+            background: var(--color-surface-2);
+            border-bottom: 1px solid var(--color-border);
+        }
+        .table-wrap th {
+            padding: var(--space-3) var(--space-4);
+            text-align: left;
+            font-weight: 600;
+            color: var(--color-text-dim);
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            font-size: var(--text-xs);
+            white-space: nowrap;
+        }
+        .table-wrap th:first-child {
+            padding-left: var(--space-5);
+        }
+        .table-wrap td {
+            padding: var(--space-3) var(--space-4);
+            border-bottom: 1px solid var(--color-border);
+            color: var(--color-text);
+            white-space: nowrap;
+        }
+        .table-wrap td:first-child {
+            padding-left: var(--space-5);
+            font-weight: 600;
+            color: var(--color-accent);
+        }
+        .table-wrap tbody tr:last-child td {
+            border-bottom: none;
+        }
+        .table-wrap tbody tr:hover {
+            background: rgba(232, 160, 78, 0.04);
+        }
+        .table-wrap .num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .table-wrap .hash {
+            font-size: var(--text-2xs);
+            color: var(--color-text-mute);
+            max-width: 240px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .table-wrap .tag-cpu {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: var(--radius-pill);
+            font-size: var(--text-2xs);
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            background: rgba(155, 185, 74, 0.15);
+            color: var(--color-success);
+        }
+        .table-wrap .tag-gpu {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: var(--radius-pill);
+            font-size: var(--text-2xs);
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            background: rgba(123, 143, 212, 0.15);
+            color: var(--color-why-tag);
+        }
+        .table-wrap .tag-na {
+            color: var(--color-text-mute);
+            font-style: italic;
+        }
+        .table-section-title {
+            font-family: var(--font-display);
+            font-size: var(--text-lg);
+            font-weight: 700;
+            color: var(--color-text);
+            margin-bottom: var(--space-4);
+            margin-top: var(--space-4);
+        }
+        .table-section-title:first-child {
+            margin-top: 0;
+        }
+        .table-section-desc {
+            font-size: var(--text-sm);
+            color: var(--color-text-dim);
+            margin-bottom: var(--space-6);
+        }
+
+        /* ── Summary cards ────────────────────────────────────────────────── */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: var(--space-4);
+            margin-bottom: var(--space-12);
+        }
+        .summary-card {
+            padding: var(--space-5) var(--space-6);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        .summary-card-value {
+            font-family: var(--font-display);
+            font-size: var(--text-2xl);
+            font-weight: 700;
+            color: var(--color-accent);
+        }
+        .summary-card-label {
+            font-size: var(--text-xs);
+            color: var(--color-text-mute);
+            margin-top: var(--space-1);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 800px) {
+            .benchmarks { padding: var(--space-12) var(--space-5); }
+            .table-wrap th,
+            .table-wrap td { padding: var(--space-2) var(--space-3); }
+            .table-wrap th:first-child,
+            .table-wrap td:first-child { padding-left: var(--space-3); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ── Header ───────────────────────────────────────────────────────── -->
+    <header class="site-header" role="banner">
+        <div class="header-inner">
+            <a class="brand" href="./index.html" aria-label="Buff home">
+                <svg viewBox="0 0 32 32" class="brand-glyph" aria-hidden="true">
+                    <path d="M6 4 C 2 8 2 22 6 26 L 12 22 C 10 18 10 14 12 10 Z" fill="currentColor"/>
+                    <path d="M26 4 C 30 8 30 22 26 26 L 20 22 C 22 18 22 14 20 10 Z" fill="currentColor"/>
+                    <rect x="13" y="14" width="6" height="6" rx="1" fill="currentColor"/>
+                </svg>
+                <span class="brand-word">BUFF</span>
+            </a>
+            <nav class="site-nav" aria-label="Main navigation">
+                <a class="nav-btn nav-btn-ghost" href="./index.html">Home</a>
+                <a class="nav-btn nav-btn-ghost" href="./index.html#examples">Examples</a>
+                <a class="nav-btn nav-btn-accent" href="../playground/index.html">
+                    <span class="nav-btn-label">Playground</span>
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+
+        <!-- ── Benchmarks ─────────────────────────────────────────────────── -->
+        <section class="benchmarks">
+            <div class="benchmarks-inner">
+
+                <h1 class="section-heading">Compiler Benchmarks</h1>
+                <p class="section-sub">
+                    Baseline compile-time and codegen measurements for the Buff compiler.
+                    Captured from the T22 benchmark harness.
+                </p>
+
+                <div class="benchmark-meta">
+                    Captured: <span>2026-07-24</span> &middot;
+                    Commit: <span>40ca974</span> &middot;
+                    Host: <span>windows-x86_64</span>
+                </div>
+
+                <!-- ── Summary cards ──────────────────────────────────────────── -->
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div class="summary-card-value">7</div>
+                        <div class="summary-card-label">Fixtures</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-card-value">0</div>
+                        <div class="summary-card-label">GPU dispatches</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-card-value">0</div>
+                        <div class="summary-card-label">NPU dispatches</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-card-value">6 ms</div>
+                        <div class="summary-card-label">Total codegen</div>
+                    </div>
+                </div>
+
+                <!-- ── Compile time table ────────────────────────────────────── -->
+                <h2 class="table-section-title">Compile Time</h2>
+                <p class="table-section-desc">Per-fixture breakdown of compiler pipeline phases in milliseconds.</p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Fixture</th>
+                                <th class="num">Lex (ms)</th>
+                                <th class="num">Parse (ms)</th>
+                                <th class="num">Typecheck (ms)</th>
+                                <th class="num">Codegen (ms)</th>
+                                <th class="num">Functions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>closures</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">2</td>
+                                <td class="num">1</td>
+                            </tr>
+                            <tr>
+                                <td>collections</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">1</td>
+                                <td class="num">1</td>
+                            </tr>
+                            <tr>
+                                <td>error_handling</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">1</td>
+                                <td class="num">3</td>
+                            </tr>
+                            <tr>
+                                <td>fibonacci</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">2</td>
+                            </tr>
+                            <tr>
+                                <td>ola</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">1</td>
+                            </tr>
+                            <tr>
+                                <td>pattern_matching</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                                <td class="num">2</td>
+                                <td class="num">3</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ── Codegen hash table ─────────────────────────────────────── -->
+                <h2 class="table-section-title">Codegen Hashes</h2>
+                <p class="table-section-desc">SHA-256 hash of the generated Rust code per fixture. Deterministic — same AST always produces the same hash.</p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Fixture</th>
+                                <th>SHA-256</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>closures</td>
+                                <td class="hash" title="cfb5c6c15d3d6c3eb3dbfe8f01dd45b8d19e73f707f3c2b9ef5d989c4220b8c2">cfb5c6c1&hellip;220b8c2</td>
+                            </tr>
+                            <tr>
+                                <td>collections</td>
+                                <td class="hash" title="88744f51a34bb91437bfc77ea3416987d4e63c0f6dbc6eb3707f775ffdbb5b81">88744f51&hellip;dbb5b81</td>
+                            </tr>
+                            <tr>
+                                <td>error_handling</td>
+                                <td class="hash" title="f0471d7b256c6f09f1deb68031fcba5caa218318c76e0a713acf5219fbc7494a">f0471d7b&hellip;bc7494a</td>
+                            </tr>
+                            <tr>
+                                <td>fibonacci</td>
+                                <td class="hash" title="615d66cabf858f6bd3c9056d265c340c446285370b04116601eed4355f2c4ec1">615d66ca&hellip;f2c4ec1</td>
+                            </tr>
+                            <tr>
+                                <td>ola</td>
+                                <td class="hash" title="54840d4d7cc2ba54fa0d14290c6cbee2355455901d384e047a90c2c6f5cd80f2">54840d4d&hellip;5cd80f2</td>
+                            </tr>
+                            <tr>
+                                <td>pattern_matching</td>
+                                <td class="hash" title="fc7053ccbaa7373f1bbaddac22bb0aba4f3b0e26274c870a1e87f89850ee420f">fc7053cc&hellip;0ee420f</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ── Binary size table ──────────────────────────────────────── -->
+                <h2 class="table-section-title">Binary Size</h2>
+                <p class="table-section-desc">Compiled binary sizes per fixture. <em>N/A</em> indicates the fixture was not compiled to a standalone binary during this baseline capture.</p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Fixture</th>
+                                <th class="num">Binary size (bytes)</th>
+                                <th class="num">Clean build (ms)</th>
+                                <th class="num">Incremental (ms)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>closures</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>collections</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>error_handling</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>fibonacci</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>ola</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>pattern_matching</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                                <td class="num tag-na">N/A</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ── Dispatch decision table ────────────────────────────────── -->
+                <h2 class="table-section-title">Dispatch Decisions</h2>
+                <p class="table-section-desc">Runtime dispatch target selected per fixture. CPU is the default; GPU/NPU are selected when the compiler detects arithmetic intensity above the threshold or <code>@prefer(gpu)</code> / <code>@prefer(npu)</code> hints are present.</p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Fixture</th>
+                                <th>Dispatch</th>
+                                <th class="num">GPU hints</th>
+                                <th class="num">NPU hints</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>closures</td>
+                                <td><span class="tag-cpu">CPU</span></td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                            </tr>
+                            <tr>
+                                <td>collections</td>
+                                <td><span class="tag-cpu">CPU</span></td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                            </tr>
+                            <tr>
+                                <td>error_handling</td>
+                                <td><span class="tag-cpu">CPU</span></td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                            </tr>
+                            <tr>
+                                <td>fibonacci</td>
+                                <td><span class="tag-cpu">CPU</span></td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                            </tr>
+                            <tr>
+                                <td>ola</td>
+                                <td><span class="tag-cpu">CPU</span></td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                            </tr>
+                            <tr>
+                                <td>pattern_matching</td>
+                                <td><span class="tag-cpu">CPU</span></td>
+                                <td class="num">0</td>
+                                <td class="num">0</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ── Raw data ───────────────────────────────────────────────── -->
+                <details style="margin-top: var(--space-8);">
+                    <summary style="cursor: pointer; font-family: var(--font-code); font-size: var(--text-sm); color: var(--color-text-dim);">Raw baseline data (JSON)</summary>
+                    <pre style="margin-top: var(--space-4); padding: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: var(--text-xs); color: var(--color-text-dim); overflow-x: auto; max-height: 400px; white-space: pre;">{
+  "captured_at": "2026-07-24T00:20:52Z",
+  "git_sha": "40ca974",
+  "host": "standalone-capture-binary on windows-x86_64",
+  "fixtures": {
+    "closures": {
+      "lex_ms": 0, "parse_ms": 0, "typecheck_ms": 0, "codegen_ms": 2,
+      "codegen_hash": "sha256:cfb5c6c15d3d6c3eb3dbfe8f01dd45b8d19e73f707f3c2b9ef5d989c4220b8c2",
+      "function_count": 1
+    },
+    "collections": {
+      "lex_ms": 0, "parse_ms": 0, "typecheck_ms": 0, "codegen_ms": 1,
+      "codegen_hash": "sha256:88744f51a34bb91437bfc77ea3416987d4e63c0f6dbc6eb3707f775ffdbb5b81",
+      "function_count": 1
+    },
+    "error_handling": {
+      "lex_ms": 0, "parse_ms": 0, "typecheck_ms": 0, "codegen_ms": 1,
+      "codegen_hash": "sha256:f0471d7b256c6f09f1deb68031fcba5caa218318c76e0a713acf5219fbc7494a",
+      "function_count": 3
+    },
+    "fibonacci": {
+      "lex_ms": 0, "parse_ms": 0, "typecheck_ms": 0, "codegen_ms": 0,
+      "codegen_hash": "sha256:615d66cabf858f6bd3c9056d265c340c446285370b04116601eed4355f2c4ec1",
+      "function_count": 2
+    },
+    "ola": {
+      "lex_ms": 0, "parse_ms": 0, "typecheck_ms": 0, "codegen_ms": 0,
+      "codegen_hash": "sha256:54840d4d7cc2ba54fa0d14290c6cbee2355455901d384e047a90c2c6f5cd80f2",
+      "function_count": 1
+    },
+    "pattern_matching": {
+      "lex_ms": 0, "parse_ms": 0, "typecheck_ms": 0, "codegen_ms": 2,
+      "codegen_hash": "sha256:fc7053ccbaa7373f1bbaddac22bb0aba4f3b0e26274c870a1e87f89850ee420f",
+      "function_count": 3
+    }
+  },
+  "binary_sizes_bytes": {},
+  "dispatch_decisions": { "gpu": 0, "npu": 0 }
+}</pre>
+                </details>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <span class="footer-copy">Buff language. Open source under MIT + Apache-2.0.</span>
+            <a class="footer-link" href="https://github.com/buff-lang/buff" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+        </div>
+    </footer>
+
+</body>
+</html>

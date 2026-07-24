@@ -1394,12 +1394,6 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Lorem => "lorem",
             PreludeInstanceFn::FakerInt => "int",
             PreludeInstanceFn::FakerDatetime => "datetime",
-            // T42 (sibling): Email builder methods — backfill the
-            // name() arms the T42 task missed. Canonical Rust method
-            // names 1:1.
-            PreludeInstanceFn::Body => "body",
-            PreludeInstanceFn::Html => "html",
-            PreludeInstanceFn::Attach => "attach",
             // T43: buff-scrape instance method names mirror the
             // `buff_scrape::{Document, Element, Crawler}` Rust method
             // names 1:1 so codegen can splice `recv.text()` /
@@ -1418,7 +1412,6 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::RobotsAllows => "robots_allows",
             // T50: Xml instance method names.
             PreludeInstanceFn::Root => "root",
-            PreludeInstanceFn::Find => "find",
             PreludeInstanceFn::ToString => "to_string",
             // T50: XmlElement instance method name. `name` / `text` /
             // `attr` reuse the existing shared variants (Name / Text /

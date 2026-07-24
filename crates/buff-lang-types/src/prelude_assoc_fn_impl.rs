@@ -1362,12 +1362,6 @@ impl PreludeAssocFn {
             // is the T37 owner's responsibility.
             PreludeAssocFn::WithLocale => "with_locale",
             PreludeAssocFn::WithSeed => "with_seed",
-            // T43: Document.from_html — Buff §7 `Type.from_*()` ctor
-            // naming convention permits the form. Crawler.new reuses
-            // the shared `New` variant name ("new").
-            PreludeAssocFn::FromHtml => "from_html",
-            // T50: Xml.from_str — canonical name for "parse from string".
-            PreludeAssocFn::FromStr => "from_str",
             // T51: MsgPack.serialize / .deserialize / .roundtrip.
             // Mirrors the underlying `buff_msgpack::serialize` /
             // `buff_msgpack::deserialize` /
@@ -1498,11 +1492,6 @@ impl PreludeAssocFn {
             // (url), dispatched on the (type, method) pair.
             PreludeAssocFn::Connect => "connect",
             PreludeAssocFn::Bind => "bind",
-            // T11: buff-dsp window functions. Names mirror the canonical
-            // DSP literature spelling (lowercase method names).
-            PreludeAssocFn::Hann => "hann",
-            PreludeAssocFn::Hamming => "hamming",
-            PreludeAssocFn::Blackman => "blackman",
             // T24: File I/O assoc fn names. `read` / `write` / `exists` /
             // `append` mirror the canonical std::fs surface intent.
             PreludeAssocFn::Read => "read",
