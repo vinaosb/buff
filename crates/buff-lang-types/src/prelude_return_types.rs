@@ -779,6 +779,22 @@ pub fn assoc_fn_return_type(
         // `reqwest::blocking::Client::new().post(u).body(b).send()
         // .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
         (PreludeType::Http, PreludeAssocFn::HttpPost) => Some(Type::string()),
+        // T26: Assert assoc fns. Assert is namespace-only (returns Void
+        // for the type itself). All five assoc fns return Void (they
+        // panic on failure — test-only). The codegen lowers to Rust's
+        // built-in `assert_eq!` / `assert!` macros.
+        //
+        // `Assert.equal(a, b)` -> Void. Lowers to `assert_eq!(a, b)`.
+        (PreludeType::Assert, PreludeAssocFn::AssertEqual) => Some(Type::Void),
+        // `Assert.not_equal(a, b)` -> Void. Lowers to `assert_ne!(a, b)`.
+        (PreludeType::Assert, PreludeAssocFn::AssertNotEqual) => Some(Type::Void),
+        // `Assert.true_(cond)` -> Void. Lowers to `assert!(cond)`.
+        (PreludeType::Assert, PreludeAssocFn::AssertTrue) => Some(Type::Void),
+        // `Assert.false_(cond)` -> Void. Lowers to `assert!(!cond)`.
+        (PreludeType::Assert, PreludeAssocFn::AssertFalse) => Some(Type::Void),
+        // `Assert.contains(haystack, needle)` -> Void. Lowers to
+        // `assert!(haystack.contains(needle))`.
+        (PreludeType::Assert, PreludeAssocFn::AssertContains) => Some(Type::Void),
         // T52: Protobuf assoc fns. `Protobuf.serialize(value)` -> Bytes
         // (Vector<Byte>). Wraps `buff_protobuf::serialize(&value)
         // .unwrap_or_default()` (empty Vec on failure — NEVER panics).

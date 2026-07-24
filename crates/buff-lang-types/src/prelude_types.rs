@@ -1848,6 +1848,25 @@ pub enum PreludeType {
     /// returns `true`. The `reqwest` crate is recorded in codegen
     /// `extern_crates` when a Buff program uses `Http.*`.
     Http,
+    /// T26: `Assert` — the test-assertion namespace (v1.25 stdlib batch).
+    /// Like [`Self::Log`] / [`Self::Toml`], `Assert` is **never a
+    /// runtime value** — it's a NAMESPACE exposing five associated
+    /// functions that panic on failure (test-only):
+    /// - `Assert.equal(a, b)` — assert two values are equal. Lowers to
+    ///   `assert_eq!(a, b)`.
+    /// - `Assert.not_equal(a, b)` — assert two values are not equal.
+    ///   Lowers to `assert_ne!(a, b)`.
+    /// - `Assert.true_(cond)` — assert a condition is true. Lowers to
+    ///   `assert!(cond)`.
+    /// - `Assert.false_(cond)` — assert a condition is false. Lowers to
+    ///   `assert!(!cond)`.
+    /// - `Assert.contains(haystack, needle)` — assert a string contains
+    ///   a substring. Lowers to `assert!(haystack.contains(needle))`.
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. Assert uses only Rust `std` (NO extern crate
+    /// needed — the `assert_eq!` / `assert!` macros are built-in).
+    Assert,
 }
 
 

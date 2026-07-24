@@ -855,6 +855,24 @@ pub enum PreludeAssocFn {
     /// .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
     /// Http-only.
     HttpPost,
+    // ---- T26: Assert --------------------------------------------------
+    /// `Assert.equal(a, b)` — assert two values are equal. Two args.
+    /// Returns `Void`. Lowers to `assert_eq!(a, b)`. Assert-only.
+    AssertEqual,
+    /// `Assert.not_equal(a, b)` — assert two values are not equal.
+    /// Two args. Returns `Void`. Lowers to `assert_ne!(a, b)`.
+    /// Assert-only.
+    AssertNotEqual,
+    /// `Assert.true_(cond)` — assert a condition is true. One arg.
+    /// Returns `Void`. Lowers to `assert!(cond)`. Assert-only.
+    AssertTrue,
+    /// `Assert.false_(cond)` — assert a condition is false. One arg.
+    /// Returns `Void`. Lowers to `assert!(!cond)`. Assert-only.
+    AssertFalse,
+    /// `Assert.contains(haystack, needle)` — assert a string contains
+    /// a substring. Two args. Returns `Void`. Lowers to
+    /// `assert!(haystack.contains(needle))`. Assert-only.
+    AssertContains,
 }
 
 impl PreludeAssocFn {
@@ -1128,6 +1146,18 @@ impl PreludeAssocFn {
         // exposes these verbs.
         PreludeAssocFn::HttpGet,
         PreludeAssocFn::HttpPost,
+        // T26: Assert assoc fns (5 distinct names): assert_equal /
+        // assert_not_equal / assert_true / assert_false / assert_contains.
+        // All Assert-only — dispatched on the (Assert, AssertEqual) /
+        // (Assert, AssertNotEqual) / (Assert, AssertTrue) /
+        // (Assert, AssertFalse) / (Assert, AssertContains) pairs in
+        // `assoc_fn_return_type`. No other prelude type today exposes
+        // these verbs.
+        PreludeAssocFn::AssertEqual,
+        PreludeAssocFn::AssertNotEqual,
+        PreludeAssocFn::AssertTrue,
+        PreludeAssocFn::AssertFalse,
+        PreludeAssocFn::AssertContains,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1446,6 +1476,15 @@ impl PreludeAssocFn {
             // variant (Args.get / Env.get).
             PreludeAssocFn::HttpGet => "get",
             PreludeAssocFn::HttpPost => "post",
+            // T26: Assert assoc fn names. `equal` / `not_equal` /
+            // `true_` / `false_` / `contains` mirror the canonical
+            // test-assertion surface. The enum variants are prefixed
+            // `Assert` to avoid clashing with existing variants.
+            PreludeAssocFn::AssertEqual => "equal",
+            PreludeAssocFn::AssertNotEqual => "not_equal",
+            PreludeAssocFn::AssertTrue => "true_",
+            PreludeAssocFn::AssertFalse => "false_",
+            PreludeAssocFn::AssertContains => "contains",
         }
     }
 }

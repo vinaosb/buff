@@ -3844,6 +3844,60 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Http.post codegen parse: {e}")))
             }
+            // T26: Assert assoc fns. Assert is namespace-only (mirrors
+            // File / Http / Log / Toml / Math). All five fns lower to
+            // Rust's built-in `assert_eq!` / `assert!` macros. NO
+            // extern crate needed (built-in macros).
+            //
+            // `Assert.equal(a, b)` -> Void. Lowers to `assert_eq!(a, b)`.
+            (T::Assert, A::AssertEqual) => {
+                let a0 = self.lower_expr(&args[0])?;
+                let a1 = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    assert_eq!(#a0, #a1)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Assert.equal codegen parse: {e}")))
+            }
+            // `Assert.not_equal(a, b)` -> Void. Lowers to `assert_ne!(a, b)`.
+            (T::Assert, A::AssertNotEqual) => {
+                let a0 = self.lower_expr(&args[0])?;
+                let a1 = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    assert_ne!(#a0, #a1)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Assert.not_equal codegen parse: {e}")))
+            }
+            // `Assert.true_(cond)` -> Void. Lowers to `assert!(cond)`.
+            (T::Assert, A::AssertTrue) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    assert!(#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Assert.true_ codegen parse: {e}")))
+            }
+            // `Assert.false_(cond)` -> Void. Lowers to `assert!(!cond)`.
+            (T::Assert, A::AssertFalse) => {
+                let arg = one_arg(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    assert!(!#arg)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Assert.false_ codegen parse: {e}")))
+            }
+            // `Assert.contains(haystack, needle)` -> Void. Lowers to
+            // `assert!(haystack.contains(needle))`.
+            (T::Assert, A::AssertContains) => {
+                let a0 = self.lower_expr(&args[0])?;
+                let a1 = self.lower_expr(&args[1])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    assert!(#a0.contains(#a1))
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Assert.contains codegen parse: {e}")))
+            }
             // T124j: Path module - 1 assoc fn (join) wrapping
             // `std::path::PathBuf` (std-only - NO extern crate
             // needed). Path is a runtime-value type (NOT namespace-
