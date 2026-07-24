@@ -30,6 +30,7 @@ fn main() -> Result<()> {
             debuginfo,
             backend,
             explain,
+            detect_races,
         } => {
             // T62: --pgo intercepts the normal build path and dispatches
             // to commands::pgo (3-phase PGO orchestrator). PGO is
@@ -63,6 +64,7 @@ fn main() -> Result<()> {
                     linker_choice,
                     debuginfo_choice,
                     backend_choice,
+                    detect_races,
                 )
             }
         }
@@ -78,6 +80,7 @@ fn main() -> Result<()> {
             target,
             sccache,
             explain,
+            detect_races,
         } => {
             let linker_choice = buff_lang_cli::pipeline::linker_from_str(&linker)?;
             let debuginfo_choice = buff_lang_cli::pipeline::debuginfo_from_str(&debuginfo)?;
@@ -98,6 +101,7 @@ fn main() -> Result<()> {
                 debuginfo_choice,
                 backend_choice,
                 target.as_deref(),
+                detect_races,
             )
         }
         Command::New {
@@ -142,8 +146,13 @@ fn main() -> Result<()> {
             })?;
             buff_lang_cli::commands::gen::run(k, &name)
         }
-        Command::Test { path, filter, update } => {
-            buff_lang_cli::commands::test::run(&path, filter.as_deref(), update)
+        Command::Test {
+            path,
+            filter,
+            update,
+            detect_races,
+        } => {
+            buff_lang_cli::commands::test::run(&path, filter.as_deref(), update, detect_races)
         }
         Command::Fmt { file, check } => {
             use buff_lang_cli::commands::fmt::FmtOutcome;

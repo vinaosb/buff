@@ -69,6 +69,7 @@ pub fn run(
     debuginfo: pipeline::DebugInfoChoice,
     backend: pipeline::BackendChoice,
     target: Option<&str>,
+    detect_races: bool,
 ) -> Result<()> {
     // T133: dispatch on file extension. `.buffhtml` uses the span-aware
     // pipeline so runtime panics can be reverse-mapped to .buffhtml spans.
@@ -113,6 +114,7 @@ pub fn run(
             mode,
             &compile_out.span_map,
             &source,
+            detect_races,
         )?;
         (
             compile_out.rust_file_path,
@@ -135,6 +137,7 @@ pub fn run(
             debuginfo,
             backend,
             target,
+            detect_races,
         )?;
         (compile_out.rust_file_path, None, String::new())
     } else {
@@ -149,6 +152,7 @@ pub fn run(
             debuginfo,
             backend,
             target,
+            detect_races,
         )?;
         (compile_out.rust_file_path, None, String::new())
     };

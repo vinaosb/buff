@@ -1267,7 +1267,18 @@ pub fn compile_rust_to_exe_with_speed(
     debuginfo: DebugInfoChoice,
     backend: BackendChoice,
     target: Option<&str>,
+    detect_races: bool,
 ) -> Result<PathBuf> {
+    // T113: --detect-races requires nightly toolchain.
+    if detect_races && !crate::rustc_invoke::is_nightly_toolchain() {
+        bail!(
+            "ThreadSanitizer (--detect-races) requires a nightly rustc toolchain.\n\
+             Run: rustup override set nightly\n\n\
+             Note: --detect-races adds 2-10x runtime overhead and is a \
+             development-time tool only — do not use in release builds."
+        );
+    }
+
     let sccache_on = use_sccache && compile_speed::sccache_available();
     if use_sccache && !sccache_on {
         eprintln!(
@@ -1338,6 +1349,11 @@ pub fn compile_rust_to_exe_with_speed(
     )
     .map_err(|msg| anyhow::anyhow!("{msg}"))?;
 
+    // T113: ThreadSanitizer race detection (nightly-only).
+    if detect_races {
+        crate::rustc_invoke::configure_detect_races(&mut cmd);
+    }
+
     cmd.arg(rust_file).arg("-o").arg(output);
 
     let result = cmd
@@ -1382,7 +1398,18 @@ pub fn compile_buffhtml_rust_to_exe(
     mode: BuildMode,
     span_map: &SpanMap,
     buffhtml_source: &str,
+    detect_races: bool,
 ) -> Result<PathBuf> {
+    // T113: --detect-races requires nightly toolchain.
+    if detect_races && !crate::rustc_invoke::is_nightly_toolchain() {
+        bail!(
+            "ThreadSanitizer (--detect-races) requires a nightly rustc toolchain.\n\
+             Run: rustup override set nightly\n\n\
+             Note: --detect-races adds 2-10x runtime overhead and is a \
+             development-time tool only — do not use in release builds."
+        );
+    }
+
     let mut cmd = Command::new("rustc");
     cmd.arg("--edition").arg("2021");
     match mode {
@@ -1405,6 +1432,12 @@ pub fn compile_buffhtml_rust_to_exe(
             }
         }
     }
+
+    // T113: ThreadSanitizer race detection (nightly-only).
+    if detect_races {
+        crate::rustc_invoke::configure_detect_races(&mut cmd);
+    }
+
     cmd.arg(rust_file).arg("-o").arg(output);
 
     let result = cmd

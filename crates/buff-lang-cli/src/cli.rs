@@ -277,6 +277,14 @@ pub enum Command {
         /// constructed unless this flag is set.
         #[arg(long)]
         explain: bool,
+
+        /// T113: Enable ThreadSanitizer (TSan) race detection. Passes
+        /// `-Zsanitizer=thread` to rustc (requires nightly toolchain).
+        /// 2-10x runtime overhead — development-time tool only.
+        /// When the active toolchain is stable, prints a helpful error
+        /// with the `rustup override set nightly` command.
+        #[arg(long)]
+        detect_races: bool,
     },
 
     /// Compile a `.buff` file and immediately execute it.
@@ -361,6 +369,14 @@ pub enum Command {
         /// constructed unless this flag is set.
         #[arg(long)]
         explain: bool,
+
+        /// T113: Enable ThreadSanitizer (TSan) race detection. Passes
+        /// `-Zsanitizer=thread` to rustc (requires nightly toolchain).
+        /// 2-10x runtime overhead — development-time tool only.
+        /// When the active toolchain is stable, prints a helpful error
+        /// with the `rustup override set nightly` command.
+        #[arg(long)]
+        detect_races: bool,
     },
 
     /// Create a new Buff project in a fresh `<NAME>/` directory.
@@ -491,6 +507,14 @@ pub enum Command {
         /// Without this flag, missing or mismatched snapshots fail.
         #[arg(long)]
         update: bool,
+
+        /// T113: Enable ThreadSanitizer (TSan) race detection. Passes
+        /// `-Zsanitizer=thread` to rustc (requires nightly toolchain).
+        /// 2-10x runtime overhead — development-time tool only.
+        /// When the active toolchain is stable, prints a helpful error
+        /// with the `rustup override set nightly` command.
+        #[arg(long)]
+        detect_races: bool,
     },
 
     /// Format a `.buff` file into canonical form (T54).

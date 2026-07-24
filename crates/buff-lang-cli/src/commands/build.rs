@@ -85,6 +85,7 @@ pub fn run(
     linker: pipeline::LinkerChoice,
     debuginfo: pipeline::DebugInfoChoice,
     backend: pipeline::BackendChoice,
+    detect_races: bool,
 ) -> Result<()> {
     // T55: when --sccache is requested, write the .cargo/config.toml
     // snippet so bare `cargo build`/`cargo test` also pick up sccache.
@@ -105,7 +106,7 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release, minimal, fast, no_cache, incremental, no_incremental, sccache, linker, debuginfo, backend)
+            build_single_file(f, output, release, minimal, fast, no_cache, incremental, no_incremental, sccache, linker, debuginfo, backend, detect_races)
         }
         None => build_project(release, minimal, fast, target),
     }
@@ -169,6 +170,7 @@ fn build_single_file(
     linker: pipeline::LinkerChoice,
     debuginfo: pipeline::DebugInfoChoice,
     backend: pipeline::BackendChoice,
+    detect_races: bool,
 ) -> Result<()> {
     let stem_output: PathBuf = match output {
         Some(p) => pipeline::with_exe_extension(p),
@@ -188,6 +190,7 @@ fn build_single_file(
             mode,
             &compile_out.span_map,
             "", // source not retained on CompileOutput; error_mapper handles miss gracefully
+            detect_races,
         )?;
         eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
         eprintln!("  source: {}", file.display());
@@ -225,6 +228,7 @@ fn build_single_file(
         debuginfo,
         backend,
         None, // single-file mode does not support --target
+        detect_races,
     )?;
     eprintln!("Built {} ({})", stem_output.display(), mode_label(mode));
     eprintln!("  source: {}", file.display());

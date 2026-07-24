@@ -118,6 +118,7 @@ pub fn run(file: &Path, output: Option<&Path>, release: bool) -> Result<()> {
         // The driver file is a re-rendering of the buffhtml source; pass
         // the original source for span lookup in error messages.
         &read_buffhtml_source_for_diagnostics(file)?,
+        false, // SSR does not support --detect-races
     );
 
     // 6. Always clean up the driver .rs (the binary is cleaned below).

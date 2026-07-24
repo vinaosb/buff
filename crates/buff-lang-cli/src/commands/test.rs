@@ -34,8 +34,8 @@ use anyhow::{Context, Result};
 
 use crate::pipeline;
 
-/// Entry point for `buff test <PATH> [--filter <PATTERN>] [--update]`.
-pub fn run(path: &Path, filter: Option<&str>, update: bool) -> Result<()> {
+/// Entry point for `buff test <PATH> [--filter <PATTERN>] [--update] [--detect-races]`.
+pub fn run(path: &Path, filter: Option<&str>, update: bool, detect_races: bool) -> Result<()> {
     // 1. Discover test files.
     let test_files = discover_test_files(path, filter)?;
 
@@ -61,7 +61,7 @@ pub fn run(path: &Path, filter: Option<&str>, update: bool) -> Result<()> {
 
         eprint!("test {test_name} ... ");
 
-        match run_single_test(test_file, update) {
+        match run_single_test(test_file, update, detect_races) {
             Ok(true) => {
                 eprintln!("ok");
                 passed += 1;
@@ -165,7 +165,7 @@ fn collect_test_files(dir: &Path, files: &mut Vec<PathBuf>) {
 ///
 /// Returns `Ok(true)` if the output matches the snapshot (or if `--update`
 /// wrote a new snapshot). Returns `Ok(false)` if the output differs.
-fn run_single_test(test_file: &Path, update: bool) -> Result<bool> {
+fn run_single_test(test_file: &Path, update: bool, detect_races: bool) -> Result<bool> {
     // 1. Compile the test file to a temporary executable.
     let source = std::fs::read_to_string(test_file)
         .with_context(|| format!("failed to read `{}`", test_file.display()))?;
@@ -200,11 +200,12 @@ fn run_single_test(test_file: &Path, update: bool) -> Result<bool> {
     let exe_stem = pipeline::with_exe_extension(
         &temp_dir.join(format!("{}_test", stem.to_string_lossy())),
     );
-    let exe_path = pipeline::compile_rust_to_exe(
+    let exe_path = pipeline::compile_rust_to_exe_with_races(
         &rust_file,
         &exe_stem,
         test_file,
         pipeline::BuildMode::Debug,
+        detect_races,
     )?;
 
     // 2. Execute, capturing stdout.

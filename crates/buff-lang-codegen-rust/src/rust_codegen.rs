@@ -9002,6 +9002,88 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("String.len codegen parse: {e}")))
             }
+            // T80: Http response instance methods. Dispatch on
+            // `(Int, String)` tuple (the return type of Http.get / post / put / delete).
+            //
+            // `response.status()` -> Int. Wraps `recv.0` (tuple field access).
+            M::ResponseStatus => {
+                if !matches!(recv_ty, Type::Tuple(_)) {
+                    return Err(self.unsupported(&format!(
+                        "status() requires a response tuple, got {recv_ty}"
+                    )));
+                }
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "status() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.0
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Response.status codegen parse: {e}")))
+            }
+            // `response.body()` -> String. Wraps `recv.1.clone()`.
+            M::ResponseBody => {
+                if !matches!(recv_ty, Type::Tuple(_)) {
+                    return Err(self.unsupported(&format!(
+                        "body() requires a response tuple, got {recv_ty}"
+                    )));
+                }
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "body() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.1.clone()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Response.body codegen parse: {e}")))
+            }
+            // `response.json()` -> Map<String, Unknown>. Wraps
+            // `serde_json::from_str::<HashMap<String, serde_json::Value>>(&recv.1).unwrap_or_default()`.
+            M::ResponseJson => {
+                if !matches!(recv_ty, Type::Tuple(_)) {
+                    return Err(self.unsupported(&format!(
+                        "json() requires a response tuple, got {recv_ty}"
+                    )));
+                }
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "json() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&#recv.1)
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Response.json codegen parse: {e}")))
+            }
+            // `response.headers()` -> Map<String, String>. Returns empty Map
+            // (headers not available from body-only response).
+            M::ResponseHeaders => {
+                if !matches!(recv_ty, Type::Tuple(_)) {
+                    return Err(self.unsupported(&format!(
+                        "headers() requires a response tuple, got {recv_ty}"
+                    )));
+                }
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "headers() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    std::collections::HashMap::<String, String>::new()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Response.headers codegen parse: {e}")))
+            }
             // Non-Image / Non-Audio receiver with an Image-only /
             // Audio-only method (Width / Height / PixelFormat /
             // GetPixel / SetPixel / Grayscale / Invert / Resize /

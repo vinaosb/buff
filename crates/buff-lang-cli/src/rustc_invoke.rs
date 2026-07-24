@@ -153,6 +153,47 @@ pub fn target_is_installed(triple: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// T113: ThreadSanitizer (--detect-races) helpers
+// ---------------------------------------------------------------------------
+
+/// Probe whether the active rustc toolchain is nightly (T113).
+///
+/// Runs `rustc --version --verbose` and checks if the release channel
+/// contains "nightly". Returns `true` when nightly is active, `false`
+/// on any failure (rustc not on PATH, probe error, stable/beta/dev).
+///
+/// The probe is cheap (sub-second) and runs at most once per compile
+/// invocation when `--detect-races` is set.
+pub fn is_nightly_toolchain() -> bool {
+    let probe = Command::new("rustc")
+        .args(["--version", "--verbose"])
+        .output();
+    match probe {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.lines().any(|line| {
+                line.trim().starts_with("release:")
+                    && line.to_ascii_lowercase().contains("nightly")
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Add ThreadSanitizer flags to a `rustc` [`Command`] (T113).
+///
+/// Appends `-Zsanitizer=thread` to the command. The caller MUST have
+/// verified that the toolchain is nightly via [`is_nightly_toolchain`]
+/// before calling this function.
+///
+/// # Panics
+///
+/// Does not panic — this is a pure Command configuration helper.
+pub fn configure_detect_races(cmd: &mut Command) {
+    cmd.arg("-Z").arg("sanitizer=thread");
+}
+
+// ---------------------------------------------------------------------------
 // Shared rustc Command configuration
 // ---------------------------------------------------------------------------
 
