@@ -306,6 +306,29 @@ pub struct RustCodegen {
     /// iteration (the T29 flaky-test lesson — never rely on hash-seed-
     /// dependent iteration for codegen output).
     user_enum_variants: BTreeMap<String, String>,
+    /// T86: depth of `return <expr>` operands we're currently lowering.
+    /// Incremented by [`Self::lower_stmt`]'s `Stmt::Return` arm around
+    /// the inner expression lowering so [`Self::lower_match_expr`] can
+    /// detect it's operating in RETURN POSITION and strip the trailing
+    /// `;` from each arm body block — without that strip, every arm
+    /// body block lowers as `{ <expr>; }` whose Rust type is `()`
+    /// (statement, not tail expression), making
+    /// `return match n { A => 1, _ => 0 }` fail to typecheck against a
+    /// non-`()` return type.
+    ///
+    /// The counter (not a boolean) is incremented by EVERY nested
+    /// `return` so a `return match x { A => return 5, _ => 0 }` (whose
+    /// inner arm body is itself a return) still works: the outer return
+    /// sets depth=1; the inner return's match arm bodies consult depth
+    /// (still ≥1) — but the inner return itself is fine because
+    /// `Stmt::Return` always wraps in `SynStmt::Expr(_, Some(semi))`
+    /// regardless of depth.
+    ///
+    /// Stays ≥1 for the ENTIRE expression tree under a return
+    /// (intentionally): a `return if c { match x { ... } } else { 0 }`
+    /// needs the INNER match's arm bodies stripped too, because the
+    /// whole expression must yield the function's return type.
+    return_position_depth: usize,
 }
 
 impl RustCodegen {
@@ -333,6 +356,7 @@ impl RustCodegen {
             current_atomic_set: crate::atomic_analysis::AtomicSet::new(),
             extern_fn_names: BTreeSet::new(),
             user_enum_variants: BTreeMap::new(),
+            return_position_depth: 0,
         }
     }
 
@@ -2670,11 +2694,26 @@ impl RustCodegen {
                 Ok(SynStmt::Expr(e, Some(Default::default())))
             }
             Stmt::Return(opt_expr, _) => {
-                let return_expr = match opt_expr {
+                // T86: mark that we're lowering the operand of a
+                // `return <expr>`. [`Self::lower_match_expr`] consults
+                // this depth counter to strip the trailing `;` from
+                // match arm body blocks (without the strip, every arm
+                // body block has Rust type `()` and
+                // `return match n { A => 1, _ => 0 }` fails to
+                // typecheck against a non-`()` return type). The
+                // counter (not a bool) is incremented so nested
+                // returns inside match arms still work correctly.
+                self.return_position_depth = self.return_position_depth.saturating_add(1);
+                let lowered_inner = opt_expr
+                    .as_ref()
+                    .map(|expr| self.lower_expr(expr))
+                    .transpose()?;
+                self.return_position_depth = self.return_position_depth.saturating_sub(1);
+                let return_expr = match lowered_inner {
                     Some(expr) => SynExpr::Return(syn::ExprReturn {
                         attrs: Vec::new(),
                         return_token: Default::default(),
-                        expr: Some(Box::new(self.lower_expr(expr)?)),
+                        expr: Some(Box::new(expr)),
                     }),
                     None => SynExpr::Return(syn::ExprReturn {
                         attrs: Vec::new(),
@@ -11529,6 +11568,22 @@ impl RustCodegen {
         arms: &[MatchArm],
     ) -> Result<SynExpr, CodegenError> {
         let scrut = self.lower_expr(scrutinee)?;
+        // T86: when this match is in RETURN POSITION (i.e. somewhere up
+        // the lowering stack a `Stmt::Return` incremented
+        // [`Self::return_position_depth`]), every arm body block MUST
+        // yield the arm's value type — not `()`. The parser wraps each
+        // arm body as a one-stmt `Block { stmts: [Stmt::ExprStmt(e)] }`,
+        // and the default [`Self::lower_block`] emits that as `{ e; }`
+        // (statement with semi → block type `()`). In return position
+        // that produces a type-mismatch against the function's declared
+        // return type, so we strip the trailing `;` on the LAST
+        // statement of each arm body block, turning `{ e; }` into
+        // `{ e }` (tail expression → block yields the value).
+        //
+        // Out of return position (e.g. `match c { ... }` as a
+        // standalone ExprStmt), the original `{ e; }` shape is
+        // preserved so existing snapshots stay byte-identical.
+        let in_return_position = self.return_position_depth > 0;
         let mut arms_syn: Vec<syn::Arm> = Vec::with_capacity(arms.len());
         for arm in arms {
             let pat = self.lower_pattern(&arm.pattern, false)?;
@@ -11538,7 +11593,10 @@ impl RustCodegen {
             // a single trailing expression, prettyplease will format it
             // back as `pat => expr,`; if it's multiple statements, the
             // block form `pat => { ... },` is emitted (also valid Rust).
-            let body_block = self.lower_block(&arm.body)?;
+            let mut body_block = self.lower_block(&arm.body)?;
+            if in_return_position {
+                strip_trailing_semi_on_last_expr_stmt(&mut body_block);
+            }
             let body_expr = SynExpr::Block(syn::ExprBlock {
                 attrs: Vec::new(),
                 label: None,
@@ -12744,6 +12802,37 @@ fn two_segment_path_expr(enum_name: &str, variant_name: &str) -> SynExpr {
         qself: None,
         path: two_segment_path(enum_name, variant_name),
     })
+}
+
+/// T86: strip the trailing `;` on the LAST statement of a [`syn::Block`]
+/// iff that statement is a [`SynStmt::Expr`] with `Some(semi)`.
+///
+/// Used by [`RustCodegen::lower_match_expr`] when the match is in return
+/// position: the parser wraps each arm body as a one-statement
+/// `Block { stmts: [Stmt::ExprStmt(e)] }`, which [`Self::lower_block`]
+/// (correctly, for general blocks) emits as `{ e; }` (statement with
+/// semi → block type `()`). For an arm body that must YIELD a value
+/// (so the surrounding `return match n { ... }` typechecks against the
+/// function's declared return type), we strip the trailing `;` on the
+/// last expression-statement so it becomes a tail expression
+/// (`{ e }` → block yields the value of `e`).
+///
+/// NO-OP when:
+/// - the block is empty (`{}`),
+/// - the last statement is not a [`SynStmt::Expr`] (e.g. it's a
+///   `Local` let-binding or a Semi with `None` already),
+/// - the last statement is already a tail expression (`None` semi).
+///
+/// Only the LAST statement is touched — interior statements keep their
+/// semis (they MUST be statements; only the tail position can be an
+/// expression in Rust).
+fn strip_trailing_semi_on_last_expr_stmt(block: &mut syn::Block) {
+    let Some(last) = block.stmts.last_mut() else {
+        return;
+    };
+    if let SynStmt::Expr(_, semi) = last {
+        *semi = None;
+    }
 }
 
 /// T75: rewrite the first parameter of a [`syn::Signature`] from a typed

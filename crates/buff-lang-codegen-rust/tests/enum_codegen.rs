@@ -826,3 +826,177 @@ fn t85_variant_name_collision_is_left_unqualified() {
         "T85: colliding variant X must stay bare (no auto-qualify); got: {src}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 5. T86 — Match return-position trailing-semicolon fix.
+// ---------------------------------------------------------------------------
+
+/// T86: `return match n { A => 1, _ => 0 }` must emit arm body blocks
+/// WITHOUT the trailing `;` so the block yields the value (not `()`).
+///
+/// Without the fix, each arm body lowered as `{ 1; }` whose Rust type is
+/// `()`, causing a type mismatch against the function's declared return
+/// type. With the fix, the arm body becomes `{ 1 }` (tail expression).
+#[test]
+fn t86_return_match_strips_arm_body_trailing_semicolon() {
+    // `func f(n: Int) -> Int { return match n { 0 => 1, _ => 99 } }`
+    // The arm bodies `1` and `99` MUST lower as tail expressions (no
+    // trailing `;`) so the function returns the matched value.
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("n")),
+        arms: vec![
+            arm(int_lit_pat(0), int_expr(1)),
+            arm(wildcard_pat(), int_expr(99)),
+        ],
+        span: span(),
+    };
+    let func = FuncDecl {
+        name: ident("f"),
+        params: vec![Param {
+            name: ident("n"),
+            ty: named_ty("Int"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(mt), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::FuncDecl(func)]).expect("T86 codegen must succeed");
+    // The arm body `1` MUST NOT have a trailing `;` (would be `{ 1; }`
+    // without the fix, yielding `()` instead of `i64`).
+    assert!(
+        !src.contains("1;"),
+        "T86: arm body must NOT have trailing `;` in return-position match: {src}"
+    );
+    assert!(
+        !src.contains("99;"),
+        "T86: wildcard arm body must NOT have trailing `;`: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T86: standalone match (NOT in return position) KEEPS the trailing `;`
+/// on arm body statements. This preserves the existing codegen shape for
+/// non-return-position matches so existing snapshots stay byte-identical
+/// (the fix is narrow: only return-position matches get the strip).
+#[test]
+fn t86_standalone_match_keeps_arm_body_trailing_semicolon() {
+    // `match c { Red => 1, _ => 0 }` as a standalone ExprStmt (NOT in
+    // return position). Arm bodies keep `{ 1; }` shape.
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("c")),
+        arms: vec![
+            arm(ident_pat("Red"), int_expr(1)),
+            arm(wildcard_pat(), int_expr(0)),
+        ],
+        span: span(),
+    };
+    let src = codegen_one_expr(mt);
+    // Arm body in standalone position KEEPS the trailing `;`.
+    assert!(
+        src.contains("1;"),
+        "T86: standalone match arm body must KEEP trailing `;`: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T86: `let v = match c { ... }` — the match is the RHS of a let
+/// binding (NOT return position). The fix must NOT strip semis here
+/// (`let bindings` exclusion per the task spec).
+#[test]
+fn t86_let_binding_match_keeps_arm_body_trailing_semicolon() {
+    // `let v = match c { Red => 1, _ => 0 }` — let binding, not return.
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("c")),
+        arms: vec![
+            arm(ident_pat("Red"), int_expr(1)),
+            arm(wildcard_pat(), int_expr(0)),
+        ],
+        span: span(),
+    };
+    let stmt = Stmt::LetDecl {
+        name: ident("v"),
+        value: mt,
+        mutable: false,
+        ty: None,
+        span: span(),
+    };
+    let src = codegen_stmts(vec![stmt]);
+    // Let-binding context: arm bodies keep trailing `;` (T86 only
+    // strips in return position — let bindings keep the original shape).
+    assert!(
+        src.contains("1;"),
+        "T86: let-binding match arm body must KEEP trailing `;`: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T86: end-to-end — `return match c { Red => 1, Green => 2, Blue => 3 }`
+/// with the `Color` enum in scope. Combines T85 (qualify `Red` →
+/// `Color::Red`) and T86 (strip arm body trailing `;`) so the function
+/// typechecks as `-> i64`.
+#[test]
+fn t86_return_match_with_user_enum_typechecks() {
+    let color = enum_decl(
+        "Color",
+        &[],
+        vec![
+            unit_variant("Red"),
+            unit_variant("Green"),
+            unit_variant("Blue"),
+        ],
+    );
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("c")),
+        arms: vec![
+            arm(ident_pat("Red"), int_expr(1)),
+            arm(ident_pat("Green"), int_expr(2)),
+            arm(ident_pat("Blue"), int_expr(3)),
+        ],
+        span: span(),
+    };
+    let func = FuncDecl {
+        name: ident("describe"),
+        params: vec![Param {
+            name: ident("c"),
+            ty: named_ty("Color"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(mt), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::EnumDecl(color), Decl::FuncDecl(func)])
+        .expect("T86 codegen must succeed");
+    // T85: user variants qualified.
+    assert!(
+        src.contains("Color::Red"),
+        "T85+T86: expected `Color::Red` in: {src}"
+    );
+    // T86: no trailing `;` on arm bodies (so arm type is `i64` not `()`).
+    assert!(
+        !src.contains("1;") && !src.contains("2;") && !src.contains("3;"),
+        "T86: return-position match arm bodies must NOT have trailing `;`: {src}"
+    );
+    must_reparse(&src);
+}
