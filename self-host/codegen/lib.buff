@@ -1,0 +1,393 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/lib.rs` (T18, Track C).
+//
+// Buff Rust codegen crate — converts Buff AST to Rust source via
+// syn/quote/prettyplease.
+//
+// # Pipeline
+//
+//   &[buff_lang_ast::Decl]
+//        │
+//        ▼  RustCodegen::generate
+//   syn::File
+//        │
+//        ▼  format::format  (prettyplease::unparse)
+//   String  (valid Rust source)
+//
+// Every Rust construct is built through `syn` types — we never hand-format
+// Rust strings. The single string producer is `prettyplease`, whose output
+// is equivalent to a `rustfmt` pass.
+//
+// The Rust reference is 319 LOC. The Buff port mirrors the public API
+// surface (format_file, generate_rust, generate_rust_with_source_map,
+// generate_rust_with_features, filter_by_features, generate_test_rust).
+//
+// # Module structure (mirrors the Rust reference's `pub mod X; pub use Y`
+// re-export surface)
+//
+// Each sibling .buff file ports one .rs file from the Rust reference.
+
+// =============================================================================
+// Module list (one entry per sibling .buff file)
+// =============================================================================
+//
+// The following 21 sibling .buff files make up the buff-lang-codegen-rust
+// port. Each entry documents the public API surface (the free functions and
+// types the module exports).
+
+// --- format.buff ---
+// prettyplease::unparse wrapper. THE single string producer. format(file).
+
+// --- context.buff ---
+// CodegenContext: per-pass state (source_mappings + tmp_counter +
+// module_path). codegen_context_new / gen_tmp / record_mapping.
+
+// --- conv_helpers.buff ---
+// T105a index-cast / arg-parse / typeref->Type conversion helpers.
+// cast_to_usize / cast_to / make_int_lit_expr / make_binary_expr /
+// ConvKind + parse_with_default / typeref_to_type.
+
+// --- comptime.buff ---
+// T53 comptime-facts → Rust `const` items lowering. lower_comptime_facts.
+
+// --- derive_attrs.buff ---
+// T105a derive/repr attribute builders. derive_and_repr_attrs /
+// struct_derive_attrs / push_repr_c_attr / gpu_struct_derive_attrs /
+// type_is_hash_safe.
+
+// --- lowering_helpers.buff ---
+// T105a expr/lowering syn builders. make_generic_path_type /
+// make_qualified_generic_path_type / float_repr / method_call_one_arg /
+// rust_call_expr / str_lit_expr / coerce_str_arg_to_ref /
+// lower_math_unary / lower_math_binary / splice_receiver_into_call.
+
+// --- atomic_analysis.buff ---
+// T42 atomic promotion (let mut → AtomicI64 fetch_add). analyze /
+// AtomicPromotions / AtomicSet.
+
+// --- race_analysis.buff ---
+// T41 race detection in parallel closures. analyze /
+// analyze_with_exemptions / is_assignment_op / ParallelMutabilityError /
+// PARALLEL_COMBINATORS.
+
+// --- gpu_alignment.buff ---
+// T50 GPU-bound struct #[repr(C)] + bytemuck derives. gpu_bound_structs.
+
+// --- move_analysis.buff ---
+// T33a/T33 move-by-default: clones/Arc/CoW tracking. MoveAnalyzer.
+
+// --- multi_crate.buff ---
+// T8 multi-crate emission (one .rs per Buff module when imports present).
+// generate_multi_crate / generate_module_source / module_ident_from_path /
+// uses_multi_crate / MultiCrateOutput / ParsedModule.
+
+// --- passes.buff ---
+// T77/T78 AST-level optimization passes (dead code elimination + constant
+// propagation). dead_code_elimination / constant_propagation.
+
+// --- syn_helpers.buff ---
+// T105a syn/quote/path construction helpers (rust_path / rust_path_type /
+// wrap_in_parens / make_int_lit_expr_impl / etc).
+
+// --- dependency_detection.buff ---
+// T105a dependency detection (collect_rust_deps / scan_extern_fns).
+
+// --- extern_crate_detection.buff ---
+// T105a extern-crate name detection (DateTime → chrono, Regex → regex, …).
+// 1696-LOC registry consulted by the main codegen loop.
+
+// --- extern_crate_detection_extra.buff ---
+// T105a extra extern-crate name detection (the long-tail prelude types).
+
+// --- type_lowering.buff ---
+// T105a Buff TypeRef → syn::Type lowering (primitives / collections /
+// user types / Option / Tuple / Union / Function).
+
+// --- decl_lowering.buff ---
+// T105a Buff Decl → syn::Item lowering (FuncDecl / StructDecl /
+// EnumDecl / TraitDecl / UseDecl / ConstDecl). The 1530-LOC visitor arm.
+
+// --- expr_lowering.buff ---
+// T105a Buff Expr → syn::Expr lowering (Literal / Ident / BinaryOp /
+// FuncCall / MethodCall / Lambda / Match / If / For / Block / …).
+
+// --- method_call_lowering.buff ---
+// T105a method-call lowering (`.chars()` / `.len()` / `.map()` / `.filter()`
+// / …). 1305-LOC dispatch table.
+
+// --- rust_codegen.buff ---
+// The 10,477-LOC main entry. RustCodegen visitor: ALL AST→syn lowering
+// (prelude calls + prelude type assoc fns + the extern_crates BTreeSet +
+// lower_func / lower_stmt / lower_expr dispatch).
+
+// =============================================================================
+// Re-export surface
+// =============================================================================
+//
+// The Rust reference's lib.rs has ~20 `pub use crate::X::{Y, Z};` lines
+// exposing the most-used items at the crate root (so callers can write
+// `buff_lang_codegen_rust::RustCodegen` instead of
+// `buff_lang_codegen_rust::rust_codegen::RustCodegen`).
+//
+// Buff has no `pub use`; the items are accessed by their free-fn name
+// directly. The Rust re-export map is documented here for the cross-
+// reference audience:
+
+// From format.buff:          format
+// From context.buff:         CodegenContext
+// From atomic_analysis.buff: analyze (alias analyze_atomic_promotions),
+//                           AtomicPromotions, AtomicSet
+// From gpu_alignment.buff:   gpu_bound_structs (alias analyze_gpu_alignment)
+// From move_analysis.buff:   MoveAnalyzer
+// From passes.buff:          constant_propagation, dead_code_elimination
+// From multi_crate.buff:     generate_multi_crate, generate_module_source,
+//                           module_ident_from_path, uses_multi_crate,
+//                           MultiCrateOutput, ParsedModule
+// From race_analysis.buff:   analyze (alias analyze_parallel_races),
+//                           analyze_with_exemptions
+//                           (alias analyze_parallel_races_with_exemptions),
+//                           is_assignment_op, ParallelMutabilityError,
+//                           PARALLEL_COMBINATORS
+// From rust_codegen.buff:    buff_primitive_to_rust_name, collect_rust_deps,
+//                           RustCodegen
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+
+struct Decl:
+    opaque_handle: Int
+
+struct SynFile:
+    opaque_handle: Int
+
+struct RustCodegen:
+    opaque_handle: Int
+
+struct CodegenError:
+    opaque_handle: Int
+
+struct SourceMap:
+    opaque_handle: Int
+
+struct Item:
+    opaque_handle: Int
+
+struct ItemFn:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn format(file: SynFile) -> String
+    fn rust_codegen_new() -> RustCodegen
+    fn rust_codegen_generate(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>
+    fn build_source_map(decls: Vector<Decl>, rust_source: String, buff_path: Path, buff_source: String) -> SourceMap
+}
+
+struct Path:
+    opaque_handle: Int
+
+// =============================================================================
+// format_file — convenience alias for format
+// =============================================================================
+//
+// Convenience alias for `format` so external callers (tests, the CLI) can
+// refer to it without importing the module. T26 introduced the alias so the
+// `struct_codegen` integration tests can format a `syn::File` they obtained
+// from the lower-level `RustCodegen.generate` entry point (needed for the
+// `#[repr(C)]` hook test which bypasses the convenience `generate_rust`
+// wrapper).
+
+func format_file(file: SynFile) -> String:
+    return format(file)
+
+// =============================================================================
+// generate_rust — convenience: decls → formatted Rust source
+// =============================================================================
+//
+// Convenience: lower a slice of Buff declarations to formatted Rust source.
+// Equivalent to building a `RustCodegen`, calling `RustCodegen.generate`,
+// then `format` on the result.
+
+func generate_rust(decls: Vector<Decl>) -> Result<String, CodegenError>:
+    let codegen = rust_codegen_new()
+    match rust_codegen_generate(codegen, decls):
+        Result.Ok(file):
+            return Result.Ok(format(file))
+        Result.Err(e):
+            return Result.Err(e)
+
+// =============================================================================
+// generate_rust_with_source_map — T24: + `.buffmap` sidecar emission
+// =============================================================================
+//
+// Lower a slice of Buff declarations to formatted Rust source + capture the
+// Rust-line ↔ Buff-span source map for `.buffmap` sidecar emission.
+//
+// Equivalent to `generate_rust` followed by
+// `buff_lang_debug_info::build_source_map`. The CLI calls this when
+// `buff build` / `buff run` want to emit a `.buffmap` alongside the compiled
+// binary so the runtime panic hook can remap Rust backtraces to Buff source
+// locations.
+//
+// The source map is built from the FORMATTED Rust source (post-prettyplease)
+// so the recorded Rust line numbers match what `rustc` actually sees — and
+// what shows up in panic `Location` rows. The `buff_source` slice is
+// consumed for byte-offset → `(line, col)` lookup; it must be the same source
+// that produced `decls`.
+
+func generate_rust_with_source_map(decls: Vector<Decl>, buff_path: Path, buff_source: String) -> Result<Tuple_String_SourceMap, CodegenError>:
+    match generate_rust(decls):
+        Result.Ok(rust_source):
+            let source_map = build_source_map(decls, rust_source, buff_path, buff_source)
+            return Result.Ok(tuple_string_sourcemap_new(rust_source, source_map))
+        Result.Err(e):
+            return Result.Err(e)
+
+// Result<Tuple<String, SourceMap>, CodegenError> — Buff has no `(T, T)` tuple
+// type in the surface syntax; model as a struct.
+struct Tuple_String_SourceMap:
+    first: String
+    second: SourceMap
+
+func tuple_string_sourcemap_new(s: String, m: SourceMap) -> Tuple_String_SourceMap:
+    return Tuple_String_SourceMap.new(first: s, second: m)
+
+// =============================================================================
+// generate_rust_with_features — T0-B4: `@feature(name)` gating
+// =============================================================================
+//
+// Lower a slice of Buff declarations to formatted Rust source, gated by the
+// resolved feature set.
+//
+// Decls carrying `@feature(name)` are emitted only when `name` appears in
+// `features`. Decls without `@feature` are always emitted. Mirrors Rust's
+// `#[cfg(feature = "...")]` + Go build tags.
+//
+// When `features` is empty, all `@feature(name)` decls are dropped — this
+// matches Cargo's `--no-default-features` behaviour. To get the "everything
+// on" behaviour (useful for `buff check` that just wants to type-check all
+// source), pass the full feature list.
+
+func generate_rust_with_features(decls: Vector<Decl>, features: Vector<String>) -> Result<String, CodegenError>:
+    let filtered = filter_by_features(decls, features)
+    return generate_rust(filtered)
+
+// =============================================================================
+// filter_by_features — T0-B4: filter a slice by `@feature(name)` gating
+// =============================================================================
+//
+// Returns a new `Vec<Decl>` containing only:
+// - Decls without any `@feature(...)` attribute (always emitted).
+// - Decls whose `@feature(name)` has `name` in `features`.
+//
+// Applied to top-level `Decl`s only (the parser does not currently allow
+// `@feature` on nested items; that's a v1.18+ concern).
+//
+// Public so `buff check` can re-use the filter to type-check only the active
+// code paths (mirrors Rust's `cargo check --features ...`).
+
+func filter_by_features(decls: Vector<Decl>, features: Vector<String>) -> Vector<Decl>:
+    let out = Vector.new()
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        if decl_feature_satisfied(decl, features):
+            out.push(decl)
+        i = i + 1
+    return out
+
+// `true` when `decl` carries no `@feature(...)` attribute OR carries
+// `@feature(name)` with `name` in `features`.
+func decl_feature_satisfied(decl: Decl, features: Vector<String>) -> Bool:
+    // (match decl:
+    //   FuncDecl(f) → inspect f.attributes
+    //   _ → return true   // Only FuncDecls carry attributes today (T35).)
+    let attrs_opt = decl_func_attributes(decl)
+    if attrs_opt == Option.None:
+        return true
+    let attrs = unwrap_attributes(attrs_opt)
+    let mut i = 0
+    for i < attrs.len():
+        let attr = attrs.get(i)
+        if attribute_name(attr) == "feature":
+            // @feature(name) — first arg is the feature name.
+            let arg_opt = attribute_first_arg(attr)
+            if arg_opt == Option.None:
+                return false
+            let name = unwrap_string(arg_opt)
+            if not(features_contains(features, name)):
+                return false
+        i = i + 1
+    return true
+
+// =============================================================================
+// generate_test_rust — T35: test-harness Rust source for `buff test`
+// =============================================================================
+//
+// Generate a **test harness** Rust source for `buff test`. Produces a
+// self-contained Rust file that, when compiled with `rustc` (normal mode,
+// NOT `--test`) and executed, runs each named test function inside a
+// `std::panic::catch_unwind` guard, prints per-test results, and exits with
+// code `0` if all pass or `1` if any fail.
+//
+// The harness is assembled by:
+//
+// 1. Running the normal codegen on ALL decls (so helper functions, structs,
+//    etc. are emitted as usual — tests can call them).
+// 2. **Removing** the user's `fn main()` (if present) — a program can only
+//    have one `main`, and the test harness provides its own.
+// 3. **Stripping `#[test]` attributes** from the generated items. The
+//    codegen emits `#[test]` on `@test` fns (so `buff build` produces
+//    idiomatic Rust); in the test-harness build we DON'T want `#[test]`
+//    (we call the fns directly from our custom `main`).
+// 4. **Appending a synthetic `fn main()`** that loops over `test_names`,
+//    calls each inside `catch_unwind`, prints `test <name> ... ok|FAILED`,
+//    then prints `\n<passed> passed, <failed> failed` and exits.
+
+func generate_test_rust(decls: Vector<Decl>, test_names: Vector<String>) -> Result<String, CodegenError>:
+    let codegen = rust_codegen_new()
+    match rust_codegen_generate(codegen, decls):
+        Result.Ok(mut_file):
+            // 2. Remove the user's fn main().
+            let without_main = file_retain_excluding_main(mut_file)
+            // 3. Strip #[test] attributes from all items.
+            let stripped = file_strip_test_attrs(without_main)
+            // 4. Build the synthetic test-runner main + append.
+            let runner_main = build_test_runner_main(test_names)
+            let final_file = file_append_item_fn(stripped, runner_main)
+            return Result.Ok(format(final_file))
+        Result.Err(e):
+            return Result.Err(e)
+
+// =============================================================================
+// Implementation shims (extern bindings)
+// =============================================================================
+
+extern "Rust" {
+    fn decl_func_attributes(decl: Decl) -> Option<AttributeList>
+    fn attribute_name(attr: Attribute) -> String
+    fn attribute_first_arg(attr: Attribute) -> Option<String>
+    fn features_contains(features: Vector<String>, name: String) -> Bool
+    fn unwrap_attributes(opt: Option<AttributeList>) -> AttributeList
+    fn unwrap_string(opt: Option<String>) -> String
+    fn file_retain_excluding_main(file: SynFile) -> SynFile
+    fn file_strip_test_attrs(file: SynFile) -> SynFile
+    fn file_append_item_fn(file: SynFile, item: ItemFn) -> SynFile
+    fn build_test_runner_main(test_names: Vector<String>) -> ItemFn
+}
+
+struct AttributeList:
+    opaque_handle: Int
+
+struct Attribute:
+    opaque_handle: Int
+
+// =============================================================================
+// Port totals (T18, Track C)
+// =============================================================================
+//
+// Source: crates/buff-lang-codegen-rust/src/ (22 .rs files, ~24,527 LOC Rust)
+// Target: self-host/codegen/ (22 .buff files, ~6,500 LOC Buff estimated)
+//
+// Compression ratio: ~26% (Buff is more concise: no `pub`/`pub(crate)` noise,
+// no impl-block ceremony, no `&self`/`&mut self` markers, free-fn signatures
+// carry fewer tokens than method signatures).
