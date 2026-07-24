@@ -10,6 +10,7 @@
 
 use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, Stmt, TypeRef, UnaryOp};
 use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
+use std::collections::BTreeMap;
 
 use crate::env::TypeEnv;
 use crate::prelude;
@@ -17,10 +18,63 @@ use crate::prelude_types;
 use crate::promote::{assignable_to, promote_binary};
 use crate::ty::Type;
 
+/// A registry of user-defined generic type declarations (T37).
+///
+/// Maps a user struct/enum name to its declared generic arity (the number of
+/// type parameters). Built by walking the top-level `Decl`s once (structs +
+/// enums with `type_params`); consulted by
+/// [`typeref_to_type_with_user`] so a source annotation like `Pair<Int,
+/// String>` can resolve to a [`Type::User`] carrying the bound arguments,
+/// instead of falling through to `None` / `Type::Unknown`.
+///
+/// The arity check defends against arity-mismatched annotations
+/// (`Pair<Int>` when `Pair<T, U>` is declared): a mismatch defers to
+/// rustc (returns `None`) rather than producing a malformed `User` type.
+/// This is the same defer-to-rustc stance the pre-T37 resolver took for ALL
+/// user generics, so the only behaviour change is the NEW happy path
+/// (matching arity → resolved `Type::User`).
+#[derive(Debug, Clone, Default)]
+pub struct UserGenericDecls {
+    inner: BTreeMap<String, usize>,
+}
+
+impl UserGenericDecls {
+    /// Build an empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a user type's declared generic arity. Idempotent — the last
+    /// registration wins (mirrors Rust's "one definition per name" rule).
+    pub fn register(&mut self, name: impl Into<String>, arity: usize) {
+        self.inner.insert(name.into(), arity);
+    }
+
+    /// Look up the declared arity for `name`, if it is a registered
+    /// user-defined generic type.
+    pub fn arity_of(&self, name: &str) -> Option<usize> {
+        self.inner.get(name).copied()
+    }
+
+    /// Returns `true` if `name` is a registered user-defined type (generic or
+    /// not — a 0-arity user struct is still registered so bare references
+    /// resolve to `Type::User { args: [] }`).
+    pub fn contains(&self, name: &str) -> bool {
+        self.inner.contains_key(name)
+    }
+}
+
 /// A local type inferencer. Owns a [`TypeEnv`] that accumulates bindings as
 /// `let` declarations are processed.
 pub struct TypeInferencer {
     env: TypeEnv,
+    /// T37: registry of user-defined generic type declarations. Consulted by
+    /// the let-annotation resolution path so a `let p: Pair<Int, String> =`
+    /// annotation resolves to a `Type::User` (instead of `Unknown`). Seeded
+    /// by the codegen driver (which walks the top-level `Decl`s once and
+    /// calls [`Self::register_user_generics`]). Empty by default — keeps
+    /// standalone/test inferencers behaving exactly as before T37.
+    user_generic_decls: UserGenericDecls,
 }
 
 impl TypeInferencer {
@@ -28,7 +82,22 @@ impl TypeInferencer {
     pub fn new() -> Self {
         Self {
             env: TypeEnv::new(),
+            user_generic_decls: UserGenericDecls::new(),
         }
+    }
+
+    /// Register a single user-defined generic type declaration (T37). `name`
+    /// is the user struct/enum identifier; `arity` is the number of declared
+    /// type parameters (0 for a non-generic user type). Idempotent.
+    pub fn register_user_generic(&mut self, name: impl Into<String>, arity: usize) {
+        self.user_generic_decls.register(name, arity);
+    }
+
+    /// Replace the user-generic registry wholesale (T37). Convenience for
+    /// drivers that build a [`UserGenericDecls`] from the full `Decl` list
+    /// once and install it in one call.
+    pub fn set_user_generic_decls(&mut self, decls: UserGenericDecls) {
+        self.user_generic_decls = decls;
     }
 
     /// Pre-binds `name` to `ty` in the environment. Useful for seeding the
@@ -746,7 +815,15 @@ impl TypeInferencer {
             } => {
                 let value_ty = self.infer_expr(value)?;
                 if let Some(annotated_ref) = ty {
-                    if let Some(annotated_ty) = typeref_to_type(annotated_ref) {
+                    // T37: consult the user-aware resolver so annotations
+                    // referencing user-defined generic types
+                    // (`let p: Pair<Int, String> = ...`) resolve to a real
+                    // `Type::User` instead of falling through to Unknown.
+                    // Built-in generics are unaffected (the user-aware
+                    // resolver delegates to `typeref_to_type` first).
+                    if let Some(annotated_ty) =
+                        typeref_to_type_with_user(annotated_ref, &self.user_generic_decls)
+                    {
                         if !assignable_to(&annotated_ty, &value_ty) {
                             // T28: null-safety. When a value of type
                             // `Option<T>` is bound/used where the BARE inner
@@ -1024,6 +1101,83 @@ pub(crate) fn is_null_safety_violation(annotated: &Type, value: &Type) -> bool {
     matches!(value, Type::Option(_)) && !matches!(annotated, Type::Option(_))
 }
 
+/// T37 — user-aware type-reference resolution.
+///
+/// Resolves a [`TypeRef`] to a [`Type`] exactly like [`typeref_to_type`] for
+/// all built-in shapes (primitives, `Option`, `Result`, unions, tuples), and
+/// ADDITIONALLY resolves user-defined generic applications when `user_decls`
+/// knows about them.
+///
+/// # Built-in generics are NOT broken
+///
+/// `Vector`/`Map`/`Channel` continue to resolve at the expression-inference
+/// level (unchanged). `Option<T>` and `Result<T, E>` continue to resolve here
+/// via the same `Generic`-arm special-case as before — the user-decl lookup
+/// is consulted ONLY when the builtin arms have already returned `None`, so
+/// a user type shadowing a builtin name (e.g. a user `Option` struct) cannot
+/// hijack builtin resolution.
+///
+/// # User-generic substitution
+///
+/// When `ty` is a `TypeRef::Generic { base: Named(name), args, .. }` whose
+/// `name` is registered in `user_decls` with MATCHING arity, each arg is
+/// resolved recursively (via this same function, so nested user generics and
+/// builtins compose), and a [`Type::User { name, args }`] is returned. An
+/// arity mismatch defers to rustc (returns `None`) — mirroring the pre-T37
+/// behaviour so existing snapshots stay byte-identical for malformed
+/// annotations.
+///
+/// When `ty` is a bare `TypeRef::Named(name)` whose `name` is registered with
+/// arity 0 (a non-generic user struct/enum), a `Type::User { name, args: [] }`
+/// is returned. This lets `let p: Point = ...` carry a real type instead of
+/// `Unknown`.
+pub(crate) fn typeref_to_type_with_user(
+    ty: &TypeRef,
+    user_decls: &UserGenericDecls,
+) -> Option<Type> {
+    // First, try the builtin resolver. If it succeeds, the type is a builtin
+    // (primitive / Option / Result / Union / Tuple) — return as-is. This
+    // guarantees built-in generic resolution is NOT broken by T37: the
+    // user-decl registry is never consulted for a builtin name.
+    if let Some(resolved) = typeref_to_type(ty) {
+        return Some(resolved);
+    }
+    // Builtin resolution returned None — consult the user-decl registry.
+    match ty {
+        TypeRef::Generic { base, args, .. } => {
+            if let TypeRef::Named { name, .. } = base.as_ref() {
+                if let Some(declared_arity) = user_decls.arity_of(&name.name) {
+                    // Arity must match the declaration; a mismatch defers to
+                    // rustc (None) rather than emitting a malformed User type.
+                    if declared_arity == args.len() {
+                        // Recursively resolve each argument so nested user
+                        // generics (`Outer<Pair<Int, String>>`) and builtins
+                        // (`Tree<Option<Int>>`) compose. Unresolvable args
+                        // fall back to Unknown (the same stance as Union/Tuple).
+                        let resolved_args: Vec<Type> = args
+                            .iter()
+                            .map(|a| typeref_to_type_with_user(a, user_decls).unwrap_or(Type::Unknown))
+                            .collect();
+                        return Some(Type::user(name.name.clone(), resolved_args));
+                    }
+                }
+            }
+            None
+        }
+        TypeRef::Named { name, .. } => {
+            // A bare user type reference. Only resolve when registered with
+            // arity 0 (a non-generic user struct/enum). A registered generic
+            // referenced without args (e.g. `Pair` when `Pair<T, U>` is
+            // declared) defers to rustc — the user omitted required args.
+            if user_decls.arity_of(&name.name) == Some(0) {
+                return Some(Type::user(name.name.clone(), Vec::new()));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// T124b: prelude-datetime arithmetic result-type helper.
 ///
 /// chrono (and `std::time::Instant`) impl `Add<Duration>` and `Sub<Duration>`
@@ -1255,6 +1409,132 @@ mod tests {
         assert_eq!(
             resolved, None,
             "type-param names resolve to None (rustc handles binding)"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // T37 — User-defined generic type resolution (v1.25 language-features
+    // batch). The builtin resolver (`typeref_to_type`) is unchanged; the
+    // user-aware resolver (`typeref_to_type_with_user`) adds a `Type::User`
+    // result for registered user generics with matching arity.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn t37_builtin_option_still_resolves_under_user_aware_resolver() {
+        // The user-aware resolver MUST delegate to the builtin resolver
+        // first, so Option<Int> still resolves to Type::Option(Int<64>)
+        // even with a populated user-decl registry.
+        let mut decls = UserGenericDecls::new();
+        decls.register("Pair", 2);
+        let ty = generic("Option", &["Int"]);
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved,
+            Some(Type::option(Type::int_default())),
+            "Option<Int> must still resolve via the user-aware resolver"
+        );
+    }
+
+    #[test]
+    fn t37_user_generic_with_matching_arity_resolves() {
+        // Pair<Int, String> registered with arity 2 resolves to
+        // Type::User { name: "Pair", args: [Int<64>, String] }.
+        let mut decls = UserGenericDecls::new();
+        decls.register("Pair", 2);
+        let ty = generic("Pair", &["Int", "String"]);
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved,
+            Some(Type::user("Pair", vec![Type::int_default(), Type::string()])),
+            "Pair<Int, String> must resolve to Type::User with bound args"
+        );
+    }
+
+    #[test]
+    fn t37_user_generic_arity_mismatch_defers_to_rustc() {
+        // Pair<Int> when Pair<T, U> is declared (arity 2) — arity mismatch
+        // defers to rustc (returns None), preserving pre-T37 behaviour.
+        let mut decls = UserGenericDecls::new();
+        decls.register("Pair", 2);
+        let ty = generic("Pair", &["Int"]);
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved, None,
+            "arity-mismatched user generic defers to rustc (None)"
+        );
+    }
+
+    #[test]
+    fn t37_user_generic_not_registered_defers_to_rustc() {
+        // An unregistered user generic (no decl in the registry) defers to
+        // rustc — the resolver cannot invent a Type::User without a decl.
+        let decls = UserGenericDecls::new();
+        let ty = generic("Pair", &["Int", "String"]);
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved, None,
+            "unregistered user generic defers to rustc (None)"
+        );
+    }
+
+    #[test]
+    fn t37_bare_user_type_resolves_when_registered_zero_arity() {
+        // A bare user type `Point` registered with arity 0 resolves to
+        // Type::User { name: "Point", args: [] }.
+        let mut decls = UserGenericDecls::new();
+        decls.register("Point", 0);
+        let ty = named("Point");
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved,
+            Some(Type::user("Point", Vec::new())),
+            "bare user type registered with arity 0 resolves to Type::User"
+        );
+    }
+
+    #[test]
+    fn t37_nested_user_generic_resolves_recursively() {
+        // Outer<Pair<Int, String>> — the outer arg is itself a user generic
+        // that must resolve recursively.
+        let mut decls = UserGenericDecls::new();
+        decls.register("Outer", 1);
+        decls.register("Pair", 2);
+        let inner = generic("Pair", &["Int", "String"]);
+        let ty = TypeRef::Generic {
+            base: Box::new(named("Outer")),
+            args: vec![inner],
+            span: span(),
+        };
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved,
+            Some(Type::user(
+                "Outer",
+                vec![Type::user(
+                    "Pair",
+                    vec![Type::int_default(), Type::string()]
+                )]
+            )),
+            "nested user generics resolve recursively"
+        );
+    }
+
+    #[test]
+    fn t37_user_generic_mixed_with_builtin_arg_resolves() {
+        // Tree<Option<Int>> — a user generic whose arg is a builtin generic.
+        let mut decls = UserGenericDecls::new();
+        decls.register("Tree", 1);
+        let inner = generic("Option", &["Int"]);
+        let ty = TypeRef::Generic {
+            base: Box::new(named("Tree")),
+            args: vec![inner],
+            span: span(),
+        };
+        let resolved = typeref_to_type_with_user(&ty, &decls);
+        assert_eq!(
+            resolved,
+            Some(Type::user("Tree", vec![Type::option(Type::int_default())])),
+            "user generic with builtin arg resolves recursively"
         );
     }
 }

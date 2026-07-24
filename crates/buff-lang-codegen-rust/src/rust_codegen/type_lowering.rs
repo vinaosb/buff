@@ -179,6 +179,26 @@ impl RustCodegen {
                     Err(_) => return None,
                 }
             }
+            // T37: user-defined generic type application. Emit the user
+            // type's name verbatim with a turbofish when args are present
+            // (`Pair<i64, String>`), or the bare name when args are empty
+            // (`Point`). Unknown args fall back to i64 (Buff's default Int)
+            // so the annotation still compiles — mirrors the Matrix<T>
+            // precedent. This produces byte-identical Rust to the
+            // `ast_typeref_to_syn` path that lowers the same shape directly
+            // from a `TypeRef`, so a `Type::User` flowing through inference
+            // and a `TypeRef::Generic` flowing through annotation lowering
+            // emit the same source.
+            Type::User { name, args } => {
+                if args.is_empty() {
+                    return Some(rust_path_type(name));
+                }
+                let lowered_args: Vec<SynType> = args
+                    .iter()
+                    .map(|a| self.buff_type_to_syn(a).unwrap_or_else(|| rust_path_type("i64")))
+                    .collect();
+                return Some(make_generic_path_type(name, lowered_args));
+            }
             _ => {}
         }
         let rust_name: &str = match ty {
@@ -355,7 +375,11 @@ impl RustCodegen {
             | Type::Map(_, _)
             | Type::Result(_, _)
             | Type::Union(_)
-            | Type::Tuple(_) => return None,
+            | Type::Tuple(_)
+            // T37: User is handled by the early-return match above
+            // (turbofish-or-bare-path emission); unreachable here but
+            // required for exhaustiveness.
+            | Type::User { .. } => return None,
             // T2: channel sender / receiver. Opaque runtime-value types
             // mapped to `buff_lang_runtime::Sender<T>` /
             // `buff_lang_runtime::Receiver<T>`. The element type T is

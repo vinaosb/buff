@@ -1066,6 +1066,38 @@ pub enum Type {
     /// `.temporary` / `.transient`. Maps to
     /// `buff_actors::supervisor::RestartStrategy`.
     RestartStrategy,
+    /// A user-defined generic type application: `Pair<Int, String>`,
+    /// `Tree<T>`, or a bare user struct/enum `Point` (T37 — v1.25
+    /// language-features batch).
+    ///
+    /// Produced by [`crate::infer::typeref_to_type_with_user`] when a
+    /// source annotation references a user-defined struct/enum that the
+    /// builtin resolver (`typeref_to_type`) does not recognise. The
+    /// `name` is the user type's identifier (`"Pair"`, `"Tree"`,
+    /// `"Point"`); `args` is the list of resolved type arguments
+    /// (`[Int<64>, String]` for `Pair<Int, String>`), empty for a bare
+    /// non-generic user type.
+    ///
+    /// This is **additive** (T37): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
+    /// predicates all return `false` for `User` (it is an opaque,
+    /// user-defined shape that participates in no numeric promotion).
+    /// The codegen lowering emits the user type's name verbatim with a
+    /// turbofish when `args` is non-empty (`Pair<i64, String>`), or the
+    /// bare name when `args` is empty (`Point`) — mirroring what
+    /// `ast_typeref_to_syn` already emits directly from the `TypeRef`
+    /// (so a `Type::User` flowing through `buff_type_to_syn` produces
+    /// byte-identical Rust to the `TypeRef`-driven path).
+    ///
+    /// Bounds substitution is structural: when resolving `Pair<Int,
+    /// String>` against a declaration `struct Pair<T, U>`, the resolver
+    /// binds `T=Int`, `U=String` positionally and recurses into each
+    /// argument. Full monomorphization happens in rustc (zero-cost
+    /// static dispatch) — Buff's type system only needs to be AWARE of
+    /// the user generic so the null-safety / assignment checks can
+    /// compare annotations like `let p: Pair<Int, String>`.
+    User { name: String, args: Vec<Type> },
 }
 
 /// The width of an integer type (`Int` or `Bits`).
@@ -1205,6 +1237,17 @@ impl Type {
     /// [`Type::map`].
     pub fn result(ok: Type, err: Type) -> Self {
         Type::Result(Box::new(ok), Box::new(err))
+    }
+
+    /// Create a user-defined generic type application (T37). `name` is the
+    /// user struct/enum identifier; `args` are the resolved type arguments
+    /// (empty for a bare non-generic user type). Used by the user-aware
+    /// resolver `typeref_to_type_with_user`.
+    pub fn user(name: impl Into<String>, args: Vec<Type>) -> Self {
+        Type::User {
+            name: name.into(),
+            args,
+        }
     }
 
     /// Create a tuple type `(T, U, ...)` from its resolved members (T103).
@@ -2354,6 +2397,24 @@ impl fmt::Display for Type {
             Type::ECDH => f.write_str("ECDH"),
             Type::Argon2 => f.write_str("Argon2"),
             Type::RsaKeypair => f.write_str("RsaKeypair"),
+            // T37: user-defined generic type application. Renders the
+            // user type's name with comma-separated resolved args in
+            // angle brackets (matching the source form), or the bare
+            // name when there are no args.
+            Type::User { name, args } => {
+                if args.is_empty() {
+                    f.write_str(name)
+                } else {
+                    write!(f, "{name}<")?;
+                    for (i, a) in args.iter().enumerate() {
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
+                        write!(f, "{a}")?;
+                    }
+                    f.write_str(">")
+                }
+            }
         }
     }
 }

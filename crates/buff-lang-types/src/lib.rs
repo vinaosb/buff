@@ -96,6 +96,10 @@ pub use exhaustiveness::{
     check_program, EnumRegistry,
 };
 pub use infer::TypeInferencer;
+// T37: user-defined generic type registry. Re-exported at crate root so the
+// codegen driver can build it from the top-level `Decl`s once and install it
+// into a `TypeInferencer` via `set_user_generic_decls`.
+pub use infer::UserGenericDecls;
 // T58: multiple-dispatch table (Julia-inspired). Re-exported at crate root
 // so the type inferencer + Rust codegen consume it by short path.
 pub use multi_dispatch::{MultiDispatchMethod, MultiDispatchTable};
