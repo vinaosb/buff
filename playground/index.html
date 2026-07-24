@@ -38,7 +38,7 @@
                 </svg>
                 <span class="brand-word">BUFF</span>
             </a>
-            <span class="brand-tag">transpile-only playground</span>
+            <span class="brand-tag">v1.25 playground</span>
         </div>
 
         <nav class="site-nav" aria-label="Playground controls">
@@ -58,12 +58,25 @@
         </nav>
     </header>
 
-    <!-- Example dropdown — hidden by default, shown when #example-picker is clicked. -->
+    <!-- Example dropdown — hidden by default, shown when #example-picker is clicked.
+         Grouped: Basics (evergreen v0.1/v0.5) + v1.25 (language + stdlib surface). -->
     <div id="example-menu" class="example-menu" role="menu" hidden>
+        <span class="example-group-label" aria-hidden="true">basics</span>
         <button class="example-item" role="menuitemradio" aria-checked="false" data-example="fibonacci">fibonacci</button>
         <button class="example-item" role="menuitemradio" aria-checked="false" data-example="ola">olá, buff</button>
         <button class="example-item" role="menuitemradio" aria-checked="false" data-example="calculadora">calculadora</button>
         <button class="example-item" role="menuitemradio" aria-checked="false" data-example="error_demo">error demo</button>
+        <span class="example-group-separator" aria-hidden="true"></span>
+        <span class="example-group-label" aria-hidden="true">v1.25 — language</span>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="generics">generics <em class="example-tag">T13</em></button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="range">ranges <em class="example-tag">T84</em></button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="pattern_matching">pattern matching <em class="example-tag">T39-41</em></button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="raw_strings">raw strings <em class="example-tag">T93</em></button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="defer">defer <em class="example-tag">T100</em></button>
+        <span class="example-group-separator" aria-hidden="true"></span>
+        <span class="example-group-label" aria-hidden="true">v1.25 — stdlib</span>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="http_client">Http client <em class="example-tag">T80</em></button>
+        <button class="example-item" role="menuitemradio" aria-checked="false" data-example="json">Json <em class="example-tag">T23</em></button>
     </div>
 
     <!-- ── Main split: editor | output ─────────────────────────────────── -->

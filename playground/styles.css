@@ -294,7 +294,9 @@ body[data-state="loading"] .site-footer { animation-delay: 240ms; }
     top: calc(var(--header-h) - var(--space-2));
     right: var(--space-8);
     z-index: 100;
-    min-width: 200px;
+    min-width: 220px;
+    max-height: calc(100vh - var(--header-h) - var(--space-4));
+    overflow-y: auto;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
@@ -327,6 +329,37 @@ body[data-state="loading"] .site-footer { animation-delay: 240ms; }
     color: var(--color-accent);
     background: rgba(232, 160, 78, 0.08);
 }
+
+/* Group labels + separators — keep the dropdown scannable when it grows. */
+.example-group-label {
+    display: block;
+    padding: var(--space-2) var(--space-3) var(--space-1);
+    font-family: var(--font-code);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-text-mute);
+    user-select: none;
+}
+.example-group-label:not(:first-child) {
+    margin-top: var(--space-1);
+}
+.example-group-separator {
+    display: block;
+    height: 1px;
+    margin: var(--space-2) var(--space-1);
+    background: var(--color-border);
+}
+/* Inline task tag — discreet T-number provenance for v1.25 examples. */
+.example-tag {
+    font-style: normal;
+    font-size: var(--text-2xs);
+    color: var(--color-text-mute);
+    margin-left: var(--space-2);
+    letter-spacing: 0.04em;
+}
+.example-item:hover .example-tag { color: var(--color-accent-dim); }
 
 /* ----- Split layout --------------------------------------------------- */
 .split {

@@ -33,7 +33,18 @@ const URL_FRAGMENT_PREFIX = "s="; // fragment shape: #s=<base64>
 
 // ----- Examples (kept inline so the playground works fully offline once
 //        the Wasm is fetched; no second round-trip for examples). ---------
+//
+//        Categories:
+//          • basics — the v0.1/v0.5 evergreen examples
+//          • v1.25  — new language + stdlib surface shipped in the launch-
+//                     readiness waves (generics, ranges, raw strings, defer,
+//                     Http / Json prelude types, …). Each snippet is a
+//                     transpile-only demo; some lower to crates that the
+//                     single-file rustc pipeline cannot LINK (Http/Json
+//                     reach into reqwest/serde_json), but the generated
+//                     Rust IS the demo. See README "What it does NOT do".
 const EXAMPLES = {
+    // ─── Basics ───────────────────────────────────────────────────────
     fibonacci:
         "// recursive fibonacci\n" +
         "func fib(n: Int) -> Int:\n" +
@@ -58,6 +69,186 @@ const EXAMPLES = {
     error_demo:
         "// triggers a parse error — watch the status rail\n" +
         "func ( broken\n",
+
+    // ─── v1.25 language features ───────────────────────────────────────
+    // Generics (T13): user-defined generic types + functions. rustc
+    // monomorphizes each call site — zero-cost static dispatch.
+    generics:
+        "// v1.25 — generics + monomorphization (T13)\n" +
+        "//\n" +
+        "// rustc generates a fresh copy of `id` per call site: `id::<i64>`\n" +
+        "// and `id::<&str>`. No type erasure, no vtable — pure static dispatch.\n" +
+        "//\n" +
+        "// Brace form for the generic struct — the documented & tested shape\n" +
+        "// from the T13 acceptance criteria.\n" +
+        "\n" +
+        "struct Pair<T, U> { x: T, y: U }\n" +
+        "\n" +
+        "func id<T>(x: T) -> T:\n" +
+        "    return x\n" +
+        "\n" +
+        "func main():\n" +
+        "    let p = Pair.new(x: 42, y: \"hello\")\n" +
+        "    let n = id(42)\n" +
+        "    let s = id(\"hello\")\n" +
+        "    print(p.x)\n" +
+        "    print(p.y)\n" +
+        "    print(n)\n" +
+        "    print(s)\n",
+
+    // Range syntax (T84): `a..b` exclusive + `a..=b` inclusive. Ranges
+    // are LAZY iterators (Rust std::ops::Range / RangeInclusive).
+    range:
+        "// v1.25 — range syntax (T84)\n" +
+        "//\n" +
+        "// `a..b`  — exclusive (excludes b)\n" +
+        "// `a..=b` — inclusive (includes b)\n" +
+        "// Both are LAZY iterators: no allocation, O(1) `.contains()`.\n" +
+        "\n" +
+        "func main():\n" +
+        "    print(\"exclusive 0..5:\")\n" +
+        "    for i in 0..5:\n" +
+        "        print(i)\n" +
+        "\n" +
+        "    print(\"inclusive 0..=5:\")\n" +
+        "    for i in 0..=5:\n" +
+        "        print(i)\n" +
+        "\n" +
+        "    if (0..10).contains(5):\n" +
+        "        print(\"5 is in 0..10\")\n" +
+        "\n" +
+        "    let n = 3\n" +
+        "    for i in 0..n * 2:\n" +
+        "        print(i)\n",
+
+    // Pattern matching (T39/T40/T41 + T27 exhaustiveness): or-patterns,
+    // guards, struct patterns. Built-in Option<T> / Result<T, E> arms.
+    pattern_matching:
+        "// v1.25 — pattern matching (T27/T39/T40/T41)\n" +
+        "//\n" +
+        "// Exhaustive match over Option<T> + Result<T, E>. v1.25 also adds\n" +
+        "// or-patterns (`A | B`), guards (`if cond`), and struct patterns\n" +
+        "// (T39/T40/T41).\n" +
+        "\n" +
+        "func classify(n: Int) -> Int:\n" +
+        "    if n == 0:\n" +
+        "        return 100\n" +
+        "    return 999\n" +
+        "\n" +
+        "func lookup(id: Int) -> Result<Int, Error>:\n" +
+        "    if id == 1:\n" +
+        "        return Ok(111)\n" +
+        "    return Error(\"not found\")\n" +
+        "\n" +
+        "func main():\n" +
+        "    let mut drawer = [11, 22, 33]\n" +
+        "    let taken = drawer.pop()\n" +
+        "    match taken { Some(x) => print(x), None => print(0) }\n" +
+        "\n" +
+        "    let found = lookup(1)\n" +
+        "    match found { Ok(v) => print(v), Err(_) => print(0) }\n" +
+        "\n" +
+        "    let missing = lookup(99)\n" +
+        "    match missing { Ok(v) => print(v), Err(_) => print(0) }\n",
+
+    // Raw strings (T93): `r"..."` and `r#"..."#` (Rust-style). Backslashes
+    // and braces are literal — no escape processing, no interpolation.
+    raw_strings:
+        "// v1.25 — raw string literals (T93)\n" +
+        "//\n" +
+        "// `r\"...\"`     — backslashes and braces are literal\n" +
+        "// `r#\"...\"#`   — N hashes let `\"` appear inside the string\n" +
+        "//\n" +
+        "// Perfect for embedding regex / JSON / shell globs without\n" +
+        "// escaping every metacharacter.\n" +
+        "\n" +
+        "func main():\n" +
+        "    let re = r\"\\d+\\.\\d+\"\n" +
+        "    let json = r#\"{\"name\": \"Buff\", \"version\": 1.25}\"#\n" +
+        "    let path = r\"C:\\Users\\buff\\playground\"\n" +
+        "    print(re)\n" +
+        "    print(json)\n" +
+        "    print(path)\n",
+
+    // Defer statement (T100): schedule cleanup at function exit. Multiple
+    // defers run LIFO. Codegen emits them at EVERY return point.
+    defer:
+        "// v1.25 — defer statement (T100)\n" +
+        "//\n" +
+        "// `defer EXPR` schedules EXPR to run when the enclosing FUNCTION\n" +
+        "// exits, on ANY exit path (explicit `return` or implicit fall-\n" +
+        "// through). Multiple defers run LIFO (last-registered first).\n" +
+        "// The borrow checker never sees them — Buff hides the choreography.\n" +
+        "\n" +
+        "func process(label: String):\n" +
+        "    print(\"opening \" + label)\n" +
+        "    defer print(\"closing \" + label)\n" +
+        "    print(\"working with \" + label)\n" +
+        "    if label == \"skip\":\n" +
+        "        return\n" +
+        "    print(\"more work\")\n" +
+        "\n" +
+        "func main():\n" +
+        "    process(\"file-a\")\n" +
+        "    print(\"---\")\n" +
+        "    process(\"skip\")\n",
+
+    // ─── v1.25 stdlib prelude types ────────────────────────────────────
+    // Http (T80): blocking GET/POST via reqwest::blocking. The generated
+    // Rust references `reqwest` (recorded in codegen `extern_crates`) —
+    // single-file rustc cannot LINK it, but the lowered Rust IS the demo.
+    // NOTE: raw strings (T93) for the JSON body — Buff treats `{` in
+    // regular strings as interpolation. The r#"..."# form is needed when
+    // the payload itself contains `"`.
+    http_client:
+        "// v1.25 — Http prelude type (T80)\n" +
+        "//\n" +
+        "// Http.get(url)  — blocking GET, returns String body\n" +
+        "// Http.post(u,b) — blocking POST with a String body\n" +
+        "//\n" +
+        "// Lowers to reqwest::blocking — the generated Rust references the\n" +
+        "// reqwest crate (registered in codegen extern_crates). The single-\n" +
+        "// file rustc pipeline cannot LINK external crates, but the lowered\n" +
+        "// Rust on the right IS the demo — see how clean the call site is\n" +
+        "// compared to reqwest's verbose Rust surface.\n" +
+        "//\n" +
+        "// The POST body uses a raw string (T93): Buff's regular strings\n" +
+        "// treat `{` as interpolation; raw strings are literal. The r#\"...\"#\n" +
+        "// form lets `\"` appear inside the payload.\n" +
+        "\n" +
+        "func main():\n" +
+        "    let body = Http.get(\"https://example.com\")\n" +
+        "    print(body)\n" +
+        "\n" +
+        "    let json = r#\"{\"hi\": 1}\"#\n" +
+        "    let reply = Http.post(\"https://httpbin.org/post\", json)\n" +
+        "    print(reply)\n",
+
+    // Json (T23): parse + stringify via serde_json. Same namespace shape
+    // as Toml / Yaml / Csv — heterogeneous Map round-trip, never panics.
+    // Uses a raw string for the JSON payload (see http_client note above).
+    json:
+        "// v1.25 — Json prelude type (T23)\n" +
+        "//\n" +
+        "// Json.parse(s)     — parse JSON text into a Buff Map (NEVER panics;\n" +
+        "//                    malformed input → empty Map)\n" +
+        "// Json.stringify(v) — serialize a Map back to JSON text\n" +
+        "//\n" +
+        "// Lowers to serde_json — recorded in codegen extern_crates. The\n" +
+        "// right pane shows the generated Rust; the parse/stringify call\n" +
+        "// sites use unwrap_or_default() so the surface is panic-free.\n" +
+        "//\n" +
+        "// Raw string for the payload — Buff's regular strings interpolate\n" +
+        "// `{...}`, but JSON is full of braces. r#\"...\"# is the clean way\n" +
+        "// to embed JSON in Buff (the # hashes let `\"` appear literally).\n" +
+        "\n" +
+        "func main():\n" +
+        "    let payload = r#\"{\"name\":\"Buff\",\"version\":1.25}\"#\n" +
+        "    let data = Json.parse(payload)\n" +
+        "    print(data)\n" +
+        "\n" +
+        "    let back = Json.stringify(data)\n" +
+        "    print(back)\n",
 };
 
 // ----- CodeMirror instance ---------------------------------------------

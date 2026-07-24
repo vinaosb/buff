@@ -217,4 +217,59 @@ test.describe('Buff playground — T114', () => {
         expect(rust).toContain('fn ');
         expect(rust).toContain('fib');
     });
+
+    // ─── Scenario 6 (T117): v1.25 example via dropdown ───────────────
+    test('v1.25 generics example loads from the dropdown and transpiles', async ({ page }) => {
+        // Open the examples dropdown.
+        await page.locator('#example-picker').click();
+        const menu = page.locator('#example-menu');
+        await expect(menu).toBeVisible();
+
+        // The v1.25 generics item must be present (T117 added 7 new items).
+        const genericsItem = page.locator('.example-item[data-example="generics"]');
+        await expect(genericsItem).toBeVisible();
+
+        // Click it — the editor should swap to the generics snippet and
+        // transpile immediately (transpileNow fires on selection).
+        await genericsItem.click();
+        await expect(menu).toBeHidden(); // menu closes on selection
+
+        // The Rust output must contain the generic struct + generic fn.
+        await expect(statusPill(page)).toHaveAttribute('data-status', 'ok', { timeout: 5_000 });
+        const rust = await outputCode(page).textContent();
+        expect(rust).toContain('struct Pair<T, U>');
+        expect(rust).toContain('fn id<T>');
+
+        // The selected item should be marked checked in the menu.
+        await page.locator('#example-picker').click();
+        await expect(genericsItem).toHaveAttribute('aria-checked', 'true');
+
+        await page.screenshot({
+            path: path.join(EVIDENCE_DIR, 'task-117-generics-dropdown.png'),
+            fullPage: true,
+        });
+    });
+
+    // ─── Scenario 7 (T117): dropdown groups are present ───────────────
+    test('examples dropdown contains v1.25 group labels and all 11 items', async ({ page }) => {
+        await page.locator('#example-picker').click();
+        const menu = page.locator('#example-menu');
+        await expect(menu).toBeVisible();
+
+        // Group labels — basics + v1.25 language + v1.25 stdlib.
+        const labels = await menu.locator('.example-group-label').allTextContents();
+        expect(labels).toEqual(['basics', 'v1.25 — language', 'v1.25 — stdlib']);
+
+        // All 11 example items (4 basics + 5 v1.25 language + 2 v1.25 stdlib).
+        const items = await menu.locator('.example-item').count();
+        expect(items).toBe(11);
+
+        // Specific v1.25 items must be present.
+        for (const key of [
+            'generics', 'range', 'pattern_matching', 'raw_strings', 'defer',
+            'http_client', 'json',
+        ]) {
+            await expect(menu.locator(`.example-item[data-example="${key}"]`)).toBeVisible();
+        }
+    });
 });
