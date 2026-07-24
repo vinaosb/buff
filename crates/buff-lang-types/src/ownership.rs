@@ -370,7 +370,7 @@ fn collect_bound_names_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     collect_bound_names_in_expr(e, out);
                 }
             }
@@ -678,7 +678,7 @@ fn collect_spawn_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     collect_spawn_free_vars_in_expr(e, out);
                 }
             }
@@ -787,7 +787,7 @@ fn collect_free_vars_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     collect_free_vars_in_expr(e, out);
                 }
             }
@@ -1025,7 +1025,7 @@ fn collect_assignment_targets_in_expr(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     collect_assignment_targets_in_expr(e, out);
                 }
             }

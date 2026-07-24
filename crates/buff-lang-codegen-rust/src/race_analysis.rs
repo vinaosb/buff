@@ -466,7 +466,7 @@ fn walk_expr_for_parallel_calls<F>(
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     walk_expr_for_parallel_calls(e, func_name, is_exempt, errors);
                 }
             }
@@ -742,7 +742,7 @@ fn walk_expr_for_captured_mutations<F>(
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     walk_expr_for_captured_mutations(e, captures, func_name, is_exempt, errors);
                 }
             }

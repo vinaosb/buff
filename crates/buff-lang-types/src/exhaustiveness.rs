@@ -346,7 +346,7 @@ fn check_expr(
         }
         Expr::StringInterp { parts, .. } => {
             for p in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = p {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = p {
                     check_expr(e, registry, inferencer)?;
                 }
             }

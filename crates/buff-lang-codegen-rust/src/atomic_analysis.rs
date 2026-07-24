@@ -397,7 +397,7 @@ fn collect_expr_mutations(expr: &Expr, name: &str, out: &mut Vec<BinaryOp>) {
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     collect_expr_mutations(e, name, out);
                 }
             }
@@ -573,7 +573,7 @@ fn walk_expr_for_integer_lets(expr: &Expr, out: &mut AtomicSet) {
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     walk_expr_for_integer_lets(e, out);
                 }
             }
@@ -754,7 +754,7 @@ fn collect_expr_accumulating_parallel(expr: &Expr, out: &mut Vec<(Vec<Param>, Bl
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     collect_expr_accumulating_parallel(e, out);
                 }
             }

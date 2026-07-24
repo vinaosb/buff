@@ -411,7 +411,7 @@ impl RenameWalker {
             }
             Expr::StringInterp { parts, .. } => {
                 for p in parts {
-                    if let buff_lang_ast::InterpPart::Expr(e) = p {
+                    if let buff_lang_ast::InterpPart::Expr(e, _) = p {
                         self.rename_expr(e);
                     }
                 }
@@ -678,7 +678,7 @@ fn replace_ident_in_expr(e: &mut Expr, name: &str, initializer: &Expr) {
         }
         Expr::StringInterp { parts, .. } => {
             for p in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = p {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = p {
                     replace_ident_in_expr(e, name, initializer);
                 }
             }

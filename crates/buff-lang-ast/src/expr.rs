@@ -124,13 +124,19 @@ impl fmt::Display for Literal {
 /// StringInterp {
 ///     parts: vec![
 ///         InterpPart::Literal("Hello ".to_string()),
-///         InterpPart::Expr(Box::new(Expr::Ident("name"))),
+///         InterpPart::Expr(Box::new(Expr::Ident("name")), None),
 ///         InterpPart::Literal(", you are ".to_string()),
-///         InterpPart::Expr(Box::new(Expr::Ident("age"))),
+///         InterpPart::Expr(Box::new(Expr::Ident("age")), None),
 ///         InterpPart::Literal("!".to_string()),
 ///     ],
 ///     span: ...,
 /// }
+/// ```
+///
+/// With format specifiers (T81), `${x:.2}` produces:
+///
+/// ```text
+/// InterpPart::Expr(Box::new(Expr::Ident("x")), Some(".2".to_string()))
 /// ```
 ///
 /// Literal runs of zero or more `StringPart` tokens are collapsed into one
@@ -140,15 +146,25 @@ impl fmt::Display for Literal {
 pub enum InterpPart {
     /// A literal text run from the source string (no escapes processed yet).
     Literal(String),
-    /// An embedded expression `{expr}`.
-    Expr(Box<Expr>),
+    /// An embedded expression `{expr}` or `{expr:spec}` (T81).
+    ///
+    /// The optional `format_spec` is the raw spec text after `:` (e.g. `.2`,
+    /// `?`, `>10`, `x`). It is passed through to Rust's `format!("{spec}", ...)`
+    /// unchanged — Buff does NOT interpret format specifiers.
+    Expr(Box<Expr>, Option<String>),
 }
 
 impl fmt::Display for InterpPart {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             InterpPart::Literal(s) => write!(f, "Lit({s:?})"),
-            InterpPart::Expr(e) => write!(f, "Expr({e})"),
+            InterpPart::Expr(e, spec) => {
+                if let Some(s) = spec {
+                    write!(f, "Expr({e}:{s})")
+                } else {
+                    write!(f, "Expr({e})")
+                }
+            }
         }
     }
 }

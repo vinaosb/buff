@@ -1,0 +1,41 @@
+// Buff v1.25 example — string format specifiers (T81).
+// Run: `buff run examples/format_specifiers.buff`
+//
+// Demonstrates `${expr:spec}` syntax where spec is passed through
+// to Rust's format!() macro unchanged.
+//
+// Supported specifiers: .N (decimals), ? (debug), >N/<N/^N (pad),
+// x (hex), b (binary), o (octal), e (scientific), 0N (zero-pad).
+
+func main():
+    let pi = 3.14159
+    let name = "Buff"
+    let val = 255
+    let large = 1234.5678
+
+    // Decimal places
+    print("pi = ${pi:.2}")          // → "pi = 3.14"
+    print("pi = ${pi:.4}")          // → "pi = 3.1416"
+
+    // Debug formatting
+    print("name = ${name:?}")       // → 'name = "Buff"'
+
+    // Padding (right, left, center)
+    print("[${name:>10}]")          // → "[      Buff]"
+    print("[${name:<10}]")          // → "[Buff      ]"
+    print("[${name:^10}]")          // → "[   Buff   ]"
+
+    // Hex, binary, octal
+    print("255 = 0x${val:x}")       // → "255 = 0xff"
+    print("255 = 0b${val:b}")       // → "255 = 0b11111111"
+    print("255 = 0o${val:o}")       // → "255 = 0o377"
+
+    // Scientific notation
+    print("large = ${large:e}")     // → "large = 1.2345678e3"
+
+    // Zero-padding
+    print("${val:05}")              // → "00255"
+
+    // Mixed with regular interpolation
+    print("Hello ${name}, pi is ${pi:.2}")
+    // → "Hello Buff, pi is 3.14"

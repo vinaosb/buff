@@ -239,7 +239,7 @@ impl TypeInferencer {
             // checked) but the parts themselves don't affect the result.
             Expr::StringInterp { parts, .. } => {
                 for part in parts {
-                    if let InterpPart::Expr(e) = part {
+                    if let InterpPart::Expr(e, _) = part {
                         self.infer_expr(e)?;
                     }
                 }

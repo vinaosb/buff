@@ -359,7 +359,7 @@ fn walk_expr(
         }
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = part {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = part {
                     walk_expr(e, in_parallel_closure, user_structs, found);
                 }
             }

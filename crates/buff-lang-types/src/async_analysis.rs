@@ -349,7 +349,7 @@ fn collect_func_calls(expr: &Expr, out: &mut BTreeSet<String>) {
         }
         Expr::StringInterp { parts, .. } => {
             for p in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = p {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = p {
                     collect_func_calls(e, out);
                 }
             }

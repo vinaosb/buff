@@ -922,7 +922,7 @@ fn collect_uses(expr: &Expr, out: &mut Vec<Ident>) {
         // text runs do not contribute any uses.
         Expr::StringInterp { parts, .. } => {
             for part in parts {
-                if let crate::InterpPart::Expr(e) = part {
+                if let crate::InterpPart::Expr(e, _) = part {
                     collect_uses(e, out);
                 }
             }

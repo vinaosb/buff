@@ -1459,9 +1459,13 @@ impl<'a> Formatter<'a> {
                         }
                     }
                 }
-                InterpPart::Expr(e) => {
+                InterpPart::Expr(e, spec) => {
                     self.buf.push('{');
                     self.write_expr(e);
+                    if let Some(s) = spec {
+                        self.buf.push(':');
+                        self.buf.push_str(s);
+                    }
                     self.buf.push('}');
                 }
             }

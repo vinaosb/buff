@@ -351,7 +351,7 @@ fn record_expr_types(expr: &Expr, infer: &TypeInferencer, types: &mut TypeBindin
         }
         Expr::StringInterp { parts, .. } => {
             for p in parts {
-                if let buff_lang_ast::InterpPart::Expr(e) = p {
+                if let buff_lang_ast::InterpPart::Expr(e, _) = p {
                     record_expr_types(e, infer, types);
                 }
             }

@@ -1984,9 +1984,19 @@ fn parse_string_literal(
                     parts.push(InterpPart::Literal(std::mem::take(&mut text_buf)));
                 }
                 let expr = parse_expression(stream)?;
-                parts.push(InterpPart::Expr(Box::new(expr)));
+                // T81: check for optional format specifier before InterpEnd.
+                let spec = match stream.peek_kind() {
+                    Some(TokenKind::InterpSpec(s)) => {
+                        let s = s.clone();
+                        stream.advance(); // consume InterpSpec
+                        Some(s)
+                    }
+                    _ => None,
+                };
+                parts.push(InterpPart::Expr(Box::new(expr), spec));
                 has_interp = true;
-                // The lexer emits InterpEnd immediately after the inner tokens.
+                // The lexer emits InterpEnd immediately after the inner tokens
+                // (and optional InterpSpec).
                 stream.expect(TokenKind::InterpEnd)?;
             }
             TokenKind::StringEnd => {

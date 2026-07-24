@@ -54,6 +54,16 @@ pub enum TokenKind {
     StringStart,
     StringPart(String),
     InterpStart,
+    /// A format specifier inside `${expr:spec}` (T81).
+    ///
+    /// Emitted by the string-interpolation scanner when it finds a `:` at
+    /// brace-depth 0 between the opening `{` and the matching `}`. The
+    /// payload is the raw spec text (everything between `:` and `}`),
+    /// e.g. `.2`, `?`, `>10`, `x`, `b`, `o`, `e`, `05`.
+    ///
+    /// The parser attaches this to the preceding `InterpPart::Expr` and
+    /// codegen passes it through to Rust's `format!("{spec}", expr)`.
+    InterpSpec(String),
     InterpEnd,
     StringEnd,
 
@@ -324,6 +334,7 @@ impl fmt::Display for TokenKind {
             Self::StringStart => write!(f, "string_start"),
             Self::StringPart(v) => write!(f, "string_part({:?})", v),
             Self::InterpStart => write!(f, "interp_start"),
+            Self::InterpSpec(v) => write!(f, "interp_spec({:?})", v),
             Self::InterpEnd => write!(f, "interp_end"),
             Self::StringEnd => write!(f, "string_end"),
             // Identifiers

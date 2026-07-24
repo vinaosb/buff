@@ -41,7 +41,7 @@ pub trait LexCallback {
         source: &str,
         range_start: usize,
         range_end: usize,
-        source_id: SourceId,
+    _source_id: SourceId,
         out: &mut Vec<Token>,
     ) -> Result<(), LexerError>;
 }
@@ -105,7 +105,16 @@ pub fn scan_string(
                 ));
                 let after_brace = i + 1;
                 let closing = find_matching_brace(source, after_brace, source_id)?;
-                interp_cb.lex_range(source, after_brace, closing, source_id, out)?;
+                // T81: scan for `:` at brace-depth 0 to split expr from spec.
+                let (expr_end, spec_text) =
+                    split_interp_spec(source, after_brace, closing, source_id)?;
+                interp_cb.lex_range(source, after_brace, expr_end, source_id, out)?;
+                if let Some(spec) = spec_text {
+                    out.push(Token::new(
+                        TokenKind::InterpSpec(spec),
+                        Span::new(expr_end, closing, source_id),
+                    ));
+                }
                 out.push(Token::new(
                     TokenKind::InterpEnd,
                     Span::new(closing, closing + 1, source_id),
@@ -199,6 +208,69 @@ fn find_matching_brace(
     ))
 }
 
+/// Split the inner text of `${...}` at the first `:` at brace-depth 0.
+///
+/// Returns `(expr_end, Some(spec_text))` when a `:` is found, or
+/// `(closing, None)` when there is no specifier.
+///
+/// The `:` is NOT included in the spec text — `${x:.2}` yields
+/// `(pos_of_colon, Some(".2"))`.
+///
+/// Nested braces `{ ... { ... } ... }` are tracked so `:` inside
+/// nested braces does NOT count as a spec separator. String literals
+/// inside the interpolation are also skipped so their `:` characters
+/// are ignored.
+fn split_interp_spec(
+    source: &str,
+    start: usize,
+    closing: usize,
+    _source_id: SourceId,
+) -> Result<(usize, Option<String>), LexerError> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut i = start;
+    while i < closing {
+        match bytes[i] {
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                if depth == 0 {
+                    // Reached the closing `}` — no spec found.
+                    return Ok((closing, None));
+                }
+                depth -= 1;
+                i += 1;
+            }
+            b':' if depth == 0 => {
+                // Found the spec separator at brace-depth 0.
+                let spec = source[i + 1..closing].to_string();
+                return Ok((i, Some(spec)));
+            }
+            b'"' => {
+                // Skip a nested string literal so its `:` doesn't confuse us.
+                i += 1;
+                while i < closing && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < closing {
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                if i < closing {
+                    i += 1;
+                }
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    // Reached `closing` without finding `:` at depth 0.
+    Ok((closing, None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +338,175 @@ mod tests {
         };
         let result = scan_string("\"abc", 0, SourceId(0), &mut out, &mut cb);
         assert!(result.is_err());
+    }
+
+    // T81: format specifier tests
+    //
+    // We use a callback that records the inner expression text AND the spec
+    // text (if any) by scanning the source for `:` at depth 0.
+    struct RecordInterpWithSpec {
+        captured: Vec<(String, Option<String>)>,
+    }
+
+    impl LexCallback for RecordInterpWithSpec {
+        fn lex_range(
+            &mut self,
+            source: &str,
+            range_start: usize,
+            range_end: usize,
+            _source_id: SourceId,
+            _out: &mut Vec<Token>,
+        ) -> Result<(), LexerError> {
+            // Scan for `:` at depth 0 to find the spec separator.
+            let bytes = source.as_bytes();
+            let mut depth = 0usize;
+            let mut i = range_start;
+            let spec = loop {
+                if i >= range_end {
+                    break None;
+                }
+                match bytes[i] {
+                    b'{' => { depth += 1; i += 1; }
+                    b'}' => {
+                        if depth == 0 { break None; }
+                        depth -= 1; i += 1;
+                    }
+                    b':' if depth == 0 => {
+                        let s = source[i + 1..range_end].to_string();
+                        break Some(s);
+                    }
+                    b'"' => {
+                        i += 1;
+                        while i < range_end && bytes[i] != b'"' {
+                            if bytes[i] == b'\\' && i + 1 < range_end { i += 2; } else { i += 1; }
+                        }
+                        if i < range_end { i += 1; }
+                    }
+                    _ => { i += 1; }
+                }
+            };
+            let expr_text = match &spec {
+                Some(_) => {
+                    // Find the `:` position
+                    let mut depth2 = 0usize;
+                    let mut j = range_start;
+                    let colon_pos = loop {
+                        if j >= range_end { break range_end; }
+                        match bytes[j] {
+                            b'{' => { depth2 += 1; j += 1; }
+                            b'}' => {
+                                if depth2 == 0 { break range_end; }
+                                depth2 -= 1; j += 1;
+                            }
+                            b':' if depth2 == 0 => { break j; }
+                            _ => { j += 1; }
+                        }
+                    };
+                    source[range_start..colon_pos].to_string()
+                }
+                None => source[range_start..range_end].to_string(),
+            };
+            self.captured.push((expr_text, spec));
+            Ok(())
+        }
+    }
+
+    fn lex_str_with_specs(src: &str) -> Vec<(String, Option<String>)> {
+        let mut out = Vec::new();
+        let mut cb = RecordInterpWithSpec {
+            captured: Vec::new(),
+        };
+        let _ = scan_string(src, 0, SourceId(0), &mut out, &mut cb);
+        cb.captured
+    }
+
+    #[test]
+    fn interp_without_spec_still_works() {
+        let interps = lex_str_with_specs("\"{x}\"");
+        assert_eq!(interps, vec![("x".to_string(), None)]);
+    }
+
+    #[test]
+    fn interp_with_decimal_spec() {
+        let interps = lex_str_with_specs("\"pi = {pi:.2}\"");
+        assert_eq!(interps, vec![("pi".to_string(), Some(".2".to_string()))]);
+    }
+
+    #[test]
+    fn interp_with_debug_spec() {
+        let interps = lex_str_with_specs("\"{obj:?}\"");
+        assert_eq!(interps, vec![("obj".to_string(), Some("?".to_string()))]);
+    }
+
+    #[test]
+    fn interp_with_pad_spec() {
+        let interps = lex_str_with_specs("\"{n:>10}\"");
+        assert_eq!(interps, vec![("n".to_string(), Some(">10".to_string()))]);
+    }
+
+    #[test]
+    fn interp_with_hex_spec() {
+        let interps = lex_str_with_specs("\"{val:x}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("x".to_string()))]);
+    }
+
+    #[test]
+    fn interp_with_binary_spec() {
+        let interps = lex_str_with_specs("\"{val:b}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("b".to_string()))]);
+    }
+
+    #[test]
+    fn interp_with_zero_pad_spec() {
+        let interps = lex_str_with_specs("\"{val:05}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("05".to_string()))]);
+    }
+
+    #[test]
+    fn interp_spec_ignores_colon_in_nested_braces() {
+        let interps = lex_str_with_specs("\"{f({a: 1})}\"");
+        assert_eq!(interps, vec![("f({a: 1})".to_string(), None)]);
+    }
+
+    #[test]
+    fn interp_spec_with_expression() {
+        let interps = lex_str_with_specs("\"{x + y:.2}\"");
+        assert_eq!(interps, vec![("x + y".to_string(), Some(".2".to_string()))]);
+    }
+
+    #[test]
+    fn interp_spec_with_scientific() {
+        let interps = lex_str_with_specs("\"{val:e}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("e".to_string()))]);
+    }
+
+    #[test]
+    fn interp_spec_with_octal() {
+        let interps = lex_str_with_specs("\"{val:o}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("o".to_string()))]);
+    }
+
+    #[test]
+    fn interp_spec_with_left_pad() {
+        let interps = lex_str_with_specs("\"{val:<10}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("<10".to_string()))]);
+    }
+
+    #[test]
+    fn interp_spec_with_center_pad() {
+        let interps = lex_str_with_specs("\"{val:^10}\"");
+        assert_eq!(interps, vec![("val".to_string(), Some("^10".to_string()))]);
+    }
+
+    #[test]
+    fn interp_spec_multiple_interpolations() {
+        let interps = lex_str_with_specs("\"{a:.2} and {b:?}\"");
+        assert_eq!(
+            interps,
+            vec![
+                ("a".to_string(), Some(".2".to_string())),
+                ("b".to_string(), Some("?".to_string())),
+            ]
+        );
     }
 }
