@@ -167,7 +167,7 @@ pub fn parse_pattern(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError
     // ident's NAME rather than a dedicated token kind.
     if let Some(TokenKind::Ident(name)) = stream.peek_kind() {
         if name == "_" {
-            let tok = stream.advance().expect("peek guaranteed `_`");
+            let tok = stream.advance_after_peek();
             return Ok(Pattern::Wildcard(tok.span));
         }
     }

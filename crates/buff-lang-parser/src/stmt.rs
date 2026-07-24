@@ -90,11 +90,11 @@ pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError>
         ))),
         Some(TokenKind::KwReturn) => parse_return(stream),
         Some(TokenKind::KwBreak) => {
-            let tok = stream.advance().expect("peek guaranteed a token");
+            let tok = stream.advance_after_peek();
             Ok(Stmt::Break(tok.span))
         }
         Some(TokenKind::KwContinue) => {
-            let tok = stream.advance().expect("peek guaranteed a token");
+            let tok = stream.advance_after_peek();
             Ok(Stmt::Continue(tok.span))
         }
         Some(TokenKind::KwFor) => parse_for(stream),
@@ -670,7 +670,7 @@ fn parse_for(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     );
 
     if is_iterator {
-        let var_tok = stream.advance().expect("peek guaranteed Ident");
+        let var_tok = stream.advance_after_peek();
         let var = extract_ident(var_tok)?;
         stream.expect(TokenKind::KwIn)?;
         let iter_expr = parse_expression(stream)?;

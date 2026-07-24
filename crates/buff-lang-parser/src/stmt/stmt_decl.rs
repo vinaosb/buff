@@ -63,7 +63,7 @@ pub fn parse_func_decl(
 ) -> Result<FuncDecl, ParseError> {
     // T32: consume the optional leading `extern` modifier (FFI declaration).
     let is_extern = if matches!(stream.peek_kind(), Some(TokenKind::KwExtern)) {
-        let extern_tok = stream.advance().expect("peek guaranteed KwExtern");
+        let extern_tok = stream.advance_after_peek();
         let _ = extern_tok; // span tracking not needed for v0.5
         true
     } else {
@@ -71,7 +71,7 @@ pub fn parse_func_decl(
     };
     // T31: consume the optional leading `async` modifier.
     let is_async = if matches!(stream.peek_kind(), Some(TokenKind::KwAsync)) {
-        let async_tok = stream.advance().expect("peek guaranteed KwAsync");
+        let async_tok = stream.advance_after_peek();
         let _ = async_tok; // span tracking not needed for v0.5
         true
     } else {
@@ -1043,7 +1043,7 @@ pub fn parse_import_decl(stream: &mut TokenStream<'_>) -> Result<ImportDecl, Par
         Some(TokenKind::Ident(_)) => {
             // Either ES6 default-import (`ident from "..."`) or legacy
             // dotted module path (`ident.ident...`).
-            let ident_tok = stream.advance().expect("peek guaranteed Ident");
+            let ident_tok = stream.advance_after_peek();
             let ident = extract_ident(ident_tok.clone())?;
             match stream.peek_kind() {
                 Some(TokenKind::KwFrom) => {
@@ -1508,9 +1508,7 @@ pub fn parse_trait_decl(stream: &mut TokenStream<'_>) -> Result<TraitDecl, Parse
         // no `;`-terminated path. Duplicating the ~30 lines of signature
         // parsing is cleaner than threading a "may be bodyless" flag
         // through parse_func_decl.
-        let member_start_tok = stream
-            .advance()
-            .expect("peek guaranteed a fn-start keyword");
+        let member_start_tok = stream.advance_after_peek();
         let member_start = member_start_tok.span.start;
         // Consume optional `extern` / `async` modifiers (same order as
         // parse_func_decl).
@@ -1573,7 +1571,7 @@ pub fn parse_trait_decl(stream: &mut TokenStream<'_>) -> Result<TraitDecl, Parse
         // Body decision: `;` → required (bodyless); block/`=>`/layout → default.
         if matches!(stream.peek_kind(), Some(TokenKind::Semicolon)) {
             // REQUIRED method — bodyless signature.
-            let semi = stream.advance().expect("peek guaranteed Semicolon");
+            let semi = stream.advance_after_peek();
             required.push(MethodSig {
                 name: m_name,
                 params: m_params,
@@ -2087,7 +2085,7 @@ pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, 
     let source_id = stream.source_id();
     let mut attrs = Vec::new();
     while matches!(stream.peek_kind(), Some(TokenKind::At)) {
-        let at_tok = stream.advance().expect("peek guaranteed At");
+        let at_tok = stream.advance_after_peek();
         let start = at_tok.span.start;
         let name_tok = stream.advance().ok_or_else(|| {
             ParseError::new(Diagnostic::error(

@@ -89,7 +89,7 @@ fn parse_assignment(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 fn parse_pipeline(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let mut lhs = parse_range(stream)?;
     while matches!(stream.peek_kind(), Some(TokenKind::PipeGt)) {
-        let pipe_tok = stream.advance().expect("peek guaranteed PipeGt");
+        let pipe_tok = stream.advance_after_peek();
         let rhs = parse_range(stream)?;
         lhs = desugar_pipeline(lhs, rhs, &pipe_tok)?;
     }
@@ -483,7 +483,7 @@ fn parse_unary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         _ => None,
     };
     if let Some(op) = op {
-        let op_tok = stream.advance().expect("peek guaranteed a token");
+        let op_tok = stream.advance_after_peek();
         let operand = parse_unary(stream)?;
         let span = Span::new(op_tok.span.start, operand.span().end, stream.source_id());
         return Ok(Expr::UnaryOp {
@@ -508,9 +508,7 @@ fn parse_unary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                         .unwrap_or_else(|| stream.eof_span()),
                 ))
             })?;
-            let prefix_tok = stream
-                .advance()
-                .expect("peek guaranteed a Unicode prefix token");
+            let prefix_tok = stream.advance_after_peek();
             let operand = parse_unary(stream)?;
             let span = Span::new(
                 prefix_tok.span.start,
@@ -965,7 +963,7 @@ fn parse_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     // returns, so `spawn task()` parses as `Expr::Spawn { task: Call(task) }`
     // — exactly the shape codegen wants).
     if matches!(tok.kind, TokenKind::KwSpawn) {
-        let spawn_tok = stream.advance().expect("peek guaranteed KwSpawn");
+        let spawn_tok = stream.advance_after_peek();
         let start = spawn_tok.span.start;
         // Parse the task body. Use `parse_unary` (one level above
         // parse_postfix) so `spawn task()` captures the full call, not

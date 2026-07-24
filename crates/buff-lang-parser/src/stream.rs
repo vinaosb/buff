@@ -162,6 +162,27 @@ impl<'a> TokenStream<'a> {
         }
     }
 
+    /// Infallible companion to [`advance`](Self::advance): consume and return
+    /// the next significant token, assuming the caller already verified via
+    /// [`peek`](Self::peek) or [`peek_kind`](Self::peek_kind) that a token is
+    /// present.
+    ///
+    /// This consolidates the `advance().expect("peek guaranteed ...")` pattern
+    /// that appeared at 16+ call sites into a single well-documented location
+    /// (T106 duplication + idiom fix).
+    ///
+    /// # Contract
+    ///
+    /// The caller MUST have observed `Some(...)` from `peek`/`peek_kind` for
+    /// the **same** cursor position before calling this method. Layout tokens
+    /// (`Newline`/`Indent`/`Dedent`) are transparent — `peek_kind` already
+    /// skips them — so the guarantee holds.
+    pub fn advance_after_peek(&mut self) -> Token {
+        // The contract guarantees advance() returns Some; the expect
+        // documents the invariant (NOT a user-facing error path).
+        self.advance().expect("peek guaranteed a token")
+    }
+
     /// True when the next significant token is `kind` (by structural match).
     /// Use [`matches!`](core::matches) at the call site for variants that
     /// carry data (e.g. `TokenKind::Ident(_)`).
@@ -187,7 +208,7 @@ impl<'a> TokenStream<'a> {
             if tok.kind == expected_kind {
                 // SAFETY: peek returned Some(tok) at index self.pos (post-
                 // layout-skip). advance() will return the same token.
-                Ok(self.advance().expect("peek guaranteed a token"))
+                Ok(self.advance_after_peek())
             } else {
                 Err(ParseError::new(
                     Diagnostic::error(

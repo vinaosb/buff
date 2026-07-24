@@ -85,7 +85,7 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                 // rejected at parse time with the helpful message. Any other
                 // receiver (ident, call, nested index, …) builds an Index node.
                 if matches!(&expr, Expr::Literal(Literal::String(_), _)) {
-                    let lb = stream.advance().expect("peek guaranteed an LBracket");
+                    let lb = stream.advance_after_peek();
                     return Err(ParseError::new(
                         Diagnostic::error(
                             "direct indexing `expr[...]` is not supported on strings; \
@@ -170,7 +170,7 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
             // `Result<T, E>` (or `Option<T>`); the codegen lowers it 1:1 to
             // Rust's native `?`.
             Some(TokenKind::Question) => {
-                let q = stream.advance().expect("peek guaranteed Question");
+                let q = stream.advance_after_peek();
                 let span = Span::new(expr.span().start, q.span.end, stream.source_id());
                 expr = Expr::Try {
                     expr: Box::new(expr),
@@ -197,7 +197,7 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                                 .unwrap_or_else(|| stream.eof_span()),
                         ))
                     })?;
-                let adj = stream.advance().expect("peek guaranteed Adjoint");
+                let adj = stream.advance_after_peek();
                 let span = Span::new(expr.span().start, adj.span.end, stream.source_id());
                 expr = Expr::MethodCall {
                     receiver: Box::new(expr),
@@ -231,7 +231,7 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
             // variant are needed — same strategy as T69 (`|>`) and T101
             // (`??`).
             Some(TokenKind::QuestionDot) => {
-                let qd = stream.advance().expect("peek guaranteed QuestionDot");
+                let qd = stream.advance_after_peek();
                 // Parse the field/method name (must be an Ident, like the
                 // Dot arm above).
                 let name_tok = match stream.advance() {
@@ -372,9 +372,7 @@ pub fn parse_one_call_arg(stream: &mut TokenStream<'_>) -> Result<Expr, ParseErr
         (Some(TokenKind::Ident(_)), Some(TokenKind::Colon))
     );
     if is_named {
-        let name_tok = stream
-            .advance()
-            .expect("peek guaranteed an Ident for named arg");
+        let name_tok = stream.advance_after_peek();
         let name_span = name_tok.span;
         let name = match name_tok.kind {
             TokenKind::Ident(s) => Ident::new(s, name_span),
