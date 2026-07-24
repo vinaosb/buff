@@ -853,6 +853,26 @@ pub enum PreludeInstanceFn {
     /// `simd.to_vec()` — extract 4 lanes to `Vector<Float>`. Zero
     /// args. Returns `Vector<Float>`. Simd-only.
     ToVec,
+    // ---- T73: String instance methods ------------------------------------
+    /// `s.split(sep) -> Vector<String>` — split text by separator.
+    /// One arg (String). Wraps `s.split(sep).map(|s|
+    /// s.to_string()).collect::<Vec<String>>()`.
+    Split,
+    /// `s.trim() -> String` — strip leading/trailing whitespace.
+    /// Zero args. Wraps `s.trim().to_string()`.
+    Trim,
+    /// `s.starts_with(prefix) -> Bool` — test prefix. One arg
+    /// (String). Wraps `s.starts_with(prefix)`.
+    StartsWith,
+    /// `s.ends_with(suffix) -> Bool` — test suffix. One arg
+    /// (String). Wraps `s.ends_with(suffix)`.
+    EndsWith,
+    /// `s.to_upper() -> String` — uppercase. Zero args. Wraps
+    /// `s.to_uppercase().to_string()`.
+    ToUppercase,
+    /// `s.to_lower() -> String` — lowercase. Zero args. Wraps
+    /// `s.to_lowercase().to_string()`.
+    ToLowercase,
 }
 
 impl PreludeInstanceFn {
@@ -1166,6 +1186,17 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Min,
         PreludeInstanceFn::Max,
         PreludeInstanceFn::ToVec,
+        // T73: String instance methods — split / trim / starts_with /
+        // ends_with / to_uppercase / to_lowercase. All dispatched on
+        // (Type::String, method) pairs. The existing Replace / Contains
+        // / Len variants are also valid on Type::String (added in
+        // instance_fn_return_type).
+        PreludeInstanceFn::Split,
+        PreludeInstanceFn::Trim,
+        PreludeInstanceFn::StartsWith,
+        PreludeInstanceFn::EndsWith,
+        PreludeInstanceFn::ToUppercase,
+        PreludeInstanceFn::ToLowercase,
     ];
 
     /// The source name of this instance method (the method identifier).
@@ -1503,6 +1534,17 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Min => "min",
             PreludeInstanceFn::Max => "max",
             PreludeInstanceFn::ToVec => "to_vec",
+            // T73: String instance method names. `split` / `trim` /
+            // `starts_with` / `ends_with` map 1:1 to Rust's str methods.
+            // `to_upper` / `to_lower` map to `to_uppercase` /
+            // `to_lowercase` (the codegen emits `.to_uppercase()`
+            // and `.to_lowercase()` directly).
+            PreludeInstanceFn::Split => "split",
+            PreludeInstanceFn::Trim => "trim",
+            PreludeInstanceFn::StartsWith => "starts_with",
+            PreludeInstanceFn::EndsWith => "ends_with",
+            PreludeInstanceFn::ToUppercase => "to_upper",
+            PreludeInstanceFn::ToLowercase => "to_lower",
         }
     }
 }

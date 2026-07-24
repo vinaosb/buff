@@ -6267,7 +6267,9 @@ impl RustCodegen {
             // `replace_all` (not `replace`) gives the "replace ALL
             // matches" semantics the task spec requires:
             // `regex.replace("a1b2","\\d","X") == "aXbX"`.
-            M::Replace => {
+            // Guard on Type::Regex so the String.Replace arm below
+            // (dispatched on Type::String) is reachable (T73).
+            M::Replace if matches!(recv_ty, Type::Regex) => {
                 if args.len() != 2 {
                     return Err(self.unsupported(&format!(
                         "replace() expects exactly 2 args (text, replacement), got {}",
@@ -8791,6 +8793,131 @@ impl RustCodegen {
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Template.render codegen parse: {e}")))
+            }
+            // T73: String instance methods — dispatched on (Type::String,
+            // variant) pairs. These lower to Rust's str methods directly.
+            // Methods returning `&str` chain `.to_string()` to produce an
+            // owned String (Buff hides references from users).
+            //
+            // `s.split(sep)` -> Vector<String>. Wraps
+            // `s.split(sep).map(|s| s.to_string()).collect::<Vec<String>>()`.
+            M::Split if matches!(recv_ty, Type::String) => {
+                let sep = one_arg(self)?;
+                let sep_ref = coerce_str_arg_to_ref(sep, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.split(#sep_ref).map(|s| s.to_string()).collect::<Vec<String>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("String.split codegen parse: {e}")))
+            }
+            // `s.trim()` -> String. Wraps `s.trim().to_string()`.
+            M::Trim if matches!(recv_ty, Type::String) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "trim() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.trim().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("String.trim codegen parse: {e}")))
+            }
+            // `s.starts_with(prefix)` -> Bool. Wraps `s.starts_with(prefix)`.
+            M::StartsWith if matches!(recv_ty, Type::String) => {
+                let prefix = one_arg(self)?;
+                let prefix_ref = coerce_str_arg_to_ref(prefix, &args[0]);
+                Ok(method_call_one_arg(recv, "starts_with", prefix_ref))
+            }
+            // `s.ends_with(suffix)` -> Bool. Wraps `s.ends_with(suffix)`.
+            M::EndsWith if matches!(recv_ty, Type::String) => {
+                let suffix = one_arg(self)?;
+                let suffix_ref = coerce_str_arg_to_ref(suffix, &args[0]);
+                Ok(method_call_one_arg(recv, "ends_with", suffix_ref))
+            }
+            // `s.to_upper()` -> String. Wraps `s.to_uppercase().to_string()`.
+            // `.to_uppercase()` returns a `String` in Rust, but we chain
+            // `.to_string()` for consistency (the source `&str` method
+            // signature returns `String` directly; chaining `.to_string()`
+            // on a `String` is a no-op clone, but the generated code is
+            // simple and the optimizer removes the redundant `to_string`).
+            M::ToUppercase if matches!(recv_ty, Type::String) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_upper() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.to_uppercase().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("String.to_uppercase codegen parse: {e}")))
+            }
+            // `s.to_lower()` -> String. Wraps `s.to_lowercase().to_string()`.
+            M::ToLowercase if matches!(recv_ty, Type::String) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "to_lower() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.to_lowercase().to_string()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("String.to_lowercase codegen parse: {e}")))
+            }
+            // `s.replace(from, to)` -> String (reuses existing Replace
+            // variant — dispatched on Type::String). Wraps
+            // `s.replace(from, to)`. Two args (String, String).
+            M::Replace if matches!(recv_ty, Type::String) => {
+                if args.len() != 2 {
+                    return Err(self.unsupported(&format!(
+                        "replace() expects exactly 2 args (from, to), got {}",
+                        args.len()
+                    )));
+                }
+                let from = self.lower_expr(&args[0])?;
+                let to = self.lower_expr(&args[1])?;
+                let from_ref = coerce_str_arg_to_ref(from, &args[0]);
+                let to_ref = coerce_str_arg_to_ref(to, &args[1]);
+                let mut call_args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+                call_args.push(from_ref);
+                call_args.push(to_ref);
+                let replace_call = SynExpr::MethodCall(syn::ExprMethodCall {
+                    attrs: Vec::new(),
+                    receiver: Box::new(recv),
+                    dot_token: Default::default(),
+                    method: Ident::new("replace", ProcSpan::call_site()),
+                    turbofish: None,
+                    paren_token: Default::default(),
+                    args: call_args,
+                });
+                Ok(replace_call)
+            }
+            // `s.contains(sub)` -> Bool (reuses existing Contains variant
+            // — dispatched on Type::String). Wraps `s.contains(sub)`.
+            M::Contains if matches!(recv_ty, Type::String) => {
+                let sub = one_arg(self)?;
+                let sub_ref = coerce_str_arg_to_ref(sub, &args[0]);
+                Ok(method_call_one_arg(recv, "contains", sub_ref))
+            }
+            // `s.len()` -> Int (reuses existing Len variant — dispatched on
+            // Type::String). Zero args. Wraps `recv.len() as i64`.
+            M::Len if matches!(recv_ty, Type::String) => {
+                if !args.is_empty() {
+                    return Err(self.unsupported(&format!(
+                        "len() takes no arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.len() as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("String.len codegen parse: {e}")))
             }
             // Non-Image / Non-Audio receiver with an Image-only /
             // Audio-only method (Width / Height / PixelFormat /

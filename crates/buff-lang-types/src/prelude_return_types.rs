@@ -1607,6 +1607,38 @@ pub fn instance_fn_return_type(
         (Type::ContractMethod, PreludeInstanceFn::Call) => Some(Type::String),
         (Type::ContractMethod, PreludeInstanceFn::Send) => Some(Type::String),
 
+        // T73: String instance methods — split / trim / starts_with /
+        // ends_with / to_upper / to_lower. These are instance methods
+        // on Buff's built-in String type. The existing Replace / Contains
+        // / Len variants are also valid on Type::String.
+        //
+        // `s.split(sep)` -> Vector<String>. One arg (String seperator).
+        // Wraps `s.split(sep).map(|s| s.to_string()).collect::<Vec<...>>()`.
+        (Type::String, PreludeInstanceFn::Split) => Some(Type::vector(Type::string())),
+        // `s.trim()` -> String. Zero args. Wraps `s.trim().to_string()`.
+        (Type::String, PreludeInstanceFn::Trim) => Some(Type::string()),
+        // `s.starts_with(prefix)` -> Bool. One arg (String). Wraps
+        // `s.starts_with(prefix)`.
+        (Type::String, PreludeInstanceFn::StartsWith) => Some(Type::bool()),
+        // `s.ends_with(suffix)` -> Bool. One arg (String). Wraps
+        // `s.ends_with(suffix)`.
+        (Type::String, PreludeInstanceFn::EndsWith) => Some(Type::bool()),
+        // `s.to_upper()` -> String. Zero args. Wraps
+        // `s.to_uppercase().to_string()`.
+        (Type::String, PreludeInstanceFn::ToUppercase) => Some(Type::string()),
+        // `s.to_lower()` -> String. Zero args. Wraps
+        // `s.to_lowercase().to_string()`.
+        (Type::String, PreludeInstanceFn::ToLowercase) => Some(Type::string()),
+        // `s.replace(from, to)` -> String (reuses existing Replace variant).
+        // Two args (String from, String to). Wraps `s.replace(from, to)`.
+        (Type::String, PreludeInstanceFn::Replace) => Some(Type::string()),
+        // `s.contains(sub)` -> Bool (reuses existing Contains variant).
+        // One arg (String). Wraps `s.contains(sub)`.
+        (Type::String, PreludeInstanceFn::Contains) => Some(Type::bool()),
+        // `s.len()` -> Int (reuses existing Len variant). Zero args.
+        // Wraps `s.len() as i64`.
+        (Type::String, PreludeInstanceFn::Len) => Some(Type::int_default()),
+
         // T49: RsaKeypair instance methods. Both PEM-string accessors
         // return String (owned `String` lifted from `&String` via
         // `.clone()` — Buff hides references from users). Infallible
