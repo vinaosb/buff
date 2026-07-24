@@ -1,0 +1,25 @@
+﻿version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      production-dependencies:
+        update-types:
+          - minor
+          - patch
+      dev-dependencies:
+        update-types:
+          - minor
+          - patch
+        dependency-type: direct:development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
