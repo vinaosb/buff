@@ -39,7 +39,7 @@
 use buff_lang_ast::{
     Attribute, BinaryOp, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, ExtendBlock,
     FuncDecl, GuardCondition, Ident, ImportDecl, MethodSig, Param, Pattern, ReexportDecl, Stmt,
-    TraitDecl, TypeParam, TypeRef,
+    StructDecl, TraitDecl, TypeParam, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -318,6 +318,11 @@ pub fn parse_func_decl(
     })?;
     let name = extract_ident(name_tok)?;
 
+    // T13: Optional generic parameters `<T, U, ...>` after the function name.
+    // e.g. `func id<T>(x: T) -> T`. Uses the shared `parse_type_params` helper
+    // (same as `enum`/`struct`). Returns empty Vec for non-generic funcs.
+    let type_params = parse_type_params(stream)?;
+
     // Parameter list ( ... )
     stream.expect(TokenKind::LParen)?;
     let params = parse_params(stream)?;
@@ -384,7 +389,7 @@ pub fn parse_func_decl(
         is_unsafe: false,
         is_extern,
         attributes,
-        type_params: Vec::new(),
+        type_params,
         span,
     })
 }
@@ -1641,6 +1646,103 @@ fn fold_if_chain(
 /// - a variant name is missing or not an identifier,
 /// - a variant payload type fails to parse via [`parse_type_ref`],
 /// - the closing `}` is missing.
+/// Parse an optional generic parameter list `<T, U, ...>` (T13).
+///
+/// Called after the decl name in `func`, `struct`, and `enum` declarations.
+/// Returns an empty `Vec` when the next token is not `<` (the common case —
+/// non-generic decls). When `<` is present, parses a comma-separated list of
+/// type-parameter names, each wrapped in a [`TypeParam`] with empty bounds
+/// (bounds are T38).
+///
+/// # Grammar
+///
+/// ```text
+/// TypeParams ::= "<" Ident ("," Ident)* [","] ">"
+///              |  /* empty — no `<` follows */
+/// ```
+///
+/// Trailing comma is allowed: `<T, U,>`. The `>` closes the list.
+///
+/// # Disambiguation
+///
+/// The `<` token is shared with the less-than operator. This function is
+/// ONLY called in declaration-name position (after `func NAME` / `struct
+/// NAME` / `enum NAME`), where less-than is syntactically impossible —
+/// so no peek-ahead disambiguation is needed.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if:
+/// - a parameter name is not an identifier,
+/// - the list is not comma-or-`>` separated,
+/// - the closing `>` is missing.
+pub fn parse_type_params(stream: &mut TokenStream<'_>) -> Result<Vec<TypeParam>, ParseError> {
+    let source_id = stream.source_id();
+    let mut params: Vec<TypeParam> = Vec::new();
+    if !matches!(stream.peek_kind(), Some(TokenKind::Lt)) {
+        return Ok(params);
+    }
+    stream.advance(); // consume `<`
+    loop {
+        let gtok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected generic parameter name, found end of input",
+                stream.eof_span(),
+            ))
+        })?;
+        let g_span = gtok.span;
+        let g = extract_ident(gtok)?;
+        params.push(TypeParam {
+            name: g,
+            bounds: Vec::new(),
+            span: g_span,
+        });
+        match stream.peek_kind() {
+            Some(TokenKind::Comma) => {
+                stream.advance();
+                // Allow trailing comma: `<T,>`.
+                if matches!(stream.peek_kind(), Some(TokenKind::Gt)) {
+                    stream.advance();
+                    break;
+                }
+            }
+            Some(TokenKind::Gt) => {
+                stream.advance();
+                break;
+            }
+            Some(other) => {
+                return Err(ParseError::new(Diagnostic::error(
+                    format!("expected `,` or `>` in generic param list, found `{other}`"),
+                    stream
+                        .peek()
+                        .map(|t| t.span)
+                        .unwrap_or_else(|| stream.eof_span()),
+                )));
+            }
+            None => {
+                return Err(ParseError::new(Diagnostic::error(
+                    "unterminated generic param list (missing `>`)",
+                    stream.eof_span(),
+                )));
+            }
+        }
+    }
+    let _ = source_id; // source_id retained for future span construction
+    Ok(params)
+}
+
+/// Parse an `enum` declaration (T27 + T13 generics).
+///
+/// See [`parse_enum_decl`] docs above for the full grammar.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if:
+/// - the token after `enum` is not an identifier,
+/// - the opening `{` is missing,
+/// - a variant name is missing or not an identifier,
+/// - a variant payload type fails to parse via [`parse_type_ref`],
+/// - the closing `}` is missing.
 pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseError> {
     let enum_tok = stream.expect(TokenKind::KwEnum)?;
     let start = enum_tok.span.start;
@@ -1655,63 +1757,8 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
     })?;
     let name = extract_ident(name_tok)?;
 
-    // Optional generic parameters: `<T, E>`. These are bare identifiers (no
-    // bounds, no defaults — keep v0.5 minimal). The lexer already special-cases
-    // `>>` as a single token in type-arg position via `parse_type_ref`; here we
-    // only need to recognise a single `>` to close the param list (since the
-    // params themselves are idents, not nested type refs).
-    //
-    // T13: the params are stored as `TypeParam` (with empty bounds — bounds
-    // are T38). Pre-T13 these were bare `Ident`s (`EnumDecl.generics`);
-    // the T13 migration unified all three decl kinds on `type_params: Vec<TypeParam>`.
-    let mut type_params: Vec<TypeParam> = Vec::new();
-    if matches!(stream.peek_kind(), Some(TokenKind::Lt)) {
-        stream.advance(); // consume `<`
-        loop {
-            let gtok = stream.advance().ok_or_else(|| {
-                ParseError::new(Diagnostic::error(
-                    "expected generic parameter name, found end of input",
-                    stream.eof_span(),
-                ))
-            })?;
-            let g_span = gtok.span;
-            let g = extract_ident(gtok)?;
-            type_params.push(TypeParam {
-                name: g,
-                bounds: Vec::new(),
-                span: g_span,
-            });
-            match stream.peek_kind() {
-                Some(TokenKind::Comma) => {
-                    stream.advance();
-                    // Allow trailing comma: `<T,>`.
-                    if matches!(stream.peek_kind(), Some(TokenKind::Gt)) {
-                        stream.advance();
-                        break;
-                    }
-                }
-                Some(TokenKind::Gt) => {
-                    stream.advance();
-                    break;
-                }
-                Some(other) => {
-                    return Err(ParseError::new(Diagnostic::error(
-                        format!("expected `,` or `>` in generic param list, found `{other}`"),
-                        stream
-                            .peek()
-                            .map(|t| t.span)
-                            .unwrap_or_else(|| stream.eof_span()),
-                    )));
-                }
-                None => {
-                    return Err(ParseError::new(Diagnostic::error(
-                        "unterminated generic param list (missing `>`)",
-                        stream.eof_span(),
-                    )));
-                }
-            }
-        }
-    }
+    // Optional generic parameters: `<T, E>` (T13 — shared helper).
+    let type_params = parse_type_params(stream)?;
 
     // Opening `{` of the variant list.
     stream.expect(TokenKind::LBrace)?;
@@ -1831,8 +1878,202 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
     })
 }
 
-// ---------------------------------------------------------------------------
-// T29 — Import / Export declarations.
+/// Parse a `struct` declaration (T13 — generics + monomorphization).
+///
+/// # Grammar
+///
+/// ```text
+/// StructDecl ::= "struct" Ident TypeParams? ":" Newline
+///                  Indent FieldDecl+ Dedent
+///              | "struct" Ident TypeParams? "{" FieldList "}"
+///
+/// TypeParams ::= "<" Ident ("," Ident)* [","] ">"   (shared helper)
+///
+/// FieldDecl  ::= Ident ":" TypeRef Newline
+/// FieldList  ::= FieldEntry ("," FieldEntry)* [","]
+/// FieldEntry ::= Ident ":" TypeRef
+/// ```
+///
+/// **Layout-sensitive form** (primary — matches Buff's indentation-based
+/// philosophy and the T13 example `struct Pair<T, U>:`):
+///
+/// ```text
+/// struct Pair<T, U>:
+///     x: T
+///     y: U
+/// ```
+///
+/// **Brace form** (secondary — matches enum syntax for compact one-liners):
+///
+/// ```text
+/// struct Point { x: Float, y: Float }
+/// ```
+///
+/// The parser peeks at the token after the type-param list: `:` → layout
+/// form, `{` → brace form. Both produce the same [`StructDecl`] AST.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if:
+/// - the token after `struct` is not an identifier,
+/// - the type-param list is malformed,
+/// - the opening `{` or `:` is missing,
+/// - a field name is missing or not an identifier,
+/// - a field type fails to parse via [`parse_type_ref`],
+/// - the closing `}` is missing (brace form).
+pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, ParseError> {
+    let struct_tok = stream.expect(TokenKind::KwStruct)?;
+    let start = struct_tok.span.start;
+    let source_id = stream.source_id();
+
+    // Struct name.
+    let name_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected struct name after `struct`",
+            stream.eof_span(),
+        ))
+    })?;
+    let name = extract_ident(name_tok)?;
+
+    // Optional generic parameters: `<T, U>` (T13 — shared helper).
+    let type_params = parse_type_params(stream)?;
+
+    // Field list: layout-sensitive (`: \n Indent ...`) OR brace-delimited.
+    let mut fields: Vec<(Ident, TypeRef)> = Vec::new();
+
+    if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+        // Layout-sensitive form: `struct Name:` + indented field lines.
+        stream.advance(); // consume `:`
+        // Expect a Newline then an Indent (the offside-rule tokens emitted by
+        // `indent.rs`). If either is missing, it's a parse error.
+        if !matches!(stream.peek_kind(), Some(TokenKind::Newline)) {
+            let span = stream
+                .peek()
+                .map(|t| t.span)
+                .unwrap_or_else(|| stream.eof_span());
+            return Err(ParseError::new(Diagnostic::error(
+                "expected newline after `struct Name:`",
+                span,
+            )));
+        }
+        stream.advance(); // consume Newline
+        if !matches!(stream.peek_kind(), Some(TokenKind::Indent)) {
+            let span = stream
+                .peek()
+                .map(|t| t.span)
+                .unwrap_or_else(|| stream.eof_span());
+            return Err(ParseError::new(Diagnostic::error(
+                "expected indented field list after `struct Name:`",
+                span,
+            )));
+        }
+        stream.advance(); // consume Indent
+        // Parse fields until Dedent.
+        loop {
+            // Field name.
+            let fname_tok = stream.advance().ok_or_else(|| {
+                ParseError::new(Diagnostic::error(
+                    "expected field name, found end of input",
+                    stream.eof_span(),
+                ))
+            })?;
+            let fname = extract_ident(fname_tok.clone())?;
+            // `:` separator.
+            stream.expect(TokenKind::Colon)?;
+            // Field type.
+            let ftype = parse_type_ref(stream)?;
+            fields.push((fname, ftype));
+            // Consume the trailing Newline (required between fields in
+            // layout-sensitive form — the offside rule doesn't insert them
+            // automatically between same-indentation items on separate lines).
+            if matches!(stream.peek_kind(), Some(TokenKind::Newline)) {
+                stream.advance();
+            }
+            // Check for Dedent (end of field list) or continue.
+            if matches!(stream.peek_kind(), Some(TokenKind::Dedent)) {
+                stream.advance(); // consume Dedent
+                break;
+            }
+            if stream.is_at_end() {
+                break;
+            }
+        }
+        let span_end = stream
+            .peek()
+            .map(|t| t.span.start)
+            .unwrap_or_else(|| 0);
+        return Ok(StructDecl {
+            name,
+            fields,
+            traits: Vec::new(),
+            type_params,
+            span: Span::new(start, span_end, source_id),
+        });
+    }
+
+    // Brace-delimited form: `struct Name { field: Type, ... }`.
+    stream.expect(TokenKind::LBrace)?;
+    // Empty body: `struct Empty { }`.
+    if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+        let rb = stream.expect(TokenKind::RBrace)?;
+        return Ok(StructDecl {
+            name,
+            fields: Vec::new(),
+            traits: Vec::new(),
+            type_params,
+            span: Span::new(start, rb.span.end, source_id),
+        });
+    }
+    loop {
+        // Field name.
+        let fname_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected field name, found end of input",
+                stream.eof_span(),
+            ))
+        })?;
+        let fname = extract_ident(fname_tok)?;
+        // `:` separator.
+        stream.expect(TokenKind::Colon)?;
+        // Field type.
+        let ftype = parse_type_ref(stream)?;
+        fields.push((fname, ftype));
+        // Comma separator or end of list.
+        match stream.peek_kind() {
+            Some(TokenKind::Comma) => {
+                stream.advance();
+                // Allow trailing comma.
+                if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                    break;
+                }
+            }
+            Some(TokenKind::RBrace) => break,
+            Some(other) => {
+                return Err(ParseError::new(Diagnostic::error(
+                    format!("expected `,` or `}}` in struct body, found `{other}`"),
+                    stream
+                        .peek()
+                        .map(|t| t.span)
+                        .unwrap_or_else(|| stream.eof_span()),
+                )));
+            }
+            None => {
+                return Err(ParseError::new(Diagnostic::error(
+                    "unterminated struct body (missing `}`)",
+                    stream.eof_span(),
+                )));
+            }
+        }
+    }
+    let rb = stream.expect(TokenKind::RBrace)?;
+    Ok(StructDecl {
+        name,
+        fields,
+        traits: Vec::new(),
+        type_params,
+        span: Span::new(start, rb.span.end, source_id),
+    })
+}
 //
 // Buff v0.5 module system syntax (ES6-style):
 //

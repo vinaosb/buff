@@ -26,8 +26,8 @@ use buff_lang_lexer::TokenKind;
 
 use crate::options::Edition;
 use crate::stmt::{
-    parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl,
-    parse_extern_crate_decl, parse_extern_func_decl_with_abi, parse_func_decl, parse_import_decl,
+    parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl, parse_extern_crate_decl,
+    parse_extern_func_decl_with_abi, parse_func_decl, parse_import_decl, parse_struct_decl,
     parse_trait_decl,
 };
 use crate::stream::TokenStream;
@@ -90,6 +90,25 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
             }
             let e = parse_enum_decl(stream)?;
             Ok(Some(Decl::EnumDecl(e)))
+        }
+        // T13: top-level struct declarations. Supports both layout-sensitive
+        // (`struct Pair<T, U>:` + indented fields) and brace-delimited
+        // (`struct Point { x: Float, y: Float }`) forms. The lexer already
+        // tokenises `struct` as `TokenKind::KwStruct`; the parser dispatches
+        // to `parse_struct_decl`. Generic params `<T, U>` follow the name.
+        Some(TokenKind::KwStruct) => {
+            if saw_attributes {
+                let span = stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span());
+                return Err(ParseError::new(Diagnostic::error(
+                    "attributes are not yet supported on `struct` declarations (only `func`)",
+                    span,
+                )));
+            }
+            let s = parse_struct_decl(stream)?;
+            Ok(Some(Decl::StructDecl(s)))
         }
         // T29: top-level import / export declarations.
         Some(TokenKind::KwImport) => {
