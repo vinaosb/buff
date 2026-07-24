@@ -1,0 +1,195 @@
+// error_recovery.buff - v1.26 real-use-case (T14 batch 4).
+//
+// Error recovery: try multiple strategies with fallback chains,
+// circuit breaker pattern, and graceful degradation. Exercises:
+//   - Result<T, E> with the `?` operator
+//   - Option<T> for nullable values
+//   - Pattern matching on Ok/Err and Some/None
+//   - retry logic with exponential backoff simulation
+//   - circuit breaker state machine
+
+// --- Error simulation ---
+
+func unreliable_service(input: Int, fail_count: Int) -> Result<Int, Error>:
+    if input % 2 != 0 and fail_count > 0:
+        return Error("service unavailable (attempt for input ${input})")
+    return Ok(input * 10)
+
+func primary_source(key: Int) -> Result<String, Error>:
+    if key == 0:
+        return Error("primary: key not found")
+    return Ok("primary:${key}")
+
+func fallback_source(key: Int) -> Result<String, Error>:
+    if key < 0:
+        return Error("fallback: negative key")
+    return Ok("fallback:${key}")
+
+func cache_source(key: Int) -> Result<String, Error>:
+    if key == 999:
+        return Error("cache: cold start")
+    return Ok("cache:${key}")
+
+// --- Fallback chain ---
+
+func fetch_with_fallback(key: Int) -> Result<String, Error> {
+    let primary = primary_source(key)
+    match primary:
+        Ok(v):
+            return Ok(v)
+        Err(_):
+            let fallback = fallback_source(key)
+            match fallback:
+                Ok(v):
+                    return Ok(v)
+                Err(_):
+                    let cached = cache_source(key)
+                    match cached:
+                        Ok(v):
+                            return Ok(v)
+                        Err(e):
+                            return Error("all sources failed: ${e}")
+}
+
+// --- Retry with attempts ---
+
+func retry_operation(attempt: Int, max_attempts: Int) -> Result<Int, Error>:
+    if attempt >= max_attempts:
+        return Error("exhausted ${max_attempts} attempts")
+    let result = unreliable_service(attempt, fail_count: 2)
+    match result:
+        Ok(v):
+            return Ok(v)
+        Err(e):
+            print("  retry ${attempt + 1}/${max_attempts}: ${e}")
+            return retry_operation(attempt + 1, max_attempts: max_attempts)
+
+// --- Circuit breaker ---
+
+struct CircuitBreaker:
+    failure_count: Int
+    threshold: Int
+    is_open: Bool
+
+func CircuitBreaker.new(threshold: Int) -> CircuitBreaker:
+    return CircuitBreaker.new(
+        failure_count: 0,
+        threshold: threshold,
+        is_open: false
+    )
+
+func CircuitBreaker.record_failure(self):
+    self.failure_count = self.failure_count + 1
+    if self.failure_count >= self.threshold:
+        self.is_open = true
+
+func CircuitBreaker.record_success(self):
+    self.is_open = false
+    self.failure_count = 0
+
+func CircuitBreaker.allow_request(self) -> Bool:
+    return not self.is_open
+
+// --- Pipeline: validate -> transform ---
+
+func validate_input(n: Int) -> Result<Int, Error>:
+    if n < 0:
+        return Error("negative input not allowed: ${n}")
+    return Ok(n)
+
+func transform(n: Int) -> Result<Int, Error>:
+    if n > 1000:
+        return Error("overflow: ${n} exceeds limit")
+    return Ok(n * 3 + 7)
+
+func safe_pipeline(input: Int) -> Result<Int, Error>:
+    let validated = validate_input(input)?
+    let result = transform(validated)?
+    return Ok(result)
+
+// --- Demo scenarios ---
+
+func demo_fallback_chain():
+    print("--- fallback chain ---")
+    let r1 = fetch_with_fallback(3)
+    match r1:
+        Ok(v):
+            print("key=3: ${v}")
+        Err(e):
+            print("key=3: ${e}")
+
+    let r2 = fetch_with_fallback(0)
+    match r2:
+        Ok(v):
+            print("key=0: ${v}")
+        Err(e):
+            print("key=0: ${e}")
+
+    let r3 = fetch_with_fallback(-1)
+    match r3:
+        Ok(v):
+            print("key=-1: ${v}")
+        Err(e):
+            print("key=-1: ${e}")
+
+    let r4 = fetch_with_fallback(999)
+    match r4:
+        Ok(v):
+            print("key=999: ${v}")
+        Err(e):
+            print("key=999: ${e}")
+
+func demo_retry():
+    print("")
+    print("--- retry with backoff ---")
+    let result = retry_operation(0, max_attempts: 5)
+    match result:
+        Ok(v):
+            print("retry succeeded: ${v}")
+        Err(e):
+            print("retry failed: ${e}")
+
+func demo_circuit_breaker():
+    print("")
+    print("--- circuit breaker ---")
+    let cb = CircuitBreaker.new(threshold: 3)
+    print("allowed=${cb.allow_request()}")
+    cb.record_failure()
+    cb.record_failure()
+    cb.record_failure()
+    print("after 3 failures: allowed=${cb.allow_request()}")
+    cb.record_success()
+    print("after success:    allowed=${cb.allow_request()}")
+
+func demo_pipeline():
+    print("")
+    print("--- safe pipeline ---")
+    let r1 = safe_pipeline(10)
+    match r1:
+        Ok(v):
+            print("pipeline(10): ${v}")
+        Err(e):
+            print("pipeline(10): ${e}")
+
+    let r2 = safe_pipeline(-5)
+    match r2:
+        Ok(v):
+            print("pipeline(-5): ${v}")
+        Err(e):
+            print("pipeline(-5): ${e}")
+
+    let r3 = safe_pipeline(500)
+    match r3:
+        Ok(v):
+            print("pipeline(500): ${v}")
+        Err(e):
+            print("pipeline(500): ${e}")
+
+func main():
+    print("=== Error Recovery Demo ===")
+    demo_fallback_chain()
+    demo_retry()
+    demo_circuit_breaker()
+    demo_pipeline()
+    print("")
+    print("=== done ===")

@@ -1,0 +1,182 @@
+// structured_logger.buff - v1.26 real-use-case (T14 batch 4).
+//
+// A structured logger with levels (debug/info/warn/error), JSON output,
+// and level-based filtering. Exercises: enums, struct, pattern matching,
+// string formatting, closures, collections.
+
+// --- Log levels ---
+
+enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+// Convert a log level to its string tag for JSON output.
+func level_tag(level: LogLevel) -> String:
+    match level:
+        LogLevel.Debug:
+            return "DEBUG"
+        LogLevel.Info:
+            return "INFO"
+        LogLevel.Warn:
+            return "WARN"
+        LogLevel.Error:
+            return "ERROR"
+
+// Numeric severity for filtering (lower = more verbose).
+func level_severity(level: LogLevel) -> Int:
+    match level:
+        LogLevel.Debug:
+            return 0
+        LogLevel.Info:
+            return 1
+        LogLevel.Warn:
+            return 2
+        LogLevel.Error:
+            return 3
+
+// --- Structured log entry ---
+
+struct LogEntry:
+    level: LogLevel
+    module: String
+    message: String
+
+// Format a log entry as a human-readable line.
+func format_plain(entry: LogEntry) -> String:
+    let tag = level_tag(entry.level)
+    return "[${tag}] ${entry.module}: ${entry.message}"
+
+// Format a log entry as a single-line JSON object.
+func format_json(entry: LogEntry) -> String:
+    let tag = level_tag(entry.level)
+    return "{\"level\":\"${tag}\",\"module\":\"${entry.module}\",\"msg\":\"${entry.message}\"}"
+
+// --- Logger with filtering ---
+
+struct Logger:
+    min_level: LogLevel
+    module: String
+    entries: Vector<LogEntry>
+
+// Create a new logger that only emits entries at or above `min_level`.
+func Logger.new(module: String, min_level: LogLevel) -> Logger:
+    return Logger.new(module: module, min_level: min_level, entries: [])
+
+// Check if a level passes the logger's filter.
+func Logger.should_log(self, level: LogLevel) -> Bool:
+    return level_severity(level) >= level_severity(self.min_level)
+
+// Record a log entry (always stored, filtered on output).
+func Logger.log(self, level: LogLevel, message: String) -> String:
+    let entry = LogEntry.new(
+        level: level,
+        module: self.module,
+        message: message
+    )
+    self.entries.push(entry)
+    if self.should_log(level):
+        return format_plain(entry)
+    return ""
+
+// Convenience methods for each level.
+func Logger.debug(self, message: String) -> String:
+    return self.log(LogLevel.Debug, message: message)
+
+func Logger.info(self, message: String) -> String:
+    return self.log(LogLevel.Info, message: message)
+
+func Logger.warn(self, message: String) -> String:
+    return self.log(LogLevel.Warn, message: message)
+
+func Logger.error(self, message: String) -> String:
+    return self.log(LogLevel.Error, message: message)
+
+// --- Batch operations ---
+
+// Render all stored entries as JSON lines.
+func render_json_log(entries: Vector<LogEntry>) -> String:
+    let lines = entries.map({ e => format_json(e) })
+    return lines.join(separator: "\n")
+
+// Count entries by level using a loop.
+func count_by_level(entries: Vector<LogEntry>) -> Map<String, Int>:
+    let counts = {}
+    let levels = ["DEBUG", "INFO", "WARN", "ERROR"]
+    for level_str in levels:
+        counts[level_str] = 0
+    for entry in entries:
+        let tag = level_tag(entry.level)
+        let prev = counts[tag]
+        counts[tag] = prev + 1
+    return counts
+
+// --- Demo scenarios ---
+
+func demo_basic_logging():
+    print("--- basic logging (min=Info) ---")
+    let log = Logger.new("app.main", min_level: LogLevel.Info)
+    log.debug("initializing subsystems")   // filtered out
+    let out1 = log.info("server started on port 8080")
+    let out2 = log.warn("memory usage at 82%")
+    let out3 = log.error("connection refused to database")
+    if out1.len() > 0:
+        print(out1)
+    if out2.len() > 0:
+        print(out2)
+    if out3.len() > 0:
+        print(out3)
+    print("total entries stored: ${log.entries.len()}")
+
+func demo_debug_mode():
+    print("")
+    print("--- debug logging (min=Debug) ---")
+    let log = Logger.new("app.debug", min_level: LogLevel.Debug)
+    let d = log.debug("entering handle_request()")
+    let i = log.info("processing 42 items")
+    let w = log.warn("retry attempt 2/3")
+    let e = log.error("timeout after 30s")
+    if d.len() > 0:
+        print(d)
+    if i.len() > 0:
+        print(i)
+    if w.len() > 0:
+        print(w)
+    if e.len() > 0:
+        print(e)
+
+func demo_json_output():
+    print("")
+    print("--- JSON output ---")
+    let log = Logger.new("app.json", min_level: LogLevel.Debug)
+    log.info("user login")
+    log.warn("deprecated API call")
+    log.error("payment failed")
+    let json = render_json_log(log.entries)
+    print(json)
+
+func demo_level_counts():
+    print("")
+    print("--- level counts ---")
+    let log = Logger.new("app.counts", min_level: LogLevel.Debug)
+    log.debug("trace A")
+    log.debug("trace B")
+    log.info("startup")
+    log.warn("disk full")
+    log.error("crash")
+    log.error("panic")
+    let counts = count_by_level(log.entries)
+    for key in ["DEBUG", "INFO", "WARN", "ERROR"]:
+        let n = counts[key]
+        print("${key}: ${n}")
+
+func main():
+    print("=== Structured Logger Demo ===")
+    demo_basic_logging()
+    demo_debug_mode()
+    demo_json_output()
+    demo_level_counts()
+    print("")
+    print("=== done ===")

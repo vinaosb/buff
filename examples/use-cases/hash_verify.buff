@@ -1,0 +1,132 @@
+// hash_verify.buff - v1.26 real-use-case (T14 batch 4).
+//
+// Hash data with SHA-256, verify integrity, compare digests.
+// Exercises: Hash prelude type, hex encoding, string comparison,
+// Result handling, struct, pattern matching, string formatting.
+//
+// NOTE: Hash.sha256() and Hex.encode/decode are prelude types (T124k)
+// that require no import. They lower to sha2 + hex crates via codegen.
+
+// --- Pure data types ---
+
+struct FileRecord:
+    path: String
+    size: Int
+    digest: String
+
+// --- Hash operations ---
+
+// Hash a string and return the hex-encoded SHA-256 digest.
+func hash_data(data: String) -> String:
+    return Hash.sha256(data)
+
+// Verify that data matches an expected hex digest.
+func verify_integrity(data: String, expected_hex: String) -> Result<Bool, Error>:
+    let actual_hex = hash_data(data)
+    if actual_hex == expected_hex:
+        return Ok(true)
+    return Error("digest mismatch: expected ${expected_hex}, got ${actual_hex}")
+
+// --- File registry simulation ---
+
+func build_registry() -> Vector<FileRecord>:
+    let registry = []
+    registry.push(FileRecord.new(
+        path: "src/main.buff",
+        size: 1024,
+        digest: "a1b2c3d4e5f6"
+    ))
+    registry.push(FileRecord.new(
+        path: "src/lib.buff",
+        size: 2048,
+        digest: "deadbeef1234"
+    ))
+    registry.push(FileRecord.new(
+        path: "config.toml",
+        size: 256,
+        digest: "cafebabe5678"
+    ))
+    return registry
+
+// Verify a single file against its expected digest.
+func check_file(record: FileRecord, content: String) -> Result<Bool, Error>:
+    let actual = hash_data(content)
+    if actual == record.digest:
+        return Ok(true)
+    return Error("${record.path}: expected ${record.digest}, got ${actual}")
+
+// --- Demo scenarios ---
+
+func demo_hash():
+    let payload = "Hello, Buff!"
+    let digest = hash_data(payload)
+    print("payload:  ${payload}")
+    print("sha256:   ${digest}")
+    print("length:   ${digest.len()} hex chars")
+
+func demo_hex_roundtrip():
+    let original = [72, 101, 108, 108, 111]  // "Hello"
+    let hex_str = Hex.encode(original)
+    print("bytes:    ${original:?}")
+    print("hex:      ${hex_str}")
+
+    let decoded = Hex.decode(hex_str)
+    match decoded:
+        Ok(bytes):
+            print("decoded:  ${bytes:?}")
+        Err(e):
+            print("decode error: ${e}")
+
+func demo_integrity_check():
+    let data = "important configuration data"
+    let stored_hash = hash_data(data)
+    print("stored:   ${stored_hash}")
+
+    // Verify with correct data — should succeed.
+    let ok = verify_integrity(data, stored_hash)
+    match ok:
+        Ok(true):
+            print("integrity: PASS")
+        Ok(false):
+            print("integrity: FAIL (unexpected)")
+        Err(e):
+            print("integrity: ERROR — ${e}")
+
+    // Verify with tampered data — should fail.
+    let tampered = "important configuration datX"
+    let bad = verify_integrity(tampered, stored_hash)
+    match bad:
+        Ok(true):
+            print("tamper check: PASS (unexpected)")
+        Ok(false):
+            print("tamper check: FAIL (expected)")
+        Err(e):
+            print("tamper check: caught — ${e}")
+
+func demo_registry():
+    let registry = build_registry()
+    let sample_content = "file content here"
+    print("registry: ${registry.len()} files")
+
+    for record in registry:
+        let result = check_file(record, sample_content)
+        match result:
+            Ok(true):
+                print("  ${record.path}: OK (${record.size} bytes)")
+            Ok(false):
+                print("  ${record.path}: MISMATCH")
+            Err(e):
+                print("  ${record.path}: ERROR — ${e}")
+
+func main():
+    print("=== Hash & Verify Demo ===")
+    print("")
+    demo_hash()
+    print("")
+    demo_hex_roundtrip()
+    print("")
+    demo_integrity_check()
+    print("")
+    demo_registry()
+    print("")
+    print("=== done ===")

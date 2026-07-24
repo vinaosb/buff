@@ -1,135 +1,129 @@
-# BUGS-FOUND.md — examples/use-cases/apps/data_pipeline.buff
+# BUGS-FOUND.md — T14 Batch 4 (hash_verify, structured_logger, error_recovery)
 
-**File:** `examples/use-cases/apps/data_pipeline.buff`
-**Lines:** 1194
 **Date:** 2026-07-24
-**Status:** Parse-only / check-only (framework codegen deferred)
+**Examples:** hash_verify.buff, structured_logger.buff, error_recovery.buff
 
-## Build environment issue
+---
 
-`cargo run -p buff-lang-cli -- check` **cannot execute** on this Windows host due
-to the pre-existing MSVC `msvcrt.lib` linker failure (`LINK : fatal error LNK1104:
-cannot open file 'msvcrt.lib'`). This is caused by empty `LIB`/`INCLUDE`
-environment variables and affects ALL crates that link proc-macro DLLs
-(`clap_derive`, `serde_derive`, `dioxus-core-macro`, `ring`, `pprof`). CI on the
-3-OS matrix (ubuntu/windows/macos) does NOT have this issue. See
-`buff-image/AGENTS.md` and `buff-pipeline/AGENTS.md` for the full explanation.
+## Build Environment Issue
 
-## Known bugs / gaps in data_pipeline.buff
+**Status:** BLOCKING — cannot run `buff check` or `buff run` on this machine.
 
-### B1: Framework types not yet registered in codegen (MEDIUM)
+The MSVC toolchain on this Windows host is incomplete:
+- `vcruntime.h` not found (ring v0.17.14 build fails)
+- `msvcrt.lib` not found (linker fails for proc-macro crates)
 
-**Symptom:** `buff check` cannot resolve `Pipeline.*`, `Source.*`, `Sink.*` calls.
+This prevents any `cargo build`, `cargo check`, `cargo run`, or `buff check` execution.
+The examples were written based on existing working examples and the prelude_types registry.
 
-**Root cause:** `Type::Pipeline` / `Source` / `Sink` are not yet registered in the
-prelude type registry (`crates/buff-lang-types/src/ty.rs`). Only `Type::DataFrame`
-exists with partial codegen lowering. The `Pipeline.new()`, `Source.from_csv()`,
-`Sink.to_csv()`, and `Sink.to_json()` calls are forward-declared and will fail
-type resolution until T8 (type variant registration) and T9 (instance-method
-lowering) land.
+**Action required:** Verify all three examples on a machine with a complete MSVC toolchain.
 
-**Impact:** The pipeline streaming demos (demo 8) and framework-path functions
-(`extract_stream`, `stream_transform`, `load_to_csv`, `load_to_json`) are
-parse-only. The pure Buff core (CSV parsing, validation, stats, formatting,
-table rendering) runs today.
+---
 
-**Fix:** Coordinate T8 + T9 to register `Type::Pipeline`, `Type::Source`,
-`Type::Sink` and add codegen lowering arms for their methods.
+## hash_verify.buff — Potential Issues
 
-### B2: `Double.from()` not available in prelude (LOW)
+### B1: Hash.sha256() type contract
+- **Risk:** `Hash.sha256(data: String) -> String` — the prelude_types.rs registration says this returns a 64-char lowercase hex digest. The codegen lowering uses `sha2::Sha256::digest(data.as_bytes())` + `hex::encode()`. This should work end-to-end.
+- **Verify:** Run `buff run examples/use-cases/hash_verify.buff` and confirm the SHA-256 digest matches `57c028b506aa21e287f558604a6ea6eb223911a27982a50e907e291715ccaa5f` for "Hello, Buff!".
 
-**Symptom:** `parse_number()` uses `Double.from(trimmed)` which is not a
-recognized prelude constructor.
+### B2: Hex.encode/decode type compatibility
+- **Risk:** `Hex.encode(bytes: Vector<Byte>)` expects `Vector<Byte>` but we pass `[72, 101, 108, 108, 111]` which infers as `Vector<Int>`. Buff may or may not coerce Int→Byte for this call.
+- **Verify:** If this fails with a type error, change `Hex.encode(original)` to use a byte literal or remove the hex roundtrip demo.
 
-**Root cause:** The prelude does not expose a `Double.from(String)` constructor.
-Numeric parsing in Buff relies on `str::parse::<f64>()` internally, but the
-Buff surface doesn't have a direct `Double.from()` call.
+### B3: Hex.decode return type
+- **Risk:** `Hex.decode(string: String) -> Vector<Byte>` — returns empty Vec on decode failure (never panics). The codegen uses `hex::decode(&string).unwrap_or_default()`. Should work but the return type is `Vector<Byte>` not `Vector<Int>`, so the `decoded` variable may have a different type than `original`.
+- **Verify:** Check if `match decoded { Ok(bytes) => print(bytes) }` works with `Vector<Byte>`.
 
-**Impact:** `parse_number()` falls through to the `Err(_)` arm for all inputs in
-the current type-checker. The function is correct in intent but cannot be
-verified by `buff check` today.
+### B4: String.len() on hex digest
+- **Risk:** `digest.len()` — String.len() returns the string length. For a 64-char hex digest, this should print 64. Confirmed working in existing examples.
 
-**Fix:** Either add `Double.from()` to the prelude type registry, or replace
-with a `extern` binding to `str::parse::<f64>()`.
+### B5: FileRecord.new() named args
+- **Risk:** `FileRecord.new(path: "...", size: 1024, digest: "...")` — struct constructors use named args. This is the standard pattern in existing examples. Should work.
 
-### B3: `chars()` method not on String (LOW)
+---
 
-**Symptom:** `parse_csv_line()` and `json_escape()` call `line.chars()` which
-is not a recognized String method.
+## structured_logger.buff — Potential Issues
 
-**Root cause:** The prelude String API doesn't expose `.chars()` iterator.
-Iteration over string characters requires either `.split("")` or a
-`for ch in text` loop that the parser supports for `Vector` but not `String`.
+### B6: Custom enum matching (LogLevel.Debug, etc.)
+- **Risk:** Matching on user-defined enum variants is **codegen-verified but does not compile end-to-end**. The codegen emits `Debug` instead of `LogLevel::Debug`, causing a Rust name resolution error.
+- **Documented gap:** `examples/pattern_matching.buff` lines 11-14 explicitly state this is a v0.5 codegen gap.
+- **Impact:** `buff check` should pass (typecheck succeeds), but `buff run` will fail at the rustc stage.
+- **Action:** This is expected behavior — the example is a typecheck-only showcase.
 
-**Impact:** CSV line parsing and JSON escaping use `.chars()` which won't
-type-check. The pure parsing logic is correct but unverifiable.
+### B7: Logger.new() self-constructor recursion
+- **Risk:** `Logger.new(module: String, min_level: LogLevel) -> Logger` calls `Logger.new(module: module, min_level: min_level, entries: [])`. This is a static method that creates a struct literal, not a recursive call. Buff's `Type.new()` convention should handle this correctly.
+- **Verify:** If this causes infinite recursion, change to direct struct literal construction.
 
-**Fix:** Add `String.chars() -> Vector<String>` to the prelude, or rewrite
-using `.split("")` with a trailing empty-string drop.
+### B8: Logger method syntax (func Logger.method(self, ...))
+- **Risk:** `func Logger.log(self, level: LogLevel, message: String) -> String` — methods on structs using `Type.method` syntax. This is documented in the language spec and used in existing examples (e.g., `CircuitBreaker.record_failure` in error_handling patterns).
+- **Verify:** Should work. The `self` parameter is implicit.
 
-### B4: `contains()` method not on String (LOW)
+### B9: Map indexing without .get_or()
+- **Risk:** `counts[tag]` — Map key access by index. The collections.buff example says "keyed lookup (`m[k]`) is a documented gap" because HashMap has no Index impl in Rust. However, the structured_logger uses a loop to initialize all keys to 0 first, so all keys exist before access.
+- **Impact:** If Map indexing doesn't work, use a different approach (e.g., if/else chain per level).
+- **Documented gap:** `examples/collections.buff` line 11.
 
-**Symptom:** `is_numeric_header()` calls `lower.contains(suffix)` which is
-not a recognized String method.
+### B10: Vector.map() with closure
+- **Risk:** `entries.map({ e => format_json(e) })` — Vector.map() with a closure. Confirmed working in `examples/collections.buff` line 35: `.map({ x => x * 10 })`.
+- **Verify:** Should work.
 
-**Root cause:** The prelude String API doesn't expose `.contains(substring)`.
-String containment checks require manual iteration or `index_of() >= 0`.
+### B11: Vector.join(separator: "")
+- **Risk:** `lines.join(separator: "\n")` — Vector.join() method. Not shown in existing examples. May not exist on Vector<T>.
+- **Mitigation:** If join doesn't exist, the render_json_log function will fail. This is a discoverable bug.
+- **Action:** Document as a potential missing API.
 
-**Impact:** The numeric-header heuristic won't type-check. Can be rewritten
-using `.index_of(suffix) >= 0` which IS available.
+### B12: Struct field mutation via self.field
+- **Risk:** `self.failure_count = self.failure_count + 1` — mutating struct fields through `self`. This is the standard pattern for methods. Should work.
 
-**Fix:** Replace `lower.contains(suffix)` with `lower.index_of(suffix) >= 0`.
+---
 
-### B5: Enum variant constructors without type prefix (LOW)
+## error_recovery.buff — Potential Issues
 
-**Symptom:** `validate_row()` returns `Err(EmptyRow)` instead of
-`Err(RowError::EmptyRow)`. Similarly `WrongArity`, `BadNumber` are used
-without the `RowError::` prefix in error returns.
+### B13: fetch_with_fallback brace syntax
+- **Risk:** `func fetch_with_fallback(key: Int) -> Result<String, Error> {` uses brace-delimited function body. Both brace and indentation syntax should work. The existing examples use indentation (`:` + indented body). Brace syntax is also valid.
+- **Verify:** Should work. Both syntaxes are supported.
 
-**Root cause:** Buff's `match` arms use bare variant names, but `return`
-statements in error positions may require the full `Type::Variant` path.
-The parser may accept bare names in match but not in constructors.
+### B14: Nested match on Result
+- **Risk:** Three levels of nested `match primary: Ok(v) => ... Err(_) => match fallback: ...` — deep nesting with indentation. Should work but may hit indentation parsing edge cases.
+- **Verify:** Run `buff check` and confirm no parse errors.
 
-**Impact:** The validation logic won't type-check until the parser fully
-supports enum variant constructor disambiguation.
+### B15: retry_operation recursion
+- **Risk:** `retry_operation` calls itself recursively. Buff supports recursion (confirmed in `examples/fibonacci.buff`). Should work.
 
-**Fix:** Use `Err(RowError::EmptyRow)`, `Err(RowError::WrongArity(...))`,
-etc. in all return positions.
+### B16: CircuitBreaker struct methods
+- **Risk:** `func CircuitBreaker.record_failure(self)` — mutating self fields. Same pattern as B12. Should work.
 
-### B6: `Vector.contains()` not available (LOW)
+### B17: safe_pipeline with ? operator
+- **Risk:** `validate_input(input)?` and `transform(validated)?` — the `?` operator on Result<T, Error>. Confirmed working in `examples/error_handling.buff` line 31: `let h = half(n)?`.
+- **Verify:** Should work.
 
-**Symptom:** `extend_headers()` calls `out.contains("size_bucket")` which
-is not a recognized Vector method.
+### B18: Vector.get(0) returning Option
+- **Risk:** `data.get(0)` — Vector.get() returning Option<T>. Not shown in existing examples (only .pop() is shown returning Option). May not exist.
+- **Mitigation:** If get() doesn't exist, the demo_option_chain section (which was removed) would need alternative syntax. The current error_recovery.buff does NOT use .get() — it was trimmed. No issue.
 
-**Root cause:** The prelude Vector API doesn't expose `.contains(value)`.
-Membership checks require manual iteration.
+### B19: Struct literal in CircuitBreaker.new()
+- **Risk:** `CircuitBreaker.new(failure_count: 0, threshold: threshold, is_open: false)` — passing a non-literal `threshold` variable as a named arg. Should work.
 
-**Impact:** Header extension logic won't type-check. Can be rewritten with
-a `for` loop and equality check.
+---
 
-**Fix:** Replace `out.contains(x)` with a manual `for h in out: if h == x: return true` pattern.
+## Compiler Gaps (Known, Not New)
 
-### B7: `Vector.contains()` on String slice (LOW)
+These are documented compiler gaps that affect these examples:
 
-**Symptom:** Same as B6 — `extend_headers()` uses `out.contains(...)`.
+1. **Custom enum variant qualification** (B6): `LogLevel.Debug` emitted as `Debug` in Rust codegen. Affects structured_logger.buff. buff check passes, buff run fails.
+2. **Map key access by index** (B9): `m[k]` not supported on HashMap. Affects count_by_level in structured_logger.buff if keys aren't pre-initialized.
+3. **Module imports** (removed from all examples): `import X from buff.Y` not yet wired. All examples use prelude types instead.
 
-**Impact:** Same as B6.
+---
 
-**Fix:** Same as B6.
+## Verification Checklist
 
-## Summary
-
-| ID | Severity | Category | Status |
-|----|----------|----------|--------|
-| B1 | MEDIUM | Framework codegen | Deferred to T8+T9 |
-| B2 | LOW | Prelude API gap | Needs `Double.from()` |
-| B3 | LOW | Prelude API gap | Needs `String.chars()` |
-| B4 | LOW | Prelude API gap | Use `index_of` workaround |
-| B5 | LOW | Parser disambiguation | Use qualified variant names |
-| B6 | LOW | Prelude API gap | Manual iteration workaround |
-| B7 | LOW | Prelude API gap | Same as B6 |
-
-**No blocking bugs** — all issues are either pre-existing framework gaps or
-low-severity prelude API gaps with straightforward workarounds. The pure Buff
-core (CSV parsing, validation, enrichment, stats, formatting, table rendering)
-is structurally correct and will pass `buff check` once B2-B7 are addressed.
+- [ ] Run `buff check examples/use-cases/hash_verify.buff` on a working build
+- [ ] Run `buff check examples/use-cases/structured_logger.buff` on a working build
+- [ ] Run `buff check examples/use-cases/error_recovery.buff` on a working build
+- [ ] Run `buff run examples/use-cases/hash_verify.buff` and verify output matches .expected
+- [ ] Run `buff run examples/use-cases/error_recovery.buff` and verify output matches .expected
+- [ ] Run `buff run examples/use-cases/structured_logger.buff` — expected to FAIL at rustc stage due to enum qualification gap (B6)
+- [ ] Fill in actual SHA-256 digests in hash_verify.expected if they differ from Python's hashlib
+- [ ] Verify Hex.encode/decode type compatibility (B2, B3)
+- [ ] Verify Vector.join() exists (B11)

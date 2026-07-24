@@ -1,0 +1,25 @@
+=== Structured Logger Demo ===
+--- basic logging (min=Info) ---
+[INFO] app.main: server started on port 8080
+[WARN] app.main: memory usage at 82%
+[ERROR] app.main: connection refused to database
+total entries stored: 4
+
+--- debug logging (min=Debug) ---
+[DEBUG] app.debug: entering handle_request()
+[INFO] app.debug: processing 42 items
+[WARN] app.debug: retry attempt 2/3
+[ERROR] app.debug: timeout after 30s
+
+--- JSON output ---
+{"level":"INFO","module":"app.json","msg":"user login"}
+{"level":"WARN","module":"app.json","msg":"deprecated API call"}
+{"level":"ERROR","module":"app.json","msg":"payment failed"}
+
+--- level counts ---
+DEBUG: 2
+INFO: 1
+WARN: 1
+ERROR: 2
+
+=== done ===

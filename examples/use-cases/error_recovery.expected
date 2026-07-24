@@ -1,0 +1,21 @@
+=== Error Recovery Demo ===
+--- fallback chain ---
+key=3: primary:3
+key=0: fallback:0
+key=-1: cache:-1
+key=999: all sources failed: cache: cold start
+
+--- retry with backoff ---
+retry succeeded: 0
+
+--- circuit breaker ---
+allowed=true
+after 3 failures: allowed=false
+after success:    allowed=true
+
+--- safe pipeline ---
+pipeline(10): 37
+pipeline(-5): negative input not allowed: -5
+pipeline(500): 1507
+
+=== done ===

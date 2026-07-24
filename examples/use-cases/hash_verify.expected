@@ -1,0 +1,20 @@
+=== Hash & Verify Demo ===
+
+payload:  Hello, Buff!
+sha256:   57c028b506aa21e287f558604a6ea6eb223911a27982a50e907e291715ccaa5f
+length:   64 hex chars
+
+bytes:    [72, 101, 108, 108, 111]
+hex:      48656c6c6f
+decoded:  [72, 101, 108, 108, 111]
+
+stored:   75ff95af0d034c844a81517e2275a498d956ac860c9173e214a342b60c4216fa
+integrity: PASS
+tamper check: caught — digest mismatch: expected 75ff95af0d034c844a81517e2275a498d956ac860c9173e214a342b60c4216fa, got d02fe33766ec770899d460f944aca27a7202a8a36d75f450775faa0364b2036f
+
+registry: 3 files
+  src/main.buff: ERROR — src/main.buff: expected a1b2c3d4e5f6, got 7d594931e105664087bbb65fb6ba5358fdcb5636e4c8415583313d34a448144b
+  src/lib.buff: ERROR — src/lib.buff: expected deadbeef1234, got 7d594931e105664087bbb65fb6ba5358fdcb5636e4c8415583313d34a448144b
+  config.toml: ERROR — config.toml: expected cafebabe5678, got 7d594931e105664087bbb65fb6ba5358fdcb5636e4c8415583313d34a448144b
+
+=== done ===
