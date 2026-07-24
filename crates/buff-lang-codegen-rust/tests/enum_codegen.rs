@@ -578,3 +578,251 @@ fn enum_codegen_result_end_to_end_with_binding() {
     assert!(src.contains("Err(_) =>"), "missing Err(_) arm in: {src}");
     must_reparse(&src);
 }
+
+// ---------------------------------------------------------------------------
+// 4. T85 — User-defined enum variant path qualification.
+// ---------------------------------------------------------------------------
+
+/// T85: user-defined enum variants MUST be qualified with the enum name
+/// when emitted as bare identifier references. `Red` belonging to
+/// `enum Color` must lower to `Color::Red`, not bare `Red` (which rustc
+/// rejects as an unresolved identifier in expression position and treats
+/// as a fresh binding pattern in match-arm position).
+#[test]
+fn t85_user_enum_variant_in_expression_is_qualified() {
+    // `enum Color { Red, Green, Blue }` + `func f() { Red }`.
+    // The bare `Red` in expression position must lower to `Color::Red`.
+    let color = enum_decl(
+        "Color",
+        &[],
+        vec![
+            unit_variant("Red"),
+            unit_variant("Green"),
+            unit_variant("Blue"),
+        ],
+    );
+    let func = FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: Some(named_ty("Color")),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(ident_expr("Red")), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::EnumDecl(color), Decl::FuncDecl(func)])
+        .expect("T85 codegen must succeed");
+    assert!(
+        src.contains("Color::Red"),
+        "T85: expected `Color::Red` qualified path in: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T85: bare variant in a match-arm IDENT pattern must lower to the
+/// qualified path pattern `Color::Red` (otherwise rustc treats it as a
+/// fresh binding that matches any value).
+#[test]
+fn t85_user_enum_variant_in_match_ident_pattern_is_qualified() {
+    let color = enum_decl(
+        "Color",
+        &[],
+        vec![
+            unit_variant("Red"),
+            unit_variant("Green"),
+            unit_variant("Blue"),
+        ],
+    );
+    // `match c { Red => 1, _ => 0 }` — Red is parsed as Pattern::Ident.
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("c")),
+        arms: vec![
+            arm(ident_pat("Red"), int_expr(1)),
+            arm(wildcard_pat(), int_expr(0)),
+        ],
+        span: span(),
+    };
+    let func = FuncDecl {
+        name: ident("f"),
+        params: vec![Param {
+            name: ident("c"),
+            ty: named_ty("Color"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(mt, span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::EnumDecl(color), Decl::FuncDecl(func)])
+        .expect("T85 codegen must succeed");
+    assert!(
+        src.contains("Color::Red =>"),
+        "T85: expected `Color::Red =>` qualified arm in: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T85: tuple variant via `Pattern::Variant` with EMPTY `enum_name` must
+/// also resolve through the registry (`Color::Rgb(r, g, b)` not bare
+/// `Rgb(r, g, b)`).
+#[test]
+fn t85_user_enum_tuple_variant_in_match_resolves_via_registry() {
+    let color = enum_decl(
+        "Color",
+        &[],
+        vec![tuple_variant("Rgb", &["Int", "Int", "Int"])],
+    );
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("c")),
+        arms: vec![
+            arm(
+                variant_pat("Rgb", vec![ident_pat("r"), ident_pat("g"), ident_pat("b")]),
+                ident_expr("r"),
+            ),
+            arm(wildcard_pat(), int_expr(0)),
+        ],
+        span: span(),
+    };
+    let func = FuncDecl {
+        name: ident("f"),
+        params: vec![Param {
+            name: ident("c"),
+            ty: named_ty("Color"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(mt, span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::EnumDecl(color), Decl::FuncDecl(func)])
+        .expect("T85 codegen must succeed");
+    assert!(
+        src.contains("Color::Rgb("),
+        "T85: expected `Color::Rgb(` qualified tuple-variant arm in: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T85: prelude enums `Option` / `Result` are EXCLUDED — their variants
+/// (`Some`/`None`/`Ok`/`Err`) live in the Rust prelude and must stay
+/// unqualified. Even when the user explicitly declares an `enum Option`,
+/// Buff stays out of the way (shadowing the prelude is the user's choice).
+#[test]
+fn t85_prelude_enums_are_not_qualified() {
+    // `enum Option<T> { Some(T), None }` + `match o { Some(v) => v, None => 0 }`.
+    // The variant patterns MUST stay as `Some(v)` / `None`, NOT
+    // `Option::Some(v)` / `Option::None`.
+    let option_decl = enum_decl(
+        "Option",
+        &["T"],
+        vec![tuple_variant("Some", &["T"]), unit_variant("None")],
+    );
+    let mt = Expr::MatchExpr {
+        scrutinee: Box::new(ident_expr("o")),
+        arms: vec![
+            arm(variant_pat("Some", vec![ident_pat("v")]), ident_expr("v")),
+            arm(variant_pat("None", vec![]), int_expr(0)),
+        ],
+        span: span(),
+    };
+    let func = FuncDecl {
+        name: ident("f"),
+        params: vec![Param {
+            name: ident("o"),
+            ty: TypeRef::Generic {
+                base: Box::new(named_ty("Option")),
+                args: vec![named_ty("Int")],
+                span: span(),
+            },
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(mt, span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[Decl::EnumDecl(option_decl), Decl::FuncDecl(func)])
+        .expect("T85 codegen must succeed");
+    assert!(
+        src.contains("Some(") && !src.contains("Option::Some"),
+        "T85: prelude Some MUST stay unqualified; got: {src}"
+    );
+    assert!(
+        src.contains("None") && !src.contains("Option::None"),
+        "T85: prelude None MUST stay unqualified; got: {src}"
+    );
+    must_reparse(&src);
+}
+
+/// T85: variant-name COLLISION across two user enums removes the entry
+/// from the registry — bare references stay unqualified so rustc raises
+/// the right "ambiguous" error and the user is forced to write `A::X`
+/// or `B::X` explicitly.
+#[test]
+fn t85_variant_name_collision_is_left_unqualified() {
+    // Two enums both declaring a variant `X`: ambiguous, so the bare `X`
+    // reference must NOT be auto-qualified (rustc will emit the right
+    // ambiguous-associated-type diagnostic).
+    let enum_a = enum_decl("A", &[], vec![unit_variant("X")]);
+    let enum_b = enum_decl("B", &[], vec![unit_variant("X")]);
+    let func = FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(ident_expr("X"), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
+    let src = generate_rust(&[
+        Decl::EnumDecl(enum_a),
+        Decl::EnumDecl(enum_b),
+        Decl::FuncDecl(func),
+    ])
+    .expect("T85 codegen must succeed");
+    assert!(
+        !src.contains("A::X") && !src.contains("B::X"),
+        "T85: colliding variant X must stay bare (no auto-qualify); got: {src}"
+    );
+}

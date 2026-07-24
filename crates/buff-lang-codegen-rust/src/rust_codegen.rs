@@ -281,6 +281,31 @@ pub struct RustCodegen {
     /// guarantee), so the codegen inserts the wrapper silently. The set
     /// is a [`BTreeSet`] for deterministic membership checks.
     extern_fn_names: BTreeSet<String>,
+    /// T85: registry of USER-defined enum variants in this compilation
+    /// unit. Maps `variant_name` (e.g. `"Red"`) → owning `enum_name`
+    /// (e.g. `"Color"`). Populated by [`Self::generate`] BEFORE the main
+    /// lowering loop, via the [`collect_user_enum_variants`] helper.
+    ///
+    /// Consulted by [`Self::lower_expr`]'s `Expr::Ident` arm and by
+    /// [`Self::lower_pattern`]'s `Pattern::Ident` / `Pattern::Variant`
+    /// arms so that a bare user-written `Red` (which the parser encodes
+    /// as `Pattern::Ident("Red")` or `Pattern::Variant { enum_name: "",
+    /// variant: "Red", .. }`) lowers to the fully-qualified Rust path
+    /// `Color::Red`. Without this qualification rustc treats the bare
+    /// `Red` in match-arms as a fresh binding pattern (silently shadowing
+    /// the variant) and the bare `Red` in expression position as an
+    /// unresolved identifier — both produce compile errors.
+    ///
+    /// Prelude enums (`Option`, `Result`) are EXCLUDED: their variants
+    /// (`Some`/`None`/`Ok`/`Err`) live in the Rust prelude and MUST stay
+    /// unqualified. Variant-name COLLISIONS (same name declared by two
+    /// user enums) also remove the entry — ambiguous references are left
+    /// unqualified so rustc produces the right diagnostic.
+    ///
+    /// A [`BTreeMap`] (not [`HashMap`]) for deterministic membership and
+    /// iteration (the T29 flaky-test lesson — never rely on hash-seed-
+    /// dependent iteration for codegen output).
+    user_enum_variants: BTreeMap<String, String>,
 }
 
 impl RustCodegen {
@@ -307,6 +332,7 @@ impl RustCodegen {
             atomic_promotions: AtomicPromotions::empty(),
             current_atomic_set: crate::atomic_analysis::AtomicSet::new(),
             extern_fn_names: BTreeSet::new(),
+            user_enum_variants: BTreeMap::new(),
         }
     }
 
@@ -1334,6 +1360,14 @@ impl RustCodegen {
         // to this set. Built BEFORE the main lowering loop so per-function
         // lowering can consult it.
         self.extern_fn_names = collect_extern_fn_names(decls);
+        // T85: collect the registry of USER-defined enum variants
+        // (variant_name → enum_name), EXCLUDING prelude enums
+        // (`Option`/`Result`). Built BEFORE the main lowering loop so
+        // [`Self::lower_expr`]'s `Expr::Ident` arm and
+        // [`Self::lower_pattern`]'s `Pattern::Ident` / `Pattern::Variant`
+        // arms can qualify bare variant references as `Enum::Variant`.
+        // See [`collect_user_enum_variants`] for the collision rule.
+        self.user_enum_variants = collect_user_enum_variants(decls);
         for decl in decls {
             // T29: re-export declarations are a multi-file module-graph
             // concern — they emit no Rust item in single-file codegen.
@@ -2844,6 +2878,23 @@ impl RustCodegen {
         match expr {
             Expr::Literal(lit, _) => self.lower_literal(lit),
             Expr::Ident(name, _) => {
+                // T85: bare user-defined enum variant reference. If the
+                // name resolves to a user-defined enum variant
+                // (e.g. `Red` belongs to `enum Color`), emit the
+                // fully-qualified Rust path `Color::Red`. Without this,
+                // rustc rejects the bare `Red` as an unresolved
+                // identifier. Prelude variants (`Some`/`None`/`Ok`/`Err`)
+                // are EXCLUDED by [`collect_user_enum_variants`] and stay
+                // unqualified (they're in Rust's prelude).
+                //
+                // This branch fires BEFORE the move-analyzer / atomic /
+                // closure-bypass checks because an enum VARIANT is not a
+                // variable — it has no ownership state, can't be atomic,
+                // and is never captured by closures. Returning early
+                // keeps the variant path pure (no spurious `.clone()`).
+                if let Some(enum_name) = self.user_enum_variants.get(&name.name) {
+                    return Ok(two_segment_path_expr(enum_name, &name.name));
+                }
                 let path = syn::ExprPath {
                     attrs: Vec::new(),
                     qself: None,
@@ -11756,13 +11807,35 @@ impl RustCodegen {
                 attrs: Vec::new(),
                 underscore_token: Default::default(),
             }),
-            Pattern::Ident(name, _) => Pat::Ident(PatIdent {
-                attrs: Vec::new(),
-                ident: ast_ident_to_syn(name),
-                by_ref: None,
-                mutability: mutable.then(Default::default),
-                subpat: None,
-            }),
+            Pattern::Ident(name, _) => {
+                // T85: bare user-defined enum variant used as a match
+                // pattern. The parser encodes a bare `Red` as
+                // `Pattern::Ident("Red")` because at parse time it
+                // cannot tell variant-vs-binding apart. Here we resolve
+                // the ambiguity: if `Red` is a known user-defined enum
+                // variant, lower to the qualified path pattern
+                // `Color::Red`; otherwise keep the binding-pattern
+                // lowering (`Pat::Ident`). Without this, rustc treats
+                // bare `Red` in a match arm as a fresh binding that
+                // matches ANY value (silently shadowing the variant) —
+                // a particularly nasty bug because it typechecks but
+                // does the wrong thing at runtime.
+                if let Some(enum_name) = self.user_enum_variants.get(&name.name) {
+                    Pat::Path(syn::PatPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: two_segment_path(enum_name, &name.name),
+                    })
+                } else {
+                    Pat::Ident(PatIdent {
+                        attrs: Vec::new(),
+                        ident: ast_ident_to_syn(name),
+                        by_ref: None,
+                        mutability: mutable.then(Default::default),
+                        subpat: None,
+                    })
+                }
+            }
             Pattern::Literal(lit, _) => {
                 let lit_expr = self.lower_literal(lit)?;
                 // `syn::Pat::Lit` is an alias for `syn::ExprLit` in syn 2.0
@@ -11781,17 +11854,38 @@ impl RustCodegen {
                 Pat::Lit(expr_lit)
             }
             Pattern::Variant {
+                enum_name,
                 variant,
                 subpatterns,
                 ..
             } => {
+                // T85: resolve the variant's owning enum. The parser
+                // leaves `enum_name` empty for bare `Variant(...)`
+                // patterns; we look up the owning enum from the
+                // user-enum-variant registry built in [`Self::generate`].
+                // If `enum_name` was explicitly written by the user
+                // (`Color::Red(x)`) we use it as-is. If the registry has
+                // no entry (e.g. prelude `Some`/`None`/`Ok`/`Err`, or
+                // the variant belongs to an enum declared in another
+                // file we don't see) we fall back to the bare variant
+                // name — preserving the prior codegen shape so existing
+                // snapshots for Option/Result stay byte-identical.
+                let resolved_enum: Option<&str> = if !enum_name.name.is_empty() {
+                    Some(enum_name.name.as_str())
+                } else {
+                    self.user_enum_variants.get(&variant.name).map(String::as_str)
+                };
+                let path = match resolved_enum {
+                    Some(en) => two_segment_path(en, &variant.name),
+                    None => syn::Path::from(ast_ident_to_syn(variant)),
+                };
                 if subpatterns.is_empty() {
                     // Unit variant via path. Build `syn::Pat::Path` with a
-                    // single-segment path equal to the variant name.
+                    // single-segment (or two-segment, T85) path.
                     Pat::Path(syn::PatPath {
                         attrs: Vec::new(),
                         qself: None,
-                        path: syn::Path::from(ast_ident_to_syn(variant)),
+                        path,
                     })
                 } else {
                     // Tuple-struct variant: `Variant(subpat1, subpat2, ...)`.
@@ -11802,7 +11896,7 @@ impl RustCodegen {
                     Pat::TupleStruct(syn::PatTupleStruct {
                         attrs: Vec::new(),
                         qself: None,
-                        path: syn::Path::from(ast_ident_to_syn(variant)),
+                        path,
                         paren_token: Default::default(),
                         elems,
                     })
@@ -12612,6 +12706,44 @@ impl Default for RustCodegen {
 /// line/col) is recorded separately in [`CodegenContext`].
 fn ast_ident_to_syn(ident: &buff_lang_ast::common::Ident) -> Ident {
     Ident::new(&ident.name, ProcSpan::call_site())
+}
+
+/// T85: build a two-segment `EnumName::VariantName` [`syn::Path`].
+///
+/// Used by [`RustCodegen::lower_expr`] (the `Expr::Ident` arm) and
+/// [`RustCodegen::lower_pattern`] (the `Pattern::Ident` /
+/// `Pattern::Variant` arms) to qualify bare user-defined enum variant
+/// references. The path is built explicitly (not via `parse_quote!`,
+/// which is banned in non-test code per the crate's hard rules).
+///
+/// Determinism: the path is built from two [`Ident`]s joined by a single
+/// `::` separator — byte-identical for the same `(enum, variant)` pair.
+fn two_segment_path(enum_name: &str, variant_name: &str) -> syn::Path {
+    syn::Path {
+        leading_colon: None,
+        segments: std::iter::once(syn::PathSegment {
+            ident: Ident::new(enum_name, ProcSpan::call_site()),
+            arguments: syn::PathArguments::None,
+        })
+        .chain(std::iter::once(syn::PathSegment {
+            ident: Ident::new(variant_name, ProcSpan::call_site()),
+            arguments: syn::PathArguments::None,
+        }))
+        .collect(),
+    }
+}
+
+/// T85: build a two-segment `EnumName::VariantName` [`SynExpr::Path`].
+///
+/// Thin wrapper around [`two_segment_path`] that wraps the path in an
+/// [`syn::ExprPath`] for use as a Rust expression. Used by
+/// [`RustCodegen::lower_expr`]'s `Expr::Ident` arm.
+fn two_segment_path_expr(enum_name: &str, variant_name: &str) -> SynExpr {
+    SynExpr::Path(syn::ExprPath {
+        attrs: Vec::new(),
+        qself: None,
+        path: two_segment_path(enum_name, variant_name),
+    })
 }
 
 /// T75: rewrite the first parameter of a [`syn::Signature`] from a typed
@@ -13788,6 +13920,70 @@ fn collect_func_param_names(decls: &[Decl]) -> BTreeMap<String, Vec<String>> {
                 f.params.iter().map(|p| p.name.name.clone()).collect(),
             );
         }
+    }
+    out
+}
+
+/// T85: collect the registry of USER-defined enum variants in this
+/// compilation unit (T85 — fixes the bare-`Red`-vs-`Color::Red` bug).
+///
+/// Returns a [`BTreeMap`] keyed by VARIANT NAME with the owning ENUM NAME
+/// as the value. The map is consulted by `lower_expr` / `lower_pattern`
+/// so that bare variant references (`Red`) lower to the qualified Rust
+/// path (`Color::Red`) — without this, rustc treats a bare `Red` in a
+/// match arm as a fresh binding pattern and a bare `Red` in expression
+/// position as an unresolved identifier.
+///
+/// # Exclusion rules
+///
+/// - **Prelude enums** (`Option`, `Result`): their variants
+///   (`Some`/`None`/`Ok`/`Err`) live in the Rust prelude and MUST stay
+///   unqualified (`Some(5)` not `Option::Some(5)`). The user can still
+///   declare an `enum Option` / `enum Result` (it shadows the prelude
+///   within their crate) but Buff stays out of the way — prelude-name
+///   shadowing is a footgun the user opted into.
+/// - **Collisions**: if the SAME variant name appears in two or more
+///   user-defined enums (e.g. `enum A { X }` and `enum B { X }`), the
+///   entry is REMOVED from the map. An ambiguous bare reference cannot
+///   be auto-qualified; rustc will produce the right "ambiguous" error
+///   and the user must write `A::X` / `B::X` explicitly in Buff source.
+///
+/// Determinism: a [`BTreeMap`] (not [`HashMap`]) is used so iteration
+/// order is independent of hash seed (the T29 flaky-test lesson).
+fn collect_user_enum_variants(decls: &[Decl]) -> BTreeMap<String, String> {
+    // Rust prelude enums whose variants must NOT be auto-qualified.
+    const PRELUDE_ENUMS: &[&str] = &["Option", "Result"];
+    // Two-pass: first collect (variant -> enum) pairs into a Vec so we
+    // can detect collisions; then fold into the BTreeMap, removing any
+    // key that appears more than once. A Vec-of-tuples (not a HashMap)
+    // keeps the input order deterministic for the collision scan.
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for decl in decls {
+        if let Decl::EnumDecl(e) = decl {
+            if PRELUDE_ENUMS.contains(&e.name.name.as_str()) {
+                continue;
+            }
+            for v in &e.variants {
+                pairs.push((v.name.name.clone(), e.name.name.clone()));
+            }
+        }
+    }
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for (variant, enum_name) in &pairs {
+        out.insert(variant.clone(), enum_name.clone());
+    }
+    // Collision removal: any variant name appearing in 2+ distinct enums
+    // is ambiguous and must not be auto-qualified.
+    let mut collisions: BTreeSet<String> = BTreeSet::new();
+    for (i, (v1, e1)) in pairs.iter().enumerate() {
+        for (v2, e2) in pairs.iter().skip(i + 1) {
+            if v1 == v2 && e1 != e2 {
+                collisions.insert(v1.clone());
+            }
+        }
+    }
+    for c in &collisions {
+        out.remove(c);
     }
     out
 }
