@@ -129,10 +129,52 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     })
 }
 
-/// Parse a single pattern (T27, extended in T71).
+/// Parse a single pattern (T27, extended in T71 and T39).
 ///
-/// This parser is shared by `match` arms and `let`-destructuring bindings, so
-/// extending it benefits both contexts.
+/// This is the PUBLIC entry point shared by `match` arms and `let`-
+/// destructuring bindings. It parses ONE atomic pattern via
+/// [`parse_pattern_atom`], then — when a `|` follows (T39 or-patterns) —
+/// greedily consumes `| atom | atom | ...` and wraps the result in a
+/// [`Pattern::Or`]. The `|` handling lives HERE (the wrapper), not in
+/// [`parse_pattern_atom`], so every recursive subpattern position
+/// (variant tuples, tuple patterns, struct fields) inherits or-pattern
+/// support automatically: a subpattern call goes through this wrapper,
+/// so `Ok(Red | Green)` and `Some(1 | 2)` parse correctly.
+///
+/// The `|` token is unambiguous in pattern position: Buff closures use
+/// `{ params => body }` (FatArrow, no pipes), and `||`/`|>` are expression-
+/// level operators that never appear inside a pattern. So a lone `Pipe`
+/// after a pattern unambiguously introduces an or-pattern alternative.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if a subpattern fails to parse or a closing
+/// delimiter (`)` or `}`) is missing.
+pub fn parse_pattern(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError> {
+    let source_id = stream.source_id();
+    let first = parse_pattern_atom(stream)?;
+    // T39: or-pattern `A | B | C`. Only enter the loop when a `|` follows;
+    // the common single-pattern case returns immediately (zero peek cost
+    // when there is no `|`, and byte-identical AST to pre-T39).
+    if !matches!(stream.peek_kind(), Some(TokenKind::Pipe)) {
+        return Ok(first);
+    }
+    let start = first.span().start;
+    let mut alts = vec![first];
+    while matches!(stream.peek_kind(), Some(TokenKind::Pipe)) {
+        stream.advance(); // consume `|`
+        alts.push(parse_pattern_atom(stream)?);
+    }
+    let end = alts
+        .last()
+        .map(|p| p.span().end)
+        .unwrap_or_else(|| stream.eof_span().end);
+    Ok(Pattern::Or(alts, Span::new(start, end, source_id)))
+}
+
+/// Parse a single ATOMIC pattern — the inner helper that does NOT consume a
+/// trailing `|` chain (T39). See [`parse_pattern`] for the public wrapper
+/// that adds or-pattern support.
 ///
 /// Supported shapes:
 /// - `_` — wildcard. Emits [`Pattern::Wildcard`].
@@ -152,15 +194,15 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 ///   the sign here so downstream codegen sees a plain `Literal::Int(-N)`).
 ///
 /// Subpatterns inside a variant tuple / tuple pattern / struct field
-/// recursively call `parse_pattern`, so nesting (`Ok(Err(_))`, `(a, (b, c))`,
-/// `Outer { inner: Inner { x } }`) works. Trailing comma is allowed in all
-/// delimited forms.
+/// recursively call `parse_pattern` (the wrapper), so nesting
+/// (`Ok(Err(_))`, `(a, (b, c))`, `Outer { inner: Inner { x } }`,
+/// `Some(1 | 2)`) works. Trailing comma is allowed in all delimited forms.
 ///
 /// # Errors
 ///
 /// Returns [`ParseError`] if a subpattern fails to parse or a closing
 /// delimiter (`)` or `}`) is missing.
-pub fn parse_pattern(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError> {
+fn parse_pattern_atom(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseError> {
     let source_id = stream.source_id();
     // Wildcard `_`. The lexer produces this as `Ident("_")` (underscore is a
     // valid identifier character), so we detect the wildcard by matching the

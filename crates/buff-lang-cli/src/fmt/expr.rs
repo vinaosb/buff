@@ -538,6 +538,17 @@ impl<'a> Formatter<'a> {
                 }
                 self.raw(" }");
             }
+            // T39: or-pattern `A | B | C`. Renders with ` | `-separated
+            // alternatives, mirroring the source form (the formatter
+            // round-trips or-patterns byte-faithfully).
+            Pattern::Or(alts, _) => {
+                for (i, p) in alts.iter().enumerate() {
+                    if i > 0 {
+                        self.raw(" | ");
+                    }
+                    self.write_pattern(p);
+                }
+            }
         }
     }
 }

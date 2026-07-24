@@ -769,6 +769,30 @@ impl RustCodegen {
                     rest: None,
                 })
             }
+            Pattern::Or(alts, _) => {
+                // T39: or-pattern `A | B | C`. Lower each alternative via the
+                // shared `lower_pattern` (so nested or-patterns and all other
+                // shapes compose) and build a `syn::Pat::Or`. The leading `|`
+                // is implicit in syn's PatOr (prettyplease emits it between
+                // alternatives). An empty alts vec is a parser invariant
+                // violation (parse_pattern always pushes ≥2); defensively
+                // fall back to Wild to avoid a panic.
+                if alts.len() < 2 {
+                    return Ok(Pat::Wild(syn::PatWild {
+                        attrs: Vec::new(),
+                        underscore_token: Default::default(),
+                    }));
+                }
+                let mut cases: Punctuated<Pat, syn::Token![|]> = Punctuated::new();
+                for alt in alts {
+                    cases.push(self.lower_pattern(alt, mutable)?);
+                }
+                Pat::Or(syn::PatOr {
+                    attrs: Vec::new(),
+                    leading_vert: None,
+                    cases,
+                })
+            }
         };
         Ok(syn_pat)
     }

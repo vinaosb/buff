@@ -753,6 +753,21 @@ pub enum Pattern {
         fields: Vec<(Ident, Pattern)>,
         span: Span,
     },
+    /// An or-pattern: `Red | Green | Blue` (T39 — v1.25 language-features
+    /// batch).
+    ///
+    /// Two-or-more alternatives separated by `|`, matching when ANY
+    /// alternative matches. Mirrors Rust's or-pattern syntax 1:1. The
+    /// alternatives are themselves [`Pattern`]s, so nesting
+    /// (`Some(1 | 2)`, `Ok(Red) | Err(Blue)`) composes — each subpattern
+    /// position recursively calls `parse_pattern`, which itself accepts a
+    /// trailing `| ...` chain.
+    ///
+    /// Bindings across alternatives must agree (Rust requires the same set
+    /// of bindings in each arm of an or-pattern); Buff defers this check to
+    /// rustc (which enforces it at match lowering). The span covers the whole
+    /// `A | B | C` sequence.
+    Or(Vec<Pattern>, Span),
 }
 
 impl Pattern {
@@ -767,7 +782,8 @@ impl Pattern {
             | Pattern::Ident(_, s)
             | Pattern::Variant { span: s, .. }
             | Pattern::Tuple(_, s)
-            | Pattern::Struct { span: s, .. } => *s,
+            | Pattern::Struct { span: s, .. }
+            | Pattern::Or(_, s) => *s,
         }
     }
 
@@ -789,7 +805,8 @@ impl Pattern {
             Pattern::Wildcard(_)
             | Pattern::Literal(_, _)
             | Pattern::Tuple(_, _)
-            | Pattern::Struct { .. } => None,
+            | Pattern::Struct { .. }
+            | Pattern::Or(_, _) => None,
         }
     }
 
@@ -814,6 +831,12 @@ impl Pattern {
             Pattern::Struct { fields, .. } => {
                 fields.iter().flat_map(|(_, p)| p.bindings()).collect()
             }
+            // T39: an or-pattern's bindings are the union of each
+            // alternative's bindings. (Rust requires all alternatives to bind
+            // the SAME names; Buff defers that consistency check to rustc.
+            // For inference purposes we return the flattened union —
+            // duplicates are harmless as they collapse to the same binding.)
+            Pattern::Or(alts, _) => alts.iter().flat_map(Pattern::bindings).collect(),
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => Vec::new(),
         }
     }
@@ -863,6 +886,17 @@ impl fmt::Display for Pattern {
                     write!(f, "{fname}: {p}")?;
                 }
                 f.write_str(" }}")
+            }
+            // T39: or-pattern `A | B | C`. Renders with ` | `-separated
+            // alternatives, mirroring the source form.
+            Pattern::Or(alts, _) => {
+                for (i, p) in alts.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" | ")?;
+                    }
+                    write!(f, "{p}")?;
+                }
+                Ok(())
             }
         }
     }

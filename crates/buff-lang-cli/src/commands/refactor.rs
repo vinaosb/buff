@@ -330,6 +330,13 @@ impl RenameWalker {
                     self.rename_pattern(sub);
                 }
             }
+            // T39: recurse into each or-pattern alternative so a rename
+            // inside `Red | Some(x)` reaches the `x` binding.
+            Pattern::Or(alts, _) => {
+                for alt in alts {
+                    self.rename_pattern(alt);
+                }
+            }
             _ => {}
         }
     }
