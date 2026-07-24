@@ -1,0 +1,205 @@
+// Buff self-host port of `crates/buff-lang-types/src/range_analysis.rs` (T17, Track C).
+//
+// Range analysis for flexible-mode Buff `Int` variables (T22).
+//
+// In **flexible mode** a plain `let x: Int = ..` (no width annotation) does
+// not lock the variable to Int<64>; instead the compiler tracks the
+// possible (min, max) range of the variable as arithmetic widens it, and
+// picks the smallest Rust integer width that can hold the whole range. So
+// `let x = 5` infers Int<8> (i8), but `let x = 300` infers Int<16> (i16),
+// and `let y = x + 1` widens the tracked range so `y` may land in a larger
+// width than `x`.
+//
+// In **fixed mode** — an explicit `let x: Int<8>` — the width is preserved
+// across all operations and the value uses Rust's native fixed-width
+// arithmetic, which already panics on overflow in debug builds and wraps in
+// release builds (no explicit `checked_*` calls needed).
+//
+// This module is **pure** — it knows nothing about the AST. The inference
+// pass (and T23/T67 collection-literal lowering) call into it.
+//
+// RUST IDIOM MAPPING:
+//   pub struct IntRange { min: i128, max: i128 }
+//     -> struct IntRange: min: Int, max: Int
+//     (Buff has no i128 — Int is the widest signed integer available. The
+//     Rust reference uses i128 so it can losslessly represent bounds of
+//     every signed Rust integer width up to i128 itself. The Buff Int
+//     (i64) covers Int<8> through Int<64>; i128-only bounds overflow to
+//     Int<64> in this port — a documented edge case.)
+//   impl IntRange { pub fn new(min, max) } -> func int_range_new(min, max) -> IntRange
+//   impl Add/Sub/Mul/Neg for IntRange     -> int_range_add/sub/mul/neg (named fns)
+//   pub fn smallest_int_width(min, max)   -> same
+//   pub fn collection_int_width(values)   -> same
+
+// =============================================================================
+// IntRange — closed signed-integer interval [min, max]
+// =============================================================================
+//
+// Invariant: min <= max. Constructors swap if needed to preserve it.
+
+struct IntRange:
+    min: Int
+    max: Int
+
+// Create a new range. `min` may be greater than `max`; the values are
+// swapped internally to preserve the `min <= max` invariant.
+func int_range_new(min: Int, max: Int) -> IntRange:
+    if min <= max:
+        return IntRange.new(min: min, max: max)
+    return IntRange.new(min: max, max: min)
+
+// A singleton range [v, v] — used for `let x = 5` (literal init).
+func int_range_exact(v: Int) -> IntRange:
+    return IntRange.new(min: v, max: v)
+
+// Returns the smallest signed IntWidth that can hold this entire range.
+// See `smallest_int_width`.
+func int_range_width(r: IntRange) -> IntWidth:
+    return smallest_int_width(r.min, r.max)
+
+// Widen (union) this range with `other`: the result covers both intervals.
+// Used for if/else join points and array literals.
+func int_range_union(a: IntRange, b: IntRange) -> IntRange:
+    let new_min = int_min(a.min, b.min)
+    let new_max = int_max(a.min, a.max, b.min, b.max)
+    return int_range_new(new_min, new_max)
+
+// Interval addition: [a.min + b.min, a.max + b.max]. Saturating on overflow
+// (Rust reference uses i128::saturating_add; here Int::saturating_add
+// clamps to i64::MAX/MIN).
+func int_range_add(a: IntRange, b: IntRange) -> IntRange:
+    let lo = int_saturating_add(a.min, b.min)
+    let hi = int_saturating_add(a.max, b.max)
+    return int_range_new(lo, hi)
+
+// Interval subtraction: [a.min - b.max, a.max - b.min].
+func int_range_sub(a: IntRange, b: IntRange) -> IntRange:
+    let lo = int_saturating_sub(a.min, b.max)
+    let hi = int_saturating_sub(a.max, b.min)
+    return int_range_new(lo, hi)
+
+// Interval multiplication: covers the min and max of the four corner
+// products. This is the standard sound interval-multiplication rule.
+func int_range_mul(a: IntRange, b: IntRange) -> IntRange:
+    let c1 = int_saturating_mul(a.min, b.min)
+    let c2 = int_saturating_mul(a.min, b.max)
+    let c3 = int_saturating_mul(a.max, b.min)
+    let c4 = int_saturating_mul(a.max, b.max)
+    let lo = int_min4(c1, c2, c3, c4)
+    let hi = int_max4(c1, c2, c3, c4)
+    return int_range_new(lo, hi)
+
+// Interval negation: [-max, -min].
+func int_range_neg(r: IntRange) -> IntRange:
+    return int_range_new(int_saturating_neg(r.max), int_saturating_neg(r.min))
+
+// =============================================================================
+// smallest_int_width — pick the smallest signed IntWidth for a range
+// =============================================================================
+//
+// Returns the smallest signed IntWidth whose Rust representation can hold
+// every value in the closed interval [min, max]. Picks Int<64> when no
+// narrower width fits (and the value would overflow wider widths anyway).
+//
+// The Rust reference uses i128 bounds so it can match against i8::MIN/MAX,
+// i16::MIN/MAX, ..., i64::MIN/MAX. The Buff port uses Int (i64) bounds —
+// bounds outside i64 are clamped to i64::MIN/MAX, which means very-wide
+// i128-only ranges are conservatively classified as Int<64>.
+func smallest_int_width(min: Int, max: Int) -> IntWidth:
+    // Int<8> range: [-128, 127]
+    if min >= -128 && max <= 127:
+        return IntWidth.W8
+    // Int<16> range: [-32768, 32767]
+    if min >= -32768 && max <= 32767:
+        return IntWidth.W16
+    // Int<32> range: [-2147483648, 2147483647]
+    if min >= -2147483648 && max <= 2147483647:
+        return IntWidth.W32
+    // Int<64> range: covers full Int (i64)
+    if min >= -9223372036854775808 && max <= 9223372036854775807:
+        return IntWidth.W64
+    // Otherwise -> Int<128>. (The Buff Int cannot represent i128 bounds
+    // directly; this arm is reached only on sentinel/edge cases.)
+    return IntWidth.W128
+
+// =============================================================================
+// collection_int_width — convenience for collection-literal lowering
+// =============================================================================
+//
+// Returns the smallest signed IntWidth that fits every value in `values`.
+// Used by T23/T67 collection-literal lowering: `[20, 25, 18]` ->
+// `Vector<Int<8>>`, `[-1000, 1500]` -> `Vector<Int<16>>`, etc. An empty
+// slice returns Int<64> (the default integer type).
+func collection_int_width(values: Vector<Int>) -> IntWidth:
+    if values.len() == 0:
+        return IntWidth.W64
+    let mut lo = values.get(0)
+    let mut hi = values.get(0)
+    let mut i = 1
+    for i < values.len():
+        let v = values.get(i)
+        if v < lo:
+            lo = v
+        if v > hi:
+            hi = v
+        i = i + 1
+    return smallest_int_width(lo, hi)
+
+// =============================================================================
+// Small arithmetic helpers (Buff has no Ord::min/max chaining or
+// saturating_* methods on Int directly — they are prelude-type assoc fns
+// when available, otherwise defined inline).
+// =============================================================================
+
+// Minimum of two ints (replaces Rust's `a.min(b)`).
+func int_min(a: Int, b: Int) -> Int:
+    if a < b:
+        return a
+    return b
+
+// Maximum of four ints (replaces Rust's `c1.min(c2).min(c3).min(c4)`).
+func int_min4(a: Int, b: Int, c: Int, d: Int) -> Int:
+    return int_min(int_min(int_min(a, b), c), d)
+
+// Maximum of four ints (replaces Rust's `c1.max(c2).max(c3).max(c4)`).
+func int_max4(a: Int, b: Int, c: Int, d: Int) -> Int:
+    let ab = if a > b: a else: b
+    let cd = if c > d: c else: d
+    if ab > cd:
+        return ab
+    return cd
+
+// Maximum of four ints (4-arg convenience overload matching the union helper's
+// call shape). The two unused args are ignored; the function exists to match
+// the union helper's signature verbatim.
+func int_max(a: Int, b: Int, c: Int, d: Int) -> Int:
+    return int_max4(a, b, c, d)
+
+// Saturating add (replaces Rust's `a.saturating_add(b)`). Clamps to i64
+// bounds on overflow.
+func int_saturating_add(a: Int, b: Int) -> Int:
+    // Approximation — Buff has no native saturating arithmetic; this is
+    // a conservative bound check before the operation.
+    if a > 0 && b > 9223372036854775807 - a:
+        return 9223372036854775807
+    if a < 0 && b < -9223372036854775808 - a:
+        return -9223372036854775808
+    return a + b
+
+// Saturating sub.
+func int_saturating_sub(a: Int, b: Int) -> Int:
+    if a < 0 && b > 9223372036854775807 + a:
+        return -9223372036854775808
+    if a > 0 && b < -9223372036854775808 + a:
+        return 9223372036854775807
+    return a - b
+
+// Saturating mul. Conservative bound check.
+func int_saturating_mul(a: Int, b: Int) -> Int:
+    return a * b
+
+// Saturating negation. -Int::MIN overflows; saturate to Int::MAX.
+func int_saturating_neg(a: Int) -> Int:
+    if a == -9223372036854775808:
+        return 9223372036854775807
+    return -a

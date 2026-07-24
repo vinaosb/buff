@@ -1,0 +1,216 @@
+// Buff self-host port of `crates/buff-lang-types/src/promote.rs` (T17, Track C).
+//
+// Numeric promotion rules for the Buff type system.
+//
+// `promote_binary(lhs, rhs)` computes the result type of a binary operation
+// between two numeric (or compatible) types, applying the language's implicit
+// widening / coercion rules.
+//
+// `assignable_to(annotated, value)` returns true if a value of type `value`
+// can be assigned to a binding annotated with `annotated`.
+//
+// RUST IDIOM MAPPING:
+//   pub fn promote_binary(lhs: &Type, rhs: &Type) -> Option<Type>
+//     -> func promote_binary(lhs: Type, rhs: Type) -> Type
+//     (Type.Unknown replaces Option.None — preserves the "did not promote"
+//     signal as a sentinel value; callers test `result != type_unknown()`
+//     to check for success)
+//   pub fn assignable_to(annotated: &Type, value: &Type) -> bool
+//     -> func assignable_to(annotated: Type, value: Type) -> Bool
+//   fn max_int(a: IntWidth, b: IntWidth) -> IntWidth  (private helper)
+//     -> func max_int(a: IntWidth, b: IntWidth) -> IntWidth  (no privates
+//        in Buff; helper becomes a regular free fn)
+//   match (lhs, rhs) { (Unknown, _) | (_, Unknown) => .. }
+//     -> chained if/else on equality (Buff match arms cannot destructure
+//        tuples)
+
+// =============================================================================
+// promote_binary — the binary-op result-type promotion matrix
+// =============================================================================
+//
+// Computes the result type of applying a binary operator to two types.
+// Returns Type.Unknown when the operands are incompatible (e.g.
+// `Int + String`).
+//
+// ## Rules (highest precedence first)
+// - Decimal dominates all numeric types (Decimal + Int -> Decimal).
+// - Double dominates all non-decimal numerics (Double + Float -> Double).
+// - Float dominates integers (Float + Int -> Float, max width wins).
+// - Two integers promote to the wider one (Int<32> + Int<64> -> Int<64>);
+//   when signedness differs, the signed (Int) width wins.
+// - Bool/String combine only with themselves.
+// - Unknown combines with anything, yielding Unknown (suppresses error
+//   cascades after a prior type error).
+//
+// The Rust reference uses tuple-pattern match `(Unknown, _) | (_, Unknown)
+// => Some(Unknown)`. Buff match arms cannot destructure tuples, so the
+// dispatch is a chained if/else over equality on each axis.
+func promote_binary(lhs: Type, rhs: Type) -> Type:
+    // --- Unknown suppresses cascading errors ---
+    if lhs == type_unknown() || rhs == type_unknown():
+        return type_unknown()
+
+    // --- Same simple types ---
+    if lhs == type_bool() && rhs == type_bool():
+        return type_bool()
+    if lhs == type_string() && rhs == type_string():
+        return type_string()
+    if lhs == type_void() && rhs == type_void():
+        return type_void()
+
+    // --- Decimal dominates all numerics ---
+    // (Decimal, other_numeric) OR (other_numeric, Decimal) -> Decimal.
+    if lhs == type_decimal():
+        if type_is_numeric(rhs):
+            return type_decimal()
+    if rhs == type_decimal():
+        if type_is_numeric(lhs):
+            return type_decimal()
+
+    // --- Double dominates non-decimal numerics ---
+    if lhs == type_double():
+        if type_is_numeric(rhs) && rhs != type_decimal():
+            return type_double()
+    if rhs == type_double():
+        if type_is_numeric(lhs) && lhs != type_decimal():
+            return type_double()
+
+    // --- Float vs Float — max width ---
+    if type_is_float_like(lhs) && type_is_float_like(rhs):
+        if lhs != type_decimal() && rhs != type_decimal():
+            // Both are Float(w) variants (Double handled above). Extract
+            // widths via match and produce a Float with the max width.
+            return promote_float_pair(lhs, rhs)
+
+    // --- Float vs integer — Float wins (widen) ---
+    if type_is_float_like(lhs) && type_is_integer_like(rhs):
+        return lhs
+    if type_is_integer_like(lhs) && type_is_float_like(rhs):
+        return rhs
+
+    // --- Int vs Int — signed, max width ---
+    if type_is_integer_like(lhs) && type_is_integer_like(rhs):
+        return promote_int_pair(lhs, rhs)
+
+    // --- Incompatible (e.g. Bool + Int, String + Int, user-type + scalar) ---
+    return type_unknown()
+
+// Helper for Float vs Float promotion (max width wins).
+func promote_float_pair(lhs: Type, rhs: Type) -> Type:
+    let lw = float_width_of(lhs)
+    let rw = float_width_of(rhs)
+    if lw == IntWidth.W64 || rw == IntWidth.W64:
+        return Type.Float(FloatWidth.W64)
+    if lw == IntWidth.W32 || rw == IntWidth.W32:
+        return Type.Float(FloatWidth.W32)
+    return Type.Float(FloatWidth.W16)
+
+// Helper for Int vs Int / Bits vs Bits / Int vs Bits promotion. The Rust
+// reference has 4 sub-rules: Int-Int -> Int(max_width); Bits-Bits ->
+// Bits(max_width); Int-Bits -> Int(int_width) [signed wins]; Bits-Int ->
+// Int(int_width) [symmetric]. Dispatch via a match on (lhs, rhs).
+func promote_int_pair(lhs: Type, rhs: Type) -> Type:
+    return match lhs {
+        Type.Int(w1) => promote_int_int(w1, rhs),
+        Type.Bits(w1) => promote_bits_int(w1, rhs),
+        _ => type_unknown(),
+    }
+
+// Dispatch for `Int(w1) op rhs`.
+func promote_int_int(w1: IntWidth, rhs: Type) -> Type:
+    return match rhs {
+        Type.Int(w2) => Type.Int(max_int(w1, w2)),
+        Type.Bits(_) => Type.Int(w1),
+        _ => type_unknown(),
+    }
+
+// Dispatch for `Bits(w1) op rhs`.
+func promote_bits_int(w1: IntWidth, rhs: Type) -> Type:
+    return match rhs {
+        Type.Bits(w2) => Type.Bits(max_int(w1, w2)),
+        Type.Int(w2) => Type.Int(w2),
+        _ => type_unknown(),
+    }
+
+// Extract the FloatWidth from a Float(w) type (Double -> W64). Sentinel
+// W32 on contract violation.
+func float_width_of(t: Type) -> IntWidth:
+    return match t {
+        Type.Float(w) => w,
+        Type.Double => IntWidth.W64,
+        _ => IntWidth.W32,
+    }
+
+// =============================================================================
+// assignable_to — type-assignment compatibility
+// =============================================================================
+//
+// Returns true if a value of type `value` can be assigned to a binding
+// annotated with `annotated`.
+//
+// - Equality always passes.
+// - Numeric widening passes when `value` promotes up to `annotated` (e.g.
+//   Int -> Float, Int -> Double, Float -> Double). Narrowing (e.g.
+//   Float -> Int) is rejected.
+//
+// ## T28 — Option assignment rules
+//
+// Option<T> is treated COVARIANTLY in its inner type for assignment:
+// - None (which infers as Option<Unknown>) assigns to ANY Option<T>,
+//   because the empty case carries no inner evidence (the annotation pins
+//   T).
+// - Option<U> assigns to Option<T> when U assigns to T (recursive).
+//
+// This lets `let x: Option<Int> = None` and `let x: Option<String> =
+// Some("hi")` both type-check, while `let y: Int = some_option` is still
+// rejected (the bare-target case falls through to the numeric promote path,
+// which returns Unknown for an Option value and triggers the null-safety
+// diagnostic in the inferencer).
+func assignable_to(annotated: Type, value: Type) -> Bool:
+    if annotated == value:
+        return true
+    // T28: Option<T> covariance + None (Option<Unknown>) assigns to any Option.
+    let ann_inner = type_option_inner(annotated)
+    let val_inner = type_option_inner(value)
+    if ann_inner != type_unknown() && val_inner != type_unknown():
+        // Both are Option<T>. None (Option<Unknown>) is the empty case —
+        // it fits any Option<T>.
+        if val_inner == type_unknown():
+            return true
+        // Otherwise the inner types must be assignable (covariant Option).
+        return assignable_to(ann_inner, val_inner)
+    // Numeric widening via promote_binary. The Rust reference's promote
+    // returns Some(promoted) then checks `promoted == annotated`. Here
+    // promote returns Type.Unknown on failure — test for that.
+    let promoted = promote_binary(annotated, value)
+    if promoted == type_unknown():
+        return false
+    return promoted == annotated
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+// Maximum of two integer widths (by bit count). Used by promote_int_pair.
+func max_int(a: IntWidth, b: IntWidth) -> IntWidth:
+    if int_width_bits(a) >= int_width_bits(b):
+        return a
+    return b
+
+// Maximum of two float widths (by bit count). Used by promote_float_pair.
+// (Kept for parity with the Rust reference; the dispatch above currently
+// uses a chain of if/else on W64/W32/W16, but the helper is the canonical
+// shape and a future refactor can fold both.)
+func max_float(a: FloatWidth, b: FloatWidth) -> FloatWidth:
+    if float_width_bits(a) >= float_width_bits(b):
+        return a
+    return b
+
+// Extract the inner Type from Option(inner). Returns Type.Unknown if `t`
+// is not an Option. (Replaces the Rust reference's `if let (Option(a),
+// Option(v)) = (annotated, value)` destructuring.)
+func type_option_inner(t: Type) -> Type:
+    return match t {
+        Type.Option(inner) => inner,
+        _ => type_unknown(),
+    }

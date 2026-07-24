@@ -1,0 +1,345 @@
+// Buff self-host port of `crates/buff-lang-types/src/multi_dispatch.rs` (T17, Track C).
+//
+// T58 — Multiple Dispatch for Numerical APIs (Julia-inspired).
+//
+// Compile-time dispatch on ALL argument types, not just the receiver. A
+// group of free functions sharing the same name with different argument
+// type signatures forms a "multi-dispatch group". At a call site, the
+// compiler infers each argument's type and selects the unique matching
+// impl. Single-dispatch is the special case (group size 1) — unchanged
+// from pre-T58 behaviour.
+//
+// # Design (backward-compatible)
+//
+// - A name forms a multi-dispatch group ONLY if **2+ free funcs share it**
+//   in the same compilation unit. A lone `func foo(a: Int)` does NOT form
+//   a group and bypasses the dispatcher entirely (preserves the existing
+//   unmangled Rust name so all pre-T58 code keeps compiling identically).
+// - At codegen, multi-dispatch group impls are MANGLED as
+//   `<name>_<argTy1>_<argTy2>_...` so each impl lowers to a unique Rust
+//   free function. Call sites emit the mangled name selected by the
+//   dispatcher.
+// - All matching is on TYPES (not values); all dispatch is COMPILE-TIME
+//   (no runtime vtable, no dynamic dispatch).
+//
+// # Errors (existing E12xx range, no new variants)
+//
+// - 0 matching impls for a call -> E1201 (UndefinedVariable: "no matching
+//   impl").
+// - 2+ equally-matching impls for a call -> E1202 (BinaryOpTypeMismatch:
+//   "ambiguous dispatch").
+//
+// # Mangling scheme
+//
+// `<buff_name>_<arg1_ty>_<arg2_ty>_...` where each `<argN_ty>` is the
+// lowercased base primitive name (int, float, string, bool, vector, matrix,
+// option, result, decimal, double, char, byte, user-defined-type names).
+// Nested generics collapse to the base name (so Vector<Int> and
+// Vector<Float> both -> vector); the 2+ arity of a group guarantees
+// uniqueness even with collapsed names when each impl's param ARITY or
+// param BASE-TYPE-SEQUENCE differs.
+//
+// Mangling is deterministic (driven by declaration source order +
+// canonicalised type tokens via BTreeMap/BTreeSet), so the same Buff
+// source always produces byte-identical Rust (the T29 flaky-test lesson).
+//
+// RUST IDIOM MAPPING:
+//   pub struct MultiDispatchMethod { ... } -> struct MultiDispatchMethod: ...
+//   pub struct MultiDispatchTable { groups: BTreeMap<...> }
+//     -> struct MultiDispatchTable: groups: Map<String, Vector<MultiDispatchMethod>>
+//   impl MultiDispatchTable { pub fn build(&[Decl]) }
+//     -> func multi_dispatch_table_build(decls: Vector<Decl>) -> MultiDispatchTable
+//   pub fn is_group(&self, name) -> bool
+//     -> func multi_dispatch_is_group(table: MultiDispatchTable, name: String) -> Bool
+//   pub fn method_for_decl(&self, f: &FuncDecl) -> Option<&MultiDispatchMethod>
+//     -> func multi_dispatch_method_for_decl(table: MultiDispatchTable, f: FuncDecl) -> Option<MultiDispatchMethod>
+//   pub fn resolve_call(...) -> Result<MultiDispatchMethod, TypeError>
+//     -> func multi_dispatch_resolve_call(...) -> Result<MultiDispatchMethod, TypeError>
+//   fn mangle(name, param_types) -> String -> func mangle(name, param_types) -> String
+
+// =============================================================================
+// MultiDispatchMethod — one impl inside a multi-dispatch group
+// =============================================================================
+//
+// Carries the resolved param types and the resolved return type so the
+// dispatcher can match arguments and report the inferred call type. The
+// `mangled_name` is the unique Rust free-fn name this impl lowers to.
+
+struct MultiDispatchMethod:
+    param_types: Vector<Type>
+    return_type: Type
+    mangled_name: String
+
+// =============================================================================
+// MultiDispatchTable — registry of all multi-dispatch groups in a unit
+// =============================================================================
+//
+// Keyed by Buff function name. **Only names with 2+ impls are present** —
+// a lone `func foo(a: Int)` does NOT form a multi-dispatch group and
+// bypasses the dispatcher entirely (preserving backward compatibility with
+// pre-T58 unmangled codegen).
+//
+// Built once at the start of codegen / type-checking from the top-level
+// declaration list. Lookups are O(N) where N is the number of impls in the
+// group (typically tiny — 2-5 impls in practice).
+
+struct MultiDispatchTable:
+    groups: Map<String, Vector<MultiDispatchMethod>>
+
+// =============================================================================
+// Build the table from a declaration list
+// =============================================================================
+//
+// Free functions sharing a name with 2+ impls form a group; lone impls are
+// NOT registered (so they go through the existing single-dispatch codegen
+// path unchanged).
+//
+// DETERMINISM: declarations are walked in source order, the Map keys
+// iterate deterministically, and the per-group impl vector preserves source
+// order. The same `Vector<Decl>` always produces a byte-identical table
+// (the T29 flaky-test lesson).
+//
+// SCOPE NOTE: The Rust reference walks `&[Decl]` and matches on
+// `Decl::FuncDecl(f)`. Buff has no `if let` and no AST enums to
+// destructure here; the port accepts the equivalent AST shape
+// (`Vector<FuncDecl>` already extracted by the caller). A thin wrapper in
+// the inferencer wraps the FuncDecl extraction.
+func multi_dispatch_table_build(funcs_by_name: Map<String, Vector<FuncDecl>>) -> MultiDispatchTable:
+    let groups = Map.new()
+    let names = map_keys(funcs_by_name)
+    let mut i = 0
+    for i < names.len():
+        let name = names.get(i)
+        let funcs_opt = funcs_by_name.get(name)
+        if funcs_opt == Option.None:
+            i = i + 1
+            continue
+        let funcs = unwrap_func_decl_vec(funcs_opt)
+        // Skip single-impl names: NOT a multi-dispatch group. The existing
+        // unmangled path handles them — backward compat.
+        if funcs.len() < 2:
+            i = i + 1
+            continue
+        let methods = Vector.new()
+        let mut j = 0
+        for j < funcs.len():
+            let f = funcs.get(j)
+            let param_types = extract_param_types(f)
+            let return_type = extract_return_type(f)
+            let mangled = mangle(name, param_types)
+            methods.push(MultiDispatchMethod.new(
+                param_types: param_types,
+                return_type: return_type,
+                mangled_name: mangled,
+            ))
+            j = j + 1
+        groups.set(name, methods)
+        i = i + 1
+    return MultiDispatchTable.new(groups: groups)
+
+// =============================================================================
+// Lookups
+// =============================================================================
+
+// Is `name` a multi-dispatch group? (Used by codegen to short-circuit the
+// existing single-impl lowering path — when false, the caller uses the
+// unmangled name unchanged.)
+func multi_dispatch_is_group(table: MultiDispatchTable, name: String) -> Bool:
+    let opt = table.groups.get(name)
+    return opt != Option.None
+
+// Returns the method at the given source-order index for the named group.
+// Used by codegen's lower_func to look up the mangled name for the FuncDecl
+// being lowered (callers locate the index by matching the FuncDecl's param
+// types against the group's methods).
+func multi_dispatch_method_for_decl(table: MultiDispatchTable, f: FuncDecl) -> Option<MultiDispatchMethod>:
+    let methods_opt = table.groups.get(func_decl_name(f))
+    if methods_opt == Option.None:
+        return Option.None
+    let methods = unwrap_method_vec(methods_opt)
+    let target_param_types = extract_param_types(f)
+    // Source-order-preserving search: the FIRST method whose param types
+    // match the decl's signature. Identical signatures inside a group are
+    // illegal Buff (and a future hard error); for now, first-match gives
+    // deterministic behaviour.
+    let mut i = 0
+    for i < methods.len():
+        let m = methods.get(i)
+        if vector_types_equal(m.param_types, target_param_types):
+            return Option.Some(m)
+        i = i + 1
+    return Option.None
+
+// =============================================================================
+// Resolve a call to a multi-dispatch group
+// =============================================================================
+//
+// Given the table, the called name, and the resolved arg types at the call
+// site, return the unique matching MultiDispatchMethod.
+//
+// - 0 matching impls -> Result.Err with "no matching impl" (E1201).
+// - 2+ equally-matching impls -> Result.Err with "ambiguous dispatch"
+//   (E1202).
+// - 1 unique matching impl -> Result.Ok with that method.
+//
+// Matching is structural-equality on the resolved arg types (assignment-
+// compatible per the assignable_to rules — see promote.buff).
+func multi_dispatch_resolve_call(table: MultiDispatchTable, name: String, arg_types: Vector<Type>) -> Result<MultiDispatchMethod, TypeError>:
+    let methods_opt = table.groups.get(name)
+    if methods_opt == Option.None:
+        return Result.Err(type_error_new("E1201: no matching impl for `" + name + "`"))
+    let methods = unwrap_method_vec(methods_opt)
+    let mut matches = Vector.new()
+    let mut i = 0
+    for i < methods.len():
+        let m = methods.get(i)
+        if vector_types_assignable(m.param_types, arg_types):
+            matches.push(m)
+        i = i + 1
+    if matches.len() == 0:
+        return Result.Err(type_error_new("E1201: no matching impl for `" + name + "` with given arg types"))
+    if matches.len() > 1:
+        return Result.Err(type_error_new("E1202: ambiguous dispatch on `" + name + "` — multiple impls match"))
+    return Result.Ok(matches.get(0))
+
+// =============================================================================
+// Mangling
+// =============================================================================
+//
+// `<buff_name>_<arg1_ty>_<arg2_ty>_...` where each `<argN_ty>` is the
+// lowercased base primitive name. Nested generics collapse to the base
+// name (so Vector<Int> and Vector<Float> both -> vector).
+
+func mangle(name: String, param_types: Vector<Type>) -> String:
+    let mut out = name
+    let mut i = 0
+    for i < param_types.len():
+        out = out + "_" + mangle_token(param_types.get(i))
+        i = i + 1
+    return out
+
+// Lowercase base type name for mangling. Nested generics collapse to the
+// base name (Vector<Int> -> "vector", Option<Bool> -> "option", etc).
+func mangle_token(t: Type) -> String:
+    return match t {
+        Type.Int(_) => return "int",
+        Type.Bits(_) => return "byte",
+        Type.Float(_) => return "float",
+        Type.Double => return "double",
+        Type.Bool => return "bool",
+        Type.String => return "string",
+        Type.Char => return "char",
+        Type.Decimal => return "decimal",
+        Type.Vector(_) => return "vector",
+        Type.Matrix(_) => return "matrix",
+        Type.Option(_) => return "option",
+        Type.Map(_, _) => return "map",
+        Type.Result(_, _) => return "result",
+        Type.Union(_) => return "union",
+        Type.Tuple(_) => return "tuple",
+        Type.User(name, _) => return name,
+        _ => return "t",
+    }
+
+// =============================================================================
+// Small helpers (Buff has no `if let`, no slice-pattern match, no Vec::==
+// on Payload vectors — these wrappers replace the Rust reference's idiom).
+// =============================================================================
+
+// True iff the two Type vectors are element-wise structurally equal.
+func vector_types_equal(a: Vector<Type>, b: Vector<Type>) -> Bool:
+    if a.len() != b.len():
+        return false
+    let mut i = 0
+    for i < a.len():
+        if a.get(i) != b.get(i):
+            return false
+        i = i + 1
+    return true
+
+// True iff each `b[i]` is assignable to `a[i]` (covariant).
+func vector_types_assignable(a: Vector<Type>, b: Vector<Type>) -> Bool:
+    if a.len() != b.len():
+        return false
+    let mut i = 0
+    for i < a.len():
+        if assignable_to(a.get(i), b.get(i)) == false:
+            return false
+        i = i + 1
+    return true
+
+// Extract param types from a FuncDecl. (Helpery on top of buff-lang-ast's
+// FuncDecl — the real implementation lives in the inferencer; this is the
+// shape the table-builder calls.)
+func extract_param_types(f: FuncDecl) -> Vector<Type>:
+    return func_decl_param_types(f)
+
+// Extract the return type from a FuncDecl. Returns Type.Void when no
+// annotation is present.
+func extract_return_type(f: FuncDecl) -> Type:
+    let opt = func_decl_return_type(f)
+    if opt == Option.None:
+        return type_void()
+    return unwrap_type(opt)
+
+// Get the keys of a Map<String, X> as a Vector<String>.
+func map_keys(m: Map<String, FuncDecl>) -> Vector<String>:
+    return m.keys()
+
+// Unwrap helpers (sentinel-on-violation; callers MUST have checked Some).
+func unwrap_func_decl_vec(opt: Option<Vector<FuncDecl>>) -> Vector<FuncDecl>:
+    return match opt {
+        Some(v) => v,
+        None => Vector.new(),
+    }
+
+func unwrap_method_vec(opt: Option<Vector<MultiDispatchMethod>>) -> Vector<MultiDispatchMethod>:
+    return match opt {
+        Some(v) => v,
+        None => Vector.new(),
+    }
+
+func unwrap_type(opt: Option<Type>) -> Type:
+    return match opt {
+        Some(t) => t,
+        None => type_unknown(),
+    }
+
+// =============================================================================
+// AST-declared placeholder shapes
+// =============================================================================
+//
+// The Rust reference imports `buff_lang_ast::{Decl, FuncDecl, TypeRef}` and
+// `buff_lang_error::TypeError`. The Buff self-host port of buff-lang-ast is
+// OUT OF SCOPE for T17 (the types crate is the target). The FuncDecl and
+// TypeError types are declared here as FORWARD-DECLARATION placeholders so
+// the .buff file parses; a future self-host task will replace them with the
+// real ported definitions.
+//
+// These shapes intentionally match the Rust reference's field names so a
+// future drop-in replacement is mechanical.
+
+// Placeholder FuncDecl — mirrors buff_lang_ast::FuncDecl shape.
+// (Replaced when buff-lang-ast self-host port lands.)
+// The Rust reference's full FuncDecl has 6 fields; the multi_dispatch
+// consumer needs only `name`, `params`, `return_type`. The other fields
+// (body, span, attributes, generics, is_async) are present in the Rust
+// source but not consulted by multi_dispatch.
+
+// Placeholder TypeError — mirrors buff_lang_error::TypeError shape.
+struct TypeError:
+    message: String
+    code: String
+
+func type_error_new(message: String) -> TypeError:
+    return TypeError.new(message: message, code: "E1200")
+
+// FuncDecl is opaque from this module's perspective. The real shape lives
+// in the buff-lang-ast self-host port (a future task). The three accessor
+// funcs below are the contract this module requires; the future port
+// provides them.
+//
+// (Declarations omitted — Buff allows forward-referencing free functions
+// declared in other files of the same module group. The inferencer.buff
+// port will declare `func_decl_name`, `func_decl_param_types`, and
+// `func_decl_return_type`.)
