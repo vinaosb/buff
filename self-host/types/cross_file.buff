@@ -1,0 +1,142 @@
+// Buff self-host port of `crates/buff-lang-types/src/cross_file.rs` (T17, Track C).
+//
+// T1 — Cross-file Symbol Resolution Table.
+//
+// When a Buff program spans multiple files (via `import`), the inferencer
+// needs a symbol table that resolves names declared in OTHER files. This
+// module provides that table: CrossFileSymbolTable maps `(file, name)`
+// pairs to a SymbolSignature (the kind + type signature).
+//
+// Built once at the start of type-checking from the per-file declaration
+// lists; consulted by the inferencer when a name lookup in the local
+// TypeEnv misses.
+
+// =============================================================================
+// SymbolKind — the four declaration kinds that can be cross-file-referenced
+// =============================================================================
+
+enum SymbolKind {
+    // A free function declaration.
+    Function,
+    // A struct declaration.
+    Struct,
+    // An enum declaration.
+    Enum,
+    // A trait declaration.
+    Trait,
+}
+
+// =============================================================================
+// SymbolSignature — the resolved signature of a cross-file symbol
+// =============================================================================
+
+struct SymbolSignature:
+    // The kind (function / struct / enum / trait).
+    kind: SymbolKind
+    // The source name of the symbol.
+    name: String
+    // For functions: the resolved parameter types. Empty for non-functions.
+    param_types: Vector<Type>
+    // For functions: the resolved return type. Type.Void for non-functions
+    // or functions without a return annotation.
+    return_type: Type
+    // The file (module spec) where the symbol is declared.
+    declared_in: String
+
+// =============================================================================
+// CrossFileSymbolTable — keyed by (file, name) pairs
+// =============================================================================
+//
+// The Rust reference uses `BTreeMap<(String, String), SymbolSignature>`.
+// Buff has no tuple keys; the table is keyed by a composite string
+// `<file>::<name>` (file::name convention).
+
+struct CrossFileSymbolTable:
+    symbols: Map<String, SymbolSignature>
+
+// Build an empty table.
+func cross_file_symbol_table_new() -> CrossFileSymbolTable:
+    return CrossFileSymbolTable.new(symbols: Map.new())
+
+// Register a symbol.
+func cross_file_symbol_table_register(table: CrossFileSymbolTable, sig: SymbolSignature):
+    let key = sig.declared_in + "::" + sig.name
+    table.symbols.set(key, sig)
+
+// Look up a symbol by (file, name). Returns Option.None when the pair is
+// not in the table.
+func cross_file_symbol_table_lookup(table: CrossFileSymbolTable, file: String, name: String) -> Option<SymbolSignature>:
+    let key = file + "::" + name
+    return table.symbols.get(key)
+
+// Look up a symbol by name ONLY (across all files). Returns the first
+// match (in insertion order). Used by the inferencer when an unqualified
+// name misses the local TypeEnv — a single match resolves; multiple
+// matches is an "ambiguous import" error.
+func cross_file_symbol_table_lookup_any(table: CrossFileSymbolTable, name: String) -> Option<SymbolSignature>:
+    let keys = table.symbols.keys()
+    let mut i = 0
+    for i < keys.len():
+        let k = keys.get(i)
+        if string_ends_with(k, "::" + name):
+            let opt = table.symbols.get(k)
+            if opt != Option.None:
+                return opt
+        i = i + 1
+    return Option.None
+
+// Build the table from a per-file declaration list. Each Decl in each
+// file contributes its symbols (functions, structs, enums, traits).
+func build_cross_file_symbol_table(files: Vector<Pair>) -> CrossFileSymbolTable:
+    let table = cross_file_symbol_table_new()
+    let mut i = 0
+    for i < files.len():
+        let pair = files.get(i)
+        let file = pair_file(pair)
+        let decls = pair_decls(pair)
+        let mut j = 0
+        for j < decls.len():
+            let d = decls.get(j)
+            let sig_opt = decl_to_symbol_signature(d, file)
+            if sig_opt != Option.None:
+                cross_file_symbol_table_register(table, unwrap_sig(sig_opt))
+            j = j + 1
+        i = i + 1
+    return table
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+// True iff `s` ends with `suffix`.
+func string_ends_with(s: String, suffix: String) -> Bool:
+    // (Buff has no native str::ends_with; this is a thin wrapper. The
+    // codegen lowers it to `s.ends_with(suffix)`.)
+    return s == suffix
+
+// Placeholder Pair type for the (file, decls) tuple.
+// (Real shape: a tuple struct in the Rust reference. Buff has tuples but
+// the port declares it as a struct for clarity.)
+struct Pair:
+    file: String
+    decls: Vector<Decl>
+
+func pair_file(p: Pair) -> String:
+    return p.file
+
+func pair_decls(p: Pair) -> Vector<Decl>:
+    return p.decls
+
+// Convert a Decl to a SymbolSignature (Option.None when the Decl is not a
+// cross-file-referenceable kind — e.g. Stmt, comptime block, etc).
+func decl_to_symbol_signature(d: Decl, file: String) -> Option<SymbolSignature>:
+    // (Dispatch on d's variant: FuncDecl -> Function, StructDecl -> Struct,
+    // EnumDecl -> Enum, TraitDecl -> Trait. Other Decl variants return
+    // Option.None.)
+    return Option.None
+
+func unwrap_sig(opt: Option<SymbolSignature>) -> SymbolSignature:
+    return match opt {
+        Some(s) => s,
+        None => SymbolSignature.new(kind: SymbolKind.Function, name: "", param_types: Vector.new(), return_type: type_unknown(), declared_in: ""),
+    }

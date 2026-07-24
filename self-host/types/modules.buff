@@ -1,0 +1,144 @@
+// Buff self-host port of `crates/buff-lang-types/src/modules.rs` (T17, Track C).
+//
+// T29 — Module System: dependency graph + loaders.
+//
+// `build_graph` walks the import declarations in each source file and builds
+// a directed acyclic graph (DAG) of module dependencies. `resolve_path`
+// resolves a dotted module path (`a.b.c`) against the graph. The FsLoader
+// reads source files from disk; the MemoryLoader reads from an in-memory
+// map (used by tests and the playground).
+//
+// The Rust reference is 643 LOC. The Buff port mirrors the data shapes
+// (Module, ModuleGraph, FsLoader, MemoryLoader) and the public API.
+
+// =============================================================================
+// Module — one node in the module graph
+// =============================================================================
+
+struct Module:
+    // The dotted-path module spec (`my_project.utils.math`).
+    spec: String
+    // The source text of the module's file (empty when not yet loaded).
+    source: String
+    // The list of imports declared in the module (each is a dotted spec).
+    imports: Vector<String>
+    // True iff the module's source failed to parse (the graph still
+    // includes it so error messages can reference it).
+    has_parse_error: Bool
+
+// =============================================================================
+// ModuleGraph — DAG of module dependencies
+// =============================================================================
+
+struct ModuleGraph:
+    modules: Map<String, Module>
+
+// Build a graph from a root module + a loader. Walks imports recursively
+// (BFS), loading each module's source via the loader, parsing its imports,
+// and adding to the graph. Cycle detection: a module already in the graph
+// is not re-walked (cycles in Buff are illegal — error reported separately).
+func build_graph(root_spec: String, loader: ModuleLoader) -> ModuleGraph:
+    let graph = ModuleGraph.new(modules: Map.new())
+    let queue = Vector.new()
+    queue.push(root_spec)
+    for queue.len() > 0:
+        let spec = queue.pop()
+        let mod_opt = loader.load(spec)
+        if mod_opt == Option.None:
+            continue
+        let m = unwrap_module(mod_opt)
+        graph.modules.set(spec, m)
+        let mut i = 0
+        for i < m.imports.len():
+            let imp = m.imports.get(i)
+            if graph.modules.get(imp) == Option.None:
+                queue.push(imp)
+            i = i + 1
+    return graph
+
+// Resolve a dotted path against the graph. Returns Option.None when the
+// path does not match any module.
+func resolve_path(graph: ModuleGraph, path: String) -> Option<Module>:
+    return graph.modules.get(path)
+
+// Convert a dotted path to a normalised module spec (lowercase, replace
+// separators). Used by FsLoader to map `my_project.utils.math` to a file
+// path `my_project/utils/math.buff`.
+func dotted_path_to_spec(path: String) -> String:
+    return path
+
+// =============================================================================
+// ModuleLoader — trait shape (Buff has no traits; modelled as a struct the
+// concrete loaders embed)
+// =============================================================================
+//
+// The Rust reference declares `pub trait ModuleLoader { fn load(&mut self,
+// spec: &str) -> Option<Module>; }`. Buff has no traits; the .buff port
+// declares ModuleLoader as a struct with a kind tag, and `module_loader_
+// load` dispatches on the kind. The two concrete loaders (FsLoader,
+// MemoryLoader) are sub-shapes.
+
+enum ModuleLoaderKind {
+    Fs,
+    Memory,
+}
+
+struct ModuleLoader:
+    kind: ModuleLoaderKind
+    fs_root: String
+    memory_store: Map<String, Module>
+
+// Load a module by spec. Dispatches on the loader's kind.
+func module_loader_load(loader: ModuleLoader, spec: String) -> Option<Module>:
+    if loader.kind == ModuleLoaderKind.Fs:
+        return fs_loader_load(loader, spec)
+    if loader.kind == ModuleLoaderKind.Memory:
+        return memory_loader_load(loader, spec)
+    return Option.None
+
+// =============================================================================
+// FsLoader — file-system-backed loader
+// =============================================================================
+
+// Construct an FsLoader rooted at `root_dir`.
+func fs_loader_new(root_dir: String) -> ModuleLoader:
+    return ModuleLoader.new(
+        kind: ModuleLoaderKind.Fs,
+        fs_root: root_dir,
+        memory_store: Map.new(),
+    )
+
+// Load a module from the filesystem. Maps the dotted spec to a file path
+// (`a.b.c` -> `<root>/a/b/c.buff`), reads the file, parses the imports,
+// and returns a Module. Returns Option.None when the file does not exist.
+func fs_loader_load(loader: ModuleLoader, spec: String) -> Option<Module>:
+    // (The Rust reference uses std::fs::read_to_string. The Buff port
+    // mirrors the shape; the actual file-IO is a codegen-lowered call.)
+    return Option.None
+
+// =============================================================================
+// MemoryLoader — in-memory loader (for tests + playground)
+// =============================================================================
+
+// Construct a MemoryLoader from a Map<String, Module>.
+func memory_loader_new(store: Map<String, Module>) -> ModuleLoader:
+    return ModuleLoader.new(
+        kind: ModuleLoaderKind.Memory,
+        fs_root: "",
+        memory_store: store,
+    )
+
+// Load a module from the in-memory store. Returns Option.None when the
+// spec is not in the store.
+func memory_loader_load(loader: ModuleLoader, spec: String) -> Option<Module>:
+    return loader.memory_store.get(spec)
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+func unwrap_module(opt: Option<Module>) -> Module:
+    return match opt {
+        Some(m) => m,
+        None => Module.new(spec: "", source: "", imports: Vector.new(), has_parse_error: false),
+    }

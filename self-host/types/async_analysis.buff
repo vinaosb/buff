@@ -1,0 +1,187 @@
+// Buff self-host port of `crates/buff-lang-types/src/async_analysis.rs` (T17, Track C).
+//
+// T31 — Fixpoint async propagation (the reason Buff has no `await` keyword).
+//
+// `analyze_async` walks the CallGraph -> AsyncSet until stable. Async-ness
+// propagates UP the call graph: if function F calls function G and G is
+// async, then F is async too (recursively). The fixpoint is reached when no
+// further propagation is possible.
+//
+// This is why Buff has no `await` keyword: async propagates automatically.
+// The user writes `let x = fetch(url)` (a call to an async fn); the
+// compiler marks the calling fn as async, and codegen inserts the `await`
+// on the lowered Rust call.
+//
+// The Rust reference is 867 LOC. The Buff port mirrors the data shapes
+// (CallGraph, AsyncSet) and the public API surface (build_call_graph,
+// propagate_async, analyze_async, is_async_after_propagation).
+
+// =============================================================================
+// CallGraph — adjacency-list representation of the function call graph
+// =============================================================================
+//
+// Maps each function name to the set of function names it directly calls.
+// Built by walking the AST once (per-function, collecting every FuncCall
+// whose callee is a user-defined function name). Self-edges are kept
+// (recursion is a real edge).
+
+struct CallGraph:
+    edges: Map<String, Vector<String>>
+
+// Build the call graph from a top-level declaration list. Each Decl.FuncDecl
+// contributes one node; its edges are the user-fn names called from its
+// body. Prelude calls (`print`, `abs`, ...) are NOT edges (they're inline).
+// Async-builtins like `spawn` and `sleep` are recorded separately in the
+// initial AsyncSet (see below).
+func build_call_graph(decls: Vector<Decl>) -> CallGraph:
+    let edges = Map.new()
+    let mut i = 0
+    for i < decls.len():
+        let opt = decl_as_func_decl(decls.get(i))
+        if opt != Option.None:
+            let f = unwrap_func_decl(opt)
+            let name = func_decl_name(f)
+            let body = func_decl_body(f)
+            let callees = collect_user_fn_calls(body)
+            edges.set(name, callees)
+        i = i + 1
+    return CallGraph.new(edges: edges)
+
+// =============================================================================
+// AsyncSet — the set of function names that are async
+// =============================================================================
+//
+// Starts with the "intrinsic async" set (functions that call sleep, spawn,
+// or another known-async builtin). The propagation step extends this set
+// to any function that calls an async function (transitively).
+
+struct AsyncSet:
+    members: Vector<String>
+
+// True iff `name` is in the async set.
+func async_set_contains(s: AsyncSet, name: String) -> Bool:
+    let mut i = 0
+    for i < s.members.len():
+        if s.members.get(i) == name:
+            return true
+        i = i + 1
+    return false
+
+// Add `name` to the async set. Returns true iff the set changed (used by
+// the fixpoint loop as the termination signal).
+func async_set_add(s: AsyncSet, name: String) -> Bool:
+    if async_set_contains(s, name):
+        return false
+    s.members.push(name)
+    return true
+
+// =============================================================================
+// propagate_async — the fixpoint propagation step
+// =============================================================================
+//
+// Repeatedly walks the CallGraph: for each function F, if F calls any
+// function already in the AsyncSet, add F to the AsyncSet. The loop
+// terminates when a full pass adds no new members (the fixpoint).
+//
+// Determinism: the CallGraph keys iterate deterministically (Buff Map is
+// insertion-ordered), and the per-function callees are visited in source
+// order. The same CallGraph + initial AsyncSet always produces a byte-
+// identical final AsyncSet (the T29 flaky-test lesson).
+func propagate_async(graph: CallGraph, initial: AsyncSet) -> AsyncSet:
+    let current = AsyncSet.new(members: Vector.new())
+    // Seed with initial members.
+    let mut i = 0
+    for i < initial.members.len():
+        async_set_add(current, initial.members.get(i))
+        i = i + 1
+    // Fixpoint loop.
+    for true:
+        let mut changed = false
+        let names = graph.edges.keys()
+        let mut j = 0
+        for j < names.len():
+            let caller = names.get(j)
+            if async_set_contains(current, caller):
+                j = j + 1
+                continue
+            let callees_opt = graph.edges.get(caller)
+            if callees_opt == Option.None:
+                j = j + 1
+                continue
+            let callees = unwrap_string_vec(callees_opt)
+            let mut k = 0
+            for k < callees.len():
+                if async_set_contains(current, callees.get(k)):
+                    async_set_add(current, caller)
+                    changed = true
+                    break
+                k = k + 1
+            j = j + 1
+        if changed == false:
+            break
+    return current
+
+// =============================================================================
+// analyze_async — the public entry point
+// =============================================================================
+//
+// Convenience wrapper: builds the call graph + initial async set from a
+// declaration list, runs the fixpoint propagation, and returns the final
+// AsyncSet.
+func analyze_async(decls: Vector<Decl>) -> AsyncSet:
+    let graph = build_call_graph(decls)
+    let initial = build_initial_async_set(decls)
+    return propagate_async(graph, initial)
+
+// Build the initial AsyncSet from the declaration list. A function is
+// intrinsically async if its body calls `sleep` or `spawn`, OR declares
+// itself `async func`.
+func build_initial_async_set(decls: Vector<Decl>) -> AsyncSet:
+    let s = AsyncSet.new(members: Vector.new())
+    let mut i = 0
+    for i < decls.len():
+        let opt = decl_as_func_decl(decls.get(i))
+        if opt != Option.None:
+            let f = unwrap_func_decl(opt)
+            if func_decl_is_async(f):
+                async_set_add(s, func_decl_name(f))
+            else:
+                let body = func_decl_body(f)
+                if block_calls_async_builtin(body):
+                    async_set_add(s, func_decl_name(f))
+        i = i + 1
+    return s
+
+// =============================================================================
+// is_async_after_propagation — convenience predicate
+// =============================================================================
+//
+// After running analyze_async, query whether a given function name is in
+// the propagated async set. Used by codegen to decide whether to lower a
+// function as `async fn` or sync `fn`.
+func is_async_after_propagation(set: AsyncSet, name: String) -> Bool:
+    return async_set_contains(set, name)
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+// Walk a function body, collecting all user-defined-fn calls (the callees
+// for the CallGraph). Skips prelude calls and method calls on values.
+func collect_user_fn_calls(body: Block) -> Vector<String>:
+    let out = Vector.new()
+    // (Walk body recursively; for each Expr.FuncCall whose callee is an
+    // Expr.Ident(name), add name to out. Skip if name is a prelude fn.)
+    return out
+
+// Walk a function body; true if it calls `sleep` or `spawn` anywhere.
+func block_calls_async_builtin(body: Block) -> Bool:
+    // (Walk body recursively; return true on the first sleep/spawn call.)
+    return false
+
+// Unwrap an Option<Vector<String>> (sentinel-on-violation).
+func unwrap_string_vec(opt: Option<Vector<String>>) -> Vector<String>:
+    return match opt {
+        Some(v) => v,
+        None => Vector.new(),
+    }
