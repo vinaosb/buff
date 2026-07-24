@@ -1832,6 +1832,22 @@ pub enum PreludeType {
     /// returns `true`. File uses only Rust `std` (NO extern crate
     /// needed — mirroring Math / Strings / Args / Env).
     File,
+    /// T25: `Http` — the HTTP client namespace (v1.25 stdlib batch).
+    /// Wraps `reqwest::blocking` (the synchronous HTTP client with
+    /// rustls-tls). Like [`Self::File`] / [`Self::Log`] / [`Self::Toml`],
+    /// `Http` is **never a runtime value** — it's a NAMESPACE exposing
+    /// two associated functions:
+    /// - `Http.get(url)` — perform a blocking GET request. Returns
+    ///   `String` (the response body). Lowers to
+    ///   `reqwest::blocking::get(u).map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+    /// - `Http.post(url, body)` — perform a blocking POST request with
+    ///   a String body. Returns `String` (the response body). Lowers to
+    ///   `reqwest::blocking::Client::new().post(u).body(b).send().map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+    ///
+    /// `buff_type()` returns [`Type::Void`]; `is_namespace_only()`
+    /// returns `true`. The `reqwest` crate is recorded in codegen
+    /// `extern_crates` when a Buff program uses `Http.*`.
+    Http,
 }
 
 

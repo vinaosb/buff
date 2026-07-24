@@ -842,6 +842,19 @@ pub enum PreludeAssocFn {
     /// .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
     /// .unwrap_or_default()`. File-only.
     Append,
+    // ---- T25: Http ----------------------------------------------------
+    /// `Http.get(url)` — perform a blocking GET request. One arg
+    /// (String url). Returns `String` (the response body). Lowers to
+    /// `reqwest::blocking::get(u).map(|r| r.text().unwrap_or_default())
+    /// .unwrap_or_default()`. Http-only.
+    HttpGet,
+    /// `Http.post(url, body)` — perform a blocking POST request with
+    /// a String body. Two args (String url, String body). Returns
+    /// `String` (the response body). Lowers to
+    /// `reqwest::blocking::Client::new().post(u).body(b).send()
+    /// .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+    /// Http-only.
+    HttpPost,
 }
 
 impl PreludeAssocFn {
@@ -1109,6 +1122,12 @@ impl PreludeAssocFn {
         PreludeAssocFn::Write,
         PreludeAssocFn::Exists,
         PreludeAssocFn::Append,
+        // T25: Http assoc fns (2 distinct names): http_get / http_post.
+        // All Http-only — dispatched on the (Http, HttpGet) / (Http, HttpPost)
+        // pairs in `assoc_fn_return_type`. No other prelude type today
+        // exposes these verbs.
+        PreludeAssocFn::HttpGet,
+        PreludeAssocFn::HttpPost,
     ];
 
     /// The source name of this associated function (the method identifier).
@@ -1421,6 +1440,12 @@ impl PreludeAssocFn {
             PreludeAssocFn::Write => "write",
             PreludeAssocFn::Exists => "exists",
             PreludeAssocFn::Append => "append",
+            // T25: Http assoc fn names. `get` / `post` mirror the
+            // canonical HTTP verb names. The enum variants are prefixed
+            // `Http` to avoid clashing with the existing shared `Get`
+            // variant (Args.get / Env.get).
+            PreludeAssocFn::HttpGet => "get",
+            PreludeAssocFn::HttpPost => "post",
         }
     }
 }

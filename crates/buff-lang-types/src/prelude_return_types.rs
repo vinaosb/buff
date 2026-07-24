@@ -764,6 +764,21 @@ pub fn assoc_fn_return_type(
         // .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
         // .unwrap_or_default()`.
         (PreludeType::File, PreludeAssocFn::Append) => Some(Type::Void),
+        // T25: Http assoc fns. Http is namespace-only (returns Void
+        // for the type itself). Both assoc fns return String (the
+        // response body). The codegen lowers to reqwest::blocking::*
+        // with `.unwrap_or_default()` so the Buff surface is always
+        // infallible — NEVER panics, matching Buff's "no panicking
+        // generated code" rule.
+        //
+        // `Http.get(url)` -> String. Wraps
+        // `reqwest::blocking::get(u).map(|r| r.text().unwrap_or_default())
+        // .unwrap_or_default()`.
+        (PreludeType::Http, PreludeAssocFn::HttpGet) => Some(Type::string()),
+        // `Http.post(url, body)` -> String. Wraps
+        // `reqwest::blocking::Client::new().post(u).body(b).send()
+        // .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+        (PreludeType::Http, PreludeAssocFn::HttpPost) => Some(Type::string()),
         // T52: Protobuf assoc fns. `Protobuf.serialize(value)` -> Bytes
         // (Vector<Byte>). Wraps `buff_protobuf::serialize(&value)
         // .unwrap_or_default()` (empty Vec on failure — NEVER panics).

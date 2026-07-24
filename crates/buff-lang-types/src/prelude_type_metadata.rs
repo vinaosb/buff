@@ -446,6 +446,10 @@ impl PreludeType {
         // std::fs. NO extern crate needed (std-only, mirroring
         // Math / Strings / Args / Env).
         PreludeType::File,
+        // T25: Http — namespace-only HTTP client module wrapping
+        // reqwest (blocking, rustls-tls). Records `reqwest` in
+        // extern_crates when a Buff program uses `Http.*`.
+        PreludeType::Http,
     ];
 
     /// The source name of this prelude type (the identifier the user writes).
@@ -838,6 +842,8 @@ impl PreludeType {
             PreludeType::RsaKeypair => "RsaKeypair",
             // T24: File — namespace-only file I/O module.
             PreludeType::File => "File",
+            // T25: Http — namespace-only HTTP client module.
+            PreludeType::Http => "Http",
         }
     }
 
@@ -1268,6 +1274,11 @@ impl PreludeType {
             // Log / Toml / Math). Returns Void — the namespace itself
             // is never a value, only its associated functions are callable.
             PreludeType::File => Type::Void,
+            // T25: Http — namespace-only HTTP client module (mirrors
+            // File / Log / Toml / Math). Returns Void — the namespace
+            // itself is never a value, only its associated functions
+            // are callable.
+            PreludeType::Http => Type::Void,
         }
     }
 
@@ -1327,6 +1338,7 @@ impl PreludeType {
                 | PreludeType::Simd
                 | PreludeType::RestartStrategy
                 | PreludeType::File
+                | PreludeType::Http
         )
     }
 }
