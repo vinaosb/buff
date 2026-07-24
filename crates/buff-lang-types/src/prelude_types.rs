@@ -2246,7 +2246,7 @@ impl PreludeType {
             // etc. without rewriting.
             PreludeType::Math => "Math",
             // T124f: the Random prelude type name. The codegen splices
-            // `rand::thread_rng().gen_range(...)` etc. for the four
+            // `rand::rng().random_range(...)` etc. for the four
             // associated functions.
             PreludeType::Random => "Random",
             // T124f: the Strings prelude type name. The codegen splices
@@ -3209,21 +3209,21 @@ pub enum PreludeAssocFn {
     Max,
     // ---- Random (T124f) ------------------------------------------------
     /// `Random.int(min, max)` - inclusive integer range. Two args
-    /// (Int, Int). Returns Int. Wraps `rand::thread_rng().gen_range
+    /// (Int, Int). Returns Int. Wraps `rand::rng().random_range
     /// (min..=max)`.
     Int,
     /// `Random.float()` - `f64` in `[0, 1)`. Zero args. Returns Float.
-    /// Wraps `rand::thread_rng().gen::<f64>()`.
+    /// Wraps `rand::rng().random::<f64>()`.
     Float,
     /// `Random.choice(vec)` - pick a random element. One arg (Vector).
     /// Returns `Option<element_type>` (None on empty input - NEVER
     /// panics, matching Buff's "no panicking generated code" rule).
-    /// Wraps `SliceRandom::choose(&vec, &mut rng).cloned()`.
+    /// Wraps `IndexedRandom::choose(&vec, &mut rng).cloned()`.
     Choice,
     /// `Random.shuffle(vec)` - return a shuffled copy. One arg (Vector).
     /// Returns Vector<element_type> (a NEW Vec; the input is NOT
     /// mutated in the user's surface - the codegen makes a `let mut`
-    /// binding internally). Wraps `SliceRandom::shuffle(&mut vec, &mut
+    /// binding internally). Wraps `IndexedRandom::shuffle(&mut vec, &mut
     /// rng)`.
     Shuffle,
     // ---- Strings (T124f) -----------------------------------------------
@@ -4393,8 +4393,8 @@ impl PreludeAssocFn {
             PreludeAssocFn::Min => "min",
             PreludeAssocFn::Max => "max",
             // T124f: Random - `int`/`float` are Buff-flavored names
-            // (clearer than `gen_range` / `gen`); `choice` / `shuffle`
-            // mirror rand's `SliceRandom` trait method names.
+            // (clearer than `random_range` / `random`); `choice` / `shuffle`
+            // mirror rand's `IndexedRandom` trait method names.
             PreludeAssocFn::Int => "int",
             PreludeAssocFn::Float => "float",
             PreludeAssocFn::Choice => "choice",
@@ -4737,7 +4737,7 @@ pub fn assoc_fn_return_type(
         (PreludeType::Math, PreludeAssocFn::Max) => Some(Type::float_default()),
         // T124f: Random module.
         // `Random.int(min, max)` -> Int (default width = Int<64>).
-        // Inclusive range - `min..=max` in Rust's `gen_range`.
+        // Inclusive range - `min..=max` in Rust's `random_range`.
         (PreludeType::Random, PreludeAssocFn::Int) => Some(Type::int_default()),
         // `Random.float()` -> Float (f64 in [0, 1)).
         (PreludeType::Random, PreludeAssocFn::Float) => Some(Type::float_default()),

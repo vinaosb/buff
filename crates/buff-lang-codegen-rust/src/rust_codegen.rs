@@ -520,7 +520,7 @@ impl RustCodegen {
         // the program references the prelude `Random` namespace module
         // (`Random.int(lo, hi)`, `Random.float()`, `Random.choice(v)`,
         // `Random.shuffle(v)`). Generated code uses fully-qualified
-        // `rand::thread_rng()` / `rand::seq::SliceRandom::*` paths so
+        // `rand::rng()` / `rand::seq::IndexedRandom::*` paths so
         // no `use` import is emitted - but the recorded name signals to
         // the pipeline / build-driver that the generated Cargo project
         // must declare `rand` in `[dependencies]`.
@@ -3897,42 +3897,42 @@ impl RustCodegen {
             (T::Math, A::Min) => lower_math_binary(n_args(self, 2)?, "min"),
             (T::Math, A::Max) => lower_math_binary(n_args(self, 2)?, "max"),
             // T124f: Random module - 4 assoc fns wrapping the `rand`
-            // crate (0.8 API). All use `rand::thread_rng()` to obtain
+            // crate (0.9 API). All use `rand::rng()` to obtain
             // a thread-local RNG (NOT cryptographically secure - the
             // plan defers CSPRNG to a future Hash/Crypto module).
             //
-            // `Random.int(min, max)` -> `rand::thread_rng().gen_range(min..=max)`.
+            // `Random.int(min, max)` -> `rand::rng().random_range(min..=max)`.
             // The inclusive range `min..=max` matches the spec's
             // acceptance criterion `Random.int(1, 10)` returns int in
-            // [1, 10] (NOT [1, 11)). `gen_range` is the rand 0.8 API
-            // (rand 0.9 renamed it to `random_range`).
+            // [1, 10] (NOT [1, 11)). `random_range` is the rand 0.9 API
+            // (rand 0.8 called it `gen_range`).
             (T::Random, A::Int) => {
                 let args = n_args(self, 2)?;
                 let (lo, hi) = (args[0].clone(), args[1].clone());
                 let tokens: proc_macro2::TokenStream = quote::quote! {
-                    rand::thread_rng().gen_range(#lo..=#hi)
+                    rand::rng().random_range(#lo..=#hi)
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Random.int codegen parse: {e}")))
             }
-            // `Random.float()` -> `rand::thread_rng().gen::<f64>()`.
-            // Returns f64 in `[0, 1)`. Zero args. Uses `gen::<f64>()`
-            // (rand 0.8 API; rand 0.9 renamed to `random::<f64>()`).
+            // `Random.float()` -> `rand::rng().random::<f64>()`.
+            // Returns f64 in `[0, 1)`. Zero args. Uses `random::<f64>()`
+            // (rand 0.9 API; rand 0.8 called it `gen::<f64>()`).
             (T::Random, A::Float) => {
                 no_args(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
-                    rand::thread_rng().gen::<f64>()
+                    rand::rng().random::<f64>()
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Random.float codegen parse: {e}")))
             }
-            // `Random.choice(vec)` -> `rand::seq::SliceRandom::choose(
-            //   &vec, &mut rand::thread_rng()).cloned()`.
+            // `Random.choice(vec)` -> `rand::seq::IndexedRandom::choose(
+            //   &vec, &mut rand::rng()).cloned()`.
             //
             // Returns `Option<T>` (None on empty input - NEVER panics,
             // matching Buff's "no panicking generated code" rule). The
-            // fully-qualified `SliceRandom::choose` path avoids needing
-            // a `use rand::seq::SliceRandom;` import in the generated
+            // fully-qualified `IndexedRandom::choose` path avoids needing
+            // a `use rand::seq::IndexedRandom;` import in the generated
             // crate. The `.cloned()` lifts `Option<&T>` to `Option<T>`
             // so the user gets an owned value (Buff hides references).
             //
@@ -3942,20 +3942,20 @@ impl RustCodegen {
             (T::Random, A::Choice) => {
                 let arg = one_arg(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
-                    rand::seq::SliceRandom::choose(&#arg, &mut rand::thread_rng()).cloned()
+                    rand::seq::IndexedRandom::choose(&#arg, &mut rand::rng()).cloned()
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Random.choice codegen parse: {e}")))
             }
             // `Random.shuffle(vec)` -> `{ let mut __v = vec;
-            //   rand::seq::SliceRandom::shuffle(&mut __v, &mut
-            //   rand::thread_rng()); __v }`.
+            //   rand::seq::IndexedRandom::shuffle(&mut __v, &mut
+            //   rand::rng()); __v }`.
             //
             // Returns a NEW shuffled Vector (the input is consumed -
             // the codegen makes a `let mut` binding internally and
             // returns it; in Buff's move-by-default world this is the
             // natural ownership transfer). The fully-qualified
-            // `SliceRandom::shuffle` path avoids needing a `use` import.
+            // `IndexedRandom::shuffle` path avoids needing a `use` import.
             //
             // Built via `quote!` + parse2 because the block expression
             // (`{ let mut __v = ...; ...; __v }`) is awkward to build
@@ -3973,7 +3973,7 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     {
                         let mut __v = #arg;
-                        rand::seq::SliceRandom::shuffle(&mut __v, &mut rand::thread_rng());
+                        rand::seq::IndexedRandom::shuffle(&mut __v, &mut rand::rng());
                         __v
                     }
                 };
@@ -6610,7 +6610,7 @@ impl RustCodegen {
             // T49: Argon2.generate_salt() -> Vector<Byte>. Zero
             // args. Wraps `buff_crypto_extras::argon2_api::
             // generate_salt()` (infallible — fills a 16-byte Vec
-            // via `rand::thread_rng().fill_bytes`).
+            // via `rand::rng().fill_bytes`).
             (T::Argon2, A::GenerateSalt) => {
                 no_args(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
@@ -11086,8 +11086,16 @@ impl RustCodegen {
                         }
                     }
                 }
-                InterpPart::Expr(e) => {
-                    fmt_string.push_str("{}");
+                InterpPart::Expr(e, spec) => {
+                    // T81: use `{spec}` when a format specifier is present,
+                    // otherwise `{}`.
+                    if let Some(s) = spec {
+                        fmt_string.push('{');
+                        fmt_string.push_str(s);
+                        fmt_string.push('}');
+                    } else {
+                        fmt_string.push_str("{}");
+                    }
                     lowered_args.push(self.lower_expr(e)?);
                 }
             }
@@ -14143,7 +14151,7 @@ fn expr_uses_matrix(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_matrix)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_matrix(e),
+            InterpPart::Expr(e, _) => expr_uses_matrix(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_matrix),
@@ -14351,7 +14359,7 @@ fn expr_uses_error(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_error)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_error(e),
+            InterpPart::Expr(e, _) => expr_uses_error(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_error),
@@ -14546,7 +14554,7 @@ fn expr_uses_chrono(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_chrono)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_chrono(e),
+            InterpPart::Expr(e, _) => expr_uses_chrono(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_chrono),
@@ -14698,7 +14706,7 @@ fn expr_uses_tracing(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_tracing)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_tracing(e),
+            InterpPart::Expr(e, _) => expr_uses_tracing(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_tracing),
@@ -14965,7 +14973,7 @@ fn expr_uses_regex(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_regex)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_regex(e),
+            InterpPart::Expr(e, _) => expr_uses_regex(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_regex),
@@ -15115,7 +15123,7 @@ fn expr_uses_toml(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_toml)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_toml(e),
+            InterpPart::Expr(e, _) => expr_uses_toml(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_toml),
@@ -15256,7 +15264,7 @@ fn expr_uses_rand(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_rand)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_rand(e),
+            InterpPart::Expr(e, _) => expr_uses_rand(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_rand),
@@ -15398,7 +15406,7 @@ fn expr_uses_tokio(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_tokio)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_tokio(e),
+            InterpPart::Expr(e, _) => expr_uses_tokio(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_tokio),
@@ -15551,7 +15559,7 @@ fn expr_uses_namespace(expr: &Expr, namespace: &str) -> bool {
                     .is_some_and(|b| block_uses_namespace(b, namespace))
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_namespace(e, namespace),
+            InterpPart::Expr(e, _) => expr_uses_namespace(e, namespace),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => {
@@ -15729,7 +15737,7 @@ fn expr_uses_url_instance(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_url_instance)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_url_instance(e),
+            InterpPart::Expr(e, _) => expr_uses_url_instance(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_url_instance),
@@ -15934,7 +15942,7 @@ fn expr_uses_dir_walk(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_dir_walk)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_dir_walk(e),
+            InterpPart::Expr(e, _) => expr_uses_dir_walk(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_dir_walk),
@@ -16113,7 +16121,7 @@ fn expr_uses_sha2(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_sha2)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_sha2(e),
+            InterpPart::Expr(e, _) => expr_uses_sha2(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_sha2),
@@ -16239,7 +16247,7 @@ fn expr_uses_md5(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_md5)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_md5(e),
+            InterpPart::Expr(e, _) => expr_uses_md5(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_md5),
@@ -16373,7 +16381,7 @@ fn expr_uses_hmac(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_hmac)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_hmac(e),
+            InterpPart::Expr(e, _) => expr_uses_hmac(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_hmac),
@@ -16523,7 +16531,7 @@ fn expr_uses_num_cpus(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_uses_num_cpus)
         }
         Expr::StringInterp { parts, .. } => parts.iter().any(|p| match p {
-            InterpPart::Expr(e) => expr_uses_num_cpus(e),
+            InterpPart::Expr(e, _) => expr_uses_num_cpus(e),
             InterpPart::Literal(_) => false,
         }),
         Expr::ArrayLit { elements, .. } => elements.iter().any(expr_uses_num_cpus),

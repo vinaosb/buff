@@ -135,22 +135,20 @@ url = "2"
 # so the LSP crate can use synchronous `select!` for debouncing.
 crossbeam-channel = "0.5"
 # T124f: Random module (Random.int / Random.float / Random.choice /
-# Random.shuffle) wraps the `rand` crate. We pin rand 0.8 (NOT 0.9)
-# because rand 0.8 ships the stable, long-standing API surface most of
-# the Rust ecosystem already targets:
-#   - `rand::thread_rng().gen_range(min..=max)` for inclusive integer range
-#   - `rand::thread_rng().gen::<f64>()` for [0, 1) float
-#   - `rand::seq::SliceRandom::{choose, shuffle}` for collection ops
-# rand 0.9 (released 2024) renamed the API (`rng()` instead of
-# `thread_rng()`, `random_range()` instead of `gen_range()`,
-# `IndexedRandom` instead of part of `SliceRandom`) - targeting 0.8
-# keeps the codegen-lowered calls stable across the wider ecosystem
-# (chrono / tracing / regex / toml already pin pre-1.0 majors too).
+# Random.shuffle) wraps the `rand` crate. We pin rand 0.9 (migrated
+# from 0.8 in T36 v1.25 tech-debt batch). rand 0.9 ships the stable
+# API surface:
+#   - `rand::rng().random_range(min..=max)` for inclusive integer range
+#   - `rand::rng().random::<f64>()` for [0, 1) float
+#   - `rand::seq::IndexedRandom::{choose, shuffle}` for collection ops
+# rand 0.9 renamed the API (`rng()` instead of `thread_rng()`,
+# `random_range()` instead of `gen_range()`,
+# `IndexedRandom` instead of part of `SliceRandom`).
 # Recorded in the codegen `extern_crates` BTreeSet when a Buff program
 # uses `Random`, mirroring the chrono/toml/regex/tracing codegen-only
 # linking boundary (single-file `buff run` rustc path does NOT link it;
 # cargo-project wiring is deferred).
-rand = "0.8"
+rand = "0.9"
 # T124h: Web modules (Base64 / Hex / URLEncode / UUID / URL) wrap four
 # mature Rust crates. Each codegen-lowered call uses fully-qualified
 # paths so generated code requires no `use` import - but the recorded

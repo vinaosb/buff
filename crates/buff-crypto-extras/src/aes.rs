@@ -18,7 +18,7 @@
 //!
 //! The 12-byte nonce MUST be unique per (key, message) pair. Reusing
 //! a (key, nonce) pair is CATASTROPHIC for GCM confidentiality AND
-//! integrity. [`Aes256::generate_nonce`] draws from `rand::thread_rng()`
+//! integrity. [`Aes256::generate_nonce`] draws from `rand::rng()`
 //! (CSPRNG). For deterministic test vectors use a fixed nonce.
 
 use crate::error::CryptoError;

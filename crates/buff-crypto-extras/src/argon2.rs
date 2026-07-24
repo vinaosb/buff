@@ -41,7 +41,7 @@ pub const P_COST: u32 = 1;
 /// Generate a random 16-byte salt using `OsRng` (CSPRNG).
 pub fn generate_salt() -> Vec<u8> {
     let mut salt = vec![0u8; SALT_LEN];
-    rand::thread_rng().fill_bytes(&mut salt);
+    rand::rng().fill_bytes(&mut salt);
     salt
 }
 

@@ -135,7 +135,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants. ErrorCodes (E10xx lex / E11xx parse / E12xx type / E13xx codegen) are STABLE FOREVER — never renumber/reuse/silently-remove.
 - **Tests in per-crate `tests/`** (not src). Inline `#[cfg(test)]` ok for unit smoke tests.
 - **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy --workspace --all-targets -- -D warnings`).
-- **Conservative pin philosophy**: pin to long-standing stable majors (rand 0.8 NOT 0.9, chrono 0.4, rustyline 15, dirs 5, zeromq 0.4). Documented inline in root Cargo.toml.
+- **Conservative pin philosophy**: pin to long-standing stable majors (rand 0.9, chrono 0.4, rustyline 15, dirs 5, zeromq 0.4). rand was migrated from 0.8→0.9 in T36 (v1.25 tech-debt batch) — 0.9 is now the stable surface. Documented inline in root Cargo.toml.
 - **Pure-Rust preference**: reqwest uses `rustls-tls` (NOT native-tls); zeromq (NOT zmq which links C libzmq); no diesel/libpq/S3 SDK in registry. Matches the "no C library, no Docker" hard rule from T126/T127 task specs.
 
 ## ANTI-PATTERNS (THIS REPO)

@@ -7,8 +7,8 @@
 //!   Uses only Rust `std` (NO extern crate).
 //! - **Random** namespace (`Random.int(lo, hi)`, `Random.float()`,
 //!   `Random.choice(v)`, `Random.shuffle(v)`) - wraps the `rand` crate
-//!   (0.8 API: `thread_rng().gen_range`, `gen::<f64>`,
-//!   `SliceRandom::choose`/`shuffle`). Records `rand` in extern_crates.
+//!   (0.9 API: `rng().random_range`, `random::<f64>`,
+//!   `IndexedRandom::choose`/`shuffle`). Records `rand` in extern_crates.
 //! - **Sort** instance methods on Buff's existing Vector type
 //!   (`vec.sort()`, `vec.sort_by(cmp)`) - lowers to a `{ let mut __v =
 //!   recv; __v.sort[_by](...); __v }` block so the surface stays
@@ -23,8 +23,8 @@
 //! Math.sqrt(16)        ->  (16 as f64).sqrt()       (= 4.0)
 //! Math.PI              ->  std::f64::consts::PI
 //! Math.floor(3.7)      ->  (3.7 as f64).floor()     (= 3.0)
-//! Random.int(1, 100)   ->  rand::thread_rng().gen_range(1..=100)
-//! Random.choice(v)     ->  rand::seq::SliceRandom::choose(&v, &mut rng).cloned()
+//! Random.int(1, 100)   ->  rand::rng().random_range(1..=100)
+//! Random.choice(v)     ->  rand::seq::IndexedRandom::choose(&v, &mut rng).cloned()
 //! [3, 1, 2].sort()     ->  { let mut __v = vec![3, 1, 2]; __v.sort(); __v }
 //! Strings.split(s, ",") ->  s.split(",").map(|s| s.to_string()).collect::<Vec<String>>()
 //! ```
@@ -358,7 +358,7 @@ fn math_codegen_e_const_lowers_to_std_path() {
 
 #[test]
 fn random_codegen_int_inclusive_range() {
-    // Random.int(1, 100) -> rand::thread_rng().gen_range(1..=100)
+    // Random.int(1, 100) -> rand::rng().random_range(1..=100)
     // The `..=` (inclusive) matches the spec acceptance `Random.int(1, 10)`
     // returns int in [1, 10] (NOT [1, 11)).
     let src = codegen_one_expr_in(
@@ -366,8 +366,8 @@ fn random_codegen_int_inclusive_range() {
         ns_assoc_call("Random", "int", vec![int_expr(1), int_expr(100)]),
     );
     assert!(
-        src.contains("rand::thread_rng().gen_range(1..=100)"),
-        "expected `rand::thread_rng().gen_range(1..=100)` in: {src}"
+        src.contains("rand::rng().random_range(1..=100)"),
+        "expected `rand::rng().random_range(1..=100)` in: {src}"
     );
     // Must use `..=` (inclusive), NOT `..` (exclusive).
     assert!(
@@ -379,11 +379,11 @@ fn random_codegen_int_inclusive_range() {
 
 #[test]
 fn random_codegen_float_zero_args() {
-    // Random.float() -> rand::thread_rng().gen::<f64>()
+    // Random.float() -> rand::rng().random::<f64>()
     let src = codegen_one_expr_in("f", ns_assoc_call("Random", "float", vec![]));
     assert!(
-        src.contains("rand::thread_rng().gen::<f64>()"),
-        "expected `rand::thread_rng().gen::<f64>()` in: {src}"
+        src.contains("rand::rng().random::<f64>()"),
+        "expected `rand::rng().random::<f64>()` in: {src}"
     );
     must_reparse(&src);
 }
@@ -391,26 +391,26 @@ fn random_codegen_float_zero_args() {
 #[test]
 fn random_codegen_choice_uses_slicerandom_cloned() {
     // Random.choice(vec) ->
-    //   rand::seq::SliceRandom::choose(&vec, &mut rand::thread_rng()).cloned()
+    //   rand::seq::IndexedRandom::choose(&vec, &mut rand::rng()).cloned()
     //
     // The `.cloned()` lifts `Option<&T>` to `Option<T>` (Buff hides
-    // references). The fully-qualified `SliceRandom::choose` path
+    // references). The fully-qualified `IndexedRandom::choose` path
     // avoids needing a `use` import.
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call("Random", "choice", vec![ident_expr("vec")]),
     );
     assert!(
-        src.contains("rand::seq::SliceRandom::choose"),
-        "expected `rand::seq::SliceRandom::choose` in: {src}"
+        src.contains("rand::seq::IndexedRandom::choose"),
+        "expected `rand::seq::IndexedRandom::choose` in: {src}"
     );
     assert!(
         src.contains("&vec"),
-        "expected `&vec` (SliceRandom::choose takes &self) in: {src}"
+        "expected `&vec` (IndexedRandom::choose takes &self) in: {src}"
     );
     assert!(
-        src.contains("&mut rand::thread_rng()"),
-        "expected `&mut rand::thread_rng()` in: {src}"
+        src.contains("&mut rand::rng()"),
+        "expected `&mut rand::rng()` in: {src}"
     );
     assert!(
         src.contains(".cloned()"),
@@ -422,7 +422,7 @@ fn random_codegen_choice_uses_slicerandom_cloned() {
 #[test]
 fn random_codegen_shuffle_uses_block_returning_vec() {
     // Random.shuffle(vec) -> { let mut __v = vec;
-    //   rand::seq::SliceRandom::shuffle(&mut __v, &mut rng); __v }
+    //   rand::seq::IndexedRandom::shuffle(&mut __v, &mut rng); __v }
     //
     // The block evaluates to the owned shuffled Vec (Buff's surface
     // treats sort/shuffle as functional - returns a NEW Vec).
@@ -431,8 +431,8 @@ fn random_codegen_shuffle_uses_block_returning_vec() {
         ns_assoc_call("Random", "shuffle", vec![ident_expr("vec")]),
     );
     assert!(
-        src.contains("rand::seq::SliceRandom::shuffle"),
-        "expected `rand::seq::SliceRandom::shuffle` in: {src}"
+        src.contains("rand::seq::IndexedRandom::shuffle"),
+        "expected `rand::seq::IndexedRandom::shuffle` in: {src}"
     );
     assert!(
         src.contains("let mut __v"),
