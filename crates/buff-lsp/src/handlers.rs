@@ -6,6 +6,7 @@
 //! trivially unit-testable: drive `analyze::analyze` →
 //! [`DocumentState::new`] → call a handler → assert on the response.
 
+use buff_lang_ast::{Attribute, Decl, FuncDecl};
 use buff_lang_error::{Applicability, Diagnostic, Severity};
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
@@ -93,6 +94,20 @@ pub fn hover(state: &DocumentState, position: Position) -> Option<Hover> {
         if !lines.iter().any(|l| l.contains(&top.name)) {
             lines.push(format!("declared in `{}`", top.name));
         }
+    }
+
+    // T45: --explain dispatch info in hover. When the cursor is inside a
+    // function, surface what the heterogeneous runtime WOULD do: the
+    // `@prefer(...)` hint (if any), the CPU/GPU routing bands, and the
+    // GPU-dispatch overhead threshold. Mirrors the `BUFF_EXPLAIN_DISPATCH=1`
+    // runtime diagnostic that `buff run --explain` prints at execution time,
+    // but computed statically from the AST so the user sees it on hover
+    // WITHOUT running the program. Constants are inlined (NOT imported from
+    // `buff-lang-runtime`) so the LSP stays decoupled from the heavy
+    // wgpu/rayon/tokio runtime crate — see T45 spec ("quick" task; do not
+    // add deps").
+    if let Some(explain) = dispatch_explain_for(state, byte) {
+        lines.push(explain);
     }
 
     // T72: LSP plugin dispatch. Calls into the global plugin registry
@@ -321,6 +336,110 @@ fn top_decl_containing(state: &DocumentState, byte: usize) -> Option<crate::symb
         .iter()
         .find(|d| d.span.start <= byte && byte < d.span.end)
         .cloned()
+}
+
+/// T45: Build the `--explain` dispatch info string for the function whose
+/// span contains `byte`. Returns `None` when the cursor is not inside a
+/// function (so non-function hovers are unchanged) or when the function
+/// has no `@prefer(...)` hint AND nothing noteworthy to say (kept minimal
+/// to avoid hover spam on every plain function — see T45 spec).
+///
+/// When the cursor IS inside a function, the returned string is a single
+/// markdown block summarising:
+///
+/// 1. The `@prefer(gpu)` / `@prefer(npu)` / no-hint disposition.
+/// 2. The runtime's CPU/GPU routing bands (the same thresholds
+///    `buff-lang-runtime::threshold::decide` uses, inlined here as
+///    constants — see file-level doc on why we don't import the runtime
+///    crate).
+/// 3. The lowered GPU threshold when a `@prefer(gpu)` hint is present
+///    (mirrors `PREFER_GPU_MIN_ELEMENTS` from the runtime's `hints` module).
+///
+/// **Why static-only?** The LSP cannot run the user's program, so the
+/// actual element count at the dispatch site is unknown at hover time.
+/// We surface the DECISION RULE — the user can then reason "my array is
+/// 10k elements → CPU parallel" without executing. For the live decision
+/// on a real run, `buff run --explain` prints it.
+fn dispatch_explain_for(state: &DocumentState, byte: usize) -> Option<String> {
+    let func = enclosing_func(state, byte)?;
+    let prefer = prefer_hint(&func);
+
+    // Header line — always present when we have a function.
+    let header = match &prefer {
+        Some(h) => format!("⚙️ **Dispatch** — hint: `{h}`"),
+        None => "⚙️ **Dispatch** — no hint (runtime decides by element count)".to_string(),
+    };
+
+    // Threshold table. These are the SAME constants the runtime uses
+    // (`SINGLE_THREAD_MAX = 999`, `CPU_PARALLEL_MAX = 50_000`,
+    //  `PREFER_GPU_MIN_ELEMENTS = 1024`) — duplicated here to keep the LSP
+    // decoupled from `buff-lang-runtime` (which pulls wgpu+rayon+tokio).
+    // If the runtime constants ever change, this table needs the same bump.
+    let bands = "| elements | backend |\n|---|---|\n\
+        | < 1000 | single-thread CPU |\n\
+        | 1000–50 000 | parallel CPU (rayon) |\n\
+        | > 50 000 | GPU (wgpu), when available + fits VRAM |";
+
+    let note = match &prefer {
+        Some(h) if h.contains("gpu") => {
+            "\n\nWith `@prefer(gpu)`, the GPU band opens at **≥ 1024 elements** \
+             (overrides cost model when a GPU is present)."
+        }
+        Some(_) => {
+            "\n\n`@prefer(npu)` is reserved — currently routes through the \
+             unhinted cost model."
+        }
+        None => "",
+    };
+
+    Some(format!("{header}\n\n```\n{bands}\n```{note}"))
+}
+
+/// Find the [`FuncDecl`] whose `span` contains `byte`, or `None`.
+///
+/// Walks the parsed top-level decls (kept in [`DocumentAnalysis::decls`])
+/// and returns the first [`Decl::FuncDecl`] whose span covers the cursor.
+/// Returns the raw AST node (not the [`TopDeclEntry`](crate::symbol::TopDeclEntry)
+/// summary) so we can read `@prefer(...)` attributes.
+fn enclosing_func<'a>(state: &'a DocumentState, byte: usize) -> Option<&'a FuncDecl> {
+    for decl in &state.analysis.decls {
+        if let Decl::FuncDecl(f) = decl {
+            if f.span.start <= byte && byte < f.span.end {
+                return Some(f);
+            }
+        }
+        // `export func …` wraps a FuncDecl — its outer span also covers
+        // the body, so check the inner func too.
+        if let Decl::ExportDecl(exp) = decl {
+            if let Decl::FuncDecl(f) = exp.inner.as_ref() {
+                if exp.span.start <= byte && byte < exp.span.end {
+                    return Some(f);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract the `@prefer(...)` hint from a function's attributes. Returns
+/// the rendered hint string (e.g. `"@prefer(gpu)"`) or `None` when the
+/// function has no `@prefer` attribute.
+///
+/// Mirrors the parsing the runtime's `prefer_from_name_args` would do —
+/// kept local so the LSP doesn't depend on the runtime crate.
+fn prefer_hint(f: &FuncDecl) -> Option<String> {
+    let prefer: Option<&Attribute> = f
+        .attributes
+        .iter()
+        .find(|a| a.name.name == "prefer");
+    let attr = prefer?;
+    if attr.args.is_empty() {
+        return Some("@prefer".to_string());
+    }
+    Some(format!(
+        "@prefer({})",
+        attr.args.iter().cloned().collect::<Vec<_>>().join(", ")
+    ))
 }
 
 // ---------------------------------------------------------------------
@@ -658,5 +777,60 @@ mod tests {
         let canonical = buff_lang_cli::fmt::format_source(raw).unwrap();
         let st = open(&canonical);
         assert!(formatting(&st).is_none(), "expected no edits");
+    }
+
+    // -----------------------------------------------------------------
+    // T45: --explain dispatch info in hover
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn t45_hover_inside_function_shows_dispatch_info() {
+        // Plain function — no @prefer hint. Cursor in the body.
+        let st = open("func main():\n    let x = 42\n    print(x)\n");
+        let h = hover(&st, pos(1, 8)).expect("hover inside function body");
+        let s = match h.contents {
+            HoverContents::Markup(m) => m.value,
+            _ => panic!("expected markup"),
+        };
+        assert!(
+            s.contains("Dispatch"),
+            "expected Dispatch section, got: {s}"
+        );
+        // Bands table should be present.
+        assert!(s.contains("CPU") && s.contains("GPU"), "missing bands: {s}");
+    }
+
+    #[test]
+    fn t45_hover_on_prefer_gpu_function_mentions_lowered_threshold() {
+        // Function with @prefer(gpu) hint.
+        let src = "@prefer(gpu)\nfunc kernel(data: Vector<Float>):\n    return data.map({ x => x * 2.0 })\n";
+        let st = open(src);
+        // Cursor on the function name line (line 1, the `f` of `func`).
+        let h = hover(&st, pos(1, 4)).expect("hover on @prefer(gpu) function");
+        let s = match h.contents {
+            HoverContents::Markup(m) => m.value,
+            _ => panic!("expected markup"),
+        };
+        assert!(s.contains("@prefer(gpu)"), "missing hint: {s}");
+        assert!(
+            s.contains("1024"),
+            "expected lowered GPU threshold (1024) mentioned, got: {s}"
+        );
+    }
+
+    #[test]
+    fn t45_hover_on_prefer_npu_function_mentions_reserved_routing() {
+        let src = "@prefer(npu)\nfunc infer(x: Tensor<Float>):\n    return x\n";
+        let st = open(src);
+        let h = hover(&st, pos(1, 4)).expect("hover on @prefer(npu) function");
+        let s = match h.contents {
+            HoverContents::Markup(m) => m.value,
+            _ => panic!("expected markup"),
+        };
+        assert!(s.contains("@prefer(npu)"), "missing hint: {s}");
+        assert!(
+            s.contains("reserved"),
+            "expected NPU-reserved note, got: {s}"
+        );
     }
 }
