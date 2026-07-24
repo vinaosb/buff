@@ -678,6 +678,23 @@ impl RustCodegen {
             Type::ECDH => "buff_crypto_extras::ECDH",
             Type::Argon2 => "buff_crypto_extras::Argon2",
             Type::RsaKeypair => "buff_crypto_extras::RsaKeypair",
+            // T8/T11/T17/T18/T27/T34: framework runtime-value types
+            // whose PreludeType registrations previously forward-declared
+            // as Type::Unknown/Void. Each maps to the matching
+            // `buff_*::TypeName` path 1:1 (no generic parameter, no
+            // turbofish needed). Mirrors the T9 Image / T7 DataFrame /
+            // T33 HttpClient precedent: if a user annotates a let
+            // binding with an explicit type, codegen emits the concrete
+            // path; otherwise Rust infers the type from the
+            // initializer.
+            Type::Tensor => "buff_tensor::Tensor",
+            Type::Signal => "buff_dsp::Signal",
+            Type::Spectrum => "buff_dsp::Spectrum",
+            Type::Web => "buff_web::Web",
+            Type::Pool => "buff_db::Pool",
+            Type::Strategy => "buff_fuzz::Strategy",
+            Type::OAuth2Client => "buff_auth::OAuth2Client",
+            Type::Rbac => "buff_auth::Rbac",
         };
         Some(rust_path_type(rust_name))
     }

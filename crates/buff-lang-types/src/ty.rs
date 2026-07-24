@@ -1066,6 +1066,67 @@ pub enum Type {
     /// `.temporary` / `.transient`. Maps to
     /// `buff_actors::supervisor::RestartStrategy`.
     RestartStrategy,
+    /// T8: a multi-dimensional numeric tensor, mapped to
+    /// `buff_tensor::Tensor` at codegen time. Constructed via the
+    /// prelude associated functions `Tensor.zeros(shape)` /
+    /// `Tensor.ones(shape)` / `Tensor.filled(shape, value)` /
+    /// `Tensor.from_vec(data, shape)`. This is **additive** (T8): no
+    /// existing variant was renamed, reordered, or had its payload
+    /// altered. The `is_numeric` / `is_float_like` / `is_integer_like`
+    /// / `is_gpu_eligible` predicates all return `false` for `Tensor`
+    /// — it's an opaque container that participates in no scalar
+    /// promotion (GPU dispatch is a v1.18+ enhancement).
+    Tensor,
+    /// T11: a time-domain signal, mapped to `buff_dsp::Signal` at
+    /// codegen time. Constructed via `Signal.from_vec(data,
+    /// sample_rate)` / `Signal.sine(freq_hz, sample_rate, n)`;
+    /// returned by `Signal.ifft(spectrum)` / `signal.lowpass(cutoff)`
+    /// / `signal.highpass(cutoff)` / `signal.bandpass(lo, hi)`.
+    /// **Additive** (T11). Pure-Rust, CPU-only per Metis G7 lock.
+    Signal,
+    /// T11: an FFT frequency-spectrum runtime-value type, mapped to
+    /// `buff_dsp::Spectrum` at codegen time. Returned by
+    /// `signal.fft()` / `signal.spectrogram(window_size)`. Carries
+    /// `Vec<Complex>` + sample_rate — hermitian half (`N/2 + 1` bins)
+    /// of a length-N real input. **Additive** (T11).
+    Spectrum,
+    /// T17: an HTTP web server runtime-value type, mapped to
+    /// `buff_web::Web` at codegen time. Constructed via `Web.new()`
+    /// (empty server) or `Web.bind(addr)`; carries the instance
+    /// methods `web.get(path, handler)` / `web.post(...)` /
+    /// `web.put(...)` / `web.delete(...)` / `web.patch(...)` /
+    /// `web.middleware(mw)` / `web.listen(port)` / `web.run()`.
+    /// **Additive** (T17). Pure-Rust (axum 0.8 + tokio + serde_json).
+    Web,
+    /// T18: a database connection-pool runtime-value type, mapped to
+    /// `buff_db::Pool` at codegen time. Constructed via
+    /// `Database.connect(url)`; carries the instance methods
+    /// `pool.query(sql, params)` / `pool.query_one(sql, params)` /
+    /// `pool.execute(sql, params)` / `pool.begin()`. **Additive**
+    /// (T18). Pure-Rust (sqlx, rustls-tls — NOT native-tls).
+    Pool,
+    /// T27: a fuzz input-strategy runtime-value type, mapped to
+    /// `buff_fuzz::Strategy` at codegen time. Constructed via
+    /// `Strategy.int(min, max)` / `Strategy.float(min, max)` /
+    /// `Strategy.bool()` / `Strategy.string(max_len)` /
+    /// `Strategy.bytes(max_len)`; passed to `Fuzz.run(strategy,
+    /// iterations, closure)`. **Additive** (T27). Pure-Rust (proptest).
+    Strategy,
+    /// T34: an OAuth2 authorization-code client runtime-value type,
+    /// mapped to `buff_auth::OAuth2Client` at codegen time.
+    /// Constructed via `OAuth2Client.new(client_id, client_secret,
+    /// auth_url, token_url, redirect_url, scopes)`; carries the
+    /// instance methods `client.authorization_url()` /
+    /// `client.exchange_code(code, pkce_verifier)`. **Additive**
+    /// (T34). Pure-Rust (oauth2 + reqwest rustls-tls).
+    OAuth2Client,
+    /// T34: a role-based access-control policy runtime-value type,
+    /// mapped to `buff_auth::Rbac` at codegen time. Constructed via
+    /// `Rbac.new()`; carries the instance methods `policy.add(role,
+    /// resource, action)` / `policy.enforce(roles, resource, action)`
+    /// / `policy.len()` / `policy.is_empty()`. **Additive** (T34).
+    /// Pure stdlib (BTreeSet-backed).
+    Rbac,
     /// A user-defined generic type application: `Pair<Int, String>`,
     /// `Tree<T>`, or a bare user struct/enum `Point` (T37 — v1.25
     /// language-features batch).
@@ -2006,6 +2067,124 @@ impl Type {
         matches!(self, Type::RestartStrategy)
     }
 
+    /// T8: the multi-dimensional tensor runtime-value type. Maps to
+    /// `buff_tensor::Tensor` at codegen time. Constructed via
+    /// `Tensor.zeros(shape)` / `Tensor.ones(shape)` /
+    /// `Tensor.from_vec(data, shape)` / `Tensor.filled(shape, value)`.
+    pub fn tensor() -> Self {
+        Type::Tensor
+    }
+
+    /// T8: Returns `true` if this type is the prelude `Tensor`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`t.shape()`, `t.rank()`, `t.matmul(other)`, ...) to the
+    /// `buff_tensor::Tensor` lowering (instance-method dispatch is a
+    /// follow-up; this predicate closes the type-recognition gap).
+    pub fn is_prelude_tensor(&self) -> bool {
+        matches!(self, Type::Tensor)
+    }
+
+    /// T11: the time-domain signal runtime-value type. Maps to
+    /// `buff_dsp::Signal` at codegen time.
+    pub fn signal() -> Self {
+        Type::Signal
+    }
+
+    /// T11: Returns `true` if this type is the prelude `Signal`
+    /// runtime value (DSP). Used to dispatch instance method calls
+    /// (`s.fft()`, `s.lowpass(c)`, ...) to the `buff_dsp::Signal`
+    /// lowering.
+    pub fn is_prelude_signal(&self) -> bool {
+        matches!(self, Type::Signal)
+    }
+
+    /// T11: the FFT frequency-spectrum runtime-value type. Maps to
+    /// `buff_dsp::Spectrum` at codegen time. Returned by
+    /// `signal.fft()` / `signal.spectrogram(window_size)`.
+    pub fn spectrum() -> Self {
+        Type::Spectrum
+    }
+
+    /// T11: Returns `true` if this type is the prelude `Spectrum`
+    /// runtime value (the FFT-bin container returned by
+    /// `signal.fft()`).
+    pub fn is_prelude_spectrum(&self) -> bool {
+        matches!(self, Type::Spectrum)
+    }
+
+    /// T17: the HTTP web-server runtime-value type. Maps to
+    /// `buff_web::Web` at codegen time. Constructed via `Web.new()`
+    /// / `Web.bind(addr)`.
+    pub fn web() -> Self {
+        Type::Web
+    }
+
+    /// T17: Returns `true` if this type is the prelude `Web` runtime
+    /// value (HTTP server). Used to dispatch instance method calls
+    /// (`web.get(...)`, `web.listen(...)`, ...) to the `buff_web::Web`
+    /// lowering.
+    pub fn is_prelude_web(&self) -> bool {
+        matches!(self, Type::Web)
+    }
+
+    /// T18: the database connection-pool runtime-value type. Maps to
+    /// `buff_db::Pool` at codegen time. Constructed via
+    /// `Database.connect(url)`.
+    pub fn pool() -> Self {
+        Type::Pool
+    }
+
+    /// T18: Returns `true` if this type is the prelude `Pool` runtime
+    /// value (database connection pool). Used to dispatch instance
+    /// method calls (`pool.query(...)`, `pool.execute(...)`, ...) to
+    /// the `buff_db::Pool` lowering.
+    pub fn is_prelude_pool(&self) -> bool {
+        matches!(self, Type::Pool)
+    }
+
+    /// T27: the fuzz input-strategy runtime-value type. Maps to
+    /// `buff_fuzz::Strategy` at codegen time. Constructed via
+    /// `Strategy.int(min, max)` / `Strategy.float(...)` / etc.
+    pub fn strategy() -> Self {
+        Type::Strategy
+    }
+
+    /// T27: Returns `true` if this type is the prelude `Strategy`
+    /// runtime value (fuzz input generator). Passed to
+    /// `Fuzz.run(strategy, iterations, closure)`.
+    pub fn is_prelude_strategy(&self) -> bool {
+        matches!(self, Type::Strategy)
+    }
+
+    /// T34: the OAuth2 client runtime-value type. Maps to
+    /// `buff_auth::OAuth2Client` at codegen time. Constructed via
+    /// `OAuth2Client.new(...)`.
+    pub fn oauth2_client() -> Self {
+        Type::OAuth2Client
+    }
+
+    /// T34: Returns `true` if this type is the prelude `OAuth2Client`
+    /// runtime value. Used to dispatch instance method calls
+    /// (`client.authorization_url()`, `client.exchange_code(...)`)
+    /// to the `buff_auth::OAuth2Client` lowering.
+    pub fn is_prelude_oauth2_client(&self) -> bool {
+        matches!(self, Type::OAuth2Client)
+    }
+
+    /// T34: the RBAC policy runtime-value type. Maps to
+    /// `buff_auth::Rbac` at codegen time. Constructed via `Rbac.new()`.
+    pub fn rbac() -> Self {
+        Type::Rbac
+    }
+
+    /// T34: Returns `true` if this type is the prelude `Rbac` runtime
+    /// value. Used to dispatch instance method calls
+    /// (`policy.add(...)`, `policy.enforce(...)`) to the
+    /// `buff_auth::Rbac` lowering.
+    pub fn is_prelude_rbac(&self) -> bool {
+        matches!(self, Type::Rbac)
+    }
+
     /// T46: the `Text` NLP namespace type. Maps to `buff_nlp::Text` at
     /// codegen time. Namespace-only — never instantiated as a runtime
     /// value; only its associated functions are callable
@@ -2471,6 +2650,18 @@ impl fmt::Display for Type {
             Type::Supervisor => f.write_str("Supervisor"),
             Type::ChildSpec => f.write_str("ChildSpec"),
             Type::RestartStrategy => f.write_str("RestartStrategy"),
+            // T8/T11/T17/T18/T27/T34: framework runtime-value types
+            // whose canonical Rust representations live in the
+            // matching `buff-*` framework crates. Display mirrors the
+            // Buff surface name so diagnostics read naturally.
+            Type::Tensor => f.write_str("Tensor"),
+            Type::Signal => f.write_str("Signal"),
+            Type::Spectrum => f.write_str("Spectrum"),
+            Type::Web => f.write_str("Web"),
+            Type::Pool => f.write_str("Pool"),
+            Type::Strategy => f.write_str("Strategy"),
+            Type::OAuth2Client => f.write_str("OAuth2Client"),
+            Type::Rbac => f.write_str("Rbac"),
             // T46: prelude NLP types. `Text` is namespace-only (mirrors
             // MsgPack); `Language` is a runtime value (mirrors Point);
             // `StemAlgorithm` is an opaque enum (only passed as arg).

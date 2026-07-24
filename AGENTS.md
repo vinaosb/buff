@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-24 (v1.26 real-use-cases launch; v1.25 launch-readiness refresh; originally v0.1 → v1.0 → v1.9 → v1.24 → v1.38)
-**Commit:** 90e1768 (`v1x-frameworks`, v1.26 real use cases + launch infra; v1.0-v1.38 shipped)
+**Commit:** 0467fbd (`v1x-frameworks`, v1.26 launch infra polish — pages/CI/CodeOwners/funding; v1.0-v1.38 shipped)
 **Branch:** `v1x-frameworks` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.38.0; v0.1-dev preserved as historical marker)
 
 ## OVERVIEW
@@ -17,15 +17,15 @@ buff/
 │   ├── buff-lang-ast/                   # Pure AST data nodes (decl/expr/stmt/ty/op/ir/lossless) + T57 byte-exact roundtrip
 │   ├── buff-lang-lexer/                 # Hand-rolled byte-scanner + offside-rule indent tracker
 │   ├── buff-lang-parser/                # Hand-rolled recursive-descent + Pratt (NOT chumsky)
-│   ├── buff-lang-types/                 # Type inference + 12-module analysis suite + prelude + prelude_types (T124b 4527-line stdlib registry)
-│   ├── buff-lang-codegen-rust/          # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses + T124 stdlib lowering); rust_codegen.rs is ~17k lines (largest file in the workspace)
+│   ├── buff-lang-types/                 # Type inference + 12-module analysis suite + prelude + prelude_types (T124b 1919-line stdlib registry)
+│   ├── buff-lang-codegen-rust/          # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses + T124 stdlib lowering); rust_codegen.rs is ~10.5k lines (largest file in the workspace)
 │   ├── buff-lang-codegen-wgsl/          # AST → WGSL GPU shaders (T44; the ONE format!() exception to no-raw-string-codegen rule)
 │   ├── buff-lang-codegen-buffhtml/      # RSX template AST → rsx!{} TokenStream (T133-T135; post-format SpanMap side-table)
 │   ├── buff-lang-ast-rsx/               # Pure-data AST for .buffhtml SFC (T133; sibling to buff-lang-ast, separate blast radius)
 │   ├── buff-lang-buffhtml-parser/       # Hand-rolled 3-mode lexer + recursive-descent for .buffhtml (T133)
 │   ├── buff-lang-runtime/               # Heterogeneous compute host: rayon + wgpu + tokio (~170KB, 11 src files)
 │   ├── buff-lang-debug-info/            # Buff-span stack traces via SourceMap + panic hook (T1)
-│   ├── buff-lang-cli/                   # Binary + library: pipeline orchestration (21 subcommands, ui_dev/, coverage/)
+│   ├── buff-lang-cli/                   # Binary + library: pipeline orchestration (23 subcommands, ui_dev/, coverage/)
 │   ├── buff-lsp/                        # LSP server v1.2 (lsp-server 0.10 + lsp-types 0.97; stdio; full-reparse)
 │   ├── buff-eval/                       # T125-prep thin eval engine (REPL + Jupyter consumer)
 │   ├── buff-repl/                       # T125a REPL (rustyline 15; wraps buff-eval)
@@ -51,7 +51,7 @@ buff/
 ├── website/                             # v1.1 static landing page (HTML/CSS/JS, no build step, playwright tests)
 ├── playground/                          # v1.1 static transpile-only playground (HTML/CSS/JS + pkg/buff_playground_bg.wasm)
 ├── docs/                                # Generated error pages (docs/errors/E*.html) + component-model/extern-guide markdown
-├── .sisyphus/                           # Project orchestration: boulder.json + plans/ (10 files) + decisions/ + evidence/ + notepads/
+├── .sisyphus/                           # Project orchestration: boulder.json + plans/ (13 files) + decisions/ + evidence/ + notepads/
 ├── .github/workflows/ci.yml             # 3-OS matrix: fmt --check + clippy --all-targets -D warnings + test
 ├── Cargo.toml                           # Pure workspace (no [package]); ~50 deps centralized in [workspace.dependencies] with T-numbered rationale
 └── rust-toolchain.toml                  # Pin: 1.95.0 + rustfmt + clippy
@@ -61,12 +61,12 @@ buff/
 
 | Task | Location | Notes |
 |---|---|---|
-| Add a CLI subcommand | `crates/buff-lang-cli/src/cli.rs` (Command enum) + `commands/<name>.rs` + `main.rs` dispatch arm | 21 subcommands today; new variant + new commands/ file + new main.rs match arm |
+| Add a CLI subcommand | `crates/buff-lang-cli/src/cli.rs` (Command enum) + `commands/<name>.rs` + `main.rs` dispatch arm | 23 subcommands today; new variant + new commands/ file + new main.rs match arm |
 | Add a new AST node | `crates/buff-lang-ast/src/{decl,expr,stmt,ty}.rs` | Ripple: parser + types + codegen-rust (+ codegen-wgsl if GPU-relevant) |
 | Add a new RSX/`.buffhtml` node | `crates/buff-lang-ast-rsx/src/lib.rs` | Ripple: buffhtml-parser + codegen-buffhtml |
 | Add a TokenKind | `crates/buff-lang-lexer/src/token.rs` → `lexer.rs` → parser `stream.rs` | Also check `regex_context()` `/`-disambiguation |
 | Add a prelude/builtin fn (free) | `crates/buff-lang-types/src/prelude.rs` (PreludeFn + return_type) + codegen-rust `lower_prelude_call` | Implicit — no `import` needed |
-| Add a prelude type (DateTime/Regex/URL/etc) | `crates/buff-lang-types/src/prelude_types.rs` (PreludeType + PreludeAssocFn + PreludeInstanceFn) + codegen-rust `lower_prelude_type_assoc_fn` + `extern_crates` BTreeSet | THE 4527-line registry every T124 stdlib task extends |
+| Add a prelude type (DateTime/Regex/URL/etc) | `crates/buff-lang-types/src/prelude_types.rs` (PreludeType + PreludeAssocFn + PreludeInstanceFn) + codegen-rust `lower_prelude_type_assoc_fn` + `extern_crates` BTreeSet | THE 1919-line registry every T124 stdlib task extends |
 | Add a `buff check` lint | `crates/buff-lang-cli/src/naming_lint.rs` + `check.rs::check_source` | Standalone typecheck T55 shipped; no codegen needed |
 | Add an LSP capability | `crates/buff-lsp/src/handlers.rs` + `server.rs` capability registration | Pure handlers; only server.rs has I/O |
 | Add a registry endpoint | `crates/buff-registry/src/handlers.rs` + `lib.rs::app()` route arm | axum 0.8 `{name}` path syntax |
@@ -162,7 +162,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 - **`compile_to_rust` vs `compile_rust_to_exe`** split in `pipeline.rs`: callers can inspect intermediate Rust source before invoking rustc. `.buffhtml` adds `compile_buffhtml_to_rust` with a `SpanMap` side-table for reverse error mapping.
 - **Standalone typecheck SHIPPED**: `buff check` (T55) at `buff-lang-cli/src/check.rs::check_source()` runs lex → parse → TypeInferencer → naming_lint WITHOUT codegen. (Earlier docs said "post-v1.0 work" — OUTDATED.)
 - **Type-checking is ALSO INSIDE codegen** for `buff build`/`buff run` (TypeInferencer embedded in RustCodegen, consulted at each `let` binding; failures fall back to no annotation).
-- **Prelude**: free fns (`print`, etc.) AND prelude types (`DateTime`, `Regex`, `URL`, `Hash`, `TCP`, etc) are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs` + `prelude_types.rs` (4527-line extensible registry). Codegen-lowered to mature Rust crates (chrono/tracing/regex/toml/rand/base64/sha2/hmac/tokio-tungstenite/etc).
+- **Prelude**: free fns (`print`, etc.) AND prelude types (`DateTime`, `Regex`, `URL`, `Hash`, `TCP`, etc) are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs` + `prelude_types.rs` (1919-line extensible registry). Codegen-lowered to mature Rust crates (chrono/tracing/regex/toml/rand/base64/sha2/hmac/tokio-tungstenite/etc).
 - **Two parser entry points**: `parse()` fail-fast (production) + `parse_recovering()` accumulating (LSP/`buff check`). Both share `parse_one_decl()` dispatcher.
 - **Three parse-time desugars** (no new AST nodes): `|>` (pipeline) → FuncCall; `?.` (null-conditional) → `and_then` MethodCall + Lambda; `??` (null-coalesce) → BinaryOp.
 - **`buff-ui dev` server** (`crates/buff-lang-cli/src/ui_dev/`): WebSocket live reload + file watcher + Wasm builder (T131). `buff ssr` for server-side rendering (T135 via `dioxus-ssr`).
@@ -183,7 +183,7 @@ cargo run -p buff-lang-cli -- run examples/fibonacci.buff    # → 55
 # Run a .buffhtml UI app (T133+)
 cargo run -p buff-lang-cli -- ui dev examples/<name>.buffhtml
 
-# Scaffold a new project (21 subcommands total)
+# Scaffold a new project (23 subcommands total)
 cargo run -p buff-lang-cli -- new my_app
 cargo run -p buff-lang-cli -- run my_app/src/main.buff
 

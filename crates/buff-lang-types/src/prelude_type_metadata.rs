@@ -1046,28 +1046,24 @@ impl PreludeType {
             // types (the value type IS first-class; the namespace is
             // not).
             PreludeType::Channel => Type::Void,
-            // T8: namespace-only - Tensor has no value representation
-            // at the Buff Type level for MVP. The associated functions
-            // (`Tensor.zeros` / `Tensor.from_vec` / etc.) return
-            // `Type::Unknown` (forward-declaration contract — the
-            // coordinated `Type::Tensor` variant is added in a
-            // follow-up task outside the T8 shared zone). Mirrors the
-            // Log / Toml / OS / Channel namespace-only stance: the
-            // namespace itself is never a value, only its assoc fns
-            // are callable.
-            PreludeType::Tensor => Type::Void,
-            // T11: Signal / Window are namespace-only modules (their
-            // buff_type is Void — only the ctor return values are
-            // typed). Spectrum is a runtime-value type carrying the
-            // FFT bins — but since the T11 MVP keeps Type::Void for
-            // forward-declared variants (mirrors T8's Tensor stance),
-            // we return Void here and let the codegen layer splice the
-            // real `buff_dsp::Spectrum` paths. A coordinated `Type::
-            // Spectrum` variant is a follow-up task outside the T11
-            // shared zone.
-            PreludeType::Signal => Type::Void,
+            // T8: Tensor IS a runtime value (NOT namespace-only).
+            // The namespace `Tensor` carries the assoc fns
+            // (`Tensor.zeros` / `Tensor.from_vec` / etc.) whose
+            // return values are the opaque [`Type::Tensor`] variant;
+            // the codegen layer maps it to `buff_tensor::Tensor`.
+            // (Previously forward-declared as Void — the coordinated
+            // `Type::Tensor` variant now exists.)
+            PreludeType::Tensor => Type::Tensor,
+            // T11: Signal IS a runtime value (NOT namespace-only).
+            // The namespace `Signal` carries the assoc fn
+            // `Signal.from_vec` whose return value is the opaque
+            // [`Type::Signal`] variant; the codegen layer maps it to
+            // `buff_dsp::Signal`. Spectrum is the FFT-bin container
+            // returned by `signal.fft()` — also a real runtime value.
+            // (Previously forward-declared as Void.)
+            PreludeType::Signal => Type::Signal,
+            PreludeType::Spectrum => Type::Spectrum,
             PreludeType::Window => Type::Void,
-            PreludeType::Spectrum => Type::Void,
             // T7: DataFrame IS a runtime value (NOT namespace-only).
             // Returns the opaque [`Type::DataFrame`] variant; the
             // codegen layer maps it to `buff_dataframe::DataFrame`.
@@ -1115,28 +1111,18 @@ impl PreludeType {
             PreludeType::ReactiveSignal => Type::Void,
             PreludeType::ReactiveComputed => Type::Void,
             PreludeType::ReactiveEffect => Type::Void,
-            // T17: Web IS a runtime value (NOT namespace-only) but
-            // for MVP returns Type::Unknown as a forward-declaration
-            // contract. The coordinated `Type::Web` variant in `ty.rs`
-            // is a follow-up sibling task OUTSIDE the T17 shared zone
-            // (mirrors the T8 Tensor / T11 Signal / T12-Tensor
-            // precedent). The codegen layer splices `buff_web::Web::*`
-            // paths directly in the assoc-fn lowering; the instance-
-            // method lowering (web.get / web.listen / ...) is also a
-            // follow-up (requires Type::Web for receiver-type dispatch
-            // in `instance_fn_lookup`).
-            PreludeType::Web => Type::Unknown,
+            // T17: Web IS a runtime value (NOT namespace-only).
+            // Returns the opaque [`Type::Web`] variant; the codegen
+            // layer maps it to `buff_web::Web`. (Previously
+            // forward-declared as Unknown — the coordinated
+            // `Type::Web` variant now exists.)
+            PreludeType::Web => Type::Web,
             // T18: Database IS a runtime value (NOT namespace-only).
-            // Returns [`Type::Unknown`] (forward-declaration, mirrors
-            // the T17 Web precedent); the codegen layer splices the
-            // real `buff_db::Pool::*` paths. A coordinated
-            // [`Type::Pool`] variant in `ty.rs` is a follow-up
-            // sibling task OUTSIDE the T18 shared zone per the MUST
-            // NOT in the task brief. `Database.connect(url)` returns
-            // the runtime Pool value (also typed as `Type::Unknown`
-            // in `assoc_fn_return_type` — the codegen emits
-            // `buff_db::Pool::connect(&url).await?`).
-            PreludeType::Database => Type::Unknown,
+            // `Database.connect(url)` returns the runtime Pool value.
+            // Returns the opaque [`Type::Pool`] variant; the codegen
+            // layer maps it to `buff_db::Pool`. (Previously
+            // forward-declared as Unknown.)
+            PreludeType::Database => Type::Pool,
             // T33: HttpClient IS a runtime value (NOT namespace-only).
             // Returns the opaque [`Type::HttpClient`] variant; the
             // codegen layer maps it to `buff_http_client::HttpClient`.
@@ -1173,13 +1159,16 @@ impl PreludeType {
             // `buff_type()` returns Type::Void (Observe is NOT a runtime
             // value — it's a namespace for observability operations).
             PreludeType::Observe => Type::Void,
-            // T27: Fuzz + Strategy are namespace-only modules (mirror
-            // Log / Toml / Hash / HMAC / OS / Audit / Signature). The
-            // assoc fns return opaque `buff_fuzz::*` values whose Type
-            // variants are forward-declared as Unknown (mirrors the
-            // Channel / Tensor / Signal-DSP precedent).
-            PreludeType::Fuzz => Type::Unknown,
-            PreludeType::Strategy => Type::Unknown,
+            // T27: Fuzz is a namespace-only module (mirror Log / Toml /
+            // Hash / HMAC / OS / Audit / Signature). `Fuzz.run` returns
+            // Void (side-effecting); the namespace itself has no value
+            // representation. Strategy IS a runtime value: its assoc fns
+            // (`Strategy.int(min, max)` / etc.) return the opaque
+            // [`Type::Strategy`] variant passed to `Fuzz.run`. (Strategy
+            // was previously forward-declared as Unknown; Fuzz was
+            // previously Unknown but is genuinely namespace-only → Void.)
+            PreludeType::Fuzz => Type::Void,
+            PreludeType::Strategy => Type::Strategy,
             // T34: JWT + Password are namespace-only modules (mirror
             // Audit / Signature / Hash / HMAC). The assoc fns return
             // String / Map / Bool — NOT an opaque value type — so the
@@ -1188,14 +1177,13 @@ impl PreludeType {
             PreludeType::Jwt => Type::Void,
             PreludeType::Password => Type::Void,
             // T34: OAuth2Client + Rbac ARE runtime values (NOT
-            // namespace-only). Returns [`Type::Unknown`] for MVP — the
-            // coordinated Type::OAuth2Client / Type::Rbac variants in
-            // `ty.rs` are follow-up sibling tasks OUTSIDE the T34 shared
-            // zone (mirrors the T17 Web / T18 Database forward-declaration
-            // precedent). The codegen layer splices the real
-            // `buff_auth::OAuth2Client::*` / `buff_auth::Rbac::*` paths.
-            PreludeType::OAuth2Client => Type::Unknown,
-            PreludeType::Rbac => Type::Unknown,
+            // namespace-only). Returns the opaque [`Type::OAuth2Client`]
+            // / [`Type::Rbac`] variants; the codegen layer maps them to
+            // `buff_auth::OAuth2Client` / `buff_auth::Rbac`. (Previously
+            // forward-declared as Unknown — the coordinated variants
+            // now exist.)
+            PreludeType::OAuth2Client => Type::OAuth2Client,
+            PreludeType::Rbac => Type::Rbac,
             // T39: Archive is a namespace-only module (mirror Log /
             // Toml / Math / Config / Observe). The namespace itself
             // has no value representation; only its associated
@@ -1367,10 +1355,7 @@ impl PreludeType {
                 | PreludeType::UDP
                 | PreludeType::WebSocket
                 | PreludeType::Channel
-                | PreludeType::Tensor
-                | PreludeType::Signal
                 | PreludeType::Window
-                | PreludeType::Spectrum
                 | PreludeType::Audit
                 | PreludeType::Signature
                 | PreludeType::ReactiveSignal

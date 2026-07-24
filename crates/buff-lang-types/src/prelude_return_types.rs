@@ -445,24 +445,16 @@ pub fn assoc_fn_return_type(
             Some(Type::tuple(vec![Type::Sender, Type::Receiver]))
         }
         // T8: Tensor constructor assoc fns. Each returns the opaque
-        // Tensor value type. For MVP we surface `Type::Unknown`
-        // because the coordinated `Type::Tensor` variant lives in
-        // `ty.rs` which is OUTSIDE the T8 shared zone (sibling-task
-        // coordination concern). The codegen lowering + the
-        // `Type::Tensor` variant are added in a follow-up task. This
-        // forward-declaration lets `buff check` validate
-        // `Tensor.zeros([3, 4])` syntax today (parses + resolves +
-        // return-type-checks as Unknown); `buff run` codegen
-        // integration ships when the coordinated sibling task lands.
-        //
-        // The 4 fns cover the spec-mandated constructors (T8 spec
-        // line 1469: zeros / from_vec; plus ones + filled as
-        // natural symmetric siblings matching buff_tensor's Rust
-        // surface).
-        (PreludeType::Tensor, PreludeAssocFn::Zeros) => Some(Type::Unknown),
-        (PreludeType::Tensor, PreludeAssocFn::Ones) => Some(Type::Unknown),
-        (PreludeType::Tensor, PreludeAssocFn::FromVec) => Some(Type::Unknown),
-        (PreludeType::Tensor, PreludeAssocFn::Filled) => Some(Type::Unknown),
+        // [`Type::Tensor`] runtime-value type (the coordinated variant
+        // now exists — previously forward-declared as Unknown). The
+        // codegen layer maps it to `buff_tensor::Tensor`. The 4 fns
+        // cover the spec-mandated constructors (T8 spec: zeros /
+        // from_vec; plus ones + filled as natural symmetric siblings
+        // matching buff_tensor's Rust surface).
+        (PreludeType::Tensor, PreludeAssocFn::Zeros) => Some(Type::Tensor),
+        (PreludeType::Tensor, PreludeAssocFn::Ones) => Some(Type::Tensor),
+        (PreludeType::Tensor, PreludeAssocFn::FromVec) => Some(Type::Tensor),
+        (PreludeType::Tensor, PreludeAssocFn::Filled) => Some(Type::Tensor),
         // T7: DataFrame assoc fns return the runtime-value DataFrame
         // type (NOT Unknown, unlike T8 Tensor which forward-declares
         // only). Both ctors are panic-free at the codegen layer:
@@ -516,9 +508,10 @@ pub fn assoc_fn_return_type(
         // consumer).
         (PreludeType::Audio, PreludeAssocFn::FromSamples) => Some(Type::Audio),
         // T11: Signal.from_vec reuses FromVec (shared with Tensor).
-        // Returns Signal (modeled as Void — coordinated Type::Signal
-        // variant is a follow-up outside T11 shared zone).
-        (PreludeType::Signal, PreludeAssocFn::FromVec) => Some(Type::Void),
+        // Returns the [`Type::Signal`] runtime-value variant
+        // (previously forward-declared as Void — the coordinated
+        // variant now exists). Wraps `buff_dsp::Signal::from_vec(...)`.
+        (PreludeType::Signal, PreludeAssocFn::FromVec) => Some(Type::Signal),
         // T11: Window constructors return Window (modeled as Void).
         (PreludeType::Window, PreludeAssocFn::Hann) => Some(Type::Void),
         (PreludeType::Window, PreludeAssocFn::Hamming) => Some(Type::Void),
@@ -547,43 +540,28 @@ pub fn assoc_fn_return_type(
         (PreludeType::ReactiveSignal, PreludeAssocFn::New) => Some(Type::Unknown),
         (PreludeType::ReactiveComputed, PreludeAssocFn::New) => Some(Type::Unknown),
         (PreludeType::ReactiveEffect, PreludeAssocFn::New) => Some(Type::Unknown),
-        // T17: Web assoc fns. Both ctors return Web (modeled as
-        // Type::Unknown for MVP - the coordinated Type::Web variant
-        // in ty.rs is a follow-up sibling task outside the T17 shared
-        // zone, mirroring the T8 Tensor / T11 Signal / T12-Tensor
-        // forward-declaration precedent). The codegen-lowered
+        // T17: Web assoc fns. Both ctors return the runtime-value
+        // [`Type::Web`] (the coordinated variant now exists —
+        // previously forward-declared as Unknown). The codegen-lowered
         // `buff_web::Web::new()` / `buff_web::Web::bind(addr)` calls
-        // splice the path directly; the Buff-side type check accepts
-        // the Unknown return so `buff check` validates the syntax.
+        // splice the path directly.
         //
         // `Web.new()` -> Web. Zero args. Wraps `buff_web::Web::new()`
         // (infallible - returns an empty Web with no routes / no
         // middleware / no bind addr).
-        (PreludeType::Web, PreludeAssocFn::New) => Some(Type::Unknown),
+        (PreludeType::Web, PreludeAssocFn::New) => Some(Type::Web),
         // `Web.bind(addr)` -> Web. One arg (String). Wraps
         // `buff_web::Web::bind(addr)` (infallible - returns an empty
         // Web with the bind addr preset; the user adds routes via
         // web.get / web.post / ... and starts serving via web.run()).
-        (PreludeType::Web, PreludeAssocFn::Bind) => Some(Type::Unknown),
-        // T18: Database.connect(url) -> Pool (forward-declared as
-        // Type::Unknown). Wraps `buff_db::Pool::connect(&url).await?`
-        // (the `?` propagates DbError per Buff's R3 error-mapping
-        // contract — the Buff user's surrounding fn must return
-        // `Result<T, DbError>` so `?` can splice cleanly; the Buff
-        // `?` operator is the standard error-propagation idiom,
-        // mirroring `regex::Regex::new(p)?` from T124d and
-        // `buff_image::Image::from_path(p)?` from T9).
-        //
-        // The `Connect` variant is shared with TCP.connect /
-        // WebSocket.connect (existing variants — same name,
-        // different per-type lowering, dispatched on the
-        // (Database, Connect) pair). The codegen lowering emits the
-        // async call via `.await` (Buff has no `await` keyword — the
-        // codegen auto-inserts it when the surrounding fn is async
-        // per the T31 async-propagation path). Records `buff-db` +
-        // `sqlx` + `tokio` in codegen `extern_crates` (mirrors the
-        // chrono / regex / tracing codegen-only linking boundary).
-        (PreludeType::Database, PreludeAssocFn::Connect) => Some(Type::Unknown),
+        (PreludeType::Web, PreludeAssocFn::Bind) => Some(Type::Web),
+        // T18: Database.connect(url) -> Pool. Returns the
+        // [`Type::Pool`] runtime-value variant (previously
+        // forward-declared as Unknown). Wraps
+        // `buff_db::Pool::connect(&url).await?` (the `?` propagates
+        // DbError per Buff's R3 error-mapping contract). Records
+        // `buff-db` + `sqlx` + `tokio` in codegen `extern_crates`.
+        (PreludeType::Database, PreludeAssocFn::Connect) => Some(Type::Pool),
         // T33: HttpClient.new() -> HttpClient. Zero args. Wraps
         // `buff_http_client::HttpClient::new()` (infallible - returns
         // a new client with default settings). Returns the concrete
