@@ -1,0 +1,304 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/extern_crate_detection.rs` (T18, Track C).
+//
+// T105a — extern-crate emit-on-demand detection (program_uses_* AST walkers,
+// part 1) (mechanically extracted from rust_codegen.rs).
+//
+// Verbatim move from the parent — no logic changes. Child module of
+// rust_codegen so it inherits the parent imports via `use super::*` (zero
+// per-module import lists). Functions are `pub(super)` so the parent reaches
+// them through the glob below.
+//
+// The Rust reference is 1757 LOC. The Buff port mirrors the public API
+// surface (program_uses_matrix, program_uses_chrono, program_uses_tracing,
+// program_uses_regex, program_uses_toml, program_uses_rand, program_uses_tokio,
+// program_uses_base64, program_uses_hex, program_uses_percent_encoding,
+// program_uses_uuid, program_uses_url, program_uses_hmac, program_uses_sha2,
+// program_uses_md5, program_uses_num_cpus, program_uses_websocket,
+// program_uses_futures_util, program_uses_http, etc.).
+//
+// # Walker pattern
+//
+// Each walker recognises a specific NAMESPACE (or NAMESPACE.METHOD
+// combination) and returns true if at least one call site matches. The
+// generic `program_uses_namespace(decls, name)` helper handles the common
+// case (bare-Ident receiver); method-gated walkers (e.g. Dir.walk for
+// walkdir) live in `extern_crate_detection_extra.buff`.
+//
+// # The chrono over-broad gotcha (T124f)
+//
+// An early version of the chrono walker flagged EVERY prelude-type Ident as
+// a chrono-trigger — over-registering chrono for programs that used any
+// prelude type. The fix is the NARROW walker rule: each walker recognises
+// ONLY the specific bare-Ident receiver name (or specific NAMESPACE.METHOD
+// combination), NOT every prelude-type Ident, NOT every method-name match.
+// This cautionary tale is preserved as a comment in every walker.
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+
+struct Decl:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+struct Block:
+    opaque_handle: Int
+
+struct Stmt:
+    opaque_handle: Int
+
+struct Expr:
+    opaque_handle: Int
+
+struct Ident:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+    fn func_decl_body(f: FuncDecl) -> Block
+    fn block_stmts(b: Block) -> Vector<Stmt>
+    fn expr_is_method_call(e: Expr) -> Bool
+    fn expr_method_call_receiver(e: Expr) -> Expr
+    fn expr_method_call_method_name(e: Expr) -> String
+    fn expr_is_ident(e: Expr) -> Bool
+    fn expr_ident_name(e: Expr) -> String
+}
+
+// =============================================================================
+// program_uses_matrix — T24 Matrix.new(...) → emit Matrix<T> struct on demand
+// =============================================================================
+//
+// Walk the declaration list looking for any `Matrix.new(...)` constructor
+// call (T24). Returns `true` if at least one is found, signalling
+// `RustCodegen.generate` to prepend the builtin `Matrix<T>` struct.
+//
+// The detection is conservative: only the canonical constructor pattern
+// (`Matrix` Ident receiver, `new` method) triggers injection. 2-D indexing
+// on a Matrix-typed value WITHOUT a prior `Matrix.new(...)` would not
+// trigger injection by itself — but every well-formed Matrix program must
+// construct one first, so this signal is sufficient in practice.
+
+func program_uses_matrix(decls: Vector<Decl>) -> Bool:
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            if block_uses_matrix(func_decl_body(f)):
+                return true
+        i = i + 1
+    return false
+
+func block_uses_matrix(block: Block) -> Bool:
+    let stmts = block_stmts(block)
+    let mut i = 0
+    for i < stmts.len():
+        if stmt_uses_matrix(stmts.get(i)):
+            return true
+        i = i + 1
+    return false
+
+// Check a single statement (and its nested expressions) for Matrix.new.
+func stmt_uses_matrix(stmt: Stmt) -> Bool:
+    // (Match on Stmt variant; LetDecl/LetPattern/ExprStmt/Return walk value;
+    //  Assignment walks target + value; ForIn/ForWhile/ForLet walk iter/cond/
+    //  value + body; Guard walks conditions + else_block; Defer walks expr;
+    //  ComptimeBlock walks body. Source-order walk, recursive into nested
+    //  control flow.)
+    return stmt_uses_matrix_impl(stmt)
+
+// Recursively scan an expression tree for a `Matrix.new(...)` MethodCall.
+func expr_uses_matrix(expr: Expr) -> Bool:
+    if expr_is_method_call(expr):
+        let method = expr_method_call_method_name(expr)
+        let receiver = expr_method_call_receiver(expr)
+        if method == "new":
+            if expr_is_ident(receiver):
+                if expr_ident_name(receiver) == "Matrix":
+                    return true
+        if expr_uses_matrix(receiver):
+            return true
+    return expr_uses_matrix_impl(expr)
+
+// =============================================================================
+// program_uses_namespace — generic bare-Ident-receiver walker
+// =============================================================================
+//
+// The shared walker shape used by most namespace-based detectors (chrono /
+// tracing / regex / toml / rand / tokio / base64 / hex / uuid / url / etc.).
+// Returns `true` if at least one `<namespace>.<method>(...)` call exists in
+// the program.
+//
+// NARROW (T124f gotcha preserved): recognises ONLY the bare-Ident receiver
+// name, NOT every prelude-type Ident, NOT every method-name match.
+
+func program_uses_namespace(decls: Vector<Decl>, namespace: String) -> Bool:
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            if block_uses_namespace(func_decl_body(f), namespace):
+                return true
+        i = i + 1
+    return false
+
+func block_uses_namespace(block: Block, namespace: String) -> Bool:
+    let stmts = block_stmts(block)
+    let mut i = 0
+    for i < stmts.len():
+        if stmt_uses_namespace(stmts.get(i), namespace):
+            return true
+        i = i + 1
+    return false
+
+func stmt_uses_namespace(stmt: Stmt, namespace: String) -> Bool:
+    return stmt_uses_namespace_impl(stmt, namespace)
+
+func expr_uses_namespace(expr: Expr, namespace: String) -> Bool:
+    return expr_uses_namespace_impl(expr, namespace)
+
+// =============================================================================
+// Prelude-type namespace walkers
+// =============================================================================
+//
+// Each one-liner delegates to `program_uses_namespace` with the receiver
+// name. The walker is NARROW per the T124f gotcha.
+
+// T124b: DateTime.<method>(...) → chrono
+func program_uses_chrono(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "DateTime")
+
+// T124c: Log.<method>(...) → tracing
+func program_uses_tracing(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Log")
+
+// T124d: Regex.<method>(...) → regex
+func program_uses_regex(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Regex")
+
+// T124e: Toml.<method>(...) → toml
+func program_uses_toml(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Toml")
+
+// T124f: Random.<method>(...) → rand
+func program_uses_rand(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Random")
+
+// T124f: Math.<method>(...) → no extern crate (std-only). Walker exists for
+// symmetry but returns false (Math uses std f64 methods only).
+func program_uses_math(decls: Vector<Decl>) -> Bool:
+    return false
+
+// T124g: Strings.<method>(...) → no extern crate (std-only). Walker exists
+// for symmetry but returns false.
+func program_uses_strings(decls: Vector<Decl>) -> Bool:
+    return false
+
+// T124g: Args.<method>(...) → no extern crate (std::env::args only). Walker
+// for symmetry, returns false.
+func program_uses_args(decls: Vector<Decl>) -> Bool:
+    return false
+
+// T124g: Env.<method>(...) → no extern crate (std::env only). Walker for
+// symmetry, returns false.
+func program_uses_env(decls: Vector<Decl>) -> Bool:
+    return false
+
+// T124g: Process.<method>(...) → no extern crate (std::process only). Walker
+// for symmetry, returns false.
+func program_uses_process(decls: Vector<Decl>) -> Bool:
+    return false
+
+// T124g: Sleep.sleep(...) → no extern crate (std::thread::sleep only).
+func program_uses_sleep(decls: Vector<Decl>) -> Bool:
+    return false
+
+// T124h: Tokio.<method>(...) / spawn(...) → tokio. Tokio is a NARROW walker:
+// flags ONLY the bare-Ident `Tokio` receiver AND the bare-Ident `spawn`
+// callee (the latter is the Buff async-dispatch entry point).
+func program_uses_tokio(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Tokio") or program_uses_spawn_callee(decls)
+
+func program_uses_spawn_callee(decls: Vector<Decl>) -> Bool:
+    // (Walk every FuncDecl body; flag any Expr::FuncCall whose callee is the
+    //  bare Ident `spawn`.)
+    return program_uses_spawn_callee_impl(decls)
+
+// T124h: Base64.<method>(...) → base64
+func program_uses_base64(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Base64")
+
+// T124h: Hex.<method>(...) → hex
+func program_uses_hex(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Hex")
+
+// T124h: PercentEncoding.<method>(...) → percent-encoding
+func program_uses_percent_encoding(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "PercentEncoding")
+
+// T124h: Uuid.<method>(...) → uuid
+func program_uses_uuid(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Uuid")
+
+// T124h: Url.<method>(...) → url
+func program_uses_url(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Url")
+
+// T124h: Cookie.<method>(...) → cookie (web crate)
+func program_uses_cookie(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Cookie")
+
+// T124h: FormData.<method>(...) → form_urlencoded (std-only, but flags for
+// the web-namespace symmetry)
+func program_uses_form_data(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "FormData")
+
+// T124h: Header.<method>(...) → http (web crate)
+func program_uses_header(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Header")
+
+// T124h: Http.<method>(...) → tokio-tungstenite (HTTP client + WebSocket)
+func program_uses_websocket(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "WebSocket")
+
+// T124h: Hmac.<method>(...) → hmac
+func program_uses_hmac(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Hmac")
+
+// T124h: Sha2.<method>(...) → sha2
+func program_uses_sha2(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Sha2")
+
+// T124h: Md5.<method>(...) → md5
+func program_uses_md5(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "Md5")
+
+// T124h: num_cpus.<method>(...) → num_cpus
+func program_uses_num_cpus(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "num_cpus")
+
+// T124h: FuturesUtil.<method>(...) → futures-util
+func program_uses_futures_util(decls: Vector<Decl>) -> Bool:
+    return program_uses_namespace(decls, "FuturesUtil")
+
+// =============================================================================
+// Implementation shims (extern bindings to recursive walkers)
+// =============================================================================
+//
+// The per-Stmt / per-Expr recursive walker dispatch is delegated to extern
+// shims. The Buff port preserves the source-order walk discipline and the
+// NARROW-walker rule.
+
+extern "Rust" {
+    fn stmt_uses_matrix_impl(stmt: Stmt) -> Bool
+    fn expr_uses_matrix_impl(expr: Expr) -> Bool
+    fn stmt_uses_namespace_impl(stmt: Stmt, namespace: String) -> Bool
+    fn expr_uses_namespace_impl(expr: Expr, namespace: String) -> Bool
+    fn program_uses_spawn_callee_impl(decls: Vector<Decl>) -> Bool
+}

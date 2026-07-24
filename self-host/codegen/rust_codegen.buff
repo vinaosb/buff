@@ -1,0 +1,527 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen.rs` (T18, Track C).
+//
+// The Rust code generator — lowers Buff AST nodes to `syn` types.
+//
+// # Design
+//
+// - Every Rust construct is built via explicit `syn` struct construction. We
+//   **never** hand-format Rust strings; the only string producers are
+//   `prettyplease` (via `format.buff::format`) and identifier names.
+// - `parse_quote!` is intentionally avoided in non-test code because it
+//   panics on parse failure; we construct `syn` nodes by hand instead.
+// - Unsupported AST nodes return a `CodegenError` rather than panicking, so
+//   future tasks (T12/T13/…) can extend coverage incrementally.
+//
+// # Supported AST → Rust coverage
+//
+// - `Decl::FuncDecl` → `Item::Fn` (async/unsafe/extern modifiers + params +
+//   return type + body)
+// - `Stmt::LetDecl`, `Stmt::ExprStmt`, `Stmt::Return`, `Stmt::Assignment`,
+//   `Stmt::Break`, `Stmt::Continue`, `Stmt::ForIn`, `Stmt::ForWhile`
+// - `Expr::Literal`, `Expr::Ident`, `Expr::BinaryOp`, `Expr::UnaryOp`,
+//   `Expr::FuncCall`, `Expr::IfExpr`
+// - `Literal::{Int, Float, Double, Bool, String, Byte, Decimal}`
+// - `TypeRef::Named` for the seven v0.1 primitive names (`Int`→`i64`, etc.)
+//   plus `TypeRef::Option` and `TypeRef::Generic` (named base)
+//
+// # Type-annotated `let` bindings (T12)
+//
+// Every `let` binding emits an explicit Rust type annotation. If the Buff
+// source provides one (`let x: Int = …`), it is used directly; otherwise the
+// integrated `TypeInferencer` infers the type from the initializer
+// expression and `RustCodegen.buff_type_to_syn` maps it to the corresponding
+// Rust type. `Type::Decimal` maps to `rust_decimal::Decimal` (so generated
+// crates must depend on `rust_decimal`/`rust_decimal_macros`).
+//
+// # Control flow (T13)
+//
+// - `if cond { a } else { b }` → Rust `if` expression (with optional else)
+// - `for x in iter { body }` → Rust `for x in iter { body }`
+// - `for cond { body }` (Buff conditional loop) → Rust `while cond { body }`
+// - `print(arg)` calls map to `println!("{}", arg)` macro invocations.
+//
+// # Move semantics (T33a)
+//
+// All bindings are MOVED by default (Rust move semantics). The integrated
+// `MoveAnalyzer` pre-classifies each binding as Copy or non-Copy, and
+// `lower_expr` inserts `.clone()` at the use site of any non-Copy variable
+// that has already been moved once. Generated Rust never contains `&`,
+// `&mut`, or lifetime annotations in function signatures.
+//
+// The Rust reference is 10,542 LOC. The Buff port mirrors the public API
+// surface (RustCodegen struct, RustCodegen.new, RustCodegen.generate,
+// lower_prelude_call, lower_prelude_type_assoc_fn, the extern_crates
+// BTreeSet, buff_primitive_to_rust_name, collect_rust_deps re-export).
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+//
+// The codegen threads syn AST nodes + Buff AST nodes through opaque handles.
+// The Buff port never inspects their interior; the per-arm lowering logic
+// lives in the sibling .buff files (expr_lowering, decl_lowering,
+// method_call_lowering, type_lowering, lowering_helpers, syn_helpers).
+
+struct Decl:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+struct Block:
+    opaque_handle: Int
+
+struct Stmt:
+    opaque_handle: Int
+
+struct Expr:
+    opaque_handle: Int
+
+struct Pattern:
+    opaque_handle: Int
+
+struct TypeRef:
+    opaque_handle: Int
+
+struct TypeParam:
+    opaque_handle: Int
+
+struct Type:
+    opaque_handle: Int
+
+struct Ident:
+    opaque_handle: Int
+
+struct Literal:
+    opaque_handle: Int
+
+struct Item:
+    opaque_handle: Int
+
+struct SynFile:
+    opaque_handle: Int
+
+struct SynExpr:
+    opaque_handle: Int
+
+struct SynStmt:
+    opaque_handle: Int
+
+struct SynType:
+    opaque_handle: Int
+
+struct SynBlock:
+    opaque_handle: Int
+
+struct SynPat:
+    opaque_handle: Int
+
+struct SynPath:
+    opaque_handle: Int
+
+struct CodegenError:
+    opaque_handle: Int
+
+struct Diagnostic:
+    opaque_handle: Int
+
+struct BuffSpan:
+    opaque_handle: Int
+
+struct TypeInferencer:
+    opaque_handle: Int
+
+struct MoveAnalyzer:
+    opaque_handle: Int
+
+struct CodegenContext:
+    opaque_handle: Int
+
+struct AtomicPromotions:
+    opaque_handle: Int
+
+struct OwnershipFacts:
+    opaque_handle: Int
+
+struct PreludeFn:
+    opaque_handle: Int
+
+struct PreludeType:
+    opaque_handle: Int
+
+struct PreludeAssocFn:
+    opaque_handle: Int
+
+struct PreludeInstanceFn:
+    opaque_handle: Int
+
+// =============================================================================
+// RustCodegen — the visitor struct
+// =============================================================================
+//
+// The codegen visitor. Owns:
+//
+// - `items`: the Vec<Item> accumulated during `generate()`. Each lowered
+//   Decl pushes 1+ Items; the final `syn::File` is built from this Vec.
+// - `extern_crates`: BTreeSet<String> of extern crate names the generated
+//   Cargo project must depend on (chrono, tracing, regex, toml, rand,
+//   tokio, base64, hex, sha2, md5, hmac, walkdir, tempfile, num_cpus,
+//   tokio-tungstenite, futures-util, serde_yml, csv). Populated lazily by
+//   the program_uses_* walkers (extern_crate_detection.buff).
+// - `collected_unions`: BTreeMap<String, Vec<TypeRef>> of T76 union types
+//   encountered. The wrapper enum definitions are emitted at the END of
+//   `generate()` (after all user decls), one per unique union name.
+// - `hash_safe_user_structs`: BTreeSet<String> populated by the
+//   `compute_hash_safe_structs` fixpoint pass (which structs can safely
+//   carry `#[derive(Hash)]`). Consulted by `struct_derive_attrs`.
+// - `gpu_bound_structs`: BTreeSet<String> populated by gpu_alignment.
+//   Consulted by `lower_struct_decl` (T50 #[repr(C)] + Pod/Zeroable).
+// - `matrix_used`: bool — set when the program constructs a Matrix; triggers
+//   the on-demand Matrix<T> struct emission at the top of `generate()`.
+// - `type_inferencer`: TypeInferencer — the embedded type-inference engine.
+//   Reset + rebound with param types at the start of `lower_func`.
+// - `move_analyzer`: MoveAnalyzer — the embedded move/copy/Arc classifier.
+//   Reset between functions.
+// - `closure_capture_stack`: Vec<BTreeSet<String>> — the T34 capture stack
+//   pushed/popped by `lower_lambda` so the `Expr::Ident` arm can bypass
+//   `needs_clone` for captured variables.
+// - `func_param_names` / `func_param_defaults`: BTreeMap populated by
+//   `collect_func_param_names` / `collect_func_param_defaults` (dependency_
+//   detection.buff). Consulted by `lower_expr`'s FuncCall arm.
+// - `user_enum_variants`: BTreeMap<String, String> populated by
+//   `collect_user_enum_variants`. Consulted by `lower_expr`'s Ident arm
+//   (T85 bare-variant qualification).
+// - `extern_fn_names`: BTreeSet<String> populated by
+//   `collect_extern_fn_names`. Consulted by `lower_expr`'s FuncCall arm
+//   (T119 unsafe-block wrap).
+
+struct RustCodegen:
+    items: Vector<Item>
+    extern_crates: BTreeSet_String
+    collected_unions: BTreeMap_String_TypeRefVec
+    hash_safe_user_structs: BTreeSet_String
+    gpu_bound_structs: BTreeSet_String
+    matrix_used: Bool
+    matrix_emitted: Bool
+    type_inferencer: TypeInferencer
+    move_analyzer: MoveAnalyzer
+    closure_capture_stack: Vector<BTreeSet_String>
+    func_param_names: BTreeMap_String_StringVec
+    func_param_defaults: BTreeMap_String_OptionExprVec
+    user_enum_variants: BTreeMap_String_String
+    extern_fn_names: BTreeSet_String
+    ctx: CodegenContext
+
+// =============================================================================
+// RustCodegen.new — construct a fresh visitor
+// =============================================================================
+
+func rust_codegen_new() -> RustCodegen:
+    return RustCodegen.new(
+        items: Vector.new(),
+        extern_crates: btreetap_string_new(),
+        collected_unions: btreetap_string_typerefvec_new(),
+        hash_safe_user_structs: btreetap_string_new(),
+        gpu_bound_structs: btreetap_string_new(),
+        matrix_used: false,
+        matrix_emitted: false,
+        type_inferencer: type_inferencer_new(),
+        move_analyzer: move_analyzer_new(),
+        closure_capture_stack: Vector.new(),
+        func_param_names: btreetap_string_stringvec_new(),
+        func_param_defaults: btreetap_string_optionexprvec_new(),
+        user_enum_variants: btreetap_string_string_new(),
+        extern_fn_names: btreetap_string_new(),
+        ctx: codegen_context_new(),
+    )
+
+// =============================================================================
+// RustCodegen.generate — the public entry point
+// =============================================================================
+//
+// Lower a slice of Buff declarations to a `syn::File`. The pipeline:
+//
+// 1. Atomic analysis (T42) — produces AtomicPromotions; consulted by
+//    `lower_func` to emit AtomicI64 declarations + fetch_add sites.
+// 2. Race analysis (T41) with atomic-exemption hook — returns Err on the
+//    first ParallelMutabilityError not exempted by atomic promotion.
+// 3. Async propagation (T31 fixpoint) — drives the `async fn` annotation.
+// 4. Hash-safety fixpoint — populates hash_safe_user_structs.
+// 5. GPU-bound analysis (T50) — populates gpu_bound_structs.
+// 6. Named-arg/default/extern-fn collection (T105/T106/T119) — populates
+//    func_param_names, func_param_defaults, extern_fn_names.
+// 7. User-enum-variant collection (T85) — populates user_enum_variants.
+// 8. Lower comptime facts (T53) — prepends const items BEFORE user decls.
+// 9. Matrix detection (T24) — if program_uses_matrix, set matrix_used.
+// 10. Extern-crate detection (T124b-T124j) — populate extern_crates via
+//     the program_uses_* walkers.
+// 11. Per-Decl lowering loop — call lower_decl for each decl, push items.
+// 12. Union wrapper emission — append one enum per collected_unions entry.
+// 13. Matrix on-demand emission — prepend Matrix<T> struct + impl if used.
+// 14. Build `syn::File { shebang: None, attrs: vec![], items }`.
+
+func rust_codegen_generate(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>:
+    // (Full algorithm: see the Rust reference lines 100-1000. The Buff port
+    //  preserves the 14-step pipeline order; each step is delegated to an
+    //  extern shim that performs the actual analysis + lowering.)
+    return rust_codegen_generate_impl(codegen, decls)
+
+// =============================================================================
+// lower_func — per-function lowering entry (delegates to decl_lowering.buff)
+// =============================================================================
+
+func rust_codegen_lower_func(codegen: RustCodegen, f: FuncDecl) -> Result<Item, CodegenError>:
+    return lower_func_decl(codegen, f)
+
+// =============================================================================
+// lower_stmt — per-statement dispatch (LetDecl/ExprStmt/Return/Assignment/...)
+// =============================================================================
+//
+// The statement-level lowering. LetDecl emits a `let x: T = v;` SynStmt::Local
+// (with T inferred if the source annotation is absent). ExprStmt emits a
+// SynStmt::Expr or SynStmt::Semi (depending on the surrounding context —
+// tail-expression-vs-statement distinction). Return/Assignment/For/While
+// emit the corresponding SynStmt variants.
+
+func rust_codegen_lower_stmt(codegen: RustCodegen, stmt: Stmt) -> Result<SynStmt, CodegenError>:
+    return rust_codegen_lower_stmt_impl(codegen, stmt)
+
+// =============================================================================
+// lower_expr — per-expression dispatch (the largest visitor arm)
+// =============================================================================
+//
+// Match on the Expr variant and dispatch:
+//
+// - `Literal` → lower_literal (Int/Float/Double/Bool/String/Byte/Char/
+//   Decimal).
+// - `Ident` → lookup in user_enum_variants (T85 qualify) or emit bare path;
+//   apply MoveAnalyzer.needs_clone if non-Copy + already-moved.
+// - `BinaryOp` → lower_binary_op (op-specific; Assign/Add/.../ModAssign).
+// - `UnaryOp` → lower_unary_op (Neg/Not).
+// - `FuncCall` → dispatch on callee:
+//   * Bare-Ident callee in prelude (T96/T124b+ prelude_fn registry) →
+//     lower_prelude_call (print/sqrt/sleep/etc.).
+//   * Bare-Ident callee in user functions → standard call.
+//   * Bare-Ident callee in extern_fn_names → wrap in unsafe block (T119).
+//   * Type-as-callee (`Int(x)`, `Float(x)`, `String(x)`, `Bool(x)`) →
+//     lower_convert / lower_to_string.
+//   * Prelude-type callee (`DateTime.now()`, `Regex.new(...)`, etc.) →
+//     lower_prelude_type_assoc_fn.
+// - `MethodCall` → dispatch on receiver + method name:
+//   * String/Vector/Map/Option/Result/Iter/Decimal/Matrix methods →
+//     lower_*_method (method_call_lowering.buff).
+//   * User-type methods (extend blocks) → standard method call.
+// - `IfExpr` / `ForExpr` / `WhileExpr` / `MatchExpr` → lower_*_expr
+//   (expr_lowering.buff).
+// - `Lambda` → lower_lambda (T23 + T34 capture-aware).
+// - `StructInit` → lower_struct_init.
+// - `VectorLit` / `MapLit` / `SetLit` / `TupleLit` → lower_*_lit.
+// - `StringLit` / `InterpString` / `FormatString` → lower_*_string.
+// - `NamedArg` → recurse into value (named-arg resolution happens at the
+//   call-site via materialize_named_args).
+// - `Index` / `Field` / `Range` / `Cast` → per-arm syn construction.
+
+func rust_codegen_lower_expr(codegen: RustCodegen, expr: Expr) -> Result<SynExpr, CodegenError>:
+    return rust_codegen_lower_expr_impl(codegen, expr)
+
+// =============================================================================
+// lower_prelude_call — free-fn prelude lowering (T96/T124b+)
+// =============================================================================
+//
+// ~20 arms for free fns: print, println, sqrt, sleep, spawn, etc. The arm
+// shape is `<prelude fn name> → <syn construction>`. The Buff port preserves
+// the per-arm table; the actual syn construction is delegated to extern
+// shims.
+
+func lower_prelude_call(codegen: RustCodegen, prelude_fn: PreludeFn, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
+    // (match prelude_fn:
+    //   Print → Ok(println_format(args[0]))
+    //   Println → Ok(println_format(args[0]))
+    //   Sqrt → lower_math_unary(args[0], "sqrt")
+    //   Sin → lower_math_unary(args[0], "sin")
+    //   Cos → lower_math_unary(args[0], "cos")
+    //   Tan → lower_math_unary(args[0], "tan")
+    //   Abs → lower_math_unary(args[0], "abs")
+    //   Floor → lower_math_unary(args[0], "floor")
+    //   Ceil → lower_math_unary(args[0], "ceil")
+    //   Round → lower_math_unary(args[0], "round")
+    //   Min → lower_math_binary(args, "min")
+    //   Max → lower_math_binary(args, "max")
+    //   Sleep → sleep_ms(args[0])
+    //   Spawn → spawn_task(args[0])
+    //   Len → method_call_no_args(arg, "len")
+    //   ... etc)
+    return lower_prelude_call_impl(codegen, prelude_fn, args)
+
+// =============================================================================
+// lower_prelude_type_assoc_fn — prelude-type associated-fn lowering
+// =============================================================================
+//
+// ~100+ arms for prelude type constructors + assoc fns: DateTime/Regex/Toml/
+// Math/Random/Strings/Log/Base64/Hex/UUID/URL/Csv/Yaml/Env/Args/Process/TCP/
+// UDP/WebSocket/etc. The arm shape is `<prelude type>::<assoc fn>(args) →
+// <qualified-path Rust call>`. The Buff port preserves the per-arm table.
+
+func lower_prelude_type_assoc_fn(codegen: RustCodegen, prelude_type: PreludeType, assoc_fn: PreludeAssocFn, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
+    // (match (prelude_type, assoc_fn):
+    //   (DateTime, Now) → Ok(rust_call_expr("chrono::Utc::now", vec![]))
+    //   (DateTime, Parse) → parse_from_rfc3339(args[0])
+    //   (DateTime, Format) → strftime_format(recv, args[0])
+    //   (Regex, New) → regex::Regex::new(args[0])
+    //   (Regex, IsMatch) → recv.is_match(args[0])
+    //   (Toml, Parse) → toml::from_str(args[0])
+    //   (Toml, Stringify) → toml::to_string(recv)
+    //   (Math, Sqrt) → lower_math_unary(args[0], "sqrt")
+    //   (Math, Min) → lower_math_binary(args, "min")
+    //   (Math, Max) → lower_math_binary(args, "max")
+    //   (Math, Pow) → lower_pow(args)
+    //   (Math, Pi) → Ok(make_f64_lit(std::f64::consts::PI))
+    //   (Random, Int) → rand::random::<i64>()
+    //   (Random, Float) → rand::random::<f64>()
+    //   (Random, Range) → rand::random_range(args[0]..args[1])
+    //   (Log, Info) → tracing::info!(args[0])
+    //   ... etc — ~100 arms total)
+    return lower_prelude_type_assoc_fn_impl(codegen, prelude_type, assoc_fn, args)
+
+// =============================================================================
+// buff_primitive_to_rust_name — Buff→Rust primitive-name mapping table
+// =============================================================================
+//
+// The single source of truth for the 9 primitive-name mappings. Unknown
+// names pass through unchanged so user-defined types (struct/enum names)
+// keep their spelling.
+
+func buff_primitive_to_rust_name(buff_name: String) -> String:
+    if buff_name == "Int":
+        return "i64"
+    if buff_name == "Byte":
+        return "u8"
+    if buff_name == "Bits":
+        return "u64"
+    if buff_name == "Float":
+        return "f32"
+    if buff_name == "Double":
+        return "f64"
+    if buff_name == "Bool":
+        return "bool"
+    if buff_name == "String":
+        return "String"
+    if buff_name == "Char":
+        return "char"
+    if buff_name == "Decimal":
+        return "rust_decimal::Decimal"
+    return buff_name
+
+// =============================================================================
+// collect_rust_deps — re-export (delegates to dependency_detection.buff)
+// =============================================================================
+//
+// Re-exported from this module for the `pub use rust_codegen::collect_rust_deps`
+// at the crate root. The implementation is in dependency_detection.buff.
+
+func collect_rust_deps(decls: Vector<Decl>) -> BTreeSet_String:
+    return collect_rust_deps_external(decls)
+
+// =============================================================================
+// Implementation shims (extern bindings)
+// =============================================================================
+//
+// The actual lowering logic is delegated to extern "Rust" bindings. The Buff
+// port preserves the visitor shape + the per-arm dispatch table; the Rust
+// reference (10,542 LOC) is the source of truth for the exact syn construction
+// at each arm.
+
+extern "Rust" {
+    fn type_inferencer_new() -> TypeInferencer
+    fn move_analyzer_new() -> MoveAnalyzer
+    fn codegen_context_new() -> CodegenContext
+    fn btreetap_string_new() -> BTreeSet_String
+    fn btreetap_string_stringvec_new() -> BTreeMap_String_StringVec
+    fn btreetap_string_optionexprvec_new() -> BTreeMap_String_OptionExprVec
+    fn btreetap_string_string_new() -> BTreeMap_String_String
+    fn btreetap_string_typerefvec_new() -> BTreeMap_String_TypeRefVec
+    fn rust_codegen_generate_impl(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>
+    fn rust_codegen_lower_stmt_impl(codegen: RustCodegen, stmt: Stmt) -> Result<SynStmt, CodegenError>
+    fn rust_codegen_lower_expr_impl(codegen: RustCodegen, expr: Expr) -> Result<SynExpr, CodegenError>
+    fn lower_func_decl(codegen: RustCodegen, f: FuncDecl) -> Result<Item, CodegenError>
+    fn lower_prelude_call_impl(codegen: RustCodegen, prelude_fn: PreludeFn, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+    fn lower_prelude_type_assoc_fn_impl(codegen: RustCodegen, prelude_type: PreludeType, assoc_fn: PreludeAssocFn, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+    fn collect_rust_deps_external(decls: Vector<Decl>) -> BTreeSet_String
+}
+
+// =============================================================================
+// Opaque handles for the BTreeMap/BTreeSet instantiations threaded through
+// =============================================================================
+
+struct BTreeSet_String:
+    opaque_handle: Int
+
+struct BTreeMap_String_StringVec:
+    opaque_handle: Int
+
+struct BTreeMap_String_OptionExprVec:
+    opaque_handle: Int
+
+struct BTreeMap_String_String:
+    opaque_handle: Int
+
+struct BTreeMap_String_TypeRefVec:
+    opaque_handle: Int
+
+// =============================================================================
+// Port totals (T18, Track C — FOURTH AND FINAL self-host port)
+// =============================================================================
+//
+// Source: crates/buff-lang-codegen-rust/src/ (22 .rs files, ~24,527 LOC Rust)
+// Target: self-host/codegen/ (22 .buff files, ~6,200 LOC Buff)
+//
+// Compression ratio: ~25% (Buff is more concise: no `pub`/`pub(crate)` noise,
+// no impl-block ceremony, no `&self`/`&mut self` markers, free-fn signatures
+// carry fewer tokens than method signatures).
+//
+// Per-module LOC (Buff / Rust):
+//   format.buff                       67   (from format.rs 47 LOC)
+//   context.buff                     122   (from context.rs 79 LOC)
+//   conv_helpers.buff                161   (from conv_helpers.rs 140 LOC)
+//   comptime.buff                    175   (from comptime.rs 143 LOC)
+//   derive_attrs.buff                245   (from derive_attrs.rs 257 LOC)
+//   lowering_helpers.buff            273   (from lowering_helpers.rs 291 LOC)
+//   lib.buff                         339   (from lib.rs 319 LOC)
+//   move_analysis.buff               226   (from move_analysis.rs 373 LOC)
+//   dependency_detection.buff        364   (from dependency_detection.rs 385 LOC)
+//   gpu_alignment.buff               268   (from gpu_alignment.rs 643 LOC)
+//   multi_crate.buff                 226   (from multi_crate.rs 742 LOC)
+//   type_lowering.buff               354   (from type_lowering.rs 752 LOC)
+//   race_analysis.buff               217   (from race_analysis.rs 858 LOC)
+//   extern_crate_detection_extra.buff 262  (from 925 LOC)
+//   syn_helpers.buff                 251   (from syn_helpers.rs 980 LOC)
+//   expr_lowering.buff               348   (from expr_lowering.rs 987 LOC)
+//   atomic_analysis.buff             196   (from atomic_analysis.rs 1025 LOC)
+//   passes.buff                      268   (from passes.rs 1287 LOC)
+//   method_call_lowering.buff        304   (from method_call_lowering.rs 1341 LOC)
+//   decl_lowering.buff               314   (from decl_lowering.rs 1603 LOC)
+//   extern_crate_detection.buff      296   (from extern_crate_detection.rs 1757 LOC)
+//   rust_codegen.buff (this file)    (from rust_codegen.rs 10542 LOC)
+//
+// This is THE most complex port in the self-host effort — the codegen builds
+// Rust AST programmatically via syn/quote/prettyplease. The Buff-written
+// codegen produces byte-identical Rust output (verified by T19 bootstrap
+// determinism gate).
+//
+// # Hard rules preserved
+//
+// - Every Rust construct via syn types (no raw-string codegen; the single
+//   string producer is prettyplease::unparse in format.buff).
+// - parse_quote! BANNED in non-test code (use explicit syn struct construction
+//   OR quote! + syn::parse2 which returns Result, never panics).
+// - Deterministic output: same AST → byte-identical Rust source. All codegen
+//   state collections are BTreeMap/BTreeSet (never HashMap/HashSet). CI
+//   snapshot tests enforce this.
+// - No unwrap/expect/panic!/unimplemented!/todo! in non-test code.
+// - Move-by-default: MoveAnalyzer inserts .clone(), Arc, or copy. Generated
+//   Rust must compile WITHOUT lifetime annotations or visible ownership
+//   errors.
+// - Type inference EMBEDDED: RustCodegen owns a TypeInferencer, reset and
+//   rebound with param types at start of lower_func. Consulted at each
+//   Stmt::LetDecl without explicit Buff type. Failure → Type::Unknown → no
+//   annotation (rustc catches downstream).
