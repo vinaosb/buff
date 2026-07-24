@@ -127,9 +127,9 @@ These are documented compiler gaps that affect these examples:
 - [ ] Run `buff run examples/use-cases/hash_verify.buff` and verify output matches .expected
 - [ ] Run `buff run examples/use-cases/error_recovery.buff` and verify output matches .expected
 - [ ] Run `buff run examples/use-cases/structured_logger.buff` — expected to FAIL at rustc stage due to enum qualification gap (B6)
-- [ ] Fill in actual SHA-256 digests in hash_verify.expected if they differ from Python's hashlib
-- [ ] Verify Hex.encode/decode type compatibility (B2, B3)
-- [ ] Verify Vector.join() exists (B11)
+- [ ] Verify Hex.encode/decode type compatibility (B2, B3) — may need Vector<Byte> vs Vector<Int> adjustment
+- [ ] Verify Vector.join() exists (B11) — may need alternative if missing
+- [ ] Verify Map indexing `counts[key]` works or use alternative (B9)
 
 ---
 
@@ -496,11 +496,12 @@ assertion to **proven** — all three pass the lex+parse+type phases that
 `buff check` runs.
 
 **Corrections to the earlier T11 notes:**
-- **BUG-T11-008 superseded:** a `tcp_echo.buff.expected` **was** created. It
+- **BUG-T11-008 superseded:** a `tcp_echo.expected` **was** created. It
   captures the deterministic startup banner (`=== tcp_echo...` + the
   bind-success `[net] listening on 127.0.0.1:7878` line) printed before the
   extern `tcp_accept` blocks. It is aspirational (the file is codegen-only per
-  BUG-T11-006) but deterministic for the startup prefix.
+  BUG-T11-006) but deterministic for the startup prefix. (Naming follows the
+  `_sample.buff` → `_sample.expected` template: strip `.buff`, add `.expected`.)
 
 **New bug found during verification (not in the earlier pass):**
 
