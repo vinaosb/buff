@@ -171,6 +171,9 @@ fn main() -> Result<()> {
         Command::Login { token } => buff_lang_cli::commands::login::run(token.as_deref()),
         Command::Publish => buff_lang_cli::commands::publish::run(),
         Command::Install { name } => buff_lang_cli::commands::install::run(&name).map(|_| ()),
+        Command::Expand { file, output } => {
+            buff_lang_cli::commands::expand::run(&file, output.as_deref())
+        }
         Command::Deps { why } => buff_lang_cli::commands::deps::run(why.as_deref()),
         Command::Outdated => buff_lang_cli::commands::outdated::run(),
         Command::Search { query } => buff_lang_cli::commands::search::run(query.as_deref()),

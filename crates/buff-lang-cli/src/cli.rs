@@ -641,6 +641,22 @@ pub enum Command {
         name: String,
     },
 
+    /// `buff expand <FILE>` — show the generated Rust source for a `.buff` file.
+    ///
+    /// Runs the front-end of the compiler (lex → parse → codegen) and prints
+    /// the resulting Rust source to stdout (or writes to `--output <FILE>`).
+    /// Like `cargo expand` shows macro expansion, but for Buff source files.
+    /// No `rustc` invocation — just the intermediate Rust.
+    Expand {
+        /// Input `.buff` source file.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Write output to `<FILE>` instead of stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
     /// Print the project's dependency tree (T128).
     ///
     /// Reads `buff.toml` from the current directory and renders every
