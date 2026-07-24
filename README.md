@@ -1,5 +1,9 @@
 # Buff
 
+[![CI](https://github.com/vinaosb/buff/actions/workflows/ci.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/ci.yml)
+[![Security](https://github.com/vinaosb/buff/actions/workflows/security.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/security.yml)
+[![Release](https://github.com/vinaosb/buff/actions/workflows/release.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/release.yml)
+
 > **Buff** — a high-level language that transpiles to Rust.
 > Removes the "rust" (complexity), leaving pure performance.
 

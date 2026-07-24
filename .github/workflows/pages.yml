@@ -1,0 +1,89 @@
+name: Deploy to GitHub Pages
+
+# T19/T24 — GitHub Pages deployment for landing + playground + book + docs.
+# This workflow is activated on the `main` branch (Task 22 renames v1x-frameworks → main).
+# Until then, it runs only on manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "playground/**"
+      - "book/**"
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --locked
+
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: 'latest'
+
+      - name: Build playground WASM
+        run: |
+          cargo build -p buff-playground-wasm --target wasm32-unknown-unknown --release
+          wasm-bindgen --target web --out-dir playground/pkg --out-name buff_playground \
+            target/wasm32-unknown-unknown/release/buff_playground_wasm.wasm
+
+      - name: Build book
+        run: mdbook build book/
+
+      - name: Assemble publish directory
+        run: |
+          mkdir -p publish
+          # Landing page (static, no build)
+          cp -r website/* publish/
+          # Playground (with WASM)
+          mkdir -p publish/playground
+          cp playground/index.html playground/styles.css playground/app.js publish/playground/
+          cp -r playground/pkg/* publish/playground/
+          # Book (rendered HTML)
+          cp -r book/html/* publish/book/
+          # Docs (error pages + markdown)
+          cp -r docs/* publish/docs/
+          # Disable Jekyll processing
+          touch publish/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./publish
+
+  deploy:
+    needs: build
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
