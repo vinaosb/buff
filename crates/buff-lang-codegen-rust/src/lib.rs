@@ -69,10 +69,9 @@ pub use context::CodegenContext;
 pub use format::format;
 pub use gpu_alignment::gpu_bound_structs as analyze_gpu_alignment;
 pub use move_analysis::MoveAnalyzer;
-// T77: re-export the DCE pass so external callers can refer to it as
-// `buff_lang_codegen_rust::dead_code_elimination`. T78 adds
-// `constant_propagation`.
-pub use passes::dead_code_elimination;
+// T77/T78: re-export the optimization passes so external callers can refer
+// to them as `buff_lang_codegen_rust::dead_code_elimination` etc.
+pub use passes::{constant_propagation, dead_code_elimination};
 // T8: re-export the multi-crate entry points + types so the pipeline
 // (and tests) can refer to them as `buff_lang_codegen_rust::*` without
 // reaching into the private module path.
