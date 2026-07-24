@@ -179,6 +179,42 @@ pub enum Command {
         #[arg(long)]
         no_cache: bool,
 
+        /// T7: Use salsa-based incremental compilation for the front-end
+        /// (lex + parse + typecheck). The salsa database memoizes the
+        /// parsed AST per source file so unchanged inputs skip
+        /// re-processing on subsequent compiles within a single CLI
+        /// session (the primary win for `buff watch`, `buff repl`, and
+        /// the LSP server). For one-shot `buff build` invocations the
+        /// overhead is negligible (one extra tokenize + parse pass);
+        /// the T55 `.rs` byte-cache short-circuits codegen regardless.
+        ///
+        /// Default: ON for `Debug` builds (the dev inner-loop mode
+        /// where incremental wins matter most). OFF for `--release` /
+        /// `--minimal` (release builds care about the final binary,
+        /// not the edit loop).
+        ///
+        /// Correctness is unaffected — salsa is purely a memoization
+        /// cache; the generated Rust source is byte-identical with or
+        /// without it. Use `--no-incremental` to force the legacy
+        /// non-incremental path (e.g. for bisecting a suspected
+        /// cache-corruption issue).
+        #[arg(long)]
+        incremental: bool,
+
+        /// T7: Force the legacy non-incremental compilation path.
+        ///
+        /// Equivalent to omitting `--incremental`, but explicit. Takes
+        /// precedence over `--incremental` when both are set (defensive
+        /// default — a user who passes both clearly wants the safe
+        /// path).
+        ///
+        /// Use this when you suspect the salsa memoization layer is
+        /// serving stale results (should never happen — the cache key
+        /// is the source bytes — but the escape hatch exists for
+        /// debugging).
+        #[arg(long)]
+        no_incremental: bool,
+
         /// Wrap the rustc invocation in `sccache` for cross-project crate
         /// caching (T55). When sccache is on `PATH`, the rustc call
         /// becomes `sccache rustc ...` so compiled crates are shared
@@ -261,6 +297,18 @@ pub enum Command {
         /// for `buff run`'s tight edit-run loop than the runtime speedup.
         #[arg(long)]
         release: bool,
+
+        /// T7: Use salsa-based incremental compilation for the front-end.
+        /// See `buff build --incremental` for full details. Default: ON
+        /// for `Debug` builds (the typical `buff run` mode), OFF for
+        /// `--release`. Correctness is unaffected.
+        #[arg(long)]
+        incremental: bool,
+
+        /// T7: Force the legacy non-incremental compilation path. Takes
+        /// precedence over `--incremental` when both are set.
+        #[arg(long)]
+        no_incremental: bool,
 
         /// T2: linker selection. `auto` (default) probes PATH for mold
         /// (Linux) → rust-lld → system default. `mold` and `lld` request

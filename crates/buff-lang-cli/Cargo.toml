@@ -136,6 +136,18 @@ buff-dap.workspace = true
 # buff-lang-error workspace pins. Minimal hook: 5 lines in
 # `check.rs::check_source`; empty registry is a pure no-op.
 buff-plugins.workspace = true
+# T7: salsa-based incremental compilation front-end. The
+# `incremental` module wraps the lex + parse + typecheck passes in
+# salsa tracked queries so unchanged input files skip re-processing
+# on subsequent `buff build` / `buff run` invocations within a single
+# CLI session. Pure-Rust, no native deps (already workspace-pinned at
+# the root level alongside `rayon` + `tokio`); reused here without
+# re-pinning. The pipeline integration is opt-in via the
+# `--incremental` / `--no-incremental` CLI flags (default: ON for
+# dev Debug builds, OFF for Release/Minimal). Correctness is
+# unaffected — salsa is purely a memoization cache; the underlying
+# lex + parse + codegen pipeline is byte-identical with or without it.
+salsa.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

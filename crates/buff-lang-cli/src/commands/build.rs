@@ -44,9 +44,9 @@ use crate::project_pipeline::{
 };
 
 /// Entry point for `buff build [<FILE>] [--output <PATH>] [--release]
-/// [--minimal] [--fast] [--no-cache] [--sccache] [--target <TRIPLE>]
-/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]
-/// [--backend <llvm|cranelift>]`.
+/// [--minimal] [--fast] [--no-cache] [--incremental] [--no-incremental]
+/// [--sccache] [--target <TRIPLE>] [--linker <auto|mold|lld|system>]
+/// [--debuginfo <line-tables-only|full|none>] [--backend <llvm|cranelift>]`.
 ///
 /// When `file` is `Some`, compiles that single `.buff` file (v0.1 behavior;
 /// the `--target` flag is ignored in this mode).
@@ -63,6 +63,13 @@ use crate::project_pipeline::{
 /// the flag. The project-mode path (cargo build) does NOT honour
 /// `--backend` (cargo's own `[profile.dev] codegen-backend` controls
 /// that; buff does not rewrite the user's `Cargo.toml`).
+///
+/// T7: `--incremental` enables salsa-based incremental compilation
+/// (memoizes lex + parse + typecheck across CLI session invocations).
+/// `--no-incremental` forces the legacy path. The effective flag is
+/// `incremental && !no_incremental` (defensive: `--no-incremental`
+/// wins when both are set). Default for single-file mode:
+/// incremental ON for Debug, OFF for Release/Minimal/Fast.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     file: Option<&Path>,
@@ -71,6 +78,8 @@ pub fn run(
     minimal: bool,
     fast: bool,
     no_cache: bool,
+    incremental: bool,
+    no_incremental: bool,
     sccache: bool,
     target: Option<&str>,
     linker: pipeline::LinkerChoice,
@@ -96,7 +105,7 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release, minimal, fast, no_cache, sccache, linker, debuginfo, backend)
+            build_single_file(f, output, release, minimal, fast, no_cache, incremental, no_incremental, sccache, linker, debuginfo, backend)
         }
         None => build_project(release, minimal, fast, target),
     }
@@ -128,8 +137,9 @@ fn write_sccache_config_best_effort() {
 /// (v0.1 behavior; T133 extends to `.buffhtml`).
 ///
 /// Dispatches on file extension:
-/// - `.buff` (default): [`pipeline::compile_to_rust_with_cache`] →
-///   [`pipeline::compile_rust_to_exe_with_speed`].
+/// - `.buff` (default): [`pipeline::compile_to_rust_with_cache`] (or
+///   [`pipeline::compile_to_rust_incremental`] when `--incremental` is
+///   active) → [`pipeline::compile_rust_to_exe_with_speed`].
 /// - `.buffhtml` (T133): [`pipeline::compile_buffhtml_to_rust`] →
 ///   [`pipeline::compile_buffhtml_rust_to_exe`] with the post-format
 ///   [`SpanMap`] wired through for span-aware error mapping.
@@ -138,6 +148,13 @@ fn write_sccache_config_best_effort() {
 /// (T56) selects [`pipeline::BuildMode::Release`]; `fast` (T55) selects
 /// [`pipeline::BuildMode::Fast`]; default is
 /// [`pipeline::BuildMode::Debug`]. Precedence: minimal > release > fast.
+///
+/// T7: incremental compilation defaults to ON for `Debug` builds (the
+/// dev inner-loop mode). `--no-incremental` forces the legacy path;
+/// `--incremental` is a no-op when the default already applies. For
+/// `Release`/`Minimal`/`Fast` builds, `--incremental` opt-ins; the
+/// default is OFF (release builds care about the final binary, not the
+/// edit loop).
 #[allow(clippy::too_many_arguments)]
 fn build_single_file(
     file: &Path,
@@ -146,6 +163,8 @@ fn build_single_file(
     minimal: bool,
     fast: bool,
     no_cache: bool,
+    incremental: bool,
+    no_incremental: bool,
     sccache: bool,
     linker: pipeline::LinkerChoice,
     debuginfo: pipeline::DebugInfoChoice,
@@ -178,7 +197,24 @@ fn build_single_file(
 
     // T55: cache ON by default (--no-cache bypasses); sccache opt-in.
     let use_cache = !no_cache;
-    let compile_out = pipeline::compile_to_rust_with_cache(file, use_cache)?;
+
+    // T7: resolve the effective incremental flag. --no-incremental wins
+    // when both are set (defensive default). Default is ON for Debug,
+    // OFF for Release/Minimal/Fast.
+    let incremental_default_for_mode = matches!(mode, pipeline::BuildMode::Debug);
+    let use_incremental =
+        !no_incremental && (incremental_default_for_mode || incremental);
+
+    let compile_out = if use_cache && use_incremental {
+        // Salsa-backed path: warm the parse + typecheck memoization
+        // tables, then fall through to the regular pipeline for codegen.
+        // The DB is per-invocation for single-file mode; long-running
+        // sessions (watch, repl, LSP) thread a shared DB through.
+        let mut db = crate::incremental::BuffDatabase::new();
+        pipeline::compile_to_rust_incremental(file, &mut db)?
+    } else {
+        pipeline::compile_to_rust_with_cache(file, use_cache)?
+    };
     pipeline::compile_rust_to_exe_with_speed(
         &compile_out.rust_file_path,
         &stem_output,

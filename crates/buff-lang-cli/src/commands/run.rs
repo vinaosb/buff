@@ -20,8 +20,9 @@ use anyhow::{Context, Result};
 use crate::pipeline;
 
 /// Entry point for `buff run <FILE> [-- ARGS]... [--release]
-/// [--linker <auto|mold|lld|system>] [--debuginfo <line-tables-only|full|none>]
-/// [--backend <llvm|cranelift>] [--target <TRIPLE>]`.
+/// [--incremental] [--no-incremental] [--linker <auto|mold|lld|system>]
+/// [--debuginfo <line-tables-only|full|none>] [--backend <llvm|cranelift>]
+/// [--target <TRIPLE>]`.
 ///
 /// - Compiles `file` to Rust + executable (the executable goes into
 ///   `std::env::temp_dir().join("buff-run")` so it never pollutes the
@@ -40,6 +41,12 @@ use crate::pipeline;
 /// gate silently uses LLVM regardless of the `--backend` flag (release
 /// binaries must always ship via LLVM).
 ///
+/// T7: `--incremental` / `--no-incremental` toggle salsa-based
+/// incremental compilation for the front-end. Default: ON for debug
+/// builds (the typical `buff run` mode), OFF for `--release`.
+/// `--no-incremental` wins when both are set. Correctness is
+/// unaffected.
+///
 /// T112: `--target <TRIPLE>` forwards to rustc's `--target` flag for
 /// cross-compilation. When the target is not installed, returns a clear
 /// error with the `rustup target add` command.
@@ -49,7 +56,18 @@ use crate::pipeline;
 /// Propagates pipeline errors. A non-zero program exit code is *not* an
 /// `Err` from this function — instead the process exits directly so the exit
 /// code is preserved.
-pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::LinkerChoice, debuginfo: pipeline::DebugInfoChoice, backend: pipeline::BackendChoice, target: Option<&str>) -> Result<()> {
+#[allow(clippy::too_many_arguments)] // T7: incremental flags add 2 params
+pub fn run(
+    file: &Path,
+    args: &[String],
+    release: bool,
+    incremental: bool,
+    no_incremental: bool,
+    linker: pipeline::LinkerChoice,
+    debuginfo: pipeline::DebugInfoChoice,
+    backend: pipeline::BackendChoice,
+    target: Option<&str>,
+) -> Result<()> {
     // T133: dispatch on file extension. `.buffhtml` uses the span-aware
     // pipeline so runtime panics can be reverse-mapped to .buffhtml spans.
     let is_buffhtml = file
@@ -68,6 +86,13 @@ pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::Linker
     let exe_stem = pipeline::with_exe_extension(&temp_dir.join(stem));
 
     let mode = pipeline::BuildMode::from_release_flag(release);
+
+    // T7: resolve the effective incremental flag for `buff run`. Default
+    // is ON for Debug (the typical edit-run mode), OFF for Release.
+    // --no-incremental wins when both are set.
+    let incremental_default_for_mode = matches!(mode, pipeline::BuildMode::Debug);
+    let use_incremental =
+        !no_incremental && (incremental_default_for_mode || incremental);
 
     // Track the .rs file path + (for .buffhtml) the SpanMap + source so we
     // can post-process runtime panics after execution.
@@ -92,6 +117,24 @@ pub fn run(file: &Path, args: &[String], release: bool, linker: pipeline::Linker
             Some(compile_out.span_map),
             source,
         )
+    } else if use_incremental {
+        // T7: salsa-backed incremental path. The DB is per-invocation
+        // for single-file `buff run`; long-running sessions (watch, repl,
+        // LSP) thread a shared DB through.
+        let mut db = crate::incremental::BuffDatabase::new();
+        let compile_out = pipeline::compile_to_rust_incremental(file, &mut db)?;
+        pipeline::compile_rust_to_exe_with_speed(
+            &compile_out.rust_file_path,
+            &exe_stem,
+            file,
+            mode,
+            false,
+            linker,
+            debuginfo,
+            backend,
+            target,
+        )?;
+        (compile_out.rust_file_path, None, String::new())
     } else {
         let compile_out = pipeline::compile_to_rust(file)?;
         pipeline::compile_rust_to_exe_with_speed(

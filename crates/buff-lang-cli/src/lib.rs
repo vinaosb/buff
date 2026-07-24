@@ -40,6 +40,14 @@ pub mod config;
 pub mod coverage;
 pub mod error_mapper;
 pub mod fmt;
+// T7: salsa-based incremental compilation front-end. The `incremental`
+// module wraps the lex + parse + typecheck passes in salsa tracked
+// queries so unchanged input files skip re-processing on subsequent
+// compiles within a single CLI session. Opt-in via `--incremental` /
+// `--no-incremental` CLI flags (default: ON for dev Debug builds, OFF
+// for Release/Minimal). Correctness is unaffected — salsa is purely a
+// memoization cache layered above the existing `pipeline` module.
+pub mod incremental;
 pub mod naming_lint;
 pub mod pipeline;
 // T1: multi-file project compilation pipeline (parse_project + cargo).

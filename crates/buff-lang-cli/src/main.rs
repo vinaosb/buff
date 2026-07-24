@@ -20,6 +20,8 @@ fn main() -> Result<()> {
             minimal,
             fast,
             no_cache,
+            incremental,
+            no_incremental,
             sccache,
             target,
             pgo,
@@ -54,6 +56,8 @@ fn main() -> Result<()> {
                     minimal,
                     fast,
                     no_cache,
+                    incremental,
+                    no_incremental,
                     sccache,
                     target.as_deref(),
                     linker_choice,
@@ -66,6 +70,8 @@ fn main() -> Result<()> {
             file,
             args,
             release,
+            incremental,
+            no_incremental,
             linker,
             debuginfo,
             backend,
@@ -80,7 +86,7 @@ fn main() -> Result<()> {
                 // runtime can emit dispatch diagnostics.
                 std::env::set_var("BUFF_EXPLAIN_DISPATCH", "1");
             }
-            buff_lang_cli::commands::run::run(&file, &args, release, linker_choice, debuginfo_choice, backend_choice, target.as_deref())
+            buff_lang_cli::commands::run::run(&file, &args, release, incremental, no_incremental, linker_choice, debuginfo_choice, backend_choice, target.as_deref())
         }
         Command::New {
             name,

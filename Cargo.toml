@@ -1999,6 +1999,26 @@ buff-plugins = { path = "crates/buff-plugins" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
+# T7: `salsa` 0.28 — the canonical Rust incremental-computation framework
+# (the de-facto Rust ecosystem default since rust-analyzer adopted it;
+# same family as the modern `#[salsa::db]` / `#[salsa::input]` /
+# `#[salsa::tracked]` macro API). API surface used by
+# `crates/buff-lang-cli/src/incremental.rs`:
+#   - `salsa::Database` trait + `salsa::Storage<Self>` plumbing
+#   - `#[salsa::db]` attribute on the database struct + trait impl
+#   - `#[salsa::input]` for `SourceFile` (path + source text)
+#   - `#[salsa::tracked]` for `parse_file` + `typecheck_file` queries
+# Pure-Rust, no native deps, no cc-rs — matches the "no C library, no
+# Docker" hard rule from AGENTS.md. Pinned to major 0.28 (the current
+# stable major; rust-version 1.85 — well within our pinned 1.95.0
+# toolchain). The default features (`macros` + `rayon` + `inventory` +
+# `accumulator` + `salsa_unstable`) are kept ON because the macro API
+# (`#[salsa::db]` / `#[salsa::input]` / `#[salsa::tracked]`) requires
+# the `macros` feature; `rayon` is already a workspace dep so the
+# transitive cost is zero; `inventory`/`accumulator`/`salsa_unstable`
+# are required by salsa's own internal plumbing and the modern API
+# surface we depend on.
+salsa = "0.28"
 
 # T60: Binary Size Minimization profile.
 #
