@@ -1,0 +1,12 @@
+// INVALID — undefined variable with did-you-mean suggestion (exercises
+// suggestion API for typo correction)
+//
+// `pritn("hello")` should report E1201 (undefined variable) with a
+// machine-applicable suggestion to replace `pritn` with `print`. The
+// suggestion's applicability is `MachineApplicable` because the fix is
+// always correct (there's no ambiguity — `print` is the only close match).
+//
+// This fixture exercises the CodeSuggestion + Applicability API in the
+// most common real-world scenario: a typo in a prelude function name.
+func main():
+    pritn("hello")

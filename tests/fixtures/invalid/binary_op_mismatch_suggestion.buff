@@ -1,0 +1,16 @@
+// INVALID — binary operator type mismatch (exercises multi-span + suggestion)
+//
+// `x + y` where `x: Int` and `y: String` should report a binary-op type
+// mismatch (E1202) with:
+//   - Primary span: the `+` operator (or the full `x + y` expression)
+//   - Secondary label: `x` declared as `Int` on line 4
+//   - Secondary label: `y` declared as `String` on line 5
+//   - Suggestion: convert `y` to `Int` via `Int.from(y)` (MachineApplicable
+//     when the conversion is unambiguous)
+//
+// This fixture exercises both the multi-span AND the suggestion APIs.
+func main():
+    let x = 42
+    let y = "hello"
+    let z = x + y
+    print(z)

@@ -1,0 +1,18 @@
+// INVALID — type mismatch at call site (exercises multi-span diagnostic)
+//
+// When the type-checker reports `add("hello", 2)`, the ideal diagnostic
+// points at BOTH the argument `"hello"` (primary — "expected `Int`, found
+// `String`") AND the function declaration `func add(a: Int, b: Int)`
+// (secondary — "parameter `a` declared here"). This is the canonical
+// multi-span scenario the T1 error-system extension targets.
+//
+// The compiler does not yet EMIT multi-span labels for this case (the API
+// ships in T1; wiring it into the type-checker is follow-up work). This
+// fixture documents the intended trigger so the follow-up task has a
+// regression test ready.
+func add(a: Int, b: Int) -> Int:
+    return a + b
+
+func main():
+    let result = add("hello", 2)
+    print(result)
