@@ -1,0 +1,5 @@
+// INVALID — type error: E1202 (binary operator type mismatch)
+// Int + String triggers BinaryOpTypeMismatch.
+func main():
+    let x = 1 + "hello"
+    print(x)

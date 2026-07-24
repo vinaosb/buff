@@ -1,0 +1,4 @@
+// INVALID — codegen error: E1301 (unsupported language feature)
+// Tuple destructuring in let is not yet implemented in codegen.
+func main():
+    let (a, b) = (1, 2)

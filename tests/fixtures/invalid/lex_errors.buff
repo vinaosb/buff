@@ -1,0 +1,4 @@
+// INVALID — lex error: E1001 (unexpected character)
+// A stray '@' outside attribute position triggers UnexpectedChar.
+func main():
+    let x = @

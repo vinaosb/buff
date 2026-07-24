@@ -1,0 +1,4 @@
+// INVALID — parse error: E1102 (unexpected token)
+// A stray integer literal after an expression triggers UnexpectedToken.
+func main():
+    let x = 1 2

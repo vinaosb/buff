@@ -1,0 +1,9 @@
+// INVALID — warning: E1501 (use of a deprecated API)
+// Calling a function marked @deprecated triggers DeprecatedApiUsed.
+@deprecated(since = "2.0", replacement = "new_fn")
+func old_fn():
+    return 0
+
+func caller():
+    let r = old_fn()
+    print(r)

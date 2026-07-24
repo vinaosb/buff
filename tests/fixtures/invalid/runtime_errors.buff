@@ -1,0 +1,18 @@
+// INVALID — runtime errors: E14xx codes are NOT compile-time detectable.
+//
+// These codes are surfaced by buff-lang-runtime at runtime, not by
+// buff check at compile time. The fixture exists for documentation
+// and to ensure the ErrorCode enum stays in sync with the runtime.
+//
+// E1401 — GPU dispatch failed and no CPU fallback was available
+// E1402 — GPU shader execution fault
+// E1403 — GPU adapter or device initialization failed
+// E1404 — no GPU adapter is available on this host
+// E1405 — input exceeds the VRAM tiling budget
+// E1406 — WGSL shader rejected by the GPU pipeline compiler
+// E1407 — Channel.send failed — all receivers dropped
+// E1408 — Channel.receive returned none — all senders dropped
+// E1409 — spawned async task panicked before completing
+// E1410 — runtime operation exceeded its deadline
+func main():
+    print("runtime errors are not compile-time detectable")
