@@ -1024,6 +1024,375 @@ fn open_in_browser(path: &Path) -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// T102: `buff doc --serve` — local HTTP server with live reload
+// ---------------------------------------------------------------------------
+
+/// Entry point for `buff doc --serve`.
+///
+/// 1. Generates docs via [`run`] (the normal doc pipeline).
+/// 2. Starts a minimal HTTP server on `127.0.0.1:<port>` serving the
+///    generated HTML from `docs_root`.
+/// 3. Polls `.buff` source files for mtime changes (reuses T97's polling
+///    approach — no `notify` dependency).
+/// 4. On change: regenerates docs + broadcasts an SSE `reload` event to
+///    all connected browsers.
+///
+/// Blocks until Ctrl-C / SIGINT.
+pub fn run_serve(dir: &Path, output: Option<&Path>, port: u16) -> Result<()> {
+    // Phase 1: generate docs first so the server has something to serve.
+    run(dir, output, false)?;
+
+    let docs_root: PathBuf = match output {
+        Some(o) => {
+            let p = PathBuf::from(o);
+            if p.is_absolute() {
+                p
+            } else {
+                dir.join(o)
+            }
+        }
+        None => dir.join("doc"),
+    };
+
+    let addr = format!("127.0.0.1:{port}");
+    let listener = std::net::TcpListener::bind(&addr)
+        .with_context(|| format!("failed to bind to {addr}"))?;
+    listener
+        .set_nonblocking(true)
+        .context("failed to set non-blocking")?;
+
+    eprintln!(
+        "buff doc: serving docs at http://{addr}/ — Ctrl-C to exit",
+    );
+
+    // Collect .buff source files for mtime polling.
+    let source_files: Vec<PathBuf> = collect_source_files(dir);
+
+    // Shared state: last mtime per source file + SSE clients.
+    let last_mtimes: std::sync::Arc<std::sync::Mutex<Vec<(PathBuf, std::time::SystemTime)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(
+            source_files
+                .iter()
+                .map(|p| {
+                    let mtime = std::fs::metadata(p)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    (p.clone(), mtime)
+                })
+                .collect(),
+        ));
+
+    let sse_clients: std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let sse_clients_watcher = sse_clients.clone();
+    let last_mtimes_watcher = last_mtimes.clone();
+    let docs_root_watcher = docs_root.clone();
+    let dir_watcher = dir.to_path_buf();
+    let output_watcher = output.map(|p| p.to_path_buf());
+
+    // Spawn a polling watcher thread (reuses T97's polling approach).
+    std::thread::Builder::new()
+        .name("buff-doc-watcher".into())
+        .spawn(move || {
+            let poll_interval = std::time::Duration::from_millis(500);
+            loop {
+                std::thread::sleep(poll_interval);
+
+                let mut mtimes = match last_mtimes_watcher.lock() {
+                    Ok(g) => g,
+                    Err(_) => break,
+                };
+
+                let mut changed = false;
+                for (path, last) in mtimes.iter_mut() {
+                    let current = std::fs::metadata(path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    if current > *last {
+                        *last = current;
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    eprintln!("buff doc: source changed — regenerating docs");
+                    // Regenerate docs (best-effort — errors are logged, not fatal).
+                    if let Err(e) = run(&dir_watcher, output_watcher.as_deref(), false) {
+                        eprintln!("buff doc: regeneration error: {e:#}");
+                    } else {
+                        eprintln!("buff doc: docs regenerated — notifying browsers");
+                    }
+
+                    // Notify all SSE clients.
+                    let mut clients = match sse_clients_watcher.lock() {
+                        Ok(g) => g,
+                        Err(_) => break,
+                    };
+                    let msg = "data: reload\n\n";
+                    clients.retain(|stream| {
+                        // Try to send; drop broken connections.
+                        let mut s = stream.try_clone().ok();
+                        match s.as_mut() {
+                            Some(s) => {
+                                use std::io::Write;
+                                if let Err(_) = write!(s, "{msg}") {
+                                    false
+                                } else {
+                                    s.flush().ok();
+                                    true
+                                }
+                            }
+                            None => false,
+                        }
+                    });
+                }
+            }
+        })
+        .context("failed to spawn watcher thread")?;
+
+    // Main accept loop: handle HTTP requests + SSE connections.
+    let mut incoming = listener.incoming();
+    loop {
+        match incoming.next() {
+            Some(Ok(stream)) => {
+                if let Err(e) = handle_connection(
+                    stream,
+                    &docs_root,
+                    &sse_clients,
+                ) {
+                    eprintln!("buff doc: request error: {e:#}");
+                }
+            }
+            Some(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // No pending connection — yield briefly.
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Some(Err(e)) => {
+                eprintln!("buff doc: accept error: {e}");
+            }
+            None => break,
+        }
+    }
+
+    Ok(())
+}
+
+/// Collect all `.buff` source files under `dir/src/` recursively.
+fn collect_source_files(dir: &Path) -> Vec<PathBuf> {
+    let src_dir = dir.join("src");
+    let mut files = Vec::new();
+    if src_dir.is_dir() {
+        walk_buff_files(&src_dir, &mut files);
+    }
+    files
+}
+
+/// Handle a single HTTP connection: parse the request, serve the file, or
+/// handle the SSE `/live-reload` endpoint.
+fn handle_connection(
+    mut stream: std::net::TcpStream,
+    docs_root: &Path,
+    sse_clients: &std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+) -> Result<()> {
+    use std::io::{BufRead, Write};
+
+    // Read the request line + headers (small read — we only need the path).
+    let mut reader = std::io::BufReader::new(&stream);
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line)?;
+    let request_line = request_line.trim().to_string();
+
+    // Read remaining headers (we don't need them, but consume them so the
+    // connection doesn't stall).
+    let mut header = String::new();
+    loop {
+        header.clear();
+        if reader.read_line(&mut header)? == 0 || header.trim().is_empty() {
+            break;
+        }
+    }
+
+    // Parse the request path from "GET /path HTTP/1.1".
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("/");
+
+    match path {
+        "/live-reload" => {
+            // SSE endpoint: register the client and keep the connection open.
+            let peer = stream.peer_addr().ok();
+            eprintln!(
+                "buff doc: SSE client connected{}",
+                peer.map(|p| format!(" from {p}")).unwrap_or_default()
+            );
+
+            // Send SSE headers.
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: text/event-stream\r\n\
+                 Cache-Control: no-cache\r\n\
+                 Connection: keep-alive\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
+                 \r\n"
+            )?;
+            stream.flush()?;
+
+            // Register this client.
+            {
+                let mut clients = sse_clients.lock().unwrap();
+                clients.push(stream.try_clone()?);
+            }
+
+            // Keep the connection open (block on read until the client
+            // disconnects). The watcher thread writes to the stream.
+            let mut buf = [0u8; 1024];
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+
+            // Client disconnected — remove from the list.
+            {
+                let mut clients = sse_clients.lock().unwrap();
+                clients.retain(|c| {
+                    c.peer_addr().ok() != stream.peer_addr().ok()
+                });
+            }
+            eprintln!("buff doc: SSE client disconnected");
+        }
+        _ => {
+            // Serve a static file from the docs root.
+            let file_path = if path == "/" || path == "/index.html" {
+                docs_root.join("index.html")
+            } else {
+                // Strip leading slash and serve relative to docs_root.
+                let rel = path.trim_start_matches('/');
+                docs_root.join(rel)
+            };
+
+            let canonical = file_path.canonicalize().unwrap_or(file_path.clone());
+            // Security: ensure the resolved path is inside docs_root.
+            let docs_canon = docs_root.canonicalize().unwrap_or_else(|_| docs_root.to_path_buf());
+            if !canonical.starts_with(&docs_canon) {
+                // Path traversal attempt — 404.
+                serve_404(&mut stream, &request_line)?;
+                return Ok(());
+            }
+
+            match std::fs::read(&canonical) {
+                Ok(body) => {
+                    let ext = canonical
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("");
+                    let content_type = mime_type_for(ext);
+
+                    // Inject SSE live-reload script into HTML pages.
+                    let response = if ext == "html" {
+                        let body_str = String::from_utf8_lossy(&body);
+                        let injected = inject_live_reload_script(&body_str);
+                        format!(
+                            "HTTP/1.1 200 OK\r\n\
+                             Content-Length: {}\r\n\
+                             Content-Type: {}\r\n\
+                             \r\n\
+                             {}",
+                            injected.len(),
+                            content_type,
+                            injected,
+                        )
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\n\
+                             Content-Length: {}\r\n\
+                             Content-Type: {}\r\n\
+                             \r\n",
+                            body.len(),
+                            content_type,
+                        )
+                    };
+
+                    let mut response_bytes = response.into_bytes();
+                    if ext != "html" {
+                        response_bytes.extend_from_slice(&body);
+                    }
+
+                    use std::io::Write;
+                    stream.write_all(&response_bytes)?;
+                    stream.flush()?;
+                }
+                Err(_) => {
+                    serve_404(&mut stream, &request_line)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Serve a 404 response.
+fn serve_404(stream: &mut std::net::TcpStream, _request_line: &str) -> Result<()> {
+    use std::io::Write;
+    let body = "<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>";
+    let response = format!(
+        "HTTP/1.1 404 Not Found\r\n\
+         Content-Length: {}\r\n\
+         Content-Type: text/html\r\n\
+         \r\n\
+         {}",
+        body.len(),
+        body,
+    );
+    stream.write_all(response.as_bytes())?;
+    stream.flush()?;
+    Ok(())
+}
+
+/// Map a file extension to a MIME type.
+fn mime_type_for(ext: &str) -> &'static str {
+    match ext {
+        "html" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "js" => "application/javascript; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "ttf" => "font/ttf",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Inject a small SSE-based live-reload script just before `</body>` in an
+/// HTML page. The script opens an `EventSource` to `/live-reload` and calls
+/// `location.reload()` on every `reload` event.
+fn inject_live_reload_script(html: &str) -> String {
+    let script = r#"<script>
+(function(){var s=new EventSource("/live-reload");s.addEventListener("reload",function(){location.reload()});s.addEventListener("error",function(){s.close();setTimeout(function(){location.reload()},3000)})})();
+</script>"#;
+    if let Some(pos) = html.rfind("</body>") {
+        let mut result = String::with_capacity(html.len() + script.len());
+        result.push_str(&html[..pos]);
+        result.push_str(script);
+        result.push_str(&html[pos..]);
+        result
+    } else {
+        // No </body> tag — append the script at the end.
+        format!("{html}\n{script}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

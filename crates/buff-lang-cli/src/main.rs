@@ -125,8 +125,25 @@ fn main() -> Result<()> {
             buff_lang_cli::commands::new::run(&name, kind)
         }
         Command::Init => buff_lang_cli::commands::init::run(),
-        Command::Doc { output, open } => {
-            buff_lang_cli::commands::doc::run(std::path::Path::new("."), output.as_deref(), open)
+        Command::Doc {
+            output,
+            open,
+            serve,
+            port,
+        } => {
+            if serve {
+                buff_lang_cli::commands::doc::run_serve(
+                    std::path::Path::new("."),
+                    output.as_deref(),
+                    port,
+                )
+            } else {
+                buff_lang_cli::commands::doc::run(
+                    std::path::Path::new("."),
+                    output.as_deref(),
+                    open,
+                )
+            }
         }
         Command::Release { level } => {
             let lvl =

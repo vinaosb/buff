@@ -452,6 +452,7 @@ pub enum Command {
     /// plus a JSON search index and a top-level `index.html`.
     ///
     /// Use `--open` to launch the generated docs in the default browser.
+    /// Use `--serve` to start a local HTTP server with live reload (T102).
     Doc {
         /// Output directory (default: `doc/`). Idempotent: re-running
         /// overwrites the previous output (matches `cargo doc`).
@@ -462,6 +463,17 @@ pub enum Command {
         /// writing the docs (mirrors `cargo doc --open`).
         #[arg(long)]
         open: bool,
+
+        /// Start a local HTTP server serving the generated docs with
+        /// live reload on `.buff` source changes (T102). Default port: 3000.
+        /// The server binds to 127.0.0.1 (loopback only).
+        #[arg(long)]
+        serve: bool,
+
+        /// Port for the `--serve` HTTP server (default: 3000). Only
+        /// meaningful when `--serve` is also set.
+        #[arg(long, value_name = "PORT", default_value_t = 3000)]
+        port: u16,
     },
 
     /// `buff release <patch|minor|major>` — bump version, update
