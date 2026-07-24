@@ -600,6 +600,19 @@ impl RustCodegen {
                     };
                     attrs.push(parsed);
                 }
+                // T65: `@blocking` marks a function as performing blocking
+                // I/O (for the async runtime). Buff auto-propagates `async`;
+                // `@blocking` signals that the function's body blocks the
+                // thread and should be dispatched via `spawn_blocking` when
+                // called from an async context. We emit a `#[doc]` marker so
+                // the attribute survives into the generated Rust source as
+                // machine-readable metadata for the runtime dispatch layer,
+                // without requiring a custom Rust attribute (which would be
+                // rejected by rustc). This is a pure marker — the function's
+                // async propagation is unchanged (a `@blocking` fn is still
+                // emitted `async` if it transitively calls async fns, so the
+                // generated Rust always compiles).
+                "blocking" => attrs.push(syn::parse_quote!(#[doc = "@blocking"])),
                 // Unknown attribute — surface as a codegen error so the
                 // user knows it was not applied (rather than silently
                 // dropping it). Future tasks can add recognised attributes
@@ -608,7 +621,7 @@ impl RustCodegen {
                     return Err(self.unsupported(&format!(
                         "unrecognised attribute `@{other}` \
                          (supported: @test, @feature, @internal, @deprecated, \
-                         @should_panic, @ignore, @bench, @property)"
+                         @should_panic, @ignore, @bench, @property, @blocking)"
                     )));
                 }
             }
