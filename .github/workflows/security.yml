@@ -1,0 +1,51 @@
+name: Security
+
+on:
+  push:
+    branches: [main, v1x-frameworks]
+    tags: ['v*']
+  pull_request:
+    branches: [main, v1x-frameworks]
+  schedule:
+    - cron: '0 9 * * 1'  # Monday 9am UTC
+
+jobs:
+  cargo-audit:
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit
+        run: cargo audit --deny warnings
+        continue-on-error: false
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report
+          path: |
+            target/audit/**/*.json
+            target/audit/**/*.md
+          retention-days: 30
+
+  sbom:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+      - name: Generate SBOM
+        run: cargo cyclonedx -f json
+      - name: Upload SBOM as release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cyclonedx.json
