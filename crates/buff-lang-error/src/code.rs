@@ -18,7 +18,8 @@
 //! | `E11xx`    | Parsing     | `buff-lang-parser`                               |
 //! | `E12xx`    | Type-check  | `buff-lang-types`                                |
 //! | `E13xx`    | Codegen     | `buff-lang-codegen-rust`                         |
-//! | `E14xx`    | Runtime     | `buff-lang-runtime` (reserved — unused today)    |
+//! | `E14xx`    | Runtime     | `buff-lang-runtime`                              |
+//! | `E15xx`    | Warnings    | `buff-lang-types` / `buff-lang-codegen-rust`     |
 //!
 //! # Stability guarantee
 //!
@@ -177,6 +178,53 @@ pub enum ErrorCode {
     /// comptime interpreter ran but produced a value codegen cannot splice
     /// into the generated Rust source.
     ComptimeLoweringFailed,
+
+    // -----------------------------------------------------------------------
+    // E14xx — Runtime (buff-lang-runtime) [T47]
+    //
+    // Stable across releases — see the [module docs](self) for the policy.
+    // These cover user-visible failures surfaced when the compiled Buff
+    // program runs (NOT compile-time failures). The runtime crate's
+    // `RuntimeError` enum is the upstream source; codes here are the
+    // stable user-facing identifiers.
+    // -----------------------------------------------------------------------
+    /// E1401 — A GPU dispatch raised an error AND no CPU fallback was
+    /// available (or the fallback also failed). The runtime normally
+    /// masks GPU errors behind `dispatch_with_prefer`'s CPU oracle; this
+    /// code fires only when the oracle itself returned `Err`.
+    GpuDispatchFailed,
+    /// E1402 — A GPU compute pass failed validation or panicked (e.g.
+    /// a WGSL binding mismatch surfaced inside the compute pass, or the
+    /// device was lost mid-dispatch).
+    GpuShaderPanic,
+    /// E1403 — The GPU stack returned an error during adapter or device
+    /// initialization. Bridges `RuntimeError::GpuInit`.
+    GpuInitFailed,
+    /// E1404 — No GPU adapter is available on this host. Bridges
+    /// `RuntimeError::GpuUnavailable`.
+    GpuUnavailable,
+    /// E1405 — The input to a GPU-dispatched function exceeds the VRAM
+    /// tiling budget (T46 `dispatch_tiled` could not split the input
+    /// into tiles small enough to fit available VRAM).
+    VramBudgetExceeded,
+    /// E1406 — WGSL shader source produced by `buff-lang-codegen-wgsl`
+    /// was rejected by the wgpu pipeline compiler. The error string
+    /// includes the wgpu-side parse/validation diagnostic.
+    ShaderCompileFailed,
+    /// E1407 — A `Channel<T>.send(...)` call failed because all
+    /// receivers were dropped (the channel is closed). T2 MPSC.
+    ChannelClosed,
+    /// E1408 — A `Channel<T>.receive()` call returned `None` because
+    /// all senders were dropped AND the buffer is empty. T2 MPSC.
+    ChannelDisconnected,
+    /// E1409 — A spawned async task panicked before completing. The
+    /// panic message is captured and surfaced as the diagnostic detail.
+    AsyncTaskPanicked,
+    /// E1410 — A runtime operation (channel receive, GPU dispatch wait,
+    /// or device init) exceeded its deadline. Distinct from the
+    /// underlying I/O fault codes (E1401/E1403) — timeout is a deadline
+    /// miss, not a hard failure.
+    RuntimeTimeout,
 }
 
 impl ErrorCode {
@@ -229,6 +277,17 @@ impl ErrorCode {
             ErrorCode::CodegenParseError => "E1302",
             ErrorCode::AsyncBlockDeadlock => "E1303",
             ErrorCode::ComptimeLoweringFailed => "E1304",
+            // E14xx — Runtime (T47)
+            ErrorCode::GpuDispatchFailed => "E1401",
+            ErrorCode::GpuShaderPanic => "E1402",
+            ErrorCode::GpuInitFailed => "E1403",
+            ErrorCode::GpuUnavailable => "E1404",
+            ErrorCode::VramBudgetExceeded => "E1405",
+            ErrorCode::ShaderCompileFailed => "E1406",
+            ErrorCode::ChannelClosed => "E1407",
+            ErrorCode::ChannelDisconnected => "E1408",
+            ErrorCode::AsyncTaskPanicked => "E1409",
+            ErrorCode::RuntimeTimeout => "E1410",
         }
     }
 
@@ -285,6 +344,19 @@ impl ErrorCode {
             }
             ErrorCode::AsyncBlockDeadlock => "`block()` inside an async function can deadlock",
             ErrorCode::ComptimeLoweringFailed => "codegen cannot lower a comptime value to Rust",
+            // E14xx — Runtime (T47)
+            ErrorCode::GpuDispatchFailed => "GPU dispatch failed and no CPU fallback was available",
+            ErrorCode::GpuShaderPanic => "GPU shader execution fault",
+            ErrorCode::GpuInitFailed => "GPU adapter or device initialization failed",
+            ErrorCode::GpuUnavailable => "no GPU adapter is available on this host",
+            ErrorCode::VramBudgetExceeded => "input exceeds the VRAM tiling budget",
+            ErrorCode::ShaderCompileFailed => "WGSL shader rejected by the GPU pipeline compiler",
+            ErrorCode::ChannelClosed => "`Channel.send` failed — all receivers dropped",
+            ErrorCode::ChannelDisconnected => {
+                "`Channel.receive` returned none — all senders dropped"
+            }
+            ErrorCode::AsyncTaskPanicked => "spawned async task panicked before completing",
+            ErrorCode::RuntimeTimeout => "runtime operation exceeded its deadline",
         }
     }
 
@@ -333,6 +405,17 @@ impl ErrorCode {
             ErrorCode::CodegenParseError => "Codegen produced a Rust token stream that `syn` refused to parse back into an AST. This is always an internal compiler error — the user's Buff program is well-formed; the bug is in the codegen pass. The message includes the `syn` parse error for triage. Fix: report the bug with a minimal reproducer; as a workaround, rewrite the offending construct using a simpler equivalent.",
             ErrorCode::AsyncBlockDeadlock => "`block()` was called inside an `async func`. `block_on` parks the current worker thread, which can prevent any future scheduled on the same worker from running — a deadlock. Codegen still emits the call (so you can see what you wrote), but treats it as a warning. Fix: remove `block()` and let the async fn `return` the future directly, or restructure so the blocking work happens in a non-async function.",
             ErrorCode::ComptimeLoweringFailed => "Codegen could not splice a comptime-evaluated value into the generated Rust source. The comptime interpreter produced a value of a shape the lowering pass does not yet handle (e.g. a nested array of structs, or a value of a user-defined type without a `const` constructor). Fix: simplify the comptime expression so its result is a primitive literal or a flat array of primitives.",
+            // E14xx — Runtime (T47)
+            ErrorCode::GpuDispatchFailed => "A function dispatched to the GPU raised an error, AND the runtime's automatic CPU fallback was either unavailable or also failed. The Buff runtime normally masks every GPU error behind `dispatch_with_prefer`'s CPU oracle — when both paths fail the runtime surfaces this code so the user knows the dispatch decision was correct but BOTH backends were broken. The message includes both the GPU-side and CPU-side error strings. Fix: inspect the GPU error first (E1402/E1403/E1406); if it is environmental (no GPU, driver issue), the CPU fallback error is the real bug — the CPU oracle should never fail on well-typed input.",
+            ErrorCode::GpuShaderPanic => "A GPU compute pass failed validation or panicked mid-dispatch. Common causes: a WGSL binding mismatch (the shader declared `@group(0) @binding(0) var<storage, read>` but the runtime uploaded a `read_write` buffer), an out-of-bounds workgroup dispatch (`workgroup_count` overflowed `device.limits().max_compute_workgroups_per_dimension`), or the device was lost (driver crash, OOM, or another process holding exclusive access). Fix: if the error mentions a binding, the WGSL codegen contract between `buff-lang-codegen-wgsl` and `buff-lang-runtime` has drifted — report it as a compiler bug. If the device was lost, retry on a host with a stable GPU driver, or remove `@prefer(gpu)` so the runtime uses the CPU path.",
+            ErrorCode::GpuInitFailed => "The GPU stack returned an error during adapter or device initialization. The `buff-lang-runtime::GpuContext` walks `wgpu::Instance::request_adapter` then `adapter.request_device`. Either step can fail: no adapter matched the required features, the adapter's limits were too low, or the driver rejected the device descriptor. The diagnostic includes the underlying `wgpu` detail string. Fix: update the GPU driver, or — on a CI host without GPU hardware — set `BUFF_DISABLE_GPU=1` so the runtime routes everything through the CPU path.",
+            ErrorCode::GpuUnavailable => "No GPU adapter is available on this host. `wgpu::Instance::request_adapter` returned `None` for every backend (Vulkan/Metal/DX12/WebGPU). The runtime treats this as a soft failure — every `@prefer(gpu)` hint falls back to CPU automatically. This error surfaces only when the user EXPLICITLY required a GPU (e.g. a library that refuses to run without one). Fix: install a GPU, or use the CPU path. This is NOT a bug — it is the runtime correctly reporting host capability.",
+            ErrorCode::VramBudgetExceeded => "The input to a GPU-dispatched function is larger than the VRAM tiling budget. T46's `dispatch_tiled` splits the input into tiles sized to fit `max_elements_per_tile(vram, bytes_per_element) = vram / (3 * bytes_per_element)`; if even a single tile of the minimum useful size cannot fit, the dispatch aborts with this code. Fix: reduce the input size, increase the per-tile workgroup count (so each tile does more work on the same buffer), or split the computation across multiple dispatches at the application level.",
+            ErrorCode::ShaderCompileFailed => "WGSL shader source produced by `buff-lang-codegen-wgsl` was rejected by the wgpu pipeline compiler. The shader source parses at compile time (the codegen crate's own tests cover that) but fails wgpu's stricter validation: unsupported extension, unsupported address space, type mismatch the WGSL spec catches and the codegen tests don't. The diagnostic includes the wgpu-side parse/validation error. Fix: this is almost always a `buff-lang-codegen-wgsl` bug (the codegen produced invalid WGSL) — report it with the shader source from the error message. Workaround: remove `@prefer(gpu)` so the runtime uses the CPU path.",
+            ErrorCode::ChannelClosed => "A `Channel<T>.send(...)` call failed because all receivers were dropped — the channel is closed and further sends cannot succeed. T2's MPSC channel (`buff_lang_runtime::Channel`) follows Rust's `tokio::sync::mpsc` semantics: a channel is closed when the last `Receiver` is dropped. Fix: keep the receiving task alive for the lifetime of all senders, or restructure the program so the sender knows the receiver has exited (e.g. via a separate shutdown signal).",
+            ErrorCode::ChannelDisconnected => "A `Channel<T>.receive()` call returned `None` because all senders were dropped AND the channel buffer is empty. This is the normal end-of-stream signal for T2 MPSC channels — distinct from E1407 (which fires on `send` when the receiver is gone). Fix: in most cases this is NOT a bug — `receive` returning `None` is the idiomatic way to detect producer shutdown. If the producer exited unexpectedly early, inspect its task for a panic (E1409) or a logic error.",
+            ErrorCode::AsyncTaskPanicked => "A task spawned via `spawn { ... }` panicked before completing. The Buff runtime captures the panic payload via `tokio::task::JoinError` and surfaces its message as the diagnostic detail. Common causes: an `unwrap`/`expect`/`panic!` in user code (Buff codegen forbids these in user-written code, but FFI calls into Rust crates can still panic), an integer overflow in release mode, or an index-out-of-bounds. Fix: read the panic message; the captured backtrace (when `RUST_BACKTRACE=1` is set) shows the originating frame.",
+            ErrorCode::RuntimeTimeout => "A runtime operation exceeded its deadline. Three sub-cases share this code: (1) `Channel.receive(timeout: Duration)` returned `Err` because no message arrived within the deadline; (2) a GPU dispatch's `map_async` + `device.poll(Wait)` exceeded the internal readback deadline; (3) the cold-start `wait_ready(deadline)` deadline expired before the GPU device finished initializing. Fix: increase the deadline (if the operation is expected to be slow), or investigate why the operation is slow (GPU readback latency, channel starvation, slow driver init on first use).",
         }
     }
 
@@ -386,6 +469,17 @@ impl ErrorCode {
             ErrorCode::CodegenParseError,
             ErrorCode::AsyncBlockDeadlock,
             ErrorCode::ComptimeLoweringFailed,
+            // E14xx — Runtime (T47)
+            ErrorCode::GpuDispatchFailed,
+            ErrorCode::GpuShaderPanic,
+            ErrorCode::GpuInitFailed,
+            ErrorCode::GpuUnavailable,
+            ErrorCode::VramBudgetExceeded,
+            ErrorCode::ShaderCompileFailed,
+            ErrorCode::ChannelClosed,
+            ErrorCode::ChannelDisconnected,
+            ErrorCode::AsyncTaskPanicked,
+            ErrorCode::RuntimeTimeout,
         ]
     }
 }

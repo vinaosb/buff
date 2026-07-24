@@ -184,7 +184,7 @@
     </section>
 
     <section class="phase-section">
-        <h2 class="phase-heading">Code generation <span class="phase-range">E1301&ndash;E1303</span></h2>
+        <h2 class="phase-heading">Code generation <span class="phase-range">E1301&ndash;E1304</span></h2>
         <p class="phase-blurb">Errors (and one warning) emitted while lowering the AST to Rust. Source crate: <code>buff-lang-codegen-rust</code>.</p>
         <ul class="code-list">
             <li><a class="code-row" href="E1301.html">
@@ -198,6 +198,57 @@
             <li><a class="code-row" href="E1303.html">
                 <span class="code-tag">E1303</span>
                 <span class="code-title">`block()` inside an async function can deadlock</span>
+            </a></li>
+            <li><a class="code-row" href="E1304.html">
+                <span class="code-tag">E1304</span>
+                <span class="code-title">codegen cannot lower a comptime value to Rust</span>
+            </a></li>
+        </ul>
+    </section>
+
+    <section class="phase-section">
+        <h2 class="phase-heading">Runtime <span class="phase-range">E1401&ndash;E1410</span></h2>
+        <p class="phase-blurb">Errors surfaced by the heterogeneous compute runtime (GPU dispatch, channels, async). Source crate: <code>buff-lang-runtime</code>.</p>
+        <ul class="code-list">
+            <li><a class="code-row" href="E1401.html">
+                <span class="code-tag">E1401</span>
+                <span class="code-title">GPU dispatch failed and no CPU fallback was available</span>
+            </a></li>
+            <li><a class="code-row" href="E1402.html">
+                <span class="code-tag">E1402</span>
+                <span class="code-title">GPU shader execution fault</span>
+            </a></li>
+            <li><a class="code-row" href="E1403.html">
+                <span class="code-tag">E1403</span>
+                <span class="code-title">GPU adapter or device initialization failed</span>
+            </a></li>
+            <li><a class="code-row" href="E1404.html">
+                <span class="code-tag">E1404</span>
+                <span class="code-title">no GPU adapter is available on this host</span>
+            </a></li>
+            <li><a class="code-row" href="E1405.html">
+                <span class="code-tag">E1405</span>
+                <span class="code-title">input exceeds the VRAM tiling budget</span>
+            </a></li>
+            <li><a class="code-row" href="E1406.html">
+                <span class="code-tag">E1406</span>
+                <span class="code-title">WGSL shader rejected by the GPU pipeline compiler</span>
+            </a></li>
+            <li><a class="code-row" href="E1407.html">
+                <span class="code-tag">E1407</span>
+                <span class="code-title"><code>Channel.send</code> failed &mdash; all receivers dropped</span>
+            </a></li>
+            <li><a class="code-row" href="E1408.html">
+                <span class="code-tag">E1408</span>
+                <span class="code-title"><code>Channel.receive</code> returned none &mdash; all senders dropped</span>
+            </a></li>
+            <li><a class="code-row" href="E1409.html">
+                <span class="code-tag">E1409</span>
+                <span class="code-title">spawned async task panicked before completing</span>
+            </a></li>
+            <li><a class="code-row" href="E1410.html">
+                <span class="code-tag">E1410</span>
+                <span class="code-title">runtime operation exceeded its deadline</span>
             </a></li>
         </ul>
     </section>
