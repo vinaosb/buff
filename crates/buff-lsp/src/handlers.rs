@@ -6,12 +6,14 @@
 //! trivially unit-testable: drive `analyze::analyze` →
 //! [`DocumentState::new`] → call a handler → assert on the response.
 
-use buff_lang_error::{Diagnostic, Severity};
+use buff_lang_error::{Applicability, Diagnostic, Severity};
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CompletionItem, CompletionItemKind,
     CompletionResponse, DocumentSymbol, GotoDefinitionResponse, Hover, HoverContents,
     InsertTextFormat, Location, MarkupContent, MarkupKind, Position, Range, SymbolKind, TextEdit,
+    WorkspaceEdit,
 };
+use std::collections::BTreeMap;
 
 use crate::analysis::DocumentAnalysis;
 use crate::state::DocumentState;
@@ -135,26 +137,127 @@ fn plugin_hover_for(state: &DocumentState, position: Position) -> Option<String>
 }
 
 // ---------------------------------------------------------------------
-// Code actions (T72 plugin hook)
+// Code actions (T72 plugin hook + T1 suggestion → CodeAction conversion)
 // ---------------------------------------------------------------------
 
-/// Compute code actions at `position`. Returns the list of
-/// actions registered by LSP plugins (the global plugin
-/// registry). Empty registry → empty `Vec`.
+/// Compute code actions at `position`. Returns the list of actions from
+/// two sources (merged, suggestion-derived first):
 ///
-/// Buff's v1.2 LSP server does not ship a built-in code-action
-/// handler — this entry point exists specifically to give plugins
-/// a hook. When no plugins are registered, callers receive `None`
-/// (the LSP server falls back to "no code actions" which is the
-/// pre-T72 behaviour).
+/// 1. **Diagnostic fix suggestions** (T1, v1.25 Wave 0) — every
+///    [`buff_lang_error::CodeSuggestion`] attached to a diagnostic whose
+///    primary span contains `position` becomes a `quickfix` CodeAction
+///    with a `WorkspaceEdit` that applies the replacement. Actions with
+///    [`Applicability::MachineApplicable`] are marked `is_preferred` so
+///    VSCode / Neovim auto-highlight them.
+/// 2. **LSP plugins** (T72) — the global plugin registry's
+///    `dispatch_global_lsp_code_actions` hook. Empty registry → no
+///    actions from this source.
+///
+/// Returns `None` when both sources are empty (the pre-T1 / pre-T72
+/// behavior — the LSP server reports "no code actions" to the editor).
+///
+/// **Light touch**: this adds the suggestion → CodeAction CONVERSION only.
+/// No new LSP capabilities are registered in `server.rs`; the server's
+/// existing code-action dispatch (when wired) picks this up automatically.
 pub fn code_actions(state: &DocumentState, position: Position) -> Option<Vec<CodeActionOrCommand>> {
+    let suggestion_actions = suggestions_to_code_actions(state, position);
+    let plugin_actions = plugin_code_actions(state, position);
+
+    if suggestion_actions.is_empty() && plugin_actions.is_empty() {
+        return None;
+    }
+
+    let mut out: Vec<CodeActionOrCommand> = Vec::with_capacity(
+        suggestion_actions.len() + plugin_actions.len(),
+    );
+    // Suggestion-derived quickfixes first (most actionable), then plugin
+    // actions. Editors typically show them in declaration order.
+    out.extend(suggestion_actions);
+    out.extend(plugin_actions);
+    Some(out)
+}
+
+/// Convert [`Diagnostic::suggestions`] on diagnostics whose primary span
+/// contains `position` into LSP [`CodeAction`]s (T1, v1.25 Wave 0).
+///
+/// Each suggestion becomes a `quickfix` CodeAction with:
+///
+/// - `title` — the suggestion's label, or `"Apply suggestion: <replacement>"`
+///   when no label is attached.
+/// - `kind` — [`CodeActionKind::QUICK_FIX`].
+/// - `is_preferred` — `Some(true)` when [`Applicability::MachineApplicable`]
+///   (so editors auto-highlight the safe fix).
+/// - `edit` — a [`WorkspaceEdit`] with one [`TextEdit`] replacing the
+///   suggestion's byte span with `replacement`. The edit is keyed by the
+///   synthesized `buff://source-{id}` URI (same form the plugin hook
+///   uses); the LSP server substitutes the real document URI when it
+///   forwards the response.
+///
+/// Returns an empty `Vec` when no diagnostic at `position` carries
+/// suggestions (the common case — most diagnostics have no fix yet).
+fn suggestions_to_code_actions(
+    state: &DocumentState,
+    position: Position,
+) -> Vec<CodeActionOrCommand> {
+    let byte = state.lines.byte_offset(&state.text, position);
+    let uri: lsp_types::Uri = format!("buff://source-{}", state.source_id.0)
+        .parse()
+        .unwrap_or_else(|_| "buff://unknown".parse().unwrap_or_default());
+
+    let mut out: Vec<CodeActionOrCommand> = Vec::new();
+    for diag in &state.analysis.diagnostics {
+        // Only surface suggestions for diagnostics whose primary span
+        // contains the cursor. (Suggestions on the same diagnostic but
+        // at a different span still qualify — the diagnostic IS the
+        // anchor; the suggestion's own span is in the TextEdit.)
+        if !span_contains(diag.span, byte) {
+            continue;
+        }
+        for suggestion in &diag.suggestions {
+            let range = state.lines.lsp_range(&state.text, suggestion.span);
+            let edit = TextEdit {
+                range,
+                new_text: suggestion.replacement.clone(),
+            };
+            let mut changes: BTreeMap<lsp_types::Uri, Vec<TextEdit>> = BTreeMap::new();
+            changes.insert(uri.clone(), vec![edit]);
+            let workspace_edit = WorkspaceEdit {
+                changes: Some(changes),
+                document_changes: None,
+                change_annotations: None,
+            };
+            let title = suggestion
+                .label
+                .clone()
+                .unwrap_or_else(|| format!("Apply suggestion: `{}`", suggestion.replacement));
+            let is_preferred = matches!(
+                suggestion.applicability,
+                Applicability::MachineApplicable
+            );
+            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title,
+                kind: Some(CodeActionKind::QUICK_FIX),
+                command: None,
+                is_preferred: if is_preferred { Some(true) } else { None },
+                disabled: None,
+                data: Some(serde_json::Value::String(
+                    suggestion.applicability.to_string(),
+                )),
+                edit: Some(workspace_edit),
+            }));
+        }
+    }
+    out
+}
+
+/// T72: Call the global plugin registry's code-action dispatch and
+/// convert the results to LSP wire types. Returns the actions or an
+/// empty `Vec` when no plugins are registered / no plugin fires.
+fn plugin_code_actions(state: &DocumentState, position: Position) -> Vec<CodeActionOrCommand> {
     let uri = format!("buff://source-{}", state.source_id.0);
     let cursor = buff_plugins::PluginPosition::new(position.line, position.character);
     let plugin_actions = buff_plugins::dispatch_global_lsp_code_actions(&uri, cursor);
-    if plugin_actions.is_empty() {
-        return None;
-    }
-    let out: Vec<CodeActionOrCommand> = plugin_actions
+    plugin_actions
         .into_iter()
         .map(|a| {
             CodeActionOrCommand::CodeAction(CodeAction {
@@ -163,8 +266,13 @@ pub fn code_actions(state: &DocumentState, position: Position) -> Option<Vec<Cod
                 ..Default::default()
             })
         })
-        .collect();
-    Some(out)
+        .collect()
+}
+
+/// `true` when `byte` lies within `[span.start, span.end)` (inclusive of
+/// start, exclusive of end — the standard half-open range).
+fn span_contains(span: buff_lang_error::Span, byte: usize) -> bool {
+    span.start <= byte && byte < span.end
 }
 
 /// Render a [`buff_lang_types::Type`] for hover. Defaults collapse to their
