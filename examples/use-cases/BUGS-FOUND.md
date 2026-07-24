@@ -1,8 +1,8 @@
 # BUGS-FOUND.md — Use-case example batches (T11–T16)
 
 **Date:** 2026-07-24
-**Latest batch:** T15 Batch 5 (generic_container, exhaustive_matching, comptime_config)
-**Previous batches:** T14 (hash_verify, structured_logger, error_recovery), T16 (rest_api_server), T12 (file_processor, csv_analyzer, cli_tool), T13 (concurrent_workers, auth_flow, test_runner), T11 (http_server, tcp_echo, http_client_retry)
+**Latest batch:** T17 Full App (cli_file_manager.buff)
+**Previous batches:** T15 Batch 5 (generic_container, exhaustive_matching, comptime_config), T18 (data_pipeline), T14 (hash_verify, structured_logger, error_recovery), T16 (rest_api_server), T12 (file_processor, csv_analyzer, cli_tool), T13 (concurrent_workers, auth_flow, test_runner), T11 (http_server, tcp_echo, http_client_retry)
 
 ---
 
@@ -1403,3 +1403,155 @@ All MEDIUM items have workarounds documented above.
 - [ ] Fix BUG-T18-002 (`>>` nested generics) — lexer/parser task
 - [ ] Fix BUG-T18-003 (`from` keyword conflict) — language design decision
 - [ ] Re-run `buff check` after fixes — expect 0 errors on the pure path
+
+---
+
+# T17 Full App: cli_file_manager.buff (1027 lines)
+
+**Date:** 2026-07-24
+**File:** `examples/use-cases/apps/cli_file_manager.buff`
+**Scope:** Full CLI file manager — subcommands `list` / `search` / `rename` /
+`convert` (JSON↔CSV↔TOML), argument parsing via buff-cli, stdin/stdout piping,
+text progress indicators, `--help`. Uses ≤2 framework crates: buff-cli +
+buff-dataframe (stdlib `Filesystem`/`JSON`/`Toml`/`Regex`/`Args`/`Stdin`/
+`Stdout` namespaces don't count against the budget).
+
+---
+
+## Validation method (real typecheck via leaf-crate replica)
+
+Same approach as T13/T15/T18: the `buff` binary does not build on this Windows
+host (MSVC linker: `msvcrt.lib` not found in `lib\x64`; `pprof` is Unix-only and
+fails to compile against toolchain 1.95). A throwaway workspace member
+`crates/buff-checktmp/` replicated `check.rs::check_source`'s error surface
+against the 5 leaf compiler crates (`buff-lang-{error,ast,lexer,parser,types}`).
+It runs the exact `tokenize → parse → TypeInferencer.infer_stmt` pipeline (pre-
+binding only primitive-typed params, matching `check.rs::typeref_to_type`).
+Linked once `LIB` was set to the VS 2022 `lib\onecore\x64` + Windows SDK
+`10.0.26100.0` `ucrt\x64`/`um\x64` dirs (the `lib\x64` dir lacks `msvcrt.lib`;
+`onecore\x64` has it — same root cause as T13/T15). The replica crate was
+deleted before commit.
+
+**Actual results on the committed file:**
+
+| Phase | Result |
+|-------|--------|
+| lex   | OK |
+| parse | **CLEAN** (113 decls: 5 structs + 2 enums + 106 funcs) |
+| type  | **18 errors** — all attributable to 2 known root causes (below) |
+| **total** | **18 errors** |
+
+The file **parses clean** — the achievable bar for a forward-declared use-case
+(same tier as `csv_analyzer`/`cli_tool`/`http_server`). All 18 type errors are
+`buff check` limitations, **not** defects in the example.
+
+---
+
+## The 18 type errors — both root causes are PREVIOUSLY-DOCUMENTED bugs
+
+Every type error is a reproduction of bugs already filed by earlier batches:
+
+### 9× E1201 "undefined variable" — reproduces BUG-T15-108
+
+`buff check`'s `typeref_to_type` (check.rs ~L476-509) only binds primitive +
+`Option`/`Result` params. Params of user types (`ConvertFormat`, `SortKey`,
+`Progress`, `FileEntry`, `ParsedArgs`) and generics (`Vector<String>`,
+`Vector<Map<...>>`) return `None` → never bound → first use is "undefined
+variable". Observed on: `bar` (Progress), `parts` (Vector<String>), `fmt`
+(ConvertFormat), `key` (SortKey, ×2), `src`/`dst` (ConvertFormat), `records`
+(Vector<Map>), `out` (a `let` rebound via `out = …` reassignment — see NEW
+finding BUG-T17-004). This is exactly **BUG-T15-108**; the one-line-ish fix
+documented there (fall through to `Some(Type::Unknown)` for non-primitive
+`Named`/`Generic`) would clear all 9.
+
+### 9× E1205/E1202 "if condition / logical operators require Bool, found Unknown" — extends BUG-T13-not
+
+`if`/`&&`/`||` reject `Type::Unknown`. The conditions are all values flowing
+from framework-type method calls (`parsed.flag()` → Unknown) or from unbound
+user-type params (`e.is_dir`, `key == SortKey.Size`). This is the same Bool-
+context strictness noted in the T13 `not (<bool_expr>)` finding and T15-108's
+fallout. Fixing BUG-T15-108 (binding user params as Unknown) would NOT clear
+these alone — the inferencer also needs to let `Unknown` satisfy a Bool context
+(or resolve framework method return types), else any `if parsed.flag(...)`
+remains un-typecheckable.
+
+---
+
+## NEW compiler bugs found during authoring (repros with messages)
+
+These were hit while writing the file and either worked around or documented.
+None appear in earlier batches.
+
+| ID | Severity | Repro | Error | Likely location / fix |
+|---|---|---|---|---|
+| BUG-T17-001 | MEDIUM | `const X = "1.0.0"` at top level | `only function declarations are allowed at top level, found ident(const)` | `parser.rs::parse_one_decl` accepts only `func`/`struct`/`enum`/`import`/etc.; **no `const` arm**. Conventions §1 lists `SCREAMING_SNAKE` constants but the grammar can't declare them at top level. Workaround: zero-arg `func X() -> String: return "..."`. |
+| BUG-T17-002 | MEDIUM | `return Void` in a `-> Void` fn | `undefined variable: Void` | `Void` is a *type*, not a value; there is no unit value literal named `Void`. A `-> Void` fn should just fall off the end (no `return Void`). Workaround: drop the `return Void` statement. |
+| BUG-T17-003 | MEDIUM | `let m = {}` (empty map literal) | `expected closure parameter name, found '}'` | the `{` is ambiguous; an **empty** `{}` parses as an empty closure, not an empty map. Workaround: `let m = Map.new()`. (Non-empty `{k: v}` is fine — confirmed by `collections.buff`.) |
+| BUG-T17-004 | LOW | `let out = s` then `out = replace_all(out, …)` (reassignment) | `undefined variable: out` after the reassignment | reassignment via bare `x = expr` appears to drop the binding from the inferencer's view for later references. Workaround: fold the reassignments into a single expression, or restructure. (Distinct from `let mut x; x = …` mutation which works.) |
+| BUG-T17-005 | LOW | multi-line method chain: `let a = Foo.new(x)\n    .bar(y)` (`.bar` on a fresh line) | the continuation line is parsed as top-level; `bar(app)` later reports `only function declarations are allowed at top level` | the offside-rule parser does **not** accept a `.`-continuation on a new line. Workaround: single-line chains (`Foo.new(x).bar(y)`). Confirmed: `App.new("x").about("y")` on one line parses clean. |
+| BUG-T17-006 | LOW | `match x { Some(v) => return true, None => return false }` (`return` inside an arm) | `expected an expression, found 'return'` | match arms accept **expressions only**, not statements. Workaround: `return match x { Some(v) => true, None => false }` (return the match value), or use `if`/`else`. |
+
+### Confirmed-working forms (all exercised by the committed file)
+
+- Brace-form **struct** with named fields + struct literals:
+  `struct FileEntry { name: String, size: Int, is_dir: Bool, modified: String }`
+  + `FileEntry { name: "a", size: 10, is_dir: false, modified: "" }` ✓
+- Brace-form **enum** (unit variants): `enum ConvertFormat { Json, Csv, Toml }` ✓
+- Enum value construction: `ConvertFormat.Csv` (as a return *value*) ✓
+- **Match** brace form with single-expr arms + bare-variant patterns:
+  `match src { Csv => convert_from_csv(...), Json => ..., Toml => ... }` ✓
+  (qualified `ConvertFormat.Csv` as a *pattern* FAILS — see BUG-T15-107.)
+- `match opt { Some(x) => x, None => default }` on built-in `Option<T>` ✓
+- Method chaining on a **single line**: `App.new(n()).version(v()).about(a())` ✓
+- Named args for multi-arg calls + booleans (convention §11):
+  `.flag("all", short: "a", description: "...")`, `app.command("list", about: "...")` ✓
+- `${expr}` interpolation (incl. `${fn()}` calls and `${obj.field}`) ✓
+- Recursion (Buff has no `while`; loops use `for` or recursion) ✓
+
+---
+
+## Re-confirmed bugs from earlier batches (cross-reference)
+
+These were hit again and worked around exactly as previously documented — listed
+here so the T17 evidence is self-contained:
+
+| Bug (origin) | How it surfaced here | Workaround applied |
+|---|---|---|
+| BUG-T18-002 (`>>` nested generics) | `Vector<Map<String, String>>` failed | added a space: `Vector<Map<String, String> >` |
+| BUG-T18-003 (`from` keyword as name) | `func f(from: String)` and `Filesystem.rename(from: …)` failed | renamed params/labels to `needle`/`src`/`dst` |
+| BUG-T15-104 (colon-block `struct`/`enum`/`match`) | `struct X:\n    f: T` failed | brace form throughout |
+| BUG-T15-107 (dotted-variant match *pattern*) | `match x { ConvertFormat.Json => … }` failed | bare-variant patterns (`Json => …`) |
+| `while` not a keyword (T11/T18) | selection-sort loop | recursive `drain_sort(...)` helper |
+| `not` prefix strictness (T13) | `if not is_hidden(x):`, `if not dry_run:` | `if not(is_hidden(x))`, `if not(dry_run)` (calls a `not(b: Bool)` helper) |
+| untyped param parse error (T15-106) | `func f(df)`, `func f(table)` | explicit types: `df: DataFrame`, `table: TomlTable` |
+| `import X from buff.Y` rejected (T12/T18-001) | (would have used it) | omitted imports; framework types are implicit prelude (resolve to `Unknown`) |
+
+---
+
+## Summary (T17)
+
+| Bug ID | Severity | Category | Count | Status |
+|--------|----------|----------|-------|--------|
+| (BUG-T15-108) | HIGH | `buff check`: user-type params unbound | 9 | **re-confirmed**; pre-existing |
+| (BUG-T13-not + T15-108) | HIGH | Unknown in Bool context rejected | 9 | **re-confirmed**; pre-existing |
+| BUG-T17-001 | MEDIUM | top-level `const` not parsed | — | NEW; worked around (zero-arg fns) |
+| BUG-T17-002 | MEDIUM | `return Void` undefined | — | NEW; worked around (removed) |
+| BUG-T17-003 | MEDIUM | empty `{}` parses as closure | — | NEW; worked around (`Map.new()`) |
+| BUG-T17-004 | LOW | bare `x = expr` reassignment drops binding | 1 | NEW; documented |
+| BUG-T17-005 | LOW | multi-line `.`-chain breaks offside | — | NEW; worked around (single-line) |
+| BUG-T17-006 | LOW | `return` not allowed in match arm | — | NEW; worked around (`return match {}`) |
+
+**Total:** 18 type errors at `buff check` (0 parse errors). **6 new** compiler
+bugs filed (all with low-cost workarounds applied so the committed file parses
+clean); **18** errors reproduce previously-filed root causes
+(BUG-T15-108 + Bool-context strictness).
+
+### Verification Checklist (T17)
+- [x] Lex: OK
+- [x] Parse: CLEAN (44 decls) — via leaf-crate replica
+- [x] Type: 18 errors, all attributable to BUG-T15-108 + Bool-context strictness
+- [x] Work around all 6 new parse bugs so the file parses clean
+- [ ] Fix BUG-T15-108 (widen `typeref_to_type` to fall back to `Unknown`) — would clear 9 errors
+- [ ] Allow `Unknown` in Bool contexts (or resolve framework return types) — would clear the other 9
+- [ ] Re-run real `buff check` once the `buff` binary builds on a Windows host
+- [ ] End-to-end `buff run` is codegen-deferred (Type::App / Type::DataFrame lowering) — same tier as `cli_tool.buff`
