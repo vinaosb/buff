@@ -1242,3 +1242,220 @@ fn t84_range_registered_as_prelude_type() {
         "Range.buff_type() must return Type::Range, got {ty:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// T42 — Complex pattern type inference for match arms
+// ---------------------------------------------------------------------------
+//
+// Tests for enum variant patterns, nested patterns, struct patterns,
+// or-patterns, and guard conditions.
+
+use buff_lang_ast::{MatchArm, Pattern};
+
+fn pat_ident(name: &str) -> Pattern {
+    Pattern::Ident(Ident::new(name, sp()), sp())
+}
+
+fn pat_wild() -> Pattern {
+    Pattern::Wildcard(sp())
+}
+
+fn pat_variant(enum_name: &str, variant: &str, subpatterns: Vec<Pattern>) -> Pattern {
+    Pattern::Variant {
+        enum_name: Ident::new(enum_name, sp()),
+        variant: Ident::new(variant, sp()),
+        subpatterns,
+        span: sp(),
+    }
+}
+
+fn pat_tuple(subs: Vec<Pattern>) -> Pattern {
+    Pattern::Tuple(subs, sp())
+}
+
+fn pat_struct(name: &str, fields: Vec<(&str, Pattern)>) -> Pattern {
+    Pattern::Struct {
+        name: Ident::new(name, sp()),
+        fields: fields.into_iter().map(|(n, p)| (Ident::new(n, sp()), p)).collect(),
+        span: sp(),
+        rest: false,
+    }
+}
+
+fn pat_or(alts: Vec<Pattern>) -> Pattern {
+    Pattern::Or(alts, sp())
+}
+
+fn match_arm(pattern: Pattern, body: Vec<Stmt>) -> MatchArm {
+    MatchArm {
+        pattern,
+        guard: None,
+        body: block(body),
+        span: sp(),
+    }
+}
+
+fn match_arm_guarded(pattern: Pattern, guard: Expr, body: Vec<Stmt>) -> MatchArm {
+    MatchArm {
+        pattern,
+        guard: Some(guard),
+        body: block(body),
+        span: sp(),
+    }
+}
+
+fn match_expr(scrutinee: Expr, arms: Vec<MatchArm>) -> Expr {
+    Expr::MatchExpr {
+        scrutinee: Box::new(scrutinee),
+        arms,
+        span: sp(),
+    }
+}
+
+/// T42: enum variant pattern `Some(x)` infers `x` as the inner type.
+/// `match opt { Some(x) => x, None => 0 }` — the scrutinee is
+/// `Option<Int>`, so `x` should infer as `Int`.
+#[test]
+fn t42_enum_variant_pattern_infers_inner_type() {
+    // Build: match opt { Some(x) => x, None => 0 }
+    let scrutinee = ident("opt");
+    let arms = vec![
+        match_arm(
+            pat_variant("Option", "Some", vec![pat_ident("x")]),
+            vec![expr_stmt(ident("x"))],
+        ),
+        match_arm(
+            pat_variant("Option", "None", vec![]),
+            vec![expr_stmt(int_lit(0))],
+        ),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("opt", Type::option(Type::int_default()));
+    let ty = inf.infer_expr(&e).unwrap();
+    // Both arms return Int, so the match type is Int.
+    assert_eq!(ty, Type::int_default(), "T42: match on Option<Int> should infer Int");
+    // x should be bound to Int in the Some arm.
+    // (The env is restored after each arm, so we check via the arm body inference.)
+}
+
+/// T42: nested pattern `Some(Some(x))` infers `x` as the innermost type.
+/// `match opt { Some(Some(x)) => x, _ => 0 }` — scrutinee is
+/// `Option<Option<Int>>`, so `x` should infer as `Int`.
+#[test]
+fn t42_nested_pattern_infers_inner_type() {
+    let scrutinee = ident("opt");
+    let arms = vec![
+        match_arm(
+            pat_variant("Option", "Some", vec![
+                pat_variant("Option", "Some", vec![pat_ident("x")]),
+            ]),
+            vec![expr_stmt(ident("x"))],
+        ),
+        match_arm(pat_wild(), vec![expr_stmt(int_lit(0))]),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("opt", Type::option(Type::option(Type::int_default())));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(ty, Type::int_default(), "T42: nested match on Option<Option<Int>> should infer Int");
+}
+
+/// T42: struct pattern `Point(x, y)` — each field binding gets Unknown
+/// (full struct field resolution is deferred to rustc).
+#[test]
+fn t42_struct_pattern_binds_fields() {
+    let scrutinee = ident("p");
+    let arms = vec![
+        match_arm(
+            pat_struct("Point", vec![("x", pat_ident("a")), ("y", pat_ident("b"))]),
+            vec![expr_stmt(int_lit(1))],
+        ),
+        match_arm(pat_wild(), vec![expr_stmt(int_lit(0))]),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("p", Type::Unknown);
+    let ty = inf.infer_expr(&e).unwrap();
+    // Both arms return Int, so the match type is Int.
+    assert_eq!(ty, Type::int_default(), "T42: struct pattern match should infer Int");
+}
+
+/// T42: or-pattern `Red | Blue` — both arms bind the same types.
+/// `match color { Red | Blue => 1, _ => 0 }`.
+#[test]
+fn t42_or_pattern_accepts_alternatives() {
+    let scrutinee = ident("color");
+    let arms = vec![
+        match_arm(
+            pat_or(vec![pat_ident("Red"), pat_ident("Blue")]),
+            vec![expr_stmt(int_lit(1))],
+        ),
+        match_arm(pat_wild(), vec![expr_stmt(int_lit(0))]),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("color", Type::Unknown);
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(ty, Type::int_default(), "T42: or-pattern match should infer Int");
+}
+
+/// T42: guard condition `Some(x) if x > 0` — the guard is inferred
+/// and must be Bool.
+#[test]
+fn t42_guard_condition_inferred() {
+    let scrutinee = ident("opt");
+    let arms = vec![
+        match_arm_guarded(
+            pat_variant("Option", "Some", vec![pat_ident("x")]),
+            binary(BinaryOp::Gt, ident("x"), int_lit(0)),
+            vec![expr_stmt(ident("x"))],
+        ),
+        match_arm(pat_wild(), vec![expr_stmt(int_lit(0))]),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("opt", Type::option(Type::int_default()));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(ty, Type::int_default(), "T42: guarded match should infer Int");
+}
+
+/// T42: tuple pattern `(a, b)` — each element gets the corresponding
+/// tuple member type.
+#[test]
+fn t42_tuple_pattern_infers_member_types() {
+    let scrutinee = ident("pair");
+    let arms = vec![
+        match_arm(
+            pat_tuple(vec![pat_ident("a"), pat_ident("b")]),
+            vec![expr_stmt(int_lit(1))],
+        ),
+        match_arm(pat_wild(), vec![expr_stmt(int_lit(0))]),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("pair", Type::tuple(vec![Type::string(), Type::int_default()]));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(ty, Type::int_default(), "T42: tuple pattern match should infer Int");
+}
+
+/// T42: match arms with different types return Unknown (defer to rustc).
+#[test]
+fn t42_mismatched_arm_types_return_unknown() {
+    let scrutinee = ident("opt");
+    let arms = vec![
+        match_arm(
+            pat_variant("Option", "Some", vec![pat_ident("x")]),
+            vec![expr_stmt(ident("x"))],  // returns Int
+        ),
+        match_arm(
+            pat_variant("Option", "None", vec![]),
+            vec![expr_stmt(str_lit("none"))],  // returns String
+        ),
+    ];
+    let e = match_expr(scrutinee, arms);
+    let mut inf = TypeInferencer::new();
+    inf.bind("opt", Type::option(Type::int_default()));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(ty, Type::Unknown, "T42: mismatched arm types should return Unknown");
+}

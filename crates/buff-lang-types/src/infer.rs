@@ -8,7 +8,7 @@
 //! from literals/identifiers/operators/calls, exhaustiveness checking, and
 //! recursion detection.
 
-use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, Stmt, TypeRef, UnaryOp};
+use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp};
 use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 use std::collections::BTreeMap;
 
@@ -513,10 +513,19 @@ impl TypeInferencer {
                 }
                 Ok(Type::map(key_ty, val_ty))
             }
-            // v0.5: lambda/struct/match inference.
-            Expr::Lambda { .. } | Expr::StructInit { .. } | Expr::MatchExpr { .. } => {
+            // v0.5: lambda/struct inference.
+            Expr::Lambda { .. } | Expr::StructInit { .. } => {
                 Ok(Type::Unknown)
             }
+            // T42: match expression inference. Infer the scrutinee type, then
+            // for each arm: infer pattern bindings from the scrutinee type,
+            // bind them in the environment, infer the arm body, and unify the
+            // arm result types. All arms must have the same result type.
+            Expr::MatchExpr {
+                scrutinee,
+                arms,
+                span,
+            } => self.infer_match(scrutinee, arms, *span),
             // T30: `expr?` yields the Ok type `T` of a `Result<T, E>`. When
             // the operand infers to a known `Result(T, E)`, return `T`;
             // otherwise (Unknown, Option, etc.) fall back to `Unknown` so the
@@ -986,6 +995,166 @@ impl TypeInferencer {
             last_ty = self.infer_stmt(stmt)?;
         }
         Ok(last_ty)
+    }
+
+    /// T42: infer the type of a `match` expression.
+    ///
+    /// Infers the scrutinee type, then for each arm: infers pattern bindings
+    /// from the scrutinee type, binds them in a SNAPSHOT-restored environment,
+    /// infers the arm body, and unifies the arm result types. All arms must
+    /// have the same result type (or the match expression type is `Unknown`).
+    fn infer_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+        _span: Span,
+    ) -> Result<Type, TypeError> {
+        let scrutinee_ty = self.infer_expr(scrutinee)?;
+        let mut result_ty: Option<Type> = None;
+
+        for arm in arms {
+            // Snapshot the environment before this arm's bindings.
+            let saved_env = self.env.clone();
+
+            // Infer pattern bindings from the scrutinee type.
+            self.infer_pattern(&arm.pattern, &scrutinee_ty)?;
+
+            // If there's a guard, infer it (must be Bool).
+            if let Some(guard) = &arm.guard {
+                let guard_ty = self.infer_expr(guard)?;
+                if guard_ty != Type::Bool {
+                    return Err(TypeError::new(
+                        Diagnostic::error(
+                            format!("match guard must be Bool, found {guard_ty}"),
+                            guard.span(),
+                        )
+                        .with_code(ErrorCode::IfConditionMustBeBool),
+                    ));
+                }
+            }
+
+            // Infer the arm body.
+            let arm_ty = self.infer_block_tail(&arm.body)?;
+
+            // Unify arm result types: all arms must agree.
+            match &result_ty {
+                Some(expected) if *expected != arm_ty => {
+                    // Arms disagree — return Unknown (defer to rustc).
+                    return Ok(Type::Unknown);
+                }
+                None => result_ty = Some(arm_ty),
+                _ => {}
+            }
+
+            // Restore the environment for the next arm (each arm's bindings
+            // are scoped to that arm only).
+            self.env = saved_env;
+        }
+
+        Ok(result_ty.unwrap_or(Type::Void))
+    }
+
+    /// T42: infer pattern bindings from a scrutinee type.
+    ///
+    /// Walks the pattern tree and binds each `Ident` binding to the
+    /// corresponding type extracted from the scrutinee type. For enum
+    /// variant patterns (`Some(x)`), the subpattern types are extracted
+    /// from the variant's inner type. For nested patterns (`Some(Some(x))`),
+    /// the inner type is unwrapped recursively. For struct patterns
+    /// (`Point(x, y)`), each field binding gets the struct's field type
+    /// (currently Unknown — full struct field resolution is deferred).
+    /// For or-patterns (`Red | Blue`), each alternative is inferred
+    /// independently (bindings must agree — deferred to rustc).
+    fn infer_pattern(&mut self, pattern: &Pattern, scrutinee_ty: &Type) -> Result<(), TypeError> {
+        match pattern {
+            Pattern::Ident(name, _) => {
+                // A bare ident pattern binds the scrutinee type.
+                self.env.insert(&name.name, scrutinee_ty.clone());
+            }
+            Pattern::Variant {
+                enum_name: _,
+                variant: _,
+                subpatterns,
+                ..
+            } => {
+                // An enum variant pattern like `Some(x)` or `Green(int_value)`.
+                // The scrutinee type should be an Option<T>, Result<T,E>, or
+                // a User type. Extract the inner type(s) and recurse into
+                // subpatterns.
+                let inner_tys: Vec<Type> = match scrutinee_ty {
+                    Type::Option(inner) => {
+                        // `Some(x)` — the single subpattern gets the inner type.
+                        vec![*(inner.clone())]
+                    }
+                    Type::Result(ok, _err) => {
+                        // `Ok(x)` — the single subpattern gets the Ok type.
+                        // `Err(e)` — the single subpattern gets the Err type.
+                        // We use the Ok type as the default; the variant name
+                        // disambiguates at codegen time.
+                        vec![*(ok.clone())]
+                    }
+                    Type::User { args, .. } => {
+                        // A user enum variant: the subpatterns correspond to
+                        // the variant's data fields. We pass the user type's
+                        // args as the expected types for subpatterns.
+                        args.clone()
+                    }
+                    _ => {
+                        // Unknown scrutinee — bind subpatterns to Unknown.
+                        vec![Type::Unknown; subpatterns.len()]
+                    }
+                };
+                // Recurse into subpatterns, pairing each with the inner type.
+                // If there are more subpatterns than inner types, the extra
+                // subpatterns get Unknown (defer to rustc).
+                for (i, sub) in subpatterns.iter().enumerate() {
+                    let sub_ty = inner_tys.get(i).cloned().unwrap_or(Type::Unknown);
+                    self.infer_pattern(sub, &sub_ty)?;
+                }
+            }
+            Pattern::Tuple(subs, _) => {
+                // A tuple pattern `(x, y)`. The scrutinee should be a
+                // Type::Tuple. Pair each subpattern with the corresponding
+                // member type.
+                let member_tys = match scrutinee_ty {
+                    Type::Tuple(members) => members.clone(),
+                    _ => vec![Type::Unknown; subs.len()],
+                };
+                for (i, sub) in subs.iter().enumerate() {
+                    let sub_ty = member_tys.get(i).cloned().unwrap_or(Type::Unknown);
+                    self.infer_pattern(sub, &sub_ty)?;
+                }
+            }
+            Pattern::Struct { name: _, fields, .. } => {
+                // A struct pattern `Point { x, y }`. Each field's subpattern
+                // gets Unknown (full struct field resolution is deferred to
+                // rustc — the struct type is opaque at the Buff type level).
+                for (_, sub) in fields {
+                    self.infer_pattern(sub, &Type::Unknown)?;
+                }
+            }
+            Pattern::Or(alts, _) => {
+                // An or-pattern `Red | Blue`. Each alternative must bind the
+                // same names with the same types. We infer each alternative
+                // independently against the scrutinee type. Bindings from the
+                // first alternative are used; subsequent alternatives must
+                // agree (we don't enforce this — rustc does).
+                for alt in alts {
+                    let saved = self.env.clone();
+                    self.infer_pattern(alt, scrutinee_ty)?;
+                    // Restore after each alternative — only the first alt's
+                    // bindings survive (they must all be the same).
+                    self.env = saved;
+                }
+                // Re-infer the first alternative to establish bindings.
+                if let Some(first) = alts.first() {
+                    self.infer_pattern(first, scrutinee_ty)?;
+                }
+            }
+            // Wildcard and literal patterns bind nothing.
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+        }
+        Ok(())
     }
 
     /// Infers the type produced by a statement.
