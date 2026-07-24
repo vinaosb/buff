@@ -107,8 +107,11 @@ pub use hints::{
 };
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
 pub use threshold::{
-    decide, decide_dynamic, explain_dispatch, DataLocation, DispatchPlanner, WorkloadContext,
-    CPU_PARALLEL_MAX, GPU_ARITHMETIC_INTENSITY_THRESHOLD, SINGLE_THREAD_MAX,
+    cost_model_favors_gpu, decide, decide_dynamic, estimate_costs, explain_dispatch, CostEstimate,
+    DataLocation, DispatchPlanner, WorkloadContext, CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC,
+    CPU_PARALLEL_MAX, CPU_PEAK_FLOPS_PER_SEC, GPU_ARITHMETIC_INTENSITY_THRESHOLD,
+    GPU_LAUNCH_OVERHEAD_SECS, GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC, GPU_PEAK_FLOPS_PER_SEC,
+    PCIE_BANDWIDTH_BYTES_PER_SEC, SINGLE_THREAD_MAX,
 };
 pub use tiling::{
     dispatch_map_with_tiling, dispatch_tiled, max_elements_per_tile, tile_ranges,

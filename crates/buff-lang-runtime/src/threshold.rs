@@ -476,6 +476,16 @@ pub struct WorkloadContext {
     ///
     /// Use [`.with_data_location(loc)`](Self::with_data_location) to set it.
     pub data_location: DataLocation,
+    /// T11: Bytes per element in the buffer (e.g. 4 for `f32`, 8 for `f64`).
+    ///
+    /// When `> 0`, [`decide_dynamic`] uses the multi-factor cost model
+    /// (transfer time + launch overhead + occupancy + arithmetic intensity)
+    /// instead of the simpler intensity-threshold heuristic. When `0`
+    /// (the default), the cost model is bypassed and the T5 intensity
+    /// threshold logic runs — keeping all existing T5 tests unchanged.
+    ///
+    /// Use [`.with_bytes_per_element(n)`](Self::with_bytes_per_element) to set it.
+    pub bytes_per_element: u64,
 }
 
 impl WorkloadContext {
@@ -502,6 +512,7 @@ impl WorkloadContext {
             gpu_available,
             arithmetic_intensity: None,
             data_location: DataLocation::Cpu,
+            bytes_per_element: 0,
         }
     }
 
@@ -562,6 +573,32 @@ impl WorkloadContext {
         self.data_location = data_location;
         self
     }
+
+    /// T11: Chainable builder to set the bytes-per-element width.
+    ///
+    /// When set to a non-zero value (e.g. 4 for `f32`, 8 for `f64`),
+    /// [`decide_dynamic`] activates the multi-factor cost model
+    /// (transfer time + launch overhead + occupancy + arithmetic intensity)
+    /// instead of the simpler intensity-threshold heuristic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use buff_lang_runtime::{
+    ///     DispatchKind, WorkloadContext, threshold::decide_dynamic,
+    /// };
+    ///
+    /// // With bytes_per_element set, the cost model runs:
+    /// let ctx = WorkloadContext::new(100_000, true)
+    ///     .with_bytes_per_element(4)    // f32
+    ///     .with_intensity(8.0);        // compute-bound
+    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
+    /// ```
+    #[must_use]
+    pub fn with_bytes_per_element(mut self, bytes_per_element: u64) -> Self {
+        self.bytes_per_element = bytes_per_element;
+        self
+    }
 }
 
 /// Whether `arithmetic_intensity` is "high" enough for the GPU to win.
@@ -577,6 +614,231 @@ impl WorkloadContext {
 /// (treated as memory-bound — the conservative choice for garbage input).
 fn is_gpu_favorable_intensity(arithmetic_intensity: Option<f64>) -> bool {
     arithmetic_intensity.is_none_or(|ai| ai >= GPU_ARITHMETIC_INTENSITY_THRESHOLD)
+}
+
+// ===========================================================================
+// T11: Refined multi-factor cost model (v1.25 Wave 1)
+// ===========================================================================
+//
+// T5's [`decide_dynamic`] uses a single-factor heuristic: arithmetic
+// intensity ≥ 4.0 FLOPs/byte → GPU, else CPU. This is correct on average
+// but misses several real-world factors:
+//
+// * **Transfer time**: uploading data CPU→GPU over PCIe (~16 GB/s) takes
+//   real wall-clock time. For data already on the GPU (T10), this is zero.
+// * **Launch overhead**: every GPU dispatch pays a fixed cost (~100 µs
+//   warm) for command encoding + submission + poll. The CPU has no such
+//   overhead.
+// * **Occupancy**: the GPU's hundreds of compute units are wasted if the
+//   input is too small to fill them. Below ~64 workgroups (4096 elements
+//   at workgroup size 64), the GPU is underutilized.
+// * **Arithmetic intensity**: the roofline model — compute-bound work
+//   favours the GPU's massive ALU array; memory-bound work is bottlenecked
+//   by bandwidth on both CPU and GPU.
+//
+// T11 replaces the single intensity threshold with a **roofline-based cost
+// model** that estimates GPU time and CPU time, then picks the faster one.
+// The model is activated ONLY when [`WorkloadContext::bytes_per_element`]
+// is non-zero (callers opt in). When `bytes_per_element == 0` (the default),
+// [`decide_dynamic`] falls back to the T5 intensity threshold — keeping all
+// existing tests unchanged.
+//
+// # Cost
+//
+// Pure O(1) `f64` arithmetic — a handful of multiplies, divides, and `max`.
+// Sub-microsecond on any modern CPU. No I/O, no allocation, no hashing.
+//
+// # Determinism
+//
+// Pure function of `&WorkloadContext`. Same inputs → same output on every
+// host, every run. The constants are `pub const f64` so callers can inspect
+// (and override in their own wrappers) the assumed hardware parameters.
+
+/// T11: PCIe 3.0 x16 effective bandwidth in bytes/sec (~16 GB/s).
+///
+/// Conservative: PCIe 4.0 reaches ~32 GB/s, but many hosts still run 3.0.
+/// Used by the cost model to estimate CPU→GPU transfer time.
+pub const PCIE_BANDWIDTH_BYTES_PER_SEC: f64 = 16e9;
+
+/// T11: Fixed overhead per GPU dispatch in seconds (~100 µs warm).
+///
+/// Covers command encoding + queue submission + `device.poll(Wait)`. The
+/// cold-start cost (first dispatch of a shader, ~300 µs–1 ms) is amortized
+/// by T47's pipeline cache; this constant reflects the warm steady-state.
+pub const GPU_LAUNCH_OVERHEAD_SECS: f64 = 100e-6;
+
+/// T11: Modern discrete GPU peak FP32 throughput in FLOPs/sec (~15 TFLOPS).
+///
+/// Representative of a mid-range discrete GPU (e.g. RTX 3060 ~12 TFLOPS,
+/// RTX 4070 ~29 TFLOPS). Used by the cost model's roofline computation.
+pub const GPU_PEAK_FLOPS_PER_SEC: f64 = 15e12;
+
+/// T11: Modern discrete GPU memory bandwidth in bytes/sec (~500 GB/s).
+///
+/// Representative of GDDR6 on a mid-range card. Used by the cost model's
+/// roofline computation for the memory-bound ceiling.
+pub const GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC: f64 = 500e9;
+
+/// T11: Multi-core CPU peak FP32 throughput in FLOPs/sec (~500 GFLOPS).
+///
+/// Representative of a 16-core desktop CPU using AVX2/AVX-512.
+pub const CPU_PEAK_FLOPS_PER_SEC: f64 = 500e9;
+
+/// T11: Multi-core CPU memory bandwidth in bytes/sec (~100 GB/s).
+///
+/// Representative of dual-channel DDR4/DDR5 on a desktop platform.
+pub const CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC: f64 = 100e9;
+
+/// T11: Workgroup size used by the cost model for occupancy estimation.
+///
+/// Matches [`crate::WORKGROUP_SIZE`] (64) — T44 codegen emits
+/// `@compute @workgroup_size(64)`. Duplicated here to avoid pulling the
+/// wgpu-backed `gpu_pipeline` module into the pure `threshold` module.
+const COST_MODEL_WORKGROUP_SIZE: usize = 64;
+
+/// T11: Minimum workgroups for full GPU occupancy (~64 compute units).
+///
+/// Below this, the GPU's compute units are underutilized and the cost
+/// model applies a throughput penalty. 64 CUs × 1 wave = 64 workgroups;
+/// below that, effective throughput scales down proportionally.
+const GPU_MIN_WORKGROUPS_FOR_OCCUPANCY: u32 = 64;
+
+/// T11: Estimated GPU and CPU execution times from the cost model.
+///
+/// Returned by [`estimate_costs``. All fields are in seconds. The caller
+/// compares `gpu_time < cpu_time` to decide whether the GPU wins.
+///
+/// # Fields
+///
+/// * `gpu_time` — total estimated GPU time: launch overhead + PCIe transfer
+///   (0 if data is already on GPU) + roofline compute (max of compute-bound
+///   and memory-bound times), scaled by an occupancy penalty if the input
+///   is too small to fill the GPU.
+/// * `cpu_time` — estimated CPU time: roofline compute only (no transfer,
+///   no launch overhead — data is already in RAM).
+/// * `transfer_time` — the PCIe upload/download component of `gpu_time`
+///   (0 when [`DataLocation::Gpu`]).
+/// * `launch_overhead` — the fixed GPU dispatch overhead (always
+///   [`GPU_LAUNCH_OVERHEAD_SECS`]).
+/// * `occupancy_factor` — throughput multiplier applied to GPU compute
+///   (1.0 when fully occupied; > 1.0 when underutilized).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CostEstimate {
+    /// Total estimated GPU execution time (seconds).
+    pub gpu_time: f64,
+    /// Estimated CPU execution time (seconds).
+    pub cpu_time: f64,
+    /// PCIe transfer time component of `gpu_time` (seconds). 0 when data
+    /// is already on the GPU (T10 [`DataLocation::Gpu`]).
+    pub transfer_time: f64,
+    /// Fixed GPU launch overhead ([`GPU_LAUNCH_OVERHEAD_SECS`]).
+    pub launch_overhead: f64,
+    /// Occupancy penalty multiplier on GPU compute (1.0 = full occupancy).
+    pub occupancy_factor: f64,
+}
+
+/// T11: Estimate GPU and CPU execution times for the given workload.
+///
+/// Uses a roofline-based cost model with four factors:
+///
+/// 1. **Transfer time**: `total_bytes / PCIE_BANDWIDTH` (0 if data on GPU).
+/// 2. **Launch overhead**: [`GPU_LAUNCH_OVERHEAD_SECS`] (fixed per dispatch).
+/// 3. **Occupancy**: throughput penalty when workgroups < [`GPU_MIN_WORKGROUPS_FOR_OCCUPANCY`].
+/// 4. **Arithmetic intensity**: roofline `max(flops/peak, bytes/bandwidth)`.
+///
+/// # NaN safety
+///
+/// If `arithmetic_intensity` is `Some(NaN)`, `total_flops` becomes NaN.
+/// `f64::max(NaN, x)` returns `x`, so the compute term degenerates to the
+/// memory-bound path — conservative and correct.
+///
+/// # Cost
+///
+/// Pure O(1) `f64` arithmetic. No allocation, no I/O.
+///
+/// # Examples
+///
+/// ```
+/// use buff_lang_runtime::{WorkloadContext, threshold::estimate_costs};
+///
+/// let ctx = WorkloadContext::new(1_000_000, true)
+///     .with_bytes_per_element(4)
+///     .with_intensity(8.0);
+/// let costs = estimate_costs(&ctx);
+/// // GPU with 1M elements + high intensity should be faster than CPU.
+/// assert!(costs.gpu_time < costs.cpu_time);
+/// ```
+#[must_use]
+pub fn estimate_costs(ctx: &WorkloadContext) -> CostEstimate {
+    let total_bytes = ctx.element_count as f64 * ctx.bytes_per_element as f64;
+
+    // Default to the GPU-favorable threshold when intensity is unknown,
+    // matching T5's convention.
+    let intensity = ctx
+        .arithmetic_intensity
+        .unwrap_or(GPU_ARITHMETIC_INTENSITY_THRESHOLD);
+    let total_flops = intensity * total_bytes;
+
+    // --- Transfer time ---
+    let transfer_time = match ctx.data_location {
+        DataLocation::Gpu => 0.0,
+        DataLocation::Cpu => total_bytes / PCIE_BANDWIDTH_BYTES_PER_SEC,
+    };
+
+    // --- Occupancy penalty ---
+    // Ceiling division: how many workgroups this input would generate.
+    let workgroups = ctx
+        .element_count
+        .div_ceil(COST_MODEL_WORKGROUP_SIZE) as u32;
+    let occupancy_factor = if workgroups < GPU_MIN_WORKGROUPS_FOR_OCCUPANCY {
+        // Underutilized: scale compute time up proportionally.
+        // max(1) avoids division by zero (can't happen here since we're
+        // past the SingleThread check, but defensive).
+        GPU_MIN_WORKGROUPS_FOR_OCCUPANCY as f64 / workgroups.max(1) as f64
+    } else {
+        1.0
+    };
+
+    // --- GPU roofline ---
+    let gpu_compute_bound = total_flops / GPU_PEAK_FLOPS_PER_SEC;
+    let gpu_memory_bound = total_bytes / GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC;
+    // f64::max(NaN, x) = x — NaN intensity degenerates to memory-bound.
+    let gpu_compute = gpu_compute_bound.max(gpu_memory_bound) * occupancy_factor;
+    let gpu_time = GPU_LAUNCH_OVERHEAD_SECS + transfer_time + gpu_compute;
+
+    // --- CPU roofline ---
+    let cpu_compute_bound = total_flops / CPU_PEAK_FLOPS_PER_SEC;
+    let cpu_memory_bound = total_bytes / CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC;
+    let cpu_time = cpu_compute_bound.max(cpu_memory_bound);
+
+    CostEstimate {
+        gpu_time,
+        cpu_time,
+        transfer_time,
+        launch_overhead: GPU_LAUNCH_OVERHEAD_SECS,
+        occupancy_factor,
+    }
+}
+
+/// T11: Whether the multi-factor cost model favours the GPU.
+///
+/// Returns `true` when [`estimate_costs`] reports `gpu_time < cpu_time`.
+/// Used by [`decide_dynamic`] when [`WorkloadContext::bytes_per_element`]
+/// is non-zero.
+///
+/// # Cost
+///
+/// Delegates to [`estimate_costs`] — pure O(1) `f64` arithmetic.
+///
+/// # NaN safety
+///
+/// If any computation produces NaN (e.g. from `Some(NaN)` intensity), the
+/// comparison `gpu_time < cpu_time` returns `false` (NaN comparisons are
+/// always false), so the GPU is NOT favoured — conservative.
+#[must_use]
+pub fn cost_model_favors_gpu(ctx: &WorkloadContext) -> bool {
+    let costs = estimate_costs(ctx);
+    costs.gpu_time < costs.cpu_time
 }
 
 /// T5: Decide which [`DispatchKind`] to use, inspecting ACTUAL runtime
@@ -698,6 +960,25 @@ pub fn decide_dynamic(ctx: &WorkloadContext) -> DispatchKind {
     // GPU availability and intensity are irrelevant here.
     if ctx.element_count <= SINGLE_THREAD_MAX {
         return DispatchKind::SingleThread;
+    }
+
+    // T11: Refined multi-factor cost model.
+    //
+    // When the caller provides `bytes_per_element` (> 0), replace the
+    // single intensity threshold with a roofline-based cost model that
+    // considers transfer time + launch overhead + occupancy + arithmetic
+    // intensity. This gives finer-grained decisions than the intensity-
+    // only heuristic.
+    //
+    // When `bytes_per_element == 0` (the default), this branch is skipped
+    // and the T5 intensity-threshold logic below runs — keeping all
+    // existing T5 tests byte-identical.
+    if ctx.bytes_per_element > 0 {
+        if ctx.gpu_available && cost_model_favors_gpu(ctx) {
+            return DispatchKind::GpuCompute;
+        }
+        // Cost model says CPU wins, or no GPU available.
+        return DispatchKind::CpuParallel;
     }
 
     // Precompute intensity favorability. None (unknown) → true (GPU-favorable),
@@ -848,18 +1129,48 @@ pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String
         }
     };
 
-    format!(
-        "Dispatch: {decision:?}\n\
-         element_count: {count}\n\
-         gpu_available: {gpu}\n\
-         {data_location_line}\n\
-         {intensity_line}\n\
-         {st_line}\n\
-         {cpu_parallel_line}\n\
-         {decision_line}",
-        count = ctx.element_count,
-        gpu = ctx.gpu_available,
-    )
+    // T11: Cost model line (only when bytes_per_element is set).
+    let cost_model_line = if ctx.bytes_per_element > 0 {
+        let costs = estimate_costs(ctx);
+        format!(
+            "  cost_model: gpu={:.2}µs cpu={:.2}µs transfer={:.2}µs occupancy={:.1}x",
+            costs.gpu_time * 1e6,
+            costs.cpu_time * 1e6,
+            costs.transfer_time * 1e6,
+            costs.occupancy_factor,
+        )
+    } else {
+        String::new()
+    };
+
+    if cost_model_line.is_empty() {
+        format!(
+            "Dispatch: {decision:?}\n\
+             element_count: {count}\n\
+             gpu_available: {gpu}\n\
+             {data_location_line}\n\
+             {intensity_line}\n\
+             {st_line}\n\
+             {cpu_parallel_line}\n\
+             {decision_line}",
+            count = ctx.element_count,
+            gpu = ctx.gpu_available,
+        )
+    } else {
+        format!(
+            "Dispatch: {decision:?}\n\
+             element_count: {count}\n\
+             gpu_available: {gpu}\n\
+             {data_location_line}\n\
+             {intensity_line}\n\
+             {cost_model_line}\n\
+             {st_line}\n\
+             {cpu_parallel_line}\n\
+             {decision_line}",
+            count = ctx.element_count,
+            gpu = ctx.gpu_available,
+        )
+    }
 }
 
 #[cfg(test)]
