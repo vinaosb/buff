@@ -225,6 +225,26 @@ impl RustCodegen {
                     .collect();
                 return Some(make_generic_path_type(name, lowered_args));
             }
+            // T68: trait object `Box<dyn Trait>`. Lower the inner trait
+            // type to a syn::Type (conventionally a bare path like
+            // `Drawable`), then wrap in `Box<dyn ...>` via `quote!` +
+            // `parse2` (the same shape the Tuple arm uses). An unresolvable
+            // inner (e.g. Unknown trait) makes the whole annotation
+            // indeterminate — return None so Rust infers from context.
+            // Buff's hide-the-borrow-checker philosophy: the user writes
+            // only the trait name; codegen always emits the single owned
+            // `Box<dyn Trait>` form (never `&dyn`, never visible
+            // lifetimes).
+            Type::DynamicDispatch(trait_ty) => {
+                let inner = self.buff_type_to_syn(trait_ty)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    Box<dyn #inner>
+                };
+                match syn::parse2::<SynType>(tokens) {
+                    Ok(ty) => return Some(ty),
+                    Err(_) => return None,
+                }
+            }
             _ => {}
         }
         let rust_name: &str = match ty {
@@ -418,6 +438,10 @@ impl RustCodegen {
             // distinct types). Mirrors Unknown / Void / Sender /
             // Receiver: let Rust infer from context.
             | Type::Range(_) => return None,
+            // T68: trait object `Box<dyn Trait>` is handled by the
+            // early-return match above (lowers to `Box<dyn Trait>` via
+            // `quote!`); unreachable here but required for exhaustiveness.
+            | Type::DynamicDispatch(_) => return None,
             // T2: channel sender / receiver. Opaque runtime-value types
             // mapped to `buff_lang_runtime::Sender<T>` /
             // `buff_lang_runtime::Receiver<T>`. The element type T is
@@ -645,5 +669,71 @@ impl RustCodegen {
         Some(rust_path_type(rust_name))
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    //! T68 inline unit tests for the `Box<dyn Trait>` trait-object lowering.
+    //! Exercises `buff_type_to_syn` directly (the method is `pub(super)`,
+    //! reachable from this child module) so the lowering is verified without
+    //! needing a full `generate_rust` round-trip or parser support for the
+    //! `Box<dyn ...>` source form.
+
+    use super::*;
+    use buff_lang_types::Type;
+    use quote::ToTokens;
+
+    #[test]
+    fn dynamic_dispatch_lowers_to_box_dyn_trait() {
+        let cg = RustCodegen::new();
+        let trait_obj = Type::dynamic_dispatch(Type::user("Drawable", Vec::new()));
+        let syn_ty = cg
+            .buff_type_to_syn(&trait_obj)
+            .expect("Box<dyn Drawable> must lower to a syn::Type");
+        // Render via ToTokens so we can assert on the token fragments
+        // (spacing is unspecified; assert on the meaningful tokens).
+        let rendered = syn_ty.to_token_stream().to_string();
+        assert!(
+            rendered.contains("Box") && rendered.contains("dyn") && rendered.contains("Drawable"),
+            "expected `Box<dyn Drawable>`-shaped lowering, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("&dyn"),
+            "must emit owned Box<dyn>, never a reference: {rendered}"
+        );
+    }
+
+    #[test]
+    fn dynamic_dispatch_inner_unknown_returns_none() {
+        // When the inner trait type is Unknown (indeterminate), the whole
+        // annotation is indeterminate — return None so Rust infers from
+        // context (mirrors Option/Result/Tuple Unknown handling).
+        let cg = RustCodegen::new();
+        let trait_obj = Type::dynamic_dispatch(Type::Unknown);
+        assert!(
+            cg.buff_type_to_syn(&trait_obj).is_none(),
+            "Unknown inner trait must yield None"
+        );
+    }
+}
+
+#[cfg(test)]
+mod t68_display_tests {
+    use buff_lang_types::Type;
+
+    #[test]
+    fn dynamic_dispatch_display_renders_box_dyn() {
+        let trait_obj = Type::dynamic_dispatch(Type::user("Drawable", Vec::new()));
+        assert_eq!(trait_obj.to_string(), "Box<dyn Drawable>");
+    }
+
+    #[test]
+    fn dynamic_dispatch_is_not_numeric_nor_gpu_eligible() {
+        let trait_obj = Type::dynamic_dispatch(Type::user("Drawable", Vec::new()));
+        assert!(!trait_obj.is_numeric());
+        assert!(!trait_obj.is_float_like());
+        assert!(!trait_obj.is_integer_like());
+        assert!(!trait_obj.is_gpu_eligible());
+    }
 }
 

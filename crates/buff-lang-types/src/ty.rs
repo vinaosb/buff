@@ -1098,6 +1098,37 @@ pub enum Type {
     /// the user generic so the null-safety / assignment checks can
     /// compare annotations like `let p: Pair<Int, String>`.
     User { name: String, args: Vec<Type> },
+    /// A trait object: `Box<dyn Trait>` for runtime polymorphism (T68).
+    ///
+    /// Carries the trait as a resolved [`Type`] — conventionally a
+    /// [`Type::User`] whose `name` is the trait identifier (e.g.
+    /// `Type::User { name: "Drawable", args: [] }` represents `Box<dyn
+    /// Drawable>`). Codegen lowers this 1:1 to Rust's `Box<dyn Trait>`,
+    /// enabling runtime dispatch (vtable-based) over a set of concrete
+    /// types that implement the trait. This is the dynamic counterpart to
+    /// Rust's static (monomorphized) generics: when the concrete type at a
+    /// call site is not known at compile time — e.g. a heterogeneous
+    /// collection `Vector<Box<dyn Drawable>>` holding circles, squares,
+    /// and triangles — the trait object erases the concrete type behind a
+    /// single fat pointer.
+    ///
+    /// Buff's hide-the-borrow-checker philosophy maps cleanly onto trait
+    /// objects: the user writes the trait name, the compiler emits
+    /// `Box<dyn ...>` (the single owned, heap-allocated form — no `&dyn`
+    /// references leak into user-visible syntax). Construction is via
+    /// `Box::new(concrete_value)` emitted by codegen when a concrete value
+    /// flows into a `Box<dyn Trait>` parameter/return.
+    ///
+    /// This is **additive** (T68): no existing variant was renamed,
+    /// reordered, or had its payload altered. The `is_numeric` /
+    /// `is_float_like` / `is_integer_like` / `is_gpu_eligible` predicates
+    /// all return `false` for `DynamicDispatch` — a trait object is an
+    /// opaque erased shape that participates in no numeric promotion and
+    /// is never GPU-eligible (vtable dispatch cannot cross the CPU/GPU
+    /// boundary). All exhaustive `match`es on `Type` were extended with
+    /// an arm for the new variant: `Display`, `buff_type_to_syn`
+    /// (codegen).
+    DynamicDispatch(Box<Type>),
     /// A lazy integer range: `Range<T>` produced by `start..end`
     /// (exclusive) or `start..=end` (inclusive) (T84 — v1.25 Wave 2a).
     ///
@@ -1296,6 +1327,16 @@ impl Type {
     /// [`Type::matrix`]).
     pub fn range(elem: Type) -> Self {
         Type::Range(Box::new(elem))
+    }
+
+    /// Create a `Box<dyn Trait>` trait-object type (T68). Maps 1:1 to
+    /// Rust's `Box<dyn Trait>` for runtime polymorphism (vtable dispatch).
+    /// The `trait_ty` is conventionally a [`Type::user`] bearing the trait
+    /// identifier (e.g. `Type::user("Drawable", Vec::new())`); it is boxed
+    /// so the variant carries it inline without enum recursion. A trait
+    /// object is neither numeric nor GPU-eligible.
+    pub fn dynamic_dispatch(trait_ty: Type) -> Self {
+        Type::DynamicDispatch(Box::new(trait_ty))
     }
 
     /// T124b: the timezone-aware datetime type. Maps to
@@ -2459,6 +2500,11 @@ impl fmt::Display for Type {
             // (mirrors Vector<T> / Matrix<T>). The element is the
             // inferred bound type (`Range<Int<64>>` for `0..10`).
             Type::Range(elem) => write!(f, "Range<{elem}>"),
+            // T68: trait object `Box<dyn Trait>`. Renders the Rust surface
+            // form verbatim so diagnostics read naturally and the codegen
+            // output matches 1:1. The inner type is the trait (conventionally
+            // a `Type::User { name: "Drawable", .. }`).
+            Type::DynamicDispatch(trait_ty) => write!(f, "Box<dyn {trait_ty}>"),
         }
     }
 }
