@@ -102,3 +102,16 @@ These decisions were informed by 13 research dossiers and analyses (drafted in `
 - Self-host bootstrap dependency chain analysis
 
 For implementation details, see the full plan at `.sisyphus/plans/buff-launch-readiness.md`.
+
+## Accepted Deferrals (v1.25 Launch)
+
+The following planned tasks are **accepted as deferred** for the v1.25 launch. Each is documented here per the F-wave verification requirement. None block the launch — they are enhancements, optimizations, or features with adequate workarounds.
+
+| Task | Description | Rationale for Deferral |
+|---|---|---|
+| **T95** | Formal language specification (`docs/spec/`) | The Book (T55, 9 chapters) covers user-facing documentation. Formal spec is a post-launch academic exercise. |
+| **T14** | Runtime dataflow-graph IR + kernel fusion | Optimization on top of working CPU/GPU dispatch (T5/T10-T12 shipped). Fusion improves performance, not correctness. Post-launch. |
+| **T44** | ErrorCode→LSP clickable doc link | ErrorCode IS propagated via T46's semanticTokens + T47/T48 new code ranges. Clickable link is a minor VSCode UX enhancement. |
+| **T49** | WGSL span preservation for GPU errors | GPU errors already fall back to CPU silently ("GPU failure invisible"). Span mapping is a debugging enhancement. |
+| **T107** | Tier-3 code hygiene (naming/dead-code) | Explicitly DEFERRABLE per plan. T104 audit documents all P2 findings with [DEFER] tags. No blocking edges. |
+| **T19** | Bootstrap determinism gate (full) | Proxy-verified: 7/56 self-host .buff files transpile with byte-identical determinism. Full bootstrap (Stage 2==3) blocked by MSVC host limitation — CI 3-OS matrix is authoritative. See `self-host/bootstrap-report.md`. |
