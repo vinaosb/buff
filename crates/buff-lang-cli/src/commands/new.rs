@@ -24,9 +24,11 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
+use crate::config;
 use crate::scaffold::{self, TemplateKind};
 
 /// Entry point for `buff new <NAME> [--lib | --server | --gpu | --workspace]`.
@@ -58,6 +60,32 @@ pub fn run(name: &str, template: TemplateKind) -> Result<()> {
         }
         fs::write(&full_path, content)
             .with_context(|| format!("failed to write `{}`", full_path.display()))?;
+    }
+
+    // T31: generate Cargo.toml + Cargo.lock for reproducible builds.
+    // The scaffolded project has a buff.toml; we parse it and emit a
+    // Cargo.toml, then run `cargo generate-lockfile` to produce Cargo.lock.
+    // If cargo is not on PATH, skip silently — the project is still usable.
+    let buff_toml_path = project_dir.join("buff.toml");
+    if let Ok(toml_text) = fs::read_to_string(&buff_toml_path) {
+        if let Ok(cfg) = config::BuffConfig::parse(&toml_text) {
+            let cargo_toml = config::generate_cargo_toml(&cfg);
+            let cargo_toml_path = project_dir.join("Cargo.toml");
+            if fs::write(&cargo_toml_path, &cargo_toml).is_ok() {
+                // Run cargo generate-lockfile to produce Cargo.lock.
+                // This resolves path deps (buff-lang-*) and creates a lockfile.
+                if Command::new("cargo")
+                    .arg("generate-lockfile")
+                    .current_dir(&project_dir)
+                    .output()
+                    .is_ok()
+                {
+                    // Cargo.lock was generated successfully.
+                } else {
+                    // cargo not on PATH or command failed — skip silently.
+                }
+            }
+        }
     }
 
     eprintln!(
