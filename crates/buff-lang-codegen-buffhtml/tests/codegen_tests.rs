@@ -499,6 +499,57 @@ fn await_block_with_catch_emits_error_arm() {
 }
 
 // ---------------------------------------------------------------------------
+// T32 — comment preservation in RSX lowering.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn html_comment_preserved_as_rsx_comment() {
+    // HTML comment `<!-- hello -->` should emit as `{ /* hello */ }`.
+    let src = gen("<div><!-- hello --></div>");
+    assert!(
+        src.contains("/* hello */"),
+        "expected `/* hello */` RSX comment in:\n{src}"
+    );
+}
+
+#[test]
+fn buff_comment_preserved_as_rsx_comment() {
+    // Buff comment `{# comment text}` should emit as `{ /* comment text */ }`.
+    let src = gen("<div>{# comment text}</div>");
+    assert!(
+        src.contains("/* comment text */"),
+        "expected `/* comment text */` RSX comment in:\n{src}"
+    );
+}
+
+#[test]
+fn comment_with_special_chars_escapes_close_sequence() {
+    // If the comment text contains `*/`, it must be escaped to avoid
+    // prematurely closing the block comment.
+    let src = gen("<div><!-- a */ b --></div>");
+    assert!(
+        src.contains("/* a * / b */"),
+        "expected `*/` escaped to `* /` in:\n{src}"
+    );
+}
+
+#[test]
+fn comment_does_not_affect_surrounding_elements() {
+    // Comments between elements should not break the surrounding RSX.
+    let src = gen("<div><!-- comment --><span>text</span></div>");
+    assert!(src.contains("div"), "expected `div` in:\n{src}");
+    assert!(src.contains("span"), "expected `span` in:\n{src}");
+    assert!(
+        src.contains("\"text\""),
+        "expected `\"text\"` text literal in:\n{src}"
+    );
+    assert!(
+        src.contains("/* comment */"),
+        "expected `/* comment */` in:\n{src}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // T134 — component interface declaration + lifecycle hooks.
 // ---------------------------------------------------------------------------
 

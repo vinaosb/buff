@@ -24,7 +24,7 @@
 //! - `{#if}` / `{#each}` blocks (lowered as `if`/`for` expressions inside the
 //!   `rsx!{}` body — Dioxus supports control flow there)
 //! - Default `<slot />` (lowered as `{children}` — Dioxus component children)
-//! - Comments (lowered as Rust `//` comments inside the macro body)
+//! - Comments (lowered as `{/* ... */}` RSX comment nodes)
 //!
 //! Deferred per decision record §6 (NOT lowered; the parser already rejects
 //! them — these notes are for future implementers):
@@ -519,12 +519,14 @@ fn first_anchor_text(expr_src: &str) -> String {
         .unwrap_or_else(|| expr_src.to_string())
 }
 
-fn lower_comment(_c: &RsxComment) -> TokenStream {
-    // rsx!{} macro does not accept `//` comments inside its body. Drop
-    // comments for now — they round-trip via the AST, but the generated
-    // `rsx!{}` body omits them. (TODO: emit as `""` empty-string child to
-    // preserve child-index stability? For T133, drop is fine.)
-    quote! {}
+fn lower_comment(c: &RsxComment) -> TokenStream {
+    // Dioxus RSX comment: `{ /* text */ }` — a Rust block comment inside a
+    // Rust expression block. The `rsx!` macro treats `{ expr }` as an
+    // expression; `/* ... */` is a valid block comment (evaluates to `()`).
+    // Guard against `*/` in the text (would close the comment early).
+    let safe = c.text.replace("*/", "* /");
+    let full = format!("{{ /* {} */ }}", safe);
+    full.parse().unwrap_or_else(|_| quote! { { /* */ } })
 }
 
 fn lower_slot(s: &RsxSlot) -> TokenStream {
