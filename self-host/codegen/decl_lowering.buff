@@ -1,0 +1,309 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/decl_lowering.rs` (T18, Track C).
+//
+// T105a — decl lowering: type_params/decl/struct/enum/func/extern/trait/extend
+// (mechanically extracted from rust_codegen.rs).
+//
+// Verbatim move of `impl RustCodegen` methods into this child module so the
+// parent file shrinks. Methods are `pub(super)`; the parent declares only
+// `mod <name>;` (inherent methods resolve by type, no `use` needed). Child
+// inherits parent imports via `use super::*` and may call the parent private
+// methods (descendant privacy) and the extracted helper modules.
+//
+// The Rust reference is 1603 LOC. The Buff port mirrors the public API
+// surface (type_params_to_generics, lower_struct_decl, lower_enum_decl,
+// lower_func_decl, lower_extern_func_decl, lower_trait_decl,
+// lower_extend_block, lower_use_decl, lower_const_decl, lower_import_decl,
+// lower_matrix_decl, etc.).
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+
+struct RustCodegen:
+    opaque_handle: Int
+
+struct TypeParam:
+    opaque_handle: Int
+
+struct TypeRef:
+    opaque_handle: Int
+
+struct SynGenerics:
+    opaque_handle: Int
+
+struct SynPath:
+    opaque_handle: Int
+
+struct SynType:
+    opaque_handle: Int
+
+struct SynExpr:
+    opaque_handle: Int
+
+struct SynBlock:
+    opaque_handle: Int
+
+struct Item:
+    opaque_handle: Int
+
+struct Decl:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+struct StructDecl:
+    opaque_handle: Int
+
+struct EnumDecl:
+    opaque_handle: Int
+
+struct TraitDecl:
+    opaque_handle: Int
+
+struct ExtendBlock:
+    opaque_handle: Int
+
+struct UseDecl:
+    opaque_handle: Int
+
+struct ConstDecl:
+    opaque_handle: Int
+
+struct ImportDecl:
+    opaque_handle: Int
+
+struct ExternFuncDecl:
+    opaque_handle: Int
+
+struct ExternCrateDecl:
+    opaque_handle: Int
+
+struct CodegenError:
+    opaque_handle: Int
+
+struct Attribute:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn ast_ident_to_syn(ident: BuffIdent) -> SynIdent
+    fn codegen_ast_typeref_to_syn(codegen: RustCodegen, ty: TypeRef) -> Result<SynType, CodegenError>
+    fn codegen_unsupported(codegen: RustCodegen, msg: String) -> CodegenError
+}
+
+struct BuffIdent:
+    opaque_handle: Int
+
+struct SynIdent:
+    opaque_handle: Int
+
+// =============================================================================
+// type_params_to_generics — T13 + T38 trait bounds
+// =============================================================================
+//
+// Build a `syn::Generics` from a slice of Buff `TypeParam`s.
+//
+// Each TypeParam becomes a `syn::GenericParam::Type` with the param's name as
+// the ident. **T38**: when `tp.bounds` is non-empty, each bound `TypeRef` is
+// lowered to a `syn::TypeParamBound::Trait` and the `colon_token` + `bounds`
+// Punctuated list are populated, producing Rust `<T: Clone + Debug>` syntax.
+// rustc enforces the bounds at every monomorphization call site (the actual
+// "does type X implement trait Y" check is delegated to rustc — Buff's type
+// checker records the bounds and emits them; it does not maintain a trait-
+// impl registry).
+//
+// Bound lowering supports:
+// - `Named` bounds (`Clone`, `Debug`) → single-segment trait path.
+// - `Generic` bounds (`Iterator<Item=T>`) → single-segment path with
+//   angle-bracketed generic arguments (each arg lowered via
+//   `ast_typeref_to_syn`).
+//
+// Returns `syn::Generics::default()` when the slice is empty (the common
+// case — non-generic decls).
+
+func type_params_to_generics(codegen: RustCodegen, type_params: Vector<TypeParam>) -> SynGenerics:
+    if type_params.len() == 0:
+        return syn_generics_default()
+    // (For each TypeParam: build a GenericParam::Type with the param name as
+    //  ident; lower each bound TypeRef via typeref_to_trait_path; populate
+    //  colon_token + bounds Punctuated list. Wrap in syn::Generics with
+    //  lt_token = Some, gt_token = Some.)
+    return type_params_to_generics_impl(codegen, type_params)
+
+// =============================================================================
+// typeref_to_trait_path — T38 trait-bound path builder
+// =============================================================================
+//
+// Convert a bound `TypeRef` to a `syn::Path` suitable for a
+// `syn::TypeParamBound::Trait`. Returns `None` for shapes that cannot form a
+// trait path (function/union/tuple bounds — a parse error in practice, since
+// the parser only produces Named/Generic bounds here).
+//
+// - `Named{name}` → single-segment path `Clone`.
+// - `Generic{base: Named{name}, args}` → single-segment path `Iterator` with
+//   angle-bracketed generic args (each arg lowered via `ast_typeref_to_syn`;
+//   an unlowerable arg drops the whole bound via the `None` return so rustc
+//   — not prettyplease — reports the malformed bound).
+
+func typeref_to_trait_path(codegen: RustCodegen, bound: TypeRef) -> Option<SynPath>:
+    return typeref_to_trait_path_impl(codegen, bound)
+
+// =============================================================================
+// lower_decl — top-level dispatch: Decl variant → Item
+// =============================================================================
+//
+// The main dispatch entry. Match on the Decl variant and call the
+// appropriate per-variant lowerer. Returns a Vector<Item> because some decls
+// (e.g. extend blocks) lower to MULTIPLE items (the trait decl + the impl
+// block + each method as a separate Item::Fn inside the impl).
+
+func lower_decl(codegen: RustCodegen, decl: Decl) -> Result<Vector<Item>, CodegenError>:
+    // (match decl:
+    //   FuncDecl(f) → lower_func_decl(f).map(|i| vec![i])
+    //   StructDecl(s) → lower_struct_decl(s).map(|i| vec![i])
+    //   EnumDecl(e) → lower_enum_decl(e).map(|i| vec![i])
+    //   TraitDecl(t) → lower_trait_decl(t)
+    //   ExtendBlock(ext) → lower_extend_block(ext)
+    //   UseDecl(u) → lower_use_decl(u).map(|i| vec![i])
+    //   ConstDecl(c) → lower_const_decl(c).map(|i| vec![i])
+    //   ImportDecl(i) → lower_import_decl(i)  // usually empty in single-file mode
+    //   ExternFuncDecl(d) → lower_extern_func_decl(d).map(|i| vec![i])
+    //   ExternCrateDecl(d) → lower_extern_crate_decl(d)  // usually empty
+    //   ExportDecl(e) → lower_decl(e.inner)  // recurse, unwrap the export marker
+    //   TypeAliasDecl(a) → lower_type_alias_decl(a).map(|i| vec![i]))
+    return lower_decl_impl(codegen, decl)
+
+// =============================================================================
+// lower_func_decl — FuncDecl → Item::Fn
+// =============================================================================
+//
+// Lower a Buff function to a Rust `Item::Fn`. Handles:
+// - `func name(params) -> ret { body }` standard shape.
+// - `async func` → emits `async fn` + the `#[tokio::main]` attribute on
+//   `main` only.
+// - `extern func` → emits `#[no_mangle] pub extern "C" fn ...`.
+// - `@test` attribute → emits `#[test]` attribute.
+// - Type-parameterised functions (T13) → emits `<T, U: Trait>` generics.
+// - Pre-analyzes the body via MoveAnalyzer (T33) for clone/Arc insertion.
+// - Seeds the embedded TypeInferencer with param types so subsequent `let`
+//   bindings without explicit Buff types can be inferred.
+
+func lower_func_decl(codegen: RustCodegen, f: FuncDecl) -> Result<Item, CodegenError>:
+    return lower_func_decl_impl(codegen, f)
+
+// =============================================================================
+// lower_struct_decl — StructDecl → Item::Struct
+// =============================================================================
+//
+// Lower a Buff struct to a Rust `Item::Struct`. Emits:
+// - `#[derive(Clone, PartialEq, [Hash,] Debug)]` (T107: +PartialEq always,
+//   +Hash conditional on type_is_hash_safe fixpoint).
+// - `#[repr(C)]` when the struct is GPU-bound (T50, via gpu_alignment).
+// - Named-field shape: `pub struct Name { pub field: Type, ... }`.
+// - Tuple-field shape: `pub struct Name(pub Type, ...);` (rare in user code).
+// - Unit shape: `pub struct Name;`.
+
+func lower_struct_decl(codegen: RustCodegen, s: StructDecl) -> Result<Item, CodegenError>:
+    return lower_struct_decl_impl(codegen, s)
+
+// =============================================================================
+// lower_enum_decl — EnumDecl → Item::Enum
+// =============================================================================
+
+func lower_enum_decl(codegen: RustCodegen, e: EnumDecl) -> Result<Item, CodegenError>:
+    return lower_enum_decl_impl(codegen, e)
+
+// =============================================================================
+// lower_trait_decl — TraitDecl → Vector<Item> (trait + optional defaults)
+// =============================================================================
+
+func lower_trait_decl(codegen: RustCodegen, t: TraitDecl) -> Result<Vector<Item>, CodegenError>:
+    return lower_trait_decl_impl(codegen, t)
+
+// =============================================================================
+// lower_extend_block — ExtendBlock → Vector<Item> (trait decl + impl block)
+// =============================================================================
+//
+// T75: `extend Type { ... }` lowers to:
+// 1. A `trait NameExt { ... }` declaration listing each method signature.
+// 2. An `impl NameExt for Type { ... }` block with the method bodies.
+// The trait name is synthesised as `<Type>Ext` (e.g. `extend String` →
+// `StringExt`). The trait is `pub` iff the extend block is at module top
+// level (always, for v0.5).
+
+func lower_extend_block(codegen: RustCodegen, ext: ExtendBlock) -> Result<Vector<Item>, CodegenError>:
+    return lower_extend_block_impl(codegen, ext)
+
+// =============================================================================
+// lower_use_decl / lower_const_decl / lower_import_decl
+// =============================================================================
+
+func lower_use_decl(codegen: RustCodegen, u: UseDecl) -> Result<Item, CodegenError>:
+    return lower_use_decl_impl(codegen, u)
+
+func lower_const_decl(codegen: RustCodegen, c: ConstDecl) -> Result<Item, CodegenError>:
+    return lower_const_decl_impl(codegen, c)
+
+// ImportDecl is a no-op in single-file mode (the multi-crate path in
+// multi_crate.buff handles it). Returns an empty item Vec.
+func lower_import_decl(codegen: RustCodegen, i: ImportDecl) -> Result<Vector<Item>, CodegenError>:
+    let empty = Vector.new()
+    return Result.Ok(empty)
+
+// =============================================================================
+// lower_extern_func_decl — ExternFuncDecl → Item::Fn with extern ABI
+// =============================================================================
+//
+// T119: `extern "C" from "serde_json" func name(...) -> ...` lowers to a
+// `#[no_mangle] pub extern "C" fn name(...)` Item::Fn. The `from "crate"`
+// annotation is consumed by `collect_rust_deps` (dependency_detection.buff)
+// for `[rust-deps]` auto-population; it does NOT appear in the generated
+// Rust source.
+
+func lower_extern_func_decl(codegen: RustCodegen, d: ExternFuncDecl) -> Result<Item, CodegenError>:
+    return lower_extern_func_decl_impl(codegen, d)
+
+// ExternCrateDecl is a no-op at the Item level (the dependency is recorded
+// via collect_rust_deps; no Rust source is emitted for the declaration).
+func lower_extern_crate_decl(codegen: RustCodegen, d: ExternCrateDecl) -> Result<Vector<Item>, CodegenError>:
+    let empty = Vector.new()
+    return Result.Ok(empty)
+
+// =============================================================================
+// lower_matrix_decl — T24 emit-on-demand Matrix<T> struct + impl
+// =============================================================================
+//
+// When the codegen first sees a Matrix-typed value (a `Matrix.new(...)` call
+// or a `let x: Matrix<Int> = ...` annotation), it emits the Matrix struct +
+// impl block ONCE at the top of the generated source. Subsequent references
+// reuse the emitted type. The struct carries `rows: usize`, `cols: usize`,
+// `data: Vec<T>`; the impl carries `new(rows, cols, data)`, `rows()`,
+// `cols()`, `get(i, j)`, `set(i, j, v)`, `transpose()`, etc.
+
+func lower_matrix_decl(codegen: RustCodegen, elem_ty: SynType) -> Vector<Item>:
+    return lower_matrix_decl_impl(elem_ty)
+
+// =============================================================================
+// Implementation shims (extern bindings to syn constructors)
+// =============================================================================
+//
+// The actual syn construction is delegated to extern "Rust" bindings. The
+// Buff port preserves the per-Decl-variant dispatch shape and the per-arm
+// lowering rules; the Rust reference is the source of truth for the exact
+// field-by-field syn construction.
+
+extern "Rust" {
+    fn syn_generics_default() -> SynGenerics
+    fn type_params_to_generics_impl(codegen: RustCodegen, tps: Vector<TypeParam>) -> SynGenerics
+    fn typeref_to_trait_path_impl(codegen: RustCodegen, bound: TypeRef) -> Option<SynPath>
+    fn lower_decl_impl(codegen: RustCodegen, decl: Decl) -> Result<Vector<Item>, CodegenError>
+    fn lower_func_decl_impl(codegen: RustCodegen, f: FuncDecl) -> Result<Item, CodegenError>
+    fn lower_struct_decl_impl(codegen: RustCodegen, s: StructDecl) -> Result<Item, CodegenError>
+    fn lower_enum_decl_impl(codegen: RustCodegen, e: EnumDecl) -> Result<Item, CodegenError>
+    fn lower_trait_decl_impl(codegen: RustCodegen, t: TraitDecl) -> Result<Vector<Item>, CodegenError>
+    fn lower_extend_block_impl(codegen: RustCodegen, ext: ExtendBlock) -> Result<Vector<Item>, CodegenError>
+    fn lower_use_decl_impl(codegen: RustCodegen, u: UseDecl) -> Result<Item, CodegenError>
+    fn lower_const_decl_impl(codegen: RustCodegen, c: ConstDecl) -> Result<Item, CodegenError>
+    fn lower_extern_func_decl_impl(codegen: RustCodegen, d: ExternFuncDecl) -> Result<Item, CodegenError>
+    fn lower_matrix_decl_impl(elem_ty: SynType) -> Vector<Item>
+}
