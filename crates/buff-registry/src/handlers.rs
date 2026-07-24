@@ -32,7 +32,7 @@ use crate::storage::{
     DepSpec, PackageSummary, PublishRequest, PublishResponse, QualityAttachment, ResolveResponse,
     VERSION_EXISTS_MARKER,
 };
-use crate::{validate_name, AppState};
+use crate::AppState;
 
 /// The canonical prefix expected on publish `Authorization` headers.
 const BEARER_PREFIX: &str = "Bearer ";
@@ -100,9 +100,25 @@ pub(crate) async fn publish(
         .map_err(|e| RegistryError::InvalidTarball(e.to_string()))?;
 
     // --- 4. Validate name + version ----------------------------------------
-    validate_name(&request.name)?;
+    // T57: validate_package_name accepts BOTH unscoped (foo) and scoped
+    // (@org/pkg) names. validate_name (legacy) rejected '/' so scoped
+    // names would fail — we use the new validator.
+    crate::validate_package_name(&request.name)?;
     let version = Version::parse(&request.version)
         .map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
+
+    // --- 4b. T57: Scope ownership check -----------------------------------
+    // For scoped packages (@org/pkg), require the authenticated identity
+    // to be a member of the org. Unscoped packages skip this check.
+    if let Some(org) = crate::scope_of(&request.name) {
+        let identity = session_user
+            .as_ref()
+            .map(|u| u.github_login.as_str())
+            .unwrap_or(token);
+        if !state.storage.is_org_member(org, identity)? {
+            return Err(RegistryError::ScopeForbidden);
+        }
+    }
 
     // --- 5. Rate limit -----------------------------------------------------
     if !state

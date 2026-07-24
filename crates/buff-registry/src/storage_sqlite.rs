@@ -108,6 +108,15 @@ CREATE TABLE IF NOT EXISTS sessions (\
     user_id     INTEGER NOT NULL REFERENCES users(id),\
     created_at  INTEGER NOT NULL\
 );\
+CREATE TABLE IF NOT EXISTS orgs (\
+    name       TEXT PRIMARY KEY,\
+    created_at INTEGER NOT NULL\
+);\
+CREATE TABLE IF NOT EXISTS org_members (\
+    org_name TEXT NOT NULL REFERENCES orgs(name),\
+    user_id  INTEGER NOT NULL REFERENCES users(id),\
+    PRIMARY KEY (org_name, user_id)\
+);\
 ";
 
 /// SQLite-backed registry storage.
@@ -582,6 +591,62 @@ impl crate::storage::Storage for SqliteStorage {
         .map_err(|e| StorageError::Failure(format!("delete_session: {e}")))?;
         Ok(())
     }
+
+    fn is_org_member(&self, org: &str, identity: &str) -> Result<bool, StorageError> {
+        let conn = self.lock_conn()?;
+        // `identity` is either a GitHub login (OAuth users) or a static
+        // token string (backwards-compat auth). Both are stored as
+        // `github_login` in the users table — a single JOIN query covers
+        // both cases.
+        let is_member: bool = conn
+            .query_row(
+                "SELECT 1 FROM org_members om \
+                 JOIN users u ON om.user_id = u.id \
+                 WHERE om.org_name = ?1 AND u.github_login = ?2",
+                params![org, identity],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| StorageError::Failure(format!("is_org_member: {e}")))?
+            .is_some();
+        Ok(is_member)
+    }
+
+    fn add_org_member(&self, org: &str, identity: &str) -> Result<(), StorageError> {
+        let conn = self.lock_conn()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        // Create the org if it doesn't exist.
+        conn.execute(
+            "INSERT OR IGNORE INTO orgs (name, created_at) VALUES (?1, ?2)",
+            params![org, now],
+        )
+        .map_err(|e| StorageError::Failure(format!("add_org_member insert org: {e}")))?;
+        // Ensure a user row exists for `identity` (synthetic user for
+        // static tokens — github_id = 0, real users have their real ID).
+        conn.execute(
+            "INSERT OR IGNORE INTO users (github_login, github_id, created_at) VALUES (?1, 0, ?2)",
+            params![identity, now],
+        )
+        .map_err(|e| StorageError::Failure(format!("add_org_member insert user: {e}")))?;
+        // Fetch the user id.
+        let user_id: i64 = conn
+            .query_row(
+                "SELECT id FROM users WHERE github_login = ?1",
+                params![identity],
+                |row| row.get(0),
+            )
+            .map_err(|e| StorageError::Failure(format!("add_org_member fetch user: {e}")))?;
+        // Insert the membership (idempotent).
+        conn.execute(
+            "INSERT OR IGNORE INTO org_members (org_name, user_id) VALUES (?1, ?2)",
+            params![org, user_id],
+        )
+        .map_err(|e| StorageError::Failure(format!("add_org_member insert member: {e}")))?;
+        Ok(())
+    }
 }
 
 impl Default for SqliteStorage {
@@ -833,5 +898,70 @@ mod tests {
             SqliteStorage::scope_of("@buff/core"),
             Some("@buff".to_string())
         );
+    }
+
+    #[test]
+    fn sqlite_org_member_added_then_found() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_org_member("buff", "alice").expect("add");
+        assert!(storage.is_org_member("buff", "alice").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_org_member_not_found_for_non_member() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_org_member("buff", "alice").expect("add");
+        assert!(!storage.is_org_member("buff", "bob").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_org_member_not_found_for_unknown_org() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        assert!(!storage.is_org_member("ghost-org", "alice").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_add_org_member_is_idempotent() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_org_member("buff", "alice").expect("first add");
+        // Adding again should succeed (INSERT OR IGNORE).
+        storage.add_org_member("buff", "alice").expect("second add");
+        assert!(storage.is_org_member("buff", "alice").expect("check"));
+    }
+
+    #[test]
+    fn sqlite_multiple_orgs_isolated() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_org_member("buff", "alice").expect("add buff/alice");
+        storage.add_org_member("other", "bob").expect("add other/bob");
+        assert!(storage.is_org_member("buff", "alice").expect("check buff/alice"));
+        assert!(!storage.is_org_member("buff", "bob").expect("check buff/bob"));
+        assert!(storage.is_org_member("other", "bob").expect("check other/bob"));
+        assert!(!storage.is_org_member("other", "alice").expect("check other/alice"));
+    }
+
+    #[test]
+    fn sqlite_scoped_package_publish_then_get() {
+        let storage = SqliteStorage::open_in_memory().expect("open");
+        storage.add_token("dev-token").expect("add token");
+        // Allow the token to publish to @buff scope.
+        storage.add_org_member("buff", "dev-token").expect("add org member");
+        storage
+            .put_version(
+                "@buff/core",
+                Version::new(1, 0, 0),
+                vec![],
+                vec![0x01],
+                Some("dev-token".to_string()),
+                None,
+                QualityAttachment::default(),
+            )
+            .expect("put scoped pkg");
+        let meta = storage
+            .get_package("@buff/core")
+            .expect("get")
+            .expect("present");
+        assert_eq!(meta.name, "@buff/core");
+        assert_eq!(meta.versions.len(), 1);
     }
 }

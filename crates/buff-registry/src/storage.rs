@@ -337,6 +337,30 @@ pub trait Storage: Send + Sync {
     fn delete_session(&self, _session_token: &str) -> Result<(), StorageError> {
         Ok(())
     }
+
+    /// T57: Check whether `identity` is a member of `org`. Used by the
+    /// publish handler to enforce scope ownership: only org members
+    /// can publish to `@org/pkg`.
+    ///
+    /// `identity` is the GitHub login (for OAuth-authenticated users) or
+    /// the static token string (for backwards-compat token auth).
+    ///
+    /// Default impl: returns `false` (no orgs in this backend — scoped
+    /// publishes will be rejected).
+    fn is_org_member(&self, _org: &str, _identity: &str) -> Result<bool, StorageError> {
+        Ok(false)
+    }
+
+    /// T57: Add `identity` as a member of `org`. Creates the org if it
+    /// doesn't exist (idempotent on the membership row). Used by
+    /// admin tooling / tests to provision org membership.
+    ///
+    /// Default impl: returns an error (orgs not supported by this backend).
+    fn add_org_member(&self, _org: &str, _identity: &str) -> Result<(), StorageError> {
+        Err(StorageError::Failure(
+            "orgs not supported by this backend".to_string(),
+        ))
+    }
 }
 
 /// T57: User identity resolved from a valid session token.

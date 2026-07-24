@@ -247,6 +247,92 @@ pub fn validate_name(name: &str) -> Result<(), RegistryError> {
     Ok(())
 }
 
+/// T57: Validate a Buff package name, supporting BOTH unscoped (`foo`)
+/// and scoped (`@org/pkg`) names.
+///
+/// For unscoped names (no `@` prefix), this delegates to [`validate_name`].
+///
+/// For scoped names (`@org/pkg`), the rules are:
+/// - Must start with `@`.
+/// - Must contain exactly one `/` separating `@org` from `pkg`.
+/// - **Org** (`@org`): 1–64 chars, ASCII lowercase letters + digits +
+///   hyphens (NO underscores — matches npm's scope convention).
+/// - **Pkg** (after `/`): 1–64 chars, same charset as unscoped names
+///   (`[a-z0-9_-]`).
+/// - No `..`, no path separators beyond the single `/`.
+///
+/// Returns `Ok(())` on success, `Err(RegistryError::InvalidName)` on
+/// any validation failure.
+///
+/// # Examples
+///
+/// ```
+/// use buff_registry::validate_package_name;
+///
+/// assert!(validate_package_name("foo").is_ok());          // unscoped
+/// assert!(validate_package_name("@org/pkg").is_ok());     // scoped
+/// assert!(validate_package_name("@buff/core").is_ok());   // scoped
+/// assert!(validate_package_name("../evil").is_err());     // traversal
+/// assert!(validate_package_name("@ORG/pkg").is_err());    // uppercase org
+/// assert!(validate_package_name("@org/").is_err());       // empty pkg
+/// ```
+pub fn validate_package_name(name: &str) -> Result<(), RegistryError> {
+    if name.starts_with('@') {
+        validate_scoped_name(name)
+    } else {
+        validate_name(name)
+    }
+}
+
+/// T57: Validate a scoped package name (`@org/pkg`). See
+/// [`validate_package_name`] for the full rules.
+fn validate_scoped_name(name: &str) -> Result<(), RegistryError> {
+    // Strip the leading '@'.
+    let after_at = name.strip_prefix('@').ok_or(RegistryError::InvalidName)?;
+    // Split on the FIRST '/' only (pkg names can't contain '/' anyway,
+    // but being explicit avoids confusion).
+    let Some((org, pkg)) = after_at.split_once('/') else {
+        return Err(RegistryError::InvalidName);
+    };
+    // Org: must start with a lowercase letter, 1–64 chars, [a-z0-9-].
+    if org.is_empty() || org.len() > 64 {
+        return Err(RegistryError::InvalidName);
+    }
+    if !org
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(RegistryError::InvalidName);
+    }
+    // Pkg: same rules as unscoped names, but we already consumed the '/'.
+    // Re-check the pkg portion against the unscoped charset.
+    if pkg.is_empty() || pkg.len() > 64 {
+        return Err(RegistryError::InvalidName);
+    }
+    if pkg.contains('/') || pkg.contains('\\') || pkg.contains("..") {
+        return Err(RegistryError::InvalidName);
+    }
+    if !pkg
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    {
+        return Err(RegistryError::InvalidName);
+    }
+    Ok(())
+}
+
+/// T57: Extract the org name from a scoped package name.
+///
+/// Returns `Some("org")` for `@org/pkg`, `None` for unscoped names.
+#[must_use]
+pub fn scope_of(name: &str) -> Option<&str> {
+    if name.starts_with('@') {
+        name.strip_prefix('@').and_then(|s| s.split_once('/')).map(|(org, _)| org)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,5 +411,75 @@ mod tests {
         let state = AppState::new(storage).with_rate_limit(Duration::from_secs(1), 3);
         assert_eq!(state.rate_limit_window, Duration::from_secs(1));
         assert_eq!(state.rate_limit_max, 3);
+    }
+
+    // --- T57 scoped-name validation tests ---
+
+    #[test]
+    fn validate_package_name_accepts_unscoped() {
+        assert!(validate_package_name("foo").is_ok());
+        assert!(validate_package_name("foo-bar").is_ok());
+        assert!(validate_package_name("foo_bar").is_ok());
+    }
+
+    #[test]
+    fn validate_package_name_accepts_scoped() {
+        assert!(validate_package_name("@org/pkg").is_ok());
+        assert!(validate_package_name("@buff/core").is_ok());
+        assert!(validate_package_name("@my-org/my-pkg").is_ok());
+        assert!(validate_package_name("@org123/pkg").is_ok());
+    }
+
+    #[test]
+    fn validate_package_name_rejects_uppercase_scope() {
+        assert!(matches!(
+            validate_package_name("@ORG/pkg"),
+            Err(RegistryError::InvalidName)
+        ));
+        assert!(matches!(
+            validate_package_name("@org/Pkg"),
+            Err(RegistryError::InvalidName)
+        ));
+    }
+
+    #[test]
+    fn validate_package_name_rejects_underscore_in_scope() {
+        // npm convention: scopes use hyphens, not underscores.
+        assert!(matches!(
+            validate_package_name("@my_org/pkg"),
+            Err(RegistryError::InvalidName)
+        ));
+    }
+
+    #[test]
+    fn validate_package_name_rejects_empty_scope_or_pkg() {
+        assert!(matches!(
+            validate_package_name("@/pkg"),
+            Err(RegistryError::InvalidName)
+        ));
+        assert!(matches!(
+            validate_package_name("@org/"),
+            Err(RegistryError::InvalidName)
+        ));
+        assert!(matches!(
+            validate_package_name("@"),
+            Err(RegistryError::InvalidName)
+        ));
+    }
+
+    #[test]
+    fn validate_package_name_rejects_no_slash_in_scoped() {
+        assert!(matches!(
+            validate_package_name("@orgpkg"),
+            Err(RegistryError::InvalidName)
+        ));
+    }
+
+    #[test]
+    fn scope_of_extracts_org() {
+        assert_eq!(scope_of("@org/pkg"), Some("org"));
+        assert_eq!(scope_of("@buff/core"), Some("buff"));
+        assert_eq!(scope_of("unscoped"), None);
+        assert_eq!(scope_of(""), None);
     }
 }
