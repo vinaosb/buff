@@ -50,6 +50,9 @@ pub mod fmt;
 pub mod incremental;
 pub mod naming_lint;
 pub mod pipeline;
+// T35: shared rustc-invocation helpers (extracted from pipeline.rs so
+// buff-eval can reuse them without duplicating the logic).
+pub mod rustc_invoke;
 // T1: multi-file project compilation pipeline (parse_project + cargo).
 pub mod project_pipeline;
 pub mod scaffold;

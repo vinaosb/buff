@@ -250,34 +250,11 @@ pub fn backend_from_str(s: &str) -> Result<BackendChoice> {
 
 /// Probe whether the Cranelift codegen backend is available (T4).
 ///
-/// Runs `rustc +nightly -C codegen-backend=cranelift --version` (silent
-/// — output is discarded). Returns `true` when the probe succeeds (exit
-/// 0), `false` on any failure (missing nightly, missing component,
-/// rustc not on PATH, etc.).
-///
-/// This is the single source of truth for "is Cranelift usable on this
-/// host?" — both the CLI pipeline and `buff-eval` consult it before
-/// setting `CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift` on the spawned
-/// rustc process. The probe is cheap (sub-second) and runs at most once
-/// per `compile_rust_to_exe_with_speed` call.
-///
-/// # Why `+nightly`
-///
-/// `rustc-codegen-cranelift-preview` is currently nightly-only on
-/// stable rustup channels. The probe therefore uses `+nightly` to
-/// exercise the actual toolchain that would be used. A future stable
-/// promotion would simplify this to bare `rustc`.
+/// Delegates to [`crate::rustc_invoke::cranelift_available`] (T35 — the
+/// single source of truth for Cranelift probing across the CLI and
+/// buff-eval).
 pub fn cranelift_available() -> bool {
-    let probe = Command::new("rustc")
-        .arg("+nightly")
-        .arg("-C")
-        .arg("codegen-backend=cranelift")
-        .arg("--version")
-        .output();
-    match probe {
-        Ok(out) => out.status.success(),
-        Err(_) => false,
-    }
+    crate::rustc_invoke::cranelift_available()
 }
 
 /// User-facing linker selection for `buff build` / `buff run`.
@@ -916,7 +893,6 @@ pub fn compile_rust_to_exe_with_speed(
         );
     }
     let mut cmd = compile_speed::rustc_command(use_sccache);
-    cmd.arg("--edition").arg("2021");
 
     // Select the optimization/LTO flag set based on the build mode.
     // Debug keeps the v0.1 `-O` exactly — byte-identical behavior with the
@@ -924,37 +900,23 @@ pub fn compile_rust_to_exe_with_speed(
     // codegen-unit block. Minimal (T60) adds size-first knobs:
     // opt-level=z + panic=abort + strip=symbols. Fast (T55) disables all
     // optimisation (opt-level=0) for the fastest possible compile.
-    match mode {
-        BuildMode::Fast => {
-            for flag in rustc_fast_flags() {
-                cmd.arg(flag);
-            }
-        }
-        BuildMode::Debug => {
-            cmd.arg("-O");
-        }
-        BuildMode::Release => {
-            for flag in rustc_release_flags() {
-                cmd.arg(flag);
-            }
-        }
-        BuildMode::Minimal => {
-            for flag in rustc_minimal_flags() {
-                cmd.arg(flag);
-            }
-        }
-    }
+    let opt_flags: &[&str] = match mode {
+        BuildMode::Fast => &rustc_fast_flags(),
+        BuildMode::Debug => &["-O"],
+        BuildMode::Release => &rustc_release_flags(),
+        BuildMode::Minimal => &rustc_minimal_flags(),
+    };
 
     // T2: resolve the linker choice (auto-detect or explicit) and pass
     // the -fuse-ld flag. No-op when the resolved linker is None (system
     // default). Errors when an explicit linker is requested but missing.
     let resolved = resolve_linker(linker)?;
-    if resolved.is_fast() {
-        for flag in resolved.rustc_flags() {
-            cmd.arg(flag);
-        }
+    let linker_flags: &[&str] = if resolved.is_fast() {
         eprintln!("note: using fast linker `{}`", resolved.name());
-    }
+        &resolved.rustc_flags()
+    } else {
+        &[]
+    };
 
     // T4: Cranelift dev backend. ONLY honoured for Debug builds —
     // release/minimal/fast always use LLVM (the env-var gate is the
@@ -962,54 +924,36 @@ pub fn compile_rust_to_exe_with_speed(
     // user passes `--release --backend=cranelift`). When Cranelift is
     // requested but unavailable (probe fails), fall back to LLVM with
     // a warning — correctness is never affected, only compile speed.
-    //
-    // The env var is set on the child `Command` (not via
-    // `std::env::set_var`) so it is scoped to the rustc subprocess and
-    // does not leak into the parent `buff` process or any subsequent
-    // `Command::new` call in the same session.
-    if matches!(backend, BackendChoice::Cranelift) && matches!(mode, BuildMode::Debug) {
-        if cranelift_available() {
-            cmd.env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift");
-            eprintln!(
-                "note: using Cranelift dev backend (T4) — faster compile, \
-                 slower runtime; release builds always use LLVM"
-            );
-        } else {
-            eprintln!(
-                "warning: --backend=cranelift requested but Cranelift is not \
-                 available (install via `rustup component add \
-                 rustc-codegen-cranelift-preview` on nightly); falling back \
-                 to LLVM"
-            );
-        }
-    }
+    let use_cranelift = matches!(backend, BackendChoice::Cranelift)
+        && matches!(mode, BuildMode::Debug)
+        && {
+            if cranelift_available() {
+                eprintln!(
+                    "note: using Cranelift dev backend (T4) — faster compile, \
+                     slower runtime; release builds always use LLVM"
+                );
+                true
+            } else {
+                eprintln!(
+                    "warning: --backend=cranelift requested but Cranelift is not \
+                     available (install via `rustup component add \
+                     rustc-codegen-cranelift-preview` on nightly); falling back \
+                     to LLVM"
+                );
+                false
+            }
+        };
 
-    // T3: debug-info control. For Debug/Fast builds, default to
-    // LineTablesOnly (-C debuginfo=1). For Release/Minimal, keep the
-    // existing behavior (don't force debuginfo unless explicitly set).
-    // The user's explicit --debuginfo flag always wins.
-    cmd.arg("-C");
-    cmd.arg(debuginfo.to_rustc_arg());
-
-    // T112: cross-compilation target. When set, verify the target is
-    // installed via `rustup target list --installed` before passing
-    // `--target <triple>` to rustc. If not installed, surface a clear
-    // error with the install command.
-    if let Some(triple) = target {
-        if !target_is_installed(triple) {
-            bail!(
-                "Target `{triple}` is not installed.\n\
-                 Run: rustup target add {triple}\n\n\
-                 Common targets:\n\
-                   x86_64-unknown-linux-gnu   (Linux x86_64)\n\
-                   aarch64-apple-darwin        (Apple Silicon macOS)\n\
-                   x86_64-pc-windows-msvc     (Windows x86_64)\n\
-                   wasm32-unknown-unknown      (WebAssembly)"
-            );
-        }
-        cmd.arg("--target");
-        cmd.arg(triple);
-    }
+    // T35: delegate common flag configuration to the shared helper.
+    rustc_invoke::configure_rustc_command(
+        &mut cmd,
+        opt_flags,
+        linker_flags,
+        use_cranelift,
+        debuginfo.to_rustc_arg(),
+        target,
+    )
+    .map_err(|msg| anyhow::anyhow!("{msg}"))?;
 
     cmd.arg(rust_file).arg("-o").arg(output);
 
@@ -1278,23 +1222,11 @@ pub fn minimal_profile_toml() -> String {
 
 /// Probe whether a rustc target triple is installed (T112).
 ///
-/// Runs `rustup target list --installed` and checks if `<triple>` appears
-/// in the output. Returns `true` when the target is listed, `false` on
-/// any failure (rustup not on PATH, probe error, target not found).
-///
-/// The probe is cheap (sub-second) and runs at most once per
-/// `compile_rust_to_exe_with_speed` call when `--target` is set.
+/// Delegates to [`crate::rustc_invoke::target_is_installed`] (T35 — the
+/// single source of truth for target-installed probing across the CLI
+/// and buff-eval).
 fn target_is_installed(triple: &str) -> bool {
-    let probe = Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output();
-    match probe {
-        Ok(out) if out.status.success() => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            stdout.lines().any(|line| line.trim() == triple)
-        }
-        _ => false,
-    }
+    crate::rustc_invoke::target_is_installed(triple)
 }
 
 // ---------------------------------------------------------------------------

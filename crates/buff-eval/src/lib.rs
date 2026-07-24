@@ -1,6 +1,15 @@
 //! `buff-eval` — a thin evaluation engine over the existing Buff compiler
 //! primitives (`tokenize`, `parse`, `TypeInferencer`, `generate_rust`).
 //!
+//! # Shared rustc-invoke helpers (T35)
+//!
+//! The `rustc_invoke` module is included via `#[path]` from
+//! `buff-lang-cli/src/rustc_invoke.rs` — the single source of truth for
+//! PATH probes, Cranelift detection, target-installed checks, and common
+//! rustc flag configuration. This avoids duplicating the logic while
+//! keeping `buff-eval` free of `clap`/`tokio` transitive dependencies
+//! (the shared module itself has zero CLI-specific deps).
+//!
 //! # Purpose
 //!
 //! T125-prep extracts a reusable evaluation API consumed by the REPL
@@ -75,6 +84,12 @@ use buff_lang_lexer::tokenize;
 use buff_lang_parser::{parse, parse_expression};
 use buff_lang_types::{Type, TypeInferencer};
 
+// T35: Include the shared rustc-invoke helpers from buff-lang-cli via
+// `#[path]` so we get the single source of truth WITHOUT pulling clap/
+// tokio transitively. The shared module has zero CLI-specific deps.
+#[path = "../../buff-lang-cli/src/rustc_invoke.rs"]
+mod rustc_invoke;
+
 // ---------------------------------------------------------------------------
 // T2: Fast-linker selection (mirrors buff_lang_cli::pipeline::LinkerChoice).
 // Kept inline to avoid pulling clap/tokio transitively into the eval crate.
@@ -115,26 +130,9 @@ fn resolve_eval_linker_flags(linker: EvalLinker) -> Vec<&'static str> {
 }
 
 /// Returns `true` when `name` (an executable basename) is found on `PATH`.
-/// Mirrors `buff_lang_cli::compile_speed::on_path` without depending on the
-/// CLI crate.
+/// Delegates to the shared [`rustc_invoke::on_path`] (T35).
 fn on_path(name: &str) -> bool {
-    let path_var = match std::env::var_os("PATH") {
-        Some(p) => p,
-        None => return false,
-    };
-    let candidates: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
-    for dir in candidates {
-        let full = dir.join(name);
-        if full.is_file() {
-            return true;
-        }
-        if cfg!(windows) {
-            if dir.join(format!("{name}.exe")).is_file() {
-                return true;
-            }
-        }
-    }
-    false
+    rustc_invoke::on_path(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -154,26 +152,9 @@ fn sccache_available() -> bool {
 
 /// Probe whether the Cranelift codegen backend is available (T4).
 ///
-/// Mirrors `buff_lang_cli::pipeline::cranelift_available`. Runs
-/// `rustc +nightly -C codegen-backend=cranelift --version` (silent —
-/// output is discarded). Returns `true` when the probe succeeds (exit
-/// 0), `false` on any failure (missing nightly, missing component,
-/// rustc not on PATH, etc.).
-///
-/// `buff-eval` always runs in debug mode (`rustc -O`), so the only gate
-/// is "is Cranelift usable on this host?" — there is no release-mode
-/// safety rail to consult (the eval crate never ships binaries).
+/// Delegates to the shared [`rustc_invoke::cranelift_available`] (T35).
 fn cranelift_available() -> bool {
-    let probe = Command::new("rustc")
-        .arg("+nightly")
-        .arg("-C")
-        .arg("codegen-backend=cranelift")
-        .arg("--version")
-        .output();
-    match probe {
-        Ok(out) => out.status.success(),
-        Err(_) => false,
-    }
+    rustc_invoke::cranelift_available()
 }
 
 /// Decide whether to set `CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift` on
@@ -220,21 +201,9 @@ fn eval_target() -> Option<String> {
 
 /// Probe whether a rustc target triple is installed (T112).
 ///
-/// Mirrors `buff_lang_cli::pipeline::target_is_installed`. Runs
-/// `rustup target list --installed` and checks if `<triple>` appears
-/// in the output. Returns `true` when the target is listed, `false` on
-/// any failure (rustup not on PATH, probe error, target not found).
+/// Delegates to the shared [`rustc_invoke::target_is_installed`] (T35).
 fn eval_target_is_installed(triple: &str) -> bool {
-    let probe = Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output();
-    match probe {
-        Ok(out) if out.status.success() => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            stdout.lines().any(|line| line.trim() == triple)
-        }
-        _ => false,
-    }
+    rustc_invoke::target_is_installed(triple)
 }
 
 /// Re-export of the resolved [`Type`] so consumers can refer to it as
@@ -672,18 +641,11 @@ fn run_full_program(source: &str) -> EvalResult {
     if std::env::var("BUFF_EVAL_SCCACHE").as_deref() == Ok("1") && sccache_available() {
         rustc_cmd.env("RUSTC_WRAPPER", "sccache");
     }
-    rustc_cmd.arg("--edition").arg("2021");
-    rustc_cmd.arg("-O");
-    rustc_cmd.arg("-C").arg("debuginfo=1");
-    for flag in resolve_eval_linker_flags(EvalLinker::Auto) {
-        rustc_cmd.arg(flag);
-    }
-    if should_eval_use_cranelift() {
-        rustc_cmd.env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift");
-    }
-    // T112: cross-compilation target via env var (no CLI surface in eval).
-    if let Some(triple) = eval_target() {
-        if !eval_target_is_installed(&triple) {
+    // T35: delegate common flag configuration to the shared helper.
+    let linker_flags = resolve_eval_linker_flags(EvalLinker::Auto);
+    let target = eval_target();
+    if let Some(ref triple) = target {
+        if !eval_target_is_installed(triple) {
             let _ = std::fs::remove_file(&rust_path);
             return EvalResult::err(Diagnostic::error(
                 format!(
@@ -693,8 +655,17 @@ fn run_full_program(source: &str) -> EvalResult {
                 Span::dummy(),
             ));
         }
-        rustc_cmd.arg("--target");
-        rustc_cmd.arg(triple);
+    }
+    if let Err(msg) = rustc_invoke::configure_rustc_command(
+        &mut rustc_cmd,
+        &["-O"],
+        &linker_flags,
+        should_eval_use_cranelift(),
+        "debuginfo=1",
+        target.as_deref(),
+    ) {
+        let _ = std::fs::remove_file(&rust_path);
+        return EvalResult::err(Diagnostic::error(msg, Span::dummy()));
     }
     rustc_cmd.arg(&rust_path).arg("-o").arg(&exe_path);
     let compile_out = match rustc_cmd.output()

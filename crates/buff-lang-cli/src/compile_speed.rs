@@ -34,7 +34,7 @@
 //! - **No panics**: every fallible op returns [`anyhow::Result`]; cache
 //!   misses + read failures degrade gracefully (regenerate, never crash).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -336,53 +336,10 @@ pub fn synthetic_buff_program(tier: BenchTier) -> String {
 
 /// Returns `true` when `name` (an executable basename) is found on `PATH`.
 ///
-/// Walks `$PATH` entries and checks for an executable file matching `name`
-/// (with the platform extension appended on Windows). No subprocess is
-/// spawned — this is a pure filesystem probe, so it's cheap to call.
-///
-/// Mirrors the logic of `which`/`where` without shelling out. Returns
-/// `false` when `PATH` is unset or empty.
+/// Delegates to [`crate::rustc_invoke::on_path`] (T35 — the single source
+/// of truth for PATH probes across the CLI and buff-eval).
 pub(crate) fn on_path(name: &str) -> bool {
-    let path_var = match std::env::var_os("PATH") {
-        Some(p) => p,
-        None => return false,
-    };
-    let candidates: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
-    for dir in candidates {
-        let full = dir.join(name);
-        if is_executable(&full) {
-            return true;
-        }
-        // On Windows, also try with `.exe` (and `.bat`).
-        if cfg!(windows) {
-            if is_executable(&dir.join(format!("{name}.exe"))) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Cross-platform "is this path an executable file" check.
-///
-/// On Unix this checks the executable bit; on Windows it checks that the
-/// file exists (Windows determines executability by extension, which the
-/// caller already appended).
-fn is_executable(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        match std::fs::metadata(path) {
-            Ok(md) => md.is_file() && md.permissions().mode() & 0o111 != 0,
-            Err(_) => false,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::metadata(path)
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-    }
+    crate::rustc_invoke::on_path(name)
 }
 
 // ---------------------------------------------------------------------------
