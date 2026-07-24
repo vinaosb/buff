@@ -40,10 +40,14 @@ git push origin v1.X.0
 
 ### 2. CI Builds Artifacts
 
-The tag push triggers `.github/workflows/security.yml` which:
-- Builds release binaries for 6 targets (linux-x64/arm64, macOS-x64/arm64, Windows-x64/arm64)
-- Generates SBOM via `cargo cyclonedx`
-- Uploads artifacts to GitHub Releases page
+The tag push triggers `.github/workflows/release.yml` which:
+- Builds stripped release binaries for 5 targets (linux-x64/arm64,
+  macOS-x64/arm64, Windows-x64; windows-arm64 lands when GitHub ships the runner)
+- Generates a SHA256 checksum sidecar for every archive
+- Publishes all artifacts to a GitHub Release (with auto-generated notes)
+
+`security.yml` runs in parallel on the same tag push and attaches a CycloneDX
+SBOM to the release.
 
 Monitor at: `https://github.com/<org>/buff/actions`
 
@@ -166,4 +170,5 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the full compatibility promise.
 - [MEMORY_SAFETY.md](MEMORY_SAFETY.md)
 - [STABILITY promise](.sisyphus/decisions/stability-promise.md)
 - [CI workflow](.github/workflows/ci.yml)
+- [Release workflow](.github/workflows/release.yml)
 - [Security workflow](.github/workflows/security.yml)

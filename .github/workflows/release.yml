@@ -1,0 +1,152 @@
+name: Release
+
+# T58 — Prebuilt binaries for 6 targets + installer channels.
+#
+# Triggered by a tag push matching `v*` (e.g. `v1.25.0`). Produces stripped,
+# compressed release artifacts for every platform that has a GA GitHub-hosted
+# runner today (5 targets) and publishes them to a GitHub Release.
+#
+# windows-arm64 (aarch64-pc-windows-msvc) has NO GA runner yet — it is listed
+# below as a documented TODO so enabling it later is a one-line uncomment.
+#
+# Artifacts produced (per tag `vX.Y.Z`):
+#   buff-vX.Y.Z-linux-x64.tar.gz     (x86_64-unknown-linux-gnu)
+#   buff-vX.Y.Z-linux-arm64.tar.gz   (aarch64-unknown-linux-gnu)
+#   buff-vX.Y.Z-macos-x64.tar.gz     (x86_64-apple-darwin)
+#   buff-vX.Y.Z-macos-arm64.tar.gz   (aarch64-apple-darwin)
+#   buff-vX.Y.Z-windows-x64.zip      (x86_64-pc-windows-msvc)
+#
+# See docs/RELEASE.md for the full release runbook.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # softprops/action-gh-release needs this to create the release
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every target below is NATIVE to its runner, so a plain
+        # `cargo build --release --target <T>` works without `cross`.
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - name: linux-arm64
+            os: ubuntu-24.04-arm        # T61 — GitHub-hosted arm64, GA 2025
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+          - name: macos-x64
+            os: macos-13                # last Intel runner (macos-latest is now arm64)
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - name: macos-arm64
+            os: macos-14                # Apple Silicon, GA 2024
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          # TODO(T58): windows-arm64 — no GA GitHub-hosted runner exists yet.
+          # Uncomment when `windows-11-arm` (aarch64-pc-windows-msvc) ships.
+          # - name: windows-arm64
+          #   os: windows-11-arm
+          #   target: aarch64-pc-windows-msvc
+          #   archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} -p buff-lang-cli
+
+      # Strip on Unix for smaller binaries + cleaner stack traces.
+      # Windows MSVC release builds are already reasonably lean; the workspace
+      # intentionally has no `[profile.release]` (repo rule), so we strip here.
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/buff
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          mkdir staging
+          cp target/${{ matrix.target }}/release/buff staging/buff
+          cp README.md LICENSE staging/ 2>/dev/null || true
+          tar czf buff-${{ github.ref_name }}-${{ matrix.name }}.tar.gz -C staging .
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path staging -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/buff.exe" "staging/buff.exe"
+          Copy-Item README.md staging/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE staging/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path staging/* -DestinationPath "buff-${{ github.ref_name }}-${{ matrix.name }}.zip" -Force
+
+      - name: Generate SHA256 checksum
+        shell: bash
+        run: |
+          ARCHIVE="buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}"
+          # Git Bash on Windows ships sha256sum; fall back to shasum just in case.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          else
+            shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buff-${{ github.ref_name }}-${{ matrix.name }}
+          path: buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}.sha256
+          path: buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}.sha256
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          # generate_release_notes assembles a changelog from commits/PRs
+          # since the previous tag.
+          generate_release_notes: true
+          # Attach every archive + its .sha256 checksum sidecar.
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.sha256

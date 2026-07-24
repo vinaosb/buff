@@ -1,0 +1,37 @@
+{
+    "##": "Scoop manifest for the Buff language compiler (buff-lang-cli binary).",
+    "##_repo": "https://github.com/buff-lang/buff",
+    "##_workflow": "https://github.com/buff-lang/buff/blob/v1x-frameworks/.github/workflows/release.yml",
+    "##_notes": [
+        "Belongs in a scoop-bucket repo (e.g. buff-lang/scoop-bucket).",
+        "On each release, bump `version` and replace the `hash` placeholder",
+        "with the sha256 of buff-v<version>-windows-x64.zip (published as a",
+        ".sha256 sidecar on every GitHub Release). With `autoupdate` below,",
+        "scoop can refresh this automatically once the bucket repo is wired up."
+    ],
+    "version": "1.24.0",
+    "description": "Buff — a high-level language that transpiles to Rust. Rust performance with Go productivity.",
+    "homepage": "https://github.com/buff-lang/buff",
+    "license": "MIT OR Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/buff-lang/buff/releases/download/v1.24.0/buff-v1.24.0-windows-x64.zip",
+            "hash": "<FILL-ME: sha256 of buff-v1.24.0-windows-x64.zip — see the .sha256 sidecar on the release>"
+        }
+    },
+    "bin": "buff.exe",
+    "checkver": {
+        "github": "https://github.com/buff-lang/buff"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/buff-lang/buff/releases/download/v$version/buff-v$version-windows-x64.zip",
+                "hash": {
+                    "url": "https://github.com/buff-lang/buff/releases/download/v$version/buff-v$version-windows-x64.sha256",
+                    "regex": "$sha256"
+                }
+            }
+        }
+    }
+}

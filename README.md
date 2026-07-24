@@ -110,16 +110,74 @@ Full task breakdown: [`.sisyphus/plans/`](./.sisyphus/plans/)
 
 ## Installation
 
-The `buff` CLI can be installed from source:
+Buff ships prebuilt release binaries for the major platforms. Pick whichever
+channel you prefer — they all install the same `buff` CLI.
+
+### Option 1 — Prebuilt binary (all platforms)
+
+Every tagged release publishes stripped, compressed binaries for 5 targets to
+[GitHub Releases](https://github.com/buff-lang/buff/releases) (a 6th,
+windows-arm64, lands as soon as GitHub ships the runner). Download the archive
+matching your OS/arch, extract, and put `buff` on your `PATH`:
+
+| Platform | Archive |
+|---|---|
+| Linux x64 | `buff-vX.Y.Z-linux-x64.tar.gz` |
+| Linux arm64 | `buff-vX.Y.Z-linux-arm64.tar.gz` |
+| macOS x64 (Intel) | `buff-vX.Y.Z-macos-x64.tar.gz` |
+| macOS arm64 (Apple Silicon) | `buff-vX.Y.Z-macos-arm64.tar.gz` |
+| Windows x64 | `buff-vX.Y.Z-windows-x64.zip` |
+| Windows arm64 | *(planned — runner not yet GA)* |
+
+Each archive also has a `.sha256` checksum sidecar for integrity verification.
+
+### Option 2 — Homebrew (macOS / Linux)
 
 ```bash
-cargo install --path crates/buff-lang-cli --locked
-# Or, in a clone of this repo:
-cargo install --path crates/buff-lang-cli --locked --force
+brew tap buff-lang/tap https://github.com/buff-lang/homebrew-tap
+brew install buff
 ```
 
-A `cargo install buff-cli` flow (publishing to crates.io) is planned for a
-future release.
+Formula source: [`installers/homebrew/buff.rb`](./installers/homebrew/buff.rb).
+It downloads the matching prebuilt binary for your arch (Apple Silicon / Intel
+/ Linux arm64 / Linux x64) — no compile-from-source.
+
+### Option 3 — Scoop (Windows)
+
+```powershell
+scoop bucket add buff https://github.com/buff-lang/scoop-bucket
+scoop install buff
+```
+
+Manifest source: [`installers/scoop/buff.json`](./installers/scoop/buff.json).
+
+### Option 4 — `buffup` version manager
+
+[`buffup`](./crates/buffup/) (shipped in v1.12, T139) manages multiple Buff
+releases side-by-side, rustup-style. It downloads the same prebuilt binaries
+from GitHub Releases into `~/.buff/versions/` and points `~/.buff/bin/buff`
+at the active one:
+
+```bash
+cargo install --path crates/buffup --locked   # install buffup itself
+buffup install 1.24.0
+buffup default 1.24.0
+echo 'export PATH="$HOME/.buff/bin:$PATH"' >> ~/.bashrc
+buff --version
+```
+
+### Option 5 — `cargo install` (build from source)
+
+```bash
+cargo install --path crates/buff-lang-cli --locked    # in a clone of this repo
+# or, once published to crates.io:
+cargo install buff-cli --locked
+```
+
+> **Release process:** pushing a `v*` tag triggers
+> [`.github/workflows/release.yml`](./.github/workflows/release.yml), which
+> builds all targets, generates SBOM + checksums, and publishes the GitHub
+> Release. See [`docs/RELEASE.md`](./docs/RELEASE.md) for the full runbook.
 
 ## Quick start
 
