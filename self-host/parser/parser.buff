@@ -1,0 +1,277 @@
+// Buff self-host port of `crates/buff-lang-parser/src/parser.rs` (T16),
+// together with the thin `lib.rs` public re-export surface and the small
+// `options.rs` (Edition already lives in stream.buff, which mirrors options.rs).
+//
+// Top-level parser entry point. [`parse`] consumes a slice of lexer-produced
+// tokens and emits a list of top-level declarations ([`Decl`]). Statement-level
+// parsing (`let`, `if`, `func`, `return`, `for`, …) lives in stmt.buff; this
+// module only dispatches on top-level keywords.
+//
+// [`parse`] is the public boundary that downstream code calls. It hides
+// [`TokenStream`] construction and any pre-filtering of layout tokens.
+//
+// # Error-recovery entry point (T36)
+//
+// [`parse`] is **fail-fast**: it returns the first [`ParseError`] it encounters
+// and discards any partial output. [`parse_recovering`] is the recovering
+// variant: it accumulates every recoverable error into a vector and continues
+// parsing after each error by skipping forward to the next sync point (see
+// [`stream_sync_to_recovery_point`]). Both entry points share the same
+// per-iteration dispatch logic via [`parse_one_decl`].
+//
+// SYNTAX MAPPING NOTES (Buff grammar differs from the Rust it lowers to):
+//   * Rust `match stream.peek_kind() { Some(KwFunc) => .., Some(KwAsync) if
+//     .. => .., other => .. }` (or-patterns + guards + catch-all) becomes an
+//     `if/else if` chain comparing `peek_kind == Option.Some(TokenKind.X)`
+//     (Buff enums derive structural equality). The guarded `async func` arm
+//     becomes a nested `&&` test on the second peek kind.
+//   * Rust `while let Some(d) = parse_one_decl(..)? { decls.push(d) }` becomes
+//     a `for true:` loop using `?` to propagate errors and an explicit
+//     `if opt == Option.None: break` to terminate — Buff has no `while let`.
+//   * Rust's tuple return `(Vec<Decl>, Vec<ParseError>)` from
+//     parse_recovering becomes a `RecoveryResult` struct (Buff struct values
+//     are proven to parse; tuple *values* are avoided to minimise risk).
+//   * `Result`/`Option` have no infallible unwrap in Buff, so
+//     parse_recovering uses small specialised (non-generic) accessors plus
+//     never-reached sentinels on the contract-violation branches.
+
+// Result of the recovering parse: the declarations that parsed successfully
+// plus every error collected along the way. Both vectors may be non-empty
+// simultaneously (a partial program with several errors can still produce some
+// valid declarations).
+struct RecoveryResult {
+    decls: Vector<Decl>,
+    errors: Vector<ParseError>,
+}
+
+// Parse one top-level declaration (after parsing any leading `@attributes`)
+// from the stream. Shared per-iteration body used by both parse (fail-fast)
+// and parse_recovering (accumulating).
+//
+// Returns:
+//   Result.Ok(Option.Some(decl)) — one declaration parsed successfully.
+//   Result.Ok(Option.None)       — end of input.
+//   Result.Err(e)                — a syntax error.
+func parse_one_decl(s: TokenStream) -> Result<Option<Decl>, ParseError>:
+    if stream_is_at_end(s):
+        return Result.Ok(Option.None)
+    // T35: parse any leading `@name` attributes before the declaration.
+    let attributes = parse_attributes(s)?
+    let saw_attributes = attributes.len() > 0
+    let pk = stream_peek_kind(s)
+    // T8: `func name(...) { ... }`.
+    if pk == Option.Some(TokenKind.KwFunc):
+        let f = parse_func_decl(s, attributes)?
+        return Result.Ok(Option.Some(Decl.FuncDecl(f)))
+    // T31: `async func name(...) { ... }` — the async modifier precedes func;
+    // parse_func_decl consumes the leading async (if present) and sets
+    // is_async accordingly. Disambiguate via the second peek kind.
+    if pk == Option.Some(TokenKind.KwAsync):
+        if stream_peek_second_kind(s) == Option.Some(TokenKind.KwFunc):
+            let f = parse_func_decl(s, attributes)?
+            return Result.Ok(Option.Some(Decl.FuncDecl(f)))
+    // T27: top-level enum declarations.
+    if pk == Option.Some(TokenKind.KwEnum):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not yet supported on `enum` declarations (only `func`)"))
+        let e = parse_enum_decl(s)?
+        return Result.Ok(Option.Some(Decl.EnumDecl(e)))
+    // T13: top-level struct declarations (layout-sensitive OR brace-delimited).
+    if pk == Option.Some(TokenKind.KwStruct):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not yet supported on `struct` declarations (only `func`)"))
+        let st = parse_struct_decl(s)?
+        return Result.Ok(Option.Some(Decl.StructDecl(st)))
+    // T29: top-level import / export declarations.
+    if pk == Option.Some(TokenKind.KwImport):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not supported on `import` declarations"))
+        let imp = parse_import_decl(s)?
+        return Result.Ok(Option.Some(Decl.ImportDecl(imp)))
+    if pk == Option.Some(TokenKind.KwExport):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not supported on `export` declarations (put the attribute on the inner declaration instead, e.g. `@test\\nfunc ...` without `export`)"))
+        let exp = parse_export_decl(s)?
+        return Result.Ok(Option.Some(exp))
+    // T32/T119: top-level FFI declarations. Three shapes share `extern`.
+    if pk == Option.Some(TokenKind.KwExtern):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not supported on `extern` declarations"))
+        let second = stream_peek_second_kind(s)
+        // `extern crate "name"` — record a dependency on an external Rust crate.
+        if second == Option.Some(TokenKind.Ident("crate")):
+            let d = parse_extern_crate_decl(s)?
+            return Result.Ok(Option.Some(d))
+        // T119: `extern "ABI" [from "crate"] func ...` — the new ABI-string
+        // form. The ABI literal is a StringStart token (every "..." is lexed
+        // as StringStart, StringPart, StringEnd).
+        if second == Option.Some(TokenKind.StringStart):
+            let d = parse_extern_func_decl_with_abi(s)?
+            return Result.Ok(Option.Some(d))
+        // `extern func name(...) -> Ret` — legacy bodyless foreign-fn form.
+        if second == Option.Some(TokenKind.KwFunc):
+            let f = parse_func_decl(s, attributes)?
+            return Result.Ok(Option.Some(Decl.FuncDecl(f)))
+        let span = peek_span_or_eof(s)
+        return Result.Err(parse_error_new(diagnostic_error("expected `extern crate \"<name>\"`, `extern \"ABI\" func ...`, or `extern func ...` after `extern`", span), ErrorCode.UnexpectedToken))
+    // T75: `extend TYPE { fn ...; ... }` — extension-method block.
+    if pk == Option.Some(TokenKind.KwExtend):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not supported on `extend` declarations"))
+        let e = parse_extend_decl(s)?
+        return Result.Ok(Option.Some(Decl.ExtendBlock(e)))
+    // T93: `trait Name [: Super] { fn ...; fn ... { } }` — trait declaration.
+    if pk == Option.Some(TokenKind.KwTrait):
+        if saw_attributes:
+            return Result.Err(attributes_not_supported_on(s, "attributes are not supported on `trait` declarations"))
+        let t = parse_trait_decl(s)?
+        return Result.Ok(Option.Some(Decl.TraitDecl(t)))
+    // T35: attributes were present but the next token is not a recognised
+    // attribute-attachable declaration. This is a parse error.
+    if saw_attributes:
+        let span = peek_span_or_eof(s)
+        let found = peek_kind_display(s)
+        let msg = "attributes must precede a `func` declaration, found `" + found + "`"
+        return Result.Err(parse_error_new(diagnostic_error(msg, span), ErrorCode.UnexpectedToken))
+    // Anything else at top level is an error — statements belong inside a fn.
+    let span = peek_span_or_eof(s)
+    let found = peek_kind_display(s)
+    let msg = "only function declarations are allowed at top level, found `" + found + "`"
+    return Result.Err(parse_error_new(diagnostic_error(msg, span), ErrorCode.UnexpectedToken))
+
+// Build the "attributes not supported on <decl>" ParseError at the current
+// position (shared by several parse_one_decl arms).
+func attributes_not_supported_on(s: TokenStream, what: String) -> ParseError:
+    let span = peek_span_or_eof(s)
+    return parse_error_new(diagnostic_error(what, span), ErrorCode.UnexpectedToken)
+
+// The span of the next significant token, or the eof span when at end of input.
+// Mirrors Rust's `stream.peek().map(|t| t.span).unwrap_or_else(|| stream.eof_span())`.
+func peek_span_or_eof(s: TokenStream) -> Span:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        return stream_eof_span(s)
+    return stream_unwrap(opt).span
+
+// Render the next peek kind for error messages (Rust's `k.to_string()` /
+// `"end of input"` fallback).
+func peek_kind_display(s: TokenStream) -> String:
+    let opt = stream_peek_kind(s)
+    if opt == Option.None:
+        return "end of input"
+    return token_kind_to_string(stream_unwrap_kind(opt))
+
+// Unwrap Option<TokenKind> -> TokenKind (contract: Some). Returns Eof on
+// contract violation.
+func stream_unwrap_kind(opt: Option<TokenKind>) -> TokenKind:
+    return match opt {
+        Some(k) => k,
+        None => TokenKind.Eof,
+    }
+
+// Parse a slice of tokens into zero or more top-level Decls (fail-fast). The
+// public boundary downstream code calls.
+func parse(tokens: Vector<Token>, source_id: SourceId) -> Result<Vector<Decl>, ParseError>:
+    return parse_with_edition(tokens, source_id, edition_default())
+
+// Edition-aware variant of parse (T57). Accepts an explicit Edition which
+// selects whether the parser accepts scientific-edition syntax extensions.
+func parse_with_edition(tokens: Vector<Token>, source_id: SourceId, edition: Edition) -> Result<Vector<Decl>, ParseError>:
+    let s = stream_with_edition(tokens, source_id, edition)
+    let decls = Vector.new()
+    for true:
+        let opt = parse_one_decl(s)?
+        if opt == Option.None:
+            break
+        decls.push(option_unwrap_decl(opt))
+    return Result.Ok(decls)
+
+// Recovering variant of parse: on a ParseError RECORD the error and continue
+// rather than failing fast. After each error the parser skips tokens forward
+// to the next sync point via stream_sync_to_recovery_point, then resumes.
+//
+// Errors appear in source order. Returns a RecoveryResult (decls + errors).
+func parse_recovering(tokens: Vector<Token>, source_id: SourceId) -> RecoveryResult:
+    let s = stream_new(tokens, source_id)
+    let decls = Vector.new()
+    let errors = Vector.new()
+    for true:
+        let r = parse_one_decl(s)
+        if result_is_ok_decl(r):
+            let opt = result_ok_decl(r)
+            if opt == Option.None:
+                break
+            decls.push(option_unwrap_decl(opt))
+        else:
+            let e = result_err_decl(r)
+            errors.push(e)
+            // Skip to the next sync point, then resume.
+            let pos_before = stream_save(s)
+            let _synced = stream_sync_to_recovery_point(s)
+            // Infinite-loop guard: if sync did not advance the cursor AND we
+            // are not at EOF, force-advance one token so the next iteration
+            // sees fresh input.
+            if pos_before == stream_save(s):
+                if stream_is_at_end(s) == false:
+                    let _forced = stream_advance(s)
+    return RecoveryResult.new(decls: decls, errors: errors)
+
+// Parse a single top-level expression from a token slice. Convenience wrapper
+// for tests and embedding tools that want to evaluate an expression without
+// setting up a TokenStream themselves.
+func parse_expression(tokens: Vector<Token>, source_id: SourceId) -> Result<Expr, ParseError>:
+    return parse_expression_with_edition(tokens, source_id, edition_default())
+
+// Edition-aware variant of parse_expression (T57).
+func parse_expression_with_edition(tokens: Vector<Token>, source_id: SourceId, edition: Edition) -> Result<Expr, ParseError>:
+    let s = stream_with_edition(tokens, source_id, edition)
+    let expr = expr_parse_expression(s)?
+    if stream_is_at_end(s) == false:
+        return Result.Err(stream_unexpected(s, "extra tokens after expression"))
+    return Result.Ok(expr)
+
+// --- Specialised Result<Option<Decl>, ParseError> accessors ---
+//
+// Buff's Result has no infallible unwrap, and match arms cannot contain
+// statements (so a match can't push to a vector directly). parse_recovering
+// therefore inspects the Result via these small non-generic accessors. The
+// contract-violation branches return never-reached sentinels.
+
+// True when the Result is Ok.
+func result_is_ok_decl(r: Result<Option<Decl>, ParseError>) -> Bool:
+    return match r {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+
+// Extract the Ok payload (contract: is_ok). Returns None on violation.
+func result_ok_decl(r: Result<Option<Decl>, ParseError>) -> Option<Decl>:
+    return match r {
+        Ok(v) => v,
+        Err(_) => Option.None,
+    }
+
+// Extract the Err payload (contract: is_err). Returns a zero-span sentinel on
+// violation.
+func result_err_decl(r: Result<Option<Decl>, ParseError>) -> ParseError:
+    return match r {
+        Ok(_) => parse_error_sentinel(),
+        Err(e) => e,
+    }
+
+// Unwrap Option<Decl> -> Decl (contract: Some). Returns a sentinel Decl on
+// violation.
+func option_unwrap_decl(opt: Option<Decl>) -> Decl:
+    return match opt {
+        Some(d) => d,
+        None => module_decl_sentinel(),
+    }
+
+// Never-reached sentinel: a zero-span module declaration. Only constructed on
+// contract violations in the accessors above.
+func module_decl_sentinel() -> Decl:
+    return Decl.ModuleDecl(ModuleDecl.new(name: ident_new("", span_dummy()), span: span_dummy()))
+
+// Never-reached sentinel: a zero-span ParseError.
+func parse_error_sentinel() -> ParseError:
+    return parse_error_new(diagnostic_error("internal: parse_error_sentinel constructed (contract violation)", span_dummy()), ErrorCode.Other)
