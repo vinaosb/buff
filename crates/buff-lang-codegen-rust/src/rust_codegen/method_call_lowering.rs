@@ -733,22 +733,84 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("sort_by codegen parse: {e}")))?
             }
-            // T25: Map methods. The Buff names map to Rust's standard
-            // HashMap methods, except `.contains(k)` → `.contains_key(k)`
-            // (Buff hides the `_key` suffix for ergonomics). `.get(k)`
-            // returns `Option<&V>` in Rust; we keep it as-is (`Option<&V>`)
-            // for v0.5 — a future task may add `.cloned()` to recover an
-            // owned `Option<V>` if the move-by-default analysis requires it.
-            // `.insert(k, v)`, `.remove(k)`, and `.len()` pass through
-            // unchanged because Buff and Rust share those names.
+            // T27: Vector.reverse() — returns a new reversed Vector.
+            // Built via `{ let mut __v = recv; __v.reverse(); __v }`.
+            "reverse" if args.is_empty() => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __v = #recv;
+                        __v.reverse();
+                        __v
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("reverse codegen parse: {e}")))?
+            }
+            // T27: Vector.unique() — deduplicate adjacent equal elements.
+            // Built via `{ let mut __v = recv; __v.dedup(); __v }`.
+            "unique" if args.is_empty() => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    {
+                        let mut __v = #recv;
+                        __v.sort();
+                        __v.dedup();
+                        __v
+                    }
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("unique codegen parse: {e}")))?
+            }
+            // T27: Vector.contains(item) -> Bool. Lowers to
+            // `recv.contains(&item)`.
+            // T25: Map.contains(k) -> Bool. Lowers to
+            // `recv.contains_key(&k)` (Buff hides the `_key` suffix).
+            // We differentiate by checking the receiver's inferred type.
             "contains" if args.len() == 1 => {
                 let arg = self.lower_expr(&args[0])?;
-                method_call_one_arg(recv, "contains_key", arg)
+                if matches!(recv_for_prelude_check, Type::Map(..)) {
+                    method_call_one_arg(recv, "contains_key", arg)
+                } else {
+                    method_call_one_arg(recv, "contains", arg)
+                }
             }
-            // `.get`, `.insert`, `.remove`, `.len` all share Rust's name —
-            // they fall through to the default arm below with no special
-            // mapping. We keep this comment block to document the T25 design
-            // (so a future change doesn't accidentally rewrite these).
+            // T27: Vector.binary_search(item) -> Option<Int>. Lowers to
+            // `recv.binary_search(&item).ok().map(|i| i as i64)`.
+            "binary_search" if args.len() == 1 => {
+                let arg = self.lower_expr(&args[0])?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.binary_search(&#arg).ok().map(|i| i as i64)
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("binary_search codegen parse: {e}")))?
+            }
+            // T27: Map.keys() -> Vector<K>. Lowers to
+            // `recv.keys().cloned().collect::<Vec<_>>()`.
+            "keys" if args.is_empty() => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.keys().cloned().collect::<Vec<_>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("keys codegen parse: {e}")))?
+            }
+            // T27: Map.values() -> Vector<V>. Lowers to
+            // `recv.values().cloned().collect::<Vec<_>>()`.
+            "values" if args.is_empty() => {
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.values().cloned().collect::<Vec<_>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("values codegen parse: {e}")))?
+            }
+            // T88: Vector.find(pred) -> Option<T>. Lowers to
+            // `recv.into_iter().find(pred)`.
+            "find" if args.len() == 1 => {
+                let f = self.lower_expr(&args[0])?;
+                self.lower_into_iter_find(recv, f)?
+            }
+            // T25: Map methods. `.get`, `.insert`, `.remove`, `.len` all
+            // share Rust's name — they fall through to the default arm
+            // below with no special mapping. `.contains` is handled above
+            // (type-aware: Map -> contains_key, Vector -> contains).
             // Default: a plain method call `recv.method(args)`.
             _ => {
                 let args_punct = lower_args(self)?;
@@ -988,6 +1050,20 @@ impl RustCodegen {
             #recv.into_iter().reduce(#closure)
         };
         syn::parse2(tokens).map_err(|e| self.unsupported(&format!("reduce codegen parse: {e}")))
+    }
+
+    /// Lower `.find(closure)` → `recv.into_iter().find(closure)` (T88).
+    ///
+    /// Returns `Option<T>` (Rust parity). The closure is a 1-arg `|a| …`.
+    pub(super) fn lower_into_iter_find(
+        &self,
+        recv: SynExpr,
+        closure: SynExpr,
+    ) -> Result<SynExpr, CodegenError> {
+        let tokens: proc_macro2::TokenStream = quote::quote! {
+            #recv.into_iter().find(#closure)
+        };
+        syn::parse2(tokens).map_err(|e| self.unsupported(&format!("find codegen parse: {e}")))
     }
 
     /// Lower a string interpolation `"text {expr} more"` to a Rust
