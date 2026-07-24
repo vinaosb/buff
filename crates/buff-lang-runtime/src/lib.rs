@@ -107,8 +107,8 @@ pub use hints::{
 };
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
 pub use threshold::{
-    decide, decide_dynamic, explain_dispatch, DispatchPlanner, WorkloadContext, CPU_PARALLEL_MAX,
-    GPU_ARITHMETIC_INTENSITY_THRESHOLD, SINGLE_THREAD_MAX,
+    decide, decide_dynamic, explain_dispatch, DataLocation, DispatchPlanner, WorkloadContext,
+    CPU_PARALLEL_MAX, GPU_ARITHMETIC_INTENSITY_THRESHOLD, SINGLE_THREAD_MAX,
 };
 pub use tiling::{
     dispatch_map_with_tiling, dispatch_tiled, max_elements_per_tile, tile_ranges,

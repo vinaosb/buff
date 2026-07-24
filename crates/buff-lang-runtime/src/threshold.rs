@@ -298,6 +298,93 @@ pub(crate) fn fits_vram(
 /// ```
 pub const GPU_ARITHMETIC_INTENSITY_THRESHOLD: f64 = 4.0;
 
+// ===========================================================================
+// T10: Data-locality-aware dispatch (v1.25 Wave 1)
+// ===========================================================================
+//
+// T5's [`decide_dynamic`] assumes data starts on the CPU (the common case
+// for Buff values, which are Rust `Vec<f32>` in RAM). But when a chain of
+// GPU operations runs, the OUTPUT of op N is already resident in VRAM —
+// feeding it as the INPUT to op N+1 should NOT incur a round-trip through
+// CPU RAM. The PCIe download (~16 GB/s) + re-upload would dominate the
+// actual compute for all but the most arithmetic-heavy kernels.
+//
+// T10 extends [`WorkloadContext`] with a [`DataLocation`] field so the
+// CALLER (the dispatch site / runtime manager) can tell [`decide_dynamic`]
+// where the data currently lives. When `data_location == Gpu` AND a GPU is
+// available, [`decide_dynamic`] returns [`DispatchKind::GpuCompute`]
+// UNCONDITIONALLY — even for inputs smaller than [`SINGLE_THREAD_MAX`].
+// The rationale: the alternative (bring data back to CPU) costs a PCIe
+// download that exceeds even a warm GPU dispatch (~100 µs).
+//
+// # Key invariants (preserved)
+//
+// * **Default is `Cpu`** — existing callers (and all T5 tests) see zero
+//   behavior change. The T10 path only fires when the caller explicitly
+//   sets `data_location` to [`DataLocation::Gpu`] via
+//   [`.with_data_location()`](WorkloadContext::with_data_location).
+// * **GPU-fallback guarantee preserved** — when `gpu_available == false`,
+//   the T10 check does not fire (data cannot be on the GPU if there is no
+//   GPU), and [`decide_dynamic`] falls through to the normal CPU path.
+// * **Pure + deterministic** — [`DataLocation`] is a plain enum; the
+//   check is one `==` comparison. Sub-microsecond.
+
+/// T10: Where the input data currently resides at dispatch time.
+///
+/// Used by [`decide_dynamic`] to avoid redundant CPU↔GPU transfers in
+/// chained GPU operations. When data is already on the GPU, the dispatch
+/// stays on the GPU — bringing it back to CPU RAM would cost a PCIe
+/// download that exceeds the GPU dispatch overhead for nearly all
+/// workloads.
+///
+/// # Variants
+///
+/// * [`DataLocation::Cpu`] — data lives in CPU RAM (the default; Buff
+///   values are Rust `Vec<f32>` in main memory). [`decide_dynamic`] uses
+///   the normal threshold + intensity logic.
+/// * [`DataLocation::Gpu`] — data is resident in GPU VRAM (typically the
+///   output of a prior [`DispatchKind::GpuCompute`] dispatch in a chain).
+///   [`decide_dynamic`] returns [`DispatchKind::GpuCompute`] whenever a
+///   GPU is available, regardless of element count or intensity.
+///
+/// # Determinism
+///
+/// Plain `Copy` enum — no interior mutability, no I/O. The default
+/// ([`DataLocation::Cpu`]) is the conservative choice.
+///
+/// # Examples
+///
+/// ```
+/// use buff_lang_runtime::{
+///     DataLocation, DispatchKind, WorkloadContext, threshold::decide_dynamic,
+/// };
+///
+/// // Default: data on CPU → 500 elements → SingleThread (tiny band).
+/// let ctx = WorkloadContext::new(500, true);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::SingleThread);
+///
+/// // T10: data already on GPU → 500 elements → GpuCompute (no transfer).
+/// let ctx = WorkloadContext::new(500, true).with_data_location(DataLocation::Gpu);
+/// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DataLocation {
+    /// Data resides in CPU RAM (main memory). This is the default — Buff
+    /// values are Rust `Vec<f32>` living in process memory. [`decide_dynamic`]
+    /// uses the normal element-count + arithmetic-intensity thresholds.
+    ///
+    /// When this is set and a GPU is available, dispatching to the GPU
+    /// incurs a PCIe upload cost (~16 GB/s) that the cost model factors in.
+    #[default]
+    Cpu,
+    /// Data is resident in GPU VRAM — typically the output of a prior
+    /// [`DispatchKind::GpuCompute`] dispatch in a chained operation.
+    /// [`decide_dynamic`] prefers [`DispatchKind::GpuCompute`] whenever a
+    /// GPU is available, because bringing the data back to CPU RAM would
+    /// cost a PCIe download that exceeds the GPU dispatch overhead.
+    Gpu,
+}
+
 /// T5: Runtime workload context for dynamic dispatch decisions.
 ///
 /// Captures the actual runtime inputs that [`decide_dynamic`] uses to make
@@ -380,6 +467,15 @@ pub struct WorkloadContext {
     /// `v < GPU_ARITHMETIC_INTENSITY_THRESHOLD` means "memory-bound —
     /// CPU wins (GPU's bandwidth ceiling is no higher)".
     pub arithmetic_intensity: Option<f64>,
+    /// T10: Where the input data currently lives.
+    ///
+    /// Defaults to [`DataLocation::Cpu`] (data in main memory — the common
+    /// case). Set to [`DataLocation::Gpu`] when the data is the output of a
+    /// prior GPU dispatch (chained operations) so [`decide_dynamic`] avoids
+    /// a redundant PCIe round-trip.
+    ///
+    /// Use [`.with_data_location(loc)`](Self::with_data_location) to set it.
+    pub data_location: DataLocation,
 }
 
 impl WorkloadContext {
@@ -405,6 +501,7 @@ impl WorkloadContext {
             element_count,
             gpu_available,
             arithmetic_intensity: None,
+            data_location: DataLocation::Cpu,
         }
     }
 
@@ -434,6 +531,35 @@ impl WorkloadContext {
     #[must_use]
     pub fn with_intensity(mut self, arithmetic_intensity: f64) -> Self {
         self.arithmetic_intensity = Some(arithmetic_intensity);
+        self
+    }
+
+    /// T10: Chainable builder to set where the input data currently lives.
+    ///
+    /// Set to [`DataLocation::Gpu`] when the data is the output of a prior
+    /// GPU dispatch (chained operations) so [`decide_dynamic`] avoids a
+    /// redundant PCIe round-trip and keeps the dispatch on the GPU.
+    ///
+    /// Defaults to [`DataLocation::Cpu`] (data in main memory).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use buff_lang_runtime::{
+    ///     DataLocation, DispatchKind, WorkloadContext, threshold::decide_dynamic,
+    /// };
+    ///
+    /// // Default (CPU): 500 elements → SingleThread (tiny band).
+    /// let ctx = WorkloadContext::new(500, true);
+    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::SingleThread);
+    ///
+    /// // Data on GPU: 500 elements → GpuCompute (no PCIe transfer needed).
+    /// let ctx = ctx.with_data_location(DataLocation::Gpu);
+    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
+    /// ```
+    #[must_use]
+    pub fn with_data_location(mut self, data_location: DataLocation) -> Self {
+        self.data_location = data_location;
         self
     }
 }
@@ -550,6 +676,23 @@ fn is_gpu_favorable_intensity(arithmetic_intensity: Option<f64>) -> bool {
 /// ```
 #[must_use]
 pub fn decide_dynamic(ctx: &WorkloadContext) -> DispatchKind {
+    // T10: Data-locality-aware dispatch.
+    //
+    // If the data is ALREADY on the GPU (from a prior GpuCompute dispatch
+    // in a chained operation) AND a GPU is available, stay on the GPU.
+    // Bringing the data back to CPU RAM would cost a PCIe download
+    // (~16 GB/s ≈ 60 µs/MB) that exceeds even a warm GPU dispatch
+    // (~100 µs). This check fires BEFORE the SingleThread band so that
+    // even tiny inputs stay on the GPU when they're already resident.
+    //
+    // The "GPU failure invisible; CPU fallback always correct" guarantee
+    // is preserved: when `gpu_available == false`, this check does NOT
+    // fire (data_location == Gpu with no GPU is a caller bug, but we
+    // handle it gracefully by falling through to the normal CPU logic).
+    if ctx.data_location == DataLocation::Gpu && ctx.gpu_available {
+        return DispatchKind::GpuCompute;
+    }
+
     // Branch 1: element_count ≤ SINGLE_THREAD_MAX → SingleThread.
     // Tiny work: parallel/GPU setup overhead dominates at this size.
     // GPU availability and intensity are irrelevant here.
@@ -687,7 +830,21 @@ pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String
             }
         }
         DispatchKind::GpuCompute => {
-            "  Decision: GPU available + high intensity → GpuCompute".to_string()
+            if ctx.data_location == DataLocation::Gpu && ctx.gpu_available {
+                "  Decision: T10 data-locality → data on GPU → GpuCompute (no PCIe transfer)".to_string()
+            } else {
+                "  Decision: GPU available + high intensity → GpuCompute".to_string()
+            }
+        }
+    };
+
+    let data_location_line = match ctx.data_location {
+        DataLocation::Cpu => "  data_location: cpu".to_string(),
+        DataLocation::Gpu if ctx.gpu_available => {
+            "  data_location: gpu (resident — T10 keeps dispatch on GPU)".to_string()
+        }
+        DataLocation::Gpu => {
+            "  data_location: gpu (but no GPU available — falling through to CPU)".to_string()
         }
     };
 
@@ -695,6 +852,7 @@ pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String
         "Dispatch: {decision:?}\n\
          element_count: {count}\n\
          gpu_available: {gpu}\n\
+         {data_location_line}\n\
          {intensity_line}\n\
          {st_line}\n\
          {cpu_parallel_line}\n\
