@@ -250,6 +250,18 @@ fn main() -> Result<()> {
             iterations,
             warmup,
         } => buff_lang_cli::commands::bench_program::run(&file, iterations, warmup),
+        Command::Generate {
+            template,
+            name,
+            output,
+            list,
+        } => {
+            if list {
+                buff_lang_cli::commands::generate::print_template_list();
+                return Ok(());
+            }
+            buff_lang_cli::commands::generate::run(&template, &name, output)
+        }
         Command::Watch { file, interval } => {
             buff_lang_cli::commands::watch::run(&file, Some(interval))
         }

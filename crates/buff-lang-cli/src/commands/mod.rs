@@ -20,6 +20,7 @@ pub mod expand;
 pub mod doc;
 pub mod fmt;
 pub mod gen;
+pub mod generate;
 pub mod init;
 pub mod install;
 pub mod jupyter;

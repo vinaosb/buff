@@ -1187,6 +1187,48 @@ pub enum Command {
         warmup: u32,
     },
 
+    /// `buff generate <TEMPLATE> [--name <NAME>] [--output <PATH>]` —
+    /// generate boilerplate from a built-in template (T103).
+    ///
+    /// Like `cargo generate` but for Buff-specific patterns. Four templates
+    /// are built in:
+    ///
+    /// - `gpu_kernel` — GPU-dispatched function with `@prefer(gpu)` + WGSL
+    ///   scaffold.
+    /// - `web_handler` — Web.get/post handler with JSON response.
+    /// - `data_pipeline` — Source → filter → Sink pipeline.
+    /// - `cli_app` — CLI app with argument parsing.
+    ///
+    /// Use `--list` to print available templates and exit.
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// buff generate gpu_kernel --name my_kernel --output src/my_kernel.buff
+    /// buff generate web_handler --name hello_handler
+    /// buff generate --list
+    /// ```
+    Generate {
+        /// Template name: `gpu_kernel`, `web_handler`, `data_pipeline`,
+        /// or `cli_app`.
+        #[arg(value_name = "TEMPLATE")]
+        template: String,
+
+        /// Name for the generated artifact (substituted into `{{NAME}}`
+        /// placeholders). Defaults to the template name if omitted.
+        #[arg(short, long, value_name = "NAME", default_value = "")]
+        name: String,
+
+        /// Output file path. Defaults to `<name>.buff` in the current
+        /// directory when `--name` is set, or `<template>.buff` otherwise.
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+
+        /// List available templates and exit.
+        #[arg(long)]
+        list: bool,
+    },
+
     /// `buff watch <FILE> [--interval <MS>]` — file watcher with
     /// auto-recompile (T97).
     ///
