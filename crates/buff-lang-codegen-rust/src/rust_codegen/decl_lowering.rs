@@ -613,6 +613,20 @@ impl RustCodegen {
                 // emitted `async` if it transitively calls async fns, so the
                 // generated Rust always compiles).
                 "blocking" => attrs.push(syn::parse_quote!(#[doc = "@blocking"])),
+                // T66: `@workgroup(N)` sets the GPU workgroup size for a
+                // GPU-dispatched function. The codegen emits a `#[doc]`
+                // marker recording N so the runtime/dispatch layer can read
+                // the workgroup size from the generated source metadata.
+                // When N is omitted (argument-less `@workgroup`), the default
+                // of 64 is used (matching the runtime's default workgroup
+                // size). This is a pure metadata marker — the actual WGSL
+                // shader + wgpu dispatch config is emitted by
+                // `buff-lang-codegen-wgsl` and `buff-lang-runtime`.
+                "workgroup" => {
+                    let n = attr.args.first().map(|s| s.as_str()).unwrap_or("64");
+                    let doc = format!("@workgroup({n})");
+                    attrs.push(syn::parse_quote!(#[doc = #doc]));
+                }
                 // Unknown attribute — surface as a codegen error so the
                 // user knows it was not applied (rather than silently
                 // dropping it). Future tasks can add recognised attributes
@@ -621,7 +635,8 @@ impl RustCodegen {
                     return Err(self.unsupported(&format!(
                         "unrecognised attribute `@{other}` \
                          (supported: @test, @feature, @internal, @deprecated, \
-                         @should_panic, @ignore, @bench, @property, @blocking)"
+                         @should_panic, @ignore, @bench, @property, @blocking, \
+                         @workgroup)"
                     )));
                 }
             }

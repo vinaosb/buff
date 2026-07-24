@@ -2222,6 +2222,15 @@ pub fn parse_attributes(stream: &mut TokenStream<'_>) -> Result<Vec<Attribute>, 
                     }
                     let arg = match &arg_tok.kind {
                         TokenKind::Ident(s) => s.clone(),
+                        // T66: accept integer literals as attribute args so
+                        // `@workgroup(64)` parses (the workgroup size is a
+                        // numeric value). The integer is stored as its string
+                        // representation in `Attribute::args` alongside the
+                        // existing identifier/string forms. This is purely
+                        // additive — existing attribute forms (`@test`,
+                        // `@prefer(gpu)`, `@deprecated(since = "2.0")`) are
+                        // unaffected.
+                        TokenKind::IntLit(n) => n.to_string(),
                         TokenKind::StringStart => {
                             // Consume the full string-token triple.
                             let part = stream.advance().ok_or_else(|| {
