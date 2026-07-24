@@ -62,7 +62,7 @@ use semver::Version;
 
 use crate::error::StorageError;
 use crate::storage::{
-    DepSpec, PackageMetadata, PackageSummary, QualityAttachment, VersionInfo,
+    DepSpec, PackageMetadata, PackageSummary, QualityAttachment, SessionUser, VersionInfo,
 };
 use crate::storage::VERSION_EXISTS_MARKER;
 
@@ -97,6 +97,17 @@ CREATE TABLE IF NOT EXISTS verified_authors (\
 );\
 CREATE INDEX IF NOT EXISTS idx_versions_name ON versions(name);\
 CREATE INDEX IF NOT EXISTS idx_rate_log_token ON rate_log(token);\
+CREATE TABLE IF NOT EXISTS users (\
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,\
+    github_login TEXT NOT NULL UNIQUE,\
+    github_id    INTEGER NOT NULL,\
+    created_at   INTEGER NOT NULL\
+);\
+CREATE TABLE IF NOT EXISTS sessions (\
+    token       TEXT PRIMARY KEY,\
+    user_id     INTEGER NOT NULL REFERENCES users(id),\
+    created_at  INTEGER NOT NULL\
+);\
 ";
 
 /// SQLite-backed registry storage.
@@ -508,6 +519,68 @@ impl crate::storage::Storage for SqliteStorage {
             .map_err(|e| StorageError::Failure(format!("is_verified_author: {e}")))?
             .is_some();
         Ok(exists)
+    }
+
+    fn create_session(&self, github_login: &str, github_id: i64) -> Result<String, StorageError> {
+        let conn = self.lock_conn()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        // Upsert the user (INSERT OR IGNORE — a returning user already
+        // has a row keyed by github_login UNIQUE).
+        conn.execute(
+            "INSERT OR IGNORE INTO users (github_login, github_id, created_at) VALUES (?1, ?2, ?3)",
+            params![github_login, github_id, now],
+        )
+        .map_err(|e| StorageError::Failure(format!("create_session insert user: {e}")))?;
+
+        // Fetch the user's id (whether just inserted or pre-existing).
+        let user_id: i64 = conn
+            .query_row(
+                "SELECT id FROM users WHERE github_login = ?1",
+                params![github_login],
+                |row| row.get(0),
+            )
+            .map_err(|e| StorageError::Failure(format!("create_session fetch user: {e}")))?;
+
+        // Generate a session token (UUID v4 as a simple hex string).
+        let session_token = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO sessions (token, user_id, created_at) VALUES (?1, ?2, ?3)",
+            params![session_token, user_id, now],
+        )
+        .map_err(|e| StorageError::Failure(format!("create_session insert session: {e}")))?;
+        Ok(session_token)
+    }
+
+    fn validate_session(&self, session_token: &str) -> Result<Option<SessionUser>, StorageError> {
+        let conn = self.lock_conn()?;
+        let row: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT u.github_login, u.github_id \
+                 FROM sessions s JOIN users u ON s.user_id = u.id \
+                 WHERE s.token = ?1",
+                params![session_token],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| StorageError::Failure(format!("validate_session: {e}")))?;
+        Ok(row.map(|(login, id)| SessionUser {
+            github_login: login,
+            github_id: id,
+        }))
+    }
+
+    fn delete_session(&self, session_token: &str) -> Result<(), StorageError> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "DELETE FROM sessions WHERE token = ?1",
+            params![session_token],
+        )
+        .map_err(|e| StorageError::Failure(format!("delete_session: {e}")))?;
+        Ok(())
     }
 }
 

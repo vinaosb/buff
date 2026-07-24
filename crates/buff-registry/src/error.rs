@@ -88,6 +88,32 @@ pub enum RegistryError {
     /// HTTP 400.
     #[error("invalid tarball encoding: {0}")]
     InvalidTarball(String),
+
+    // --- T57: OAuth + production errors ---
+
+    /// T57: GitHub OAuth is not configured (env vars missing).
+    /// HTTP 503 Service Unavailable.
+    #[error("GitHub OAuth is not configured. Set BUFF_REGISTRY_GITHUB_CLIENT_ID and BUFF_REGISTRY_GITHUB_CLIENT_SECRET to enable login.")]
+    OAuthNotConfigured,
+
+    /// T57: The GitHub token-exchange step failed (network error,
+    /// invalid code, rate-limited by GitHub, etc.). HTTP 502.
+    #[error("GitHub token exchange failed: {0}")]
+    OAuthExchangeFailed(String),
+
+    /// T57: The GitHub user-info fetch failed. HTTP 502.
+    #[error("GitHub user fetch failed: {0}")]
+    OAuthUserFetchFailed(String),
+
+    /// T57: The GitHub user is not on the invite-only beta allowlist.
+    /// HTTP 403 Forbidden.
+    #[error("Buff registry is in invite-only beta. Your GitHub account is not on the allowlist.")]
+    NotAllowlisted,
+
+    /// T57: The authenticated user does not have permission to publish
+    /// to the requested scope (e.g. not a member of `@org`). HTTP 403.
+    #[error("you do not have permission to publish to this scope")]
+    ScopeForbidden,
 }
 
 impl IntoResponse for RegistryError {
@@ -105,6 +131,11 @@ impl IntoResponse for RegistryError {
                 StatusCode::NOT_FOUND
             }
             Self::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::OAuthNotConfigured => StatusCode::SERVICE_UNAVAILABLE,
+            Self::OAuthExchangeFailed(_) | Self::OAuthUserFetchFailed(_) => {
+                StatusCode::BAD_GATEWAY
+            }
+            Self::NotAllowlisted | Self::ScopeForbidden => StatusCode::FORBIDDEN,
         };
         let body = Json(ErrorBody {
             error: self.to_string(),

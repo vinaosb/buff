@@ -47,5 +47,8 @@ uuid.workspace = true
 # `#[tokio::test]` macro is available without further feature flags.
 # T57: `tempfile` for SQLite roundtrip tests (unique temp DB path per
 # test, auto-cleaned on drop).
+# T57: `httpmock` for OAuth flow mock tests (mock GitHub token + user
+# endpoints without hitting real GitHub).
 tokio.workspace = true
 tempfile.workspace = true
+httpmock.workspace = true

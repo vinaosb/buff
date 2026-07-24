@@ -87,6 +87,7 @@
 
 mod error;
 mod handlers;
+mod oauth;
 mod quality;
 mod storage;
 mod storage_sqlite;
@@ -98,10 +99,11 @@ use axum::routing::{get, post};
 use axum::Router;
 
 pub use error::{RegistryError, StorageError};
+pub use oauth::OAuthConfig;
 pub use quality::{compute_badges, AuditResult, Package, QualityBadges, MAINTAINED_WINDOW};
 pub use storage::{
     DepSpec, InMemoryStorage, PackageMetadata, PackageSummary, PublishRequest, PublishResponse,
-    QualityAttachment, ResolveResponse, Storage, StorageResult, VersionInfo,
+    QualityAttachment, ResolveResponse, SessionUser, Storage, StorageResult, VersionInfo,
 };
 pub use storage_sqlite::SqliteStorage;
 
@@ -128,13 +130,17 @@ pub const DEFAULT_RATE_LIMIT_MAX: usize = 100;
 #[derive(Clone)]
 pub struct AppState {
     /// Backend storage. Concrete type is [`InMemoryStorage`] for v1.6;
-    /// future backends (Postgres + S3) implement the same trait.
+    /// [`SqliteStorage`] for T57 production; future backends implement
+    /// the same trait.
     pub storage: Arc<dyn Storage>,
     /// Per-token rolling-window length. Publishes older than this are
     /// pruned before counting.
     pub rate_limit_window: Duration,
     /// Max publishes per token inside `rate_limit_window`.
     pub rate_limit_max: usize,
+    /// T57: GitHub OAuth configuration. `None` when OAuth env vars are
+    /// not set (login endpoints return 503; static-token auth still works).
+    pub oauth_config: Option<OAuthConfig>,
 }
 
 impl AppState {
@@ -146,6 +152,7 @@ impl AppState {
             storage,
             rate_limit_window: DEFAULT_RATE_LIMIT_WINDOW,
             rate_limit_max: DEFAULT_RATE_LIMIT_MAX,
+            oauth_config: OAuthConfig::from_env(),
         }
     }
 
@@ -155,6 +162,14 @@ impl AppState {
     pub fn with_rate_limit(mut self, window: Duration, max: usize) -> Self {
         self.rate_limit_window = window;
         self.rate_limit_max = max;
+        self
+    }
+
+    /// T57: Override the OAuth configuration (for tests that inject a
+    /// mock config pointing at a local mock server).
+    #[must_use]
+    pub fn with_oauth_config(mut self, config: Option<OAuthConfig>) -> Self {
+        self.oauth_config = config;
         self
     }
 }
@@ -176,6 +191,11 @@ pub fn app(state: AppState) -> Router {
             get(handlers::get_badges),
         )
         .route("/api/v1/search", get(handlers::search))
+        // T57: GitHub OAuth login flow.
+        .route("/auth/github/login", get(oauth::login))
+        .route("/auth/github/callback", get(oauth::callback))
+        .route("/auth/logout", post(oauth::logout))
+        .route("/auth/whoami", get(oauth::whoami))
         .with_state(state)
 }
 

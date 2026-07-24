@@ -81,8 +81,12 @@ pub(crate) async fn publish(
     body: Bytes,
 ) -> Result<impl IntoResponse, RegistryError> {
     // --- 1. Auth -----------------------------------------------------------
+    // T57: accept BOTH static tokens (backwards compat from T126) AND
+    // OAuth session tokens (from the /auth/github/callback flow).
     let token = extract_bearer(&headers).ok_or(RegistryError::Unauthorized)?;
-    if !state.storage.validate_token(token)? {
+    let session_user = state.storage.validate_session(token)?;
+    let is_valid = state.storage.validate_token(token)? || session_user.is_some();
+    if !is_valid {
         return Err(RegistryError::Unauthorized);
     }
 
@@ -128,9 +132,13 @@ pub(crate) async fn publish(
         documented_coverage: request.documented_coverage,
         security_audit: None,
     };
-    // The author is the bearer token — the "who published this" signal
-    // the verified-publisher badge checks against the verified-author set.
-    let author = Some(token.to_string());
+    // The author is the GitHub login (if OAuth session) or the bearer
+    // token (for static-token backwards compat). The verified-publisher
+    // badge checks this against the verified-author set.
+    let author = session_user
+        .as_ref()
+        .map(|u| u.github_login.clone())
+        .or_else(|| Some(token.to_string()));
 
     // --- 8. Store ----------------------------------------------------------
     let deps = request.deps.clone();

@@ -302,6 +302,54 @@ pub trait Storage: Send + Sync {
     /// [`InMemoryStorage::add_verified_author`] for tests / local dev.
     /// Future: GitHub OAuth verified-email check.
     fn is_verified_author(&self, author: &str) -> Result<bool, StorageError>;
+
+    // --- T57: OAuth sessions + user management (default impls) ---
+    //
+    // These methods have default implementations that signal "not
+    // supported by this backend" so [`InMemoryStorage`] keeps working
+    // without code changes. [`SqliteStorage`] overrides them with real
+    // table-backed persistence.
+
+    /// T57: Create a session for `github_login`, returning the opaque
+    /// session token string (a UUID v4). Used by the OAuth callback
+    /// handler to mint a session after GitHub authentication succeeds.
+    ///
+    /// Default impl: returns an error (sessions not supported by this
+    /// backend).
+    fn create_session(&self, _github_login: &str, _github_id: i64) -> Result<String, StorageError> {
+        Err(StorageError::Failure(
+            "sessions not supported by this backend".to_string(),
+        ))
+    }
+
+    /// T57: Validate a session token. Returns `Ok(Some(user))` if the
+    /// session is valid, `Ok(None)` if the session is unknown / expired.
+    ///
+    /// Default impl: always returns `Ok(None)` (no sessions).
+    fn validate_session(&self, _session_token: &str) -> Result<Option<SessionUser>, StorageError> {
+        Ok(None)
+    }
+
+    /// T57: Delete a session (logout). Idempotent — deleting an unknown
+    /// session is a no-op.
+    ///
+    /// Default impl: no-op.
+    fn delete_session(&self, _session_token: &str) -> Result<(), StorageError> {
+        Ok(())
+    }
+}
+
+/// T57: User identity resolved from a valid session token.
+///
+/// Returned by [`Storage::validate_session`] when a session token is
+/// valid. Carries the GitHub login + numeric ID so handlers can
+/// attribute publishes + enforce org membership.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionUser {
+    /// The GitHub username (e.g. `octocat`).
+    pub github_login: String,
+    /// The numeric GitHub user ID (stable across username changes).
+    pub github_id: i64,
 }
 
 /// Pure-Rust in-memory backend for the Buff registry.
