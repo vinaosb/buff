@@ -3990,7 +3990,9 @@ impl RustCodegen {
                     .map(|a| self.lower_expr(a))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut iter = lowered.into_iter();
-                let head = iter.next().expect("non-empty (checked above)");
+                let head = iter.next().ok_or_else(|| {
+                    self.unsupported("Path.join requires at least one argument")
+                })?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     std::path::PathBuf::from(#head)
                 };
