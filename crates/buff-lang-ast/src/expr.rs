@@ -711,16 +711,40 @@ impl fmt::Display for Expr {
 }
 
 /// A single arm of a `match` expression.
+///
+/// # Migration notes (additive AST changes)
+///
+/// ## T40 — `guard` field
+///
+/// A `guard: Option<Expr>` field was **added** in T40 (v1.25 language-features
+/// batch) to carry the optional `if <cond>` guard on a match arm
+/// (`match x { Some(v) if v > 0 => "positive", _ => "other" }`). This is a
+/// **migration** (a new field was inserted between `pattern` and `body`,
+/// before `span`) — every construction site was updated to pass
+/// `guard: None` for non-guarded arms. The Display impl renders ` if <cond>`
+/// between the pattern and the `=>`. The codegen lowers it to a Rust
+/// `syn::Arm { guard: Some(...) }`. The exhaustiveness checker treats a
+/// guarded arm as non-exhaustive for its variant (a guard can fail, so the
+/// arm does not unconditionally cover the variant — matching Rust's rule).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: Pattern,
+    /// The optional `if <cond>` guard (T40). `None` for an unguarded arm.
+    /// When `Some`, the arm matches only when BOTH the pattern matches AND
+    /// the guard expression evaluates to `true`.
+    pub guard: Option<Expr>,
     pub body: Block,
     pub span: Span,
 }
 
 impl fmt::Display for MatchArm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} => {}", self.pattern, self.body)
+        write!(f, "{}", self.pattern)?;
+        // T40: render the optional `if <cond>` guard between pattern and `=>`.
+        if let Some(guard) = &self.guard {
+            write!(f, " if {guard}")?;
+        }
+        write!(f, " => {}", self.body)
     }
 }
 

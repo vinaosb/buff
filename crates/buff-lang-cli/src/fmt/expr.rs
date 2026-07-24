@@ -457,6 +457,11 @@ impl<'a> Formatter<'a> {
                     self.raw(", ");
                 }
                 self.write_pattern(&arm.pattern);
+                // T40: render the optional `if <cond>` guard inline.
+                if let Some(g) = &arm.guard {
+                    self.raw(" if ");
+                    self.write_expr(g);
+                }
                 self.raw(" => ");
                 self.write_stmt(&arm.body.stmts[0]);
             }
@@ -469,6 +474,11 @@ impl<'a> Formatter<'a> {
             for arm in arms {
                 self.nl();
                 self.write_pattern(&arm.pattern);
+                // T40: render the optional `if <cond>` guard (multi-line).
+                if let Some(g) = &arm.guard {
+                    self.raw(" if ");
+                    self.write_expr(g);
+                }
                 self.raw(" => ");
                 if arm.body.stmts.len() == 1 {
                     self.write_stmt(&arm.body.stmts[0]);

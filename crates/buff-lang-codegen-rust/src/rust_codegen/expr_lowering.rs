@@ -249,6 +249,17 @@ impl RustCodegen {
         let mut arms_syn: Vec<syn::Arm> = Vec::with_capacity(arms.len());
         for arm in arms {
             let pat = self.lower_pattern(&arm.pattern, false)?;
+            // T40: lower the optional `if <cond>` guard to a syn::Arm guard.
+            // `Some(v) if v > 0 => ...` lowers to Rust's `Some(v) if v > 0 =>
+            // ...` 1:1 (Rust match-arm guards use the identical `if` syntax,
+            // so no translation is needed — just lower the guard expression).
+            // This syn version's `Arm::guard` is `Option<(If, Box<Expr>)>` —
+            // a tuple of the `if` keyword token + the condition expression.
+            let guard = if let Some(guard_expr) = &arm.guard {
+                Some((syn::Token![if](ProcSpan::call_site()), Box::new(self.lower_expr(guard_expr)?)))
+            } else {
+                None
+            };
             // The parser wraps the body expression in a one-statement
             // `ExprStmt` block. We lower the block and use it as the arm
             // body — Rust accepts a block as an arm body. If the block has
@@ -267,7 +278,7 @@ impl RustCodegen {
             arms_syn.push(syn::Arm {
                 attrs: Vec::new(),
                 pat,
-                guard: None,
+                guard,
                 fat_arrow_token: Default::default(),
                 body: Box::new(body_expr),
                 comma: Some(Default::default()),

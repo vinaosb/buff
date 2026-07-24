@@ -1,0 +1,742 @@
+// Buff self-host port of `crates/buff-lang-parser/src/stmt.rs` (T16).
+//
+// Statement parser — hand-rolled recursive-descent for Buff statements plus
+// the shared `parse_block` (brace OR layout form) and `parse_if_expr`.
+// Declaration parsers (func/struct/enum/import/export/extend/trait/extern +
+// parse_type_ref/parse_params/parse_type_params/parse_attributes/extract_ident)
+// live in stmt_decl.buff (the T106 mechanical split, mirrored here).
+//
+// Builds on expr_parse_expression (expr.buff) for sub-expressions and shares
+// the TokenStream cursor (stream.buff).
+//
+// SYNTAX MAPPING NOTES (Buff grammar differs from the Rust it lowers to):
+//   * `match stream.peek_kind() { Some(KwLet) => .., Some(Ident(s)) if s ==
+//     "comptime" => .., _ => .. }` (or-patterns + guards + catch-all) becomes
+//     an `if/else if` chain comparing `peek_kind == Option.Some(TokenKind.X)`;
+//     a guarded `Ident(s) if s == "comptime"` becomes a `==` test against
+//     `Option.Some(TokenKind.Ident("comptime"))` (Buff enums — incl. payload
+//     variants — derive structural equality).
+//   * Rust `if let Expr::BinaryOp { .. } = expr` becomes a helper
+//     `expr_as_binop(expr) -> Option<BinOpParts>` + an `if != Option.None`
+//     test (Buff has no `if let`).
+//   * Rust `matches!(peek, A | B | C)` becomes a chained `||` of `==` tests.
+//   * `loop { .. }` becomes `for true:`.
+//   * AST enums are modelled as TUPLE variants with a documented field order
+//     (Buff has no named-field enum variants); construction is positional.
+//     Structs (FuncDecl/Block/Param/...) keep named-field brace form.
+
+// --- Parser-internal accumulator for one condition in a T74 let-chain ---
+// (`if cond, cond, ... { }`). Mirrors GuardCondition but kept parser-local.
+enum IfCondition {
+    // Let(pattern, value, span) — a binding condition `let PATTERN = EXPR`.
+    Let(Pattern, Expr, Span),
+    // Bool(expr) — a boolean condition.
+    Bool(Expr),
+}
+
+// Unpacked BinaryOp fields (helper for parse_assignment_or_expr_stmt). Buff's
+// match arms cannot contain statements and there is no `if let`, so a small
+// option-returning extractor + this holder replaces Rust's destructuring bind.
+struct BinOpParts {
+    op: BinaryOp,
+    lhs: Expr,
+    rhs: Expr,
+    span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// Public entry points
+// ---------------------------------------------------------------------------
+
+// Parse a single statement. Dispatches on the upcoming significant token.
+func parse_statement(s: TokenStream) -> Result<Stmt, ParseError>:
+    let pk = stream_peek_kind(s)
+    if pk == Option.Some(TokenKind.KwLet):
+        return parse_let(s)
+    // T56: property wrappers (`@State`/`@Published`/`@Cached`) on a `let`.
+    if pk == Option.Some(TokenKind.At):
+        return parse_statement_with_property_wrappers(s)
+    if pk == Option.Some(TokenKind.KwIf):
+        // if-as-expression: parse as Expr, wrap in ExprStmt.
+        let expr = parse_if_expr(s)?
+        let span = expr_span(expr)
+        return Result.Ok(Stmt.ExprStmt(expr, span))
+    if pk == Option.Some(TokenKind.KwFunc):
+        let span = peek_span_or_eof(s)
+        return Result.Err(err_with("function declarations must be top-level", span, ErrorCode.UnexpectedToken))
+    if pk == Option.Some(TokenKind.KwReturn):
+        return parse_return(s)
+    if pk == Option.Some(TokenKind.KwBreak):
+        let tok = stream_advance_after_peek(s)
+        return Result.Ok(Stmt.Break(tok.span))
+    if pk == Option.Some(TokenKind.KwContinue):
+        let tok = stream_advance_after_peek(s)
+        return Result.Ok(Stmt.Continue(tok.span))
+    if pk == Option.Some(TokenKind.KwFor):
+        return parse_for(s)
+    if pk == Option.Some(TokenKind.KwGuard):
+        return parse_guard(s)
+    if pk == Option.Some(TokenKind.KwDefer):
+        return parse_defer(s)
+    if pk == Option.Some(TokenKind.Ident("comptime")):
+        return parse_comptime_block(s)
+    return parse_assignment_or_expr_stmt(s)
+
+// Parse a brace-delimited block of statements: `{ stmt stmt ... }`. The
+// opening `{` and closing `}` are consumed. An empty block `{ }` is valid.
+func parse_block_braces(s: TokenStream) -> Result<Block, ParseError>:
+    let lbrace = stream_expect(s, TokenKind.LBrace)?
+    let start = lbrace.span.start
+    let source_id = stream_source_id(s)
+    let stmts = Vector.new()
+    // Loop until the upcoming significant token is `}` or EOF.
+    for is_block_end(stream_peek_kind(s)) == false:
+        stmts.push(parse_statement(s)?)
+        // Optional separator between statements (semicolon). Newlines are
+        // already auto-skipped by TokenStream::peek/advance.
+        if stream_peek_kind(s) == Option.Some(TokenKind.Semicolon):
+            let _semi = stream_advance(s)
+    let rbrace = stream_expect(s, TokenKind.RBrace)?
+    return Result.Ok(Block.new(stmts: stmts, span: span_new(start, rbrace.span.end, source_id)))
+
+// True when the peek kind signals the end of a brace block (`}`) or EOF.
+func is_block_end(pk: Option<TokenKind>) -> Bool:
+    if pk == Option.None:
+        return true
+    if pk == Option.Some(TokenKind.RBrace):
+        return true
+    return false
+
+// Parse a block — EITHER brace-delimited OR layout-sensitive (T9).
+//
+// Form 1 (fast path): the next raw token is `{` → parse_block_braces.
+// Form 2: `:` NEWLINE INDENT ... DEDENT (Python-style offside-rule block).
+func parse_block(s: TokenStream) -> Result<Block, ParseError>:
+    // Form 1: braces.
+    if stream_check_raw(s, TokenKind.LBrace):
+        return parse_block_braces(s)
+    // Form 2: layout-sensitive `: NEWLINE INDENT ... DEDENT`.
+    let source_id = stream_source_id(s)
+    let colon = stream_expect(s, TokenKind.Colon)?
+    let start = colon.span.start
+    // Expect Newline right after the colon.
+    if stream_check_raw(s, TokenKind.Newline) == false:
+        return Result.Err(err_with("expected newline after `:` for layout block", stream_span_here(s), ErrorCode.ExpectedLayoutNewline))
+    let _nl = stream_advance_raw(s)
+    // Stray newlines/blanks between `:` line and first indented line: skip.
+    for stream_consume_newline(s):
+        let _noop = 0
+    if stream_consume_indent(s) == false:
+        return Result.Err(err_with("expected indented block after `:`", stream_span_here(s), ErrorCode.ExpectedIndentedBlock))
+    let stmts = Vector.new()
+    let mut end_off = start
+    for true:
+        // Stop on Dedent.
+        if stream_check_raw(s, TokenKind.Dedent):
+            break
+        // Stop at end of significant input.
+        if stream_is_at_end(s):
+            break
+        // Skip stray Newlines/Indents between statements.
+        if stream_check_raw(s, TokenKind.Newline):
+            let _n = stream_advance_raw(s)
+            continue
+        if stream_check_raw(s, TokenKind.Indent):
+            let _i = stream_advance_raw(s)
+            continue
+        let stmt = parse_statement(s)?
+        let se = stmt_end(stmt)
+        if se > end_off:
+            end_off = se
+        stmts.push(stmt)
+    // Consume the closing Dedent if present (may be absent at EOF).
+    let _dedent = stream_consume_dedent(s)
+    return Result.Ok(Block.new(stmts: stmts, span: span_new(start, end_off, source_id)))
+
+// ---------------------------------------------------------------------------
+// Internal: per-statement parsers
+// ---------------------------------------------------------------------------
+
+// The three recognised property-wrapper attribute names (T56).
+func is_property_wrapper(name: String) -> Bool:
+    if name == "State":
+        return true
+    if name == "Published":
+        return true
+    if name == "Cached":
+        return true
+    return false
+
+// T56: parse a statement led by a property-wrapper attribute. Collects leading
+// `@name` attributes, validates exactly one recognised wrapper, expects `let`,
+// and rewrites the LetDecl's value to desugar the wrapper (parse-time desugar,
+// no new AST nodes — mirrors `|>`/`?.`/`??`).
+func parse_statement_with_property_wrappers(s: TokenStream) -> Result<Stmt, ParseError>:
+    let attrs = parse_attributes(s)?
+    // Validate: exactly ONE recognised wrapper, no extras.
+    let mut wrapper = Option.None
+    let mut idx = 0
+    for idx < attrs.len():
+        let a = attrs[idx]
+        let name = a.name.name
+        if is_property_wrapper(name) == false:
+            let msg = "unknown property wrapper `@" + name + "`; recognised wrappers are: State, Published, Cached"
+            return Result.Err(err_with(msg, a.span, ErrorCode.UnexpectedToken))
+        if wrapper != Option.None:
+            let prev = unwrap_opt_str(wrapper)
+            let msg = "only one property wrapper per `let` is allowed (saw `@" + prev + "` and `@" + name + "`)"
+            return Result.Err(err_with(msg, a.span, ErrorCode.UnexpectedToken))
+        wrapper = Option.Some(name)
+        idx = idx + 1
+    let wrapper_name = unwrap_opt_str(wrapper)
+    // @Cached requires exactly one positional arg naming the compute fn.
+    let mut cached_fn_name = Option.None
+    if wrapper_name == "Cached":
+        if attrs.len() != 1:
+            return Result.Err(err_with("`@Cached` cannot be combined with other property wrappers", attrs[0].span, ErrorCode.UnexpectedToken))
+        let args = attrs[0].args
+        if args.len() != 1:
+            let cnt = int_to_string(args.len())
+            return Result.Err(err_with("`@Cached(compute_fn)` requires exactly 1 positional arg (the compute function name); got " + cnt, attrs[0].span, ErrorCode.UnexpectedToken))
+        if attrs[0].named_args.len() > 0:
+            return Result.Err(err_with("`@Cached` does not accept named arguments (use positional: `@Cached(compute_fn)`)", attrs[0].span, ErrorCode.UnexpectedToken))
+        cached_fn_name = Option.Some(args[0])
+    if wrapper_name != "Cached":
+        // @State/@Published: reject any args.
+        if attrs[0].args.len() > 0:
+            return Result.Err(err_with("`@" + wrapper_name + "` takes no arguments (use plain `@" + wrapper_name + " let x = init`)", attrs[0].span, ErrorCode.UnexpectedToken))
+        if attrs[0].named_args.len() > 0:
+            return Result.Err(err_with("`@" + wrapper_name + "` takes no arguments (use plain `@" + wrapper_name + " let x = init`)", attrs[0].span, ErrorCode.UnexpectedToken))
+    let cached_fn_span = attrs[0].span
+    // The next significant token MUST be `let`.
+    if stream_peek_kind(s) != Option.Some(TokenKind.KwLet):
+        let span = peek_span_or_eof(s)
+        let found = peek_kind_display(s)
+        let msg = "property wrapper `@" + wrapper_name + "` must precede a `let` binding, found `" + found + "`"
+        return Result.Err(err_with(msg, span, ErrorCode.UnexpectedToken))
+    // Parse the underlying let (returns Stmt.LetDecl or Stmt.LetPattern).
+    let let_stmt = parse_let(s)?
+    // Reject destructuring patterns (LetPattern) for MVP.
+    if stmt_is_let_decl(let_stmt) == false:
+        return Result.Err(err_with("property wrappers do not support destructuring `let` targets (use a plain `let` and apply the wrapper to each binding)", cached_fn_span, ErrorCode.UnexpectedToken))
+    // Destructure the LetDecl so we can rewrite `value`. mutable/ty are
+    // discarded: the wrapper cell is always immutable and the user's
+    // annotation would describe T not Signal<T>/Computed<T>.
+    let parts = stmt_unpack_let_decl(let_stmt)
+    let desugared = build_desugared_value(wrapper_name, cached_fn_name, parts.value, cached_fn_span, parts.span)
+    return Result.Ok(Stmt.LetDecl(parts.name, desugared, false, Option.None, parts.span))
+
+// Build the desugared value expression for a property-wrapper let.
+func build_desugared_value(wrapper: String, cached_fn: Option<String>, original: Expr, name_span: Span, let_span: Span) -> Expr:
+    if wrapper == "Cached":
+        let fn_name = unwrap_opt_str(cached_fn)
+        return build_reactive_computed_new(fn_name, name_span, let_span)
+    return build_reactive_signal_new(original, let_span)
+
+// T56 helper: build `ReactiveSignal.new(value)`.
+func build_reactive_signal_new(value: Expr, span: Span) -> Expr:
+    return Expr.MethodCall(Expr.Ident(ident_new("ReactiveSignal", span), span), ident_new("new", span), [value], span)
+
+// T56 helper: build `ReactiveComputed.new({ || fn_name() })`.
+func build_reactive_computed_new(fn_name: String, name_span: Span, let_span: Span) -> Expr:
+    let fn_call = Expr.FuncCall(Expr.Ident(ident_new(fn_name, name_span), name_span), Vector.new(), name_span)
+    let lambda = Expr.Lambda(Vector.new(), Block.new(stmts: [Stmt.ExprStmt(fn_call, name_span)], span: name_span), Option.None, name_span)
+    return Expr.MethodCall(Expr.Ident(ident_new("ReactiveComputed", name_span), name_span), ident_new("new", name_span), [lambda], let_span)
+
+// `let [mut] name[: Type] = expr` (or a destructuring `let (x,y) = ..`).
+func parse_let(s: TokenStream) -> Result<Stmt, ParseError>:
+    let source_id = stream_source_id(s)
+    let let_tok = stream_expect(s, TokenKind.KwLet)?
+    let start = let_tok.span.start
+    let mutable = stream_peek_kind(s) == Option.Some(TokenKind.KwMut)
+    if mutable:
+        let _m = stream_advance(s)
+    // T71: destructuring dispatch.
+    let is_tuple_pat = stream_peek_kind(s) == Option.Some(TokenKind.LParen)
+    let is_struct_pat = is_struct_pat_shape(stream_peek_kind(s), stream_peek_second_kind(s))
+    if is_tuple_pat || is_struct_pat:
+        let pattern = expr_parse_pattern(s)?
+        // Optional type annotation `: Type`.
+        let ty = parse_opt_type_annotation(s)?
+        stream_expect(s, TokenKind.Assign)?
+        let value = expr_parse_expression(s)?
+        let end = expr_span(value).end
+        return Result.Ok(Stmt.LetPattern(pattern, value, mutable, ty, span_new(start, end, source_id)))
+    // Expect identifier.
+    let name_tok = opt_advance_or_err(s, "expected identifier after `let`, found end of input")?
+    let name = extract_ident(name_tok)?
+    // Optional type annotation `: Type`.
+    let ty = parse_opt_type_annotation(s)?
+    stream_expect(s, TokenKind.Assign)?
+    let value = expr_parse_expression(s)?
+    let end = expr_span(value).end
+    return Result.Ok(Stmt.LetDecl(name, value, mutable, ty, span_new(start, end, source_id)))
+
+// True when the (peek, second_peek) pair is `Ident {` — a struct-destructuring
+// let target (an Ident immediately followed by `{`).
+func is_struct_pat_shape(pk: Option<TokenKind>, sk: Option<TokenKind>) -> Bool:
+    // `Ident(_)` followed by `LBrace`. Buff has no `matches!` with wildcard
+    // payload, so test the shape via a helper that classifies the kind.
+    if sk != Option.Some(TokenKind.LBrace):
+        return false
+    return is_any_ident(pk)
+
+// True when the kind is some Ident (any name).
+func is_any_ident(pk: Option<TokenKind>) -> Bool:
+    let k = stream_unwrap_kind(pk)
+    return is_ident_kind(k)
+
+// Optional type annotation `: Type` → Option<TypeRef>. Returns Option.None
+// when the next token is not `:`.
+func parse_opt_type_annotation(s: TokenStream) -> Result<Option<TypeRef>, ParseError>:
+    if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
+        let _c = stream_advance(s)
+        let t = parse_type_ref(s)?
+        return Result.Ok(Option.Some(t))
+    return Result.Ok(Option.None)
+
+// `return [expr]`
+func parse_return(s: TokenStream) -> Result<Stmt, ParseError>:
+    let source_id = stream_source_id(s)
+    let ret_tok = stream_expect(s, TokenKind.KwReturn)?
+    let start = ret_tok.span.start
+    // No value if next is `}`, `;`, or EOF.
+    let pk = stream_peek_kind(s)
+    if pk == Option.None:
+        return Result.Ok(Stmt.Return(Option.None, ret_tok.span))
+    if pk == Option.Some(TokenKind.RBrace):
+        return Result.Ok(Stmt.Return(Option.None, ret_tok.span))
+    if pk == Option.Some(TokenKind.Semicolon):
+        return Result.Ok(Stmt.Return(Option.None, ret_tok.span))
+    let expr = expr_parse_expression(s)?
+    let span = span_new(start, expr_span(expr).end, source_id)
+    return Result.Ok(Stmt.Return(Option.Some(expr), span))
+
+// `for var in iter { body }` or `for cond { body }`. Disambiguation is via
+// two-token lookahead: `IDENT in` → iterator form, otherwise → conditional.
+func parse_for(s: TokenStream) -> Result<Stmt, ParseError>:
+    let source_id = stream_source_id(s)
+    let for_tok = stream_expect(s, TokenKind.KwFor)?
+    let start = for_tok.span.start
+    // T72: `for let PATTERN = EXPR { body }` — detect `let` right after `for`.
+    if stream_peek_kind(s) == Option.Some(TokenKind.KwLet):
+        return parse_for_let(s, start, source_id)
+    let is_iterator = is_iter_shape(stream_peek_kind(s), stream_peek_second_kind(s))
+    if is_iterator:
+        let var_tok = stream_advance_after_peek(s)
+        let var = extract_ident(var_tok)?
+        stream_expect(s, TokenKind.KwIn)?
+        let iter_expr = expr_parse_expression(s)?
+        let body = parse_block(s)?
+        let span = span_new(start, body.span.end, source_id)
+        return Result.Ok(Stmt.ForIn(var, iter_expr, body, span))
+    let cond = expr_parse_expression(s)?
+    let body = parse_block(s)?
+    let span = span_new(start, body.span.end, source_id)
+    return Result.Ok(Stmt.ForWhile(cond, body, span))
+
+// True when (peek, second_peek) is `Ident(_) in` (iterator-form for).
+func is_iter_shape(pk: Option<TokenKind>, sk: Option<TokenKind>) -> Bool:
+    if sk != Option.Some(TokenKind.KwIn):
+        return false
+    return is_any_ident(pk)
+
+// Parse the looping-binding form `for let PATTERN = EXPR { body }` (T72).
+// The leading `for` is already consumed; the cursor sits at `let`.
+func parse_for_let(s: TokenStream, start: Int, source_id: SourceId) -> Result<Stmt, ParseError>:
+    let _let_tok = stream_expect(s, TokenKind.KwLet)?
+    let pattern = expr_parse_pattern(s)?
+    stream_expect(s, TokenKind.Assign)?
+    let value = expr_parse_expression(s)?
+    let body = parse_block(s)?
+    let span = span_new(start, body.span.end, source_id)
+    return Result.Ok(Stmt.ForLet(pattern, value, body, span))
+
+// Parse an early-return guard: `guard <cond>[, <cond>...] else { block }` (T73).
+func parse_guard(s: TokenStream) -> Result<Stmt, ParseError>:
+    let source_id = stream_source_id(s)
+    let guard_tok = stream_expect(s, TokenKind.KwGuard)?
+    let start = guard_tok.span.start
+    let conditions = Vector.new()
+    for true:
+        // After the first condition, the next token must be `,` or `else`.
+        if conditions.len() > 0:
+            let pk = stream_peek_kind(s)
+            if pk == Option.Some(TokenKind.KwElse):
+                break
+            if pk == Option.Some(TokenKind.Comma):
+                let _c = stream_advance(s)
+                // Trailing comma: `guard a, else { ... }` is allowed.
+                if stream_peek_kind(s) == Option.Some(TokenKind.KwElse):
+                    break
+            // Neither `else` nor `comma-with-trailing-else` => error (other
+            // token or EOF). Expressed with negated conditions to avoid a
+            // dangling `else:` (which Buff's offside parser binds ambiguously
+            // after two sibling ifs).
+            if pk != Option.Some(TokenKind.KwElse):
+                if pk != Option.Some(TokenKind.Comma):
+                    if pk == Option.None:
+                        return Result.Err(err_with("unterminated guard (missing `else`)", stream_eof_span(s), ErrorCode.UnexpectedToken))
+                    let span = peek_span_or_eof(s)
+                    let found = peek_kind_display(s)
+                    return Result.Err(err_with("expected `,` or `else` in guard, found `" + found + "`", span, ErrorCode.UnexpectedToken))
+        // The next token starts a condition (or it's `else`/EOF → error).
+        let pk2 = stream_peek_kind(s)
+        if pk2 == Option.Some(TokenKind.KwElse):
+            let span = peek_span_or_eof(s)
+            return Result.Err(err_with("expected at least one condition after `guard`", span, ErrorCode.UnexpectedToken))
+        if pk2 == Option.None:
+            return Result.Err(err_with("unterminated guard (missing `else`)", stream_eof_span(s), ErrorCode.UnexpectedToken))
+        // Parse one condition: `let PATTERN = EXPR` or a BOOL expr.
+        let cond = parse_one_guard_condition(s, source_id)?
+        conditions.push(cond)
+    stream_expect(s, TokenKind.KwElse)?
+    let else_block = parse_block(s)?
+    let span = span_new(start, else_block.span.end, source_id)
+    return Result.Ok(Stmt.Guard(conditions, else_block, span))
+
+// Parse a single guard condition (let-binding or boolean). Helper for
+// parse_guard.
+func parse_one_guard_condition(s: TokenStream, source_id: SourceId) -> Result<GuardCondition, ParseError>:
+    if stream_peek_kind(s) == Option.Some(TokenKind.KwLet):
+        let let_tok = stream_expect(s, TokenKind.KwLet)?
+        let cond_start = let_tok.span.start
+        let pattern = expr_parse_pattern(s)?
+        stream_expect(s, TokenKind.Assign)?
+        let value = expr_parse_expression(s)?
+        let end = expr_span(value).end
+        return Result.Ok(GuardCondition.Let(pattern, value, span_new(cond_start, end, source_id)))
+    let expr = expr_parse_expression(s)?
+    return Result.Ok(GuardCondition.Bool(expr))
+
+// Parse a deferred-execution statement: `defer EXPR` (T100).
+func parse_defer(s: TokenStream) -> Result<Stmt, ParseError>:
+    let source_id = stream_source_id(s)
+    let defer_tok = stream_expect(s, TokenKind.KwDefer)?
+    let start = defer_tok.span.start
+    let expr = expr_parse_expression(s)?
+    let end = expr_span(expr).end
+    return Result.Ok(Stmt.Defer(expr, span_new(start, end, source_id)))
+
+// `comptime { body }` — a comptime-evaluated block (T53).
+func parse_comptime_block(s: TokenStream) -> Result<Stmt, ParseError>:
+    let source_id = stream_source_id(s)
+    let ct_tok = opt_advance_or_err(s, "expected `comptime`, found end of input")?
+    let start = ct_tok.span.start
+    let body = parse_block(s)?
+    let span = span_new(start, body.span.end, source_id)
+    return Result.Ok(Stmt.ComptimeBlock(body, span))
+
+// Either an assignment (`x = ..`, `x += ..`) or a bare expression statement.
+// The expression parser already folds `=`/`+=`/etc. into Expr.BinaryOp at the
+// assignment-precedence level; this unwraps assignment BinaryOps into
+// Stmt.Assignment.
+func parse_assignment_or_expr_stmt(s: TokenStream) -> Result<Stmt, ParseError>:
+    let expr = expr_parse_expression(s)?
+    let maybe = expr_as_binop(expr)
+    if maybe != Option.None:
+        let parts = unwrap_binop_parts(maybe)
+        if is_assignment_op(parts.op):
+            return Result.Ok(Stmt.Assignment(parts.lhs, parts.op, parts.rhs, parts.span))
+        // Non-assignment BinaryOp falls through to ExprStmt.
+        let rebuilt = Expr.BinaryOp(parts.op, parts.lhs, parts.rhs, parts.span)
+        return Result.Ok(Stmt.ExprStmt(rebuilt, parts.span))
+    let span = expr_span(expr)
+    return Result.Ok(Stmt.ExprStmt(expr, span))
+
+// Parse an `if` expression: `if cond BLOCK [else BLOCK | else if ...]`. Also
+// handles T74 let-chains (`if c1, c2 { }`) via fold_if_chain.
+func parse_if_expr(s: TokenStream) -> Result<Expr, ParseError>:
+    let source_id = stream_source_id(s)
+    let if_tok = stream_expect(s, TokenKind.KwIf)?
+    let start = if_tok.span.start
+    let conditions = Vector.new()
+    for true:
+        // After the first condition, expect `,` or stop at block/else.
+        if conditions.len() > 0:
+            let pk = stream_peek_kind(s)
+            if pk == Option.Some(TokenKind.Comma):
+                let _c = stream_advance(s)
+                // Trailing comma: `if a, { }` / `if a, else { }`.
+                let pk2 = stream_peek_kind(s)
+                if pk2 == Option.Some(TokenKind.LBrace):
+                    break
+                if pk2 == Option.Some(TokenKind.Colon):
+                    break
+                if pk2 == Option.Some(TokenKind.KwElse):
+                    break
+            // Not a comma => check then/else starter or error (negated
+            // condition replaces a dangling `else:`).
+            if pk != Option.Some(TokenKind.Comma):
+                if is_then_or_else(pk):
+                    break
+                let span = peek_span_or_eof(s)
+                let found = peek_kind_display(s)
+                return Result.Err(err_with("expected comma, brace-open, or else in if-chain, found `" + found + "`", span, ErrorCode.UnexpectedToken))
+        // Parse one condition.
+        let cond = parse_one_if_condition(s, source_id)?
+        conditions.push(cond)
+    // Then-block.
+    let then_block = parse_block(s)?
+    let mut end = then_block.span.end
+    // Optional else: `else BLOCK` or `else if ...` (chains).
+    let mut else_block = Option.None
+    if stream_peek_kind(s) == Option.Some(TokenKind.KwElse):
+        let _e = stream_advance(s)
+        let is_else_if = stream_peek_kind(s) == Option.Some(TokenKind.KwIf)
+        if is_else_if:
+            // `else if ...` — recurse. Wrap the nested if-expr in a single-
+            // statement block.
+            let nested = parse_if_expr(s)?
+            let nes = expr_span(nested)
+            end = nes.end
+            else_block = Option.Some(Block.new(stmts: [Stmt.ExprStmt(nested, nes)], span: nes))
+        if is_else_if == false:
+            let blk = parse_block(s)?
+            end = blk.span.end
+            else_block = Option.Some(blk)
+    return Result.Ok(fold_if_chain(conditions, then_block, else_block, start, end, source_id))
+
+// Parse one if-chain condition (`let PATTERN = EXPR` or boolean EXPR).
+func parse_one_if_condition(s: TokenStream, source_id: SourceId) -> Result<IfCondition, ParseError>:
+    if stream_peek_kind(s) == Option.Some(TokenKind.KwLet):
+        let let_tok = stream_expect(s, TokenKind.KwLet)?
+        let cond_start = let_tok.span.start
+        let pattern = expr_parse_pattern(s)?
+        stream_expect(s, TokenKind.Assign)?
+        let value = expr_parse_expression(s)?
+        let end = expr_span(value).end
+        return Result.Ok(IfCondition.Let(pattern, value, span_new(cond_start, end, source_id)))
+    let expr = expr_parse_expression(s)?
+    return Result.Ok(IfCondition.Bool(expr))
+
+// True when the peek kind is a then-block starter (`{` / `:`) or `else`.
+func is_then_or_else(pk: Option<TokenKind>) -> Bool:
+    if pk == Option.Some(TokenKind.LBrace):
+        return true
+    if pk == Option.Some(TokenKind.Colon):
+        return true
+    if pk == Option.Some(TokenKind.KwElse):
+        return true
+    return false
+
+// Fold a comma-separated list of if-conditions into a (possibly nested) chain
+// of single-condition Expr.IfLet / Expr.IfExpr (T74). The desugar nests from
+// the OUTER condition inward; when an else is present it is replicated at
+// every nesting level. A single condition produces a flat IfLet/IfExpr whose
+// shape is byte-identical to the pre-T74 form.
+func fold_if_chain(conditions: Vector<IfCondition>, then_block: Block, else_block: Option<Block>, start: Int, end: Int, source_id: SourceId) -> Expr:
+    // Peel the FIRST condition (outermost). Fold the remaining conditions
+    // (indices 1..) into the then-block, building from the INNERMOST outward.
+    let conds = conditions
+    let outermost = vec_remove_first(conds)
+    let inner_rev = vec_rev_range(conds, 1)
+    let mut body_block = then_block
+    let mut body_end = body_block.span.end
+    let mut j = 0
+    for j < inner_rev.len():
+        let cond = inner_rev[j]
+        let level_else = else_block
+        let cond_end = if_condition_end(cond)
+        let level_end = int_max(body_end, cond_end)
+        let expr = wrap_one_condition(cond, body_block, level_else, start, level_end, source_id)
+        let es = expr_span(expr)
+        body_block = Block.new(stmts: [Stmt.ExprStmt(expr, es)], span: es)
+        body_end = es.end
+        j = j + 1
+    // Build the outermost condition wrapping the folded body.
+    return wrap_one_condition(outermost, body_block, else_block, start, end, source_id)
+
+// Build a single Expr.IfLet / Expr.IfExpr from one IfCondition.
+func wrap_one_condition(cond: IfCondition, then_block: Block, else_block: Option<Block>, start: Int, end: Int, source_id: SourceId) -> Expr:
+    return match cond {
+        Let(pattern, value, _) => Expr.IfLet(pattern, value, then_block, else_block, span_new(start, end, source_id)),
+        Bool(e) => Expr.IfExpr(e, then_block, else_block, span_new(start, end, source_id)),
+    }
+
+// End byte offset of an IfCondition's span.
+func if_condition_end(cond: IfCondition) -> Int:
+    return match cond {
+        Let(_, _, span) => span.end,
+        Bool(e) => expr_span(e).end,
+    }
+
+// ---------------------------------------------------------------------------
+// Statement-inspection helpers (replace Rust `matches!` / `if let` on Stmt)
+// ---------------------------------------------------------------------------
+
+// True when stmt is a Stmt.LetDecl.
+func stmt_is_let_decl(stmt: Stmt) -> Bool:
+    return match stmt {
+        LetDecl(_, _, _, _, _) => true,
+        _ => false,
+    }
+
+// Unpack a Stmt.LetDecl into its (name, value, mutable, ty, span) parts.
+// Contract: stmt IS a LetDecl (caller checked via stmt_is_let_decl).
+struct LetDeclParts {
+    name: Ident,
+    value: Expr,
+    mutable: Bool,
+    ty: Option<TypeRef>,
+    span: Span,
+}
+
+func stmt_unpack_let_decl(stmt: Stmt) -> LetDeclParts:
+    return match stmt {
+        LetDecl(name, value, mutable, ty, span) => LetDeclParts.new(name: name, value: value, mutable: mutable, ty: ty, span: span),
+        _ => let_decl_parts_sentinel(),
+    }
+
+func let_decl_parts_sentinel() -> LetDeclParts:
+    return LetDeclParts.new(name: ident_new("", span_dummy()), value: expr_sentinel(), mutable: false, ty: Option.None, span: span_dummy())
+
+// End byte offset of a Stmt's span.
+func stmt_end(stmt: Stmt) -> Int:
+    return match stmt {
+        LetDecl(_, _, _, _, span) => span.end,
+        Assignment(_, _, _, span) => span.end,
+        ExprStmt(_, span) => span.end,
+        Return(_, span) => span.end,
+        Break(span) => span.end,
+        Continue(span) => span.end,
+        ForIn(_, _, _, span) => span.end,
+        ForWhile(_, _, span) => span.end,
+        LetPattern(_, _, _, _, span) => span.end,
+        ForLet(_, _, _, span) => span.end,
+        Guard(_, _, span) => span.end,
+        Defer(_, span) => span.end,
+        ComptimeBlock(_, span) => span.end,
+    }
+
+// ---------------------------------------------------------------------------
+// Expr-inspection helpers (replace Rust `if let Expr::..` / `.span()`)
+// ---------------------------------------------------------------------------
+
+// The Span carried by an Expr (mirrors Rust Expr::span()).
+func expr_span(e: Expr) -> Span:
+    return match e {
+        Literal(_, s) => s,
+        Ident(_, s) => s,
+        BinaryOp(_, _, _, s) => s,
+        UnaryOp(_, _, s) => s,
+        IfExpr(_, _, _, s) => s,
+        FuncCall(_, _, s) => s,
+        MethodCall(_, _, _, s) => s,
+        Lambda(_, _, _, s) => s,
+        StructInit(_, _, s) => s,
+        MatchExpr(_, _, s) => s,
+        SuspendExpr(_, s) => s,
+        ArrayLit(_, s) => s,
+        Index(_, _, s) => s,
+        StringInterp(_, s) => s,
+        MapLit(_, s) => s,
+        Try(_, s) => s,
+        Spawn(_, s) => s,
+        Range(_, _, _, s) => s,
+        IfLet(_, _, _, _, s) => s,
+        TupleLit(_, s) => s,
+        NamedArg(_, _, s) => s,
+    }
+
+// If e is an Expr.BinaryOp, return its unpacked parts; else Option.None.
+func expr_as_binop(e: Expr) -> Option<BinOpParts>:
+    return match e {
+        BinaryOp(op, lhs, rhs, span) => Option.Some(BinOpParts.new(op: op, lhs: lhs, rhs: rhs, span: span)),
+        _ => Option.None,
+    }
+
+func unwrap_binop_parts(opt: Option<BinOpParts>) -> BinOpParts:
+    return match opt {
+        Some(p) => p,
+        None => binop_sentinel(),
+    }
+
+func binop_sentinel() -> BinOpParts:
+    return BinOpParts.new(op: BinaryOp.Assign, lhs: expr_sentinel(), rhs: expr_sentinel(), span: span_dummy())
+
+// True when op is one of the six assignment operators.
+func is_assignment_op(op: BinaryOp) -> Bool:
+    if op == BinaryOp.Assign:
+        return true
+    if op == BinaryOp.AddAssign:
+        return true
+    if op == BinaryOp.SubAssign:
+        return true
+    if op == BinaryOp.MulAssign:
+        return true
+    if op == BinaryOp.DivAssign:
+        return true
+    if op == BinaryOp.ModAssign:
+        return true
+    return false
+
+// A zero-span sentinel Expr (only used on never-reached contract-violation
+// branches of the unpack helpers).
+func expr_sentinel() -> Expr:
+    return Expr.Literal(Literal.Int(0), span_dummy())
+
+// ---------------------------------------------------------------------------
+// Small shared helpers
+// ---------------------------------------------------------------------------
+
+// `stream.advance().ok_or_else(|| err)?` — advance, or return the given error
+// at the eof span when no token is present.
+func opt_advance_or_err(s: TokenStream, msg: String) -> Result<Token, ParseError>:
+    let opt = stream_advance(s)
+    if opt == Option.None:
+        return Result.Err(err_with(msg, stream_eof_span(s), ErrorCode.UnexpectedToken))
+    return Result.Ok(stream_unwrap(opt))
+
+// The span of the next significant token, or the eof span at end of input.
+func peek_span_or_eof(s: TokenStream) -> Span:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        return stream_eof_span(s)
+    return stream_unwrap(opt).span
+
+// Render the next peek kind for error messages (Rust's `k.to_string()` /
+// `"end of input"` fallback).
+func peek_kind_display(s: TokenStream) -> String:
+    let opt = stream_peek_kind(s)
+    if opt == Option.None:
+        return "end of input"
+    return token_kind_to_string(stream_unwrap_kind(opt))
+
+// Build a ParseError from (message, span, code). Mirrors Rust's
+// `ParseError::new(Diagnostic::error(msg, span).with_code(code))`.
+func err_with(msg: String, span: Span, code: ErrorCode) -> ParseError:
+    return parse_error_new(diagnostic_error(msg, span), code)
+
+// Unwrap an Option<String> (contract: Some). Returns "" on violation.
+func unwrap_opt_str(opt: Option<String>) -> String:
+    return match opt {
+        Some(s) => s,
+        None => "",
+    }
+
+// Maximum of two ints (Buff has no Ord method chaining in expressions).
+func int_max(a: Int, b: Int) -> Int:
+    if a > b:
+        return a
+    return b
+
+// Remove and return the first element of a vector (mirrors Vec::remove(0)).
+// The returned value is the element; the input vector is consumed.
+func vec_remove_first(v: Vector<IfCondition>) -> IfCondition:
+    if v.len() > 0:
+        return v[0]
+    return if_condition_sentinel()
+
+func if_condition_sentinel() -> IfCondition:
+    return IfCondition.Bool(expr_sentinel())
+
+// Return a reversed sub-range of `v` from index `start_idx` to the end,
+// reversed (innermost-first). Mirrors Rust `conds[1..].iter().rev().collect()`.
+func vec_rev_range(v: Vector<IfCondition>, start_idx: Int) -> Vector<IfCondition>:
+    let out = Vector.new()
+    let mut i = v.len() - 1
+    for i >= start_idx:
+        out.push(v[i])
+        i = i - 1
+    return out

@@ -891,6 +891,7 @@ mod tests {
                         )],
                         span: dummy(),
                     },
+                    guard: None,
                     body: Block {
                         stmts: vec![Stmt::Return(
                             Some(call_expr("g", vec![ident_expr("v")])),
@@ -902,6 +903,7 @@ mod tests {
                 },
                 buff_lang_ast::MatchArm {
                     pattern: buff_lang_ast::Pattern::Ident(Ident::new("None", dummy()), dummy()),
+                    guard: None,
                     body: Block {
                         stmts: vec![Stmt::Return(Some(call_expr("h", Vec::new())), dummy())],
                         span: dummy(),

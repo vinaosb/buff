@@ -498,11 +498,13 @@ fn error_handling_match_on_result_with_ok_err_arms() {
         arms: vec![
             MatchArm {
                 pattern: variant_pat("Ok", vec![ident_pat("v")]),
+                guard: None,
                 body: block(vec![Stmt::ExprStmt(ident_expr("v"), span())]),
                 span: span(),
             },
             MatchArm {
                 pattern: variant_pat("Err", vec![Pattern::Wildcard(span())]),
+                guard: None,
                 body: block(vec![Stmt::ExprStmt(int_expr(0), span())]),
                 span: span(),
             },

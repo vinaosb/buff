@@ -80,6 +80,20 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let mut arm_end;
     loop {
         let pat = parse_pattern(stream)?;
+        // T40: optional `if <cond>` pattern guard. After the pattern (and
+        // before the `=>`), a `if` keyword introduces a guard expression.
+        // The arm matches only when BOTH the pattern matches AND the guard
+        // evaluates to `true`. Buff's `if` is the reserved `KwIf` keyword, so
+        // there is no ambiguity with an identifier named `if`.
+        let guard = if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
+            stream.advance(); // consume `if`
+            let g = parse_expression(stream)?;
+            // Extend the arm's token-span start to include the guard so the
+            // span covers `Pattern if guard`.
+            Some(g)
+        } else {
+            None
+        };
         stream.expect(TokenKind::FatArrow)?;
         let body_expr = parse_expression(stream)?;
         // Wrap the body in a one-statement block (consistent with closures).
@@ -91,6 +105,7 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         };
         arms.push(MatchArm {
             pattern: pat,
+            guard,
             body,
             span: Span::new(arm_tok_span.start, arm_end, source_id),
         });

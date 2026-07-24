@@ -59,14 +59,10 @@ fn unit_enum_decl(name: &str, variants: &[&str]) -> EnumDecl {
 
 /// Build a `match` arm with the given pattern and an empty body.
 fn arm_with_pattern(pat: Pattern) -> MatchArm {
-    MatchArm {
-        pattern: pat,
-        body: Block {
-            stmts: Vec::new(),
-            span: span(),
-        },
+    MatchArm { pattern: pat, guard: None, body: Block {
+        stmts: Vec::new(),
         span: span(),
-    }
+    }, span: span() }
 }
 
 fn ident_pattern(name: &str) -> Pattern {

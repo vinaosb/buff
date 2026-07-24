@@ -98,6 +98,7 @@ fn snapshot_match_expr() {
             subpatterns: vec![Pattern::Ident(Ident::new("x", span()), span())],
             span: span(),
         },
+        guard: None,
         body: Block {
             stmts: vec![Stmt::ExprStmt(int_lit(1), span())],
             span: span(),

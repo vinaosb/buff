@@ -120,14 +120,10 @@ fn int_lit_pat(n: i64) -> Pattern {
 
 /// Build a match arm with a single-expression body.
 fn arm(pat: Pattern, body: Expr) -> MatchArm {
-    MatchArm {
-        pattern: pat,
-        body: Block {
-            stmts: vec![Stmt::ExprStmt(body, span())],
-            span: span(),
-        },
+    MatchArm { pattern: pat, guard: None, body: Block {
+        stmts: vec![Stmt::ExprStmt(body, span())],
         span: span(),
-    }
+    }, span: span() }
 }
 
 /// Generate Rust source from a single enum declaration.

@@ -195,11 +195,13 @@ fn match_on_option_with_some_binding_and_none_codegen() {
                     subpatterns: vec![Pattern::Ident(ident("x"), span())],
                     span: span(),
                 },
+                guard: None,
                 body: block(vec![Stmt::ExprStmt(ident_expr("x"), span())]),
                 span: span(),
             },
             MatchArm {
                 pattern: Pattern::Ident(ident("None"), span()),
+                guard: None,
                 body: block(vec![Stmt::ExprStmt(int_expr(0), span())]),
                 span: span(),
             },
