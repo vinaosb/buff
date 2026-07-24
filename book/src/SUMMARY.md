@@ -19,3 +19,7 @@
 - [7. Stdlib Reference](./chapter-7.md)
 - [8. Error Code Handbook](./chapter-8.md)
 - [9. Migration Guides](./chapter-9.md)
+
+# Real-World Examples
+
+- [10. Real-World Examples](./chapter-10.md)
