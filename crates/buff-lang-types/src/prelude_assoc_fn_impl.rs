@@ -868,6 +868,19 @@ pub enum PreludeAssocFn {
     /// .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
     /// Http-only.
     HttpPost,
+    /// `Http.put(url, body)` — perform a blocking PUT request with
+    /// a String body. Two args (String url, String body). Returns
+    /// `String` (the response body). Lowers to
+    /// `reqwest::blocking::Client::new().put(u).body(b).send()
+    /// .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+    /// Http-only.
+    HttpPut,
+    /// `Http.delete(url)` — perform a blocking DELETE request. One arg
+    /// (String url). Returns `String` (the response body). Lowers to
+    /// `reqwest::blocking::Client::new().delete(u).send()
+    /// .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+    /// Http-only.
+    HttpDelete,
     // ---- T26: Assert --------------------------------------------------
     /// `Assert.equal(a, b)` — assert two values are equal. Two args.
     /// Returns `Void`. Lowers to `assert_eq!(a, b)`. Assert-only.
@@ -1159,12 +1172,15 @@ impl PreludeAssocFn {
         PreludeAssocFn::Write,
         PreludeAssocFn::Exists,
         PreludeAssocFn::Append,
-        // T25: Http assoc fns (2 distinct names): http_get / http_post.
-        // All Http-only — dispatched on the (Http, HttpGet) / (Http, HttpPost)
+        // T25/T80: Http assoc fns (4 distinct names): http_get / http_post /
+        // http_put / http_delete. All Http-only — dispatched on the
+        // (Http, HttpGet) / (Http, HttpPost) / (Http, HttpPut) / (Http, HttpDelete)
         // pairs in `assoc_fn_return_type`. No other prelude type today
         // exposes these verbs.
         PreludeAssocFn::HttpGet,
         PreludeAssocFn::HttpPost,
+        PreludeAssocFn::HttpPut,
+        PreludeAssocFn::HttpDelete,
         // T26: Assert assoc fns (5 distinct names): assert_equal /
         // assert_not_equal / assert_true / assert_false / assert_contains.
         // All Assert-only — dispatched on the (Assert, AssertEqual) /
@@ -1499,6 +1515,9 @@ impl PreludeAssocFn {
             // variant (Args.get / Env.get).
             PreludeAssocFn::HttpGet => "get",
             PreludeAssocFn::HttpPost => "post",
+            // T80: Http.put / Http.delete — same pattern as get/post.
+            PreludeAssocFn::HttpPut => "put",
+            PreludeAssocFn::HttpDelete => "delete",
             // T26: Assert assoc fn names. `equal` / `not_equal` /
             // `true_` / `false_` / `contains` mirror the canonical
             // test-assertion surface. The enum variants are prefixed

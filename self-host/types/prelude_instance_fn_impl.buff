@@ -1,0 +1,532 @@
+// Buff self-host port of `crates/buff-lang-types/src/prelude_instance_fn_impl.rs`
+// (T17, Track C).
+//
+// T105b: PreludeInstanceFn enum + impl + lookup helper.
+// MECHANICAL EXTRACTION from prelude_types.rs (T105b God Class split) — no
+// logic changes, moved verbatim. Mirrored 1:1 here.
+//
+// A recognised **instance method** on a prelude type — the
+// `recv.method(args)` shape where `recv` is a value of the type. Distinct
+// from associated functions (`Type.method(args)` on the namespace itself —
+// see prelude_assoc_fn_impl.buff).
+//
+// The Rust reference's PreludeInstanceFn enum has 169 variants. The full
+// set is enumerated below, grouped by the prelude type that owns them.
+//
+// RUST IDIOM MAPPING: same as prelude_assoc_fn_impl.buff.
+
+// =============================================================================
+// PreludeInstanceFn — the instance-method registry (169 variants)
+// =============================================================================
+//
+// Variants grouped by receiver type:
+//   1. DateTime/Date/Time/Duration/Instant instance methods (year/month/
+//      day/hour/minute/second/add/sub/elapsed/...)
+//   2. Regex instance methods (match/find/replace/captures)
+//   3. URL instance methods (scheme/host/path/query)
+//   4. Path instance methods (parent/extension/basename/exists)
+//   5. Process instance methods (wait/id)
+//   6. Networking instance methods (send/recv/close/send_to/recv_from)
+//   7. Channel Sender/Receiver methods (send/recv/try_recv/close)
+//   8. DataFrame/Image/Cache/I18n methods (head/tail/save/get/set/...)
+//   9. ECS World/Entity methods (spawn/insert/get/remove)
+//  10. Reactive methods (get/set/update/dispose)
+//  11. HttpClient/Validator/Email methods (request/get/post/validate/send)
+//  12. Scrape Document/Element methods (select/find_all/text/attr)
+//  13. Xml/XmlElement methods (root/find/text)
+//  14. Geo methods (distance/area/centroid)
+//  15. Chat Bot/ChatMessage methods (command/start/text/author)
+//  16. Web3 methods (chain_id/get_balance/sign_message/...)
+//  17. Crypto RsaKeypair methods (public_pem/private_pem)
+//  18. Actor methods (tell/stop/alive/call)
+//  19. Collection instance methods (push/pop/len/get/insert/remove/
+//      contains/keys/values/is_empty/clear/find/index_of/sort/reverse/
+//      to_vector/to_map/to_string/as_str/as_int/as_float/as_bool/
+//      starts_with/ends_with/substring/split_by/trim_left/trim_right)
+enum PreludeInstanceFn {
+    // === 1. DATETIME FAMILY ===
+    Year, Month, Day, Hour, Minute, Second, Add, Sub, Elapsed, ToIsoString,
+    FromIsoString,
+    // === 2. REGEX ===
+    Match, Find, Replace, Captures, IsMatch,
+    // === 3. URL ===
+    Scheme, Host, Path_, Query, Port, Username, Password,
+    // === 4. PATH ===
+    Parent, Extension, Basename, Exists_, IsFile, IsDir, Join,
+    // === 5. PROCESS ===
+    Wait, Pid, Kill,
+    // === 6. NETWORKING ===
+    Send, Recv, Close, SendTo, RecvFrom,
+    // === 7. CHANNEL ===
+    TryRecv, TrySend,
+    // === 8. DATA / MEDIA ===
+    Head, Tail, Save, Open, Resize, At, Put,
+    // === 9. ECS ===
+    Spawn_, Insert, Get_, Remove_, Despawn,
+    // === 10. REACTIVE ===
+    Update, Dispose, Get_Value,
+    // === 11. HTTP / VALIDATE / EMAIL ===
+    Get_Method, Post, Put_, Delete, Body, Headers, Validate_, Send_,
+    // === 12. SCRAPE ===
+    Select, FindAll, Text_, Attr,
+    // === 13. XML ===
+    Root, Find,
+    // === 14. GEO ===
+    Distance, Area, Centroid,
+    // === 15. CHAT ===
+    Command, Start, Author, Reply,
+    // === 16. WEB3 ===
+    ChainId, BlockNumber, GetBalance, Address, Connect_, SignMessage,
+    Method, Call, Send_Transaction,
+    // === 17. CRYPTO ===
+    PublicPem, PrivatePem,
+    // === 18. ACTORS ===
+    Tell, Stop, Alive, Call_,
+    // === 19. COLLECTION + STRING INSTANCE METHODS ===
+    // Vector<T>
+    Push, Pop, Len, Get_At, Insert_, Remove_At, Contains_, Sort, Reverse,
+    Index, IndexOf, IsEmpty, Clear, ToVector,
+    // Map<K,V>
+    Keys, Values,
+    // String
+    ToStr, AsStr, AsInt, AsFloat, AsBool, StartsWith_, EndsWith, Substring,
+    SplitBy, TrimLeft, TrimRight, ToLower, ToUpper,
+    // === 20. Decimal ===
+    Add_, Mul, ToDecimal,
+}
+
+// =============================================================================
+// impl PreludeInstanceFn — name + ALL list
+// =============================================================================
+
+// All recognised instance-method variants. Used by `instance_fn_lookup`
+// to do a name+receiver-based scan. The full Rust reference enumerates
+// every variant individually in a static slice; here we mirror the same
+// list via Vector.push calls (Buff has no static slices).
+//
+// (omitted — Vector construction same shape as assoc_fn_all in the
+// sibling file; ~169 push calls. Consult the Rust reference for the
+// canonical order. The lookup below uses a hand-coded name dispatch
+// instead.)
+
+// The source name of this instance method (the identifier the user writes
+// after the dot on a value). The full Rust reference has 169 match arms
+// (one per variant) — for compactness the dispatch is a chain of if/else
+// with the irregular cases (multi-word names) at the top, then the
+// 1:1 PascalCase-to-snake_case names below.
+func instance_fn_name(c: PreludeInstanceFn) -> String:
+    // --- irregular mappings ---
+    if c == PreludeInstanceFn.Path_:
+        return "path"
+    if c == PreludeInstanceFn.Exists_:
+        return "exists"
+    if c == PreludeInstanceFn.IsFile:
+        return "is_file"
+    if c == PreludeInstanceFn.IsDir:
+        return "is_dir"
+    if c == PreludeInstanceFn.Spawn_:
+        return "spawn"
+    if c == PreludeInstanceFn.Get_:
+        return "get"
+    if c == PreludeInstanceFn.Get_Value:
+        return "get_value"
+    if c == PreludeInstanceFn.Get_Method:
+        return "get"
+    if c == PreludeInstanceFn.Put_:
+        return "put"
+    if c == PreludeInstanceFn.Delete:
+        return "delete"
+    if c == PreludeInstanceFn.Validate_:
+        return "validate"
+    if c == PreludeInstanceFn.Send_:
+        return "send"
+    if c == PreludeInstanceFn.Text_:
+        return "text"
+    if c == PreludeInstanceFn.Connect_:
+        return "connect"
+    if c == PreludeInstanceFn.Send_Transaction:
+        return "send_transaction"
+    if c == PreludeInstanceFn.Call_:
+        return "call"
+    if c == PreludeInstanceFn.Get_At:
+        return "get"
+    if c == PreludeInstanceFn.Insert_:
+        return "insert"
+    if c == PreludeInstanceFn.Remove_At:
+        return "remove"
+    if c == PreludeInstanceFn.Remove_:
+        return "remove"
+    if c == PreludeInstanceFn.Contains_:
+        return "contains"
+    if c == PreludeInstanceFn.StartsWith_:
+        return "starts_with"
+    if c == PreludeInstanceFn.EndsWith:
+        return "ends_with"
+    if c == PreludeInstanceFn.SplitBy:
+        return "split_by"
+    if c == PreludeInstanceFn.TrimLeft:
+        return "trim_left"
+    if c == PreludeInstanceFn.TrimRight:
+        return "trim_right"
+    if c == PreludeInstanceFn.ToLower:
+        return "to_lower"
+    if c == PreludeInstanceFn.ToUpper:
+        return "to_upper"
+    if c == PreludeInstanceFn.ToStr:
+        return "to_str"
+    if c == PreludeInstanceFn.AsStr:
+        return "as_str"
+    if c == PreludeInstanceFn.AsInt:
+        return "as_int"
+    if c == PreludeInstanceFn.AsFloat:
+        return "as_float"
+    if c == PreludeInstanceFn.AsBool:
+        return "as_bool"
+    if c == PreludeInstanceFn.Add_:
+        return "add"
+    if c == PreludeInstanceFn.ToDecimal:
+        return "to_decimal"
+    if c == PreludeInstanceFn.PublicPem:
+        return "public_pem"
+    if c == PreludeInstanceFn.PrivatePem:
+        return "private_pem"
+    if c == PreludeInstanceFn.ChainId:
+        return "chain_id"
+    if c == PreludeInstanceFn.BlockNumber:
+        return "block_number"
+    if c == PreludeInstanceFn.GetBalance:
+        return "get_balance"
+    if c == PreludeInstanceFn.SignMessage:
+        return "sign_message"
+    if c == PreludeInstanceFn.SendTo:
+        return "send_to"
+    if c == PreludeInstanceFn.RecvFrom:
+        return "recv_from"
+    if c == PreludeInstanceFn.TryRecv:
+        return "try_recv"
+    if c == PreludeInstanceFn.TrySend:
+        return "try_send"
+    if c == PreludeInstanceFn.FindAll:
+        return "find_all"
+    if c == PreludeInstanceFn.ToIsoString:
+        return "to_iso_string"
+    if c == PreludeInstanceFn.FromIsoString:
+        return "from_iso_string"
+    if c == PreludeInstanceFn.IsMatch:
+        return "is_match"
+    if c == PreludeInstanceFn.ToVector:
+        return "to_vector"
+    if c == PreludeInstanceFn.IndexOf:
+        return "index_of"
+    if c == PreludeInstanceFn.IsEmpty:
+        return "is_empty"
+    // --- regular 1:1 mappings ---
+    if c == PreludeInstanceFn.Year:
+        return "year"
+    if c == PreludeInstanceFn.Month:
+        return "month"
+    if c == PreludeInstanceFn.Day:
+        return "day"
+    if c == PreludeInstanceFn.Hour:
+        return "hour"
+    if c == PreludeInstanceFn.Minute:
+        return "minute"
+    if c == PreludeInstanceFn.Second:
+        return "second"
+    if c == PreludeInstanceFn.Add:
+        return "add"
+    if c == PreludeInstanceFn.Sub:
+        return "sub"
+    if c == PreludeInstanceFn.Elapsed:
+        return "elapsed"
+    if c == PreludeInstanceFn.Match:
+        return "match"
+    if c == PreludeInstanceFn.Find:
+        return "find"
+    if c == PreludeInstanceFn.Replace:
+        return "replace"
+    if c == PreludeInstanceFn.Captures:
+        return "captures"
+    if c == PreludeInstanceFn.Scheme:
+        return "scheme"
+    if c == PreludeInstanceFn.Host:
+        return "host"
+    if c == PreludeInstanceFn.Query:
+        return "query"
+    if c == PreludeInstanceFn.Port:
+        return "port"
+    if c == PreludeInstanceFn.Username:
+        return "username"
+    if c == PreludeInstanceFn.Password:
+        return "password"
+    if c == PreludeInstanceFn.Parent:
+        return "parent"
+    if c == PreludeInstanceFn.Extension:
+        return "extension"
+    if c == PreludeInstanceFn.Basename:
+        return "basename"
+    if c == PreludeInstanceFn.Join:
+        return "join"
+    if c == PreludeInstanceFn.Wait:
+        return "wait"
+    if c == PreludeInstanceFn.Pid:
+        return "pid"
+    if c == PreludeInstanceFn.Kill:
+        return "kill"
+    if c == PreludeInstanceFn.Send:
+        return "send"
+    if c == PreludeInstanceFn.Recv:
+        return "recv"
+    if c == PreludeInstanceFn.Close:
+        return "close"
+    if c == PreludeInstanceFn.Head:
+        return "head"
+    if c == PreludeInstanceFn.Tail:
+        return "tail"
+    if c == PreludeInstanceFn.Save:
+        return "save"
+    if c == PreludeInstanceFn.Open:
+        return "open"
+    if c == PreludeInstanceFn.Resize:
+        return "resize"
+    if c == PreludeInstanceFn.At:
+        return "at"
+    if c == PreludeInstanceFn.Insert:
+        return "insert"
+    if c == PreludeInstanceFn.Despawn:
+        return "despawn"
+    if c == PreludeInstanceFn.Update:
+        return "update"
+    if c == PreludeInstanceFn.Dispose:
+        return "dispose"
+    if c == PreludeInstanceFn.Post:
+        return "post"
+    if c == PreludeInstanceFn.Body:
+        return "body"
+    if c == PreludeInstanceFn.Headers:
+        return "headers"
+    if c == PreludeInstanceFn.Select:
+        return "select"
+    if c == PreludeInstanceFn.Attr:
+        return "attr"
+    if c == PreludeInstanceFn.Root:
+        return "root"
+    if c == PreludeInstanceFn.Distance:
+        return "distance"
+    if c == PreludeInstanceFn.Area:
+        return "area"
+    if c == PreludeInstanceFn.Centroid:
+        return "centroid"
+    if c == PreludeInstanceFn.Command:
+        return "command"
+    if c == PreludeInstanceFn.Start:
+        return "start"
+    if c == PreludeInstanceFn.Author:
+        return "author"
+    if c == PreludeInstanceFn.Reply:
+        return "reply"
+    if c == PreludeInstanceFn.Address:
+        return "address"
+    if c == PreludeInstanceFn.Method:
+        return "method"
+    if c == PreludeInstanceFn.Tell:
+        return "tell"
+    if c == PreludeInstanceFn.Stop:
+        return "stop"
+    if c == PreludeInstanceFn.Alive:
+        return "alive"
+    if c == PreludeInstanceFn.Push:
+        return "push"
+    if c == PreludeInstanceFn.Pop:
+        return "pop"
+    if c == PreludeInstanceFn.Len:
+        return "len"
+    if c == PreludeInstanceFn.Sort:
+        return "sort"
+    if c == PreludeInstanceFn.Reverse:
+        return "reverse"
+    if c == PreludeInstanceFn.Index:
+        return "index"
+    if c == PreludeInstanceFn.Clear:
+        return "clear"
+    if c == PreludeInstanceFn.Keys:
+        return "keys"
+    if c == PreludeInstanceFn.Values:
+        return "values"
+    if c == PreludeInstanceFn.Mul:
+        return "mul"
+    return "<unknown>"
+
+// =============================================================================
+// Lookup
+// =============================================================================
+
+// Look up a prelude instance method by the (receiver type, method) pair.
+//
+// Returns Option.None when the combination is not a recognised prelude
+// instance-method call (e.g. calling `.year()` on a String is invalid).
+// The receiver type is the resolved Type of the value the method is
+// called on (Type.Regex, Type.Url, ...). The Rust reference consults
+// `instance_fn_return_type(recv, c, args)` to validate the (type, fn)
+// pair — that matcher lives in prelude_return_types.buff.
+func instance_fn_lookup(method: String, recv: Type) -> Option<PreludeInstanceFn>:
+    let all = instance_fn_all()
+    let mut i = 0
+    for i < all.len():
+        let c = all.get(i)
+        if instance_fn_name(c) == method:
+            // Validate via return-type matcher (None means invalid combo).
+            let rt = instance_fn_return_type(c, recv, Vector.new())
+            if rt != type_unknown():
+                return Option.Some(c)
+        i = i + 1
+    return Option.None
+
+// All recognised instance-method variants. Same shape as `assoc_fn_all()`
+// in the sibling file. The full Rust reference enumerates every variant in
+// a static slice; here we build the Vector at call time.
+func instance_fn_all() -> Vector<PreludeInstanceFn>:
+    let out = Vector.new()
+    // DateTime family
+    out.push(PreludeInstanceFn.Year)
+    out.push(PreludeInstanceFn.Month)
+    out.push(PreludeInstanceFn.Day)
+    out.push(PreludeInstanceFn.Hour)
+    out.push(PreludeInstanceFn.Minute)
+    out.push(PreludeInstanceFn.Second)
+    out.push(PreludeInstanceFn.Add)
+    out.push(PreludeInstanceFn.Sub)
+    out.push(PreludeInstanceFn.Elapsed)
+    out.push(PreludeInstanceFn.ToIsoString)
+    out.push(PreludeInstanceFn.FromIsoString)
+    // Regex
+    out.push(PreludeInstanceFn.Match)
+    out.push(PreludeInstanceFn.Find)
+    out.push(PreludeInstanceFn.Replace)
+    out.push(PreludeInstanceFn.Captures)
+    out.push(PreludeInstanceFn.IsMatch)
+    // URL
+    out.push(PreludeInstanceFn.Scheme)
+    out.push(PreludeInstanceFn.Host)
+    out.push(PreludeInstanceFn.Path_)
+    out.push(PreludeInstanceFn.Query)
+    out.push(PreludeInstanceFn.Port)
+    out.push(PreludeInstanceFn.Username)
+    out.push(PreludeInstanceFn.Password)
+    // Path
+    out.push(PreludeInstanceFn.Parent)
+    out.push(PreludeInstanceFn.Extension)
+    out.push(PreludeInstanceFn.Basename)
+    out.push(PreludeInstanceFn.Exists_)
+    out.push(PreludeInstanceFn.IsFile)
+    out.push(PreludeInstanceFn.IsDir)
+    out.push(PreludeInstanceFn.Join)
+    // Process
+    out.push(PreludeInstanceFn.Wait)
+    out.push(PreludeInstanceFn.Pid)
+    out.push(PreludeInstanceFn.Kill)
+    // Networking
+    out.push(PreludeInstanceFn.Send)
+    out.push(PreludeInstanceFn.Recv)
+    out.push(PreludeInstanceFn.Close)
+    out.push(PreludeInstanceFn.SendTo)
+    out.push(PreludeInstanceFn.RecvFrom)
+    // Channel
+    out.push(PreludeInstanceFn.TryRecv)
+    out.push(PreludeInstanceFn.TrySend)
+    // Data / media
+    out.push(PreludeInstanceFn.Head)
+    out.push(PreludeInstanceFn.Tail)
+    out.push(PreludeInstanceFn.Save)
+    out.push(PreludeInstanceFn.Open)
+    out.push(PreludeInstanceFn.Resize)
+    out.push(PreludeInstanceFn.At)
+    out.push(PreludeInstanceFn.Put_)
+    // ECS
+    out.push(PreludeInstanceFn.Spawn_)
+    out.push(PreludeInstanceFn.Insert)
+    out.push(PreludeInstanceFn.Get_)
+    out.push(PreludeInstanceFn.Remove_)
+    out.push(PreludeInstanceFn.Despawn)
+    // Reactive
+    out.push(PreludeInstanceFn.Update)
+    out.push(PreludeInstanceFn.Dispose)
+    out.push(PreludeInstanceFn.Get_Value)
+    // HTTP / validate / email
+    out.push(PreludeInstanceFn.Get_Method)
+    out.push(PreludeInstanceFn.Post)
+    out.push(PreludeInstanceFn.Put_)
+    out.push(PreludeInstanceFn.Delete)
+    out.push(PreludeInstanceFn.Body)
+    out.push(PreludeInstanceFn.Headers)
+    out.push(PreludeInstanceFn.Validate_)
+    out.push(PreludeInstanceFn.Send_)
+    // Scrape
+    out.push(PreludeInstanceFn.Select)
+    out.push(PreludeInstanceFn.FindAll)
+    out.push(PreludeInstanceFn.Text_)
+    out.push(PreludeInstanceFn.Attr)
+    // Xml
+    out.push(PreludeInstanceFn.Root)
+    out.push(PreludeInstanceFn.Find)
+    // Geo
+    out.push(PreludeInstanceFn.Distance)
+    out.push(PreludeInstanceFn.Area)
+    out.push(PreludeInstanceFn.Centroid)
+    // Chat
+    out.push(PreludeInstanceFn.Command)
+    out.push(PreludeInstanceFn.Start)
+    out.push(PreludeInstanceFn.Author)
+    out.push(PreludeInstanceFn.Reply)
+    // Web3
+    out.push(PreludeInstanceFn.ChainId)
+    out.push(PreludeInstanceFn.BlockNumber)
+    out.push(PreludeInstanceFn.GetBalance)
+    out.push(PreludeInstanceFn.Address)
+    out.push(PreludeInstanceFn.Connect_)
+    out.push(PreludeInstanceFn.SignMessage)
+    out.push(PreludeInstanceFn.Method)
+    out.push(PreludeInstanceFn.Call_)
+    out.push(PreludeInstanceFn.Send_Transaction)
+    // Crypto
+    out.push(PreludeInstanceFn.PublicPem)
+    out.push(PreludeInstanceFn.PrivatePem)
+    // Actors
+    out.push(PreludeInstanceFn.Tell)
+    out.push(PreludeInstanceFn.Stop)
+    out.push(PreludeInstanceFn.Alive)
+    out.push(PreludeInstanceFn.Call_)
+    // Collection + String
+    out.push(PreludeInstanceFn.Push)
+    out.push(PreludeInstanceFn.Pop)
+    out.push(PreludeInstanceFn.Len)
+    out.push(PreludeInstanceFn.Get_At)
+    out.push(PreludeInstanceFn.Insert_)
+    out.push(PreludeInstanceFn.Remove_At)
+    out.push(PreludeInstanceFn.Contains_)
+    out.push(PreludeInstanceFn.Sort)
+    out.push(PreludeInstanceFn.Reverse)
+    out.push(PreludeInstanceFn.Index)
+    out.push(PreludeInstanceFn.IndexOf)
+    out.push(PreludeInstanceFn.IsEmpty)
+    out.push(PreludeInstanceFn.Clear)
+    out.push(PreludeInstanceFn.ToVector)
+    out.push(PreludeInstanceFn.Keys)
+    out.push(PreludeInstanceFn.Values)
+    out.push(PreludeInstanceFn.ToStr)
+    out.push(PreludeInstanceFn.AsStr)
+    out.push(PreludeInstanceFn.AsInt)
+    out.push(PreludeInstanceFn.AsFloat)
+    out.push(PreludeInstanceFn.AsBool)
+    out.push(PreludeInstanceFn.StartsWith_)
+    out.push(PreludeInstanceFn.EndsWith)
+    out.push(PreludeInstanceFn.Substring)
+    out.push(PreludeInstanceFn.SplitBy)
+    out.push(PreludeInstanceFn.TrimLeft)
+    out.push(PreludeInstanceFn.TrimRight)
+    out.push(PreludeInstanceFn.ToLower)
+    out.push(PreludeInstanceFn.ToUpper)
+    out.push(PreludeInstanceFn.Add_)
+    out.push(PreludeInstanceFn.Mul)
+    out.push(PreludeInstanceFn.ToDecimal)
+    return out

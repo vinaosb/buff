@@ -772,21 +772,26 @@ pub fn assoc_fn_return_type(
         // .and_then(|mut f| std::io::Write::write_all(&mut f, c.as_bytes()))
         // .unwrap_or_default()`.
         (PreludeType::File, PreludeAssocFn::Append) => Some(Type::Void),
-        // T25: Http assoc fns. Http is namespace-only (returns Void
-        // for the type itself). Both assoc fns return String (the
-        // response body). The codegen lowers to reqwest::blocking::*
-        // with `.unwrap_or_default()` so the Buff surface is always
-        // infallible — NEVER panics, matching Buff's "no panicking
-        // generated code" rule.
+        // T25/T80: Http assoc fns. Http is namespace-only (returns Void
+        // for the type itself). All four assoc fns return `(Int, String)`
+        // — a tuple of (status_code, body_text) so the caller can inspect
+        // the response via instance methods. The codegen lowers to
+        // reqwest::blocking::* with `.unwrap_or_default()` so the Buff
+        // surface is always infallible — NEVER panics, matching Buff's
+        // "no panicking generated code" rule.
         //
-        // `Http.get(url)` -> String. Wraps
-        // `reqwest::blocking::get(u).map(|r| r.text().unwrap_or_default())
+        // `Http.get(url)` -> (Int, String). Wraps
+        // `reqwest::blocking::get(u).map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
         // .unwrap_or_default()`.
-        (PreludeType::Http, PreludeAssocFn::HttpGet) => Some(Type::string()),
-        // `Http.post(url, body)` -> String. Wraps
+        (PreludeType::Http, PreludeAssocFn::HttpGet) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        // `Http.post(url, body)` -> (Int, String). Wraps
         // `reqwest::blocking::Client::new().post(u).body(b).send()
-        // .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
-        (PreludeType::Http, PreludeAssocFn::HttpPost) => Some(Type::string()),
+        // .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default())).unwrap_or_default()`.
+        (PreludeType::Http, PreludeAssocFn::HttpPost) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        // T80: `Http.put(url, body)` -> (Int, String).
+        (PreludeType::Http, PreludeAssocFn::HttpPut) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        // T80: `Http.delete(url)` -> (Int, String).
+        (PreludeType::Http, PreludeAssocFn::HttpDelete) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
         // T26: Assert assoc fns. Assert is namespace-only (returns Void
         // for the type itself). All five assoc fns return Void (they
         // panic on failure — test-only). The codegen lowers to Rust's

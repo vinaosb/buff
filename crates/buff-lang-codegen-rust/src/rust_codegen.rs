@@ -3897,29 +3897,30 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("File.append codegen parse: {e}")))
             }
-            // T25: Http assoc fns. Http is namespace-only (mirrors
-            // File / Log / Toml / Math). Both fns lower to
+            // T25/T80: Http assoc fns. Http is namespace-only (mirrors
+            // File / Log / Toml / Math). All four fns lower to
             // reqwest::blocking::* with `.unwrap_or_default()` so the
             // Buff surface is always infallible — NEVER panics.
+            // Returns `(i64, String)` — (status_code, body_text).
             // Records `reqwest` in extern_crates.
             //
-            // `Http.get(url)` -> String. Wraps
-            // `reqwest::blocking::get(u).map(|r| r.text().unwrap_or_default())
+            // `Http.get(url)` -> (Int, String). Wraps
+            // `reqwest::blocking::get(u).map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
             // .unwrap_or_default()`.
             (T::Http, A::HttpGet) => {
                 let arg = one_arg(self)?;
                 let arg = coerce_str_arg_to_ref(arg, &args[0]);
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     reqwest::blocking::get(#arg)
-                        .map(|r| r.text().unwrap_or_default())
+                        .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
                         .unwrap_or_default()
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Http.get codegen parse: {e}")))
             }
-            // `Http.post(url, body)` -> String. Wraps
+            // `Http.post(url, body)` -> (Int, String). Wraps
             // `reqwest::blocking::Client::new().post(u).body(b).send()
-            // .map(|r| r.text().unwrap_or_default()).unwrap_or_default()`.
+            // .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default())).unwrap_or_default()`.
             (T::Http, A::HttpPost) => {
                 let url_arg = self.lower_expr(&args[0])?;
                 let url_arg = coerce_str_arg_to_ref(url_arg, &args[0]);
@@ -3930,11 +3931,46 @@ impl RustCodegen {
                         .post(#url_arg)
                         .body(#body_arg.to_string())
                         .send()
-                        .map(|r| r.text().unwrap_or_default())
+                        .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
                         .unwrap_or_default()
                 };
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Http.post codegen parse: {e}")))
+            }
+            // T80: `Http.put(url, body)` -> (Int, String). Wraps
+            // `reqwest::blocking::Client::new().put(u).body(b).send()
+            // .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default())).unwrap_or_default()`.
+            (T::Http, A::HttpPut) => {
+                let url_arg = self.lower_expr(&args[0])?;
+                let url_arg = coerce_str_arg_to_ref(url_arg, &args[0]);
+                let body_arg = self.lower_expr(&args[1])?;
+                let body_arg = coerce_str_arg_to_ref(body_arg, &args[1]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    reqwest::blocking::Client::new()
+                        .put(#url_arg)
+                        .body(#body_arg.to_string())
+                        .send()
+                        .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Http.put codegen parse: {e}")))
+            }
+            // T80: `Http.delete(url)` -> (Int, String). Wraps
+            // `reqwest::blocking::Client::new().delete(u).send()
+            // .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default())).unwrap_or_default()`.
+            (T::Http, A::HttpDelete) => {
+                let arg = one_arg(self)?;
+                let arg = coerce_str_arg_to_ref(arg, &args[0]);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    reqwest::blocking::Client::new()
+                        .delete(#arg)
+                        .send()
+                        .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
+                        .unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Http.delete codegen parse: {e}")))
             }
             // T26: Assert assoc fns. Assert is namespace-only (mirrors
             // File / Http / Log / Toml / Math). All five fns lower to
