@@ -89,6 +89,7 @@ mod error;
 mod handlers;
 mod quality;
 mod storage;
+mod storage_sqlite;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -102,6 +103,7 @@ pub use storage::{
     DepSpec, InMemoryStorage, PackageMetadata, PackageSummary, PublishRequest, PublishResponse,
     QualityAttachment, ResolveResponse, Storage, StorageResult, VersionInfo,
 };
+pub use storage_sqlite::SqliteStorage;
 
 /// The default bind address when `BUFF_REGISTRY_ADDR` is unset.
 ///

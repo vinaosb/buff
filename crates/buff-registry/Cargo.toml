@@ -20,18 +20,32 @@ path = "src/lib.rs"
 # `axum::serve` consumes). `semver` parses and matches Cargo-compatible
 # version requirements. `base64` round-trips tarball bytes in the JSON
 # publish envelope (pure-Rust, no native deps).
+# T57: `rusqlite` (bundled) adds SQLite persistence; `tower-http` adds
+# CORS + tracing middleware; `axum-extra` adds typed headers + cookies
+# for the OAuth session flow; `rand` generates session tokens; `reqwest`
+# (rustls, already pinned for T127 CLI) calls the GitHub OAuth + API
+# endpoints; `uuid` generates session IDs.
 axum.workspace = true
 tower.workspace = true
+tower-http.workspace = true
+axum-extra.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 base64.workspace = true
+rusqlite.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 # T126: integration tests drive the axum `Router` in-process via
 # `tower::ServiceExt::oneshot`. The `tokio` workspace pin already
 # enables the `macros` + `rt-multi-thread` features (`full`), so the
 # `#[tokio::test]` macro is available without further feature flags.
+# T57: `tempfile` for SQLite roundtrip tests (unique temp DB path per
+# test, auto-cleaned on drop).
 tokio.workspace = true
+tempfile.workspace = true

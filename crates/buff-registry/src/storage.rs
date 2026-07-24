@@ -238,6 +238,7 @@ pub trait Storage: Send + Sync {
     /// publish time (unix seconds, set by the handler); `quality`
     /// carries the publisher's optional coverage / doc / audit
     /// attachments.
+    #[allow(clippy::too_many_arguments)]
     fn put_version(
         &self,
         name: &str,

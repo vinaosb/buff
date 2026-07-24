@@ -425,7 +425,7 @@ dirs = "5"
 # base64-encoded string inside a JSON envelope — pure Rust, no native
 # deps, matches the "no C library, no Docker" hard rule from the T126
 # task spec.
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
 tower = "0.5"
 semver = "1"
 # T126: `buff-registry` workspace path dep — mirrors the buff-eval /
@@ -1963,6 +1963,42 @@ buff-actors = { path = "crates/buff-actors" }
 # plus `buff-lang-ast` (for `&[Decl]` AST-shaped lint inputs) +
 # `buff-lang-error` (for `Span` re-use in `LintWarning`).
 buff-plugins = { path = "crates/buff-plugins" }
+
+# T57: Production registry upgrade (`crates/buff-registry`). Three new
+# top-level crates promote the in-memory MVP (T126) to production-ready
+# with SQLite persistence + GitHub OAuth + scoped packages + invite-only
+# beta + tarball storage. All three are pure-Rust (no Postgres/libpq, no
+# Docker, no OpenSSL) — matches the "no C library, no Docker" hard rule.
+#
+# - `rusqlite` 0.32: the canonical Rust SQLite binding. We enable the
+#   `bundled` feature so libsqlite3-sys compiles the SQLite amalgamation
+#   (self-contained C89 source) IN-CRATE via cc-rs — NO system-installed
+#   SQLite library required, NO external service, NO Docker. This is the
+#   same family of "bundled C amalgamation" that the `sqlx` 0.8 `sqlite`
+#   feature (line 1048, buff-db T18) already uses in this workspace.
+#   SQLite is a single-file embedded database (zero-config, zero-admin)
+#   that is the natural persistence choice for a package registry MVP.
+#   The `bundled` feature compiles cleanly on all 3 CI OSes (the SQLite
+#   amalgamation is portable C89 — it does not need excpt.h or any
+#   Windows SDK header beyond what MSVC ships by default, unlike the
+#   stacker C shim that forced hand-rolling the lexer/parser). API
+#   surface used: `Connection::open(path)`, `conn.execute(sql, params!)`,
+#   `conn.prepare(sql)?.query_map(params, row_fn)`, transactions via
+#   `conn.transaction()`. Pinned to major 0.32 (the long-standing surface
+#   since 2024 — stable `params!` macro + `Connection::transaction` API).
+#
+# - `tower-http` 0.6: the canonical HTTP middleware layer for axum/tower
+#   apps. We use `CorsLayer` (T57 cross-origin for the registry web UI)
+#   and `TraceLayer` (request logging). Pinned to 0.6 (matched to axum
+#   0.8 + tower 0.5). Pure-Rust, no native deps.
+#
+# - `axum-extra` 0.10: typed extractors + response types for axum 0.8.
+#   We use `TypedHeader` (for Cookie / Authorization typed headers in the
+#   OAuth flow) + `Cookie` / `PrivateCookieJar` (for session cookies).
+#   Pinned to 0.10 (the version matched to axum 0.8). Pure-Rust.
+rusqlite = { version = "0.32", features = ["bundled"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
 
 # T60: Binary Size Minimization profile.
 #

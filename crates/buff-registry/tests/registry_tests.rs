@@ -431,6 +431,8 @@ async fn typed_publish_request_round_trips_through_http() {
         version: "1.2.3".to_string(),
         deps: vec![],
         tarball_b64: base64::engine::general_purpose::STANDARD.encode([0xAA, 0xBB]),
+        tested_coverage: None,
+        documented_coverage: None,
     };
     let body_bytes = serde_json::to_vec(&typed).expect("serialize");
     let request = Request::builder()
