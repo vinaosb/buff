@@ -44,6 +44,10 @@ pub mod prelude;
 // short path. This is the GENERAL, extensible mechanism every future v1.4
 // stdlib task (Regex, Math, URL, Hash, ...) extends.
 pub mod prelude_types;
+// T105b: impl PreludeType metadata extracted from prelude_types.rs
+// (God Class split). Re-exported via prelude_types so the public API
+// is unchanged.
+pub mod prelude_type_metadata;
 // T1: project-level parse entry point + span-aware error formatting.
 pub mod project;
 // T1: cross-file symbol resolution table.
