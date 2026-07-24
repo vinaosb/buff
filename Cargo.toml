@@ -182,7 +182,7 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # encoding/uuid/url codegen-only linking boundary (single-file `buff
 # run` rustc path does NOT link them; cargo-project wiring is
 # deferred). Snapshots + extern_crates set is the verifiable contract.
-serde_yml = "0.0.12"
+serde_yml = "=0.0.12"
 csv = "1"
 # T124j: Filesystem modules (Path / Dir / Tempfile) wrap two mature
 # Rust crates + std::path / std::fs. Each codegen-lowered call uses
