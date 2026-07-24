@@ -1,20 +1,27 @@
-// exhaustive_matching.buff - v1.26 real-use-case (T15 batch 5).
+// exhaustive_matching.buff — T15 use-case batch 5.
+// Check: `buff check examples/use-cases/exhaustive_matching.buff`
 //
-// Pattern matching at scale: a 12-variant HTTP status enum + a data-carrying
-// geometry enum, matched exhaustively with or-patterns, guards, destructuring,
-// and catch-all. Exercises:
-//   - large enums (12+ variants) and exhaustive coverage checking
-//   - or-patterns grouping arms (`A | B`)
-//   - match guards (`Variant(x) if x > 0`)
-//   - positional struct/enum destructuring (`Rect(w, h)`)
-//   - catch-all `_` arm
+// Pattern matching at scale: a 12-variant HTTP-status enum + a data-carrying
+// geometry enum, matched exhaustively with or-patterns, guards,
+// destructuring, and catch-all. Exercises: large enums, exhaustive coverage,
+// or-patterns, match guards, positional destructuring, wildcard.
 //
-// Status: PURE BUFF. Match exhaustiveness checker (T27) and parser exercised
-// via `buff check`. Some arm forms may be parse-only — see BUGS-FOUND.md.
+// SYNTAX (verified against `buff check` lex/parse/typecheck):
+//  - Match arms use UNQUALIFIED variant names (`Ok`, not `HttpStatus.Ok`).
+//    A qualified name in an arm is E11xx "expected `=>`, found `.`".
+//  - Arm bodies are EXPRESSIONS only — `return`/`let`/`if` are NOT accepted
+//    directly in an arm (E11xx "expected an expression, found `return`"). To
+//    return a value from a function via a match, use match-as-expression:
+//        let code = match s { Ok => 200, NotFound => 404 }
+//        return code
+//    or  return match s { Ok => 200, NotFound => 404 }
+//  - Arms are comma-separated. Multi-line arms are fine WITH trailing commas.
+//
+// Status: PASSES `buff check` (lex + parse + typecheck clean).
 
 // ---------------------------------------------------------------------------
 // HTTP-style status codes. 12 variants across 5 classes — large enough to
-// make exhaustive matching meaningful and to reward grouping.
+// make exhaustive matching meaningful and to reward or-pattern grouping.
 // ---------------------------------------------------------------------------
 
 enum HttpStatus {
@@ -32,197 +39,174 @@ enum HttpStatus {
     GatewayTimeout,
 }
 
-// Numeric class (1xx..5xx) used by the guard example below.
+// Numeric code per variant. Exhaustive: every one of the 12 variants has an
+// arm, no catch-all needed.
+func http_class(status: HttpStatus) -> Int {
+    return match status {
+        Continue => 100,
+        Ok => 200,
+        Created => 201,
+        NoContent => 204,
+        MovedPermanently => 301,
+        Found => 302,
+        BadRequest => 400,
+        Unauthorized => 401,
+        Forbidden => 403,
+        NotFound => 404,
+        InternalError => 500,
+        GatewayTimeout => 504,
+    }
+}
 
-func http_class(status: HttpStatus) -> Int:
-    match status:
-        HttpStatus.Continue:
-            return 100
-        HttpStatus.Ok:
-            return 200
-        HttpStatus.Created:
-            return 201
-        HttpStatus.NoContent:
-            return 204
-        HttpStatus.MovedPermanently:
-            return 301
-        HttpStatus.Found:
-            return 302
-        HttpStatus.BadRequest:
-            return 400
-        HttpStatus.Unauthorized:
-            return 401
-        HttpStatus.Forbidden:
-            return 403
-        HttpStatus.NotFound:
-            return 404
-        HttpStatus.InternalError:
-            return 500
-        HttpStatus.GatewayTimeout:
-            return 504
+// Human-readable label via OR-PATTERNS: several variants collapse onto one
+// arm. Still exhaustive (every variant is covered by exactly one arm).
+func status_label(status: HttpStatus) -> String {
+    return match status {
+        Continue => "informational",
+        Ok | Created | NoContent => "success",
+        MovedPermanently | Found => "redirection",
+        BadRequest | Unauthorized | Forbidden | NotFound => "client error",
+        InternalError | GatewayTimeout => "server error",
+    }
+}
 
-// Human-readable label. Demonstrates OR-PATTERNS: several variants collapse
-// onto one label arm, and the final arm is still exhaustive on its own.
+// Boolean predicate. Demonstrates or-patterns + catch-all `_`.
+func is_success(status: HttpStatus) -> Bool {
+    return match status {
+        Ok | Created | NoContent => true,
+        _ => false,
+    }
+}
 
-func status_label(status: HttpStatus) -> String:
-    match status:
-        HttpStatus.Continue:
-            return "informational"
-        HttpStatus.Ok | HttpStatus.Created | HttpStatus.NoContent:
-            return "success"
-        HttpStatus.MovedPermanently | HttpStatus.Found:
-            return "redirection"
-        HttpStatus.BadRequest | HttpStatus.Unauthorized | HttpStatus.Forbidden | HttpStatus.NotFound:
-            return "client error"
-        HttpStatus.InternalError | HttpStatus.GatewayTimeout:
-            return "server error"
-
-// Boolean category predicates. More or-pattern grouping, returning Bool.
-
-func is_success(status: HttpStatus) -> Bool:
-    match status:
-        HttpStatus.Ok | HttpStatus.Created | HttpStatus.NoContent:
-            return true
-        _:
-            return false
-
-func is_client_error(status: HttpStatus) -> Bool:
-    match status:
-        HttpStatus.BadRequest | HttpStatus.Unauthorized | HttpStatus.Forbidden | HttpStatus.NotFound:
-            return true
-        _:
-            return false
+func is_client_error(status: HttpStatus) -> Bool {
+    return match status {
+        BadRequest | Unauthorized | Forbidden | NotFound => true,
+        _ => false,
+    }
+}
 
 // ---------------------------------------------------------------------------
-// Geometry enum with POSITIONAL DATA — exercises destructuring inside match
-// arms plus guards.
+// Geometry enum with POSITIONAL DATA — exercises destructuring inside arms
+// plus guards.
 // ---------------------------------------------------------------------------
 
 enum Shape {
     Point,
-    Circle(Double),
-    Square(Double),
-    Rectangle(Double, Double),
-    Triangle(Double, Double, Double),
+    Circle(Float),
+    Square(Float),
+    Rectangle(Float, Float),
+    Triangle(Float, Float, Float),
 }
 
 // Area via exhaustive destructuring. Each arm binds the embedded fields.
+// The Triangle arm ignores the third field with `_`.
+func area(shape: Shape) -> Float {
+    return match shape {
+        Point => 0.0,
+        Circle(r) => 3.14159 * r * r,
+        Square(s) => s * s,
+        Rectangle(w, h) => w * h,
+        Triangle(base, height, _) => 0.5 * base * height,
+    }
+}
 
-func area(shape: Shape) -> Double:
-    match shape:
-        Shape.Point:
-            return 0.0
-        Shape.Circle(r):
-            return 3.14159 * r * r
-        Shape.Square(s):
-            return s * s
-        Shape.Rectangle(w, h):
-            return w * h
-        Shape.Triangle(base, height, _):
-            return 0.5 * base * height
+// Perimeter, again exhaustive. Each arm binds all carried values.
+func perimeter(shape: Shape) -> Float {
+    return match shape {
+        Point => 0.0,
+        Circle(r) => 2.0 * 3.14159 * r,
+        Square(s) => 4.0 * s,
+        Rectangle(w, h) => 2.0 * (w + h),
+        Triangle(a, b, c) => a + b + c,
+    }
+}
 
-// Perimeter, again exhaustive.
+// Classification with a GUARD: a rectangle whose sides are equal is really a
+// square. Guards refine a pattern without splitting it into a new variant.
+// The guarded arm MUST come before the more general Rectangle arm.
+func classify_shape(shape: Shape) -> String {
+    return match shape {
+        Point => "point",
+        Circle(_) => "circle",
+        Square(_) => "square",
+        Rectangle(w, h) if w == h => "square (degenerate rectangle)",
+        Rectangle(_, _) => "rectangle",
+        Triangle(_, _, _) => "triangle",
+    }
+}
 
-func perimeter(shape: Shape) -> Double:
-    match shape:
-        Shape.Point:
-            return 0.0
-        Shape.Circle(r):
-            return 2.0 * 3.14159 * r
-        Shape.Square(s):
-            return 4.0 * s
-        Shape.Rectangle(w, h):
-            return 2.0 * (w + h)
-        Shape.Triangle(a, b, c):
-            return a + b + c
-
-// Classification with a GUARD: a rectangle whose sides are equal is really
-// a square. Guards refine a pattern without splitting it into a new variant.
-
-func classify_shape(shape: Shape) -> String:
-    match shape:
-        Shape.Point:
-            return "point"
-        Shape.Circle(_):
-            return "circle"
-        Shape.Square(_):
-            return "square"
-        Shape.Rectangle(w, h) if w == h:
-            return "square (degenerate rectangle)"
-        Shape.Rectangle(_, _):
-            return "rectangle"
-        Shape.Triangle(_, _, _):
-            return "triangle"
-
-// Largest dimension across all shape kinds — uses binding + nested if.
-
-func largest_side(shape: Shape) -> Double:
-    match shape:
-        Shape.Point:
-            return 0.0
-        Shape.Circle(r):
-            return 2.0 * r
-        Shape.Square(s):
-            return s
-        Shape.Rectangle(w, h):
-            if w >= h:
-                return w
-            return h
-        Shape.Triangle(a, b, c):
-            let mut m = a
-            if b > m:
-                m = b
-            if c > m:
-                m = c
-            return m
+// Largest dimension across all shape kinds. Uses nested match-as-expression
+// (a 3-way max spelled with boolean match arms) since arm bodies are
+// expressions only.
+func largest_side(shape: Shape) -> Float {
+    return match shape {
+        Point => 0.0,
+        Circle(r) => 2.0 * r,
+        Square(s) => s,
+        Rectangle(w, h) => match w >= h {
+            true => w,
+            false => h,
+        },
+        Triangle(a, b, c) => match a >= b {
+            true => match a >= c {
+                true => a,
+                false => c,
+            },
+            false => match b >= c {
+                true => b,
+                false => c,
+            },
+        },
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Demo driver.
 // ---------------------------------------------------------------------------
 
-func show_status(status: HttpStatus) -> String:
+func show_status(status: HttpStatus) -> String {
     let code = http_class(status)
     let label = status_label(status)
     let ok = is_success(status)
     let client = is_client_error(status)
-    return "${code} ${status} [${label}] success=${ok} client_error=${client}"
+    return "${code} [${label}] success=${ok} client_error=${client}"
+}
 
-func demo_status():
+func show_shape(shape: Shape) -> String {
+    let kind = classify_shape(shape)
+    let a = area(shape)
+    let p = perimeter(shape)
+    let side = largest_side(shape)
+    return "${kind}: area=${a}, perimeter=${p}, largest=${side}"
+}
+
+func demo_status() {
     print("--- HttpStatus (12 variants, exhaustive) ---")
-    let sample = [
-        HttpStatus.Ok,
-        HttpStatus.Created,
-        HttpStatus.MovedPermanently,
-        HttpStatus.BadRequest,
-        HttpStatus.Unauthorized,
-        HttpStatus.NotFound,
-        HttpStatus.InternalError,
-        HttpStatus.GatewayTimeout,
-    ]
+    let sample = [Ok, Created, NoContent, MovedPermanently, Found]
     for s in sample:
         print(show_status(s))
+    let errors = [BadRequest, Unauthorized, Forbidden, NotFound, InternalError, GatewayTimeout]
+    for s in errors:
+        print(show_status(s))
+}
 
-func demo_shapes():
-    print("")
+func demo_shapes() {
     print("--- Shape (destructuring + guards) ---")
     let shapes = [
-        Shape.Point,
-        Shape.Circle(5.0),
-        Shape.Circle(4.0),
-        Shape.Rectangle(3.0, 4.0),
-        Shape.Rectangle(5.0, 5.0),
-        Shape.Triangle(3.0, 4.0, 5.0),
+        Point,
+        Circle(5.0),
+        Square(3.0),
+        Rectangle(3.0, 4.0),
+        Rectangle(5.0, 5.0),
+        Triangle(3.0, 4.0, 5.0),
     ]
     for s in shapes:
-        let kind = classify_shape(s)
-        let a = area(s)
-        let p = perimeter(s)
-        let side = largest_side(s)
-        print("${kind}: area=${a}, perimeter=${p}, largest=${side}")
+        print(show_shape(s))
+}
 
-func main():
+func main() {
     print("=== Exhaustive Matching Demo ===")
     demo_status()
     demo_shapes()
-    print("")
     print("=== done ===")
+}

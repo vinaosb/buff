@@ -1,0 +1,17 @@
+=== Comptime Config Demo ===
+max_connections : 128
+worker_threads  : 4
+timeout_seconds : 30
+read_buffer_kb  : 8
+enable_tls      : true
+
+--- derived (const-folded) ---
+pool            : 4 workers x 128 conns (tls=true)
+total_buffer    : 1048576 bytes
+
+--- lookup table (compile-time materialised) ---
+well_known_ports: [22, 80, 443, 8080, 8443]
+default_port    : 8080
+find 443        : 443
+find 9999       : -1
+=== done ===

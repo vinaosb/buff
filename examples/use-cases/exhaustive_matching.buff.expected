@@ -1,0 +1,20 @@
+=== Exhaustive Matching Demo ===
+--- HttpStatus (12 variants, exhaustive) ---
+200 Ok [success] success=true client_error=false
+201 Created [success] success=true client_error=false
+301 MovedPermanently [redirection] success=false client_error=false
+400 BadRequest [client error] success=false client_error=true
+401 Unauthorized [client error] success=false client_error=true
+404 NotFound [client error] success=false client_error=true
+500 InternalError [server error] success=false client_error=false
+504 GatewayTimeout [server error] success=false client_error=false
+
+--- Shape (destructuring + guards) ---
+point: area=0, perimeter=0, largest=0
+circle: area=78.53975, perimeter=31.4159, largest=10
+circle: area=50.26544, perimeter=25.13272, largest=8
+rectangle: area=12, perimeter=14, largest=4
+square (degenerate rectangle): area=25, perimeter=20, largest=5
+triangle: area=6, perimeter=12, largest=5
+
+=== done ===
