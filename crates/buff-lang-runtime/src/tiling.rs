@@ -400,11 +400,28 @@ where
 
     match dispatch_tiled(backend, shader_wgsl, input, max_tile_elements) {
         Ok(out) => out,
-        // Defensive: any GPU-side failure → CPU. Includes GpuUnavailable
-        // (which we couldn't pre-check without querying the backend) and
-        // GpuInit (device init, shader compile, buffer alloc, etc).
-        // The CPU oracle is infallible, so this fallback always succeeds.
-        Err(_) => cpu_oracle(input),
+        Err(err) => {
+            // T70: BUFF_FAIL_LOUD_GPU — development debugging tool.
+            // When set (any non-empty value), GPU dispatch failure
+            // panics with a diagnostic message instead of silently
+            // falling back to CPU. Zero overhead when absent.
+            if let Ok(val) = std::env::var("BUFF_FAIL_LOUD_GPU") {
+                if !val.is_empty() {
+                    panic!(
+                        "BUFF_FAIL_LOUD_GPU: GPU dispatch failed in \
+                         dispatch_map_with_tiling (input.len={}, max_tile={}): {}",
+                        input.len(),
+                        max_tile_elements,
+                        err,
+                    );
+                }
+            }
+            // Defensive: any GPU-side failure → CPU. Includes GpuUnavailable
+            // (which we couldn't pre-check without querying the backend) and
+            // GpuInit (device init, shader compile, buffer alloc, etc).
+            // The CPU oracle is infallible, so this fallback always succeeds.
+            cpu_oracle(input)
+        }
     }
 }
 

@@ -597,10 +597,27 @@ where
             // the CPU oracle — the caller's contract is "always returns
             // Vec<f32>", matching dispatch_map_with_tiling's contract
             // (T46).
-            if let Ok(gpu_out) = backend.dispatch_map(shader_wgsl, input) {
-                return gpu_out;
+            match backend.dispatch_map(shader_wgsl, input) {
+                Ok(gpu_out) => return gpu_out,
+                Err(err) => {
+                    // T70: BUFF_FAIL_LOUD_GPU — development debugging tool.
+                    // When set (any non-empty value), GPU dispatch failure
+                    // panics with a diagnostic message instead of silently
+                    // falling back to CPU. Zero overhead when absent.
+                    if let Ok(val) = std::env::var("BUFF_FAIL_LOUD_GPU") {
+                        if !val.is_empty() {
+                            panic!(
+                                "BUFF_FAIL_LOUD_GPU: GPU dispatch failed in \
+                                 dispatch_with_prefer (input.len={}, prefer={:?}): {}",
+                                input.len(),
+                                prefer,
+                                err,
+                            );
+                        }
+                    }
+                    // GPU-side failure → fall through to the CPU oracle.
+                }
             }
-            // GPU-side failure → fall through to the CPU oracle.
         }
     }
 
