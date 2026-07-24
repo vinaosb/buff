@@ -367,7 +367,7 @@ pub const GPU_ARITHMETIC_INTENSITY_THRESHOLD: f64 = 4.0;
 /// let ctx = WorkloadContext::new(500, true).with_data_location(DataLocation::Gpu);
 /// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum DataLocation {
     /// Data resides in CPU RAM (main memory). This is the default — Buff
     /// values are Rust `Vec<f32>` living in process memory. [`decide_dynamic`]

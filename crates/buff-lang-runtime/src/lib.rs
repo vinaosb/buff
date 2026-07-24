@@ -87,6 +87,7 @@ pub mod gpu;
 pub mod gpu_pipeline;
 pub mod hints;
 pub mod mock_gpu;
+pub mod profile_cache;
 pub mod threshold;
 pub mod tiling;
 
@@ -106,6 +107,7 @@ pub use hints::{
     explain_dispatch_with_prefer, prefer_from_name_args, Prefer, PREFER_GPU_MIN_ELEMENTS,
 };
 pub use mock_gpu::{cpu_fallback_map, DispatchRecord, GpuBackend, MockGpuBackend};
+pub use profile_cache::{bucket_intensity, ProfileCache, ProfileKey};
 pub use threshold::{
     cost_model_favors_gpu, decide, decide_dynamic, estimate_costs, explain_dispatch, CostEstimate,
     DataLocation, DispatchPlanner, WorkloadContext, CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC,
