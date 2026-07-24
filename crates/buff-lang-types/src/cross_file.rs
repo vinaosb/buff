@@ -76,7 +76,9 @@ impl CrossFileSymbolTable {
         };
         let mut out = Vec::new();
         for imp in &module.imports {
-            if imp.wildcard {
+            if imp.wildcard || !imp.path.is_empty() {
+                // Wildcard and dotted-path imports bring in everything;
+                // individual symbols are not named here.
                 continue;
             }
             for n in &imp.imports {
@@ -92,7 +94,7 @@ impl CrossFileSymbolTable {
         let Some(module) = project.graph.get(importer_module) else {
             return false;
         };
-        module.imports.iter().any(|i| i.wildcard)
+        module.imports.iter().any(|i| i.wildcard || !i.path.is_empty())
     }
 
     pub fn all_visible_in<'a>(
@@ -192,7 +194,8 @@ fn trait_signature(t: &TraitDecl, defining_module: &Path) -> SymbolSignature {
 }
 
 pub fn import_includes(imp: &ImportDecl, name: &str) -> bool {
-    if imp.wildcard {
+    if imp.wildcard || !imp.path.is_empty() {
+        // Wildcard and dotted-path imports include everything.
         return true;
     }
     imp.imports.iter().any(|n| n.name == name)

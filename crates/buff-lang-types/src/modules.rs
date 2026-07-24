@@ -45,7 +45,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use buff_lang_ast::{Decl, ImportDecl, ReexportDecl};
+use buff_lang_ast::{Decl, Ident, ImportDecl, ReexportDecl};
 use buff_lang_error::{suggest_with_message, Diagnostic, ErrorCode, Span, TypeError};
 
 /// A parsed module: its canonical file path, top-level decls, computed
@@ -229,6 +229,18 @@ pub fn resolve_path(importing: &Path, spec: &str) -> Result<PathBuf, TypeError> 
         }
     }
     Ok(lexical_canonicalize(&with_ext))
+}
+
+/// Convert a dotted module path (`a.b.c`) to a relative file spec
+/// (`"./a/b/c.buff"`). Used by T72 to resolve legacy `import a.b.c`
+/// declarations.
+///
+/// The result is always a `./`-prefixed relative path so that
+/// [`resolve_path`] resolves it correctly relative to the importing file's
+/// directory.
+pub fn dotted_path_to_spec(path: &[Ident]) -> String {
+    let segments: Vec<&str> = path.iter().map(|i| i.name.as_str()).collect();
+    format!("./{}.buff", segments.join("/"))
 }
 
 /// Lexically strip `.` and `..` segments from a path. Used as a fallback
@@ -430,9 +442,15 @@ fn process_module(path: &Path, ctx: &mut BuildCtx<'_>) -> Result<PathBuf, TypeEr
             let target = resolve_path(path, spec)?;
             process_module(&target, ctx)?;
             resolved_import_targets.push((target, imp.clone()));
+        } else if !imp.path.is_empty() {
+            // T72: resolve legacy dotted-path imports (`import a.b.c`).
+            // Convert to a file spec: a.b.c → "./a/b/c.buff", then resolve
+            // relative to the importing file's directory.
+            let spec = dotted_path_to_spec(&imp.path);
+            let target = resolve_path(path, &spec)?;
+            process_module(&target, ctx)?;
+            resolved_import_targets.push((target, imp.clone()));
         }
-        // Legacy dotted-path imports (`import a.b.c`) are not part of the
-        // v0.5 module system — they're an unused placeholder. Skip.
     }
 
     // Recurse on re-export targets too (they create real edges).

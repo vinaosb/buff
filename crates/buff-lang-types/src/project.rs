@@ -88,6 +88,12 @@ fn snapshot_reachable_sources(root: &Path, loader: &dyn ModuleLoader) -> HashMap
                     if let Ok(target) = crate::modules::resolve_path(&path, &spec) {
                         stack.push(target);
                     }
+                } else if !imp.path.is_empty() {
+                    // T72: resolve dotted-path imports for snapshot too.
+                    let spec = crate::modules::dotted_path_to_spec(&imp.path);
+                    if let Ok(target) = crate::modules::resolve_path(&path, &spec) {
+                        stack.push(target);
+                    }
                 }
             }
         }

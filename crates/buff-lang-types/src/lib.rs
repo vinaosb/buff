@@ -106,7 +106,8 @@ pub use multi_dispatch::{MultiDispatchMethod, MultiDispatchTable};
 // T29: module-system graph. Re-exported at crate root for the CLI/LSP
 // so callers can `buff_lang_types::build_graph(...)` without a long path.
 pub use modules::{
-    build_graph, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph, ModuleLoader,
+    build_graph, dotted_path_to_spec, resolve_path, FsLoader, MemoryLoader, Module, ModuleGraph,
+    ModuleLoader,
 };
 // T1: project-level parse entry point + span-aware error type.
 pub use project::{parse_project, parse_project_with_loader, ParsedProject, ProjectError};
