@@ -27,7 +27,11 @@ members = ["crates/*"]
 # semver-incompatible version.
 
 [workspace.dependencies]
-syn = { version = "2.0", features = ["full", "parsing", "printing", "extra-traits"] }
+# `visit` feature added in T69 (@no-alloc lint): enables `syn::visit::Visit`,
+# the immutable AST walker the allocation-scanner uses to recurse into every
+# expression of a lowered function body. Additive (features only widen syn's
+# API surface; no behaviour change for existing consumers).
+syn = { version = "2.0", features = ["full", "parsing", "printing", "extra-traits", "visit"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 prettyplease = "0.2"

@@ -640,6 +640,14 @@ impl RustCodegen {
                 // function (useful for cold paths or to reduce code bloat).
                 // Rust's `#[inline(never)]` is the direct equivalent.
                 "no_inline" => attrs.push(syn::parse_quote!(#[inline(never)])),
+                // T69: `@no-alloc` marks the function as allocation-free. The
+                // attribute is consumed here (stripped — no Rust lowering); the
+                // verification is a post-lowering scan of the generated body
+                // (see the `is_no_alloc` block below), which emits a warning
+                // per heap-allocating construct found. Both the hyphenated
+                // (`@no-alloc`) and underscored (`@no_alloc`) spellings are
+                // accepted (defensive — matches the @no_inline convention).
+                "no-alloc" | "no_alloc" => continue,
                 // T64: `@prefer(cpu)` / `@prefer(gpu)` / `@prefer(npu)` —
                 // dispatch hint overrides. The arg selects the target
                 // backend the user wants the runtime to favour. Emitted
@@ -687,9 +695,35 @@ impl RustCodegen {
                         "unrecognised attribute `@{other}` \
                          (supported: @test, @feature, @internal, @deprecated, \
                          @should_panic, @ignore, @bench, @property, @blocking, \
-                         @workgroup, @inline, @no_inline, @prefer, @force)"
+                         @workgroup, @inline, @no_inline, @prefer, @force, \
+                         @no-alloc)"
                     )));
                 }
+            }
+        }
+
+        // T69: `@no-alloc` lint. When the function is marked allocation-
+        // free, scan the GENERATED Rust body for heap-allocating
+        // constructs (`vec!`, `Box::new`, `String::from`, `Vec::new`,
+        // `String::new`, `format!`, `.to_string()`, `.to_owned()`). Each
+        // hit emits a WARNING (via the shared `warnings` channel, surfaced
+        // to the CLI / tests via [`Self::take_warnings`]) — this is a lint,
+        // NOT a hard error: the code still compiles and runs; the user is
+        // informed that their allocation-free promise was violated so they
+        // can fix the body or drop the attribute. The scan walks the
+        // lowered [`syn::Block`] with a `syn::visit::Visit` walker, catching
+        // allocations however deeply nested. Both `@no-alloc` (hyphenated)
+        // and `@no_alloc` (underscored) spellings are honored.
+        let is_no_alloc = f
+            .attributes
+            .iter()
+            .any(|a| matches!(a.name.name.as_str(), "no-alloc" | "no_alloc"));
+        if is_no_alloc {
+            for violation in check_no_alloc_violations(&block) {
+                self.warnings.push(Diagnostic::warning(
+                    format!("@no-alloc violation in `{}`: {violation}", f.name.name),
+                    f.span,
+                ));
             }
         }
 
@@ -1394,5 +1428,176 @@ impl RustCodegen {
         })
     }
 
+}
+
+// ===========================================================================
+// T69: @no-alloc lint — allocation-free function verification
+// ===========================================================================
+
+/// T69: scan a lowered Rust [`syn::Block`] for heap-allocating constructs and
+/// return one human-readable description per violation.
+///
+/// Used by [`RustCodegen`](super::RustCodegen) when a function carries the
+/// `@no-alloc` attribute. Each returned string names the offending construct
+/// (e.g. `` `vec!` macro allocates on the heap ``); the caller wraps it in a
+/// [`Diagnostic::warning`] tagged with the function's span.
+///
+/// # What counts as an allocation
+///
+/// The lint flags the unambiguous heap-producers in generated Rust:
+///
+/// - **Macros**: `vec!`, `format!` (and the printing macros `println!` /
+///   `print!` / `eprintln!` / `eprint!` / `write!` / `writeln!`, which format
+///   a `String` internally).
+/// - **Path calls**: `String::from`, `String::new`, `Vec::new`,
+///   `Vec::with_capacity`, `Box::new`.
+/// - **Method calls**: `.to_string()`, `.to_owned()` (each clones into a fresh
+///   heap `String`).
+///
+/// Iterator `.collect()` is intentionally NOT flagged: it MAY allocate but the
+/// target collection is context-dependent and a sized/borrowing collect is
+/// possible, so flagging it would produce false positives.
+///
+/// # How
+///
+/// A [`syn::visit::Visit`] walker recurses into every expression in the block,
+/// so allocations nested inside `if`/`match`/closure/loop bodies are caught.
+/// The walker is allocation-free itself (it only pushes to a `Vec` on a hit).
+fn check_no_alloc_violations(block: &syn::Block) -> Vec<String> {
+    let mut visitor = NoAllocVisitor { violations: Vec::new() };
+    syn::visit::visit_block(&mut visitor, block);
+    visitor.violations
+}
+
+/// Render a [`syn::Path`] as a `::`-joined identifier string for comparison
+/// (e.g. `String::from`, `Vec::new`). Used by the macro- and call-detection
+/// arms of [`NoAllocVisitor`].
+fn syn_path_to_string(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|s| s.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+/// T69: `syn::visit::Visit` impl that collects heap-allocation violations.
+struct NoAllocVisitor {
+    violations: Vec<String>,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for NoAllocVisitor {
+    fn visit_expr_macro(&mut self, i: &'ast syn::ExprMacro) {
+        let name = syn_path_to_string(&i.mac.path);
+        if matches!(
+            name.as_str(),
+            "vec"
+                | "format"
+                | "println"
+                | "print"
+                | "eprintln"
+                | "eprint"
+                | "write"
+                | "writeln"
+        ) {
+            self.violations
+                .push(format!("`{name}!` macro allocates on the heap"));
+        }
+        syn::visit::visit_expr_macro(self, i);
+    }
+
+    fn visit_expr_call(&mut self, i: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(path_expr) = i.func.as_ref() {
+            let name = syn_path_to_string(&path_expr.path);
+            if matches!(
+                name.as_str(),
+                "String::from"
+                    | "String::new"
+                    | "String::from_utf8"
+                    | "Vec::new"
+                    | "Vec::with_capacity"
+                    | "Box::new"
+            ) {
+                self.violations
+                    .push(format!("`{name}(...)` allocates on the heap"));
+            }
+        }
+        syn::visit::visit_expr_call(self, i);
+    }
+
+    fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
+        let method = i.method.to_string();
+        if matches!(method.as_str(), "to_string" | "to_owned") {
+            self.violations
+                .push(format!("`.{method}()` allocates a new String on the heap"));
+        }
+        syn::visit::visit_expr_method_call(self, i);
+    }
+}
+
+#[cfg(test)]
+mod no_alloc_tests {
+    //! T69 inline unit tests for the @no-alloc allocation scanner.
+    use super::*;
+
+    fn block_from(src: &str) -> syn::Block {
+        let item: syn::ItemFn = syn::parse_quote!(
+            fn __no_alloc_probe() { #src }
+        );
+        *item.block
+    }
+
+    #[test]
+    fn detects_vec_macro() {
+        let b = block_from("let v = vec![1, 2, 3];");
+        let v = check_no_alloc_violations(&b);
+        assert!(v.iter().any(|s| s.contains("vec!")), "got {v:?}");
+    }
+
+    #[test]
+    fn detects_box_new() {
+        let b = block_from("let b = Box::new(42);");
+        let v = check_no_alloc_violations(&b);
+        assert!(v.iter().any(|s| s.contains("Box::new")), "got {v:?}");
+    }
+
+    #[test]
+    fn detects_string_from() {
+        let b = block_from("let s = String::from(\"hi\");");
+        let v = check_no_alloc_violations(&b);
+        assert!(v.iter().any(|s| s.contains("String::from")), "got {v:?}");
+    }
+
+    #[test]
+    fn detects_to_string_method() {
+        let b = block_from("let s = 5.to_string();");
+        let v = check_no_alloc_violations(&b);
+        assert!(v.iter().any(|s| s.contains("to_string")), "got {v:?}");
+    }
+
+    #[test]
+    fn detects_nested_allocation() {
+        // Allocations inside an if-body are caught (deep recursion).
+        let b = block_from("if c { let s = format!(\"{}\", x); }");
+        let v = check_no_alloc_violations(&b);
+        assert!(v.iter().any(|s| s.contains("format!")), "got {v:?}");
+    }
+
+    #[test]
+    fn clean_block_has_no_violations() {
+        let b = block_from("let n = 1 + 2; let m = n * 3;");
+        let v = check_no_alloc_violations(&b);
+        assert!(v.is_empty(), "pure arithmetic must not flag: {v:?}");
+    }
+
+    #[test]
+    fn does_not_flag_collect() {
+        // .collect() is intentionally not flagged (may or may not allocate).
+        let b = block_from("let v: Vec<i64> = (0..3).collect();");
+        let v = check_no_alloc_violations(&b);
+        assert!(
+            !v.iter().any(|s| s.contains("collect")),
+            "collect must NOT be flagged: {v:?}"
+        );
+    }
 }
 
