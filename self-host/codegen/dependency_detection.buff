@@ -1,0 +1,438 @@
+// Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/dependency_detection.rs` (T18, Track C).
+//
+// T105a — named-arg/default/extern-fn dependency collectors (mechanically
+// extracted from rust_codegen.rs).
+//
+// Verbatim move from the parent — no logic changes. Child module of
+// rust_codegen so it inherits the parent imports via `use super::*` (zero
+// per-module import lists). Functions are `pub(super)` so the parent reaches
+// them through the glob below.
+//
+// The Rust reference is 385 LOC. The Buff port mirrors the public API
+// surface (collect_func_param_names, collect_user_enum_variants,
+// materialize_named_args, collect_func_param_defaults, fill_default_args,
+// collect_extern_fn_names, collect_rust_deps).
+
+// =============================================================================
+// T105 — named-argument resolution helpers
+// =============================================================================
+//
+// Named args (`name: value` inside a call's arg list) carry their param name
+// through the AST. At codegen, the codegen reorders them to match the
+// callee's declared parameter order (when known) so the generated Rust call
+// uses POSITIONAL arguments (Rust has no named-arg call syntax for free
+// functions).
+
+// =============================================================================
+// Forward declarations (opaque handles)
+// =============================================================================
+
+struct Decl:
+    opaque_handle: Int
+
+struct Expr:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+struct Param:
+    opaque_handle: Int
+
+struct EnumDecl:
+    opaque_handle: Int
+
+struct Variant:
+    opaque_handle: Int
+
+struct ExternFuncDecl:
+    opaque_handle: Int
+
+struct ExternCrateDecl:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+    fn decl_as_enum_decl(decl: Decl) -> Option<EnumDecl>
+    fn decl_as_extern_func_decl(decl: Decl) -> Option<ExternFuncDecl>
+    fn decl_as_extern_crate_decl(decl: Decl) -> Option<ExternCrateDecl>
+    fn func_decl_name(f: FuncDecl) -> String
+    fn func_decl_params(f: FuncDecl) -> Vector<Param>
+    fn func_decl_is_extern(f: FuncDecl) -> Bool
+    fn param_name(p: Param) -> String
+    fn param_default_value(p: Param) -> Option<Expr>
+    fn enum_decl_name(e: EnumDecl) -> String
+    fn enum_decl_variants(e: EnumDecl) -> Vector<Variant>
+    fn variant_name(v: Variant) -> String
+    fn extern_func_decl_name(d: ExternFuncDecl) -> String
+    fn extern_func_decl_crate_name(d: ExternFuncDecl) -> Option<String>
+    fn extern_crate_decl_name(d: ExternCrateDecl) -> String
+    fn expr_is_named_arg(e: Expr) -> Bool
+    fn expr_named_arg_name(e: Expr) -> String
+    fn expr_named_arg_value(e: Expr) -> Expr
+    fn expr_clone(e: Expr) -> Expr
+}
+
+// =============================================================================
+// collect_func_param_names — T105: fn_name -> Vec<param_name> map
+// =============================================================================
+//
+// Collect param-name lists for every user-defined free function in `decls`.
+//
+// Returns a `BTreeMap` keyed by function name; the value is the parameter-
+// name list in DECLARATION ORDER (so reorder is positional). Methods (inside
+// `extend TYPE { ... }` blocks) are NOT collected — their param names
+// require receiver-type resolution (a v1.0 concern); for method calls the
+// codegen falls back to value-extraction (drop names).
+//
+// A `BTreeMap` (not `HashMap`) is used so iteration is deterministic across
+// runs (the T29 flaky-test lesson). Last-declaration-wins on name collisions
+// (Buff allows shadowing at module level; the visible binding at a call site
+// is the last one in source order in single-file compilation).
+
+func collect_func_param_names(decls: Vector<Decl>) -> BTreeMap_String_StringVec:
+    let out = btreetap_string_stringvec_new()
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            let name = func_decl_name(f)
+            let params = func_decl_params(f)
+            let pnames = vector_new()
+            let mut j = 0
+            for j < params.len():
+                pnames.push(param_name(params.get(j)))
+                j = j + 1
+            btreetap_string_stringvec_set(out, name, pnames)
+        i = i + 1
+    return out
+
+// =============================================================================
+// collect_user_enum_variants — T85: bare-Red-vs-Color::Red fix
+// =============================================================================
+//
+// Collect the registry of USER-defined enum variants in this compilation
+// unit (T85 — fixes the bare-`Red`-vs-`Color::Red` bug).
+//
+// Returns a `BTreeMap` keyed by VARIANT NAME with the owning ENUM NAME as the
+// value. The map is consulted by `lower_expr` / `lower_pattern` so that bare
+// variant references (`Red`) lower to the qualified Rust path (`Color::Red`)
+// — without this, rustc treats a bare `Red` in a match arm as a fresh
+// binding pattern and a bare `Red` in expression position as an unresolved
+// identifier.
+//
+// # Exclusion rules
+//
+// - **Prelude enums** (`Option`, `Result`): their variants (`Some`/`None`/
+//   `Ok`/`Err`) live in the Rust prelude and MUST stay unqualified
+//   (`Some(5)` not `Option::Some(5)`).
+// - **Collisions**: if the SAME variant name appears in two or more
+//   user-defined enums (e.g. `enum A { X }` and `enum B { X }`), the entry
+//   is REMOVED from the map. An ambiguous bare reference cannot be
+//   auto-qualified; rustc will produce the right "ambiguous" error and the
+//   user must write `A::X` / `B::X` explicitly in Buff source.
+//
+// Determinism: a `BTreeMap` (not `HashMap`) is used so iteration order is
+// independent of hash seed (the T29 flaky-test lesson).
+
+// Rust prelude enums whose variants must NOT be auto-qualified.
+//
+// Note: Buff has no module-level `let` or `const`; this is exposed via a
+// function. Two entries: "Option", "Result".
+func prelude_enums() -> Vector<String>:
+    let out = Vector.new()
+    out.push("Option")
+    out.push("Result")
+    return out
+
+func collect_user_enum_variants(decls: Vector<Decl>) -> BTreeMap_String_String:
+    // Two-pass: first collect (variant -> enum) pairs into a Vec so we can
+    // detect collisions; then fold into the BTreeMap, removing any key that
+    // appears more than once. A Vec-of-tuples (not a HashMap) keeps the
+    // input order deterministic for the collision scan.
+    let prelude = prelude_enums()
+    let pairs = vector_new()  // Vector<Pair_String_String>
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_e = decl_as_enum_decl(decl)
+        if opt_e != Option.None:
+            let e = unwrap_enum_decl(opt_e)
+            let ename = enum_decl_name(e)
+            if not(string_vector_contains(prelude, ename)):
+                let variants = enum_decl_variants(e)
+                let mut j = 0
+                for j < variants.len():
+                    let v = variants.get(j)
+                    pairs.push(pair_string_string_new(variant_name(v), ename))
+                    j = j + 1
+        i = i + 1
+    // Build the BTreeMap.
+    let out = btreetap_string_string_new()
+    let mut k = 0
+    for k < pairs.len():
+        let pair = pairs.get(k)
+        btreetap_string_string_set(out, pair_string_string_first(pair), pair_string_string_second(pair))
+        k = k + 1
+    // Collision removal: any variant name appearing in 2+ distinct enums is
+    // ambiguous and must not be auto-qualified.
+    let collisions = btreetap_string_new()
+    let mut a = 0
+    for a < pairs.len():
+        let mut b = a + 1
+        for b < pairs.len():
+            let pa = pairs.get(a)
+            let pb = pairs.get(b)
+            if pair_string_string_first(pa) == pair_string_string_first(pb):
+                if pair_string_string_second(pa) != pair_string_string_second(pb):
+                    btreetap_string_insert(collisions, pair_string_string_first(pa))
+            b = b + 1
+        a = a + 1
+    // Walk collisions in BTreeSet order and remove from out.
+    let collisions_list = btreetap_string_to_vector(collisions)
+    let mut c = 0
+    for c < collisions_list.len():
+        btreetap_string_string_remove(out, collisions_list.get(c))
+        c = c + 1
+    return out
+
+// =============================================================================
+// materialize_named_args — T105: convert a call's args to POSITIONAL Vec<Expr>
+// =============================================================================
+//
+// Two modes:
+//
+// - **Reorder** (`params = Some(pnames)`): walk `pnames` in declaration order;
+//   for each param name, pull the matching named arg's value if present, else
+//   take the next positional arg in source order. Unmatched leftover args
+//   (positional or named) are appended AFTER the params so the caller still
+//   sees them (Rust will then diagnose the arity mismatch — Buff does not
+//   validate arg counts at codegen in v0.5). `create(port: 80, host: "x")`
+//   with `params=[host, port]` becomes `["x", 80]`.
+//
+// - **Extract** (`params = None`): no param-order info available (method
+//   call, prelude, builtin, foreign callee). Drop the names from any
+//   NamedArg and emit the values in SOURCE order; pure-positional args pass
+//   through unchanged. This is the v0.5 fallback for cases where full
+//   callee-signature resolution isn't done.
+
+func materialize_named_args(args: Vector<Expr>, params_opt: Option<StringVec>) -> Vector<Expr>:
+    // Fast path: no NamedArg → pass through (clone the slice; cheap for the
+    // typical small arg list).
+    if not(args_any_named_arg(args)):
+        return args_clone_all(args)
+    match params_opt:
+        Option.None:
+            // Extract: drop names, keep values, source order.
+            return args_extract_values(args)
+        Option.Some(pnames):
+            // Reorder.
+            return args_reorder(args, pnames)
+
+// =============================================================================
+// collect_func_param_defaults — T106: fn_name -> Vec<Option<Expr>> map
+// =============================================================================
+//
+// Collect default-value expressions for every parameter of every user-defined
+// free function in `decls`.
+//
+// Returns a `BTreeMap` keyed by function name; the value is the per-param
+// default list in DECLARATION ORDER (`None` for required params, `Some(expr)`
+// for defaulted ones). Mirrors `collect_func_param_names` (T105) for scope:
+// methods (inside `extend TYPE { ... }`) and cross-module callees are NOT
+// collected (deferred to v1.0).
+
+func collect_func_param_defaults(decls: Vector<Decl>) -> BTreeMap_String_OptionExprVec:
+    let out = btreetap_string_optionexprvec_new()
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            let name = func_decl_name(f)
+            let params = func_decl_params(f)
+            let defaults = vector_new()  // Vector<Option<Expr>>
+            let mut j = 0
+            for j < params.len():
+                defaults.push(param_default_value(params.get(j)))
+                j = j + 1
+            btreetap_string_optionexprvec_set(out, name, defaults)
+        i = i + 1
+    return out
+
+// =============================================================================
+// collect_extern_fn_names — T119: bare extern-fn-name set (unsafe-block wrap)
+// =============================================================================
+//
+// Collect the names of all `extern` functions declared in this compilation
+// unit (T119). Both decl shapes contribute:
+// - `Decl::FuncDecl(f)` where `f.is_extern` (the legacy `extern func
+//   name(...)` form from T32),
+// - `Decl::ExternFuncDecl(d)` (the new `extern "ABI" [from "..."] func
+//   name(...)` form from T119).
+//
+// The set is consulted by `lower_expr`'s `Expr::FuncCall` arm: a bare-ident
+// callee whose name is in this set wraps the call in `unsafe { ... }` —
+// Rust requires an `unsafe` block at every foreign-function call site, but
+// Buff hides that from the user (the README's "no `unsafe` Rust" guarantee).
+
+func collect_extern_fn_names(decls: Vector<Decl>) -> BTreeSet_String:
+    let out = btreetap_string_new()
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_f = decl_as_func_decl(decl)
+        if opt_f != Option.None:
+            let f = unwrap_func_decl(opt_f)
+            if func_decl_is_extern(f):
+                btreetap_string_insert(out, func_decl_name(f))
+        else:
+            let opt_d = decl_as_extern_func_decl(decl)
+            if opt_d != Option.None:
+                let d = unwrap_extern_func_decl(opt_d)
+                btreetap_string_insert(out, extern_func_decl_name(d))
+        i = i + 1
+    return out
+
+// =============================================================================
+// collect_rust_deps — T119: Rust crate deps auto-population for buff.toml
+// =============================================================================
+//
+// Collect the Rust crate dependencies a Buff program declares via extern
+// (T119). Walks the declaration list and returns the set of crate names
+// referenced from:
+//
+// - `Decl::ExternCrateDecl` (the v0.5 `extern crate "serde"` form), AND
+// - `Decl::ExternFuncDecl` carrying a `from "crate"` annotation (the T119
+//   `extern "C" from "serde_json" func ...` form).
+//
+// The legacy `extern func name(...)` form (T32, no ABI) does NOT carry a
+// crate annotation and so contributes nothing.
+//
+// This is the function the CLI pipeline calls to auto-populate the
+// `[rust-deps]` section of `buff.toml`.
+
+func collect_rust_deps(decls: Vector<Decl>) -> BTreeSet_String:
+    let out = btreetap_string_new()
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls.get(i)
+        let opt_d = decl_as_extern_crate_decl(decl)
+        if opt_d != Option.None:
+            let d = unwrap_extern_crate_decl(opt_d)
+            btreetap_string_insert(out, extern_crate_decl_name(d))
+        else:
+            let opt_ef = decl_as_extern_func_decl(decl)
+            if opt_ef != Option.None:
+                let ef = unwrap_extern_func_decl(opt_ef)
+                let opt_c = extern_func_decl_crate_name(ef)
+                if opt_c != Option.None:
+                    btreetap_string_insert(out, unwrap_string(opt_c))
+        i = i + 1
+    return out
+
+// =============================================================================
+// fill_default_args — T106: append default expressions for omitted trailing params
+// =============================================================================
+//
+// Given a call's already-positional `args` and the callee's per-param
+// `defaults` list (in declaration order), append the default expression for
+// each trailing param the caller omitted:
+//
+// - If `args.len() >= defaults.len()`: no fill needed. Returns `None`.
+// - If `args.len() < defaults.len()`: walk `defaults[args.len() ..]`. For
+//   each `Some(dv)`, push `dv.clone()`. For each `None` (a REQUIRED param
+//   the caller omitted), push nothing — Rust will diagnose the missing arg.
+//   Returns `Some(filled)` iff at least one default was filled.
+//
+// **Interaction with T105 named-arg resolution**: this runs AFTER
+// `materialize_named_args`, on the already-positional arg list. So a
+// named-arg call that omits a defaulted param (`fetch(url: "x")` with
+// `timeout` defaulted) is reordered first, then the missing trailing default
+// is filled — yielding `fetch("x", 30)` correctly.
+
+func fill_default_args(args: Vector<Expr>, defaults: Vector<Option<Expr>>) -> Option<Vector<Expr>>:
+    if args.len() >= defaults.len():
+        return Option.None
+    let filled = args_clone_all(args)
+    let mut filled_any = false
+    let start = args.len()
+    let mut i = start
+    for i < defaults.len():
+        let opt_dv = defaults.get(i)
+        if opt_dv != Option.None:
+            let dv = unwrap_expr(opt_dv)
+            filled.push(expr_clone(dv))
+            filled_any = true
+        i = i + 1
+    if filled_any:
+        return Option.Some(filled)
+    return Option.None
+
+// =============================================================================
+// Implementation shims (extern bindings to AST accessors + BTreeMap ops)
+// =============================================================================
+//
+// The `materialize_named_args` reorder / extract logic is dispatched to
+// extern shims that walk the args Vector. The Buff port preserves the
+// algorithm; the Rust reference is the source of truth for the per-arm
+// construction.
+
+extern "Rust" {
+    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+    fn unwrap_enum_decl(opt: Option<EnumDecl>) -> EnumDecl
+    fn unwrap_extern_func_decl(opt: Option<ExternFuncDecl>) -> ExternFuncDecl
+    fn unwrap_extern_crate_decl(opt: Option<ExternCrateDecl>) -> ExternCrateDecl
+    fn unwrap_expr(opt: Option<Expr>) -> Expr
+    fn unwrap_string(opt: Option<String>) -> String
+    fn string_vector_contains(vec: Vector<String>, s: String) -> Bool
+    fn vector_new() -> Vector<Any>
+    fn args_any_named_arg(args: Vector<Expr>) -> Bool
+    fn args_clone_all(args: Vector<Expr>) -> Vector<Expr>
+    fn args_extract_values(args: Vector<Expr>) -> Vector<Expr>
+    fn args_reorder(args: Vector<Expr>, pnames: StringVec) -> Vector<Expr>
+    fn pair_string_string_new(first: String, second: String) -> Pair_String_String
+    fn pair_string_string_first(p: Pair_String_String) -> String
+    fn pair_string_string_second(p: Pair_String_String) -> String
+}
+
+// Opaque handles for the BTreeMap / BTreeSet / Vector types threaded through
+// these helpers. Buff has no generic-arg syntax in v1.x surface for these
+// shapes — each instantiation is a distinct opaque struct.
+
+struct BTreeMap_String_StringVec:
+    opaque_handle: Int
+
+struct BTreeMap_String_String:
+    opaque_handle: Int
+
+struct BTreeMap_String_OptionExprVec:
+    opaque_handle: Int
+
+struct BTreeSet_String:
+    opaque_handle: Int
+
+struct StringVec:
+    opaque_handle: Int
+
+struct Pair_String_String:
+    opaque_handle: Int
+
+struct Any:
+    opaque_handle: Int
+
+extern "Rust" {
+    fn btreetap_string_stringvec_new() -> BTreeMap_String_StringVec
+    fn btreetap_string_stringvec_set(map: BTreeMap_String_StringVec, k: String, v: Vector<String>)
+    fn btreetap_string_string_new() -> BTreeMap_String_String
+    fn btreetap_string_string_set(map: BTreeMap_String_String, k: String, v: String)
+    fn btreetap_string_string_remove(map: BTreeMap_String_String, k: String)
+    fn btreetap_string_optionexprvec_new() -> BTreeMap_String_OptionExprVec
+    fn btreetap_string_optionexprvec_set(map: BTreeMap_String_OptionExprVec, k: String, v: Vector<Option<Expr>>)
+    fn btreetap_string_new() -> BTreeSet_String
+    fn btreetap_string_insert(set: BTreeSet_String, s: String)
+    fn btreetap_string_to_vector(set: BTreeSet_String) -> Vector<String>
+}
