@@ -798,6 +798,7 @@ mod tests {
             is_unsafe: false,
             is_extern: false,
             attributes: vec![],
+            type_params: Vec::new(),
             span: dummy_span(),
         });
         let facts = analyze_program(&[func]);

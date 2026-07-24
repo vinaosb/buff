@@ -867,6 +867,27 @@ fn const_int_value(expr: &Expr) -> Option<i128> {
 /// wrapper still flows through — this lets `let x: Option<MyEnum> = None`
 /// type-check at the wrapper level even before user-enum resolution lands).
 ///
+/// ## T13 — User-defined generic types
+///
+/// User-defined generic types (`struct Pair<T, U>`, `func id<T>(x: T) -> T`)
+/// are **deferred to rustc** for type inference and monomorphization. This
+/// function returns `None` for any `TypeRef::Generic` whose base name is NOT
+/// one of the built-in prelude types (`Option`, `Result`). The caller (the
+/// type inferencer / codegen) then treats the type as [`Type::Unknown`] and
+/// lets rustc perform the actual monomorphization at each call site.
+///
+/// This is the documented MVP approach (per the T13 task spec): "substitute
+/// type params at call site — no full Hindley-Milner needed; rustc does the
+/// heavy lifting via monomorphization". A full Buff-side generic inference
+/// engine (Hindley-Milner or rustc-query-based) is a future task.
+///
+/// **Built-in generic resolution is NOT broken**: `Option<T>`, `Result<T, E>`,
+/// `Vector<T>`, `Map<K, V>`, `Channel<T>` continue to resolve exactly as
+/// before. The `Vector`/`Map`/`Channel` families are NOT handled here (they
+/// resolve at the expression-inference level from literals and constructor
+/// calls, not from type annotations); only `Option` and `Result` are handled
+/// in this function's `Generic` arm.
+///
 /// ## T58 — `pub(crate)` visibility
 ///
 /// Exposed at `pub(crate)` so the `multi_dispatch` module can resolve
@@ -1125,5 +1146,77 @@ mod tests {
             span: span(),
         };
         assert!(inf.infer_stmt(&stmt).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // T13 — Generics: verify that built-in generic resolution is NOT broken
+    // by the type_params AST migration, and that user-defined generics
+    // defer to rustc (return None from typeref_to_type).
+    // -----------------------------------------------------------------------
+
+    fn named(name: &str) -> TypeRef {
+        TypeRef::Named {
+            name: buff_lang_ast::Ident::new(name, span()),
+            span: span(),
+        }
+    }
+
+    fn generic(base: &str, args: &[&str]) -> TypeRef {
+        TypeRef::Generic {
+            base: Box::new(named(base)),
+            args: args.iter().map(|a| named(a)).collect(),
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn t13_option_generic_still_resolves() {
+        // Option<Int> must resolve to Type::Option(Int<64>).
+        let ty = generic("Option", &["Int"]);
+        let resolved = typeref_to_type(&ty);
+        assert_eq!(
+            resolved,
+            Some(Type::option(Type::int_default())),
+            "Option<Int> must still resolve after the T13 type_params migration"
+        );
+    }
+
+    #[test]
+    fn t13_result_generic_still_resolves() {
+        // Result<Int, String> must resolve to Type::Result(Int<64>, String).
+        let ty = generic("Result", &["Int", "String"]);
+        let resolved = typeref_to_type(&ty);
+        assert_eq!(
+            resolved,
+            Some(Type::result(Type::int_default(), Type::string())),
+            "Result<Int, String> must still resolve after the T13 type_params migration"
+        );
+    }
+
+    #[test]
+    fn t13_user_defined_generic_defers_to_rustc() {
+        // User-defined generics like Pair<T, U> are NOT resolved by the Buff
+        // type inferencer — they defer to rustc for monomorphization.
+        // typeref_to_type returns None (the existing fallthrough behavior).
+        let ty = generic("Pair", &["Int", "String"]);
+        let resolved = typeref_to_type(&ty);
+        assert_eq!(
+            resolved, None,
+            "user-defined generics defer to rustc (typeref_to_type returns None)"
+        );
+    }
+
+    #[test]
+    fn t13_generic_func_param_type_defers_to_rustc() {
+        // A generic func parameter like `x: T` (where T is a type param)
+        // resolves to None from typeref_to_type (T is not a builtin name).
+        // The type inferencer treats it as Unknown; rustc handles the actual
+        // type binding at monomorphization time.
+        let ty = named("T");
+        let resolved = typeref_to_type(&ty);
+        assert_eq!(
+            resolved, None,
+            "type-param names resolve to None (rustc handles binding)"
+        );
     }
 }

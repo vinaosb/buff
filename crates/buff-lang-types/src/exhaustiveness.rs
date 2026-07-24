@@ -691,7 +691,7 @@ mod tests {
         use buff_lang_ast::{EnumDecl, EnumVariant};
         let decls = vec![Decl::EnumDecl(EnumDecl {
             name: Ident::new("Color", dummy_span()),
-            generics: Vec::new(),
+            type_params: Vec::new(),
             variants: vec![
                 EnumVariant {
                     name: Ident::new("Red", dummy_span()),
