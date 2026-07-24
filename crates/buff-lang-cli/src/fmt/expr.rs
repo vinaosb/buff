@@ -537,7 +537,9 @@ impl<'a> Formatter<'a> {
                 }
                 self.raw(")");
             }
-            Pattern::Struct { name, fields, .. } => {
+            Pattern::Struct {
+                name, fields, rest, ..
+            } => {
                 let _ = write!(self.buf, "{name} {{ ");
                 for (i, (fname, p)) in fields.iter().enumerate() {
                     if i > 0 {
@@ -545,6 +547,13 @@ impl<'a> Formatter<'a> {
                     }
                     let _ = write!(self.buf, "{fname}: ");
                     self.write_pattern(p);
+                }
+                // T41: render the `..` rest pattern before the closing brace.
+                if *rest {
+                    if !fields.is_empty() {
+                        self.raw(", ");
+                    }
+                    self.raw("..");
                 }
                 self.raw(" }");
             }

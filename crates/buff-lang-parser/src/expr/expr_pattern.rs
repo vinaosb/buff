@@ -381,12 +381,51 @@ fn parse_pattern_atom(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseErro
             // (shorthand `Name { field }` == `Name { field: field }`). Field
             // order is preserved as written (Vec, never a HashMap — determinism).
             // Trailing comma inside the braces is allowed. Empty `Name { }` is
-            // allowed.
+            // allowed. T41: a `..` rest token (`Name { x, .. }`) ignores all
+            // unmentioned fields (sets the `rest` flag).
             if matches!(stream.peek_kind(), Some(TokenKind::LBrace)) {
                 stream.expect(TokenKind::LBrace)?; // consume `{`
                 let mut fields: Vec<(Ident, Pattern)> = Vec::new();
+                // T41: `..` rest flag. Set when a `..` token is encountered
+                // in the field list; the codegen emits Rust `..rest`.
+                let mut rest = false;
                 if !matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
                     loop {
+                        // T41: `..` rest pattern. Consume the DotDot token,
+                        // set the rest flag, then fall through to the
+                        // comma/RBrace separator handling (a trailing comma
+                        // after `..` is allowed: `{ x, .., }`).
+                        if matches!(stream.peek_kind(), Some(TokenKind::DotDot)) {
+                            stream.advance(); // consume `..`
+                            rest = true;
+                            match stream.peek_kind() {
+                                Some(TokenKind::Comma) => {
+                                    stream.advance();
+                                    if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                Some(TokenKind::RBrace) => break,
+                                Some(other) => {
+                                    return Err(ParseError::new(Diagnostic::error(
+                                        format!(
+                                            "expected `,` or `}}` after `..` in struct pattern, found `{other}`"
+                                        ),
+                                        stream
+                                            .peek()
+                                            .map(|t| t.span)
+                                            .unwrap_or_else(|| stream.eof_span()),
+                                    )));
+                                }
+                                None => {
+                                    return Err(ParseError::new(Diagnostic::error(
+                                        "unterminated struct pattern after `..` (missing `}`)",
+                                        stream.eof_span(),
+                                    )));
+                                }
+                            }
+                        }
                         // Field name MUST be a bare identifier.
                         let Some(ftok) = stream.advance() else {
                             return Err(ParseError::new(Diagnostic::error(
@@ -446,6 +485,7 @@ fn parse_pattern_atom(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseErro
                     name: ident,
                     fields,
                     span: Span::new(tok.span.start, rb.span.end, source_id),
+                    rest,
                 });
             }
             // Bare unit variant / binding.

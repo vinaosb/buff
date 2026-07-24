@@ -749,12 +749,16 @@ impl RustCodegen {
                     elems,
                 })
             }
-            Pattern::Struct { name, fields, .. } => {
+            Pattern::Struct {
+                name, fields, rest, ..
+            } => {
                 // T71: struct destructuring `Name { field: subpat, ... }`.
                 // Hand-built via `syn::PatStruct` + `syn::FieldPat` (syn 2.0
                 // renamed the field type `PatField`→`FieldPat`). Shorthand
                 // (immutable + field name == binding name) is reproduced
                 // without a colon: `Point { x }` not `Point { x: x }`.
+                // T41: the `rest` flag lowers to a Rust `..` rest pattern
+                // (`Point { x, .. }`) via `syn::PatStruct::rest = Some(..)`.
                 let mut field_pats: Punctuated<syn::FieldPat, syn::Token![,]> = Punctuated::new();
                 for (field_name, subpat) in fields {
                     let is_shorthand = !mutable
@@ -777,7 +781,18 @@ impl RustCodegen {
                     path: syn::Path::from(ast_ident_to_syn(name)),
                     brace_token: Default::default(),
                     fields: field_pats,
-                    rest: None,
+                    // T41: `..` rest pattern. When the Buff struct pattern
+                    // carries `rest = true`, emit Rust's `..` rest token so
+                    // unmentioned fields are ignored. prettyplease renders it
+                    // as `Point { x, .. }`.
+                    rest: if *rest {
+                        Some(syn::PatRest {
+                            attrs: Vec::new(),
+                            dot2_token: Default::default(),
+                        })
+                    } else {
+                        None
+                    },
                 })
             }
             Pattern::Or(alts, _) => {

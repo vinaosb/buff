@@ -766,16 +766,32 @@ pub enum Pattern {
     },
     /// A tuple destructuring pattern: `(x, y)`, `(a, _, c)` (T71).
     Tuple(Vec<Pattern>, Span),
-    /// A struct destructuring pattern: `Point { x, y }` (T71).
+    /// A struct destructuring pattern: `Point { x, y }` (T71) with optional
+    /// `..` rest (T41 — v1.25 language-features batch).
     ///
     /// Each entry is `(field_name, subpattern)`. Shorthand `Point { x, y }`
     /// is parsed as `{ x: x, y: y }` — i.e. a field whose name equals its
     /// binding. Field order is preserved as written (determinism: never use a
     /// HashMap here).
+    ///
+    /// # Migration note (additive)
+    ///
+    /// ## T41 — `rest` field
+    ///
+    /// A `rest: bool` field was **added** in T41 to carry the `..` rest
+    /// pattern (`Point { x, .. }` — ignore all unmentioned fields). This is a
+    /// **migration** (a new field was appended after `span`) — every
+    /// construction site was updated to pass `rest: false` for non-rest
+    /// patterns. The Display impl renders ` , ..` before the closing brace
+    /// when `rest` is true. The codegen lowers it to a Rust `Pat::Struct`
+    /// with `rest: Some(..)`. The formatter round-trips it.
     Struct {
         name: Ident,
         fields: Vec<(Ident, Pattern)>,
         span: Span,
+        /// T41: when `true`, the pattern ends in `..` (ignore unmentioned
+        /// fields). Mirrors Rust's `Point { x, .. }` rest pattern.
+        rest: bool,
     },
     /// An or-pattern: `Red | Green | Blue` (T39 — v1.25 language-features
     /// batch).
@@ -901,7 +917,9 @@ impl fmt::Display for Pattern {
                 }
                 f.write_str(")")
             }
-            Pattern::Struct { name, fields, .. } => {
+            Pattern::Struct {
+                name, fields, rest, ..
+            } => {
                 write!(f, "{name} {{ ")?;
                 for (i, (fname, p)) in fields.iter().enumerate() {
                     if i > 0 {
@@ -909,7 +927,14 @@ impl fmt::Display for Pattern {
                     }
                     write!(f, "{fname}: {p}")?;
                 }
-                f.write_str(" }}")
+                // T41: render the `..` rest pattern before the closing brace.
+                if *rest {
+                    if !fields.is_empty() {
+                        f.write_str(", ")?;
+                    }
+                    f.write_str("..")?;
+                }
+                f.write_str(" }")
             }
             // T39: or-pattern `A | B | C`. Renders with ` | `-separated
             // alternatives, mirroring the source form.

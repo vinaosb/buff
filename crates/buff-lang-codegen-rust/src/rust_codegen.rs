@@ -10047,6 +10047,7 @@ mod tests {
             name: AstIdent::new("Foo", dummy_span()),
             fields: Vec::new(),
             traits: Vec::new(),
+            type_params: Vec::new(),
             span: dummy_span(),
         };
         let mut codegen = RustCodegen::new();
