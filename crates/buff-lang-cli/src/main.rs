@@ -105,9 +105,11 @@ fn main() -> Result<()> {
         Command::Check {
             file,
             deny_warnings,
+            error_format,
         } => {
-            use buff_lang_cli::check::CheckOutcome;
-            let outcome = buff_lang_cli::commands::check::run(&file, deny_warnings)?;
+            use buff_lang_cli::check::{CheckOutcome, ErrorFormat};
+            let format = ErrorFormat::from_str(&error_format);
+            let outcome = buff_lang_cli::commands::check::run(&file, deny_warnings, format)?;
             if matches!(outcome, CheckOutcome::HasErrors) {
                 std::process::exit(1);
             }

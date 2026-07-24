@@ -353,6 +353,14 @@ pub enum Command {
     /// codegen pass and the `rustc` compilation. Type errors exit 1.
     /// Naming-convention warnings (e.g. camelCase function names) exit 0
     /// by default; pass `--deny-warnings` / `-D` to treat them as errors.
+    ///
+    /// **T1 (v1.25 Wave 0):** `--error-format <human|json>` selects the
+    /// output format. `human` (default) renders rustc-style source-line +
+    /// caret blocks to stderr. `json` emits a single JSON array on stdout
+    /// (each entry carries byte offsets + 1-based line/col + suggestions +
+    /// applicability) — see `crates/buff-lang-error/src/json.rs` for the
+    /// shape. Useful for tooling (LSP round-trip, CI reporters, future
+    /// `buff fix`).
     Check {
         /// Input `.buff` source file.
         #[arg(value_name = "FILE")]
@@ -362,6 +370,13 @@ pub enum Command {
         /// Mirrors `rustc -D warnings` / `cargo clippy -- -D warnings`.
         #[arg(short = 'D', long = "deny-warnings")]
         deny_warnings: bool,
+
+        /// Diagnostic output format (T1). `human` (default) — rustc-style
+        /// source-line + caret blocks to stderr. `json` — single JSON
+        /// array on stdout for tooling consumption. See
+        /// [`buff_lang_cli::check::ErrorFormat`] for details.
+        #[arg(long, value_name = "FORMAT", default_value = "human")]
+        error_format: String,
     },
 
     /// Remove the `target/` build directory (wraps `cargo clean`).

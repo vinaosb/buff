@@ -29,6 +29,14 @@ impl LexerError {
                 span,
                 notes: Vec::new(),
                 code: None,
+                // T1 (v1.25 Wave 0): new Diagnostic fields. Empty by
+                // default — the lexer does not yet emit multi-span labels
+                // or fix suggestions, but the struct literal must list
+                // every field (no `..Default::default()` on non-Default
+                // types). Adding these keeps the constructor
+                // byte-identical to the pre-T1 single-span render.
+                labels: Vec::new(),
+                suggestions: Vec::new(),
             }),
         }
     }

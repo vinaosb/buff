@@ -1240,6 +1240,8 @@ name = "buff-lang-error"
 version = "1.2.0"
 dependencies = [
  "insta",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

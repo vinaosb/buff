@@ -47,12 +47,64 @@
 use std::path::Path;
 
 use buff_lang_ast::{Decl, Expr, Stmt, TypeRef};
-use buff_lang_error::{Diagnostic, Severity, SourceFile, SourceId};
+use buff_lang_error::{render_diagnostics_json, Diagnostic, Severity, SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 use buff_lang_types::{Type, TypeInferencer};
 
 use crate::naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation};
+
+// ---------------------------------------------------------------------------
+// Error output format (T1, v1.25 Wave 0).
+// ---------------------------------------------------------------------------
+
+/// How `buff check` (and other diagnostic-emitting commands) format their
+/// output. Selected via `--error-format <KIND>` on the CLI.
+///
+/// - [`Human`](Self::Human) (default) renders rustc-style source-line +
+///   caret blocks to **stderr** — the pre-T1 behavior, byte-identical.
+/// - [`Json`](Self::Json) emits a single JSON array of
+///   [`buff_lang_error::DiagnosticJson`] to **stdout** (one line, no
+///   trailing newline added by the serializer) so `buff check
+///   --error-format json | jq '.[].code'` works.
+///
+/// Unknown strings resolve to [`Human`](Self::Human) on parse (see
+/// [`ErrorFormat::from_str`]) — we never panic on a bad CLI flag value,
+/// we just fall back to the safe default. The CLI's clap `value_parser`
+/// rejects unknown values up front, so the from_str fallback is a
+/// belt-and-braces safety net for library callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorFormat {
+    /// Rustc-style human-readable output (default). Emits to stderr.
+    Human,
+    /// JSON array of diagnostics. Emits to stdout.
+    Json,
+}
+
+impl ErrorFormat {
+    /// Parse a `--error-format` value. Lowercase, case-sensitive (matches
+    /// rustc / cargo conventions: `human` / `json`). Returns
+    /// [`Human`](Self::Human) for any unrecognized string — the CLI's clap
+    /// layer is responsible for rejecting bad values up front; this is
+    /// the library-side safety net.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "json" => ErrorFormat::Json,
+            _ => ErrorFormat::Human,
+        }
+    }
+
+    /// `true` when this format is JSON.
+    pub fn is_json(self) -> bool {
+        matches!(self, ErrorFormat::Json)
+    }
+}
+
+impl Default for ErrorFormat {
+    fn default() -> Self {
+        ErrorFormat::Human
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Outcome + report.
@@ -187,7 +239,8 @@ pub fn check_source(src: &str) -> CheckReport {
 }
 
 /// Run the check pipeline on a file, render diagnostics to stderr, and
-/// return the outcome.
+/// return the outcome. Thin wrapper around [`run_check_file_with_format`]
+/// with [`ErrorFormat::Human`] — byte-identical to the pre-T1 behavior.
 ///
 /// File-read failures propagate as `Err` (they are I/O errors, not
 /// diagnostics). All compile diagnostics are rendered to stderr via
@@ -204,56 +257,97 @@ pub fn check_source(src: &str) -> CheckReport {
 /// Returns `Err` only when the file cannot be read. Compile diagnostics
 /// are NOT errors here — they become the returned [`CheckReport`].
 pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
+    run_check_file_with_format(file, ErrorFormat::Human)
+}
+
+/// Run the full check pipeline on a `.buff` or `.buffhtml` file and emit
+/// diagnostics in the requested [`ErrorFormat`] (T1, v1.25 Wave 0).
+///
+/// - [`ErrorFormat::Human`] (default) — rustc-style source-line + caret
+///   blocks to **stderr**. Byte-identical to pre-T1 output.
+/// - [`ErrorFormat::Json`] — single JSON array of
+///   [`buff_lang_error::DiagnosticJson`] to **stdout**. Each entry carries
+///   byte offsets + 1-based line/col + suggestions + applicability. Empty
+///   diagnostics → `[]`. The "no issues found" stderr note is suppressed
+///   in JSON mode (would pollute the JSON stream consumers parse).
+///
+/// The JSON mode exists for tooling (LSP CodeAction round-trip, CI
+/// reporters, future `buff fix`). See `crates/buff-lang-error/src/json.rs`
+/// for the shape contract.
+///
+/// # Errors
+///
+/// Returns `Err` only when the file cannot be read. Compile diagnostics
+/// are NOT errors here — they become the returned [`CheckReport`].
+pub fn run_check_file_with_format(
+    file: &Path,
+    format: ErrorFormat,
+) -> anyhow::Result<CheckReport> {
     let is_buffhtml = file
         .extension()
         .is_some_and(|e| e == crate::pipeline::BUFFHTML_EXT);
     if is_buffhtml {
-        return run_check_buffhtml_file(file);
+        return run_check_buffhtml_file_with_format(file, format);
     }
     let src = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to read `{}`: {e}", file.display()))?;
     let report = check_source(&src);
 
-    // Build a SourceFile so render() can resolve byte offsets to line/col.
-    let source_file = SourceFile::new(file.to_path_buf(), src.clone());
-    for d in &report.diagnostics {
-        let rendered = render_diagnostic(d, &source_file);
-        match d.severity {
-            Severity::Error => eprint!("{rendered}"),
-            Severity::Warning | Severity::Info => eprint!("{rendered}"),
-        }
-    }
+    emit_diagnostics(&report.diagnostics, &src, file, format);
 
-    if matches!(report.outcome, CheckOutcome::Clean) {
+    if matches!(report.outcome, CheckOutcome::Clean) && !format.is_json() {
         eprintln!("{}: no issues found", file.display());
     }
     Ok(report)
 }
 
-/// T133: run the `.buffhtml` check pipeline on a file.
+/// Emit a slice of diagnostics in the requested [`ErrorFormat`].
 ///
-/// `buff check` on a `.buffhtml` runs parse + codegen WITHOUT invoking
-/// rustc. Errors are reported with `.buffhtml` line:col via the parser's
-/// span tracking (rustc-level errors inside `rsx!{}` are surfaced via
-/// `buff build` + the post-format [`SpanMap`]; they are NOT in scope for
-/// `buff check`'s fast-feedback loop).
-///
-/// The check is fail-soft: a parse error short-circuits codegen (there's
-/// no AST to lower); a codegen error reports the construct name. Both
-/// surface as [`Severity::Error`] → [`CheckOutcome::HasErrors`].
+/// Pulled out of [`run_check_file_with_format`] so the same logic serves
+/// the `.buff` and `.buffhtml` check paths without duplication. `source`
+/// is the raw file content (the same `&str` you'd pass to
+/// [`Diagnostic::render`]).
+fn emit_diagnostics(
+    diagnostics: &[Diagnostic],
+    source: &str,
+    file: &Path,
+    format: ErrorFormat,
+) {
+    match format {
+        ErrorFormat::Json => {
+            // Single JSON array on stdout. Empty input → `[]` (clean file).
+            let json = render_diagnostics_json(diagnostics, source);
+            println!("{json}");
+        }
+        ErrorFormat::Human => {
+            // Human-readable render to stderr — byte-identical to pre-T1.
+            let source_file = SourceFile::new(file.to_path_buf(), source.to_string());
+            for d in diagnostics {
+                let rendered = render_diagnostic(d, &source_file);
+                // Pre-T1 behavior: both Error and Warning go to stderr.
+                eprint!("{rendered}");
+            }
+        }
+    }
+}
+
+/// T133: run the `.buffhtml` check pipeline on a file. Thin wrapper around
+/// [`run_check_buffhtml_file_with_format`] with [`ErrorFormat::Human`].
 fn run_check_buffhtml_file(file: &Path) -> anyhow::Result<CheckReport> {
+    run_check_buffhtml_file_with_format(file, ErrorFormat::Human)
+}
+
+/// T133 + T1: run the `.buffhtml` check pipeline on a file with a
+/// configurable output format.
+fn run_check_buffhtml_file_with_format(
+    file: &Path,
+    format: ErrorFormat,
+) -> anyhow::Result<CheckReport> {
     let src = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to read `{}`: {e}", file.display()))?;
     let report = check_buffhtml_source(&src, file);
-    let source_file = SourceFile::new(file.to_path_buf(), src);
-    for d in &report.diagnostics {
-        let rendered = render_diagnostic(d, &source_file);
-        match d.severity {
-            Severity::Error => eprint!("{rendered}"),
-            Severity::Warning | Severity::Info => eprint!("{rendered}"),
-        }
-    }
-    if matches!(report.outcome, CheckOutcome::Clean) {
+    emit_diagnostics(&report.diagnostics, &src, file, format);
+    if matches!(report.outcome, CheckOutcome::Clean) && !format.is_json() {
         eprintln!("{}: no issues found", file.display());
     }
     Ok(report)

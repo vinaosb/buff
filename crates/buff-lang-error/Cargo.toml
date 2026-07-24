@@ -6,6 +6,15 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 thiserror.workspace = true
+# T1 (v1.25 Wave 0): JSON diagnostic output mode. serde + serde_json are
+# the only non-thiserror deps on this leaf crate — explicitly sanctioned
+# by the T1 task spec ("do NOT add deps beyond minimal serde"). Used only
+# by the `json` module's `to_json` / `DiagnosticJson` serializable shape
+# consumed by `buff check --error-format json` and (transitively) the LSP
+# CodeAction conversion. Does NOT touch the render path — single-span
+# human-readable output stays unchanged.
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 # T36: snapshot tests for stable error-message rendering (public API).
