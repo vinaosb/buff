@@ -44,10 +44,10 @@
             // we read the attribute).
             try {
                 var encoded = encodeBase64(source);
-                link.href = "../playground/index.html#s=" + encoded;
+                link.href = "./playground/index.html#s=" + encoded;
             } catch (err) {
                 // Silently degrade: link just goes to playground without code.
-                link.href = "../playground/index.html";
+                link.href = "./playground/index.html";
             }
         }
     }

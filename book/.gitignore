@@ -1,0 +1,4 @@
+# mdBook build output (regenerate via `mdbook build book/`).
+# The default build-dir is "book", producing book/book/ with the rendered
+# HTML site. This is a build artifact, not source.
+book/

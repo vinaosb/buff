@@ -32,8 +32,15 @@ jobs:
           toolchain: 1.95.0
           targets: wasm32-unknown-unknown
 
-      - name: Install wasm-bindgen
-        run: cargo install wasm-bindgen-cli --locked
+      - name: Install wasm-bindgen (matching lockfile version)
+        # The CLI version MUST byte-match the wasm-bindgen runtime baked into
+        # the .wasm (documented in playground/README.md "Pinning wasm-bindgen").
+        # Extract the resolved version from the workspace and pin the CLI to it.
+        run: |
+          WB_VERSION=$(cargo tree -p buff-playground-wasm --target wasm32-unknown-unknown \
+            | grep -oP 'wasm-bindgen v\K[0-9.]+' | head -1)
+          echo "Installing wasm-bindgen-cli @ ${WB_VERSION}"
+          cargo install wasm-bindgen-cli --version "${WB_VERSION}" --locked
 
       - name: Install mdBook
         uses: peaceiris/actions-mdbook@v2
@@ -58,8 +65,9 @@ jobs:
           mkdir -p publish/playground
           cp playground/index.html playground/styles.css playground/app.js publish/playground/
           cp -r playground/pkg/* publish/playground/
-          # Book (rendered HTML)
-          cp -r book/html/* publish/book/
+          # Book (rendered HTML) — mdBook writes directly to <book-root>/book/
+          # (mdBook 0.5.x default build-dir is "book", no html/ subdir).
+          cp -r book/book/* publish/book/
           # Docs (error pages + markdown)
           cp -r docs/* publish/docs/
           # Disable Jekyll processing

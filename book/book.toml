@@ -3,7 +3,6 @@ title        = "The Buff Book"
 authors      = ["Vinicius Schwinden Berkenbrock"]
 description  = "The official guide to the Buff programming language — Rust performance with Go productivity."
 language     = "en"
-multilingual = false
 src          = "src"
 
 [rust]
@@ -12,9 +11,9 @@ edition = "2021"
 [output.html]
 default-theme     = "ayu"
 preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/buff-lang/buff"
-git-repository-icon = "fa-github"
-edit-url-template  = "https://github.com/buff-lang/buff/edit/v1x-frameworks/book/src/{path}"
+site-url          = "/buff/"
+git-repository-url = "https://github.com/vinaosb/buff"
+edit-url-template  = "https://github.com/vinaosb/buff/edit/main/book/src/{path}"
 no-section-label   = false
 
 [output.html.search]

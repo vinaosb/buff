@@ -31,7 +31,7 @@
                 <a class="nav-btn nav-btn-ghost" href="#examples">Examples</a>
                 <a class="nav-btn nav-btn-ghost" href="#quickstart">Quick start</a>
                 <a class="nav-btn nav-btn-ghost" href="./benchmarks.html">Benchmarks</a>
-                <a class="nav-btn nav-btn-accent" href="../playground/index.html">
+                <a class="nav-btn nav-btn-accent" href="./playground/index.html">
                     <span class="nav-btn-label">Playground</span>
                 </a>
             </nav>
@@ -51,7 +51,7 @@
                     so you don't have to.
                 </p>
                 <div class="hero-actions">
-                    <a class="nav-btn nav-btn-accent hero-cta" href="../playground/index.html">Try in playground</a>
+                    <a class="nav-btn nav-btn-accent hero-cta" href="./playground/index.html">Try in playground</a>
                     <a class="nav-btn nav-btn-ghost hero-cta" href="#quickstart">Install locally</a>
                 </div>
             </div>
@@ -90,7 +90,7 @@
                             </div>
                             <div class="col-body">
                                 <p>No braces, no semicolons. Indentation defines blocks. <code>func</code> replaces <code>fn</code>, <code>print</code> is a built-in prelude function. One less concept to learn.</p>
-                                <a class="try-link" data-buff-source="func main():&#10;    print(&quot;Olá, Buff!&quot;)" href="../playground/index.html#s=">Try this in playground →</a>
+                                <a class="try-link" data-buff-source="func main():&#10;    print(&quot;Olá, Buff!&quot;)" href="./playground/index.html#s=">Try this in playground →</a>
                             </div>
                         </div>
                     </div>
@@ -127,7 +127,7 @@
                             </div>
                             <div class="col-body">
                                 <p>No <code>&amp;</code> references. No <code>as i64</code> casts for simple integer math. The transpiler owns data and emits <code>Arc</code> or clones where needed. You never see a lifetime.</p>
-                                <a class="try-link" data-buff-source="func process(data: Vector&lt;Int&gt;):&#10;    let sum = data.iter().sum()&#10;    let avg = sum / data.len()&#10;    print(&quot;avg: {avg}&quot;)" href="../playground/index.html#s=">Try this in playground →</a>
+                                <a class="try-link" data-buff-source="func process(data: Vector&lt;Int&gt;):&#10;    let sum = data.iter().sum()&#10;    let avg = sum / data.len()&#10;    print(&quot;avg: {avg}&quot;)" href="./playground/index.html#s=">Try this in playground →</a>
                             </div>
                         </div>
                     </div>
@@ -165,7 +165,7 @@
                             </div>
                             <div class="col-body">
                                 <p>Compact <code>match</code> on a single line when arms are simple. No variable binding boilerplate. The <code>_</code> catch-all works the same as Rust's.</p>
-                                <a class="try-link" data-buff-source="func classify(n: Int):&#10;    match n { 0 =&gt; print(&quot;zero&quot;), 1 =&gt; print(&quot;one&quot;), _ =&gt; print(&quot;other&quot;) }" href="../playground/index.html#s=">Try this in playground →</a>
+                                <a class="try-link" data-buff-source="func classify(n: Int):&#10;    match n { 0 =&gt; print(&quot;zero&quot;), 1 =&gt; print(&quot;one&quot;), _ =&gt; print(&quot;other&quot;) }" href="./playground/index.html#s=">Try this in playground →</a>
                             </div>
                         </div>
                     </div>
@@ -214,7 +214,7 @@ func main():
                             </div>
                             <div class="col-body">
                                 <p>No <code>Box&lt;dyn Error&gt;</code>. No <code>.into()</code>. The builtin <code>Error("msg")</code> constructor maps to Rust's <code>Err(Error::new(...))</code>. The <code>?</code> operator works identically to Rust for propagation.</p>
-                                <a class="try-link" data-buff-source="func half(n: Int) -> Result&lt;Int, Error&gt;:&#10;    if n &lt; 2:&#10;        return Error(&quot;input too small&quot;)&#10;    return Ok(n / 2)&#10;&#10;func main():&#10;    let result = half(10)&#10;    match result { Ok(v) =&gt; print(v), Err(_) =&gt; print(0) }" href="../playground/index.html#s=">Try this in playground →</a>
+                                <a class="try-link" data-buff-source="func half(n: Int) -> Result&lt;Int, Error&gt;:&#10;    if n &lt; 2:&#10;        return Error(&quot;input too small&quot;)&#10;    return Ok(n / 2)&#10;&#10;func main():&#10;    let result = half(10)&#10;    match result { Ok(v) =&gt; print(v), Err(_) =&gt; print(0) }" href="./playground/index.html#s=">Try this in playground →</a>
                             </div>
                         </div>
                     </div>
@@ -273,7 +273,7 @@ func main():
                             </div>
                             <div class="col-body">
                                 <p>No <code>.await</code> keyword. Async propagates automatically through the call graph. <code>spawn</code> creates tasks, <code>.result()</code> replaces <code>.await</code>. No <code>#[tokio::main]</code>, no function coloring.</p>
-                                <a class="try-link" data-buff-source="async func fetch_value() -> Int:&#10;    return 42&#10;&#10;func pipeline() -> Int:&#10;    return fetch_value()&#10;&#10;func main():&#10;    let value = pipeline()&#10;    print(value)&#10;    let task = spawn fetch_value()&#10;    let answer = task.result()&#10;    print(answer)" href="../playground/index.html#s=">Try this in playground →</a>
+                                <a class="try-link" data-buff-source="async func fetch_value() -> Int:&#10;    return 42&#10;&#10;func pipeline() -> Int:&#10;    return fetch_value()&#10;&#10;func main():&#10;    let value = pipeline()&#10;    print(value)&#10;    let task = spawn fetch_value()&#10;    let answer = task.result()&#10;    print(answer)" href="./playground/index.html#s=">Try this in playground →</a>
                             </div>
                         </div>
                     </div>
@@ -320,7 +320,7 @@ func main():
                             </div>
                             <div class="col-body">
                                 <p>No <code>.iter()</code>, no <code>.collect()</code>, no type annotations on the binding. Lambdas use <code>{ x =&gt; body }</code> syntax. Chains read left-to-right naturally.</p>
-                                <a class="try-link" data-buff-source="func main():&#10;    let doubled = [1, 2, 3, 4, 5].map({ x =&gt; x * 2 })&#10;    print(doubled[4])&#10;    let stacked = [1, 2, 3].map({ x =&gt; x * 2 }).map({ y =&gt; y + 1 })&#10;    print(stacked[0])" href="../playground/index.html#s=">Try this in playground →</a>
+                                <a class="try-link" data-buff-source="func main():&#10;    let doubled = [1, 2, 3, 4, 5].map({ x =&gt; x * 2 })&#10;    print(doubled[4])&#10;    let stacked = [1, 2, 3].map({ x =&gt; x * 2 }).map({ y =&gt; y + 1 })&#10;    print(stacked[0])" href="./playground/index.html#s=">Try this in playground →</a>
                             </div>
                         </div>
                     </div>
