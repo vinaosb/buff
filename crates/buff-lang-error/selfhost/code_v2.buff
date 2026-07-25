@@ -1,0 +1,61 @@
+// buff-lang-error/code — FULL port with String returns
+// String coercion fix enables code_str() returning String
+
+enum ErrorCode {
+    UnexpectedChar,
+    UnterminatedString,
+    InvalidNumber,
+    MixedTabsSpaces,
+    InconsistentIndent,
+    UnterminatedBlockComment,
+    UnterminatedRegex,
+    EmptyRegex,
+    UnterminatedCharLiteral,
+    EmptyCharLiteral,
+    InvalidCharEscape,
+    InvalidUnicodeEscape,
+    UnexpectedBraceInString,
+    UnterminatedInterpolation,
+    ExpectedToken,
+    UnexpectedToken,
+    ExpectedLayoutNewline,
+    ExpectedIndentedBlock,
+    FuncMustBeTopLevel,
+    ExpectedIdentifier,
+    UnterminatedList,
+    UnsupportedAbi,
+    ExternGenericsUnsupported,
+}
+
+func code_str(code: ErrorCode) -> String:
+    match code {
+        UnexpectedChar => "E1001",
+        UnterminatedString => "E1002",
+        InvalidNumber => "E1003",
+        MixedTabsSpaces => "E1004",
+        InconsistentIndent => "E1005",
+        UnterminatedBlockComment => "E1006",
+        UnterminatedRegex => "E1007",
+        EmptyRegex => "E1008",
+        UnterminatedCharLiteral => "E1009",
+        EmptyCharLiteral => "E1010",
+        InvalidCharEscape => "E1011",
+        InvalidUnicodeEscape => "E1012",
+        UnexpectedBraceInString => "E1013",
+        UnterminatedInterpolation => "E1014",
+        ExpectedToken => "E1101",
+        UnexpectedToken => "E1102",
+        ExpectedLayoutNewline => "E1103",
+        ExpectedIndentedBlock => "E1104",
+        FuncMustBeTopLevel => "E1105",
+        ExpectedIdentifier => "E1106",
+        UnterminatedList => "E1107",
+        UnsupportedAbi => "E1108",
+        ExternGenericsUnsupported => "E1109",
+    }
+
+func main():
+    print(code_str(code: UnexpectedChar))
+    print(code_str(code: InvalidNumber))
+    print(code_str(code: ExpectedToken))
+    print(code_str(code: ExternGenericsUnsupported))

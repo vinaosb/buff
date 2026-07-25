@@ -798,10 +798,11 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
         // Layout-sensitive form: `struct Name:` + indented field lines.
         stream.advance(); // consume `:`
                           // Expect a Newline then an Indent (the offside-rule tokens emitted by
-                          // `indent.rs`). If either is missing, it's a parse error.
-        if !matches!(stream.peek_kind(), Some(TokenKind::Newline)) {
+                          // `indent.rs`). Use RAW stream access because the regular
+                          // TokenStream skips layout tokens (Newline/Indent/Dedent).
+        if !matches!(stream.peek_raw_kind(), Some(TokenKind::Newline)) {
             let span = stream
-                .peek()
+                .peek_raw()
                 .map(|t| t.span)
                 .unwrap_or_else(|| stream.eof_span());
             return Err(ParseError::new(Diagnostic::error(
@@ -809,10 +810,10 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
                 span,
             )));
         }
-        stream.advance(); // consume Newline
-        if !matches!(stream.peek_kind(), Some(TokenKind::Indent)) {
+        stream.advance_raw(); // consume Newline
+        if !matches!(stream.peek_raw_kind(), Some(TokenKind::Indent)) {
             let span = stream
-                .peek()
+                .peek_raw()
                 .map(|t| t.span)
                 .unwrap_or_else(|| stream.eof_span());
             return Err(ParseError::new(Diagnostic::error(
@@ -820,8 +821,8 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
                 span,
             )));
         }
-        stream.advance(); // consume Indent
-                          // Parse fields until Dedent.
+        stream.advance_raw(); // consume Indent
+                              // Parse fields until Dedent.
         loop {
             // Field name.
             let fname_tok = stream.advance().ok_or_else(|| {
@@ -837,14 +838,14 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
             let ftype = parse_type_ref(stream)?;
             fields.push((fname, ftype));
             // Consume the trailing Newline (required between fields in
-            // layout-sensitive form — the offside rule doesn't insert them
-            // automatically between same-indentation items on separate lines).
-            if matches!(stream.peek_kind(), Some(TokenKind::Newline)) {
-                stream.advance();
+            // layout-sensitive form — use RAW stream because regular stream
+            // skips layout tokens).
+            if matches!(stream.peek_raw_kind(), Some(TokenKind::Newline)) {
+                stream.advance_raw();
             }
-            // Check for Dedent (end of field list) or continue.
-            if matches!(stream.peek_kind(), Some(TokenKind::Dedent)) {
-                stream.advance(); // consume Dedent
+            // Check for Dedent (end of field list) using RAW stream.
+            if matches!(stream.peek_raw_kind(), Some(TokenKind::Dedent)) {
+                stream.advance_raw(); // consume Dedent
                 break;
             }
             if stream.is_at_end() {
