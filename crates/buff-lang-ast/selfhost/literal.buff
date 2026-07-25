@@ -1,0 +1,28 @@
+// buff-lang-ast literal types — data variants with mixed types
+// Tests: Int, Float, String, Bool data variants in enum
+
+enum Literal {
+    IntVal(Int),
+    FloatVal(Float),
+    StringVal(String),
+    BoolVal(Bool),
+}
+
+func lit_kind_num(l: Literal) -> Int:
+    match l {
+        IntVal(_) => 0,
+        FloatVal(_) => 1,
+        StringVal(_) => 2,
+        BoolVal(_) => 3,
+    }
+
+func main():
+    let a = IntVal(42)
+    let b = FloatVal(3.14)
+    let c = StringVal("hello")
+    let d = BoolVal(true)
+
+    print(lit_kind_num(l: a))
+    print(lit_kind_num(l: b))
+    print(lit_kind_num(l: c))
+    print(lit_kind_num(l: d))
