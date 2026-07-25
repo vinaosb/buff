@@ -1,14 +1,14 @@
 {
-  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/buff-launch-readiness.md",
-  "started_at": "2026-07-23T00:00:00.0000000-03:00",
+  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/v1.26-real-use-cases-launch.md",
+  "started_at": "2026-07-24T00:00:00.0000000-03:00",
   "session_ids": [
-    "ses_current_atlas_launch_readiness"
+    "ses_current_atlas_v1_26_real_use_cases"
   ],
-  "plan_name": "buff-launch-readiness",
+  "plan_name": "v1.26-real-use-cases-launch",
   "worktree_path": null,
   "task_sessions": {},
-  "previous_active_plan": "buff-v1x-frameworks",
-  "previous_session_count": 79,
+  "previous_active_plan": "buff-launch-readiness",
+  "previous_session_count": 80,
   "master_preserved_session_ids": [
     "ses_current_atlas_buff_master",
     "ses_087555ce0ffeNOqNTee60G0RhT",
@@ -25,5 +25,5 @@
     "ses_0702b04baffeUnLphfW2q3EHJe",
     "ses_06ff0be57ffe6mdxhjOfO2Ec4r"
   ],
-  "notes": "Switched from buff-v1x-frameworks (COMPLETE: v1.13.0-v1.24.0 all shipped + tagged, F1-F4 all APPROVE post-fix, 4 F3 lib compile bugs fixed in b68e14f, v1.24.0 tag force-updated to 0c83da5). User confirmed acceptance by moving on to launch-readiness plan. Now starting buff-launch-readiness (v1.25+): 122 tasks across 9 tracks (A-I) + 6 waves + Final Verification. Wave 0 SEQUENTIAL START: T22 (benchmark baseline) → T13 (generics) → T104 (code-hygiene audit)."
+  "notes": "Previous plan buff-launch-readiness COMPLETE (165 commits, 42 tags v0.1.0-v1.38.0, all F1-F4 APPROVED). Starting v1.26-real-use-cases-launch: 28 tasks (24 implementation + 4 F-verify) across 5 waves. Wave 0: AGENTS.md refresh + baseline verification. Wave 1: CI repair + framework audit + test harness + unreachable! catalog. Wave 2: 13 parallel (bug fixes + 15 examples + 3 full apps + Pages pipeline). Wave 3: discovered fixes + docs. Wave 4: branch rename + Pages deploy."
 }
