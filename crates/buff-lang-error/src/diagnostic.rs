@@ -558,7 +558,7 @@ impl Diagnostic {
             let help_line = suggestion.render_help_line();
             // Wrap the "help:" prefix and the backtick-quoted replacement in green.
             // The original line is "  help: replace with `...`" or "  help: label: replace with `...`"
-            out.push_str(&GREEN);
+            out.push_str(GREEN);
             out.push_str(&help_line);
             out.push_str(RESET);
         }
@@ -738,9 +738,7 @@ fn render_span_label_in_source(
         LabelStyle::Primary => '^',
         LabelStyle::Secondary => '~',
     };
-    let carets: String = std::iter::repeat(caret_char)
-        .take(width)
-        .collect::<String>();
+    let carets: String = std::iter::repeat_n(caret_char, width).collect();
     let trailing = if label.is_empty() {
         String::new()
     } else {
@@ -795,9 +793,7 @@ fn render_span_label_in_source_with_color(
         LabelStyle::Primary => '^',
         LabelStyle::Secondary => '~',
     };
-    let carets: String = std::iter::repeat(caret_char)
-        .take(width)
-        .collect::<String>();
+    let carets: String = std::iter::repeat_n(caret_char, width).collect();
     let color = severity_color(severity);
     let trailing = if label.is_empty() {
         String::new()

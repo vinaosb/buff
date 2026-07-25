@@ -171,11 +171,8 @@ pub fn to_json(diag: &Diagnostic, source: &str) -> DiagnosticJson {
         ));
     }
 
-    let suggestions: Vec<SuggestionJson> = diag
-        .suggestions
-        .iter()
-        .map(|s| suggestion_to_json(s))
-        .collect();
+    let suggestions: Vec<SuggestionJson> =
+        diag.suggestions.iter().map(suggestion_to_json).collect();
 
     DiagnosticJson {
         code: diag.code.map(|c| c.code_str().to_string()),
@@ -291,12 +288,10 @@ impl ErrorCode {
     /// future `buff fix` / reporter tooling. Does NOT renumber codes —
     /// it only matches already-shipped variants.
     pub fn from_code_str(s: &str) -> Option<ErrorCode> {
-        for &c in ErrorCode::all() {
-            if c.code_str() == s {
-                return Some(c);
-            }
-        }
-        None
+        ErrorCode::all()
+            .iter()
+            .find(|&&c| c.code_str() == s)
+            .copied()
     }
 }
 
