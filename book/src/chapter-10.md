@@ -1,6 +1,6 @@
 # 10. Real-World Examples
 
-> This chapter catalogs the **19 real-world use cases** shipped in v1.26.
+> This chapter catalogs the **18 real-world use cases** shipped in v1.26.
 > Each example exercises a distinct set of language features and framework
 > crates, stress-testing the compiler in production-like scenarios. Every
 > example lives in [`examples/use-cases/`](https://github.com/vinaosb/buff/tree/main/examples/use-cases)
@@ -60,7 +60,7 @@ Each full application is 500–1500 lines and exercises multiple framework crate
 
 ### REST API Server
 
-[`examples/use-cases/apps/rest_api_server.buff`](https://github.com/vinaosb/buff/tree/main/examples/use-cases/apps/rest_api_server.buff) — 918 lines
+[`examples/use-cases/apps/rest_api_server.buff`](https://github.com/vinaosb/buff/tree/main/examples/use-cases/apps/rest_api_server.buff) — 638 lines
 
 A complete CRUD REST API for a "tasks" resource built on `buff-web`:
 
@@ -93,7 +93,7 @@ A CLI file management tool with subcommands:
 
 ### ETL Data Pipeline
 
-[`examples/use-cases/apps/data_pipeline.buff`](https://github.com/vinaosb/buff/tree/main/examples/use-cases/apps/data_pipeline.buff) — 1194 lines
+[`examples/use-cases/apps/data_pipeline.buff`](https://github.com/vinaosb/buff/tree/main/examples/use-cases/apps/data_pipeline.buff) — 735 lines
 
 A complete ETL data processing pipeline:
 

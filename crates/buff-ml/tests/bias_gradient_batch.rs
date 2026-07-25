@@ -104,7 +104,10 @@ fn model_loss_value(model: &Model, x: &Tensor, target: &Tensor) -> f32 {
     let tape = Tape::new();
     let xv = tape.leaf(x.clone(), false).expect("leaf x");
     let pred = model.forward(xv, false).expect("forward");
-    mse_loss(&pred, target).expect("mse_loss").value().as_slice()[0]
+    mse_loss(&pred, target)
+        .expect("mse_loss")
+        .value()
+        .as_slice()[0]
 }
 
 /// Read a layer's bias gradient as an owned Vec. Linear::collect_grads returns
@@ -127,8 +130,11 @@ fn numerical_bias_grad(layer_index: usize, x: &Tensor, target: &Tensor) -> Vec<f
     let mut out = vec![0.0f32; OUT_DIM];
     for k in 0..OUT_DIM {
         let l_plus = model_loss_value(&build_model_with_bias_shift(layer_index, k, EPS), x, target);
-        let l_minus =
-            model_loss_value(&build_model_with_bias_shift(layer_index, k, -EPS), x, target);
+        let l_minus = model_loss_value(
+            &build_model_with_bias_shift(layer_index, k, -EPS),
+            x,
+            target,
+        );
         out[k] = (l_plus - l_minus) / (2.0 * EPS);
     }
     out
@@ -152,7 +158,11 @@ fn last_layer_bias_grad_matches_analytical_batch_gt1() {
     // `sum_axis`, autodiff returned [3.0, 6.0] instead of the analytical [4,5].
     let model = run_backward(&input_x(), &target_zero());
     let g = bias_grad(&model, 2);
-    assert_eq!(g.len(), OUT_DIM, "expected {OUT_DIM} bias components, got {g:?}");
+    assert_eq!(
+        g.len(),
+        OUT_DIM,
+        "expected {OUT_DIM} bias components, got {g:?}"
+    );
     let eps = 1e-5;
     assert!(
         (g[0] - 4.0).abs() < eps,

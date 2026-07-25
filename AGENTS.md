@@ -50,6 +50,7 @@ buff/
 ├── editors/vscode/                      # T118 VSCode extension (TypeScript → out/extension.js; bundles buff-lsp + TextMate + snippets)
 ├── website/                             # v1.1 static landing page (HTML/CSS/JS, no build step, playwright tests)
 ├── playground/                          # v1.1 static transpile-only playground (HTML/CSS/JS + pkg/buff_playground_bg.wasm)
+├── book/                                # T55 "The Buff Book" — mdBook guide (11 chapters: intro → real-world examples)
 ├── docs/                                # Generated error pages (docs/errors/E*.html) + component-model/extern-guide markdown
 ├── .sisyphus/                           # Project orchestration: boulder.json + plans/ (13 files) + decisions/ + evidence/ + notepads/
 ├── .github/workflows/ci.yml             # 3-OS matrix: fmt --check + clippy --all-targets -D warnings + test
@@ -75,6 +76,7 @@ buff/
 | Add a snapshot test | `crates/<crate>/tests/*.rs` + commit the `.snap` | Per-crate `tests/snapshots/` |
 | Add a `.buffhtml` example | `examples/<name>.buffhtml` | SFC: `<script>buff</script>` + `<template>RSX</template>` + `<style>CSS</style>` |
 | Find phase status (v0.1/v0.5/v1.0/v1.x) | `.sisyphus/plans/buff-{v01,v05,v10,post-v10-tooling,v1x-frameworks}-*.md` | Master: `buff-master.md` |
+| Read the official guide | `book/src/SUMMARY.md` → `chapter-{0..10}.md` | "The Buff Book" (mdBook); every code block is ```buff fenced and traces to `examples/` |
 | Find the conventions doc | `.sisyphus/plans/buff-conventions.md` | 18+ conventions for BUFF LANGUAGE (not Rust) |
 
 ## CODE MAP — Pipeline
