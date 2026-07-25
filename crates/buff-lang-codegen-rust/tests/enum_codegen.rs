@@ -901,14 +901,17 @@ fn t86_return_match_strips_arm_body_trailing_semicolon() {
     must_reparse(&src);
 }
 
-/// T86: standalone match (NOT in return position) KEEPS the trailing `;`
-/// on arm body statements. This preserves the existing codegen shape for
-/// non-return-position matches so existing snapshots stay byte-identical
-/// (the fix is narrow: only return-position matches get the strip).
+/// T86: standalone match (e.g. `match c { Red => 1, _ => 0 }` as an
+/// ExprStmt) ALSO gets its arm body stripped of the trailing `;`.
+///
+/// Originally the strip was gated on return-position depth, but that left
+/// implicit tail-expression returns broken (see [`lower_match_expr`] doc).
+/// The strip is now unconditional: `{ expr }` is strictly more general than
+/// `{ expr; }` — valid Rust whether the value is wanted or discarded.
 #[test]
 fn t86_standalone_match_keeps_arm_body_trailing_semicolon() {
-    // `match c { Red => 1, _ => 0 }` as a standalone ExprStmt (NOT in
-    // return position). Arm bodies keep `{ 1; }` shape.
+    // `match c { Red => 1, _ => 0 }` as a standalone ExprStmt. Arm
+    // bodies strip to `{ 1 }` shape (tail expression).
     let mt = Expr::MatchExpr {
         scrutinee: Box::new(ident_expr("c")),
         arms: vec![
@@ -918,20 +921,23 @@ fn t86_standalone_match_keeps_arm_body_trailing_semicolon() {
         span: span(),
     };
     let src = codegen_one_expr(mt);
-    // Arm body in standalone position KEEPS the trailing `;`.
+    // Arm body in standalone position is ALSO stripped (always-strip
+    // rule — `{ expr }` is valid Rust in statement context too).
     assert!(
-        src.contains("1;"),
-        "T86: standalone match arm body must KEEP trailing `;`: {src}"
+        !src.contains("1;"),
+        "T86: standalone match arm body must NOT have trailing `;` (always strip): {src}"
     );
     must_reparse(&src);
 }
 
-/// T86: `let v = match c { ... }` — the match is the RHS of a let
-/// binding (NOT return position). The fix must NOT strip semis here
-/// (`let bindings` exclusion per the task spec).
+/// T86: `let v = match c { ... }` — the match is the RHS of a let binding.
+/// Arm bodies are stripped here too (always-strip rule). The let binding
+/// captures the value of the match, so each arm MUST yield a value (not
+/// `()`), which is exactly what the unconditional strip guarantees.
 #[test]
 fn t86_let_binding_match_keeps_arm_body_trailing_semicolon() {
-    // `let v = match c { Red => 1, _ => 0 }` — let binding, not return.
+    // `let v = match c { Red => 1, _ => 0 }` — let binding. The match
+    // yields the arm value into `v`, so arms strip to `{ 1 }` shape.
     let mt = Expr::MatchExpr {
         scrutinee: Box::new(ident_expr("c")),
         arms: vec![
@@ -948,11 +954,10 @@ fn t86_let_binding_match_keeps_arm_body_trailing_semicolon() {
         span: span(),
     };
     let src = codegen_stmts(vec![stmt]);
-    // Let-binding context: arm bodies keep trailing `;` (T86 only
-    // strips in return position — let bindings keep the original shape).
+    // Let-binding context: arm bodies are stripped (always-strip rule).
     assert!(
-        src.contains("1;"),
-        "T86: let-binding match arm body must KEEP trailing `;`: {src}"
+        !src.contains("1;"),
+        "T86: let-binding match arm body must NOT have trailing `;` (always strip): {src}"
     );
     must_reparse(&src);
 }

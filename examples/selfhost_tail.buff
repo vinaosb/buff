@@ -1,0 +1,10 @@
+// Test: tail expression (non-match)
+func forty_two() -> Int:
+    42
+
+func add(a: Int, b: Int) -> Int:
+    a + b
+
+func main():
+    print(forty_two())
+    print(add(a: 3, b: 4))

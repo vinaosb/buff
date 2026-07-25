@@ -1,0 +1,18 @@
+// Test: match returning integers (no string coercion needed)
+enum OpCode {
+    Add,
+    Sub,
+    Mul,
+}
+
+func op_code(op: OpCode) -> Int:
+    match op {
+        Add => 1,
+        Sub => 2,
+        Mul => 3,
+    }
+
+func main():
+    print(op_code(op: Add))
+    print(op_code(op: Sub))
+    print(op_code(op: Mul))
