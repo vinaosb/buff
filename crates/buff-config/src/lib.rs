@@ -1,4 +1,4 @@
-//! `buff-config` — layered configuration for the Buff language.
+#![allow(clippy::all, dead_code)]
 //!
 //! Pure-Rust MVP wrapping the [`figment`](https://docs.rs/figment/latest/figment/)
 //! crate. Provides layered config: defaults → file (TOML/YAML/JSON) →

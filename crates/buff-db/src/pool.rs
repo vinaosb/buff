@@ -34,11 +34,17 @@ impl Pool {
             .connect(url)
             .await
             .map_err(DbError::from)?;
-        Ok(Pool { inner: pool, scheme })
+        Ok(Pool {
+            inner: pool,
+            scheme,
+        })
     }
 
     pub fn from_inner(inner: AnyPool) -> Pool {
-        Pool { inner, scheme: String::new() }
+        Pool {
+            inner,
+            scheme: String::new(),
+        }
     }
 
     pub fn inner(&self) -> &AnyPool {
