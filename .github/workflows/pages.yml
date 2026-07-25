@@ -67,8 +67,10 @@ jobs:
           cp -r playground/pkg/* publish/playground/
           # Book (rendered HTML) — mdBook writes directly to <book-root>/book/
           # (mdBook 0.5.x default build-dir is "book", no html/ subdir).
+          mkdir -p publish/book
           cp -r book/book/* publish/book/
           # Docs (error pages + markdown)
+          mkdir -p publish/docs
           cp -r docs/* publish/docs/
           # Disable Jekyll processing
           touch publish/.nojekyll
