@@ -1,0 +1,15 @@
+// buff-pubsub self-host port — Event type
+// Mirrors crates/buff-pubsub/src/lib.rs Event struct (simplified)
+
+struct Event {
+    topic_id: Int,
+    payload_size: Int,
+}
+
+func event_new(topic: Int, size: Int) -> Event:
+    return Event { topic_id: topic, payload_size: size }
+
+func main():
+    let e = event_new(topic: 1, size: 100)
+    print(e.topic_id)
+    print(e.payload_size)

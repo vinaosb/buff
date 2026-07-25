@@ -149,3 +149,39 @@ jobs:
           tags: buff:builder-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Self-host bootstrap check (informational, not required) ──────────────
+  # Runs `buff check` on all self-host .buff files and reports the pass rate.
+  # This tracks progress as codegen/parser gaps are fixed.
+  self-host-check:
+    name: Self-host bootstrap
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: self-host
+      - name: Build buff CLI
+        run: cargo build --release -p buff-lang-cli
+      - name: Check self-host corpus
+        run: |
+          BUFF=./target/release/buff
+          PASS=0; FAIL=0; TOTAL=0
+          for f in self-host/lexer/*.buff self-host/parser/*.buff self-host/types/*.buff self-host/codegen/*.buff; do
+            [ -f "$f" ] || continue
+            TOTAL=$((TOTAL+1))
+            rm -rf target/buff-cache
+            if $BUFF check "$f" 2>&1 | head -1 | grep -q "no issues"; then
+              PASS=$((PASS+1))
+              echo "PASS: $f"
+            else
+              FAIL=$((FAIL+1))
+              echo "FAIL: $f"
+            fi
+          done
+          echo "::notice::Self-host bootstrap: $PASS/$TOTAL files pass buff check"
+          echo "Total: $TOTAL, Pass: $PASS, Fail: $FAIL"
