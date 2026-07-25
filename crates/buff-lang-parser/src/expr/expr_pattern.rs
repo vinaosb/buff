@@ -330,6 +330,59 @@ fn parse_pattern_atom(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseErro
                 unreachable!("matched Ident above");
             };
             let ident = Ident::new(name, tok.span);
+            // Dot-qualified variant pattern: `EnumName.VariantName` or
+            // `EnumName.VariantName(args)`. Buff convention uses dot
+            // notation for enum variant access (Type.method()).
+            if matches!(stream.peek_kind(), Some(TokenKind::Dot)) {
+                stream.advance(); // consume `.`
+                let variant_tok = stream.advance().ok_or_else(|| {
+                    ParseError::new(Diagnostic::error(
+                        "expected variant name after `.` in pattern",
+                        stream.eof_span(),
+                    ))
+                })?;
+                let TokenKind::Ident(variant_ident) = variant_tok.kind.clone() else {
+                    return Err(ParseError::new(Diagnostic::error(
+                        "expected variant name after `.` in pattern",
+                        variant_tok.span,
+                    )));
+                };
+                let variant_ident = Ident::new(variant_ident, variant_tok.span);
+                // Check for tuple variant: `EnumName.VariantName(args)`.
+                if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
+                    stream.advance(); // consume `(`
+                    let mut subpats: Vec<Pattern> = Vec::new();
+                    if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                        loop {
+                            subpats.push(parse_pattern(stream)?);
+                            match stream.peek_kind() {
+                                Some(TokenKind::Comma) => {
+                                    stream.advance();
+                                    if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                                        break;
+                                    }
+                                }
+                                Some(TokenKind::RParen) => break,
+                                _ => break,
+                            }
+                        }
+                    }
+                    let rp = stream.expect(TokenKind::RParen)?;
+                    return Ok(Pattern::Variant {
+                        enum_name: ident,
+                        variant: variant_ident,
+                        subpatterns: subpats,
+                        span: Span::new(tok.span.start, rp.span.end, source_id),
+                    });
+                }
+                // Unit variant: `EnumName.VariantName` (no args).
+                return Ok(Pattern::Variant {
+                    enum_name: ident,
+                    variant: variant_ident,
+                    subpatterns: Vec::new(),
+                    span: Span::new(tok.span.start, variant_tok.span.end, source_id),
+                });
+            }
             // Variant tuple: `Ident ( subpat, subpat, ... )`.
             if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
                 stream.advance(); // consume `(`
