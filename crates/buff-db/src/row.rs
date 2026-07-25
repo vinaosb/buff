@@ -117,7 +117,7 @@ pub fn row_from_any(row: &sqlx::any::AnyRow) -> Result<Row> {
     if columns.is_empty() {
         return Err(DbError::ColumnMissing("(empty row)".into()));
     }
-    Ok(Row { columns, values })
+    Ok(crate::row::Row { columns, values })
 }
 
 fn read_any_value(row: &sqlx::any::AnyRow, i: usize) -> DbValue {

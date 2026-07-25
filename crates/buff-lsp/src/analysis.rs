@@ -270,6 +270,11 @@ fn record_expr_types_in_stmt(stmt: &Stmt, infer: &TypeInferencer, types: &mut Ty
             }
         }
         Stmt::Defer { expr, .. } => record_expr_types(expr, infer, types),
+        Stmt::ComptimeBlock { body, .. } => {
+            for s in &body.stmts {
+                record_expr_types_in_stmt(s, infer, types);
+            }
+        }
     }
 }
 
@@ -415,6 +420,7 @@ pub fn decl_span(decl: &Decl) -> Span {
         Decl::ExternCrateDecl(c) => c.span,
         Decl::ExternFuncDecl(d) => d.span,
         Decl::ExtendBlock(ext) => ext.span,
+        Decl::ImplBlock(_) => Span::dummy(),
     }
 }
 
@@ -432,6 +438,7 @@ pub fn stmt_span(stmt: &Stmt) -> Span {
         Stmt::ForLet { span, .. } => *span,
         Stmt::Guard { span, .. } => *span,
         Stmt::Defer { span, .. } => *span,
+        Stmt::ComptimeBlock { span, .. } => *span,
     }
 }
 

@@ -24,10 +24,15 @@
 //! `System.Security.Cryptography.ECDiffieHellman` use.
 
 use crate::error::CryptoError;
-use p256::ecdh::Ecdh as EcdhP256;
+// p256 0.13 API drift fix: the old `p256::ecdh::Ecdh` struct was removed;
+// the module now exposes a `diffie_hellman(scalar, point) -> SharedSecret`
+// free function (re-exported from `elliptic_curve::ecdh`). The
+// `raw_secret_bytes()` method moved to `SharedSecret`. Same shape for p384.
+use p256::ecdh::diffie_hellman as ecdh_p256;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::{AffinePoint, NonZeroScalar, PublicKey as P256Public, SecretKey as P256Secret};
-use p384::ecdh::Ecdh as EcdhP384;
+#[allow(unused_imports)] // P-384 ECDH derive is deferred to v1.20+ per AGENTS.md.
+use p384::ecdh::diffie_hellman as ecdh_p384;
 use p384::{PublicKey as P384Public, SecretKey as P384Secret};
 use rand::rngs::OsRng;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -105,9 +110,10 @@ pub fn p256_derive_shared(private: &[u8], public: &[u8]) -> Result<Vec<u8>, Cryp
         let non_zero = NonZeroScalar::from_repr(secret.to_nonzero_scalar().into())
             .into_option()
             .ok_or_else(|| CryptoError::Ecdh("invalid p256 private scalar".into()))?;
-        let ecdh = EcdhP256::new(non_zero, public_key.as_affine());
-        let shared = ecdh.raw_secret_bytes();
-        Ok::<Vec<u8>, CryptoError>(shared.to_vec())
+        // p256 0.13: `Ecdh::new(scalar, point).raw_secret_bytes()` →
+        // `diffie_hellman(scalar, point).raw_secret_bytes()`.
+        let shared = ecdh_p256(non_zero, public_key.as_affine());
+        Ok::<Vec<u8>, CryptoError>(shared.raw_secret_bytes().to_vec())
     }));
     match result {
         Ok(Ok(v)) => Ok(v),

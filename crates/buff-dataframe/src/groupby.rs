@@ -127,8 +127,8 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
                         format!("{}", xs.iter().sum::<f64>() / xs.len() as f64)
                     }
                 }
-                AggOp::Min => format!("{}", xs.iter().fold(f64::INFINITY, f64::min)),
-                AggOp::Max => format!("{}", xs.iter().fold(f64::NEG_INFINITY, f64::max)),
+                AggOp::Min => format!("{}", xs.iter().copied().fold(f64::INFINITY, f64::min)),
+                AggOp::Max => format!("{}", xs.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
                 AggOp::Count => unreachable!(),
             }
         }

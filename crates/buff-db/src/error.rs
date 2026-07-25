@@ -39,10 +39,9 @@ impl From<sqlx::Error> for DbError {
     }
 }
 
-impl From<sqlx::migrate::MigrateError> for DbError {
-    fn from(e: sqlx::migrate::MigrateError) -> Self {
-        DbError::Transaction(e.to_string())
-    }
-}
+// NOTE: `From<sqlx::migrate::MigrateError>` was removed because the `migrate`
+// module is gated behind sqlx's `migrate` cargo feature, which the workspace
+// pin does not enable (migrations are deferred per the T18 spec). The crate
+// body never invokes migrate, so this impl was unused.
 
 pub type Result<T> = std::result::Result<T, DbError>;

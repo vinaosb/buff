@@ -8,6 +8,8 @@
 //! so the parser logic stays clean. Callers that care about layout should
 //! construct the stream from a pre-filtered token slice.
 
+use std::collections::VecDeque;
+
 use buff_lang_error::{Diagnostic, ErrorCode, ParseError, SourceId, Span};
 use buff_lang_lexer::{Token, TokenKind};
 
@@ -23,6 +25,10 @@ pub struct TokenStream<'a> {
     source_id: SourceId,
     edition: Edition,
     matrix_row_depth: usize,
+    /// Synthetic tokens injected by token-splitting (e.g. `>>` split into two
+    /// `>` tokens when closing nested generics). Checked BEFORE the token slice
+    /// so the parser sees them as the "next" token.
+    pending_split: VecDeque<Token>,
 }
 
 impl<'a> TokenStream<'a> {
@@ -44,6 +50,7 @@ impl<'a> TokenStream<'a> {
             source_id,
             edition,
             matrix_row_depth: 0,
+            pending_split: VecDeque::new(),
         }
     }
 
@@ -88,6 +95,12 @@ impl<'a> TokenStream<'a> {
     /// `None` at end-of-input or when an explicit [`TokenKind::Eof`] is
     /// reached.
     pub fn peek(&self) -> Option<&Token> {
+        // Check pending split tokens FIRST — they take priority over the
+        // token slice so the parser sees synthetic `>` tokens before the
+        // real next token.
+        if let Some(tok) = self.pending_split.front() {
+            return Some(tok);
+        }
         let mut i = self.pos;
         while i < self.tokens.len() {
             match self.tokens[i].kind {
@@ -142,6 +155,11 @@ impl<'a> TokenStream<'a> {
     /// [`Iterator::next`] trait method (which would trigger clippy's
     /// `should_implement_trait` lint).
     pub fn advance(&mut self) -> Option<Token> {
+        // Check pending split tokens FIRST — drain them before touching the
+        // real token slice.
+        if let Some(tok) = self.pending_split.pop_front() {
+            return Some(tok);
+        }
         // Skip any layout tokens first.
         while self.pos < self.tokens.len() {
             match self.tokens[self.pos].kind {
@@ -285,6 +303,34 @@ impl<'a> TokenStream<'a> {
     /// by re-advancing over already-seen tokens).
     pub fn restore(&mut self, pos: usize) {
         self.pos = pos;
+    }
+
+    /// Split a `>>` (Shr) token into two `>` (Gt) tokens for nested-generic
+    /// parsing (e.g. `Map<String, Vector<String>>`).
+    ///
+    /// When the parser is closing a generic argument list and encounters a
+    /// `Shr` token, it calls this method to:
+    /// 1. Consume the `Shr` token (advance past it).
+    /// 2. Push a synthetic `Gt` token onto the pending queue so the OUTER
+    ///    generic context sees its own closing `>` on the next peek.
+    ///
+    /// This handles the classic `>>` ambiguity in languages with C-style
+    /// generics without requiring lexer context-sensitivity.
+    pub fn split_shr(&mut self) {
+        // Consume the Shr token from the real slice.
+        let shr_tok = self.advance();
+        if let Some(tok) = shr_tok {
+            if matches!(tok.kind, TokenKind::Shr) {
+                // Fabricate a synthetic Gt token covering the second `>`
+                // character of the `>>` pair. Span: [start+1, end).
+                let synthetic_span =
+                    Span::new(tok.span.start + 1, tok.span.end, tok.span.source_id);
+                self.pending_split.push_back(Token {
+                    kind: TokenKind::Gt,
+                    span: synthetic_span,
+                });
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

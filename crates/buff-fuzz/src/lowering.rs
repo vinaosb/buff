@@ -236,7 +236,11 @@ fn mk_i64_type() -> SynType {
 }
 
 fn mk_borrow_expr(name: &str) -> Expr {
-    Expr::Borrow(syn::ExprBorrow {
+    // syn 2.x API drift: `Expr::Borrow(syn::ExprBorrow {...})` was renamed to
+    // `Expr::Reference(syn::ExprReference {...})` with identical fields
+    // (`attrs`, `and_token`, `mutability`, `expr`). The `&expr` AST shape is
+    // unchanged; only the variant/struct names moved.
+    Expr::Reference(syn::ExprReference {
         attrs: Vec::new(),
         and_token: Token![&](ProcSpan::call_site()),
         mutability: None,

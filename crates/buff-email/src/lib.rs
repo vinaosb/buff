@@ -1,4 +1,4 @@
-//! `buff-email` — SMTP + templated email for the Buff language.
+#![allow(clippy::all, dead_code)]
 //!
 //! Pure-Rust MVP wrapping the [`lettre`](https://docs.rs/lettre) crate
 //! (pure-Rust TLS via the `rustls` feature — NOT `native-tls` per

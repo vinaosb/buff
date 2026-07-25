@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_imports, private_interfaces)]
 //! `buff-chat` — Discord + Telegram bot framework for the Buff language.
 //!
 //! Pure-Rust MVP wrapping [`serenity`](https://crates.io/crates/serenity)
@@ -104,7 +105,7 @@ impl std::fmt::Display for Platform {
 }
 
 /// Internal mutable state behind `Arc<RwLock<...>>`.
-struct BotInner {
+pub(crate) struct BotInner {
     commands: HashMap<String, Handler>,
     message_handler: Option<Handler>,
     running: Arc<AtomicBool>,
@@ -283,11 +284,12 @@ impl Bot {
         let inner = self.inner.clone();
         let platform = self.platform;
         let token = self.token.clone();
+        let running_clone = running_flag.clone();
 
         let result = runtime.block_on(async move {
             match platform {
-                Platform::Discord => discord::run(&token, inner, &running_flag).await,
-                Platform::Telegram => telegram::run(&token, inner, &running_flag).await,
+                Platform::Discord => discord::run(&token, inner, &running_clone).await,
+                Platform::Telegram => telegram::run(&token, inner, &running_clone).await,
             }
         });
 

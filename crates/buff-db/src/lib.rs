@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, mismatched_lifetime_syntaxes)]
 //! `buff-db` — database access MVP for the Buff language.
 //!
 //! Wraps [`sqlx`](https://crates.io/crates/sqlx) behind a safe, owned

@@ -54,7 +54,7 @@ pub use error::{Result, Web3Error};
 // as opaque enums (mirrors the `image::ImageFormat` re-export in
 // `buff-image`).
 pub use ethers::abi::Token;
-pub use Client as ClientKind;
+pub(crate) use Client as ClientKind;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, OnceLock};

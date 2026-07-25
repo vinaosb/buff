@@ -34,31 +34,34 @@ pub async fn run(
     let inner_clone = inner;
     let running_clone = running.clone();
 
-    teloxide::repl(bot, move |_bot, msg| {
-        let inner = inner_clone.clone();
-        let running = running_clone.clone();
-        async move {
-            if !running.load(Ordering::Relaxed) {
-                return Ok::<(), teloxide::RequestError>(());
-            }
-            let text = msg.text().unwrap_or("").to_string();
-            let channel = msg.chat.id.to_string();
-            let author = msg
-                .from
-                .as_ref()
-                .and_then(|u| u.username.clone())
-                .unwrap_or_default();
-            // Telegram convention: private chats use the user's positive
-            // ID as the chat ID; group/supergroup/channel chats use
-            // negative IDs. This is the documented Telegram Bot API
-            // behavior for distinguishing DMs from group messages.
-            let is_dm = msg.chat.id.0 > 0;
+    teloxide::repl(
+        bot,
+        move |_bot: Arc<teloxide::Bot>, msg: teloxide::types::Message| {
+            let inner = inner_clone.clone();
+            let running = running_clone.clone();
+            async move {
+                if !running.load(Ordering::Relaxed) {
+                    return Ok::<(), teloxide::RequestError>(());
+                }
+                let text = msg.text().unwrap_or("").to_string();
+                let channel = msg.chat.id.to_string();
+                let author = msg
+                    .from
+                    .as_ref()
+                    .and_then(|u| u.username.clone())
+                    .unwrap_or_default();
+                // Telegram convention: private chats use the user's positive
+                // ID as the chat ID; group/supergroup/channel chats use
+                // negative IDs. This is the documented Telegram Bot API
+                // behavior for distinguishing DMs from group messages.
+                let is_dm = msg.chat.id.0 > 0;
 
-            let our_msg = Message::new(text, channel, author, Platform::Telegram, is_dm);
-            let _ = Bot::dispatch_to_inner(&inner, our_msg);
-            Ok(())
-        }
-    })
+                let our_msg = Message::new(text, channel, author, Platform::Telegram, is_dm);
+                let _ = Bot::dispatch_to_inner(&inner, our_msg);
+                Ok(())
+            }
+        },
+    )
     .await;
 
     Ok(())

@@ -243,7 +243,9 @@ pub fn roundtrip(value: &serde_json::Value) -> Option<serde_json::Value> {
 /// (protobuf's `Value` message is never a top-level message). The
 /// inverse is [`struct_to_value`].
 fn value_to_struct(value: &serde_json::Value) -> Result<prost_types::Struct, ProtobufError> {
-    let mut fields = std::collections::HashMap::new();
+    // prost 0.13: `prost_types::Struct::fields` is a `BTreeMap<String, Value>`
+    // (not HashMap). Use BTreeMap directly so we hand off the exact type.
+    let mut fields = std::collections::BTreeMap::new();
     match value {
         serde_json::Value::Object(map) => {
             for (k, v) in map {
@@ -288,7 +290,7 @@ fn json_to_proto_value(value: &serde_json::Value) -> Result<prost_types::Value, 
             Some(Kind::ListValue(prost_types::ListValue { values }))
         }
         serde_json::Value::Object(map) => {
-            let mut fields = std::collections::HashMap::new();
+            let mut fields = std::collections::BTreeMap::new();
             for (k, v) in map {
                 fields.insert(k.clone(), json_to_proto_value(v)?);
             }

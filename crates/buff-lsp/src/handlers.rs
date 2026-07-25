@@ -218,7 +218,9 @@ fn suggestions_to_code_actions(
     let byte = state.lines.byte_offset(&state.text, position);
     let uri: lsp_types::Uri = format!("buff://source-{}", state.source_id.0)
         .parse()
-        .unwrap_or_else(|_| "buff://unknown".parse().unwrap_or_default());
+        // lsp-types 0.97 `Uri` does not impl `Default`; parse a known-good
+        // constant fallback. "buff://unknown" is always a valid URI.
+        .unwrap_or_else(|_| "buff://unknown".parse().unwrap());
 
     let mut out: Vec<CodeActionOrCommand> = Vec::new();
     for diag in &state.analysis.diagnostics {
@@ -255,7 +257,7 @@ fn suggestions_to_code_actions(
             let is_preferred = matches!(suggestion.applicability, Applicability::MachineApplicable);
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title,
-                kind: Some(CodeActionKind::QUICK_FIX),
+                kind: Some(CodeActionKind::QUICKFIX),
                 // The diagnostics this action resolves. T1's suggestion
                 // engine attaches the fix to the diagnostic in scope; we
                 // don't yet thread the originating `lsp_types::Diagnostic`
@@ -1081,6 +1083,7 @@ fn token_type_index(
         | TokenKind::KwUnsafe
         | TokenKind::KwGuard
         | TokenKind::KwExtend
+        | TokenKind::KwImpl
         | TokenKind::KwDefer => {
             Some(0) // keyword
         }

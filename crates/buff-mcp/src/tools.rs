@@ -110,6 +110,16 @@ pub enum ToolError {
     Execution(String),
 }
 
+impl std::fmt::Display for ToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolError::UnknownTool => write!(f, "unknown tool"),
+            ToolError::MissingArg(name) => write!(f, "missing argument: {name}"),
+            ToolError::Execution(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tool schema (single source of truth for `tools/list`).
 // ---------------------------------------------------------------------------

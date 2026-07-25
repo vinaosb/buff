@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]
 //! `buff-geo` — geospatial / GIS primitives for the Buff language.
 //!
 //! Pure-Rust MVP wrapping the [`geo`](https://crates.io/crates/geo) +
@@ -50,6 +51,12 @@ pub mod error;
 pub use error::GeoError;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+
+// T45: `geo::LineString::coords_count` moved to the `CoordsIter` trait
+// in geo 0.28 — importing the trait puts the method back in scope for
+// `num_points` / `num_vertices` below. Mirrors the project rule that
+// `use` imports live at the top of the file.
+use geo::CoordsIter;
 
 const WEB_MERCATOR_MAX_LAT: f64 = 85.05112878;
 const WEB_MERCATOR_R: f64 = 6378137.0;

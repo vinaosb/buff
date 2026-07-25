@@ -1434,7 +1434,14 @@ buff-i18n = { path = "crates/buff-i18n" }
 # Recorded in the codegen `extern_crates` BTreeSet when a Buff program
 # uses `Faker` (mirrors the chrono / regex / tracing codegen-only
 # linking boundary). Pure-Rust, no native deps.
-fake = "2"
+# NOTE: `features = ["uuid", "chrono"]` added to fix
+# `unresolved import fake::uuid` (T37 API-drift fix). In fake 2.x the
+# `uuid` and `chrono` modules are OPTIONAL cargo features (not enabled
+# by default). The import paths `fake::uuid::UUIDv4` and
+# `fake::faker::datetime::en::DateTime` are correct for fake 2.x — they
+# just need the features enabled. Version pin untouched; no new
+# dependency added.
+fake = { version = "2", features = ["uuid", "chrono"] }
 # T37: `buff-fake` workspace path dep — mirrors the buff-image /
 # buff-audio / buff-dsp / buff-dataframe pattern so any future consumer
 # (codegen-lowered `Faker.*` calls, IDE hover/completion) resolves to
@@ -1835,8 +1842,13 @@ buff-geo = { path = "crates/buff-geo" }
 # Snapshots + extern_crates set is the verifiable contract.
 aes-gcm = "0.10"
 rsa = "0.9"
-p256 = "0.13"
-p384 = "0.13"
+# NOTE: `features = ["ecdh"]` added to fix `unresolved import p256::ecdh`
+# (T49 API-drift fix). The `p256::ecdh::Ecdh` path is correct in 0.13 but
+# the `ecdh` cargo feature must be explicitly enabled — it is NOT a default
+# feature. Version pin untouched; no new dependency added. Mirrors the
+# RustCrypto feature-flag convention shared by p256/p384 0.13.
+p256 = { version = "0.13", features = ["ecdh"] }
+p384 = { version = "0.13", features = ["ecdh"] }
 signature = "2"
 # T49: `buff-crypto-extras` workspace path dep — mirrors the
 # buff-image / buff-geo / buff-msgpack pattern so any future consumer

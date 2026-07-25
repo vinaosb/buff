@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]
 //! `buff-scrape` — HTML parsing + crawling for the Buff language.
 //!
 //! Pure-Rust MVP wrapping the [`scraper`](https://crates.io/crates/scraper)

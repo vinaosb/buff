@@ -132,7 +132,9 @@ impl Scheduler {
     }
 
     pub fn is_running(&self) -> bool {
-        use tokio::sync::atomic::Ordering;
+        // tokio has no `sync::atomic` module — `AtomicBool` is from `std::sync::atomic`.
+        // (Mirrors line 129 above; the `running` field is `Arc<std::sync::atomic::AtomicBool>`.)
+        use std::sync::atomic::Ordering;
         self.running.load(Ordering::SeqCst)
     }
 

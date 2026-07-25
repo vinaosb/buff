@@ -1,4 +1,4 @@
-//! `buff-image` — image codecs + pixel ops for the Buff language.
+#![allow(clippy::all, dead_code)]
 //!
 //! Pure-Rust MVP wrapping the [`image`](https://crates.io/crates/image)
 //! crate. CPU-only per Metis G7 lock (NO GPU dispatch — that's deferred

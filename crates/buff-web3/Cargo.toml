@@ -47,7 +47,8 @@ path = "src/lib.rs"
 # the verifiable contract.
 ethers.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
-tokio.workspace = true
