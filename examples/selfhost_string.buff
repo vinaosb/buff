@@ -1,0 +1,12 @@
+struct Person {
+    name: String,
+    age: Int,
+}
+
+func make_person(n: String, a: Int) -> Person:
+    return Person { name: n, age: a }
+
+func main():
+    let p = make_person(n: "Alice", a: 30)
+    print(p.name)
+    print(p.age)

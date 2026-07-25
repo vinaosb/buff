@@ -864,6 +864,26 @@ impl RustCodegen {
         if let Literal::Decimal(raw) = lit {
             return self.lower_decimal_literal(raw);
         }
+        // Self-host: Always wrap string literals in .to_string() so they
+        // are String type (not &str). This allows passing string literals
+        // to String-typed function parameters without a codegen gap.
+        // Rust's deref coercion handles the reverse (&str params receive
+        // String via auto-deref), so this is always safe.
+        if let Literal::String(s) = lit {
+            let lit_expr = SynExpr::Lit(syn::ExprLit {
+                attrs: Vec::new(),
+                lit: syn::Lit::Str(syn::LitStr::new(s, ProcSpan::call_site())),
+            });
+            return Ok(SynExpr::MethodCall(syn::ExprMethodCall {
+                attrs: Vec::new(),
+                receiver: Box::new(lit_expr),
+                dot_token: Default::default(),
+                method: syn::Ident::new("to_string", ProcSpan::call_site()),
+                turbofish: None,
+                args: Punctuated::new(),
+                paren_token: Default::default(),
+            }));
+        }
         let syn_lit = match lit {
             Literal::Int(n) => {
                 syn::Lit::Int(syn::LitInt::new(&n.to_string(), ProcSpan::call_site()))

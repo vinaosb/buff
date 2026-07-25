@@ -1,0 +1,13 @@
+// Test: Vector fields in structs
+struct IntBag {
+    num_items: Int,
+    sum_total: Int,
+}
+
+func make_bag(n: Int, t: Int) -> IntBag:
+    return IntBag { num_items: n, sum_total: t }
+
+func main():
+    let bag = make_bag(n: 5, t: 100)
+    print(bag.num_items)
+    print(bag.sum_total)
