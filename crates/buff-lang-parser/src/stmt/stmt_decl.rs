@@ -822,7 +822,7 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
             )));
         }
         stream.advance_raw(); // consume Indent
-                          // Parse fields until Dedent.
+                              // Parse fields until Dedent.
         loop {
             // Field name.
             let fname_tok = stream.advance().ok_or_else(|| {
