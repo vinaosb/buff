@@ -95,13 +95,36 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
             None
         };
         stream.expect(TokenKind::FatArrow)?;
-        let body_expr = parse_expression(stream)?;
-        // Wrap the body in a one-statement block (consistent with closures).
+        // Allow `return` as a match arm body (self-host pattern:
+        // `TokenKind.KwFunc => return true,`). `return` is a statement,
+        // not an expression, so we handle it specially before falling
+        // through to the expression parser.
         let arm_tok_span = pat.span();
-        arm_end = body_expr.span().end;
-        let body = Block {
-            stmts: vec![Stmt::ExprStmt(body_expr, arm_tok_span)],
-            span: Span::new(arm_tok_span.start, arm_end, source_id),
+        let body = if matches!(stream.peek_kind(), Some(TokenKind::KwReturn)) {
+            let ret_tok = stream.advance().unwrap(); // consume `return`
+            let ret_expr = if matches!(
+                stream.peek_kind(),
+                Some(TokenKind::Comma | TokenKind::RBrace)
+            ) {
+                None
+            } else {
+                Some(parse_expression(stream)?)
+            };
+            arm_end = ret_expr
+                .as_ref()
+                .map(|e| e.span().end)
+                .unwrap_or(ret_tok.span.end);
+            Block {
+                stmts: vec![Stmt::Return(ret_expr, ret_tok.span)],
+                span: Span::new(arm_tok_span.start, arm_end, source_id),
+            }
+        } else {
+            let body_expr = parse_expression(stream)?;
+            arm_end = body_expr.span().end;
+            Block {
+                stmts: vec![Stmt::ExprStmt(body_expr, arm_tok_span)],
+                span: Span::new(arm_tok_span.start, arm_end, source_id),
+            }
         };
         arms.push(MatchArm {
             pattern: pat,
