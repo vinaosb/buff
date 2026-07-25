@@ -26,8 +26,8 @@ path = "src/lib.rs"
 # rustls-tls + json + blocking.
 reqwest.workspace = true
 thiserror.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
 httpmock.workspace = true
-serde_json.workspace = true

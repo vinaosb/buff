@@ -222,7 +222,7 @@ impl Response {
     /// Get all response headers as a `HashMap<String, String>`.
     /// If a header has multiple values, they are joined with `, `.
     pub fn headers(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
+        let mut map: HashMap<String, String> = HashMap::new();
         for (name, value) in self.inner.headers().iter() {
             let key = name.to_string();
             let val = value.to_str().unwrap_or_default().to_string();

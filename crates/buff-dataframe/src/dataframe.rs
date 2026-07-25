@@ -271,7 +271,7 @@ impl DataFrame {
                     None => continue,
                 };
                 let mut buf = String::new();
-                let _ = series.fmt_cell(r, &mut std::fmt::Formatter::new(&mut buf));
+                let _ = series.fmt_cell(r, &mut buf);
                 widths[c] = widths[c].max(buf.chars().count());
             }
         }
@@ -302,7 +302,7 @@ impl DataFrame {
                     None => continue,
                 };
                 let mut buf = String::new();
-                let _ = series.fmt_cell(r, &mut std::fmt::Formatter::new(&mut buf));
+                let _ = series.fmt_cell(r, &mut buf);
                 pad_to(&mut out, &buf, widths[c]);
             }
             out.push('\n');

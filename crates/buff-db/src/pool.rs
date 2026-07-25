@@ -1,4 +1,8 @@
-use sqlx::any::{AnyPool, AnyPoolOptions};
+// sqlx 0.8 removed the `AnyPool` type alias from `sqlx::any` (it still ships
+// `AnyPoolOptions`, `AnyRow`, `AnyArguments`). The replacement is `Pool<Any>`,
+// re-aliased here so the rest of this crate stays unchanged.
+use sqlx::any::AnyPoolOptions;
+type AnyPool = sqlx::Pool<sqlx::Any>;
 
 use crate::error::{DbError, Result};
 use crate::row::{row_from_any, Row};
@@ -16,21 +20,25 @@ use crate::row::{row_from_any, Row};
 #[derive(Debug, Clone)]
 pub struct Pool {
     inner: AnyPool,
+    // sqlx 0.8 dropped the `AnyPool::any_kind()` accessor; capture the URL
+    // scheme at connect time so `url_scheme()` stays synchronous + alloc-free.
+    scheme: String,
 }
 
 impl Pool {
     pub async fn connect(url: &str) -> Result<Pool> {
         validate_driver(url)?;
+        let scheme = url.split(':').next().unwrap_or("").to_string();
         let pool = AnyPoolOptions::new()
             .max_connections(8)
             .connect(url)
             .await
             .map_err(DbError::from)?;
-        Ok(Pool { inner: pool })
+        Ok(Pool { inner: pool, scheme })
     }
 
     pub fn from_inner(inner: AnyPool) -> Pool {
-        Pool { inner }
+        Pool { inner, scheme: String::new() }
     }
 
     pub fn inner(&self) -> &AnyPool {
@@ -73,7 +81,7 @@ impl Pool {
     }
 
     pub fn url_scheme(&self) -> &str {
-        self.inner.any_kind().name()
+        &self.scheme
     }
 }
 
@@ -86,7 +94,7 @@ fn validate_driver(url: &str) -> Result<()> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Transaction<'a> {
     inner: Option<sqlx::Transaction<'a, sqlx::Any>>,
 }

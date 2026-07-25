@@ -34,7 +34,7 @@ pub async fn run(
     let inner_clone = inner;
     let running_clone = running.clone();
 
-    teloxide::repl(bot, move |_bot, msg| {
+    teloxide::repl(bot, move |_bot: Arc<teloxide::Bot>, msg: teloxide::types::Message| {
         let inner = inner_clone.clone();
         let running = running_clone.clone();
         async move {

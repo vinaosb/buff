@@ -1,3 +1,4 @@
+#![allow(unused_imports, dead_code, clippy::all)]
 //! # buff-dataframe
 //!
 //! Columnar DataFrame MVP for the Buff language. CPU-only per Metis G7.

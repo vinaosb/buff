@@ -44,6 +44,11 @@ pub use error::AuditError;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+// T26: `SigningKey::sign` lives on the `Signer` trait — bring it into
+// scope so the `signing.sign(...)` call below resolves. Re-exported by
+// ed25519-dalek when the `rand_core` feature is on.
+use ed25519_dalek::Signer;
+
 /// The default manifest paths `Audit.scan` consults in order.
 ///
 /// The scanner reads the first match; missing files are silently
@@ -62,8 +67,16 @@ pub const MANIFEST_PATHS: &[&str] = &["buff.lock", "Cargo.lock", "buff.toml"];
 /// in `catch_unwind` per FFI guide R6.
 pub fn keypair() -> Result<(String, String), AuditError> {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let mut csprng = rand::rngs::OsRng;
-        let signing = ed25519_dalek::SigningKey::generate(&mut csprng);
+        // T26 + T36: rand was bumped from 0.8 → 0.9 at the workspace
+        // level, which moved `OsRng` onto rand_core 0.9 (incompatible
+        // with ed25519-dalek 2.x's rand_core 0.6 `CryptoRngCore` bound).
+        // Generate 32 CSPRNG bytes via rand 0.9's `ThreadRng` (OS-
+        // entropy-backed ChaCha — cryptographically secure per the
+        // rand 0.9 docs) and construct the SigningKey via `from_bytes`,
+        // which sidesteps the rand_core trait mismatch entirely.
+        use rand::Rng;
+        let secret: [u8; ed25519_dalek::SECRET_KEY_LENGTH] = rand::rng().random();
+        let signing = ed25519_dalek::SigningKey::from_bytes(&secret);
         let verifying: ed25519_dalek::VerifyingKey = signing.verifying_key();
         Ok::<(String, String), AuditError>((
             hex::encode(verifying.to_bytes()),

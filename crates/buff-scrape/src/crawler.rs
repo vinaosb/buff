@@ -199,6 +199,7 @@ fn extract_links(doc: &Document) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
     anchor_links
+        .into_iter()
         .filter_map(|el| {
             el.attr("href")
                 .filter(|href| !href.is_empty() && !href.starts_with('#'))

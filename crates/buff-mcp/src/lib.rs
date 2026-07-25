@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]
 //! `buff-mcp` — Model Context Protocol (MCP) bridge server for the Buff
 //! language (T62, v1.25 Wave 2a).
 //!

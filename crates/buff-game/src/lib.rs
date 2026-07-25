@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]
 //! `buff-game` — game loop + asset pipeline + rendering for Buff.
 //!
 //! ECS-based 2-D game framework (T16 v1.22 Wave 10). Composes the

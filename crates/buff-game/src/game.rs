@@ -223,24 +223,26 @@ impl Game {
         // 3. Scene enter (once) — only the first scene on the stack
         //    is active in the MVP. Multi-scene sequencing is deferred.
         if !self.scene_entered {
-            if !self.scenes.is_empty() {
-                // SAFETY: scenes[0] is valid (checked is_empty above).
-                // on_enter does not modify the scenes vec — it only
-                // accesses world/renderer/input through &mut Game.
-                let scene: *mut dyn Scene = &mut self.scenes[0];
-                unsafe {
-                    (*scene).on_enter(self);
-                }
+            // Split the borrow: take the scenes Vec out of self so the
+            // scene callback can borrow `self` mutably without an
+            // aliasing conflict. on_enter does not modify the scenes
+            // vec (it only touches world/renderer/input through &mut
+            // Game) so we restore it verbatim after the call.
+            let mut scenes = std::mem::take(&mut self.scenes);
+            if !scenes.is_empty() {
+                scenes[0].on_enter(self);
             }
+            self.scenes = scenes;
             self.scene_entered = true;
         }
 
         // 4. Scene update — only the first scene is active.
-        if !self.scenes.is_empty() {
-            let scene: *mut dyn Scene = &mut self.scenes[0];
-            unsafe {
-                (*scene).on_update(self, dt);
+        {
+            let mut scenes = std::mem::take(&mut self.scenes);
+            if !scenes.is_empty() {
+                scenes[0].on_update(self, dt);
             }
+            self.scenes = scenes;
         }
 
         // 5. Run registered ECS systems.

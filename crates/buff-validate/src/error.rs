@@ -16,7 +16,7 @@
 
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum ValidationError {
     /// The input field failed an `email` rule.
     #[error("field `{field}` is not a valid email address: {value}")]

@@ -80,7 +80,7 @@ impl Series {
         }
     }
 
-    pub(crate) fn fmt_cell(&self, idx: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub(crate) fn fmt_cell(&self, idx: usize, f: &mut impl std::fmt::Write) -> fmt::Result {
         match self {
             Series::Int(v) => write!(f, "{}", v.get(idx).copied().unwrap_or_default()),
             Series::Float(v) => {
