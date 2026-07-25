@@ -2166,7 +2166,6 @@ impl RustCodegen {
                             path: rust_path(&qualified),
                         });
                         let mut call_args: Punctuated<SynExpr, syn::Token![,]> =
-                            Punctuated::new();
                         for arg in args_ref {
                             call_args.push(self.lower_expr(arg)?);
                         }
