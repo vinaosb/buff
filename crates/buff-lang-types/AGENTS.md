@@ -1,27 +1,38 @@
 # buff-lang-types
 
-Type representation, local inference, async propagation, ownership analysis, prelude registry. ~9,900 LOC across 12 src files. Crate version: 1.2.0.
+Type representation, local inference, async propagation, ownership analysis, prelude registry. ~22,000 LOC across 22 src files + 1 subdirectory. Crate version: 1.2.0.
 
 ## STRUCTURE
 
 ```
 src/
-├── lib.rs                # 107 lines — 12 pub mod + 35+ pub use re-exports
-├── prelude_types.rs      # 4527 lines — THE LARGEST FILE (see below)
+├── lib.rs                # 156 lines — 22 pub mod + 35+ pub use re-exports
+├── prelude_types.rs      # 1919 lines — PreludeType enum + lookup helpers (see below)
 ├── ownership.rs          # 1432 lines — T33 Copy/Arc/CoW classification
-├── infer.rs              # 1053 lines — TypeInferencer + expr/stmt inference
+├── infer.rs              # 2028 lines — TypeInferencer + expr/stmt inference
 ├── async_analysis.rs     # 867 lines — T31 fixpoint async propagation (no await keyword)
-├── ty.rs                 # 831 lines — Type enum (20 variants) + IntWidth + FloatWidth
+├── comptime.rs           # 897 lines — T53 Zig-inspired comptime interpreter
+├── cross_file.rs         # 305 lines — T1 cross-file symbol resolution table
+├── ty.rs                 # 2641 lines — Type enum (20 variants) + IntWidth + FloatWidth
 ├── recursion.rs          # 759 lines — T48 DFS cycle detection, GPU-ineligible marking
 ├── exhaustiveness.rs     # 682 lines — T27 match coverage checking
 ├── modules.rs            # 615 lines — T29 module graph, FsLoader, MemoryLoader
+├── multi_dispatch.rs     # 495 lines — T58 Julia-inspired multiple dispatch
 ├── prelude.rs            # 483 lines — 21 free-fn preludes (Math/Convert/Io/System)
+├── prelude_assoc_const_impl.rs   # 133 lines — T105b PreludeAssocConst enum + lookup
+├── prelude_assoc_fn_impl.rs      # 1545 lines — T105b PreludeAssocFn enum + assoc_fn_lookup
+├── prelude_instance_fn_impl.rs   # 1561 lines — T105b PreludeInstanceFn enum + instance_fn_lookup
+├── prelude_return_types.rs       # 1610 lines — T105b return-type inference for prelude fns
+├── prelude_type_metadata.rs      # 1392 lines — T105b PreludeType metadata impl + lookup
+├── project.rs            # 342 lines — T1 project-level parsing + error formatting
 ├── range_analysis.rs     # 274 lines — IntRange (i128 interval) + flexible width
 ├── promote.rs            # 155 lines — promote_binary + assignable_to
-└── env.rs                # 60 lines — TypeEnv (flat HashMap<String, Type>)
+├── env.rs                # 60 lines — TypeEnv (flat HashMap<String, Type>)
+└── prelude_types/
+    └── tests.rs          # 1667 lines — T105b prelude-type integration tests
 ```
 
-### prelude_types.rs (4527 lines)
+### prelude_types.rs (1919 lines)
 
 The extensible stdlib registry. Every future prelude type (URL, Base64, Hash, TCP, etc.) adds here.
 
