@@ -1,0 +1,82 @@
+// buff-lang-ast/op — Buff self-host port of op.rs
+//
+// Mirrors crates/buff-lang-ast/src/op.rs BinaryOp + UnaryOp enums.
+// Pure data: binary and unary operator tags.
+
+// A binary operator (e.g. +, ==, +=)
+enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    NullCoalesce,
+}
+
+// A unary operator (e.g. -x, !x, ~x)
+enum UnaryOp {
+    Neg,
+    Not,
+    BitNot,
+}
+
+func binary_op_num(op: BinaryOp) -> Int:
+    match op {
+        Add => 1,
+        Sub => 2,
+        Mul => 3,
+        Div => 4,
+        Mod => 5,
+        Eq => 6,
+        Neq => 7,
+        Lt => 8,
+        Gt => 9,
+        Lte => 10,
+        Gte => 11,
+        And => 12,
+        Or => 13,
+        BitAnd => 14,
+        BitOr => 15,
+        BitXor => 16,
+        Shl => 17,
+        Shr => 18,
+        Assign => 19,
+        AddAssign => 20,
+        SubAssign => 21,
+        MulAssign => 22,
+        DivAssign => 23,
+        ModAssign => 24,
+        NullCoalesce => 25,
+    }
+
+func unary_op_num(op: UnaryOp) -> Int:
+    match op {
+        Neg => 1,
+        Not => 2,
+        BitNot => 3,
+    }
+
+func main():
+    print(binary_op_num(op: Add))
+    print(binary_op_num(op: NullCoalesce))
+    print(unary_op_num(op: Neg))
+    print(unary_op_num(op: BitNot))
