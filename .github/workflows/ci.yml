@@ -29,7 +29,7 @@ env:
     -p buff-resilience -p buff-archive -p buff-template -p buff-web
     -p buff-chat -p buff-dataframe -p buff-db -p buff-game -p buff-geo
     -p buff-http-client -p buff-lsp -p buff-mcp -p buff-protobuf
-    -p buff-scrape -p buff-audit -p buff-validate
+    -p buff-scrape -p buff-audit -p buff-validate -p buff-auth
 
 jobs:
   # ── Format check (fast, runs first) ────────────────────────────────────────
