@@ -1,0 +1,25 @@
+// Test: enum variants with data (tuple-style)
+enum Shape {
+    Circle(Int),
+    Square(Int),
+    Rectangle(Int, Int),
+    Point,
+}
+
+func area(s: Shape) -> Int:
+    match s {
+        Circle(r) => 3 * r * r,
+        Square(s) => s * s,
+        Rectangle(w, h) => w * h,
+        Point => 0,
+    }
+
+func main():
+    let c = Circle(5)
+    print(area(s: c))
+    let sq = Square(4)
+    print(area(s: sq))
+    let rect = Rectangle(3, 6)
+    print(area(s: rect))
+    let p = Point
+    print(area(s: p))

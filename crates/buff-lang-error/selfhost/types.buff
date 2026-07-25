@@ -1,0 +1,99 @@
+// buff-lang-error types — comprehensive Buff self-host port
+// Mirrors multiple types from diagnostic.rs, suggest.rs, source_map.rs
+// Only types with Int-only fields and unit-variant enums are ported
+// (String fields and data variants have codegen gaps — tracked separately).
+
+// Severity level for diagnostics (diagnostic.rs:88)
+enum Severity {
+    Error,
+    Warning,
+    Note,
+    Help,
+}
+
+// Label style for span labels (diagnostic.rs:104)
+enum LabelStyle {
+    Primary,
+    Secondary,
+}
+
+// Suggestion applicability (diagnostic.rs:324)
+enum Applicability {
+    MachineApplicable,
+    MaybeIncorrect,
+    Unspecified,
+}
+
+// Top-level error union (diagnostic.rs:1042)
+// NOTE: Rust version has data (Lex(LexError), Parse(ParseError), etc.)
+// Buff codegen gap: data variant constructors not qualified.
+// Using unit variants for now.
+enum BuffError {
+    Lex,
+    Parse,
+    Type,
+    Codegen,
+    Runtime,
+}
+
+// Span label (diagnostic.rs:119) — simplified (no String label)
+struct SpanLabel {
+    start: Int,
+    end: Int,
+    style_primary: Int,
+}
+
+func spanlabel_new(start: Int, end: Int, is_primary: Int) -> SpanLabel:
+    return SpanLabel { start: start, end: end, style_primary: is_primary }
+
+// Diagnostic (diagnostic.rs:164) — simplified (no String message, no Vector)
+struct SimpleDiagnostic {
+    severity_num: Int,
+    code_num: Int,
+}
+
+func severity_num(s: Severity) -> Int:
+    match s {
+        Error => 0,
+        Warning => 1,
+        Note => 2,
+        Help => 3,
+    }
+
+func labelstyle_num(ls: LabelStyle) -> Int:
+    match ls {
+        Primary => 0,
+        Secondary => 1,
+    }
+
+func applicability_num(a: Applicability) -> Int:
+    match a {
+        MachineApplicable => 0,
+        MaybeIncorrect => 1,
+        Unspecified => 2,
+    }
+
+func error_phase_num(e: BuffError) -> Int:
+    match e {
+        Lex => 0,
+        Parse => 1,
+        Type => 2,
+        Codegen => 3,
+        Runtime => 4,
+    }
+
+func main():
+    print(severity_num(s: Error))
+    print(severity_num(s: Help))
+    print(labelstyle_num(ls: Primary))
+    print(applicability_num(a: MachineApplicable))
+    print(error_phase_num(e: Codegen))
+
+    let sl = spanlabel_new(start: 10, end: 20, is_primary: 1)
+    print(sl.start)
+    print(sl.end)
+    print(sl.style_primary)
+
+    let diag = SimpleDiagnostic { severity_num: 0, code_num: 1001 }
+    print(diag.severity_num)
+    print(diag.code_num)
