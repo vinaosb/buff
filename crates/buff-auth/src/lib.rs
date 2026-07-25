@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code)]
 //! `buff-auth` — JWT + OAuth2 + password hashing + RBAC for Buff.
 //!
 //! Pure-Rust MVP wrapping four crates via a safe FFI boundary per

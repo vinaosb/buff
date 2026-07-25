@@ -53,7 +53,7 @@ buff/
 ├── book/                                # T55 "The Buff Book" — mdBook guide (11 chapters: intro → real-world examples)
 ├── docs/                                # Generated error pages (docs/errors/E*.html) + component-model/extern-guide markdown
 ├── .sisyphus/                           # Project orchestration: boulder.json + plans/ (13 files) + decisions/ + evidence/ + notepads/
-├── .github/workflows/ci.yml             # 3-OS matrix: fmt --check + clippy --all-targets -D warnings + test
+├── .github/workflows/ci.yml             # 3-OS matrix: fmt --check + clippy --lib -D warnings + test (advisory) + buff-validation + docker-build
 ├── Cargo.toml                           # Pure workspace (no [package]); ~50 deps centralized in [workspace.dependencies] with T-numbered rationale
 └── rust-toolchain.toml                  # Pin: 1.95.0 + rustfmt + clippy
 ```
@@ -136,7 +136,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 - **Derive defaults**: `Debug, Clone, PartialEq` (+ `Eq, Hash` when used in maps/sets).
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants. ErrorCodes (E10xx lex / E11xx parse / E12xx type / E13xx codegen) are STABLE FOREVER — never renumber/reuse/silently-remove.
 - **Tests in per-crate `tests/`** (not src). Inline `#[cfg(test)]` ok for unit smoke tests.
-- **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy --workspace --all-targets -- -D warnings`).
+- **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy $CI_CRATES --lib -- -D warnings`; local builds should use `--all-targets` for thoroughness).
 - **Conservative pin philosophy**: pin to long-standing stable majors (rand 0.9, chrono 0.4, rustyline 15, dirs 5, zeromq 0.4). rand was migrated from 0.8→0.9 in T36 (v1.25 tech-debt batch) — 0.9 is now the stable surface. Documented inline in root Cargo.toml.
 - **Pure-Rust preference**: reqwest uses `rustls-tls` (NOT native-tls); zeromq (NOT zmq which links C libzmq); no diesel/libpq/S3 SDK in registry. Matches the "no C library, no Docker" hard rule from T126/T127 task specs.
 
@@ -227,7 +227,7 @@ cd editors/vscode && npm run build
 ## NOTES
 
 - **Toolchain mismatch**: `rust-toolchain.toml` pins `1.95.0`, but `.github/workflows/ci.yml` uses `dtolnay/rust-toolchain@master` with `toolchain: 1.95.0`. CI MAY diverge from local on dtolnay action master bumps.
-- **CI clippy DOES include `--all-targets`** (CI line 18). CONTRIBUTING.md was updated in the T28 v1.24 audit to match CI; README.md "Building from source" omits `--all-targets` (cosmetic).
+- **CI clippy uses `--lib`** (CI line 61). Tests are `continue-on-error` (advisory, not gating). `buff-validation` emits warnings/notices but does not fail CI. The hard gates are: `fmt --check`, `clippy --lib -- -D warnings`, and Docker image build. CONTRIBUTING.md was updated in the T28 v1.24 audit; README.md "Building from source" still says `--all-targets` (cosmetic — local builds should use `--all-targets` for thoroughness, CI uses `--lib` for speed).
 - **CI runs on 3 OSes**: ubuntu-latest, windows-latest, macos-latest.
 - **`crates-io/` is empty** — reserved for future crates.io publishing workflow.
 - **`buff.lock`** is gitignored — Buff's future lockfile (not yet generated).
