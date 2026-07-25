@@ -1518,7 +1518,8 @@ impl RustCodegen {
 
     fn lower_block(&mut self, block: &Block) -> Result<syn::Block, CodegenError> {
         let mut stmts = Vec::with_capacity(block.stmts.len());
-        for stmt in &block.stmts {            // T73: `Stmt::Guard` lowers to MULTIPLE sibling `syn::Stmt`s at
+        for stmt in &block.stmts {
+            // T73: `Stmt::Guard` lowers to MULTIPLE sibling `syn::Stmt`s at
             // the same scope level (one per condition). The let-else form's
             // pattern bindings MUST remain in scope for subsequent
             // statements in the SAME function block — wrapping them in an
