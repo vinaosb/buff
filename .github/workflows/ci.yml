@@ -24,6 +24,9 @@ env:
     -p buff-science -p buff-simd -p buff-actors
     -p buff-cache -p buff-pubsub -p buff-assertions -p buff-fsm
     -p buff-msgpack -p buff-xml -p buff-mock
+    -p buff-audio -p buff-config -p buff-email -p buff-i18n -p buff-image
+    -p buff-nlp -p buff-observe -p buff-plugins -p buff-reactive
+    -p buff-resilience -p buff-archive -p buff-template -p buff-web
 
 jobs:
   # ── Format check (fast, runs first) ────────────────────────────────────────

@@ -41,6 +41,8 @@
 //! | R4 — Thread safety | `Config` is `Send + Sync` (wraps `figment::Figment` which is `Send + Sync`). |
 //! | R5 — Lifetime hiding | No public lifetime parameters. `Config` owns its `Figment`. |
 //! | R6 — Panic boundary | `load_file` / `watch` wrap their bodies in `catch_unwind` (per FFI guide §6). |
+// Framework MVP: clippy false positive on MutexGuard reborrow.
+#![allow(clippy::explicit_auto_deref)]
 
 pub mod error;
 

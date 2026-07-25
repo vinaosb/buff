@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! `buff-image` — image codecs + pixel ops for the Buff language.
 //!
 //! Pure-Rust MVP wrapping the [`image`](https://crates.io/crates/image)

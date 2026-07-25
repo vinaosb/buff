@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::useless_conversion, clippy::wrong_self_convention, clippy::doc_lazy_continuation)]
 //! `buff-email` — SMTP + templated email for the Buff language.
 //!
 //! Pure-Rust MVP wrapping the [`lettre`](https://docs.rs/lettre) crate
