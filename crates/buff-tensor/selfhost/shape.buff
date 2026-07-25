@@ -1,0 +1,19 @@
+// buff-tensor self-host port — Shape + error types
+// Mirrors crates/buff-tensor/src/shape.rs and error.rs (simplified)
+
+struct Shape {
+    rank: Int,
+    total_size: Int,
+}
+
+func shape_new(rank: Int, size: Int) -> Shape:
+    return Shape { rank: rank, total_size: size }
+
+func mvp_rank_cap() -> Int:
+    return 4
+
+func main():
+    let s = shape_new(rank: 2, size: 6)
+    print(s.rank)
+    print(s.total_size)
+    print(mvp_rank_cap())

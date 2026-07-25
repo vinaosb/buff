@@ -1,0 +1,17 @@
+// buff-fsm self-host port — TransitionSummary type
+// Mirrors crates/buff-fsm/src/lib.rs TransitionSummary struct (simplified)
+
+struct TransitionSummary {
+    transitioned: Bool,
+    from_state: Int,
+    to_state: Int,
+}
+
+func summary_new(from_s: Int, to_s: Int, did_transition: Bool) -> TransitionSummary:
+    return TransitionSummary { transitioned: did_transition, from_state: from_s, to_state: to_s }
+
+func main():
+    let t = summary_new(from_s: 0, to_s: 1, did_transition: true)
+    print(t.transitioned)
+    print(t.from_state)
+    print(t.to_state)
