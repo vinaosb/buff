@@ -1905,23 +1905,22 @@ pub enum PreludeType {
     Range,
 }
 
-
 // T105b: impl PreludeType + lookup helpers extracted to prelude_type_metadata.
 pub use crate::prelude_type_metadata::{is_prelude_type, prelude_type_lookup};
 
-
 // T105b: PreludeAssocFn + impl + lookup extracted to prelude_assoc_fn_impl.
-pub use crate::prelude_assoc_fn_impl::{PreludeAssocFn, assoc_fn_lookup};
+pub use crate::prelude_assoc_fn_impl::{assoc_fn_lookup, PreludeAssocFn};
 
 // T105b: PreludeAssocConst + impl + lookups extracted to prelude_assoc_const_impl.
-pub use crate::prelude_assoc_const_impl::{PreludeAssocConst, assoc_const_lookup, assoc_const_return_type};
+pub use crate::prelude_assoc_const_impl::{
+    assoc_const_lookup, assoc_const_return_type, PreludeAssocConst,
+};
 
 // T105b: return-type inference extracted to prelude_return_types.
 pub use crate::prelude_return_types::{assoc_fn_return_type, instance_fn_return_type};
 
 // T105b: PreludeInstanceFn + impl + lookup extracted to prelude_instance_fn_impl.
-pub use crate::prelude_instance_fn_impl::{PreludeInstanceFn, instance_fn_lookup};
-
+pub use crate::prelude_instance_fn_impl::{instance_fn_lookup, PreludeInstanceFn};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -1929,4 +1928,3 @@ pub use crate::prelude_instance_fn_impl::{PreludeInstanceFn, instance_fn_lookup}
 
 #[cfg(test)]
 mod tests;
-

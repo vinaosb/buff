@@ -9,7 +9,6 @@
 use super::*;
 
 impl RustCodegen {
-
     /// Lower `abs(x)` → `(x).abs()`. Wrapping the receiver in parens
     /// ensures integer literals like `5` lower to `(5).abs()` rather than
     /// the ambiguous `5.abs()` (which Rust parses as a field access on a
@@ -30,7 +29,11 @@ impl RustCodegen {
     }
 
     /// Lower `min(a, b)` / `max(a, b)` → `(a).<method>(b)`.
-    pub(super) fn lower_min_max(&mut self, args: &[Expr], method: &str) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_min_max(
+        &mut self,
+        args: &[Expr],
+        method: &str,
+    ) -> Result<SynExpr, CodegenError> {
         if args.len() != 2 {
             return Err(self.unsupported(&format!(
                 "{method} expects exactly 2 args, got {}",
@@ -45,7 +48,11 @@ impl RustCodegen {
     /// Lower a float-returning unary math fn (`sqrt`/`floor`/`ceil`/`round`)
     /// to `((x) as f64).<method>()`. Coercing to `f64` first means int args
     /// compile without requiring the user to write `x as Double` manually.
-    pub(super) fn lower_float_unary(&mut self, args: &[Expr], method: &str) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_float_unary(
+        &mut self,
+        args: &[Expr],
+        method: &str,
+    ) -> Result<SynExpr, CodegenError> {
         let recv = self.lower_one_arg(args)?;
         let as_f64 = cast_to(recv, "f64");
         Ok(method_call_no_args(as_f64, method))
@@ -678,33 +685,23 @@ impl RustCodegen {
                 // `vector.lazy()` → `vector.iter()`
                 self.method_chain(recv, &["iter"], None)?
             }
-            "map" if args.len() == 1
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "map" if args.len() == 1 && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 let f = self.lower_expr(&args[0])?;
                 method_call_one_arg(recv, "map", f)
             }
-            "filter" if args.len() == 1
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "filter" if args.len() == 1 && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 let f = self.lower_expr(&args[0])?;
                 method_call_one_arg(recv, "filter", f)
             }
-            "take" if args.len() == 1
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "take" if args.len() == 1 && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 let n = self.lower_expr(&args[0])?;
                 method_call_one_arg(recv, "take", n)
             }
-            "skip" if args.len() == 1
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "skip" if args.len() == 1 && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 let n = self.lower_expr(&args[0])?;
                 method_call_one_arg(recv, "skip", n)
             }
-            "collect" if args.is_empty()
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "collect" if args.is_empty() && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 // `iter.collect()` → `iter.collect::<Vec<_>>()`
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     #recv.collect::<Vec<_>>()
@@ -712,9 +709,7 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("collect codegen parse: {e}")))?
             }
-            "fold" if args.len() == 2
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "fold" if args.len() == 2 && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 let init = self.lower_expr(&args[0])?;
                 let f = self.lower_expr(&args[1])?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
@@ -723,9 +718,7 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("fold codegen parse: {e}")))?
             }
-            "count" if args.is_empty()
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
-            {
+            "count" if args.is_empty() && matches!(recv_for_prelude_check, Type::Iterator(_)) => {
                 // `iter.count()` → `iter.count() as i64`
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     #recv.count() as i64
@@ -733,8 +726,8 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("count codegen parse: {e}")))?
             }
-            "for_each" if args.len() == 1
-                && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
+            "for_each"
+                if args.len() == 1 && matches!(recv_for_prelude_check, Type::Iterator(_)) =>
             {
                 let f = self.lower_expr(&args[0])?;
                 method_call_one_arg(recv, "for_each", f)
@@ -1001,7 +994,11 @@ impl RustCodegen {
     /// not — using `{:?}` guarantees the generated Rust compiles for ANY
     /// error type the user's `Result<T, E>` might carry. See the design
     /// note on the `context` arm in [`Self::lower_method_call`].
-    pub(super) fn lower_context_call(&self, recv: SynExpr, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_context_call(
+        &self,
+        recv: SynExpr,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
         if args.len() != 1 {
             return Err(self.unsupported(&format!(
                 "context() expects exactly 1 string-literal arg, got {}",
@@ -1040,7 +1037,11 @@ impl RustCodegen {
     ///
     /// Emits (conceptually) `s.chars().skip(a).take(b - a).collect::<String>()`.
     /// A single-arg form `s.slice(a)` becomes `s.chars().skip(a).collect::<String>()`.
-    pub(super) fn lower_slice_call(&mut self, recv: SynExpr, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_slice_call(
+        &mut self,
+        recv: SynExpr,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
         if args.is_empty() || args.len() > 2 {
             return Err(self.unsupported(&format!(
                 "slice expects 1 or 2 integer args, got {}",
@@ -1149,7 +1150,10 @@ impl RustCodegen {
     ///
     /// The final `format!` call is built via `quote!` so the format string
     /// and args are spliced in without any hand-formatted Rust.
-    pub(super) fn lower_string_interp(&mut self, parts: &[InterpPart]) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_string_interp(
+        &mut self,
+        parts: &[InterpPart],
+    ) -> Result<SynExpr, CodegenError> {
         // Build the format string with `{}` placeholders for each Expr.
         let mut fmt_string = String::new();
         let mut lowered_args: Vec<SynExpr> = Vec::new();
@@ -1336,6 +1340,4 @@ impl RustCodegen {
             args: lowered,
         }))
     }
-
 }
-

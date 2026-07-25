@@ -135,16 +135,21 @@ fn binary_op(op: BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
 }
 
 fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> FuncDecl {
-    FuncDecl { name: ident(name),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts,
+    FuncDecl {
+        name: ident(name),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts,
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), }
+    }
 }
 
 fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, CodegenError> {

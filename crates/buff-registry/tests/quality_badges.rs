@@ -27,9 +27,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use base64::Engine as _;
-use buff_registry::{
-    app, AppState, InMemoryStorage, QualityAttachment, Storage,
-};
+use buff_registry::{app, AppState, InMemoryStorage, QualityAttachment, Storage};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -263,7 +261,10 @@ async fn badges_endpoint_returns_404_for_unknown_package() {
     let (status, body) = do_get_json(router, "/api/v1/packages/nonexistent/badges").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(
-        body["error"].as_str().unwrap_or_default().contains("not found"),
+        body["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not found"),
         "unknown package → 404 with error: {body}"
     );
 }

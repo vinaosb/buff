@@ -619,10 +619,15 @@ mod tests {
     }
 
     fn arm(pat: Pattern) -> MatchArm {
-        MatchArm { pattern: pat, guard: None, body: Block {
-            stmts: Vec::new(),
+        MatchArm {
+            pattern: pat,
+            guard: None,
+            body: Block {
+                stmts: Vec::new(),
+                span: dummy_span(),
+            },
             span: dummy_span(),
-        }, span: dummy_span() }
+        }
     }
 
     fn ident_pat(name: &str) -> Pattern {

@@ -34,8 +34,7 @@ fn oauth_app_with_allowlist(storage: Arc<dyn Storage>, mock_server: &MockServer)
 
 fn mock_github(server: &MockServer, login: &str, id: i64) {
     server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/login/oauth/access_token");
+        when.method(Method::POST).path("/login/oauth/access_token");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(json!({"access_token": "gho_tok"}).to_string());
@@ -78,7 +77,11 @@ async fn allowlisted_user_can_login() {
     let router = app(state);
 
     let (status, body) = do_callback(router).await;
-    assert_eq!(status, StatusCode::OK, "allowlisted user should log in: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "allowlisted user should log in: {body}"
+    );
     assert_eq!(body["github_login"], "vipuser");
 }
 
@@ -93,7 +96,11 @@ async fn non_allowlisted_user_gets_403() {
     let router = app(state);
 
     let (status, body) = do_callback(router).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "non-allowlisted should get 403: {body}");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "non-allowlisted should get 403: {body}"
+    );
     let err = body["error"].as_str().unwrap_or_default();
     assert!(
         err.contains("invite-only beta"),
@@ -121,7 +128,11 @@ async fn allowlist_disabled_allows_anyone() {
     let router = app(state);
 
     let (status, _) = do_callback(router).await;
-    assert_eq!(status, StatusCode::OK, "allowlist disabled = open registration");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "allowlist disabled = open registration"
+    );
 }
 
 #[tokio::test]
@@ -138,7 +149,11 @@ async fn allowlist_is_case_sensitive() {
     // GitHub logins are case-insensitive but we store them case-sensitively.
     // "TestUser" != "testuser" → 403. This is a known limitation documented
     // in the allowlist docs. Production should normalize to lowercase.
-    assert_eq!(status, StatusCode::FORBIDDEN, "case mismatch = not allowlisted");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "case mismatch = not allowlisted"
+    );
 }
 
 #[tokio::test]

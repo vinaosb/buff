@@ -31,19 +31,24 @@ fn ident_expr(s: &str) -> Expr {
 
 /// Wrap a list of statements in a zero-arg `fn f() { ... }` declaration.
 fn func_with_stmts(stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident("f"),
-    params: Vec::<Param>::new(),
-    return_type: Some(TypeRef::Named {
-        name: ident("Void"),
+    Decl::FuncDecl(FuncDecl {
+        name: ident("f"),
+        params: Vec::<Param>::new(),
+        return_type: Some(TypeRef::Named {
+            name: ident("Void"),
+            span: span(),
+        }),
+        body: Block {
+            stmts,
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }),
-    body: Block {
-        stmts,
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -105,10 +110,15 @@ fn destructuring_codegen_struct_shorthand() {
     // `let Point { x, y } = p` → Rust `let Point { x, y } = p;`
     // (shorthand reproduced because field name == binding name).
     let stmt = Stmt::LetPattern {
-        pattern: Pattern::Struct { name: ident("Point"), fields: vec![
-            (ident("x"), Pattern::Ident(ident("x"), span())),
-            (ident("y"), Pattern::Ident(ident("y"), span())),
-        ], span: span(), rest: false },
+        pattern: Pattern::Struct {
+            name: ident("Point"),
+            fields: vec![
+                (ident("x"), Pattern::Ident(ident("x"), span())),
+                (ident("y"), Pattern::Ident(ident("y"), span())),
+            ],
+            span: span(),
+            rest: false,
+        },
         value: ident_expr("p"),
         mutable: false,
         ty: None,
@@ -125,10 +135,15 @@ fn destructuring_codegen_struct_shorthand() {
 fn destructuring_codegen_struct_explicit_field() {
     // `let Point { x: a, y: b } = p` → Rust `let Point { x: a, y: b } = p;`.
     let stmt = Stmt::LetPattern {
-        pattern: Pattern::Struct { name: ident("Point"), fields: vec![
-            (ident("x"), Pattern::Ident(ident("a"), span())),
-            (ident("y"), Pattern::Ident(ident("b"), span())),
-        ], span: span(), rest: false },
+        pattern: Pattern::Struct {
+            name: ident("Point"),
+            fields: vec![
+                (ident("x"), Pattern::Ident(ident("a"), span())),
+                (ident("y"), Pattern::Ident(ident("b"), span())),
+            ],
+            span: span(),
+            rest: false,
+        },
         value: ident_expr("p"),
         mutable: false,
         ty: None,

@@ -61,10 +61,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use semver::Version;
 
 use crate::error::StorageError;
+use crate::storage::VERSION_EXISTS_MARKER;
 use crate::storage::{
     DepSpec, PackageMetadata, PackageSummary, QualityAttachment, SessionUser, VersionInfo,
 };
-use crate::storage::VERSION_EXISTS_MARKER;
 
 /// The DDL executed on [`SqliteStorage::new`] to create all tables +
 /// indexes if they don't already exist. Idempotent — safe to run on
@@ -207,8 +207,11 @@ impl SqliteStorage {
     /// this method is for seeding test tokens + local-dev setup.
     pub fn add_token(&self, token: &str) -> Result<(), StorageError> {
         let conn = self.lock_conn()?;
-        conn.execute("INSERT OR IGNORE INTO tokens (token) VALUES (?1)", params![token])
-            .map_err(|e| StorageError::Failure(format!("add_token: {e}")))?;
+        conn.execute(
+            "INSERT OR IGNORE INTO tokens (token) VALUES (?1)",
+            params![token],
+        )
+        .map_err(|e| StorageError::Failure(format!("add_token: {e}")))?;
         Ok(())
     }
 
@@ -237,8 +240,7 @@ impl SqliteStorage {
     /// scope-based queries (T57 commit 3).
     fn scope_of(name: &str) -> Option<String> {
         if name.starts_with('@') {
-            name.split_once('/')
-                .map(|(scope, _)| scope.to_string())
+            name.split_once('/').map(|(scope, _)| scope.to_string())
         } else {
             None
         }
@@ -720,8 +722,8 @@ impl Default for SqliteStorage {
             // create a SqliteStorage with a lazily-failing connection.
             // In practice this path is unreachable — open_in_memory
             // only fails on OOM or SQLite init failure.
-            let conn = Connection::open_in_memory()
-                .expect("in-memory SQLite must succeed in default()");
+            let conn =
+                Connection::open_in_memory().expect("in-memory SQLite must succeed in default()");
             Self::init(conn).expect("in-memory SQLite init must succeed in default()")
         })
     }
@@ -837,7 +839,10 @@ mod tests {
                 QualityAttachment::default(),
             )
             .expect_err("should fail");
-        assert_eq!(err.to_string(), format!("storage failure: {VERSION_EXISTS_MARKER}"));
+        assert_eq!(
+            err.to_string(),
+            format!("storage failure: {VERSION_EXISTS_MARKER}")
+        );
     }
 
     #[test]
@@ -910,9 +915,7 @@ mod tests {
                 QualityAttachment::default(),
             )
             .expect("put");
-        let versions = storage
-            .list_versions_with_deps("dep-pkg")
-            .expect("list");
+        let versions = storage.list_versions_with_deps("dep-pkg").expect("list");
         assert_eq!(versions.len(), 1);
         let (_, deps) = &versions[0];
         assert_eq!(deps.len(), 2);
@@ -957,7 +960,10 @@ mod tests {
 
     #[test]
     fn scope_of_scoped_returns_org() {
-        assert_eq!(SqliteStorage::scope_of("@org/pkg"), Some("@org".to_string()));
+        assert_eq!(
+            SqliteStorage::scope_of("@org/pkg"),
+            Some("@org".to_string())
+        );
         assert_eq!(
             SqliteStorage::scope_of("@buff/core"),
             Some("@buff".to_string())
@@ -996,12 +1002,24 @@ mod tests {
     #[test]
     fn sqlite_multiple_orgs_isolated() {
         let storage = SqliteStorage::open_in_memory().expect("open");
-        storage.add_org_member("buff", "alice").expect("add buff/alice");
-        storage.add_org_member("other", "bob").expect("add other/bob");
-        assert!(storage.is_org_member("buff", "alice").expect("check buff/alice"));
-        assert!(!storage.is_org_member("buff", "bob").expect("check buff/bob"));
-        assert!(storage.is_org_member("other", "bob").expect("check other/bob"));
-        assert!(!storage.is_org_member("other", "alice").expect("check other/alice"));
+        storage
+            .add_org_member("buff", "alice")
+            .expect("add buff/alice");
+        storage
+            .add_org_member("other", "bob")
+            .expect("add other/bob");
+        assert!(storage
+            .is_org_member("buff", "alice")
+            .expect("check buff/alice"));
+        assert!(!storage
+            .is_org_member("buff", "bob")
+            .expect("check buff/bob"));
+        assert!(storage
+            .is_org_member("other", "bob")
+            .expect("check other/bob"));
+        assert!(!storage
+            .is_org_member("other", "alice")
+            .expect("check other/alice"));
     }
 
     #[test]
@@ -1009,7 +1027,9 @@ mod tests {
         let storage = SqliteStorage::open_in_memory().expect("open");
         storage.add_token("dev-token").expect("add token");
         // Allow the token to publish to @buff scope.
-        storage.add_org_member("buff", "dev-token").expect("add org member");
+        storage
+            .add_org_member("buff", "dev-token")
+            .expect("add org member");
         storage
             .put_version(
                 "@buff/core",

@@ -18,24 +18,39 @@ async fn select_insert_round_trip() {
     pool.execute(SCHEMA, &[]).await.unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(2), DbParam::Text("Alan".into()), DbParam::Int(41)],
+        &[
+            DbParam::Int(2),
+            DbParam::Text("Alan".into()),
+            DbParam::Int(41),
+        ],
     )
     .await
     .unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(3), DbParam::Text("Grace".into()), DbParam::Int(85)],
+        &[
+            DbParam::Int(3),
+            DbParam::Text("Grace".into()),
+            DbParam::Int(85),
+        ],
     )
     .await
     .unwrap();
 
-    let rows = pool.query("SELECT id, name, age FROM users ORDER BY id", &[]).await.unwrap();
+    let rows = pool
+        .query("SELECT id, name, age FROM users ORDER BY id", &[])
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].get("name").and_then(|v| v.as_text()), Some("Ada"));
     assert_eq!(rows[0].get("age").and_then(|v| v.as_int()), Some(36));
@@ -49,7 +64,11 @@ async fn select_update_delete_round_trip() {
     pool.execute(SCHEMA, &[]).await.unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
@@ -69,7 +88,10 @@ async fn select_update_delete_round_trip() {
         .unwrap();
     assert_eq!(row.get("age").and_then(|v| v.as_int()), Some(37));
 
-    let n = pool.execute("DELETE FROM users WHERE id = ?", &[DbParam::Int(1)]).await.unwrap();
+    let n = pool
+        .execute("DELETE FROM users WHERE id = ?", &[DbParam::Int(1)])
+        .await
+        .unwrap();
     assert_eq!(n, 1);
 
     let rows = pool.query("SELECT * FROM users", &[]).await.unwrap();
@@ -84,7 +106,11 @@ async fn transaction_commit_persists() {
     let tx = pool.begin().await.unwrap();
     tx.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
@@ -95,14 +121,18 @@ async fn transaction_commit_persists() {
 }
 
 #[tokio::test]
-async fn transaction rollback_does_not_persist() {
+async fn transaction_rollback_does_not_persist() {
     let pool = Pool::connect("sqlite::memory:").await.unwrap();
     pool.execute(SCHEMA, &[]).await.unwrap();
 
     let tx = pool.begin().await.unwrap();
     tx.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
@@ -113,7 +143,7 @@ async fn transaction rollback_does_not_persist() {
 }
 
 #[tokio::test]
-async fn transaction drop_without_commit_rolls_back() {
+async fn transaction_drop_without_commit_rolls_back() {
     let pool = Pool::connect("sqlite::memory:").await.unwrap();
     pool.execute(SCHEMA, &[]).await.unwrap();
 
@@ -121,14 +151,21 @@ async fn transaction drop_without_commit_rolls_back() {
         let mut tx = pool.begin().await.unwrap();
         tx.execute(
             "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-            &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+            &[
+                DbParam::Int(1),
+                DbParam::Text("Ada".into()),
+                DbParam::Int(36),
+            ],
         )
         .await
         .unwrap();
     }
 
     let rows = pool.query("SELECT * FROM users", &[]).await.unwrap();
-    assert!(rows.is_empty(), "tx dropped without commit should auto-rollback");
+    assert!(
+        rows.is_empty(),
+        "tx dropped without commit should auto-rollback"
+    );
 }
 
 #[tokio::test]
@@ -137,7 +174,11 @@ async fn transaction_query_inside_tx() {
     pool.execute(SCHEMA, &[]).await.unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
@@ -155,7 +196,11 @@ async fn join_round_trip() {
     pool.execute(ORDERS_SCHEMA, &[]).await.unwrap();
     pool.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
-        &[DbParam::Int(1), DbParam::Text("Ada".into()), DbParam::Int(36)],
+        &[
+            DbParam::Int(1),
+            DbParam::Text("Ada".into()),
+            DbParam::Int(36),
+        ],
     )
     .await
     .unwrap();
@@ -175,7 +220,10 @@ async fn join_round_trip() {
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("name").and_then(|v| v.as_text()), Some("Ada"));
-    let total = rows[0].get("total").and_then(|v| v.as_float()).unwrap_or(0.0);
+    let total = rows[0]
+        .get("total")
+        .and_then(|v| v.as_float())
+        .unwrap_or(0.0);
     assert!((total - 99.5).abs() < 1e-6);
 }
 
@@ -213,8 +261,14 @@ fn query_builder_full_pipeline() {
 
 #[test]
 fn query_builder_join_kinds() {
-    assert!(Query::new("a").inner_join("b", "b.id = a.id").sql().contains("INNER JOIN"));
-    assert!(Query::new("a").left_join("b", "b.id = a.id").sql().contains("LEFT JOIN"));
+    assert!(Query::new("a")
+        .inner_join("b", "b.id = a.id")
+        .sql()
+        .contains("INNER JOIN"));
+    assert!(Query::new("a")
+        .left_join("b", "b.id = a.id")
+        .sql()
+        .contains("LEFT JOIN"));
     let q = Query::new("a").join(JoinKind::Right, "b", "b.id = a.id");
     assert!(q.sql().contains("RIGHT JOIN"));
 }
@@ -236,7 +290,11 @@ fn row_to_map_conversion() {
     use buff_db::{DbValue, Row};
     let row = Row {
         columns: vec!["id".into(), "name".into(), "active".into()],
-        values: vec![DbValue::Int(1), DbValue::Text("Ada".into()), DbValue::Bool(true)],
+        values: vec![
+            DbValue::Int(1),
+            DbValue::Text("Ada".into()),
+            DbValue::Bool(true),
+        ],
     };
     let m = row.to_map();
     assert_eq!(m.get("id"), Some(&"1".to_string()));

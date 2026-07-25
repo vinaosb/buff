@@ -33,9 +33,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use buff_lang_ast::{
-    Decl, EnumDecl, FuncDecl, StructDecl, TraitDecl, TypeParam,
-};
+use buff_lang_ast::{Decl, EnumDecl, FuncDecl, StructDecl, TraitDecl, TypeParam};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 
@@ -50,9 +48,8 @@ use crate::config::BuffConfig;
 /// default browser.
 pub fn run(dir: &Path, output: Option<&Path>, open: bool) -> Result<()> {
     let manifest_path = dir.join("buff.toml");
-    let cfg = BuffConfig::load_from_file(&manifest_path).with_context(|| {
-        format!("failed to read manifest at {}", manifest_path.display())
-    })?;
+    let cfg = BuffConfig::load_from_file(&manifest_path)
+        .with_context(|| format!("failed to read manifest at {}", manifest_path.display()))?;
 
     let docs_root: PathBuf = match output {
         Some(o) => {
@@ -115,8 +112,7 @@ pub fn run(dir: &Path, output: Option<&Path>, open: bool) -> Result<()> {
         for module in &pkg.modules {
             let html = render_module_html(&pkg.name, module, &pkg.modules, &symbols);
             let out = pkg_dir.join(&module.page);
-            fs::write(&out, html)
-                .with_context(|| format!("failed to write {}", out.display()))?;
+            fs::write(&out, html).with_context(|| format!("failed to write {}", out.display()))?;
 
             for item in &module.items {
                 search_entries.push(SearchEntry {
@@ -135,8 +131,7 @@ pub fn run(dir: &Path, output: Option<&Path>, open: bool) -> Result<()> {
         let pkg_index_path = pkg_dir.join("index.html");
         fs::write(&pkg_index_path, pkg_index_html)
             .with_context(|| format!("failed to write {}", pkg_index_path.display()))?;
-        package_index_links
-            .push((pkg.name.clone(), format!("{}/index.html", pkg.name)));
+        package_index_links.push((pkg.name.clone(), format!("{}/index.html", pkg.name)));
     }
 
     // Top-level workspace index linking to each package page.
@@ -309,13 +304,7 @@ fn page_name_for(rel: &str) -> String {
     let stem = rel.strip_suffix(".buff").unwrap_or(rel);
     let flat: String = stem
         .chars()
-        .map(|c| {
-            if c == '/' || c == '\\' {
-                '_'
-            } else {
-                c
-            }
-        })
+        .map(|c| if c == '/' || c == '\\' { '_' } else { c })
         .collect();
     format!("{flat}.html")
 }
@@ -476,24 +465,34 @@ fn render_func_sig(f: &FuncDecl) -> String {
 }
 
 fn render_struct_sig(s: &StructDecl) -> String {
-    let mut out = format!("struct {}{}", s.name.name, render_type_params(&s.type_params));
+    let mut out = format!(
+        "struct {}{}",
+        s.name.name,
+        render_type_params(&s.type_params)
+    );
     if !s.traits.is_empty() {
         out.push_str(": ");
-        out.push_str(&s.traits.iter().map(|t| t.name.clone()).collect::<Vec<_>>().join(" + "));
+        out.push_str(
+            &s.traits
+                .iter()
+                .map(|t| t.name.clone())
+                .collect::<Vec<_>>()
+                .join(" + "),
+        );
     }
     out.push_str(" { ");
-    let fields: Vec<String> = s
-        .fields
-        .iter()
-        .map(|(n, t)| format!("{n}: {t}"))
-        .collect();
+    let fields: Vec<String> = s.fields.iter().map(|(n, t)| format!("{n}: {t}")).collect();
     out.push_str(&fields.join(", "));
     out.push_str(" }");
     out
 }
 
 fn render_enum_sig(e: &EnumDecl) -> String {
-    let mut out = format!("enum {}{} {{ ", e.name.name, render_type_params(&e.type_params));
+    let mut out = format!(
+        "enum {}{} {{ ",
+        e.name.name,
+        render_type_params(&e.type_params)
+    );
     let variants: Vec<String> = e.variants.iter().map(|v| v.to_string()).collect();
     out.push_str(&variants.join(", "));
     out.push_str(" }");
@@ -567,9 +566,7 @@ fn linkify(text: &str, symbols: &BTreeMap<String, String>) -> String {
         if b.is_ascii_alphanumeric() || b == b'_' {
             // identifier run
             let start = i;
-            while i < bytes.len()
-                && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
-            {
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
             let word = &text[start..i];
@@ -585,9 +582,7 @@ fn linkify(text: &str, symbols: &BTreeMap<String, String>) -> String {
         } else {
             // non-identifier run
             let start = i;
-            while i < bytes.len()
-                && !(bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
-            {
+            while i < bytes.len() && !(bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
             out.push_str(&html_escape(&text[start..i]));
@@ -737,8 +732,10 @@ fn render_module_html(
     ));
 
     if module.items.is_empty() {
-        body.push_str("<p class=\"meta\">No documented declarations \
-                       (func / struct / enum / trait) found in this module.</p>\n");
+        body.push_str(
+            "<p class=\"meta\">No documented declarations \
+                       (func / struct / enum / trait) found in this module.</p>\n",
+        );
     }
 
     // Group items by kind for a rustdoc-like layout.
@@ -776,10 +773,7 @@ fn render_module_html(
         body.push_str("</ul>\n");
     }
 
-    html_document(
-        &format!("{} — {} — Buff docs", module.rel, pkg_name),
-        &body,
-    )
+    html_document(&format!("{} — {} — Buff docs", module.rel, pkg_name), &body)
 }
 
 /// Render a single documented item.
@@ -817,8 +811,10 @@ fn render_package_index(pkg: &PackageDoc) -> String {
     ));
 
     if pkg.modules.is_empty() {
-        body.push_str("<p class=\"meta\">No <code>.buff</code> source files found \
-                       under <code>src/</code>.</p>\n");
+        body.push_str(
+            "<p class=\"meta\">No <code>.buff</code> source files found \
+                       under <code>src/</code>.</p>\n",
+        );
     } else {
         body.push_str("<h2>Modules</h2>\n<ul class=\"module-list\">\n");
         for module in &pkg.modules {
@@ -870,12 +866,11 @@ fn render_package_index(pkg: &PackageDoc) -> String {
 }
 
 /// Render the top-level workspace `index.html`.
-fn render_workspace_index(
-    package_links: &[(String, String)],
-    packages: &[PackageDoc],
-) -> String {
+fn render_workspace_index(package_links: &[(String, String)], packages: &[PackageDoc]) -> String {
     let mut body = String::new();
-    body.push_str("<header>\n  <h1>Buff docs</h1>\n  <div class=\"crumbs\">workspace</div>\n</header>\n");
+    body.push_str(
+        "<header>\n  <h1>Buff docs</h1>\n  <div class=\"crumbs\">workspace</div>\n</header>\n",
+    );
     if package_links.is_empty() {
         body.push_str("<p class=\"meta\">No packages documented.</p>\n");
     } else {
@@ -969,7 +964,9 @@ impl LineTable {
     /// 0-based index of the line containing `byte`.
     fn line_of(&self, byte: usize) -> usize {
         // Largest i with starts[i] <= byte.
-        self.starts.partition_point(|&s| s <= byte).saturating_sub(1)
+        self.starts
+            .partition_point(|&s| s <= byte)
+            .saturating_sub(1)
     }
 
     /// Text of line `idx` (without the trailing newline), borrowed from `src`.
@@ -994,9 +991,7 @@ impl LineTable {
 /// Open `path` in the default browser, platform-specific. Mirrors
 /// `cargo doc --open`. Errors are non-fatal (the docs are already written).
 fn open_in_browser(path: &Path) -> Result<()> {
-    let abs = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+    let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let display = abs.display().to_string();
     match std::env::consts::OS {
         "windows" => {
@@ -1056,15 +1051,13 @@ pub fn run_serve(dir: &Path, output: Option<&Path>, port: u16) -> Result<()> {
     };
 
     let addr = format!("127.0.0.1:{port}");
-    let listener = std::net::TcpListener::bind(&addr)
-        .with_context(|| format!("failed to bind to {addr}"))?;
+    let listener =
+        std::net::TcpListener::bind(&addr).with_context(|| format!("failed to bind to {addr}"))?;
     listener
         .set_nonblocking(true)
         .context("failed to set non-blocking")?;
 
-    eprintln!(
-        "buff doc: serving docs at http://{addr}/ — Ctrl-C to exit",
-    );
+    eprintln!("buff doc: serving docs at http://{addr}/ — Ctrl-C to exit",);
 
     // Collect .buff source files for mtime polling.
     let source_files: Vec<PathBuf> = collect_source_files(dir);
@@ -1157,11 +1150,7 @@ pub fn run_serve(dir: &Path, output: Option<&Path>, port: u16) -> Result<()> {
     loop {
         match incoming.next() {
             Some(Ok(stream)) => {
-                if let Err(e) = handle_connection(
-                    stream,
-                    &docs_root,
-                    &sse_clients,
-                ) {
+                if let Err(e) = handle_connection(stream, &docs_root, &sse_clients) {
                     eprintln!("buff doc: request error: {e:#}");
                 }
             }
@@ -1215,10 +1204,7 @@ fn handle_connection(
     }
 
     // Parse the request path from "GET /path HTTP/1.1".
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or("/");
+    let path = request_line.split_whitespace().nth(1).unwrap_or("/");
 
     match path {
         "/live-reload" => {
@@ -1260,9 +1246,7 @@ fn handle_connection(
             // Client disconnected — remove from the list.
             {
                 let mut clients = sse_clients.lock().unwrap();
-                clients.retain(|c| {
-                    c.peer_addr().ok() != stream.peer_addr().ok()
-                });
+                clients.retain(|c| c.peer_addr().ok() != stream.peer_addr().ok());
             }
             eprintln!("buff doc: SSE client disconnected");
         }
@@ -1278,7 +1262,9 @@ fn handle_connection(
 
             let canonical = file_path.canonicalize().unwrap_or(file_path.clone());
             // Security: ensure the resolved path is inside docs_root.
-            let docs_canon = docs_root.canonicalize().unwrap_or_else(|_| docs_root.to_path_buf());
+            let docs_canon = docs_root
+                .canonicalize()
+                .unwrap_or_else(|_| docs_root.to_path_buf());
             if !canonical.starts_with(&docs_canon) {
                 // Path traversal attempt — 404.
                 serve_404(&mut stream, &request_line)?;
@@ -1287,10 +1273,7 @@ fn handle_connection(
 
             match std::fs::read(&canonical) {
                 Ok(body) => {
-                    let ext = canonical
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("");
+                    let ext = canonical.extension().and_then(|e| e.to_str()).unwrap_or("");
                     let content_type = mime_type_for(ext);
 
                     // Inject SSE live-reload script into HTML pages.
@@ -1466,7 +1449,10 @@ mod tests {
 
     #[test]
     fn html_escape_replaces_special_chars() {
-        assert_eq!(html_escape("a < b & c > d \" e"), "a &lt; b &amp; c &gt; d &quot; e");
+        assert_eq!(
+            html_escape("a < b & c > d \" e"),
+            "a &lt; b &amp; c &gt; d &quot; e"
+        );
     }
 
     #[test]
@@ -1516,7 +1502,9 @@ mod tests {
         assert_eq!(greet.kind, ItemKind::Function);
         assert!(greet.is_pub);
         assert_eq!(greet.doc, "A greeting.");
-        assert!(greet.signature.contains("func greet(name: String) -> String"));
+        assert!(greet
+            .signature
+            .contains("func greet(name: String) -> String"));
         let point = module.items.iter().find(|i| i.name == "Point").unwrap();
         assert_eq!(point.kind, ItemKind::Struct);
         assert!(!point.is_pub);

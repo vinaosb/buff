@@ -120,10 +120,15 @@ fn int_lit_pat(n: i64) -> Pattern {
 
 /// Build a match arm with a single-expression body.
 fn arm(pat: Pattern, body: Expr) -> MatchArm {
-    MatchArm { pattern: pat, guard: None, body: Block {
-        stmts: vec![Stmt::ExprStmt(body, span())],
+    MatchArm {
+        pattern: pat,
+        guard: None,
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(body, span())],
+            span: span(),
+        },
         span: span(),
-    }, span: span() }
+    }
 }
 
 /// Generate Rust source from a single enum declaration.
@@ -133,16 +138,21 @@ fn codegen_enum(d: EnumDecl) -> String {
 
 /// Wrap a list of statements in a no-arg function called `f` and codegen.
 fn codegen_stmts(stmts: Vec<Stmt>) -> String {
-    let func = FuncDecl { name: ident("f"),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts,
+    let func = FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts,
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
 }
 
@@ -494,22 +504,27 @@ fn enum_codegen_end_to_end_decl_and_match_reparse() {
         ],
         span: span(),
     };
-    let func = FuncDecl { name: ident("describe"),
-    params: vec![Param {
-        name: ident("c"),
-        ty: named_ty("Color"),
-        default_value: None,
-        is_comptime: false,
+    let func = FuncDecl {
+        name: ident("describe"),
+        params: vec![Param {
+            name: ident("c"),
+            ty: named_ty("Color"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(mt), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }],
-    return_type: Some(named_ty("Int")),
-    body: Block {
-        stmts: vec![Stmt::Return(Some(mt), span())],
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    };
     let src = generate_rust(&[Decl::EnumDecl(color), Decl::FuncDecl(func)])
         .expect("end-to-end codegen must succeed");
     assert!(
@@ -539,26 +554,31 @@ fn enum_codegen_result_end_to_end_with_binding() {
         ],
         span: span(),
     };
-    let func = FuncDecl { name: ident("unwrap_or_zero"),
-    params: vec![Param {
-        name: ident("r"),
-        ty: TypeRef::Generic {
-            base: Box::new(named_ty("Result")),
-            args: vec![named_ty("Int"), named_ty("String")],
+    let func = FuncDecl {
+        name: ident("unwrap_or_zero"),
+        params: vec![Param {
+            name: ident("r"),
+            ty: TypeRef::Generic {
+                base: Box::new(named_ty("Result")),
+                args: vec![named_ty("Int"), named_ty("String")],
+                span: span(),
+            },
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(mt), span())],
             span: span(),
         },
-        default_value: None,
-        is_comptime: false,
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }],
-    return_type: Some(named_ty("Int")),
-    body: Block {
-        stmts: vec![Stmt::Return(Some(mt), span())],
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    };
     let src = generate_rust(&[Decl::EnumDecl(result_decl), Decl::FuncDecl(func)])
         .expect("end-to-end codegen must succeed");
     assert!(

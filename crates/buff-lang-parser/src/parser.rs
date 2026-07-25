@@ -26,10 +26,9 @@ use buff_lang_lexer::TokenKind;
 
 use crate::options::Edition;
 use crate::stmt::{
-    parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl, parse_extern_crate_decl,
-
-    parse_extern_func_decl_with_abi, parse_func_decl, parse_impl_decl, parse_import_decl,
-    parse_struct_decl, parse_trait_decl,
+    parse_attributes, parse_enum_decl, parse_export_decl, parse_extend_decl,
+    parse_extern_crate_decl, parse_extern_func_decl_with_abi, parse_func_decl, parse_impl_decl,
+    parse_import_decl, parse_struct_decl, parse_trait_decl,
 };
 use crate::stream::TokenStream;
 

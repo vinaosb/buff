@@ -94,8 +94,7 @@ pub fn run(
     // is ON for Debug (the typical edit-run mode), OFF for Release.
     // --no-incremental wins when both are set.
     let incremental_default_for_mode = matches!(mode, pipeline::BuildMode::Debug);
-    let use_incremental =
-        !no_incremental && (incremental_default_for_mode || incremental);
+    let use_incremental = !no_incremental && (incremental_default_for_mode || incremental);
 
     // Track the .rs file path + (for .buffhtml) the SpanMap + source so we
     // can post-process runtime panics after execution.

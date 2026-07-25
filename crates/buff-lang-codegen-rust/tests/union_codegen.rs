@@ -37,22 +37,27 @@ fn union_ty(members: Vec<TypeRef>) -> TypeRef {
 }
 
 fn union_func(name: &str, param_name: &str, ty: TypeRef) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident(name),
-    params: vec![Param {
-        name: ident(param_name),
-        ty: ty.clone(),
-        default_value: None,
-        is_comptime: false,
+    Decl::FuncDecl(FuncDecl {
+        name: ident(name),
+        params: vec![Param {
+            name: ident(param_name),
+            ty: ty.clone(),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(ty),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(ident_expr(param_name)), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }],
-    return_type: Some(ty),
-    body: Block {
-        stmts: vec![Stmt::Return(Some(ident_expr(param_name)), span())],
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    })
 }
 
 fn must_reparse(src: &str) {

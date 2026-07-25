@@ -7,7 +7,10 @@ use super::*;
 impl<T: ZmqTransport + Unpin> Kernel<T> {
     /// Build a `kernel_info_reply` WireMessage in response to a
     /// `kernel_info_request`.
-    pub(super) fn build_kernel_info_reply(&self, parent: &WireMessage) -> JupyterResult<WireMessage> {
+    pub(super) fn build_kernel_info_reply(
+        &self,
+        parent: &WireMessage,
+    ) -> JupyterResult<WireMessage> {
         let content = serde_json::to_value(KernelInfoReply::buff())?;
         Ok(WireMessage::new_reply(
             "kernel_info_reply",

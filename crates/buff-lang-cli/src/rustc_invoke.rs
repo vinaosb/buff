@@ -172,8 +172,7 @@ pub fn is_nightly_toolchain() -> bool {
         Ok(out) if out.status.success() => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             stdout.lines().any(|line| {
-                line.trim().starts_with("release:")
-                    && line.to_ascii_lowercase().contains("nightly")
+                line.trim().starts_with("release:") && line.to_ascii_lowercase().contains("nightly")
             })
         }
         _ => false,
@@ -307,29 +306,16 @@ mod tests {
     #[test]
     fn configure_rustc_command_sets_edition_and_flags() {
         let mut cmd = Command::new("rustc");
-        configure_rustc_command(
-            &mut cmd,
-            &["-O"],
-            &[],
-            false,
-            "debuginfo=1",
-            None,
-        )
-        .expect("configure should succeed");
+        configure_rustc_command(&mut cmd, &["-O"], &[], false, "debuginfo=1", None)
+            .expect("configure should succeed");
 
         let args: Vec<&str> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert!(
             args.contains(&"--edition"),
             "expected --edition in args: {args:?}"
         );
-        assert!(
-            args.contains(&"2021"),
-            "expected 2021 in args: {args:?}"
-        );
-        assert!(
-            args.contains(&"-O"),
-            "expected -O in args: {args:?}"
-        );
+        assert!(args.contains(&"2021"), "expected 2021 in args: {args:?}");
+        assert!(args.contains(&"-O"), "expected -O in args: {args:?}");
         assert!(
             args.contains(&"debuginfo=1"),
             "expected debuginfo=1 in args: {args:?}"
@@ -357,15 +343,8 @@ mod tests {
     #[test]
     fn configure_rustc_command_sets_cranelift_env() {
         let mut cmd = Command::new("rustc");
-        configure_rustc_command(
-            &mut cmd,
-            &["-O"],
-            &[],
-            true,
-            "debuginfo=1",
-            None,
-        )
-        .expect("configure should succeed");
+        configure_rustc_command(&mut cmd, &["-O"], &[], true, "debuginfo=1", None)
+            .expect("configure should succeed");
 
         let env_val = cmd.get_envs().find_map(|(k, v)| {
             if k == "CARGO_PROFILE_DEV_CODEGEN_BACKEND" {

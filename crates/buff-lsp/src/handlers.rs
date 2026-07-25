@@ -184,9 +184,8 @@ pub fn code_actions(state: &DocumentState, position: Position) -> Option<Vec<Cod
         return None;
     }
 
-    let mut out: Vec<CodeActionOrCommand> = Vec::with_capacity(
-        suggestion_actions.len() + plugin_actions.len(),
-    );
+    let mut out: Vec<CodeActionOrCommand> =
+        Vec::with_capacity(suggestion_actions.len() + plugin_actions.len());
     // Suggestion-derived quickfixes first (most actionable), then plugin
     // actions. Editors typically show them in declaration order.
     out.extend(suggestion_actions);
@@ -253,10 +252,7 @@ fn suggestions_to_code_actions(
                 .label
                 .clone()
                 .unwrap_or_else(|| format!("Apply suggestion: `{}`", suggestion.replacement));
-            let is_preferred = matches!(
-                suggestion.applicability,
-                Applicability::MachineApplicable
-            );
+            let is_preferred = matches!(suggestion.applicability, Applicability::MachineApplicable);
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title,
                 kind: Some(CodeActionKind::QUICK_FIX),
@@ -442,10 +438,7 @@ fn enclosing_func<'a>(state: &'a DocumentState, byte: usize) -> Option<&'a FuncD
 /// Mirrors the parsing the runtime's `prefer_from_name_args` would do —
 /// kept local so the LSP doesn't depend on the runtime crate.
 fn prefer_hint(f: &FuncDecl) -> Option<String> {
-    let prefer: Option<&Attribute> = f
-        .attributes
-        .iter()
-        .find(|a| a.name.name == "prefer");
+    let prefer: Option<&Attribute> = f.attributes.iter().find(|a| a.name.name == "prefer");
     let attr = prefer?;
     if attr.args.is_empty() {
         return Some("@prefer".to_string());
@@ -662,7 +655,10 @@ pub fn formatting(state: &DocumentState) -> Option<Vec<TextEdit>> {
 /// the cursor's exact position within the selection is what matters.
 ///
 /// Returns `None` (the pre-T46 behaviour) when there are no actions.
-pub fn code_action(state: &DocumentState, params: CodeActionParams) -> Option<Vec<CodeActionOrCommand>> {
+pub fn code_action(
+    state: &DocumentState,
+    params: CodeActionParams,
+) -> Option<Vec<CodeActionOrCommand>> {
     code_actions(state, params.range.start)
 }
 
@@ -755,7 +751,9 @@ pub fn inlay_hints(state: &DocumentState, params: InlayHintParams) -> Vec<InlayH
         }
         // Skip bindings whose source line already contains a `: <Type>`
         // annotation (cheap byte-level check on the binding's line).
-        let line_start_byte = state.lines.line_start_byte(&state.text, entry.def_span.start);
+        let line_start_byte = state
+            .lines
+            .line_start_byte(&state.text, entry.def_span.start);
         let line_end_byte = state.lines.line_end_byte(&state.text, entry.def_span.start);
         let line_slice = &state.text[line_start_byte..line_end_byte];
         // A `:` after the binding name signals an explicit annotation.
@@ -774,9 +772,7 @@ pub fn inlay_hints(state: &DocumentState, params: InlayHintParams) -> Vec<InlayH
         // (column = UTF-16 width of the line contents).
         let hint_pos = state.lines.lsp_position(&state.text, line_end_byte);
         // Filter by params.range (only emit hints in the requested viewport).
-        if hint_pos.line < params.range.start.line
-            || hint_pos.line > params.range.end.line
-        {
+        if hint_pos.line < params.range.start.line || hint_pos.line > params.range.end.line {
             continue;
         }
 
@@ -904,8 +900,7 @@ pub fn semantic_tokens_full(
     // Params: their name spans are in the locals index with kind == Param.
     let mut param_name_starts: std::collections::BTreeSet<usize> =
         std::collections::BTreeSet::new();
-    let mut let_name_starts: std::collections::BTreeSet<usize> =
-        std::collections::BTreeSet::new();
+    let mut let_name_starts: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     for (_byte, entry) in &state.analysis.symbols.locals {
         match entry.kind {
             crate::symbol::LocalKind::Param => {
@@ -921,7 +916,14 @@ pub fn semantic_tokens_full(
     // First pass: build absolute (line, char, length, type, mods) tuples.
     let mut abs: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(tokens.len());
     for tok in &tokens {
-        let (ty_idx, mods) = token_type_index(&tok.kind, &tok.span, state, &name_to_type, &param_name_starts, &let_name_starts);
+        let (ty_idx, mods) = token_type_index(
+            &tok.kind,
+            &tok.span,
+            state,
+            &name_to_type,
+            &param_name_starts,
+            &let_name_starts,
+        );
         let Some(ty_idx) = ty_idx else { continue };
         // Length: number of UTF-16 code units in the token's source slice.
         let start = tok.span.start.min(state.text.len());
@@ -959,7 +961,11 @@ pub fn semantic_tokens_full(
             continue;
         }
         let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 { char - prev_char } else { char };
+        let delta_start = if delta_line == 0 {
+            char - prev_char
+        } else {
+            char
+        };
         data.push(SemanticToken {
             delta_line,
             delta_start,
@@ -998,36 +1004,94 @@ fn token_type_index(
     use buff_lang_lexer::TokenKind;
     // --- literals ---
     let ty = match kind {
-        TokenKind::IntLit(_) | TokenKind::FloatLit(_) | TokenKind::ByteLit(_)
-        | TokenKind::DoubleLit(_) | TokenKind::DecimalLit(_) => Some(9), // number
-        TokenKind::CharLit(_) => Some(10),                                // char
-        TokenKind::RegexLit(_) => Some(11),                               // regexp
-        TokenKind::StringStart | TokenKind::StringEnd | TokenKind::StringLit(_)
-        | TokenKind::StringPart(_) | TokenKind::InterpStart | TokenKind::InterpSpec(_)
+        TokenKind::IntLit(_)
+        | TokenKind::FloatLit(_)
+        | TokenKind::ByteLit(_)
+        | TokenKind::DoubleLit(_)
+        | TokenKind::DecimalLit(_) => Some(9), // number
+        TokenKind::CharLit(_) => Some(10),  // char
+        TokenKind::RegexLit(_) => Some(11), // regexp
+        TokenKind::StringStart
+        | TokenKind::StringEnd
+        | TokenKind::StringLit(_)
+        | TokenKind::StringPart(_)
+        | TokenKind::InterpStart
+        | TokenKind::InterpSpec(_)
         | TokenKind::InterpEnd => Some(8), // string — boundaries + parts coloured as string
         // --- operators (arithmetic / comparison / assignment / etc) ---
-        TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash
-        | TokenKind::Percent | TokenKind::EqEq | TokenKind::NotEq | TokenKind::Lt
-        | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq | TokenKind::AndAnd
-        | TokenKind::OrOr | TokenKind::Not | TokenKind::Question | TokenKind::QuestionQuestion
-        | TokenKind::QuestionDot | TokenKind::Caret | TokenKind::Pipe | TokenKind::Amp
-        | TokenKind::Shl | TokenKind::Shr | TokenKind::Tilde | TokenKind::Arrow
-        | TokenKind::FatArrow | TokenKind::Assign | TokenKind::PlusEq | TokenKind::MinusEq
-        | TokenKind::StarEq | TokenKind::SlashEq | TokenKind::PercentEq | TokenKind::PipeGt
-        | TokenKind::DotDot | TokenKind::DotDotEq => Some(12), // operator
+        TokenKind::Plus
+        | TokenKind::Minus
+        | TokenKind::Star
+        | TokenKind::Slash
+        | TokenKind::Percent
+        | TokenKind::EqEq
+        | TokenKind::NotEq
+        | TokenKind::Lt
+        | TokenKind::Gt
+        | TokenKind::LtEq
+        | TokenKind::GtEq
+        | TokenKind::AndAnd
+        | TokenKind::OrOr
+        | TokenKind::Not
+        | TokenKind::Question
+        | TokenKind::QuestionQuestion
+        | TokenKind::QuestionDot
+        | TokenKind::Caret
+        | TokenKind::Pipe
+        | TokenKind::Amp
+        | TokenKind::Shl
+        | TokenKind::Shr
+        | TokenKind::Tilde
+        | TokenKind::Arrow
+        | TokenKind::FatArrow
+        | TokenKind::Assign
+        | TokenKind::PlusEq
+        | TokenKind::MinusEq
+        | TokenKind::StarEq
+        | TokenKind::SlashEq
+        | TokenKind::PercentEq
+        | TokenKind::PipeGt
+        | TokenKind::DotDot
+        | TokenKind::DotDotEq => Some(12), // operator
         // --- keywords (all `Kw*` variants) ---
-        TokenKind::KwFunc | TokenKind::KwLet | TokenKind::KwMut | TokenKind::KwStruct
-        | TokenKind::KwEnum | TokenKind::KwTrait | TokenKind::KwType | TokenKind::KwIf
-        | TokenKind::KwElse | TokenKind::KwFor | TokenKind::KwReturn | TokenKind::KwBreak
-        | TokenKind::KwContinue | TokenKind::KwIn | TokenKind::KwMatch | TokenKind::KwAsync
-        | TokenKind::KwSpawn | TokenKind::KwImport | TokenKind::KwExport | TokenKind::KwFrom
-        | TokenKind::KwAs | TokenKind::KwTrue | TokenKind::KwFalse | TokenKind::KwExtern
-        | TokenKind::KwUnsafe | TokenKind::KwGuard | TokenKind::KwExtend | TokenKind::KwDefer => {
+        TokenKind::KwFunc
+        | TokenKind::KwLet
+        | TokenKind::KwMut
+        | TokenKind::KwStruct
+        | TokenKind::KwEnum
+        | TokenKind::KwTrait
+        | TokenKind::KwType
+        | TokenKind::KwIf
+        | TokenKind::KwElse
+        | TokenKind::KwFor
+        | TokenKind::KwReturn
+        | TokenKind::KwBreak
+        | TokenKind::KwContinue
+        | TokenKind::KwIn
+        | TokenKind::KwMatch
+        | TokenKind::KwAsync
+        | TokenKind::KwSpawn
+        | TokenKind::KwImport
+        | TokenKind::KwExport
+        | TokenKind::KwFrom
+        | TokenKind::KwAs
+        | TokenKind::KwTrue
+        | TokenKind::KwFalse
+        | TokenKind::KwExtern
+        | TokenKind::KwUnsafe
+        | TokenKind::KwGuard
+        | TokenKind::KwExtend
+        | TokenKind::KwDefer => {
             Some(0) // keyword
         }
         // --- mathematical-syntax operators (T19) ---
-        TokenKind::Sum | TokenKind::Product | TokenKind::Sqrt | TokenKind::InUni
-        | TokenKind::NotInUni | TokenKind::SubsetUni | TokenKind::ApproxUni
+        TokenKind::Sum
+        | TokenKind::Product
+        | TokenKind::Sqrt
+        | TokenKind::InUni
+        | TokenKind::NotInUni
+        | TokenKind::SubsetUni
+        | TokenKind::ApproxUni
         | TokenKind::Adjoint => Some(12), // operator
         // --- decorator (attribute marker) ---
         TokenKind::At => Some(13), // decorator
@@ -1051,10 +1115,20 @@ fn token_type_index(
             Some(6)
         }
         // --- skip: layout markers, punctuation, eof ---
-        TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent | TokenKind::Eof
-        | TokenKind::LParen | TokenKind::RParen | TokenKind::LBrace | TokenKind::RBrace
-        | TokenKind::LBracket | TokenKind::RBracket | TokenKind::Colon | TokenKind::Comma
-        | TokenKind::Dot | TokenKind::Semicolon => None,
+        TokenKind::Newline
+        | TokenKind::Indent
+        | TokenKind::Dedent
+        | TokenKind::Eof
+        | TokenKind::LParen
+        | TokenKind::RParen
+        | TokenKind::LBrace
+        | TokenKind::RBrace
+        | TokenKind::LBracket
+        | TokenKind::RBracket
+        | TokenKind::Colon
+        | TokenKind::Comma
+        | TokenKind::Dot
+        | TokenKind::Semicolon => None,
     };
     (ty, 0)
 }
@@ -1335,7 +1409,11 @@ mod tests {
             range: Range::new(pos(0, 0), pos(99, 0)),
         };
         let hints = inlay_hints(&st, params);
-        assert_eq!(hints.len(), 1, "expected one type hint for `let x`, got: {hints:?}");
+        assert_eq!(
+            hints.len(),
+            1,
+            "expected one type hint for `let x`, got: {hints:?}"
+        );
         let label = match &hints[0].label {
             InlayHintLabel::String(s) => s.clone(),
             _ => panic!("expected string label"),
@@ -1357,7 +1435,10 @@ mod tests {
             range: Range::new(pos(0, 0), pos(99, 0)),
         };
         let hints = inlay_hints(&st, params);
-        assert!(hints.is_empty(), "expected no hints for explicit annotation, got: {hints:?}");
+        assert!(
+            hints.is_empty(),
+            "expected no hints for explicit annotation, got: {hints:?}"
+        );
     }
 
     #[test]
@@ -1410,8 +1491,14 @@ mod tests {
         // function tokens present.
         let types_present: std::collections::BTreeSet<u32> =
             tokens.iter().map(|t| t.token_type).collect();
-        assert!(types_present.contains(&0), "expected keyword (0), got: {types_present:?}");
-        assert!(types_present.contains(&1), "expected function (1), got: {types_present:?}");
+        assert!(
+            types_present.contains(&0),
+            "expected keyword (0), got: {types_present:?}"
+        );
+        assert!(
+            types_present.contains(&1),
+            "expected function (1), got: {types_present:?}"
+        );
     }
 
     #[test]

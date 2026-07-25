@@ -18,10 +18,10 @@
 //! * **Explain output** (1 test): cost_model line appears when bpe > 0.
 
 use buff_lang_runtime::{
-    cost_model_favors_gpu, decide_dynamic, estimate_costs, explain_dispatch, DispatchKind,
-    WorkloadContext, DataLocation, CostEstimate, GPU_ARITHMETIC_INTENSITY_THRESHOLD,
-    PCIE_BANDWIDTH_BYTES_PER_SEC, GPU_LAUNCH_OVERHEAD_SECS, GPU_PEAK_FLOPS_PER_SEC,
-    GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC, CPU_PEAK_FLOPS_PER_SEC, CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC,
+    cost_model_favors_gpu, decide_dynamic, estimate_costs, explain_dispatch, CostEstimate,
+    DataLocation, DispatchKind, WorkloadContext, CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC,
+    CPU_PEAK_FLOPS_PER_SEC, GPU_ARITHMETIC_INTENSITY_THRESHOLD, GPU_LAUNCH_OVERHEAD_SECS,
+    GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC, GPU_PEAK_FLOPS_PER_SEC, PCIE_BANDWIDTH_BYTES_PER_SEC,
 };
 
 // ===========================================================================
@@ -60,7 +60,10 @@ fn cost_model_estimate_large_compute_bound_gpu_wins() {
     // Transfer is zero (data on GPU).
     assert_eq!(costs.transfer_time, 0.0, "data on GPU → no transfer");
     assert_eq!(costs.launch_overhead, GPU_LAUNCH_OVERHEAD_SECS);
-    assert!(costs.occupancy_factor <= 1.0, "1M elements → full occupancy");
+    assert!(
+        costs.occupancy_factor <= 1.0,
+        "1M elements → full occupancy"
+    );
 }
 
 #[test]
@@ -91,10 +94,7 @@ fn cost_model_transfer_time_zero_when_data_on_gpu() {
         .with_intensity(8.0)
         .with_data_location(DataLocation::Gpu);
     let costs = estimate_costs(&ctx);
-    assert_eq!(
-        costs.transfer_time, 0.0,
-        "data on GPU → no PCIe transfer"
-    );
+    assert_eq!(costs.transfer_time, 0.0, "data on GPU → no PCIe transfer");
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn cost_model_estimate_is_copy_and_debug() {
     let costs = estimate_costs(&ctx);
     let _copy = costs; // Copy
     let _debug = format!("{:?}", costs); // Debug
-    // costs is still usable (Copy)
+                                         // costs is still usable (Copy)
     assert!(costs.gpu_time >= 0.0);
 }
 

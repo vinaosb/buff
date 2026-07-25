@@ -60,10 +60,7 @@ fn generic_id_fn() -> FuncDecl {
         }],
         return_type: Some(named_ty("T")),
         body: Block {
-            stmts: vec![Stmt::Return(
-                Some(Expr::Ident(ident("x"), span())),
-                span(),
-            )],
+            stmts: vec![Stmt::Return(Some(Expr::Ident(ident("x"), span())), span())],
             span: span(),
         },
         is_async: false,

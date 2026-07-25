@@ -109,11 +109,21 @@ impl Faker {
         let result = catch_unwind(AssertUnwindSafe(|| match self.locale {
             FakerLocale::EnUs => {
                 use fake::faker::address::en::{BuildingNumber, StreetName, StreetSuffix};
-                format!("{} {} {}", BuildingNumber().fake_with_rng::<String, _>(&mut self.rng), StreetName().fake_with_rng::<String, _>(&mut self.rng), StreetSuffix().fake_with_rng::<String, _>(&mut self.rng))
+                format!(
+                    "{} {} {}",
+                    BuildingNumber().fake_with_rng::<String, _>(&mut self.rng),
+                    StreetName().fake_with_rng::<String, _>(&mut self.rng),
+                    StreetSuffix().fake_with_rng::<String, _>(&mut self.rng)
+                )
             }
             FakerLocale::PtBr => {
                 use fake::faker::address::pt_br::{BuildingNumber, StreetName, StreetSuffix};
-                format!("{} {} {}", StreetName().fake_with_rng::<String, _>(&mut self.rng), BuildingNumber().fake_with_rng::<String, _>(&mut self.rng), StreetSuffix().fake_with_rng::<String, _>(&mut self.rng))
+                format!(
+                    "{} {} {}",
+                    StreetName().fake_with_rng::<String, _>(&mut self.rng),
+                    BuildingNumber().fake_with_rng::<String, _>(&mut self.rng),
+                    StreetSuffix().fake_with_rng::<String, _>(&mut self.rng)
+                )
             }
         }));
         result.unwrap_or_else(|_| String::new())

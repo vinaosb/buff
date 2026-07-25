@@ -44,7 +44,10 @@ fn workgroup_with_explicit_size_emits_marker() {
         src.contains("#[doc = \"@workgroup(64)\"]"),
         "expected workgroup marker, src: {src}"
     );
-    assert!(src.contains("fn gpu_kernel"), "fn name preserved, src: {src}");
+    assert!(
+        src.contains("fn gpu_kernel"),
+        "fn name preserved, src: {src}"
+    );
 }
 
 #[test]

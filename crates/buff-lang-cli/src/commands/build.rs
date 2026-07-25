@@ -106,7 +106,21 @@ pub fn run(
                      (use project mode by omitting the FILE argument to cross-compile)"
                 );
             }
-            build_single_file(f, output, release, minimal, fast, no_cache, incremental, no_incremental, sccache, linker, debuginfo, backend, detect_races)
+            build_single_file(
+                f,
+                output,
+                release,
+                minimal,
+                fast,
+                no_cache,
+                incremental,
+                no_incremental,
+                sccache,
+                linker,
+                debuginfo,
+                backend,
+                detect_races,
+            )
         }
         None => build_project(release, minimal, fast, target),
     }
@@ -205,8 +219,7 @@ fn build_single_file(
     // when both are set (defensive default). Default is ON for Debug,
     // OFF for Release/Minimal/Fast.
     let incremental_default_for_mode = matches!(mode, pipeline::BuildMode::Debug);
-    let use_incremental =
-        !no_incremental && (incremental_default_for_mode || incremental);
+    let use_incremental = !no_incremental && (incremental_default_for_mode || incremental);
 
     let compile_out = if use_cache && use_incremental {
         // Salsa-backed path: warm the parse + typecheck memoization

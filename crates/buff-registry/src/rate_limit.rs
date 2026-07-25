@@ -58,12 +58,7 @@ impl IpRateLimiter {
     /// over budget (the request is NOT recorded in that case).
     ///
     /// Prunes old timestamps before counting.
-    pub fn try_record(
-        &self,
-        ip: IpAddr,
-        window: std::time::Duration,
-        max: usize,
-    ) -> bool {
+    pub fn try_record(&self, ip: IpAddr, window: std::time::Duration, max: usize) -> bool {
         let Ok(mut inner) = self.inner.lock() else {
             return true; // mutex poisoned — allow (fail open, not fail closed)
         };
@@ -100,11 +95,10 @@ pub async fn ip_rate_limit_middleware(
     next: Next,
 ) -> Response {
     let ip = extract_client_ip(&request);
-    if !state.ip_rate_limiter.try_record(
-        ip,
-        state.rate_limit_window,
-        state.ip_rate_limit_max,
-    ) {
+    if !state
+        .ip_rate_limiter
+        .try_record(ip, state.rate_limit_window, state.ip_rate_limit_max)
+    {
         return (StatusCode::TOO_MANY_REQUESTS, "IP rate limit exceeded").into_response();
     }
     next.run(request).await

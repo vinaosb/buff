@@ -8,7 +8,9 @@
 //! from literals/identifiers/operators/calls, exhaustiveness checking, and
 //! recursion detection.
 
-use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp};
+use buff_lang_ast::{
+    Block, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp,
+};
 use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 use std::collections::BTreeMap;
 
@@ -127,10 +129,7 @@ impl TraitImplRegistry {
             // Generic targets are deferred — skip silently.
             _ => return,
         };
-        let bindings = self
-            .inner
-            .entry((trait_name, target_name))
-            .or_default();
+        let bindings = self.inner.entry((trait_name, target_name)).or_default();
         for b in &impl_block.type_bindings {
             bindings.insert(b.name.name.clone(), b.target.clone());
         }
@@ -138,7 +137,10 @@ impl TraitImplRegistry {
 
     /// Bulk-register every `Decl::ImplBlock` in `decls`. Convenience for
     /// drivers that walk the top-level decl list once.
-    pub fn register_from_decls<'a>(&mut self, decls: impl IntoIterator<Item = &'a buff_lang_ast::Decl>) {
+    pub fn register_from_decls<'a>(
+        &mut self,
+        decls: impl IntoIterator<Item = &'a buff_lang_ast::Decl>,
+    ) {
         for decl in decls {
             if let buff_lang_ast::Decl::ImplBlock(impl_block) = decl {
                 self.register_impl_block(impl_block);
@@ -450,17 +452,14 @@ impl TypeInferencer {
                     }
                 }
                 // Lazy iterator adapter methods (receiver is Iterator<T>).
-                if matches!(
-                    method.name.as_str(),
-                    "map" | "filter" | "take" | "skip"
-                ) && args.len() == 1
+                if matches!(method.name.as_str(), "map" | "filter" | "take" | "skip")
+                    && args.len() == 1
                 {
                     let recv_ty = self.infer_expr(receiver)?;
                     if let Type::Iterator(elem_ty) = &recv_ty {
                         if method.name == "map" {
                             if let Expr::Lambda { .. } = &args[0] {
-                                let body_ty =
-                                    self.infer_expr_expected(&args[0], Some(elem_ty))?;
+                                let body_ty = self.infer_expr_expected(&args[0], Some(elem_ty))?;
                                 return Ok(Type::iterator(body_ty));
                             }
                             // Non-lambda map arg: element type unknown.
@@ -583,9 +582,7 @@ impl TypeInferencer {
                 Ok(Type::map(key_ty, val_ty))
             }
             // v0.5: lambda/struct inference.
-            Expr::Lambda { .. } | Expr::StructInit { .. } => {
-                Ok(Type::Unknown)
-            }
+            Expr::Lambda { .. } | Expr::StructInit { .. } => Ok(Type::Unknown),
             // T42: match expression inference. Infer the scrutinee type, then
             // for each arm: infer pattern bindings from the scrutinee type,
             // bind them in the environment, infer the arm body, and unify the
@@ -1194,7 +1191,9 @@ impl TypeInferencer {
                     self.infer_pattern(sub, &sub_ty)?;
                 }
             }
-            Pattern::Struct { name: _, fields, .. } => {
+            Pattern::Struct {
+                name: _, fields, ..
+            } => {
                 // A struct pattern `Point { x, y }`. Each field's subpattern
                 // gets Unknown (full struct field resolution is deferred to
                 // rustc — the struct type is opaque at the Buff type level).
@@ -1582,7 +1581,9 @@ pub(crate) fn typeref_to_type_with_user(
                         // fall back to Unknown (the same stance as Union/Tuple).
                         let resolved_args: Vec<Type> = args
                             .iter()
-                            .map(|a| typeref_to_type_with_user(a, user_decls).unwrap_or(Type::Unknown))
+                            .map(|a| {
+                                typeref_to_type_with_user(a, user_decls).unwrap_or(Type::Unknown)
+                            })
                             .collect();
                         return Some(Type::user(name.name.clone(), resolved_args));
                     }
@@ -1871,7 +1872,10 @@ mod tests {
         let resolved = typeref_to_type_with_user(&ty, &decls);
         assert_eq!(
             resolved,
-            Some(Type::user("Pair", vec![Type::int_default(), Type::string()])),
+            Some(Type::user(
+                "Pair",
+                vec![Type::int_default(), Type::string()]
+            )),
             "Pair<Int, String> must resolve to Type::User with bound args"
         );
     }
@@ -2008,11 +2012,7 @@ mod tests {
     #[test]
     fn t75b_registry_resolves_registered_binding() {
         let mut reg = TraitImplRegistry::new();
-        reg.register_impl_block(&t75b_impl_block(
-            "Container",
-            "Box",
-            &[("Item", "Int")],
-        ));
+        reg.register_impl_block(&t75b_impl_block("Container", "Box", &[("Item", "Int")]));
         assert!(reg.has_impl("Container", "Box"));
         let resolved = reg
             .resolve_associated_type("Container", "Box", "Item")
@@ -2050,11 +2050,7 @@ mod tests {
     #[test]
     fn t75b_registry_unknown_assoc_returns_none() {
         let mut reg = TraitImplRegistry::new();
-        reg.register_impl_block(&t75b_impl_block(
-            "Container",
-            "Box",
-            &[("Item", "Int")],
-        ));
+        reg.register_impl_block(&t75b_impl_block("Container", "Box", &[("Item", "Int")]));
         // Assoc name NOT in the registered bindings → None.
         assert!(reg
             .resolve_associated_type("Container", "Box", "Other")
@@ -2064,11 +2060,7 @@ mod tests {
     #[test]
     fn t75b_registry_unknown_target_returns_none() {
         let mut reg = TraitImplRegistry::new();
-        reg.register_impl_block(&t75b_impl_block(
-            "Container",
-            "Box",
-            &[("Item", "Int")],
-        ));
+        reg.register_impl_block(&t75b_impl_block("Container", "Box", &[("Item", "Int")]));
         // Different target type that has no registered impl → None.
         assert!(reg
             .resolve_associated_type("Container", "Bag", "Item")
@@ -2093,11 +2085,7 @@ mod tests {
     #[test]
     fn t75b_inferencer_delegates_to_registry() {
         let mut inf = TypeInferencer::new();
-        inf.register_trait_impl(&t75b_impl_block(
-            "Container",
-            "Box",
-            &[("Item", "Int")],
-        ));
+        inf.register_trait_impl(&t75b_impl_block("Container", "Box", &[("Item", "Int")]));
         let resolved = inf
             .resolve_associated_type("Container", "Box", "Item")
             .expect("inferencer must consult its registry");

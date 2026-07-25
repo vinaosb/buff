@@ -90,7 +90,6 @@ pub enum RegistryError {
     InvalidTarball(String),
 
     // --- T57: OAuth + production errors ---
-
     /// T57: GitHub OAuth is not configured (env vars missing).
     /// HTTP 503 Service Unavailable.
     #[error("GitHub OAuth is not configured. Set BUFF_REGISTRY_GITHUB_CLIENT_ID and BUFF_REGISTRY_GITHUB_CLIENT_SECRET to enable login.")]
@@ -132,9 +131,7 @@ impl IntoResponse for RegistryError {
             }
             Self::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::OAuthNotConfigured => StatusCode::SERVICE_UNAVAILABLE,
-            Self::OAuthExchangeFailed(_) | Self::OAuthUserFetchFailed(_) => {
-                StatusCode::BAD_GATEWAY
-            }
+            Self::OAuthExchangeFailed(_) | Self::OAuthUserFetchFailed(_) => StatusCode::BAD_GATEWAY,
             Self::NotAllowlisted | Self::ScopeForbidden => StatusCode::FORBIDDEN,
         };
         let body = Json(ErrorBody {

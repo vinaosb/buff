@@ -26,7 +26,11 @@ fn publish_payload(name: &str, version: &str, tarball: &[u8]) -> Value {
     })
 }
 
-async fn do_publish(router: axum::Router, payload: &Value, token: Option<&str>) -> (StatusCode, Value) {
+async fn do_publish(
+    router: axum::Router,
+    payload: &Value,
+    token: Option<&str>,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method("POST")
         .uri("/api/v1/publish")
@@ -39,7 +43,9 @@ async fn do_publish(router: axum::Router, payload: &Value, token: Option<&str>) 
         .expect("build request");
     let response = router.oneshot(request).await.expect("oneshot");
     let status = response.status();
-    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.expect("collect");
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("collect");
     let json: Value = if bytes.is_empty() {
         Value::Null
     } else {
@@ -56,7 +62,9 @@ async fn do_get(router: axum::Router, uri: &str) -> (StatusCode, Vec<u8>) {
         .expect("build");
     let response = router.oneshot(request).await.expect("oneshot");
     let status = response.status();
-    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.expect("collect");
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("collect");
     (status, bytes.to_vec())
 }
 
@@ -64,13 +72,19 @@ async fn do_get(router: axum::Router, uri: &str) -> (StatusCode, Vec<u8>) {
 async fn scoped_publish_succeeds_for_org_member() {
     let storage = Arc::new(SqliteStorage::open_in_memory().expect("open"));
     storage.add_token("member-token").expect("add token");
-    storage.add_org_member("buff", "member-token").expect("add org member");
+    storage
+        .add_org_member("buff", "member-token")
+        .expect("add org member");
     let state = AppState::new(storage.clone() as Arc<dyn Storage>);
     let router = app(state);
 
     let payload = publish_payload("@buff/core", "1.0.0", &[0xAB]);
     let (status, body) = do_publish(router, &payload, Some("member-token")).await;
-    assert_eq!(status, StatusCode::CREATED, "scoped publish should succeed: {body}");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "scoped publish should succeed: {body}"
+    );
     assert_eq!(body["name"], "@buff/core");
 }
 
@@ -84,9 +98,15 @@ async fn scoped_publish_rejected_for_non_member() {
 
     let payload = publish_payload("@buff/core", "1.0.0", &[]);
     let (status, body) = do_publish(router, &payload, Some("outsider-token")).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "non-member should get 403: {body}");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "non-member should get 403: {body}"
+    );
     assert!(
-        body["error"].as_str().is_some_and(|s| s.contains("permission")),
+        body["error"]
+            .as_str()
+            .is_some_and(|s| s.contains("permission")),
         "error should mention permission: {body}"
     );
 }
@@ -126,7 +146,9 @@ async fn unscoped_publish_still_works() {
 async fn scoped_package_download_and_resolve() {
     let storage = Arc::new(SqliteStorage::open_in_memory().expect("open"));
     storage.add_token("tok").expect("add token");
-    storage.add_org_member("buff", "tok").expect("add org member");
+    storage
+        .add_org_member("buff", "tok")
+        .expect("add org member");
     let state = AppState::new(storage as Arc<dyn Storage>);
     let router = app(state);
 

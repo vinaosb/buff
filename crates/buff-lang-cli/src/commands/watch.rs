@@ -239,15 +239,15 @@ fn rebuild(file: &Path, exec: Option<&str>) {
         false, // fast
         false, // no_cache (cache stays on — watch rebuilds benefit)
         false, // incremental (watch.rs uses the legacy path for now; a
-               //           follow-up can thread a persistent salsa DB
-               //           through the watch loop for true incremental
-               //           rebuilds — T7 lays the foundation)
+        //           follow-up can thread a persistent salsa DB
+        //           through the watch loop for true incremental
+        //           rebuilds — T7 lays the foundation)
         true,  // no_incremental (force legacy path; see above)
         false, // sccache
         None,  // target
-        crate::pipeline::LinkerChoice::default(),       // linker
-        crate::pipeline::DebugInfoChoice::default(),    // debuginfo
-        crate::pipeline::BackendChoice::default(),      // backend
+        crate::pipeline::LinkerChoice::default(), // linker
+        crate::pipeline::DebugInfoChoice::default(), // debuginfo
+        crate::pipeline::BackendChoice::default(), // backend
     );
     match args {
         Ok(()) => {

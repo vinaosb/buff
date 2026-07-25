@@ -98,8 +98,7 @@ fn t39_or_of_variant_patterns() {
         Pattern::Or(alts, _) => {
             assert_eq!(alts.len(), 2);
             assert!(
-                alts.iter()
-                    .all(|a| matches!(a, Pattern::Variant { .. })),
+                alts.iter().all(|a| matches!(a, Pattern::Variant { .. })),
                 "both alternatives should be Variant patterns"
             );
         }
@@ -138,8 +137,5 @@ fn t39_or_pattern_bindings_union() {
     let p = parse_pat("Some(a) | Some(b)");
     let binds = p.bindings();
     let names: Vec<&str> = binds.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(
-        names, vec!["a", "b"],
-        "bindings should be the union [a, b]"
-    );
+    assert_eq!(names, vec!["a", "b"], "bindings should be the union [a, b]");
 }

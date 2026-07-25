@@ -161,9 +161,7 @@ pub fn assoc_fn_return_type(
         // returns the loaded key-value pairs. Does NOT override existing
         // env vars (only sets if absent). Simple parsing: one KEY=VALUE
         // per line, skip `#` comments, skip blank lines.
-        (PreludeType::Env, PreludeAssocFn::Load) => {
-            Some(Type::map(Type::string(), Type::string()))
-        }
+        (PreludeType::Env, PreludeAssocFn::Load) => Some(Type::map(Type::string(), Type::string())),
         // T124h: Base64 module.
         // `Base64.encode(bytes)` -> String. Wraps
         // `base64::Engine::encode(&general_purpose::STANDARD, bytes)`
@@ -761,15 +759,23 @@ pub fn assoc_fn_return_type(
         // `Http.get(url)` -> (Int, String). Wraps
         // `reqwest::blocking::get(u).map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default()))
         // .unwrap_or_default()`.
-        (PreludeType::Http, PreludeAssocFn::HttpGet) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        (PreludeType::Http, PreludeAssocFn::HttpGet) => {
+            Some(Type::tuple(vec![Type::int_default(), Type::string()]))
+        }
         // `Http.post(url, body)` -> (Int, String). Wraps
         // `reqwest::blocking::Client::new().post(u).body(b).send()
         // .map(|r| (r.status().as_u16() as i64, r.text().unwrap_or_default())).unwrap_or_default()`.
-        (PreludeType::Http, PreludeAssocFn::HttpPost) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        (PreludeType::Http, PreludeAssocFn::HttpPost) => {
+            Some(Type::tuple(vec![Type::int_default(), Type::string()]))
+        }
         // T80: `Http.put(url, body)` -> (Int, String).
-        (PreludeType::Http, PreludeAssocFn::HttpPut) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        (PreludeType::Http, PreludeAssocFn::HttpPut) => {
+            Some(Type::tuple(vec![Type::int_default(), Type::string()]))
+        }
         // T80: `Http.delete(url)` -> (Int, String).
-        (PreludeType::Http, PreludeAssocFn::HttpDelete) => Some(Type::tuple(vec![Type::int_default(), Type::string()])),
+        (PreludeType::Http, PreludeAssocFn::HttpDelete) => {
+            Some(Type::tuple(vec![Type::int_default(), Type::string()]))
+        }
         // T26: Assert assoc fns. Assert is namespace-only (returns Void
         // for the type itself). All five assoc fns return Void (they
         // panic on failure — test-only). The codegen lowers to Rust's

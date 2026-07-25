@@ -37,7 +37,10 @@ fn bench_subcommand_parses_with_no_args() {
             fixtures_dir,
             no_backend,
         } => {
-            assert!(output.is_none(), "default output should be None (lib default applies)");
+            assert!(
+                output.is_none(),
+                "default output should be None (lib default applies)"
+            );
             assert!(fixtures_dir.is_none());
             assert!(!no_backend);
         }
@@ -62,7 +65,10 @@ fn bench_subcommand_parses_with_all_flags() {
             fixtures_dir,
             no_backend,
         } => {
-            assert_eq!(output.as_ref().map(|p| p.to_str().unwrap_or("")), Some("/tmp/baseline.json"));
+            assert_eq!(
+                output.as_ref().map(|p| p.to_str().unwrap_or("")),
+                Some("/tmp/baseline.json")
+            );
             assert_eq!(
                 fixtures_dir.as_ref().map(|p| p.to_str().unwrap_or("")),
                 Some("/tmp/fixtures"),
@@ -94,7 +100,10 @@ fn bench_subcommand_help_string_mentions_fixtures() {
 
 #[test]
 fn default_baseline_path_is_v1_25_json_under_evidence() {
-    assert_eq!(DEFAULT_BASELINE_PATH, ".sisyphus/evidence/baseline-v1.25.json");
+    assert_eq!(
+        DEFAULT_BASELINE_PATH,
+        ".sisyphus/evidence/baseline-v1.25.json"
+    );
 }
 
 #[test]
@@ -106,7 +115,14 @@ fn default_fixtures_dir_is_examples() {
 fn fixture_names_contains_six_canonical_fixtures() {
     assert_eq!(
         FIXTURE_NAMES,
-        &["ola", "fibonacci", "closures", "collections", "pattern_matching", "error_handling"],
+        &[
+            "ola",
+            "fibonacci",
+            "closures",
+            "collections",
+            "pattern_matching",
+            "error_handling"
+        ],
         "the fixture set is part of the T22 contract — do not reorder/rename",
     );
 }
@@ -140,7 +156,11 @@ fn measure_ola_fixture_produces_stable_codegen_hash() {
         return;
     };
     let ola = root.join("examples/ola.buff");
-    assert!(ola.is_file(), "examples/ola.buff should exist at {}", ola.display());
+    assert!(
+        ola.is_file(),
+        "examples/ola.buff should exist at {}",
+        ola.display()
+    );
 
     // Two consecutive measurements on the SAME source must produce
     // byte-identical hashes (project hard rule: deterministic codegen).
@@ -150,25 +170,52 @@ fn measure_ola_fixture_produces_stable_codegen_hash() {
     assert_eq!(m1.name, "ola");
     assert_eq!(m1.name, m2.name);
 
-    let h1 = m1.codegen_hash.as_ref().expect("ola codegen should produce a hash");
-    let h2 = m2.codegen_hash.as_ref().expect("ola codegen should produce a hash");
+    let h1 = m1
+        .codegen_hash
+        .as_ref()
+        .expect("ola codegen should produce a hash");
+    let h2 = m2
+        .codegen_hash
+        .as_ref()
+        .expect("ola codegen should produce a hash");
     assert!(
         h1.starts_with("sha256:"),
         "hash should be prefixed with `sha256:`, got {h1}",
     );
-    assert_eq!(h1.len(), "sha256:".len() + 64, "hash should be sha256: + 64 hex chars");
-    assert_eq!(h1, h2, "deterministic codegen — same fixture must hash identically");
+    assert_eq!(
+        h1.len(),
+        "sha256:".len() + 64,
+        "hash should be sha256: + 64 hex chars"
+    );
+    assert_eq!(
+        h1, h2,
+        "deterministic codegen — same fixture must hash identically"
+    );
 
     // ola is a one-function `print("...")` program.
-    assert!(m1.function_count >= 1, "ola should have at least 1 function, got {}", m1.function_count);
-    assert_eq!(m1.error, None, "ola should not produce a measurement error; got {:?}", m1.error);
+    assert!(
+        m1.function_count >= 1,
+        "ola should have at least 1 function, got {}",
+        m1.function_count
+    );
+    assert_eq!(
+        m1.error, None,
+        "ola should not produce a measurement error; got {:?}",
+        m1.error
+    );
 }
 
 #[test]
 fn measure_missing_fixture_records_lex_error_not_panic() {
     // A non-existent path errors at the read step (anyhow propagates).
-    let res = bench_harness::measure_fixture(PathBuf::from("/nonexistent/does-not-exist.buff").as_path(), false);
-    assert!(res.is_err(), "missing fixture should error (not silently produce zero metrics)");
+    let res = bench_harness::measure_fixture(
+        PathBuf::from("/nonexistent/does-not-exist.buff").as_path(),
+        false,
+    );
+    assert!(
+        res.is_err(),
+        "missing fixture should error (not silently produce zero metrics)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +256,10 @@ fn build_report_serialises_to_parseable_json() {
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
     let obj = parsed.as_object().expect("top-level object");
     for key in &["captured_at", "git_sha", "host", "fixtures"] {
-        assert!(obj.contains_key(*key), "report JSON must include `{key}`: {json}");
+        assert!(
+            obj.contains_key(*key),
+            "report JSON must include `{key}`: {json}"
+        );
     }
 }
 

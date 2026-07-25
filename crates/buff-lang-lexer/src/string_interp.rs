@@ -41,7 +41,7 @@ pub trait LexCallback {
         source: &str,
         range_start: usize,
         range_end: usize,
-    _source_id: SourceId,
+        _source_id: SourceId,
         out: &mut Vec<Token>,
     ) -> Result<(), LexerError>;
 }
@@ -366,10 +366,16 @@ mod tests {
                     break None;
                 }
                 match bytes[i] {
-                    b'{' => { depth += 1; i += 1; }
+                    b'{' => {
+                        depth += 1;
+                        i += 1;
+                    }
                     b'}' => {
-                        if depth == 0 { break None; }
-                        depth -= 1; i += 1;
+                        if depth == 0 {
+                            break None;
+                        }
+                        depth -= 1;
+                        i += 1;
                     }
                     b':' if depth == 0 => {
                         let s = source[i + 1..range_end].to_string();
@@ -378,11 +384,19 @@ mod tests {
                     b'"' => {
                         i += 1;
                         while i < range_end && bytes[i] != b'"' {
-                            if bytes[i] == b'\\' && i + 1 < range_end { i += 2; } else { i += 1; }
+                            if bytes[i] == b'\\' && i + 1 < range_end {
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
                         }
-                        if i < range_end { i += 1; }
+                        if i < range_end {
+                            i += 1;
+                        }
                     }
-                    _ => { i += 1; }
+                    _ => {
+                        i += 1;
+                    }
                 }
             };
             let expr_text = match &spec {
@@ -391,15 +405,27 @@ mod tests {
                     let mut depth2 = 0usize;
                     let mut j = range_start;
                     let colon_pos = loop {
-                        if j >= range_end { break range_end; }
+                        if j >= range_end {
+                            break range_end;
+                        }
                         match bytes[j] {
-                            b'{' => { depth2 += 1; j += 1; }
-                            b'}' => {
-                                if depth2 == 0 { break range_end; }
-                                depth2 -= 1; j += 1;
+                            b'{' => {
+                                depth2 += 1;
+                                j += 1;
                             }
-                            b':' if depth2 == 0 => { break j; }
-                            _ => { j += 1; }
+                            b'}' => {
+                                if depth2 == 0 {
+                                    break range_end;
+                                }
+                                depth2 -= 1;
+                                j += 1;
+                            }
+                            b':' if depth2 == 0 => {
+                                break j;
+                            }
+                            _ => {
+                                j += 1;
+                            }
                         }
                     };
                     source[range_start..colon_pos].to_string()

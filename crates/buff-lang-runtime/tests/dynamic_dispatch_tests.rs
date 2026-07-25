@@ -290,7 +290,8 @@ fn dynamic_dispatch_arithmetic_intensity_threshold_is_four() {
 fn dynamic_dispatch_intensity_at_exact_threshold_is_high() {
     // At exactly the threshold (4.0), the comparison is `>=` → high.
     // (Inclusive: 4.0 IS high enough for GPU.)
-    let ctx = WorkloadContext::new(100_000, true).with_intensity(GPU_ARITHMETIC_INTENSITY_THRESHOLD);
+    let ctx =
+        WorkloadContext::new(100_000, true).with_intensity(GPU_ARITHMETIC_INTENSITY_THRESHOLD);
     assert_eq!(
         decide_dynamic(&ctx),
         DispatchKind::GpuCompute,
@@ -329,7 +330,11 @@ fn dynamic_dispatch_mock_gpu_records_dispatch_for_gpu_compute_branch() {
 
     // Simulate the dispatch path: GpuCompute → backend.dispatch_map.
     let out = backend.dispatch_map(SHADER_WGSL, &input).unwrap();
-    assert_eq!(backend.recorded_dispatches(), 1, "GPU dispatch must be recorded");
+    assert_eq!(
+        backend.recorded_dispatches(),
+        1,
+        "GPU dispatch must be recorded"
+    );
     assert_eq!(out.len(), input.len());
     assert_eq!(out[0], 0.0); // 0 * 2.0
     assert_eq!(out[1], 2.0); // 1 * 2.0

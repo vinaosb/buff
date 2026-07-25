@@ -6,7 +6,6 @@
 
 use super::*;
 
-
 /// Build the attribute list for a generated struct: always
 /// `#[derive(Clone, Debug)]`, plus an optional `#[repr(C)]` when
 /// `emit_repr_c` is true (T26 hook).
@@ -254,4 +253,3 @@ pub(super) fn type_is_hash_safe(ty: &TypeRef, hash_safe_user_structs: &BTreeSet<
         TypeRef::Generic { .. } | TypeRef::Function { .. } => false,
     }
 }
-

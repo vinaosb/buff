@@ -244,9 +244,9 @@ impl PipelineCache {
         // Fast path: lock, check for hit, return clone.
         // The map lock is the only synchronization we need.
         let guard = self.map.lock().map_err(|_| RuntimeError::GpuInit {
-                    detail: "pipeline cache mutex poisoned".to_string(),
-                    span: None,
-                })?;
+            detail: "pipeline cache mutex poisoned".to_string(),
+            span: None,
+        })?;
         if let Some(cached) = guard.get(shader_wgsl) {
             return Ok(cached.clone());
         }
@@ -262,9 +262,9 @@ impl PipelineCache {
         // existing entry to keep the compile_count consistent (we
         // don't want to double-count).
         let mut guard = self.map.lock().map_err(|_| RuntimeError::GpuInit {
-                    detail: "pipeline cache mutex poisoned on insert".to_string(),
-                    span: None,
-                })?;
+            detail: "pipeline cache mutex poisoned on insert".to_string(),
+            span: None,
+        })?;
         if let Some(existing) = guard.get(shader_wgsl) {
             // Another thread won the race. Use theirs; don't increment.
             return Ok(existing.clone());
@@ -417,9 +417,9 @@ impl BufferPool {
     ) -> Result<wgpu::Buffer, RuntimeError> {
         let key = (size, BufferUsageKey::from(usage));
         let mut guard = self.free.lock().map_err(|_| RuntimeError::GpuInit {
-                    detail: "buffer pool mutex poisoned".to_string(),
-                    span: None,
-                })?;
+            detail: "buffer pool mutex poisoned".to_string(),
+            span: None,
+        })?;
         if let Some(free_list) = guard.get_mut(&key) {
             if let Some(buffer) = free_list.pop() {
                 return Ok(buffer);
@@ -699,18 +699,18 @@ impl ColdStartBackend {
                 ready_flag.store(true, Ordering::Release);
             })
             .map_err(|e| RuntimeError::GpuInit {
-                        detail: format!("failed to spawn cold-start init thread: {e}"),
-                        span: None,
-                    })?;
+                detail: format!("failed to spawn cold-start init thread: {e}"),
+                span: None,
+            })?;
 
         let mut guard = self
             .init_state
             .handle
             .lock()
             .map_err(|_| RuntimeError::GpuInit {
-                        detail: "init_state mutex poisoned on spawn".to_string(),
-                        span: None,
-                    })?;
+                detail: "init_state mutex poisoned on spawn".to_string(),
+                span: None,
+            })?;
         *guard = Some(handle);
         Ok(())
     }
@@ -922,9 +922,9 @@ impl GpuBackend for ColdStartBackend {
                 staging_buffer,
             );
             return Err(RuntimeError::GpuInit {
-                        detail: format!("device.poll(Wait) failed: {e:?}"),
-                        span: None,
-                    });
+                detail: format!("device.poll(Wait) failed: {e:?}"),
+                span: None,
+            });
         }
 
         // map_async + drain via poll + read.
@@ -953,15 +953,15 @@ impl GpuBackend for ColdStartBackend {
                 staging_buffer,
             );
             return Err(RuntimeError::GpuInit {
-                        detail: format!("device.poll(Wait) for map_async failed: {e:?}"),
-                        span: None,
-                    });
+                detail: format!("device.poll(Wait) for map_async failed: {e:?}"),
+                span: None,
+            });
         }
 
         let map_result = rx.recv().map_err(|e| RuntimeError::GpuInit {
-                    detail: format!("map_async callback did not fire (sender dropped): {e}"),
-                    span: None,
-                })?;
+            detail: format!("map_async callback did not fire (sender dropped): {e}"),
+            span: None,
+        })?;
 
         // Map_err path: release buffers BEFORE returning the error.
         if let Err(async_err) = map_result {
@@ -982,9 +982,9 @@ impl GpuBackend for ColdStartBackend {
                 staging_buffer,
             );
             return Err(RuntimeError::GpuInit {
-                        detail: format!("map_async(BufferAsyncError): {async_err:?}"),
-                        span: None,
-                    });
+                detail: format!("map_async(BufferAsyncError): {async_err:?}"),
+                span: None,
+            });
         }
 
         // Read mapped range.

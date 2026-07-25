@@ -41,10 +41,7 @@ impl From<GpuContextError> for RuntimeError {
     fn from(err: GpuContextError) -> Self {
         match err {
             GpuContextError::NoAdapter => Self::GpuUnavailable { span: None },
-            GpuContextError::DeviceRequest(detail) => Self::GpuInit {
-                detail,
-                span: None,
-            },
+            GpuContextError::DeviceRequest(detail) => Self::GpuInit { detail, span: None },
         }
     }
 }

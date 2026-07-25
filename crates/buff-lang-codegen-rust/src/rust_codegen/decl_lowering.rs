@@ -9,7 +9,6 @@
 use super::*;
 
 impl RustCodegen {
-
     /// Build a `syn::Generics` from a slice of Buff [`TypeParam`]s (T13 +
     /// T38 trait bounds).
     ///
@@ -31,18 +30,14 @@ impl RustCodegen {
     /// Returns `syn::Generics::default()` when the slice is empty (the common
     /// case — non-generic decls). The lt_token/gt_token are `Some` only when
     /// the param list is non-empty (matching Rust's prettyplease formatting).
-    pub(super) fn type_params_to_generics(
-        &mut self,
-        type_params: &[TypeParam],
-    ) -> syn::Generics {
+    pub(super) fn type_params_to_generics(&mut self, type_params: &[TypeParam]) -> syn::Generics {
         if type_params.is_empty() {
             return syn::Generics::default();
         }
         let mut params: Punctuated<syn::GenericParam, syn::Token![,]> = Punctuated::new();
         for tp in type_params {
             // T38: lower each bound TypeRef to a syn::TypeParamBound::Trait.
-            let mut bound_list: Punctuated<syn::TypeParamBound, syn::Token![+]> =
-                Punctuated::new();
+            let mut bound_list: Punctuated<syn::TypeParamBound, syn::Token![+]> = Punctuated::new();
             let has_bounds = !tp.bounds.is_empty();
             for bound in &tp.bounds {
                 if let Some(path) = self.typeref_to_trait_path(bound) {
@@ -251,7 +246,10 @@ impl RustCodegen {
     /// codegen time — Buff emits blanket `Clone + PartialEq + Debug`
     /// derives (plus `Hash` when safe); user-specified trait impls are a
     /// later task.
-    pub(super) fn lower_struct_decl(&mut self, s: &AstStructDecl) -> Result<ItemStruct, CodegenError> {
+    pub(super) fn lower_struct_decl(
+        &mut self,
+        s: &AstStructDecl,
+    ) -> Result<ItemStruct, CodegenError> {
         // Build named fields: each field is `pub name: <rust_type>`. Field
         // visibility is always `pub` so any generated constructor / user
         // code can initialise and read struct values without accessors.
@@ -1171,9 +1169,8 @@ impl RustCodegen {
         // Build the trait item list: associated types first (T75b), then
         // required methods, then defaults. The capacity hint covers all
         // three categories.
-        let mut trait_items: Vec<syn::TraitItem> = Vec::with_capacity(
-            t.associated_types.len() + t.required.len() + t.defaults.len(),
-        );
+        let mut trait_items: Vec<syn::TraitItem> =
+            Vec::with_capacity(t.associated_types.len() + t.required.len() + t.defaults.len());
 
         // T75b: ASSOCIATED TYPES — `type Item;` (or `type Item: Bound;`).
         // Each lowers to a `syn::TraitItem::AssocType` (`type Item;`).
@@ -1427,7 +1424,6 @@ impl RustCodegen {
             output,
         })
     }
-
 }
 
 // ===========================================================================
@@ -1464,7 +1460,9 @@ impl RustCodegen {
 /// so allocations nested inside `if`/`match`/closure/loop bodies are caught.
 /// The walker is allocation-free itself (it only pushes to a `Vec` on a hit).
 fn check_no_alloc_violations(block: &syn::Block) -> Vec<String> {
-    let mut visitor = NoAllocVisitor { violations: Vec::new() };
+    let mut visitor = NoAllocVisitor {
+        violations: Vec::new(),
+    };
     syn::visit::visit_block(&mut visitor, block);
     visitor.violations
 }
@@ -1490,14 +1488,7 @@ impl<'ast> syn::visit::Visit<'ast> for NoAllocVisitor {
         let name = syn_path_to_string(&i.mac.path);
         if matches!(
             name.as_str(),
-            "vec"
-                | "format"
-                | "println"
-                | "print"
-                | "eprintln"
-                | "eprint"
-                | "write"
-                | "writeln"
+            "vec" | "format" | "println" | "print" | "eprintln" | "eprint" | "write" | "writeln"
         ) {
             self.violations
                 .push(format!("`{name}!` macro allocates on the heap"));
@@ -1600,4 +1591,3 @@ mod no_alloc_tests {
         );
     }
 }
-

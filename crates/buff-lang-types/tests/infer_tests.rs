@@ -990,9 +990,7 @@ fn t83_nested_vector_literal_preserves_nesting_depth() {
         Type::Vector(inner) => match *inner {
             Type::Vector(innermost) => match *innermost {
                 Type::Int { .. } => {}
-                other => panic!(
-                    "T83: innermost type must be Int, got {other:?}"
-                ),
+                other => panic!("T83: innermost type must be Int, got {other:?}"),
             },
             other => panic!("T83: inner type must be Vector, got {other:?}"),
         },
@@ -1041,9 +1039,7 @@ fn t83_nested_map_literal_preserves_value_nesting() {
         Type::Map(_key_ty, val_ty) => match *val_ty {
             Type::Map(_inner_k, inner_v) => match *inner_v {
                 Type::Int { .. } => {}
-                other => panic!(
-                    "T83: innermost value must be Int, got {other:?}"
-                ),
+                other => panic!("T83: innermost value must be Int, got {other:?}"),
             },
             other => panic!("T83: value must be Map, got {other:?}"),
         },
@@ -1276,7 +1272,10 @@ fn pat_tuple(subs: Vec<Pattern>) -> Pattern {
 fn pat_struct(name: &str, fields: Vec<(&str, Pattern)>) -> Pattern {
     Pattern::Struct {
         name: Ident::new(name, sp()),
-        fields: fields.into_iter().map(|(n, p)| (Ident::new(n, sp()), p)).collect(),
+        fields: fields
+            .into_iter()
+            .map(|(n, p)| (Ident::new(n, sp()), p))
+            .collect(),
         span: sp(),
         rest: false,
     }
@@ -1334,7 +1333,11 @@ fn t42_enum_variant_pattern_infers_inner_type() {
     inf.bind("opt", Type::option(Type::int_default()));
     let ty = inf.infer_expr(&e).unwrap();
     // Both arms return Int, so the match type is Int.
-    assert_eq!(ty, Type::int_default(), "T42: match on Option<Int> should infer Int");
+    assert_eq!(
+        ty,
+        Type::int_default(),
+        "T42: match on Option<Int> should infer Int"
+    );
     // x should be bound to Int in the Some arm.
     // (The env is restored after each arm, so we check via the arm body inference.)
 }
@@ -1347,9 +1350,11 @@ fn t42_nested_pattern_infers_inner_type() {
     let scrutinee = ident("opt");
     let arms = vec![
         match_arm(
-            pat_variant("Option", "Some", vec![
-                pat_variant("Option", "Some", vec![pat_ident("x")]),
-            ]),
+            pat_variant(
+                "Option",
+                "Some",
+                vec![pat_variant("Option", "Some", vec![pat_ident("x")])],
+            ),
             vec![expr_stmt(ident("x"))],
         ),
         match_arm(pat_wild(), vec![expr_stmt(int_lit(0))]),
@@ -1358,7 +1363,11 @@ fn t42_nested_pattern_infers_inner_type() {
     let mut inf = TypeInferencer::new();
     inf.bind("opt", Type::option(Type::option(Type::int_default())));
     let ty = inf.infer_expr(&e).unwrap();
-    assert_eq!(ty, Type::int_default(), "T42: nested match on Option<Option<Int>> should infer Int");
+    assert_eq!(
+        ty,
+        Type::int_default(),
+        "T42: nested match on Option<Option<Int>> should infer Int"
+    );
 }
 
 /// T42: struct pattern `Point(x, y)` — each field binding gets Unknown
@@ -1378,7 +1387,11 @@ fn t42_struct_pattern_binds_fields() {
     inf.bind("p", Type::Unknown);
     let ty = inf.infer_expr(&e).unwrap();
     // Both arms return Int, so the match type is Int.
-    assert_eq!(ty, Type::int_default(), "T42: struct pattern match should infer Int");
+    assert_eq!(
+        ty,
+        Type::int_default(),
+        "T42: struct pattern match should infer Int"
+    );
 }
 
 /// T42: or-pattern `Red | Blue` — both arms bind the same types.
@@ -1397,7 +1410,11 @@ fn t42_or_pattern_accepts_alternatives() {
     let mut inf = TypeInferencer::new();
     inf.bind("color", Type::Unknown);
     let ty = inf.infer_expr(&e).unwrap();
-    assert_eq!(ty, Type::int_default(), "T42: or-pattern match should infer Int");
+    assert_eq!(
+        ty,
+        Type::int_default(),
+        "T42: or-pattern match should infer Int"
+    );
 }
 
 /// T42: guard condition `Some(x) if x > 0` — the guard is inferred
@@ -1417,7 +1434,11 @@ fn t42_guard_condition_inferred() {
     let mut inf = TypeInferencer::new();
     inf.bind("opt", Type::option(Type::int_default()));
     let ty = inf.infer_expr(&e).unwrap();
-    assert_eq!(ty, Type::int_default(), "T42: guarded match should infer Int");
+    assert_eq!(
+        ty,
+        Type::int_default(),
+        "T42: guarded match should infer Int"
+    );
 }
 
 /// T42: tuple pattern `(a, b)` — each element gets the corresponding
@@ -1434,9 +1455,16 @@ fn t42_tuple_pattern_infers_member_types() {
     ];
     let e = match_expr(scrutinee, arms);
     let mut inf = TypeInferencer::new();
-    inf.bind("pair", Type::tuple(vec![Type::string(), Type::int_default()]));
+    inf.bind(
+        "pair",
+        Type::tuple(vec![Type::string(), Type::int_default()]),
+    );
     let ty = inf.infer_expr(&e).unwrap();
-    assert_eq!(ty, Type::int_default(), "T42: tuple pattern match should infer Int");
+    assert_eq!(
+        ty,
+        Type::int_default(),
+        "T42: tuple pattern match should infer Int"
+    );
 }
 
 /// T42: match arms with different types return Unknown (defer to rustc).
@@ -1446,16 +1474,20 @@ fn t42_mismatched_arm_types_return_unknown() {
     let arms = vec![
         match_arm(
             pat_variant("Option", "Some", vec![pat_ident("x")]),
-            vec![expr_stmt(ident("x"))],  // returns Int
+            vec![expr_stmt(ident("x"))], // returns Int
         ),
         match_arm(
             pat_variant("Option", "None", vec![]),
-            vec![expr_stmt(str_lit("none"))],  // returns String
+            vec![expr_stmt(str_lit("none"))], // returns String
         ),
     ];
     let e = match_expr(scrutinee, arms);
     let mut inf = TypeInferencer::new();
     inf.bind("opt", Type::option(Type::int_default()));
     let ty = inf.infer_expr(&e).unwrap();
-    assert_eq!(ty, Type::Unknown, "T42: mismatched arm types should return Unknown");
+    assert_eq!(
+        ty,
+        Type::Unknown,
+        "T42: mismatched arm types should return Unknown"
+    );
 }

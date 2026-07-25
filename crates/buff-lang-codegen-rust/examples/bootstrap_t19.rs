@@ -149,13 +149,27 @@ fn main() {
         let det = if m.determinism_pass { "PASS" } else { "FAIL" };
         eprintln!(
             "{:<40} {:>6} {:>6} {:>8} {:>16} {:>16} {:>5} {:>5} {:>5}",
-            name, m.lex_ms, m.parse_ms, m.codegen_ms, s2_tail, s3_tail, one_a, det, m.function_count,
+            name,
+            m.lex_ms,
+            m.parse_ms,
+            m.codegen_ms,
+            s2_tail,
+            s3_tail,
+            one_a,
+            det,
+            m.function_count,
         );
     }
 
     eprintln!();
-    eprintln!("Stage 1A (Rust→Buff transpile): {}/{} files", stage1a_pass, total);
-    eprintln!("Determinism (Stage 2 == Stage 3): {}/{} files", determinism_pass, stage1a_pass);
+    eprintln!(
+        "Stage 1A (Rust→Buff transpile): {}/{} files",
+        stage1a_pass, total
+    );
+    eprintln!(
+        "Determinism (Stage 2 == Stage 3): {}/{} files",
+        determinism_pass, stage1a_pass
+    );
     if report.determinism_holds {
         eprintln!("RESULT: DETERMINISM HOLDS for all files that transpiled.");
     } else if stage1a_pass == 0 {
@@ -225,10 +239,14 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
             return FixtureMeasurement {
                 name: name.to_string(),
                 lex_ms: start.elapsed().as_millis(),
-                parse_ms: 0, codegen_ms: 0,
-                stage2_hash: None, stage3_hash: None,
-                stage2_bytes: None, stage3_bytes: None,
-                stage1a_pass: false, determinism_pass: false,
+                parse_ms: 0,
+                codegen_ms: 0,
+                stage2_hash: None,
+                stage3_hash: None,
+                stage2_bytes: None,
+                stage3_bytes: None,
+                stage1a_pass: false,
+                determinism_pass: false,
                 function_count: 0,
                 error: Some(format!("lex_error: {}", e.inner.diagnostic.message)),
             };
@@ -243,11 +261,15 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         Err(e) => {
             return FixtureMeasurement {
                 name: name.to_string(),
-                lex_ms, parse_ms: start.elapsed().as_millis(),
+                lex_ms,
+                parse_ms: start.elapsed().as_millis(),
                 codegen_ms: 0,
-                stage2_hash: None, stage3_hash: None,
-                stage2_bytes: None, stage3_bytes: None,
-                stage1a_pass: false, determinism_pass: false,
+                stage2_hash: None,
+                stage3_hash: None,
+                stage2_bytes: None,
+                stage3_bytes: None,
+                stage1a_pass: false,
+                determinism_pass: false,
                 function_count: 0,
                 error: Some(format!("parse_error: {}", e.diagnostic.message)),
             };
@@ -263,11 +285,15 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         Err(e) => {
             return FixtureMeasurement {
                 name: name.to_string(),
-                lex_ms, parse_ms,
+                lex_ms,
+                parse_ms,
                 codegen_ms: start.elapsed().as_millis(),
-                stage2_hash: None, stage3_hash: None,
-                stage2_bytes: None, stage3_bytes: None,
-                stage1a_pass: false, determinism_pass: false,
+                stage2_hash: None,
+                stage3_hash: None,
+                stage2_bytes: None,
+                stage3_bytes: None,
+                stage1a_pass: false,
+                determinism_pass: false,
                 function_count,
                 error: Some(format!("codegen_error (stage2): {}", e.diagnostic.message)),
             };
@@ -285,10 +311,15 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         Err(e) => {
             return FixtureMeasurement {
                 name: name.to_string(),
-                lex_ms, parse_ms, codegen_ms,
-                stage2_hash: Some(stage2_hash), stage3_hash: None,
-                stage2_bytes: Some(stage2_bytes), stage3_bytes: None,
-                stage1a_pass: false, determinism_pass: false,
+                lex_ms,
+                parse_ms,
+                codegen_ms,
+                stage2_hash: Some(stage2_hash),
+                stage3_hash: None,
+                stage2_bytes: Some(stage2_bytes),
+                stage3_bytes: None,
+                stage1a_pass: false,
+                determinism_pass: false,
                 function_count,
                 error: Some(format!("codegen_error (stage3): {}", e.diagnostic.message)),
             };
@@ -306,7 +337,9 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
 
     FixtureMeasurement {
         name: name.to_string(),
-        lex_ms, parse_ms, codegen_ms,
+        lex_ms,
+        parse_ms,
+        codegen_ms,
         stage2_hash: Some(stage2_hash),
         stage3_hash: Some(stage3_hash),
         stage2_bytes: Some(stage2_bytes),
@@ -327,10 +360,15 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
 fn error_only(name: &str, msg: String) -> FixtureMeasurement {
     FixtureMeasurement {
         name: name.to_string(),
-        lex_ms: 0, parse_ms: 0, codegen_ms: 0,
-        stage2_hash: None, stage3_hash: None,
-        stage2_bytes: None, stage3_bytes: None,
-        stage1a_pass: false, determinism_pass: false,
+        lex_ms: 0,
+        parse_ms: 0,
+        codegen_ms: 0,
+        stage2_hash: None,
+        stage3_hash: None,
+        stage2_bytes: None,
+        stage3_bytes: None,
+        stage1a_pass: false,
+        determinism_pass: false,
         function_count: 0,
         error: Some(msg),
     }

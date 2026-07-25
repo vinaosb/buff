@@ -392,7 +392,10 @@ fn scan_raw_string(
                 if !text.is_empty() {
                     out.push(Token::new(TokenKind::StringPart(text), span(body_start, i)));
                 }
-                out.push(Token::new(TokenKind::StringEnd, span(close_start, close_end)));
+                out.push(Token::new(
+                    TokenKind::StringEnd,
+                    span(close_start, close_end),
+                ));
                 return Ok(close_end);
             }
         }
@@ -1324,10 +1327,13 @@ mod tests {
             let src = r#"r"\n\t\\""#;
             let tokens = kinds(src).unwrap();
             match &tokens[..] {
-                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] =>
+                {
                     assert_eq!(s, "\\n\\t\\\\");
                 }
-                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+                other => {
+                    panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}")
+                }
             }
         }
 
@@ -1337,10 +1343,13 @@ mod tests {
             let src = r#"r"x {y} z""#;
             let tokens = kinds(src).unwrap();
             match &tokens[..] {
-                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] =>
+                {
                     assert_eq!(s, "x {y} z");
                 }
-                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+                other => {
+                    panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}")
+                }
             }
         }
 
@@ -1350,10 +1359,13 @@ mod tests {
             let src = r##"r#"say "hello""#"##;
             let tokens = kinds(src).unwrap();
             match &tokens[..] {
-                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] =>
+                {
                     assert_eq!(s, r##"say "hello""##);
                 }
-                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+                other => {
+                    panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}")
+                }
             }
         }
 
@@ -1363,10 +1375,13 @@ mod tests {
             let src = r#####"r##"hello "# world"##"#####;
             let tokens = kinds(src).unwrap();
             match &tokens[..] {
-                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] =>
+                {
                     assert_eq!(s, r##"hello "# world"##);
                 }
-                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+                other => {
+                    panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}")
+                }
             }
         }
 
@@ -1403,10 +1418,13 @@ mod tests {
             let src = "r\"line1\nline2\"";
             let tokens = kinds(src).unwrap();
             match &tokens[..] {
-                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] => {
+                [TokenKind::StringStart, TokenKind::StringPart(s), TokenKind::StringEnd, TokenKind::Eof] =>
+                {
                     assert_eq!(s, "line1\nline2");
                 }
-                other => panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}"),
+                other => {
+                    panic!("expected [StringStart, StringPart, StringEnd, Eof], got {other:?}")
+                }
             }
         }
 

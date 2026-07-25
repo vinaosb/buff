@@ -3,8 +3,8 @@
 //! MECHANICAL EXTRACTION from prelude_types.rs (T105b God Class split).
 //! No logic changes — moved verbatim.
 
-use crate::prelude_types::PreludeType;
 use crate::prelude_types::prelude_type_lookup;
+use crate::prelude_types::PreludeType;
 use crate::ty::Type;
 
 // ---------------------------------------------------------------------------
@@ -138,4 +138,3 @@ pub fn assoc_const_return_type(type_: PreludeType, const_: PreludeAssocConst) ->
         _ => None,
     }
 }
-

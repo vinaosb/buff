@@ -41,7 +41,10 @@ fn attr_with_arg(name: &str, arg: &str) -> Attribute {
 
 #[test]
 fn prefer_cpu_emits_doc_marker() {
-    let decls = vec![fn_with_attrs("scalar_work", vec![attr_with_arg("prefer", "cpu")])];
+    let decls = vec![fn_with_attrs(
+        "scalar_work",
+        vec![attr_with_arg("prefer", "cpu")],
+    )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(src.contains("fn scalar_work"), "src: {src}");
     assert!(
@@ -57,7 +60,10 @@ fn prefer_cpu_emits_doc_marker() {
 
 #[test]
 fn prefer_gpu_emits_doc_marker() {
-    let decls = vec![fn_with_attrs("vec_work", vec![attr_with_arg("prefer", "gpu")])];
+    let decls = vec![fn_with_attrs(
+        "vec_work",
+        vec![attr_with_arg("prefer", "gpu")],
+    )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
         src.contains(r#"#[doc = "@prefer(gpu)"]"#),
@@ -67,7 +73,10 @@ fn prefer_gpu_emits_doc_marker() {
 
 #[test]
 fn prefer_npu_emits_doc_marker() {
-    let decls = vec![fn_with_attrs("accel_work", vec![attr_with_arg("prefer", "npu")])];
+    let decls = vec![fn_with_attrs(
+        "accel_work",
+        vec![attr_with_arg("prefer", "npu")],
+    )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
         src.contains(r#"#[doc = "@prefer(npu)"]"#),
@@ -77,7 +86,10 @@ fn prefer_npu_emits_doc_marker() {
 
 #[test]
 fn force_gpu_emits_doc_marker() {
-    let decls = vec![fn_with_attrs("heavy_gpu", vec![attr_with_arg("force", "gpu")])];
+    let decls = vec![fn_with_attrs(
+        "heavy_gpu",
+        vec![attr_with_arg("force", "gpu")],
+    )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(src.contains("fn heavy_gpu"), "src: {src}");
     assert!(

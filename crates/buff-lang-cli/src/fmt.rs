@@ -163,7 +163,6 @@ struct Formatter<'a> {
     last_emitted_byte: usize,
 }
 
-
 // T106: declaration + expression formatting extracted to submodules.
 mod decl;
 mod expr;
@@ -514,7 +513,6 @@ impl<'a> Formatter<'a> {
 
     // ------- declarations -------
 
-
     // ------- types -------
 
     fn write_typeref(&mut self, ty: &TypeRef) {
@@ -862,7 +860,6 @@ impl<'a> Formatter<'a> {
     }
 
     // ------- expressions -------
-
 }
 
 // ---------------------------------------------------------------------------

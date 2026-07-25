@@ -260,19 +260,13 @@ pub fn app(state: AppState) -> Router {
         .route("/api/v1/package/{name}", get(handlers::get_package))
         .route("/api/v1/download/{name}/{version}", get(handlers::download))
         .route("/api/v1/resolve/{name}", get(handlers::resolve))
-        .route(
-            "/api/v1/packages/{name}/badges",
-            get(handlers::get_badges),
-        )
+        .route("/api/v1/packages/{name}/badges", get(handlers::get_badges))
         .route("/api/v1/packages/{name}/stats", get(handlers::get_stats))
         .route("/api/v1/search", get(handlers::search))
         // T57: New multipart upload + download endpoints (parallel to the
         // legacy JSON publish/download — the new endpoints use the
         // multipart tarball format and filesystem storage).
-        .route(
-            "/api/v1/packages/{name}",
-            post(handlers::multipart_publish),
-        )
+        .route("/api/v1/packages/{name}", post(handlers::multipart_publish))
         .route(
             "/api/v1/packages/{name}/{version}/download",
             get(handlers::multipart_download),
@@ -283,10 +277,7 @@ pub fn app(state: AppState) -> Router {
         .route("/auth/logout", post(oauth::logout))
         .route("/auth/whoami", get(oauth::whoami))
         // T57: IP-based rate limiting on ALL endpoints.
-        .layer(from_fn_with_state(
-            state.clone(),
-            ip_rate_limit_middleware,
-        ))
+        .layer(from_fn_with_state(state.clone(), ip_rate_limit_middleware))
         .with_state(state)
 }
 
@@ -418,7 +409,9 @@ fn validate_scoped_name(name: &str) -> Result<(), RegistryError> {
 #[must_use]
 pub fn scope_of(name: &str) -> Option<&str> {
     if name.starts_with('@') {
-        name.strip_prefix('@').and_then(|s| s.split_once('/')).map(|(org, _)| org)
+        name.strip_prefix('@')
+            .and_then(|s| s.split_once('/'))
+            .map(|(org, _)| org)
     } else {
         None
     }

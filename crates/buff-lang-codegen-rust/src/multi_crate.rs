@@ -224,9 +224,7 @@ pub fn module_ident_from_path(from_path: &str) -> String {
 /// `(source, extern_crates)` — the formatted Rust source for the
 /// module + the extern-crate deps the module pulls in (recorded by
 /// [`RustCodegen::extern_crates`] during lowering).
-pub fn generate_module_source(
-    decls: &[Decl],
-) -> Result<(String, BTreeSet<String>), CodegenError> {
+pub fn generate_module_source(decls: &[Decl]) -> Result<(String, BTreeSet<String>), CodegenError> {
     let filtered: Vec<Decl> = decls
         .iter()
         .filter(|d| !is_module_graph_decl(d))
@@ -247,10 +245,7 @@ pub fn generate_module_source(
 ///   `generate()` loop; we filter here too for direct callers of
 ///   [`generate_module_source`].
 fn is_module_graph_decl(decl: &Decl) -> bool {
-    matches!(
-        decl,
-        Decl::ImportDecl(_) | Decl::ReexportDecl(_)
-    )
+    matches!(decl, Decl::ImportDecl(_) | Decl::ReexportDecl(_))
 }
 
 /// Collect the ES6-form imports from `decls` as `(from_path, names,
@@ -449,10 +444,7 @@ pub fn generate_multi_crate(
 /// error code (T8). The span is `dummy()` because the error is a
 /// structural / module-graph concern, not tied to a single source span.
 fn multi_crate_error(message: String) -> CodegenError {
-    CodegenError::new(Diagnostic::error(
-        message,
-        BuffSpan::dummy(),
-    ))
+    CodegenError::new(Diagnostic::error(message, BuffSpan::dummy()))
 }
 
 #[cfg(test)]

@@ -37,7 +37,6 @@ mod expr_postfix;
 pub use expr_pattern::*;
 pub use expr_postfix::*;
 
-
 /// Public entry point — parse one expression (precedence: assignment level).
 ///
 /// The stream cursor is advanced past everything needed to construct the
@@ -542,7 +541,6 @@ fn unicode_prefix_desugar(kind: &TokenKind) -> Option<&'static str> {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Level 14 — primary: literals, identifiers, parenthesized expressions.
 // ---------------------------------------------------------------------------
@@ -738,7 +736,6 @@ fn starts_matrix_element(kind: &TokenKind) -> bool {
             | TokenKind::Sqrt
     )
 }
-
 
 /// Speculative lookahead: return `true` if the cursor is positioned at an
 /// `LBrace` whose contents match the struct-init field shape (T26).

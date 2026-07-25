@@ -6,7 +6,6 @@
 
 use super::*;
 
-
 // ---------------------------------------------------------------------------
 // T105 — named-argument resolution helpers.
 //
@@ -382,4 +381,3 @@ pub(super) fn fill_default_args(args: &[Expr], defaults: &[Option<Expr>]) -> Opt
         None
     }
 }
-

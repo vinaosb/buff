@@ -66,7 +66,10 @@ fn is_dead_function(
         return false;
     }
     if func.attributes.iter().any(|a| {
-        matches!(a.name.name.as_str(), "test" | "bench" | "should_panic" | "ignore")
+        matches!(
+            a.name.name.as_str(),
+            "test" | "bench" | "should_panic" | "ignore"
+        )
     }) {
         return false;
     }
@@ -195,9 +198,7 @@ fn collect_called_in_expr(expr: &Expr, called: &mut BTreeSet<String>) {
                 collect_called_in_expr(a, called);
             }
         }
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             collect_called_in_expr(receiver, called);
             for a in args {
                 collect_called_in_expr(a, called);
@@ -225,7 +226,9 @@ fn collect_called_in_expr(expr: &Expr, called: &mut BTreeSet<String>) {
                 collect_called_in_expr(v, called);
             }
         }
-        Expr::MatchExpr { scrutinee, arms, .. } => {
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
             collect_called_in_expr(scrutinee, called);
             for arm in arms {
                 if let Some(g) = &arm.guard {
@@ -342,9 +345,9 @@ fn eliminate_dead_bindings_in_block(block: &Block) -> Block {
 
 fn is_dead_let(stmt: &Stmt, used_names: &BTreeSet<String>) -> bool {
     match stmt {
-        Stmt::LetDecl {
-            name, value, ..
-        } => !used_names.contains(&name.name) && expr_is_pure_literal(value),
+        Stmt::LetDecl { name, value, .. } => {
+            !used_names.contains(&name.name) && expr_is_pure_literal(value)
+        }
         _ => false,
     }
 }
@@ -352,9 +355,7 @@ fn is_dead_let(stmt: &Stmt, used_names: &BTreeSet<String>) -> bool {
 fn expr_is_pure_literal(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(_, _) | Expr::Ident(_, _) => true,
-        Expr::BinaryOp { lhs, rhs, .. } => {
-            expr_is_pure_literal(lhs) && expr_is_pure_literal(rhs)
-        }
+        Expr::BinaryOp { lhs, rhs, .. } => expr_is_pure_literal(lhs) && expr_is_pure_literal(rhs),
         Expr::UnaryOp { operand, .. } => expr_is_pure_literal(operand),
         Expr::ArrayLit { elements, .. } => elements.iter().all(expr_is_pure_literal),
         _ => false,
@@ -476,9 +477,7 @@ fn collect_ident_names_in_expr(expr: &Expr, names: &mut BTreeSet<String>) {
                 collect_ident_names_in_expr(a, names);
             }
         }
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             collect_ident_names_in_expr(receiver, names);
             for a in args {
                 collect_ident_names_in_expr(a, names);
@@ -506,7 +505,9 @@ fn collect_ident_names_in_expr(expr: &Expr, names: &mut BTreeSet<String>) {
                 collect_ident_names_in_expr(v, names);
             }
         }
-        Expr::MatchExpr { scrutinee, arms, .. } => {
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
             collect_ident_names_in_expr(scrutinee, names);
             for arm in arms {
                 if let Some(g) = &arm.guard {
@@ -744,9 +745,7 @@ fn collect_const_info_expr(
                 collect_const_info_expr(a, candidates, let_counts, mutated);
             }
         }
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             collect_const_info_expr(receiver, candidates, let_counts, mutated);
             for a in args {
                 collect_const_info_expr(a, candidates, let_counts, mutated);
@@ -771,7 +770,9 @@ fn collect_const_info_expr(
                 collect_const_info_block(eb, candidates, let_counts, mutated);
             }
         }
-        Expr::MatchExpr { scrutinee, arms, .. } => {
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
             collect_const_info_expr(scrutinee, candidates, let_counts, mutated);
             for arm in arms {
                 if let Some(g) = &arm.guard {
@@ -936,13 +937,15 @@ fn propagate_in_stmt(stmt: &Stmt, map: &BTreeMap<String, Literal>) -> Stmt {
             conditions: conditions
                 .iter()
                 .map(|c| match c {
-                    buff_lang_ast::GuardCondition::Let { pattern, value, span } => {
-                        buff_lang_ast::GuardCondition::Let {
-                            pattern: pattern.clone(),
-                            value: propagate_in_expr(value, map),
-                            span: *span,
-                        }
-                    }
+                    buff_lang_ast::GuardCondition::Let {
+                        pattern,
+                        value,
+                        span,
+                    } => buff_lang_ast::GuardCondition::Let {
+                        pattern: pattern.clone(),
+                        value: propagate_in_expr(value, map),
+                        span: *span,
+                    },
                     buff_lang_ast::GuardCondition::Bool(e) => {
                         buff_lang_ast::GuardCondition::Bool(propagate_in_expr(e, map))
                     }
@@ -1022,7 +1025,11 @@ fn propagate_in_expr(expr: &Expr, map: &BTreeMap<String, Literal>) -> Expr {
                 .collect(),
             span: *span,
         },
-        Expr::MatchExpr { scrutinee, arms, span } => Expr::MatchExpr {
+        Expr::MatchExpr {
+            scrutinee,
+            arms,
+            span,
+        } => Expr::MatchExpr {
             scrutinee: Box::new(propagate_in_expr(scrutinee, map)),
             arms: arms
                 .iter()
@@ -1050,7 +1057,11 @@ fn propagate_in_expr(expr: &Expr, map: &BTreeMap<String, Literal>) -> Expr {
             elements: elements.iter().map(|e| propagate_in_expr(e, map)).collect(),
             span: *span,
         },
-        Expr::Index { base, indices, span } => Expr::Index {
+        Expr::Index {
+            base,
+            indices,
+            span,
+        } => Expr::Index {
             base: Box::new(propagate_in_expr(base, map)),
             indices: indices.iter().map(|i| propagate_in_expr(i, map)).collect(),
             span: *span,
@@ -1062,12 +1073,10 @@ fn propagate_in_expr(expr: &Expr, map: &BTreeMap<String, Literal>) -> Expr {
                     buff_lang_ast::InterpPart::Literal(t) => {
                         buff_lang_ast::InterpPart::Literal(t.clone())
                     }
-                    buff_lang_ast::InterpPart::Expr(e, spec) => {
-                        buff_lang_ast::InterpPart::Expr(
-                            Box::new(propagate_in_expr(e, map)),
-                            spec.clone(),
-                        )
-                    }
+                    buff_lang_ast::InterpPart::Expr(e, spec) => buff_lang_ast::InterpPart::Expr(
+                        Box::new(propagate_in_expr(e, map)),
+                        spec.clone(),
+                    ),
                 })
                 .collect(),
             span: *span,
@@ -1174,17 +1183,20 @@ mod tests {
     #[test]
     fn dce_removes_unused_function() {
         let decls = vec![
-            func("main", Block {
-                stmts: vec![Stmt::ExprStmt(
-                    Expr::FuncCall {
-                        callee: Box::new(ident("helper")),
-                        args: Vec::new(),
-                        span: Span::dummy(),
-                    },
-                    Span::dummy(),
-                )],
-                span: Span::dummy(),
-            }),
+            func(
+                "main",
+                Block {
+                    stmts: vec![Stmt::ExprStmt(
+                        Expr::FuncCall {
+                            callee: Box::new(ident("helper")),
+                            args: Vec::new(),
+                            span: Span::dummy(),
+                        },
+                        Span::dummy(),
+                    )],
+                    span: Span::dummy(),
+                },
+            ),
             func("dead", empty_block()),
         ];
         let result = dead_code_elimination(&decls);
@@ -1244,10 +1256,7 @@ mod tests {
                     "x",
                     Expr::FuncCall {
                         callee: Box::new(ident("print")),
-                        args: vec![Expr::Literal(
-                            Literal::String("hi".into()),
-                            Span::dummy(),
-                        )],
+                        args: vec![Expr::Literal(Literal::String("hi".into()), Span::dummy())],
                         span: Span::dummy(),
                     },
                 ),
@@ -1268,17 +1277,20 @@ mod tests {
     #[test]
     fn dce_does_not_remove_called_function() {
         let decls = vec![
-            func("main", Block {
-                stmts: vec![Stmt::ExprStmt(
-                    Expr::FuncCall {
-                        callee: Box::new(ident("helper")),
-                        args: Vec::new(),
-                        span: Span::dummy(),
-                    },
-                    Span::dummy(),
-                )],
-                span: Span::dummy(),
-            }),
+            func(
+                "main",
+                Block {
+                    stmts: vec![Stmt::ExprStmt(
+                        Expr::FuncCall {
+                            callee: Box::new(ident("helper")),
+                            args: Vec::new(),
+                            span: Span::dummy(),
+                        },
+                        Span::dummy(),
+                    )],
+                    span: Span::dummy(),
+                },
+            ),
             func("helper", empty_block()),
         ];
         let result = dead_code_elimination(&decls);

@@ -40,10 +40,7 @@ fn attr(name: &str) -> Attribute {
 fn inline_emits_rust_inline_attribute() {
     let decls = vec![fn_with_attrs("hot_path", vec![attr("inline")])];
     let src = generate_rust(&decls).expect("codegen");
-    assert!(
-        src.contains("#[inline]"),
-        "expected #[inline], src: {src}"
-    );
+    assert!(src.contains("#[inline]"), "expected #[inline], src: {src}");
     assert!(src.contains("fn hot_path"), "fn name preserved, src: {src}");
 }
 

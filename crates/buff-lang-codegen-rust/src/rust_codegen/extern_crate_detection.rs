@@ -6,7 +6,6 @@
 
 use super::*;
 
-
 /// Walk the declaration list looking for any `Matrix.new(...)` constructor
 /// call (T24). Returns `true` if at least one is found, signalling
 /// [`RustCodegen::generate`] to prepend the builtin `Matrix<T>` struct.
@@ -1754,4 +1753,3 @@ pub(super) fn expr_uses_url_instance(expr: &Expr) -> bool {
         Expr::NamedArg { value, .. } => expr_uses_url_instance(value),
     }
 }
-

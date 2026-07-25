@@ -6,7 +6,6 @@
 
 use super::*;
 
-
 /// Build a `Type::Path` with generic type arguments, e.g.
 /// `Option<T>`, `Vec<T>`.
 pub(super) fn make_generic_path_type(name: &str, args: Vec<SynType>) -> SynType {
@@ -39,7 +38,10 @@ pub(super) fn make_generic_path_type(name: &str, args: Vec<SynType>) -> SynType 
 /// arguments to the LAST segment. Used by the T25 Map codegen so generated
 /// programs can reference `std::collections::HashMap<K, V>` without a `use`
 /// import (avoiding import management in v0.5).
-pub(super) fn make_qualified_generic_path_type(qualified_name: &str, args: Vec<SynType>) -> SynType {
+pub(super) fn make_qualified_generic_path_type(
+    qualified_name: &str,
+    args: Vec<SynType>,
+) -> SynType {
     let mut path_args: Punctuated<syn::GenericArgument, syn::Token![,]> = Punctuated::new();
     for a in args {
         path_args.push(syn::GenericArgument::Type(a));
@@ -288,4 +290,3 @@ pub(super) fn splice_receiver_into_call(
         args,
     }))
 }
-

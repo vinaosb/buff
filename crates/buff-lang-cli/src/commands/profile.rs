@@ -196,7 +196,10 @@ fn run_alloc(file: &Path, output: Option<&Path>) -> Result<()> {
     std::fs::write(&report_dst, &report_text)
         .with_context(|| format!("failed to write `{}`", report_dst.display()))?;
     println!("buff profile (alloc): wrote {}", report_dst.display());
-    println!("buff profile (alloc): wrote {} (raw dhat JSON)", json_dst.display());
+    println!(
+        "buff profile (alloc): wrote {} (raw dhat JSON)",
+        json_dst.display()
+    );
 
     cleanup_project(&project_dir);
     Ok(())
@@ -218,7 +221,10 @@ struct InstrumentedSource {
 /// [`pipeline::inject_profiling`] (the T111 syn transform). The
 /// intermediate `.rs` file written by the front-end is NOT used —
 /// we pass the returned `rust_source` string directly to the injector.
-fn build_instrumented_source(file: &Path, mode: pipeline::ProfileMode) -> Result<InstrumentedSource> {
+fn build_instrumented_source(
+    file: &Path,
+    mode: pipeline::ProfileMode,
+) -> Result<InstrumentedSource> {
     let compile_out = pipeline::compile_to_rust(file)
         .with_context(|| format!("failed to compile `{}`", file.display()))?;
     let instrumented = pipeline::inject_profiling(&compile_out.rust_source, mode)?;
@@ -287,9 +293,7 @@ fn render_profile_cargo_toml(bin_name: &str, mode: pipeline::ProfileMode) -> Str
             r#"pprof = { version = "0.15", features = ["flamegraph"] }
 flamegraph = "0.6""#
         }
-        pipeline::ProfileMode::Alloc => {
-            r#"dhat = "0.3""#
-        }
+        pipeline::ProfileMode::Alloc => r#"dhat = "0.3""#,
     };
     format!(
         "[package]\n\
@@ -395,14 +399,8 @@ fn render_dhat_report(json_bytes: &[u8], source_file: &Path) -> String {
     let parsed: Option<serde_json::Value> = serde_json::from_slice(json_bytes).ok();
 
     if let Some(ref v) = parsed {
-        let total_bytes = v
-            .get("totalBytes")
-            .and_then(|b| b.as_u64())
-            .unwrap_or(0);
-        let total_blocks = v
-            .get("totalBlocks")
-            .and_then(|b| b.as_u64())
-            .unwrap_or(0);
+        let total_bytes = v.get("totalBytes").and_then(|b| b.as_u64()).unwrap_or(0);
+        let total_blocks = v.get("totalBlocks").and_then(|b| b.as_u64()).unwrap_or(0);
         out.push_str(&format!("total heap allocated: {total_bytes} bytes\n"));
         out.push_str(&format!("total allocations:    {total_blocks} blocks\n"));
         out.push_str("\n");
@@ -415,14 +413,8 @@ fn render_dhat_report(json_bytes: &[u8], source_file: &Path) -> String {
 
         if let (Some(frames), Some(events)) = (frames, events) {
             out.push_str("top allocation sites (by bytes at peak):\n");
-            out.push_str(&format!(
-                "{:<12}  {:<10}  {}\n",
-                "bytes", "blocks", "site"
-            ));
-            out.push_str(&format!(
-                "{:-<12}  {:-<10}  {:-<40}\n",
-                "", "", ""
-            ));
+            out.push_str(&format!("{:<12}  {:<10}  {}\n", "bytes", "blocks", "site"));
+            out.push_str(&format!("{:-<12}  {:-<10}  {:-<40}\n", "", "", ""));
 
             // Collect + sort events by req (bytes) descending.
             let mut event_list: Vec<(u64, u64, String)> = events
@@ -439,9 +431,7 @@ fn render_dhat_report(json_bytes: &[u8], source_file: &Path) -> String {
                         .and_then(|arr| arr.last())
                         .and_then(|last| last.get("f"))
                         .and_then(|f| f.as_u64())
-                        .and_then(|fid| {
-                            frames.get(fid as usize).and_then(|s| s.as_str())
-                        })
+                        .and_then(|fid| frames.get(fid as usize).and_then(|s| s.as_str()))
                         .unwrap_or("??");
                     Some((req, allocs, top_frame.to_string()))
                 })
@@ -449,10 +439,7 @@ fn render_dhat_report(json_bytes: &[u8], source_file: &Path) -> String {
             event_list.sort_by(|a, b| b.0.cmp(&a.0));
 
             for (bytes, blocks, site) in event_list.iter().take(20) {
-                out.push_str(&format!(
-                    "{:<12}  {:<10}  {}\n",
-                    bytes, blocks, site
-                ));
+                out.push_str(&format!("{:<12}  {:<10}  {}\n", bytes, blocks, site));
             }
         }
     } else {
@@ -526,9 +513,6 @@ mod tests {
         let toml = render_profile_cargo_toml("test_bin", pipeline::ProfileMode::Alloc);
         assert!(toml.contains("dhat"));
         assert!(toml.contains(r#"name = "test_bin""#));
-        assert!(
-            !toml.contains("pprof"),
-            "alloc mode must NOT pull in pprof"
-        );
+        assert!(!toml.contains("pprof"), "alloc mode must NOT pull in pprof");
     }
 }

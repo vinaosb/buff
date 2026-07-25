@@ -172,11 +172,9 @@ pub fn validate_project_layout(dir: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
-
 // T106: Cargo.toml generation extracted to `config/cargo_gen.rs`.
 mod cargo_gen;
 pub use cargo_gen::*;
-
 
 /// Discover the project manifest starting from `start_dir` and walking up
 /// to the filesystem root. Returns the path of the first manifest found

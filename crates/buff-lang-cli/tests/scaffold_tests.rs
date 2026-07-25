@@ -338,10 +338,7 @@ fn test_new_generates_cargo_lock() {
 
     // Cargo.lock should be non-empty.
     let lock_content = fs::read_to_string(&cargo_lock).unwrap_or_default();
-    assert!(
-        !lock_content.is_empty(),
-        "Cargo.lock should not be empty"
-    );
+    assert!(!lock_content.is_empty(), "Cargo.lock should not be empty");
 
     cleanup(&project_dir);
     cleanup(&workdir);

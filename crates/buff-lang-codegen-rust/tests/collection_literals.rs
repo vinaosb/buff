@@ -54,16 +54,21 @@ fn map_lit(entries: Vec<(Expr, Expr)>) -> Expr {
 
 /// Wrap a list of statements in a no-arg function called `f`.
 fn codegen_stmts(stmts: Vec<Stmt>) -> String {
-    let func = FuncDecl { name: ident("f"),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts,
+    let func = FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts,
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
 }
 

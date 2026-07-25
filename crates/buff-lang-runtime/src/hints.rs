@@ -679,8 +679,11 @@ pub fn explain_dispatch_with_prefer(
             "  @prefer({target}): not honored (no GPU available)",
             target = prefer_label(prefer),
         )
-    } else if !crate::threshold::fits_vram(ctx.element_count, bytes_per_element, available_vram_bytes)
-    {
+    } else if !crate::threshold::fits_vram(
+        ctx.element_count,
+        bytes_per_element,
+        available_vram_bytes,
+    ) {
         format!(
             "  @prefer({target}): not honored (data exceeds VRAM)",
             target = prefer_label(prefer),

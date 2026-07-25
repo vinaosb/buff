@@ -51,7 +51,10 @@ fn block_of(stmts: Vec<Stmt>) -> Block {
 /// `print(1)` — lowers to `println!(...)`, which the no-alloc scanner flags.
 fn print_call() -> Expr {
     Expr::FuncCall {
-        callee: Box::new(Expr::Ident(Ident::new("print", Span::dummy()), Span::dummy())),
+        callee: Box::new(Expr::Ident(
+            Ident::new("print", Span::dummy()),
+            Span::dummy(),
+        )),
         args: vec![Expr::Literal(Literal::Int(1), Span::dummy())],
         span: Span::dummy(),
     }

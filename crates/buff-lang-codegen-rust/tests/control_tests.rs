@@ -87,13 +87,18 @@ fn if_expr(cond: Expr, then_block: Block, else_block: Option<Block>) -> Expr {
 }
 
 fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident(name),
-    params: Vec::new(),
-    return_type: None,
-    body: block(stmts),
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    Decl::FuncDecl(FuncDecl {
+        name: ident(name),
+        params: Vec::new(),
+        return_type: None,
+        body: block(stmts),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    })
 }
 
 fn func_with_params_return(
@@ -102,13 +107,18 @@ fn func_with_params_return(
     ret: Option<TypeRef>,
     stmts: Vec<Stmt>,
 ) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident(name),
-    params,
-    return_type: ret,
-    body: block(stmts),
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    Decl::FuncDecl(FuncDecl {
+        name: ident(name),
+        params,
+        return_type: ret,
+        body: block(stmts),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -5,8 +5,7 @@
 use std::fmt::Write;
 
 use buff_lang_ast::{
-    Block, Expr, GuardCondition, Ident, InterpPart, Literal, MatchArm, Param, Pattern,
-    TypeRef,
+    Block, Expr, GuardCondition, Ident, InterpPart, Literal, MatchArm, Param, Pattern, TypeRef,
 };
 
 use super::Formatter;
@@ -378,7 +377,12 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    pub(super) fn write_if_expr(&mut self, cond: &Expr, then_block: &Block, else_block: Option<&Block>) {
+    pub(super) fn write_if_expr(
+        &mut self,
+        cond: &Expr,
+        then_block: &Block,
+        else_block: Option<&Block>,
+    ) {
         self.raw("if ");
         self.write_expr(cond);
         self.raw(":");
@@ -414,7 +418,12 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    pub(super) fn write_lambda(&mut self, params: &[Param], body: &Block, _return_type: Option<&TypeRef>) {
+    pub(super) fn write_lambda(
+        &mut self,
+        params: &[Param],
+        body: &Block,
+        _return_type: Option<&TypeRef>,
+    ) {
         // Buff lambda canonical form: `{ params => body }` (single-line).
         // Multi-statement bodies use `; ` separators inside the braces.
         self.raw("{ ");

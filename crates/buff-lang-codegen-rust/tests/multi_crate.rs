@@ -328,7 +328,8 @@ fn three_module_program_emits_all_mods() {
     // The use items bring each symbol into scope.
     for (mod_name, fn_name) in &[("a", "a_fn"), ("b", "b_fn"), ("c", "c_fn")] {
         assert!(
-            out.root_source.contains(&format!("use {mod_name}::{fn_name}")),
+            out.root_source
+                .contains(&format!("use {mod_name}::{fn_name}")),
             "expected `use {mod_name}::{fn_name};`; got:\n{}",
             out.root_source
         );

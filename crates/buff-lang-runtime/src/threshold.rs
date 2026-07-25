@@ -787,9 +787,7 @@ pub fn estimate_costs(ctx: &WorkloadContext) -> CostEstimate {
 
     // --- Occupancy penalty ---
     // Ceiling division: how many workgroups this input would generate.
-    let workgroups = ctx
-        .element_count
-        .div_ceil(COST_MODEL_WORKGROUP_SIZE) as u32;
+    let workgroups = ctx.element_count.div_ceil(COST_MODEL_WORKGROUP_SIZE) as u32;
     let occupancy_factor = if workgroups < GPU_MIN_WORKGROUPS_FOR_OCCUPANCY {
         // Underutilized: scale compute time up proportionally.
         // max(1) avoids division by zero (can't happen here since we're
@@ -1056,9 +1054,7 @@ pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String
                 threshold = GPU_ARITHMETIC_INTENSITY_THRESHOLD,
             )
         }
-        None => {
-            "  arithmetic_intensity: unknown (treated as GPU-favorable)".to_string()
-        }
+        None => "  arithmetic_intensity: unknown (treated as GPU-favorable)".to_string(),
     };
 
     let st_line = if ctx.element_count <= SINGLE_THREAD_MAX {
@@ -1094,10 +1090,15 @@ pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String
                 if ctx.gpu_available {
                     "  Decision: count > CPU_PARALLEL_MAX + GPU available + low intensity → CpuParallel (demotion)".to_string()
                 } else {
-                    "  Decision: count > CPU_PARALLEL_MAX + no GPU → CpuParallel (fallback)".to_string()
+                    "  Decision: count > CPU_PARALLEL_MAX + no GPU → CpuParallel (fallback)"
+                        .to_string()
                 }
             } else if ctx.element_count > SINGLE_THREAD_MAX {
-                if ctx.gpu_available && ctx.arithmetic_intensity.is_none_or(|ai| ai >= GPU_ARITHMETIC_INTENSITY_THRESHOLD) {
+                if ctx.gpu_available
+                    && ctx
+                        .arithmetic_intensity
+                        .is_none_or(|ai| ai >= GPU_ARITHMETIC_INTENSITY_THRESHOLD)
+                {
                     // This shouldn't happen in practice (decide_dynamic would return GpuCompute),
                     // but we handle it defensively for the explain function.
                     "  Decision: medium band + GPU + high intensity → CpuParallel (unexpected — see GpuCompute path)".to_string()
@@ -1107,12 +1108,14 @@ pub fn explain_dispatch(ctx: &WorkloadContext, decision: DispatchKind) -> String
                     "  Decision: medium band + low intensity → CpuParallel".to_string()
                 }
             } else {
-                "  Decision: count <= SINGLE_THREAD_MAX → SingleThread (CpuParallel not reached)".to_string()
+                "  Decision: count <= SINGLE_THREAD_MAX → SingleThread (CpuParallel not reached)"
+                    .to_string()
             }
         }
         DispatchKind::GpuCompute => {
             if ctx.data_location == DataLocation::Gpu && ctx.gpu_available {
-                "  Decision: T10 data-locality → data on GPU → GpuCompute (no PCIe transfer)".to_string()
+                "  Decision: T10 data-locality → data on GPU → GpuCompute (no PCIe transfer)"
+                    .to_string()
             } else {
                 "  Decision: GPU available + high intensity → GpuCompute".to_string()
             }
@@ -1229,7 +1232,8 @@ mod tests {
         assert!(explain.contains("element_count: 100000"));
         assert!(explain.contains("gpu_available: false"));
         assert!(explain.contains("CPU_PARALLEL_MAX: 50000 (branch not taken: count > 50000)"));
-        assert!(explain.contains("Decision: count > CPU_PARALLEL_MAX + no GPU → CpuParallel (fallback)"));
+        assert!(explain
+            .contains("Decision: count > CPU_PARALLEL_MAX + no GPU → CpuParallel (fallback)"));
     }
 
     #[test]

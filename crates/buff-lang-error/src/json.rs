@@ -198,10 +198,7 @@ pub fn to_json(diag: &Diagnostic, source: &str) -> DiagnosticJson {
 /// no custom serializers that can error); we surface the result rather
 /// than panicking so callers retain control over error handling.
 pub fn render_diagnostics_json(diagnostics: &[Diagnostic], source: &str) -> String {
-    let arr: Vec<DiagnosticJson> = diagnostics
-        .iter()
-        .map(|d| to_json(d, source))
-        .collect();
+    let arr: Vec<DiagnosticJson> = diagnostics.iter().map(|d| to_json(d, source)).collect();
     serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -209,12 +206,7 @@ pub fn render_diagnostics_json(diagnostics: &[Diagnostic], source: &str) -> Stri
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn span_to_json(
-    span: &Span,
-    style: LabelStyle,
-    label: Option<&str>,
-    source: &str,
-) -> SpanJson {
+fn span_to_json(span: &Span, style: LabelStyle, label: Option<&str>, source: &str) -> SpanJson {
     let (line_start, col_start) = lookup_line_col(source, span.start);
     let (line_end, col_end) = lookup_line_col(source, span.end);
     SpanJson {

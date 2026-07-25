@@ -348,9 +348,7 @@ impl ComptimeInterpreter {
                                             Ok(ComptimeValue::String(ident.name.clone()))
                                         }
                                     }
-                                    _ => {
-                                        Ok(ComptimeValue::String("Unknown".to_string()))
-                                    }
+                                    _ => Ok(ComptimeValue::String("Unknown".to_string())),
                                 }
                             }
                             "fields" => {
@@ -362,11 +360,15 @@ impl ComptimeInterpreter {
                                 }
                                 let type_name = match &args[0] {
                                     Expr::Ident(ident, _) => &ident.name,
-                                    other => return Err(ComptimeError::failed(
-                                        format!("Type.fields() expected a type name, got `{}`",
-                                            expr_kind(other)),
-                                        span,
-                                    )),
+                                    other => {
+                                        return Err(ComptimeError::failed(
+                                            format!(
+                                                "Type.fields() expected a type name, got `{}`",
+                                                expr_kind(other)
+                                            ),
+                                            span,
+                                        ))
+                                    }
                                 };
                                 match self.struct_fields.get(type_name) {
                                     Some(fields) => {

@@ -49,8 +49,8 @@ pub mod gpu_alignment;
 // parallelism + better incremental rebuilds. Activates ONLY when the
 // root has ES6 `import ... from "..."` declarations; single-file
 // programs use the existing [`generate_rust`] path unchanged.
-pub mod multi_crate;
 pub mod move_analysis;
+pub mod multi_crate;
 // T77/T78: AST-level optimization passes (dead code elimination + constant
 // propagation). Applied via [`generate_rust_optimized`] so the default
 // [`generate_rust`] path is unchanged (backwards compatibility).
@@ -76,7 +76,7 @@ pub use passes::{constant_propagation, dead_code_elimination};
 // (and tests) can refer to them as `buff_lang_codegen_rust::*` without
 // reaching into the private module path.
 pub use multi_crate::{
-    generate_multi_crate, generate_module_source, module_ident_from_path, uses_multi_crate,
+    generate_module_source, generate_multi_crate, module_ident_from_path, uses_multi_crate,
     MultiCrateOutput, ParsedModule,
 };
 pub use race_analysis::{

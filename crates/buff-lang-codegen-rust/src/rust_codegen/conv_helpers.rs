@@ -6,7 +6,6 @@
 
 use super::*;
 
-
 /// Build a Rust `as usize` cast for a vector index (T23).
 ///
 /// Unlike [`cast_to`], this only wraps the operand in parens when it is a
@@ -137,4 +136,3 @@ pub(super) fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
         _ => None,
     }
 }
-

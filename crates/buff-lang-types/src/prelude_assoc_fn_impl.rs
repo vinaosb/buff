@@ -5,7 +5,7 @@
 //! enum definition, its impl block (ALL + name()), and the
 //! assoc_fn_lookup free function.
 
-use crate::prelude_types::{PreludeType, assoc_fn_return_type, prelude_type_lookup};
+use crate::prelude_types::{assoc_fn_return_type, prelude_type_lookup, PreludeType};
 
 // ---------------------------------------------------------------------------
 // Associated functions: `Type.method(args)`
@@ -1549,4 +1549,3 @@ pub fn assoc_fn_lookup(type_name: &str, method: &str) -> Option<(PreludeType, Pr
     }
     None
 }
-

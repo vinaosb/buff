@@ -102,10 +102,7 @@ fn discover_test_files(path: &Path, filter: Option<&str>) -> Result<Vec<PathBuf>
     }
 
     if !path.is_dir() {
-        anyhow::bail!(
-            "`{}` is neither a file nor a directory",
-            path.display()
-        );
+        anyhow::bail!("`{}` is neither a file nor a directory", path.display());
     }
 
     let mut files: Vec<PathBuf> = Vec::new();
@@ -197,9 +194,8 @@ fn run_single_test(test_file: &Path, update: bool, detect_races: bool) -> Result
         .with_context(|| format!("failed to write `{}`", rust_file.display()))?;
 
     // Compile with rustc (debug mode for fast iteration).
-    let exe_stem = pipeline::with_exe_extension(
-        &temp_dir.join(format!("{}_test", stem.to_string_lossy())),
-    );
+    let exe_stem =
+        pipeline::with_exe_extension(&temp_dir.join(format!("{}_test", stem.to_string_lossy())));
     let exe_path = pipeline::compile_rust_to_exe_with_races(
         &rust_file,
         &exe_stem,

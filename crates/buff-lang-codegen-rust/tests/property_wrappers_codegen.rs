@@ -56,16 +56,21 @@ fn int_expr(n: i64) -> Expr {
 
 /// Wrap a list of statements in a zero-arg `fn f() { ... }` helper.
 fn func_with_stmts(stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident("f"),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts,
+    Decl::FuncDecl(FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts,
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    })
 }
 
 /// Run a Buff source snippet through lex → parse → codegen and return

@@ -165,9 +165,7 @@ fn url_encode(s: &str) -> String {
 /// Returns `503 Service Unavailable` with a JSON body if OAuth is not
 /// configured (env vars missing). Returns `302 Found` with the GitHub
 /// authorize URL in the `Location` header otherwise.
-pub(crate) async fn login(
-    State(state): State<AppState>,
-) -> Result<Response, RegistryError> {
+pub(crate) async fn login(State(state): State<AppState>) -> Result<Response, RegistryError> {
     let config = state
         .oauth_config
         .as_ref()
@@ -239,7 +237,10 @@ pub(crate) async fn callback(
 
     // --- 4. Respond with session cookie ---
     Ok((
-        [(axum::http::header::SET_COOKIE, format!("buff_session={session_token}; Path=/; HttpOnly; SameSite=Lax"))],
+        [(
+            axum::http::header::SET_COOKIE,
+            format!("buff_session={session_token}; Path=/; HttpOnly; SameSite=Lax"),
+        )],
         Json(CallbackResponse {
             message: "Login successful".to_string(),
             github_login: user.login,
@@ -267,13 +268,16 @@ pub(crate) async fn logout(
     headers: axum::http::HeaderMap,
 ) -> Response {
     // Try to extract the session token from the cookie or bearer header.
-    if let Some(token) = extract_session_from_cookie(&headers).or_else(|| {
-        extract_bearer(&headers).map(str::to_string)
-    }) {
+    if let Some(token) = extract_session_from_cookie(&headers)
+        .or_else(|| extract_bearer(&headers).map(str::to_string))
+    {
         let _ = state.storage.delete_session(&token);
     }
     (
-        [(axum::http::header::SET_COOKIE, "buff_session=; Path=/; Max-Age=0")],
+        [(
+            axum::http::header::SET_COOKIE,
+            "buff_session=; Path=/; Max-Age=0",
+        )],
         Json(serde_json::json!({"message": "Logged out"})),
     )
         .into_response()
@@ -366,7 +370,10 @@ fn extract_session_from_cookie(headers: &axum::http::HeaderMap) -> Option<String
 
 /// Extract the bearer token from an `Authorization` header.
 fn extract_bearer(headers: &axum::http::HeaderMap) -> Option<&str> {
-    let value = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    let value = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
     value.strip_prefix("Bearer ").map(str::trim)
 }
 
@@ -376,7 +383,10 @@ mod tests {
 
     #[test]
     fn url_encode_encodes_colon_and_slash() {
-        assert_eq!(url_encode("http://localhost:7878"), "http%3A%2F%2Flocalhost%3A7878");
+        assert_eq!(
+            url_encode("http://localhost:7878"),
+            "http%3A%2F%2Flocalhost%3A7878"
+        );
         assert_eq!(url_encode("abc123"), "abc123");
     }
 
@@ -440,7 +450,10 @@ mod tests {
             axum::http::header::COOKIE,
             "buff_session=abc-123; other=val".parse().unwrap(),
         );
-        assert_eq!(extract_session_from_cookie(&headers), Some("abc-123".to_string()));
+        assert_eq!(
+            extract_session_from_cookie(&headers),
+            Some("abc-123".to_string())
+        );
     }
 
     #[test]

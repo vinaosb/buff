@@ -43,7 +43,9 @@ fn t41_struct_pattern_in_match_shorthand() {
     let e = parse_match_expr("match p { Point { x, y } => 1, _ => 0 }");
     let arms = arms_of(&e);
     match &arms[0].pattern {
-        Pattern::Struct { name, fields, rest, .. } => {
+        Pattern::Struct {
+            name, fields, rest, ..
+        } => {
             assert_eq!(name.name, "Point");
             assert_eq!(fields.len(), 2, "two fields");
             assert!(!rest, "no rest pattern");

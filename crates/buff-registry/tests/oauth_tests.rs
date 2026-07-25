@@ -65,8 +65,7 @@ async fn do_get_full(
 /// Set up the two mock GitHub endpoints (token exchange + user info).
 fn mock_github_endpoints(server: &MockServer, login: &str, id: i64) {
     server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/login/oauth/access_token");
+        when.method(Method::POST).path("/login/oauth/access_token");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(json!({"access_token": "gho_mock_token"}).to_string());
@@ -122,7 +121,9 @@ async fn callback_creates_session_via_mock_github() {
 
     let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
     assert_eq!(parsed["github_login"], "octocat");
-    assert!(parsed["session_token"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(parsed["session_token"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty()));
 
     let cookie = headers
         .get("set-cookie")
@@ -141,8 +142,7 @@ async fn whoami_returns_user_after_login() {
     let state = oauth_app(storage, &mock);
     let router = app(state);
 
-    let (_, body, _) =
-        do_get_full(router.clone(), "/auth/github/callback?code=code1", &[]).await;
+    let (_, body, _) = do_get_full(router.clone(), "/auth/github/callback?code=code1", &[]).await;
     let parsed: Value = serde_json::from_slice(&body).expect("JSON");
     let session = parsed["session_token"]
         .as_str()
@@ -179,7 +179,10 @@ async fn logout_clears_session() {
 
     let (_, body, _) = do_get_full(router.clone(), "/auth/github/callback?code=c", &[]).await;
     let parsed: Value = serde_json::from_slice(&body).expect("JSON");
-    let session = parsed["session_token"].as_str().expect("session").to_string();
+    let session = parsed["session_token"]
+        .as_str()
+        .expect("session")
+        .to_string();
 
     let auth_header = format!("Bearer {session}");
     let request = Request::builder()
@@ -207,7 +210,10 @@ async fn publish_accepts_session_token() {
 
     let (_, body, _) = do_get_full(router.clone(), "/auth/github/callback?code=c", &[]).await;
     let parsed: Value = serde_json::from_slice(&body).expect("JSON");
-    let session = parsed["session_token"].as_str().expect("session").to_string();
+    let session = parsed["session_token"]
+        .as_str()
+        .expect("session")
+        .to_string();
 
     let payload = json!({
         "name": "oauth-pkg",

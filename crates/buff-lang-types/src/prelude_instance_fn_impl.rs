@@ -1565,4 +1565,3 @@ pub fn instance_fn_lookup(recv_ty: &Type, method: &str) -> Option<PreludeInstanc
     // Validate the (type, method) pair.
     instance_fn_return_type(recv_ty, m, &[]).map(|_| m)
 }
-

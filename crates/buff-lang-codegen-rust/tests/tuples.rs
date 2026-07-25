@@ -50,19 +50,24 @@ fn tuple_value(members: Vec<Expr>) -> Expr {
 
 /// `func pair() -> (String, Int) { return ("A", 42) }`
 fn pair_func() -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident("pair"),
-    params: Vec::new(),
-    return_type: Some(tuple_ty(vec![named_ty("String"), named_ty("Int")])),
-    body: Block {
-        stmts: vec![Stmt::Return(
-            Some(tuple_value(vec![str_lit("A"), int_lit(42)])),
-            span(),
-        )],
+    Decl::FuncDecl(FuncDecl {
+        name: ident("pair"),
+        params: Vec::new(),
+        return_type: Some(tuple_ty(vec![named_ty("String"), named_ty("Int")])),
+        body: Block {
+            stmts: vec![Stmt::Return(
+                Some(tuple_value(vec![str_lit("A"), int_lit(42)])),
+                span(),
+            )],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    })
 }
 
 fn must_reparse(src: &str) {
@@ -100,27 +105,32 @@ fn tuples_codegen_pair_function() {
 #[test]
 fn tuples_codegen_three_member_return() {
     // `func triple() -> (String, Int, Bool) { return ("X", 7, true) }`
-    let decl = Decl::FuncDecl(FuncDecl { name: ident("triple"),
-    params: Vec::new(),
-    return_type: Some(tuple_ty(vec![
-        named_ty("String"),
-        named_ty("Int"),
-        named_ty("Bool"),
-    ])),
-    body: Block {
-        stmts: vec![Stmt::Return(
-            Some(tuple_value(vec![
-                str_lit("X"),
-                int_lit(7),
-                Expr::Literal(Literal::Bool(true), span()),
-            ])),
-            span(),
-        )],
+    let decl = Decl::FuncDecl(FuncDecl {
+        name: ident("triple"),
+        params: Vec::new(),
+        return_type: Some(tuple_ty(vec![
+            named_ty("String"),
+            named_ty("Int"),
+            named_ty("Bool"),
+        ])),
+        body: Block {
+            stmts: vec![Stmt::Return(
+                Some(tuple_value(vec![
+                    str_lit("X"),
+                    int_lit(7),
+                    Expr::Literal(Literal::Bool(true), span()),
+                ])),
+                span(),
+            )],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
+    });
 
     let src = generate_rust(&[decl]).expect("tuple codegen must succeed");
 
@@ -134,22 +144,27 @@ fn tuples_codegen_three_member_return() {
 #[test]
 fn tuples_codegen_tuple_as_param_type() {
     // `func take(t: (Int, Int)) -> Int { return 0 }`
-    let decl = Decl::FuncDecl(FuncDecl { name: ident("take"),
-    params: vec![Param {
-        name: ident("t"),
-        ty: tuple_ty(vec![named_ty("Int"), named_ty("Int")]),
-        default_value: None,
-        is_comptime: false,
+    let decl = Decl::FuncDecl(FuncDecl {
+        name: ident("take"),
+        params: vec![Param {
+            name: ident("t"),
+            ty: tuple_ty(vec![named_ty("Int"), named_ty("Int")]),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: Some(named_ty("Int")),
+        body: Block {
+            stmts: vec![Stmt::Return(Some(int_lit(0)), span())],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }],
-    return_type: Some(named_ty("Int")),
-    body: Block {
-        stmts: vec![Stmt::Return(Some(int_lit(0)), span())],
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
+    });
 
     let src = generate_rust(&[decl]).expect("tuple codegen must succeed");
 

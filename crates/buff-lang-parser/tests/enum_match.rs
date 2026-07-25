@@ -208,7 +208,11 @@ fn enum_match_trailing_comma_in_generics_parses() {
         Decl::EnumDecl(e) => e,
         _ => panic!("expected EnumDecl"),
     };
-    assert_eq!(e.type_params.len(), 2, "trailing comma in generics tolerated");
+    assert_eq!(
+        e.type_params.len(),
+        2,
+        "trailing comma in generics tolerated"
+    );
 }
 
 #[test]
@@ -515,10 +519,14 @@ fn enum_match_ast_node_constructors_are_public() {
     assert_eq!(variant_pat.variant_name_key(), Some("Ok"));
 
     // EnumDecl with empty generics field (the migration shape).
-    let _enum_decl = EnumDecl { name: Ident::new("Color", span), type_params: Vec::new(), variants: vec![EnumVariant {
-        name: Ident::new("Red", span),
-        data: None,
+    let _enum_decl = EnumDecl {
+        name: Ident::new("Color", span),
+        type_params: Vec::new(),
+        variants: vec![EnumVariant {
+            name: Ident::new("Red", span),
+            data: None,
+            span,
+        }],
         span,
-    }],
-    span, };
+    };
 }

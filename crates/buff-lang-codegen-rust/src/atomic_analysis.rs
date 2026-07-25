@@ -892,16 +892,21 @@ mod tests {
     }
 
     fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> FuncDecl {
-        FuncDecl { name: Ident::new(name, span()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
+        FuncDecl {
+            name: Ident::new(name, span()),
+            params: Vec::new(),
+            return_type: None,
+            body: Block {
+                stmts,
+                span: span(),
+            },
+            is_async: false,
+            is_unsafe: false,
+            is_extern: false,
+            attributes: Vec::new(),
+            type_params: Vec::new(),
             span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), }
+        }
     }
 
     #[test]

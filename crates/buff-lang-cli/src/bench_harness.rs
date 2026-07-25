@@ -138,7 +138,11 @@ pub const DEFAULT_FIXTURES_DIR: &str = "examples";
 /// is recorded in the report so consumers know which backend was used for
 /// the end-to-end measurement.
 pub fn hyperfine_available() -> Option<PathBuf> {
-    let exe_name = if cfg!(windows) { "hyperfine.exe" } else { "hyperfine" };
+    let exe_name = if cfg!(windows) {
+        "hyperfine.exe"
+    } else {
+        "hyperfine"
+    };
     let paths = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&paths) {
         let candidate = dir.join(exe_name);
@@ -274,10 +278,7 @@ pub struct BenchReport {
 /// (the smallest possible edit) to capture `incremental_build_ms`. This
 /// measures the cache + re-codegen path. The temp copy is cleaned up
 /// afterwards; the original fixture is NEVER mutated.
-pub fn measure_fixture(
-    fixture_path: &Path,
-    attempt_backend: bool,
-) -> Result<FixtureMeasurement> {
+pub fn measure_fixture(fixture_path: &Path, attempt_backend: bool) -> Result<FixtureMeasurement> {
     let name = fixture_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -285,9 +286,8 @@ pub fn measure_fixture(
         .to_string();
 
     // 1. Read source.
-    let source = std::fs::read_to_string(fixture_path).with_context(|| {
-        format!("failed to read fixture `{}`", fixture_path.display())
-    })?;
+    let source = std::fs::read_to_string(fixture_path)
+        .with_context(|| format!("failed to read fixture `{}`", fixture_path.display()))?;
     let source_id = SourceId(0);
 
     // 2. Lex.
@@ -414,7 +414,10 @@ fn attempt_backend_measurements(
     let (staged_fixture, staged_dir) = match stage_fixture(fixture_path, original_source) {
         Ok(x) => x,
         Err(e) => {
-            eprintln!("bench: stage_fixture failed for {}: {e}", fixture_path.display());
+            eprintln!(
+                "bench: stage_fixture failed for {}: {e}",
+                fixture_path.display()
+            );
             return (None, None, None);
         }
     };
@@ -432,8 +435,7 @@ fn attempt_backend_measurements(
 
     let exe_path = staged_fixture.with_extension(if cfg!(windows) { "exe" } else { "out" });
     let clean_start = Instant::now();
-    let clean_res =
-        compile_rust_to_exe(&rs_path, &exe_path, &staged_fixture, BuildMode::Debug);
+    let clean_res = compile_rust_to_exe(&rs_path, &exe_path, &staged_fixture, BuildMode::Debug);
     let clean_ms = clean_start.elapsed().as_millis();
 
     let (clean_build_ms, binary_size_bytes) = match clean_res {
@@ -461,12 +463,8 @@ fn attempt_backend_measurements(
             match incr_rust {
                 Ok(src) => {
                     let _ = std::fs::write(&rs_path, &src);
-                    let incr_exe = compile_rust_to_exe(
-                        &rs_path,
-                        &exe_path,
-                        &staged_fixture,
-                        BuildMode::Debug,
-                    );
+                    let incr_exe =
+                        compile_rust_to_exe(&rs_path, &exe_path, &staged_fixture, BuildMode::Debug);
                     let total_ms = incr_start.elapsed().as_millis();
                     match incr_exe {
                         Ok(_) => Some(total_ms),
@@ -759,9 +757,7 @@ pub fn git_short_sha() -> String {
         .args(["rev-parse", "--short", "HEAD"])
         .output();
     match out {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => "unknown".to_string(),
     }
 }
@@ -812,7 +808,9 @@ mod tests {
         let b = sha256_hex(b"hello world");
         assert_eq!(a, b);
         assert_eq!(a.len(), 64);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         // Known sha256("hello world") value.
         assert_eq!(
             a,
@@ -841,7 +839,11 @@ mod tests {
     #[test]
     fn iso8601_now_has_expected_shape() {
         let s = iso8601_now();
-        assert_eq!(s.len(), 20, "expected YYYY-MM-DDTHH:MM:SSZ (20 chars), got {s}");
+        assert_eq!(
+            s.len(),
+            20,
+            "expected YYYY-MM-DDTHH:MM:SSZ (20 chars), got {s}"
+        );
         assert_eq!(s.as_bytes()[4], b'-');
         assert_eq!(s.as_bytes()[10], b'T');
         assert_eq!(s.as_bytes()[19], b'Z');
@@ -936,10 +938,8 @@ mod tests {
 
     #[test]
     fn resolve_fixtures_returns_only_existing_files() {
-        let temp = std::env::temp_dir().join(format!(
-            "buff-bench-test-resolve-{}",
-            std::process::id()
-        ));
+        let temp =
+            std::env::temp_dir().join(format!("buff-bench-test-resolve-{}", std::process::id()));
         std::fs::create_dir_all(&temp).expect("mkdir");
         std::fs::write(temp.join("real.buff"), "func main():\n    print(1)\n").expect("write");
         let resolved = resolve_fixtures(&temp, &["real", "missing"]);

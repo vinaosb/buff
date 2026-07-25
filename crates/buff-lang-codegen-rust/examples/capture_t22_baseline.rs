@@ -109,10 +109,20 @@ fn main() {
     std::fs::write(&output_path, format!("{json}\n")).expect("write");
     eprintln!("wrote {} bytes to {}", json.len(), output_path.display());
     // Also print summary table to stderr.
-    eprintln!("{:<20} {:>8} {:>8} {:>10} {:>14}", "fixture", "lex_ms", "parse_ms", "cg_ms", "hash[..16]");
+    eprintln!(
+        "{:<20} {:>8} {:>8} {:>10} {:>14}",
+        "fixture", "lex_ms", "parse_ms", "cg_ms", "hash[..16]"
+    );
     for (name, m) in &report.fixtures {
-        let hash_tail = m.codegen_hash.as_ref().and_then(|h| h.get(7..23)).unwrap_or("<none>");
-        eprintln!("{:<20} {:>8} {:>8} {:>10} {:>14}", name, m.lex_ms, m.parse_ms, m.codegen_ms, hash_tail);
+        let hash_tail = m
+            .codegen_hash
+            .as_ref()
+            .and_then(|h| h.get(7..23))
+            .unwrap_or("<none>");
+        eprintln!(
+            "{:<20} {:>8} {:>8} {:>10} {:>14}",
+            name, m.lex_ms, m.parse_ms, m.codegen_ms, hash_tail
+        );
     }
 }
 
@@ -150,9 +160,16 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         Err(e) => {
             return FixtureMeasurement {
                 name: name.to_string(),
-                lex_ms: 0, parse_ms: 0, typecheck_ms: 0, codegen_ms: 0,
-                codegen_hash: None, clean_build_ms: None, binary_size_bytes: None,
-                incremental_build_ms: None, prefer_gpu_count: 0, prefer_npu_count: 0,
+                lex_ms: 0,
+                parse_ms: 0,
+                typecheck_ms: 0,
+                codegen_ms: 0,
+                codegen_hash: None,
+                clean_build_ms: None,
+                binary_size_bytes: None,
+                incremental_build_ms: None,
+                prefer_gpu_count: 0,
+                prefer_npu_count: 0,
                 function_count: 0,
                 error: Some(format!("read_error: {e}")),
             };
@@ -168,9 +185,15 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
             return FixtureMeasurement {
                 name: name.to_string(),
                 lex_ms: start.elapsed().as_millis(),
-                parse_ms: 0, typecheck_ms: 0, codegen_ms: 0,
-                codegen_hash: None, clean_build_ms: None, binary_size_bytes: None,
-                incremental_build_ms: None, prefer_gpu_count: 0, prefer_npu_count: 0,
+                parse_ms: 0,
+                typecheck_ms: 0,
+                codegen_ms: 0,
+                codegen_hash: None,
+                clean_build_ms: None,
+                binary_size_bytes: None,
+                incremental_build_ms: None,
+                prefer_gpu_count: 0,
+                prefer_npu_count: 0,
                 function_count: 0,
                 error: Some(format!("lex_error: {}", e.inner.diagnostic.message)),
             };
@@ -185,10 +208,16 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         Err(e) => {
             return FixtureMeasurement {
                 name: name.to_string(),
-                lex_ms, parse_ms: start.elapsed().as_millis(),
-                typecheck_ms: 0, codegen_ms: 0,
-                codegen_hash: None, clean_build_ms: None, binary_size_bytes: None,
-                incremental_build_ms: None, prefer_gpu_count: 0, prefer_npu_count: 0,
+                lex_ms,
+                parse_ms: start.elapsed().as_millis(),
+                typecheck_ms: 0,
+                codegen_ms: 0,
+                codegen_hash: None,
+                clean_build_ms: None,
+                binary_size_bytes: None,
+                incremental_build_ms: None,
+                prefer_gpu_count: 0,
+                prefer_npu_count: 0,
                 function_count: 0,
                 error: Some(format!("parse_error: {}", e.diagnostic.message)),
             };
@@ -209,9 +238,13 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         Err(e) => {
             return FixtureMeasurement {
                 name: name.to_string(),
-                lex_ms, parse_ms, typecheck_ms,
+                lex_ms,
+                parse_ms,
+                typecheck_ms,
                 codegen_ms: start.elapsed().as_millis(),
-                codegen_hash: None, clean_build_ms: None, binary_size_bytes: None,
+                codegen_hash: None,
+                clean_build_ms: None,
+                binary_size_bytes: None,
                 incremental_build_ms: None,
                 prefer_gpu_count: count_prefer(&decls, "gpu"),
                 prefer_npu_count: count_prefer(&decls, "npu"),
@@ -236,9 +269,9 @@ fn measure_fixture(path: &Path, name: &str) -> FixtureMeasurement {
         typecheck_ms,
         codegen_ms,
         codegen_hash,
-        clean_build_ms: None,           // back-end unavailable in this binary
-        binary_size_bytes: None,        // ditto
-        incremental_build_ms: None,     // ditto
+        clean_build_ms: None,       // back-end unavailable in this binary
+        binary_size_bytes: None,    // ditto
+        incremental_build_ms: None, // ditto
         prefer_gpu_count: count_prefer(&decls, "gpu"),
         prefer_npu_count: count_prefer(&decls, "npu"),
         function_count: count_funcs(&decls),
@@ -254,7 +287,10 @@ fn count_prefer(decls: &[buff_lang_ast::Decl], kind: &str) -> u64 {
         if let Decl::FuncDecl(f) = decl {
             for attr in &f.attributes {
                 if attr.name.name.eq_ignore_ascii_case("prefer")
-                    && attr.args.iter().any(|a| a.eq_ignore_ascii_case(&kind_lower))
+                    && attr
+                        .args
+                        .iter()
+                        .any(|a| a.eq_ignore_ascii_case(&kind_lower))
                 {
                     count += 1;
                 }

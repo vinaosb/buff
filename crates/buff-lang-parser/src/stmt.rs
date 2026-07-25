@@ -241,12 +241,10 @@ pub fn parse_block(stream: &mut TokenStream<'_>) -> Result<Block, ParseError> {
     })
 }
 
-
 // T106: declaration parsers extracted to `stmt_decl.rs` (mechanical split).
 // Re-export keeps the `crate::stmt::*` public surface unchanged.
 mod stmt_decl;
 pub use stmt_decl::*;
-
 
 // ---------------------------------------------------------------------------
 // Internal: per-statement parsers
@@ -1311,7 +1309,6 @@ fn fold_if_chain(
         },
     }
 }
-
 
 /// End byte offset of a [`Stmt`]'s span. Used by [`parse_block`] to compute
 /// the parent block's end position from its last child statement.

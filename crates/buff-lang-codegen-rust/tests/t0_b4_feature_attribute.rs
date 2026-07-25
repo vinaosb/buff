@@ -22,13 +22,18 @@ fn feature_attr(name: &str) -> Attribute {
 }
 
 fn plain_fn(name: &str) -> FuncDecl {
-    FuncDecl { name: Ident::new(name, Span::dummy()),
-    params: Vec::new(),
-    return_type: None,
-    body: Block::empty(Span::dummy()),
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: Span::dummy(), }
+    FuncDecl {
+        name: Ident::new(name, Span::dummy()),
+        params: Vec::new(),
+        return_type: None,
+        body: Block::empty(Span::dummy()),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: Span::dummy(),
+    }
 }
 
 fn feature_fn(name: &str, feature: &str) -> FuncDecl {

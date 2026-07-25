@@ -29,17 +29,13 @@ fn multipart_body(version: &str, tarball: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     // metadata part
     body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
-    body.extend_from_slice(
-        b"Content-Disposition: form-data; name=\"metadata\"\r\n",
-    );
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"metadata\"\r\n");
     body.extend_from_slice(b"Content-Type: application/json\r\n\r\n");
     body.extend_from_slice(metadata.as_bytes());
     body.extend_from_slice(b"\r\n");
     // tarball part
     body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
-    body.extend_from_slice(
-        b"Content-Disposition: form-data; name=\"tarball\"\r\n",
-    );
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"tarball\"\r\n");
     body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
     body.extend_from_slice(tarball);
     body.extend_from_slice(b"\r\n");
@@ -59,13 +55,18 @@ async fn do_multipart_publish(
     let request = Request::builder()
         .method("POST")
         .uri(format!("/api/v1/packages/{name}"))
-        .header("content-type", "multipart/form-data; boundary=----bufftestboundary")
+        .header(
+            "content-type",
+            "multipart/form-data; boundary=----bufftestboundary",
+        )
         .header("authorization", format!("Bearer {token}"))
         .body(Body::from(body_bytes))
         .expect("build");
     let response = router.oneshot(request).await.expect("oneshot");
     let status = response.status();
-    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.expect("collect");
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("collect");
     let json: Value = if bytes.is_empty() {
         Value::Null
     } else {
@@ -82,7 +83,9 @@ async fn do_get(router: axum::Router, uri: &str) -> (StatusCode, Vec<u8>) {
         .expect("build");
     let response = router.oneshot(request).await.expect("oneshot");
     let status = response.status();
-    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.expect("collect");
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("collect");
     (status, bytes.to_vec())
 }
 
@@ -97,8 +100,7 @@ async fn multipart_publish_then_download() {
     assert_eq!(status, StatusCode::CREATED, "multipart publish: {body}");
 
     // Download via the NEW endpoint.
-    let (status, bytes) =
-        do_get(router.clone(), "/api/v1/packages/fs-pkg/1.0.0/download").await;
+    let (status, bytes) = do_get(router.clone(), "/api/v1/packages/fs-pkg/1.0.0/download").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(bytes, tarball);
 
@@ -117,7 +119,10 @@ async fn multipart_publish_without_auth_returns_401() {
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/packages/noauth")
-        .header("content-type", "multipart/form-data; boundary=----bufftestboundary")
+        .header(
+            "content-type",
+            "multipart/form-data; boundary=----bufftestboundary",
+        )
         .body(Body::from(body_bytes))
         .expect("build");
     let response = router.oneshot(request).await.expect("oneshot");
@@ -136,8 +141,7 @@ async fn download_stats_increment() {
 
     // Download 3 times.
     for _ in 0..3 {
-        let (status, _) =
-            do_get(router.clone(), "/api/v1/packages/stats-pkg/1.0.0/download").await;
+        let (status, _) = do_get(router.clone(), "/api/v1/packages/stats-pkg/1.0.0/download").await;
         assert_eq!(status, StatusCode::OK);
     }
 

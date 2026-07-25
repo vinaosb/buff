@@ -319,9 +319,9 @@ fn compute_from_summary(
         Some(author) => state.storage.is_verified_author(author)?,
         None => false,
     };
-    let last_published_at = summary.last_published_at.and_then(|secs| {
-        SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(secs))
-    });
+    let last_published_at = summary
+        .last_published_at
+        .and_then(|secs| SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(secs)));
     let package = Package {
         name: summary.name.clone(),
         verified_publisher,
@@ -470,16 +470,14 @@ pub(crate) async fn multipart_publish(
             }
         }
     }
-    let meta = metadata.ok_or_else(|| {
-        RegistryError::InvalidBody("missing 'metadata' part".to_string())
-    })?;
-    let tarball_bytes = tarball.ok_or_else(|| {
-        RegistryError::InvalidTarball("missing 'tarball' part".to_string())
-    })?;
+    let meta = metadata
+        .ok_or_else(|| RegistryError::InvalidBody("missing 'metadata' part".to_string()))?;
+    let tarball_bytes = tarball
+        .ok_or_else(|| RegistryError::InvalidTarball("missing 'tarball' part".to_string()))?;
 
     // --- 4. Validate version ---
-    let version = Version::parse(&meta.version)
-        .map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
+    let version =
+        Version::parse(&meta.version).map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
 
     // --- 5. Scope ownership (same as legacy publish) ---
     if let Some(org) = crate::scope_of(&name) {
@@ -536,8 +534,8 @@ pub(crate) async fn multipart_download(
     State(state): State<AppState>,
     Path((name, version_str)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, RegistryError> {
-    let version = Version::parse(&version_str)
-        .map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
+    let version =
+        Version::parse(&version_str).map_err(|e| RegistryError::InvalidVersion(e.to_string()))?;
 
     // Record the download for stats.
     let _ = state.storage.record_download(&name, &version);

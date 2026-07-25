@@ -40,10 +40,7 @@ fn t40_guarded_arm_populates_guard_field() {
     let e = parse_match_expr("match opt { Some(v) if v > 0 => \"pos\", _ => \"other\" }");
     let arms = arms_of(&e);
     assert_eq!(arms.len(), 2);
-    assert!(
-        arms[0].guard.is_some(),
-        "first arm should have a guard"
-    );
+    assert!(arms[0].guard.is_some(), "first arm should have a guard");
     assert!(
         arms[1].guard.is_none(),
         "second (wildcard) arm should have no guard"
@@ -95,7 +92,11 @@ fn t40_guard_with_complex_expression() {
     let arms = arms_of(&e);
     assert!(arms[0].guard.is_some(), "complex guard parses");
     // The guard IS an expression node.
-    assert!(arms[0].guard.as_ref().map(|g| g.span().start >= 0).unwrap_or(false));
+    assert!(arms[0]
+        .guard
+        .as_ref()
+        .map(|g| g.span().start >= 0)
+        .unwrap_or(false));
 }
 
 #[test]

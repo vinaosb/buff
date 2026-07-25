@@ -160,11 +160,16 @@ fn check_pascal_case_struct_emits_no_warning() {
     use buff_lang_ast::{Decl, Ident, StructDecl};
     use buff_lang_cli::naming_lint::lint_naming;
     use buff_lang_error::Span;
-    let decl = Decl::StructDecl(StructDecl { name: Ident::new("HttpRequest", Span::dummy()),
-    fields: vec![(
-        Ident::new("method", Span::dummy()),
-        builtin_named_ty("String"),
-    )], traits: Vec::new(), type_params: Vec::new(), span: Span::dummy(), });
+    let decl = Decl::StructDecl(StructDecl {
+        name: Ident::new("HttpRequest", Span::dummy()),
+        fields: vec![(
+            Ident::new("method", Span::dummy()),
+            builtin_named_ty("String"),
+        )],
+        traits: Vec::new(),
+        type_params: Vec::new(),
+        span: Span::dummy(),
+    });
     let diags = lint_naming(&[decl]);
     assert!(
         diags.is_empty(),
@@ -178,11 +183,16 @@ fn check_non_pascal_case_struct_emits_pascal_warning() {
     use buff_lang_ast::{Decl, Ident, StructDecl};
     use buff_lang_cli::naming_lint::lint_naming;
     use buff_lang_error::Span;
-    let decl = Decl::StructDecl(StructDecl { name: Ident::new("httpRequest", Span::dummy()),
-    fields: vec![(
-        Ident::new("method", Span::dummy()),
-        builtin_named_ty("String"),
-    )], traits: Vec::new(), type_params: Vec::new(), span: Span::dummy(), });
+    let decl = Decl::StructDecl(StructDecl {
+        name: Ident::new("httpRequest", Span::dummy()),
+        fields: vec![(
+            Ident::new("method", Span::dummy()),
+            builtin_named_ty("String"),
+        )],
+        traits: Vec::new(),
+        type_params: Vec::new(),
+        span: Span::dummy(),
+    });
     let diags = lint_naming(&[decl]);
     let warning = diags
         .iter()

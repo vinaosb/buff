@@ -435,16 +435,21 @@ mod tests {
     }
 
     fn func(name: &str, body_stmts: Vec<Stmt>) -> FuncDecl {
-        FuncDecl { name: Ident::new(name, dummy()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts: body_stmts,
+        FuncDecl {
+            name: Ident::new(name, dummy()),
+            params: Vec::new(),
+            return_type: None,
+            body: Block {
+                stmts: body_stmts,
+                span: dummy(),
+            },
+            is_async: false,
+            is_unsafe: false,
+            is_extern: false,
+            attributes: Vec::new(),
+            type_params: Vec::new(),
             span: dummy(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: dummy(), }
+        }
     }
 
     fn func_with_attrs(name: &str, attrs: Vec<Attribute>, body_stmts: Vec<Stmt>) -> FuncDecl {

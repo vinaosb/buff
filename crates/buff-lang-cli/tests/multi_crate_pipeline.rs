@@ -225,11 +225,7 @@ func main():
 
     let out = pipeline::compile_to_rust_multi(&main_file, &root).expect("multi-crate ok");
 
-    assert_eq!(
-        out.module_rust_paths.len(),
-        3,
-        "expected 3 sibling modules"
-    );
+    assert_eq!(out.module_rust_paths.len(), 3, "expected 3 sibling modules");
     let root_src = fs::read_to_string(&out.root_rust_path).unwrap_or_default();
     for name in &["a", "b", "c"] {
         assert!(

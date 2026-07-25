@@ -544,4 +544,3 @@ pub enum ConfigError {
     #[error("invalid project layout: {0}")]
     Layout(String),
 }
-

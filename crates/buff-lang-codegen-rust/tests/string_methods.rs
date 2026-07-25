@@ -71,41 +71,51 @@ fn interp(parts: Vec<InterpPart>) -> Expr {
 /// Wrap a single expression-statement in a no-arg function called `f` and
 /// lower it to Rust source. Returns the generated source.
 fn codegen_one_stmt(stmt: Stmt) -> String {
-    let func = FuncDecl { name: ident("f"),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts: vec![stmt],
+    let func = FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts: vec![stmt],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
 }
 
 /// Like [`codegen_one_stmt`] but the function takes one `String` parameter
 /// named `s` — used for method-receiver tests.
 fn codegen_with_string_param(stmt: Stmt) -> String {
-    let func = FuncDecl { name: ident("f"),
-    params: vec![buff_lang_ast::common::Param {
-        name: ident("s"),
-        ty: buff_lang_ast::TypeRef::Named {
-            name: ident("String"),
+    let func = FuncDecl {
+        name: ident("f"),
+        params: vec![buff_lang_ast::common::Param {
+            name: ident("s"),
+            ty: buff_lang_ast::TypeRef::Named {
+                name: ident("String"),
+                span: span(),
+            },
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: None,
+        body: Block {
+            stmts: vec![stmt],
             span: span(),
         },
-        default_value: None,
-        is_comptime: false,
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }],
-    return_type: None,
-    body: Block {
-        stmts: vec![stmt],
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    };
     generate_rust(&[Decl::FuncDecl(func)]).expect("codegen must succeed")
 }
 

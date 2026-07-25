@@ -36,16 +36,21 @@ fn range_expr(start: Expr, end: Expr, inclusive: bool) -> Expr {
 
 /// Build a simple function with one statement and codegen it.
 fn codegen_stmt(stmt: Stmt) -> String {
-    let func = Decl::FuncDecl(FuncDecl { name: ident("f"),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts: vec![stmt],
+    let func = Decl::FuncDecl(FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts: vec![stmt],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
+    });
     generate_rust(&[func]).expect("codegen should succeed")
 }
 

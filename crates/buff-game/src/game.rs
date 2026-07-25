@@ -228,7 +228,9 @@ impl Game {
                 // on_enter does not modify the scenes vec — it only
                 // accesses world/renderer/input through &mut Game.
                 let scene: *mut dyn Scene = &mut self.scenes[0];
-                unsafe { (*scene).on_enter(self); }
+                unsafe {
+                    (*scene).on_enter(self);
+                }
             }
             self.scene_entered = true;
         }
@@ -236,7 +238,9 @@ impl Game {
         // 4. Scene update — only the first scene is active.
         if !self.scenes.is_empty() {
             let scene: *mut dyn Scene = &mut self.scenes[0];
-            unsafe { (*scene).on_update(self, dt); }
+            unsafe {
+                (*scene).on_update(self, dt);
+            }
         }
 
         // 5. Run registered ECS systems.

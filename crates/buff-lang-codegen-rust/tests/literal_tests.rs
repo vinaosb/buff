@@ -85,16 +85,21 @@ fn let_stmt_mut_typed(name: &str, ty: TypeRef, value: Expr) -> Stmt {
 }
 
 fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: ident(name),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts,
+    Decl::FuncDecl(FuncDecl {
+        name: ident(name),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts,
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+    })
 }
 
 fn binary(op: BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
@@ -436,22 +441,27 @@ fn test_codegen_type_propagation_through_let_chain() {
 
 #[test]
 fn test_codegen_param_type_propagates_to_let() {
-    let f = Decl::FuncDecl(FuncDecl { name: ident("f"),
-    params: vec![Param {
-        name: ident("n"),
-        ty: named_type("Int"),
-        default_value: None,
-        is_comptime: false,
+    let f = Decl::FuncDecl(FuncDecl {
+        name: ident("f"),
+        params: vec![Param {
+            name: ident("n"),
+            ty: named_type("Int"),
+            default_value: None,
+            is_comptime: false,
+            span: span(),
+        }],
+        return_type: None,
+        body: Block {
+            stmts: vec![let_stmt("y", ident_expr("n"))],
+            span: span(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: span(),
-    }],
-    return_type: None,
-    body: Block {
-        stmts: vec![let_stmt("y", ident_expr("n"))],
-        span: span(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), });
+    });
     let src = generate_rust(&[f]).unwrap();
     // y should get the param's type (i64) as inferred annotation.
     assert!(src.contains("let y: i64 = n"), "src = {src}");

@@ -142,10 +142,10 @@ fn renderer_accumulates_draw_commands_per_frame() {
 
     let cmds = g.renderer_mut().commands().to_vec();
     assert_eq!(cmds.len(), 2);
-    assert!(matches!(&cmds[0], DrawCommand::Sprite { texture_path, .. } if texture_path == "hero.png"));
     assert!(
-        matches!(&cmds[1], DrawCommand::Text { content, .. } if content == "Score: 100")
+        matches!(&cmds[0], DrawCommand::Sprite { texture_path, .. } if texture_path == "hero.png")
     );
+    assert!(matches!(&cmds[1], DrawCommand::Text { content, .. } if content == "Score: 100"));
 }
 
 #[test]
@@ -226,10 +226,9 @@ fn asset_cache_roundtrip_texture() {
     let mut asset = Asset::new();
     let tex = Texture::from_rgba8(4, 4, vec![255u8; 64]).expect("ok");
     // Cache insert via direct cache access (pub(crate) in tests)
-    asset.cache.insert_texture(
-        std::path::PathBuf::from("test.png"),
-        tex,
-    );
+    asset
+        .cache
+        .insert_texture(std::path::PathBuf::from("test.png"), tex);
     let found = asset.cache_get(&std::path::PathBuf::from("test.png"));
     assert!(matches!(found, Some(AssetRef::Texture(_))));
 }

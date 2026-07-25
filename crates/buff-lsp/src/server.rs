@@ -45,7 +45,7 @@ use lsp_types::{
     CodeActionParams, CodeActionProviderCapability, CodeLensOptions, CodeLensParams,
     CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
-    GotoDefinitionParams, HoverParams, HoverProviderCapability, InlayHintParams, InitializeParams,
+    GotoDefinitionParams, HoverParams, HoverProviderCapability, InitializeParams, InlayHintParams,
     OneOf, PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, Uri,

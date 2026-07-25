@@ -263,7 +263,6 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
         Ok(())
     }
 
-
     /// Parse a raw multipart ZMQ message into a [`WireMessage`].
     ///
     /// Layout: `[ids..., <IDS|MSG>, hmac_hex, header, parent_header,
@@ -349,7 +348,6 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
         hmac::verify(&self.conn.key, &frames, signature_hex)
     }
 
-
     /// Serialize + sign + send a WireMessage on the SHELL socket.
     async fn send_wire(&mut self, msg: &WireMessage) -> JupyterResult<()> {
         let frames = self.encode_wire(msg)?;
@@ -420,8 +418,8 @@ mod messages;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use buff_eval::EvalResult;
     use crate::wire::PROTOCOL_VERSION;
+    use buff_eval::EvalResult;
 
     fn dummy_header(msg_type: &str) -> MessageHeader {
         MessageHeader {

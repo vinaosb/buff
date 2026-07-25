@@ -5,8 +5,8 @@
 use std::fmt::Write;
 
 use buff_lang_ast::{
-    Attribute, Decl, EnumDecl, EnumVariant, ExportDecl, ExtendBlock, FuncDecl,
-    Ident, ImportDecl, MethodSig, Param, ReexportDecl, Span, StructDecl, TraitDecl, TypeRef,
+    Attribute, Decl, EnumDecl, EnumVariant, ExportDecl, ExtendBlock, FuncDecl, Ident, ImportDecl,
+    MethodSig, Param, ReexportDecl, Span, StructDecl, TraitDecl, TypeRef,
 };
 
 use super::Formatter;

@@ -94,7 +94,10 @@ impl CrossFileSymbolTable {
         let Some(module) = project.graph.get(importer_module) else {
             return false;
         };
-        module.imports.iter().any(|i| i.wildcard || !i.path.is_empty())
+        module
+            .imports
+            .iter()
+            .any(|i| i.wildcard || !i.path.is_empty())
     }
 
     pub fn all_visible_in<'a>(

@@ -13,8 +13,8 @@
 #![allow(clippy::needless_raw_string_hashes)]
 
 use buff_lang_error::{
-    to_json, Applicability, CodeSuggestion, Diagnostic, ErrorCode, LabelStyle, SpanLabel,
-    SourceId, Span,
+    to_json, Applicability, CodeSuggestion, Diagnostic, ErrorCode, LabelStyle, SourceId, Span,
+    SpanLabel,
 };
 
 // ---------------------------------------------------------------------------
@@ -83,8 +83,8 @@ fn multispan_empty_labels_renders_byte_identical_to_pre_t1() {
     // backward-compatibility guarantee.
     let src = "let x = 1";
     let diag_old = err_at(0, 3, "some error").with_note("a note");
-    let diag_new = Diagnostic::error("some error", Span::new(0, 3, SourceId(0)))
-        .with_note("a note");
+    let diag_new =
+        Diagnostic::error("some error", Span::new(0, 3, SourceId(0))).with_note("a note");
     // Both have empty labels + suggestions → identical render.
     assert_eq!(diag_old.render(src), diag_new.render(src));
 }
@@ -139,12 +139,11 @@ fn multispan_span_label_constructors_set_correct_style() {
 #[test]
 fn suggestion_renders_help_line_with_replacement_and_applicability() {
     let src = "pritn(\"hello\")";
-    let diag = err_at(0, 5, "unknown identifier `pritn`")
-        .with_suggestion(
-            Span::new(0, 5, SourceId(0)),
-            "print",
-            Applicability::MachineApplicable,
-        );
+    let diag = err_at(0, 5, "unknown identifier `pritn`").with_suggestion(
+        Span::new(0, 5, SourceId(0)),
+        "print",
+        Applicability::MachineApplicable,
+    );
     let rendered = diag.render(src);
     assert!(
         rendered.contains("help: replace with `print` (MachineApplicable)"),
@@ -163,7 +162,8 @@ fn suggestion_with_label_renders_label_before_replacement() {
     );
     let rendered = diag.render(src);
     assert!(
-        rendered.contains("help: change `pritn` to `print`: replace with `print` (MachineApplicable)"),
+        rendered
+            .contains("help: change `pritn` to `print`: replace with `print` (MachineApplicable)"),
         "missing labeled help line in:\n{rendered}"
     );
 }
@@ -229,9 +229,15 @@ fn applicability_is_machine_applicable_predicate() {
 
 #[test]
 fn applicability_display_matches_variant_name() {
-    assert_eq!(Applicability::MachineApplicable.to_string(), "MachineApplicable");
+    assert_eq!(
+        Applicability::MachineApplicable.to_string(),
+        "MachineApplicable"
+    );
     assert_eq!(Applicability::MaybeIncorrect.to_string(), "MaybeIncorrect");
-    assert_eq!(Applicability::HasPlaceholders.to_string(), "HasPlaceholders");
+    assert_eq!(
+        Applicability::HasPlaceholders.to_string(),
+        "HasPlaceholders"
+    );
     assert_eq!(Applicability::Unspecified.to_string(), "Unspecified");
 }
 
@@ -256,12 +262,11 @@ fn code_suggestion_render_help_line_directly() {
 #[test]
 fn json_roundtrip_simple_diagnostic_serializes_and_deserializes() {
     let src = "let x = 1";
-    let diag = Diagnostic::error("bad", Span::new(0, 3, SourceId(0)))
-        .with_code(ErrorCode::UnexpectedChar);
+    let diag =
+        Diagnostic::error("bad", Span::new(0, 3, SourceId(0))).with_code(ErrorCode::UnexpectedChar);
     let j = to_json(&diag, src);
     let json_str = serde_json::to_string(&j).expect("serialize");
-    let v: serde_json::Value =
-        serde_json::from_str(&json_str).expect("deserialize back");
+    let v: serde_json::Value = serde_json::from_str(&json_str).expect("deserialize back");
     assert_eq!(v["code"], "E1001");
     assert_eq!(v["severity"], "Error");
     assert_eq!(v["message"], "bad");
@@ -309,7 +314,10 @@ fn json_roundtrip_multispan_with_labels_and_suggestion() {
     assert_eq!(v["spans"][1]["line_start"], 1);
 
     // One note.
-    assert_eq!(v["notes"][0], "`add` expects its first argument to be `Int`");
+    assert_eq!(
+        v["notes"][0],
+        "`add` expects its first argument to be `Int`"
+    );
 
     // One suggestion.
     assert_eq!(v["suggestions"].as_array().unwrap().len(), 1);
@@ -368,7 +376,11 @@ fn json_render_diagnostics_json_emits_array_for_multiple() {
 fn json_error_code_from_code_str_roundtrips_all_variants() {
     for &code in ErrorCode::all() {
         let s = code.code_str();
-        assert_eq!(ErrorCode::from_code_str(s), Some(code), "roundtrip failed for {s}");
+        assert_eq!(
+            ErrorCode::from_code_str(s),
+            Some(code),
+            "roundtrip failed for {s}"
+        );
     }
     // Unknown codes → None (no speculative variant).
     assert_eq!(ErrorCode::from_code_str("E9999"), None);
@@ -441,8 +453,7 @@ fn snapshot_backward_compat_empty_labels_suggestions_unchanged() {
     // byte-identically to the pre-T1 format. This snapshot pins the
     // backward-compatibility guarantee.
     let src = "let x = value";
-    let diag = err_at(8, 13, "unknown identifier `value`")
-        .with_note("Did you mean `val`?");
+    let diag = err_at(8, 13, "unknown identifier `value`").with_note("Did you mean `val`?");
     insta::assert_snapshot!(diag.render(src), @r#"
     [Error] unknown identifier `value`
       |

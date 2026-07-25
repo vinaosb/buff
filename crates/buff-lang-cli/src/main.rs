@@ -168,9 +168,7 @@ fn main() -> Result<()> {
             filter,
             update,
             detect_races,
-        } => {
-            buff_lang_cli::commands::test::run(&path, filter.as_deref(), update, detect_races)
-        }
+        } => buff_lang_cli::commands::test::run(&path, filter.as_deref(), update, detect_races),
         Command::Fmt { file, check } => {
             use buff_lang_cli::commands::fmt::FmtOutcome;
             let outcome = buff_lang_cli::commands::fmt::run(&file, check)?;
@@ -291,9 +289,11 @@ fn main() -> Result<()> {
         Command::Watch { file, interval } => {
             buff_lang_cli::commands::watch::run(&file, Some(interval))
         }
-        Command::Profile { file, alloc, output } => {
-            buff_lang_cli::commands::profile::run(&file, alloc, output.as_deref())
-        }
+        Command::Profile {
+            file,
+            alloc,
+            output,
+        } => buff_lang_cli::commands::profile::run(&file, alloc, output.as_deref()),
         Command::Fix { file, dry_run } => {
             buff_lang_cli::commands::fix::run(&file, dry_run)?;
             Ok(())

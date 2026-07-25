@@ -46,23 +46,32 @@ fn ident(name: &str) -> Ident {
 
 /// Build a unit-variant-only enum decl with the given name + variants.
 fn unit_enum_decl(name: &str, variants: &[&str]) -> EnumDecl {
-    EnumDecl { name: ident(name), type_params: Vec::new(), variants: variants
-        .iter()
-        .map(|v| EnumVariant {
-            name: ident(v),
-            data: None,
-            span: span(),
-        })
-        .collect(),
-    span: span(), }
+    EnumDecl {
+        name: ident(name),
+        type_params: Vec::new(),
+        variants: variants
+            .iter()
+            .map(|v| EnumVariant {
+                name: ident(v),
+                data: None,
+                span: span(),
+            })
+            .collect(),
+        span: span(),
+    }
 }
 
 /// Build a `match` arm with the given pattern and an empty body.
 fn arm_with_pattern(pat: Pattern) -> MatchArm {
-    MatchArm { pattern: pat, guard: None, body: Block {
-        stmts: Vec::new(),
+    MatchArm {
+        pattern: pat,
+        guard: None,
+        body: Block {
+            stmts: Vec::new(),
+            span: span(),
+        },
         span: span(),
-    }, span: span() }
+    }
 }
 
 fn ident_pattern(name: &str) -> Pattern {
@@ -371,13 +380,18 @@ fn exhaustiveness_check_program_skips_unknown_scrutinee_type() {
         )],
         span: span(),
     };
-    let func = FuncDecl { name: ident("f"),
-    params: Vec::new(),
-    return_type: None,
-    body,
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), };
+    let func = FuncDecl {
+        name: ident("f"),
+        params: Vec::new(),
+        return_type: None,
+        body,
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: span(),
+    };
     let _ = Param {
         name: ident("_"),
         ty: TypeRef::Named {

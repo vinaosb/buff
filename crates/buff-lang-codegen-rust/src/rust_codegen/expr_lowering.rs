@@ -9,7 +9,6 @@
 use super::*;
 
 impl RustCodegen {
-
     /// Lower a minimal closure `{ params => expr }` to a Rust closure
     /// `|p1, p2| body` (T23 + T34 capture analysis).
     ///
@@ -123,7 +122,10 @@ impl RustCodegen {
     /// The output is built via `quote!` so the outer `::from([...])` shell and
     /// the comma-separated tuple entries are constructed without any
     /// hand-formatted Rust strings.
-    pub(super) fn lower_map_lit(&mut self, entries: &[(Expr, Expr)]) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_map_lit(
+        &mut self,
+        entries: &[(Expr, Expr)],
+    ) -> Result<SynExpr, CodegenError> {
         // Lower each (key, value) pair into a Rust tuple expression. We
         // build the tuple via `syn::ExprTuple` so it's a real AST node
         // (not a token stream).
@@ -256,7 +258,10 @@ impl RustCodegen {
             // This syn version's `Arm::guard` is `Option<(If, Box<Expr>)>` —
             // a tuple of the `if` keyword token + the condition expression.
             let guard = if let Some(guard_expr) = &arm.guard {
-                Some((syn::Token![if](ProcSpan::call_site()), Box::new(self.lower_expr(guard_expr)?)))
+                Some((
+                    syn::Token![if](ProcSpan::call_site()),
+                    Box::new(self.lower_expr(guard_expr)?),
+                ))
             } else {
                 None
             };
@@ -433,7 +438,10 @@ impl RustCodegen {
     /// The single argument is lowered as a normal expression and spliced
     /// into the `Error::new(...)` call via `quote!` (so no hand-formatted
     /// Rust). The outer `Err(...)` is a path call built the same way.
-    pub(super) fn lower_error_constructor(&mut self, args: &[Expr]) -> Result<SynExpr, CodegenError> {
+    pub(super) fn lower_error_constructor(
+        &mut self,
+        args: &[Expr],
+    ) -> Result<SynExpr, CodegenError> {
         if args.len() != 1 {
             return Err(self.unsupported(&format!(
                 "Error() expects exactly 1 arg, got {}",
@@ -636,7 +644,11 @@ impl RustCodegen {
     /// caller passes the binding's `mutable` flag so `let mut (a, b) = ...`
     /// lowers to `let (mut a, mut b) = ...`. `mutable` propagates recursively
     /// into sub-patterns so nested bindings all pick it up.
-    pub(super) fn lower_pattern(&mut self, pat: &Pattern, mutable: bool) -> Result<Pat, CodegenError> {
+    pub(super) fn lower_pattern(
+        &mut self,
+        pat: &Pattern,
+        mutable: bool,
+    ) -> Result<Pat, CodegenError> {
         let syn_pat: Pat = match pat {
             Pattern::Wildcard(_) => Pat::Wild(syn::PatWild {
                 attrs: Vec::new(),
@@ -708,7 +720,9 @@ impl RustCodegen {
                 let resolved_enum: Option<&str> = if !enum_name.name.is_empty() {
                     Some(enum_name.name.as_str())
                 } else {
-                    self.user_enum_variants.get(&variant.name).map(String::as_str)
+                    self.user_enum_variants
+                        .get(&variant.name)
+                        .map(String::as_str)
                 };
                 let path = match resolved_enum {
                     Some(en) => two_segment_path(en, &variant.name),
@@ -969,7 +983,11 @@ impl RustCodegen {
         })
     }
 
-    pub(super) fn make_unary_op(&mut self, op: UnaryOp, operand: SynExpr) -> Result<SynExpr, CodegenError> {
+    pub(super) fn make_unary_op(
+        &mut self,
+        op: UnaryOp,
+        operand: SynExpr,
+    ) -> Result<SynExpr, CodegenError> {
         // Buff's `~` (bitwise NOT on integers) maps to Rust's `!` on integers.
         let unop = match op {
             UnaryOp::Neg => syn::UnOp::Neg(Default::default()),
@@ -982,6 +1000,4 @@ impl RustCodegen {
             expr: Box::new(operand),
         }))
     }
-
 }
-

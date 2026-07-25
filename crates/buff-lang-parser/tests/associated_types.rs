@@ -21,9 +21,7 @@
 //! cargo test -p buff-lang-parser --test associated_types
 //! ```
 
-use buff_lang_ast::{
-    AssociatedType, AssociatedTypeBinding, Decl, ImplBlock, TraitDecl, TypeRef,
-};
+use buff_lang_ast::{AssociatedType, AssociatedTypeBinding, Decl, ImplBlock, TraitDecl, TypeRef};
 use buff_lang_error::SourceId;
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
@@ -98,9 +96,15 @@ fn associated_type_multiple() {
     let src = "trait Map {\n    type Key;\n    type Value;\n    func get(k: Key) -> Value;\n}";
     let decls = parse_program(src);
     assert_eq!(decls.len(), 1);
-    if let Decl::TraitDecl(TraitDecl { associated_types, .. }) = &decls[0] {
+    if let Decl::TraitDecl(TraitDecl {
+        associated_types, ..
+    }) = &decls[0]
+    {
         assert_eq!(associated_types.len(), 2, "two associated types");
-        let names: Vec<&str> = associated_types.iter().map(|a| a.name.name.as_str()).collect();
+        let names: Vec<&str> = associated_types
+            .iter()
+            .map(|a| a.name.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Key", "Value"]);
     } else {
         panic!("expected TraitDecl");
@@ -116,7 +120,10 @@ fn associated_type_with_bounds() {
     let src = "trait Container {\n    type Item: Clone + Debug;\n    func get() -> Item;\n}";
     let decls = parse_program(src);
     assert_eq!(decls.len(), 1);
-    if let Decl::TraitDecl(TraitDecl { associated_types, .. }) = &decls[0] {
+    if let Decl::TraitDecl(TraitDecl {
+        associated_types, ..
+    }) = &decls[0]
+    {
         assert_eq!(associated_types.len(), 1);
         let at: &AssociatedType = &associated_types[0];
         assert_eq!(at.name.name, "Item");
@@ -145,7 +152,12 @@ fn associated_type_after_method() {
     let src = "trait T {\n    func m1() -> Int;\n    type Item;\n    func m2() -> Item;\n}";
     let decls = parse_program(src);
     assert_eq!(decls.len(), 1);
-    if let Decl::TraitDecl(TraitDecl { associated_types, required, .. }) = &decls[0] {
+    if let Decl::TraitDecl(TraitDecl {
+        associated_types,
+        required,
+        ..
+    }) = &decls[0]
+    {
         assert_eq!(associated_types.len(), 1);
         assert_eq!(required.len(), 2, "two required methods");
     } else {
@@ -162,7 +174,13 @@ fn associated_type_only_no_methods() {
     let src = "trait Marker {\n    type Item;\n}";
     let decls = parse_program(src);
     assert_eq!(decls.len(), 1);
-    if let Decl::TraitDecl(TraitDecl { associated_types, required, defaults, .. }) = &decls[0] {
+    if let Decl::TraitDecl(TraitDecl {
+        associated_types,
+        required,
+        defaults,
+        ..
+    }) = &decls[0]
+    {
         assert_eq!(associated_types.len(), 1);
         assert!(required.is_empty());
         assert!(defaults.is_empty());
@@ -218,7 +236,12 @@ fn impl_block_multiple_bindings() {
     let src = "impl Map for Dict {\n    type Key = String;\n    type Value = Int;\n    func get(k: String) -> Int {\n        return 0\n    }\n}";
     let decls = parse_program(src);
     assert_eq!(decls.len(), 1);
-    if let Decl::ImplBlock(ImplBlock { type_bindings, methods, .. }) = &decls[0] {
+    if let Decl::ImplBlock(ImplBlock {
+        type_bindings,
+        methods,
+        ..
+    }) = &decls[0]
+    {
         assert_eq!(type_bindings.len(), 2, "two type bindings");
         let names: Vec<(&str, &str)> = type_bindings
             .iter()
@@ -244,10 +267,16 @@ fn impl_block_multiple_bindings() {
 
 #[test]
 fn impl_block_methods_only() {
-    let src = "impl Greetable for Person {\n    func name() -> String {\n        return \"x\"\n    }\n}";
+    let src =
+        "impl Greetable for Person {\n    func name() -> String {\n        return \"x\"\n    }\n}";
     let decls = parse_program(src);
     assert_eq!(decls.len(), 1);
-    if let Decl::ImplBlock(ImplBlock { type_bindings, methods, .. }) = &decls[0] {
+    if let Decl::ImplBlock(ImplBlock {
+        type_bindings,
+        methods,
+        ..
+    }) = &decls[0]
+    {
         assert!(type_bindings.is_empty(), "no type bindings");
         assert_eq!(methods.len(), 1, "one method");
     } else {
@@ -263,8 +292,7 @@ fn impl_block_methods_only() {
 fn impl_block_empty_body_errors() {
     let err = parse_program_err("impl T for U {\n}");
     assert!(
-        err.diagnostic.message.contains("at least one")
-            || err.diagnostic.message.contains("must"),
+        err.diagnostic.message.contains("at least one") || err.diagnostic.message.contains("must"),
         "empty-body error should be descriptive: {}",
         err.diagnostic.message
     );

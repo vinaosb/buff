@@ -187,9 +187,7 @@ pub fn debuginfo_from_str(s: &str) -> Result<DebugInfoChoice> {
         "line-tables-only" => Ok(DebugInfoChoice::LineTablesOnly),
         "full" => Ok(DebugInfoChoice::Full),
         "none" => Ok(DebugInfoChoice::None),
-        other => bail!(
-            "unknown debuginfo `{other}` (valid: line-tables-only, full, none)"
-        ),
+        other => bail!("unknown debuginfo `{other}` (valid: line-tables-only, full, none)"),
     }
 }
 
@@ -245,9 +243,7 @@ pub fn backend_from_str(s: &str) -> Result<BackendChoice> {
     match s.to_ascii_lowercase().as_str() {
         "llvm" => Ok(BackendChoice::Llvm),
         "cranelift" => Ok(BackendChoice::Cranelift),
-        other => bail!(
-            "unknown backend `{other}` (valid: llvm, cranelift)"
-        ),
+        other => bail!("unknown backend `{other}` (valid: llvm, cranelift)"),
     }
 }
 
@@ -289,9 +285,7 @@ pub fn linker_from_str(s: &str) -> Result<LinkerChoice> {
         "mold" => Ok(LinkerChoice::Mold),
         "lld" => Ok(LinkerChoice::Lld),
         "system" => Ok(LinkerChoice::System),
-        other => bail!(
-            "unknown linker `{other}` (valid: auto, mold, lld, system)"
-        ),
+        other => bail!("unknown linker `{other}` (valid: auto, mold, lld, system)"),
     }
 }
 
@@ -1066,10 +1060,7 @@ pub fn inject_profiling(rust_source: &str, mode: ProfileMode) -> Result<String> 
 /// Wraps `original_stmts` (the user's main body) in profiling guards
 /// selected by `mode`. Returns a `syn::Block` ready to swap into the
 /// `fn main()` Item::Fn.
-fn build_instrumented_block(
-    original_stmts: &[syn::Stmt],
-    mode: ProfileMode,
-) -> Result<syn::Block> {
+fn build_instrumented_block(original_stmts: &[syn::Stmt], mode: ProfileMode) -> Result<syn::Block> {
     // Interpolate the original stmts into the profiling wrapper.
     // `syn::Stmt` implements `quote::ToTokens`, so `#(#original_stmts)*`
     // faithfully reproduces the user's main body inside the closure.
@@ -1226,7 +1217,17 @@ pub fn compile_rust_to_exe(
     buff_file: &Path,
     mode: BuildMode,
 ) -> Result<PathBuf> {
-    compile_rust_to_exe_with_speed(rust_file, output, buff_file, mode, false, LinkerChoice::default(), DebugInfoChoice::default(), BackendChoice::default(), None)
+    compile_rust_to_exe_with_speed(
+        rust_file,
+        output,
+        buff_file,
+        mode,
+        false,
+        LinkerChoice::default(),
+        DebugInfoChoice::default(),
+        BackendChoice::default(),
+        None,
+    )
 }
 
 /// sccache-aware variant of [`compile_rust_to_exe`] (T55).
@@ -1318,9 +1319,8 @@ pub fn compile_rust_to_exe_with_speed(
     // user passes `--release --backend=cranelift`). When Cranelift is
     // requested but unavailable (probe fails), fall back to LLVM with
     // a warning — correctness is never affected, only compile speed.
-    let use_cranelift = matches!(backend, BackendChoice::Cranelift)
-        && matches!(mode, BuildMode::Debug)
-        && {
+    let use_cranelift =
+        matches!(backend, BackendChoice::Cranelift) && matches!(mode, BuildMode::Debug) && {
             if cranelift_available() {
                 eprintln!(
                     "note: using Cranelift dev backend (T4) — faster compile, \

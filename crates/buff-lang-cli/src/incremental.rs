@@ -95,10 +95,7 @@ pub enum ParseOutcome {
     /// Parse succeeded. `source_hash` is a stable hash of the source
     /// bytes (used by callers to detect content changes across DB
     /// resets). `decl_count` is the number of top-level declarations.
-    Ok {
-        source_hash: u64,
-        decl_count: usize,
-    },
+    Ok { source_hash: u64, decl_count: usize },
     /// Lexing failed (the byte-scanner rejected the input).
     LexFailed,
     /// Parsing failed (the recursive-descent parser rejected the
@@ -118,9 +115,7 @@ pub enum TypeCheckOutcome {
     /// actual [`buff_lang_error::TypeError`]s are surfaced by the
     /// regular `buff check` path — salsa only tracks the count for
     /// change detection).
-    Fail {
-        error_count: usize,
-    },
+    Fail { error_count: usize },
 }
 
 // ---------------------------------------------------------------------------
@@ -380,11 +375,7 @@ mod tests {
         // outcomes; we settle for value equality here).
         let mut db = BuffDatabase::new();
         let src = "func main() { print(\"hi\") }\n";
-        let file = SourceFile::new(
-            &mut db,
-            PathBuf::from("test.buff"),
-            src.to_string(),
-        );
+        let file = SourceFile::new(&mut db, PathBuf::from("test.buff"), src.to_string());
         let a = parse_file(&db, file);
         let b = parse_file(&db, file);
         assert_eq!(a, b, "memoized parse_file outcome must be stable");
@@ -407,7 +398,8 @@ mod tests {
             "func a() { 1 }\n".to_string(),
         );
         let before = parse_file(&db, file);
-        file.set_source(&mut db).to("func a() { 2 }\nfunc b() { 3 }\n".to_string());
+        file.set_source(&mut db)
+            .to("func a() { 2 }\nfunc b() { 3 }\n".to_string());
         let after = parse_file(&db, file);
         assert_ne!(before, after, "outcomes must differ after source change");
         // After the change, decl_count must reflect the new 2-decl source.
@@ -466,8 +458,8 @@ mod tests {
         // Mirrors the `check::typeref_to_type` surface exactly so the
         // incremental typecheck stays consistent with `buff check`.
         use buff_lang_ast::{Ident, TypeRef};
-        use buff_lang_types::Type;
         use buff_lang_error::Span;
+        use buff_lang_types::Type;
         let mk_named = |s: &str| TypeRef::Named {
             name: Ident {
                 name: s.to_string(),

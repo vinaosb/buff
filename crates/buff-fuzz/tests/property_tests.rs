@@ -28,13 +28,18 @@ fn mk_fuzz_func(name: &str, param_ty: &str, param_count: usize) -> FuncDecl {
     let params: Vec<Param> = (0..param_count)
         .map(|i| mk_param(&format!("p{i}"), param_ty))
         .collect();
-    FuncDecl { name: Ident::new(name, dummy_span()),
-    params,
-    return_type: Some(named_type("Bool")),
-    body: Block { stmts: Vec::new() },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: dummy_span(), }
+    FuncDecl {
+        name: Ident::new(name, dummy_span()),
+        params,
+        return_type: Some(named_type("Bool")),
+        body: Block { stmts: Vec::new() },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: dummy_span(),
+    }
 }
 
 #[test]

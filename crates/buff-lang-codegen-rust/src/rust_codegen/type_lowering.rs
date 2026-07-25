@@ -9,7 +9,6 @@
 use super::*;
 
 impl RustCodegen {
-
     /// Convert a Buff [`TypeRef`] to a Rust [`syn::Type`].
     ///
     /// Returns an error for unsupported forms (function types); these will
@@ -221,7 +220,10 @@ impl RustCodegen {
                 }
                 let lowered_args: Vec<SynType> = args
                     .iter()
-                    .map(|a| self.buff_type_to_syn(a).unwrap_or_else(|| rust_path_type("i64")))
+                    .map(|a| {
+                        self.buff_type_to_syn(a)
+                            .unwrap_or_else(|| rust_path_type("i64"))
+                    })
                     .collect();
                 return Some(make_generic_path_type(name, lowered_args));
             }
@@ -698,7 +700,6 @@ impl RustCodegen {
         };
         Some(rust_path_type(rust_name))
     }
-
 }
 
 #[cfg(test)]
@@ -766,4 +767,3 @@ mod t68_display_tests {
         assert!(!trait_obj.is_gpu_eligible());
     }
 }
-

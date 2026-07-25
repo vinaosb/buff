@@ -96,11 +96,11 @@ mod syn_helpers;
 use syn_helpers::*;
 // Re-export so lib.rs's `pub use rust_codegen::buff_primitive_to_rust_name` still resolves.
 pub use syn_helpers::buff_primitive_to_rust_name;
-mod expr_lowering;
-mod method_call_lowering;
 mod decl_lowering;
-mod type_lowering;
+mod expr_lowering;
 mod lowering_helpers;
+mod method_call_lowering;
+mod type_lowering;
 use lowering_helpers::*;
 mod conv_helpers;
 use conv_helpers::*;
@@ -1801,8 +1801,7 @@ impl RustCodegen {
                                 .infer_expr(base)
                                 .unwrap_or(Type::Unknown);
                             if matches!(base_ty, Type::Map(..)) {
-                                return self
-                                    .lower_map_index_write(base, &indices[0], value);
+                                return self.lower_map_index_write(base, &indices[0], value);
                             }
                         }
                     }
@@ -2113,8 +2112,7 @@ impl RustCodegen {
                     // no extern crate dependency.
                     if name.name == "__buff_pin" && args_ref.len() == 1 {
                         let inner = self.lower_expr(&args_ref[0])?;
-                        let mut call_args: Punctuated<SynExpr, syn::Token![,]> =
-                            Punctuated::new();
+                        let mut call_args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
                         call_args.push(inner);
                         return Ok(SynExpr::Call(syn::ExprCall {
                             attrs: Vec::new(),
@@ -3398,8 +3396,9 @@ impl RustCodegen {
             //   4. Returns the loaded HashMap
             (T::Env, A::Load) => {
                 let path = if args.is_empty() {
-                    syn::parse2::<SynExpr>(quote::quote! { ".env" })
-                        .map_err(|e| self.unsupported(&format!("Env.load default path parse: {e}")))?
+                    syn::parse2::<SynExpr>(quote::quote! { ".env" }).map_err(|e| {
+                        self.unsupported(&format!("Env.load default path parse: {e}"))
+                    })?
                 } else if args.len() == 1 {
                     let p = self.lower_expr(&args[0])?;
                     coerce_str_arg_to_ref(p, &args[0])
@@ -4065,9 +4064,9 @@ impl RustCodegen {
                     .map(|a| self.lower_expr(a))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut iter = lowered.into_iter();
-                let head = iter.next().ok_or_else(|| {
-                    self.unsupported("Path.join requires at least one argument")
-                })?;
+                let head = iter
+                    .next()
+                    .ok_or_else(|| self.unsupported("Path.join requires at least one argument"))?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     std::path::PathBuf::from(#head)
                 };
@@ -6115,8 +6114,9 @@ impl RustCodegen {
                 let tokens: proc_macro2::TokenStream = quote::quote! {
                     rust_decimal::Decimal::from_f64(#f).unwrap_or_default()
                 };
-                syn::parse2(tokens)
-                    .map_err(|e| self.unsupported(&format!("Decimal.from_float codegen parse: {e}")))
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Decimal.from_float codegen parse: {e}"))
+                })
             }
             // Every other combination was already rejected by
             // `assoc_fn_lookup` in the caller; this arm is unreachable but
@@ -10310,13 +10310,18 @@ mod tests {
 
     #[test]
     fn empty_func_generates_syn_file() {
-        let func = FuncDecl { name: AstIdent::new("empty", dummy_span()),
-        params: Vec::new(),
-        return_type: None,
-        body: Block::empty(dummy_span()),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: dummy_span(), };
+        let func = FuncDecl {
+            name: AstIdent::new("empty", dummy_span()),
+            params: Vec::new(),
+            return_type: None,
+            body: Block::empty(dummy_span()),
+            is_async: false,
+            is_unsafe: false,
+            is_extern: false,
+            attributes: Vec::new(),
+            type_params: Vec::new(),
+            span: dummy_span(),
+        };
         let mut codegen = RustCodegen::new();
         let file = codegen
             .generate(&[Decl::FuncDecl(func)])

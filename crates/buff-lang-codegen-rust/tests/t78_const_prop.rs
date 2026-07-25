@@ -201,10 +201,7 @@ fn const_prop_propagates_bool_and_string() {
             },
             Stmt::LetDecl {
                 name: Ident::new("name", Span::dummy()),
-                value: Expr::Literal(
-                    Literal::String("Buff".into()),
-                    Span::dummy(),
-                ),
+                value: Expr::Literal(Literal::String("Buff".into()), Span::dummy()),
                 mutable: false,
                 ty: None,
                 span: Span::dummy(),

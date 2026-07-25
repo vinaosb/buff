@@ -59,8 +59,7 @@ fn lex_errors_fixture_emits_e1001() {
         "lex fixture should produce errors"
     );
     let has_e1001 = report.diagnostics.iter().any(|d| {
-        d.code == Some(ErrorCode::UnexpectedChar)
-            && matches!(d.severity, Severity::Error)
+        d.code == Some(ErrorCode::UnexpectedChar) && matches!(d.severity, Severity::Error)
     });
     assert!(
         has_e1001,
@@ -83,8 +82,7 @@ fn parse_errors_fixture_emits_e1102() {
         "parse fixture should produce errors"
     );
     let has_e1102 = report.diagnostics.iter().any(|d| {
-        d.code == Some(ErrorCode::UnexpectedToken)
-            && matches!(d.severity, Severity::Error)
+        d.code == Some(ErrorCode::UnexpectedToken) && matches!(d.severity, Severity::Error)
     });
     assert!(
         has_e1102,
@@ -107,8 +105,7 @@ fn type_errors_fixture_emits_e1202() {
         "type fixture should produce errors"
     );
     let has_e1202 = report.diagnostics.iter().any(|d| {
-        d.code == Some(ErrorCode::BinaryOpTypeMismatch)
-            && matches!(d.severity, Severity::Error)
+        d.code == Some(ErrorCode::BinaryOpTypeMismatch) && matches!(d.severity, Severity::Error)
     });
     assert!(
         has_e1202,
@@ -127,10 +124,8 @@ fn codegen_errors_fixture_emits_e1301() {
     // Codegen errors are NOT caught by `buff check` (which stops after
     // type-check). We must drive the full lex → parse → codegen pipeline.
     let source_id = buff_lang_error::SourceId(0);
-    let tokens = tokenize(&src, source_id)
-        .expect("codegen fixture should lex cleanly");
-    let decls = parse(&tokens, source_id)
-        .expect("codegen fixture should parse cleanly");
+    let tokens = tokenize(&src, source_id).expect("codegen fixture should lex cleanly");
+    let decls = parse(&tokens, source_id).expect("codegen fixture should parse cleanly");
     let result = generate_rust(&decls);
     let err = result.expect_err("codegen fixture should produce a codegen error");
     assert_eq!(
@@ -173,8 +168,7 @@ fn warning_deprecated_fixture_emits_e1501() {
         "deprecated fixture should produce warnings"
     );
     let has_e1501 = report.diagnostics.iter().any(|d| {
-        d.code == Some(ErrorCode::DeprecatedApiUsed)
-            && matches!(d.severity, Severity::Warning)
+        d.code == Some(ErrorCode::DeprecatedApiUsed) && matches!(d.severity, Severity::Warning)
     });
     assert!(
         has_e1501,

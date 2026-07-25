@@ -6,7 +6,6 @@
 
 use super::*;
 
-
 // ---------------------------------------------------------------------------
 // T124i - serde_yml + csv emit-on-demand detection (Yaml / Csv namespace
 // modules).
@@ -922,4 +921,3 @@ pub(super) fn error_struct_items() -> Vec<Item> {
         Err(_) => Vec::new(),
     }
 }
-

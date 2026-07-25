@@ -37,7 +37,10 @@ impl<T: ZmqTransport + Unpin> Kernel<T> {
     /// The kernel NEVER returns an error from this method — even when
     /// the cell surfaces a diagnostic, the reply carries the error
     /// shape and the loop continues serving subsequent cells.
-    pub(super) async fn handle_execute_request(&mut self, parsed: &WireMessage) -> JupyterResult<()> {
+    pub(super) async fn handle_execute_request(
+        &mut self,
+        parsed: &WireMessage,
+    ) -> JupyterResult<()> {
         let execution_count = {
             let mut g = self.execution_count.lock().await;
             *g += 1;

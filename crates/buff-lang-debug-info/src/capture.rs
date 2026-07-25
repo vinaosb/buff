@@ -181,13 +181,18 @@ mod tests {
     use buff_lang_error::{SourceId, Span};
 
     fn make_func(name: &str, span_start: usize, span_end: usize) -> FuncDecl {
-        FuncDecl { name: Ident::new(name, Span::dummy()),
-        params: Vec::new(),
-        return_type: None,
-        body: buff_lang_ast::common::Block::empty(Span::dummy()),
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: Span::new(span_start, span_end, SourceId(0)), }
+        FuncDecl {
+            name: Ident::new(name, Span::dummy()),
+            params: Vec::new(),
+            return_type: None,
+            body: buff_lang_ast::common::Block::empty(Span::dummy()),
+            is_async: false,
+            is_unsafe: false,
+            is_extern: false,
+            attributes: Vec::new(),
+            type_params: Vec::new(),
+            span: Span::new(span_start, span_end, SourceId(0)),
+        }
     }
 
     #[test]

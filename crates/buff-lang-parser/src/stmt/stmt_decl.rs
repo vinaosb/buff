@@ -7,9 +7,9 @@
 //! re-exported back to the parent `stmt` module via `pub use stmt_decl::*`.
 
 use buff_lang_ast::{
-    Attribute, Block, Decl, EnumDecl, EnumVariant, ExportDecl, ExtendBlock, FuncDecl, Ident,
-    ImplBlock, ImportDecl, AssociatedType, AssociatedTypeBinding, MethodSig, Param, ReexportDecl,
-    Stmt, StructDecl, TraitDecl, TypeParam, TypeRef,
+    AssociatedType, AssociatedTypeBinding, Attribute, Block, Decl, EnumDecl, EnumVariant,
+    ExportDecl, ExtendBlock, FuncDecl, Ident, ImplBlock, ImportDecl, MethodSig, Param,
+    ReexportDecl, Stmt, StructDecl, TraitDecl, TypeParam, TypeRef,
 };
 use buff_lang_error::{Diagnostic, ParseError, Span};
 use buff_lang_lexer::{Token, TokenKind};
@@ -796,8 +796,8 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
     if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
         // Layout-sensitive form: `struct Name:` + indented field lines.
         stream.advance(); // consume `:`
-        // Expect a Newline then an Indent (the offside-rule tokens emitted by
-        // `indent.rs`). If either is missing, it's a parse error.
+                          // Expect a Newline then an Indent (the offside-rule tokens emitted by
+                          // `indent.rs`). If either is missing, it's a parse error.
         if !matches!(stream.peek_kind(), Some(TokenKind::Newline)) {
             let span = stream
                 .peek()
@@ -820,7 +820,7 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
             )));
         }
         stream.advance(); // consume Indent
-        // Parse fields until Dedent.
+                          // Parse fields until Dedent.
         loop {
             // Field name.
             let fname_tok = stream.advance().ok_or_else(|| {
@@ -850,10 +850,7 @@ pub fn parse_struct_decl(stream: &mut TokenStream<'_>) -> Result<StructDecl, Par
                 break;
             }
         }
-        let span_end = stream
-            .peek()
-            .map(|t| t.span.start)
-            .unwrap_or_else(|| 0);
+        let span_end = stream.peek().map(|t| t.span.start).unwrap_or_else(|| 0);
         return Ok(StructDecl {
             name,
             fields,

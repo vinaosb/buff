@@ -493,23 +493,33 @@ mod tests {
         named_ty("_")
     }
     fn struct_decl(name: &str, fields: Vec<(&str, &str)>) -> Decl {
-        Decl::StructDecl(StructDecl { name: ident(name),
-        fields: fields
-            .into_iter()
-            .map(|(n, t)| (ident(n), named_ty(t)))
-            .collect(), traits: Vec::new(), type_params: Vec::new(), span: span(), })
+        Decl::StructDecl(StructDecl {
+            name: ident(name),
+            fields: fields
+                .into_iter()
+                .map(|(n, t)| (ident(n), named_ty(t)))
+                .collect(),
+            traits: Vec::new(),
+            type_params: Vec::new(),
+            span: span(),
+        })
     }
     fn empty_func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
-        Decl::FuncDecl(FuncDecl { name: ident(name),
-        params: Vec::new(),
-        return_type: None,
-        body: Block {
-            stmts,
+        Decl::FuncDecl(FuncDecl {
+            name: ident(name),
+            params: Vec::new(),
+            return_type: None,
+            body: Block {
+                stmts,
+                span: span(),
+            },
+            is_async: false,
+            is_unsafe: false,
+            is_extern: false,
+            attributes: Vec::new(),
+            type_params: Vec::new(),
             span: span(),
-        },
-        is_async: false,
-        is_unsafe: false,
-        is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: span(), })
+        })
     }
     fn closure_with_typed_param(
         param_name: &str,

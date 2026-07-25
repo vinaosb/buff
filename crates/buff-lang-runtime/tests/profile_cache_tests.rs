@@ -18,8 +18,8 @@
 //! * **Contains / len / is_empty** (3 tests): observational methods.
 
 use buff_lang_runtime::{
-    bucket_intensity, decide_dynamic, ProfileCache, ProfileKey, WorkloadContext, DispatchKind,
-    DataLocation,
+    bucket_intensity, decide_dynamic, DataLocation, DispatchKind, ProfileCache, ProfileKey,
+    WorkloadContext,
 };
 
 // ===========================================================================
@@ -83,7 +83,11 @@ fn profile_cache_different_element_count_misses() {
     let _ = cache.decide_cached("k", &ctx1);
     let _ = cache.decide_cached("k", &ctx2);
 
-    assert_eq!(cache.miss_count(), 2, "different count → different key → 2 misses");
+    assert_eq!(
+        cache.miss_count(),
+        2,
+        "different count → different key → 2 misses"
+    );
     assert_eq!(cache.hit_count(), 0);
 }
 
@@ -97,7 +101,11 @@ fn profile_cache_different_intensity_misses() {
     let _ = cache.decide_cached("k", &ctx_low);
 
     // 8.0 → bucket 80; 0.5 → bucket 5. Different buckets → different keys.
-    assert_eq!(cache.miss_count(), 2, "different intensity bucket → 2 misses");
+    assert_eq!(
+        cache.miss_count(),
+        2,
+        "different intensity bucket → 2 misses"
+    );
 }
 
 #[test]
@@ -110,7 +118,11 @@ fn profile_cache_nearby_intensity_same_bucket_hits() {
     let _ = cache.decide_cached("k", &ctx1);
     let _ = cache.decide_cached("k", &ctx2);
 
-    assert_eq!(cache.miss_count(), 1, "nearby intensity → same bucket → 1 miss");
+    assert_eq!(
+        cache.miss_count(),
+        1,
+        "nearby intensity → same bucket → 1 miss"
+    );
     assert_eq!(cache.hit_count(), 1, "second call hits same bucket");
 }
 

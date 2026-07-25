@@ -668,8 +668,7 @@ fn run_full_program(source: &str) -> EvalResult {
         return EvalResult::err(Diagnostic::error(msg, Span::dummy()));
     }
     rustc_cmd.arg(&rust_path).arg("-o").arg(&exe_path);
-    let compile_out = match rustc_cmd.output()
-    {
+    let compile_out = match rustc_cmd.output() {
         Ok(o) => o,
         Err(e) => {
             let _ = std::fs::remove_file(&rust_path);

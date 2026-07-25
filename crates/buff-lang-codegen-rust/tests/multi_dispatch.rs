@@ -29,13 +29,18 @@ fn param(name: &str, ty: TypeRef) -> Param {
 }
 
 fn func(name: &str, params: &[(&str, TypeRef)]) -> Decl {
-    Decl::FuncDecl(FuncDecl { name: Ident::new(name, sp()),
-    params: params.iter().map(|(n, t)| param(n, t.clone())).collect(),
-    return_type: Some(named("Int")),
-    body: Block::empty(sp()),
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: sp(), })
+    Decl::FuncDecl(FuncDecl {
+        name: Ident::new(name, sp()),
+        params: params.iter().map(|(n, t)| param(n, t.clone())).collect(),
+        return_type: Some(named("Int")),
+        body: Block::empty(sp()),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: sp(),
+    })
 }
 
 #[test]
@@ -58,13 +63,18 @@ fn t58_c1_single_func_emits_unmangled_name() {
 fn t58_c2_extend_block_methods_are_not_mangled() {
     // Multi-dispatch applies ONLY to free functions, not methods. An
     // `extend String { fn shout(self) }` block must keep its name.
-    let method = FuncDecl { name: Ident::new("shout", sp()),
-    params: vec![param("self", named("String"))],
-    return_type: Some(named("String")),
-    body: Block::empty(sp()),
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: sp(), };
+    let method = FuncDecl {
+        name: Ident::new("shout", sp()),
+        params: vec![param("self", named("String"))],
+        return_type: Some(named("String")),
+        body: Block::empty(sp()),
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
+        span: sp(),
+    };
     let decls = vec![Decl::ExtendBlock(ExtendBlock {
         target: named("String"),
         methods: vec![method],
@@ -134,16 +144,21 @@ fn t58_c5_call_site_uses_mangled_name() {
         ],
         span: sp(),
     };
-    let main_fn = FuncDecl { name: Ident::new("main", sp()),
-    params: Vec::new(),
-    return_type: None,
-    body: Block {
-        stmts: vec![Stmt::ExprStmt(call, sp())],
+    let main_fn = FuncDecl {
+        name: Ident::new("main", sp()),
+        params: Vec::new(),
+        return_type: None,
+        body: Block {
+            stmts: vec![Stmt::ExprStmt(call, sp())],
+            span: sp(),
+        },
+        is_async: false,
+        is_unsafe: false,
+        is_extern: false,
+        attributes: Vec::new(),
+        type_params: Vec::new(),
         span: sp(),
-    },
-    is_async: false,
-    is_unsafe: false,
-    is_extern: false, attributes: Vec::new(), type_params: Vec::new(), span: sp(), };
+    };
     let decls = vec![
         func("combine", &[("a", named("Int")), ("b", named("Int"))]),
         func("combine", &[("a", named("Float")), ("b", named("Float"))]),

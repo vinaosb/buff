@@ -7,7 +7,10 @@ use buff_lang_ast::{Expr, Ident, Literal, Span, Stmt};
 use buff_lang_error::{Diagnostic, ParseError};
 use buff_lang_lexer::TokenKind;
 
-use super::{cursor_at_struct_init_body, is_numeric_primary, parse_expression, parse_primary, parse_struct_init_fields};
+use super::{
+    cursor_at_struct_init_body, is_numeric_primary, parse_expression, parse_primary,
+    parse_struct_init_fields,
+};
 use crate::stream::TokenStream;
 // ---------------------------------------------------------------------------
 // Level 13 — postfix: function call `(...)` and method call `.method(...)`.

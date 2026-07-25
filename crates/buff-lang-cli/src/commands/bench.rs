@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use buff_lang_cli::bench_harness::{
-    self, detect_host, git_short_sha, iso8601_now, measure_fixture, resolve_fixtures, build_report,
+    self, build_report, detect_host, git_short_sha, iso8601_now, measure_fixture, resolve_fixtures,
     BenchReport, DEFAULT_BASELINE_PATH, DEFAULT_FIXTURES_DIR, FIXTURE_NAMES,
 };
 
@@ -41,11 +41,7 @@ use buff_lang_cli::bench_harness::{
 /// directory (default: [`DEFAULT_FIXTURES_DIR`]). `no_backend` skips
 /// the rustc invocation entirely (front-end metrics only — useful on
 /// hosts where the linker is known-broken).
-pub fn run(
-    output: Option<&Path>,
-    fixtures_dir: Option<&Path>,
-    no_backend: bool,
-) -> Result<()> {
+pub fn run(output: Option<&Path>, fixtures_dir: Option<&Path>, no_backend: bool) -> Result<()> {
     let output_path: PathBuf = output
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from(DEFAULT_BASELINE_PATH));
@@ -58,7 +54,11 @@ pub fn run(
     println!("output:       {}", output_path.display());
     println!(
         "backend:      {}",
-        if no_backend { "skipped (--no-backend)" } else { "enabled" }
+        if no_backend {
+            "skipped (--no-backend)"
+        } else {
+            "enabled"
+        }
     );
     println!();
 
@@ -81,9 +81,8 @@ pub fn run(
 
     let mut measurements = Vec::with_capacity(fixtures.len());
     for (path, name) in &fixtures {
-        let m = measure_fixture(path, !no_backend).with_context(|| {
-            format!("measurement failed for `{}`", path.display())
-        })?;
+        let m = measure_fixture(path, !no_backend)
+            .with_context(|| format!("measurement failed for `{}`", path.display()))?;
         let hash_tail = m
             .codegen_hash
             .as_ref()
@@ -102,20 +101,16 @@ pub fn run(
     }
 
     // Build the aggregate report.
-    let report: BenchReport = build_report(
-        iso8601_now(),
-        git_short_sha(),
-        detect_host(),
-        measurements,
-    );
+    let report: BenchReport =
+        build_report(iso8601_now(), git_short_sha(), detect_host(), measurements);
 
     // Serialise + write.
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
-    let json = serde_json::to_string_pretty(&report)
-        .context("failed to serialise baseline JSON")?;
+    let json =
+        serde_json::to_string_pretty(&report).context("failed to serialise baseline JSON")?;
     std::fs::write(&output_path, format!("{json}\n"))
         .with_context(|| format!("failed to write `{}`", output_path.display()))?;
 
