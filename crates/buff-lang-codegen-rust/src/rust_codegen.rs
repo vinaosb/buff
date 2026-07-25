@@ -2153,6 +2153,29 @@ impl RustCodegen {
                     if name.name == "block" && args_ref.len() == 1 {
                         return self.lower_block_call(&args_ref[0]);
                     }
+                    // Self-host: data variant constructor qualification.
+                    // If the callee name matches a user-defined enum variant,
+                    // generate EnumName::VariantName(args) instead of bare
+                    // VariantName(args). This enables enum variants WITH data
+                    // like Circle(5) → Shape::Circle(5).
+                    if let Some(enum_name) = self.user_enum_variants.get(&name.name) {
+                        let qualified = format!("{}::{}", enum_name, name.name);
+                        let callee_expr = SynExpr::Path(syn::ExprPath {
+                            attrs: Vec::new(),
+                            qself: None,
+                            path: rust_path(&qualified),
+                        });
+                        let mut call_args: Punctuated<SynExpr, syn::Token![,]> = Punctuated::new();
+                        for arg in args_ref {
+                            call_args.push(self.lower_expr(arg)?);
+                        }
+                        return Ok(SynExpr::Call(syn::ExprCall {
+                            attrs: Vec::new(),
+                            func: Box::new(callee_expr),
+                            paren_token: Default::default(),
+                            args: call_args,
+                        }));
+                    }
                 }
 
                 // A function name (bare Ident callee) is NOT a variable
