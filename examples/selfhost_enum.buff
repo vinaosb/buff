@@ -1,0 +1,37 @@
+// Test: enums + match + multiple struct fields
+struct SourceId {
+    value: Int,
+}
+
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: SourceId,
+}
+
+enum ErrorCode {
+    UnexpectedChar,
+    UnterminatedString,
+    InvalidNumber,
+}
+
+func code_str(code: ErrorCode) -> String:
+    match code {
+        UnexpectedChar => "E1001",
+        UnterminatedString => "E1002",
+        InvalidNumber => "E1003",
+    }
+
+func span_new(s: Int, e: Int, sid: SourceId) -> Span:
+    return Span { start: s, end: e, source_id: sid }
+
+func main():
+    let sid = SourceId { value: 1 }
+    let sp = span_new(s: 0, e: 10, sid: sid)
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id.value)
+    let code = UnexpectedChar
+    print(code_str(code: code))
+    let code2 = InvalidNumber
+    print(code_str(code: code2))

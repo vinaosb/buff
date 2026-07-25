@@ -1,0 +1,19 @@
+// Test: Can we compare enum values with ==?
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+func color_name(c: Color) -> String:
+    if c == Red:
+        return "red"
+    if c == Green:
+        return "green"
+    return "blue"
+
+func main():
+    let c = Red
+    print(color_name(c: c))
+    let c2 = Blue
+    print(color_name(c: c2))

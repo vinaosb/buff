@@ -1,0 +1,56 @@
+// buff-lang-error/span — Buff self-host port of span.rs
+//
+// This is the FIRST crate file ported to Buff for self-hosting.
+// It mirrors crates/buff-lang-error/src/span.rs exactly.
+//
+// Original Rust (36 lines):
+//   pub type ByteOffset = usize;
+//   pub struct SourceId(pub u32);
+//   pub struct Span { pub start, pub end, pub source_id }
+//   impl Span { fn new(...), fn dummy() }
+
+// ByteOffset is a type alias for Int (Buff's i64/usize equivalent).
+// In the Rust original this is `usize`; Buff maps Int to i64.
+// For span arithmetic this is equivalent.
+
+// SourceId — unique identifier for a source file.
+// Rust: `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] pub struct SourceId(pub u32);`
+// Buff: auto-derives Debug, Clone, PartialEq.
+struct SourceId {
+    value: Int,
+}
+
+// Span — a byte range in a source file.
+// Rust: `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] pub struct Span { start, end, source_id }`
+// Buff: auto-derives Debug, Clone, PartialEq.
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: SourceId,
+}
+
+// Constructor: Span.new(start, end, source_id)
+// Mirrors Rust `impl Span { pub fn new(...) -> Self }`.
+// In Buff, associated functions are free functions (convention §7).
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span { start: start, end: end, source_id: source_id }
+
+// Constructor: Span.dummy()
+// Mirrors Rust `impl Span { pub fn dummy() -> Self }`.
+// Creates a zero-length span at offset 0 in source file 0.
+func span_dummy() -> Span:
+    return Span { start: 0, end: 0, source_id: SourceId { value: 0 } }
+
+func main():
+    // Test: span_new produces correct fields
+    let sid = SourceId { value: 1 }
+    let sp = span_new(start: 10, end: 20, source_id: sid)
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id.value)
+
+    // Test: span_dummy produces zero span
+    let dummy = span_dummy()
+    print(dummy.start)
+    print(dummy.end)
+    print(dummy.source_id.value)

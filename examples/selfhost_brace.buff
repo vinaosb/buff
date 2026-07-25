@@ -1,0 +1,8 @@
+// Test: brace form structs
+struct SourceId {
+    value: Int,
+}
+
+func main():
+    let id = SourceId { value: 42 }
+    print(id.value)

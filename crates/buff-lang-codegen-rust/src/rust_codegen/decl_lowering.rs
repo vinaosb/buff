@@ -390,7 +390,7 @@ impl RustCodegen {
         let generics = self.type_params_to_generics(&e.type_params);
 
         Ok(ItemEnum {
-            attrs: derive_and_repr_attrs(false),
+            attrs: struct_derive_attrs(false, false),
             vis: Visibility::Public(Default::default()),
             enum_token: Default::default(),
             ident: ast_ident_to_syn(&e.name),
@@ -487,6 +487,18 @@ impl RustCodegen {
         };
 
         let mut block = self.lower_block(&f.body)?;
+
+        // Tail-expression optimization: if this function has a non-void
+        // return type, the LAST statement (if it's an ExprStmt) should be
+        // the block's tail expression — strip the trailing semicolon so
+        // the block evaluates to the expression's value, not `()`.
+        // Only applied BEFORE .env/tracing/defer injections so those
+        // injected statements keep their semicolons.
+        if f.return_type.is_some() {
+            if let Some(SynStmt::Expr(_, ref mut semi)) = block.stmts.last_mut() {
+                *semi = None;
+            }
+        }
 
         // T124c: emit the tracing-subscriber init at the top of `main`
         // when the program uses the prelude `Log` module. The init MUST

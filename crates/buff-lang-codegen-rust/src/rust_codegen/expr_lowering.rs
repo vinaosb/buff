@@ -232,22 +232,40 @@ impl RustCodegen {
         arms: &[MatchArm],
     ) -> Result<SynExpr, CodegenError> {
         let scrut = self.lower_expr(scrutinee)?;
-        // T86: when this match is in RETURN POSITION (i.e. somewhere up
-        // the lowering stack a `Stmt::Return` incremented
-        // [`Self::return_position_depth`]), every arm body block MUST
-        // yield the arm's value type — not `()`. The parser wraps each
-        // arm body as a one-stmt `Block { stmts: [Stmt::ExprStmt(e)] }`,
-        // and the default [`Self::lower_block`] emits that as `{ e; }`
-        // (statement with semi → block type `()`). In return position
-        // that produces a type-mismatch against the function's declared
-        // return type, so we strip the trailing `;` on the LAST
-        // statement of each arm body block, turning `{ e; }` into
-        // `{ e }` (tail expression → block yields the value).
+        // T86 + tail-expression fix: ALWAYS strip the trailing `;` on the
+        // LAST statement of each arm body block. The parser wraps each arm
+        // body as a one-stmt `Block { stmts: [Stmt::ExprStmt(e)] }`, and
+        // the default [`Self::lower_block`] emits that as `{ e; }`
+        // (statement with semi → block type `()`). For match arms this is
+        // almost never what you want — arm bodies should YIELD the arm's
+        // value type, not `()`. Turning `{ e; }` into `{ e }` (tail
+        // expression → block yields the value) is strictly more general:
+        // `{ e }` is valid Rust whether you want the value or want to
+        // discard it, while `{ e; }` forces `()` and produces a type
+        // mismatch whenever the match is used in a value context
+        // (explicit `return match ...`, implicit tail-expression return,
+        // `let v = match ...`, or even `match` as a sub-expression).
         //
-        // Out of return position (e.g. `match c { ... }` as a
-        // standalone ExprStmt), the original `{ e; }` shape is
-        // preserved so existing snapshots stay byte-identical.
-        let in_return_position = self.return_position_depth > 0;
+        // Originally (T86) the strip was gated on
+        // [`Self::return_position_depth`] > 0 so only explicit
+        // `return match n { ... }` got the strip. That left the implicit
+        // tail-expression case broken:
+        //     func code_str(code: ErrorCode) -> String:
+        //         match code {
+        //             UnexpectedChar => "E1001",
+        //             ...
+        //         }
+        // Here the match is the function body's LAST expression (implicit
+        // return), but `return_position_depth` is 0 because there's no
+        // `Stmt::Return` on the lowering stack. The generated
+        // `{ "E1001"; }` arms yield `()`, mismatching the `-> String`
+        // signature. Always stripping fixes both the explicit and implicit
+        // cases uniformly.
+        //
+        // [`Self::return_position_depth`] is still incremented/decremented
+        // by the `Stmt::Return` lowering arm for backward compatibility
+        // and potential future consumers, but
+        // [`Self::lower_match_expr`] no longer reads it.
         let mut arms_syn: Vec<syn::Arm> = Vec::with_capacity(arms.len());
         for arm in arms {
             let pat = self.lower_pattern(&arm.pattern, false)?;
@@ -272,9 +290,9 @@ impl RustCodegen {
             // back as `pat => expr,`; if it's multiple statements, the
             // block form `pat => { ... },` is emitted (also valid Rust).
             let mut body_block = self.lower_block(&arm.body)?;
-            if in_return_position {
-                strip_trailing_semi_on_last_expr_stmt(&mut body_block);
-            }
+            // Always strip: match arm bodies should yield a value, never
+            // `()`. See the long comment above for rationale.
+            strip_trailing_semi_on_last_expr_stmt(&mut body_block);
             let body_expr = SynExpr::Block(syn::ExprBlock {
                 attrs: Vec::new(),
                 label: None,

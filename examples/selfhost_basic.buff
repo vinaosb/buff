@@ -1,0 +1,25 @@
+// Self-host feasibility: structs + enums + construction
+struct SourceId {
+    value: Int,
+}
+
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: SourceId,
+}
+
+enum ErrorCode {
+    UnexpectedChar,
+    UnterminatedString,
+    InvalidNumber,
+}
+
+func make_span(s: Int, e: Int) -> Span:
+    return Span { start: s, end: e, source_id: SourceId { value: 0 } }
+
+func main():
+    let sp = make_span(s: 0, e: 42)
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id.value)

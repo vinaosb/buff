@@ -1,0 +1,30 @@
+// Test: Can Buff express the core types from buff-lang-error?
+// This is a proof-of-concept for self-hosting feasibility.
+
+struct SourceId:
+    value: Int
+
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+enum ErrorCode:
+    UnexpectedChar
+    UnterminatedString
+    InvalidNumber
+
+func error_code_str(code: ErrorCode) -> String:
+    match code:
+        ErrorCode::UnexpectedChar => "E1001"
+        ErrorCode::UnterminatedString => "E1002"
+        ErrorCode::InvalidNumber => "E1003"
+
+func main():
+    let code = ErrorCode::UnexpectedChar
+    print(error_code_str(code))
+    let span = Span.new(0, 10, SourceId.new(1))
+    print("span start:")
+    print(span.start)
+    print("span end:")
+    print(span.end)

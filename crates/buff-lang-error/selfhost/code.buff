@@ -1,0 +1,69 @@
+// buff-lang-error/code — Buff self-host port of code.rs (subset)
+//
+// Mirrors crates/buff-lang-error/src/code.rs ErrorCode enum.
+// This is a SUBSET — the full enum has ~50 variants. This file
+// includes the E10xx (Lexing) and E11xx (Parsing) phases.
+//
+// STABILITY: ErrorCodes are STABLE FOREVER (§19 of conventions).
+// The variant ORDER in this enum MUST match the Rust original exactly.
+
+enum ErrorCode {
+    // E10xx — Lexing
+    UnexpectedChar,
+    UnterminatedString,
+    InvalidNumber,
+    MixedTabsSpaces,
+    InconsistentIndent,
+    UnterminatedBlockComment,
+    UnterminatedRegex,
+    EmptyRegex,
+    UnterminatedCharLiteral,
+    EmptyCharLiteral,
+    InvalidCharEscape,
+    InvalidUnicodeEscape,
+    UnexpectedBraceInString,
+    UnterminatedInterpolation,
+    // E11xx — Parsing
+    ExpectedToken,
+    UnexpectedToken,
+    ExpectedLayoutNewline,
+    ExpectedIndentedBlock,
+    FuncMustBeTopLevel,
+    ExpectedIdentifier,
+    UnterminatedList,
+    UnsupportedAbi,
+    ExternGenericsUnsupported,
+}
+
+func code_str(code: ErrorCode) -> String:
+    match code {
+        UnexpectedChar => String.from("E1001"),
+        UnterminatedString => String.from("E1002"),
+        InvalidNumber => String.from("E1003"),
+        MixedTabsSpaces => String.from("E1004"),
+        InconsistentIndent => String.from("E1005"),
+        UnterminatedBlockComment => String.from("E1006"),
+        UnterminatedRegex => String.from("E1007"),
+        EmptyRegex => String.from("E1008"),
+        UnterminatedCharLiteral => String.from("E1009"),
+        EmptyCharLiteral => String.from("E1010"),
+        InvalidCharEscape => String.from("E1011"),
+        InvalidUnicodeEscape => String.from("E1012"),
+        UnexpectedBraceInString => String.from("E1013"),
+        UnterminatedInterpolation => String.from("E1014"),
+        ExpectedToken => String.from("E1101"),
+        UnexpectedToken => String.from("E1102"),
+        ExpectedLayoutNewline => String.from("E1103"),
+        ExpectedIndentedBlock => String.from("E1104"),
+        FuncMustBeTopLevel => String.from("E1105"),
+        ExpectedIdentifier => String.from("E1106"),
+        UnterminatedList => String.from("E1107"),
+        UnsupportedAbi => String.from("E1108"),
+        ExternGenericsUnsupported => String.from("E1109"),
+    }
+
+func main():
+    print(code_str(code: UnexpectedChar))
+    print(code_str(code: InvalidNumber))
+    print(code_str(code: ExpectedToken))
+    print(code_str(code: ExternGenericsUnsupported))
