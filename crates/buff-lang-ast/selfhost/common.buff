@@ -1,0 +1,21 @@
+// buff-lang-ast/common — Buff self-host port of common.rs
+// Mirrors Ident struct. Block and Param deferred (need Vector and TypeRef).
+
+// An identifier — source location info.
+// NOTE: Rust version has name: String but Buff codegen has a gap
+// coercing &str literals to String in function params. Using Int
+// hash for now until the codegen fix lands.
+struct Ident {
+    start: Int,
+    end: Int,
+    source_id: Int,
+}
+
+func ident_new(start: Int, end: Int, source_id: Int) -> Ident:
+    return Ident { start: start, end: end, source_id: source_id }
+
+func main():
+    let id = ident_new(start: 0, end: 7, source_id: 1)
+    print(id.start)
+    print(id.end)
+    print(id.source_id)
