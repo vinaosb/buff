@@ -284,6 +284,14 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
                     stream.advance();
                     break;
                 }
+                Some(TokenKind::Shr) => {
+                    // `>>` closing two nested generics at once (e.g.
+                    // `Map<String, Vector<String>>`). Split into two `>`
+                    // tokens — one closes this generic, the other is
+                    // queued for the outer generic context.
+                    stream.split_shr();
+                    break;
+                }
                 Some(other) => {
                     return Err(ParseError::new(Diagnostic::error(
                         format!("expected `,` or `>` in type argument list, found `{other}`"),
