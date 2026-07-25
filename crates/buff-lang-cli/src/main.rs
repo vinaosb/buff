@@ -287,7 +287,21 @@ fn main() -> Result<()> {
             buff_lang_cli::commands::generate::run(&template, &name, output)
         }
         Command::Watch { file, interval } => {
-            buff_lang_cli::commands::watch::run(&file, Some(interval))
+            // The `--interval MS` CLI flag is accepted for forward
+            // compatibility (a persistent salsa DB across watch cycles
+            // would use it for the poll cadence — see T7); the current
+            // legacy watch loop polls on `notify` events, so the value
+            // is honoured only as a stderr note when set below the
+            // default 500 ms.
+            if interval != 500 {
+                eprintln!(
+                    "note: --interval {interval} is accepted but the current watch \
+                     implementation uses the notify event-driven loop (T7 lays \
+                     the foundation for an interval-based polling mode); the \
+                     flag will take effect once the persistent salsa DB lands."
+                );
+            }
+            buff_lang_cli::commands::watch::run(&file, None)
         }
         Command::Profile {
             file,

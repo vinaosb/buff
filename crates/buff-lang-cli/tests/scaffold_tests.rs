@@ -23,7 +23,28 @@ use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
 use buff_lang_cli::commands;
+use buff_lang_cli::pipeline;
 use buff_lang_cli::scaffold::{self, TemplateKind};
+
+/// Convenience wrapper for `commands::run::run` that fills in the
+/// post-T55 / T7 / T9 / T113 default values (no incremental, no
+/// sccache, default linker/debuginfo/backend, native target, no race
+/// detection). Keeps the per-test call sites readable.
+fn run_with_defaults(file: &std::path::Path, args: &[String], release: bool) -> anyhow::Result<()> {
+    commands::run::run(
+        file,
+        args,
+        release,
+        false, // incremental
+        true,  // no_incremental (force legacy path)
+        false, // sccache
+        pipeline::LinkerChoice::default(),
+        pipeline::DebugInfoChoice::default(),
+        pipeline::BackendChoice::default(),
+        None,  // target
+        false, // detect_races
+    )
+}
 
 /// Process-wide mutex serializing tests that call [`std::env::set_current_dir`].
 ///
@@ -371,7 +392,7 @@ fn test_new_generated_project_runs() {
     // doesn't let us assert — so spawn the `buff` lib pipeline via a captured
     // Command isn't trivial; instead we call the run entrypoint and rely on
     // the fact that it prints to stdout that the test runner captures.
-    let result = commands::run::run(&main_path, &[], false);
+    let result = run_with_defaults(&main_path, &[], false);
     cleanup(&workdir);
 
     result.expect("generated `buff new` project should run end-to-end");

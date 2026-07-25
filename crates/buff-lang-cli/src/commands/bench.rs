@@ -29,8 +29,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use buff_lang_cli::bench_harness::{
-    self, build_report, detect_host, git_short_sha, iso8601_now, measure_fixture, resolve_fixtures,
+use crate::bench_harness::{
+    build_report, detect_host, git_short_sha, iso8601_now, measure_fixture, resolve_fixtures,
     BenchReport, DEFAULT_BASELINE_PATH, DEFAULT_FIXTURES_DIR, FIXTURE_NAMES,
 };
 

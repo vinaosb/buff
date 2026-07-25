@@ -187,6 +187,13 @@ impl RenameWalker {
                     self.rename_func(m);
                 }
             }
+            Decl::ImplBlock(imp) => {
+                self.rename_typeref(&mut imp.trait_name);
+                self.rename_typeref(&mut imp.target);
+                for m in &mut imp.methods {
+                    self.rename_func(m);
+                }
+            }
         }
     }
 
@@ -222,19 +229,21 @@ impl RenameWalker {
     fn rename_typeref(&mut self, t: &mut TypeRef) {
         match t {
             TypeRef::Named { name, span: _ } => self.maybe_rename(name),
-            TypeRef::Generic { name, args, .. } => {
-                self.maybe_rename(name);
+            TypeRef::Generic { base, args, .. } => {
+                self.rename_typeref(base);
                 for a in args {
                     self.rename_typeref(a);
                 }
             }
-            TypeRef::Func { params, ret, .. } => {
+            TypeRef::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 for p in params {
                     self.rename_typeref(p);
                 }
-                if let Some(r) = ret {
-                    self.rename_typeref(r);
-                }
+                self.rename_typeref(return_type);
             }
             _ => {}
         }
@@ -527,14 +536,14 @@ fn span_for_name(src: &str, name: &str) -> Option<Span> {
                 .as_bytes()
                 .get(abs - 1)
                 .copied()
-                .map_or(false, is_ident_byte);
+                .is_some_and(is_ident_byte);
         let after_pos = abs + needle.len();
         let after_ok = after_pos >= src.len()
             || !src
                 .as_bytes()
                 .get(after_pos)
                 .copied()
-                .map_or(false, is_ident_byte);
+                .is_some_and(is_ident_byte);
         if before_ok && after_ok {
             return Some(Span::new(abs, after_pos, SourceId(0)));
         }
@@ -863,7 +872,7 @@ pub fn apply_extract_to_source(
     };
     let call_stmt = Stmt::ExprStmt(call, call_span);
 
-    let placeholder_span = span_for_name(src, name).unwrap_or_default();
+    let placeholder_span = span_for_name(src, name).unwrap_or_else(Span::dummy);
     let new_func = FuncDecl {
         name: Ident::new(name, placeholder_span),
         params: Vec::new(),

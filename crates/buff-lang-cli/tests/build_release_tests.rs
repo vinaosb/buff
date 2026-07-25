@@ -166,11 +166,7 @@ fn debug_mode_does_not_carry_release_flags_build_release() {
 fn build_release_flag_parses_true_when_passed_build_release() {
     let cli = Cli::parse_from(["buff", "build", "foo.buff", "--release"]);
     match cli.command {
-        Command::Build {
-            file,
-            output: _,
-            release,
-        } => {
+        Command::Build { file, release, .. } => {
             assert_eq!(file, Some(PathBuf::from("foo.buff")));
             assert!(release, "--release must parse to `true`");
         }
@@ -202,6 +198,7 @@ fn run_release_flag_parses_true_when_passed_build_release() {
             file,
             args,
             release,
+            ..
         } => {
             assert_eq!(file, PathBuf::from("foo.buff"));
             assert!(release, "--release must parse to `true` on `run`");
@@ -273,7 +270,22 @@ fn build_command_with_release_false_compiles_in_debug_build_release() {
         p
     };
 
-    let result = buff_lang_cli::commands::build::run(Some(&file), None, false);
+    let result = buff_lang_cli::commands::build::run(
+        Some(&file),
+        None,
+        false, // release
+        false, // minimal
+        false, // fast
+        false, // no_cache
+        false, // incremental
+        true,  // no_incremental (force legacy path)
+        false, // sccache
+        None,  // target
+        buff_lang_cli::pipeline::LinkerChoice::default(),
+        buff_lang_cli::pipeline::DebugInfoChoice::default(),
+        buff_lang_cli::pipeline::BackendChoice::default(),
+        false, // detect_races
+    );
     result.expect("debug-mode build (release=false) must succeed");
     assert!(exe.exists(), "debug build must produce an executable");
 

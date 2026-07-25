@@ -221,8 +221,7 @@ impl Text {
         }
         let input_owned = input.to_string();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            whatlang::Detector::detect(&input_owned)
-                .map(|info| Language::from_whatlang(info.lang()))
+            whatlang::detect(&input_owned).map(|info| Language::from_whatlang(info.lang()))
         }));
         match result {
             Ok(Some(lang)) => Some(lang),
@@ -291,12 +290,11 @@ impl Text {
 // ---------------------------------------------------------------------------
 
 fn stem_inner(word: &str, algorithm: StemAlgorithm) -> Result<String, NlpError> {
-    let stemmer = rust_stemmers::Stemmer::new(algorithm.to_rust_stemmers()).map_err(|e| {
-        NlpError::StemmerInit {
-            algorithm,
-            message: e.to_string(),
-        }
-    })?;
+    // `rust_stemmers::Stemmer::create` returns a `Stemmer` directly
+    // (no `Result` / no `Error` type in 1.2.x — the Algorithm enum is
+    // exhaustive so construction is infallible). Kept inside a
+    // `catch_unwind` by the public `Text::stem` caller per FFI guide R6.
+    let stemmer = rust_stemmers::Stemmer::create(algorithm.to_rust_stemmers());
     Ok(stemmer.stem(word).into_owned())
 }
 

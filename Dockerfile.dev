@@ -1,0 +1,28 @@
+# Development / CI container for the Buff language workspace.
+# Solves the Windows MSVC blocker by providing a clean Linux Rust toolchain.
+#
+# Usage:
+#   docker build -f Dockerfile.dev -t buff-dev .
+#   docker run --rm -v "$PWD:/workspace" -w /workspace buff-dev cargo clippy --workspace --all-targets -- -D warnings
+#   docker run --rm -v "$PWD:/workspace" -w /workspace buff-dev cargo test --workspace
+#   docker run --rm -v "$PWD:/workspace" -w /workspace buff-dev bash -c "cargo build -p buff-lang-cli --release && ./target/release/buff check examples/ola.buff"
+
+FROM rust:1.95.0-bookworm
+
+# Install system dependencies needed by the workspace
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Cache dependencies (copy only manifest files first)
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ ./crates/
+
+# Default command — override in docker run
+CMD ["bash"]

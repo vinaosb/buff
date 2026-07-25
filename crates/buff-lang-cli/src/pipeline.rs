@@ -1025,7 +1025,7 @@ pub fn inject_profiling(rust_source: &str, mode: ProfileMode) -> Result<String> 
             if fn_item.sig.ident == "main" && fn_item.sig.inputs.is_empty() {
                 let original_stmts = std::mem::take(&mut fn_item.block.stmts);
                 let new_block = build_instrumented_block(&original_stmts, mode)?;
-                fn_item.block = Box::new(new_block);
+                *fn_item.block = new_block;
                 main_found = true;
                 break;
             }
@@ -1227,6 +1227,7 @@ pub fn compile_rust_to_exe(
         DebugInfoChoice::default(),
         BackendChoice::default(),
         None,
+        false, // detect_races: not exposed on this convenience wrapper
     )
 }
 
@@ -1258,6 +1259,7 @@ pub fn compile_rust_to_exe(
 ///   rustc, probes `rustup target list --installed` to verify the target
 ///   is installed; if not, returns a clear error with the install command.
 ///   When `None` (default), no `--target` flag is passed (native compilation).
+#[allow(clippy::too_many_arguments)] // T55+T3+T4+T112+T113 layered params; would reshape public API to refactor.
 pub fn compile_rust_to_exe_with_speed(
     rust_file: &Path,
     output: &Path,
@@ -1339,7 +1341,7 @@ pub fn compile_rust_to_exe_with_speed(
         };
 
     // T35: delegate common flag configuration to the shared helper.
-    rustc_invoke::configure_rustc_command(
+    crate::rustc_invoke::configure_rustc_command(
         &mut cmd,
         opt_flags,
         linker_flags,
@@ -1641,6 +1643,7 @@ pub fn minimal_profile_toml() -> String {
 /// Delegates to [`crate::rustc_invoke::target_is_installed`] (T35 — the
 /// single source of truth for target-installed probing across the CLI
 /// and buff-eval).
+#[allow(dead_code)] // T112 helper; consumed by `--target` cross-compile dispatch.
 fn target_is_installed(triple: &str) -> bool {
     crate::rustc_invoke::target_is_installed(triple)
 }
@@ -2155,7 +2158,7 @@ fn Counter() -> Element {\n    rsx! { \"hi\" }\n}\n";
     #[test]
     fn resolve_linker_auto_never_errors() {
         // Auto must always resolve without error (may be None on any host).
-        let resolved = resolve_linker(LinkerChoice::Auto).unwrap();
+        let _resolved = resolve_linker(LinkerChoice::Auto).unwrap();
         // No assertion on is_fast — it depends on what's on PATH.
         // The important thing is it doesn't panic or error.
     }

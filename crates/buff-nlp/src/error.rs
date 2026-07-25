@@ -1,11 +1,12 @@
 //! Error type for the `buff-nlp` crate.
 //!
 //! All fallible operations surface as [`NlpError`]. The public entry
-//! points ([`crate::Text::stem`]) map the underlying
-//! `rust_stemmers::Error` into this enum so the public surface depends
-//! only on `buff-nlp`'s own types (Buff code never sees a raw
-//! `rust_stemmers::*` / `whatlang::*` / `unicode_segmentation::*`
-//! error type).
+//! points ([`crate::Text::stem`]) wrap the underlying
+//! `rust-stemmers` crate (which no longer exposes an `Error` type —
+//! `Stemmer::create` returns a `Stemmer` directly) so the public
+//! surface depends only on `buff-nlp`'s own types (Buff code never
+//! sees a raw `rust_stemmers::*` / `whatlang::*` /
+//! `unicode_segmentation::*` error type).
 //!
 //! # Panic-free contract
 //!
@@ -44,18 +45,4 @@ pub enum NlpError {
     /// of a process abort.
     #[error("internal error: nlp operation panicked")]
     Panic,
-}
-
-impl From<rust_stemmers::Error> for NlpError {
-    /// Map a raw `rust_stemmers::Error` into [`NlpError::StemmerInit`].
-    /// The algorithm field is filled by the caller after conversion
-    /// (`from(err)` cannot know which algorithm was requested), so the
-    /// public entry point uses `NlpError::StemmerInit { algorithm, .. }`
-    /// pattern matching via direct construction instead of `?` here.
-    fn from(err: rust_stemmers::Error) -> Self {
-        NlpError::StemmerInit {
-            algorithm: crate::StemAlgorithm::English,
-            message: err.to_string(),
-        }
-    }
 }

@@ -34,7 +34,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::compile_speed;
 use crate::config::{self, BuffConfig};

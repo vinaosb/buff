@@ -308,7 +308,9 @@ fn check_command_run_on_clean_file_returns_clean() {
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_clean.buff");
     std::fs::write(&path, "func main():\n    print(\"hi\")\n").expect("write temp");
-    let outcome = buff_lang_cli::commands::check::run(&path, false).expect("check ok");
+    let outcome =
+        buff_lang_cli::commands::check::run(&path, false, Default::default(), None, false)
+            .expect("check ok");
     assert_eq!(outcome, CheckOutcome::Clean);
     let _ = std::fs::remove_file(&path);
 }
@@ -323,7 +325,9 @@ fn check_command_run_on_type_error_returns_has_errors() {
         "func main():\n    let x: Int = \"oops\"\n    print(x)\n",
     )
     .expect("write");
-    let outcome = buff_lang_cli::commands::check::run(&path, false).expect("check ok");
+    let outcome =
+        buff_lang_cli::commands::check::run(&path, false, Default::default(), None, false)
+            .expect("check ok");
     assert_eq!(outcome, CheckOutcome::HasErrors);
     let _ = std::fs::remove_file(&path);
 }
@@ -334,7 +338,9 @@ fn check_command_run_on_camelcase_returns_has_warnings_by_default() {
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_camelcase.buff");
     std::fs::write(&path, "func myFunc():\n    print(\"hi\")\n").expect("write");
-    let outcome = buff_lang_cli::commands::check::run(&path, false).expect("check ok");
+    let outcome =
+        buff_lang_cli::commands::check::run(&path, false, Default::default(), None, false)
+            .expect("check ok");
     assert_eq!(outcome, CheckOutcome::HasWarnings);
     let _ = std::fs::remove_file(&path);
 }
@@ -345,7 +351,14 @@ fn check_command_run_with_deny_warnings_promotes_to_has_errors() {
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_deny_warnings.buff");
     std::fs::write(&path, "func myFunc():\n    print(\"hi\")\n").expect("write");
-    let outcome = buff_lang_cli::commands::check::run(&path, /* deny_warnings */ true).expect("ok");
+    let outcome = buff_lang_cli::commands::check::run(
+        &path,
+        /* deny_warnings */ true,
+        Default::default(),
+        None,
+        false,
+    )
+    .expect("ok");
     assert_eq!(
         outcome,
         CheckOutcome::HasErrors,
@@ -360,7 +373,7 @@ fn check_command_run_on_missing_file_propagates_error() {
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("does_not_exist.buff");
     let _ = std::fs::remove_file(&path);
-    let result = buff_lang_cli::commands::check::run(&path, false);
+    let result = buff_lang_cli::commands::check::run(&path, false, Default::default(), None, false);
     assert!(
         result.is_err(),
         "missing file should propagate as Err (not an outcome)"
@@ -383,7 +396,9 @@ fn check_rendered_output_includes_severity_and_path() {
     // by redirecting to a file (the simplest cross-process way in a test).
     // We don't assert on stderr text (that's flaky); we just confirm the
     // run itself succeeds and returns the expected outcome.
-    let outcome = buff_lang_cli::commands::check::run(&path, false).expect("check ok");
+    let outcome =
+        buff_lang_cli::commands::check::run(&path, false, Default::default(), None, false)
+            .expect("check ok");
     assert_eq!(outcome, CheckOutcome::HasWarnings);
     let _ = std::fs::remove_file(&path);
 }

@@ -22,9 +22,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use buff_lang_debug_info::{
-    format, install_panic_hook, remap_panic_backtrace, BuffTraceFrame, SourceMap,
-};
+use buff_lang_debug_info::{format, install_panic_hook, BuffTraceFrame, SourceMap};
 
 /// Entry point for `buff backtrace <LOG> [--buffmap <PATH>]`.
 ///

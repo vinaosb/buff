@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use buff_lang_ast::FuncDecl;
 use buff_lang_error::Severity;
 
 use crate::check::{run_check_file, CheckOutcome, CheckReport};
@@ -308,7 +309,7 @@ fn section_language_syntax() -> String {
     s.push_str("```buff\n");
     s.push_str("func add(a: Int, b: Int) -> Int:\n");
     s.push_str("    return a + b\n");
-    s.push_str("\n");
+    s.push('\n');
     s.push_str("func main():\n");
     s.push_str("    print(add(2, 3))\n");
     s.push_str("```\n\n");
@@ -421,7 +422,7 @@ fn section_type_methods() -> String {
         let instance_fns: Vec<&str> = PreludeInstanceFn::ALL
             .iter()
             .filter(|m| {
-                buff_lang_types::instance_fn_return_type(&pt.buff_type(), *m, &[]).is_some()
+                buff_lang_types::instance_fn_return_type(&pt.buff_type(), **m, &[]).is_some()
             })
             .map(|m| m.name())
             .collect();
@@ -430,7 +431,7 @@ fn section_type_methods() -> String {
         }
         s.push_str(&format!("### `{type_name}`\n\n"));
         if !assoc_fns.is_empty() {
-            s.push_str(&format!("- Associated functions: "));
+            s.push_str("- Associated functions: ");
             let joined = assoc_fns
                 .iter()
                 .map(|n| format!("`{n}`"))
@@ -440,7 +441,7 @@ fn section_type_methods() -> String {
             s.push_str(&format!("  (call as `{type_name}.method(args)`)\n"));
         }
         if !instance_fns.is_empty() {
-            s.push_str(&format!("- Instance methods: "));
+            s.push_str("- Instance methods: ");
             let joined = instance_fns
                 .iter()
                 .map(|n| format!("`{n}`"))
@@ -601,7 +602,6 @@ fn collect_buff_files(root: &Path) -> Vec<PathBuf> {
 /// Returns `Err` if the file fails to lex/parse (which is fine — the
 /// context pack still lists the file in section 5 above).
 fn extract_project_symbols(file: &Path) -> Result<Vec<String>> {
-    use buff_lang_ast::Decl;
     use buff_lang_error::SourceId;
     let src = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read `{}`", file.display()))?;
@@ -623,7 +623,7 @@ fn extract_decl_signatures(decls: &[buff_lang_ast::Decl]) -> Vec<String> {
 }
 
 fn walk_decl(decl: &buff_lang_ast::Decl, out: &mut Vec<String>) {
-    use buff_lang_ast::{Decl, EnumDecl, ExportDecl, FuncDecl, StructDecl};
+    use buff_lang_ast::{Decl, EnumDecl, ExportDecl, StructDecl};
     match decl {
         Decl::FuncDecl(f) => out.push(format_func_signature(f, false)),
         Decl::ExportDecl(ExportDecl { inner, .. }) => walk_decl(inner.as_ref(), out),

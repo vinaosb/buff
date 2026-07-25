@@ -201,17 +201,19 @@ impl Email {
             (Some(plain), Some(html)) => {
                 MultiPart::alternative_plain_html(plain.clone(), html.clone())
             }
-            (Some(plain), None) => MultiPart::single_single(
+            // lettre 0.11 dropped `MultiPart::single_single` and made
+            // `SinglePartBuilder::body` infallible (returns `SinglePart`
+            // directly, no `Result`). Wrap the lone SinglePart in a
+            // `multipart/mixed` envelope via `MultiPart::mixed().singlepart(..)`.
+            (Some(plain), None) => MultiPart::mixed().singlepart(
                 SinglePart::builder()
                     .header(ContentType::TEXT_PLAIN)
-                    .body(plain.clone())
-                    .map_err(|e| EmailError::Build(e.to_string()))?,
+                    .body(plain.clone()),
             ),
-            (None, Some(html)) => MultiPart::single_single(
+            (None, Some(html)) => MultiPart::mixed().singlepart(
                 SinglePart::builder()
                     .header(ContentType::TEXT_HTML)
-                    .body(html.clone())
-                    .map_err(|e| EmailError::Build(e.to_string()))?,
+                    .body(html.clone()),
             ),
             (None, None) => {
                 return Err(EmailError::Build(
@@ -223,7 +225,9 @@ impl Email {
         let final_part: MultiPart = if self.attachments.is_empty() {
             body_part
         } else {
-            let mut mixed = MultiPart::mixed().build(body_part);
+            // `MultiPart::mixed().build()` now takes no args; nest the
+            // body MultiPart via `.multipart(..)` (was `.build(part)`).
+            let mut mixed = MultiPart::mixed().multipart(body_part);
             for path in &self.attachments {
                 let filename = path
                     .file_name()

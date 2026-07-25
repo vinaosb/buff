@@ -204,7 +204,7 @@ struct DocItem {
     anchor: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ItemKind {
     Function,
     Struct,
@@ -367,7 +367,8 @@ fn item_from_decl(decl: &Decl, src: &str, lines: &LineTable, is_pub: bool) -> Op
         | Decl::ExternCrateDecl(_)
         | Decl::ExternFuncDecl(_)
         | Decl::ExtendBlock(_)
-        | Decl::ExportDecl(_) => return None,
+        | Decl::ExportDecl(_)
+        | Decl::ImplBlock(_) => return None,
     };
     let anchor = format!("{}-{}", kind.label(), name);
     let doc = doc_comment_for(src, lines, span.start);
@@ -1081,7 +1082,7 @@ pub fn run_serve(dir: &Path, output: Option<&Path>, port: u16) -> Result<()> {
 
     let sse_clients_watcher = sse_clients.clone();
     let last_mtimes_watcher = last_mtimes.clone();
-    let docs_root_watcher = docs_root.clone();
+    let _docs_root_watcher = docs_root.clone();
     let dir_watcher = dir.to_path_buf();
     let output_watcher = output.map(|p| p.to_path_buf());
 
@@ -1130,7 +1131,7 @@ pub fn run_serve(dir: &Path, output: Option<&Path>, port: u16) -> Result<()> {
                         match s.as_mut() {
                             Some(s) => {
                                 use std::io::Write;
-                                if let Err(_) = write!(s, "{msg}") {
+                                if write!(s, "{msg}").is_err() {
                                     false
                                 } else {
                                     s.flush().ok();
@@ -1235,6 +1236,7 @@ fn handle_connection(
 
             // Keep the connection open (block on read until the client
             // disconnects). The watcher thread writes to the stream.
+            use std::io::Read;
             let mut buf = [0u8; 1024];
             loop {
                 match stream.read(&mut buf) {

@@ -153,9 +153,9 @@ fn build_mode_fast_produces_disjoint_flags_from_debug() {
     // must be disjoint so a fast build never accidentally enables the
     // debug optimiser (and vice versa).
     let fast = pipeline::rustc_fast_flags().join(" ");
-    let debug_is_just_O = fast.contains("opt-level=0");
+    let debug_is_just_o = fast.contains("opt-level=0");
     assert!(
-        debug_is_just_O,
+        debug_is_just_o,
         "fast flags must contain opt-level=0, got: {fast}"
     );
     // Minimal + Release must NOT contain opt-level=0 (they use z / 3).

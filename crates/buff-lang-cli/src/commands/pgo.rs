@@ -342,7 +342,7 @@ mod tests {
         assert!(
             files
                 .iter()
-                .all(|f| f.extension() == Some("profraw".as_os())),
+                .all(|f| f.extension() == Some(std::ffi::OsStr::new("profraw"))),
             "must only return .profraw files"
         );
         let _ = std::fs::remove_file(dir.join("not_prof.txt"));

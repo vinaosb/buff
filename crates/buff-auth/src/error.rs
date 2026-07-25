@@ -76,8 +76,16 @@ impl From<argon2::password_hash::Error> for AuthError {
     }
 }
 
-impl From<oauth2::RequestTokenError<reqwest::Error>> for AuthError {
-    fn from(err: oauth2::RequestTokenError<reqwest::Error>) -> Self {
+// `oauth2::RequestTokenError` is generic over both the HTTP transport
+// error (`RE`) AND the OAuth2 error-response body (`T`) in oauth2 4.4+.
+// A blanket impl keeps the public surface independent of the underlying
+// `T` (BasicErrorResponse vs a future custom variant).
+impl<RE, T> From<oauth2::RequestTokenError<RE, T>> for AuthError
+where
+    RE: std::error::Error + Send + Sync + 'static,
+    T: oauth2::ErrorResponse + Send + Sync + 'static,
+{
+    fn from(err: oauth2::RequestTokenError<RE, T>) -> Self {
         AuthError::OAuth2(err.to_string())
     }
 }

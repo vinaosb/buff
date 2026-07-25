@@ -64,7 +64,7 @@ pub fn kind_from_str(s: &str) -> Option<GenKind> {
 /// existing files, then writes the stub content. Parent directories are
 /// created on demand (matches `buff new` behaviour).
 pub fn run(kind: GenKind, name: &str) -> Result<()> {
-    validate_artifact_name(name)?;
+    validate_artifact_name(name).map_err(anyhow::Error::msg)?;
 
     let files = files_for_gen(kind, name);
     // Refuse to clobber ANY of the files — partial clobber would leave

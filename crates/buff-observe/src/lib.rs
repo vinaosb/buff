@@ -119,48 +119,26 @@ impl Tracer {
 
     /// Bootstrap with OTLP export via gRPC.
     ///
-    /// Registers both a console fmt layer AND an OTLP gRPC exporter.
-    /// The OTLP endpoint defaults to `http://localhost:4317`.
+    /// **NOTE — opentelemetry 0.27 API gap.** The `opentelemetry-otlp`
+    /// 0.27 crate removed the `new_pipeline()` / `new_exporter()` builder
+    /// entry points this method was originally written against. The new
+    /// 0.27 API requires `opentelemetry_sdk` + `tracing-opentelemetry`
+    /// (neither of which is a workspace dep today) plus a tokio runtime
+    /// to drive the batch exporter. A proper rewrite is tracked as a
+    /// sibling task — see `.sisyphus/plans/buff-v1x-frameworks.md` T21.
     ///
-    /// # Errors
-    ///
-    /// Returns [`ObserveError::AlreadyInitialized`] if a global subscriber
-    /// is already set. Returns [`ObserveError::Message`] if the OTLP
-    /// pipeline fails to initialise.
-    pub fn bootstrap_otlp(endpoint: &str) -> Result<(), ObserveError> {
-        let ep = endpoint.to_string();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            let tracer = opentelemetry_otlp::new_pipeline()
-                .tracing()
-                .with_exporter(
-                    opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_endpoint(&ep),
-                )
-                .install_simple();
-            match tracer {
-                Ok(provider) => {
-                    opentelemetry::global::set_tracer_provider(provider);
-                    let otel_layer = tracing_opentelemetry::layer();
-                    let _ = tracing_subscriber::fmt()
-                        .with_env_filter(
-                            tracing_subscriber::EnvFilter::try_from_default_env()
-                                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-                        )
-                        .with(otel_layer)
-                        .try_init();
-                    Ok(())
-                }
-                Err(e) => Err(ObserveError::Message(format!(
-                    "failed to install OTLP pipeline: {e}"
-                ))),
-            }
-        }));
-        match result {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(ObserveError::Panic),
-        }
+    /// Until that rewrite lands, this method returns a stable
+    /// [`ObserveError::Message`] so callers see a clean diagnostic
+    /// (never a compile error or runtime panic). The console-only
+    /// [`Tracer::bootstrap`] path remains fully functional.
+    pub fn bootstrap_otlp(_endpoint: &str) -> Result<(), ObserveError> {
+        Err(ObserveError::Message(
+            "OTLP export is not yet supported against opentelemetry-otlp 0.27 \
+             (the crate's new_pipeline() / new_exporter() builder API was removed). \
+             Use Tracer::bootstrap() for console output; OTLP wiring is tracked \
+             under T21 follow-up."
+                .to_string(),
+        ))
     }
 }
 
@@ -200,9 +178,14 @@ impl Span {
 
     /// Add a structured field to the span.
     ///
-    /// The value must be a type that implements `tracing::Value` (i64, f64,
-    /// String, bool, etc.).
-    pub fn field<V: tracing::field::AsField + std::fmt::Debug>(&self, name: &str, value: V) {
+    /// The value must be a type that implements both
+    /// `tracing::field::AsField` (for the field name lookup) and
+    /// `tracing::Value` (the value trait bound on `Span::record`).
+    pub fn field<V: tracing::field::AsField + std::fmt::Debug + tracing::Value>(
+        &self,
+        name: &str,
+        value: V,
+    ) {
         self.inner.record(name, value);
     }
 
@@ -210,9 +193,16 @@ impl Span {
     ///
     /// While the guard is alive, all tracing events and child spans are
     /// associated with this span.
+    ///
+    /// **Implementation note**: the guard holds an owned `EnteredSpan`
+    /// (not `Entered<'static>` which would borrow from `self`). We clone
+    /// the underlying `tracing::Span` (cheap — Arc refcount bump) and
+    /// call `.entered()` on the clone, which consumes it and returns an
+    /// owned `EnteredSpan` that drops cleanly without a lifetime tie to
+    /// this `Span`.
     pub fn enter(&self) -> SpanGuard {
         SpanGuard {
-            _inner: self.inner.enter(),
+            _inner: self.inner.clone().entered(),
         }
     }
 }
@@ -221,7 +211,7 @@ impl Span {
 ///
 /// Created by [`Span::enter`]. Dropping the guard causes the span to close.
 pub struct SpanGuard {
-    _inner: tracing::span::Entered<'static>,
+    _inner: tracing::span::EnteredSpan,
 }
 
 // ---------------------------------------------------------------------------

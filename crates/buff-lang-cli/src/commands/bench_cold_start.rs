@@ -67,8 +67,8 @@ pub const RUN_COUNT: usize = 10;
 pub const WARMUP_COUNT: usize = 1;
 
 /// Default output paths (relative to cwd).
-const JSON_REPORT_PATH: &str = "benchmarks/cold-start.json";
-const MARKDOWN_REPORT_PATH: &str = "benchmarks/cold-start.md";
+pub const JSON_REPORT_PATH: &str = "benchmarks/cold-start.json";
+pub const MARKDOWN_REPORT_PATH: &str = "benchmarks/cold-start.md";
 
 /// The fixture source — kept inline so the subcommand is self-contained
 /// (doesn't depend on a file in the repo layout that may move).

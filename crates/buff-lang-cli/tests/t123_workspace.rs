@@ -371,8 +371,23 @@ fn integration_builds_two_member_workspace() {
     let _cwd_guard = CwdGuard(prev.clone());
 
     // Drive the library API: buff build (no file → workspace mode).
-    buff_lang_cli::commands::build::run(None, None, false, false, false, false, false, None)
-        .expect("build must succeed");
+    buff_lang_cli::commands::build::run(
+        None,
+        None,
+        false, // release
+        false, // minimal
+        false, // fast
+        false, // no_cache
+        false, // incremental
+        false, // no_incremental
+        false, // sccache
+        None,  // target
+        buff_lang_cli::pipeline::LinkerChoice::default(),
+        buff_lang_cli::pipeline::DebugInfoChoice::default(),
+        buff_lang_cli::pipeline::BackendChoice::default(),
+        false, // detect_races
+    )
+    .expect("build must succeed");
 
     // Assert both member binaries were compiled. cargo build places
     // binaries at target/debug/<name>(.exe).
@@ -440,8 +455,16 @@ fn integration_runs_cargo_test_at_workspace_root() {
     }
     let _cwd_guard = CwdGuard(prev);
 
-    // buff test (no file → workspace mode).
-    buff_lang_cli::commands::test::run(None, None).expect("cargo test must succeed");
+    // buff test (no file → workspace mode). The current library API
+    // (`commands::test::run`) does NOT have a workspace-mode dispatch
+    // (that lives in main.rs at the CLI layer); we approximate the old
+    // `run(None, None)` workspace invocation by passing `.` (the cwd,
+    // which `CwdGuard` switched to `ws_root`) so discover_test_files
+    // walks the workspace root. NOTE: the test is `#[ignore]`'d so this
+    // only matters for `cargo test --ignored` runs; the assertion
+    // (cargo test exit code 0) is preserved.
+    buff_lang_cli::commands::test::run(std::path::Path::new("."), None, false, false)
+        .expect("cargo test must succeed");
 
     cleanup(&ws_root);
 }

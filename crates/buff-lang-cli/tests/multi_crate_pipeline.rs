@@ -30,7 +30,7 @@ fn temp_root() -> PathBuf {
     dir
 }
 
-fn write_fixture(root: &PathBuf, name: &str, contents: &str) -> PathBuf {
+fn write_fixture(root: &std::path::Path, name: &str, contents: &str) -> PathBuf {
     let path = root.join(name);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
