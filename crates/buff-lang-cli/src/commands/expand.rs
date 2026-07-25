@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use buff_lang_cli::pipeline;
+use crate::pipeline;
 
 /// Run the expand subcommand.
 ///

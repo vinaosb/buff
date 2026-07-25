@@ -52,9 +52,7 @@ use std::fmt::Write;
 
 use buff_lang_ast::{
     lossless::{parse_lossless, LosslessTree, Piece},
-    Attribute, Block, Decl, EnumDecl, EnumVariant, ExportDecl, Expr, ExtendBlock, FuncDecl,
-    GuardCondition, Ident, ImportDecl, InterpPart, Literal, MatchArm, MethodSig, Param, Pattern,
-    ReexportDecl, Span, Stmt, StructDecl, TraitDecl, TypeRef,
+    Block, Decl, Expr, GuardCondition, ImportDecl, Literal, Span, Stmt, TypeRef,
 };
 use buff_lang_error::{ParseError, SourceId};
 use buff_lang_lexer::{tokenize, LexerError};
@@ -136,7 +134,7 @@ pub fn is_already_formatted(src: &str) -> Result<bool, FormatError> {
 // ---------------------------------------------------------------------------
 
 const INDENT_UNIT: &str = "    "; // 4 spaces
-const MAX_LINE_LEN: usize = 100;
+pub(crate) const MAX_LINE_LEN: usize = 100;
 
 /// Internal pretty-printer state. Owns the output buffer + current indent.
 ///
@@ -856,6 +854,10 @@ impl<'a> Formatter<'a> {
                 self.raw("defer ");
                 self.write_expr(expr);
             }
+            Stmt::ComptimeBlock { body, .. } => {
+                self.raw("comptime:");
+                self.write_block_body(body);
+            }
         }
     }
 
@@ -882,6 +884,7 @@ fn decl_span(d: &Decl) -> Span {
         Decl::ExternCrateDecl(c) => c.span,
         Decl::ExternFuncDecl(d) => d.span,
         Decl::ExtendBlock(ext) => ext.span,
+        Decl::ImplBlock(imp) => imp.span,
     }
 }
 
@@ -896,7 +899,8 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::LetPattern { span, .. }
         | Stmt::ForLet { span, .. }
         | Stmt::Guard { span, .. }
-        | Stmt::Defer { span, .. } => *span,
+        | Stmt::Defer { span, .. }
+        | Stmt::ComptimeBlock { span, .. } => *span,
         Stmt::ExprStmt(_, sp) | Stmt::Return(_, sp) | Stmt::Break(sp) | Stmt::Continue(sp) => *sp,
     }
 }
@@ -918,7 +922,7 @@ fn sort_key(imp: &ImportDecl) -> String {
 }
 
 /// Rough byte-cost estimate of an expression for line-wrapping decisions.
-fn est_expr_len(expr: &Expr) -> usize {
+pub(crate) fn est_expr_len(expr: &Expr) -> usize {
     match expr {
         Expr::Literal(lit, _) => match lit {
             Literal::Int(v) => v.to_string().len(),
@@ -953,7 +957,7 @@ fn est_expr_len(expr: &Expr) -> usize {
     }
 }
 
-fn est_block_len(block: &Block) -> usize {
+pub(crate) fn est_block_len(block: &Block) -> usize {
     block.stmts.iter().map(est_stmt_len).sum()
 }
 

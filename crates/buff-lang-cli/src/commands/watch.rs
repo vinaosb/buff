@@ -248,6 +248,7 @@ fn rebuild(file: &Path, exec: Option<&str>) {
         crate::pipeline::LinkerChoice::default(), // linker
         crate::pipeline::DebugInfoChoice::default(), // debuginfo
         crate::pipeline::BackendChoice::default(), // backend
+        false, // detect_races
     );
     match args {
         Ok(()) => {

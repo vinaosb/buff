@@ -28,7 +28,8 @@
 //! exit-non-zero.
 
 use buff_lang_ast::{
-    Block, Decl, EnumDecl, ExportDecl, ExtendBlock, FuncDecl, Ident, Stmt, StructDecl, TraitDecl,
+    Block, Decl, EnumDecl, ExportDecl, Expr, ExtendBlock, FuncDecl, Ident, Stmt, StructDecl,
+    TraitDecl,
 };
 use buff_lang_error::Diagnostic;
 
@@ -147,7 +148,8 @@ fn lint_decl(decl: &Decl, out: &mut Vec<Diagnostic>) {
         | Decl::ModuleDecl(_)
         | Decl::ReexportDecl(_)
         | Decl::ExternCrateDecl(_)
-        | Decl::ExternFuncDecl(_) => {}
+        | Decl::ExternFuncDecl(_)
+        | Decl::ImplBlock(_) => {}
     }
 }
 
@@ -390,7 +392,7 @@ fn lint_mistakes_expr(expr: &Expr, candidates: &[&str], out: &mut Vec<Diagnostic
             // e.g. `Print` -> `print`. Only suggest when the lowercase
             // form is a real prelude fn.
             let lower = name.to_ascii_lowercase();
-            if lower != name && buff_lang_types::is_prelude(&lower) {
+            if &lower != name && buff_lang_types::is_prelude(&lower) {
                 out.push(
                     Diagnostic::warning(
                         format!("function names are lowercase, not `{name}`"),

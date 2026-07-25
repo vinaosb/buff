@@ -2,8 +2,8 @@
 //! project generation).
 //!
 //! This is the multi-file sibling of [`crate::pipeline::compile_to_rust`]
-//! + [`crate::pipeline::compile_rust_to_exe`]. Given a project root
-//! (the entry-point `.buff` file), it:
+//! and [`crate::pipeline::compile_rust_to_exe`]. Given a project root
+//! (the entry-point `.buff` file), the pipeline:
 //!
 //! 1. Parses every transitively-imported module via
 //!    [`buff_lang_types::parse_project`] (cycle detection + visibility
@@ -334,7 +334,7 @@ pub fn flatten_project(project: &ParsedProject) -> Vec<Decl> {
         for decl in &module.decls {
             match decl {
                 Decl::ImportDecl(_) | Decl::ReexportDecl(_) => continue,
-                Decl::ExportDecl(e) => out.push((**e.inner).clone()),
+                Decl::ExportDecl(e) => out.push((*e.inner).clone()),
                 other => out.push(other.clone()),
             }
         }
@@ -357,13 +357,15 @@ pub fn default_project_dir(entry_buff: &Path) -> PathBuf {
     // Walk up one more level if the entry's parent is `src/` — this
     // places the Cargo project at the project root (alongside
     // `buff.toml`) rather than inside `src/`.
-    let grandparent = parent
+    let grandparent = if parent
         .file_name()
         .and_then(|n| n.to_str())
-        .map(|n| n == "src")
-        .unwrap_or(false)
-        .then(|| parent.parent().unwrap_or(parent).to_path_buf())
-        .unwrap_or_else(|| parent.to_path_buf());
+        .is_some_and(|n| n == "src")
+    {
+        parent.parent().unwrap_or(parent).to_path_buf()
+    } else {
+        parent.to_path_buf()
+    };
     grandparent.join("buff_target_project")
 }
 
@@ -600,7 +602,7 @@ mod tests {
             "import { other } from \"./a.buff\"\nexport func something() { return 1 }\n",
         );
         let a = dir.join("src").join("a.buff");
-        let err = compile_project_to_cargo(&a, Some(dir.join("out")), None)
+        let err = compile_project_to_cargo(&a, Some(&dir.join("out")), None)
             .expect_err("cycle should error");
         let msg = format!("{err}");
         assert!(
@@ -623,7 +625,7 @@ mod tests {
             "main.buff",
             "import { nonexistent } from \"./math.buff\"\nfunc main() { return 0 }\n",
         );
-        let err = compile_project_to_cargo(&main, Some(dir.join("out")), None)
+        let err = compile_project_to_cargo(&main, Some(&dir.join("out")), None)
             .expect_err("missing import should error");
         assert!(
             err.to_string().contains("no symbol 'nonexistent'"),

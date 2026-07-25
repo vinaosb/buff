@@ -329,12 +329,18 @@ fn try_measure_minimal_size(src: &str) -> Option<u64> {
     let result = buff_lang_cli::commands::build::run(
         Some(&file),
         None,
-        false,
-        true,
-        false,
-        false,
-        false,
-        None,
+        false, // release
+        true,  // minimal
+        false, // fast
+        false, // no_cache
+        false, // incremental
+        false, // no_incremental
+        false, // sccache
+        None,  // target
+        buff_lang_cli::pipeline::LinkerChoice::default(),
+        buff_lang_cli::pipeline::DebugInfoChoice::default(),
+        buff_lang_cli::pipeline::BackendChoice::default(),
+        false, // detect_races
     );
     if result.is_err() {
         let _ = fs::remove_file(&file);
@@ -379,12 +385,18 @@ fn build_command_with_minimal_true_compiles_with_size_minimization_minimal_build
     let result = buff_lang_cli::commands::build::run(
         Some(&file),
         None,
-        false,
-        true,
-        false,
-        false,
-        false,
-        None,
+        false, // release
+        true,  // minimal
+        false, // fast
+        false, // no_cache
+        false, // incremental
+        false, // no_incremental
+        false, // sccache
+        None,  // target
+        buff_lang_cli::pipeline::LinkerChoice::default(),
+        buff_lang_cli::pipeline::DebugInfoChoice::default(),
+        buff_lang_cli::pipeline::BackendChoice::default(),
+        false, // detect_races
     );
     result.expect("minimal-mode build (minimal=true) must succeed");
     assert!(exe.exists(), "minimal build must produce an executable");

@@ -83,6 +83,13 @@ buff-ui-dioxus.workspace = true
 # without re-pinning.
 syn.workspace = true
 prettyplease.workspace = true
+# T111: `buff profile` injects profiling guards into `fn main()` via
+# `quote::quote!` + `syn::parse2` (the project-wide "no raw-string codegen"
+# rule). `proc_macro2` is the TokenStream carrier type used by both `quote`
+# and `syn::parse2`. Both already pinned at the workspace level (alongside
+# `syn`); reused here without re-pinning.
+quote.workspace = true
+proc-macro2.workspace = true
 # T125a: REPL delegation. `buff repl` is a thin shim that delegates to
 # buff_repl::Repl::run() — all real logic (rustyline + buff-eval) lives
 # in the dedicated crate.

@@ -423,7 +423,7 @@ fn write_tar(
                 builder.finish()?;
             }
             let compressed = ruzstd::encoding::compress_to_vec(
-                &tar_buf,
+                &tar_buf[..],
                 ruzstd::encoding::CompressionLevel::Fastest,
             );
             let mut file = file;

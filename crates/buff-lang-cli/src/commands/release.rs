@@ -23,7 +23,7 @@
 //! `1.2.3-alpha` → patch → `1.2.4-alpha`).
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -40,6 +40,7 @@ pub enum BumpLevel {
 
 impl BumpLevel {
     /// Parse the level from the CLI argument string.
+    #[allow(clippy::should_implement_trait)] // returns Option, not Result; name kept for clarity.
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "patch" => Some(Self::Patch),
@@ -77,6 +78,7 @@ pub fn run(level: BumpLevel, project_dir: &Path) -> Result<()> {
 
     // 3. Bump version.
     let new_version = bump_version(&pkg.version, level)
+        .map_err(anyhow::Error::msg)
         .with_context(|| format!("failed to bump version `{}`", pkg.version))?;
     eprintln!("Bumping version: {} -> {new_version}", pkg.version);
 

@@ -5,8 +5,8 @@
 use std::fmt::Write;
 
 use buff_lang_ast::{
-    Attribute, Decl, EnumDecl, EnumVariant, ExportDecl, ExtendBlock, FuncDecl, Ident, ImportDecl,
-    MethodSig, Param, ReexportDecl, Span, StructDecl, TraitDecl, TypeRef,
+    Attribute, Decl, EnumDecl, EnumVariant, ExportDecl, ExtendBlock, FuncDecl, ImplBlock,
+    ImportDecl, MethodSig, Param, ReexportDecl, StructDecl, TraitDecl,
 };
 
 use super::Formatter;
@@ -56,6 +56,7 @@ impl<'a> Formatter<'a> {
                 }
             }
             Decl::ExtendBlock(ext) => self.write_extend(ext),
+            Decl::ImplBlock(imp) => self.write_impl_block(imp),
         }
     }
 
@@ -370,6 +371,38 @@ impl<'a> Formatter<'a> {
         }
         self.indent();
         for m in &ext.methods {
+            self.nl();
+            self.write_fn_method(m);
+        }
+        self.dedent();
+        self.nl();
+        self.raw("}");
+    }
+
+    /// An `impl Trait for Target { ... }` block (T75c — associated types +
+    /// method bodies). Mirrors [`write_extend`] but emits the leading
+    /// `impl <trait> for <target>` header + optional `type Item = T;`
+    /// bindings before the method bodies. Method bodies use the same
+    /// `write_fn_method` shape as `extend` (the surface `fn` keyword + body).
+    pub(super) fn write_impl_block(&mut self, imp: &ImplBlock) {
+        self.write_indent();
+        self.raw("impl ");
+        self.write_typeref(&imp.trait_name);
+        self.raw(" for ");
+        self.write_typeref(&imp.target);
+        self.raw(" {");
+        if imp.type_bindings.is_empty() && imp.methods.is_empty() {
+            self.raw(" }");
+            return;
+        }
+        self.indent();
+        for b in &imp.type_bindings {
+            self.nl();
+            let _ = write!(self.buf, "type {} = ", b.name);
+            self.write_typeref(&b.target);
+            self.raw(";");
+        }
+        for m in &imp.methods {
             self.nl();
             self.write_fn_method(m);
         }

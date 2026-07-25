@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+target/
+**/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Node (editors/website)
+node_modules/
+editors/vscode/node_modules/
+editors/vscode/out/
+
+# Docs build
+book/book/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.snap.new
+*.pending-snap
+
+# Evidence (gitignored)
+.sisyphus/evidence/

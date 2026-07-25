@@ -2,9 +2,13 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+// `TokenResponse` is no longer imported: oauth2 4.4 dropped the
+// `BasicTokenFields` / `BasicTokenExtraFields` exports in favour of
+// the `BasicClient` / `BasicTokenResponse` type aliases (which thread
+// `EmptyExtraTokenFields` through the new 6-generic `Client`).
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
-    Scope, TokenResponse, TokenUrl,
+    Scope, TokenUrl,
 };
 use serde_json::{Map, Value};
 
@@ -47,21 +51,7 @@ impl OAuth2Client {
         }
     }
 
-    fn build_core(
-        &self,
-    ) -> Result<
-        oauth2::Client<
-            oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
-            oauth2::StandardTokenResponse<
-                oauth2::basic::BasicTokenFields,
-                oauth2::basic::BasicTokenType,
-            >,
-            oauth2::basic::BasicTokenExtraFields,
-            oauth2::StandardRevocableToken,
-            oauth2::StandardErrorResponse<oauth2::RevocationErrorResponseType>,
-        >,
-        AuthError,
-    > {
+    fn build_core(&self) -> Result<oauth2::basic::BasicClient, AuthError> {
         let client_id = ClientId::new(self.client_id.clone());
         let auth_url = AuthUrl::new(self.auth_url.clone())
             .map_err(|e| AuthError::OAuth2(format!("auth url: {e}")))?;
@@ -69,11 +59,15 @@ impl OAuth2Client {
             .map_err(|e| AuthError::OAuth2(format!("token url: {e}")))?;
         let redirect_url = RedirectUrl::new(self.redirect_url.clone())
             .map_err(|e| AuthError::OAuth2(format!("redirect url: {e}")))?;
-        let mut builder =
-            oauth2::Client::new(client_id, auth_url, token_url).set_redirect_uri(redirect_url);
-        if let Some(secret) = self.client_secret.as_ref() {
-            builder = builder.set_client_secret(ClientSecret::new(secret.clone()));
-        }
+        // oauth2 4.4 moved `client_secret` into `Client::new` (was a
+        // separate `set_client_secret` builder step). The 4-arg form is
+        // `(client_id, Option<ClientSecret>, auth_url, Option<TokenUrl>)`.
+        let secret = self
+            .client_secret
+            .as_ref()
+            .map(|s| ClientSecret::new(s.clone()));
+        let builder = oauth2::Client::new(client_id, secret, auth_url, Some(token_url))
+            .set_redirect_uri(redirect_url);
         Ok(builder)
     }
 
@@ -150,7 +144,14 @@ impl OAuth2Client {
                 if let Some(verifier) = verifier_owned.as_ref() {
                     req = req.set_pkce_verifier(oauth2::PkceCodeVerifier::new(verifier.clone()));
                 }
-                let token_response = req.request(&http)?;
+                // oauth2 4.4 takes a `FnOnce(HttpRequest) -> Result<HttpResponse, RE>`
+                // closure instead of an `&dyn HttpClient` reference. The closure
+                // converts `http::Request<Vec<u8>>` to a blocking reqwest call and
+                // back to `http::Response<Vec<u8>>` (reqwest re-exports the
+                // underlying `http` types so Method / StatusCode / HeaderMap
+                // line up).
+                let token_response =
+                    req.request(move |http_req| execute_http_request(&http, http_req))?;
                 let json = serde_json::to_value(token_response)?;
                 match json {
                     Value::Object(map) => Ok(map),
@@ -168,6 +169,59 @@ impl OAuth2Client {
             Err(_) => Err(AuthError::Panic),
         }
     }
+}
+
+// ---- internal helpers ----------------------------------------------------
+
+/// Convert an `oauth2::HttpRequest` into a blocking reqwest call,
+/// returning an `oauth2::HttpResponse`. Required by oauth2 4.4's
+/// `CodeTokenRequest::request<F, RE>(.., http_client: F)` signature
+/// (was previously a `&dyn HttpClient` trait object in 4.x).
+///
+/// **http-version bridge**: oauth2 4.4 pins `http` 0.2 while the
+/// workspace's `reqwest` 0.12 uses `http` 1.x. The two versions' types
+/// (Method / StatusCode / HeaderMap / HeaderName / HeaderValue) are
+/// NOT interchangeable, so we round-trip each field through its byte
+/// representation. `url::Url` is shared between the two crates so the
+/// URL passes through unchanged.
+fn execute_http_request(
+    client: &reqwest::blocking::Client,
+    http_req: oauth2::HttpRequest,
+) -> Result<oauth2::HttpResponse, AuthError> {
+    // oauth2::http::Method (http 0.2) -> reqwest::Method (http 1.x).
+    let method = reqwest::Method::from_bytes(http_req.method.as_str().as_bytes())
+        .map_err(|e| AuthError::OAuth2(format!("http method: {e}")))?;
+    let mut req_builder = client.request(method, http_req.url);
+    // Headers: http 0.2 -> http 1.x by way of &str / &[u8].
+    for (name, value) in &http_req.headers {
+        req_builder = req_builder.header(name.as_str(), value.as_bytes());
+    }
+    let response = req_builder
+        .body(http_req.body)
+        .send()
+        .map_err(|e| AuthError::OAuth2(format!("http send: {e}")))?;
+
+    // reqwest::StatusCode (http 1.x) -> oauth2::http::StatusCode (http 0.2).
+    let status_code = oauth2::http::StatusCode::from_u16(response.status().as_u16())
+        .map_err(|e| AuthError::OAuth2(format!("http status: {e}")))?;
+    // Headers: http 1.x -> http 0.2 by way of bytes (name & value).
+    let mut headers = oauth2::http::HeaderMap::new();
+    for (name, value) in response.headers() {
+        let header_name = oauth2::http::HeaderName::from_bytes(name.as_str().as_bytes())
+            .map_err(|e| AuthError::OAuth2(format!("http header name: {e}")))?;
+        let header_value = oauth2::http::HeaderValue::from_bytes(value.as_bytes())
+            .map_err(|e| AuthError::OAuth2(format!("http header value: {e}")))?;
+        headers.append(header_name, header_value);
+    }
+    let body = response
+        .bytes()
+        .map_err(|e| AuthError::OAuth2(format!("http body: {e}")))?
+        .to_vec();
+    Ok(oauth2::HttpResponse {
+        status_code,
+        headers,
+        body,
+    })
 }
 
 #[cfg(test)]

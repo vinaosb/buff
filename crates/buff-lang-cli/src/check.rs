@@ -44,12 +44,25 @@
 //! (lex/parse/type-check) in a fraction of the time. This mirrors
 //! `cargo check` vs `cargo build` for Rust.
 
+// The `mod tests` block sits in the middle of this file (between the
+// core check pipeline and the deprecated-call collector helpers at the
+// bottom). Reordering would shuffle ~300 lines for purely stylistic
+// reasons; clippy's `items_after_test_module` is silenced here until
+// the next green-field refactor of this module.
+#![allow(clippy::items_after_test_module)]
+
 use std::path::Path;
 
 use buff_lang_ast::{Decl, Expr, Stmt, TypeRef};
 use buff_lang_error::{render_diagnostics_json, Diagnostic, Severity, SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
+
+// The `mod tests` block sits in the middle of this file (between the
+// core check pipeline and the deprecated-call collector helpers at the
+// bottom). Reordering would shuffle ~300 lines for purely stylistic
+// reasons; clippy's `items_after_test_module` is silenced here until
+// the next green-field refactor of this module.
 use buff_lang_types::{Type, TypeInferencer};
 
 use crate::naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation};
@@ -73,9 +86,10 @@ use crate::naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation
 /// we just fall back to the safe default. The CLI's clap `value_parser`
 /// rejects unknown values up front, so the from_str fallback is a
 /// belt-and-braces safety net for library callers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ErrorFormat {
     /// Rustc-style human-readable output (default). Emits to stderr.
+    #[default]
     Human,
     /// JSON array of diagnostics. Emits to stdout.
     Json,
@@ -87,6 +101,7 @@ impl ErrorFormat {
     /// [`Human`](Self::Human) for any unrecognized string — the CLI's clap
     /// layer is responsible for rejecting bad values up front; this is
     /// the library-side safety net.
+    #[allow(clippy::should_implement_trait)] // not a true FromStr (no Result); name kept for clarity.
     pub fn from_str(s: &str) -> Self {
         match s {
             "json" => ErrorFormat::Json,
@@ -97,12 +112,6 @@ impl ErrorFormat {
     /// `true` when this format is JSON.
     pub fn is_json(self) -> bool {
         matches!(self, ErrorFormat::Json)
-    }
-}
-
-impl Default for ErrorFormat {
-    fn default() -> Self {
-        ErrorFormat::Human
     }
 }
 
@@ -341,6 +350,7 @@ fn emit_diagnostics(
 /// T133: run the `.buffhtml` check pipeline on a file. Thin wrapper around
 /// [`run_check_buffhtml_file_with_format`] with [`ErrorFormat::Human`] and
 /// no color.
+#[allow(dead_code)] // T133 floor; wired in by `buff check <file>.buffhtml` once the dispatcher lands.
 fn run_check_buffhtml_file(file: &Path) -> anyhow::Result<CheckReport> {
     run_check_buffhtml_file_with_format(file, ErrorFormat::Human, false)
 }
@@ -921,15 +931,13 @@ fn collect_deprecated_calls_in_expr(
                 collect_deprecated_calls_in_expr(arg, deprecated, out);
             }
         }
-        Expr::BinaryOp { lhs, rhs, .. } | Expr::UnaryOp { operand: lhs, .. } => {
-            // The BinaryOp arm pattern-matches lhs+rhs; the UnaryOp arm
-            // re-uses lhs as the operand (the `operand` field is the
-            // first field so the pattern lines up). Cleaner than two
-            // separate arms.
+        Expr::BinaryOp { lhs, rhs, .. } => {
+            // Both sides may contain deprecated calls.
             collect_deprecated_calls_in_expr(lhs, deprecated, out);
-            if let Expr::BinaryOp { rhs, .. } = expr {
-                collect_deprecated_calls_in_expr(rhs, deprecated, out);
-            }
+            collect_deprecated_calls_in_expr(rhs, deprecated, out);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            collect_deprecated_calls_in_expr(operand, deprecated, out);
         }
         Expr::MethodCall { receiver, args, .. } => {
             collect_deprecated_calls_in_expr(receiver, deprecated, out);

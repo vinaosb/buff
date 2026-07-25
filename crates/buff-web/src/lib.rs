@@ -1,4 +1,5 @@
 //! `buff-web` — production HTTP web framework for the Buff language.
+#![allow(clippy::doc_lazy_continuation)]
 //!
 //! Wraps [`axum`] 0.8 + [`tokio`] + [`serde_json`] behind a safe Rust
 //! API that follows the [T4 FFI safety guide](../buff-lang-ffi-guide/GUIDE.md).

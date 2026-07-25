@@ -338,6 +338,7 @@ pub enum Command {
         /// honoured ONLY for debug builds; release always uses LLVM.
         /// Falls back to LLVM with a warning when unavailable (nightly
         /// + `rustc-codegen-cranelift-preview` component required).
+        ///
         /// See `buff build --help` for full details.
         #[arg(long, value_name = "BACKEND", default_value = "llvm")]
         backend: String,

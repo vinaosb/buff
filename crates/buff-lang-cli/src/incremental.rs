@@ -208,7 +208,6 @@ pub fn typecheck_file(db: &dyn salsa::Database, file: SourceFile) -> TypeCheckOu
 /// the user-facing diagnostic formatting; this function only needs the
 /// count for change detection.
 fn count_type_errors(decls: &[buff_lang_ast::Decl]) -> usize {
-    use buff_lang_ast::Decl;
     let mut count = 0;
     for d in decls {
         count += count_type_errors_decl(d);
@@ -359,6 +358,11 @@ fn content_hash(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // salsa::Setter brings the `.to(value)` method on the
+    // `set_source(&mut db)` setter into scope (the trait is needed to
+    // call the inherent-type-erased `to` method on the opaque setter
+    // returned by `#[salsa::input]` field setters).
+    use salsa::Setter;
 
     #[test]
     fn database_construction_is_cheap() {
@@ -373,9 +377,9 @@ mod tests {
         // returned `ParseOutcome` is identical (salsa guarantees
         // referential equality for memoized returns of `Eq + Hash`
         // outcomes; we settle for value equality here).
-        let mut db = BuffDatabase::new();
+        let db = BuffDatabase::new();
         let src = "func main() { print(\"hi\") }\n";
-        let file = SourceFile::new(&mut db, PathBuf::from("test.buff"), src.to_string());
+        let file = SourceFile::new(&db, PathBuf::from("test.buff"), src.to_string());
         let a = parse_file(&db, file);
         let b = parse_file(&db, file);
         assert_eq!(a, b, "memoized parse_file outcome must be stable");
@@ -393,14 +397,21 @@ mod tests {
         // via `set_source`.
         let mut db = BuffDatabase::new();
         let file = SourceFile::new(
-            &mut db,
+            &db,
             PathBuf::from("changed.buff"),
             "func a() { 1 }\n".to_string(),
         );
-        let before = parse_file(&db, file);
+        // Salsa's `#[salsa::tracked]` parse_file keeps the `&db` borrow
+        // alive as long as the returned `ParseOutcome` is in scope (the
+        // macro-generated wrapper ties the result's validity to the db
+        // handle). Clone the result to break the borrow chain so the
+        // subsequent `set_source(&mut db)` mutation can take a mutable
+        // borrow — without the clone, the immutable borrow from
+        // parse_file would still be live at set_source.
+        let before = parse_file(&db, file).clone();
         file.set_source(&mut db)
             .to("func a() { 2 }\nfunc b() { 3 }\n".to_string());
-        let after = parse_file(&db, file);
+        let after = parse_file(&db, file).clone();
         assert_ne!(before, after, "outcomes must differ after source change");
         // After the change, decl_count must reflect the new 2-decl source.
         if let ParseOutcome::Ok { decl_count, .. } = after {
@@ -414,9 +425,9 @@ mod tests {
     fn parse_file_reports_lex_failure() {
         // A source with a tab character is rejected by the Buff lexer
         // (AGENTS.md: "Tabs — Buff lexer rejects them").
-        let mut db = BuffDatabase::new();
+        let db = BuffDatabase::new();
         let file = SourceFile::new(
-            &mut db,
+            &db,
             PathBuf::from("tab.buff"),
             "func bad() {\n\tprint(\"tab\")\n}\n".to_string(),
         );
@@ -430,9 +441,9 @@ mod tests {
     #[test]
     fn typecheck_file_caches_on_pass() {
         // A trivially-typed source must produce Pass and stay cached.
-        let mut db = BuffDatabase::new();
+        let db = BuffDatabase::new();
         let file = SourceFile::new(
-            &mut db,
+            &db,
             PathBuf::from("ok.buff"),
             "func add(a: Int, b: Int) -> Int { a + b }\n".to_string(),
         );
@@ -463,9 +474,9 @@ mod tests {
         let mk_named = |s: &str| TypeRef::Named {
             name: Ident {
                 name: s.to_string(),
-                span: Span::default(),
+                span: Span::dummy(),
             },
-            span: Span::default(),
+            span: Span::dummy(),
         };
         let int_ty = typeref_to_type(&mk_named("Int")).expect("Int must map");
         assert!(matches!(int_ty, Type::Int { .. }), "got {int_ty:?}");

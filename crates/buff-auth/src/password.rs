@@ -2,9 +2,13 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+// `rand_core::OsRng` is re-exported by `password_hash` so we use the
+// OS-provided CSPRNG without pulling in a separate `rand` workspace
+// dep (the workspace `rand` 0.9 pin uses `rand_core` 0.10, which is
+// NOT the `rand_core` 0.6 that `password-hash` 0.5 requires).
+use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use rand::rngs::OsRng;
 
 use crate::error::AuthError;
 

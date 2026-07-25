@@ -71,12 +71,17 @@
 //!   dep declarations inherited by members via `dep.workspace = true`
 //!   (T0-A3b; mirrors Cargo's well-loved pattern).
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use thiserror::Error;
+
+// BTreeMap is consumed only by the `#[cfg(test)] mod tests` block at the
+// bottom of this file (the public BuffConfig / WorkspaceSection types
+// declare their BTreeMap fields in `config/types.rs` and re-import it
+// there). Gating the import here avoids an unused-import warning under
+// `cargo clippy --lib` (which does not compile the test module).
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 // T106: config struct/enum definitions extracted to `config/types.rs`.
 mod types;
@@ -224,7 +229,7 @@ pub fn discover_manifest(start_dir: &Path) -> Option<(PathBuf, bool)> {
 /// `None` when the dep is not in the workspace (the caller surfaces this
 /// as a manifest error since `workspace = true` was asserted but no
 /// workspace entry exists — mirrors Cargo's error).
-pub fn resolve_workspace_dep(ws: &WorkspaceSection, name: &str) -> Option<&str> {
+pub fn resolve_workspace_dep<'a>(ws: &'a WorkspaceSection, name: &str) -> Option<&'a str> {
     ws.dependencies
         .get(name)
         .map(String::as_str)

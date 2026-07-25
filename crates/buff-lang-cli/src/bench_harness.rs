@@ -363,7 +363,7 @@ pub fn measure_fixture(fixture_path: &Path, attempt_backend: bool) -> Result<Fix
     };
 
     // 6. Codegen hash (deterministic identity signal).
-    let codegen_hash = Some(format!("sha256:{}", sha256_hex(&rust_source)));
+    let codegen_hash = Some(format!("sha256:{}", sha256_hex(rust_source.as_bytes())));
 
     // 7. Static dispatch hints + function count.
     let prefer_gpu = count_prefer_hints(&decls, "gpu");
@@ -620,14 +620,13 @@ fn count_prefer_hints(decls: &[Decl], kind: &str) -> u64 {
     for decl in decls {
         if let Decl::FuncDecl(f) = decl {
             for attr in &f.attributes {
-                if attr.name.name.eq_ignore_ascii_case("prefer") {
-                    if attr
+                if attr.name.name.eq_ignore_ascii_case("prefer")
+                    && attr
                         .args
                         .iter()
                         .any(|a| a.eq_ignore_ascii_case(&kind_lower))
-                    {
-                        count += 1;
-                    }
+                {
+                    count += 1;
                 }
             }
         }
@@ -772,7 +771,7 @@ pub fn iso8601_now() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let days = (secs / 86400) as i64;
-    let sec_of_day = (secs % 86400) as u64;
+    let sec_of_day = secs % 86400;
     let (y, m, d) = civil_from_days(days);
     let hh = sec_of_day / 3600;
     let mm = (sec_of_day % 3600) / 60;

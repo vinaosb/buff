@@ -69,7 +69,7 @@ pub fn run(file: &Path, dry_run: bool) -> Result<usize> {
 
     // Sort by span.start DESCENDING (rightmost first) so byte offsets stay
     // valid as we apply replacements left-to-right in the source string.
-    suggestions.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+    suggestions.sort_by_key(|s| std::cmp::Reverse(s.0.start));
 
     if dry_run {
         // Print a diff-like preview.

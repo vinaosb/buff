@@ -4,11 +4,10 @@
 
 use std::fmt::Write;
 
-use buff_lang_ast::{
-    Block, Expr, GuardCondition, Ident, InterpPart, Literal, MatchArm, Param, Pattern, TypeRef,
-};
+use buff_lang_ast::{Block, Expr, Ident, InterpPart, Literal, MatchArm, Param, Pattern, TypeRef};
 
 use super::Formatter;
+use crate::fmt::{est_block_len, est_expr_len, MAX_LINE_LEN};
 
 impl<'a> Formatter<'a> {
     pub(super) fn write_expr(&mut self, expr: &Expr) {

@@ -3,11 +3,11 @@
 //! Coverage (6 tests, all named `watch_*` for filter convenience):
 //!
 //! 1. [`watch_variant_parses_path`] — `buff watch <PATH>` parses the
-//!    path into `Command::Watch { path, exec: None }`.
-//! 2. [`watch_variant_parses_exec_flag`] — `buff watch <PATH> --exec
-//!    <CMD>` parses both fields.
-//! 3. [`watch_default_path_is_dot`] — `buff watch` (no path arg)
-//!    defaults to `.`.
+//!    path into `Command::Watch { file, interval: 500 }`.
+//! 2. [`watch_variant_parses_interval_flag`] — `buff watch <PATH>
+//!    --interval <MS>` parses both fields.
+//! 3. [`watch_requires_path_arg`] — `buff watch` (no path arg) fails to
+//!    parse (the `file` positional is required).
 //! 4. [`watch_run_function_is_callable`] — the public `watch::run`
 //!    function exists + has the documented signature. We exercise
 //!    the resolution helper rather than the blocking loop (the loop
@@ -39,50 +39,45 @@ fn watch_variant_parses_path() {
         parsed.err()
     );
     match parsed.unwrap().command {
-        Command::Watch { path, exec } => {
+        Command::Watch { file, interval } => {
             assert!(
-                path.ends_with("examples/watch_demo.buff"),
-                "path should be the parsed arg, got `{}`",
-                path.display()
+                file.ends_with("examples/watch_demo.buff"),
+                "file should be the parsed arg, got `{}`",
+                file.display()
             );
-            assert!(exec.is_none(), "no --exec flag → exec is None");
+            assert_eq!(interval, 500, "no --interval flag → default 500 ms");
         }
         other => panic!("expected Command::Watch, got {other:?}"),
     }
 }
 
 #[test]
-fn watch_variant_parses_exec_flag() {
-    let parsed = Cli::try_parse_from(["buff", "watch", ".", "--exec", "buff test"]);
+fn watch_variant_parses_interval_flag() {
+    let parsed = Cli::try_parse_from(["buff", "watch", ".", "--interval", "250"]);
     assert!(
         parsed.is_ok(),
-        "`buff watch --exec <CMD>` should parse: {:?}",
+        "`buff watch --interval <MS>` should parse: {:?}",
         parsed.err()
     );
     match parsed.unwrap().command {
-        Command::Watch { path, exec } => {
-            assert_eq!(path, PathBuf::from("."));
-            assert_eq!(exec.as_deref(), Some("buff test"));
+        Command::Watch { file, interval } => {
+            assert_eq!(file, PathBuf::from("."));
+            assert_eq!(interval, 250);
         }
         other => panic!("expected Command::Watch, got {other:?}"),
     }
 }
 
 #[test]
-fn watch_default_path_is_dot() {
+fn watch_requires_path_arg() {
+    // The `file` positional is required (no default_value), so `buff
+    // watch` with no path arg must fail to parse — mirrors clap's
+    // standard "missing required argument" behaviour.
     let parsed = Cli::try_parse_from(["buff", "watch"]);
     assert!(
-        parsed.is_ok(),
-        "`buff watch` with no path arg should still parse (default `.`): {:?}",
-        parsed.err()
+        parsed.is_err(),
+        "`buff watch` without a path arg should fail to parse (file is required)"
     );
-    match parsed.unwrap().command {
-        Command::Watch { path, exec } => {
-            assert_eq!(path, PathBuf::from("."), "default path is `.`");
-            assert!(exec.is_none());
-        }
-        other => panic!("expected Command::Watch, got {other:?}"),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +110,7 @@ fn watch_help_text_mentions_subcommand() {
     // the "does --help mention watch?" check by ensuring the
     // Command::Watch variant parses + its Debug repr includes the
     // `Watch` token (mirrors the ai_command.rs help test pattern).
-    let parsed = Cli::try_parse_from(["buff", "watch"]).unwrap();
+    let parsed = Cli::try_parse_from(["buff", "watch", "."]).unwrap();
     let debug = format!("{:?}", parsed.command);
     assert!(
         debug.contains("Watch"),

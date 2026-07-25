@@ -19,6 +19,33 @@ use std::path::{Path, PathBuf};
 use buff_lang_cli::commands;
 use buff_lang_cli::pipeline;
 
+/// Convenience wrapper for `commands::build::run` that fills in the
+/// post-T55 / T7 / T9 / T113 default values (no incremental, no
+/// sccache, default linker/debuginfo/backend, native target, no race
+/// detection). Keeps the per-test call sites readable.
+fn build_with_defaults(
+    file: Option<&Path>,
+    output: Option<&Path>,
+    release: bool,
+) -> anyhow::Result<()> {
+    commands::build::run(
+        file,
+        output,
+        release,
+        false, // minimal
+        false, // fast
+        false, // no_cache
+        false, // incremental
+        true,  // no_incremental (force legacy path)
+        false, // sccache
+        None,  // target
+        pipeline::LinkerChoice::default(),
+        pipeline::DebugInfoChoice::default(),
+        pipeline::BackendChoice::default(),
+        false, // detect_races
+    )
+}
+
 /// Helper: create a unique temp dir for this test binary's fixtures.
 fn temp_root() -> PathBuf {
     let dir =
@@ -198,7 +225,7 @@ fn test_build_command_creates_executable_end_to_end() {
     let file = write_fixture("build_e2e.buff", src);
     let rs_path = file.with_extension("rs");
 
-    let result = commands::build::run(Some(&file), None, false);
+    let result = build_with_defaults(Some(&file), None, false);
 
     let exe = {
         let mut p = file.with_extension("");
@@ -229,7 +256,7 @@ fn test_build_command_with_explicit_output_path() {
     let rs_path = file.with_extension("rs");
 
     let explicit_out = temp_root().join("custom_exe_name");
-    let result = commands::build::run(Some(&file), Some(&explicit_out), false);
+    let result = build_with_defaults(Some(&file), Some(&explicit_out), false);
 
     // rustc appends the platform exe extension.
     let actual_out = {

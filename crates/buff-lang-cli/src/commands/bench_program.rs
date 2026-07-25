@@ -142,7 +142,7 @@ pub fn run(file: &Path, iterations: u32, warmup: u32) -> Result<()> {
 
     // --- Print table ---
     println!();
-    println!("{:<18} {:>10}  {}", "metric", "value", "unit");
+    println!("{:<18} {:>10}  unit", "metric", "value");
     println!("{:-<18} {:->10}  {:-<4}", "", "", "");
     print_row("min", min);
     print_row("avg (mean)", avg);

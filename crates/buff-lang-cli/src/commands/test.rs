@@ -176,7 +176,7 @@ fn run_single_test(test_file: &Path, update: bool, detect_races: bool) -> Result
         pipeline::format_diagnostic_error("parse", &e.diagnostic, &source_file, test_file)
     })?;
 
-    let rust_source = buff_lang_codegen_rust::generate_rust(&decls, source_id).map_err(|e| {
+    let rust_source = buff_lang_codegen_rust::generate_rust(&decls).map_err(|e| {
         pipeline::format_diagnostic_error("codegen", &e.diagnostic, &source_file, test_file)
     })?;
 
@@ -196,11 +196,16 @@ fn run_single_test(test_file: &Path, update: bool, detect_races: bool) -> Result
     // Compile with rustc (debug mode for fast iteration).
     let exe_stem =
         pipeline::with_exe_extension(&temp_dir.join(format!("{}_test", stem.to_string_lossy())));
-    let exe_path = pipeline::compile_rust_to_exe_with_races(
+    let exe_path = pipeline::compile_rust_to_exe_with_speed(
         &rust_file,
         &exe_stem,
         test_file,
         pipeline::BuildMode::Debug,
+        false, // use_sccache
+        pipeline::LinkerChoice::default(),
+        pipeline::DebugInfoChoice::default(),
+        pipeline::BackendChoice::default(),
+        None, // target
         detect_races,
     )?;
 

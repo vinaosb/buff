@@ -87,8 +87,11 @@ impl Config {
     /// The value is serialized via serde. Accepts any type that
     /// implements `serde::Serialize` (String, i64, f64, bool, etc.).
     pub fn set_default<T: serde::Serialize>(&self, key: &str, value: T) {
-        let mut fig = self.inner.lock().ok();
-        if let Some(ref mut figment) = fig {
+        if let Ok(mut guard) = self.inner.lock() {
+            // Deref through `MutexGuard<Figment>` so `std::mem::take`
+            // operates on `&mut Figment` (which impls `Default`), not on
+            // `&mut MutexGuard<Figment>` (which does not).
+            let figment: &mut Figment = &mut *guard;
             let provider = Serialized::default(key, value);
             *figment = std::mem::take(figment).merge(provider);
         }
@@ -113,21 +116,31 @@ impl Config {
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            let provider: Box<dyn figment::Provider> = match ext.as_str() {
-                "toml" => Box::new(Toml::file(&path_owned)),
-                "yaml" | "yml" => Box::new(Yaml::file(&path_owned)),
-                "json" => Box::new(Json::file(&path_owned)),
+            let mut guard = self
+                .inner
+                .lock()
+                .map_err(|e| ConfigError::Figment(format!("lock error: {e}")))?;
+            // figment 0.10's `Figment::merge<T: Provider>(self, T)`
+            // does NOT accept `Box<dyn Provider>` (Provider is not
+            // object-safe in this version), so we merge each format
+            // variant explicitly inside a single match arm.
+            let figment: &mut Figment = &mut *guard;
+            match ext.as_str() {
+                "toml" => {
+                    *figment = std::mem::take(figment).merge(Toml::file(&path_owned));
+                }
+                "yaml" | "yml" => {
+                    *figment = std::mem::take(figment).merge(Yaml::file(&path_owned));
+                }
+                "json" => {
+                    *figment = std::mem::take(figment).merge(Json::file(&path_owned));
+                }
                 _ => {
                     return Err(ConfigError::Figment(format!(
                         "unsupported config format: .{ext}"
                     )))
                 }
             };
-            let mut fig = self
-                .inner
-                .lock()
-                .map_err(|e| ConfigError::Figment(format!("lock error: {e}")))?;
-            *fig = std::mem::take(&mut *fig).merge(provider);
             Ok(())
         }));
         match result {
@@ -147,8 +160,8 @@ impl Config {
     /// Env vars have higher precedence than file and defaults but
     /// lower than CLI args.
     pub fn load_env(&self, prefix: &str) {
-        let mut fig = self.inner.lock().ok();
-        if let Some(ref mut figment) = fig {
+        if let Ok(mut guard) = self.inner.lock() {
+            let figment: &mut Figment = &mut *guard;
             let provider = Env::prefixed(prefix);
             *figment = std::mem::take(figment).merge(provider);
         }
@@ -161,8 +174,8 @@ impl Config {
     /// CLI args have the highest precedence — they override all
     /// other providers.
     pub fn load_args(&self, args: &[String]) {
-        let mut fig = self.inner.lock().ok();
-        if let Some(ref mut figment) = fig {
+        if let Ok(mut guard) = self.inner.lock() {
+            let figment: &mut Figment = &mut *guard;
             let mut map = figment::value::Dict::new();
             let mut iter = args.iter().peekable();
             while let Some(arg) = iter.next() {
@@ -191,29 +204,32 @@ impl Config {
     /// Get a string value for `key`. Returns `None` if the key is
     /// not set by any provider.
     pub fn get(&self, key: &str) -> Option<String> {
-        let fig = self.inner.lock().ok()?;
-        fig.try_find(key).ok().and_then(|v: Option<String>| v)
+        let guard = self.inner.lock().ok()?;
+        // figment 0.10's lookup method is `extract_inner::<T>(path)`
+        // (the older `try_find` API was renamed). MutexGuard auto-derefs
+        // to `&Figment` so we use `&*guard` for clarity.
+        (*guard).extract_inner::<String>(key).ok()
     }
 
     /// Get an integer value for `key`. Returns `None` if the key
     /// is not set or is not a valid integer.
     pub fn get_int(&self, key: &str) -> Option<i64> {
-        let fig = self.inner.lock().ok()?;
-        fig.try_find(key).ok().and_then(|v: Option<i64>| v)
+        let guard = self.inner.lock().ok()?;
+        (*guard).extract_inner::<i64>(key).ok()
     }
 
     /// Get a floating-point value for `key`. Returns `None` if the
     /// key is not set or is not a valid float.
     pub fn get_float(&self, key: &str) -> Option<f64> {
-        let fig = self.inner.lock().ok()?;
-        fig.try_find(key).ok().and_then(|v: Option<f64>| v)
+        let guard = self.inner.lock().ok()?;
+        (*guard).extract_inner::<f64>(key).ok()
     }
 
-    /// Get a boolean value for `key`. Returns `None` if the key is
-    /// not set or is not a valid boolean.
+    /// Get a boolean value for `key`. Returns `None` if the key
+    /// is not set or is not a valid boolean.
     pub fn get_bool(&self, key: &str) -> Option<bool> {
-        let fig = self.inner.lock().ok()?;
-        fig.try_find(key).ok().and_then(|v: Option<bool>| v)
+        let guard = self.inner.lock().ok()?;
+        (*guard).extract_inner::<bool>(key).ok()
     }
 
     /// Watch the config file for changes and invoke `callback` when
@@ -252,7 +268,7 @@ impl Config {
             Ok::<_, ConfigError>((watcher, rx))
         }));
 
-        let (mut watcher, rx) = match result {
+        let (watcher, rx) = match result {
             Ok(Ok(w)) => w,
             Ok(Err(e)) => return Err(e),
             Err(_) => return Err(ConfigError::Panic),
