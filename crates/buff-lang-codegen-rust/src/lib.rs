@@ -36,6 +36,11 @@
 //! assert!(src.contains("fn empty()"));
 //! ```
 
+// Boxing the large `CodegenError` would reshape the public `generate_rust`
+// surface and every downstream consumer (CLI/LSP/eval/MCP). Out of scope;
+// allowed at the crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod atomic_analysis;
 // T53: comptime-facts → Rust `const` items lowering. Consumes
 // buff_lang_types::ComptimeFacts and emits one Item::Const per

@@ -334,7 +334,7 @@ fn eliminate_dead_bindings_in_block(block: &Block) -> Block {
         .stmts
         .iter()
         .filter(|s| !is_dead_let(s, &used_names))
-        .map(|s| eliminate_dead_bindings_in_stmt(s))
+        .map(eliminate_dead_bindings_in_stmt)
         .collect();
 
     Block {

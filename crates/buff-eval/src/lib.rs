@@ -73,6 +73,11 @@
 //! through [`EvalResult::diagnostic`]. There are no `unwrap`/`expect`/
 //! `panic!`/`unimplemented!`/`todo!` calls outside `#[cfg(test)]`.
 
+// Boxing all error types to satisfy `result_large_err` would be a massive
+// breaking API change across the eval/repl/jupyter pipeline — explicitly out
+// of scope. Tracked as a future refactor; allowed at the crate level.
+#![allow(clippy::result_large_err)]
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -105,6 +110,12 @@ enum EvalLinker {
     #[default]
     Auto,
     /// Use rustc's default system linker (no `-C link-arg=-fuse-ld` flag).
+    //
+    // Mirrors `LinkerChoice::System` in the CLI so the two stay in sync,
+    // but the eval surface currently only ever constructs `Auto`. Kept for
+    // API parity + the `resolve_eval_linker_flags` match arm; allow dead
+    // code until the eval linker-flag override is exposed.
+    #[allow(dead_code)]
     System,
 }
 

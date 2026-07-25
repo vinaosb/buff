@@ -1,3 +1,15 @@
+// The fluent API deliberately mirrors AssertJ / Hamcrest / Chai Java-style
+// assertion libraries: camelCase method names (isEqualTo, isNotNull, …) and
+// the `assertThat` entry point. These are intentional naming choices to match
+// the cross-language convention, not Rust snake_case style.
+#![allow(non_snake_case)]
+// The numeric-comparison assertions (`isGreaterThan`, `isLessThanOrEqualTo`,
+// …) are expressed naturally as `if !(actual > other) { panic }` — "assert
+// the relation holds, else fail". Rewriting these to `partial_cmp` matches
+// would obscure the intent and risk subtle NaN-handling debate, so the
+// negated-comparison form is kept deliberately.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 pub mod error;
 
 use std::fmt;

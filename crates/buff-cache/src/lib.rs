@@ -132,6 +132,7 @@ impl Cache {
         self.len() == 0
     }
 
+    #[allow(dead_code)]
     pub(crate) fn run_pending_tasks(&self) {
         self.inner.run_pending_tasks();
     }

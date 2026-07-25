@@ -98,6 +98,10 @@
 //! There are no `unwrap` / `expect` / `panic!` / `unimplemented!` /
 //! `todo!` calls outside `#[cfg(test)]`.
 
+// Boxing error types would reshape the REPL's public surface (mirrors the
+// buff-eval / buff-jupyter decision). Out of scope; allowed at crate level.
+#![allow(clippy::result_large_err)]
+
 use std::io::{self, Write};
 use std::path::PathBuf;
 

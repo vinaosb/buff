@@ -88,6 +88,11 @@
 //! non-test code. All fallible operations return
 //! `Result<T, JupyterError>`.
 
+// Boxing `JupyterError` would reshape the public `run_kernel` / `install`
+// surface and the kernel dispatch paths. Out of scope; allowed at the
+// crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod connection;
 pub mod error;
 pub mod hmac;

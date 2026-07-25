@@ -63,6 +63,10 @@
 //!   617-714).
 //! - Per-crate conventions: `crates/buff-lsp/AGENTS.md`.
 
+// Boxing the LSP error type would reshape the public `run_stdio` surface
+// and all handler Result signatures. Out of scope; allowed at crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod analysis;
 pub mod handlers;
 pub mod position;

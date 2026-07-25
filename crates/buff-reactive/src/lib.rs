@@ -49,7 +49,7 @@ impl<T> Signal<T> {
             let mut slot = self.inner.borrow_mut();
             slot.value = value;
         }
-        let subs: Vec<Callback> = self.inner.borrow().subscribers.iter().cloned().collect();
+        let subs: Vec<Callback> = self.inner.borrow().subscribers.to_vec();
         runtime::schedule(subs);
     }
 
@@ -61,7 +61,7 @@ impl<T> Signal<T> {
             let mut slot = self.inner.borrow_mut();
             f(&mut slot.value);
         }
-        let subs: Vec<Callback> = self.inner.borrow().subscribers.iter().cloned().collect();
+        let subs: Vec<Callback> = self.inner.borrow().subscribers.to_vec();
         runtime::schedule(subs);
         Ok(())
     }
@@ -123,7 +123,7 @@ impl<T: Clone + 'static> Computed<T> {
             let subs: Vec<Callback> = {
                 let mut slot = cell_for_cb.borrow_mut();
                 slot.cached = None;
-                slot.subscribers.iter().cloned().collect()
+                slot.subscribers.to_vec()
             };
             runtime::schedule(subs);
         });
@@ -169,7 +169,7 @@ impl<T: Clone + 'static> Computed<T> {
 
     pub fn invalidate(&self) {
         self.cell.borrow_mut().cached = None;
-        let subs: Vec<Callback> = self.cell.borrow().subscribers.iter().cloned().collect();
+        let subs: Vec<Callback> = self.cell.borrow().subscribers.to_vec();
         runtime::schedule(subs);
     }
 }

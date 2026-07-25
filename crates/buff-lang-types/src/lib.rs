@@ -14,6 +14,18 @@
 //! (struct/enum), traits, full type inference, exhaustiveness checking, and
 //! recursion detection.
 
+// Boxing the large analysis error types would ripple through the whole
+// inference / checking surface and every consumer. Out of scope; allowed at
+// the crate level.
+#![allow(clippy::result_large_err)]
+// `prelude_types.rs` is a 1919-line stdlib registry with dense prose doc
+// comments that span multiple wrapped lines. The `doc_lazy_continuation`
+// lint flags many of these wrapped lines as list-item continuations even
+// though they are plain prose; the visual formatting is intentional and
+// re-flowing every block would churn the stable registry. Suppressed at the
+// crate level.
+#![allow(clippy::doc_lazy_continuation)]
+
 // T31: async call-graph propagation (fixpoint algorithm). Re-exported at
 // the crate root so the codegen pass (and downstream tools) can call
 // `buff_lang_types::analyze_async(...)` without a long module path.

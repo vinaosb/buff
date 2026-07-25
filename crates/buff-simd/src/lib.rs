@@ -50,6 +50,13 @@
 //! non-test code. `Simd::from_slice` returns `Result`; every other
 //! operation is infallible (4-wide register arithmetic never traps).
 
+// The SIMD wrapper deliberately mirrors `wide`'s arithmetic surface
+// (add/sub/mul/div) so generated Buff `Simd.add(other)` codegen maps 1:1.
+// These shadow the std operator trait names but operate on the SIMD register
+// type; suppressing the std-confusion lint is intentional for the API
+// ergonomics. (The actual clippy lint is `should_implement_trait`.)
+#![allow(clippy::should_implement_trait)]
+
 pub mod error;
 
 pub use error::SimdError;

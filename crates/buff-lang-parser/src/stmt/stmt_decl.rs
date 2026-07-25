@@ -479,6 +479,7 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
 /// - a variant name is missing or not an identifier,
 /// - a variant payload type fails to parse via [`parse_type_ref`],
 /// - the closing `}` is missing.
+///
 /// Parse an optional generic parameter list `<T, U, ...>` (T13).
 ///
 /// Called after the decl name in `func`, `struct`, and `enum` declarations.

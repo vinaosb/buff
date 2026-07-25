@@ -18,6 +18,11 @@
 //! - [`stmt`]: statement parser entry point ([`stmt::parse_statement`]).
 //! - [`parser`]: top-level [`parser::parse`] returning `Vec<Decl>`.
 
+// Boxing the parser error wrapper would change the public `parse` /
+// `parse_expression` Result surface for every consumer. Out of scope;
+// allowed at the crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod expr;
 pub mod options;
 pub mod parser;

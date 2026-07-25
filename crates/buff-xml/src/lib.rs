@@ -36,6 +36,15 @@
 //! | R5 — Lifetime hiding | No public lifetime parameters. `XmlDocument` owns all its data. |
 //! | R6 — Panic boundary | `from_str` wraps its body in `catch_unwind` (per FFI guide §6). |
 
+// The public surface deliberately exposes `from_str` / `to_string` as
+// inherent methods (the Buff prelude + codegen lower `Xml.from_str(s)` /
+// `el.to_string()` to these). They intentionally shadow the std trait
+// signatures (`FromStr::from_str`, blanket `ToString::to_string` from the
+// debug-style `Display` impls). Renaming would break the prelude/codegen
+// contract, so the lints are suppressed at the crate level.
+#![allow(clippy::should_implement_trait)]
+#![allow(clippy::inherent_to_string_shadow_display)]
+
 pub mod error;
 
 pub use error::XmlError;
@@ -277,12 +286,10 @@ fn parse_document(xml: &str) -> Result<XmlDocument, XmlError> {
 /// Parse attributes from a `quick_xml` start/empty event.
 fn parse_attributes(e: &quick_xml::events::BytesStart) -> Vec<(String, String)> {
     let mut attrs = Vec::new();
-    for attr_result in e.attributes() {
-        if let Ok(attr) = attr_result {
-            let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
-            let value = String::from_utf8_lossy(&attr.value).to_string();
-            attrs.push((key, value));
-        }
+    for attr in e.attributes().flatten() {
+        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        let value = String::from_utf8_lossy(&attr.value).to_string();
+        attrs.push((key, value));
     }
     attrs
 }

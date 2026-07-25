@@ -12,6 +12,10 @@
 //! - [`indent`]: offside-rule indentation tracker.
 //! - [`string_interp`]: string-literal scanner with `{expr}` interpolation.
 
+// Boxing the lexer error wrapper would change the public `tokenize` Result
+// surface for every consumer. Out of scope; allowed at the crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod error;
 pub mod indent;
 pub mod lexer;

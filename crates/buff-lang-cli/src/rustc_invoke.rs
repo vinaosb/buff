@@ -60,10 +60,8 @@ pub fn on_path(name: &str) -> bool {
             return true;
         }
         // On Windows, also try with `.exe` (and `.bat`).
-        if cfg!(windows) {
-            if is_executable(&dir.join(format!("{name}.exe"))) {
-                return true;
-            }
+        if cfg!(windows) && is_executable(&dir.join(format!("{name}.exe"))) {
+            return true;
         }
     }
     false
@@ -164,6 +162,12 @@ pub fn target_is_installed(triple: &str) -> bool {
 ///
 /// The probe is cheap (sub-second) and runs at most once per compile
 /// invocation when `--detect-races` is set.
+//
+// Used by `buff-lang-cli` (pipeline.rs) but NOT by `buff-eval`, which
+// includes this module via `#[path]`. `allow(dead_code)` keeps both
+// consumers clean — harmless where used, silences the unused warning in
+// the buff-eval compilation unit.
+#[allow(dead_code)]
 pub fn is_nightly_toolchain() -> bool {
     let probe = Command::new("rustc")
         .args(["--version", "--verbose"])
@@ -188,6 +192,10 @@ pub fn is_nightly_toolchain() -> bool {
 /// # Panics
 ///
 /// Does not panic — this is a pure Command configuration helper.
+//
+// Used by `buff-lang-cli` (pipeline.rs) but NOT by `buff-eval`, which
+// includes this module via `#[path]`. See `is_nightly_toolchain` above.
+#[allow(dead_code)]
 pub fn configure_detect_races(cmd: &mut Command) {
     cmd.arg("-Z").arg("sanitizer=thread");
 }

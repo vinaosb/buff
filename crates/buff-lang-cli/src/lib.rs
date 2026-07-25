@@ -31,6 +31,13 @@
 //! typecheck pass. v1.0 treats type errors as warnings (standalone typecheck
 //! pass is post-v1.0 work).
 
+// Boxing the large error types (CodegenError etc. returned through the
+// pipeline) would reshape the public `compile_to_rust` / `compile_rust_to_exe`
+// surface and every command consumer. Out of scope — matches the same
+// documented trade-off applied in buff-eval / buff-lang-codegen-rust /
+// buff-lang-types. Allowed at the crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod bench_harness;
 pub mod check;
 pub mod cli;

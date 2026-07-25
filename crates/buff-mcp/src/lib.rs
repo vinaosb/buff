@@ -99,6 +99,10 @@
 //! - Plan: `.sisyphus/plans/buff-launch-readiness.md` task T62.
 //! - Per-crate conventions: `crates/buff-mcp/AGENTS.md`.
 
+// Boxing the MCP error type would reshape the public dispatch / run_stdio
+// surface. Out of scope; allowed at the crate level.
+#![allow(clippy::result_large_err)]
+
 pub mod protocol;
 pub mod tools;
 pub mod transport;
