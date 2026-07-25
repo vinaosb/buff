@@ -17,7 +17,12 @@ src/
 ├── scaffold.rs           # 382 lines — TemplateKind (Binary/Lib/Server/Gpu/Desktop/Workspace)
 ├── naming_lint.rs        # 336 lines — is_snake_case, is_pascal_case, lint_naming
 ├── test_runner.rs        # 391 lines — discover_test_names, parse_report
+├── compile_speed.rs      # 451 lines — T55 compile-time optimization helpers (generated-Rust caching, SHA-256 source hashing)
+├── incremental.rs        # 489 lines — T7 Salsa-based incremental compilation front-end (skip re-processing unchanged files)
+├── project_pipeline.rs   # 651 lines — T1 multi-file project build pipeline (module graph, Cargo project generation)
+├── rustc_invoke.rs       # 403 lines — T35 shared rustc subprocess invocation helpers (extracted from pipeline + buff-eval)
 ├── commands/             # 23 files: mod.rs + 22 subcommand modules (see subcommands below)
+├── config/               # 2 files — T106 config sub-modules: types.rs (BuffConfig/Workspace/Package/Profiles serde structs), cargo_gen.rs (deterministic Cargo.toml generation)
 ├── ui_dev/               # 7 files — T131 dev server: WebSocket live reload for `buff ui dev`
 └── coverage/             # 6 files — T137 llvm-cov Rust-line → .buff source-line mapping
 ```

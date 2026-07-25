@@ -9,7 +9,10 @@ src/
 ├── lib.rs          # 9 lines — module wiring + glob re-exports
 ├── span.rs         # Span (byte range), LexError, ParseError, TypeError, CodegenError variants
 ├── source_map.rs   # SourceFile / SourceMap — line/col lookup from byte offset
-└── diagnostic.rs   # Diagnostic type for user-facing error rendering
+├── diagnostic.rs   # Diagnostic type for user-facing error rendering
+├── code.rs         # ErrorCode enum (E10xx/E11xx/E12xx/E13xx/E14xx/E15xx) — STABLE FOREVER registry
+├── json.rs         # JSON serialization of diagnostics (machine-readable error output)
+└── suggest.rs      # T63 suggestion engine — "did you mean…" identifier hints
 ```
 
 ## WHERE TO LOOK

@@ -13,6 +13,7 @@ src/
 ├── expr.rs      # Literal, Expr, MatchArm, Pattern
 ├── stmt.rs      # Stmt
 ├── decl.rs      # Decl enum + FuncDecl, StructDecl, EnumDecl, ...
+├── lossless.rs  # T57 lossless AST — trivia-preserving Piece/LosslessToken for byte-exact roundtrip and comment preservation (foundation for fmt)
 └── ir.rs        # Dataflow IR: IrGraph, IrNode, AstLowerer (lowering from AST)
 ```
 

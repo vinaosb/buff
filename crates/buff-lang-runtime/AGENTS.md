@@ -8,13 +8,14 @@ Dispatches Buff functions marked for parallelism to CPU or GPU based on hints (`
 
 Three routing bands: `SingleThread` (< 1 000 elements), `CpuParallel` (1 000-50 000), `GpuCompute` (> 50 000, GPU-available, fits VRAM). Hints can widen the GpuCompute window down to 1 024 elements.
 
-## STRUCTURE (11 src files)
+## STRUCTURE (13 src files)
 
 | File | Lines | Role |
 |------|-------|------|
 | `lib.rs` | 107 | Public API + re-exports. All map/set types are `BTreeMap`/`BTreeSet` (project hard rule). |
 | `dispatch.rs` | 58 | `DispatchKind` enum (SingleThread/CpuParallel/GpuCompute) + `Dispatcher` trait (object-safe). |
 | `cpu.rs` | 211 | `CpuDispatcher`: owns a rayon thread pool. Exposes `par_map`, `par_filter`, `par_reduce`. Deterministic order via rayon's ordered `collect`. |
+| `channel.rs` | 268 | T2 MPSC channel primitive wrapping `tokio::sync::mpsc`. `Channel<T>` bounded producer/consumer for Buff's in-process messaging. |
 | `gpu.rs` | 308 | `GpuContext`: wgpu adapter handle + `OnceLock`-cached `(Device, Queue)`. First call to `device_queue()` drives the async init via `pollster::block_on`; subsequent calls return the cached pair. Failures cached too. |
 | `gpu_pipeline.rs` | 541 | `WgpuBackend` (implements `GpuBackend`): real wgpu dispatch. Shader module creation, buffer upload (input storage + output storage + staging), compute pass, `map_async` readback, `bytemuck` cast. `workgroup_count` helper. Empty input returns empty immediately. |
 | `cold_start.rs` | 1222 | `PipelineCache` (BTreeMap, keyed by WGSL source), `BufferPool` (BTreeMap, keyed by `(byte_size, usage)`), `ColdStartBackend` (wraps `WgpuBackend` with both caches + background device init via `std::thread::spawn`). Drop-in `GpuBackend` impl. |
@@ -22,6 +23,7 @@ Three routing bands: `SingleThread` (< 1 000 elements), `CpuParallel` (1 000-50 
 | `hints.rs` | 569 | `Prefer` enum (None/Gpu/Npu), `PREFER_GPU_MIN_ELEMENTS = 1024`. `decide_with_prefer()` layers hints on top of `decide()`. `dispatch_with_prefer()` runs the chosen path end-to-end with GPU-to-CPU fallback. `prefer_from_name_args()` parses AST attributes without coupling to `buff-lang-ast`. |
 | `tiling.rs` | 493 | VRAM-aware tiling. `tile_ranges()` splits input into `(start, end)` ranges. `max_elements_per_tile(vram, bpe) = vram / (3 * bpe)`. `dispatch_tiled()` runs each tile through `GpuBackend`. `dispatch_map_with_tiling()` adds CPU fallback on any GPU error. `vram_budget_from_device()` queries wgpu device limits. |
 | `mock_gpu.rs` | 318 | `GpuBackend` trait (object-safe, `Send + Sync`). `MockGpuBackend<F>`: records dispatches in `Mutex<Vec<DispatchRecord>>`, produces output via caller-provided CPU closure. `cpu_fallback_map()`: deterministic sequential oracle for tests. No real GPU needed. |
+| `profile_cache.rs` | 455 | Caches `DecideKind` decisions per `(function signature + input shape profile)` so repeated calls with the same shape skip cost-model evaluation. In-memory only. |
 | `error.rs` | 75 | `RuntimeError` (thiserror): GpuUnavailable, GpuInit{detail}, NotImplemented{feature}, Unsupported{detail}. Bridges to `buff_lang_error::BuffError` via `From`. |
 
 ## TESTS (11 integration files)

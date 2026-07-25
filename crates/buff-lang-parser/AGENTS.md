@@ -8,8 +8,14 @@ Parses `Vec<Token>` → `Vec<Decl>`. **Hand-rolled recursive-descent + Pratt** (
 src/
 ├── lib.rs       # 31 lines — exports parse(), parse_expression(), statement helpers
 ├── stream.rs    # TokenStream cursor: peek / next / expect
+├── options.rs   # Parser edition selection (T57): Standard / Scientific
 ├── expr.rs      # Expression parser (Pratt climbing for precedence)
+├── expr/        # Expression sub-parsers
+│   ├── expr_pattern.rs  # Pattern-matching expression parsing
+│   └── expr_postfix.rs  # Postfix expression parsing (calls, indexing, etc.)
 ├── stmt.rs      # Statement parser + block / func_decl / if / params / type_ref helpers
+├── stmt/        # Statement sub-parsers
+│   └── stmt_decl.rs     # Declaration statement parsing (struct, enum, trait, impl)
 └── parser.rs    # Top-level parse() returning Vec<Decl>
 ```
 
