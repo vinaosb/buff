@@ -1,0 +1,490 @@
+// buff-lang-ast-rsx — Buff self-host port of lib.rs
+//
+// Mirrors crates/buff-lang-ast-rsx/src/lib.rs (451 LOC of pure data types).
+// This crate is pure data: it defines the node types produced by the
+// buffhtml-parser and consumed by codegen-buffhtml. No parsing logic, no
+// codegen — just 16 type definitions + the is_component_tag() heuristic.
+//
+// Mapping notes (Rust → Buff):
+//   - `pub use buff_lang_error::Span` is re-exported upstream; this single-
+//     file self-host port defines a local `Span` stand-in (3 Int fields).
+//   - Rust struct variants in `RsxAttributeKind`
+//     (`Literal { name: String, value: String }`) are flattened to tuple
+//     variants (`Literal(String, String)`) because Buff enums only support
+//     unit and tuple-variant forms. Field order is preserved; field names
+//     are documented inline.
+//   - `Vec<T>` → `Vector<T>`, `bool` → `Bool`, `usize`/`i64` → `Int`.
+//   - Convenience constructors (`RsxText::new`, `ScriptBlock::new`, etc.)
+//     become free functions per Buff convention §7 (Type.new() /
+//     Type.from() only for true constructors on the type itself; helper
+//     builders are free functions named after the type).
+
+// ---------------------------------------------------------------------------
+// Local Span stand-in (re-exported from buff-lang-error upstream).
+// ---------------------------------------------------------------------------
+
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: Int,
+}
+
+func span_new(start: Int, end: Int, source_id: Int) -> Span:
+    return Span { start: start, end: end, source_id: source_id }
+
+func span_dummy() -> Span:
+    return Span { start: 0, end: 0, source_id: 0 }
+
+// ---------------------------------------------------------------------------
+// (1) RsxTemplateFile — top-level node produced by parsing a .buffhtml file.
+// ---------------------------------------------------------------------------
+
+struct RsxTemplateFile {
+    script: Option<ScriptBlock>,
+    root: Vector<RsxNode>,
+    span: Span,
+}
+
+func rsx_template_file_new(script: Option<ScriptBlock>, root: Vector<RsxNode>, span: Span) -> RsxTemplateFile:
+    return RsxTemplateFile { script: script, root: root, span: span }
+
+// ---------------------------------------------------------------------------
+// (2) ScriptBlock — <script lang="buff" props="Props"> ... </script>
+// ---------------------------------------------------------------------------
+
+struct ScriptBlock {
+    lang: String,
+    props: Option<String>,
+    source: String,
+    span: Span,
+}
+
+func script_block_new(lang: String, source: String, span: Span) -> ScriptBlock:
+    return ScriptBlock { lang: lang, props: None, source: source, span: span }
+
+func script_block_with_props(lang: String, props: String, source: String, span: Span) -> ScriptBlock:
+    return ScriptBlock { lang: lang, props: Some(props), source: source, span: span }
+
+// ---------------------------------------------------------------------------
+// (3) RsxNode — one node in the template tree (12 variants).
+// ---------------------------------------------------------------------------
+
+enum RsxNode {
+    Element(RsxElement),
+    Fragment(RsxFragment),
+    Text(RsxText),
+    Interp(RsxInterp),
+    If(RsxIf),
+    Each(RsxEach),
+    Slot(RsxSlot),
+    Comment(RsxComment),
+    Script(ScriptBlock),
+    RawHtml(RsxRawHtml),
+    Await(RsxAwait),
+}
+
+// ---------------------------------------------------------------------------
+// (4) RsxElement — HTML element or child component.
+// ---------------------------------------------------------------------------
+
+struct RsxElement {
+    tag: String,
+    is_component: Bool,
+    attributes: Vector<RsxAttribute>,
+    children: Vector<RsxNode>,
+    self_closing: Bool,
+    span: Span,
+}
+
+func rsx_element_new(tag: String, is_component: Bool, attributes: Vector<RsxAttribute>, children: Vector<RsxNode>, self_closing: Bool, span: Span) -> RsxElement:
+    return RsxElement {
+        tag: tag,
+        is_component: is_component,
+        attributes: attributes,
+        children: children,
+        self_closing: self_closing,
+        span: span,
+    }
+
+// ---------------------------------------------------------------------------
+// (5) RsxFragment — <> ... </>
+// ---------------------------------------------------------------------------
+
+struct RsxFragment {
+    children: Vector<RsxNode>,
+    span: Span,
+}
+
+func rsx_fragment_new(children: Vector<RsxNode>, span: Span) -> RsxFragment:
+    return RsxFragment { children: children, span: span }
+
+// ---------------------------------------------------------------------------
+// (6) RsxText — raw text run.
+// ---------------------------------------------------------------------------
+
+struct RsxText {
+    text: String,
+    span: Span,
+}
+
+func rsx_text_new(text: String, span: Span) -> RsxText:
+    return RsxText { text: text, span: span }
+
+// ---------------------------------------------------------------------------
+// (7) RsxInterp — {expr} interpolation.
+// ---------------------------------------------------------------------------
+
+struct RsxInterp {
+    expr: String,
+    span: Span,
+}
+
+func rsx_interp_new(expr: String, span: Span) -> RsxInterp:
+    return RsxInterp { expr: expr, span: span }
+
+// ---------------------------------------------------------------------------
+// (8) RsxAttribute — one attribute / prop / handler on an element.
+// ---------------------------------------------------------------------------
+
+struct RsxAttribute {
+    kind: RsxAttributeKind,
+    span: Span,
+}
+
+func rsx_attribute_new(kind: RsxAttributeKind, span: Span) -> RsxAttribute:
+    return RsxAttribute { kind: kind, span: span }
+
+// ---------------------------------------------------------------------------
+// (9) RsxAttributeKind — 7 attribute forms.
+// Rust struct variants are flattened to tuple variants (field order kept).
+// ---------------------------------------------------------------------------
+
+enum RsxAttributeKind {
+    // Literal(String name, String value) — name="value"
+    Literal(String, String),
+    // Expression(String name, String expr, Span expr_span) — name={expr}
+    Expression(String, String, Span),
+    // Event(String event, Vector<String> modifiers, String handler_expr, Span handler_span)
+    // — on:event_modifier={handler_expr}
+    Event(String, Vector<String>, String, Span),
+    // NamedProp(String name, String value, Span value_span) — name: value
+    NamedProp(String, String, Span),
+    // Boolean(String name) — bare boolean attribute (e.g. <input disabled />)
+    Boolean(String),
+    // Spread(String ident) — {...rest} spread props
+    Spread(String),
+    // Bind(String prop, String signal) — bind:value={sig}
+    Bind(String, String),
+}
+
+// ---------------------------------------------------------------------------
+// (10) RsxIf — {#if cond} ... {:else if cond} ... {:else} ... {/if}
+// ---------------------------------------------------------------------------
+
+struct RsxIf {
+    branches: Vector<RsxIfBranch>,
+    else_branch: Option<Vector<RsxNode>>,
+    span: Span,
+}
+
+func rsx_if_new(branches: Vector<RsxIfBranch>, else_branch: Option<Vector<RsxNode>>, span: Span) -> RsxIf:
+    return RsxIf { branches: branches, else_branch: else_branch, span: span }
+
+// ---------------------------------------------------------------------------
+// (11) RsxIfBranch — one branch of an {#if}/{:else if} chain.
+// ---------------------------------------------------------------------------
+
+struct RsxIfBranch {
+    cond: String,
+    cond_span: Span,
+    body: Vector<RsxNode>,
+}
+
+func rsx_if_branch_new(cond: String, cond_span: Span, body: Vector<RsxNode>) -> RsxIfBranch:
+    return RsxIfBranch { cond: cond, cond_span: cond_span, body: body }
+
+// ---------------------------------------------------------------------------
+// (12) RsxEach — {#each iterable as binding} ... {:else} ... {/each}
+// ---------------------------------------------------------------------------
+
+struct RsxEach {
+    iterable: String,
+    iterable_span: Span,
+    binding: String,
+    index_binding: Option<String>,
+    key: Option<String>,
+    body: Vector<RsxNode>,
+    else_branch: Option<Vector<RsxNode>>,
+    span: Span,
+}
+
+func rsx_each_new(iterable: String, iterable_span: Span, binding: String, index_binding: Option<String>, key: Option<String>, body: Vector<RsxNode>, else_branch: Option<Vector<RsxNode>>, span: Span) -> RsxEach:
+    return RsxEach {
+        iterable: iterable,
+        iterable_span: iterable_span,
+        binding: binding,
+        index_binding: index_binding,
+        key: key,
+        body: body,
+        else_branch: else_branch,
+        span: span,
+    }
+
+// ---------------------------------------------------------------------------
+// (13) RsxSlot — <slot /> (default) or <slot name="x" /> (named).
+// ---------------------------------------------------------------------------
+
+struct RsxSlot {
+    name: Option<String>,
+    span: Span,
+}
+
+func rsx_slot_new(span: Span) -> RsxSlot:
+    return RsxSlot { name: None, span: span }
+
+func rsx_slot_named(name: String, span: Span) -> RsxSlot:
+    return RsxSlot { name: Some(name), span: span }
+
+// ---------------------------------------------------------------------------
+// (14) RsxComment — HTML <!-- --> or Buff {# ... #} directive comment.
+// ---------------------------------------------------------------------------
+
+struct RsxComment {
+    text: String,
+    span: Span,
+}
+
+func rsx_comment_new(text: String, span: Span) -> RsxComment:
+    return RsxComment { text: text, span: span }
+
+// ---------------------------------------------------------------------------
+// (15) RsxRawHtml — {@html raw_trusted_html} escape hatch.
+// ---------------------------------------------------------------------------
+
+struct RsxRawHtml {
+    expr: String,
+    span: Span,
+}
+
+func rsx_raw_html_new(expr: String, span: Span) -> RsxRawHtml:
+    return RsxRawHtml { expr: expr, span: span }
+
+// ---------------------------------------------------------------------------
+// (16) RsxAwait — {#await fut}{:then binding}{:catch binding}{/await}
+// ---------------------------------------------------------------------------
+
+struct RsxAwait {
+    fut_expr: String,
+    fut_span: Span,
+    pending_body: Option<Vector<RsxNode>>,
+    then_binding: String,
+    then_body: Vector<RsxNode>,
+    catch_binding: Option<String>,
+    catch_body: Option<Vector<RsxNode>>,
+    span: Span,
+}
+
+func rsx_await_new(fut_expr: String, fut_span: Span, pending_body: Option<Vector<RsxNode>>, then_binding: String, then_body: Vector<RsxNode>, catch_binding: Option<String>, catch_body: Option<Vector<RsxNode>>, span: Span) -> RsxAwait:
+    return RsxAwait {
+        fut_expr: fut_expr,
+        fut_span: fut_span,
+        pending_body: pending_body,
+        then_binding: then_binding,
+        then_body: then_body,
+        catch_binding: catch_binding,
+        catch_body: catch_body,
+        span: span,
+    }
+
+// ---------------------------------------------------------------------------
+// is_component_tag — first char of the tag is ASCII uppercase (Svelte/JSX).
+//
+// Rust original uses `tag.chars().next().map(|c| c.is_ascii_uppercase())`.
+// Buff codegen has no Char-comparison / `char_at` instance method today, so
+// we spell out the 26-letter ASCII uppercase check via `starts_with` (which
+// IS supported on String). Result is byte-equivalent to the Rust version for
+// any ASCII tag; multi-byte UTF-8 first chars fall through to `false` (the
+// Rust `is_ascii_uppercase()` also returns false for non-ASCII).
+// ---------------------------------------------------------------------------
+
+func is_component_tag(tag: String) -> Bool:
+    if tag.starts_with("A"):
+        return true
+    if tag.starts_with("B"):
+        return true
+    if tag.starts_with("C"):
+        return true
+    if tag.starts_with("D"):
+        return true
+    if tag.starts_with("E"):
+        return true
+    if tag.starts_with("F"):
+        return true
+    if tag.starts_with("G"):
+        return true
+    if tag.starts_with("H"):
+        return true
+    if tag.starts_with("I"):
+        return true
+    if tag.starts_with("J"):
+        return true
+    if tag.starts_with("K"):
+        return true
+    if tag.starts_with("L"):
+        return true
+    if tag.starts_with("M"):
+        return true
+    if tag.starts_with("N"):
+        return true
+    if tag.starts_with("O"):
+        return true
+    if tag.starts_with("P"):
+        return true
+    if tag.starts_with("Q"):
+        return true
+    if tag.starts_with("R"):
+        return true
+    if tag.starts_with("S"):
+        return true
+    if tag.starts_with("T"):
+        return true
+    if tag.starts_with("U"):
+        return true
+    if tag.starts_with("V"):
+        return true
+    if tag.starts_with("W"):
+        return true
+    if tag.starts_with("X"):
+        return true
+    if tag.starts_with("Y"):
+        return true
+    if tag.starts_with("Z"):
+        return true
+    return false
+
+// ---------------------------------------------------------------------------
+// main — exercise every type + constructor, print field values.
+// ---------------------------------------------------------------------------
+
+func main():
+    // --- Span stand-in ---
+    let sp = span_new(start: 10, end: 20, source_id: 1)
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id)
+
+    let dummy = span_dummy()
+    print(dummy.start)
+
+    // --- RsxText ---
+    let txt = rsx_text_new(text: "hello", span: sp)
+    print(txt.text)
+    print(txt.span.start)
+
+    // --- RsxInterp ---
+    let interp = rsx_interp_new(expr: "user.name", span: sp)
+    print(interp.expr)
+
+    // --- RsxComment ---
+    let cmt = rsx_comment_new(text: "visible only in source", span: sp)
+    print(cmt.text)
+
+    // --- RsxRawHtml ---
+    let raw = rsx_raw_html_new(expr: "trusted_html", span: sp)
+    print(raw.expr)
+
+    // --- RsxSlot (default + named) ---
+    let slot_default = rsx_slot_new(span: sp)
+    print(slot_default.name.is_none())
+
+    let slot_named = rsx_slot_named(name: "header", span: sp)
+    match slot_named.name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    // --- RsxElement (empty attrs/children, self-closing) ---
+    let elem = rsx_element_new(
+        tag: "Counter",
+        is_component: true,
+        attributes: [],
+        children: [],
+        self_closing: true,
+        span: sp,
+    )
+    print(elem.tag)
+    print(elem.is_component)
+    print(elem.self_closing)
+    print(elem.attributes.len())
+    print(elem.children.len())
+
+    // --- RsxFragment (empty children) ---
+    let frag = rsx_fragment_new(children: [], span: sp)
+    print(frag.children.len())
+
+    // --- ScriptBlock (no props + with props) ---
+    let script = script_block_new(lang: "buff", source: "print(\"hi\")", span: sp)
+    print(script.lang)
+    print(script.source)
+    print(script.props.is_none())
+
+    let script_p = script_block_with_props(lang: "buff", props: "Props", source: "x = 1", span: sp)
+    print(script_p.lang)
+    match script_p.props {
+        Some(p) => print(p),
+        None => print(0),
+    }
+
+    // --- RsxAttribute (Boolean kind) ---
+    let attr = rsx_attribute_new(kind: Boolean("disabled"), span: sp)
+    print(attr.span.start)
+
+    // --- RsxIfBranch / RsxIf (empty body, no else) ---
+    let branch = rsx_if_branch_new(cond: "count > 0", cond_span: sp, body: [])
+    print(branch.cond)
+
+    let if_node = rsx_if_new(branches: [branch], else_branch: None, span: sp)
+    print(if_node.branches.len())
+    print(if_node.else_branch.is_none())
+
+    // --- RsxEach (no index/key/else) ---
+    let each_node = rsx_each_new(
+        iterable: "items",
+        iterable_span: sp,
+        binding: "item",
+        index_binding: None,
+        key: None,
+        body: [],
+        else_branch: None,
+        span: sp,
+    )
+    print(each_node.iterable)
+    print(each_node.binding)
+    print(each_node.key.is_none())
+
+    // --- RsxAwait (no pending/catch) ---
+    let await_node = rsx_await_new(
+        fut_expr: "fetchUser(id)",
+        fut_span: sp,
+        pending_body: None,
+        then_binding: "user",
+        then_body: [],
+        catch_binding: None,
+        catch_body: None,
+        span: sp,
+    )
+    print(await_node.fut_expr)
+    print(await_node.then_binding)
+    print(await_node.catch_binding.is_none())
+
+    // --- RsxTemplateFile (no script, empty root) ---
+    let tpl = rsx_template_file_new(script: None, root: [], span: sp)
+    print(tpl.script.is_none())
+    print(tpl.root.len())
+
+    // --- is_component_tag heuristic ---
+    print(is_component_tag(tag: "Counter"))
+    print(is_component_tag(tag: "Layout"))
+    print(is_component_tag(tag: "div"))
+    print(is_component_tag(tag: "h1"))
+    print(is_component_tag(tag: ""))
