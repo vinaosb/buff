@@ -2,8 +2,8 @@
 # REAL behavioral-equivalence harness: compares .buff port stdout vs Rust original stdout.
 #
 # For each ported .buff file with a corresponding Rust example binary:
-# 1. Runs the .buff file via `buff run` (captures STDOUT only)
-# 2. Runs the Rust binary via `cargo run --example` (captures STDOUT only)
+# 1. Runs the .buff file via `buff run` (captures STDOUT ONLY)
+# 2. Runs the Rust binary via `cargo run --example` (captures STDOUT ONLY)
 # 3. Diffs the two raw stdout outputs
 # 4. Reports PASS/FAIL per file
 #
@@ -11,10 +11,10 @@
 # "we need to be sure they have the same behaviour"
 #
 # NO OUTPUT FILTERING — raw stdout comparison.
-# Stderr (compilation messages, rustup info) is discarded.
+# FAILS on any error (no `|| true` swallowing).
 #
 # Usage: bash scripts/equivalence-rust-vs-buff.sh
-# CI: continue-on-error (informational)
+# Exit code: 0 if all pass, 1 if any fail
 
 BUFF=${BUFF:-./target/release/buff}
 PASS=0
@@ -40,18 +40,34 @@ for test_def in "${TESTS[@]}"; do
     echo -n "Testing $buff_file vs $crate:$example... "
 
     # Run .buff file — capture STDOUT ONLY (stderr has rustup/compilation noise)
+    # NO error swallowing — if buff run fails, the test FAILS
     rm -rf target/buff-cache
-    buff_output=$($BUFF run "$buff_file" 2>/dev/null || true)
+    buff_output=$($BUFF run "$buff_file" 2>/dev/null)
+    buff_rc=$?
+
+    if [ $buff_rc -ne 0 ]; then
+        echo "FAIL (buff run exited $buff_rc)"
+        FAIL=$((FAIL+1))
+        continue
+    fi
 
     # Run Rust example — capture STDOUT ONLY
-    rust_output=$(cargo run -p "$crate" --example "$example" --release 2>/dev/null || true)
+    # NO error swallowing — if cargo run fails, the test FAILS
+    rust_output=$(cargo run -p "$crate" --example "$example" --release 2>/dev/null)
+    rust_rc=$?
+
+    if [ $rust_rc -ne 0 ]; then
+        echo "FAIL (cargo run exited $rust_rc)"
+        FAIL=$((FAIL+1))
+        continue
+    fi
 
     if [ "$buff_output" = "$rust_output" ]; then
         echo "PASS"
         echo "  Output: $(echo "$buff_output" | tr '\n' ' ')"
         PASS=$((PASS+1))
     else
-        echo "FAIL"
+        echo "FAIL (output mismatch)"
         echo "  Buff output: [$buff_output]"
         echo "  Rust output: [$rust_output]"
         FAIL=$((FAIL+1))
@@ -60,4 +76,7 @@ done
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
+if [ $FAIL -gt 0 ]; then
+    exit 1
+fi
 exit 0
