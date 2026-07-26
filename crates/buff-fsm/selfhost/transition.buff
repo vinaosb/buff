@@ -1,17 +1,30 @@
 // buff-fsm self-host port — TransitionSummary type
-// Mirrors crates/buff-fsm/src/lib.rs TransitionSummary struct (simplified)
+// Mirrors crates/buff-fsm/src/lib.rs TransitionSummary struct EXACTLY
+//
+// Rust original:
+//   pub struct TransitionSummary {
+//       pub from: String,
+//       pub event: String,
+//       pub to: String,
+//       pub has_guard: bool,
+//       pub has_action: bool,
+//   }
 
 struct TransitionSummary {
-    transitioned: Bool,
-    from_state: Int,
-    to_state: Int,
+    source: String,
+    event: String,
+    to: String,
+    has_guard: Bool,
+    has_action: Bool,
 }
 
-func summary_new(from_s: Int, to_s: Int, did_transition: Bool) -> TransitionSummary:
-    return TransitionSummary { transitioned: did_transition, from_state: from_s, to_state: to_s }
+func summary_new(from_s: String, event_s: String, to_s: String, has_g: Bool, has_a: Bool) -> TransitionSummary:
+    return TransitionSummary { source: from_s, event: event_s, to: to_s, has_guard: has_g, has_action: has_a }
 
 func main():
-    let t = summary_new(from_s: 0, to_s: 1, did_transition: true)
-    print(t.transitioned)
-    print(t.from_state)
-    print(t.to_state)
+    let t = summary_new(from_s: "idle", event_s: "go", to_s: "running", has_g: true, has_a: false)
+    print(t.source)
+    print(t.event)
+    print(t.to)
+    print(t.has_guard)
+    print(t.has_action)

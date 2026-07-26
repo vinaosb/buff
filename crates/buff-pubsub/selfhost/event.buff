@@ -1,15 +1,19 @@
 // buff-pubsub self-host port — Event type
-// Mirrors crates/buff-pubsub/src/lib.rs Event struct (simplified)
+// Mirrors crates/buff-pubsub/src/lib.rs Event struct EXACTLY
+//
+// Rust original:
+//   pub struct Event { pub topic: String, pub payload: String }
+//   impl Event { pub fn new(topic: String, payload: String) -> Event }
 
 struct Event {
-    topic_id: Int,
-    payload_size: Int,
+    topic: String,
+    payload: String,
 }
 
-func event_new(topic: Int, size: Int) -> Event:
-    return Event { topic_id: topic, payload_size: size }
+func event_new(topic: String, payload: String) -> Event:
+    return Event { topic: topic, payload: payload }
 
 func main():
-    let e = event_new(topic: 1, size: 100)
-    print(e.topic_id)
-    print(e.payload_size)
+    let e = event_new(topic: "user.created", payload: "hello world")
+    print(e.topic)
+    print(e.payload)

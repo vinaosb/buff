@@ -1,0 +1,41 @@
+// buff-lang-ffi-guide self-host port — FFI Safety Rules
+// Mirrors crates/buff-lang-ffi-guide/src/lib.rs
+//
+// The Rust crate is documentation-only (no code, just //! doc comments).
+// This .buff file captures the 6 FFI safety rules as a data structure.
+//
+// Rust original (19 LOC):
+//   //! # Buff FFI Safety Guide
+//   //! 1. No raw pointer exposure to Buff users.
+//   //! 2. Rust owns heap memory; Buff sees borrowed views.
+//   //! 3. Map Rust Result<T,E> to Buff Result<T,BuffError>.
+//   //! 4. Only Send + 'static types cross spawn boundaries.
+//   //! 5. No Rust lifetimes in Buff types. Owned types or 'static only.
+//   //! 6. Catch panics at the boundary; never propagate them into Buff code.
+
+enum FfiRule {
+    NoRawPointers,
+    RustOwnsMemory,
+    MapResultErrors,
+    SendStaticOnly,
+    NoLifetimes,
+    CatchPanics,
+}
+
+func rule_name(rule: FfiRule) -> String:
+    match rule {
+        NoRawPointers => "R1: No raw pointers",
+        RustOwnsMemory => "R2: Rust owns memory",
+        MapResultErrors => "R3: Map Result errors",
+        SendStaticOnly => "R4: Send + 'static only",
+        NoLifetimes => "R5: No lifetimes",
+        CatchPanics => "R6: Catch panics",
+    }
+
+func main():
+    print(rule_name(rule: NoRawPointers))
+    print(rule_name(rule: RustOwnsMemory))
+    print(rule_name(rule: MapResultErrors))
+    print(rule_name(rule: SendStaticOnly))
+    print(rule_name(rule: NoLifetimes))
+    print(rule_name(rule: CatchPanics))
