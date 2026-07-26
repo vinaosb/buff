@@ -31,6 +31,10 @@ TESTS=(
     "crates/buff-fsm/selfhost/transition.buff|buff-fsm|equivalence_transition"
     "crates/buff-lang-ffi-guide/selfhost/ffi_guide.buff|buff-lang-ffi-guide|equivalence_ffi_guide"
     "crates/buff-lang-parser/selfhost/parser.buff|buff-lang-parser|equivalence_parser"
+    "crates/buff-lang-debug-info/selfhost/debug_info.buff|buff-lang-debug-info|equivalence_debug_info"
+    "crates/buff-lang-lexer/selfhost/lexer.buff|buff-lang-lexer|equivalence_lexer"
+    "crates/buff-eval/selfhost/eval.buff|buff-eval|equivalence_eval"
+    "crates/buff-lang-buffhtml-parser/selfhost/buffhtml_parser.buff|buff-lang-buffhtml-parser|equivalence_buffhtml"
 )
 
 echo "=== Rust-vs-Buff Behavioral Equivalence (raw stdout) ==="

@@ -1,3 +1,5 @@
+#!/bin/bash
+cat > /workspace/crates/buff-lang-debug-info/selfhost/debug_info.buff << 'BUFFEOF'
 // buff-lang-debug-info self-host port
 struct SourceMap {
     source_name: String,
@@ -31,3 +33,6 @@ func main():
     print(anchor.function_name)
     print(anchor.span_start)
     print(anchor.span_end)
+BUFFEOF
+rm -rf /workspace/target/buff-cache
+/workspace/target/release/buff run /workspace/crates/buff-lang-debug-info/selfhost/debug_info.buff 2>/dev/null
