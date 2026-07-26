@@ -1,0 +1,371 @@
+// buff-eval — Buff self-host port of lib.rs
+//
+// Mirrors crates/buff-eval/src/lib.rs (925 LOC). Thin evaluation engine over
+// existing Buff compiler primitives (tokenize, parse, TypeInferencer,
+// generate_rust). Composes the front-end crates into a clean eval / eval_line
+// / type_of surface with captured stdout. Adds NO new compilation logic.
+//
+// Mapping notes (Rust → Buff):
+//   - `Diagnostic` is re-exported from buff-lang-error upstream. This
+//     single-file self-host port defines a local `Diagnostic` stand-in
+//     (message + Span) — same pattern as ast_rsx.buff's local Span stand-in.
+//   - `&str` params → `String` (Buff owns at the boundary).
+//   - `Option<i32>` → `Option<Int>` (Buff's i32 is widened to Int).
+//   - `Option<&str>` → `Option<String>`.
+//   - Private `top_level_src` / `body_stmts_src` fields on `Evaluator` are
+//     exposed here (single-file Buff has no visibility modifiers; mirrors
+//     the ast_rsx.buff precedent of exposing all fields for construction).
+//   - The `SnippetKind` enum is PRIVATE upstream (`enum SnippetKind` without
+//     `pub`) but architecturally central — included here so the port
+//     documents the full classification surface.
+//   - `EvalLinker` (private) + `ResolvedType` (type alias) documented inline.
+//   - Constructors + methods become free functions per Buff convention §7.
+//   - NOTE: string interpolation `${var}` currently emits a literal leading
+//     `$` (pre-existing codegen divergence) and `String + String` is not
+//     implemented in Rust. This port avoids both — the upstream Rust append
+//     / compose / classify logic that depends on string mutation is
+//     documented in comments but not re-emitted as runnable Buff code (the
+//     codegen-lowered path would not round-trip). The type surface — which
+//     is the core self-host deliverable — is fully ported.
+
+// ---------------------------------------------------------------------------
+// Local Span + Diagnostic stand-ins (re-exported from buff-lang-error upstream).
+// ---------------------------------------------------------------------------
+
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: Int,
+}
+
+func span_dummy() -> Span:
+    return Span { start: 0, end: 0, source_id: 0 }
+
+// Diagnostic stand-in. Upstream this is buff_lang_error::Diagnostic with
+// a richer surface (severity, error code, notes, suggestions). This port
+// models the two fields that buff-eval interacts with: the message and
+// the (dummy) span.
+struct Diagnostic {
+    // The human-readable diagnostic message.
+    message: String,
+    // The source span the diagnostic points at (dummy for eval-level errors).
+    span: Span,
+}
+
+func diagnostic_error(message: String) -> Diagnostic:
+    return Diagnostic { message: message, span: span_dummy() }
+
+// ---------------------------------------------------------------------------
+// (1) EvalResult — result of evaluating a Buff snippet.
+//
+// Rust original:
+//   #[derive(Debug, Clone, PartialEq)]
+//   pub struct EvalResult {
+//       pub value: Option<String>,
+//       pub stdout: String,
+//       pub stderr: String,
+//       pub diagnostic: Option<Diagnostic>,
+//       pub exit_code: Option<i32>,
+//   }
+//
+// All fallible phases (lex, parse, codegen, rustc, exec) surface their errors
+// through `diagnostic` rather than `Result<>`. Callers check `is_ok()`.
+// ---------------------------------------------------------------------------
+
+struct EvalResult {
+    // Bare-expression value (None for statements / declarations / errors).
+    value: Option<String>,
+    // Everything the spawned program wrote to stdout (Buff's `print` lands here).
+    stdout: String,
+    // Everything the spawned program wrote to stderr (includes panic messages).
+    stderr: String,
+    // Diagnostic for any pipeline error (None on clean evaluation).
+    diagnostic: Option<Diagnostic>,
+    // Spawned program's exit code (None if it never ran).
+    exit_code: Option<Int>,
+}
+
+// `true` when the pipeline reached a successful program execution.
+// Mirrors `EvalResult::is_ok(&self) -> bool`:
+//   `self.diagnostic.is_none() && self.exit_code == Some(0)`.
+// Buff has no Option::is_none() prelude method, so we destructure.
+func eval_result_is_ok(result: EvalResult) -> Bool:
+    // If a diagnostic is present, the run failed.
+    let has_diag = match result.diagnostic {
+        Some(_) => true,
+        None => false,
+    }
+    if has_diag:
+        return false
+    // Otherwise the exit code must be Some(0).
+    match result.exit_code {
+        Some(code) => return code == 0,
+        None => return false,
+    }
+
+// Construct an error result with the given diagnostic and empty output.
+// Mirrors private `EvalResult::err(diagnostic) -> Self`.
+func eval_result_err(diagnostic: Diagnostic) -> EvalResult:
+    return EvalResult {
+        value: None,
+        stdout: "",
+        stderr: "",
+        diagnostic: Some(diagnostic),
+        exit_code: None,
+    }
+
+// Construct a successful result with captured output.
+// Mirrors private `EvalResult::ok(stdout, stderr, exit_code, value) -> Self`.
+func eval_result_ok(stdout: String, stderr: String, exit_code: Option<Int>, value: Option<String>) -> EvalResult:
+    return EvalResult {
+        value: value,
+        stdout: stdout,
+        stderr: stderr,
+        diagnostic: None,
+        exit_code: exit_code,
+    }
+
+// ---------------------------------------------------------------------------
+// (2) SnippetKind — classification of a user-supplied snippet.
+//
+// Rust original (PRIVATE — `enum SnippetKind` without `pub`):
+//   #[derive(Debug, Clone)]
+//   enum SnippetKind {
+//       Empty,
+//       BareExpr(String, bool),
+//       BodyStmt(String),
+//       TopLevelDecl(String),
+//       FullProgram(String),
+//   }
+//
+// Produced by `classify(snippet)` — drives the accumulation + composition
+// strategy in `Evaluator::evaluate`. Included here because it's central to
+// the crate's architecture even though it's private upstream.
+// ---------------------------------------------------------------------------
+
+enum SnippetKind {
+    // Whitespace-only input — no-op.
+    Empty,
+    // A bare expression (`2 + 3`). Carries the source + a flag indicating
+    // whether the expression is itself a `print(...)` call.
+    BareExpr(String, Bool),
+    // A body statement (`let x = 42`). Carries the source.
+    BodyStmt(String),
+    // A top-level declaration (`func helper(): ...`). Carries the source.
+    TopLevelDecl(String),
+    // A full Buff program with its own `func main()`. Evaluated verbatim.
+    FullProgram(String),
+}
+
+// Human-readable tag for a SnippetKind (for diagnostics / introspection).
+// Matches once on the enum (consuming it) and returns a short label.
+func snippet_kind_tag(kind: SnippetKind) -> String:
+    match kind {
+        Empty => "empty",
+        BareExpr(_, _) => "bare_expr",
+        BodyStmt(_) => "body_stmt",
+        TopLevelDecl(_) => "top_level_decl",
+        FullProgram(_) => "full_program",
+    }
+
+// Whether a BareExpr variant carries the "is itself a print call" flag.
+// Returns false for non-BareExpr variants.
+func snippet_kind_is_print(kind: SnippetKind) -> Bool:
+    match kind {
+        BareExpr(_, is_print) => is_print,
+        Empty => false,
+        BodyStmt(_) => false,
+        TopLevelDecl(_) => false,
+        FullProgram(_) => false,
+    }
+
+// ---------------------------------------------------------------------------
+// (3) EvalLinker — fast-linker selection (private, mirrors CLI's LinkerChoice).
+//
+// Kept inline to avoid pulling clap/tokio transitively into the eval crate.
+// Rust original:
+//   #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+//   enum EvalLinker { #[default] Auto, System }
+//
+// `resolve_eval_linker_flags(linker)` probes PATH for mold (Linux) →
+// rust-lld → lld → system default. Documented here (not exercised in main)
+// because it's part of the crate's rustc-invocation configuration surface.
+// ---------------------------------------------------------------------------
+
+enum EvalLinker {
+    // Auto-detect: probe PATH for mold (Linux) → rust-lld → system default.
+    Auto,
+    // Use rustc's default system linker (no `-C link-arg=-fuse-ld` flag).
+    System,
+}
+
+// ---------------------------------------------------------------------------
+// (4) Evaluator — a reusable Buff evaluator that accumulates state.
+//
+// Rust original:
+//   #[derive(Debug)]
+//   pub struct Evaluator {
+//       top_level_src: String,
+//       body_stmts_src: String,
+//   }
+//
+// Clone is NOT derived upstream (mutable session state callers keep singular).
+// Buff port exposes both fields for construction (single-file, no visibility).
+//
+// The upstream `append_top_level` / `append_body_stmt` / `compose_program_body`
+// methods perform string mutation (push_str + trailing-newline normalization)
+// that this self-host port does not re-emit — the codegen-lowered string ops
+// (`+` concat) are not implemented in Rust. The fields are exposed so callers
+// can construct + inspect the accumulated state directly.
+// ---------------------------------------------------------------------------
+
+struct Evaluator {
+    // Accumulated source for top-level declarations (e.g. `func helper()`).
+    top_level_src: String,
+    // Accumulated source for body statements inside the synthetic `main`.
+    body_stmts_src: String,
+}
+
+// Construct a fresh evaluator with no accumulated state.
+// Mirrors `Evaluator::new() -> Self` (+ `Default::default()`).
+func evaluator_new() -> Evaluator:
+    return Evaluator { top_level_src: "", body_stmts_src: "" }
+
+// Whether the evaluator has accumulated any state (top-level OR body).
+// Convenience predicate — upstream has no direct equivalent but the REPL
+// uses `!body_stmts_src.is_empty()` internally for prompt rendering.
+func evaluator_has_state(evaluator: Evaluator) -> Bool:
+    if evaluator.top_level_src != "":
+        return true
+    if evaluator.body_stmts_src != "":
+        return true
+    return false
+
+// ---------------------------------------------------------------------------
+// ResolvedType — re-export of `buff_lang_types::Type` upstream.
+//
+// Rust original:
+//   pub use buff_lang_types::Type as ResolvedType;
+//
+// This is a type ALIAS, not a struct. `Evaluator::type_of(expr) -> Option<Type>`
+// returns `Option<ResolvedType>` upstream. The Buff type system's `Type`
+// surface (Int, String, Bool, Vector<T>, Option<T>, etc.) is the lowered
+// representation; a full port lives in buff-lang-types, not here. We
+// document the alias; it has no runtime body to exercise.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Helper: `true` if `name` is `print` or `println` (the prelude print fns).
+// Simplified port of `fn is_print_call(expr: &Expr) -> bool` — upstream
+// pattern-matches on `Expr::FuncCall { callee: Expr::Ident(name) }`, here
+// we accept the callee name directly (the caller extracts it).
+// ---------------------------------------------------------------------------
+
+func is_print_name(name: String) -> Bool:
+    if name == "print":
+        return true
+    if name == "println":
+        return true
+    return false
+
+// ---------------------------------------------------------------------------
+// main — exercise every type + constructor, print field values.
+// (Each piece printed separately — avoids string interpolation / concat.)
+// ---------------------------------------------------------------------------
+
+func main():
+    // --- EvalResult: success path (Ok) ---
+    // (EvalResult doesn't impl Copy; we read all fields BEFORE the
+    // consuming is_ok() call to avoid borrow-of-moved-value errors.)
+    let ok = eval_result_ok(stdout: "42", stderr: "", exit_code: Some(0), value: Some("42"))
+    print(ok.stdout)
+    print(ok.stderr)
+    match ok.value {
+        Some(v) => print(v),
+        None => print("<no value>"),
+    }
+    match ok.exit_code {
+        Some(c) => print(c),
+        None => print(-1),
+    }
+    match ok.diagnostic {
+        Some(_) => print("<has diagnostic>"),
+        None => print("<no diagnostic>"),
+    }
+    // is_ok consumes `ok` — call it last.
+    print(eval_result_is_ok(result: ok))
+
+    // --- EvalResult: error path (Err) ---
+    let err = eval_result_err(diagnostic: diagnostic_error(message: "lex error"))
+    print(err.stdout)
+    print(err.stderr)
+    match err.value {
+        Some(v) => print(v),
+        None => print("<no value>"),
+    }
+    match err.exit_code {
+        Some(c) => print(c),
+        None => print(-1),
+    }
+    match err.diagnostic {
+        Some(d) => print(d.message),
+        None => print("<no diagnostic>"),
+    }
+    // is_ok consumes `err` — call it last.
+    print(eval_result_is_ok(result: err))
+
+    // --- SnippetKind variants + tag + is_print flag ---
+    print(snippet_kind_tag(kind: Empty))
+    print(snippet_kind_tag(kind: BareExpr("2 + 3", false)))
+    print(snippet_kind_tag(kind: BodyStmt("let x = 42")))
+    print(snippet_kind_tag(kind: TopLevelDecl("func helper(): return 1")))
+    print(snippet_kind_tag(kind: FullProgram("func main(): print(\"hi\")")))
+
+    print(snippet_kind_is_print(kind: BareExpr("print(42)", true)))
+    print(snippet_kind_is_print(kind: BareExpr("2 + 3", false)))
+    print(snippet_kind_is_print(kind: Empty))
+    print(snippet_kind_is_print(kind: BodyStmt("let x = 1")))
+
+    // --- is_print_name ---
+    print(is_print_name(name: "print"))
+    print(is_print_name(name: "println"))
+    print(is_print_name(name: "foo"))
+    print(is_print_name(name: "printf"))
+
+    // --- EvalLinker variants + equality ---
+    let auto_linker = Auto
+    let system_linker = System
+    print(auto_linker == Auto)
+    print(system_linker == System)
+    print(auto_linker == system_linker)
+    print(auto_linker == Auto)
+
+    // --- Evaluator fresh + has_state ---
+    // (has_state consumes the Evaluator; print fields first.)
+    let ev0 = evaluator_new()
+    print(ev0.top_level_src)
+    print(ev0.body_stmts_src)
+    print(evaluator_has_state(evaluator: ev0))
+
+    // --- Evaluator with accumulated state (constructed directly) ---
+    let ev1 = Evaluator { top_level_src: "func helper(): return 1", body_stmts_src: "let x = 42" }
+    print(ev1.top_level_src)
+    print(ev1.body_stmts_src)
+    print(evaluator_has_state(evaluator: ev1))
+
+    // --- Evaluator with only top-level state ---
+    let ev2 = Evaluator { top_level_src: "func f(): return 0", body_stmts_src: "" }
+    print(evaluator_has_state(evaluator: ev2))
+
+    // --- Diagnostic stand-in ---
+    let diag = diagnostic_error(message: "synthetic eval error")
+    print(diag.message)
+    print(diag.span.start)
+    print(diag.span.end)
+    print(diag.span.source_id)
+
+    // --- Span stand-in (dummy) ---
+    let sp = span_dummy()
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id)
