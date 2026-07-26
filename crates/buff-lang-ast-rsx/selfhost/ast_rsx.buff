@@ -394,8 +394,13 @@ func main():
     print(raw.expr)
 
     // --- RsxSlot (default + named) ---
+    // Buff has no Option.is_none() prelude method; we match instead
+    // (idiomatic Buff — pattern matching over boolean predicates).
     let slot_default = rsx_slot_new(span: sp)
-    print(slot_default.name.is_none())
+    match slot_default.name {
+        Some(n) => print(n),
+        None => print(0),
+    }
 
     let slot_named = rsx_slot_named(name: "header", span: sp)
     match slot_named.name {
@@ -426,7 +431,10 @@ func main():
     let script = script_block_new(lang: "buff", source: "print(\"hi\")", span: sp)
     print(script.lang)
     print(script.source)
-    print(script.props.is_none())
+    match script.props {
+        Some(p) => print(p),
+        None => print(0),
+    }
 
     let script_p = script_block_with_props(lang: "buff", props: "Props", source: "x = 1", span: sp)
     print(script_p.lang)
@@ -445,7 +453,10 @@ func main():
 
     let if_node = rsx_if_new(branches: [branch], else_branch: None, span: sp)
     print(if_node.branches.len())
-    print(if_node.else_branch.is_none())
+    match if_node.else_branch {
+        Some(b) => print(b.len()),
+        None => print(0),
+    }
 
     // --- RsxEach (no index/key/else) ---
     let each_node = rsx_each_new(
@@ -460,7 +471,10 @@ func main():
     )
     print(each_node.iterable)
     print(each_node.binding)
-    print(each_node.key.is_none())
+    match each_node.key {
+        Some(k) => print(k),
+        None => print(0),
+    }
 
     // --- RsxAwait (no pending/catch) ---
     let await_node = rsx_await_new(
@@ -475,12 +489,18 @@ func main():
     )
     print(await_node.fut_expr)
     print(await_node.then_binding)
-    print(await_node.catch_binding.is_none())
+    match await_node.catch_binding {
+        Some(b) => print(b),
+        None => print(0),
+    }
 
     // --- RsxTemplateFile (no script, empty root) ---
     let tpl = rsx_template_file_new(script: None, root: [], span: sp)
-    print(tpl.script.is_none())
     print(tpl.root.len())
+    match tpl.script {
+        Some(s) => print(s.lang),
+        None => print(0),
+    }
 
     // --- is_component_tag heuristic ---
     print(is_component_tag(tag: "Counter"))
