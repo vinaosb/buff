@@ -1,620 +1,79 @@
-// buff-lang-parser — Buff self-host port of the parser crate's PUBLIC TYPES.
-//
-// Mirrors the public API surface from crates/buff-lang-parser/src/:
-//   - options.rs — Edition enum (Standard, Scientific) + is_scientific + require_for
-//   - lib.rs     — re-export list (parse / parse_with_edition / parse_recovering /
-//                  parse_expression / parse_expression_with_edition + statement helpers
-//                  + TokenStream)
-//   - stream.rs  — TokenStream cursor (peek / next / expect / save / restore / ...)
-//   - parser.rs  — top-level parse() returning Vec<Decl>
-//   - stmt.rs    — statement-level public entry points (parse_statement / parse_block / ...)
-//
-// The full recursive-descent + Pratt implementation is 14,204 LOC of Rust; this
-// port captures the PUBLIC TYPE SURFACE and SIGNATURES only, with stub
-// implementations that round-trip test instances through the constructors.
-// The real parsing logic depends on buff-lang-lexer::Token / buff-lang-ast::Decl
-// (each selfhosted in their own crate's selfhost/ dir) and is left as a
-// follow-up.
-//
-// Mapping notes (Rust → Buff):
-//   - `&[Token]` (borrowed slice) → `Vector<Token>` (owned; Buff has no borrows).
-//   - `usize`/`u32` cursor types → `Int`.
-//   - `&'static str` error returns → `String`.
-//   - `Result<T, ParseError>` → modelled as `Result<T, String>` since the
-//     detailed ParseError tree lives in the buff-lang-error selfhost port
-//     (sibling crate). Keeping the error arm as String preserves the
-//     `Ok`/`Err` shape without duplicating that enum here.
-//   - `Option<&Token>` (peek) → `Option<Token>` (Buff returns owned values;
-//     no borrows in the surface language).
-//   - `TokenKind` (50+ variants in the lexer crate) — only the 7 SCIENTIFIC
-//     token kinds actually gated by `Edition::require_for` are modelled here
-//     (Sum/Product/Sqrt/InUni/NotInUni/SubsetUni/ApproxUni/Adjoint). The rest
-//     of the lexer self-hosts separately.
-//   - `Decl` (10+ variants in the AST crate) — modelled as an opaque
-//     stand-in struct with a `kind: String` tag. The full enum self-hosts in
-//     crates/buff-lang-ast/selfhost/.
-//   - Constructors follow Buff convention §7 — free functions named after
-//     the type (`edition_default`, `token_stream_new`, `token_stream_with_edition`).
+// buff-lang-parser self-host port — Edition + ParseError + key types
+// Mirrors crates/buff-lang-parser/src/options.rs + lib.rs public types
 
-// ---------------------------------------------------------------------------
-// (1) Edition — parser edition selection (T57).
-// Rust: pub enum Edition { Standard, Scientific }  (Default = Standard)
-// ---------------------------------------------------------------------------
-
+// Edition — parser edition selection (T57)
 enum Edition {
     Standard,
     Scientific,
 }
 
-func edition_default() -> Edition:
-    return Standard
-
-func edition_is_scientific(edition: Edition) -> Bool:
-    match edition {
-        Scientific => true,
-        Standard => false,
-    }
-
-// The 7 scientific-edition-only token kinds gated by `require_for` upstream.
-// Full TokenKind enum lives in crates/buff-lang-lexer (selfhosted separately).
-enum SciTokenKind {
-    Sum,
-    Product,
-    Sqrt,
-    InUni,
-    NotInUni,
-    SubsetUni,
-    ApproxUni,
-    Adjoint,
-}
-
-// Rust: pub fn require_for(self, kind: &TokenKind) -> Result<(), &'static str>
-// Returns Ok (None) if kind is acceptable under this edition; else Err with
-// a human-readable message naming the missing edition opt-in.
-func edition_require_for(edition: Edition, kind: SciTokenKind) -> Result<String, String>:
-    let needs_scientific = match kind {
-        Sum => true,
-        Product => true,
-        Sqrt => true,
-        InUni => true,
-        NotInUni => true,
-        SubsetUni => true,
-        ApproxUni => true,
-        Adjoint => true,
-    }
-    if needs_scientific:
-        if edition_is_scientific(edition: edition):
-            return Ok("ok")
-        return Error("this syntax requires `edition = \"scientific\"` in buff.toml (T57 mathematical syntax edition)")
-    return Ok("ok")
-
-// ---------------------------------------------------------------------------
-// (2) Span + Token stand-ins (re-exported from buff-lang-error / buff-lang-lexer
-// upstream; both selfhost separately). Minimal projection sufficient to type
-// the TokenStream cursor methods below.
-// ---------------------------------------------------------------------------
-
-struct Span {
+// ParseError — wraps a Diagnostic with source info
+struct ParseError {
+    message: String,
     start: Int,
     end: Int,
-    source_id: Int,
 }
 
-func span_new(start: Int, end: Int, source_id: Int) -> Span:
-    return Span { start: start, end: end, source_id: source_id }
-
-// A lexer-produced Token. Rust: pub struct Token { pub kind: TokenKind, pub span: Span }.
-// `kind` is projected to String (the lexer's 50+ TokenKind variants selfhost
-// in crates/buff-lang-lexer/selfhost/lexer.buff).
-struct Token {
-    kind: String,
-    span: Span,
-}
-
-func token_new(kind: String, span: Span) -> Token:
-    return Token { kind: kind, span: span }
-
-// ---------------------------------------------------------------------------
-// (3) ParseError + Decl stand-ins (full types live in sibling selfhost ports).
-// ---------------------------------------------------------------------------
-
-// Rust: pub struct ParseError { pub kind: ParseErrorKind, pub span: Span, ... }.
-// Projected to a 3-field record (kind tag + span + message) — enough to thread
-// through the parse_recovering accumulator below.
-struct ParseError {
-    kind: String,
-    span: Span,
-    message: String,
-}
-
-func parse_error_new(kind: String, span: Span, message: String) -> ParseError:
-    return ParseError { kind: kind, span: span, message: message }
-
-// Rust: pub enum Decl { FuncDecl(FuncDecl), StructDecl(...), EnumDecl(...), ... }.
-// 10+ variants in crates/buff-lang-ast/src/decl.rs; selfhosted separately.
-// Projected to an opaque tag + name record.
-struct Decl {
-    kind: String,
-    name: String,
-}
-
-func decl_new(kind: String, name: String) -> Decl:
-    return Decl { kind: kind, name: name }
-
-// ---------------------------------------------------------------------------
-// (4) TokenStream — a read-only cursor over a slice of tokens.
-// Rust: pub struct TokenStream<'a> {
-//     tokens: &'a [Token],
-//     pos: usize,
-//     source_id: SourceId,
-//     edition: Edition,
-//     matrix_row_depth: usize,
-//     pending_split: VecDeque<Token>,
-// }
-//
-// Buff has no borrows and no VecDeque in the surface language, so:
-//   - `tokens` becomes an owned `Vector<Token>` (the cursor consumes the slice).
-//   - `pending_split` becomes a `Vector<Token>` used as a FIFO (push_back +
-//     remove(0)). The parser's `>>`-splitting for nested generics is the only
-//     consumer; we expose push_pending / take_pending helpers below.
-// ---------------------------------------------------------------------------
-
-struct TokenStream {
-    tokens: Vector<Token>,
+// TokenStream cursor state (simplified from stream.rs)
+struct TokenStreamState {
     pos: Int,
     source_id: Int,
-    edition: Edition,
     matrix_row_depth: Int,
-    pending_split: Vector<Token>,
 }
 
-func token_stream_new(tokens: Vector<Token>, source_id: Int) -> TokenStream:
-    return token_stream_with_edition(tokens: tokens, source_id: source_id, edition: edition_default())
-
-func token_stream_with_edition(tokens: Vector<Token>, source_id: Int, edition: Edition) -> TokenStream:
-    return TokenStream {
-        tokens: tokens,
-        pos: 0,
-        source_id: source_id,
-        edition: edition,
-        matrix_row_depth: 0,
-        pending_split: [],
-    }
-
-func token_stream_source_id(stream: TokenStream) -> Int:
-    return stream.source_id
-
-func token_stream_edition(stream: TokenStream) -> Edition:
-    return stream.edition
-
-func token_stream_in_matrix_row(stream: TokenStream) -> Bool:
-    return stream.matrix_row_depth > 0
-
-func token_stream_enter_matrix_row(stream: TokenStream) -> TokenStream:
-    let next = stream.matrix_row_depth + 1
-    return TokenStream {
-        tokens: stream.tokens,
-        pos: stream.pos,
-        source_id: stream.source_id,
-        edition: stream.edition,
-        matrix_row_depth: next,
-        pending_split: stream.pending_split,
-    }
-
-func token_stream_exit_matrix_row(stream: TokenStream) -> TokenStream:
-    let next = if stream.matrix_row_depth > 0:
-        stream.matrix_row_depth - 1
-    else:
-        0
-    return TokenStream {
-        tokens: stream.tokens,
-        pos: stream.pos,
-        source_id: stream.source_id,
-        edition: stream.edition,
-        matrix_row_depth: next,
-        pending_split: stream.pending_split,
-    }
-
-// pub fn is_at_end(&self) -> bool
-func token_stream_is_at_end(stream: TokenStream) -> Bool:
-    if stream.pending_split.len() > 0:
-        return false
-    return stream.pos >= stream.tokens.len()
-
-// pub fn save(&self) -> usize
-func token_stream_save(stream: TokenStream) -> Int:
-    return stream.pos
-
-// pub fn restore(&mut self, pos: usize)
-func token_stream_restore(stream: TokenStream, pos: Int) -> TokenStream:
-    return TokenStream {
-        tokens: stream.tokens,
-        pos: pos,
-        source_id: stream.source_id,
-        edition: stream.edition,
-        matrix_row_depth: stream.matrix_row_depth,
-        pending_split: stream.pending_split,
-    }
-
-// pub fn peek(&self) -> Option<&Token>  →  Option<Token>
-// Pending split tokens are consulted BEFORE the slice so the parser sees
-// synthetic `>` tokens before the real next token.
-func token_stream_peek(stream: TokenStream) -> Option<Token>:
-    if stream.pending_split.len() > 0:
-        return Some(stream.pending_split[0])
-    if stream.pos >= stream.tokens.len():
-        return None
-    return Some(stream.tokens[stream.pos])
-
-// pub fn advance(&mut self) -> Option<Token>
-func token_stream_advance(stream: TokenStream) -> Option<Token>:
-    let mut s = stream
-    if s.pending_split.len() > 0:
-        let tok = s.pending_split[0]
-        let mut rest = []
-        let i = 1
-        while i < s.pending_split.len():
-            rest.push(s.pending_split[i])
-            i = i + 1
-        s.pending_split = rest
-        return Some(tok)
-    if s.pos >= s.tokens.len():
-        return None
-    let tok = s.tokens[s.pos]
-    s.pos = s.pos + 1
-    return Some(tok)
-
-// pub fn eof_span(&self) -> Span
-func token_stream_eof_span(stream: TokenStream) -> Span:
-    let last_end = if stream.tokens.len() > 0:
-        stream.tokens[stream.tokens.len() - 1].span.end
-    else:
-        0
-    return span_new(start: last_end, end: last_end, source_id: stream.source_id)
-
-// pub fn span_here(&self) -> Span  — projected (real impl consults current token).
-func token_stream_span_here(stream: TokenStream) -> Span:
-    match token_stream_peek(stream: stream) {
-        Some(tok) => return tok.span,
-        None => return token_stream_eof_span(stream: stream),
-    }
-
-// pub fn unexpected(&self, what: impl Display) -> ParseError
-func token_stream_unexpected(stream: TokenStream, what: String) -> ParseError:
-    return parse_error_new(
-        kind: "UnexpectedToken",
-        span: token_stream_span_here(stream: stream),
-        message: what,
-    )
-
-// ---------------------------------------------------------------------------
-// (5) Top-level parser entry points (parser.rs).
-//
-// Real implementations are 430 LOC of dispatch + error recovery. The Buff
-// port models the SIGNATURES and return shapes; bodies return empty results
-// (a faithful parse would need the full AST + lexer selfhost ports plumbed
-// together — tracked as a follow-up).
-// ---------------------------------------------------------------------------
-
-// pub fn parse(tokens: &[Token], source_id: SourceId) -> Result<Vec<Decl>, ParseError>
-func parse(tokens: Vector<Token>, source_id: Int) -> Result<Vector<Decl>, String>:
-    return parse_with_edition(tokens: tokens, source_id: source_id, edition: edition_default())
-
-// pub fn parse_with_edition(tokens, source_id, edition) -> Result<Vec<Decl>, ParseError>
-func parse_with_edition(tokens: Vector<Token>, source_id: Int, edition: Edition) -> Result<Vector<Decl>, String>:
-    let _stream = token_stream_with_edition(tokens: tokens, source_id: source_id, edition: edition)
-    // Real impl: loop parse_one_decl(stream) until EOF; fail-fast on first Err.
-    return Ok([])
-
-// pub fn parse_recovering(tokens, source_id) -> (Vec<Decl>, Vec<ParseError>)
-// Recovering variant: record each error and continue to the next sync point.
-func parse_recovering(tokens: Vector<Token>, source_id: Int) -> Vector<Any>:
-    let stream = token_stream_new(tokens: tokens, source_id: source_id)
-    let decls: Vector<Decl> = []
-    let errors: Vector[ParseError] = []
-    // Real impl loops parse_one_decl with sync_to_recovery_point on Err; the
-    // shape returned here is the (decls, errors) tuple.
-    let result: Vector[Any] = [decls, errors]
-    return result
-
-// pub fn parse_expression(tokens, source_id) -> Result<Expr, ParseError>
-// Expr (10+ variants) selfhosts in crates/buff-lang-ast; projected as the
-// opaque tag record below so the signature matches.
-struct Expr {
-    kind: String,
-}
-
-func parse_expression(tokens: Vector<Token>, source_id: Int) -> Result<Expr, String>:
-    return parse_expression_with_edition(tokens: tokens, source_id: source_id, edition: edition_default())
-
-func parse_expression_with_edition(tokens: Vector<Token>, source_id: Int, edition: Edition) -> Result<Expr, String>:
-    let _stream = token_stream_with_edition(tokens: tokens, source_id: source_id, edition: edition)
-    return Ok(Expr { kind: "placeholder" })
-
-// ---------------------------------------------------------------------------
-// (6) Statement-level public entry points (stmt.rs).
-//
-// 19 public fns re-exported from lib.rs. Projected as stubs that take a
-// TokenStream + (where relevant) extra parameters and return the placeholder
-// Decl/Block/Stmt shape. Real bodies are 1,401 LOC of recursive-descent.
-// ---------------------------------------------------------------------------
-
-struct Stmt {
-    kind: String,
-}
-
-struct Block {
-    stmts: Vector<Stmt>,
-}
-
-struct Param {
-    name: String,
-}
-
-struct TypeRef {
-    name: String,
-}
-
-struct Pattern {
-    kind: String,
-}
-
+// Attribute on a declaration
 struct Attribute {
     name: String,
+    value: String,
 }
 
-func parse_statement(stream: TokenStream) -> Result<Stmt, String>:
-    return Ok(Stmt { kind: "placeholder" })
+func edition_default() -> Edition:
+    let e: Edition = Standard
+    return e
 
-func parse_block(stream: TokenStream) -> Result<Block, String>:
-    return Ok(Block { stmts: [] })
+func edition_is_standard(ed: Edition) -> Bool:
+    match ed {
+        Standard => return true,
+        Scientific => return false,
+    }
 
-func parse_block_braces(stream: TokenStream) -> Result<Block, String>:
-    return Ok(Block { stmts: [] })
+func edition_is_scientific(ed: Edition) -> Bool:
+    match ed {
+        Standard => return false,
+        Scientific => return true,
+    }
 
-func parse_if_expr(stream: TokenStream) -> Result[Expr, String]:
-    return Ok(Expr { kind: "IfExpr" })
+func parse_error_new(msg: String, s: Int, e: Int) -> ParseError:
+    return ParseError { message: msg, start: s, end: e }
 
-func parse_func_decl(stream: TokenStream, attributes: Vector[Attribute]) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "FuncDecl", name: "placeholder"))
+func token_stream_state_new(src_id: Int) -> TokenStreamState:
+    return TokenStreamState { pos: 0, source_id: src_id, matrix_row_depth: 0 }
 
-func parse_struct_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "StructDecl", name: "placeholder"))
-
-func parse_enum_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "EnumDecl", name: "placeholder"))
-
-func parse_trait_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "TraitDecl", name: "placeholder"))
-
-func parse_import_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "ImportDecl", name: "placeholder"))
-
-func parse_export_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "ExportDecl", name: "placeholder"))
-
-func parse_extend_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "ExtendDecl", name: "placeholder"))
-
-func parse_extern_crate_decl(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "ExternCrateDecl", name: "placeholder"))
-
-func parse_extern_func_decl_with_abi(stream: TokenStream) -> Result<Decl, String>:
-    return Ok(decl_new(kind: "ExternFuncDecl", name: "placeholder"))
-
-func parse_params(stream: TokenStream) -> Result<Vector<Param>, String>:
-    return Ok([])
-
-func parse_type_ref(stream: TokenStream) -> Result<TypeRef, String>:
-    return Ok(TypeRef { name: "placeholder" })
-
-func parse_attributes(stream: TokenStream) -> Result<Vector<Attribute>, String>:
-    return Ok([])
-
-func parse_type_params(stream: TokenStream) -> Result<Vector<TypeRef>, String>:
-    return Ok([])
-
-// T27 match parsing lives in expr.rs (match is an expression like if).
-func parse_match(stream: TokenStream) -> Result<Expr, String>:
-    return Ok(Expr { kind: "MatchExpr" })
-
-func parse_pattern(stream: TokenStream) -> Result<Pattern, String>:
-    return Ok(Pattern { kind: "placeholder" })
-
-// ---------------------------------------------------------------------------
-// (7) main — exercise every type + constructor + public parse fn, print
-// observable field values. Mirrors the selfhost convention established by
-// crates/buff-lang-debug-info/selfhost/debug_info.buff.
-// ---------------------------------------------------------------------------
+func attribute_new(n: String, v: String) -> Attribute:
+    return Attribute { name: n, value: v }
 
 func main():
-    // --- Edition (default + is_scientific + require_for) ---
-    let standard = edition_default()
-    print(standard == Standard)
-    print(edition_is_scientific(edition: standard))
-    print(edition_is_scientific(edition: Scientific))
+    // Edition tests
+    let ed = edition_default()
+    let is_std = edition_is_standard(ed: ed)
+    print(is_std)
 
-    // Standard rejects Sum; Scientific accepts it.
-    match edition_require_for(edition: standard, kind: Sum) {
-        Ok(_) => print("standard-accepts-sum"),
-        Err(msg) => print(msg),
-    }
-    match edition_require_for(edition: Scientific, kind: Sum) {
-        Ok(_) => print("scientific-accepts-sum"),
-        Err(msg) => print(msg),
-    }
-    match edition_require_for(edition: standard, kind: Adjoint) {
-        Ok(_) => print("standard-accepts-adjoint"),
-        Err(msg) => print(msg),
-    }
+    print(edition_is_scientific(ed: Scientific))
+    print(edition_is_standard(ed: Scientific))
 
-    // --- Span + Token ---
-    let sp = span_new(start: 0, end: 5, source_id: 1)
-    print(sp.start)
-    print(sp.end)
-    print(sp.source_id)
+    // ParseError test
+    let pe = parse_error_new(msg: "unexpected token", s: 10, e: 15)
+    print(pe.message)
+    print(pe.start)
+    print(pe.end)
 
-    let tok = token_new(kind: "KwFunc", span: sp)
-    print(tok.kind)
-    print(tok.span.start)
+    // TokenStreamState test
+    let ts = token_stream_state_new(src_id: 1)
+    print(ts.pos)
+    print(ts.source_id)
+    print(ts.matrix_row_depth)
 
-    // --- ParseError + Decl stand-ins ---
-    let err = parse_error_new(kind: "UnexpectedToken", span: sp, message: "expected func")
-    print(err.kind)
-    print(err.message)
-    print(err.span.start)
-
-    let decl = decl_new(kind: "FuncDecl", name: "main")
-    print(decl.kind)
-    print(decl.name)
-
-    // --- TokenStream lifecycle: new → save → enter_matrix_row → exit → restore ---
-    let toks: Vector<Token> = [tok]
-    let stream = token_stream_new(tokens: toks, source_id: 1)
-    print(token_stream_source_id(stream: stream))
-    print(token_stream_edition(stream: stream) == Standard)
-    print(token_stream_in_matrix_row(stream: stream))
-    print(token_stream_is_at_end(stream: stream))
-
-    let scientific_stream = token_stream_with_edition(tokens: toks, source_id: 2, edition: Scientific)
-    print(token_stream_edition(stream: scientific_stream) == Scientific)
-    print(token_stream_source_id(stream: scientific_stream))
-
-    // save → restore round-trip.
-    let saved = token_stream_save(stream: stream)
-    print(saved)
-    let restored = token_stream_restore(stream: stream, pos: saved)
-    print(token_stream_save(stream: restored))
-
-    // matrix-row nesting counter.
-    let in_matrix = token_stream_enter_matrix_row(stream: stream)
-    print(token_stream_in_matrix_row(stream: in_matrix))
-    let in_matrix2 = token_stream_enter_matrix_row(stream: in_matrix)
-    let exited = token_stream_exit_matrix_row(stream: in_matrix2)
-    print(token_stream_in_matrix_row(stream: exited))
-
-    // peek the first (and only) token; advance consumes it; next peek is None.
-    match token_stream_peek(stream: stream) {
-        Some(t) => print(t.kind),
-        None => print("eof"),
-    }
-    let advanced = token_stream_advance(stream: stream)
-    match advanced {
-        Some(t) => print(t.kind),
-        None => print("eof"),
-    }
-    let after_advance = token_stream_restore(stream: stream, pos: 1)
-    match token_stream_peek(stream: after_advance) {
-        Some(_) => print("peek-after-advance-some"),
-        None => print("peek-after-advance-none"),
-    }
-    print(token_stream_is_at_end(stream: after_advance))
-    print(token_stream_eof_span(stream: after_advance).end)
-
-    // unexpected() helper produces a ParseError at the cursor's current span.
-    let ue = token_stream_unexpected(stream: stream, what: "expected `func` here")
-    print(ue.kind)
-    print(ue.message)
-
-    // --- Top-level parser entry points ---
-    let empty: Vector<Token> = []
-    match parse(tokens: empty, source_id: 0) {
-        Ok(decls) => print(decls.len()),
-        Err(msg) => print(msg),
-    }
-    match parse_with_edition(tokens: empty, source_id: 0, edition: edition_default()) {
-        Ok(decls) => print(decls.len()),
-        Err(msg) => print(msg),
-    }
-    let recovering = parse_recovering(tokens: empty, source_id: 0)
-    print(recovering.len())
-
-    match parse_expression(tokens: empty, source_id: 0) {
-        Ok(e) => print(e.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_expression_with_edition(tokens: empty, source_id: 0, edition: Scientific) {
-        Ok(e) => print(e.kind),
-        Err(msg) => print(msg),
-    }
-
-    // --- Statement-level public entry points ---
-    let stmt_stream = token_stream_new(tokens: empty, source_id: 0)
-    match parse_statement(stream: stmt_stream) {
-        Ok(s) => print(s.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_block(stream: stmt_stream) {
-        Ok(b) => print(b.stmts.len()),
-        Err(msg) => print(msg),
-    }
-    match parse_block_braces(stream: stmt_stream) {
-        Ok(b) => print(b.stmts.len()),
-        Err(msg) => print(msg),
-    }
-    match parse_if_expr(stream: stmt_stream) {
-        Ok(e) => print(e.kind),
-        Err(msg) => print(msg),
-    }
-
-    let empty_attrs: Vector[Attribute] = []
-    match parse_func_decl(stream: stmt_stream, attributes: empty_attrs) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_struct_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_enum_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_trait_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_import_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_export_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_extend_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_extern_crate_decl(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_extern_func_decl_with_abi(stream: stmt_stream) {
-        Ok(d) => print(d.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_params(stream: stmt_stream) {
-        Ok(ps) => print(ps.len()),
-        Err(msg) => print(msg),
-    }
-    match parse_type_ref(stream: stmt_stream) {
-        Ok(t) => print(t.name),
-        Err(msg) => print(msg),
-    }
-    match parse_attributes(stream: stmt_stream) {
-        Ok(attrs) => print(attrs.len()),
-        Err(msg) => print(msg),
-    }
-    match parse_type_params(stream: stmt_stream) {
-        Ok(tps) => print(tps.len()),
-        Err(msg) => print(msg),
-    }
-    match parse_match(stream: stmt_stream) {
-        Ok(e) => print(e.kind),
-        Err(msg) => print(msg),
-    }
-    match parse_pattern(stream: stmt_stream) {
-        Ok(p) => print(p.kind),
-        Err(msg) => print(msg),
-    }
+    // Attribute test
+    let attr = attribute_new(n: "deprecated", v: "use new_func instead")
+    print(attr.name)
+    print(attr.value)

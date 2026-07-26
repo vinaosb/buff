@@ -30,6 +30,7 @@ TESTS=(
     "crates/buff-pubsub/selfhost/event.buff|buff-pubsub|equivalence_event"
     "crates/buff-fsm/selfhost/transition.buff|buff-fsm|equivalence_transition"
     "crates/buff-lang-ffi-guide/selfhost/ffi_guide.buff|buff-lang-ffi-guide|equivalence_ffi_guide"
+    "crates/buff-lang-parser/selfhost/parser.buff|buff-lang-parser|equivalence_parser"
 )
 
 echo "=== Rust-vs-Buff Behavioral Equivalence (raw stdout) ==="
