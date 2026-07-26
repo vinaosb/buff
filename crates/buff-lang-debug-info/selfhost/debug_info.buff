@@ -1,0 +1,539 @@
+// buff-lang-debug-info — Buff self-host port of the crate
+//
+// Mirrors the FOUR Rust source files in crates/buff-lang-debug-info/src/:
+//   - lib.rs        — SourceMap + BuffLocation + FunctionAnchor (3 types)
+//   - format.rs     — BuffMapFile + FunctionMapping + LineMapping + MAP_FORMAT_VERSION const
+//   - panic_hook.rs — BuffTrace + BuffTraceFrame (2 types)
+//   - capture.rs    — pure logic (build_source_map, find_fn_line, find_fn_end_line);
+//                     its PRODUCT is SourceMap, so no separate types here.
+//
+// T24 — Buff-span stack traces via `.buffmap` source-map sidecar + std::panic hook.
+//
+// Mapping notes (Rust → Buff):
+//   - `pub use buff_lang_error::{SourceId, Span}` are re-exported upstream;
+//     this single-file self-host port defines a local `Span` stand-in
+//     (SourceId is a `pub u32` newtype upstream → modelled as raw Int here).
+//   - `BTreeMap<usize, BuffLocation>` → `Vector<LineEntry>` (a LineEntry
+//     struct carrying `rust_line: Int` + `location: BuffLocation`). Buff has
+//     no ordered-map type today; the Vector-of-entries preserves the
+//     (key → value) mapping faithfully (the BTreeMap ordering is preserved
+//     by capture.rs pushing in ascending rust_line order, so the projection
+//     is loss-free in practice).
+//   - `Option<PathBuf>` → `Option<String>` (PathBuf serialises to String).
+//   - `Vec<T>` → `Vector<T>`, `bool` → `Bool`, `u32`/`usize`/`i64` → `Int`.
+//   - `MAP_FORMAT_VERSION: u32 = 1` is a Rust `const`; Buff has no top-level
+//     const today, so it is wrapped in a zero-arg `func map_format_version()`.
+//   - Constructors follow Buff convention §7 — free functions named after
+//     the type (`type_new`, `type_with_<field>`, `type_default`).
+
+// ---------------------------------------------------------------------------
+// Local Span stand-in (re-exported from buff-lang-error upstream).
+// Rust: pub struct Span { pub start, pub end: usize, pub source_id: SourceId }
+// ---------------------------------------------------------------------------
+
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: Int,
+}
+
+func span_new(start: Int, end: Int, source_id: Int) -> Span:
+    return Span { start: start, end: end, source_id: source_id }
+
+func span_dummy() -> Span:
+    return Span { start: 0, end: 0, source_id: 0 }
+
+// ---------------------------------------------------------------------------
+// (1) BuffLocation — a Buff source location with line/col/byte span/name.
+// Rust: pub struct BuffLocation {
+//     pub line, col: usize,
+//     pub span: Span,
+//     pub name: Option<String>,
+// }
+// ---------------------------------------------------------------------------
+
+struct BuffLocation {
+    line: Int,
+    col: Int,
+    span: Span,
+    name: Option<String>,
+}
+
+func buff_location_new(line: Int, col: Int, span: Span, name: Option<String>) -> BuffLocation:
+    return BuffLocation { line: line, col: col, span: span, name: name }
+
+// ---------------------------------------------------------------------------
+// (2) FunctionAnchor — function-level Buff↔Rust mapping anchor.
+// Rust: pub struct FunctionAnchor {
+//     pub name: String,
+//     pub buff_span: Span,
+//     pub buff_line, buff_col: usize,
+//     pub rust_start_line, rust_end_line: usize,
+//     pub buff_location: Option<BuffLocation>,
+// }
+// ---------------------------------------------------------------------------
+
+struct FunctionAnchor {
+    name: String,
+    buff_span: Span,
+    buff_line: Int,
+    buff_col: Int,
+    rust_start_line: Int,
+    rust_end_line: Int,
+    buff_location: Option<BuffLocation>,
+}
+
+func function_anchor_new(name: String, buff_span: Span, buff_line: Int, buff_col: Int, rust_start_line: Int, rust_end_line: Int, buff_location: Option<BuffLocation>) -> FunctionAnchor:
+    return FunctionAnchor {
+        name: name,
+        buff_span: buff_span,
+        buff_line: buff_line,
+        buff_col: buff_col,
+        rust_start_line: rust_start_line,
+        rust_end_line: rust_end_line,
+        buff_location: buff_location,
+    }
+
+// ---------------------------------------------------------------------------
+// (3) LineEntry — flat key→value entry from SourceMap.rust_to_buff (BTreeMap).
+// Buff has no ordered-map type today; the BTreeMap is projected as a Vector
+// of LineEntry records (key preserved as `rust_line`).
+// ---------------------------------------------------------------------------
+
+struct LineEntry {
+    rust_line: Int,
+    location: BuffLocation,
+}
+
+func line_entry_new(rust_line: Int, location: BuffLocation) -> LineEntry:
+    return LineEntry { rust_line: rust_line, location: location }
+
+// ---------------------------------------------------------------------------
+// (4) SourceMap — the bidirectional Rust-line ↔ Buff-location mapping.
+// Rust: pub struct SourceMap {
+//     pub buff_file: Option<PathBuf>,
+//     pub rust_file: Option<PathBuf>,
+//     pub rust_to_buff: BTreeMap<usize, BuffLocation>,
+//     pub functions: Vec<FunctionAnchor>,
+//     pub source_id: SourceId,
+// }
+// ---------------------------------------------------------------------------
+
+struct SourceMap {
+    buff_file: Option<String>,
+    rust_file: Option<String>,
+    rust_to_buff: Vector<LineEntry>,
+    functions: Vector<FunctionAnchor>,
+    source_id: Int,
+}
+
+func source_map_new() -> SourceMap:
+    return SourceMap {
+        buff_file: None,
+        rust_file: None,
+        rust_to_buff: [],
+        functions: [],
+        source_id: 0,
+    }
+
+func source_map_with_buff_file(map: SourceMap, path: String, source_id: Int) -> SourceMap:
+    return SourceMap {
+        buff_file: Some(path),
+        rust_file: map.rust_file,
+        rust_to_buff: map.rust_to_buff,
+        functions: map.functions,
+        source_id: source_id,
+    }
+
+func source_map_with_rust_file(map: SourceMap, path: String) -> SourceMap:
+    return SourceMap {
+        buff_file: map.buff_file,
+        rust_file: Some(path),
+        rust_to_buff: map.rust_to_buff,
+        functions: map.functions,
+        source_id: map.source_id,
+    }
+
+func source_map_add_line_mapping(map: SourceMap, rust_line: Int, location: BuffLocation) -> SourceMap:
+    let entry = line_entry_new(rust_line: rust_line, location: location)
+    let mut new_rust_to_buff = map.rust_to_buff
+    new_rust_to_buff.push(entry)
+    return SourceMap {
+        buff_file: map.buff_file,
+        rust_file: map.rust_file,
+        rust_to_buff: new_rust_to_buff,
+        functions: map.functions,
+        source_id: map.source_id,
+    }
+
+func source_map_add_function(map: SourceMap, anchor: FunctionAnchor) -> SourceMap:
+    let mut new_functions = map.functions
+    new_functions.push(anchor)
+    return SourceMap {
+        buff_file: map.buff_file,
+        rust_file: map.rust_file,
+        rust_to_buff: map.rust_to_buff,
+        functions: new_functions,
+        source_id: map.source_id,
+    }
+
+func source_map_is_empty(map: SourceMap) -> Bool:
+    if map.rust_to_buff.len() > 0:
+        return false
+    if map.functions.len() > 0:
+        return false
+    return true
+
+// ---------------------------------------------------------------------------
+// (5) FunctionMapping — JSON projection of FunctionAnchor.
+// Rust: pub struct FunctionMapping {
+//     pub buff_name: String,
+//     pub buff_span_start, buff_span_end: usize,
+//     pub buff_source_id: u32,
+//     pub buff_line, buff_col: usize,
+//     pub rust_start_line, rust_end_line: usize,
+// }
+// ---------------------------------------------------------------------------
+
+struct FunctionMapping {
+    buff_name: String,
+    buff_span_start: Int,
+    buff_span_end: Int,
+    buff_source_id: Int,
+    buff_line: Int,
+    buff_col: Int,
+    rust_start_line: Int,
+    rust_end_line: Int,
+}
+
+func function_mapping_new(buff_name: String, buff_span_start: Int, buff_span_end: Int, buff_source_id: Int, buff_line: Int, buff_col: Int, rust_start_line: Int, rust_end_line: Int) -> FunctionMapping:
+    return FunctionMapping {
+        buff_name: buff_name,
+        buff_span_start: buff_span_start,
+        buff_span_end: buff_span_end,
+        buff_source_id: buff_source_id,
+        buff_line: buff_line,
+        buff_col: buff_col,
+        rust_start_line: rust_start_line,
+        rust_end_line: rust_end_line,
+    }
+
+// ---------------------------------------------------------------------------
+// (6) LineMapping — JSON projection of SourceMap.rust_to_buff entry.
+// Rust: pub struct LineMapping {
+//     pub rust_line, buff_line, buff_col: usize,
+//     pub buff_span_start, buff_span_end: usize,
+//     pub buff_source_id: u32,
+//     pub buff_name: Option<String>,
+// }
+// ---------------------------------------------------------------------------
+
+struct LineMapping {
+    rust_line: Int,
+    buff_line: Int,
+    buff_col: Int,
+    buff_span_start: Int,
+    buff_span_end: Int,
+    buff_source_id: Int,
+    buff_name: Option<String>,
+}
+
+func line_mapping_new(rust_line: Int, buff_line: Int, buff_col: Int, buff_span_start: Int, buff_span_end: Int, buff_source_id: Int, buff_name: Option<String>) -> LineMapping:
+    return LineMapping {
+        rust_line: rust_line,
+        buff_line: buff_line,
+        buff_col: buff_col,
+        buff_span_start: buff_span_start,
+        buff_span_end: buff_span_end,
+        buff_source_id: buff_source_id,
+        buff_name: buff_name,
+    }
+
+// ---------------------------------------------------------------------------
+// (7) BuffMapFile — top-level JSON object written to <binary>.buffmap.
+// Rust: pub struct BuffMapFile {
+//     pub version: u32,
+//     pub buff_file: Option<String>,
+//     pub rust_file: Option<String>,
+//     pub source_id: u32,
+//     pub function_mappings: Vec<FunctionMapping>,
+//     pub line_mappings: Vec<LineMapping>,
+// }
+// MAP_FORMAT_VERSION: u32 = 1 (hard-coded in map_format_version() below).
+// ---------------------------------------------------------------------------
+
+func map_format_version() -> Int:
+    return 1
+
+struct BuffMapFile {
+    version: Int,
+    buff_file: Option<String>,
+    rust_file: Option<String>,
+    source_id: Int,
+    function_mappings: Vector<FunctionMapping>,
+    line_mappings: Vector<LineMapping>,
+}
+
+func buff_map_file_new(version: Int, buff_file: Option<String>, rust_file: Option<String>, source_id: Int, function_mappings: Vector<FunctionMapping>, line_mappings: Vector<LineMapping>) -> BuffMapFile:
+    return BuffMapFile {
+        version: version,
+        buff_file: buff_file,
+        rust_file: rust_file,
+        source_id: source_id,
+        function_mappings: function_mappings,
+        line_mappings: line_mappings,
+    }
+
+// ---------------------------------------------------------------------------
+// (8) BuffTraceFrame — one frame in a remapped Buff stack trace.
+// Rust: pub struct BuffTraceFrame {
+//     pub buff_line, buff_col: usize,
+//     pub buff_name: Option<String>,
+//     pub rust_line: usize,
+// }
+// ---------------------------------------------------------------------------
+
+struct BuffTraceFrame {
+    buff_line: Int,
+    buff_col: Int,
+    buff_name: Option<String>,
+    rust_line: Int,
+}
+
+func buff_trace_frame_new(buff_line: Int, buff_col: Int, buff_name: Option<String>, rust_line: Int) -> BuffTraceFrame:
+    return BuffTraceFrame {
+        buff_line: buff_line,
+        buff_col: buff_col,
+        buff_name: buff_name,
+        rust_line: rust_line,
+    }
+
+// ---------------------------------------------------------------------------
+// (9) BuffTrace — a remapped Buff stack trace (Default upstream).
+// Rust: pub struct BuffTrace {
+//     pub frames: Vec<BuffTraceFrame>,
+//     pub buff_file_display: String,
+// }
+// ---------------------------------------------------------------------------
+
+struct BuffTrace {
+    frames: Vector<BuffTraceFrame>,
+    buff_file_display: String,
+}
+
+func buff_trace_new(frames: Vector<BuffTraceFrame>, buff_file_display: String) -> BuffTrace:
+    return BuffTrace { frames: frames, buff_file_display: buff_file_display }
+
+func buff_trace_default() -> BuffTrace:
+    return BuffTrace { frames: [], buff_file_display: "" }
+
+// ---------------------------------------------------------------------------
+// main — exercise every type + constructor, print field values.
+// ---------------------------------------------------------------------------
+
+func main():
+    // --- Span stand-in ---
+    let sp = span_new(start: 30, end: 80, source_id: 0)
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id)
+
+    let dummy = span_dummy()
+    print(dummy.start)
+    print(dummy.end)
+    print(dummy.source_id)
+
+    // --- BuffLocation (named + anonymous) ---
+    let loc_named = buff_location_new(line: 1, col: 1, span: sp, name: Some("helper"))
+    print(loc_named.line)
+    print(loc_named.col)
+    print(loc_named.span.start)
+    match loc_named.name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    let loc_anon = buff_location_new(line: 4, col: 5, span: sp, name: None)
+    print(loc_anon.line)
+    match loc_anon.name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    // --- FunctionAnchor (with buff_location) ---
+    let anchor = function_anchor_new(
+        name: "helper",
+        buff_span: sp,
+        buff_line: 1,
+        buff_col: 1,
+        rust_start_line: 3,
+        rust_end_line: 5,
+        buff_location: Some(loc_named),
+    )
+    print(anchor.name)
+    print(anchor.buff_line)
+    print(anchor.buff_col)
+    print(anchor.rust_start_line)
+    print(anchor.rust_end_line)
+    print(anchor.buff_span.start)
+    print(anchor.buff_span.end)
+    match anchor.buff_location {
+        Some(loc) => print(loc.line),
+        None => print(0),
+    }
+
+    // --- LineEntry (the BTreeMap projection) ---
+    let entry = line_entry_new(rust_line: 3, location: loc_named)
+    print(entry.rust_line)
+    print(entry.location.line)
+
+    // --- SourceMap lifecycle: new → empty → with_buff_file → add_function → add_line_mapping ---
+    let empty_map = source_map_new()
+    print(source_map_is_empty(map: empty_map))
+
+    let map = source_map_with_buff_file(map: empty_map, path: "examples/debug/panic_demo.buff", source_id: 0)
+    print(source_map_is_empty(map: map))
+
+    let map2 = source_map_add_function(map: map, anchor: anchor)
+    print(source_map_is_empty(map: map2))
+    print(map2.functions.len())
+    print(map2.functions[0].name)
+    print(map2.source_id)
+
+    let map3 = source_map_add_line_mapping(map: map2, rust_line: 3, location: loc_named)
+    print(map3.rust_to_buff.len())
+    print(map3.rust_to_buff[0].rust_line)
+    print(map3.rust_to_buff[0].location.line)
+
+    match map3.buff_file {
+        Some(p) => print(p),
+        None => print(0),
+    }
+
+    let map_with_rust = source_map_with_rust_file(map: map3, path: "panic_demo.rs")
+    match map_with_rust.rust_file {
+        Some(p) => print(p),
+        None => print(0),
+    }
+
+    // --- FunctionMapping (JSON projection) ---
+    let fm = function_mapping_new(
+        buff_name: "helper",
+        buff_span_start: 30,
+        buff_span_end: 80,
+        buff_source_id: 0,
+        buff_line: 1,
+        buff_col: 1,
+        rust_start_line: 3,
+        rust_end_line: 5,
+    )
+    print(fm.buff_name)
+    print(fm.buff_span_start)
+    print(fm.buff_span_end)
+    print(fm.buff_source_id)
+    print(fm.buff_line)
+    print(fm.buff_col)
+    print(fm.rust_start_line)
+    print(fm.rust_end_line)
+
+    // --- LineMapping (named + anonymous) ---
+    let lm = line_mapping_new(
+        rust_line: 3,
+        buff_line: 1,
+        buff_col: 1,
+        buff_span_start: 30,
+        buff_span_end: 80,
+        buff_source_id: 0,
+        buff_name: Some("helper"),
+    )
+    print(lm.rust_line)
+    print(lm.buff_line)
+    print(lm.buff_col)
+    print(lm.buff_span_start)
+    print(lm.buff_span_end)
+    print(lm.buff_source_id)
+    match lm.buff_name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    let lm_anon = line_mapping_new(
+        rust_line: 4,
+        buff_line: 2,
+        buff_col: 1,
+        buff_span_start: 90,
+        buff_span_end: 100,
+        buff_source_id: 0,
+        buff_name: None,
+    )
+    print(lm_anon.rust_line)
+    match lm_anon.buff_name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    // --- MAP_FORMAT_VERSION ---
+    print(map_format_version())
+
+    // --- BuffMapFile (populated from SourceMap projections) ---
+    let bmf = buff_map_file_new(
+        version: map_format_version(),
+        buff_file: Some("examples/debug/panic_demo.buff"),
+        rust_file: Some("panic_demo.rs"),
+        source_id: 0,
+        function_mappings: [fm],
+        line_mappings: [lm, lm_anon],
+    )
+    print(bmf.version)
+    print(bmf.source_id)
+    print(bmf.function_mappings.len())
+    print(bmf.line_mappings.len())
+    print(bmf.function_mappings[0].buff_name)
+    print(bmf.line_mappings[0].rust_line)
+    print(bmf.line_mappings[1].rust_line)
+    match bmf.buff_file {
+        Some(p) => print(p),
+        None => print(0),
+    }
+    match bmf.rust_file {
+        Some(p) => print(p),
+        None => print(0),
+    }
+
+    // --- BuffTraceFrame (named + anonymous) ---
+    let btf = buff_trace_frame_new(
+        buff_line: 1,
+        buff_col: 1,
+        buff_name: Some("helper"),
+        rust_line: 3,
+    )
+    print(btf.buff_line)
+    print(btf.buff_col)
+    print(btf.rust_line)
+    match btf.buff_name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    let btf_anon = buff_trace_frame_new(buff_line: 2, buff_col: 5, buff_name: None, rust_line: 7)
+    print(btf_anon.buff_line)
+    print(btf_anon.rust_line)
+    match btf_anon.buff_name {
+        Some(n) => print(n),
+        None => print(0),
+    }
+
+    // --- BuffTrace (default + populated) ---
+    let empty_trace = buff_trace_default()
+    print(empty_trace.frames.len())
+    print(empty_trace.buff_file_display.len() == 0)
+
+    let trace = buff_trace_new(frames: [btf, btf_anon], buff_file_display: "panic_demo.buff")
+    print(trace.frames.len())
+    print(trace.buff_file_display)
+    print(trace.frames[0].buff_line)
+    print(trace.frames[1].buff_line)
+    match trace.frames[0].buff_name {
+        Some(n) => print(n),
+        None => print(0),
+    }

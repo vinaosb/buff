@@ -1,0 +1,610 @@
+// buff-lang-lexer self-host port (feasibility stage).
+//
+// Ports the public surface of `crates/buff-lang-lexer/src/token.rs`:
+//   - TokenKind enum (101 variants: literals, keywords, operators, delimiters,
+//     layout, string-interpolation, Unicode math operators).
+//   - Token struct { kind, span }.
+//   - LexerError struct (simplified — wraps a message + span).
+//   - token_kind_num(kind) -> Int: stable numbering of every variant.
+//
+// The actual byte-scanner (`lexer.rs`), offside-rule indent tracker
+// (`indent.rs`), and string-interpolation scanner (`string_interp.rs`) are
+// deferred to a later port wave — this file proves the data model ports
+// cleanly and exercises every TokenKind variant end-to-end via `buff run`.
+//
+// Faithful type mapping (Rust -> Buff):
+//   i64    -> Int
+//   f32    -> Float
+//   f64    -> Float        (Buff's float literals default to f32 and the type
+//                          // system does not auto-widen f32 -> f64; collapsing
+//                          // to Float keeps the data variant constructible
+//                          // without a cast. The Rust source's f64 vs f32
+//                          // distinction is preserved at the VARIANT level —
+//                          // both FloatLit and DoubleLit exist as separate
+//                          // variants, just both carrying an f32 here.)
+//   u8     -> Int          (no Rust u8 binding hazard in Buff yet)
+//   char   -> String       (a one-codepoint String is the safest carrier)
+//   String -> String
+//   bool   -> Bool
+
+// ----------------------------------------------------------------------------
+// Span — byte range in source text. Simplified port of buff_lang_error::Span.
+// ----------------------------------------------------------------------------
+struct Span {
+    start: Int,
+    end: Int,
+}
+
+func span_new(s: Int, e: Int) -> Span:
+    return Span { start: s, end: e }
+
+// ----------------------------------------------------------------------------
+// TokenKind — ALL 101 variants ported from token.rs.
+// ----------------------------------------------------------------------------
+enum TokenKind {
+    // --- Literals ---
+    IntLit(Int),
+    FloatLit(Float),
+    DoubleLit(Float),
+    StringLit(String),
+    ByteLit(Int),
+    CharLit(String),
+    DecimalLit(String),
+    RegexLit(String),
+
+    // --- String interpolation tokens ---
+    StringStart,
+    StringPart(String),
+    InterpStart,
+    InterpSpec(String),
+    InterpEnd,
+    StringEnd,
+
+    // --- Identifiers ---
+    Ident(String),
+
+    // --- 29 keywords (Kw-prefixed to avoid clashing with Buff's own keywords) ---
+    KwFunc,
+    KwLet,
+    KwMut,
+    KwStruct,
+    KwEnum,
+    KwTrait,
+    KwType,
+    KwIf,
+    KwElse,
+    KwFor,
+    KwReturn,
+    KwBreak,
+    KwContinue,
+    KwIn,
+    KwMatch,
+    KwAsync,
+    KwSpawn,
+    KwImport,
+    KwExport,
+    KwFrom,
+    KwAs,
+    KwTrue,
+    KwFalse,
+    KwExtern,
+    KwUnsafe,
+    KwGuard,
+    KwExtend,
+    KwDefer,
+    KwImpl,
+
+    // --- Operators ---
+    DotDot,
+    DotDotEq,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    AndAnd,
+    OrOr,
+    Not,
+    Question,
+    QuestionQuestion,
+    QuestionDot,
+    Caret,
+    Pipe,
+    Amp,
+    Shl,
+    Shr,
+    Tilde,
+    Arrow,
+    FatArrow,
+    Assign,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    PercentEq,
+    PipeGt,
+
+    // --- T57: Unicode mathematical operators (scientific edition) ---
+    Sum,
+    Product,
+    Sqrt,
+    InUni,
+    NotInUni,
+    SubsetUni,
+    ApproxUni,
+    Adjoint,
+
+    // --- Delimiters ---
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    Colon,
+    Comma,
+    Dot,
+    Semicolon,
+    At,
+
+    // --- Layout tokens ---
+    Newline,
+    Indent,
+    Dedent,
+    Eof,
+}
+
+// ----------------------------------------------------------------------------
+// Token — kind + span. Port of token.rs::Token.
+// ----------------------------------------------------------------------------
+struct Token {
+    kind: TokenKind,
+    span: Span,
+}
+
+func token_new(kind: TokenKind, span: Span) -> Token:
+    return Token { kind: kind, span: span }
+
+// ----------------------------------------------------------------------------
+// LexerError — simplified port of error.rs::LexerError.
+//
+// The Rust LexerError wraps buff_lang_error::LexError (Diagnostic + ErrorCode).
+// For the self-host feasibility port we keep just the user-visible message +
+// the source span + the stable ErrorCode tag (E1xxx rendered as a number).
+// ----------------------------------------------------------------------------
+struct LexerError {
+    message: String,
+    span: Span,
+    code: Int,
+}
+
+func lexer_error_new(msg: String, sp: Span) -> LexerError:
+    return LexerError { message: msg, span: sp, code: 0 }
+
+func lexer_error_unexpected_char(ch: String, sp: Span) -> LexerError:
+    // NOTE: The dynamic `ch` is intentionally omitted from the message.
+    // Buff's current codegen lowers string-literal `+` to
+    // `"lit".to_string() + rhs`, and Rust's `String + String` does not
+    // compile (only `String + &str`). The variable case (`String + ch`)
+    // therefore hits a codegen gap. The Rust original includes the ch in
+    // the message; the self-host port will pick it up once string-concat
+    // codegen is fixed. The `ch` parameter is preserved for API parity.
+    return LexerError { message: "unexpected character", span: sp, code: 1001 }
+
+func lexer_error_unterminated_string(sp: Span) -> LexerError:
+    return LexerError { message: "unterminated string literal", span: sp, code: 1002 }
+
+func lexer_error_invalid_number(sp: Span) -> LexerError:
+    return LexerError { message: "invalid numeric literal", span: sp, code: 1003 }
+
+func lexer_error_mixed_tabs_spaces(sp: Span) -> LexerError:
+    return LexerError { message: "mixed tabs and spaces in indentation", span: sp, code: 1004 }
+
+// ----------------------------------------------------------------------------
+// token_kind_num — stable numeric ID for every TokenKind variant.
+//
+// Numbering follows the declaration order in the enum above (and matches the
+// source order in `crates/buff-lang-lexer/src/token.rs`), starting at 1. This
+// is NOT the same as Rust's `Discriminant` (which would skip data-carrying
+// variants) — it is a hand-assigned 1..=101 contiguous ID suitable for
+// snapshot tests, cross-language parity checks, and (eventually) a
+// hand-written encoder/decoder for the .buff cache format.
+// ----------------------------------------------------------------------------
+func token_kind_num(kind: TokenKind) -> Int:
+    match kind {
+        // Literals (1-8)
+        IntLit(_) => 1,
+        FloatLit(_) => 2,
+        DoubleLit(_) => 3,
+        StringLit(_) => 4,
+        ByteLit(_) => 5,
+        CharLit(_) => 6,
+        DecimalLit(_) => 7,
+        RegexLit(_) => 8,
+        // String interpolation (9-14)
+        StringStart => 9,
+        StringPart(_) => 10,
+        InterpStart => 11,
+        InterpSpec(_) => 12,
+        InterpEnd => 13,
+        StringEnd => 14,
+        // Identifier (15)
+        Ident(_) => 15,
+        // Keywords (16-44)
+        KwFunc => 16,
+        KwLet => 17,
+        KwMut => 18,
+        KwStruct => 19,
+        KwEnum => 20,
+        KwTrait => 21,
+        KwType => 22,
+        KwIf => 23,
+        KwElse => 24,
+        KwFor => 25,
+        KwReturn => 26,
+        KwBreak => 27,
+        KwContinue => 28,
+        KwIn => 29,
+        KwMatch => 30,
+        KwAsync => 31,
+        KwSpawn => 32,
+        KwImport => 33,
+        KwExport => 34,
+        KwFrom => 35,
+        KwAs => 36,
+        KwTrue => 37,
+        KwFalse => 38,
+        KwExtern => 39,
+        KwUnsafe => 40,
+        KwGuard => 41,
+        KwExtend => 42,
+        KwDefer => 43,
+        KwImpl => 44,
+        // Operators (45-77)
+        DotDot => 45,
+        DotDotEq => 46,
+        Plus => 47,
+        Minus => 48,
+        Star => 49,
+        Slash => 50,
+        Percent => 51,
+        EqEq => 52,
+        NotEq => 53,
+        Lt => 54,
+        Gt => 55,
+        LtEq => 56,
+        GtEq => 57,
+        AndAnd => 58,
+        OrOr => 59,
+        Not => 60,
+        Question => 61,
+        QuestionQuestion => 62,
+        QuestionDot => 63,
+        Caret => 64,
+        Pipe => 65,
+        Amp => 66,
+        Shl => 67,
+        Shr => 68,
+        Tilde => 69,
+        Arrow => 70,
+        FatArrow => 71,
+        Assign => 72,
+        PlusEq => 73,
+        MinusEq => 74,
+        StarEq => 75,
+        SlashEq => 76,
+        PercentEq => 77,
+        PipeGt => 78,
+        // Unicode math operators (79-86)
+        Sum => 79,
+        Product => 80,
+        Sqrt => 81,
+        InUni => 82,
+        NotInUni => 83,
+        SubsetUni => 84,
+        ApproxUni => 85,
+        Adjoint => 86,
+        // Delimiters (87-97)
+        LParen => 87,
+        RParen => 88,
+        LBrace => 89,
+        RBrace => 90,
+        LBracket => 91,
+        RBracket => 92,
+        Colon => 93,
+        Comma => 94,
+        Dot => 95,
+        Semicolon => 96,
+        At => 97,
+        // Layout (98-101)
+        Newline => 98,
+        Indent => 99,
+        Dedent => 100,
+        Eof => 101,
+    }
+
+// ----------------------------------------------------------------------------
+// is_keyword — port of TokenKind::is_keyword. Returns true for the 29
+// keyword variants (KwFunc..KwImpl), false for everything else.
+// ----------------------------------------------------------------------------
+func is_keyword(kind: TokenKind) -> Bool:
+    let n = token_kind_num(kind: kind)
+    return n >= 16 && n <= 44
+
+// ----------------------------------------------------------------------------
+// kind_label — short human-readable label for diagnostics / pretty-printing.
+// Data-carrying variants render just the variant stem (the payload is omitted
+// to keep the output deterministic; full Display formatting is a follow-up).
+// ----------------------------------------------------------------------------
+func kind_label(kind: TokenKind) -> String:
+    match kind {
+        IntLit(_) => "IntLit",
+        FloatLit(_) => "FloatLit",
+        DoubleLit(_) => "DoubleLit",
+        StringLit(_) => "StringLit",
+        ByteLit(_) => "ByteLit",
+        CharLit(_) => "CharLit",
+        DecimalLit(_) => "DecimalLit",
+        RegexLit(_) => "RegexLit",
+        StringStart => "StringStart",
+        StringPart(_) => "StringPart",
+        InterpStart => "InterpStart",
+        InterpSpec(_) => "InterpSpec",
+        InterpEnd => "InterpEnd",
+        StringEnd => "StringEnd",
+        Ident(_) => "Ident",
+        KwFunc => "KwFunc",
+        KwLet => "KwLet",
+        KwMut => "KwMut",
+        KwStruct => "KwStruct",
+        KwEnum => "KwEnum",
+        KwTrait => "KwTrait",
+        KwType => "KwType",
+        KwIf => "KwIf",
+        KwElse => "KwElse",
+        KwFor => "KwFor",
+        KwReturn => "KwReturn",
+        KwBreak => "KwBreak",
+        KwContinue => "KwContinue",
+        KwIn => "KwIn",
+        KwMatch => "KwMatch",
+        KwAsync => "KwAsync",
+        KwSpawn => "KwSpawn",
+        KwImport => "KwImport",
+        KwExport => "KwExport",
+        KwFrom => "KwFrom",
+        KwAs => "KwAs",
+        KwTrue => "KwTrue",
+        KwFalse => "KwFalse",
+        KwExtern => "KwExtern",
+        KwUnsafe => "KwUnsafe",
+        KwGuard => "KwGuard",
+        KwExtend => "KwExtend",
+        KwDefer => "KwDefer",
+        KwImpl => "KwImpl",
+        DotDot => "DotDot",
+        DotDotEq => "DotDotEq",
+        Plus => "Plus",
+        Minus => "Minus",
+        Star => "Star",
+        Slash => "Slash",
+        Percent => "Percent",
+        EqEq => "EqEq",
+        NotEq => "NotEq",
+        Lt => "Lt",
+        Gt => "Gt",
+        LtEq => "LtEq",
+        GtEq => "GtEq",
+        AndAnd => "AndAnd",
+        OrOr => "OrOr",
+        Not => "Not",
+        Question => "Question",
+        QuestionQuestion => "QuestionQuestion",
+        QuestionDot => "QuestionDot",
+        Caret => "Caret",
+        Pipe => "Pipe",
+        Amp => "Amp",
+        Shl => "Shl",
+        Shr => "Shr",
+        Tilde => "Tilde",
+        Arrow => "Arrow",
+        FatArrow => "FatArrow",
+        Assign => "Assign",
+        PlusEq => "PlusEq",
+        MinusEq => "MinusEq",
+        StarEq => "StarEq",
+        SlashEq => "SlashEq",
+        PercentEq => "PercentEq",
+        PipeGt => "PipeGt",
+        Sum => "Sum",
+        Product => "Product",
+        Sqrt => "Sqrt",
+        InUni => "InUni",
+        NotInUni => "NotInUni",
+        SubsetUni => "SubsetUni",
+        ApproxUni => "ApproxUni",
+        Adjoint => "Adjoint",
+        LParen => "LParen",
+        RParen => "RParen",
+        LBrace => "LBrace",
+        RBrace => "RBrace",
+        LBracket => "LBracket",
+        RBracket => "RBracket",
+        Colon => "Colon",
+        Comma => "Comma",
+        Dot => "Dot",
+        Semicolon => "Semicolon",
+        At => "At",
+        Newline => "Newline",
+        Indent => "Indent",
+        Dedent => "Dedent",
+        Eof => "Eof",
+    }
+
+// ----------------------------------------------------------------------------
+// main — exercises every variant.
+//
+// Each TokenKind variant is constructed INLINE at the call site and passed
+// directly to token_kind_num / kind_label / is_keyword. This is deliberate:
+// Buff's current move-analysis codegen moves a non-Copy value on first use
+// and inserts `.clone()` only on SECOND+ uses — so extracting `.kind` from a
+// Token once and reusing it across many calls hits a "use of moved value"
+// error. Constructing inline side-steps the codegen gap entirely (each call
+// gets a fresh value). The Token struct is still exercised below (one
+// construction + Copy field reads) to prove the data model compiles.
+// ----------------------------------------------------------------------------
+func main():
+    print("--- buff-lang-lexer self-host: TokenKind port ---")
+
+    // --- Literals (1-8) ---
+    print(token_kind_num(kind: IntLit(42)))
+    print(token_kind_num(kind: FloatLit(3.14)))
+    print(token_kind_num(kind: DoubleLit(2.71828)))
+    print(token_kind_num(kind: StringLit("hi")))
+    print(token_kind_num(kind: ByteLit(255)))
+    print(token_kind_num(kind: CharLit("A")))
+    print(token_kind_num(kind: DecimalLit("99.90")))
+    print(token_kind_num(kind: RegexLit("\\d+")))
+
+    // --- String interpolation (9-14) ---
+    print(token_kind_num(kind: StringStart))
+    print(token_kind_num(kind: StringPart("hello ")))
+    print(token_kind_num(kind: InterpStart))
+    print(token_kind_num(kind: InterpSpec(".2")))
+    print(token_kind_num(kind: InterpEnd))
+    print(token_kind_num(kind: StringEnd))
+
+    // --- Identifier (15) ---
+    print(token_kind_num(kind: Ident("foo")))
+
+    // --- Keywords 16-44 ---
+    print(token_kind_num(kind: KwFunc))
+    print(token_kind_num(kind: KwLet))
+    print(token_kind_num(kind: KwMut))
+    print(token_kind_num(kind: KwStruct))
+    print(token_kind_num(kind: KwEnum))
+    print(token_kind_num(kind: KwTrait))
+    print(token_kind_num(kind: KwType))
+    print(token_kind_num(kind: KwIf))
+    print(token_kind_num(kind: KwElse))
+    print(token_kind_num(kind: KwFor))
+    print(token_kind_num(kind: KwReturn))
+    print(token_kind_num(kind: KwBreak))
+    print(token_kind_num(kind: KwContinue))
+    print(token_kind_num(kind: KwIn))
+    print(token_kind_num(kind: KwMatch))
+    print(token_kind_num(kind: KwAsync))
+    print(token_kind_num(kind: KwSpawn))
+    print(token_kind_num(kind: KwImport))
+    print(token_kind_num(kind: KwExport))
+    print(token_kind_num(kind: KwFrom))
+    print(token_kind_num(kind: KwAs))
+    print(token_kind_num(kind: KwTrue))
+    print(token_kind_num(kind: KwFalse))
+    print(token_kind_num(kind: KwExtern))
+    print(token_kind_num(kind: KwUnsafe))
+    print(token_kind_num(kind: KwGuard))
+    print(token_kind_num(kind: KwExtend))
+    print(token_kind_num(kind: KwDefer))
+    print(token_kind_num(kind: KwImpl))
+
+    // --- Operators 45-78 ---
+    print(token_kind_num(kind: DotDot))
+    print(token_kind_num(kind: DotDotEq))
+    print(token_kind_num(kind: Plus))
+    print(token_kind_num(kind: Minus))
+    print(token_kind_num(kind: Star))
+    print(token_kind_num(kind: Slash))
+    print(token_kind_num(kind: Percent))
+    print(token_kind_num(kind: EqEq))
+    print(token_kind_num(kind: NotEq))
+    print(token_kind_num(kind: Lt))
+    print(token_kind_num(kind: Gt))
+    print(token_kind_num(kind: LtEq))
+    print(token_kind_num(kind: GtEq))
+    print(token_kind_num(kind: AndAnd))
+    print(token_kind_num(kind: OrOr))
+    print(token_kind_num(kind: Not))
+    print(token_kind_num(kind: Question))
+    print(token_kind_num(kind: QuestionQuestion))
+    print(token_kind_num(kind: QuestionDot))
+    print(token_kind_num(kind: Caret))
+    print(token_kind_num(kind: Pipe))
+    print(token_kind_num(kind: Amp))
+    print(token_kind_num(kind: Shl))
+    print(token_kind_num(kind: Shr))
+    print(token_kind_num(kind: Tilde))
+    print(token_kind_num(kind: Arrow))
+    print(token_kind_num(kind: FatArrow))
+    print(token_kind_num(kind: Assign))
+    print(token_kind_num(kind: PlusEq))
+    print(token_kind_num(kind: MinusEq))
+    print(token_kind_num(kind: StarEq))
+    print(token_kind_num(kind: SlashEq))
+    print(token_kind_num(kind: PercentEq))
+    print(token_kind_num(kind: PipeGt))
+
+    // --- Unicode math operators 79-86 ---
+    print(token_kind_num(kind: Sum))
+    print(token_kind_num(kind: Product))
+    print(token_kind_num(kind: Sqrt))
+    print(token_kind_num(kind: InUni))
+    print(token_kind_num(kind: NotInUni))
+    print(token_kind_num(kind: SubsetUni))
+    print(token_kind_num(kind: ApproxUni))
+    print(token_kind_num(kind: Adjoint))
+
+    // --- Delimiters 87-97 ---
+    print(token_kind_num(kind: LParen))
+    print(token_kind_num(kind: RParen))
+    print(token_kind_num(kind: LBrace))
+    print(token_kind_num(kind: RBrace))
+    print(token_kind_num(kind: LBracket))
+    print(token_kind_num(kind: RBracket))
+    print(token_kind_num(kind: Colon))
+    print(token_kind_num(kind: Comma))
+    print(token_kind_num(kind: Dot))
+    print(token_kind_num(kind: Semicolon))
+    print(token_kind_num(kind: At))
+
+    // --- Layout 98-101 ---
+    print(token_kind_num(kind: Newline))
+    print(token_kind_num(kind: Indent))
+    print(token_kind_num(kind: Dedent))
+    print(token_kind_num(kind: Eof))
+
+    // --- Exercise kind_label + is_keyword (inline construction) ---
+    print("--- helpers ---")
+    print(kind_label(kind: StringLit("hi")))
+    print(kind_label(kind: KwFunc))
+    print(kind_label(kind: Eof))
+    print(is_keyword(kind: KwFunc))
+    print(is_keyword(kind: IntLit(42)))
+
+    // --- Exercise Token struct (single construction; Copy field reads) ---
+    print("--- Token struct ---")
+    let tok = token_new(kind: IntLit(7), span: span_new(s: 10, e: 20))
+    print(tok.span.start)
+    print(tok.span.end)
+
+    // --- Exercise LexerError constructors (fresh span per call) ---
+    print("--- LexerError ---")
+    let e1 = lexer_error_unexpected_char(ch: "@", sp: span_new(s: 0, e: 1))
+    print(e1.code)
+    print(e1.message)
+    let e2 = lexer_error_unterminated_string(sp: span_new(s: 2, e: 4))
+    print(e2.code)
+    print(e2.message)
+    let e3 = lexer_error_invalid_number(sp: span_new(s: 5, e: 7))
+    print(e3.code)
+    let e4 = lexer_error_mixed_tabs_spaces(sp: span_new(s: 8, e: 9))
+    print(e4.code)
+    let e5 = lexer_error_new(msg: "generic lex error", sp: span_new(s: 0, e: 0))
+    print(e5.code)
+    print(e5.message)

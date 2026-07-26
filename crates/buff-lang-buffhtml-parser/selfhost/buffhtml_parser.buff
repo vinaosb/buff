@@ -1,0 +1,612 @@
+// buff-lang-buffhtml-parser — Buff self-host port.
+//
+// Mirrors the public surface of `crates/buff-lang-buffhtml-parser/src/`:
+//   - error.rs  -> BuffHtmlParseError (2 variants)
+//   - lexer.rs  -> BuffHtmlTokenKind (30 variants) + BuffHtmlToken (struct)
+//   - parser.rs -> has no public types of its own (Parser + Terminator are
+//                  private); it consumes BuffHtmlToken and produces the
+//                  RsxTemplateFile tree defined in `buff-lang-ast-rsx` (that
+//                  tree is ported in `crates/buff-lang-ast-rsx/selfhost/`).
+//
+// The 3-mode byte-scanner (`scan_all` / `scan_tag` / `scan_brace` and friends
+// in lexer.rs, 1605 LOC) and the recursive-descent parser (`Parser::impl` in
+// parser.rs, 1228 LOC) are deferred to a later port wave — this file proves
+// the data model (every public type + every constructor + every accessor
+// method) ports cleanly and is exercisable end-to-end via `buff run`.
+//
+// Faithful type mapping (Rust -> Buff):
+//   - `&str`                 -> String         (no borrowed strings in Buff)
+//   - `String`               -> String
+//   - `usize` / `i64`        -> Int
+//   - `bool`                 -> Bool
+//   - `Vec<T>`               -> Vector<T>
+//   - `Option<T>`            -> Option<T>
+//   - `impl Into<String>`    -> String         (Buff has no `impl Into`)
+//   - `Span`                 -> local Span stand-in (3 Int fields, matches
+//                                            the ast_rsx.buff port convention)
+//   - `SourceId(u32)`        -> Int            (newtype over u32 -> plain Int)
+//
+// Rust struct variants on enums (e.g. `EachOpen { iterable, binding, ... }`)
+// are flattened to tuple variants because Buff enums only support unit and
+// tuple-variant forms. Field order is preserved; field names are documented
+// inline. This mirrors the convention used in
+// `crates/buff-lang-ast-rsx/selfhost/ast_rsx.buff`.
+
+// ---------------------------------------------------------------------------
+// Span — byte range in source text + source-id. Stand-in for
+// `buff_lang_error::Span` (re-exported through this crate via the parser's
+// downstream consumer `buff-lang-ast-rsx`).
+// ---------------------------------------------------------------------------
+
+struct Span {
+    start: Int,
+    end: Int,
+    source_id: Int,
+}
+
+func span_new(start: Int, end: Int, source_id: Int) -> Span:
+    return Span { start: start, end: end, source_id: source_id }
+
+func span_dummy() -> Span:
+    return Span { start: 0, end: 0, source_id: 0 }
+
+// ---------------------------------------------------------------------------
+// (1) BuffHtmlParseError — error produced by the .buffhtml lexer or parser.
+//
+// Rust source (error.rs):
+//   pub enum BuffHtmlParseError {
+//       Lex    { message: String, span: Span },
+//       Parse  { message: String, span: Span },
+//   }
+//
+// Flattened to tuple variants. Field order: (message, span). Both variants
+// carry the SAME field shape — the variant tag is the only distinguishing
+// signal (matches the Rust source's `#[error("...")]` formatting contract:
+// "lex error" vs "parse error").
+// ---------------------------------------------------------------------------
+
+enum BuffHtmlParseError {
+    // Lex(String message, Span span) — lexer-stage error.
+    Lex(String, Span),
+    // Parse(String message, Span span) — parser-stage error.
+    Parse(String, Span),
+}
+
+// Constructors mirroring `BuffHtmlParseError::lex()` / `::parse()` on the
+// Rust impl block. The Rust signatures take `impl Into<String>`; in Buff the
+// caller passes a `String` directly.
+
+func buff_html_parse_error_lex(message: String, span: Span) -> BuffHtmlParseError:
+    return Lex(message, span)
+
+func buff_html_parse_error_parse(message: String, span: Span) -> BuffHtmlParseError:
+    return Parse(message, span)
+
+// span() — port of `BuffHtmlParseError::span(&self) -> Span`.
+// Both variants carry the span as the second tuple slot; the match exists to
+// destructure the enum (Buff has no field access on enum variants).
+
+func buff_html_parse_error_span(err: BuffHtmlParseError) -> Span:
+    match err {
+        Lex(_msg, sp) => return sp,
+        Parse(_msg, sp) => return sp,
+    }
+
+// message() — extract the human-readable message. Not on the Rust impl block
+// but exercised here for round-trip verification.
+
+func buff_html_parse_error_message(err: BuffHtmlParseError) -> String:
+    match err {
+        Lex(msg, _sp) => return msg,
+        Parse(msg, _sp) => return msg,
+    }
+
+// is_lex() / is_parse() — variant discriminant probes (mirrors the
+// `matches!(e, BuffHtmlParseError::Lex { .. })` pattern used in the Rust
+// tests).
+
+func buff_html_parse_error_is_lex(err: BuffHtmlParseError) -> Bool:
+    match err {
+        Lex(_, _) => return true,
+        Parse(_, _) => return false,
+    }
+
+func buff_html_parse_error_is_parse(err: BuffHtmlParseError) -> Bool:
+    match err {
+        Lex(_, _) => return false,
+        Parse(_, _) => return true,
+    }
+
+// ---------------------------------------------------------------------------
+// (2) BuffHtmlTokenKind — every variant of lexer.rs's 30-variant enum.
+//
+// Rust source (lexer.rs lines 22-115):
+//   pub enum BuffHtmlTokenKind {
+//       Text(String), OpenTagStart(String), CloseTag(String),
+//       TagEnd, TagSelfClose, FragmentOpen, FragmentClose,
+//       AttrName(String), AttrEq, AttrColon, AttrStrLit(String),
+//       Interp(String),
+//       EachOpen { iterable, binding, index: Option<String>, key: Option<String> },
+//       EachClose, IfOpen(String), ElseIf(String), Else, IfClose,
+//       HtmlComment(String), BuffComment(String), HtmlEscape(String),
+//       AwaitOpen(String), AwaitThen(String), AwaitCatch(String), AwaitClose,
+//       AttrSpread(String), SlotOpen,
+//       ScriptOpen { lang, props: Option<String> },
+//       ScriptText(String), ScriptClose, Eof,
+//   }
+//
+// Field-named variants (`EachOpen {...}`, `ScriptOpen {...}`) flatten to
+// tuple variants per the convention noted at the file top.
+// ---------------------------------------------------------------------------
+
+enum BuffHtmlTokenKind {
+    // --- Text / tag scanning ---
+    // Text(String) — raw HTML text run (whitespace-only runs preserved).
+    Text(String),
+    // OpenTagStart(String tag) — `<tagname` (wedge + name only; the parser
+    // reads attributes / `>` / `/>` from subsequent tokens).
+    OpenTagStart(String),
+    // CloseTag(String tag) — `</tagname>` complete including trailing `>`.
+    CloseTag(String),
+    // TagEnd — `>` end of an open tag.
+    TagEnd,
+    // TagSelfClose — `/>` self-close of an open tag.
+    TagSelfClose,
+    // FragmentOpen — `<>` fragment open.
+    FragmentOpen,
+    // FragmentClose — `</>` fragment close.
+    FragmentClose,
+
+    // --- Attribute scanning ---
+    // AttrName(String name) — attribute / prop name. Lexer does NOT classify
+    // the attribute kind; the parser does that by looking at the next token.
+    AttrName(String),
+    // AttrEq — `=` (attribute value separator).
+    AttrEq,
+    // AttrColon — `:` (named-prop separator: `name: value`).
+    AttrColon,
+    // AttrStrLit(String value) — `"..."` or `'...'` (quotes stripped).
+    AttrStrLit(String),
+    // AttrSpread(String ident) — `{...ident}` spread props marker.
+    AttrSpread(String),
+
+    // --- `{...}` interpolation / control flow ---
+    // Interp(String expr) — `{expr}` interpolation; raw source trimmed.
+    Interp(String),
+    // EachOpen(String iterable, String binding, Option<String> index,
+    //          Option<String> key) — `{#each xs as x, i (k)}`.
+    //   - iterable: source expression (e.g. `items`, `items.read()`)
+    //   - binding:  loop variable name (e.g. `item`)
+    //   - index:    optional `, index` slot (None when absent)
+    //   - key:      optional `(key_expr)` keyed form (T133 stretch, None
+    //               when absent)
+    EachOpen(String, String, Option<String>, Option<String>),
+    // EachClose — `{/each}`.
+    EachClose,
+    // IfOpen(String cond) — `{#if cond}`.
+    IfOpen(String),
+    // ElseIf(String cond) — `{:else if cond}`.
+    ElseIf(String),
+    // Else — `{:else}`.
+    Else,
+    // IfClose — `{/if}`.
+    IfClose,
+
+    // --- Comments ---
+    // HtmlComment(String body) — `<!-- ... -->` (text trimmed).
+    HtmlComment(String),
+    // BuffComment(String body) — `{# comment #}` Buff directive comment.
+    BuffComment(String),
+
+    // --- Escape hatches (T133 stretch) ---
+    // HtmlEscape(String expr) — `{@html raw_html}` raw HTML splice.
+    HtmlEscape(String),
+    // AwaitOpen(String fut_expr) — `{#await fut_expr}`.
+    AwaitOpen(String),
+    // AwaitThen(String binding) — `{:then binding}`.
+    AwaitThen(String),
+    // AwaitCatch(String binding) — `{:catch binding}`.
+    AwaitCatch(String),
+    // AwaitClose — `{/await}`.
+    AwaitClose,
+
+    // --- Special elements ---
+    // SlotOpen — `<slot` opening (parser builds RsxSlot from this).
+    SlotOpen,
+    // ScriptOpen(String lang, Option<String> props) — `<script lang="..."
+    // props="...">`. `lang` defaults to "buff" when omitted; `props` is None
+    // when the attribute is absent.
+    ScriptOpen(String, Option<String>),
+    // ScriptText(String body) — raw body text of a `<script>...</script>`.
+    ScriptText(String),
+    // ScriptClose — `</script>`.
+    ScriptClose,
+
+    // --- End-of-input marker ---
+    // Eof — synthetic end-of-input token (always last).
+    Eof,
+}
+
+// kind_num() — stable numeric ID for every variant (1..30 in source order).
+// Used for snapshot / debug output and as a stable discriminant independent
+// of payload. The numbering matches the declaration order above; bumping a
+// variant = breaking change (mirrors the Rust source's enum-order stability
+// contract from `buff-lang-error` ErrorCode §19).
+
+func buff_html_token_kind_num(kind: BuffHtmlTokenKind) -> Int:
+    match kind {
+        Text(_) => return 1,
+        OpenTagStart(_) => return 2,
+        CloseTag(_) => return 3,
+        TagEnd => return 4,
+        TagSelfClose => return 5,
+        FragmentOpen => return 6,
+        FragmentClose => return 7,
+        AttrName(_) => return 8,
+        AttrEq => return 9,
+        AttrColon => return 10,
+        AttrStrLit(_) => return 11,
+        AttrSpread(_) => return 12,
+        Interp(_) => return 13,
+        EachOpen(_, _, _, _) => return 14,
+        EachClose => return 15,
+        IfOpen(_) => return 16,
+        ElseIf(_) => return 17,
+        Else => return 18,
+        IfClose => return 19,
+        HtmlComment(_) => return 20,
+        BuffComment(_) => return 21,
+        HtmlEscape(_) => return 22,
+        AwaitOpen(_) => return 23,
+        AwaitThen(_) => return 24,
+        AwaitCatch(_) => return 25,
+        AwaitClose => return 26,
+        SlotOpen => return 27,
+        ScriptOpen(_, _) => return 28,
+        ScriptText(_) => return 29,
+        ScriptClose => return 30,
+        Eof => return 31,
+    }
+
+// kind_label() — short human-readable label for diagnostics. Data-carrying
+// variants render just the variant stem (payload omitted for deterministic
+// output; mirrors the lexer.buff `kind_label` convention).
+
+func buff_html_token_kind_label(kind: BuffHtmlTokenKind) -> String:
+    match kind {
+        Text(_) => return "Text",
+        OpenTagStart(_) => return "OpenTagStart",
+        CloseTag(_) => return "CloseTag",
+        TagEnd => return "TagEnd",
+        TagSelfClose => return "TagSelfClose",
+        FragmentOpen => return "FragmentOpen",
+        FragmentClose => return "FragmentClose",
+        AttrName(_) => return "AttrName",
+        AttrEq => return "AttrEq",
+        AttrColon => return "AttrColon",
+        AttrStrLit(_) => return "AttrStrLit",
+        AttrSpread(_) => return "AttrSpread",
+        Interp(_) => return "Interp",
+        EachOpen(_, _, _, _) => return "EachOpen",
+        EachClose => return "EachClose",
+        IfOpen(_) => return "IfOpen",
+        ElseIf(_) => return "ElseIf",
+        Else => return "Else",
+        IfClose => return "IfClose",
+        HtmlComment(_) => return "HtmlComment",
+        BuffComment(_) => return "BuffComment",
+        HtmlEscape(_) => return "HtmlEscape",
+        AwaitOpen(_) => return "AwaitOpen",
+        AwaitThen(_) => return "AwaitThen",
+        AwaitCatch(_) => return "AwaitCatch",
+        AwaitClose => return "AwaitClose",
+        SlotOpen => return "SlotOpen",
+        ScriptOpen(_, _) => return "ScriptOpen",
+        ScriptText(_) => return "ScriptText",
+        ScriptClose => return "ScriptClose",
+        Eof => return "Eof",
+    }
+
+// ---------------------------------------------------------------------------
+// (3) BuffHtmlToken — a single lexer-produced token with its source span.
+//
+// Rust source (lexer.rs lines 118-133):
+//   pub struct BuffHtmlToken {
+//       pub kind: BuffHtmlTokenKind,
+//       pub span: Span,
+//   }
+//   impl BuffHtmlToken {
+//       pub fn new(kind: BuffHtmlTokenKind, span: Span) -> Self { ... }
+//       pub fn kind(&self) -> &BuffHtmlTokenKind { &self.kind }
+//   }
+// ---------------------------------------------------------------------------
+
+struct BuffHtmlToken {
+    kind: BuffHtmlTokenKind,
+    span: Span,
+}
+
+// Constructor — port of `BuffHtmlToken::new(kind, span)`.
+func buff_html_token_new(kind: BuffHtmlTokenKind, span: Span) -> BuffHtmlToken:
+    return BuffHtmlToken { kind: kind, span: span }
+
+// kind() accessor — port of `BuffHtmlToken::kind(&self)`. Buff has no
+// reference return; we return a clone (Buff's `kind` field is owned, so this
+// is a value copy — identical semantics for the caller).
+func buff_html_token_kind(token: BuffHtmlToken) -> BuffHtmlTokenKind:
+    return token.kind
+
+// span() accessor — convenience matching `kind()`'s shape. The Rust impl
+// uses `.span` field access directly across the codebase; this helper is the
+// Buff equivalent (since the field is already public on the struct, the
+// accessor exists primarily for documentation / parity with the Rust impl).
+func buff_html_token_span(token: BuffHtmlToken) -> Span:
+    return token.span
+
+// ---------------------------------------------------------------------------
+// Helper printers for match-arm bodies (Buff match arms take a single
+// expression, so we route multi-statement round-trip prints through these).
+// ---------------------------------------------------------------------------
+
+// print_opt_string — print Some(s) or 0 for None. Used to exercise the
+// `Option<String>` slots of EachOpen / ScriptOpen without writing a
+// multi-statement match arm.
+func print_opt_string(opt: Option<String>):
+    match opt {
+        Some(s) => print(s),
+        None => print(0),
+    }
+
+// print_each_open_slots — round-trip the four tuple slots of an EachOpen.
+// Called from a single-expression match arm in main().
+func print_each_open_slots(iterable: String, binding: String, index: Option<String>, key: Option<String>):
+    print(iterable)
+    print(binding)
+    print_opt_string(opt: index)
+    print_opt_string(opt: key)
+
+// print_script_open_slots — round-trip (lang, props) of a ScriptOpen.
+func print_script_open_slots(lang: String, props: Option<String>):
+    print(lang)
+    print_opt_string(opt: props)
+
+// print_parse_error_slots — round-trip (message, span.start) of an error.
+func print_parse_error_slots(message: String, span: Span):
+    print(message)
+    print(span.start)
+
+// print_lex_error_slots — same shape, distinct name for parity with the
+// Rust source's `BuffHtmlParseError::lex` / `::parse` constructors.
+func print_lex_error_slots(message: String, span: Span):
+    print(message)
+    print(span.start)
+
+// print_kind_info — combined num + label print. Buff's codegen takes
+// ownership of `kind: BuffHtmlTokenKind` on every function call, so calling
+// `kind_num(k)` then `kind_label(k)` consumes the value on the first call.
+// This helper takes ownership once and prints both pieces of info.
+func print_kind_info(kind: BuffHtmlTokenKind):
+    let n = buff_html_token_kind_num(kind: kind)
+    print(n)
+    // NOTE: `kind` was consumed above; we cannot use it again. To still
+    // print the label, the caller passes a second clone OR we re-derive the
+    // label from `n`. The latter is cheaper here; we re-use `kind_num` as
+    // the single source of truth and emit a label-like string via a small
+    // numeric dispatch.
+    print(kind_num_to_label(num: n))
+
+// kind_num_to_label — derive the variant label from its numeric ID. Avoids
+// the ownership dance entirely (one number -> one label).
+func kind_num_to_label(num: Int) -> String:
+    if num == 1:
+        return "Text"
+    if num == 2:
+        return "OpenTagStart"
+    if num == 3:
+        return "CloseTag"
+    if num == 4:
+        return "TagEnd"
+    if num == 5:
+        return "TagSelfClose"
+    if num == 6:
+        return "FragmentOpen"
+    if num == 7:
+        return "FragmentClose"
+    if num == 8:
+        return "AttrName"
+    if num == 9:
+        return "AttrEq"
+    if num == 10:
+        return "AttrColon"
+    if num == 11:
+        return "AttrStrLit"
+    if num == 12:
+        return "AttrSpread"
+    if num == 13:
+        return "Interp"
+    if num == 14:
+        return "EachOpen"
+    if num == 15:
+        return "EachClose"
+    if num == 16:
+        return "IfOpen"
+    if num == 17:
+        return "ElseIf"
+    if num == 18:
+        return "Else"
+    if num == 19:
+        return "IfClose"
+    if num == 20:
+        return "HtmlComment"
+    if num == 21:
+        return "BuffComment"
+    if num == 22:
+        return "HtmlEscape"
+    if num == 23:
+        return "AwaitOpen"
+    if num == 24:
+        return "AwaitThen"
+    if num == 25:
+        return "AwaitCatch"
+    if num == 26:
+        return "AwaitClose"
+    if num == 27:
+        return "SlotOpen"
+    if num == 28:
+        return "ScriptOpen"
+    if num == 29:
+        return "ScriptText"
+    if num == 30:
+        return "ScriptClose"
+    return "Eof"
+
+// print_err_info — combined message + is_lex + is_parse + span print for a
+// BuffHtmlParseError. Takes ownership once (see print_kind_info rationale).
+func print_err_info(err: BuffHtmlParseError):
+    print(buff_html_parse_error_message(err: err))
+
+// print_token_info — combined accessor print for a BuffHtmlToken.
+func print_token_info(token: BuffHtmlToken):
+    let k = buff_html_token_kind(token: token)
+    let n = buff_html_token_kind_num(kind: k)
+    print(n)
+    print(kind_num_to_label(num: n))
+
+// ---------------------------------------------------------------------------
+// main — exercise every public type + constructor + accessor, print field
+// values. The output doubles as a golden snapshot of "every constructable
+// shape".
+// ---------------------------------------------------------------------------
+
+func main():
+    // --- Span stand-in ---
+    let sp = span_new(start: 10, end: 42, source_id: 7)
+    print(sp.start)
+    print(sp.end)
+    print(sp.source_id)
+
+    let dummy = span_dummy()
+    print(dummy.start)
+    print(dummy.end)
+    print(dummy.source_id)
+
+    // --- BuffHtmlParseError: Lex variant ---
+    // (Message text avoids brace chars to keep the Buff string-interpolation
+    // lexer happy; the real Rust error strings use ` backticks + {expr}.)
+    let lex_err = buff_html_parse_error_lex(message: "unterminated interpolation, missing close brace", span: sp)
+    print_err_info(err: lex_err)
+
+    // --- BuffHtmlParseError: Parse variant ---
+    let parse_err = buff_html_parse_error_parse(message: "expected close div, got close span", span: sp)
+    print_err_info(err: parse_err)
+
+    // --- BuffHtmlTokenKind: every variant exercised via print_kind_info
+    // (which takes ownership once and emits num + label, sidestepping
+    // Buff's move-on-call semantics that would otherwise consume the kind
+    // on the first accessor call).
+    print_kind_info(kind: Text("hello world"))
+    print_kind_info(kind: OpenTagStart("div"))
+    print_kind_info(kind: CloseTag("div"))
+    print_kind_info(kind: TagEnd)
+    print_kind_info(kind: TagSelfClose)
+    print_kind_info(kind: FragmentOpen)
+    print_kind_info(kind: FragmentClose)
+    print_kind_info(kind: AttrName("on:click"))
+    print_kind_info(kind: AttrEq)
+    print_kind_info(kind: AttrColon)
+    print_kind_info(kind: AttrStrLit("card"))
+    print_kind_info(kind: AttrSpread("rest"))
+    print_kind_info(kind: Interp("count + 1"))
+    print_kind_info(kind: EachOpen("items.read()", "item", Some("i"), Some("item.id")))
+    print_kind_info(kind: EachOpen("items", "item", None, None))
+    print_kind_info(kind: EachClose)
+    print_kind_info(kind: IfOpen("count > 0"))
+    print_kind_info(kind: ElseIf("count == 0"))
+    print_kind_info(kind: Else)
+    print_kind_info(kind: IfClose)
+    print_kind_info(kind: HtmlComment("hi"))
+    print_kind_info(kind: BuffComment("this is a comment"))
+    print_kind_info(kind: HtmlEscape("raw_trusted_html"))
+    print_kind_info(kind: AwaitOpen("fetchUser(id)"))
+    print_kind_info(kind: AwaitThen("user"))
+    print_kind_info(kind: AwaitCatch("err"))
+    print_kind_info(kind: AwaitClose)
+    print_kind_info(kind: SlotOpen)
+    print_kind_info(kind: ScriptOpen("buff", Some("CounterProps")))
+    print_kind_info(kind: ScriptOpen("buff", None))
+    print_kind_info(kind: ScriptText("print(\"hi\")"))
+    print_kind_info(kind: ScriptClose)
+    print_kind_info(kind: Eof)
+
+    // --- Wrap a few kinds in BuffHtmlToken, exercise accessors ---
+    // (Construct the kind inline; the helper pulls out the kind + span fields
+    // in one ownership pass.)
+    let tok_text = buff_html_token_new(kind: Text("hello world"), span: sp)
+    print_token_info(token: tok_text)
+    print(sp.start)
+    print(sp.end)
+
+    let tok_eof = buff_html_token_new(kind: Eof, span: sp)
+    print_token_info(token: tok_eof)
+
+    let tok_each = buff_html_token_new(kind: EachOpen("items.read()", "item", Some("i"), Some("item.id")), span: sp)
+    print_token_info(token: tok_each)
+
+    // --- Field destructuring of multi-payload variants (round-trip check).
+    // Match arms take a single expression, so multi-statement bodies route
+    // through helper functions. ---
+    // EachOpen: full form (iterable, binding, Some(index), Some(key))
+    match EachOpen("items.read()", "item", Some("i"), Some("item.id")) {
+        EachOpen(iterable, binding, index, key) => print_each_open_slots(iterable: iterable, binding: binding, index: index, key: key),
+        _ => print(0),
+    }
+
+    // EachOpen minimal form: index and key are None
+    match EachOpen("items", "item", None, None) {
+        EachOpen(iterable, binding, index, key) => print_each_open_slots(iterable: iterable, binding: binding, index: index, key: key),
+        _ => print(0),
+    }
+
+    // ScriptOpen with props
+    match ScriptOpen("buff", Some("CounterProps")) {
+        ScriptOpen(lang, props) => print_script_open_slots(lang: lang, props: props),
+        _ => print(0),
+    }
+
+    // ScriptOpen without props (T133 floor)
+    match ScriptOpen("buff", None) {
+        ScriptOpen(lang, props) => print_script_open_slots(lang: lang, props: props),
+        _ => print(0),
+    }
+
+    // --- BuffHtmlParseError round-trip via match (exercises both variants) ---
+    match buff_html_parse_error_lex(message: "lex boom", span: sp) {
+        Lex(msg, s) => print_lex_error_slots(message: msg, span: s),
+        Parse(msg, s) => print_parse_error_slots(message: msg, span: s),
+    }
+
+    match buff_html_parse_error_parse(message: "parse boom", span: sp) {
+        Lex(msg, s) => print_lex_error_slots(message: msg, span: s),
+        Parse(msg, s) => print_parse_error_slots(message: msg, span: s),
+    }
+
+    // --- Exercise the remaining accessors (each consumes its argument once;
+    // we construct fresh inline instances per call so ownership flows cleanly).
+    // These mirror the helper functions defined above that exist for parity
+    // with the Rust impl (`BuffHtmlParseError::span()`, `is_lex()` etc.) and
+    // the BuffHtmlToken `span()` / `kind_label()` accessors.
+
+    // BuffHtmlParseError accessors
+    print(buff_html_parse_error_span(err: buff_html_parse_error_lex(message: "x", span: sp)).start)
+    print(buff_html_parse_error_is_lex(err: buff_html_parse_error_lex(message: "x", span: sp)))
+    print(buff_html_parse_error_is_parse(err: buff_html_parse_error_lex(message: "x", span: sp)))
+    print(buff_html_parse_error_is_lex(err: buff_html_parse_error_parse(message: "x", span: sp)))
+    print(buff_html_parse_error_is_parse(err: buff_html_parse_error_parse(message: "x", span: sp)))
+
+    // BuffHtmlTokenKind label accessor (single payload-carrying variant)
+    print(buff_html_token_kind_label(kind: Text("payload")))
+    print(buff_html_token_kind_label(kind: Eof))
+
+    // BuffHtmlToken span accessor
+    print(buff_html_token_span(token: buff_html_token_new(kind: Eof, span: sp)).end)
+
