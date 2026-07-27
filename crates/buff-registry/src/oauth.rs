@@ -287,9 +287,7 @@ pub(crate) async fn callback(
     Ok((
         [(
             axum::http::header::SET_COOKIE,
-            format!(
-                "buff_session={session_token}; Path=/; HttpOnly; Secure; SameSite=Lax",
-            ),
+            format!("buff_session={session_token}; Path=/; HttpOnly; Secure; SameSite=Lax",),
         )],
         Json(CallbackResponse {
             message: "Login successful".to_string(),

@@ -171,8 +171,7 @@ impl TypeRef {
                 "span": span_to_json(*span),
             }),
             TypeRef::Generic { base, args, span } => {
-                let args_json: Vec<serde_json::Value> =
-                    args.iter().map(TypeRef::to_json).collect();
+                let args_json: Vec<serde_json::Value> = args.iter().map(TypeRef::to_json).collect();
                 json!({
                     "type": "Generic",
                     "base": base.to_json(),

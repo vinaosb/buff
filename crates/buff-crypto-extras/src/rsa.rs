@@ -36,8 +36,8 @@ use aes_gcm::aead::OsRng;
 // from pkcs8 were imported, but `from_pkcs8_pem` comes from pkcs8's
 // `DecodePrivateKey` trait).
 use rsa::pkcs1::DecodeRsaPrivateKey;
-use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use rsa::pkcs1v15::{SigningKey, VerifyingKey};
+use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
 use signature::{RandomizedSigner, SignatureEncoding, Verifier};
@@ -112,10 +112,8 @@ pub fn sign(private_pem: &str, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let pem_owned = private_pem.to_string();
     let data_owned = data.to_vec();
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let private_key =
-            RsaPrivateKey::from_pkcs8_pem(&pem_owned).or_else(|_| {
-                RsaPrivateKey::from_pkcs1_pem(&pem_owned).map_err(CryptoError::from)
-            })?;
+        let private_key = RsaPrivateKey::from_pkcs8_pem(&pem_owned)
+            .or_else(|_| RsaPrivateKey::from_pkcs1_pem(&pem_owned).map_err(CryptoError::from))?;
         let signing_key = SigningKey::<Sha256>::new(private_key);
         let mut rng = OsRng;
         let signature = signing_key.sign_with_rng(&mut rng, &data_owned);

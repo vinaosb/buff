@@ -157,9 +157,7 @@ async fn ws_handler(
             .get(header::ORIGIN)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("<missing>");
-        eprintln!(
-            "[buff ui dev] rejected WS upgrade: origin not allowed ({origin_display})"
-        );
+        eprintln!("[buff ui dev] rejected WS upgrade: origin not allowed ({origin_display})");
         return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
     }
 

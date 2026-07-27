@@ -272,12 +272,20 @@ async fn publish_accepts_boundary_length_names() {
     // 2 chars (min).
     let payload = publish_payload("ab", "1.0.0", &[]);
     let (status, _body) = do_publish(router.clone(), &payload, Some("test-token")).await;
-    assert_eq!(status, StatusCode::CREATED, "2-char name should be accepted");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "2-char name should be accepted"
+    );
     // 64 chars (max).
     let max_name = "a".to_string() + &"b".repeat(63);
     let payload = publish_payload(&max_name, "1.0.0", &[]);
     let (status, _body) = do_publish(router, &payload, Some("test-token")).await;
-    assert_eq!(status, StatusCode::CREATED, "64-char name should be accepted");
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "64-char name should be accepted"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -356,8 +364,7 @@ async fn get_package_rejects_path_traversal_in_url() {
 async fn download_rejects_path_traversal_in_version_url() {
     let (router, _storage) = fresh_app();
     // URL-encoded `..` in the version segment.
-    let (status, _body) =
-        do_get(router, "/api/v1/download/some-pkg/..%2F..%2Fetc%2Fpasswd").await;
+    let (status, _body) = do_get(router, "/api/v1/download/some-pkg/..%2F..%2Fetc%2Fpasswd").await;
     assert_eq!(
         status,
         StatusCode::BAD_REQUEST,
@@ -414,13 +421,13 @@ async fn publish_accepts_canonical_semver() {
 async fn publish_rejects_malformed_version() {
     let (router, _storage) = fresh_app();
     for bad in &[
-        "1.0",       // missing patch
-        "1",         // only major
-        "1.0.0.0",   // extra component
-        "v1.0.0",    // leading v
+        "1.0",         // missing patch
+        "1",           // only major
+        "1.0.0.0",     // extra component
+        "v1.0.0",      // leading v
         "1.0.0-junk!", // illegal prerelease char
-        "1.0.0-",    // empty prerelease
-        "1.0.0+",    // empty build
+        "1.0.0-",      // empty prerelease
+        "1.0.0+",      // empty build
     ] {
         let payload = publish_payload("verbad", bad, &[]);
         let (status, body) = do_publish(router.clone(), &payload, Some("test-token")).await;

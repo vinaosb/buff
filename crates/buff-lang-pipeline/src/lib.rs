@@ -1,4 +1,4 @@
-﻿//! Shared compiler pipeline used by both `buff build` and `buff run`.
+//! Shared compiler pipeline used by both `buff build` and `buff run`.
 //!
 //! The pipeline is split into two phases so callers can decide what to do
 //! with the intermediate Rust source:
@@ -14,10 +14,10 @@
 
 #![allow(clippy::result_large_err)]
 
-pub mod rustc_invoke;
 pub mod compile_speed;
-pub mod incremental;
 pub mod error_mapper;
+pub mod incremental;
+pub mod rustc_invoke;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

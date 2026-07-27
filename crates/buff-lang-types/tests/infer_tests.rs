@@ -1614,7 +1614,11 @@ fn qualified_enum_variant_in_comparison_yields_bool() {
     inf.bind("f", Type::user("PreludeFn", Vec::new()));
 
     // Build: f == PreludeFn.Abs
-    let e = binary(BinaryOp::Eq, ident("f"), enum_variant_expr("PreludeFn", "Abs"));
+    let e = binary(
+        BinaryOp::Eq,
+        ident("f"),
+        enum_variant_expr("PreludeFn", "Abs"),
+    );
     let ty = inf.infer_expr(&e).unwrap();
     assert_eq!(
         ty,
@@ -1638,7 +1642,11 @@ fn qualified_enum_variant_comparison_with_unknown_param_yields_bool() {
     inf.bind("f", Type::Unknown);
 
     // Build: f == PreludeFn.Abs
-    let e = binary(BinaryOp::Eq, ident("f"), enum_variant_expr("PreludeFn", "Abs"));
+    let e = binary(
+        BinaryOp::Eq,
+        ident("f"),
+        enum_variant_expr("PreludeFn", "Abs"),
+    );
     let ty = inf.infer_expr(&e).unwrap();
     assert_eq!(
         ty,
@@ -1706,9 +1714,9 @@ fn p16_if_with_enum_variant_comparison_and_unknown_param() {
     let then_block = block(vec![Stmt::Return(Some(bool_lit(true)), sp())]);
     let e = if_expr(cond, then_block, None);
 
-    let ty = inf.infer_expr(&e).expect(
-        "P1.6: if f == EnumName.Variant must not error when f is Type::Unknown",
-    );
+    let ty = inf
+        .infer_expr(&e)
+        .expect("P1.6: if f == EnumName.Variant must not error when f is Type::Unknown");
     assert_eq!(ty, Type::Void, "if without else yields Void");
 }
 
@@ -1726,23 +1734,23 @@ fn p16_logical_and_or_with_unknown_operands() {
 
     // Unknown and Bool → Bool
     let e1 = binary(BinaryOp::And, ident("a"), ident("b"));
-    let t1 = inf.infer_expr(&e1).expect(
-        "P1.6: Unknown and Bool must yield Bool (not error)",
-    );
+    let t1 = inf
+        .infer_expr(&e1)
+        .expect("P1.6: Unknown and Bool must yield Bool (not error)");
     assert_eq!(t1, Type::Bool);
 
     // Bool or Unknown → Bool
     let e2 = binary(BinaryOp::Or, ident("b"), ident("a"));
-    let t2 = inf.infer_expr(&e2).expect(
-        "P1.6: Bool or Unknown must yield Bool (not error)",
-    );
+    let t2 = inf
+        .infer_expr(&e2)
+        .expect("P1.6: Bool or Unknown must yield Bool (not error)");
     assert_eq!(t2, Type::Bool);
 
     // Unknown and Unknown → Bool
     let e3 = binary(BinaryOp::And, ident("a"), ident("c"));
-    let t3 = inf.infer_expr(&e3).expect(
-        "P1.6: Unknown and Unknown must yield Bool (not error)",
-    );
+    let t3 = inf
+        .infer_expr(&e3)
+        .expect("P1.6: Unknown and Unknown must yield Bool (not error)");
     assert_eq!(t3, Type::Bool);
 }
 
@@ -1756,8 +1764,8 @@ fn p16_bare_not_identifier_resolves_to_unknown() {
     let mut inf = TypeInferencer::new();
     // Do NOT bind `not` in the environment — it must still resolve via the
     // special-case in the Expr::Ident arm, not via env lookup.
-    let ty = inf.infer_expr(&ident("not")).expect(
-        "P1.6: bare `not` identifier must resolve to Unknown (parser lang-gap workaround)",
-    );
+    let ty = inf
+        .infer_expr(&ident("not"))
+        .expect("P1.6: bare `not` identifier must resolve to Unknown (parser lang-gap workaround)");
     assert_eq!(ty, Type::Unknown, "bare `not` resolves to Unknown");
 }

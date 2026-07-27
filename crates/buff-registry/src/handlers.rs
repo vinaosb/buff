@@ -906,7 +906,10 @@ pub(crate) async fn get_stats(
 /// registry has no external dependencies that would make it unhealthy
 /// while the process is running.
 pub(crate) async fn health_handler() -> impl IntoResponse {
-    (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
+    (
+        axum::http::StatusCode::OK,
+        Json(serde_json::json!({"status": "ok"})),
+    )
 }
 
 /// `GET /ready` — readiness probe.
@@ -916,7 +919,10 @@ pub(crate) async fn health_handler() -> impl IntoResponse {
 /// for. A future backend (e.g. Postgres) would check connectivity here
 /// and return `503 Service Unavailable` on failure.
 pub(crate) async fn ready_handler() -> impl IntoResponse {
-    (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "ready"})))
+    (
+        axum::http::StatusCode::OK,
+        Json(serde_json::json!({"status": "ready"})),
+    )
 }
 
 // --- Filesystem tarball helpers ---
@@ -1047,7 +1053,7 @@ mod tests {
         assert!(validate_package_name("foo-bar").is_ok());
         assert!(validate_package_name("foo123").is_ok());
         assert!(validate_package_name("ab").is_ok()); // boundary: 2 chars
-        // Boundary: 64 chars (regex max).
+                                                      // Boundary: 64 chars (regex max).
         let max_name = "a".to_string() + &"b".repeat(63);
         assert_eq!(max_name.len(), 64);
         assert!(validate_package_name(&max_name).is_ok());

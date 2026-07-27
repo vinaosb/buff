@@ -42,8 +42,7 @@ fn aes256_gcm_kat_test_case_13_empty_plaintext_zero_key() {
     // Expected tag for the all-zero (key, IV, empty-PT, no-AAD) input.
     // Cross-verified by: RustCrypto aes-gcm, ring, BoringSSL, OpenSSL,
     // pycryptodome, BouncyCastle. 16 bytes total (the bare GCM tag).
-    let expected_ct_plus_tag =
-        hex_decode("530f8afbc74536b9a963b4f1c4cb738b");
+    let expected_ct_plus_tag = hex_decode("530f8afbc74536b9a963b4f1c4cb738b");
 
     let actual = aes_gcm_api::encrypt(&key, &nonce, plaintext)
         .expect("AES-256-GCM Test Case 13 must succeed");
@@ -75,14 +74,11 @@ fn aes256_gcm_kat_test_case_13_empty_plaintext_zero_key() {
 /// manifests for non-trivial keys would be caught here.
 #[test]
 fn aes256_gcm_kat_ring_first_vector_no_aad_empty_pt() {
-    let key = hex_decode(
-        "e5ac4a32c67e425ac4b143c83c6f161312a97d88d634afdf9f4da5bd35223f01",
-    );
+    let key = hex_decode("e5ac4a32c67e425ac4b143c83c6f161312a97d88d634afdf9f4da5bd35223f01");
     let nonce = hex_decode("5bf11a0951f0bfc7ea5c9e58");
     let plaintext: &[u8] = b"";
 
-    let expected_ct_plus_tag =
-        hex_decode("d7cba289d6d19a5af45dc13857016bac");
+    let expected_ct_plus_tag = hex_decode("d7cba289d6d19a5af45dc13857016bac");
 
     let actual = aes_gcm_api::encrypt(&key, &nonce, plaintext)
         .expect("ring AES-256-GCM vector 1 must succeed");
@@ -111,17 +107,15 @@ fn aes256_gcm_kat_ring_first_vector_no_aad_empty_pt() {
 /// surface, so the resulting CT/Tag will differ from the published vector).
 #[test]
 fn aes256_gcm_round_trip_recovers_plaintext() {
-    let key = hex_decode(
-        "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
-    );
+    let key = hex_decode("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
     let nonce = hex_decode("cafebabefacedbaddecaf888");
     let plaintext = hex_decode(
         "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72\
          1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
     );
 
-    let ct_plus_tag = aes_gcm_api::encrypt(&key, &nonce, &plaintext)
-        .expect("round-trip encrypt must succeed");
+    let ct_plus_tag =
+        aes_gcm_api::encrypt(&key, &nonce, &plaintext).expect("round-trip encrypt must succeed");
 
     // Wire-format invariant: ciphertext length = plaintext.len() + 16-byte tag.
     assert_eq!(
@@ -130,8 +124,8 @@ fn aes256_gcm_round_trip_recovers_plaintext() {
         "wire format must be ciphertext || 16-byte tag"
     );
 
-    let recovered = aes_gcm_api::decrypt(&key, &nonce, &ct_plus_tag)
-        .expect("round-trip decrypt must succeed");
+    let recovered =
+        aes_gcm_api::decrypt(&key, &nonce, &ct_plus_tag).expect("round-trip decrypt must succeed");
     assert_eq!(
         recovered, plaintext,
         "recovered plaintext must byte-match input"
@@ -149,12 +143,12 @@ fn aes256_gcm_round_trip_random_key_nonce_non_block_aligned() {
     assert_eq!(nonce.len(), 12, "generate_nonce must return 12 bytes");
 
     let plaintext = b"The quick brown fox jumps over."; // 31 bytes, non-block-aligned
-    let ct_plus_tag = aes_gcm_api::encrypt(&key, &nonce, plaintext)
-        .expect("random-key encrypt must succeed");
+    let ct_plus_tag =
+        aes_gcm_api::encrypt(&key, &nonce, plaintext).expect("random-key encrypt must succeed");
     assert_eq!(ct_plus_tag.len(), plaintext.len() + 16);
 
-    let recovered = aes_gcm_api::decrypt(&key, &nonce, &ct_plus_tag)
-        .expect("random-key decrypt must succeed");
+    let recovered =
+        aes_gcm_api::decrypt(&key, &nonce, &ct_plus_tag).expect("random-key decrypt must succeed");
     assert_eq!(recovered.as_slice(), plaintext.as_slice());
 }
 
@@ -218,8 +212,8 @@ fn aes256_gcm_wrong_key_fails_authentication() {
     let nonce = aes_gcm_api::generate_nonce();
     let plaintext = b"payload encrypted under key A";
 
-    let ct_plus_tag = aes_gcm_api::encrypt(&key_a, &nonce, plaintext)
-        .expect("encrypt under key A must succeed");
+    let ct_plus_tag =
+        aes_gcm_api::encrypt(&key_a, &nonce, plaintext).expect("encrypt under key A must succeed");
 
     let result = aes_gcm_api::decrypt(&key_b, &nonce, &ct_plus_tag);
     assert!(
@@ -243,7 +237,14 @@ fn aes256_gcm_short_key_returns_invalid_length() {
 
     let result = aes_gcm_api::encrypt(&short_key, &nonce, plaintext);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: 32, got: 31, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: 32,
+                got: 31,
+                ..
+            })
+        ),
         "31-byte key must return InvalidLength {{ expected: 32, got: 31 }}, got {:?}",
         result
     );
@@ -251,7 +252,14 @@ fn aes256_gcm_short_key_returns_invalid_length() {
     // Same check for decrypt.
     let result = aes_gcm_api::decrypt(&short_key, &nonce, &[0u8; 32]);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: 32, got: 31, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: 32,
+                got: 31,
+                ..
+            })
+        ),
         "decrypt with 31-byte key must return InvalidLength, got {:?}",
         result
     );
@@ -267,7 +275,14 @@ fn aes256_gcm_short_nonce_returns_invalid_length() {
 
     let result = aes_gcm_api::encrypt(&key, &short_nonce, plaintext);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: 12, got: 11, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: 12,
+                got: 11,
+                ..
+            })
+        ),
         "11-byte nonce must return InvalidLength {{ expected: 12, got: 11 }}, got {:?}",
         result
     );
@@ -283,7 +298,14 @@ fn aes256_gcm_too_short_ciphertext_returns_invalid_length() {
 
     let result = aes_gcm_api::decrypt(&key, &nonce, &short_ct);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: 16, got: 15, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: 16,
+                got: 15,
+                ..
+            })
+        ),
         "15-byte ciphertext must return InvalidLength {{ expected: 16, got: 15 }}, got {:?}",
         result
     );

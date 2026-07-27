@@ -52,10 +52,10 @@ fn argon2id_derive_key_is_deterministic_for_same_input() {
     let password = "correct horse battery staple";
     let salt = vec![0x42u8; ARGON2_SALT_LEN]; // fixed 16-byte salt
 
-    let derived_1 = argon2_api::derive_key(password, &salt)
-        .expect("first derive_key call must succeed");
-    let derived_2 = argon2_api::derive_key(password, &salt)
-        .expect("second derive_key call must succeed");
+    let derived_1 =
+        argon2_api::derive_key(password, &salt).expect("first derive_key call must succeed");
+    let derived_2 =
+        argon2_api::derive_key(password, &salt).expect("second derive_key call must succeed");
 
     assert_eq!(
         derived_1.len(),
@@ -74,8 +74,8 @@ fn argon2id_derive_key_is_deterministic_for_same_input() {
 fn argon2id_derive_key_empty_password_is_deterministic() {
     let salt = vec![0x00u8; ARGON2_SALT_LEN];
 
-    let derived_1 = argon2_api::derive_key("", &salt)
-        .expect("first derive_key on empty password must succeed");
+    let derived_1 =
+        argon2_api::derive_key("", &salt).expect("first derive_key on empty password must succeed");
     let derived_2 = argon2_api::derive_key("", &salt)
         .expect("second derive_key on empty password must succeed");
 
@@ -97,10 +97,10 @@ fn argon2id_derive_key_empty_password_is_deterministic() {
 fn argon2id_different_passwords_produce_different_keys() {
     let salt = vec![0x11u8; ARGON2_SALT_LEN];
 
-    let derived_a = argon2_api::derive_key("password A", &salt)
-        .expect("derive for password A must succeed");
-    let derived_b = argon2_api::derive_key("password B", &salt)
-        .expect("derive for password B must succeed");
+    let derived_a =
+        argon2_api::derive_key("password A", &salt).expect("derive for password A must succeed");
+    let derived_b =
+        argon2_api::derive_key("password B", &salt).expect("derive for password B must succeed");
 
     assert_ne!(
         derived_a, derived_b,
@@ -117,10 +117,10 @@ fn argon2id_different_salts_produce_different_keys() {
     let salt_a = vec![0xAAu8; ARGON2_SALT_LEN];
     let salt_b = vec![0xBBu8; ARGON2_SALT_LEN];
 
-    let derived_a = argon2_api::derive_key(password, &salt_a)
-        .expect("derive under salt A must succeed");
-    let derived_b = argon2_api::derive_key(password, &salt_b)
-        .expect("derive under salt B must succeed");
+    let derived_a =
+        argon2_api::derive_key(password, &salt_a).expect("derive under salt A must succeed");
+    let derived_b =
+        argon2_api::derive_key(password, &salt_b).expect("derive under salt B must succeed");
 
     assert_ne!(
         derived_a, derived_b,
@@ -164,7 +164,14 @@ fn argon2id_derive_key_short_salt_returns_invalid_length() {
 
     let result = argon2_api::derive_key("password", &short_salt);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: ARGON2_SALT_LEN, got: 15, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: ARGON2_SALT_LEN,
+                got: 15,
+                ..
+            })
+        ),
         "15-byte salt must return InvalidLength {{ expected: 16, got: 15 }}, got {:?}",
         result
     );
@@ -179,7 +186,14 @@ fn argon2id_derive_key_long_salt_returns_invalid_length() {
 
     let result = argon2_api::derive_key("password", &long_salt);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: ARGON2_SALT_LEN, got: 17, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: ARGON2_SALT_LEN,
+                got: 17,
+                ..
+            })
+        ),
         "17-byte salt must return InvalidLength {{ expected: 16, got: 17 }}, got {:?}",
         result
     );
@@ -193,7 +207,14 @@ fn argon2id_derive_key_empty_salt_returns_invalid_length() {
 
     let result = argon2_api::derive_key("password", &empty_salt);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: ARGON2_SALT_LEN, got: 0, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: ARGON2_SALT_LEN,
+                got: 0,
+                ..
+            })
+        ),
         "empty salt must return InvalidLength {{ expected: 16, got: 0 }}, got {:?}",
         result
     );
@@ -236,8 +257,8 @@ fn argon2id_derived_key_usable_as_aes256_gcm_key_hybrid_pattern() {
 
     // Round-trip: decrypt must recover the plaintext using the same
     // Argon2id-derived key.
-    let derived_key_again = argon2_api::derive_key(password, &salt)
-        .expect("re-deriving the same key must succeed");
+    let derived_key_again =
+        argon2_api::derive_key(password, &salt).expect("re-deriving the same key must succeed");
     let recovered = aes_gcm_api::decrypt(&derived_key_again, &nonce, &ct_plus_tag)
         .expect("AES-256-GCM decrypt with re-derived key must succeed");
 

@@ -95,10 +95,7 @@ fn session_from_set_cookie(headers: &axum::http::HeaderMap) -> String {
         .to_str()
         .expect("ascii");
     let prefix = "buff_session=";
-    let start = cookie
-        .find(prefix)
-        .expect("buff_session cookie")
-        + prefix.len();
+    let start = cookie.find(prefix).expect("buff_session cookie") + prefix.len();
     let rest = &cookie[start..];
     let end = rest.find(';').unwrap_or(rest.len());
     rest[..end].to_string()

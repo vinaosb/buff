@@ -36,8 +36,8 @@
 use buff_lang_ast::{FuncDecl, TypeRef};
 use proc_macro2::Span as ProcSpan;
 use syn::{
-    punctuated::Punctuated, Expr, ExprCall, ExprPath, Ident, Item, ItemFn, Pat, PatIdent,
-    PatType, Path, PathArguments, PathSegment, ReturnType, Signature, Stmt, Token, Type as SynType,
+    punctuated::Punctuated, Expr, ExprCall, ExprPath, Ident, Item, ItemFn, Pat, PatIdent, PatType,
+    Path, PathArguments, PathSegment, ReturnType, Signature, Stmt, Token, Type as SynType,
     TypePath,
 };
 

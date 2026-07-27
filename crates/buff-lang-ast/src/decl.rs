@@ -200,8 +200,7 @@ impl FuncDecl {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let params_json: Vec<serde_json::Value> =
-            self.params.iter().map(|p| p.to_json()).collect();
+        let params_json: Vec<serde_json::Value> = self.params.iter().map(|p| p.to_json()).collect();
         let attributes_json: Vec<serde_json::Value> =
             self.attributes.iter().map(Attribute::to_json).collect();
         let type_params_json: Vec<serde_json::Value> =
@@ -251,8 +250,7 @@ impl StructDecl {
             .iter()
             .map(|(n, t)| json!({ "name": n.to_json(), "ty": t.to_json() }))
             .collect();
-        let traits_json: Vec<serde_json::Value> =
-            self.traits.iter().map(|i| i.to_json()).collect();
+        let traits_json: Vec<serde_json::Value> = self.traits.iter().map(|i| i.to_json()).collect();
         let type_params_json: Vec<serde_json::Value> =
             self.type_params.iter().map(TypeParam::to_json).collect();
         json!({
@@ -290,8 +288,7 @@ impl EnumVariant {
         use serde_json::json;
         let data_json = match &self.data {
             Some(tys) => {
-                let tys_json: Vec<serde_json::Value> =
-                    tys.iter().map(TypeRef::to_json).collect();
+                let tys_json: Vec<serde_json::Value> = tys.iter().map(TypeRef::to_json).collect();
                 serde_json::Value::Array(tys_json)
             }
             None => serde_json::Value::Null,
@@ -309,8 +306,7 @@ impl ImportDecl {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let path_json: Vec<serde_json::Value> =
-            self.path.iter().map(|i| i.to_json()).collect();
+        let path_json: Vec<serde_json::Value> = self.path.iter().map(|i| i.to_json()).collect();
         let imports_json: Vec<serde_json::Value> =
             self.imports.iter().map(|i| i.to_json()).collect();
         json!({
@@ -344,8 +340,7 @@ impl ReexportDecl {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let names_json: Vec<serde_json::Value> =
-            self.names.iter().map(|i| i.to_json()).collect();
+        let names_json: Vec<serde_json::Value> = self.names.iter().map(|i| i.to_json()).collect();
         json!({
             "from": self.from,
             "names": names_json,
@@ -384,8 +379,7 @@ impl ExternFuncDecl {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let params_json: Vec<serde_json::Value> =
-            self.params.iter().map(|p| p.to_json()).collect();
+        let params_json: Vec<serde_json::Value> = self.params.iter().map(|p| p.to_json()).collect();
         json!({
             "abi": self.abi,
             "crate_name": self.crate_name,
@@ -432,8 +426,7 @@ impl MethodSig {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let params_json: Vec<serde_json::Value> =
-            self.params.iter().map(|p| p.to_json()).collect();
+        let params_json: Vec<serde_json::Value> = self.params.iter().map(|p| p.to_json()).collect();
         json!({
             "name": self.name.to_json(),
             "params": params_json,

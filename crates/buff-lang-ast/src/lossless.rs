@@ -487,8 +487,7 @@ impl LosslessTree {
     /// (the original source is the input the user already has).
     pub fn to_json(&self) -> serde_json::Value {
         use serde_json::json;
-        let pieces_json: Vec<serde_json::Value> =
-            self.pieces.iter().map(Piece::to_json).collect();
+        let pieces_json: Vec<serde_json::Value> = self.pieces.iter().map(Piece::to_json).collect();
         json!({
             "src_len": self.src.len(),
             "piece_count": self.pieces.len(),

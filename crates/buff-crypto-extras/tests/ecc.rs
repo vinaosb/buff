@@ -67,9 +67,7 @@ fn hex_decode(s: &str) -> Vec<u8> {
 #[test]
 fn p256_public_from_private_rfc6979_kat() {
     // RFC 6979 A.2.5 published P-256 private scalar (32 bytes).
-    let private = hex_decode(
-        "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
-    );
+    let private = hex_decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
     assert_eq!(
         private.len(),
         P256_PRIVATE_LEN,
@@ -156,7 +154,14 @@ fn p256_public_from_private_short_scalar_returns_invalid_length() {
     let short = vec![0u8; 31];
     let result = ecdh_api::p256_public_from_private(&short);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: P256_PRIVATE_LEN, got: 31, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: P256_PRIVATE_LEN,
+                got: 31,
+                ..
+            })
+        ),
         "31-byte scalar must return InvalidLength, got {:?}",
         result
     );
@@ -170,7 +175,14 @@ fn p256_derive_shared_short_public_returns_invalid_length() {
     let short_public = vec![0x04u8; 64]; // 64 bytes, missing one Y byte
     let result = ecdh_api::p256_derive_shared(&private, &short_public);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: P256_PUBLIC_LEN, got: 64, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: P256_PUBLIC_LEN,
+                got: 64,
+                ..
+            })
+        ),
         "64-byte public key must return InvalidLength, got {:?}",
         result
     );
@@ -198,12 +210,12 @@ fn p256_derive_shared_short_public_returns_invalid_length() {
 fn p256_ecdh_symmetry_both_parties_derive_same_shared_secret() {
     // Two independent P-256 keypairs.
     let alice_priv = ecdh_api::p256_generate_private();
-    let alice_pub = ecdh_api::p256_public_from_private(&alice_priv)
-        .expect("Alice's public key must derive");
+    let alice_pub =
+        ecdh_api::p256_public_from_private(&alice_priv).expect("Alice's public key must derive");
 
     let bob_priv = ecdh_api::p256_generate_private();
-    let bob_pub = ecdh_api::p256_public_from_private(&bob_priv)
-        .expect("Bob's public key must derive");
+    let bob_pub =
+        ecdh_api::p256_public_from_private(&bob_priv).expect("Bob's public key must derive");
 
     assert_ne!(
         alice_priv, bob_priv,
@@ -252,9 +264,7 @@ fn p256_ecdh_symmetry_both_parties_derive_same_shared_secret() {
 #[test]
 fn p256_ecdh_rfc6979_keypair_used_as_both_parties_agrees() {
     // RFC 6979 A.2.5 published scalar + corresponding public point.
-    let private = hex_decode(
-        "c9afa9d845ba75166b5c215767b1d6934e50c3db36e891127b8a622b120f6721",
-    );
+    let private = hex_decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e891127b8a622b120f6721");
     let public = ecdh_api::p256_public_from_private(&private)
         .expect("RFC 6979 public derivation must succeed");
 

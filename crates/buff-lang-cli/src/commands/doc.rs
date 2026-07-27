@@ -1233,9 +1233,7 @@ fn handle_connection(
             // panicking — a prior panic in a watcher thread shouldn't
             // take down the doc server.
             {
-                let mut clients = sse_clients
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
+                let mut clients = sse_clients.lock().unwrap_or_else(|e| e.into_inner());
                 clients.push(stream.try_clone()?);
             }
 
@@ -1254,9 +1252,7 @@ fn handle_connection(
             // P0.25 (ft-003): recover from poisoned mutex instead of
             // panicking — matches the registration-side lock above.
             {
-                let mut clients = sse_clients
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
+                let mut clients = sse_clients.lock().unwrap_or_else(|e| e.into_inner());
                 clients.retain(|c| c.peer_addr().ok() != stream.peer_addr().ok());
             }
             eprintln!("buff doc: SSE client disconnected");

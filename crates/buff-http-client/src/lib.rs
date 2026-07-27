@@ -75,7 +75,7 @@ impl HttpClient {
     pub fn new() -> Self {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let inner = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))       // P0.17: ft-001 — prevent infinite hangs
+                .timeout(std::time::Duration::from_secs(30)) // P0.17: ft-001 — prevent infinite hangs
                 .connect_timeout(std::time::Duration::from_secs(10)) // P0.17: ft-001 — fast-fail unreachable hosts
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::new());
