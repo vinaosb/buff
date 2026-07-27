@@ -1,0 +1,9 @@
+---
+source: crates/buff-fuzz/tests/property_tests.rs
+expression: source
+---
+fn canonical_target() {
+    let strategy = buff_fuzz::Strategy::int(0, 100);
+    let summary = buff_fuzz::run(&strategy, 256, move |p0: i64| true);
+    assert!("property failed: {:?}", summary.failures);
+}

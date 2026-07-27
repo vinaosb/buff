@@ -60,7 +60,7 @@ where
     }
     strategy.validate()?;
 
-    let runner = TestRunner::new(Config {
+    let mut runner = TestRunner::new(Config {
         cases: iterations,
         ..Config::default()
     });
@@ -68,8 +68,11 @@ where
 
     let mut failures: Vec<i64> = Vec::new();
     for _ in 0..iterations {
-        let mut local_runner = runner.clone();
-        let tree = match prop_strategy.new_tree(&mut local_runner) {
+        // BUG FIX (P6.2): previously cloned the runner inside the loop, which
+        // snapshot the RNG state on every iteration → every generated value
+        // was identical → the failing-property assertion never fired. Use the
+        // runner directly so its RNG advances naturally across iterations.
+        let tree = match prop_strategy.new_tree(&mut runner) {
             Ok(t) => t,
             Err(_) => continue,
         };

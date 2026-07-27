@@ -67,7 +67,7 @@ impl Strategy {
         Self::Bytes { max_len }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), crate::FuzzError> {
+    pub fn validate(&self) -> Result<(), crate::FuzzError> {
         use crate::FuzzError;
         match self {
             Self::Int { min, max } if min > max => Err(FuzzError::invalid_strategy(format!(

@@ -32,7 +32,7 @@ fn mk_fuzz_func(name: &str, param_ty: &str, param_count: usize) -> FuncDecl {
         name: Ident::new(name, dummy_span()),
         params,
         return_type: Some(named_type("Bool")),
-        body: Block { stmts: Vec::new() },
+        body: Block { stmts: Vec::new(), span: dummy_span() },
         is_async: false,
         is_unsafe: false,
         is_extern: false,
@@ -101,8 +101,9 @@ fn lower_fuzz_harness_emits_valid_fn_for_int_param() {
     let func = mk_fuzz_func("parse_property", "Int", 1);
     let item = lower_fuzz_harness(&func).expect("lowering should succeed");
     let file = syn::File {
+        shebang: None,
+        attrs: Vec::new(),
         items: vec![item],
-        ..Default::default()
     };
     let source = prettyplease::unparse(&file);
     assert!(source.contains("fn parse_property"));
@@ -117,8 +118,9 @@ fn lower_fuzz_harness_includes_param_name_in_closure() {
     let func = mk_fuzz_func("my_target", "Int", 1);
     let item = lower_fuzz_harness(&func).expect("lowering should succeed");
     let file = syn::File {
+        shebang: None,
+        attrs: Vec::new(),
         items: vec![item],
-        ..Default::default()
     };
     let source = prettyplease::unparse(&file);
     assert!(source.contains("p0"));
@@ -157,8 +159,9 @@ fn lower_fuzz_harness_snapshot_for_canonical_input() {
     let func = mk_fuzz_func("canonical_target", "Int", 1);
     let item = lower_fuzz_harness(&func).expect("lowering should succeed");
     let file = syn::File {
+        shebang: None,
+        attrs: Vec::new(),
         items: vec![item],
-        ..Default::default()
     };
     let source = prettyplease::unparse(&file);
     insta::assert_snapshot!(source);

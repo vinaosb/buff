@@ -97,7 +97,7 @@ mod smoke_tests {
     #[test]
     fn smoke_run_passing_property() {
         let s = Strategy::int(0, 100);
-        let summary = run(&s, 32, |n| n >= 0 && n <= 100);
+        let summary = run(&s, 32, |n| n >= 0 && n <= 100).expect("fuzz run failed");
         assert_eq!(summary.failures.len(), 0);
         assert_eq!(summary.iterations, 32);
     }
@@ -105,7 +105,7 @@ mod smoke_tests {
     #[test]
     fn smoke_run_failing_property_records_failure() {
         let s = Strategy::int(0, 100);
-        let summary = run(&s, 256, |n| n < 50);
+        let summary = run(&s, 256, |n| n < 50).expect("fuzz run failed");
         assert!(summary.failures.len() > 0);
         for value in &summary.failures {
             assert!(*value >= 50);
