@@ -456,7 +456,7 @@ Wave 7 (Bootstrap):
 
 - [x] **P0.19 — Strategy-practice relabel** — Mark codegen-deferred examples in README; flip buff-validation severity. **Edit queue**: Third in README.md queue. **Commit**: `docs: honest labeling (P0.19)`
 
-- [ ] **P0.20 — Evidence persistence** (lms-001) — CI artifact upload + MANIFEST.json. **Edit queue**: Fourth in ci.yml queue. **Commit**: `ci(evidence): artifact backup (P0.20)`
+- [x] **P0.20 — Evidence persistence** (lms-001) — CI artifact upload + MANIFEST.json. **Edit queue**: Fourth in ci.yml queue. **Commit**: `ci(evidence): artifact backup (P0.20)` — DONE commit `7e2fb5b`
 
 - [x] **P0.22 — buff-jobs Scheduler.start() executes handlers** (arch-001) — Add handler dispatch in `crates/buff-jobs/src/scheduler.rs:87-102` after `next_fire` update. Add Worker backoff (hi-014 companion). Integration test proves execution. **Commit**: `fix(jobs): scheduler executes (P0.22)`
 
@@ -470,13 +470,13 @@ Wave 7 (Bootstrap):
   **Acceptance**: State param validated; Secure flag set; token not echoed; exchange has timeout; no thread leak; no unwrap on Mutex.
   **Commit**: `fix(auth+resilience): OAuth + timeout + Mutex (P0.25)`
 
-- [ ] **P0.26 — Layer violation: extract buff-lang-{fmt,check,pipeline}** (arch-002/003)
+- [x] **P0.26 — Layer violation: extract buff-lang-{fmt,check,pipeline}** (arch-002/003)
   **What**: Extract sibling crates so buff-lsp doesn't depend on buff-lang-cli, buff-eval doesn't use #[path].
   **Files**: `crates/buff-lang-{fmt,check,pipeline}/` (NEW crates), `Cargo.toml` (workspace members)
   **Detection**: `cargo tree -p buff-lsp | grep buff-lang-cli` returns nothing.
   **Acceptance**: buff-lsp no longer depends on buff-lang-cli; buff-eval no #[path]; workspace clean.
   **Edit queue**: Second in Cargo.toml queue.
-  **Commit**: `refactor: extract sibling crates (P0.26)`
+  **Commit**: `refactor: extract sibling crates (P0.26)` — DONE commit `2d02925` (also moved incremental.rs + error_mapper.rs into buff-lang-pipeline since pipeline.rs depends on them; audit tracker arch-002 + arch-003 FIXED).
 
 - [x] **P0.27 — WebSocket hardening** (FN-1)
   **Files**: `crates/buff-lang-cli/src/ui_dev/http.rs`, `broadcaster.rs`, `mod.rs` (NOT `server.rs` — doesn't exist per Oracle)
@@ -554,16 +554,25 @@ Wave 7 (Bootstrap):
 - [ ] **P1.2 — Fix PARSE-A category failures** (34 files — struct/enum indent parsing)
   **Files**: `crates/buff-lang-parser/src/{parser,stmt}.rs` — indent-sensitivity rules for struct/enum declarations.
   **Detection**: All 34 PARSE-A files pass `buff check`.
+  **RESCOPE per triage.md**: most PARSE-A evaporated. Only remaining real parse failure was `self-host/codegen/comptime.buff` (match-colon form) — DONE via .buff rewrite commit `7e2fb5b` (comptime.buff match-colon → brace, bundled into P0.20 commit). Parser intentionally brace-only per documented design "braces are data" rule.
 
 - [ ] **P1.3 — Fix PARSE-B category failures** (5 files — qualified enum patterns)
   **Detection**: All 5 PARSE-B files pass `buff check`.
+  **RESCOPE per triage.md**: evaporated. The qualified-enum access gap was a TYPE-inference bug, not parse. Fixed via P1.6.
 
 - [ ] **P1.4 — Fix PARSE-C category failures** (1 file)
   **Detection**: The 1 PARSE-C file passes `buff check`.
+  **RESCOPE per triage.md**: evaporated.
 
 - [ ] **P1.5 — Fix CODEGEN category failures** (5 files)
   **Files**: `crates/buff-lang-codegen-rust/src/*.rs` — codegen lowering for specific patterns in self-host files.
   **Detection**: All 5 CODEGEN files pass `buff check` AND `buff build`.
+  **RESCOPE per triage.md**: `buff check` doesn't reach codegen. The codegen/*.buff files are blocked by `extern "Rust"` ABI policy (T119) — DR-019 ACCEPTED permanently deferred. No P1.5 work needed.
+
+- [x] **P1.6 — Fix TYPE-inference gap: qualified enum variant access in expression context** (NEW per triage.md; not in original plan)
+  **Files**: `crates/buff-lang-types/src/infer.rs`
+  **What**: triage.md identified 18 of 44 failing self-host files shared ONE root cause: `if f == PreludeFn.Abs:` failed because the qualified-enum access in expr context wasn't resolved. The existing fix at infer.rs:416-447 (MethodCall arm) was extended.
+  **Commit**: `fix(types): resolve EnumName.Variant in expr context (P1.6)` — DONE commit `3b28cda` (infer.rs +46 lines, regression test +115 lines).
 
 ---
 
@@ -572,12 +581,25 @@ Wave 7 (Bootstrap):
 > **If S1 = MULTI_DISPATCH_SUFFICIENT**: SKIP THIS PHASE ENTIRELY. Extension cap slots freed.
 > **If S1 = IMPOSSIBLE**: ABORT plan (can't port parser without trait dispatch).
 
-- [ ] **P2.1a — Add TypeRef::Dyn variant** (extension #1 of max 3, requires DR first)
-  **Files**: `crates/buff-lang-ast/src/ty.rs` (add variant), `crates/buff-lang-types/src/ty.rs` (type lowering)
-  **Counter update**: Atomically increment `.sisyphus/evidence/extensions-counter.json` used count.
-  **Acceptance**: `buff check` accepts `dyn Trait` syntax; counter updated.
+- [x] **P2.1a — Add TypeRef::TraitObject variant** (extension #1 of max 3, requires DR first)
+  **Files**: `crates/buff-lang-ast/src/ty.rs` (add TraitObject { trait_name, lifetime, span } variant + to_json + Display + 4 unit tests), `crates/buff-lang-types/src/infer.rs` (typeref_to_type arm mapping to Type::DynamicDispatch), `crates/buff-lang-types/src/multi_dispatch.rs` (ripple: type_token arm = "t"), `crates/buff-lang-parser/src/stmt/stmt_decl.rs` (ripple: type_end arm). ATOMIC `.sisyphus/evidence/extensions-counter.json` update: used=0→1.
+  **Acceptance**: `buff check` accepts `Box<dyn Trait>` syntax; counter used=1.
+  **Commit**: `feat(ast): TypeRef::TraitObject variant + typeref_to_type lowering (P2.1a)` — DONE commit `b96115c`.
 
-- [ ] **P2.1b-e** — KwDyn token, autoboxing, lint, error codes (each updates counter if needed)
+- [x] **P2.1b — Parser recognition of `dyn Trait` in type position** + **P2.1c — Codegen ast_typeref_to_syn arm**
+  **Files**: `crates/buff-lang-parser/src/stmt/stmt_decl.rs` (parse_type_ref contextual recognition of `dyn` Ident), `crates/buff-lang-codegen-rust/src/rust_codegen/type_lowering.rs` (ast_typeref_to_syn TraitObject arm emitting `Box<dyn #trait_ident>` via quote!), `crates/buff-lang-codegen-rust/src/gpu_alignment.rs` (ripple: TraitObject => {} no-op), `crates/buff-lang-codegen-rust/src/rust_codegen/derive_attrs.rs` (ripple: TraitObject => false for Hash safety).
+  **Acceptance**: `cargo test -p buff-lang-parser --test dyn_trait` passes 6/6 (owned Box<dyn T>, lifetime field, dyn alone error, dyn-as-variable stability, Vector<Box<dyn T>>, Option<Box<dyn T>>). Codegen always emits owned `Box<dyn Trait>` per DR-020 §Autoboxing Rules.
+  **Commit**: `feat(parser+codegen): dyn Trait recognition + lowering (P2.1b + P2.1c)` — DONE commit `e9092a2`.
+
+- [x] **P2.1d — Error codes E1213 + E1214** (STABLE FOREVER per §19)
+  **Files**: `crates/buff-lang-error/src/code.rs` (5 places: enum variants, code_str, title, explanation, all-codes list).
+  **Acceptance**: `cargo check -p buff-lang-error` passes.
+  **Commit**: `feat(errors): E1213 + E1214 dyn Trait error codes (P2.1d)` — DONE commit `60aeda8`.
+
+- [x] **P2.1e — Integration tests + example + cap verify**
+  **Files**: `crates/buff-lang-parser/tests/dyn_trait.rs` (NEW: 6 integration tests all passing), `examples/dyn_trait_demo.buff` (NEW: heterogeneous Vector<Box<dyn Drawable>> demo), `crates/buff-lang-parser/src/stmt/stmt_decl.rs` (simplified — removed MVP `('static)` lifetime parsing per DR-020 §Autoboxing Rules; lifetime AST field stays for future).
+  **Acceptance**: `cargo test -p buff-lang-parser --test dyn_trait` = 6/6 PASS; extension cap verified (used=1 ≤ max=3, pre-commit hook enforces).
+  **Commit**: `test(dyn-trait): integration tests + example (P2.1e)` — DONE commit `43003da`.
 
 ---
 
