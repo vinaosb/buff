@@ -1,0 +1,574 @@
+// Buff self-host port of `crates/buff-lang-ast-rsx/src/lib.rs` (P3.2).
+//
+// Defines the AST node types for `.buffhtml` Single-File Components: the
+// top-level [`RsxTemplateFile`], the 11-variant [`RsxNode`] tree, the
+// 7-variant [`RsxAttributeKind`], block directives ([`RsxIf`] / [`RsxEach`] /
+// [`RsxAwait`]), and the `is_component_tag` heuristic. Pure data — no parsing
+// logic and no codegen.
+//
+// Faithful 1:1 translation of the Rust reference. Where Rust uses `&str` /
+// `Vec<T>` / struct-variant enum payloads / `impl Into<String>`, Buff uses
+// owned `String` / `Vector<T>` / tuple-variant enum payloads / plain `String`
+// (Buff has no references, no `impl Trait` conversion params, and enums only
+// support unit and tuple-variant forms — struct variants are flattened with
+// field order preserved and field names documented inline). The `pub use
+// buff_lang_error::Span` re-export becomes a local `Span` stand-in (3 Int
+// fields) until the buff-lang-error self-host port lands.
+//
+// Translation decisions (deviations from Rust grammar, per conventions §1):
+//   * `impl Into<String>` constructor params → plain `String` (Buff has no
+//     `impl Trait` for conversion traits; callers pass owned strings).
+//   * Rust struct-variant enum payloads (e.g. `Literal { name, value }`) →
+//     tuple variants (`Literal(String, String)`) — Buff enums lack struct
+//     variants. Field order is preserved; field names are documented inline
+//     at each variant.
+//   * `impl Type { pub fn new(...) }` blocks → free functions `type_new(...)`
+//     whose bodies call `Type.new(...)` (conventions §2b / §8g — Type.new() /
+//     Type.from() only on the type; helper builders are free functions named
+//     after the type).
+//   * `pub fn is_component_tag(tag: &str) -> bool` → `export func
+//     is_component_tag(tag: String) -> Bool` (`&str` → owned `String`;
+//     `pub fn` → `export func`).
+//   * `tag.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)`
+//     → 26-arm `tag[0] == "<letter>"` ladder (Buff codegen in the prebuilt
+//     binary has no `starts_with` prelude method; `tag[0]` indexing is
+//     supported and byte-equivalent for ASCII first-chars).
+//   * `#[derive(Debug, Clone, PartialEq)]` dropped (Buff auto-derives these
+//     on every struct/enum — conventions §8b).
+//   * `#[cfg(test)] mod tests` omitted (test code, not pub API; conventions
+//     §5 — equivalence tests live in separate `equivalence_*.buff` files).
+//
+// Numeric widths map to the natural Buff primitives:
+//   usize / i64  -> Int    (Span byte offsets)
+//   bool         -> Bool
+//   char         -> Char   (not used in this crate's public surface)
+
+// ---------------------------------------------------------------------------
+// Crate doc (Rust `//!` block → Buff file-level `//` header, conventions §3).
+// ---------------------------------------------------------------------------
+
+// Buff RSX AST — node definitions for `.buffhtml` Single-File Components.
+//
+// This crate is **pure data**: it defines the node types produced by the
+// `buff-lang-buffhtml-parser` crate and consumed by
+// `buff-lang-codegen-buffhtml`. It contains no parsing logic and no codegen.
+//
+// # T133 scope (decision record `rsx-syntax-feasibility.md` §6 floor)
+//
+// Floor-grammar nodes shipped today:
+// - [`RsxNode::Element`] (HTML elements + child components via `is_component`)
+// - [`RsxNode::Fragment`] (`<> ... </>`)
+// - [`RsxNode::Text`] (raw text runs)
+// - [`RsxNode::Interp`] (`{expr}` interpolation; `expr` is stored as raw
+//   source text — the codegen emits it verbatim into the `rsx!{}` body)
+// - [`RsxNode::If`] / [`RsxIfBranch`] (`{#if}/{:else if}/{:else}{/if}`)
+// - [`RsxNode::Each`] (`{#each iterable as binding}{/each}` + optional `{:else}`)
+// - [`RsxNode::Slot`] (`<slot />` default slot)
+// - [`RsxNode::Comment`] (HTML `<!-- -->` + Buff `{# ... #}` directive comments)
+// - [`RsxNode::Script`] (`<script lang="buff"> ... </script>` block,
+//   preserved verbatim for the CLI to splice into the generated Rust crate)
+//
+// Stretch features shipped in T133 (per task spec, replacing the original
+// "deferred" list — these now have full AST + parser + codegen + tests):
+// - Named slots ([`RsxSlot::name`]) — `<slot name="x" />`
+// - Keyed each ([`RsxEach::key`]) — `{#each xs as x (x.id)}`
+// - Spread props ([`RsxAttributeKind::Spread`]) — `{...rest}`
+// - Two-way binding ([`RsxAttributeKind::Bind`]) — `bind:value={sig}`
+// - Await blocks ([`RsxNode::Await`]) — `{#await}{:then}{:catch}{/await}`
+// - Raw HTML escape hatch ([`RsxNode::RawHtml`]) — `{@html raw_trusted_html}`
+//
+// [`Span`] is re-exported from `buff-lang-error` for convenience.
+
+// ---------------------------------------------------------------------------
+// Span stand-in (mirrors buff_lang_error::Span + SourceId; token.buff pattern).
+// ---------------------------------------------------------------------------
+
+struct SourceId:
+    value: Int
+
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+func span_dummy() -> Span:
+    return Span.new(start: 0, end: 0, source_id: SourceId.new(value: 0))
+
+// ---------------------------------------------------------------------------
+// (1) RsxTemplateFile — top-level node produced by parsing a .buffhtml file.
+// ---------------------------------------------------------------------------
+
+// Top-level node produced by parsing a `.buffhtml` file.
+//
+// The optional [`ScriptBlock`] carries the source of `<script lang="buff">`
+// for downstream CLI integration (companion-file binding, type-checking).
+// The `root` is the template body — a sequence of sibling nodes (Svelte-
+// style: a `.buffhtml` file's body is a fragment, not necessarily a single
+// element).
+struct RsxTemplateFile:
+    script: Option<ScriptBlock>
+    root: Vector<RsxNode>
+    span: Span
+
+func rsx_template_file_new(script: Option<ScriptBlock>, root: Vector<RsxNode>, span: Span) -> RsxTemplateFile:
+    return RsxTemplateFile.new(script: script, root: root, span: span)
+
+// ---------------------------------------------------------------------------
+// (2) ScriptBlock — <script lang="buff" props="Props"> ... </script>
+// ---------------------------------------------------------------------------
+
+// `<script lang="buff" props="Props"> ... </script>` block.
+//
+// `source` is the raw text between the tags (unmodified). Downstream
+// passes (CLI) feed this through `buff-lang-lexer` + `buff-lang-parser`
+// to extract component logic. T133 does not interpret it.
+//
+// `props` (T134) carries the optional type-name declared via the
+// `props="..."` attribute on `<script>`. When present, it names the
+// Rust `struct` declared inside the script body that holds the
+// component's prop interface — codegen hoists the struct to module
+// scope and generates a `let <Type> { ... } = props;` destructure so
+// the script-body statements can reference fields directly. When
+// `None`, the component takes no props (backward-compatible with the
+// T133 floor).
+struct ScriptBlock:
+    lang: String
+    // Optional `props="TypeName"` attribute value — names the
+    // Rust `struct` declared inside the script body that codegen
+    // hoists to module scope + destructures at function entry.
+    // `None` when the attribute is absent (T133 floor behavior).
+    props: Option<String>
+    source: String
+    span: Span
+
+func script_block_new(lang: String, source: String, span: Span) -> ScriptBlock:
+    return ScriptBlock.new(lang: lang, props: None, source: source, span: span)
+
+// T134 constructor — carries an explicit `props="..."` attribute
+// value naming the prop-interface struct.
+func script_block_with_props(lang: String, props: String, source: String, span: Span) -> ScriptBlock:
+    return ScriptBlock.new(lang: lang, props: Some(props), source: source, span: span)
+
+// ---------------------------------------------------------------------------
+// (3) RsxNode — one node in the template tree (11 variants).
+// ---------------------------------------------------------------------------
+
+// One node in the template tree.
+enum RsxNode {
+    // HTML element (`<div>`) or child component (`<Counter />`).
+    //
+    // `is_component` is `true` when the tag's first character is uppercase
+    // (per Svelte/JSX convention) — codegen emits it as a `Component { ... }`
+    // call instead of a lowercase element.
+    Element(RsxElement),
+    // `<> ... </>` fragment.
+    Fragment(RsxFragment),
+    // Raw text run (whitespace-only or visible).
+    Text(RsxText),
+    // `{expr}` interpolation. `expr` is the raw source between the braces;
+    // the codegen emits it verbatim into the `rsx!{}` body where dioxus-rsx
+    // will re-parse it as a Rust expression.
+    Interp(RsxInterp),
+    // `{#if ... } ... {:else if ...} ... {:else} ... {/if}` conditional.
+    If(RsxIf),
+    // `{#each iterable as binding} ... {:else} ... {/each}` loop.
+    Each(RsxEach),
+    // `<slot />` default slot insertion point.
+    Slot(RsxSlot),
+    // `<!-- html comment -->` or `{# buff directive comment #}`.
+    Comment(RsxComment),
+    // `<script lang="buff"> ... </script>` block (only at file top-level;
+    // nested `<script>` is rejected by the parser).
+    Script(ScriptBlock),
+    // `{@html raw_trusted_html}` — opt-in raw-HTML escape hatch (T133
+    // stretch). Lowers to a wrapping `<div dangerous_inner_html=... />`.
+    // **SECURITY:** bypasses Dioxus's auto-escaping; never use with
+    // user-controlled input. Codegen emits a `/* XSS: {@html} opt-in */`
+    // marker comment in the generated source for auditing.
+    RawHtml(RsxRawHtml),
+    // `{#await fut}{:then binding}{:catch binding}{/await}` (T133 stretch).
+    // Optional `pending_body` runs before the future resolves.
+    Await(RsxAwait),
+}
+
+// ---------------------------------------------------------------------------
+// (4) RsxElement — HTML element or child component.
+// ---------------------------------------------------------------------------
+
+// HTML element or child component.
+struct RsxElement:
+    // Tag name as written (`div`, `Counter`, `h1`).
+    tag: String
+    // `true` if `tag` starts with an uppercase ASCII letter — Svelte/JSX
+    // convention for "this is a component, not a host element."
+    is_component: Bool
+    // Attributes / props / event handlers in source order.
+    attributes: Vector<RsxAttribute>
+    // Child nodes in source order. Empty for self-closing tags.
+    children: Vector<RsxNode>
+    // `true` if the tag self-closes (`<foo />`); `false` if it has a separate
+    // closing tag (`<foo>...</foo>`).
+    self_closing: Bool
+    span: Span
+
+func rsx_element_new(tag: String, is_component: Bool, attributes: Vector<RsxAttribute>, children: Vector<RsxNode>, self_closing: Bool, span: Span) -> RsxElement:
+    return RsxElement.new(
+        tag: tag,
+        is_component: is_component,
+        attributes: attributes,
+        children: children,
+        self_closing: self_closing,
+        span: span,
+    )
+
+// ---------------------------------------------------------------------------
+// (5) RsxFragment — <> ... </>
+// ---------------------------------------------------------------------------
+
+// `<> ... </>` fragment.
+struct RsxFragment:
+    children: Vector<RsxNode>
+    span: Span
+
+func rsx_fragment_new(children: Vector<RsxNode>, span: Span) -> RsxFragment:
+    return RsxFragment.new(children: children, span: span)
+
+// ---------------------------------------------------------------------------
+// (6) RsxText — raw text run.
+// ---------------------------------------------------------------------------
+
+// Raw text run.
+struct RsxText:
+    text: String
+    span: Span
+
+func rsx_text_new(text: String, span: Span) -> RsxText:
+    return RsxText.new(text: text, span: span)
+
+// ---------------------------------------------------------------------------
+// (7) RsxInterp — {expr} interpolation.
+// ---------------------------------------------------------------------------
+
+// `{expr}` interpolation.
+struct RsxInterp:
+    // Raw source text of the expression (between the braces).
+    expr: String
+    span: Span
+
+func rsx_interp_new(expr: String, span: Span) -> RsxInterp:
+    return RsxInterp.new(expr: expr, span: span)
+
+// ---------------------------------------------------------------------------
+// (8) RsxAttribute — one attribute / prop / handler on an element.
+// ---------------------------------------------------------------------------
+
+// One attribute / prop / handler on an element.
+//
+// Three forms are supported (decision record §3):
+// - `name="literal"` or `name='literal'` → [`RsxAttribute::Literal`]
+// - `name={expr}` (where `name` is NOT `on:event`) → [`RsxAttribute::Expression`]
+// - `on:event_modifier={handler_expr}` → [`RsxAttribute::Event`]
+// - `name: value` (named prop, no `=`) → [`RsxAttribute::NamedProp`]
+// - bare `name` (boolean attr) → [`RsxAttribute::Boolean`]
+struct RsxAttribute:
+    kind: RsxAttributeKind
+    span: Span
+
+func rsx_attribute_new(kind: RsxAttributeKind, span: Span) -> RsxAttribute:
+    return RsxAttribute.new(kind: kind, span: span)
+
+// ---------------------------------------------------------------------------
+// (9) RsxAttributeKind — 7 attribute forms.
+// Rust struct variants flattened to tuple variants (field order kept, names
+// documented inline — Buff enums lack struct variants).
+// ---------------------------------------------------------------------------
+
+enum RsxAttributeKind {
+    // Literal(String name, String value) — `name="value"`, Rust string-literal codegen.
+    Literal(String, String),
+    // Expression(String name, String expr, Span expr_span) — `name={expr}`,
+    // Rust expression in the `rsx!{}` body.
+    Expression(String, String, Span),
+    // Event(String event, Vector<String> modifiers, String handler_expr, Span handler_span)
+    // — `on:event_modifier={handler_expr}` Svelte-style event directive.
+    // `modifiers` is the list of `_`-separated modifiers after the event
+    // name (e.g. `on:submit_prevent` → `event="submit"`, `modifiers=["prevent"]`).
+    Event(String, Vector<String>, String, Span),
+    // Named_prop(String name, String value, Span value_span) — `name: value`
+    // named prop (Buff §11 named-args rule). `value` is raw source text —
+    // codegen emits it verbatim.
+    NamedProp(String, String, Span),
+    // Boolean(String name) — bare boolean attribute (e.g. `<input disabled />`).
+    Boolean(String),
+    // Spread(String ident) — `{...rest}` spread props (T133 stretch). `ident`
+    // is the identifier following the `...`. Codegen emits `..ident` (Dioxus
+    // spread syntax).
+    Spread(String),
+    // Bind(String prop, String signal) — `bind:value={sig}` two-way binding
+    // (T133 stretch). `prop` is the bound attribute name (e.g. `value`);
+    // `signal` is the raw source for the signal expression. Codegen emits an
+    // explicit controlled-component form:
+    // `prop: <signal>, oninput: move |e| <signal>.set(e.value())`.
+    Bind(String, String),
+}
+
+// ---------------------------------------------------------------------------
+// (10) RsxIf — {#if cond} ... {:else if cond} ... {:else} ... {/if}
+// ---------------------------------------------------------------------------
+
+// `{#if cond} ... {:else if cond} ... {:else} ... {/if}`.
+struct RsxIf:
+    // First branch is the `{#if}`; subsequent branches are `{:else if}`.
+    // Always non-empty.
+    branches: Vector<RsxIfBranch>
+    // `{:else}` body, if present.
+    else_branch: Option<Vector<RsxNode>>
+    span: Span
+
+func rsx_if_new(branches: Vector<RsxIfBranch>, else_branch: Option<Vector<RsxNode>>, span: Span) -> RsxIf:
+    return RsxIf.new(branches: branches, else_branch: else_branch, span: span)
+
+// ---------------------------------------------------------------------------
+// (11) RsxIfBranch — one branch of an {#if}/{:else if} chain.
+// ---------------------------------------------------------------------------
+
+struct RsxIfBranch:
+    // Raw source of the condition expression.
+    cond: String
+    cond_span: Span
+    body: Vector<RsxNode>
+
+func rsx_if_branch_new(cond: String, cond_span: Span, body: Vector<RsxNode>) -> RsxIfBranch:
+    return RsxIfBranch.new(cond: cond, cond_span: cond_span, body: body)
+
+// ---------------------------------------------------------------------------
+// (12) RsxEach — {#each iterable as binding} ... {:else} ... {/each}
+// ---------------------------------------------------------------------------
+
+// `{#each iterable as binding} ... {:else} ... {/each}`.
+//
+// Keyed form (`{#each xs as x (x.id)}`) is supported via the [`Self::key`]
+// field (T133 stretch). The key expression is the raw source between the
+// parens following the binding.
+struct RsxEach:
+    // Raw source of the iterable expression (`items` in `{#each items as item}`).
+    // May contain method calls (e.g. `items.read()`) — the parser only treats
+    // a `(` AFTER the binding as the key form.
+    iterable: String
+    iterable_span: Span
+    // Loop binding name (`item` in `{#each items as item}`).
+    binding: String
+    // Optional index binding (`i` in `{#each items as item, i}`).
+    index_binding: Option<String>
+    // Optional keyed-iteration expression (`item.id` in
+    // `{#each xs as x (x.id)}`). Emits a keyed Dioxus form.
+    key: Option<String>
+    body: Vector<RsxNode>
+    // `{:else}` body, if present (runs when `iterable` is empty).
+    else_branch: Option<Vector<RsxNode>>
+    span: Span
+
+func rsx_each_new(iterable: String, iterable_span: Span, binding: String, index_binding: Option<String>, key: Option<String>, body: Vector<RsxNode>, else_branch: Option<Vector<RsxNode>>, span: Span) -> RsxEach:
+    return RsxEach.new(
+        iterable: iterable,
+        iterable_span: iterable_span,
+        binding: binding,
+        index_binding: index_binding,
+        key: key,
+        body: body,
+        else_branch: else_branch,
+        span: span,
+    )
+
+// ---------------------------------------------------------------------------
+// (13) RsxSlot — <slot /> (default) or <slot name="x" /> (named).
+// ---------------------------------------------------------------------------
+
+// `<slot />` (default) or `<slot name="x" />` (named, T133 stretch).
+//
+// Named slots lower to Dioxus's named-children pattern: the parent
+// component declares `fn Comp(children: Element, header: Element)` and the
+// slot renders `{header}` (or `{children}` for the default slot).
+struct RsxSlot:
+    // `None` for default slot (`{children}`). `Some("header")` for
+    // `<slot name="header" />` → renders `{header}`.
+    name: Option<String>
+    span: Span
+
+func rsx_slot_new(span: Span) -> RsxSlot:
+    return RsxSlot.new(name: None, span: span)
+
+// Named slot constructor (`<slot name="x" />`).
+func rsx_slot_named(name: String, span: Span) -> RsxSlot:
+    return RsxSlot.new(name: Some(name), span: span)
+
+// ---------------------------------------------------------------------------
+// (14) RsxComment — HTML <!-- --> or Buff {# ... #} directive comment.
+// ---------------------------------------------------------------------------
+
+// Comment node (HTML or Buff directive).
+struct RsxComment:
+    text: String
+    span: Span
+
+func rsx_comment_new(text: String, span: Span) -> RsxComment:
+    return RsxComment.new(text: text, span: span)
+
+// ---------------------------------------------------------------------------
+// (15) RsxRawHtml — {@html raw_trusted_html} escape hatch.
+// ---------------------------------------------------------------------------
+
+// `{@html raw_trusted_html}` raw HTML escape hatch (T133 stretch).
+//
+// **SECURITY WARNING:** bypasses Dioxus's auto-escaping. Only use with
+// trusted content. Codegen emits a marker comment in the generated `.rs`
+// source for security auditing.
+struct RsxRawHtml:
+    // Raw source of the expression to inject as HTML.
+    expr: String
+    span: Span
+
+func rsx_raw_html_new(expr: String, span: Span) -> RsxRawHtml:
+    return RsxRawHtml.new(expr: expr, span: span)
+
+// ---------------------------------------------------------------------------
+// (16) RsxAwait — {#await fut}{:then binding}{:catch binding}{/await}
+// ---------------------------------------------------------------------------
+
+// `{#await fut_expr} pending... {:then binding} ok... {:catch binding} err... {/await}`
+// (T133 stretch).
+//
+// Mirrors Svelte's await block. `pending_body` is optional (the space
+// between `{#await fut}` and `{:then binding}`); if absent, nothing renders
+// until the future resolves.
+struct RsxAwait:
+    // Raw source for the future expression (`fetchUser(id)` in
+    // `{#await fetchUser(id)}`).
+    fut_expr: String
+    fut_span: Span
+    // Optional pending body — runs while the future is in-flight. The body
+    // between `{#await fut}` and the first `{:then}` / `{:catch}`.
+    pending_body: Option<Vector<RsxNode>>
+    // `{:then binding}` — `binding` is the identifier the resolved value is
+    // bound to. The then-body is required (an await with no `:then` is
+    // rejected by the parser).
+    then_binding: String
+    then_body: Vector<RsxNode>
+    // `{:catch binding}` — optional error handler.
+    catch_binding: Option<String>
+    catch_body: Option<Vector<RsxNode>>
+    span: Span
+
+func rsx_await_new(fut_expr: String, fut_span: Span, pending_body: Option<Vector<RsxNode>>, then_binding: String, then_body: Vector<RsxNode>, catch_binding: Option<String>, catch_body: Option<Vector<RsxNode>>, span: Span) -> RsxAwait:
+    return RsxAwait.new(
+        fut_expr: fut_expr,
+        fut_span: fut_span,
+        pending_body: pending_body,
+        then_binding: then_binding,
+        then_body: then_body,
+        catch_binding: catch_binding,
+        catch_body: catch_body,
+        span: span,
+    )
+
+// ---------------------------------------------------------------------------
+// is_component_tag — first char of the tag is ASCII uppercase (Svelte/JSX).
+// ---------------------------------------------------------------------------
+
+// `is_component` heuristic — first char of the tag is ASCII uppercase.
+//
+// Mirrors the Svelte/JSX convention. Used by both the parser (to set the
+// `is_component` flag) and by codegen (defensive re-check).
+//
+// Rust original uses `tag.chars().next().map(|c| c.is_ascii_uppercase())`.
+// The prebuilt binary's prelude has no `starts_with` String instance method,
+// so we spell out the 26-letter ASCII uppercase check via `tag[0] == "X"`
+// (indexing IS supported on String). Result is byte-equivalent to the Rust
+// version for any ASCII tag; multi-byte UTF-8 first chars fall through to
+// `false` (the Rust `is_ascii_uppercase()` also returns false for non-ASCII).
+export func is_component_tag(tag: String) -> Bool:
+    if tag.len() == 0:
+        return false
+    let c = tag[0]
+    if c == "A":
+        return true
+    if c == "B":
+        return true
+    if c == "C":
+        return true
+    if c == "D":
+        return true
+    if c == "E":
+        return true
+    if c == "F":
+        return true
+    if c == "G":
+        return true
+    if c == "H":
+        return true
+    if c == "I":
+        return true
+    if c == "J":
+        return true
+    if c == "K":
+        return true
+    if c == "L":
+        return true
+    if c == "M":
+        return true
+    if c == "N":
+        return true
+    if c == "O":
+        return true
+    if c == "P":
+        return true
+    if c == "Q":
+        return true
+    if c == "R":
+        return true
+    if c == "S":
+        return true
+    if c == "T":
+        return true
+    if c == "U":
+        return true
+    if c == "V":
+        return true
+    if c == "W":
+        return true
+    if c == "X":
+        return true
+    if c == "Y":
+        return true
+    if c == "Z":
+        return true
+    return false
+
+// ---------------------------------------------------------------------------
+// Equivalence test for `is_component_tag` (conventions §5).
+// Tier: T1 (pure-value Bool return — no collections, no ordering).
+// ---------------------------------------------------------------------------
+
+// Equivalence test for `is_component_tag` (P3.2).
+// Verifies the uppercase-first-char heuristic against the same cases the
+// Rust `#[test] fn is_component_tag_recognizes_convention` checks.
+func equivalence_is_component_tag() -> Bool:
+    let c = is_component_tag(tag: "Counter")
+    let l = is_component_tag(tag: "Layout")
+    let d = is_component_tag(tag: "div")
+    let h = is_component_tag(tag: "h1")
+    let e = is_component_tag(tag: "")
+    if c == false:
+        return false
+    if l == false:
+        return false
+    if d == true:
+        return false
+    if h == true:
+        return false
+    if e == true:
+        return false
+    return true
