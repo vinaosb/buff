@@ -134,7 +134,7 @@ pub fn sign(private_pem: &str, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
 /// Returns `true` iff the signature is valid. Returns `false` (NEVER
 /// an error) on signature mismatch, malformed PEM, or panic. The
 /// `false`-on-malformed-input stance mirrors the T26 Signature.verify
-/// + T34 Password.verify stance so a future `verify_allow` policy
+/// and T34 Password.verify stance so a future `verify_allow` policy
 /// can layer cleanly.
 pub fn verify(public_pem: &str, data: &[u8], signature: &[u8]) -> bool {
     let pem_owned = public_pem.to_string();
