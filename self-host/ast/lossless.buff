@@ -1,0 +1,743 @@
+// Buff self-host port of `crates/buff-lang-ast/src/lossless.rs` (P4.4).
+//
+// Lossless AST — trivia-preserving source representation (T57).
+//
+// The semantic AST produced by `buff-lang-parser` is *lossy*: it discards
+// whitespace, blank lines, and comments (the Buff lexer strips `//` and
+// `/* */` before tokens are emitted). That loss is the reason `buff fmt`
+// (T54) drops comments today.
+//
+// This module provides a focused, **additive** lossless layer that segments
+// the raw source into a flat sequence of [`Piece`]s — either trivia
+// (whitespace runs, newlines, line comments, block comments) or a
+// lossless-token run (any maximal run of "non-trivia" bytes, including
+// identifiers, literals, operators, strings, char literals). The pieces
+// concatenate back to the EXACT original bytes, giving:
+//
+//   * Byte-exact roundtrip — parse_lossless(src).to_source() == src for any
+//     valid UTF-8 string (including comments, blank lines, mixed indent,
+//     multi-byte chars, string interpolation, regex literals, etc.).
+//   * Comment preservation — line + nested block comments are first-class
+//     trivia pieces, not stripped, enabling a future comment-preserving
+//     `buff fmt` (the T57 -> T54 follow-up).
+//   * LSP-friendly structure — each piece carries its byte range, and
+//     `lossless_tree_comments` / `lossless_tree_tokens` / `lossless_tree_trivia`
+//     helpers return collections editors can use to map byte offsets to
+//     trivia / tokens (e.g. for hover, folding, "go to comment above next
+//     decl").
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions:
+//   * `pub enum Piece { Trivia { kind, start, end, text }, Token { ... } }`
+//     (Rust struct variants) -> tuple variants with a documented field
+//     order: `Trivia(TriviaKind, Int, Int, String)` and `Token(Int, Int,
+//     String)`. Buff has no named-field enum variants (the parser at
+//     `crates/buff-lang-parser/src/stmt/stmt_decl.rs:660-740` accepts only
+//     unit variants and tuple variants — same precedent as
+//     `self-host/ast/stmt.buff` lines 24-35). Field order matches the Rust
+//     source declaration verbatim; field semantics are documented on the
+//     enum. Construction stays positional.
+//   * `impl Type { ... }` -> a family of free functions named
+//     `<type_snake>_<method>` taking the receiver as the first parameter
+//     (porting-conventions §8g). E.g. `LosslessTree::parse` ->
+//     `lossless_tree_parse`, `Piece::start` -> `piece_start`.
+//   * `&str` / `&[u8]` -> owned `String` / `Vector<Int>` (Buff hides
+//     references per porting-conventions §7b). The scanner walks a
+//     `Vector<Int>` of byte values 0-255 (mirrors `self-host/lexer/lexer.buff`
+//     precedent); helper `string_to_bytes` is copied verbatim from there.
+//   * `usize` / `u8` byte literal -> `Int` (porting-conventions §7a — all
+//     unsigned widths collapse to Int). ASCII `b'x'` byte literals become
+//     named numeric constants declared as locals inside each scanner
+//     function (Buff has no module-level `let`).
+//   * `Vec<Piece>` -> `Vector<Piece>` (porting-conventions §7c hard rule).
+//   * `impl Iterator<Item = &Piece>` return types (`trivia()` / `tokens()` /
+//     `comments()`) -> `Vector<Piece>` of owned clones. Buff has no trait-
+//     object iterators; the convention (per `self-host/parser/stream.buff`
+//     and `self-host/error/json.buff`) is to return fresh filtered vectors.
+//   * `serde_json::Value` / `serde_json::json!` -> DEFERRED. Buff has no
+//     serde; per porting-conventions §8b ("Port the data type; document the
+//     serde impl as deferred"), JSON serialization stays in the Rust host.
+//     The `to_json` methods on `Trivia`, `TriviaKind`, `LosslessToken`,
+//     `Piece`, and `LosslessTree` are therefore NOT ported here — the JSON
+//     contract for `buff check --dump-ast` is a Rust-host concern. Same
+//     precedent as `self-host/ast/op.buff` and `self-host/ast/common.buff`.
+//   * `String::with_capacity(n)` -> `""`. Buff's String prelude has no
+//     `with_capacity`; the allocation hint is a Rust-host performance
+//     concern invisible to the port's semantics.
+//   * `&src[start..end]` (string slicing) -> `src.slice(start, end)` (Buff
+//     prelude string-slice API — see `self-host/error/diagnostic.buff`).
+//   * `src.as_bytes()` -> `string_to_bytes(src)` helper.
+//   * `pieces.partition_point(|p| p.start() <= byte_offset)` (binary search)
+//     -> linear scan from the end. Buff's Vector prelude does not surface
+//     `partition_point`; the linear scan has identical semantics on the
+//     small piece counts produced by realistic Buff source files. The
+//     original Rust was O(log n); this port is O(n). Documented as a known
+//     perf gap; the API contract (returns the piece containing the offset,
+//     if any) is unchanged. Mirrors the precedent in
+//     `self-host/error/source_map.buff` lines 41-42 (Rust binary_search ->
+//     linear scan with identical semantics).
+//   * `while` -> `for cond:` (Buff has no `while` keyword — porting-
+//     conventions §8d). Every conditional loop in the scanner is a `for
+//     <cond>:` spelling.
+//   * Match arms on enums use UNQUALIFIED variant names per porting-
+//     conventions §8e (e.g. `Trivia(_, start, _, _) => ...`, NOT
+//     `Piece.Trivia(...) => ...`).
+//   * Or-patterns (`A | B`) in Rust match arms -> `if/else if` chains with
+//     `==` on enum values (porting-conventions §8e). Enums derive
+//     structural equality in Buff so direct `==` works on TriviaKind.
+//   * `Option::unwrap_or` / `.expect` -> explicit `match` or `if == None`
+//     early return (no unwrap in production code per project rule).
+//   * `Option<(TriviaKind, usize)>` (Rust tuple return) -> an
+//     `Option<TriviaScan>` returning a small helper struct `TriviaScan {
+//     kind: TriviaKind, consumed: Int }`. Buff has no first-class tuple
+//     values, so a named struct is the closest idiom.
+//   * `pub` visibility dropped — Buff default visibility is module-private
+//     (porting-conventions §6d); `export` is only needed when a symbol is
+//     imported by another file (none yet — single-file port).
+//   * `#[derive(Debug, Clone, PartialEq, Eq, Hash)]` dropped — Buff auto-
+//     derives Debug, Clone, PartialEq on every struct/enum; Eq/Hash are
+//     Rust-host concerns (Buff is GC-backed and uses structural equality).
+//   * `#[cfg(test)] mod tests` -> not ported (porting-conventions §5a —
+//     equivalence tests live in separate `equivalence_*.buff` files).
+//
+// Numeric widths map to the natural Buff primitive: `usize` -> `Int`.
+
+// ---------------------------------------------------------------------------
+// Piece types
+// ---------------------------------------------------------------------------
+
+// Kind of a trivia piece.
+//
+// Trivia is the "lossy" content that the semantic AST drops: whitespace,
+// newlines, and comments. Capturing it as typed pieces (rather than opaque
+// strings) lets future tooling (LSP folding, `buff fmt` comment
+// preservation) treat each kind specifically.
+enum TriviaKind {
+    // A run of ` ` and/or `\t` bytes. NOT including newlines.
+    Whitespace,
+    // A single newline (`\n`, `\r\n`, or `\r`). CRLF is preserved as one
+    // piece, never split.
+    Newline,
+    // A line comment `// ...` running to (not including) the next EOL.
+    LineComment,
+    // A block comment `/* ... */`, possibly nested (`/* a /* b */ c */`).
+    // Unterminated block comments are captured best-effort (run to EOF).
+    BlockComment,
+}
+
+// A trivia piece: whitespace, newline, or comment.
+//
+// See TriviaKind for the discriminant taxonomy. The `text` field is the raw
+// bytes of the piece (e.g. "    ", "\n", "// hello", "/* a /* b */ c */").
+struct Trivia {
+    // Which kind of trivia this is.
+    kind: TriviaKind,
+    // The raw source text of the piece (preserved byte-for-byte).
+    text: String,
+}
+
+// Construct a new trivia piece.
+//
+// Mirrors Rust `impl Trivia { pub fn new(kind: TriviaKind, text: impl
+// Into<String>) -> Self }`. The Rust `impl Into<String>` generic collapses to
+// a plain `String` parameter (Buff has no Into trait; callers pass an owned
+// String).
+func trivia_new(kind: TriviaKind, text: String) -> Trivia:
+    return Trivia.new(kind: kind, text: text)
+
+// Byte length of this trivia piece.
+func trivia_len(t: Trivia) -> Int:
+    return t.text.len()
+
+// Whether this trivia piece is empty (should not occur for valid input,
+// but defensive — empty text is allowed).
+func trivia_is_empty(t: Trivia) -> Bool:
+    return t.text.len() == 0
+
+// A lossless token: a maximal run of "non-trivia" bytes — i.e. anything
+// that isn't whitespace, a newline, a comment, or a string/char literal.
+//
+// This intentionally does NOT distinguish identifiers / numbers / operators
+// / keywords / regex literals. For byte-exact roundtrip, opaque text is
+// sufficient. Semantic tokenization belongs to the existing `buff-lang-lexer`
+// (which DOES classify, but strips comments — that's the gap T57 closes).
+//
+// String literals, char literals, triple-quoted strings, and raw strings
+// ARE represented as a single LosslessToken each (their boundaries are
+// recognised by the scanner so they aren't mis-split internally — e.g.
+// "a // b" is one token, not a token + comment).
+struct LosslessToken {
+    // The raw source text of the token (preserved byte-for-byte).
+    text: String,
+}
+
+// Construct a new lossless token.
+func lossless_token_new(text: String) -> LosslessToken:
+    return LosslessToken.new(text: text)
+
+// Byte length of this token.
+func lossless_token_len(t: LosslessToken) -> Int:
+    return t.text.len()
+
+// Whether this token is empty (should not occur for valid input).
+func lossless_token_is_empty(t: LosslessToken) -> Bool:
+    return t.text.len() == 0
+
+// A piece in the lossless tree: either trivia or a lossless token.
+//
+// Each piece also carries its byte range in the original source
+// (`start`, `end`) so editors can map cursor offsets to pieces without
+// rescanning. `text` is stored alongside for convenience (it equals
+// `src.slice(start, end)`).
+//
+// Tuple-variant field order (matches the Rust struct-variant declaration):
+//   * Trivia(kind, start, end, text)
+//       kind  : TriviaKind
+//       start : Int (inclusive start byte offset in the original source)
+//       end   : Int (exclusive end byte offset in the original source)
+//       text  : String (the raw source text — equals src.slice(start, end))
+//   * Token(start, end, text)
+//       start : Int (inclusive start byte offset)
+//       end   : Int (exclusive end byte offset)
+//       text  : String (the raw source text)
+enum Piece {
+    // Whitespace, newline, or comment.
+    Trivia(TriviaKind, Int, Int, String),
+    // A non-trivia token (identifier, literal, operator, string, etc.).
+    Token(Int, Int, String),
+}
+
+// Inclusive start byte offset of this piece in the original source.
+func piece_start(p: Piece) -> Int:
+    return match p {
+        Trivia(_, start, _, _) => start,
+        Token(start, _, _) => start,
+    }
+
+// Exclusive end byte offset of this piece in the original source.
+func piece_end(p: Piece) -> Int:
+    return match p {
+        Trivia(_, _, end, _) => end,
+        Token(_, end, _) => end,
+    }
+
+// Byte length of this piece.
+func piece_len(p: Piece) -> Int:
+    return piece_end(p) - piece_start(p)
+
+// Whether this piece is empty (zero-length). Should not occur for
+// valid input — pieces always advance the cursor — but exposed for
+// `len`/`is_empty` symmetry.
+func piece_is_empty(p: Piece) -> Bool:
+    return piece_len(p) == 0
+
+// The raw source text of this piece.
+func piece_text(p: Piece) -> String:
+    return match p {
+        Trivia(_, _, _, text) => text,
+        Token(_, _, text) => text,
+    }
+
+// Whether this piece is a trivia piece.
+func piece_is_trivia(p: Piece) -> Bool:
+    return match p {
+        Trivia(_, _, _, _) => true,
+        Token(_, _, _) => false,
+    }
+
+// Whether this piece is a token piece.
+func piece_is_token(p: Piece) -> Bool:
+    return match p {
+        Trivia(_, _, _, _) => false,
+        Token(_, _, _) => true,
+    }
+
+// If this piece is a trivia piece, return its kind; otherwise None.
+func piece_trivia_kind(p: Piece) -> Option<TriviaKind>:
+    return match p {
+        Trivia(kind, _, _, _) => Option.Some(kind),
+        Token(_, _, _) => Option.None,
+    }
+
+// True when `kind` is one of the comment variants (LineComment or
+// BlockComment). Inline expansion of the Rust or-pattern
+// `TriviaKind::LineComment | TriviaKind::BlockComment` (Buff match rejects
+// or-patterns — porting-conventions §8e).
+func trivia_kind_is_comment(kind: TriviaKind) -> Bool:
+    if kind == TriviaKind.LineComment:
+        return true
+    if kind == TriviaKind.BlockComment:
+        return true
+    return false
+
+// If this piece is a comment (LineComment or BlockComment), return its
+// kind; otherwise None.
+func piece_comment_kind(p: Piece) -> Option<TriviaKind>:
+    // Extract the kind via a single match (Rust used a nested or-pattern
+    // inside `match self`; Buff splits the predicate out into
+    // `trivia_kind_is_comment`).
+    let kind_opt = piece_trivia_kind(p)
+    return match kind_opt {
+        Some(k) =>
+            // Inline if/else expansion of `if trivia_kind_is_comment(k)`.
+            match trivia_kind_is_comment(k) {
+                true => Option.Some(k),
+                false => Option.None,
+            },
+        None => Option.None,
+    }
+
+// ---------------------------------------------------------------------------
+// LosslessTree
+// ---------------------------------------------------------------------------
+
+// A lossless representation of a Buff source file.
+//
+// Stores the original source bytes plus a flat list of Piece values that
+// segment it. Roundtrip is guaranteed byte-exact:
+//
+//   * `lossless_tree_to_source` returns the original bytes verbatim.
+//   * `lossless_tree_pieces_to_source` reconstructs by walking pieces
+//     (used in tests to prove the pieces alone roundtrip).
+//
+// Construct via `parse_lossless` or `lossless_tree_parse`.
+struct LosslessTree {
+    // The original source. Stored in full so `to_source()` is trivially
+    // byte-exact and so piece text slicing (`src.slice(start, end)`) is
+    // always valid UTF-8.
+    src: String,
+    // Flat list of pieces, in source order, covering the full src range
+    // with no gaps or overlaps.
+    pieces: Vector<Piece>,
+}
+
+// Parse a source string into a lossless tree.
+//
+// Never panics. Unterminated strings / block comments / char literals are
+// captured best-effort (run to EOF); roundtrip still holds.
+func lossless_tree_parse(src: String) -> LosslessTree:
+    let pieces = lossless_scan(src)
+    return LosslessTree.new(src: src, pieces: pieces)
+
+// The original source bytes (byte-exact).
+func lossless_tree_src(t: LosslessTree) -> String:
+    return t.src
+
+// Reconstruct the source by returning the stored original. This is THE
+// byte-exact roundtrip primitive: parse_lossless(s).to_source() == s for
+// any valid UTF-8 string s.
+func lossless_tree_to_source(t: LosslessTree) -> String:
+    return t.src
+
+// Reconstruct the source by concatenating piece texts (proves the pieces
+// alone — without the stored `src` — roundtrip byte-exact). Used in tests;
+// useful for verifying piece integrity after an edit.
+func lossless_tree_pieces_to_source(t: LosslessTree) -> String:
+    let mut out = ""
+    for p in t.pieces:
+        out = out + piece_text(p)
+    return out
+
+// The flat list of pieces (source order).
+func lossless_tree_pieces(t: LosslessTree) -> Vector<Piece>:
+    return t.pieces
+
+// Number of pieces (trivia + tokens).
+func lossless_tree_piece_count(t: LosslessTree) -> Int:
+    return t.pieces.len()
+
+// Number of trivia pieces.
+func lossless_tree_trivia_count(t: LosslessTree) -> Int:
+    let mut count = 0
+    for p in t.pieces:
+        if piece_is_trivia(p):
+            count = count + 1
+    return count
+
+// Number of token pieces.
+func lossless_tree_token_count(t: LosslessTree) -> Int:
+    let mut count = 0
+    for p in t.pieces:
+        if piece_is_token(p):
+            count = count + 1
+    return count
+
+// Number of comment pieces (line + block).
+func lossless_tree_comment_count(t: LosslessTree) -> Int:
+    let mut count = 0
+    for p in t.pieces:
+        if piece_comment_kind(p) != Option.None:
+            count = count + 1
+    return count
+
+// Vector of trivia pieces (whitespace + newlines + comments).
+//
+// Returns owned clones. The Rust reference returned `impl Iterator<Item =
+// &Piece>`; Buff has no trait-object iterators, so this port returns a fresh
+// filtered vector (per porting-conventions §7d / `parser/stream.buff`
+// precedent).
+func lossless_tree_trivia(t: LosslessTree) -> Vector<Piece>:
+    let out = Vector.new()
+    for p in t.pieces:
+        if piece_is_trivia(p):
+            out.push(p)
+    return out
+
+// Vector of token pieces.
+func lossless_tree_tokens(t: LosslessTree) -> Vector<Piece>:
+    let out = Vector.new()
+    for p in t.pieces:
+        if piece_is_token(p):
+            out.push(p)
+    return out
+
+// Vector of comment pieces only (line + block). Useful for the future
+// comment-preserving `buff fmt`.
+func lossless_tree_comments(t: LosslessTree) -> Vector<Piece>:
+    let out = Vector.new()
+    for p in t.pieces:
+        if piece_comment_kind(p) != Option.None:
+            out.push(p)
+    return out
+
+// Find the piece index containing the given byte offset, if any.
+//
+// Returns None for offsets beyond the end of source. Useful for LSP cursor
+// to piece mapping.
+//
+// Time complexity: O(n) linear scan (Rust was O(log n) via
+// `pieces.partition_point`; Buff's Vector prelude has no partition_point, so
+// we walk backward from the end. The semantic mirror is identical: pieces
+// are non-overlapping and sorted ascending by start; the piece containing
+// `offset` is the last piece whose `start <= offset`, and only matches if
+// `offset < end`.)
+func lossless_tree_piece_at(t: LosslessTree, byte_offset: Int) -> Option<Piece>:
+    let n = t.pieces.len()
+    let mut i = n - 1
+    for i >= 0:
+        let p = t.pieces[i]
+        let s = piece_start(p)
+        let e = piece_end(p)
+        if s <= byte_offset:
+            if byte_offset < e:
+                return Option.Some(p)
+            // Offset is past this piece's end (and so past every earlier
+            // piece's end too, since pieces are sorted). Not found.
+            return Option.None
+        i = i - 1
+    return Option.None
+
+// Incremental-reparse hook (v1.0-minimal stub).
+//
+// Produces a new LosslessTree for the source after applying an edit:
+// replace src[start..end] with `replacement`. The v1.0 implementation does
+// a full re-scan of the new source. The API signature is the structured
+// hook for future incremental re-scan (re-tokenize only the pieces
+// overlapping the edit window, then reuse the unchanged prefix/suffix).
+//
+// Out-of-bounds / inverted ranges are silently clamped to [0, src.len()];
+// the resulting tree still roundtrips the (clamped) edit. This never panics.
+func lossless_tree_reparse(t: LosslessTree, start: Int, end: Int, replacement: String) -> LosslessTree:
+    let src_len = t.src.len()
+    let s = int_min(start, src_len)
+    let e_raw = int_max(end, s)
+    let e = int_min(e_raw, src_len)
+    let new_src = t.src.slice(0, s) + replacement + t.src.slice(e, src_len)
+    return lossless_tree_parse(new_src)
+
+// ---------------------------------------------------------------------------
+// Scanner
+// ---------------------------------------------------------------------------
+
+// Helper struct for `scan_trivia`'s return shape. Buff has no first-class
+// tuple values, so the Rust `Option<(TriviaKind, usize)>` becomes
+// `Option<TriviaScan>` with a named struct.
+struct TriviaScan {
+    kind: TriviaKind,
+    consumed: Int,
+}
+
+// Parse a source string into a LosslessTree. Convenience alias for
+// `lossless_tree_parse`.
+func parse_lossless(src: String) -> LosslessTree:
+    return lossless_tree_parse(src)
+
+// Scan a source string into a flat list of Piece values.
+//
+// The pieces cover the entire source range with no gaps or overlaps.
+func lossless_scan(src: String) -> Vector<Piece>:
+    let bytes = string_to_bytes(src)
+    let pieces: Vector<Piece> = Vector.new()
+    let mut pos = 0
+    let len = bytes.len()
+    for pos < len:
+        let start = pos
+        let trivia_opt = scan_trivia(bytes, start)
+        if trivia_opt != Option.None:
+            let ts = option_trivia_scan_unwrap(trivia_opt)
+            let consumed = ts.consumed
+            let text = src.slice(start, start + consumed)
+            pieces.push(Trivia(ts.kind, start, start + consumed, text))
+            pos = start + consumed
+        else:
+            let token_opt = scan_token_like(bytes, start)
+            let consumed = option_int_unwrap_or(token_opt, 1)
+            let text = src.slice(start, start + consumed)
+            pieces.push(Token(start, start + consumed, text))
+            pos = start + consumed
+    return pieces
+
+// Try to scan a trivia piece (whitespace / newline / line comment / block
+// comment) starting at `bytes[at]`. Returns the kind + bytes consumed on
+// match, or None if no trivia starts here.
+func scan_trivia(bytes: Vector<Int>, at: Int) -> Option<TriviaScan>:
+    let n = bytes.len()
+    let first = bytes[at]
+    // ASCII byte constants (Buff has no module-level `let`; values mirror
+    // the Rust `b'x'` literals — porting-conventions §7a / lexer.buff
+    // precedent).
+    let space = 32
+    let tab = 9
+    let nl = 10
+    let cr = 13
+    let slash = 47
+    let star = 42
+
+    // Whitespace run (spaces + tabs, NOT newlines).
+    if first == space || first == tab:
+        let mut p = at + 1
+        for p < n && (bytes[p] == space || bytes[p] == tab):
+            p = p + 1
+        return Option.Some(TriviaScan.new(kind: TriviaKind.Whitespace, consumed: p - at))
+
+    // Newline: \n | \r\n | \r
+    if first == nl:
+        return Option.Some(TriviaScan.new(kind: TriviaKind.Newline, consumed: 1))
+    if first == cr:
+        let consumed = match (at + 1 < n && bytes[at + 1] == nl) {
+            true => 2,
+            false => 1,
+        }
+        return Option.Some(TriviaScan.new(kind: TriviaKind.Newline, consumed: consumed))
+
+    // Line comment `//...` to (not including) EOL.
+    if first == slash && at + 1 < n && bytes[at + 1] == slash:
+        let mut p = at + 2
+        for p < n && bytes[p] != nl && bytes[p] != cr:
+            p = p + 1
+        return Option.Some(TriviaScan.new(kind: TriviaKind.LineComment, consumed: p - at))
+
+    // Block comment `/* ... */` with nesting. Unterminated runs to EOF.
+    if first == slash && at + 1 < n && bytes[at + 1] == star:
+        let mut p = at + 2
+        let mut depth = 1
+        for p < n && depth > 0:
+            if bytes[p] == slash && p + 1 < n && bytes[p + 1] == star:
+                depth = depth + 1
+                p = p + 2
+            else if bytes[p] == star && p + 1 < n && bytes[p + 1] == slash:
+                depth = depth - 1
+                p = p + 2
+            else:
+                p = p + 1
+        return Option.Some(TriviaScan.new(kind: TriviaKind.BlockComment, consumed: p - at))
+
+    return Option.None
+
+// Scan a "token-like" piece: a string / char / raw-string literal, or a
+// maximal run of "boring" bytes (anything not starting trivia or a string).
+//
+// Returns the number of bytes consumed (always >= 1) as a Some, or None if
+// the position starts with trivia (caller should call `scan_trivia` first).
+//
+// Strings / chars / raw-strings / triple-strings are recognised here so
+// they are emitted as ONE Token piece (their internal bytes — including
+// `//`, `/*`, `"`, etc. — must not be mis-split).
+func scan_token_like(bytes: Vector<Int>, at: Int) -> Option<Int>:
+    let n = bytes.len()
+    let first = bytes[at]
+    let quote = 34
+    let squote = 39
+    let lower_r = 114
+    let space = 32
+    let tab = 9
+    let nl = 10
+    let cr = 13
+    let slash = 47
+    let star = 42
+
+    // Triple-quoted raw string `"""..."""` — check BEFORE single `"`.
+    if first == quote && at + 2 < n && bytes[at + 1] == quote && bytes[at + 2] == quote:
+        return Option.Some(scan_triple_string_len(bytes, at))
+
+    // Single-quote string `"..."` with escape + `{...}` interpolation.
+    // Interpolation braces nest: `"a {b + "}"}"` — the inner `"}"` must
+    // NOT close the string.
+    if first == quote:
+        return Option.Some(scan_string_len(bytes, at))
+
+    // Char literal `'...'` with escape.
+    if first == squote:
+        return Option.Some(scan_char_len(bytes, at))
+
+    // Raw string `r"..."` — only at token start (caller guarantees we are
+    // at the first byte of a token; mid-token `r` is part of an identifier
+    // like "bar").
+    if first == lower_r && at + 1 < n && bytes[at + 1] == quote:
+        return Option.Some(scan_raw_string_len(bytes, at))
+
+    // Otherwise: maximal run of "boring" bytes — bytes that don't start
+    // trivia and don't start a string/char. This naturally groups
+    // identifiers, numbers, operators, regex literals, etc. into one
+    // opaque token.
+    let mut p = at + 1
+    for p < n:
+        let b = bytes[p]
+        // Break before any trivia starter.
+        if b == space || b == tab || b == nl || b == cr:
+            break
+        // Break before `//` or `/*`.
+        if b == slash && p + 1 < n && (bytes[p + 1] == slash || bytes[p + 1] == star):
+            break
+        // Break before a string / char starter (`"`, `'`).
+        if b == quote || b == squote:
+            break
+        // Note: do NOT break before `r"..."` mid-token — `r` only starts a
+        // raw string at the FIRST byte of a token (handled above). Mid-
+        // token `r` is part of an identifier (e.g. "bar") and must stay.
+        p = p + 1
+    return Option.Some(p - at)
+
+// Length of a `"..."` string literal starting at `bytes[at] == b'"'`,
+// including the closing quote. Handles `\\` escapes and `{...}`
+// interpolation nesting. Unterminated runs to EOF (best-effort).
+func scan_string_len(bytes: Vector<Int>, at: Int) -> Int:
+    let n = bytes.len()
+    let backslash = 92
+    let quote = 34
+    let lbrace = 123
+    let rbrace = 125
+    let mut p = at + 1  // past opening `"`
+    let mut brace_depth = 0
+    for p < n:
+        let b = bytes[p]
+        if b == backslash && p + 1 < n:
+            // Escaped byte — consume the next byte literally (it can be
+            // a `"` or `\` that doesn't close the string).
+            p = p + 2
+            continue
+        if b == quote && brace_depth == 0:
+            p = p + 1  // include closing quote
+            return p - at
+        if b == lbrace:
+            brace_depth = brace_depth + 1
+        else if b == rbrace && brace_depth > 0:
+            brace_depth = brace_depth - 1
+        p = p + 1
+    // Unterminated — return what we have (roundtrip still holds).
+    return p - at
+
+// Length of a `"""..."""` triple-quoted raw string starting at
+// `bytes[at..at+3] == b"""`. No escape / no interpolation. Unterminated
+// runs to EOF.
+func scan_triple_string_len(bytes: Vector<Int>, at: Int) -> Int:
+    let n = bytes.len()
+    let quote = 34
+    let mut p = at + 3  // past opening `"""`
+    for p + 2 < n:
+        if bytes[p] == quote && bytes[p + 1] == quote && bytes[p + 2] == quote:
+            return p + 3 - at  // include closing `"""`
+        p = p + 1
+    // Closing `"""` exactly at the tail (p == n-3 -> p+2 == n-1, which
+    // is excluded by the loop's `< n` condition). Re-check explicitly.
+    if p + 2 == n - 1 && n >= 6 && bytes[n - 3] == quote && bytes[n - 2] == quote && bytes[n - 1] == quote:
+        return n - at
+    // Unterminated — return what we have (roundtrip still holds).
+    return n - at
+
+// Length of a `'...'` char literal starting at `bytes[at] == b'\''`.
+// Handles `\\` escapes. Stops at EOL or EOF (best-effort if unterminated) —
+// newlines can't be inside a char literal.
+func scan_char_len(bytes: Vector<Int>, at: Int) -> Int:
+    let n = bytes.len()
+    let backslash = 92
+    let squote = 39
+    let nl = 10
+    let cr = 13
+    let mut p = at + 1  // past opening `'`
+    for p < n:
+        let b = bytes[p]
+        if b == backslash && p + 1 < n:
+            p = p + 2
+            continue
+        if b == squote:
+            return p + 1 - at  // include closing `'`
+        if b == nl || b == cr:
+            // Char literal can't span lines — stop here (best-effort).
+            return p - at
+        p = p + 1
+    return p - at
+
+// Length of a `r"..."` raw string starting at `bytes[at] == b'r'`. No
+// escape / no interpolation — first `"` after the opening wins.
+// Unterminated runs to EOF.
+func scan_raw_string_len(bytes: Vector<Int>, at: Int) -> Int:
+    let n = bytes.len()
+    let quote = 34
+    let mut p = at + 2  // past `r"`
+    for p < n:
+        if bytes[p] == quote:
+            return p + 1 - at  // include closing `"`
+        p = p + 1
+    return p - at
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Convert a Buff String into its UTF-8 byte sequence (Vector<Int> 0-255).
+//
+// Copied verbatim from `self-host/lexer/lexer.buff::string_to_bytes` so this
+// port stays self-contained (cross-directory `import` lands with the M7
+// monolith loader, Phase 5).
+func string_to_bytes(s: String) -> Vector<Int>:
+    let out: Vector<Int> = Vector.new()
+    let mut i = 0
+    for i < s.len():
+        out.push(s.byte_at(i))
+        i = i + 1
+    return out
+
+// Smaller of two Ints.
+func int_min(a: Int, b: Int) -> Int:
+    if a < b:
+        return a
+    return b
+
+// Larger of two Ints.
+func int_max(a: Int, b: Int) -> Int:
+    if a > b:
+        return a
+    return b
+
+// Extract the payload of a known-Some `Option<TriviaScan>`.
+//
+// Defensive: the caller MUST have checked `!= Option.None` first. The
+// None branch is unreachable but the Buff match must be exhaustive — the
+// placeholder TriviaScan.new(...) value is documented as never produced.
+func option_trivia_scan_unwrap(opt: Option<TriviaScan>) -> TriviaScan:
+    return match opt {
+        Some(x) => x,
+        None => TriviaScan.new(kind: TriviaKind.Whitespace, consumed: 0),
+    }
+
+// Extract the payload of an Option<Int>, defaulting to `default` on None.
+//
+// Mirrors Rust's `Option::unwrap_or`. Used for the defensive fallback in
+// `lossless_scan` where `scan_token_like` is expected to always return Some
+// (the Rust original asserts the same invariant by structuring the if/else
+// so the `None` branch advances one byte).
+func option_int_unwrap_or(opt: Option<Int>, default: Int) -> Int:
+    return match opt {
+        Some(n) => n,
+        None => default,
+    }

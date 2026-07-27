@@ -1,0 +1,139 @@
+// Buff self-host port of `crates/buff-lang-ast/src/op.rs` (P4.4).
+//
+// Operator enums for the Buff AST.
+//
+// Pure data: binary and unary operator tags. No parsing, no precedence.
+//
+// Faithful 1:1 translation of the Rust reference. The two enums (BinaryOp,
+// UnaryOp) translate cleanly to Buff enums. The `impl fmt::Display for
+// BinaryOp` / `impl fmt::Display for UnaryOp` blocks (free-form text
+// rendering) become free functions `binary_op_to_string(op) -> String` and
+// `unary_op_to_string(op) -> String` (Buff has no `fmt::Display` trait —
+// the closest idiom is a free function returning `String`; per
+// porting-conventions §8g: `impl Type { fn x().. }` -> `func type_x() ..`).
+// The `impl BinaryOp { fn to_json() }` / `impl UnaryOp { fn to_json() }`
+// blocks (manual serde_json::Value builders for `buff check --dump-ast`)
+// are NOT ported: serde JSON serialization is a Rust-host concern (per
+// porting-conventions §8b: "Port the data type; document the serde impl
+// as deferred"). The `#[cfg(test)] mod tests` block is also omitted (Buff
+// uses `@test` attributes on test functions in a separate
+// `equivalence_*.buff` file — see porting-conventions §5).
+//
+// Translation decisions:
+//   * `pub enum BinaryOp { ... }` -> `enum BinaryOp { ... }` (Buff auto-
+//     derives Debug, Clone, PartialEq; `Copy`, `Eq`, `Hash` are Rust-host
+//     concerns, documented inline).
+//   * `pub enum UnaryOp { ... }` -> `enum UnaryOp { ... }` (same).
+//   * `impl fmt::Display for BinaryOp { fn fmt(&self, f) -> fmt::Result }`
+//     -> `func binary_op_to_string(op: BinaryOp) -> String` returning the
+//     rendered operator string. The Rust `match self { ... }` becomes a
+//     Buff `match op { Add => "+", ... }` with UNQUALIFIED variant names
+//     in the match arms (per porting-conventions §8e — qualified patterns
+//     are rejected by the parser; the DATA MAPPING is unchanged).
+//   * `f.write_str(s)` / `fmt::Result` plumbing is deleted — Buff has no
+//     `fmt::Formatter`; a Buff function just `return "..."`.
+//   * `impl BinaryOp { pub fn to_json(&self) -> serde_json::Value }` ->
+//     DEFERRED (see header). The JSON serialization contract for
+//     `buff check --dump-ast` stays in the Rust host.
+//   * `pub` visibility dropped — Buff default visibility is module-private
+//     (porting-conventions §6d); `export` is only needed when a symbol is
+//     imported by another file (none yet — single-file port).
+//   * `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]` dropped — Buff
+//     auto-derives Debug, Clone, PartialEq; Copy/Eq/Hash are Rust-host
+//     concerns (Buff is GC-backed and uses structural equality).
+
+// A binary operator (e.g. +, ==, +=).
+enum BinaryOp {
+    // Arithmetic
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    // Comparison
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    // Logical
+    And,
+    Or,
+    // Bitwise
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    // Assignment (compound included)
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    // T101: Null coalescing `??` — lowers to `.unwrap_or()`.
+    NullCoalesce,
+}
+
+// A unary operator (e.g. -x, !x, ~x).
+enum UnaryOp {
+    // `-x` — numeric negation.
+    Neg,
+    // `!x` — logical NOT.
+    Not,
+    // `~x` — bitwise NOT.
+    BitNot,
+}
+
+// Render a BinaryOp as its source-syntax symbol (e.g. Add -> "+", Shl -> "<<").
+//
+// Mirrors the Rust `impl fmt::Display for BinaryOp` body verbatim. The match
+// arms use UNQUALIFIED variant names (Add, Sub, ...) per porting-conventions
+// §8e — qualified patterns (BinaryOp.Add) are rejected by the parser. The
+// data mapping is unchanged: same variant -> same symbol.
+func binary_op_to_string(op: BinaryOp) -> String:
+    return match op {
+        // Arithmetic
+        Add => "+",
+        Sub => "-",
+        Mul => "*",
+        Div => "/",
+        Mod => "%",
+        // Comparison
+        Eq => "==",
+        Neq => "!=",
+        Lt => "<",
+        Gt => ">",
+        Lte => "<=",
+        Gte => ">=",
+        // Logical
+        And => "&&",
+        Or => "||",
+        // Bitwise
+        BitAnd => "&",
+        BitOr => "|",
+        BitXor => "^",
+        Shl => "<<",
+        Shr => ">>",
+        // Assignment
+        Assign => "=",
+        AddAssign => "+=",
+        SubAssign => "-=",
+        MulAssign => "*=",
+        DivAssign => "/=",
+        ModAssign => "%=",
+        // T101
+        NullCoalesce => "??",
+    }
+
+// Render a UnaryOp as its source-syntax symbol (e.g. Neg -> "-", Not -> "!").
+//
+// Mirrors the Rust `impl fmt::Display for UnaryOp` body verbatim.
+func unary_op_to_string(op: UnaryOp) -> String:
+    return match op {
+        Neg => "-",
+        Not => "!",
+        BitNot => "~",
+    }

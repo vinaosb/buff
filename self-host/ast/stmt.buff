@@ -1,0 +1,167 @@
+// Buff self-host port of `crates/buff-lang-ast/src/stmt.rs` (P4.4).
+//
+// Statement nodes for the Buff AST. Statements produce no value (or unit).
+// They live inside blocks, function bodies, and module tops. The Rust
+// reference defines two pure-data enums: [`Stmt`] (12 variants covering
+// let / assignment / expr-stmt / return / break / continue / for-in /
+// for-while / let-pattern / for-let / guard / defer / comptime-block) and
+// [`GuardCondition`] (2 variants: Let / Bool).
+//
+// Faithful 1:1 translation of the Rust reference. P0.4 verdict GREEN —
+// pure data, no logic. The Rust `impl fmt::Display for Stmt` /
+// `impl fmt::Display for GuardCondition` (free-form text rendering) and
+// `impl Stmt { fn to_json() }` / `impl GuardCondition { fn to_json() }`
+// (manual serde_json::Value builders for `buff check --dump-ast`) are NOT
+// ported: Buff has no `fmt::Display` trait (the closest idiom is a free
+// `to_string` function), and serde JSON serialization is a Rust-host
+// concern (per porting-conventions §8b: "Port the data type; document the
+// serde impl as deferred"). The `#[cfg(test)] mod tests` block is also
+// omitted (Buff uses `@test` attributes on test functions in a separate
+// `equivalence_*.buff` file — see porting-conventions §5).
+//
+// Translation decisions:
+//   * `pub enum Stmt { LetDecl { name, value, mutable, ty, span }, ... }`
+//     (Rust struct variants) -> tuple variants with a documented field
+//     order: `LetDecl(Ident, Expr, Bool, Option<TypeRef>, Span)`. Buff has
+//     no named-field enum variants (the parser at
+//     `crates/buff-lang-parser/src/stmt/stmt_decl.rs:660-740` accepts only
+//     unit variants and tuple variants). Field order matches the Rust
+//     source declaration order verbatim. This mirrors the precedent in
+//     `self-host/parser/stmt.buff` lines 24-35 (`enum IfCondition { Let(
+//     Pattern, Expr, Span), Bool(Expr) }` — same shape as GuardCondition
+//     below). Construction stays positional; field semantics are
+//     documented in the per-variant comment.
+//   * `Vec<GuardCondition>` -> `Vector<GuardCondition>` (Buff uses Vector,
+//     not Vec — porting-conventions §7c hard rule).
+//   * `Option<TypeRef>` / `Option<Expr>` preserved verbatim (Buff has
+//     `Option<T>` in the prelude).
+//   * `bool` -> `Bool` (porting-conventions §7a).
+//   * `pub` visibility dropped — Buff default visibility is module-private
+//     (porting-conventions §6d); `export` is only needed when a symbol is
+//     imported by another file (none yet — single-file port).
+//   * `#[derive(Debug, Clone, PartialEq)]` dropped — Buff auto-derives
+//     Debug, Clone, PartialEq on every struct/enum (porting-conventions
+//     §8b).
+//   * Type references (`Ident`, `Expr`, `Pattern`, `BinaryOp`, `TypeRef`,
+//     `Block`, `Span`) resolve to sibling files once the M7 monolith
+//     loader (Phase 5) concatenates `self-host/ast/*.buff`. Until then
+//     they are forward references — `buff check` is permissive about
+//     unresolved user-defined types (the parser and TypeInferencer treat
+//     them as opaque type names).
+
+// A single statement.
+enum Stmt {
+    // LetDecl(name, value, mutable, ty, span) — a `let` binding:
+    // `let name[: ty] = value;` (optionally `mut`).
+    LetDecl(Ident, Expr, Bool, Option<TypeRef>, Span),
+    // Assignment(target, op, value, span) — `target op value;` (covers
+    // `=`, `+=`, ...).
+    Assignment(Expr, BinaryOp, Expr, Span),
+    // ExprStmt(expr, span) — a bare expression used as a statement.
+    ExprStmt(Expr, Span),
+    // Return(value, span) — a `return` statement, optionally with a value.
+    // Option.None carries a bare `return;`.
+    Return(Option<Expr>, Span),
+    // Break(span) — a `break` statement.
+    Break(Span),
+    // Continue(span) — a `continue` statement.
+    Continue(Span),
+    // ForIn(var, iter, body, span) — an iterator loop:
+    // `for var in iter { body }`.
+    ForIn(Ident, Expr, Block, Span),
+    // ForWhile(cond, body, span) — a conditional loop (while-style):
+    // `for cond { body }`.
+    ForWhile(Expr, Block, Span),
+    // LetPattern(pattern, value, mutable, ty, span) — a destructuring
+    // `let`: `let (x, y) = expr` or `let Point { x, y } = e` (T71). The
+    // binding target is a full Pattern rather than a bare name.
+    // mutable/ty mirror LetDecl (applied per-binding at codegen); both
+    // are usually false/None for destructuring.
+    LetPattern(Pattern, Expr, Bool, Option<TypeRef>, Span),
+    // ForLet(pattern, value, body, span) — a looping binding:
+    // `for let PATTERN = EXPR { body }` (T72).
+    //
+    // On each iteration the pattern is matched against value; if it
+    // matches, the body runs and the loop repeats; if it doesn't, the
+    // loop terminates. Codegen lowers this to Rust's `while let PAT = EXPR
+    // { body }` (the natural Rust form — Buff spells it `for let` because
+    // `while` is NOT a reserved Buff keyword and the loop reads like the
+    // iterator-form `for v in iter`).
+    //
+    // Carries a single `let`-binding condition only (NOT a let-chain —
+    // T74). The pattern reuses the shared Pattern enum. The typical use is
+    // `for let Some(x) = iter.next() { ... }` which lowers to Rust
+    // `while let Some(x) = iter.next() { ... }`.
+    //
+    // This is additive (T72): no existing variant was renamed, reordered,
+    // or had its payload altered. ForIn and ForWhile stay 100% untouched
+    // — `for v in iter { }` and `for cond { }` still produce their
+    // respective variants.
+    ForLet(Pattern, Expr, Block, Span),
+    // Guard(conditions, else_block, span) — an early-return guard:
+    // `guard <cond>[, <cond>...] else { block }` (T73).
+    //
+    // Each condition in conditions is checked IN ORDER; if ANY fails,
+    // else_block runs (which must diverge via return/break/continue). If
+    // ALL succeed, execution continues with the next statement. A
+    // GuardCondition.Let additionally introduces its pattern's bindings
+    // into the ENCLOSING scope (mirroring Rust's let-else); a
+    // GuardCondition.Bool is a plain boolean check.
+    //
+    // Codegen emits ONE Rust statement per condition at the same scope
+    // level (NOT wrapped in an inner block, which would scope-kill the
+    // let-bindings):
+    //   - Let(pattern, value, span) -> `let PAT = VALUE else ELSE_BLOCK;`
+    //     (Rust let-else; the bindings stay in scope).
+    //   - Bool(expr) -> `if !(EXPR) ELSE_BLOCK` (negated condition; the
+    //     else-block runs when the original condition is FALSE).
+    //
+    // Multiple conditions all share the SAME else_block — every failing
+    // condition dispatches to it.
+    //
+    // This is additive (T73): no existing variant was renamed, reordered,
+    // or had its payload altered.
+    Guard(Vector<GuardCondition>, Block, Span),
+    // Defer(expr, span) — a deferred-execution statement: `defer EXPR`
+    // (T100).
+    //
+    // Schedules expr to run when the ENCLOSING FUNCTION exits — on ANY
+    // exit path (return or fall-through end). Multiple defers run LIFO
+    // (last-registered first). The codegen collects deferred expressions
+    // during lowering (in registration order) and emits them in REVERSE
+    // order at every function exit point (each Stmt.Return and the
+    // implicit fall-through at the body end).
+    //
+    // v0.5 carries a single Expr (a deferred block is a future extension).
+    // A typical use is `defer f.close()` (a method call) or `defer
+    // print("done")` (a prelude call).
+    //
+    // This is additive (T100): no existing variant was renamed, reordered,
+    // or had its payload altered.
+    Defer(Expr, Span),
+    // ComptimeBlock(body, span) — T53: a comptime-evaluated block:
+    // `comptime { body }`.
+    //
+    // The body is evaluated at compile time by the comptime interpreter
+    // (T53 in-flight). The result substitutes into the surrounding code.
+    // Carries a single Block (the comptime body) + span.
+    //
+    // This is additive (T53): no existing variant was renamed, reordered,
+    // or had its payload altered.
+    ComptimeBlock(Block, Span),
+}
+
+// A single condition inside a Stmt.Guard (T73).
+//
+// Either a let-binding (which introduces names into the enclosing scope via
+// Rust's let-else codegen) or a boolean expression (which must hold for
+// the guard to pass).
+enum GuardCondition {
+    // Let(pattern, value, span) — `let PATTERN = expr`; binds PATTERN
+    // against expr. If the pattern doesn't match, the guard's else-block
+    // runs (and PATTERN's bindings are NOT introduced).
+    Let(Pattern, Expr, Span),
+    // Bool(expr) — a boolean expression. Must evaluate to true for the
+    // guard to pass. Codegen negates it: `if !(expr) else_block`.
+    Bool(Expr),
+}
