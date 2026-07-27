@@ -135,9 +135,7 @@ pub async fn fetch_checksum_sidecar(
     let hex = body
         .split_whitespace()
         .next()
-        .ok_or_else(|| BuffupError::Extract(format!(
-            "empty .sha256 sidecar at {sidecar_url}"
-        )))?;
+        .ok_or_else(|| BuffupError::Extract(format!("empty .sha256 sidecar at {sidecar_url}")))?;
     Ok(hex.to_string())
 }
 

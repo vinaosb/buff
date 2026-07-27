@@ -971,6 +971,3 @@ fn test_i64_max_literal_unchanged() {
     assert_eq!(tokens.len(), 2);
     assert_eq!(tokens[0], TokenKind::IntLit(i64::MAX));
 }
-
-
-

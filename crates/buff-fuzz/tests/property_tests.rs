@@ -32,7 +32,10 @@ fn mk_fuzz_func(name: &str, param_ty: &str, param_count: usize) -> FuncDecl {
         name: Ident::new(name, dummy_span()),
         params,
         return_type: Some(named_type("Bool")),
-        body: Block { stmts: Vec::new(), span: dummy_span() },
+        body: Block {
+            stmts: Vec::new(),
+            span: dummy_span(),
+        },
         is_async: false,
         is_unsafe: false,
         is_extern: false,

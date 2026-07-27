@@ -625,8 +625,7 @@ impl Expr {
                 "span": span_to_json(*span),
             }),
             Expr::FuncCall { callee, args, span } => {
-                let args_json: Vec<serde_json::Value> =
-                    args.iter().map(Expr::to_json).collect();
+                let args_json: Vec<serde_json::Value> = args.iter().map(Expr::to_json).collect();
                 json!({
                     "type": "FuncCall",
                     "callee": callee.to_json(),
@@ -640,8 +639,7 @@ impl Expr {
                 args,
                 span,
             } => {
-                let args_json: Vec<serde_json::Value> =
-                    args.iter().map(Expr::to_json).collect();
+                let args_json: Vec<serde_json::Value> = args.iter().map(Expr::to_json).collect();
                 json!({
                     "type": "MethodCall",
                     "receiver": receiver.to_json(),
@@ -676,9 +674,7 @@ impl Expr {
             } => {
                 let fields_json: Vec<serde_json::Value> = fields
                     .iter()
-                    .map(|(n, v)| {
-                        json!({ "name": n.to_json(), "value": v.to_json() })
-                    })
+                    .map(|(n, v)| json!({ "name": n.to_json(), "value": v.to_json() }))
                     .collect();
                 json!({
                     "type": "StructInit",
@@ -741,9 +737,7 @@ impl Expr {
             Expr::MapLit { entries, span } => {
                 let entries_json: Vec<serde_json::Value> = entries
                     .iter()
-                    .map(|(k, v)| {
-                        json!({ "key": k.to_json(), "value": v.to_json() })
-                    })
+                    .map(|(k, v)| json!({ "key": k.to_json(), "value": v.to_json() }))
                     .collect();
                 json!({
                     "type": "MapLit",
@@ -863,8 +857,7 @@ impl Pattern {
                 })
             }
             Pattern::Tuple(subs, span) => {
-                let subs_json: Vec<serde_json::Value> =
-                    subs.iter().map(Pattern::to_json).collect();
+                let subs_json: Vec<serde_json::Value> = subs.iter().map(Pattern::to_json).collect();
                 json!({
                     "type": "Tuple",
                     "subpatterns": subs_json,
@@ -879,9 +872,7 @@ impl Pattern {
             } => {
                 let fields_json: Vec<serde_json::Value> = fields
                     .iter()
-                    .map(|(n, p)| {
-                        json!({ "name": n.to_json(), "pattern": p.to_json() })
-                    })
+                    .map(|(n, p)| json!({ "name": n.to_json(), "pattern": p.to_json() }))
                     .collect();
                 json!({
                     "type": "Struct",
@@ -892,8 +883,7 @@ impl Pattern {
                 })
             }
             Pattern::Or(alts, span) => {
-                let alts_json: Vec<serde_json::Value> =
-                    alts.iter().map(Pattern::to_json).collect();
+                let alts_json: Vec<serde_json::Value> = alts.iter().map(Pattern::to_json).collect();
                 json!({
                     "type": "Or",
                     "alternatives": alts_json,

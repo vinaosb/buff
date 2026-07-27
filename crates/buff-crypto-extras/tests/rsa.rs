@@ -33,8 +33,8 @@ const RSA_MIN_BITS: usize = 2048;
 /// for Spki, `-----BEGIN PRIVATE KEY-----` for PKCS#8).
 #[test]
 fn rsa_generate_keypair_2048_returns_well_formed_pem_pair() {
-    let kp = rsa_api::generate_keypair(RSA_MIN_BITS)
-        .expect("2048-bit keypair generation must succeed");
+    let kp =
+        rsa_api::generate_keypair(RSA_MIN_BITS).expect("2048-bit keypair generation must succeed");
 
     assert!(
         !kp.public_pem.is_empty(),
@@ -69,7 +69,14 @@ fn rsa_generate_keypair_2048_returns_well_formed_pem_pair() {
 fn rsa_generate_keypair_below_min_bits_returns_invalid_length() {
     let result = rsa_api::generate_keypair(1024);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: RSA_MIN_BITS, got: 1024, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: RSA_MIN_BITS,
+                got: 1024,
+                ..
+            })
+        ),
         "1024-bit modulus must be rejected with InvalidLength {{ expected: 2048 }}, got {:?}",
         result
     );
@@ -77,7 +84,14 @@ fn rsa_generate_keypair_below_min_bits_returns_invalid_length() {
     // 2047 (one bit under the floor) must also be rejected.
     let result = rsa_api::generate_keypair(2047);
     assert!(
-        matches!(result, Err(CryptoError::InvalidLength { expected: RSA_MIN_BITS, got: 2047, .. })),
+        matches!(
+            result,
+            Err(CryptoError::InvalidLength {
+                expected: RSA_MIN_BITS,
+                got: 2047,
+                ..
+            })
+        ),
         "2047-bit modulus must be rejected (one bit below floor), got {:?}",
         result
     );
@@ -100,8 +114,8 @@ fn rsa_sign_verify_round_trip_returns_true() {
         .expect("keypair generation for sign-verify test must succeed");
     let message = b"The quick brown fox jumps over the lazy dog";
 
-    let signature = rsa_api::sign(&kp.private_pem, message)
-        .expect("RSA.sign on a valid PEM must succeed");
+    let signature =
+        rsa_api::sign(&kp.private_pem, message).expect("RSA.sign on a valid PEM must succeed");
 
     // Signature length = modulus length in bytes (256 bytes for 2048-bit).
     assert_eq!(
@@ -150,8 +164,8 @@ fn rsa_verify_with_wrong_public_key_returns_false() {
         .expect("keypair B for wrong-key test must generate");
 
     let message = b"signed under keypair A, verified against keypair B";
-    let signature = rsa_api::sign(&kp_a.private_pem, message)
-        .expect("sign under keypair A must succeed");
+    let signature =
+        rsa_api::sign(&kp_a.private_pem, message).expect("sign under keypair A must succeed");
 
     // Verify against kp_b's public key (NOT kp_a's). Must be false.
     let verified = rsa_api::verify(&kp_b.public_pem, message, &signature);
@@ -186,8 +200,8 @@ fn rsa_verify_tampered_message_returns_false() {
 /// padded digest.
 #[test]
 fn rsa_verify_tampered_signature_bytes_returns_false() {
-    let kp = rsa_api::generate_keypair(RSA_MIN_BITS)
-        .expect("keypair for sig-tamper test must generate");
+    let kp =
+        rsa_api::generate_keypair(RSA_MIN_BITS).expect("keypair for sig-tamper test must generate");
     let message = b"payload protected against signature-bit flips";
 
     let mut signature = rsa_api::sign(&kp.private_pem, message)

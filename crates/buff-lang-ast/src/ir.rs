@@ -84,10 +84,8 @@ impl ComputeNode {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let defs_json: Vec<serde_json::Value> =
-            self.defs.iter().map(|i| i.to_json()).collect();
-        let uses_json: Vec<serde_json::Value> =
-            self.uses.iter().map(|i| i.to_json()).collect();
+        let defs_json: Vec<serde_json::Value> = self.defs.iter().map(|i| i.to_json()).collect();
+        let uses_json: Vec<serde_json::Value> = self.uses.iter().map(|i| i.to_json()).collect();
         json!({
             "id": self.id.to_json(),
             "source_expr": match &self.source_expr {
@@ -111,12 +109,9 @@ impl IoNode {
     pub fn to_json(&self) -> serde_json::Value {
         use crate::common::span_to_json;
         use serde_json::json;
-        let args_json: Vec<serde_json::Value> =
-            self.args.iter().map(Expr::to_json).collect();
-        let defs_json: Vec<serde_json::Value> =
-            self.defs.iter().map(|i| i.to_json()).collect();
-        let uses_json: Vec<serde_json::Value> =
-            self.uses.iter().map(|i| i.to_json()).collect();
+        let args_json: Vec<serde_json::Value> = self.args.iter().map(Expr::to_json).collect();
+        let defs_json: Vec<serde_json::Value> = self.defs.iter().map(|i| i.to_json()).collect();
+        let uses_json: Vec<serde_json::Value> = self.uses.iter().map(|i| i.to_json()).collect();
         json!({
             "id": self.id.to_json(),
             "callee": self.callee.to_json(),
@@ -189,9 +184,11 @@ impl IrGraph {
         // nodes: array of {id, node} pairs in ascending-id order.
         let nodes_json: Vec<serde_json::Value> = node_ids
             .iter()
-            .filter_map(|id| self.nodes.get(id).map(|n| {
-                json!({ "id": id.to_json(), "node": n.to_json() })
-            }))
+            .filter_map(|id| {
+                self.nodes
+                    .get(id)
+                    .map(|n| json!({ "id": id.to_json(), "node": n.to_json() }))
+            })
             .collect();
 
         // edges: array of {from, tos: [sorted-dependent-ids]}.

@@ -1,4 +1,4 @@
-﻿//! `buff check` â€” type-checker + naming-convention linter (T55).
+//! `buff check` â€” type-checker + naming-convention linter (T55).
 //!
 //! Runs the compiler's front-end (`tokenize` â†’ `parse`) and the
 //! [`TypeInferencer`] over every function body WITHOUT invoking codegen
@@ -299,9 +299,7 @@ pub fn run_check_file_with_format(
     format: ErrorFormat,
     no_color: bool,
 ) -> anyhow::Result<CheckReport> {
-    let is_buffhtml = file
-        .extension()
-        .is_some_and(|e| e == BUFFHTML_EXT);
+    let is_buffhtml = file.extension().is_some_and(|e| e == BUFFHTML_EXT);
     if is_buffhtml {
         return run_check_buffhtml_file_with_format(file, format, no_color);
     }
@@ -440,11 +438,7 @@ fn type_check_decls(decls: &[Decl]) -> Vec<buff_lang_error::TypeError> {
     errors
 }
 
-fn type_check_decl(
-    decl: &Decl,
-    all_decls: &[Decl],
-    errors: &mut Vec<buff_lang_error::TypeError>,
-) {
+fn type_check_decl(decl: &Decl, all_decls: &[Decl], errors: &mut Vec<buff_lang_error::TypeError>) {
     match decl {
         Decl::FuncDecl(f) => type_check_func(f, all_decls, errors),
         Decl::TraitDecl(t) => {
@@ -487,7 +481,7 @@ fn type_check_func(
     // `TypeRef` annotations to resolved `Type` values (primitives only;
     // user-defined types return `None` and stay `Unknown`, which is
     // permissive in the inference rules).
-    inferencer.register_function_signatures(all_decls, |tr| typeref_to_type(tr));
+    inferencer.register_function_signatures(all_decls, typeref_to_type);
     // Pre-bind EVERY parameter. `typeref_to_type` only recognises
     // primitives + Option/Result; user-defined types (struct/enum names)
     // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED

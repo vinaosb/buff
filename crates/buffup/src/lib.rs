@@ -71,9 +71,10 @@ use clap::Parser;
 /// real command failures as [`BuffupError`].
 pub async fn dispatch(command: Command) -> Result<(), BuffupError> {
     match command {
-        Command::Install { version, skip_checksum } => {
-            commands::install::run(version, skip_checksum).await
-        }
+        Command::Install {
+            version,
+            skip_checksum,
+        } => commands::install::run(version, skip_checksum).await,
         Command::Default { version } => commands::default_cmd::run(version),
         Command::List => commands::list::run(),
         Command::Update => commands::update::run(),

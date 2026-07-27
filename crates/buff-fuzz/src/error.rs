@@ -80,6 +80,7 @@ pub struct FailureBatch {
     pub inputs: Vec<i64>,
 }
 
+#[allow(dead_code)]
 impl FailureBatch {
     /// Construct an empty batch.
     pub(crate) fn new() -> Self {
