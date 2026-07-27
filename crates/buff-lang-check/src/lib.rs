@@ -481,7 +481,7 @@ fn type_check_func(
     // `TypeRef` annotations to resolved `Type` values (primitives only;
     // user-defined types return `None` and stay `Unknown`, which is
     // permissive in the inference rules).
-    inferencer.register_function_signatures(all_decls, |tr| typeref_to_type(tr));
+    inferencer.register_function_signatures(all_decls, typeref_to_type);
     // Pre-bind EVERY parameter. `typeref_to_type` only recognises
     // primitives + Option/Result; user-defined types (struct/enum names)
     // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED

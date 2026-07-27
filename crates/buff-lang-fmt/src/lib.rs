@@ -3,6 +3,10 @@
 //! Parses a `.buff` source string to AST, then emits canonical Buff source
 //! that enforces the formatting-relevant subset of the 18 conventions (see
 //! `.sisyphus/plans/buff-conventions.md`).
+
+// Boxing the parser error wrapper would change the public API surface.
+// Allowed at the crate level (same policy as buff-lang-cli/pipeline).
+#![allow(clippy::result_large_err)]
 //!
 //! # Enforced conventions
 //!
