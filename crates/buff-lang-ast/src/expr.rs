@@ -1340,10 +1340,10 @@ mod tests {
         // T21: StringInterp renders as `Interp[Lit("..."), Expr(...), ...]`.
         let parts = vec![
             InterpPart::Literal("Hello ".into()),
-            InterpPart::Expr(Box::new(Expr::Ident(
-                Ident::new("name", dummy_span()),
-                dummy_span(),
-            )), None),
+            InterpPart::Expr(
+                Box::new(Expr::Ident(Ident::new("name", dummy_span()), dummy_span())),
+                None,
+            ),
             InterpPart::Literal("!".into()),
         ];
         let e = Expr::StringInterp {
