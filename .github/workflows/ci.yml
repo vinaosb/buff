@@ -139,6 +139,30 @@ jobs:
           done
           echo "Results: $PASS passed, $FAIL failed, $SKIPPED skipped"
 
+  # ── Installer lint (fast, checks for placeholder strings) ─────────────────
+  installer-lint:
+    name: Installer lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for placeholder strings in installer files
+        run: |
+          FAIL=0
+          # Reject any <FILL-ME or FILL_ME patterns in installers/
+          # (empty sha256 "" is a valid intermediate state — the release
+          #  workflow fills it via update-sha256.sh before publishing.)
+          for pattern in '<FILL-ME' 'FILL_ME'; do
+            if grep -rn "$pattern" installers/ 2>/dev/null; then
+              echo "::error::Found placeholder '$pattern' in installer files"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::error::Installer files contain placeholder strings"
+            exit 1
+          fi
+          echo "::notice::All installer files are free of placeholder strings"
+
   # ── Docker build validation ─────────────────────────────────────────────────
   docker-build:
     name: Docker image build

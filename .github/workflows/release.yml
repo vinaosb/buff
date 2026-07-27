@@ -139,6 +139,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Update Homebrew formula SHA-256 hashes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"  # strip leading "v"
+          chmod +x installers/homebrew/update-sha256.sh
+          ./installers/homebrew/update-sha256.sh "$VERSION"
+
       - name: Create GitHub Release with artifacts
         uses: softprops/action-gh-release@v2
         with:
