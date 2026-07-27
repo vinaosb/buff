@@ -68,13 +68,18 @@ pub struct HttpClient {
 
 impl HttpClient {
     /// Create a new `HttpClient` with default settings (no custom headers,
-    /// no proxy, default timeout).
+    /// no proxy, 30s request timeout, 10s connect timeout).
     ///
-    /// Wraps `reqwest::blocking::Client::new()`. The body is wrapped in
+    /// Wraps `reqwest::blocking::Client::builder()`. The body is wrapped in
     /// `catch_unwind` per T4 FFI guide R6.
     pub fn new() -> Self {
-        let result = catch_unwind(AssertUnwindSafe(|| HttpClient {
-            inner: reqwest::blocking::Client::new(),
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let inner = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))       // P0.17: ft-001 — prevent infinite hangs
+                .connect_timeout(std::time::Duration::from_secs(10)) // P0.17: ft-001 — fast-fail unreachable hosts
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            HttpClient { inner }
         }));
         result.unwrap_or_else(|_| HttpClient {
             inner: reqwest::blocking::Client::new(),
