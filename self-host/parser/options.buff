@@ -1,0 +1,81 @@
+// Buff self-host port of `crates/buff-lang-parser/src/options.rs` (P4.1c).
+//
+// Parser edition selection (T57). An Edition selects which language
+// extensions are accepted by the parser. The default (Standard) is the
+// historical Buff language as documented through v1.18 — it has 100%
+// backwards compatibility. Scientific opts into the Julia-inspired
+// mathematical syntax extensions (T57): implicit multiplication (2x),
+// Unicode operators, matrix literals ([1 2; 3 4]), and the
+// adjoint/transpose postfix (A').
+//
+// Faithful 1:1 translation. Rust #[derive(...)] attributes have no Buff
+// equivalent (Buff has no derive system). The Edition enum + its methods
+// are ported directly; the clippy/backend plumbing is not.
+//
+// Translation decisions:
+//   - #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)] → deleted
+//   - #[default] attribute on Standard variant → documented in comment
+//   - matches!(self, Self::Scientific) → self == Edition.Scientific
+//   - TokenKind or-patterns → sequential if/else checks
+//   - &'static str → String (Buff has no static lifetime)
+
+// Which language edition the parser should accept.
+//
+// Default: Edition.Standard (backwards-compatible with all prior Buff releases).
+enum Edition:
+    // The default Buff language (v0.1 -> v1.18 surface).
+    // All historical programs parse identically under this edition. Unicode
+    // mathematical operators and the adjoint postfix are REJECTED as parse
+    // errors with a helpful note. The four Unicode comparison aliases
+    // (<= >= != ->) ARE lexed into their existing ASCII token kinds
+    // regardless of edition, so they continue to work.
+    Standard  // #[default]
+
+    // The opt-in mathematical edition (T57, v1.19).
+    // Accepts every Standard-edition program PLUS the Julia-inspired
+    // extensions: implicit multiplication (2x, 2(x+y), 3sin(x)),
+    // Unicode operators, matrix literals ([1 2; 3 4]), and the adjoint
+    // postfix (A' -> A.transpose()).
+    Scientific
+
+// Returns true when this is Edition.Scientific.
+func edition_is_scientific(ed: Edition) -> Bool:
+    return ed == Edition.Scientific
+
+// Returns Ok(()) if the token kind is acceptable under this edition, else
+// a human-readable error message naming the missing edition opt-in.
+//
+// Used by the parser to gate scientific-edition-only tokens. The four
+// Unicode comparison aliases (<= >= != ->) are NOT gated here because they
+// lex directly into the existing ASCII token kinds (LtEq, GtEq, NotEq,
+// Arrow) — the parser never sees them as distinct tokens.
+func edition_require_for(ed: Edition, kind: TokenKind) -> Result<Void, String>:
+    let needs_scientific = edition_token_needs_scientific(kind)
+    let is_sci = edition_is_scientific(ed)
+    if needs_scientific:
+        if is_sci == false:
+            return Result.Err("this syntax requires edition = \"scientific\" in buff.toml (T57 mathematical syntax edition)")
+    return Result.Ok(())
+
+// Helper: check if a TokenKind requires the Scientific edition.
+// Ported from the Rust matches!(kind, TokenKind::Sum | ...) or-pattern.
+// Buff does not support or-patterns in match arms, so this uses a
+// sequence of equality checks instead.
+func edition_token_needs_scientific(kind: TokenKind) -> Bool:
+    if kind == TokenKind.Sum:
+        return true
+    if kind == TokenKind.Product:
+        return true
+    if kind == TokenKind.Sqrt:
+        return true
+    if kind == TokenKind.InUni:
+        return true
+    if kind == TokenKind.NotInUni:
+        return true
+    if kind == TokenKind.SubsetUni:
+        return true
+    if kind == TokenKind.ApproxUni:
+        return true
+    if kind == TokenKind.Adjoint:
+        return true
+    return false

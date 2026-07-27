@@ -1,0 +1,40 @@
+// Buff self-host port of `crates/buff-lang-parser/src/lib.rs` (P4.1c).
+//
+// Buff Parser crate root — hand-rolled recursive-descent + Pratt parser.
+//
+// Converts a slice of buff_lang_lexer::Token (produced by the T6 lexer)
+// into AST nodes (buff_lang_ast::Decl / buff_lang_ast::Expr).
+//
+// Layout (each module is a sibling .buff file):
+//   stream.buff    — the TokenStream cursor (peek / next / expect)
+//   expr.buff      — expression parser entry point (parse_expression)
+//   stmt.buff      — statement parser entry point (parse_statement)
+//   stmt_decl.buff — declaration parser (struct/enum/func/trait/etc.)
+//   parser.buff    — top-level parse() returning Vector<Decl>
+//   options.buff   — Edition selection (Standard / Scientific)
+//
+// Faithful 1:1 translation. Rust `pub mod` declarations have no Buff
+// equivalent (Buff has no module system — each .buff file is standalone).
+// Rust `pub use` re-exports become documentation comments listing the
+// public API surface.
+//
+// Translation decisions:
+//   - `pub mod X` → comment documenting the sibling .buff file
+//   - `pub use X::Y` → comment documenting the re-export
+//   - `#![allow(clippy::...)]` → deleted (Buff has no clippy)
+
+// Public API surface (re-exported from sibling files):
+//
+// From options.buff: Edition
+// From parser.buff: parse, parse_expression, parse_expression_with_edition,
+//                   parse_recovering, parse_with_edition
+// From stmt.buff: parse_attributes, parse_block, parse_block_braces,
+//                 parse_enum_decl, parse_export_decl, parse_extend_decl,
+//                 parse_extern_crate_decl, parse_extern_func_decl_with_abi,
+//                 parse_func_decl, parse_if_expr, parse_import_decl,
+//                 parse_params, parse_statement, parse_struct_decl,
+//                 parse_trait_decl, parse_type_params, parse_type_ref
+// From stream.buff: TokenStream
+// From expr.buff: parse_match, parse_pattern
+
+// T27: match parsing lives in expr.buff (match is an expression, like if).
