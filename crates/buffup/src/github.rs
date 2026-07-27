@@ -23,6 +23,9 @@ use serde::Deserialize;
 
 use crate::error::BuffupError;
 
+/// Hex-encoded SHA-256 digest string (64 lowercase hex chars).
+pub type Sha256Hex = String;
+
 /// Default base URL for the GitHub Releases API.
 ///
 /// Matches the canonical `api.github.com/repos/{owner}/{repo}` shape.
@@ -103,4 +106,44 @@ pub async fn fetch_release(
     }
     let release: Release = resp.json().await?;
     Ok(release)
+}
+
+/// Fetch the `.sha256` sidecar for a tarball and return the expected
+/// hex digest.
+///
+/// The sidecar URL is `<tarball_url>.sha256`. GitHub Releases
+/// published by the release workflow include a `.sha256` sidecar for
+/// every archive. The sidecar content is either `<hex_hash>  <filename>`
+/// or just `<hex_hash>` — we parse the first whitespace-delimited token.
+pub async fn fetch_checksum_sidecar(
+    client: &reqwest::Client,
+    tarball_url: &str,
+) -> Result<Sha256Hex, BuffupError> {
+    let sidecar_url = format!("{tarball_url}.sha256");
+    let resp = client
+        .get(&sidecar_url)
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(BuffupError::HttpStatus(status));
+    }
+    let body = resp.text().await?;
+    // Parse first whitespace-delimited token (handles both
+    // "<hex>  <filename>" and bare "<hex>" formats).
+    let hex = body
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| BuffupError::Extract(format!(
+            "empty .sha256 sidecar at {sidecar_url}"
+        )))?;
+    Ok(hex.to_string())
+}
+
+/// Compute the SHA-256 hex digest of `data`.
+pub fn sha256_digest(data: &[u8]) -> Sha256Hex {
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(data);
+    hash.iter().map(|b| format!("{b:02x}")).collect()
 }

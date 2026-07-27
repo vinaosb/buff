@@ -28,7 +28,9 @@ async fn main() -> anyhow::Result<()> {
     let cli: Cli = Cli::parse();
 
     let result = match cli.command {
-        Command::Install { version } => buffup::commands::install::run(version).await,
+        Command::Install { version, skip_checksum } => {
+            buffup::commands::install::run(version, skip_checksum).await
+        }
         Command::Default { version } => buffup::commands::default_cmd::run(version),
         Command::List => buffup::commands::list::run(),
         Command::Update => buffup::commands::update::run(),

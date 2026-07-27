@@ -99,4 +99,13 @@ pub enum BuffupError {
     /// help/version requests without special-casing exit codes.
     #[error("{0}")]
     Clap(#[from] clap::error::Error),
+
+    /// SHA-256 checksum mismatch between the downloaded tarball and
+    /// the expected sidecar value. Indicates corruption or tampering.
+    #[error(
+        "Checksum mismatch!\n  Expected: {expected}\n  Actual:   {actual}\n\
+         The downloaded file may be corrupted or tampered with.\n\
+         Use --skip-checksum to bypass (NOT RECOMMENDED)."
+    )]
+    ChecksumMismatch { expected: String, actual: String },
 }

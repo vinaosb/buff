@@ -27,7 +27,7 @@ use crate::error::BuffupError;
 use crate::{github, paths};
 
 /// Entry point for `buffup install <version>`.
-pub async fn run(version: String) -> Result<(), BuffupError> {
+pub async fn run(version: String, skip_checksum: bool) -> Result<(), BuffupError> {
     let v = semver::Version::parse(&version)?;
 
     let target = paths::version_dir(&v)?;
@@ -65,6 +65,23 @@ pub async fn run(version: String) -> Result<(), BuffupError> {
         .await?
         .bytes()
         .await?;
+
+    // P0.9: SHA-256 checksum verification (sec-001 — supply chain
+    // attack mitigation). Fetch the .sha256 sidecar and compare.
+    if skip_checksum {
+        eprintln!(
+            "WARNING: --skip-checksum specified. Tarball integrity NOT verified.\n\
+             This exposes you to supply chain attacks. Use only for development."
+        );
+    } else {
+        eprintln!("buffup: v{} — verifying checksum...", v);
+        let expected = github::fetch_checksum_sidecar(&client, &release.tarball_url).await?;
+        let actual = github::sha256_digest(&tarball_bytes);
+        if expected != actual {
+            return Err(BuffupError::ChecksumMismatch { expected, actual });
+        }
+        eprintln!("buffup: v{} — checksum OK", v);
+    }
 
     eprintln!(
         "buffup: v{} — unpacking {} bytes into {}...",
