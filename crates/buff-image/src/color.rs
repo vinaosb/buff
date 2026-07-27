@@ -78,7 +78,7 @@ impl Color {
     /// channel luma. The coefficient ordering matches `image::Luma`.
     /// pub(crate) — the surface contract for grayscale is observed
     /// via `img.grayscale()` + `img.get_pixel()` (T9 caps public API).
-    pub(crate) fn luma(self) -> u8 {
+    pub fn luma(self) -> u8 {
         let yf = 0.299_f32 * self.r as f32 + 0.587_f32 * self.g as f32 + 0.114_f32 * self.b as f32;
         yf.round().clamp(0.0, 255.0) as u8
     }

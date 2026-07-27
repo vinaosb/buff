@@ -13,7 +13,9 @@ fn main() -> Result<(), ValidationErrors> {
     let validator = Validator::new()
         .with_email("email")
         .with_length("name", 1, 80)
-        .with_range("age", 0, 150)?;
+        .expect("valid length")
+        .with_range("age", 0, 150)
+        .expect("valid range");
 
     let mut good: HashMap<String, String> = HashMap::new();
     good.insert("email".to_string(), "alice@example.com".to_string());

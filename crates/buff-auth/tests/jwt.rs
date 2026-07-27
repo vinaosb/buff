@@ -33,11 +33,11 @@ fn jwt_round_trip_preserves_numeric_claims() {
 
 #[test]
 fn jwt_decode_rejects_tampered_token() {
-    let token = jwt_encode(
-        &Map::from([("sub".to_string(), Value::String("alice".to_string()))]),
-        "real-secret",
-    )
-    .expect("encode");
+    let token = {
+        let mut claims = Map::new();
+        claims.insert("sub".to_string(), Value::String("alice".to_string()));
+        jwt_encode(&claims, "real-secret").expect("encode")
+    };
     let err = jwt_decode(&token, "other-secret").unwrap_err();
     assert!(matches!(err, AuthError::Jwt(_)));
 }
@@ -56,8 +56,11 @@ fn jwt_decode_rejects_empty_token() {
 
 #[test]
 fn jwt_encoded_token_has_three_compact_components() {
-    let token =
-        jwt_encode(&Map::from([("x".to_string(), Value::Bool(true))]), "secret").expect("encode");
+    let token = {
+        let mut claims = Map::new();
+        claims.insert("x".to_string(), Value::Bool(true));
+        jwt_encode(&claims, "secret").expect("encode")
+    };
     let parts: Vec<&str> = token.split('.').collect();
     assert_eq!(
         parts.len(),

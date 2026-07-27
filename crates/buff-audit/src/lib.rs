@@ -363,7 +363,7 @@ mod smoke_tests {
 
     #[test]
     fn verify_rejects_short_public_key() {
-        let err = verify(b"data", "00".repeat(64), "abcd").unwrap_err();
+        let err = verify(b"data", &"00".repeat(64), "abcd").unwrap_err();
         assert!(matches!(err, AuditError::BadKey(_)));
     }
 

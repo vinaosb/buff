@@ -148,8 +148,9 @@ fn missing_field_surfaces_in_aggregate() {
     let v = Validator::new()
         .with_email("email")
         .with_length("name", 1, 80)
+        .expect("valid length")
         .with_range("age", 0, 150)
-        .expect("valid rules");
+        .expect("valid range");
     let errs = v.validate(&input(&[])).unwrap_err();
     assert_eq!(errs.len(), 3);
     let mut fields: Vec<String> = errs
@@ -182,9 +183,11 @@ fn json_schema_has_expected_shape_for_each_rule_kind() {
         .with_email("email")
         .with_url("homepage")
         .with_length("name", 1, 80)
+        .expect("valid length")
         .with_range("age", 0, 150)
+        .expect("valid range")
         .with_regex("zip", "^[0-9]{5}$")
-        .expect("valid rules");
+        .expect("valid regex");
     let schema_str = v.to_json_schema();
     let schema: serde_json::Value = serde_json::from_str(&schema_str).expect("valid JSON");
     assert_eq!(
@@ -304,9 +307,11 @@ fn snapshot_json_schema_for_signup_form() {
     let v = Validator::new()
         .with_email("email")
         .with_length("name", 1, 80)
+        .expect("valid length")
         .with_range("age", 0, 150)
+        .expect("valid range")
         .with_regex("zip", "^[0-9]{5}$")
-        .expect("valid rules");
+        .expect("valid regex");
     let schema: serde_json::Value = serde_json::from_str(&v.to_json_schema()).expect("valid JSON");
     insta::assert_snapshot!(
         "json_schema_signup_form",

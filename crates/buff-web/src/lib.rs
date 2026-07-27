@@ -324,10 +324,10 @@ impl Web {
     /// 3. Converts the Buff [`Response`] into an axum response via
     ///    [`Response::into_axum_response`].
     ///
-    /// `pub(crate)` — exposed for the test suite's
+    /// `pub` — exposed for the test suite's
     /// `tower::ServiceExt::oneshot` integration (no TCP needed);
     /// never called from non-test code outside [`Web::run_with_addr`].
-    pub(crate) fn build_router(self) -> axum::Router {
+    pub fn build_router(self) -> axum::Router {
         let mut router = axum::Router::new();
         let mws = Arc::new(self.middlewares);
         for route in self.routes {

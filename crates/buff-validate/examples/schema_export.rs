@@ -13,9 +13,11 @@ fn main() {
         .with_email("email")
         .with_url("homepage")
         .with_length("name", 1, 80)
+        .expect("valid length")
         .with_range("age", 0, 150)
+        .expect("valid range")
         .with_regex("zip", "^[0-9]{5}$")
-        .expect("valid rules");
+        .expect("valid regex");
 
     let schema_str = validator.to_json_schema();
     println!("raw schema string: {schema_str}");

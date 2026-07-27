@@ -186,7 +186,7 @@ impl Email {
     /// - plain + html          -> `multipart(MultiPart::alternative_plain_html)`
     /// - any of the above + N attachments -> wrap in `multipart/mixed`
     ///   containing the body (or alternative) plus each attachment.
-    pub(crate) fn build_message(&self) -> Result<lettre::Message, EmailError> {
+    pub fn build_message(&self) -> Result<lettre::Message, EmailError> {
         use lettre::message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart};
 
         let from_mailbox: Mailbox = parse_mailbox(&self.from)?;
@@ -248,22 +248,22 @@ impl Email {
             .map_err(|e| EmailError::Build(e.to_string()))
     }
 
-    pub(crate) fn from_addr(&self) -> &str {
+    pub fn from_addr(&self) -> &str {
         &self.from
     }
-    pub(crate) fn to_addr(&self) -> &str {
+    pub fn to_addr(&self) -> &str {
         &self.to
     }
-    pub(crate) fn subject(&self) -> &str {
+    pub fn subject(&self) -> &str {
         &self.subject
     }
-    pub(crate) fn plain_body(&self) -> Option<&str> {
+    pub fn plain_body(&self) -> Option<&str> {
         self.plain_body.as_deref()
     }
-    pub(crate) fn html_body(&self) -> Option<&str> {
+    pub fn html_body(&self) -> Option<&str> {
         self.html_body.as_deref()
     }
-    pub(crate) fn attachments(&self) -> &[PathBuf] {
+    pub fn attachments(&self) -> &[PathBuf] {
         &self.attachments
     }
 }

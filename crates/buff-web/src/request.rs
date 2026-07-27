@@ -73,13 +73,7 @@ impl Request {
     /// the test suite + the routing-integration tests; never called
     /// from production code (production always goes through
     /// [`Request::from_axum`]).
-    #[cfg(test)]
-    pub(crate) fn new(
-        method: &str,
-        path: &str,
-        headers: Vec<(String, String)>,
-        body: Vec<u8>,
-    ) -> Self {
+    pub fn new(method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Self {
         Request {
             method: method.to_string(),
             path: path.to_string(),

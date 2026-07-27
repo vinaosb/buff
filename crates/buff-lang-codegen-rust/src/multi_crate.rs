@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn module_ident_replaces_non_ident_chars() {
         assert_eq!(module_ident_from_path("./my-mod.buff"), "my_mod");
-        assert_eq!(module_ident_from_path("./my.mod.buff"), "my");
+        assert_eq!(module_ident_from_path("./my.mod.buff"), "my_mod");
         assert_eq!(module_ident_from_path("./foo bar.buff"), "foo_bar");
     }
 

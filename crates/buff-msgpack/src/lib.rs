@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn deserialize_garbage_rejected() {
         let err = deserialize(b"not msgpack data").unwrap_err();
-        assert!(matches!(err, MsgPackError::Codec(_)));
+        assert!(matches!(err, MsgPackError::Decode(_)));
     }
 
     #[test]

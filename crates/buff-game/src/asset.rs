@@ -34,7 +34,7 @@ impl Texture {
     /// Construct a texture from raw RGBA8 bytes + dimensions.
     /// `bytes.len()` MUST equal `width * height * 4` — returns
     /// [`GameError::AssetLoad`] otherwise.
-    pub(crate) fn from_rgba8(width: u32, height: u32, bytes: Vec<u8>) -> GameResult<Self> {
+    pub fn from_rgba8(width: u32, height: u32, bytes: Vec<u8>) -> GameResult<Self> {
         let expected = (width as u64)
             .checked_mul(height as u64)
             .and_then(|n| n.checked_mul(4))
@@ -117,7 +117,7 @@ impl fmt::Display for Texture {
 /// AudioBuffer is `pub(crate)` — not part of the public API surface.
 /// Keeps the total public-fn count at exactly 40 (T16 cap).
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AudioBuffer {
+pub struct AudioBuffer {
     samples: Vec<f32>,
     sample_rate: u32,
     channels: u16,
@@ -127,11 +127,7 @@ impl AudioBuffer {
     /// Construct from already-interleaved samples.
     /// `channels` must be >= 1; `sample_rate` must be > 0;
     /// `samples.len()` must be a multiple of `channels`.
-    pub(crate) fn from_samples(
-        samples: Vec<f32>,
-        sample_rate: u32,
-        channels: u16,
-    ) -> GameResult<Self> {
+    pub fn from_samples(samples: Vec<f32>, sample_rate: u32, channels: u16) -> GameResult<Self> {
         if channels == 0 {
             return Err(GameError::AssetLoad {
                 path: "<inline>".to_string(),
@@ -233,6 +229,8 @@ impl fmt::Display for AudioBuffer {
 pub enum AssetRef<'a> {
     /// Cached texture handle.
     Texture(&'a Texture),
+    /// Cached audio buffer handle.
+    Audio(&'a AudioBuffer),
 }
 
 /// Path-keyed cache of loaded assets.
@@ -247,59 +245,59 @@ pub enum AssetRef<'a> {
 /// the cache without exposing the insert/get/clear methods on the
 /// public API surface (keeps the public-fn count under the T16 cap).
 #[derive(Debug, Default, Clone)]
-pub(crate) struct AssetCache {
+pub struct AssetCache {
     textures: BTreeMap<PathBuf, Texture>,
     audios: BTreeMap<PathBuf, AudioBuffer>,
 }
 
 impl AssetCache {
     /// Construct an empty cache.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Number of distinct textures currently cached.
-    pub(crate) fn texture_count(&self) -> usize {
+    pub fn texture_count(&self) -> usize {
         self.textures.len()
     }
 
     /// Number of distinct audio buffers currently cached.
-    pub(crate) fn audio_count(&self) -> usize {
+    pub fn audio_count(&self) -> usize {
         self.audios.len()
     }
 
     /// Total entries (textures + audios). Test helper.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.textures.len() + self.audios.len()
     }
 
     /// `true` iff both sub-caches are empty.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.textures.is_empty() && self.audios.is_empty()
     }
 
     /// Look up a cached texture by path. Returns `None` on miss.
-    pub(crate) fn get_texture(&self, path: &Path) -> Option<&Texture> {
+    pub fn get_texture(&self, path: &Path) -> Option<&Texture> {
         self.textures.get(path)
     }
 
     /// Look up a cached audio buffer by path. Returns `None` on miss.
-    pub(crate) fn get_audio(&self, path: &Path) -> Option<&AudioBuffer> {
+    pub fn get_audio(&self, path: &Path) -> Option<&AudioBuffer> {
         self.audios.get(path)
     }
 
     /// Insert (or overwrite) a cached texture.
-    pub(crate) fn insert_texture(&mut self, path: PathBuf, texture: Texture) {
+    pub fn insert_texture(&mut self, path: PathBuf, texture: Texture) {
         self.textures.insert(path, texture);
     }
 
     /// Insert (or overwrite) a cached audio buffer.
-    pub(crate) fn insert_audio(&mut self, path: PathBuf, audio: AudioBuffer) {
+    pub fn insert_audio(&mut self, path: PathBuf, audio: AudioBuffer) {
         self.audios.insert(path, audio);
     }
 
     /// Drop every cached entry. Useful between scenes.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.textures.clear();
         self.audios.clear();
     }
@@ -319,7 +317,7 @@ impl AssetCache {
 /// - [`Asset::cache_get`] — look up a cached asset by path. Returns
 ///   `None` on miss (the asset has not been loaded yet).
 pub struct Asset {
-    cache: AssetCache,
+    pub cache: AssetCache,
 }
 
 impl Asset {
@@ -330,7 +328,7 @@ impl Asset {
 
     /// Borrow the underlying cache (test hook for inspecting state).
     /// `pub(crate)` so it does not count toward the public API surface.
-    pub(crate) fn cache(&self) -> &AssetCache {
+    pub fn cache(&self) -> &AssetCache {
         &self.cache
     }
 

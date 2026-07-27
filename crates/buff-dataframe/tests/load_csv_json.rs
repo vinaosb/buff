@@ -91,9 +91,9 @@ fn load_json_lines() {
     let path = write_temp("rows.jsonl", json);
     let df = DataFrame::from_json(&path).expect("load");
     assert_eq!(df.len(), 3);
-    assert!(df.column_names().contains(&"name".to_string()));
-    assert!(df.column_names().contains(&"age".to_string()));
-    assert!(df.column_names().contains(&"active".to_string()));
+    assert!(df.column_names().contains(&"name"));
+    assert!(df.column_names().contains(&"age"));
+    assert!(df.column_names().contains(&"active"));
     assert!(matches!(
         df.get_column("age").unwrap().kind(),
         ColumnKind::Int

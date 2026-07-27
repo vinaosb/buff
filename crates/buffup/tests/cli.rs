@@ -11,7 +11,7 @@ use clap::Parser;
 fn parses_install() {
     let cli = Cli::try_parse_from(["buffup", "install", "1.0.0"]).expect("parse install");
     match cli.command {
-        Command::Install { version } => assert_eq!(version, "1.0.0"),
+        Command::Install { version, .. } => assert_eq!(version, "1.0.0"),
         other => panic!("expected Install, got {other:?}"),
     }
 }

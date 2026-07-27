@@ -327,7 +327,7 @@ fn formatting_routes_through_buff_fmt_and_returns_edits() {
 fn formatting_is_noop_when_source_already_canonical() {
     // Pre-canonicalize a source so we know its form.
     let raw = "func main():\n    print(\"hi\")\n";
-    let canonical = buff_lang_cli::fmt::format_source(raw).unwrap();
+    let canonical = buff_lang_fmt::format_source(raw).unwrap();
     let st = open(&canonical);
     assert!(
         handlers::formatting(&st).is_none(),

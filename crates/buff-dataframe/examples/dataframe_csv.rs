@@ -13,7 +13,7 @@ fn main() {
     println!("London rows:");
     println!("{}", london.to_table_string());
 
-    let by_city = df.group_by("city").unwrap_or_default();
+    let by_city = df.group_by("city").unwrap();
     let mean_age = by_city.agg("age", AggOp::Mean);
     println!("Mean age by city:");
     println!("{}", mean_age.to_table_string());
