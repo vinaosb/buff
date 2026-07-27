@@ -435,6 +435,11 @@ fn collect_named_user_structs(
             }
             collect_named_user_structs(return_type, user_structs, found);
         }
+        // DR-020 / P2.1a: trait objects name a trait, not a user struct.
+        // No recursion needed — the trait_name does not refer to a struct
+        // that could be GPU-aligned. The boxed-dyn representation is also
+        // fundamentally incompatible with #[repr(C)] + Pod/Zeroable.
+        TypeRef::TraitObject { .. } => {}
         TypeRef::Union(members, _) => {
             for m in members {
                 collect_named_user_structs(m, user_structs, found);

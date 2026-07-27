@@ -262,6 +262,63 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
     let name_end = name_tok.span.end;
     let start = name_tok.span.start;
     let name = extract_ident(name_tok)?;
+
+    // DR-020 / P2.1b: contextual recognition of `dyn Trait` in type
+    // position. `dyn` is NOT a reserved keyword — it lexes as `Ident`
+    // (per Stability Promise). When the parsed identifier is literally
+    // `dyn` and is followed by another identifier (the trait name), we
+    // build a `TypeRef::TraitObject` instead of `TypeRef::Named("dyn")`.
+    // This lets existing Buff code that uses `dyn` as a variable name
+    // continue to work in expression position; only type-position
+    // `dyn <ident>` is intercepted.
+    //
+    // MVP lifetime handling: an optional parenthesized `('static)` is
+    // accepted and recorded; other lifetimes are rejected at the lint
+    // layer (E1214, P2.1d). The borrowed form `&dyn Trait` is parsed
+    // via the same path (the `&` is consumed by the prefix-type parser
+    // upstream, leaving `dyn Trait` for this function).
+    if name.name == "dyn" {
+        let trait_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected trait name after `dyn`",
+                stream.eof_span(),
+            ))
+        })?;
+        let trait_end = trait_tok.span.end;
+        let trait_name = extract_ident(trait_tok)?;
+        // Optional lifetime: `('static)`. Other lifetimes parse here but
+        // are rejected at the type-check layer (E1214) — keeps the
+        // grammar permissive, the policy at the lint.
+        let lifetime = if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
+            stream.advance(); // consume `(`
+            let lt_tok = stream.advance().ok_or_else(|| {
+                ParseError::new(Diagnostic::error(
+                    "expected lifetime identifier inside parens",
+                    stream.eof_span(),
+                ))
+            })?;
+            // Accept any identifier as a lifetime; lint validates 'static-only.
+            let lt = match lt_tok.kind {
+                TokenKind::Ident(s) => s,
+                other => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected lifetime identifier, found `{other}`"),
+                        lt_tok.span,
+                    )));
+                }
+            };
+            stream.expect(TokenKind::RParen)?;
+            Some(lt)
+        } else {
+            None
+        };
+        return Ok(TypeRef::TraitObject {
+            trait_name,
+            lifetime,
+            span: Span::new(start, trait_end, source_id),
+        });
+    }
+
     let mut ty = TypeRef::Named {
         name,
         span: Span::new(start, name_end, source_id),
