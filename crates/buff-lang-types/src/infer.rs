@@ -1635,6 +1635,18 @@ pub(crate) fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
                 .collect();
             Some(Type::Tuple(resolved))
         }
+        // DR-020 / P2.1a: trait object `Box<dyn Trait>` or `&dyn Trait`.
+        // Maps to the pre-existing `Type::DynamicDispatch(Box<Type>)`
+        // (T68, v1.19). The inner `Type::User { name: trait_name }` is
+        // the convention used by `Type::dynamic_dispatch()` (ty.rs:1424)
+        // and consumed by `buff_type_to_syn` (type_lowering.rs:240).
+        // MVP: the lifetime field is ignored at this layer (codegen
+        // always emits `Box<dyn Trait>` per DR-020 §Autoboxing Rules;
+        // `&dyn Trait` parameters-only is enforced at the lint layer).
+        TypeRef::TraitObject { trait_name, .. } => Some(Type::dynamic_dispatch(Type::user(
+            trait_name.name.clone(),
+            Vec::new(),
+        ))),
         _ => None,
     }
 }

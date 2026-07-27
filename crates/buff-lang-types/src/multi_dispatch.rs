@@ -341,6 +341,11 @@ fn type_token(tr: &TypeRef) -> String {
         TypeRef::Function { .. } => return "fn".to_string(),
         TypeRef::Union(_, _) => "Union",
         TypeRef::Tuple(_, _) => "Tuple",
+        // DR-020 / P2.1a: trait objects are exotic for multi-dispatch
+        // mangling purposes (a `Box<dyn Trait>` parameter doesn't carry
+        // a concrete base type the dispatcher can dispatch on). Collapse
+        // to `t` per the doc-comment convention for unknown shapes.
+        TypeRef::TraitObject { .. } => return "t".to_string(),
     };
     base.to_lowercase()
 }

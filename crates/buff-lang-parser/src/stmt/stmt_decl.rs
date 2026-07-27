@@ -2648,6 +2648,7 @@ pub fn type_end(ty: &TypeRef) -> usize {
         | TypeRef::Option(_, span)
         | TypeRef::Function { span, .. }
         | TypeRef::Union(_, span)
-        | TypeRef::Tuple(_, span) => span.end,
+        | TypeRef::Tuple(_, span)
+        | TypeRef::TraitObject { span, .. } => span.end,
     }
 }
