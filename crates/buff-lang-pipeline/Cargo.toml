@@ -1,0 +1,30 @@
+﻿[package]
+name = "buff-lang-pipeline"
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+buff-lang-ast.workspace = true
+buff-lang-codegen-buffhtml.workspace = true
+buff-lang-codegen-rust.workspace = true
+buff-lang-error.workspace = true
+buff-lang-lexer.workspace = true
+buff-lang-parser.workspace = true
+buff-lang-types.workspace = true
+# T111: syn + quote + proc-macro2 are needed for profiling guard injection
+# (inject_profiling builds syn::Item via parse2 + quote::quote!). Also used
+# by the inline_script_block transformer in the buffhtml pipeline. These
+# were transitively available when pipeline lived inside buff-lang-cli; the
+# P0.26 sibling-crate extraction missed carrying them over.
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+# T133: buffhtml parser used by the buffhtml compilation pipeline.
+buff-lang-buffhtml-parser.workspace = true
+# T111/T133: prettyplease formats the generated Rust source (also used by
+# profiling guard injection and inline_script_block transformation).
+prettyplease.workspace = true
+anyhow.workspace = true
+sha2.workspace = true
+salsa.workspace = true

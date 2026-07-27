@@ -1,0 +1,13 @@
+---
+source: crates/buff-web3/tests/core.rs
+assertion_line: 274
+expression: "errs.join(\"\\n\")"
+---
+invalid RPC URL: bad url
+invalid Ethereum address (expected 0x + 40 hex chars): bad addr
+invalid private key (expected 0x + 64 hex chars): bad key
+invalid ABI JSON: bad abi
+ABI method not found: nope
+wallet not connected: Contract.send requires a Wallet
+tokio runtime initialization failed
+internal error: web3 operation panicked

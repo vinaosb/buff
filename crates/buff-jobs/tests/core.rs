@@ -1,6 +1,5 @@
 use buff_jobs::{
-    Backoff, Job, JobId, JobStatus, JobsError, Priority, Queue, QueueStats, Scheduler, Worker,
-    WorkerStats,
+    Backoff, Job, JobStatus, JobsError, Priority, Queue, Scheduler, Worker, WorkerStats,
 };
 use std::time::Duration;
 
@@ -303,10 +302,57 @@ fn snapshot_backoff_display() {
 
 #[test]
 fn snapshot_job_display() {
+    // The Job Display includes a UUID (random per-run), which makes
+    // a raw insta snapshot unstable. We strip the UUID before
+    // snapshotting so the structural contract (priority / status /
+    // attempts format) is pinned without coupling to UUID entropy.
     let job = make_job("payload-x")
         .with_priority(Priority::High)
         .with_max_retries(5);
-    insta::assert_snapshot!("job_display", format!("{job}"));
+    let rendered = format!("{job}");
+    // Replace the first UUID-shaped token (`xxxxxxxx-xxxx-xxxx-xxxx-
+    // xxxxxxxxxxxx`, 36 chars) with the literal `<uuid>`.
+    let redacted = strip_first_uuid(&rendered);
+    insta::assert_snapshot!("job_display", redacted);
+}
+
+/// Replace the first UUID-shaped substring (`xxxxxxxx-xxxx-xxxx-
+/// xxxx-xxxxxxxxxxxx`) in `s` with the literal `<uuid>` so that
+/// snapshot tests are stable across runs (UUIDs are randomly
+/// generated per Job via `uuid::Uuid::new_v4()`).
+///
+/// Hand-rolled to avoid pulling the `regex` crate into the
+/// production dep set (see buff-jobs AGENTS.md "Pure-Rust only").
+fn strip_first_uuid(s: &str) -> String {
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len().saturating_sub(35) {
+        if is_uuid_at(&bytes[i..i + 36]) {
+            let mut out = String::with_capacity(s.len());
+            out.push_str(std::str::from_utf8(&bytes[..i]).unwrap_or(""));
+            out.push_str("<uuid>");
+            out.push_str(std::str::from_utf8(&bytes[i + 36..]).unwrap_or(""));
+            return out;
+        }
+    }
+    s.to_string()
+}
+
+/// Recognize the canonical 8-4-4-4-12 UUID layout at the start of
+/// `b` (36 bytes total). Cheap byte-level check; no regex dep.
+fn is_uuid_at(b: &[u8]) -> bool {
+    if b.len() < 36 {
+        return false;
+    }
+    let hex = |c: u8| c.is_ascii_hexdigit();
+    b[8] == b'-'
+        && b[13] == b'-'
+        && b[18] == b'-'
+        && b[23] == b'-'
+        && (0..8).all(|i| hex(b[i]))
+        && (9..13).all(|i| hex(b[i]))
+        && (14..18).all(|i| hex(b[i]))
+        && (19..23).all(|i| hex(b[i]))
+        && (24..36).all(|i| hex(b[i]))
 }
 
 #[test]
@@ -317,6 +363,7 @@ fn snapshot_worker_stats_display() {
         failed: 5,
         retried: 4,
         dead_lettered: 1,
+        backoff_slept: Duration::from_millis(750),
     };
     insta::assert_snapshot!("worker_stats_display", format!("{stats}"));
 }

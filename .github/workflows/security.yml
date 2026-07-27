@@ -9,12 +9,17 @@ on:
   schedule:
     - cron: '0 9 * * 1'  # Monday 9am UTC
 
+# P0.10 — least-privilege default; the sbom job below overrides with
+# `contents: write` (it attaches the SBOM to a GitHub Release via action-gh-release).
+permissions:
+  contents: read
+
 jobs:
   cargo-audit:
     if: github.event_name != 'push' || github.ref_type != 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
@@ -25,7 +30,7 @@ jobs:
         continue-on-error: false
       - name: Upload audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cargo-audit-report
           path: |
@@ -36,8 +41,10 @@ jobs:
   sbom:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # softprops/action-gh-release attaches the SBOM to the release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
@@ -46,6 +53,6 @@ jobs:
       - name: Generate SBOM
         run: cargo cyclonedx -f json
       - name: Upload SBOM as release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: cyclonedx.json

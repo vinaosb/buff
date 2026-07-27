@@ -68,7 +68,7 @@ func lexer_state_new(source: String, source_id: SourceId) -> LexerState:
 func string_to_bytes(s: String) -> Vector<Int>:
     let out = Vector.new()
     let mut i = 0
-    while i < s.len():
+    for i < s.len():
         out.push(s.byte_at(i))
         i = i + 1
     return out
@@ -103,7 +103,7 @@ func is_ascii_whitespace(b: Int) -> Bool:
 func slice_to_string_lx(state: LexerState, start: Int, end: Int) -> String:
     let mut out = ""
     let mut i = start
-    while i < end:
+    for i < end:
         out = out + Char.to_string(Int.to_char(state.bytes[i]))
         i = i + 1
     return out
@@ -131,7 +131,7 @@ func tokenize(source: String, source_id: SourceId) -> Result<Vector<Token>, Lexe
     let eof_pos = state.end
     let dedents = finalize(tracker)
     let mut d = 0
-    while d < dedents.len():
+    for d < dedents.len():
         push_kind(state, dedents[d], lx_span(state, eof_pos, eof_pos))
         d = d + 1
     push_kind(state, TokenKind.Eof, lx_span(state, eof_pos, eof_pos))
@@ -182,7 +182,7 @@ func lex_range(
     let mut pending_ws_end = start
     let mut has_pending_indent = false
 
-    while state.pos < end:
+    for state.pos < end:
         let tok_start = state.pos
         let c = state.bytes[state.pos]
 
@@ -202,7 +202,7 @@ func lex_range(
         // --- Whitespace. Captured as indent only in the leading phase. ---
         if c == space_byte || c == tab_byte:
             let ws_start = state.pos
-            while state.pos < end && (state.bytes[state.pos] == space_byte || state.bytes[state.pos] == tab_byte):
+            for state.pos < end && (state.bytes[state.pos] == space_byte || state.bytes[state.pos] == tab_byte):
                 state.pos = state.pos + 1
             if track_indent && not(line_lead_ended):
                 pending_ws_start = ws_start
@@ -213,7 +213,7 @@ func lex_range(
         // --- Line comment //... runs to end-of-line. ---
         if c == slash_byte && state.pos + 1 < end && state.bytes[state.pos + 1] == slash_byte:
             state.pos = state.pos + 2
-            while state.pos < end && state.bytes[state.pos] != newline_byte && state.bytes[state.pos] != cr_byte:
+            for state.pos < end && state.bytes[state.pos] != newline_byte && state.bytes[state.pos] != cr_byte:
                 state.pos = state.pos + 1
             // A comment ends the leading-whitespace phase but is NOT a token.
             line_lead_ended = true
@@ -224,7 +224,7 @@ func lex_range(
             let comment_start = state.pos
             state.pos = state.pos + 2
             let mut depth = 1
-            while state.pos < end && depth > 0:
+            for state.pos < end && depth > 0:
                 if state.bytes[state.pos] == slash_byte && state.pos + 1 < end && state.bytes[state.pos + 1] == star_byte:
                     depth = depth + 1
                     state.pos = state.pos + 2
@@ -248,7 +248,7 @@ func lex_range(
             let indent_str = slice_to_string_lx(state, pending_ws_start, pending_ws_end)
             let kinds = check_line(tracker, indent_str, state.source_id, pending_ws_start)?
             let mut k = 0
-            while k < kinds.len():
+            for k < kinds.len():
                 push_kind(state, kinds[k], lx_span(state, pending_ws_start, pending_ws_end))
                 k = k + 1
             indent_checked_this_line = true
@@ -285,7 +285,7 @@ func lex_range(
         if c == lower_r && state.pos + 1 < end:
             let mut hash_count = 0
             let mut j = state.pos + 1
-            while j < end && state.bytes[j] == hash_byte:
+            for j < end && state.bytes[j] == hash_byte:
                 hash_count = hash_count + 1
                 j = j + 1
             if j < end && state.bytes[j] == quote_byte:
@@ -296,7 +296,7 @@ func lex_range(
         if is_ascii_alphabetic(c) || c == underscore_byte:
             let id_start = state.pos
             state.pos = state.pos + 1
-            while state.pos < end && (is_ascii_alphanumeric(state.bytes[state.pos]) || state.bytes[state.pos] == underscore_byte):
+            for state.pos < end && (is_ascii_alphanumeric(state.bytes[state.pos]) || state.bytes[state.pos] == underscore_byte):
                 state.pos = state.pos + 1
             let s = slice_to_string_lx(state, id_start, state.pos)
             let kind = match from_keyword(s) {
@@ -365,14 +365,14 @@ func scan_raw_string(state: LexerState, r_pos: Int, hash_count: Int) -> Result<I
 
     let body_start = quote_start + 1
     let mut i = body_start
-    while i < state.end:
+    for i < state.end:
         if state.bytes[i] == quote_byte:
             // Is this " followed by exactly hash_count # chars?
             let close_start = i
             let mut close_end = i + 1
             let mut matched = true
             let mut n = 0
-            while n < hash_count:
+            for n < hash_count:
                 if close_end < state.end && state.bytes[close_end] == hash_byte:
                     close_end = close_end + 1
                 else:
@@ -456,7 +456,7 @@ func scan_regex(state: LexerState, slash_start: Int) -> Result<Int, LexerError>:
     let body_start = slash_start + 1
     let mut i = body_start
     let mut escaped = false
-    while i < state.end:
+    for i < state.end:
         let b = state.bytes[i]
         if b == newline_byte || b == cr_byte:
             return Result.Err(lexer_error_new(
@@ -587,7 +587,7 @@ func compute_escape_body_end(state: LexerState, esc_start: Int, after_backslash:
                 lx_span(state, esc_start, int_min(j, state.end)),
             ))
         j = j + 1  // past {
-        while j < state.end && state.bytes[j] != rbrace_byte:
+        for j < state.end && state.bytes[j] != rbrace_byte:
             j = j + 1
         if j >= state.end:
             return Result.Err(lexer_error_new(
@@ -616,7 +616,7 @@ func scan_triple_string(state: LexerState, quote_start: Int) -> Result<Int, Lexe
     push_kind(state, TokenKind.StringStart, lx_span(state, quote_start, quote_start + 3))
     let body_start = quote_start + 3
     let mut i = body_start
-    while i + 2 < state.end:
+    for i + 2 < state.end:
         if state.bytes[i] == quote_byte && state.bytes[i + 1] == quote_byte && state.bytes[i + 2] == quote_byte:
             let text = slice_to_string_lx(state, body_start, i)
             if text.len() > 0:
@@ -650,7 +650,7 @@ func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>
         let p = state.bytes[start + 1]
         if p == lower_x || p == upper_x:
             state.pos = start + 2
-            while state.pos < state.end && is_ascii_hex_digit(state.bytes[state.pos]):
+            for state.pos < state.end && is_ascii_hex_digit(state.bytes[state.pos]):
                 state.pos = state.pos + 1
             let s = slice_to_string_lx(state, start + 2, state.pos)
             match parse_u32_radix(s, 16) {
@@ -659,7 +659,7 @@ func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>
             }
         if p == lower_b || p == upper_b:
             state.pos = start + 2
-            while state.pos < state.end && (state.bytes[state.pos] == digit_zero || state.bytes[state.pos] == one_byte):
+            for state.pos < state.end && (state.bytes[state.pos] == digit_zero || state.bytes[state.pos] == one_byte):
                 state.pos = state.pos + 1
             let s = slice_to_string_lx(state, start + 2, state.pos)
             match parse_u32_radix(s, 2) {
@@ -669,13 +669,13 @@ func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>
 
     // Integer part.
     state.pos = start
-    while state.pos < state.end && is_ascii_digit(state.bytes[state.pos]):
+    for state.pos < state.end && is_ascii_digit(state.bytes[state.pos]):
         state.pos = state.pos + 1
 
     // Decimal point + fractional part?
     if state.pos + 1 < state.end && state.bytes[state.pos] == dot_byte && is_ascii_digit(state.bytes[state.pos + 1]):
         state.pos = state.pos + 1  // dot
-        while state.pos < state.end && is_ascii_digit(state.bytes[state.pos]):
+        for state.pos < state.end && is_ascii_digit(state.bytes[state.pos]):
             state.pos = state.pos + 1
         if state.pos < state.end && (state.bytes[state.pos] == lower_d || state.bytes[state.pos] == upper_d):
             state.pos = state.pos + 1
@@ -863,7 +863,7 @@ func scan_unicode_operator(state: LexerState, pos: Int, end: Int) -> Option<Unic
     // Each glyph is a 3-byte UTF-8 sequence (U+2200..U+27FF and U+2190..U+21FF).
     let glyphs = unicode_operator_table()
     let mut idx = 0
-    while idx < glyphs.len():
+    for idx < glyphs.len():
         let entry = glyphs[idx]
         if matches_glyph(state, pos, end, entry.bytes):
             return Option.Some(UnicodeOp.new(kind: entry.kind, len: entry.bytes.len()))
@@ -908,7 +908,7 @@ func matches_glyph(state: LexerState, pos: Int, end: Int, glyph: Vector<Int>) ->
     if pos + glyph.len() > end:
         return false
     let mut i = 0
-    while i < glyph.len():
+    for i < glyph.len():
         if state.bytes[pos + i] != glyph[i]:
             return false
         i = i + 1
@@ -960,7 +960,7 @@ func scan_string_tokens(state: LexerState, quote_start: Int) -> Result<Int, Lexe
     let mut i = quote_start + 1
     let mut part_start = i
 
-    while i < state.end:
+    for i < state.end:
         let b = state.bytes[i]
         if b == quote_byte:
             flush_part_lx(state, part_start, i)
@@ -988,7 +988,7 @@ func scan_string_tokens(state: LexerState, quote_start: Int) -> Result<Int, Lexe
             i = closing + 1
             part_start = i
         else if b == rbrace_byte:
-            return Result.Err(lexer_error_new("unexpected '}' inside string literal", lx_span(state, i, i + 1)))
+            return Result.Err(lexer_error_new(r#"unexpected '}' inside string literal"#, lx_span(state, i, i + 1)))
         else:
             i = i + 1
 
@@ -1008,7 +1008,7 @@ func find_matching_brace_lx(state: LexerState, start: Int) -> Result<Int, LexerE
     let backslash_byte = 92
     let mut depth = 1
     let mut i = start
-    while i < state.end:
+    for i < state.end:
         let b = state.bytes[i]
         if b == lbrace_byte:
             depth = depth + 1
@@ -1020,7 +1020,7 @@ func find_matching_brace_lx(state: LexerState, start: Int) -> Result<Int, LexerE
             i = i + 1
         else if b == quote_byte:
             i = i + 1
-            while i < state.end && state.bytes[i] != quote_byte:
+            for i < state.end && state.bytes[i] != quote_byte:
                 if state.bytes[i] == backslash_byte && i + 1 < state.end:
                     i = i + 2
                 else:
@@ -1044,7 +1044,7 @@ func split_interp_spec_lx(state: LexerState, start: Int, closing: Int) -> Result
     let backslash_byte = 92
     let mut depth = 0
     let mut i = start
-    while i < closing:
+    for i < closing:
         let b = state.bytes[i]
         if b == lbrace_byte:
             depth = depth + 1
@@ -1059,7 +1059,7 @@ func split_interp_spec_lx(state: LexerState, start: Int, closing: Int) -> Result
             return Result.Ok(InterpSplit.new(expr_end: i, spec: Option.Some(spec)))
         else if b == quote_byte:
             i = i + 1
-            while i < closing && state.bytes[i] != quote_byte:
+            for i < closing && state.bytes[i] != quote_byte:
                 if state.bytes[i] == backslash_byte && i + 1 < closing:
                     i = i + 2
                 else:
@@ -1079,7 +1079,7 @@ func split_interp_spec_lx(state: LexerState, start: Int, closing: Int) -> Result
 func parse_u32_radix(digits: String, radix: Int) -> Result<Int, Error>:
     let mut value = 0
     let mut idx = 0
-    while idx < digits.len():
+    for idx < digits.len():
         let d = digit_value(digits[idx], radix)
         match d {
             Option.Some(v) => {

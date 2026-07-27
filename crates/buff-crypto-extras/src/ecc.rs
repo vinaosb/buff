@@ -28,13 +28,20 @@ use crate::error::CryptoError;
 // the module now exposes a `diffie_hellman(scalar, point) -> SharedSecret`
 // free function (re-exported from `elliptic_curve::ecdh`). The
 // `raw_secret_bytes()` method moved to `SharedSecret`. Same shape for p384.
+//
+// rand API drift fix: the workspace `rand` resolves to 0.9 whose
+// `rand::rngs::OsRng` implements `rand_core 0.9` traits, but
+// `p256::SecretKey::random` needs `rand_core 0.6` traits (via
+// `elliptic-curve 0.13`). `aes_gcm::aead::OsRng` (re-exported from
+// `aead` → `rand_core 0.6::OsRng`) implements the `0.6` traits.
+use aes_gcm::aead::OsRng;
 use p256::ecdh::diffie_hellman as ecdh_p256;
-use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
+use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{AffinePoint, NonZeroScalar, PublicKey as P256Public, SecretKey as P256Secret};
 #[allow(unused_imports)] // P-384 ECDH derive is deferred to v1.20+ per AGENTS.md.
 use p384::ecdh::diffie_hellman as ecdh_p384;
+#[allow(unused_imports)] // P-384 ECDH derive is deferred to v1.20+ per AGENTS.md.
 use p384::{PublicKey as P384Public, SecretKey as P384Secret};
-use rand::rngs::OsRng;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// P-256 private scalar length (32 bytes).
@@ -72,7 +79,7 @@ pub fn p256_public_from_private(private: &[u8]) -> Result<Vec<u8>, CryptoError> 
     let private_owned = private.to_vec();
     let result = catch_unwind(AssertUnwindSafe(|| {
         let secret = P256Secret::from_slice(&private_owned)?;
-        let public = public_key_from_secret_p256(&secret);
+        let public = public_key_from_secret_p256(&secret)?;
         Ok::<Vec<u8>, CryptoError>(public)
     }));
     match result {
@@ -134,7 +141,13 @@ pub fn p384_generate_private() -> Vec<u8> {
 }
 
 fn public_key_from_secret_p256(secret: &P256Secret) -> Result<Vec<u8>, CryptoError> {
-    let public = P256Public::from_secret_scalar(secret)?;
+    // p256 0.13 API drift fix: `PublicKey::from_secret_scalar` takes
+    // `&NonZeroScalar<NistP256>` (NOT `&SecretKey`) and returns
+    // `PublicKey` directly (NOT `Result`). Use `SecretKey::to_nonzero_scalar`
+    // to obtain the scalar, then `ToEncodedPoint::to_encoded_point` for
+    // the SEC1 uncompressed wire format.
+    let scalar = secret.to_nonzero_scalar();
+    let public = P256Public::from_secret_scalar(&scalar);
     let encoded = public.to_encoded_point(false);
     Ok(encoded.to_bytes().into_vec())
 }

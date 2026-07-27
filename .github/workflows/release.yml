@@ -23,8 +23,10 @@ on:
     tags:
       - "v*"
 
+# P0.10 — least-privilege default; the release-publishing job below overrides
+# with `contents: write` (only job that needs to create the GitHub Release).
 permissions:
-  contents: write  # softprops/action-gh-release needs this to create the release
+  contents: read
 
 jobs:
   build:
@@ -63,7 +65,7 @@ jobs:
           #   archive: zip
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -113,13 +115,13 @@ jobs:
           fi
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: buff-${{ github.ref_name }}-${{ matrix.name }}
           path: buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}
 
       - name: Upload checksum artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}.sha256
           path: buff-${{ github.ref_name }}-${{ matrix.name }}.${{ matrix.archive }}.sha256
@@ -131,16 +133,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
 
+      - name: Update Homebrew formula SHA-256 hashes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"  # strip leading "v"
+          chmod +x installers/homebrew/update-sha256.sh
+          ./installers/homebrew/update-sha256.sh "$VERSION"
+
       - name: Create GitHub Release with artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # generate_release_notes assembles a changelog from commits/PRs
           # since the previous tag.

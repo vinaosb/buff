@@ -1,0 +1,13 @@
+// test logical operators
+func my_bool(s: String) -> Bool:
+    return s.len() == 0
+
+func test_and(s: String) -> Bool:
+    if (my_bool(s) == true) && (s.len() < 10):
+        return true
+    return false
+
+func test_or(s: String) -> Bool:
+    if (my_bool(s) == true) || (s.len() > 100):
+        return true
+    return false

@@ -1,0 +1,1223 @@
+// Buff self-host port of `crates/buff-lang-error/src/diagnostic.rs` (P3.3).
+//
+// Diagnostic types — severity levels, diagnostic messages, and the top-level
+// error enum.
+//
+// # Source-line rendering (T36)
+//
+// `diagnostic_render` turns a diagnostic + the raw source text into a
+// rustc-style rendered string: the offending source line followed by a caret
+// line (`^^^`) pointing at the byte span. For multi-error files,
+// `render_diagnostics` concatenates several diagnostics.
+//
+// # Colored output (T43)
+//
+// `diagnostic_render_with_color` and `render_diagnostics_with_color` add
+// ANSI escape codes: red for errors, yellow for warnings, cyan for notes,
+// green for `help:` suggestions. Use `should_use_color` to detect terminal
+// capability (respects `NO_COLOR` env var and piped stderr).
+//
+// # "Did you mean?" suggestions (T36)
+//
+// When the user mistypes an identifier (e.g. `pritn` instead of `print`),
+// `levenshtein` + `suggest_close` + `format_did_you_mean` produce a
+// deterministic "Did you mean `print`?" note. Determinism: ties in
+// Levenshtein distance are broken alphabetically (no HashMap order).
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions:
+//   * `&'static str` constants (`RESET`, `RED`, ...) -> `func name() -> String`.
+//     Buff rejects top-level `let` ("only function declarations are allowed
+//     at top level") so every Rust `pub const FOO: &str = "..."` becomes a
+//     zero-arg `func foo() -> String` returning the same string.
+//   * `const fn severity_color(...) -> &'static str` -> `func
+//     severity_color(...) -> String` (Buff has no const fn; the same string
+//     is returned by a normal function).
+//   * `std::env::var_os("NO_COLOR")` and `std::io::stderr().is_terminal()`
+//     -> FFI to Rust std (Buff has no env-var or terminal-detection prelude
+//     in v1.x). The port of `should_use_color` returns `false` (the safe
+//     default for piped / non-tty output) and documents the FFI gap in the
+//     function body. Future stdlib env + terminal modules can wire this in
+//     without changing the call-site shape.
+//   * `impl Severity { ... }` / `impl LabelStyle { ... }` /
+//     `impl Diagnostic { ... }` -> free functions with `<type>_`-prefixed
+//     names per porting §8g.
+//   * `impl std::fmt::Display for Diagnostic` (and the other Display impls)
+//     -> free functions named `<type>_display` per porting §4c (thiserror
+//     derives stay in Rust; the Display logic ports as a manual function).
+//   * `impl Display for Applicability` -> `applicability_display` (the
+//     Rust reference's match arms render the variant name verbatim; the
+//     Buff helper does the same via `applicability_str`).
+//   * thiserror derives stay in Rust — per porting §4c the error ENUMS port
+//     (data) but the `#[derive(thiserror::Error)]` + `#[error("...")]` do NOT
+//     port. The Display impl each thiserror derive generates becomes a
+//     `<type>_display` free function in this file.
+//   * `&[Diagnostic]` -> `Vector<Diagnostic>` (porting §7b).
+//   * `Vec<char>` -> `Vector<Char>`.
+//   * `String::with_capacity(n)` + `push_str` -> direct `+` concatenation.
+//     Buff's String prelude does not surface `with_capacity`; the cost is
+//     the same up to a constant factor and the port does not optimize.
+//   * `std::mem::swap(&mut a, &mut b)` -> swap via a temp variable.
+//   * `matches!(self, Applicability::MachineApplicable)` -> `==` on enum.
+//   * `impl Default for Severity` -> `severity_default` (Buff has no Default
+//     trait; convention is a `<type>_default` function).
+//   * String literals containing `{` / `}` use `\{` / `\}` escapes (Buff
+//     treats `{` as opening an interpolation; the literal brace escape is
+//     required by the lexer).
+//   * KNOWN WORKAROUND: user-defined `Bool` returns lose their type at the
+//     call site (`if foo()` is rejected as "if condition must be Bool, found
+//     Unknown"). Every user-defined Bool call inside an `if` is written
+//     `if foo() == true:` / `if foo() == false:`.
+
+import { Span, SourceId, span_new } from "span"
+import { ErrorCode } from "code"
+
+// ---------------------------------------------------------------------------
+// T43: ANSI color constants + terminal detection
+// ---------------------------------------------------------------------------
+
+// ANSI escape: reset all attributes.
+func ansi_ansi_reset() -> String:
+    return "\x1b[0m"
+
+// ANSI escape: foreground red (errors).
+func ansi_ansi_red() -> String:
+    return "\x1b[31m"
+
+// ANSI escape: foreground yellow (warnings).
+func ansi_ansi_yellow() -> String:
+    return "\x1b[33m"
+
+// ANSI escape: foreground cyan (notes/info).
+func ansi_ansi_cyan() -> String:
+    return "\x1b[36m"
+
+// ANSI escape: foreground green (suggestions/help).
+func ansi_ansi_green() -> String:
+    return "\x1b[32m"
+
+// Return the ANSI escape for the given severity's color.
+func severity_color(severity: Severity) -> String:
+    if severity == Severity.Error:
+        return ansi_red()
+    if severity == Severity.Warning:
+        return ansi_yellow()
+    return ansi_cyan()
+
+// Wrap `text` in ANSI `color` + reset, returning `color text reset`.
+func color_text(color: String, text: String) -> String:
+    return color + text + ansi_reset()
+
+// Detect whether ANSI color should be emitted.
+//
+// Returns `false` when:
+//   * `NO_COLOR` environment variable is set (per https://no-color.org/)
+//   * `stderr` is not a terminal (piped / redirected)
+//
+// Callers can override this with an explicit `--no-color` flag (see
+// `diagnostic_render_with_color`).
+//
+// PORT GAP: Buff's prelude in v1.x has no env-var access (`std::env::var_os`)
+// or terminal-detection (`IsTerminal`) — both are FFI to Rust std. The port
+// returns `false` (the safe default for piped output) until env + terminal
+// prelude modules ship. The Rust host's `buff check` / LSP paths still call
+// their own Rust-side `should_use_color`; this Buff port is the data model.
+func should_use_color() -> Bool:
+    return false
+
+// Wrap `text` in the ANSI color for `severity`, returning the colored
+// string. Used by the CLI's `render_diagnostic` to color the severity
+// tag in the `<path>:<line>:<col>: [Severity]` prefix.
+//
+// Convenience wrapper around `color_text` + `severity_color`.
+func color_severity(text: String, severity: Severity) -> String:
+    return color_text(severity_color(severity), text)
+
+// ---------------------------------------------------------------------------
+// Severity + LabelStyle
+// ---------------------------------------------------------------------------
+
+// The severity of a diagnostic message.
+enum Severity {
+    Error,
+    Warning,
+    Info,
+}
+
+// Default severity — mirrors `impl Default for Severity`. Buff has no
+// Default trait; convention is a `<type>_default` function. Rust's impl
+// picks `Severity::Error` (the safest default — diagnostics default to
+// failures).
+func severity_default() -> Severity:
+    return Severity.Error
+
+// Style of a labeled span, mirroring rustc's `rustc_span::LabelStyle`.
+//
+// Primary labels point at the MAIN offending location (rendered with
+// `^` carets). Secondary labels point at additional context such as the
+// declaration of the symbol involved in the error (rendered with `~` tildes).
+//
+// A Diagnostic always carries one implicit primary span
+// (`Diagnostic.span`); entries in `Diagnostic.labels` can be either
+// style to extend the render with more locations (rustc-style multi-span
+// diagnostics).
+enum LabelStyle {
+    // Primary — `^^^` carets under the offending source.
+    Primary,
+    // Secondary — `~~~` tildes under context (a declaration site, a related
+    // span, etc.). Mirrors rustc's secondary-label visual style.
+    Secondary,
+}
+
+// ---------------------------------------------------------------------------
+// SpanLabel
+// ---------------------------------------------------------------------------
+
+// A labeled span attached to a Diagnostic, used for multi-span rendering
+// (rustc-style). Each entry contributes its own source-line + caret block to
+// `diagnostic_render`, with the message shown after the caret.
+//
+// Construct via `span_label_primary` (primary) or `span_label_secondary`
+// (secondary).
+struct SpanLabel:
+    // The byte span this label points at.
+    span: Span
+    // The label message shown alongside the caret block (e.g.
+    // "declared here", "expected `Int`").
+    label: String
+    // Primary vs. Secondary — controls caret char (`^` vs `~`).
+    style: LabelStyle
+
+// Build a primary-style label pointing at `span` with `label` text.
+func span_label_primary(span: Span, label: String) -> SpanLabel:
+    return SpanLabel.new(span: span, label: label, style: LabelStyle.Primary)
+
+// Build a secondary-style label pointing at `span` with `label` text.
+func span_label_secondary(span: Span, label: String) -> SpanLabel:
+    return SpanLabel.new(span: span, label: label, style: LabelStyle.Secondary)
+
+// ---------------------------------------------------------------------------
+// Applicability + CodeSuggestion (T1 / v1.25 Wave 0)
+// ---------------------------------------------------------------------------
+
+// How confidently a CodeSuggestion can be auto-applied by tooling
+// (LSP CodeAction, `buff check --error-format json` consumers, future
+// `buff fix` rewriter). Mirrors rustc's `Applicability` enum verbatim.
+//
+// Tooling SHOULD treat the variant as a hint, not a hard rule: an
+// `Unspecified` suggestion is still legal to surface as a CodeAction — it
+// just means the user must review the change before applying.
+enum Applicability {
+    // Always correct — safe to apply without user review. The canonical
+    // example is fixing a typo: `pritn` -> `print`.
+    MachineApplicable,
+    // Probably correct but not certain. Tooling SHOULD show the suggestion
+    // for manual review rather than auto-applying. Example: suggesting a
+    // field name that may shadow an existing binding.
+    MaybeIncorrect,
+    // Contains placeholders (e.g. `<>`, `<name>`) that the user must fill
+    // in. Renders with the placeholders visible; tooling MAY apply but MUST
+    // leave the cursor on the first placeholder.
+    HasPlaceholders,
+    // No applicability hint. Tooling should let the user decide. Use when
+    // the suggestion is intentionally vague (e.g. an example fix that may
+    // not apply to the specific case).
+    Unspecified,
+}
+
+// `true` for `MachineApplicable` — the convenience predicate tooling uses
+// to decide "auto-apply or not".
+func applicability_is_machine_applicable(a: Applicability) -> Bool:
+    return a == Applicability.MachineApplicable
+
+// Display rendering of an Applicability — the Rust reference renders the
+// variant name verbatim via `impl Display`. The Buff port reuses
+// `applicability_str` (defined below near the JSON helpers) so the
+// Display and JSON shapes agree.
+func applicability_display(a: Applicability) -> String:
+    return applicability_str(a)
+
+// Stable string for an Applicability (matches the Rust Debug / Display
+// rendering). Defined here next to the enum so the JSON-side
+// `applicability_str` alias in `json.buff` resolves to the same body.
+func applicability_str(a: Applicability) -> String:
+    if a == Applicability.MachineApplicable:
+        return "MachineApplicable"
+    if a == Applicability.MaybeIncorrect:
+        return "MaybeIncorrect"
+    if a == Applicability.HasPlaceholders:
+        return "HasPlaceholders"
+    return "Unspecified"
+
+// A machine-readable fix suggestion attached to a Diagnostic.
+//
+// Says: "the bytes at `span` should be replaced with `replacement`, and
+// the change is `applicability`-confident". Mirrors rustc's
+// `CodeSuggestion` (simplified — single replacement string per
+// suggestion; rustc's `Substitution` enum supports fragments we don't
+// need yet).
+//
+// Attach via `diagnostic_with_suggestion` /
+// `diagnostic_with_labeled_suggestion`.
+struct CodeSuggestion:
+    // The byte range whose text should be replaced.
+    span: Span
+    // The replacement text (the new bytes that go in place of `span`).
+    replacement: String
+    // How confidently tooling can auto-apply this suggestion.
+    applicability: Applicability
+    // Optional human-readable label shown alongside the replacement in the
+    // `help:` line (e.g. "change `pritn` to `print`").
+    label: Option<String>
+
+// Render this suggestion as a single `help:` line (no source-line
+// block — that's the caller's job; this just formats the payload).
+//
+// Format:
+//   help: <label>: replace with `<replacement>` (<applicability>)
+//
+// When `label` is `None`, the leading "`<label>:` " is dropped:
+//   help: replace with `<replacement>` (<applicability>)
+func code_suggestion_render_help_line(s: CodeSuggestion) -> String:
+    let applicability = applicability_str(s.applicability)
+    return match s.label {
+        Some(label) => "  help: " + label + ": replace with `" + s.replacement + "` (" + applicability + ")\n",
+        None => "  help: replace with `" + s.replacement + "` (" + applicability + ")\n",
+    }
+
+// ---------------------------------------------------------------------------
+// Diagnostic
+// ---------------------------------------------------------------------------
+
+// A diagnostic message with severity, message text, source span, notes,
+// optional secondary labels (multi-span), and an optional stable
+// `ErrorCode` (T124).
+//
+// The `code`, `labels`, and `suggestions` fields are optional /
+// empty-by-default at every existing construction site, so adding them did
+// not change any existing diagnostic output (single-span render stays
+// byte-identical when `labels` and `suggestions` are both empty).
+//
+// Use `diagnostic_with_code` / `diagnostic_with_label` /
+// `diagnostic_with_suggestion` to attach the corresponding pieces, and
+// `diagnostic_render` / `diagnostic_display` will then emit them in
+// rustc-style: `error[E1xxx]: <message>` plus per-label source-line blocks
+// plus suggestion `help:` lines.
+struct Diagnostic:
+    severity: Severity
+    message: String
+    span: Span
+    notes: Vector<String>
+    // Optional stable error code (e.g. E1001). None for diagnostics that do
+    // not yet have a code, or for ad-hoc / uncategorised messages.
+    code: Option<ErrorCode>
+    // Additional labeled spans (multi-span diagnostics). Each entry renders
+    // as its own source-line + caret block below the primary span. Empty by
+    // default -> existing single-span render output is unchanged.
+    //
+    // Added in v1.25 Wave 0 (T1) — see the launch-readiness plan.
+    labels: Vector<SpanLabel>
+    // Machine-readable fix suggestions. Each entry renders as a `help:`
+    // line below the notes. Empty by default -> no change to existing output.
+    //
+    // Added in v1.25 Wave 0 (T1) — see the launch-readiness plan.
+    suggestions: Vector<CodeSuggestion>
+
+// Create a new error-level diagnostic.
+func diagnostic_error(message: String, span: Span) -> Diagnostic:
+    return Diagnostic.new(
+        severity: Severity.Error,
+        message: message,
+        span: span,
+        notes: Vector.new(),
+        code: Option.None,
+        labels: Vector.new(),
+        suggestions: Vector.new(),
+    )
+
+// Create a new warning-level diagnostic.
+func diagnostic_warning(message: String, span: Span) -> Diagnostic:
+    return Diagnostic.new(
+        severity: Severity.Warning,
+        message: message,
+        span: span,
+        notes: Vector.new(),
+        code: Option.None,
+        labels: Vector.new(),
+        suggestions: Vector.new(),
+    )
+
+// Create a new info-level diagnostic.
+func diagnostic_info(message: String, span: Span) -> Diagnostic:
+    return Diagnostic.new(
+        severity: Severity.Info,
+        message: message,
+        span: span,
+        notes: Vector.new(),
+        code: Option.None,
+        labels: Vector.new(),
+        suggestions: Vector.new(),
+    )
+
+// Add a note to this diagnostic. Returns a new Diagnostic with the note
+// appended (Rust consumes `self` in a builder pattern; Buff's move-by-default
+// semantics mirror this — the caller is expected to chain).
+func diagnostic_with_note(d: Diagnostic, note: String) -> Diagnostic:
+    let new_notes: Vector<String> = Vector.new()
+    let mut i = 0
+    for i < d.notes.len():
+        new_notes.push(d.notes[i])
+        i = i + 1
+    new_notes.push(note)
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: new_notes,
+        code: d.code,
+        labels: d.labels,
+        suggestions: d.suggestions,
+    )
+
+// Attach a stable `ErrorCode` to this diagnostic.
+//
+// Mirrors `diagnostic_with_note` as a consuming builder. When `code`
+// is `Some`, `diagnostic_render` and `diagnostic_display` emit the code as
+// `error[E1xxx]: <message>` immediately after the severity tag.
+func diagnostic_with_code(d: Diagnostic, code: ErrorCode) -> Diagnostic:
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: d.notes,
+        code: Option.Some(code),
+        labels: d.labels,
+        suggestions: d.suggestions,
+    )
+
+// Attach a `LabelStyle::Primary` labeled span (multi-span diagnostic).
+//
+// Renders as an additional source-line + `^^^` caret block below the
+// primary span, with `label` shown after the carets. Mirrors rustc's
+// primary label rendering.
+func diagnostic_with_label(d: Diagnostic, span: Span, label: String) -> Diagnostic:
+    let new_labels: Vector<SpanLabel> = Vector.new()
+    let mut i = 0
+    for i < d.labels.len():
+        new_labels.push(d.labels[i])
+        i = i + 1
+    new_labels.push(span_label_primary(span, label))
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: d.notes,
+        code: d.code,
+        labels: new_labels,
+        suggestions: d.suggestions,
+    )
+
+// Attach a `LabelStyle::Secondary` labeled span (multi-span diagnostic).
+//
+// Renders as an additional source-line + `~~~` tilde block below the
+// primary span, with `label` shown after the tildes. Mirrors rustc's
+// secondary-label rendering (typically used for declaration sites or
+// related spans that give context for the primary error).
+func diagnostic_with_secondary_label(d: Diagnostic, span: Span, label: String) -> Diagnostic:
+    let new_labels: Vector<SpanLabel> = Vector.new()
+    let mut i = 0
+    for i < d.labels.len():
+        new_labels.push(d.labels[i])
+        i = i + 1
+    new_labels.push(span_label_secondary(span, label))
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: d.notes,
+        code: d.code,
+        labels: new_labels,
+        suggestions: d.suggestions,
+    )
+
+// Attach a pre-built `SpanLabel` (useful when the style is decided at
+// runtime; for the common cases prefer `diagnostic_with_label` /
+// `diagnostic_with_secondary_label`).
+func diagnostic_with_span_label(d: Diagnostic, label: SpanLabel) -> Diagnostic:
+    let new_labels: Vector<SpanLabel> = Vector.new()
+    let mut i = 0
+    for i < d.labels.len():
+        new_labels.push(d.labels[i])
+        i = i + 1
+    new_labels.push(label)
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: d.notes,
+        code: d.code,
+        labels: new_labels,
+        suggestions: d.suggestions,
+    )
+
+// Attach a machine-readable fix suggestion.
+//
+// Renders as a `help:` line below the notes, with the replacement text
+// shown. When the suggestion is `MachineApplicable`, tooling (LSP
+// CodeAction, `buff check --error-format json`) can apply it without
+// user review.
+func diagnostic_with_suggestion(d: Diagnostic, span: Span, replacement: String, applicability: Applicability) -> Diagnostic:
+    let new_suggestions: Vector<CodeSuggestion> = Vector.new()
+    let mut i = 0
+    for i < d.suggestions.len():
+        new_suggestions.push(d.suggestions[i])
+        i = i + 1
+    new_suggestions.push(CodeSuggestion.new(
+        span: span,
+        replacement: replacement,
+        applicability: applicability,
+        label: Option.None,
+    ))
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: d.notes,
+        code: d.code,
+        labels: d.labels,
+        suggestions: new_suggestions,
+    )
+
+// Like `diagnostic_with_suggestion` but also attaches a human-readable
+// `label` (e.g. "change `pritn` to `print`") that renders alongside the
+// replacement text in the `help:` line.
+func diagnostic_with_labeled_suggestion(d: Diagnostic, span: Span, replacement: String, applicability: Applicability, label: String) -> Diagnostic:
+    let new_suggestions: Vector<CodeSuggestion> = Vector.new()
+    let mut i = 0
+    for i < d.suggestions.len():
+        new_suggestions.push(d.suggestions[i])
+        i = i + 1
+    new_suggestions.push(CodeSuggestion.new(
+        span: span,
+        replacement: replacement,
+        applicability: applicability,
+        label: Option.Some(label),
+    ))
+    return Diagnostic.new(
+        severity: d.severity,
+        message: d.message,
+        span: d.span,
+        notes: d.notes,
+        code: d.code,
+        labels: d.labels,
+        suggestions: new_suggestions,
+    )
+
+// ---------------------------------------------------------------------------
+// Display for Diagnostic (thiserror Display stays in Rust; manual port)
+// ---------------------------------------------------------------------------
+
+// Render the diagnostic as a one-line summary string (no source-line
+// block — use `diagnostic_render` for the rustc-style multiline form).
+//
+// Mirrors `impl std::fmt::Display for Diagnostic`. The Rust reference
+// writes `[Severity?] message` and (when present) `[Severity?] error[E1xxx]: message`.
+func diagnostic_display(d: Diagnostic) -> String:
+    let head = match d.code {
+        Some(code) => "[" + severity_debug(d.severity) + "] error[" + error_code_code_str_inline(code) + "]: " + d.message,
+        None => "[" + severity_debug(d.severity) + "] " + d.message,
+    }
+    if d.notes.len() == 0:
+        return head
+    let mut out = head
+    let mut i = 0
+    for i < d.notes.len():
+        out = out + "\n  note: " + d.notes[i]
+        i = i + 1
+    return out
+
+// Debug-rendering of a Severity (mirrors Rust's `{:?}` formatting, which
+// the Display impl above uses via `format!("\{:?\}", self.severity)`).
+// Buff has no `{:?}` formatter; the equivalent is a manual match.
+func severity_debug(s: Severity) -> String:
+    if s == Severity.Error:
+        return "Error"
+    if s == Severity.Warning:
+        return "Warning"
+    return "Info"
+
+// Re-export of `error_code_code_str` for use in this file's display
+// helpers. The function body lives in `code.buff`; the alias preserves
+// the call-site shape from the Rust reference (where `code.rs` and
+// `diagnostic.rs` are sibling modules and Diagnostic calls
+// `code.code_str()` directly).
+//
+// The body is a delegation: this file's port can NOT look up a foreign
+// file's function at type-check time, so the call sites that need the
+// code string go through this thin local wrapper.
+func error_code_code_str_inline(c: ErrorCode) -> String:
+    return match c {
+        // E10xx
+        UnexpectedChar => "E1001",
+        UnterminatedString => "E1002",
+        InvalidNumber => "E1003",
+        MixedTabsSpaces => "E1004",
+        InconsistentIndent => "E1005",
+        UnterminatedBlockComment => "E1006",
+        UnterminatedRegex => "E1007",
+        EmptyRegex => "E1008",
+        UnterminatedCharLiteral => "E1009",
+        EmptyCharLiteral => "E1010",
+        InvalidCharEscape => "E1011",
+        InvalidUnicodeEscape => "E1012",
+        UnexpectedBraceInString => "E1013",
+        UnterminatedInterpolation => "E1014",
+        // E11xx
+        ExpectedToken => "E1101",
+        UnexpectedToken => "E1102",
+        ExpectedLayoutNewline => "E1103",
+        ExpectedIndentedBlock => "E1104",
+        FuncMustBeTopLevel => "E1105",
+        ExpectedIdentifier => "E1106",
+        UnterminatedList => "E1107",
+        UnsupportedAbi => "E1108",
+        ExternGenericsUnsupported => "E1109",
+        MalformedComptime => "E1110",
+        // E12xx
+        UndefinedVariable => "E1201",
+        BinaryOpTypeMismatch => "E1202",
+        AssignTypeMismatch => "E1203",
+        InvalidUnaryOperand => "E1204",
+        IfConditionMustBeBool => "E1205",
+        IfBranchTypeMismatch => "E1206",
+        NonExhaustiveMatch => "E1207",
+        PreferGpuOnRecursiveFunction => "E1208",
+        ModuleError => "E1209",
+        ComptimeEvaluationFailed => "E1210",
+        ComptimeIoForbidden => "E1211",
+        ComptimeReflectionForbidden => "E1212",
+        TraitObjectUndefinedType => "E1213",
+        TraitObjectUnsupportedLifetime => "E1214",
+        // E13xx
+        UnsupportedCodegen => "E1301",
+        CodegenParseError => "E1302",
+        AsyncBlockDeadlock => "E1303",
+        ComptimeLoweringFailed => "E1304",
+        // E14xx
+        GpuDispatchFailed => "E1401",
+        GpuShaderPanic => "E1402",
+        GpuInitFailed => "E1403",
+        GpuUnavailable => "E1404",
+        VramBudgetExceeded => "E1405",
+        ShaderCompileFailed => "E1406",
+        ChannelClosed => "E1407",
+        ChannelDisconnected => "E1408",
+        AsyncTaskPanicked => "E1409",
+        RuntimeTimeout => "E1410",
+        // E15xx
+        DeprecatedApiUsed => "E1501",
+        UnusedVariable => "E1502",
+        UnusedParameter => "E1503",
+        UnreachableCode => "E1504",
+        UnusedImport => "E1505",
+        DeadCode => "E1506",
+        ShadowedBinding => "E1507",
+        UnusedEnumVariant => "E1508",
+        RedundantIfBranch => "E1509",
+        TrailingWildArm => "E1510",
+    }
+
+// ---------------------------------------------------------------------------
+// T36: source-line + caret rendering, Levenshtein, "Did you mean?"
+// ---------------------------------------------------------------------------
+
+// Render this diagnostic against `source` as a rustc-style string:
+//
+//   [Error] the message
+//     |
+//   3 | let x = value
+//     |         ^^^^^
+//     |
+//     note: Did you mean `print`?
+//
+// The first line is always `[<severity>] <message>`. If the diagnostic's
+// `Span` lies within `source`, the offending source line plus a caret line
+// follow. Multi-span labels (`Diagnostic.labels`) each render as their own
+// source-line + caret block below the primary span, with their label
+// message appended after the caret chars. Notes (`Diagnostic.notes`) and
+// suggestions (`Diagnostic.suggestions`) appear last as `note:` / `help:`
+// lines.
+//
+// Column accounting is char-based (not byte-based), so multi-byte UTF-8
+// sequences align correctly under a single caret column — this mirrors
+// `source_file_lookup`. Multi-line spans are clamped to the line containing
+// `span.start`, so the caret never overflows past the source-line newline.
+//
+// Out-of-bounds spans (e.g. EOF errors with synthetic spans past the end of
+// source) render only the header + notes, without any caret line.
+//
+// Backward compatibility: when `labels` and `suggestions` are both empty
+// (the default for all pre-T1 construction sites), the output is identical
+// to the pre-T1 single-span render.
+func diagnostic_render(d: Diagnostic, source: String) -> String:
+    let mut out = ""
+    let header = match d.code {
+        Some(code) => "[" + severity_debug(d.severity) + "] error[" + error_code_code_str_inline(code) + "]: " + d.message + "\n",
+        None => "[" + severity_debug(d.severity) + "] " + d.message + "\n",
+    }
+    out = out + header
+    let primary_block = render_span_in_source(d.span, source)
+    if option_string_is_some(primary_block) == true:
+        let block = unwrap_render_block(primary_block)
+        out = out + block
+    // Multi-span labels: each contributes its own source-line + caret
+    // block, with the label message appended after the caret chars.
+    // Caret char is `^` for Primary (matches the primary span's carets)
+    // and `~` for Secondary (rustc convention).
+    let mut i = 0
+    for i < d.labels.len():
+        let label = d.labels[i]
+        let label_block = render_span_label_in_source(label.span, source, label.style, label.label)
+        if option_string_is_some(label_block) == true:
+            let block = unwrap_render_block(label_block)
+            out = out + block
+        else:
+            if label.label != "":
+                // Span is out of bounds; still surface the label as a
+                // note-style line so the user sees the context.
+                out = out + "  = " + label.label + "\n"
+        i = i + 1
+    let mut j = 0
+    for j < d.notes.len():
+        out = out + "  note: " + d.notes[j] + "\n"
+        j = j + 1
+    let mut k = 0
+    for k < d.suggestions.len():
+        out = out + code_suggestion_render_help_line(d.suggestions[k])
+        k = k + 1
+    return out
+
+// Like `diagnostic_render` but with ANSI color codes.
+//
+// When `use_color` is `false`, output is identical to `diagnostic_render`.
+// Callers should compute `use_color` via `should_use_color` and allow a
+// `--no-color` CLI flag to force-disable.
+func diagnostic_render_with_color(d: Diagnostic, source: String, use_color: Bool) -> String:
+    if use_color == false:
+        return diagnostic_render(d, source)
+    let mut out = ""
+    let colored_severity = color_text(severity_color(d.severity), "[" + severity_debug(d.severity) + "]")
+    let header = match d.code {
+        Some(code) => colored_severity + " error[" + error_code_code_str_inline(code) + "]: " + d.message + "\n",
+        None => colored_severity + " " + d.message + "\n",
+    }
+    out = out + header
+    let primary_block = render_span_in_source_with_color(d.span, source, d.severity)
+    if option_string_is_some(primary_block) == true:
+        let block = unwrap_render_block(primary_block)
+        out = out + block
+    let mut i = 0
+    for i < d.labels.len():
+        let label = d.labels[i]
+        let label_block = render_span_label_in_source_with_color(label.span, source, label.style, label.label, d.severity)
+        if option_string_is_some(label_block) == true:
+            let block = unwrap_render_block(label_block)
+            out = out + block
+        else:
+            if label.label != "":
+                out = out + "  = " + label.label + "\n"
+        i = i + 1
+    let mut j = 0
+    for j < d.notes.len():
+        out = out + "  " + ansi_cyan() + "note: " + d.notes[j] + ansi_reset() + "\n"
+        j = j + 1
+    let mut k = 0
+    for k < d.suggestions.len():
+        let help_line = code_suggestion_render_help_line(d.suggestions[k])
+        // Wrap the "help:" prefix and the backtick-quoted replacement in green.
+        out = out + ansi_green() + help_line + ansi_reset()
+        k = k + 1
+    return out
+
+// Render the source line containing `span.start` plus a caret underline.
+//
+// Returns `None` when `span.start` lies past the end of `source` (so the
+// caller can render just the header without a caret block).
+//
+// Format:
+//     |
+//   N | <source line>
+//     |   <padding>^^^^
+//     |
+//
+// where `N` is the 1-based line number, `<padding>` is `span.start`'s
+// 0-based column in characters (so multi-byte chars count as 1 column),
+// and the caret count is the character width of the span clamped to the
+// current line (minimum 1).
+func render_span_in_source(span: Span, source: String) -> Option<String>:
+    let start = span.start
+    let raw_end = span.end
+    if start > source.len():
+        return Option.None
+    // Find the byte offset of the start of the line containing `start`
+    // (the char after the previous '\n', or 0 if none).
+    let line_start = last_newline_before_inline(source, start)
+    // Find the byte offset just past the end of this line (the '\n' or EOF).
+    let line_end = next_newline_at_or_after(source, line_start)
+    let line_text = source.slice(line_start, line_end)
+    // 1-based line number = number of '\n' before line_start, +1.
+    let line_no = source.slice(0, line_start).matches("\n").len() + 1
+    let line_no_str = line_no.to_string()
+    // 0-based column in characters (so multi-byte UTF-8 counts as 1 col).
+    let col = source.slice(line_start, start).chars().len()
+    // Caret width: characters between start and (end clamped to line_end).
+    // Clamp end to the line so a span that crosses a newline doesn't draw
+    // carets past the source-line boundary.
+    let span_end_in_line = int_min(raw_end, line_end)
+    let width = caret_width(source, start, span_end_in_line)
+    // Gutter: line_no right-aligned to its own width, then ` | `. For
+    // empty/caret lines, replace line_no with the same number of spaces
+    // (plus the trailing space that separates line_no from `|`) so the
+    // pipes line up across all four lines.
+    let gutter_pad = " ".repeat(line_no_str.len() + 1)
+    let caret_pad = " ".repeat(col)
+    let carets = "^".repeat(width)
+    let out = gutter_pad + "|\n" + line_no_str + " | " + line_text + "\n" + gutter_pad + "| " + caret_pad + carets + "\n" + gutter_pad + "|\n"
+    return Option.Some(out)
+
+// Like `render_span_in_source` but with ANSI color on the caret line,
+// using `severity` to choose the color (red for errors, yellow for
+// warnings, cyan for info/notes).
+func render_span_in_source_with_color(span: Span, source: String, severity: Severity) -> Option<String>:
+    let start = span.start
+    let raw_end = span.end
+    if start > source.len():
+        return Option.None
+    let line_start = last_newline_before_inline(source, start)
+    let line_end = next_newline_at_or_after(source, line_start)
+    let line_text = source.slice(line_start, line_end)
+    let line_no = source.slice(0, line_start).matches("\n").len() + 1
+    let line_no_str = line_no.to_string()
+    let col = source.slice(line_start, start).chars().len()
+    let span_end_in_line = int_min(raw_end, line_end)
+    let width = caret_width(source, start, span_end_in_line)
+    let gutter_pad = " ".repeat(line_no_str.len() + 1)
+    let caret_pad = " ".repeat(col)
+    let carets = "^".repeat(width)
+    let color = severity_color(severity)
+    let out = gutter_pad + "|\n" + line_no_str + " | " + line_text + "\n" + gutter_pad + "| " + caret_pad + color + carets + ansi_reset() + "\n" + gutter_pad + "|\n"
+    return Option.Some(out)
+
+// Render a labeled span (multi-span diagnostics) — same shape as
+// `render_span_in_source` but with the caret char chosen by `style`
+// (`^` for Primary, `~` for Secondary) and the label message appended
+// after the caret chars.
+//
+// Format when the label is non-empty:
+//     |
+//   N | <source line>
+//     |   <padding>^^^^ <label>
+//     |
+//
+// When the label is empty, the caret line has no trailing message (matches
+// the primary span's caret-only shape). Returns `None` when `span.start`
+// lies past the end of `source`.
+func render_span_label_in_source(span: Span, source: String, style: LabelStyle, label: String) -> Option<String>:
+    let start = span.start
+    let raw_end = span.end
+    if start > source.len():
+        return Option.None
+    let line_start = last_newline_before_inline(source, start)
+    let line_end = next_newline_at_or_after(source, line_start)
+    let line_text = source.slice(line_start, line_end)
+    let line_no = source.slice(0, line_start).matches("\n").len() + 1
+    let line_no_str = line_no.to_string()
+    let col = source.slice(line_start, start).chars().len()
+    let span_end_in_line = int_min(raw_end, line_end)
+    let width = caret_width(source, start, span_end_in_line)
+    let gutter_pad = " ".repeat(line_no_str.len() + 1)
+    let caret_pad = " ".repeat(col)
+    let caret_char = caret_char_for_style(style)
+    let carets = caret_char.repeat(width)
+    let trailing = span_label_trailing(style, label)
+    let out = gutter_pad + "|\n" + line_no_str + " | " + line_text + "\n" + gutter_pad + "| " + caret_pad + carets + trailing + "\n" + gutter_pad + "|\n"
+    return Option.Some(out)
+
+// Like `render_span_label_in_source` but with ANSI color on the caret line,
+// using the diagnostic's `severity` color for primary labels. The label
+// text is also wrapped in color.
+func render_span_label_in_source_with_color(span: Span, source: String, style: LabelStyle, label: String, severity: Severity) -> Option<String>:
+    let start = span.start
+    let raw_end = span.end
+    if start > source.len():
+        return Option.None
+    let line_start = last_newline_before_inline(source, start)
+    let line_end = next_newline_at_or_after(source, line_start)
+    let line_text = source.slice(line_start, line_end)
+    let line_no = source.slice(0, line_start).matches("\n").len() + 1
+    let line_no_str = line_no.to_string()
+    let col = source.slice(line_start, start).chars().len()
+    let span_end_in_line = int_min(raw_end, line_end)
+    let width = caret_width(source, start, span_end_in_line)
+    let gutter_pad = " ".repeat(line_no_str.len() + 1)
+    let caret_pad = " ".repeat(col)
+    let caret_char = caret_char_for_style(style)
+    let carets = caret_char.repeat(width)
+    let color = severity_color(severity)
+    let trailing = span_label_trailing_colored(style, label, color)
+    let out = gutter_pad + "|\n" + line_no_str + " | " + line_text + "\n" + gutter_pad + "| " + caret_pad + color + carets + ansi_reset() + trailing + "\n" + gutter_pad + "|\n"
+    return Option.Some(out)
+
+// Choose the caret character for a given LabelStyle.
+//   Primary   -> "^"
+//   Secondary -> "~"
+func caret_char_for_style(style: LabelStyle) -> String:
+    if style == LabelStyle.Primary:
+        return "^"
+    return "~"
+
+// Build the trailing message appended after the caret chars for a
+// labeled span. Empty label -> empty trailing; non-empty label -> " <label>".
+func span_label_trailing(style: LabelStyle, label: String) -> String:
+    if label == "":
+        return ""
+    return " " + label
+
+// Like `span_label_trailing` but wraps the label in `color` ... RESET
+// (used by the colored renderer).
+func span_label_trailing_colored(style: LabelStyle, label: String, color: String) -> String:
+    if label == "":
+        return ""
+    return " " + color + label + ansi_reset()
+
+// Caret width: characters between `start` and (end clamped to line_end).
+// Zero-width span gets at least one caret so the user sees the location.
+func caret_width(source: String, start: Int, span_end_in_line: Int) -> Int:
+    if span_end_in_line <= start:
+        return 1
+    let n = source.slice(start, span_end_in_line).chars().len()
+    return int_max(n, 1)
+
+// Render multiple diagnostics against the same `source`, separated by a
+// blank line. Useful for parser-error-recovery output where several errors
+// are collected in one pass.
+//
+// Empty input returns the empty string.
+func render_diagnostics(diagnostics: Vector<Diagnostic>, source: String) -> String:
+    let mut out = ""
+    let mut i = 0
+    for i < diagnostics.len():
+        if i > 0:
+            out = out + "\n"
+        out = out + diagnostic_render(diagnostics[i], source)
+        i = i + 1
+    return out
+
+// Like `render_diagnostics` but with ANSI color codes.
+//
+// Delegates to `diagnostic_render_with_color` for each diagnostic.
+// When `use_color` is `false`, output is identical to `render_diagnostics`.
+func render_diagnostics_with_color(diagnostics: Vector<Diagnostic>, source: String, use_color: Bool) -> String:
+    if use_color == false:
+        return render_diagnostics(diagnostics, source)
+    let mut out = ""
+    let mut i = 0
+    for i < diagnostics.len():
+        if i > 0:
+            out = out + "\n"
+        out = out + diagnostic_render_with_color(diagnostics[i], source, true)
+        i = i + 1
+    return out
+
+// ---------------------------------------------------------------------------
+// Levenshtein + suggestion helpers (T36)
+// ---------------------------------------------------------------------------
+
+// Maximum Levenshtein distance at which a candidate is still considered a
+// "did you mean?" suggestion. Two edits covers transpositions (counted as
+// distance 2 in classic Levenshtein), single-char substitutions, and a
+// couple of typos.
+func suggestion_max_distance() -> Int:
+    return 2
+
+// Classic iterative Levenshtein edit distance between two strings, counted
+// in characters (not bytes) so multi-byte UTF-8 sequences count as a
+// single edit each.
+//
+// The distance is the minimum number of single-character insertions,
+// deletions, or substitutions needed to transform `a` into `b`.
+func levenshtein(a: String, b: String) -> Int:
+    let a_chars = a.chars_to_vector()
+    let b_chars = b.chars_to_vector()
+    let m = a_chars.len()
+    let n = b_chars.len()
+    if m == 0:
+        return n
+    if n == 0:
+        return m
+    // Two-row DP: `prev` is row i-1, `curr` is row i. We swap instead of
+    // reallocating an m*n matrix.
+    let mut prev: Vector<Int> = Vector.new()
+    let mut k = 0
+    for k <= n:
+        prev.push(k)
+        k = k + 1
+    let mut curr: Vector<Int> = Vector.new()
+    let mut z = 0
+    for z <= n:
+        curr.push(0)
+        z = z + 1
+    let mut i = 1
+    for i <= m:
+        curr[0] = i
+        let mut j = 1
+        for j <= n:
+            let cost = levenshtein_cost(a_chars[i - 1], b_chars[j - 1])
+            let v1 = prev[j] + 1
+            let v2 = curr[j - 1] + 1
+            let v3 = prev[j - 1] + cost
+            curr[j] = int_min(int_min(v1, v2), v3)
+            j = j + 1
+        // Swap prev and curr via a temp.
+        let tmp = prev
+        prev = curr
+        curr = tmp
+        i = i + 1
+    return prev[n]
+
+// Levenshtein cost for one cell: 0 if the two chars match, 1 otherwise.
+// Separated from the inner loop so the loop body stays single-expression
+// (Buff has no inline conditional expression beyond ternaries the parser
+// rejects inside `let` chains).
+func levenshtein_cost(a: Char, b: Char) -> Int:
+    if a == b:
+        return 0
+    return 1
+
+// Pick the closest candidate to `input` from `candidates` by Levenshtein
+// distance, breaking ties alphabetically for determinism.
+//
+// Returns `None` when no candidate is within `suggestion_max_distance`
+// edits of `input`, or when `candidates` is empty.
+//
+// Determinism: this function never depends on HashMap iteration order.
+// Candidates are scanned in slice order; the running best is replaced only
+// when a strictly smaller distance is found, OR an equal distance with a
+// lexicographically smaller candidate string (so the alphabetical winner
+// is stable).
+func suggest_close(input: String, candidates: Vector<String>) -> Option<String>:
+    let max_dist = suggestion_max_distance()
+    return suggest_close_scan(input, candidates, 0, max_dist, Option.None, -1, "")
+
+// Inner tail-recursive scan for `suggest_close`. Walks `candidates` from
+// index `i`, threading the running best through. The "best so far" is
+// represented by `(best_dist, best_str)` plus an `Option<String>` that
+// encodes whether we've seen any candidate yet. The separation is needed
+// because Buff's `Option<String>` doesn't carry the distance alongside,
+// and the alphabetical tiebreak needs both pieces.
+func suggest_close_scan(input: String, candidates: Vector<String>, i: Int, max_dist: Int, best_opt: Option<String>, best_dist: Int, best_str: String) -> Option<String>:
+    if i >= candidates.len():
+        return best_opt
+    let cand = candidates[i]
+    let cand_len = cand.chars().len()
+    let input_len = input.chars().len()
+    let len_delta = int_abs(cand_len - input_len)
+    if len_delta > max_dist:
+        return suggest_close_scan(input, candidates, i + 1, max_dist, best_opt, best_dist, best_str)
+    let d = levenshtein(input, cand)
+    if d > max_dist:
+        return suggest_close_scan(input, candidates, i + 1, max_dist, best_opt, best_dist, best_str)
+    // Update best?
+    return suggest_close_update(input, candidates, i + 1, max_dist, best_opt, best_dist, best_str, d, cand)
+
+// Apply the "is this new candidate better?" decision for `suggest_close`.
+// Pulled out so the inner scan function stays readable.
+func suggest_close_update(input: String, candidates: Vector<String>, next_i: Int, max_dist: Int, best_opt: Option<String>, best_dist: Int, best_str: String, d: Int, cand: String) -> Option<String>:
+    // First-ever candidate -> it's the best by default.
+    if option_string_is_none(best_opt) == true:
+        return suggest_close_scan(input, candidates, next_i, max_dist, Option.Some(cand), d, cand)
+    // Strictly smaller distance -> new best.
+    if d < best_dist:
+        return suggest_close_scan(input, candidates, next_i, max_dist, Option.Some(cand), d, cand)
+    // Equal distance and lexicographically smaller -> new best.
+    if d == best_dist:
+        if cand < best_str:
+            return suggest_close_scan(input, candidates, next_i, max_dist, Option.Some(cand), d, cand)
+    // Otherwise keep the existing best.
+    return suggest_close_scan(input, candidates, next_i, max_dist, best_opt, best_dist, best_str)
+
+// Build a deterministic "Did you mean `<candidate>`?" string for an unknown
+// identifier, or `None` when no candidate is close enough.
+//
+// Wraps `suggest_close` with the canonical note formatting used by parser
+// and type-checker error paths.
+func format_did_you_mean(input: String, candidates: Vector<String>) -> Option<String>:
+    let best = suggest_close(input, candidates)
+    return match best {
+        Some(c) => Option.Some("Did you mean `" + c + "`?"),
+        None => Option.None,
+    }
+
+// ---------------------------------------------------------------------------
+// Sub-error types — each wraps a Diagnostic (thiserror Display stays in Rust)
+// ---------------------------------------------------------------------------
+
+// A lexer error.
+//
+// Ported as a plain struct — thiserror derive stays in Rust. The Display
+// impl each thiserror derive generates becomes the `lex_error_display`
+// free function below (per porting §4c).
+struct LexError:
+    diagnostic: Diagnostic
+
+func lex_error_new(diagnostic: Diagnostic) -> LexError:
+    return LexError.new(diagnostic: diagnostic)
+
+// Display for LexError — mirrors `#[error("\{diagnostic\}")]`.
+func lex_error_display(e: LexError) -> String:
+    return diagnostic_display(e.diagnostic)
+
+// A parser error.
+struct ParseError:
+    diagnostic: Diagnostic
+
+func parse_error_new(diagnostic: Diagnostic) -> ParseError:
+    return ParseError.new(diagnostic: diagnostic)
+
+// Display for ParseError — mirrors `#[error("\{diagnostic\}")]`.
+func parse_error_display(e: ParseError) -> String:
+    return diagnostic_display(e.diagnostic)
+
+// A type-checking error.
+struct TypeError:
+    diagnostic: Diagnostic
+
+func type_error_new(diagnostic: Diagnostic) -> TypeError:
+    return TypeError.new(diagnostic: diagnostic)
+
+// Display for TypeError — mirrors `#[error("\{diagnostic\}")]`.
+func type_error_display(e: TypeError) -> String:
+    return diagnostic_display(e.diagnostic)
+
+// A code-generation error.
+struct CodegenError:
+    diagnostic: Diagnostic
+
+func codegen_error_new(diagnostic: Diagnostic) -> CodegenError:
+    return CodegenError.new(diagnostic: diagnostic)
+
+// Display for CodegenError — mirrors `#[error("\{diagnostic\}")]`.
+func codegen_error_display(e: CodegenError) -> String:
+    return diagnostic_display(e.diagnostic)
+
+// A runtime error.
+struct RuntimeError:
+    diagnostic: Diagnostic
+
+func runtime_error_new(diagnostic: Diagnostic) -> RuntimeError:
+    return RuntimeError.new(diagnostic: diagnostic)
+
+// Display for RuntimeError — mirrors `#[error("\{diagnostic\}")]`.
+func runtime_error_display(e: RuntimeError) -> String:
+    return diagnostic_display(e.diagnostic)
+
+// ---------------------------------------------------------------------------
+// Top-level error enum
+// ---------------------------------------------------------------------------
+
+// The top-level error type for the Buff compiler.
+//
+// Each variant wraps a phase-specific error that carries a Diagnostic.
+//
+// Ported as a plain enum — thiserror derive stays in Rust. The Display
+// impl becomes the `buff_error_display` free function below.
+enum BuffError {
+    Lex(LexError),
+    Parse(ParseError),
+    Type(TypeError),
+    Codegen(CodegenError),
+    Runtime(RuntimeError),
+}
+
+// Display for BuffError — mirrors the `#[error("Lex error: \{0\}")]` (etc.)
+// attributes on the Rust enum. The Rust `#[from]` auto-conversions (e.g.
+// `LexError -> BuffError::Lex`) do NOT port — Buff has no `From` trait
+// equivalent — so callers construct the variant explicitly:
+//   BuffError.Lex(lex_error_new(diag))
+func buff_error_display(e: BuffError) -> String:
+    return match e {
+        Lex(le) => "Lex error: " + lex_error_display(le),
+        Parse(pe) => "Parse error: " + parse_error_display(pe),
+        Type(te) => "Type error: " + type_error_display(te),
+        Codegen(ce) => "Codegen error: " + codegen_error_display(ce),
+        Runtime(re) => "Runtime error: " + runtime_error_display(re),
+    }
+
+// ---------------------------------------------------------------------------
+// Local helpers (Buff prelude gaps)
+// ---------------------------------------------------------------------------
+
+// `unwrap` substitute for `Option<String>` returning the rendered block.
+// Rust's `if let Some(rendered_line) = render_span_in_source(...) { out.push_str(&rendered_line); }`
+// becomes a check-then-extract pair; Buff has no infallible unwrap.
+func unwrap_render_block(opt: Option<String>) -> String:
+    return match opt {
+        Some(s) => s,
+        None => "",
+    }
+
+// Predicate: is an `Option<String>` carrying `Some`? Used where the
+// Rust reference wrote `if opt != None` — Buff rejects Option equality
+// when the inner type's variance can't be reconciled (Option<String>
+// vs Option). The `match` here is the simplest workaround.
+func option_string_is_some(opt: Option<String>) -> Bool:
+    return match opt {
+        Some(_) => true,
+        None => false,
+    }
+
+// Predicate: is an `Option<String>` carrying `None`?
+func option_string_is_none(opt: Option<String>) -> Bool:
+    return match opt {
+        Some(_) => false,
+        None => true,
+    }
+
+// Walk backward from `offset` to find the byte index immediately after
+// the last '\n' before `offset`. Returns 0 when no '\n' precedes
+// `offset`. Mirrors Rust's `source[..start].rfind('\n').map(|i| i+1).unwrap_or(0)`.
+// Local copy of the helper in `json.buff` so this file is self-contained.
+func last_newline_before_inline(source: String, offset: Int) -> Int:
+    let prefix = source.slice(0, offset)
+    let idx = prefix.last_index_of("\n")
+    if idx < 0:
+        return 0
+    return idx + 1
+
+// Find the byte offset of the next '\n' at or after `line_start`, or
+// `source.len()` if none. Mirrors Rust's
+// `source[line_start..].find('\n').map(|i| line_start + i).unwrap_or(source.len())`.
+func next_newline_at_or_after(source: String, line_start: Int) -> Int:
+    let tail = source.slice(line_start, source.len())
+    let idx = tail.index_of("\n")
+    if idx < 0:
+        return source.len()
+    return line_start + idx
+
+// `int_min` / `int_max` — Buff's prelude does not surface `i64::min` /
+// `i64::max` directly. Inline conditionals mirror the Rust std lib.
+func int_min(a: Int, b: Int) -> Int:
+    if a < b:
+        return a
+    return b
+
+func int_max(a: Int, b: Int) -> Int:
+    if a > b:
+        return a
+    return b
+
+// `int_abs` — absolute value of an Int. Buff's prelude does not surface
+// `i64::abs` directly; the inline conditional is identical.
+func int_abs(n: Int) -> Int:
+    if n < 0:
+        return 0 - n
+    return n

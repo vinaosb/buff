@@ -1,0 +1,6 @@
+---
+source: crates/buff-fake/tests/core.rs
+expression: "format!(\"{err1}\\n{err2}\")"
+---
+invalid date range: start after end
+internal error: fake operation panicked

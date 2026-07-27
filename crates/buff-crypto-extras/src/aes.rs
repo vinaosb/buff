@@ -22,8 +22,15 @@
 //! (CSPRNG). For deterministic test vectors use a fixed nonce.
 
 use crate::error::CryptoError;
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
+// p256 0.13 / aes-gcm 0.10 API drift fix: `AeadCore` MUST be in scope
+// for both `Aes256Gcm::generate_nonce` (the trait method) and for the
+// `GenericArray` type inference that replaces the old `Nonce::<Aes256Gcm>`
+// turbofish (which fails to normalize the `<A as AeadCore>::NonceSize`
+// projection in turbofish position). The `encrypt`/`decrypt` method
+// signatures drive type inference for the nonce `GenericArray` length.
+use aes_gcm::aead::generic_array::GenericArray;
+use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
+use aes_gcm::{Aes256Gcm, Key};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// AES-256-GCM key length (32 bytes).
@@ -86,7 +93,7 @@ pub fn encrypt(key: &[u8], nonce: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, Cr
     let pt_owned = plaintext.to_vec();
     let result = catch_unwind(AssertUnwindSafe(|| {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_owned));
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_owned);
+        let nonce = GenericArray::from_slice(&nonce_owned);
         cipher.encrypt(nonce, pt_owned.as_ref())
     }));
     match result {
@@ -129,7 +136,7 @@ pub fn decrypt(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, C
     let ct_owned = ciphertext.to_vec();
     let result = catch_unwind(AssertUnwindSafe(|| {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_owned));
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_owned);
+        let nonce = GenericArray::from_slice(&nonce_owned);
         cipher.decrypt(nonce, ct_owned.as_ref())
     }));
     match result {

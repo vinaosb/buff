@@ -41,6 +41,208 @@ impl fmt::Display for NodeId {
 }
 
 // ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl NodeId {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        json!({ "id": self.0 })
+    }
+}
+
+impl MemorySpace {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let name = match self {
+            MemorySpace::Cpu => "Cpu",
+            MemorySpace::GpuLocal => "GpuLocal",
+            MemorySpace::GpuShared => "GpuShared",
+        };
+        json!({ "type": "MemorySpace", "variant": name })
+    }
+}
+
+impl DispatchDecision {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let name = match self {
+            DispatchDecision::SequentialCpu => "SequentialCpu",
+            DispatchDecision::ParallelCpu => "ParallelCpu",
+            DispatchDecision::GpuCompute => "GpuCompute",
+            DispatchDecision::Auto => "Auto",
+        };
+        json!({ "type": "DispatchDecision", "variant": name })
+    }
+}
+
+impl ComputeNode {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let defs_json: Vec<serde_json::Value> =
+            self.defs.iter().map(|i| i.to_json()).collect();
+        let uses_json: Vec<serde_json::Value> =
+            self.uses.iter().map(|i| i.to_json()).collect();
+        json!({
+            "id": self.id.to_json(),
+            "source_expr": match &self.source_expr {
+                Some(e) => e.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "source_stmt": match &self.source_stmt {
+                Some(s) => s.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "defs": defs_json,
+            "uses": uses_json,
+            "span": span_to_json(self.span),
+            "description": self.description,
+        })
+    }
+}
+
+impl IoNode {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let args_json: Vec<serde_json::Value> =
+            self.args.iter().map(Expr::to_json).collect();
+        let defs_json: Vec<serde_json::Value> =
+            self.defs.iter().map(|i| i.to_json()).collect();
+        let uses_json: Vec<serde_json::Value> =
+            self.uses.iter().map(|i| i.to_json()).collect();
+        json!({
+            "id": self.id.to_json(),
+            "callee": self.callee.to_json(),
+            "args": args_json,
+            "defs": defs_json,
+            "uses": uses_json,
+            "span": span_to_json(self.span),
+            "is_suspension_point": self.is_suspension_point,
+        })
+    }
+}
+
+impl TransferNode {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        json!({
+            "id": self.id.to_json(),
+            "var": self.var.to_json(),
+            "from": self.from.to_json(),
+            "to": self.to.to_json(),
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ScheduleNode {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let governed_json: Vec<serde_json::Value> =
+            self.governed.iter().map(NodeId::to_json).collect();
+        json!({
+            "id": self.id.to_json(),
+            "governed": governed_json,
+            "decision": self.decision.to_json(),
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl IrNode {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            IrNode::Compute(n) => json!({ "type": "Compute", "node": n.to_json() }),
+            IrNode::IONode(n) => json!({ "type": "IONode", "node": n.to_json() }),
+            IrNode::Transfer(n) => json!({ "type": "Transfer", "node": n.to_json() }),
+            IrNode::Schedule(n) => json!({ "type": "Schedule", "node": n.to_json() }),
+        }
+    }
+}
+
+impl IrGraph {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    ///
+    /// The internal `HashMap`/`HashSet` storage is sorted by `NodeId` (and
+    /// by the dependent `NodeId` inside each edge set) so the output is
+    /// byte-identical for the same graph regardless of hash-seed ordering.
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        // Sort node IDs ascending for deterministic output (HashMap iter
+        // order is unspecified).
+        let mut node_ids: Vec<NodeId> = self.nodes.keys().copied().collect();
+        node_ids.sort();
+
+        // nodes: array of {id, node} pairs in ascending-id order.
+        let nodes_json: Vec<serde_json::Value> = node_ids
+            .iter()
+            .filter_map(|id| self.nodes.get(id).map(|n| {
+                json!({ "id": id.to_json(), "node": n.to_json() })
+            }))
+            .collect();
+
+        // edges: array of {from, tos: [sorted-dependent-ids]}.
+        let edges_json: Vec<serde_json::Value> = node_ids
+            .iter()
+            .filter_map(|id| {
+                self.edges.get(id).map(|dependents| {
+                    let mut deps: Vec<NodeId> = dependents.iter().copied().collect();
+                    deps.sort();
+                    let deps_json: Vec<serde_json::Value> =
+                        deps.iter().map(NodeId::to_json).collect();
+                    json!({ "from": id.to_json(), "tos": deps_json })
+                })
+            })
+            .collect();
+
+        let entry_json: Vec<serde_json::Value> =
+            self.entry_nodes.iter().map(NodeId::to_json).collect();
+        let exit_json: Vec<serde_json::Value> =
+            self.exit_nodes.iter().map(NodeId::to_json).collect();
+
+        json!({
+            "nodes": nodes_json,
+            "edges": edges_json,
+            "entry_nodes": entry_json,
+            "exit_nodes": exit_json,
+        })
+    }
+}
+
+impl AstLowerer {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    ///
+    /// [`AstLowerer`] is a stateful builder, not an AST node — this method
+    /// exposes its current lowerer state (registered async-function count +
+    /// the latest lowered [`IrGraph`], if any). The `bindings` map is
+    /// omitted because it is single-static-assignment scratch state that
+    /// only has meaning during a lowering pass.
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        // Sort async function names for deterministic output.
+        let mut async_fns: Vec<&String> = self.async_functions.iter().collect();
+        async_fns.sort();
+        json!({
+            "graph": self.graph.to_json(),
+            "async_functions": async_fns,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Memory spaces & dispatch decisions (v1.0 placeholders)
 // ---------------------------------------------------------------------------
 

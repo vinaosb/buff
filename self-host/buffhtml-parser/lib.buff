@@ -1,0 +1,60 @@
+// Buff self-host port of `crates/buff-lang-buffhtml-parser/src/lib.rs` (P4.5).
+//
+// Buff `.buffhtml` Parser crate — 3-mode lexer + recursive-descent parser.
+//
+// Implements the T133 floor grammar (decision record
+// `rsx-syntax-feasibility.md` §6 MUST-ship list):
+//
+// - HTML elements / tags / attributes
+// - `{expr}` interpolation
+// - `{#each}/{:else}/{/each}` loops
+// - `{#if}/{:else if}/{:else}/{/if}` conditionals
+// - Fragments `<> ... </>`
+// - Child component composition (capitalized tags)
+// - Default `<slot />`
+// - Comments (`<!-- -->` HTML and `{# ... #}` Buff directive)
+// - `<script lang="buff"> ... </script>` blocks
+// - `on:event_modifier={handler}` event directives
+// - Named props (`name: value`)
+//
+// Deferred per §6 (NOT implemented; emitted as a parse error with TODO):
+// named slots, keyed each, spread props, two-way binding, await, `{@html}`.
+//
+// # Layout
+//
+// - `lexer`: byte-scanner producing a flat `BuffHtmlToken` stream.
+//   The lexer has THREE modes per the decision record §3: `TEXT`,
+//   `BUFF_CODE` (inside `{...}`), and `BUFF_DIRECTIVE` (inside `{#...}`,
+//   `{:...}`, `{/...}`, `{@...}`).
+// - `parser`: recursive-descent over the token stream -> `RsxTemplateFile`.
+//
+// Faithful 1:1 translation of the Rust reference. The Rust `lib.rs` is pure
+// module wiring (`pub mod ...` + `pub use <mod>::...` re-exports). Buff has
+// no `mod` keyword and no `pub use` glob — the M7 monolith loader (Phase 5)
+// concatenates sibling `.buff` files in the same directory into a flat
+// namespace, and `export` controls visibility per symbol. There is therefore
+// nothing executable to translate here; this file is a documentation-only
+// header that mirrors the Rust crate-doc comment block and records the
+// translation decision.
+//
+// Translation decisions:
+//   * `pub mod error; pub mod lexer; pub mod parser;` (Rust module
+//     declarations) -> DELETED. Buff has no `mod` keyword; files in the same
+//     directory are auto-linked once the M7 monolith loader is active. Until
+//     then, single-file `buff check` treats cross-file references as opaque
+//     forward references (per `self-host/ast/lib.buff` header lines 33-38).
+//   * `pub use error::BuffHtmlParseError;` (re-export of a type) -> DELETED.
+//     Buff has no syntax for cross-file re-export; callers `import
+//     { BuffHtmlParseError } from "error"` directly once the monolith loader
+//     lands.
+//   * `pub use lexer::{tokenize, BuffHtmlToken, BuffHtmlTokenKind};`
+//     (re-export of three symbols) -> DELETED for the same reason. Callers
+//     reach these via `import { tokenize, BuffHtmlToken, BuffHtmlTokenKind }
+//     from "lexer"`.
+//   * `pub use parser::parse;` -> DELETED. Callers `import { parse }
+//     from "parser"`.
+//
+// The three sibling files in this directory (`error.buff`, `lexer.buff`,
+// `parser.buff`) each define their own local `Span` / `SourceId` stand-ins
+// so they pass single-file `buff check` today; the M7 monolith loader will
+// deduplicate them when it lands.

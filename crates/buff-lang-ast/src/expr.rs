@@ -538,6 +538,372 @@ impl Expr {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl Literal {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Literal::Int(v) => json!({ "type": "Int", "value": v }),
+            Literal::Float(v) => json!({ "type": "Float", "value": v }),
+            Literal::Double(v) => json!({ "type": "Double", "value": v }),
+            Literal::Bool(v) => json!({ "type": "Bool", "value": v }),
+            Literal::String(v) => json!({ "type": "String", "value": v }),
+            Literal::Byte(v) => json!({ "type": "Byte", "value": v }),
+            Literal::Char(c) => {
+                json!({ "type": "Char", "value": c.to_string() })
+            }
+            Literal::Decimal(v) => json!({ "type": "Decimal", "value": v }),
+            Literal::Regex(v) => json!({ "type": "Regex", "value": v }),
+        }
+    }
+}
+
+impl InterpPart {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            InterpPart::Literal(s) => json!({ "type": "Literal", "text": s }),
+            InterpPart::Expr(e, spec) => json!({
+                "type": "Expr",
+                "expr": e.to_json(),
+                "format_spec": match spec {
+                    Some(s) => serde_json::Value::String(s.clone()),
+                    None => serde_json::Value::Null,
+                },
+            }),
+        }
+    }
+}
+
+impl Expr {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        match self {
+            Expr::Literal(lit, span) => json!({
+                "type": "Literal",
+                "value": lit.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::Ident(ident, span) => json!({
+                "type": "Ident",
+                "ident": ident.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::BinaryOp { op, lhs, rhs, span } => json!({
+                "type": "BinaryOp",
+                "op": op.to_json(),
+                "lhs": lhs.to_json(),
+                "rhs": rhs.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::UnaryOp { op, operand, span } => json!({
+                "type": "UnaryOp",
+                "op": op.to_json(),
+                "operand": operand.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::IfExpr {
+                cond,
+                then_block,
+                else_block,
+                span,
+            } => json!({
+                "type": "IfExpr",
+                "cond": cond.to_json(),
+                "then_block": then_block.to_json(),
+                "else_block": match else_block {
+                    Some(b) => b.to_json(),
+                    None => serde_json::Value::Null,
+                },
+                "span": span_to_json(*span),
+            }),
+            Expr::FuncCall { callee, args, span } => {
+                let args_json: Vec<serde_json::Value> =
+                    args.iter().map(Expr::to_json).collect();
+                json!({
+                    "type": "FuncCall",
+                    "callee": callee.to_json(),
+                    "args": args_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                span,
+            } => {
+                let args_json: Vec<serde_json::Value> =
+                    args.iter().map(Expr::to_json).collect();
+                json!({
+                    "type": "MethodCall",
+                    "receiver": receiver.to_json(),
+                    "method": method.to_json(),
+                    "args": args_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::Lambda {
+                params,
+                body,
+                return_type,
+                span,
+            } => {
+                let params_json: Vec<serde_json::Value> =
+                    params.iter().map(|p| p.to_json()).collect();
+                json!({
+                    "type": "Lambda",
+                    "params": params_json,
+                    "body": body.to_json(),
+                    "return_type": match return_type {
+                        Some(t) => t.to_json(),
+                        None => serde_json::Value::Null,
+                    },
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::StructInit {
+                type_name,
+                fields,
+                span,
+            } => {
+                let fields_json: Vec<serde_json::Value> = fields
+                    .iter()
+                    .map(|(n, v)| {
+                        json!({ "name": n.to_json(), "value": v.to_json() })
+                    })
+                    .collect();
+                json!({
+                    "type": "StructInit",
+                    "type_name": type_name.to_json(),
+                    "fields": fields_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::MatchExpr {
+                scrutinee,
+                arms,
+                span,
+            } => {
+                let arms_json: Vec<serde_json::Value> =
+                    arms.iter().map(MatchArm::to_json).collect();
+                json!({
+                    "type": "MatchExpr",
+                    "scrutinee": scrutinee.to_json(),
+                    "arms": arms_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::SuspendExpr { inner, span } => json!({
+                "type": "SuspendExpr",
+                "inner": inner.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::ArrayLit { elements, span } => {
+                let elements_json: Vec<serde_json::Value> =
+                    elements.iter().map(Expr::to_json).collect();
+                json!({
+                    "type": "ArrayLit",
+                    "elements": elements_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::Index {
+                base,
+                indices,
+                span,
+            } => {
+                let indices_json: Vec<serde_json::Value> =
+                    indices.iter().map(Expr::to_json).collect();
+                json!({
+                    "type": "Index",
+                    "base": base.to_json(),
+                    "indices": indices_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::StringInterp { parts, span } => {
+                let parts_json: Vec<serde_json::Value> =
+                    parts.iter().map(InterpPart::to_json).collect();
+                json!({
+                    "type": "StringInterp",
+                    "parts": parts_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::MapLit { entries, span } => {
+                let entries_json: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|(k, v)| {
+                        json!({ "key": k.to_json(), "value": v.to_json() })
+                    })
+                    .collect();
+                json!({
+                    "type": "MapLit",
+                    "entries": entries_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::Try { expr, span } => json!({
+                "type": "Try",
+                "expr": expr.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::Spawn { task, span } => json!({
+                "type": "Spawn",
+                "task": task.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Expr::Range {
+                start,
+                end,
+                inclusive,
+                span,
+            } => json!({
+                "type": "Range",
+                "start": start.to_json(),
+                "end": end.to_json(),
+                "inclusive": inclusive,
+                "span": span_to_json(*span),
+            }),
+            Expr::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+                span,
+            } => json!({
+                "type": "IfLet",
+                "pattern": pattern.to_json(),
+                "value": value.to_json(),
+                "then_block": then_block.to_json(),
+                "else_block": match else_block {
+                    Some(b) => b.to_json(),
+                    None => serde_json::Value::Null,
+                },
+                "span": span_to_json(*span),
+            }),
+            Expr::TupleLit(members, span) => {
+                let members_json: Vec<serde_json::Value> =
+                    members.iter().map(Expr::to_json).collect();
+                json!({
+                    "type": "TupleLit",
+                    "members": members_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Expr::NamedArg { name, value, span } => json!({
+                "type": "NamedArg",
+                "name": name.to_json(),
+                "value": value.to_json(),
+                "span": span_to_json(*span),
+            }),
+        }
+    }
+}
+
+impl MatchArm {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        json!({
+            "pattern": self.pattern.to_json(),
+            "guard": match &self.guard {
+                Some(g) => g.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "body": self.body.to_json(),
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl Pattern {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        match self {
+            Pattern::Wildcard(span) => json!({
+                "type": "Wildcard",
+                "span": span_to_json(*span),
+            }),
+            Pattern::Literal(lit, span) => json!({
+                "type": "Literal",
+                "value": lit.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Pattern::Ident(ident, span) => json!({
+                "type": "Ident",
+                "ident": ident.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Pattern::Variant {
+                enum_name,
+                variant,
+                subpatterns,
+                span,
+            } => {
+                let subpatterns_json: Vec<serde_json::Value> =
+                    subpatterns.iter().map(Pattern::to_json).collect();
+                json!({
+                    "type": "Variant",
+                    "enum_name": enum_name.to_json(),
+                    "variant": variant.to_json(),
+                    "subpatterns": subpatterns_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Pattern::Tuple(subs, span) => {
+                let subs_json: Vec<serde_json::Value> =
+                    subs.iter().map(Pattern::to_json).collect();
+                json!({
+                    "type": "Tuple",
+                    "subpatterns": subs_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            Pattern::Struct {
+                name,
+                fields,
+                span,
+                rest,
+            } => {
+                let fields_json: Vec<serde_json::Value> = fields
+                    .iter()
+                    .map(|(n, p)| {
+                        json!({ "name": n.to_json(), "pattern": p.to_json() })
+                    })
+                    .collect();
+                json!({
+                    "type": "Struct",
+                    "name": name.to_json(),
+                    "fields": fields_json,
+                    "rest": rest,
+                    "span": span_to_json(*span),
+                })
+            }
+            Pattern::Or(alts, span) => {
+                let alts_json: Vec<serde_json::Value> =
+                    alts.iter().map(Pattern::to_json).collect();
+                json!({
+                    "type": "Or",
+                    "alternatives": alts_json,
+                    "span": span_to_json(*span),
+                })
+            }
+        }
+    }
+}
+
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

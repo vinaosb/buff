@@ -96,6 +96,7 @@ mod storage_sqlite;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::DefaultBodyLimit;
 use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
 use axum::Router;
@@ -167,6 +168,12 @@ pub struct AppState {
     pub ip_rate_limiter: Arc<IpRateLimiter>,
     /// T57: Per-IP rate limit budget (requests per window).
     pub ip_rate_limit_max: usize,
+    /// P0.28 (sec-hardening): Maximum request body size in bytes
+    /// enforced by the router-level `DefaultBodyLimit` layer (see
+    /// [`app`]). Defaults to [`handlers::MAX_BODY_BYTES`] (50 MiB);
+    /// tests can override with [`Self::with_body_limit`] to exercise
+    /// the 413 Payload Too Large path without allocating 50+ MiB.
+    pub body_limit_bytes: usize,
 }
 
 impl AppState {
@@ -183,6 +190,7 @@ impl AppState {
             tarball_dir: parse_tarball_dir(),
             ip_rate_limiter: Arc::new(IpRateLimiter::new()),
             ip_rate_limit_max: parse_ip_rate_limit_max(),
+            body_limit_bytes: handlers::MAX_BODY_BYTES,
         }
     }
 
@@ -216,6 +224,15 @@ impl AppState {
     #[must_use]
     pub fn with_tarball_dir(mut self, dir: Option<impl AsRef<std::path::Path>>) -> Self {
         self.tarball_dir = dir.map(|d| d.as_ref().to_path_buf());
+        self
+    }
+
+    /// P0.28: Override the maximum request body size (in bytes). Tests
+    /// use a small value (e.g. `with_body_limit(1024)`) to exercise the
+    /// 413 Payload Too Large path without allocating 50+ MiB.
+    #[must_use]
+    pub fn with_body_limit(mut self, limit_bytes: usize) -> Self {
+        self.body_limit_bytes = limit_bytes;
         self
     }
 }
@@ -255,6 +272,9 @@ fn parse_ip_rate_limit_max() -> usize {
 /// [`tower::ServiceExt::oneshot`]. The binary entry ([`main`]) calls
 /// this with a real storage backend and serves it via [`axum::serve`].
 pub fn app(state: AppState) -> Router {
+    // P0.28: capture the body limit BEFORE moving `state` into
+    // `with_state` so we can install the layer with the right size.
+    let body_limit = state.body_limit_bytes;
     Router::new()
         .route("/api/v1/publish", post(handlers::publish))
         .route("/api/v1/package/{name}", get(handlers::get_package))
@@ -271,11 +291,20 @@ pub fn app(state: AppState) -> Router {
             "/api/v1/packages/{name}/{version}/download",
             get(handlers::multipart_download),
         )
+        // P0.18: Health / readiness probes (BEFORE rate-limiting middleware
+        // so probes are never throttled).
+        .route("/health", get(handlers::health_handler))
+        .route("/ready", get(handlers::ready_handler))
         // T57: GitHub OAuth login flow.
         .route("/auth/github/login", get(oauth::login))
         .route("/auth/github/callback", get(oauth::callback))
         .route("/auth/logout", post(oauth::logout))
         .route("/auth/whoami", get(oauth::whoami))
+        // P0.28: 50 MiB request body limit (configurable via
+        // `AppState::body_limit_bytes`). Applied AFTER routing so the
+        // 413 response is consistent across all routes. Enforced by
+        // axum's built-in `DefaultBodyLimit` layer — no new crate deps.
+        .layer(DefaultBodyLimit::max(body_limit))
         // T57: IP-based rate limiting on ALL endpoints.
         .layer(from_fn_with_state(state.clone(), ip_rate_limit_middleware))
         .with_state(state)

@@ -78,6 +78,32 @@ fn mock_github_endpoints(server: &MockServer, login: &str, id: i64) {
     });
 }
 
+/// Fixed CSRF state token used by all callback tests. The callback
+/// handler validates `?state=<STATE>` against the `buff_oauth_state`
+/// cookie (P0.25 / sec-003); both must match. Tests send the matching
+/// cookie via the `STATE_COOKIE` constant below.
+const STATE_COOKIE: &str = "buff_oauth_state=test-csrf-state-123";
+
+/// Extract the `buff_session=<token>` value from a `set-cookie` header.
+/// Mirrors the server-side `extract_session_from_cookie` helper. Used
+/// because sec-004 removed `session_token` from the JSON response body
+/// (the cookie is now the authoritative delivery channel).
+fn session_from_set_cookie(headers: &axum::http::HeaderMap) -> String {
+    let cookie = headers
+        .get("set-cookie")
+        .expect("Set-Cookie header")
+        .to_str()
+        .expect("ascii");
+    let prefix = "buff_session=";
+    let start = cookie
+        .find(prefix)
+        .expect("buff_session cookie")
+        + prefix.len();
+    let rest = &cookie[start..];
+    let end = rest.find(';').unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
 #[tokio::test]
 async fn login_returns_503_when_oauth_not_configured() {
     let storage: Arc<dyn Storage> = Arc::new(SqliteStorage::open_in_memory().expect("open"));
@@ -104,6 +130,34 @@ async fn login_returns_302_redirect_when_configured() {
         .expect("ascii");
     assert!(location.contains("client_id=test-client-id"));
     assert!(location.contains("scope=read"));
+    // P0.25 (sec-003): login MUST set a CSRF state cookie AND include
+    // the matching `state=` query param in the authorize URL.
+    let set_cookie = headers
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        set_cookie.contains("buff_oauth_state="),
+        "login should set buff_oauth_state cookie, got: {set_cookie}"
+    );
+    assert!(
+        location.contains("state="),
+        "authorize URL should include state param, got: {location}"
+    );
+    // The cookie value and URL state MUST match (both come from the
+    // same random draw in `login`).
+    let cookie_state = set_cookie
+        .split(';')
+        .find_map(|p| p.trim().strip_prefix("buff_oauth_state="))
+        .unwrap_or("");
+    let url_state = location
+        .split('&')
+        .find_map(|p| p.strip_prefix("state="))
+        .unwrap_or("");
+    assert!(
+        !cookie_state.is_empty() && cookie_state == url_state,
+        "cookie state ({cookie_state:?}) must match URL state ({url_state:?})"
+    );
 }
 
 #[tokio::test]
@@ -115,15 +169,23 @@ async fn callback_creates_session_via_mock_github() {
     let state = oauth_app(storage, &mock);
     let router = app(state);
 
-    let (status, body, headers) =
-        do_get_full(router, "/auth/github/callback?code=mock_auth_code", &[]).await;
+    // P0.25 (sec-003): callback requires `?state=` matching the
+    // `buff_oauth_state` cookie. We send both via TEST_OAUTH_STATE.
+    let (status, body, headers) = do_get_full(
+        router,
+        "/auth/github/callback?code=mock_auth_code&state=test-csrf-state-123",
+        &[("cookie", STATE_COOKIE)],
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "callback should succeed");
 
     let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
     assert_eq!(parsed["github_login"], "octocat");
-    assert!(parsed["session_token"]
-        .as_str()
-        .is_some_and(|s| !s.is_empty()));
+    // sec-004: session_token is NOT echoed in the response body.
+    assert!(
+        parsed.get("session_token").is_none(),
+        "session_token must not be echoed in response body (sec-004)"
+    );
 
     let cookie = headers
         .get("set-cookie")
@@ -131,6 +193,86 @@ async fn callback_creates_session_via_mock_github() {
         .to_str()
         .expect("ascii");
     assert!(cookie.contains("buff_session="));
+    // sec-004: cookie MUST carry the Secure flag.
+    assert!(
+        cookie.contains("Secure"),
+        "session cookie must set Secure flag (sec-004), got: {cookie}"
+    );
+    let session = session_from_set_cookie(&headers);
+    assert!(!session.is_empty(), "session token from cookie");
+}
+
+#[tokio::test]
+async fn callback_rejects_missing_state_csrf_defense() {
+    // P0.25 (sec-003): a callback with no `state` query param MUST be
+    // rejected with OAuthStateMismatch (HTTP 400), regardless of cookie.
+    let mock = MockServer::start();
+    mock_github_endpoints(&mock, "octocat", 1);
+
+    let storage: Arc<dyn Storage> = Arc::new(SqliteStorage::open_in_memory().expect("open"));
+    let state = oauth_app(storage, &mock);
+    let router = app(state);
+
+    let (status, _, _) = do_get_full(
+        router,
+        "/auth/github/callback?code=mock_auth_code",
+        &[("cookie", STATE_COOKIE)],
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "missing state param must be rejected (CSRF defense)"
+    );
+}
+
+#[tokio::test]
+async fn callback_rejects_state_cookie_mismatch() {
+    // P0.25 (sec-003): a callback whose `?state=` does not match the
+    // `buff_oauth_state` cookie value MUST be rejected (CSRF defense).
+    let mock = MockServer::start();
+    mock_github_endpoints(&mock, "octocat", 1);
+
+    let storage: Arc<dyn Storage> = Arc::new(SqliteStorage::open_in_memory().expect("open"));
+    let state = oauth_app(storage, &mock);
+    let router = app(state);
+
+    let (status, _, _) = do_get_full(
+        router,
+        "/auth/github/callback?code=mock_auth_code&state=attacker-forged-state",
+        &[("cookie", STATE_COOKIE)],
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "state mismatch must be rejected (CSRF defense)"
+    );
+}
+
+#[tokio::test]
+async fn callback_rejects_missing_state_cookie() {
+    // P0.25 (sec-003): a callback with `?state=` but no `buff_oauth_state`
+    // cookie MUST be rejected — the cookie is the proof the login flow
+    // originated from us, not an attacker.
+    let mock = MockServer::start();
+    mock_github_endpoints(&mock, "octocat", 1);
+
+    let storage: Arc<dyn Storage> = Arc::new(SqliteStorage::open_in_memory().expect("open"));
+    let state = oauth_app(storage, &mock);
+    let router = app(state);
+
+    let (status, _, _) = do_get_full(
+        router,
+        "/auth/github/callback?code=mock_auth_code&state=test-csrf-state-123",
+        &[],
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "missing state cookie must be rejected (CSRF defense)"
+    );
 }
 
 #[tokio::test]
@@ -142,12 +284,14 @@ async fn whoami_returns_user_after_login() {
     let state = oauth_app(storage, &mock);
     let router = app(state);
 
-    let (_, body, _) = do_get_full(router.clone(), "/auth/github/callback?code=code1", &[]).await;
-    let parsed: Value = serde_json::from_slice(&body).expect("JSON");
-    let session = parsed["session_token"]
-        .as_str()
-        .expect("session token")
-        .to_string();
+    let (_, _, headers) = do_get_full(
+        router.clone(),
+        "/auth/github/callback?code=code1&state=test-csrf-state-123",
+        &[("cookie", STATE_COOKIE)],
+    )
+    .await;
+    // sec-004: session token now comes from the Set-Cookie header.
+    let session = session_from_set_cookie(&headers);
 
     let auth_header = format!("Bearer {session}");
     let (status, body, _) =
@@ -177,12 +321,13 @@ async fn logout_clears_session() {
     let state = oauth_app(storage, &mock);
     let router = app(state);
 
-    let (_, body, _) = do_get_full(router.clone(), "/auth/github/callback?code=c", &[]).await;
-    let parsed: Value = serde_json::from_slice(&body).expect("JSON");
-    let session = parsed["session_token"]
-        .as_str()
-        .expect("session")
-        .to_string();
+    let (_, _, headers) = do_get_full(
+        router.clone(),
+        "/auth/github/callback?code=c&state=test-csrf-state-123",
+        &[("cookie", STATE_COOKIE)],
+    )
+    .await;
+    let session = session_from_set_cookie(&headers);
 
     let auth_header = format!("Bearer {session}");
     let request = Request::builder()
@@ -208,12 +353,13 @@ async fn publish_accepts_session_token() {
     let state = oauth_app(storage, &mock);
     let router = app(state);
 
-    let (_, body, _) = do_get_full(router.clone(), "/auth/github/callback?code=c", &[]).await;
-    let parsed: Value = serde_json::from_slice(&body).expect("JSON");
-    let session = parsed["session_token"]
-        .as_str()
-        .expect("session")
-        .to_string();
+    let (_, _, headers) = do_get_full(
+        router.clone(),
+        "/auth/github/callback?code=c&state=test-csrf-state-123",
+        &[("cookie", STATE_COOKIE)],
+    )
+    .await;
+    let session = session_from_set_cookie(&headers);
 
     let payload = json!({
         "name": "oauth-pkg",

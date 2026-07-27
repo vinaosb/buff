@@ -262,6 +262,41 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
     let name_end = name_tok.span.end;
     let start = name_tok.span.start;
     let name = extract_ident(name_tok)?;
+
+    // DR-020 / P2.1b: contextual recognition of `dyn Trait` in type
+    // position. `dyn` is NOT a reserved keyword — it lexes as `Ident`
+    // (per Stability Promise). When the parsed identifier is literally
+    // `dyn` and is followed by another identifier (the trait name), we
+    // build a `TypeRef::TraitObject` instead of `TypeRef::Named("dyn")`.
+    // This lets existing Buff code that uses `dyn` as a variable name
+    // continue to work in expression position; only type-position
+    // `dyn <ident>` is intercepted.
+    //
+    // MVP: the `lifetime` field is recorded in the AST for future
+    // expansion but the parser does not yet accept explicit lifetime
+    // syntax (`('static)` etc.) — Buff's lexer does not produce an
+    // `Ident("static")` token for `'static` (single-quote lexes as the
+    // start of a char literal). Per DR-020 §Autoboxing Rules, codegen
+    // always emits `Box<dyn Trait>` regardless, so the lifetime field
+    // has no observable effect today. A future T-numbered task will
+    // add Lifetime token support to the lexer when borrowed-form
+    // lifetimes become a real user need.
+    if name.name == "dyn" {
+        let trait_tok = stream.advance().ok_or_else(|| {
+            ParseError::new(Diagnostic::error(
+                "expected trait name after `dyn`",
+                stream.eof_span(),
+            ))
+        })?;
+        let trait_end = trait_tok.span.end;
+        let trait_name = extract_ident(trait_tok)?;
+        return Ok(TypeRef::TraitObject {
+            trait_name,
+            lifetime: None,
+            span: Span::new(start, trait_end, source_id),
+        });
+    }
+
     let mut ty = TypeRef::Named {
         name,
         span: Span::new(start, name_end, source_id),
@@ -2648,6 +2683,7 @@ pub fn type_end(ty: &TypeRef) -> usize {
         | TypeRef::Option(_, span)
         | TypeRef::Function { span, .. }
         | TypeRef::Union(_, span)
-        | TypeRef::Tuple(_, span) => span.end,
+        | TypeRef::Tuple(_, span)
+        | TypeRef::TraitObject { span, .. } => span.end,
     }
 }

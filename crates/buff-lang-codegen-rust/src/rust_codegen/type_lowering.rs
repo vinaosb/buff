@@ -119,6 +119,26 @@ impl RustCodegen {
                 syn::parse2::<SynType>(tokens)
                     .map_err(|e| self.unsupported(&format!("tuple type codegen parse: {e}")))
             }
+            // DR-020 / P2.1c: trait object `Box<dyn Trait>` (owned) or
+            // `&dyn Trait` (borrowed). Per DR-020 §Autoboxing Rules,
+            // codegen ALWAYS emits the single owned `Box<dyn Trait>`
+            // form (never `&dyn`, never visible lifetimes) — the
+            // `lifetime` field is recorded in the AST for future
+            // expansion but ignored at the codegen layer for MVP. The
+            // borrowed form's parameters-only restriction is enforced
+            // at the lint layer (P2.1d).
+            //
+            // This is the parallel direct-AST path to the existing
+            // `Type::DynamicDispatch` arm in `buff_type_to_syn` (line
+            // ~240 of this file) — both produce identical Rust output.
+            TypeRef::TraitObject { trait_name, .. } => {
+                let trait_ident = rust_path_type(&trait_name.name);
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    Box<dyn #trait_ident>
+                };
+                syn::parse2::<SynType>(tokens)
+                    .map_err(|e| self.unsupported(&format!("trait object codegen: {e}")))
+            }
         }
     }
 

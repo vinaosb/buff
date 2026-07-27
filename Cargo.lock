@@ -1094,6 +1094,7 @@ dependencies = [
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-parser",
+ "buff-lang-pipeline",
  "buff-lang-types",
  "insta",
 ]
@@ -1105,7 +1106,8 @@ dependencies = [
  "chrono",
  "fake",
  "insta",
- "rand 0.9.5",
+ "rand 0.8.7",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1220,6 +1222,7 @@ dependencies = [
  "buff-lang-error",
  "insta",
  "proptest",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 
@@ -1242,6 +1245,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-lang-check"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "buff-lang-ast",
+ "buff-lang-buffhtml-parser",
+ "buff-lang-codegen-buffhtml",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "buff-lang-types",
+ "buff-plugins",
+]
+
+[[package]]
 name = "buff-lang-cli"
 version = "1.0.0"
 dependencies = [
@@ -1253,12 +1271,15 @@ dependencies = [
  "buff-lang-ast",
  "buff-lang-ast-rsx",
  "buff-lang-buffhtml-parser",
+ "buff-lang-check",
  "buff-lang-codegen-buffhtml",
  "buff-lang-codegen-rust",
  "buff-lang-debug-info",
  "buff-lang-error",
+ "buff-lang-fmt",
  "buff-lang-lexer",
  "buff-lang-parser",
+ "buff-lang-pipeline",
  "buff-lang-types",
  "buff-plugins",
  "buff-registry",
@@ -1365,6 +1386,17 @@ name = "buff-lang-ffi-guide"
 version = "1.0.0"
 
 [[package]]
+name = "buff-lang-fmt"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-lang-lexer"
 version = "1.2.0"
 dependencies = [
@@ -1383,6 +1415,27 @@ dependencies = [
  "buff-lang-lexer",
  "buff-lang-types",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "buff-lang-pipeline"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "buff-lang-ast",
+ "buff-lang-buffhtml-parser",
+ "buff-lang-codegen-buffhtml",
+ "buff-lang-codegen-rust",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "buff-lang-types",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "salsa",
+ "sha2",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1419,8 +1472,8 @@ name = "buff-lsp"
 version = "1.0.0"
 dependencies = [
  "buff-lang-ast",
- "buff-lang-cli",
  "buff-lang-error",
+ "buff-lang-fmt",
  "buff-lang-lexer",
  "buff-lang-parser",
  "buff-lang-types",
@@ -1716,10 +1769,14 @@ name = "buff-web3"
 version = "1.0.0"
 dependencies = [
  "ethers",
+ "hex",
  "insta",
+ "rand 0.8.7",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -1759,6 +1816,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tar",
  "tempfile",
  "thiserror 1.0.69",

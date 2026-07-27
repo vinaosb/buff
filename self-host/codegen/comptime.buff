@@ -87,11 +87,10 @@ func lower_comptime_facts(facts: ComptimeFacts) -> Result<Vector<Item>, CodegenE
     for i < offsets.len():
         let offset = offsets.get(i)
         let value = facts_values_get(facts, offset)
-        match lower_one(offset, value):
-            Result.Ok(item):
-                items.push(item)
-            Result.Err(e):
-                return Result.Err(e)
+        match lower_one(offset, value) {
+            Result.Ok(item) => items.push(item),
+            Result.Err(e) => return Result.Err(e),
+        }
         i = i + 1
     return Result.Ok(items)
 
@@ -102,11 +101,10 @@ func lower_comptime_facts(facts: ComptimeFacts) -> Result<Vector<Item>, CodegenE
 func lower_one(offset: Int, value: ComptimeValue) -> Result<Item, CodegenError>:
     let name = format_const_name(offset)
     let ty = rust_type_for(value)
-    match rust_expr_for(value, span_for(offset)):
-        Result.Ok(expr):
-            return Result.Ok(build_item_const(name, ty, expr))
-        Result.Err(e):
-            return Result.Err(e)
+    match rust_expr_for(value, span_for(offset)) {
+        Result.Ok(expr) => return Result.Ok(build_item_const(name, ty, expr)),
+        Result.Err(e) => return Result.Err(e),
+    }
 
 // =============================================================================
 // format_const_name — `__BUFF_COMPTIME_<offset>`

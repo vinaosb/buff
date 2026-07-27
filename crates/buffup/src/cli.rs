@@ -41,6 +41,10 @@ pub enum Command {
     Install {
         /// Version to install (semver `MAJOR.MINOR.PATCH`, e.g. `1.0.0`).
         version: String,
+
+        /// Skip SHA-256 checksum verification (NOT RECOMMENDED).
+        #[arg(long, default_value_t = false)]
+        skip_checksum: bool,
     },
 
     /// Set the active version by pointing `~/.buff/bin/buff` at the

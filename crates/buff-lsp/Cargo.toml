@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "buff-lsp"
 version = "1.0.0"
 edition = "2021"
@@ -25,12 +25,12 @@ buff-lang-lexer.workspace = true
 buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-error.workspace = true
-buff-lang-cli.workspace = true
-# T72: `buff-plugins` — LSP plugin extension points. `buff-lsp`
+buff-lang-fmt.workspace = true
+# T72: `buff-plugins` â€” LSP plugin extension points. `buff-lsp`
 # calls `buff_plugins::dispatch_global_lsp_code_actions` /
 # `dispatch_global_lsp_hover` after the built-in handlers when
 # `BUFF_PLUGIN_DIR` / `BUFF_PLUGIN_PATH` is set (no-op otherwise).
-# Pure-Rust trait-object dispatch (NO dlopen) — reuses the existing
+# Pure-Rust trait-object dispatch (NO dlopen) â€” reuses the existing
 # serde + toml + thiserror + syn + buff-lang-ast + buff-lang-error
 # workspace pins. Minimal hook: ~10 lines in `handlers.rs::hover`
 # + `code_actions`; empty registry is a pure no-op.

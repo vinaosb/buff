@@ -1,10 +1,10 @@
-//! LSP request handlers — pure functions on [`DocumentState`].
+﻿//! LSP request handlers â€” pure functions on [`DocumentState`].
 //!
 //! Every handler takes a `&DocumentState` (plus request params) and returns
-//! the matching LSP response type. There is no I/O here — the [`server`]
+//! the matching LSP response type. There is no I/O here â€” the [`server`]
 //! module is responsible for transport. This split keeps the handlers
-//! trivially unit-testable: drive `analyze::analyze` →
-//! [`DocumentState::new`] → call a handler → assert on the response.
+//! trivially unit-testable: drive `analyze::analyze` â†’
+//! [`DocumentState::new`] â†’ call a handler â†’ assert on the response.
 
 use buff_lang_ast::{Attribute, Decl, FuncDecl};
 use buff_lang_error::{Applicability, Diagnostic, Severity};
@@ -106,7 +106,7 @@ pub fn hover(state: &DocumentState, position: Position) -> Option<Hover> {
     // but computed statically from the AST so the user sees it on hover
     // WITHOUT running the program. Constants are inlined (NOT imported from
     // `buff-lang-runtime`) so the LSP stays decoupled from the heavy
-    // wgpu/rayon/tokio runtime crate — see T45 spec ("quick" task; do not
+    // wgpu/rayon/tokio runtime crate â€” see T45 spec ("quick" task; do not
     // add deps").
     if let Some(explain) = dispatch_explain_for(state, byte) {
         lines.push(explain);
@@ -114,7 +114,7 @@ pub fn hover(state: &DocumentState, position: Position) -> Option<Hover> {
 
     // T72: LSP plugin dispatch. Calls into the global plugin registry
     // (env-var-loaded via BUFF_PLUGIN_DIR / BUFF_PLUGIN_PATH). Empty
-    // registry → Ok(None) → no-op. When a plugin returns hover
+    // registry â†’ Ok(None) â†’ no-op. When a plugin returns hover
     // content, it's APPENDED to the built-in lines (so plugin docs
     // augment, never replace, the built-in type/symbol info).
     if let Some(plugin_hover) = plugin_hover_for(state, position) {
@@ -136,7 +136,7 @@ pub fn hover(state: &DocumentState, position: Position) -> Option<Hover> {
 
 /// T72: Call the global plugin registry's `hover` dispatch and
 /// return the content if any plugin provides hover info. Empty
-/// registry → `None` (pure no-op).
+/// registry â†’ `None` (pure no-op).
 ///
 /// Uses a synthetic URI derived from `source_id` because the
 /// hover handler's signature takes `&DocumentState` (no direct
@@ -154,26 +154,26 @@ fn plugin_hover_for(state: &DocumentState, position: Position) -> Option<String>
 }
 
 // ---------------------------------------------------------------------
-// Code actions (T72 plugin hook + T1 suggestion → CodeAction conversion)
+// Code actions (T72 plugin hook + T1 suggestion â†’ CodeAction conversion)
 // ---------------------------------------------------------------------
 
 /// Compute code actions at `position`. Returns the list of actions from
 /// two sources (merged, suggestion-derived first):
 ///
-/// 1. **Diagnostic fix suggestions** (T1, v1.25 Wave 0) — every
+/// 1. **Diagnostic fix suggestions** (T1, v1.25 Wave 0) â€” every
 ///    [`buff_lang_error::CodeSuggestion`] attached to a diagnostic whose
 ///    primary span contains `position` becomes a `quickfix` CodeAction
 ///    with a `WorkspaceEdit` that applies the replacement. Actions with
 ///    [`Applicability::MachineApplicable`] are marked `is_preferred` so
 ///    VSCode / Neovim auto-highlight them.
-/// 2. **LSP plugins** (T72) — the global plugin registry's
-///    `dispatch_global_lsp_code_actions` hook. Empty registry → no
+/// 2. **LSP plugins** (T72) â€” the global plugin registry's
+///    `dispatch_global_lsp_code_actions` hook. Empty registry â†’ no
 ///    actions from this source.
 ///
 /// Returns `None` when both sources are empty (the pre-T1 / pre-T72
-/// behavior — the LSP server reports "no code actions" to the editor).
+/// behavior â€” the LSP server reports "no code actions" to the editor).
 ///
-/// **Light touch**: this adds the suggestion → CodeAction CONVERSION only.
+/// **Light touch**: this adds the suggestion â†’ CodeAction CONVERSION only.
 /// No new LSP capabilities are registered in `server.rs`; the server's
 /// existing code-action dispatch (when wired) picks this up automatically.
 pub fn code_actions(state: &DocumentState, position: Position) -> Option<Vec<CodeActionOrCommand>> {
@@ -198,19 +198,19 @@ pub fn code_actions(state: &DocumentState, position: Position) -> Option<Vec<Cod
 ///
 /// Each suggestion becomes a `quickfix` CodeAction with:
 ///
-/// - `title` — the suggestion's label, or `"Apply suggestion: <replacement>"`
+/// - `title` â€” the suggestion's label, or `"Apply suggestion: <replacement>"`
 ///   when no label is attached.
-/// - `kind` — [`CodeActionKind::QUICK_FIX`].
-/// - `is_preferred` — `Some(true)` when [`Applicability::MachineApplicable`]
+/// - `kind` â€” [`CodeActionKind::QUICK_FIX`].
+/// - `is_preferred` â€” `Some(true)` when [`Applicability::MachineApplicable`]
 ///   (so editors auto-highlight the safe fix).
-/// - `edit` — a [`WorkspaceEdit`] with one [`TextEdit`] replacing the
+/// - `edit` â€” a [`WorkspaceEdit`] with one [`TextEdit`] replacing the
 ///   suggestion's byte span with `replacement`. The edit is keyed by the
 ///   synthesized `buff://source-{id}` URI (same form the plugin hook
 ///   uses); the LSP server substitutes the real document URI when it
 ///   forwards the response.
 ///
 /// Returns an empty `Vec` when no diagnostic at `position` carries
-/// suggestions (the common case — most diagnostics have no fix yet).
+/// suggestions (the common case â€” most diagnostics have no fix yet).
 fn suggestions_to_code_actions(
     state: &DocumentState,
     position: Position,
@@ -226,7 +226,7 @@ fn suggestions_to_code_actions(
     for diag in &state.analysis.diagnostics {
         // Only surface suggestions for diagnostics whose primary span
         // contains the cursor. (Suggestions on the same diagnostic but
-        // at a different span still qualify — the diagnostic IS the
+        // at a different span still qualify â€” the diagnostic IS the
         // anchor; the suggestion's own span is in the TextEdit.)
         if !span_contains(diag.span, byte) {
             continue;
@@ -238,7 +238,7 @@ fn suggestions_to_code_actions(
                 new_text: suggestion.replacement.clone(),
             };
             // lsp-types 0.97's `WorkspaceEdit::changes` is a HashMap (the
-            // LSP 3.17 spec uses a JSON object — unordered). We seed it
+            // LSP 3.17 spec uses a JSON object â€” unordered). We seed it
             // from a one-entry HashMap; the BTreeMap shape was a v1.24-era
             // leftover that rust-analyzer flagged but cargo didn't catch
             // because the crate hadn't been re-checked against the bump.
@@ -297,13 +297,13 @@ fn plugin_code_actions(state: &DocumentState, position: Position) -> Vec<CodeAct
 }
 
 /// `true` when `byte` lies within `[span.start, span.end)` (inclusive of
-/// start, exclusive of end — the standard half-open range).
+/// start, exclusive of end â€” the standard half-open range).
 fn span_contains(span: buff_lang_error::Span, byte: usize) -> bool {
     span.start <= byte && byte < span.end
 }
 
 /// Render a [`buff_lang_types::Type`] for hover. Defaults collapse to their
-/// bare name (`Int<64>` → `Int`) so the hover shows the user-friendly form
+/// bare name (`Int<64>` â†’ `Int`) so the hover shows the user-friendly form
 /// matching the language's annotation surface.
 fn display_type(ty: &buff_lang_types::Type) -> String {
     use buff_lang_types::{FloatWidth, IntWidth, Type};
@@ -354,7 +354,7 @@ fn top_decl_containing(state: &DocumentState, byte: usize) -> Option<crate::symb
 /// span contains `byte`. Returns `None` when the cursor is not inside a
 /// function (so non-function hovers are unchanged) or when the function
 /// has no `@prefer(...)` hint AND nothing noteworthy to say (kept minimal
-/// to avoid hover spam on every plain function — see T45 spec).
+/// to avoid hover spam on every plain function â€” see T45 spec).
 ///
 /// When the cursor IS inside a function, the returned string is a single
 /// markdown block summarising:
@@ -362,43 +362,43 @@ fn top_decl_containing(state: &DocumentState, byte: usize) -> Option<crate::symb
 /// 1. The `@prefer(gpu)` / `@prefer(npu)` / no-hint disposition.
 /// 2. The runtime's CPU/GPU routing bands (the same thresholds
 ///    `buff-lang-runtime::threshold::decide` uses, inlined here as
-///    constants — see file-level doc on why we don't import the runtime
+///    constants â€” see file-level doc on why we don't import the runtime
 ///    crate).
 /// 3. The lowered GPU threshold when a `@prefer(gpu)` hint is present
 ///    (mirrors `PREFER_GPU_MIN_ELEMENTS` from the runtime's `hints` module).
 ///
 /// **Why static-only?** The LSP cannot run the user's program, so the
 /// actual element count at the dispatch site is unknown at hover time.
-/// We surface the DECISION RULE — the user can then reason "my array is
-/// 10k elements → CPU parallel" without executing. For the live decision
+/// We surface the DECISION RULE â€” the user can then reason "my array is
+/// 10k elements â†’ CPU parallel" without executing. For the live decision
 /// on a real run, `buff run --explain` prints it.
 fn dispatch_explain_for(state: &DocumentState, byte: usize) -> Option<String> {
     let func = enclosing_func(state, byte)?;
     let prefer = prefer_hint(&func);
 
-    // Header line — always present when we have a function.
+    // Header line â€” always present when we have a function.
     let header = match &prefer {
-        Some(h) => format!("⚙️ **Dispatch** — hint: `{h}`"),
-        None => "⚙️ **Dispatch** — no hint (runtime decides by element count)".to_string(),
+        Some(h) => format!("âš™ï¸ **Dispatch** â€” hint: `{h}`"),
+        None => "âš™ï¸ **Dispatch** â€” no hint (runtime decides by element count)".to_string(),
     };
 
     // Threshold table. These are the SAME constants the runtime uses
     // (`SINGLE_THREAD_MAX = 999`, `CPU_PARALLEL_MAX = 50_000`,
-    //  `PREFER_GPU_MIN_ELEMENTS = 1024`) — duplicated here to keep the LSP
+    //  `PREFER_GPU_MIN_ELEMENTS = 1024`) â€” duplicated here to keep the LSP
     // decoupled from `buff-lang-runtime` (which pulls wgpu+rayon+tokio).
     // If the runtime constants ever change, this table needs the same bump.
     let bands = "| elements | backend |\n|---|---|\n\
         | < 1000 | single-thread CPU |\n\
-        | 1000–50 000 | parallel CPU (rayon) |\n\
+        | 1000â€“50 000 | parallel CPU (rayon) |\n\
         | > 50 000 | GPU (wgpu), when available + fits VRAM |";
 
     let note = match &prefer {
         Some(h) if h.contains("gpu") => {
-            "\n\nWith `@prefer(gpu)`, the GPU band opens at **≥ 1024 elements** \
+            "\n\nWith `@prefer(gpu)`, the GPU band opens at **â‰¥ 1024 elements** \
              (overrides cost model when a GPU is present)."
         }
         Some(_) => {
-            "\n\n`@prefer(npu)` is reserved — currently routes through the \
+            "\n\n`@prefer(npu)` is reserved â€” currently routes through the \
              unhinted cost model."
         }
         None => "",
@@ -420,7 +420,7 @@ fn enclosing_func<'a>(state: &'a DocumentState, byte: usize) -> Option<&'a FuncD
                 return Some(f);
             }
         }
-        // `export func …` wraps a FuncDecl — its outer span also covers
+        // `export func â€¦` wraps a FuncDecl â€” its outer span also covers
         // the body, so check the inner func too.
         if let Decl::ExportDecl(exp) = decl {
             if let Decl::FuncDecl(f) = exp.inner.as_ref() {
@@ -437,7 +437,7 @@ fn enclosing_func<'a>(state: &'a DocumentState, byte: usize) -> Option<&'a FuncD
 /// the rendered hint string (e.g. `"@prefer(gpu)"`) or `None` when the
 /// function has no `@prefer` attribute.
 ///
-/// Mirrors the parsing the runtime's `prefer_from_name_args` would do —
+/// Mirrors the parsing the runtime's `prefer_from_name_args` would do â€”
 /// kept local so the LSP doesn't depend on the runtime crate.
 fn prefer_hint(f: &FuncDecl) -> Option<String> {
     let prefer: Option<&Attribute> = f.attributes.iter().find(|a| a.name.name == "prefer");
@@ -456,7 +456,7 @@ fn prefer_hint(f: &FuncDecl) -> Option<String> {
 // ---------------------------------------------------------------------
 
 /// Compute completion candidates for `position`. Returns `None` when no
-/// candidates apply (rare — there's always SOMETHING in scope).
+/// candidates apply (rare â€” there's always SOMETHING in scope).
 pub fn completion(state: &DocumentState, _position: Position) -> Option<CompletionResponse> {
     let cands = state.analysis.symbols.completions();
     if cands.is_empty() {
@@ -514,7 +514,7 @@ pub fn goto_definition(
         None
     })?;
 
-    // Try local bindings first (params / lets) — they shadow top-level
+    // Try local bindings first (params / lets) â€” they shadow top-level
     // decls in lexical order.
     if let Some(local) = analysis.symbols.find_local_named(&name) {
         return Some(GotoDefinitionResponse::Scalar(Location {
@@ -619,12 +619,12 @@ fn top_decl_symbol_kind(kind: TopDeclKind) -> Option<SymbolKind> {
 /// spanning the whole document with the canonical-formatted source, or
 /// `None` if the file already parses identically (no edits needed).
 ///
-/// v1.2 routes through `buff_lang_cli::fmt::format_source` so the LSP's
+/// v1.2 routes through `buff_lang_fmt::format_source` so the LSP's
 /// formatter is byte-identical to the CLI's. NO reimplementation.
 pub fn formatting(state: &DocumentState) -> Option<Vec<TextEdit>> {
-    let canonical = match buff_lang_cli::fmt::format_source(&state.text) {
+    let canonical = match buff_lang_fmt::format_source(&state.text) {
         Ok(s) => s,
-        // Parse / lex errors mean we can't safely reformat. Skip — the
+        // Parse / lex errors mean we can't safely reformat. Skip â€” the
         // diagnostics will already have surfaced the underlying problem.
         Err(_) => return None,
     };
@@ -652,7 +652,7 @@ pub fn formatting(state: &DocumentState) -> Option<Vec<TextEdit>> {
 /// Adapter from the LSP `textDocument/codeAction` request shape to the
 /// existing [`code_actions`] handler. The LSP sends a [`CodeActionParams`]
 /// with a `range` (the editor's selection); we forward `range.start` to
-/// the position-based handler — the underlying diagnostic-suggestion
+/// the position-based handler â€” the underlying diagnostic-suggestion
 /// matcher checks `span_contains(byte)` against each diagnostic, and
 /// the cursor's exact position within the selection is what matters.
 ///
@@ -665,7 +665,7 @@ pub fn code_action(
 }
 
 // ---------------------------------------------------------------------
-// T46: codeLens — show type info inline above each top-level function
+// T46: codeLens â€” show type info inline above each top-level function
 // ---------------------------------------------------------------------
 
 /// Compute code lenses for the document.
@@ -673,7 +673,7 @@ pub fn code_action(
 /// Emits ONE lens per top-level function declaration, anchored on the
 /// function's NAME line, displaying the inferred / annotated signature
 /// (`func add(a: Int, b: Int) -> Int`). The lens is non-interactive
-/// (`command: None`) — it's purely informational, mirroring rust-analyzer's
+/// (`command: None`) â€” it's purely informational, mirroring rust-analyzer's
 /// "type info above fn" lens. Structs / enums / traits do NOT get lenses
 /// (their info is already in the document-symbol outline).
 ///
@@ -711,23 +711,23 @@ pub fn code_lens(_state: &DocumentState, _params: CodeLensParams) -> Vec<CodeLen
 }
 
 // ---------------------------------------------------------------------
-// T46: inlayHint — parameter names + inferred types
+// T46: inlayHint â€” parameter names + inferred types
 // ---------------------------------------------------------------------
 
 /// Compute inlay hints within `range`.
 ///
 /// Two flavours of hint (matching rust-analyzer's defaults):
 ///
-/// 1. **Type hints** on `let` bindings — for every local `let x = …`
+/// 1. **Type hints** on `let` bindings â€” for every local `let x = â€¦`
 ///    whose inferred type is known, emit a hint at the END of the
-///    binding's line showing `: <Type>`. Skipped for `let x: T = …`
+///    binding's line showing `: <Type>`. Skipped for `let x: T = â€¦`
 ///    where the user already wrote the annotation (no duplicate noise).
 ///    Skipped for `Type::Unknown` (the inferencer couldn't resolve).
 ///
-/// 2. **Parameter-name hints** at call sites — DEFERRED. v1.25 ships
+/// 2. **Parameter-name hints** at call sites â€” DEFERRED. v1.25 ships
 ///    type hints only; parameter-name hints require resolving which
 ///    param each positional argument maps to (the analysis doesn't yet
-///    track call-arg→param mapping for user functions). Tracked as a
+///    track call-argâ†’param mapping for user functions). Tracked as a
 ///    T46b follow-up; the handler shape accepts it via an empty prepend.
 ///
 /// Hints outside `range` are filtered out (the LSP spec requires
@@ -736,7 +736,7 @@ pub fn code_lens(_state: &DocumentState, _params: CodeLensParams) -> Vec<CodeLen
 pub fn inlay_hints(state: &DocumentState, params: InlayHintParams) -> Vec<InlayHint> {
     let mut hints: Vec<InlayHint> = Vec::new();
 
-    // Walk the local bindings. Only `Let` bindings get type hints —
+    // Walk the local bindings. Only `Let` bindings get type hints â€”
     // params already have explicit annotations in Buff's grammar
     // (`name: Type`), so emitting hints there would duplicate text.
     for (_byte, entry) in &state.analysis.symbols.locals {
@@ -747,7 +747,7 @@ pub fn inlay_hints(state: &DocumentState, params: InlayHintParams) -> Vec<InlayH
         let Some(ty) = state.analysis.types.lookup(entry.name.span.start) else {
             continue;
         };
-        // Skip unknown types — showing `: Unknown` would be misleading.
+        // Skip unknown types â€” showing `: Unknown` would be misleading.
         if matches!(ty, buff_lang_types::Type::Unknown) {
             continue;
         }
@@ -796,7 +796,7 @@ pub fn inlay_hints(state: &DocumentState, params: InlayHintParams) -> Vec<InlayH
 }
 
 // ---------------------------------------------------------------------
-// T46: semanticTokens — syntax highlighting (LSP 3.16)
+// T46: semanticTokens â€” syntax highlighting (LSP 3.16)
 // ---------------------------------------------------------------------
 
 /// The legend declared in [`semantic_tokens_legend`]. Indices are
@@ -821,10 +821,10 @@ pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
 ];
 
 /// Token modifiers we emit. Only `declaration` (marking the defining
-/// occurrence) for now — the protocol allows zero modifiers.
+/// occurrence) for now â€” the protocol allows zero modifiers.
 pub const SEMANTIC_TOKEN_MODIFIERS: &[&str] = &["declaration"];
 
-/// Bit 0 — the `declaration` modifier. Matches
+/// Bit 0 â€” the `declaration` modifier. Matches
 /// [`SEMANTIC_TOKEN_MODIFIERS`] ordering.
 const MOD_DECLARATION: u32 = 1 << 0;
 
@@ -847,7 +847,7 @@ pub fn semantic_tokens_legend() -> SemanticTokensLegend {
             lsp_types::SemanticTokenType::PARAMETER, // 7
             lsp_types::SemanticTokenType::STRING,    // 8
             lsp_types::SemanticTokenType::NUMBER,    // 9
-            // char — no predefined constant; reuse the LSP "type"
+            // char â€” no predefined constant; reuse the LSP "type"
             // category is wrong; use a custom string. lsp-types 0.97
             // added DECORATOR but no CHAR, so we use From<&str>.
             "char".into(),                           // 10
@@ -866,7 +866,7 @@ pub fn semantic_tokens_legend() -> SemanticTokensLegend {
 /// mapping each [`TokenKind`](buff_lang_lexer::TokenKind) to a type index
 /// via [`token_type_index`]. Identifiers are further resolved against the
 /// symbol index so that a function name tokens as `function`, a struct
-/// name as `struct`, etc. — without that resolution every identifier
+/// name as `struct`, etc. â€” without that resolution every identifier
 /// would be uniformly `variable`.
 ///
 /// Tokens are sorted ascending by `(line, character)` and delta-encoded
@@ -875,7 +875,7 @@ pub fn semantic_tokens_legend() -> SemanticTokensLegend {
 ///
 /// Returns `None` when the source fails to lex (the diagnostic surface
 /// already shows why). Returns `Some(SemanticTokensResult::Tokens(...))`
-/// otherwise — always with a payload, possibly empty.
+/// otherwise â€” always with a payload, possibly empty.
 pub fn semantic_tokens_full(
     state: &DocumentState,
     _params: SemanticTokensParams,
@@ -885,7 +885,7 @@ pub fn semantic_tokens_full(
         Err(_) => return None,
     };
 
-    // Pre-build a lookup of top-decl NAME start bytes → semantic type
+    // Pre-build a lookup of top-decl NAME start bytes â†’ semantic type
     // index so identifiers can be coloured by their target kind.
     let mut name_to_type: BTreeMap<usize, u32> = BTreeMap::new();
     for d in &state.analysis.symbols.top_decls {
@@ -944,21 +944,21 @@ pub fn semantic_tokens_full(
 
     // Sort by (line, char). The lexer emits tokens in source order
     // already, but the offside-rule synthesised Indent/Dedent tokens
-    // sit at the same byte as the following real token — a stable sort
+    // sit at the same byte as the following real token â€” a stable sort
     // keeps them in emission order which is what we want.
     abs.sort_by_key(|t| (t.0, t.1));
 
     // Second pass: delta-encode. Skip tokens that occupy the same
     // (line, char) as the previous emitted token (zero-length deltas
-    // are illegal per LSP spec) — this happens when two colourable
-    // tokens overlap (e.g. `@test` → decorator `@` is at the same byte
+    // are illegal per LSP spec) â€” this happens when two colourable
+    // tokens overlap (e.g. `@test` â†’ decorator `@` is at the same byte
     // as the start of `test` identifier).
     let mut data: Vec<SemanticToken> = Vec::with_capacity(abs.len());
     let mut prev_line: u32 = 0;
     let mut prev_char: u32 = 0;
     for (line, char, length, ty_idx, mods) in abs {
         if line == prev_line && char == prev_char {
-            // Overlap — skip the later-emitted one (the earlier one
+            // Overlap â€” skip the later-emitted one (the earlier one
             // already claimed this cell). Keeps the stream well-formed.
             continue;
         }
@@ -1019,7 +1019,7 @@ fn token_type_index(
         | TokenKind::StringPart(_)
         | TokenKind::InterpStart
         | TokenKind::InterpSpec(_)
-        | TokenKind::InterpEnd => Some(8), // string — boundaries + parts coloured as string
+        | TokenKind::InterpEnd => Some(8), // string â€” boundaries + parts coloured as string
         // --- operators (arithmetic / comparison / assignment / etc) ---
         TokenKind::Plus
         | TokenKind::Minus
@@ -1101,7 +1101,7 @@ fn token_type_index(
         // --- identifiers: resolve via the symbol index ---
         TokenKind::Ident(_) => {
             if let Some(&idx) = name_to_type.get(&span.start) {
-                // Top-level decl name — mark as declaration.
+                // Top-level decl name â€” mark as declaration.
                 return (Some(idx), MOD_DECLARATION);
             }
             if param_name_starts.contains(&span.start) {
@@ -1300,7 +1300,7 @@ mod tests {
     fn formatting_noop_when_already_canonical() {
         // Run format_source once to get a canonical fixture.
         let raw = "func main():\n    print(\"hi\")\n";
-        let canonical = buff_lang_cli::fmt::format_source(raw).unwrap();
+        let canonical = buff_lang_fmt::format_source(raw).unwrap();
         let st = open(&canonical);
         assert!(formatting(&st).is_none(), "expected no edits");
     }
@@ -1311,7 +1311,7 @@ mod tests {
 
     #[test]
     fn t45_hover_inside_function_shows_dispatch_info() {
-        // Plain function — no @prefer hint. Cursor in the body.
+        // Plain function â€” no @prefer hint. Cursor in the body.
         let st = open("func main():\n    let x = 42\n    print(x)\n");
         let h = hover(&st, pos(1, 8)).expect("hover inside function body");
         let s = match h.contents {
@@ -1396,7 +1396,7 @@ mod tests {
             partial_result_params: Default::default(),
         };
         let lenses = code_lens(&st, params);
-        // Only `origin` qualifies — struct/enum decls are skipped.
+        // Only `origin` qualifies â€” struct/enum decls are skipped.
         assert_eq!(lenses.len(), 1, "lenses: {lenses:?}");
     }
 
@@ -1427,7 +1427,7 @@ mod tests {
 
     #[test]
     fn t46_inlay_hints_skip_explicit_annotations() {
-        // `let x: Int = 42` already has the annotation — no hint.
+        // `let x: Int = 42` already has the annotation â€” no hint.
         let src = "func main():\n    let x: Int = 42\n    print(x)\n";
         let st = open(src);
         let params = InlayHintParams {
@@ -1506,7 +1506,7 @@ mod tests {
 
     #[test]
     fn t46_semantic_tokens_full_delta_encodes() {
-        // Two lines of source → first token is absolute, second is
+        // Two lines of source â†’ first token is absolute, second is
         // delta. Verify the delta encoding shape.
         let src = "func a():\n    print(1)\n";
         let st = open(src);

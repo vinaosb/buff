@@ -163,8 +163,16 @@ func int_min4(a: Int, b: Int, c: Int, d: Int) -> Int:
 
 // Maximum of four ints (replaces Rust's `c1.max(c2).max(c3).max(c4)`).
 func int_max4(a: Int, b: Int, c: Int, d: Int) -> Int:
-    let ab = if a > b: a else: b
-    let cd = if c > d: c else: d
+    let ab = a
+    if a > b:
+        ab = a
+    else:
+        ab = b
+    let cd = c
+    if c > d:
+        cd = c
+    else:
+        cd = d
     if ab > cd:
         return ab
     return cd

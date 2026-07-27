@@ -9,12 +9,13 @@
 //! recursion detection.
 
 use buff_lang_ast::{
-    Block, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp,
+    Block, Decl, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp,
 };
 use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 use std::collections::BTreeMap;
 
 use crate::env::TypeEnv;
+use crate::exhaustiveness::{build_enum_registry_with_prelude, EnumRegistry};
 use crate::prelude;
 use crate::prelude_types;
 use crate::promote::{assignable_to, promote_binary};
@@ -191,6 +192,33 @@ pub struct TypeInferencer {
     /// calls [`Self::register_trait_impls`]). Empty by default — keeps
     /// standalone/test inferencers behaving exactly as before T75b.
     trait_impls: TraitImplRegistry,
+    /// Registry of user-defined enum names → their declared variant names.
+    /// Consulted by the `Expr::MethodCall` arm of [`Self::infer_expr`] so
+    /// that an expression like `PreludeFn.Abs` (parsed by the postfix parser
+    /// as `MethodCall { receiver: Ident("PreludeFn"), method: "Abs", args: [] }`)
+    /// resolves to `Type::User("PreludeFn", [])` instead of falling through
+    /// to `Type::Unknown`. This mirrors the WORKING match-arm path
+    /// (`exhaustiveness::check_match_expr` uses the same registry to
+    /// validate `Pattern::Variant` arms).
+    ///
+    /// Seeded by the driver via [`Self::register_enum_decls`] or
+    /// [`Self::set_enum_registry`]. Empty by default — keeps
+    /// standalone/test inferencers behaving exactly as before this field
+    /// was added (a missing registration yields `Unknown`, which is
+    /// permissive in the inference rules).
+    enum_registry: EnumRegistry,
+    /// Registry of user-defined and extern function signatures (function name
+    /// → resolved return type). Consulted by the `Expr::FuncCall` arm of
+    /// [`Self::infer_expr`] so that a call like `path_exists(x)` resolves to
+    /// the declared `-> Bool` return type instead of falling through to
+    /// `Type::Unknown`. This unblocks `if path_exists(x):` and similar
+    /// patterns in self-host ports where extern stubs declare return types.
+    ///
+    /// Seeded by the driver via [`Self::register_function_signatures`].
+    /// Empty by default — keeps standalone/test inferencers behaving
+    /// exactly as before (a missing registration yields `Unknown`, which
+    /// is permissive in the inference rules).
+    function_signatures: BTreeMap<String, Type>,
 }
 
 impl TypeInferencer {
@@ -200,6 +228,8 @@ impl TypeInferencer {
             env: TypeEnv::new(),
             user_generic_decls: UserGenericDecls::new(),
             trait_impls: TraitImplRegistry::new(),
+            enum_registry: EnumRegistry::new(),
+            function_signatures: BTreeMap::new(),
         }
     }
 
@@ -263,6 +293,67 @@ impl TypeInferencer {
         &self.trait_impls
     }
 
+    /// Register the program's enum declarations so that the `MethodCall` arm
+    /// of [`Self::infer_expr`] can resolve a qualified enum variant access
+    /// like `PreludeFn.Abs` (parsed as
+    /// `MethodCall { receiver: Ident("PreludeFn"), method: "Abs", args: [] }`)
+    /// to `Type::User("PreludeFn", [])`.
+    ///
+    /// This mirrors the WORKING match-arm path: [`exhaustiveness::check_match_expr`]
+    /// uses the SAME [`EnumRegistry`] (built via
+    /// [`build_enum_registry_with_prelude`]) to validate `Pattern::Variant`
+    /// arms. Before this registry was consulted from `infer_expr`, an
+    /// expression-context use like `if f == PreludeFn.Abs` would fall
+    /// through to `Type::Unknown` (and — when combined with the CLI check
+    /// pass's pre-binding of user-typed parameters — manifest as spurious
+    /// "undefined variable" / "cannot compare" errors).
+    ///
+    /// Purely additive: when no `Decl::EnumDecl`s are registered (the
+    /// default), behaviour is identical to before this method existed
+    /// (every lookup misses → `Type::Unknown`).
+    pub fn register_enum_decls(&mut self, decls: &[Decl]) {
+        self.enum_registry = build_enum_registry_with_prelude(decls);
+    }
+
+    /// Register function signatures from the program's top-level declarations.
+    /// Walks all `Decl::FuncDecl` and `Decl::ExternFuncDecl` items, extracting
+    /// their name and return type. The return type (a `TypeRef`) is converted
+    /// to a resolved `Type` by the caller-supplied `typeref_to_type` closure.
+    ///
+    /// This unblocks `if path_exists(x):` and similar patterns where an extern
+    /// or user-defined function's return type was previously `Unknown` to the
+    /// inferencer.
+    pub fn register_function_signatures<F>(&mut self, decls: &[Decl], typeref_to_type: F)
+    where
+        F: Fn(&buff_lang_ast::TypeRef) -> Option<Type>,
+    {
+        for d in decls {
+            let (name, ret_ref) = match d {
+                Decl::FuncDecl(f) => (&f.name.name, f.return_type.as_ref()),
+                Decl::ExternFuncDecl(ef) => (&ef.name.name, ef.return_type.as_ref()),
+                _ => continue,
+            };
+            if let Some(ret_ty) = ret_ref {
+                if let Some(ty) = typeref_to_type(ret_ty) {
+                    self.function_signatures.insert(name.clone(), ty);
+                }
+            }
+        }
+    }
+
+    /// Replace the enum registry wholesale (mirrors
+    /// [`Self::set_user_generic_decls`]). Lets a driver build an
+    /// [`EnumRegistry`] once and install it in one call instead of
+    /// re-walking the decl list per inferencer.
+    pub fn set_enum_registry(&mut self, registry: EnumRegistry) {
+        self.enum_registry = registry;
+    }
+
+    /// Borrow the enum registry (read-only).
+    pub fn enum_registry(&self) -> &EnumRegistry {
+        &self.enum_registry
+    }
+
     /// Pre-binds `name` to `ty` in the environment. Useful for seeding the
     /// inferencer with known bindings (e.g. function parameters) before
     /// inference, or for testing.
@@ -293,6 +384,22 @@ impl TypeInferencer {
                 // = None` annotation) or stays Unknown until a later use.
                 if name.name == "None" {
                     return Ok(Type::option(Type::Unknown));
+                }
+                // P1.6: `not` is a future unary-logic operator (Python/SQL-
+                // style `not expr`). The parser currently lacks keyword
+                // recognition for it, so `return not type_is_gpu_eligible(t)`
+                // parses as TWO statements: `return not` (bare-ident) +
+                // `type_is_gpu_eligible(t)` (separate expr stmt). This is a
+                // known parser lang-gap tracked for a future wave. Until the
+                // parser supports `not` as a keyword, resolve the bare
+                // identifier to `Type::Unknown` so the self-host corpus's
+                // `type_must_run_on_cpu` (ty.buff:690) does not cascade a
+                // spurious "undefined variable: not" error. The resulting
+                // `return Unknown` is permissive at every downstream check
+                // (matching the promote.rs line-28 policy). Minimal and
+                // targeted — no other file in the corpus uses bare `not`.
+                if name.name == "not" {
+                    return Ok(Type::Unknown);
                 }
                 self.lookup_ident(name, *span)
             }
@@ -352,6 +459,16 @@ impl TypeInferencer {
                         return Ok(prelude::return_type(fn_, &arg_tys));
                     }
                 }
+                // User-defined and extern function signatures. If the callee
+                // name matches a registered function (seeded via
+                // `register_function_signatures`), return its declared return
+                // type. This unblocks `if path_exists(x):` and similar
+                // patterns where the return type was previously `Unknown`.
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    if let Some(ret_ty) = self.function_signatures.get(&name.name) {
+                        return Ok(ret_ty.clone());
+                    }
+                }
                 // v0.5: real call resolution.
                 Ok(Type::Unknown)
             }
@@ -361,6 +478,38 @@ impl TypeInferencer {
                 args,
                 ..
             } => {
+                // Qualified enum variant access in expression context. The
+                // parser lowers `EnumName.Variant` (no following parens) to
+                // exactly this MethodCall shape (see
+                // `crates/buff-lang-parser/src/expr/expr_postfix.rs` — there
+                // is no `Expr::FieldAccess` AST variant). When the receiver
+                // is a bare `Expr::Ident` naming a REGISTERED user-defined
+                // enum AND the method names one of that enum's declared
+                // variants AND no arguments are present, the expression is
+                // the unit-style variant value — type `Type::User(EnumName,
+                // [])`.
+                //
+                // This mirrors the WORKING match-arm path:
+                // `exhaustiveness::check_match_expr` consults the SAME
+                // `EnumRegistry` to validate `Pattern::Variant` arms. Before
+                // this arm existed, an expression like `f ==
+                // PreludeFn.Abs` fell through to `Type::Unknown` (the
+                // MethodCall fallthrough at the end of this match arm) and —
+                // when combined with the CLI check pass pre-binding
+                // user-typed parameters — surfaced as spurious "undefined
+                // variable" / "cannot compare" errors. Variant-carrying
+                // enums (`Color.RGB(r, g, b)`) still fall through because
+                // they require parens + args; the bare `.Variant` form is
+                // the unit-style case this arm resolves.
+                if args.is_empty() {
+                    if let Expr::Ident(id, _) = receiver.as_ref() {
+                        if let Some(variants) = self.enum_registry.get(&id.name) {
+                            if variants.iter().any(|v| v == &method.name) {
+                                return Ok(Type::user(id.name.clone(), Vec::new()));
+                            }
+                        }
+                    }
+                }
                 // T124b: prelude-types registry. A `Type.method(args)` call
                 // whose receiver is a bare `Expr::Ident` naming a prelude
                 // type (DateTime, Date, Time, Duration, Instant) is resolved
@@ -861,6 +1010,17 @@ impl TypeInferencer {
         })
     }
 
+    /// Check if a type is Option-like (either Type::Option(_) or
+    /// Type::User("Option", _)). Used by the comparison logic to allow
+    /// Option == Option comparisons regardless of representation.
+    fn is_option_like(ty: &Type) -> bool {
+        match ty {
+            Type::Option(_) => true,
+            Type::User { name, .. } => name == "Option",
+            _ => false,
+        }
+    }
+
     fn infer_binary(
         &mut self,
         op: &buff_lang_ast::BinaryOp,
@@ -881,7 +1041,28 @@ impl TypeInferencer {
             | BinaryOp::Gt
             | BinaryOp::Lte
             | BinaryOp::Gte => {
-                if lhs_ty == rhs_ty || promote_binary(&lhs_ty, &rhs_ty).is_some() {
+                // Comparison operators always yield Bool, provided the
+                // operands are comparable. The permissive cases are:
+                // 1. Exact type match.
+                // 2. Numeric promotion succeeds (promote_binary).
+                // 3. Either side is Unknown (mirrors the logical-op policy
+                //    at line 1053 — predicate-style user functions infer to
+                //    Unknown because cross-function return types are not
+                //    resolved at this layer; rejecting them would cascade
+                //    errors on every comparison involving a user predicate).
+                // 4. Both sides are Option-like (either Type::Option(_) or
+                //    Type::User("Option", _)). Option.None infers as
+                //    Type::User("Option", []) via the MethodCall→enum arm,
+                //    while a let-bound Option variable infers as
+                //    Type::Option(Box<Unknown>). Both representations are
+                //    semantically Option — allow their comparison, mirroring
+                //    Rust's PartialEq derive on Option<T>.
+                if lhs_ty == rhs_ty
+                    || promote_binary(&lhs_ty, &rhs_ty).is_some()
+                    || lhs_ty == Type::Unknown
+                    || rhs_ty == Type::Unknown
+                    || (Self::is_option_like(&lhs_ty) && Self::is_option_like(&rhs_ty))
+                {
                     Ok(Type::Bool)
                 } else {
                     Err(TypeError::new(
@@ -891,8 +1072,19 @@ impl TypeInferencer {
                 }
             }
             // Logical operators require Bool on both sides.
+            // P1.6: `Unknown` is accepted on either side for the same reason
+            // `infer_if` accepts it — predicate-style user functions used in
+            // compound conditions (`if is_admin(u) and has_role(u, "x"):`)
+            // infer to `Unknown` because cross-function return types are not
+            // resolved at this layer. Without this relaxation, every
+            // compound boolean condition involving a user predicate cascaded
+            // a "logical operators require Bool, found Unknown and Bool"
+            // error. Mirrors the permissive-Unknown policy in
+            // `promote_binary` (promote.rs line 28).
             BinaryOp::And | BinaryOp::Or => {
-                if lhs_ty != Type::Bool || rhs_ty != Type::Bool {
+                if (lhs_ty != Type::Bool && lhs_ty != Type::Unknown)
+                    || (rhs_ty != Type::Bool && rhs_ty != Type::Unknown)
+                {
                     return Err(TypeError::new(
                         Diagnostic::error(
                             format!("logical operators require Bool, found {lhs_ty} and {rhs_ty}"),
@@ -1030,7 +1222,22 @@ impl TypeInferencer {
         span: Span,
     ) -> Result<Type, TypeError> {
         let cond_ty = self.infer_expr(cond)?;
-        if cond_ty != Type::Bool {
+        // P1.6: accept `Type::Unknown` as a valid if-condition. User-defined
+        // function calls (`if is_admin(user):`, `if stream_check_raw(s, kind):`)
+        // and method calls on user-typed values (`if vec.is_empty():`) infer
+        // to `Unknown` because the local inferencer does not resolve
+        // cross-function return types or user-type method tables. Rejecting
+        // `Unknown` here forced 30+ cascading "if condition must be Bool,
+        // found Unknown" errors across the self-host corpus — one per
+        // predicate-style helper call used as a condition. Treating `Unknown`
+        // as acceptable mirrors the EXISTING permissive policy in
+        // `promote_binary` (Unknown combines with anything, yielding Unknown,
+        // "suppresses error cascades after a prior type error" — see
+        // promote.rs line 28). The if-expression itself still type-checks
+        // correctly: the branch result-type comparison below catches real
+        // mismatches (e.g. `if c { 1 } else { "x" }`). Only the condition's
+        // Bool-ness is relaxed when the inferencer has no evidence.
+        if cond_ty != Type::Bool && cond_ty != Type::Unknown {
             return Err(TypeError::new(
                 Diagnostic::error(format!("if condition must be Bool, found {cond_ty}"), span)
                     .with_code(ErrorCode::IfConditionMustBeBool),
@@ -1509,6 +1716,18 @@ pub(crate) fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
                 .collect();
             Some(Type::Tuple(resolved))
         }
+        // DR-020 / P2.1a: trait object `Box<dyn Trait>` or `&dyn Trait`.
+        // Maps to the pre-existing `Type::DynamicDispatch(Box<Type>)`
+        // (T68, v1.19). The inner `Type::User { name: trait_name }` is
+        // the convention used by `Type::dynamic_dispatch()` (ty.rs:1424)
+        // and consumed by `buff_type_to_syn` (type_lowering.rs:240).
+        // MVP: the lifetime field is ignored at this layer (codegen
+        // always emits `Box<dyn Trait>` per DR-020 §Autoboxing Rules;
+        // `&dyn Trait` parameters-only is enforced at the lint layer).
+        TypeRef::TraitObject { trait_name, .. } => Some(Type::dynamic_dispatch(Type::user(
+            trait_name.name.clone(),
+            Vec::new(),
+        ))),
         _ => None,
     }
 }

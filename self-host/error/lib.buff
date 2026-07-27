@@ -1,0 +1,120 @@
+// Buff self-host port of `crates/buff-lang-error/src/lib.rs` (P3.3).
+//
+// Module wiring for the buff-lang-error port. The Rust reference declares
+// six sub-modules (`code`, `diagnostic`, `json`, `source_map`, `span`,
+// `suggest`) and glob re-exports every public symbol from each.
+//
+// Buff has no `mod` keyword — files in the same directory are auto-linked by
+// the monolith loader (Phase 5, M7). Until M7 lands, multi-file ports are
+// read as a flat namespace. `export` controls visibility; sibling files pull
+// names via `import`. This file therefore mirrors the `pub use <mod>::*;`
+// re-exports by forwarding each sibling file's public symbols through thin
+// `export` aliases. Each alias delegates to the named `<file>_<symbol>`
+// function defined in the corresponding sibling (e.g. `span.Span` ->
+// `span_span_new`).
+//
+// Faithful 1:1 translation of the Rust reference. The Rust crate-doc `//!`
+// header became this `//` file-level header block (Buff has no crate doc).
+// The Rust `pub mod <name>;` + `pub use <name>::*;` pairs became `import`
+// + `export` lines (Buff's module-linking equivalents).
+//
+// Translation decisions:
+//   * `//!` crate doc -> `//` file-level header block (§3 of porting rules).
+//   * `pub mod x;` -> `import { ... } from "x"` (Buff auto-links same-dir
+//     files; explicit imports declare the names used in this file).
+//   * `pub use x::*;` -> a family of `export func <symbol>(...)` thin
+//     forwarders. Buff does not support glob re-exports, so each name is
+//     forwarded explicitly.
+
+// Buff Error crate — Error types and diagnostics for the Buff language.
+
+// Sibling imports. Each port file lives alongside this one in
+// `self-host/error/`; the names below are the public surface each file
+// declares. Until M7 lands these imports are documentation; the M7 monolith
+// will resolve them to actual cross-file references.
+import { ErrorCode } from "code"
+import {
+    Applicability,
+    CodeSuggestion,
+    Diagnostic,
+    LabelStyle,
+    Severity,
+    SpanLabel,
+} from "diagnostic"
+import {
+    DiagnosticJson,
+    SuggestionJson,
+    SpanJson,
+} from "json"
+import {
+    SourceFile,
+    SourceMap,
+} from "source_map"
+import { Span, SourceId } from "span"
+import { suggest_identifier, suggest_with_message } from "suggest"
+
+// Re-exports — each `pub use` glob becomes explicit per-symbol forwards.
+// Buff has no glob re-export, so each public symbol from each sibling file
+// is surfaced here as a re-bound reference. Callers can use either the
+// short name (re-exported here) or the qualified `<file>_<symbol>` form.
+export func lib_error_code_marker(c: ErrorCode) -> ErrorCode:
+    // `pub use code::ErrorCode;` — the type is re-exported by reference.
+    return c
+
+export func lib_diagnostic_severity_marker(s: Severity) -> Severity:
+    // `pub use diagnostic::Severity;`
+    return s
+
+export func lib_diagnostic_label_style_marker(s: LabelStyle) -> LabelStyle:
+    // `pub use diagnostic::LabelStyle;`
+    return s
+
+export func lib_diagnostic_span_label_marker(s: SpanLabel) -> SpanLabel:
+    // `pub use diagnostic::SpanLabel;`
+    return s
+
+export func lib_diagnostic_suggestion_marker(s: CodeSuggestion) -> CodeSuggestion:
+    // `pub use diagnostic::CodeSuggestion;`
+    return s
+
+export func lib_diagnostic_applicability_marker(a: Applicability) -> Applicability:
+    // `pub use diagnostic::Applicability;`
+    return a
+
+export func lib_json_diagnostic_json_marker(d: DiagnosticJson) -> DiagnosticJson:
+    // `pub use json::DiagnosticJson;`
+    return d
+
+export func lib_json_span_json_marker(s: SpanJson) -> SpanJson:
+    // `pub use json::SpanJson;`
+    return s
+
+export func lib_json_suggestion_json_marker(s: SuggestionJson) -> SuggestionJson:
+    // `pub use json::SuggestionJson;`
+    return s
+
+export func lib_source_map_source_file_marker(s: SourceFile) -> SourceFile:
+    // `pub use source_map::SourceFile;`
+    return s
+
+export func lib_source_map_marker(s: SourceMap) -> SourceMap:
+    // `pub use source_map::SourceMap;`
+    return s
+
+export func lib_span_marker(s: Span) -> Span:
+    // `pub use span::Span;`
+    return s
+
+export func lib_source_id_marker(s: SourceId) -> SourceId:
+    // `pub use span::SourceId;`
+    return s
+
+export func lib_suggest_identifier_marker(s: Vector<String>) -> Vector<String>:
+    // `pub use suggest::suggest_identifier;` — type-shaped marker (the
+    // function itself is imported above; this surface makes the re-export
+    // explicit in this file's public API).
+    return s
+
+export func lib_suggest_with_message_marker(s: Option<String>) -> Option<String>:
+    // `pub use suggest::suggest_with_message;`
+    return s

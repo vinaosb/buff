@@ -59,6 +59,26 @@ pub enum TypeRef {
     /// pattern on [`TypeRef`] and in `.sisyphus/notepads/` (T76 union
     /// types for the TypeRef ripple template).
     Tuple(Vec<TypeRef>, Span),
+    /// A trait object type: `Box<dyn Trait>` or `&dyn Trait` (DR-020 / P2.1a).
+    ///
+    /// `dyn` is recognized contextually in type position (NOT a reserved
+    /// keyword — it lexes as `Ident`). The `trait_name` identifies the
+    /// trait (`Drawable`, `LexCallback`, etc.). The `lifetime` is `None`
+    /// for the owned `Box<dyn Trait>` form; the borrowed `&dyn Trait`
+    /// form carries an explicit lifetime (MVP: `'static` only — see
+    /// DR-020 §Autoboxing Rules).
+    ///
+    /// This is **additive** (P2.1a): no existing variant was renamed,
+    /// reordered, or had its payload altered. The downstream lowering
+    /// (`typeref_to_type`) maps this to the pre-existing
+    /// `Type::DynamicDispatch(Box<Type>)` (T68, v1.19); codegen already
+    /// handles `Type::DynamicDispatch` at
+    /// `buff-lang-codegen-rust/src/rust_codegen/type_lowering.rs:240`.
+    TraitObject {
+        trait_name: Ident,
+        lifetime: Option<String>,
+        span: Span,
+    },
 }
 
 impl fmt::Display for TypeRef {
@@ -117,6 +137,105 @@ impl fmt::Display for TypeRef {
                 }
                 f.write_str(")")
             }
+            // DR-020 / P2.1a: trait object `Box<dyn Trait>` (owned, the
+            // canonical Buff form) or `&dyn Trait` (borrowed, MVP
+            // parameters-only). Renders the source-form shape so the
+            // Display round-trips through `buff check --dump-ast`.
+            TypeRef::TraitObject {
+                trait_name,
+                lifetime: Some(lt),
+                ..
+            } => write!(f, "&dyn {trait_name} {lt}"),
+            TypeRef::TraitObject {
+                trait_name,
+                lifetime: None,
+                ..
+            } => write!(f, "Box<dyn {trait_name}>"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl TypeRef {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        match self {
+            TypeRef::Named { name, span } => json!({
+                "type": "Named",
+                "name": name.to_json(),
+                "span": span_to_json(*span),
+            }),
+            TypeRef::Generic { base, args, span } => {
+                let args_json: Vec<serde_json::Value> =
+                    args.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Generic",
+                    "base": base.to_json(),
+                    "args": args_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            TypeRef::Option(inner, span) => json!({
+                "type": "Option",
+                "inner": inner.to_json(),
+                "span": span_to_json(*span),
+            }),
+            TypeRef::Function {
+                params,
+                return_type,
+                is_async,
+                span,
+            } => {
+                let params_json: Vec<serde_json::Value> =
+                    params.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Function",
+                    "params": params_json,
+                    "return_type": return_type.to_json(),
+                    "is_async": is_async,
+                    "span": span_to_json(*span),
+                })
+            }
+            TypeRef::Union(members, span) => {
+                let members_json: Vec<serde_json::Value> =
+                    members.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Union",
+                    "members": members_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            TypeRef::Tuple(members, span) => {
+                let members_json: Vec<serde_json::Value> =
+                    members.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Tuple",
+                    "members": members_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            // DR-020 / P2.1a: trait object. `lifetime` is `null` for the
+            // owned `Box<dyn Trait>` form; a string for the borrowed
+            // `&dyn Trait ('static)` form. Deterministic ordering per
+            // the Equivalence Contract (BTreeMap-backed serde_json by
+            // default).
+            TypeRef::TraitObject {
+                trait_name,
+                lifetime,
+                span,
+            } => {
+                json!({
+                    "type": "TraitObject",
+                    "trait_name": trait_name.to_json(),
+                    "lifetime": lifetime,
+                    "span": span_to_json(*span),
+                })
+            }
         }
     }
 }
@@ -169,5 +288,39 @@ mod tests {
             span: dummy_span(),
         };
         assert_eq!(t.to_string(), "(Int) -> Bool");
+    }
+
+    // DR-020 / P2.1a: trait object Display round-trips.
+    #[test]
+    fn trait_object_owned_display() {
+        let t = TypeRef::TraitObject {
+            trait_name: Ident::new("Drawable", dummy_span()),
+            lifetime: None,
+            span: dummy_span(),
+        };
+        assert_eq!(t.to_string(), "Box<dyn Drawable>");
+    }
+
+    #[test]
+    fn trait_object_borrowed_display() {
+        let t = TypeRef::TraitObject {
+            trait_name: Ident::new("Drawable", dummy_span()),
+            lifetime: Some("'static".to_string()),
+            span: dummy_span(),
+        };
+        assert_eq!(t.to_string(), "&dyn Drawable 'static");
+    }
+
+    #[test]
+    fn trait_object_to_json_round_trips() {
+        let t = TypeRef::TraitObject {
+            trait_name: Ident::new("Drawable", dummy_span()),
+            lifetime: None,
+            span: dummy_span(),
+        };
+        let json = t.to_json();
+        assert_eq!(json["type"], "TraitObject");
+        assert_eq!(json["trait_name"]["name"], "Drawable");
+        assert!(json["lifetime"].is_null());
     }
 }

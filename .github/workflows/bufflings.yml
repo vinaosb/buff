@@ -10,11 +10,15 @@ on:
       - "exercises/**"
       - "crates/bufflings/**"
 
+# P0.10 — least-privilege default; this workflow only checks out + builds.
+permissions:
+  contents: read
+
 jobs:
   bufflings-solvability:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0

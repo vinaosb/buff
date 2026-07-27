@@ -11,6 +11,27 @@
 //!    snippet opens a connection here and the dev server pushes
 //!    [`ReloadMessage`] frames via the [`ReloadBroadcaster`].
 //!
+//! # WebSocket hardening (P0.27)
+//!
+//! The `/__buff_reload__` endpoint enforces three defence-in-depth
+//! controls on every upgrade, all tuned for the dev-server threat
+//! model (loopback-only, trusted user, no secrets on the wire):
+//!
+//! - **Origin validation** — only `http://localhost:*`,
+//!   `http://127.0.0.1:*`, or `http://[::1]:*` origins are accepted.
+//!   Any other (or missing) `Origin` header is rejected with 403.
+//!   Stops browser-based cross-origin WS abuse from a malicious page
+//!   the user might visit while the dev server is running.
+//! - **Message size cap** — both `max_message_size` and
+//!   `max_frame_size` are clamped to [`MAX_MESSAGE_SIZE`] (1 MiB).
+//!   Reload payloads are <1 KB, so 1 MiB is generous while still
+//!   stopping a memory-exhaustion vector from a hostile client.
+//! - **Idle timeout** — if no inbound frame (browser Ping or
+//!   otherwise) is received within [`IDLE_TIMEOUT`] (60 s), the
+//!   server closes the socket cleanly. Browsers Ping idle WS
+//!   connections ~every 30 s, so legitimate dev sessions never trip
+//!   this; only abandoned browsers / zombie sockets get reaped.
+//!
 //! The router is `Router<()>`-compatible (no state extraction needed
 //! beyond the [`SharedState`] we wrap in `axum::extract::State`) so
 //! unit tests drive it in-process via `tower::ServiceExt::oneshot` —
@@ -18,11 +39,12 @@
 //! `crates/buff-registry/src/lib.rs::app`).
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::http::{header, HeaderValue, StatusCode, Uri};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
@@ -32,6 +54,21 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::ui_dev::broadcaster::ReloadBroadcaster;
 use crate::ui_dev::client_js::inject_client;
 use crate::ui_dev::error::UiDevError;
+
+/// Hard cap on a single inbound WS frame / message size. Defaults to
+/// 1 MiB — the dev-server protocol is server-push only and the
+/// largest legitimate frame is a multi-line compiler error JSON
+/// envelope, which is well under 1 KB. 1 MiB leaves headroom for
+/// pathological compiler output while still bounding memory use per
+/// connection.
+pub const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
+/// Idle timeout for a WS connection. If no inbound frame is received
+/// within this window the server closes the socket cleanly. 60 s is
+/// comfortably longer than browser WS keep-alive intervals (~30 s)
+/// so legitimate dev sessions are never affected; only abandoned
+/// browsers / zombie sockets get reaped.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Shared state threaded through every HTTP handler. Cloned cheaply
 /// (the heavy bits are `Arc`).
@@ -90,12 +127,91 @@ pub fn app(state: SharedState) -> Router {
 /// WebSocket upgrade handler. Each client gets a per-connection task
 /// that subscribes to the [`ReloadBroadcaster`] and forwards every
 /// received message as a `Text` frame.
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<SharedState>) -> Response {
-    ws.on_upgrade(move |socket| ws_client_loop(socket, state))
+///
+/// # Security (P0.27)
+///
+/// Before the upgrade is accepted, the request `Origin` header is
+/// validated against the localhost allow-list via
+/// [`is_localhost_origin`]. Non-conforming origins get a 403 instead
+/// of an upgrade. The upgrade itself is configured with
+/// [`MAX_MESSAGE_SIZE`] on both `max_message_size` and
+/// `max_frame_size`, and the per-client loop enforces
+/// [`IDLE_TIMEOUT`] (see [`ws_client_loop`]).
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Response {
+    // P0.27-1: Origin validation. Browser WS clients always send
+    // `Origin`; curl / websocat do not. In dev mode we only accept
+    // loopback origins — a malicious page the user visits in another
+    // tab cannot then open a WS to the dev server and observe
+    // compiler output / drive rebuilds.
+    let origin_ok = headers
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(is_localhost_origin)
+        .unwrap_or(false);
+    if !origin_ok {
+        let origin_display = headers
+            .get(header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<missing>");
+        eprintln!(
+            "[buff ui dev] rejected WS upgrade: origin not allowed ({origin_display})"
+        );
+        return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
+
+    // P0.27-2: Message size cap. Reload payloads are <1 KB, so 1 MiB
+    // is generous. Stops a hostile client from exhausting server
+    // memory with a giant frame.
+    ws.max_message_size(MAX_MESSAGE_SIZE)
+        .max_frame_size(MAX_MESSAGE_SIZE)
+        .on_upgrade(move |socket| ws_client_loop(socket, state))
+}
+
+/// Decide whether an `Origin` header value is allowed for a dev-mode
+/// WebSocket upgrade. Accepts the three loopback host spellings
+/// (`localhost`, `127.0.0.1`, `[::1]`) over plain HTTP, optionally
+/// followed by `:<port>`. Rejects everything else (including HTTPS
+/// origins, since the dev server itself is HTTP-only — a same-origin
+/// browser context will always send `http://...`).
+///
+/// Pure function so it can be unit-tested directly without spinning
+/// up an HTTP server.
+fn is_localhost_origin(origin: &str) -> bool {
+    // Match `http://<host>` exactly OR `http://<host>:<port>`.
+    for prefix in ["http://localhost", "http://127.0.0.1", "http://[::1]"] {
+        if origin == prefix {
+            return true;
+        }
+        if let Some(rest) = origin.strip_prefix(prefix) {
+            // Allow `:port` suffix. Anything else (e.g. `localhost.evil.com`)
+            // is rejected — the suffix-aware matcher rules out non-port
+            // continuations.
+            if let Some(port_part) = rest.strip_prefix(':') {
+                if !port_part.is_empty() && port_part.bytes().all(|b| b.is_ascii_digit()) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Per-client WS loop: subscribe to the broadcaster, forward every
-/// message, ignore inbound frames (the protocol is server-push only).
+/// message, drain inbound frames, and enforce an idle timeout.
+///
+/// # Idle timeout (P0.27-3)
+///
+/// Each `receiver.next().await` is wrapped in
+/// `tokio::time::timeout(IDLE_TIMEOUT, ...)`. If no frame arrives
+/// within [`IDLE_TIMEOUT`], the loop exits cleanly and the
+/// `tokio::select!` below drops the send task. Browsers
+/// automatically Ping idle WS connections roughly every 30 s, so a
+/// healthy dev session never trips this — only abandoned tabs or
+/// zombie sockets get reaped.
 async fn ws_client_loop(socket: WebSocket, state: SharedState) {
     let mut rx = state.broadcaster.subscribe();
     let (mut sender, mut receiver) = socket.split();
@@ -124,11 +240,25 @@ async fn ws_client_loop(socket: WebSocket, state: SharedState) {
     });
 
     let recv_task = tokio::spawn(async move {
-        while let Some(Ok(frame)) = receiver.next().await {
-            // Ignore inbound frames; we just need to drain them so
-            // Close / Ping are acknowledged by tungstenite.
-            if let Message::Close(_) = frame {
-                break;
+        loop {
+            // P0.27-3: wrap each recv in a 60 s timeout. Browser
+            // keep-alive Pings reset this every ~30 s, so legitimate
+            // dev sessions are never affected. Timeout → break out
+            // of the loop so the outer select! can clean up.
+            match tokio::time::timeout(IDLE_TIMEOUT, receiver.next()).await {
+                Ok(Some(Ok(frame))) => {
+                    // Ignore inbound frames; we just need to drain
+                    // them so Close / Ping are acknowledged by
+                    // tungstenite.
+                    if let Message::Close(_) = frame {
+                        break;
+                    }
+                }
+                Ok(Some(Err(_))) | Ok(None) => break,
+                Err(_) => {
+                    // Idle timeout elapsed — close the connection.
+                    break;
+                }
             }
         }
     });
@@ -485,4 +615,88 @@ mod tests {
             .expect("content-type");
         assert!(ct.to_str().unwrap().contains("application/json"));
     }
+
+    // ---- P0.27: WebSocket hardening tests ----
+
+    #[test]
+    fn is_localhost_origin_accepts_localhost_with_port() {
+        assert!(is_localhost_origin("http://localhost:3000"));
+        assert!(is_localhost_origin("http://localhost:8080"));
+        assert!(is_localhost_origin("http://localhost:5173"));
+    }
+
+    #[test]
+    fn is_localhost_origin_accepts_localhost_without_port() {
+        assert!(is_localhost_origin("http://localhost"));
+    }
+
+    #[test]
+    fn is_localhost_origin_accepts_loopback_ipv4() {
+        assert!(is_localhost_origin("http://127.0.0.1:3000"));
+        assert!(is_localhost_origin("http://127.0.0.1"));
+    }
+
+    #[test]
+    fn is_localhost_origin_accepts_loopback_ipv6() {
+        assert!(is_localhost_origin("http://[::1]:3000"));
+        assert!(is_localhost_origin("http://[::1]"));
+    }
+
+    #[test]
+    fn is_localhost_origin_rejects_https() {
+        // Dev server is HTTP-only — a real browser opening the dev
+        // page over HTTP sends an `http://` origin. HTTPS origins
+        // imply a different deployment (production) so they are
+        // rejected in dev mode.
+        assert!(!is_localhost_origin("https://localhost:3000"));
+        assert!(!is_localhost_origin("https://127.0.0.1"));
+    }
+
+    #[test]
+    fn is_localhost_origin_rejects_other_hosts() {
+        assert!(!is_localhost_origin("http://example.com"));
+        assert!(!is_localhost_origin("http://example.com:3000"));
+        assert!(!is_localhost_origin("http://0.0.0.0:3000"));
+        assert!(!is_localhost_origin("http://192.168.1.1:3000"));
+        assert!(!is_localhost_origin("http://buff-lang.org"));
+    }
+
+    #[test]
+    fn is_localhost_origin_rejects_substring_tricks() {
+        // `localhost.evil.com` must NOT be accepted as a `localhost`
+        // origin — the suffix-aware matcher rules out non-port
+        // continuations.
+        assert!(!is_localhost_origin("http://localhost.evil.com"));
+        assert!(!is_localhost_origin("http://localhost.evil.com:3000"));
+        assert!(!is_localhost_origin("http://localhostX:3000"));
+        assert!(!is_localhost_origin("http://127.0.0.1.evil.com:3000"));
+        assert!(!is_localhost_origin("http://127.0.0.10:3000"));
+    }
+
+    #[test]
+    fn is_localhost_origin_rejects_non_numeric_port() {
+        // A trailing `:abc` is not a valid port; reject so we don't
+        // accidentally match weird suffix tricks.
+        assert!(!is_localhost_origin("http://localhost:abc"));
+        assert!(!is_localhost_origin("http://127.0.0.1:not-a-port"));
+    }
+
+    #[test]
+    fn is_localhost_origin_rejects_garbage() {
+        assert!(!is_localhost_origin(""));
+        assert!(!is_localhost_origin("not a url"));
+        assert!(!is_localhost_origin("ftp://localhost"));
+        assert!(!is_localhost_origin("ws://localhost:3000"));
+    }
+
+    // Note: end-to-end WS-upgrade origin-rejection is verified by the
+    // integration smoke test in `tests/ui_dev_ws_origin.rs` (real TCP
+    // server bound to 127.0.0.1:0 + raw HTTP WS handshake). axum's
+    // `WebSocketUpgrade` extractor requires a real connection, so the
+    // upgrade path can't be exercised via `tower::ServiceExt::oneshot`
+    // — axum returns 426 Upgrade Required in that synthetic mode.
+    // The handler itself is trivially correct: it delegates to
+    // `is_localhost_origin` (above, 9 unit tests) and returns 403 on
+    // `false`. The constant + helper wiring is also verified by the
+    // doc-commented contract above.
 }

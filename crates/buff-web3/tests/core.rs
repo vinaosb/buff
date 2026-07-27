@@ -12,10 +12,7 @@
 //! when a local testnet (anvil / hardhat) is available at
 //! `http://localhost:8545`.
 
-use buff_web3::{
-    Client, ConnectedWallet, Contract, ContractMethod, IntoClient, Provider, Token, Wallet,
-    Web3Error,
-};
+use buff_web3::{Client, Contract, IntoClient, Provider, Token, Wallet, Web3Error};
 
 // Anvil's first derived account private key (well-known test key —
 // NEVER use on mainnet; documented at
@@ -23,8 +20,6 @@ use buff_web3::{
 // unit-test Wallet construction and the ignored integration tests.
 const ANVIL_KEY_A: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const ANVIL_ADDR_A: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
-
-const ANVIL_KEY_B: &str = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
 const ERC20_ABI: &str = r#"[
     {"type":"function","name":"balanceOf","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
@@ -261,7 +256,7 @@ fn snapshot_contract_debug() {
 
 #[test]
 fn snapshot_web3_error_debug() {
-    let errs = vec![
+    let errs = [
         format!("{}", Web3Error::InvalidUrl("bad url".into())),
         format!("{}", Web3Error::InvalidAddress("bad addr".into())),
         format!("{}", Web3Error::InvalidPrivateKey("bad key".into())),

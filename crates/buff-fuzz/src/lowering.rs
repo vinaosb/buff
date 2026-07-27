@@ -36,7 +36,7 @@
 use buff_lang_ast::{FuncDecl, TypeRef};
 use proc_macro2::Span as ProcSpan;
 use syn::{
-    punctuated::Punctuated, Expr, ExprCall, ExprPath, FnArg, Ident, Item, ItemFn, Pat, PatIdent,
+    punctuated::Punctuated, Expr, ExprCall, ExprPath, Ident, Item, ItemFn, Pat, PatIdent,
     PatType, Path, PathArguments, PathSegment, ReturnType, Signature, Stmt, Token, Type as SynType,
     TypePath,
 };
@@ -98,10 +98,11 @@ fn build_harness_item(func_decl: &FuncDecl) -> ItemFn {
             variadic: None,
             output: ReturnType::Default,
         },
-        block: syn::Block {
+        // syn 2.x API drift: `ItemFn.block` moved from `Block` to `Box<Block>`.
+        block: Box::new(syn::Block {
             brace_token: Default::default(),
             stmts: vec![strategy_let, run_let, assert_stmt],
-        },
+        }),
     }
 }
 
@@ -143,13 +144,20 @@ fn mk_property_closure(param_name: &str) -> Expr {
         asyncness: None,
         capture: Some(Token![move](ProcSpan::call_site())),
         or1_token: Token![|](ProcSpan::call_site()),
-        inputs: vec![FnArg::Typed(PatType {
+        // syn 2.x API drift: `ExprClosure.inputs` moved from `Vec<FnArg>` to
+        // `Punctuated<Pat, Comma>` (closures take patterns, not full fn args).
+        // The typed pattern `|x: i64|` is now `Pat::Type(PatType { ... })`.
+        inputs: vec![Pat::Type(PatType {
             attrs: Vec::new(),
             pat: Box::new(closure_arg),
             colon_token: Token![:](ProcSpan::call_site()),
             ty: Box::new(closure_ty),
-        })],
+        })]
+        .into_iter()
+        .collect(),
         or2_token: Token![|](ProcSpan::call_site()),
+        // syn 2.x API drift: `ExprClosure.output` field added (was implicit Default).
+        output: ReturnType::Default,
         body: Box::new(body),
     })
 }
@@ -194,11 +202,14 @@ fn mk_let_stmt(name: &str, value: Expr) -> Stmt {
             ident: Ident::new(name, ProcSpan::call_site()),
             subpat: None,
         }),
-        init: Some((
-            Token![=](ProcSpan::call_site()),
-            Box::new(value),
-            Default::default(),
-        )),
+        // syn 2.x API drift: `Local.init` moved from
+        // `Option<(Eq, Box<Expr>, Option<Then>)>` tuple to
+        // `Option<LocalInit>` struct with `eq_token`, `expr`, `diverge` fields.
+        init: Some(syn::LocalInit {
+            eq_token: Token![=](ProcSpan::call_site()),
+            expr: Box::new(value),
+            diverge: None,
+        }),
         semi_token: Token![;](ProcSpan::call_site()),
     };
     Stmt::Local(local)

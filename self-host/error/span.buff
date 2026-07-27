@@ -1,0 +1,57 @@
+// Buff self-host port of `crates/buff-lang-error/src/span.rs` (P3.3).
+//
+// Span types — byte offsets, source IDs, and source spans. This is the
+// foundation of the error system: every AST node, every Token carries a
+// [`Span`]. The Rust reference is a leaf data module with three pieces:
+//   * `pub type ByteOffset = usize`
+//   * `pub struct SourceId(pub u32)`
+//   * `pub struct Span { start, end, source_id }` + two constructors.
+//
+// Faithful 1:1 translation of the Rust reference. Buff has no `&` / lifetimes,
+// no `Copy`/`Clone` derives (Buff auto-derives them), and no newtype tuples
+// (`SourceId(pub u32)`); the port models `SourceId` as a named struct with a
+// `value: Int` field. Constructors follow the Buff rule §7: `Type.new()` /
+// `Type.from()` only — the Rust `impl Span { fn new(); fn dummy() }` becomes
+// free functions `span_new` / `span_dummy` (the `Span.new` constructor is
+// generated automatically from the struct definition).
+//
+// Translation decisions:
+//   * `pub type ByteOffset = usize` -> no Buff type alias for primitives
+//     (Buff's alias surface is restricted); callers use `Int` directly. The
+//     `ByteOffset` semantic lives on as a docstring concept.
+//   * `pub struct SourceId(pub u32)` (newtype) -> `struct SourceId { value: Int }`
+//     (named struct). The Rust call `SourceId(0)` becomes `SourceId.new(value: 0)`.
+//   * `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]` dropped — Buff
+//     auto-derives `Debug, Clone, PartialEq`; the rest are Rust host concerns.
+//   * `ByteOffset`/`usize`/`u32` -> `Int` per porting §7a.
+//   * Rust tuple-struct access `id.0` -> `id.value` (named field).
+
+// A byte offset into a source file.
+//
+// (Rust writes `pub type ByteOffset = usize`; Buff has no type-alias for
+// primitives — use `Int` directly. The name is preserved as a docstring
+// concept so callers reading the Rust reference can map `ByteOffset` <-> `Int`.)
+
+// A unique identifier for a source file.
+struct SourceId:
+    value: Int
+
+// Construct a `SourceId` from a raw integer. Mirrors the Rust tuple-struct
+// constructor `SourceId(n)` — Buff has no tuple-struct, so the integer is
+// named `value`.
+func source_id_new(value: Int) -> SourceId:
+    return SourceId.new(value: value)
+
+// A span of source code, identified by byte offsets and a source file ID.
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+// Create a new span from byte offsets and a source ID.
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+// Create a dummy span (used for synthetic nodes or error recovery).
+func span_dummy() -> Span:
+    return Span.new(start: 0, end: 0, source_id: source_id_new(0))

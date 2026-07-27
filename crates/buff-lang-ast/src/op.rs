@@ -101,6 +101,58 @@ impl fmt::Display for UnaryOp {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl BinaryOp {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let name = match self {
+            BinaryOp::Add => "Add",
+            BinaryOp::Sub => "Sub",
+            BinaryOp::Mul => "Mul",
+            BinaryOp::Div => "Div",
+            BinaryOp::Mod => "Mod",
+            BinaryOp::Eq => "Eq",
+            BinaryOp::Neq => "Neq",
+            BinaryOp::Lt => "Lt",
+            BinaryOp::Gt => "Gt",
+            BinaryOp::Lte => "Lte",
+            BinaryOp::Gte => "Gte",
+            BinaryOp::And => "And",
+            BinaryOp::Or => "Or",
+            BinaryOp::BitAnd => "BitAnd",
+            BinaryOp::BitOr => "BitOr",
+            BinaryOp::BitXor => "BitXor",
+            BinaryOp::Shl => "Shl",
+            BinaryOp::Shr => "Shr",
+            BinaryOp::Assign => "Assign",
+            BinaryOp::AddAssign => "AddAssign",
+            BinaryOp::SubAssign => "SubAssign",
+            BinaryOp::MulAssign => "MulAssign",
+            BinaryOp::DivAssign => "DivAssign",
+            BinaryOp::ModAssign => "ModAssign",
+            BinaryOp::NullCoalesce => "NullCoalesce",
+        };
+        json!({ "type": "BinaryOp", "variant": name })
+    }
+}
+
+impl UnaryOp {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let name = match self {
+            UnaryOp::Neg => "Neg",
+            UnaryOp::Not => "Not",
+            UnaryOp::BitNot => "BitNot",
+        };
+        json!({ "type": "UnaryOp", "variant": name })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

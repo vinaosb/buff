@@ -1,0 +1,420 @@
+// Buff self-host port of `crates/buff-lang-debug-info/src/capture.rs` (P3.4).
+//
+// Span capture during codegen — builds the [`SourceMap`] from the Buff
+// AST + the formatted Rust source.
+//
+// `prettyplease` reformats the generated `syn::File`, so line numbers
+// computed during AST lowering would be wrong. Instead this module runs
+// a **post-format scan**: it walks the formatted Rust source line-by-line
+// looking for stable anchors (function names) and records the Rust line
+// where each anchor appears alongside its originating Buff span.
+//
+// # Anchors
+//
+// The stable anchors today are user-defined function names. Each
+// `func <name>(...)` declaration in Buff lowers to a Rust
+// `fn <name>(...)` item, and the function name survives `prettyplease`
+// verbatim (it's an identifier — `prettyplease` never rewrites those).
+// So scanning for `fn <name>` patterns in the formatted Rust source
+// reliably identifies the Rust line where each Buff function starts.
+//
+// Additional anchor kinds (struct names, let-binding names) can be
+// added later without changing the JSON schema — they'd just populate
+// more entries in the line mapping table.
+//
+// # Why not use syn spans?
+//
+// `syn` spans are opaque `proc_macro2::Span`s carrying no source-line
+// info (the codegen doesn't go through a `proc_macro` invocation). Even
+// if it did, `prettyplease` rewrites the tree and drops span info in
+// the process. The post-format line scan is the simplest viable
+// approach and matches the pattern T133 used for `.buffhtml` span
+// mapping (see `crates/buff-lang-codegen-buffhtml/src/span_map.rs`).
+//
+// Faithful 1:1 translation of the Rust reference. The capture pipeline
+// has no OS-level runtime intrinsics itself (it's pure string + AST
+// manipulation), but it consumes two upstream types whose Buff ports
+// are still in flight:
+//   * `buff_lang_ast::Decl` / `FuncDecl` — the AST port (`self-host/ast/`)
+//     is not yet complete, so the AST surface used here is declared as
+//     `extern "C" from "buff_lang_ast"` opaque-handle trampolines. The
+//     Rust host provides the real `Decl` walk; the Buff port threads
+//     the handles and reads fields through these externs.
+//   * `buff_lang_error::{SourceFile, SourceId}` — the sibling error port
+//     (`self-host/error/`) defines both. Imported via `import` here.
+//
+// Translation decisions:
+//   * `&[Decl]` -> `Vector<Decl>` (porting §7b — Buff owns at the
+//     boundary). The Rust original takes a slice; Buff vectors are the
+//     owned-collection equivalent.
+//   * `&str` / `&Path` -> `String` (porting §7b — Buff paths and strings
+//     are owned).
+//   * `if let Decl::FuncDecl(fd) = decl { ... }` -> `match decl_as_func_decl(decl) { Some(fd) => ..., None => continue }`
+//     (porting §8e — Buff has no `if let`; the AST port also doesn't
+//     exist yet, so pattern-matching on `Decl` directly is impossible —
+//     the extern trampoline `decl_as_func_decl` returns an `Option` and
+//     the port match-walks that Option). NOTE: the match-arm binder is
+//     spelled `fd`, not `func`, because `func` is a reserved keyword in
+//     Buff (function-declaration introducer).
+//   * `func.name.name` (Rust nested field access on `Ident`) -> extern
+//     trampoline `func_decl_name(fd)` returning `String`. The Buff
+//     port cannot see inside the opaque `FuncDecl` handle, so field
+//     access is replaced by an extern accessor matching the FFI rule
+//     from `crates/buff-lang-ffi-guide/GUIDE.md`.
+//   * `func.span` / `func.is_extern` -> same extern-trampoline shape.
+//   * `source_file.lookup(span.start) -> Option<(usize, usize)>` ->
+//     direct call to `source_file_lookup(sf, span_start)` from the
+//     sibling error port (the function exists and returns the same
+//     `Option<(Int, Int)>` shape).
+//   * `span.start` -> extern `span_start(span)` (Buff port of `Span`
+//     exposes fields by name, but the corpus style favours extern
+//     accessors for cross-crate field reads — matches conv_helpers.buff).
+//   * `for (idx, line) in rust_source.lines().enumerate()` -> manual
+//     index walk over a `Vector<String>` produced by `string_lines()`
+//     (Buff iterator prelude does not surface `enumerate()`; the
+//     index/line pair is reconstructed inline — matches source_map.buff
+//     lines 219-228).
+//   * `line.trim_start()` -> `string_trim_start(line)` extern (Buff's
+//     String prelude is conservative; the trim helper lives in the Rust
+//     host's string externs).
+//   * `trimmed.strip_prefix("fn ")` -> `string_strip_prefix(s, prefix)`
+//     extern returning `Option<String>`. Rust's `&str`-returning
+//     `strip_prefix` becomes a Buff owned-`String` Option.
+//   * `line.chars().next()` -> `string_first_char(s)` extern returning
+//     `Option<Char>`. The Rust pattern match `Some('(') | Some('<') | ...`
+//     is an or-pattern; per porting §8e it becomes an `if/else if` chain
+//     with `==` on each Char.
+//   * `#[cfg(test)] mod tests { ... }` -> dropped. Per porting §5a,
+//     inline unit tests do not port; equivalence tests live in a
+//     separate `equivalence_*.buff` file (deferred until the runtime
+//     backing lands).
+//
+// Runtime intrinsics declared as extern stubs — actual linking deferred
+// to the buff-lang-runtime crate. The AST accessors (`decl_as_func_decl`,
+// `func_decl_*`, `span_start`) link against `buff_lang_ast`; the string
+// helpers (`string_lines`, `string_trim_start`, `string_strip_prefix`,
+// `string_first_char`, `string_contains_char`, `string_char_at`) link
+// against `buff_lang_runtime`'s string extern surface. None of these
+// touch OS-level facilities directly — they are pure data access.
+
+import { Span, SourceId } from "../error/span"
+import {
+    SourceFile,
+    source_file_new,
+    source_file_lookup,
+} from "../error/source_map"
+import {
+    BuffLocation,
+    FunctionAnchor,
+    SourceMap,
+    source_map_new,
+    source_map_with_buff_file,
+    source_map_add_function,
+    source_map_add_line_mapping,
+} from "lib"
+
+// =============================================================================
+// Opaque handles for AST types
+// =============================================================================
+//
+// The AST port (`self-host/ast/`) is not yet complete, so the AST surface
+// used by `build_source_map` is declared as opaque-handle structs. The Buff
+// port never inspects their interior; it threads them through extern
+// trampolines that read fields on the Rust side. Matches the conv_helpers.buff
+// pattern (opaque SynExpr / SynType / TypeRef handles for the syn types).
+
+struct Decl:
+    opaque_handle: Int
+
+struct FuncDecl:
+    opaque_handle: Int
+
+// =============================================================================
+// extern trampolines — AST field access + string helpers
+// =============================================================================
+//
+// The Rust host exposes these as `#[no_mangle] pub extern "C" fn ...` items
+// (per T119 lowering rule). Each extern wraps the corresponding Rust field
+// access or stdlib call as a free C-ABI function; Buff code calls them by
+// name and the linker resolves the symbol against the buff-lang-runtime
+// (and buff-lang-ast) Rust crates.
+
+extern "C" from "buff_lang_ast" func decl_as_func_decl(d: Decl) -> Option<FuncDecl>
+
+extern "C" from "buff_lang_ast" func func_decl_is_extern(fd: FuncDecl) -> Bool
+
+extern "C" from "buff_lang_ast" func func_decl_name(fd: FuncDecl) -> String
+
+extern "C" from "buff_lang_ast" func func_decl_span(fd: FuncDecl) -> Span
+
+extern "C" from "buff_lang_error" func span_start(span: Span) -> Int
+
+extern "C" from "buff_lang_runtime" func string_lines(source: String) -> Vector<String>
+
+extern "C" from "buff_lang_runtime" func string_trim_start(s: String) -> String
+
+extern "C" from "buff_lang_runtime" func string_strip_prefix(s: String, prefix: String) -> Option<String>
+
+extern "C" from "buff_lang_runtime" func string_first_char(s: String) -> Option<Char>
+
+extern "C" from "buff_lang_runtime" func string_chars(s: String) -> Vector<Char>
+
+extern "C" from "buff_lang_runtime" func string_contains_char(s: String, c: Char) -> Bool
+
+// =============================================================================
+// build_source_map — AST + formatted Rust source -> SourceMap
+// =============================================================================
+//
+// Build a [`SourceMap`] from the Buff AST + the formatted Rust source.
+//
+// Walks every top-level `Decl::FuncDecl` in `decls`, computes its Buff
+// `(line, col)` via the canonical [`SourceFile::lookup`], then finds
+// the corresponding `fn <name>` line in the formatted Rust source.
+//
+// For each function the scan records:
+//
+// - A function-level [`FunctionAnchor`] (Buff function name + Buff
+//   span + Rust line range). The Rust line range is computed by
+//   scanning from the `fn <name>` line forward to the closing `}`
+//   brace of the function body.
+// - A line-level [`BuffLocation`] at the function's Rust start line
+//   (carrying the function name as its `name` field).
+//
+// The `buff_source` is consumed only for line/col lookup; it is NOT
+// stored in the resulting [`SourceMap`] (the path is, via `buff_path`).
+
+func build_source_map(
+    decls: Vector<Decl>,
+    rust_source: String,
+    buff_path: String,
+    buff_source: String,
+) -> SourceMap:
+    let source_id = source_id_new(0)
+    let source_file = source_file_new(buff_path, buff_source)
+    let mut map = source_map_with_buff_file(source_map_new(), buff_path, source_id)
+
+    let mut i = 0
+    for i < decls.len():
+        let decl = decls[i]
+        let next_map = match decl_as_func_decl(decl) {
+            Some(fd) => capture_one_func_decl(map, fd, source_file, rust_source),
+            None => map,
+        }
+        map = next_map
+        i = i + 1
+    return map
+
+// Process one function declaration: extract name + span, find its line
+// range in the formatted Rust source, and append both a function anchor
+// and a line-level BuffLocation to the running SourceMap. Returns the
+// updated map. Extracted from `build_source_map` so the `for` body
+// stays a single match-expression (Buff `match` arms must be single
+// expressions — the multi-statement update lives here).
+func capture_one_func_decl(
+    map: SourceMap,
+    fd: FuncDecl,
+    source_file: SourceFile,
+    rust_source: String,
+) -> SourceMap:
+    // Skip extern funcs — they have no Buff-side body to attribute
+    // frames to. Mirrors the Rust `if fd.is_extern { continue; }`
+    // guard.
+    let is_extern: Bool = func_decl_is_extern(fd)
+    if is_extern:
+        return map
+    let name = func_decl_name(fd)
+    let span = func_decl_span(fd)
+    let lookup_opt = source_file_lookup(source_file, span_start(span))
+    match lookup_opt {
+        None => return map,
+        Some(pair) => return capture_one_func_with_loc(map, name, span, pair, rust_source),
+    }
+
+// Inner step: take the resolved (buff_line, buff_col) pair and the
+// resolved rust line range, then push both the FunctionAnchor and the
+// line-level BuffLocation. Separated so the Option-destructure stays
+// in a single-expression match arm (Buff match arms cannot contain
+// `let` statements).
+func capture_one_func_with_loc(
+    map: SourceMap,
+    name: String,
+    span: Span,
+    pair: (Int, Int),
+    rust_source: String,
+) -> SourceMap:
+    let (buff_line, buff_col) = pair
+    let rust_start_opt = find_fn_line(rust_source, name)
+    match rust_start_opt {
+        None => return map,
+        Some(rust_start_line) => return capture_one_func_commit(
+            map,
+            name,
+            span,
+            buff_line,
+            buff_col,
+            rust_start_line,
+            find_fn_end_line(rust_source, rust_start_line),
+        ),
+    }
+
+// Final step: build the BuffLocation, push both anchors, return the
+// updated map. Mirrors the Rust `map.add_function(...)` +
+// `map.add_line_mapping(...)` calls at the end of the FuncDecl arm.
+func capture_one_func_commit(
+    map: SourceMap,
+    name: String,
+    span: Span,
+    buff_line: Int,
+    buff_col: Int,
+    rust_start_line: Int,
+    rust_end_line: Int,
+) -> SourceMap:
+    let loc = BuffLocation.new(
+        line: buff_line,
+        col: buff_col,
+        span: span,
+        name: Option.Some(name),
+    )
+    source_map_add_function(map, FunctionAnchor.new(
+        name: name,
+        buff_span: span,
+        buff_line: buff_line,
+        buff_col: buff_col,
+        rust_start_line: rust_start_line,
+        rust_end_line: rust_end_line,
+        buff_location: Option.Some(loc),
+    ))
+    source_map_add_line_mapping(map, rust_start_line, loc)
+    return map
+
+// =============================================================================
+// find_fn_line — locate `fn <name>` in the formatted Rust source
+// =============================================================================
+
+// Find the 1-based Rust source line where `fn <name>` appears.
+//
+// Scans line-by-line, matching the pattern `fn <name>(` or
+// `fn <name><` (generic) or `fn <name> {` (no params). Returns the
+// first match — Buff functions are unique within a compilation unit
+// (the parser rejects duplicate names), so this is unambiguous.
+func find_fn_line(rust_source: String, name: String) -> Option<Int>:
+    let lines = string_lines(rust_source)
+    let mut idx = 0
+    for idx < lines.len():
+        let line = lines[idx]
+        if line_matches_fn_decl(line, name):
+            return Option.Some(idx + 1)
+        idx = idx + 1
+    return Option.None
+
+// Returns `true` when `line` is a `fn <name>` declaration (not a call
+// site, not a reference inside another fn's body).
+//
+// The pattern `fn <name>` followed by `(`, `<`, `{`, or whitespace is
+// specific enough to avoid false positives on call sites (which have
+// no `fn` keyword) and trait-impl signatures (which have a `fn`
+// keyword but are inside an `impl` block — those don't match Buff's
+// top-level fn shape today).
+func line_matches_fn_decl(line: String, name: String) -> Bool:
+    let trimmed = string_trim_start(line)
+    let after_fn = string_strip_prefix(trimmed, "fn ")
+    match after_fn {
+        None => return false,
+        Some(rest) => return line_matches_fn_decl_after_fn(rest, name),
+    }
+
+// Inner step: given `rest` is `trimmed` with `fn ` stripped, check
+// whether the next token is exactly `name` followed by a fn-decl
+// terminator (`(`, `<`, `{`, whitespace, tab). Separated so the Buff
+// `match` arms stay single-expression (porting §8e).
+func line_matches_fn_decl_after_fn(rest: String, name: String) -> Bool:
+    let after_name = string_strip_prefix(rest, name)
+    match after_name {
+        None => return false,
+        Some(tail) => return line_matches_fn_decl_terminator(tail),
+    }
+
+// Inner step: check whether `tail` (the source after the function
+// name) starts with a fn-decl terminator char. Mirrors the Rust
+// `matches!(after_name.chars().next(), Some('(') | Some('<') | Some('{') | Some(' ') | Some('\t'))`
+// — ported to an `if/else if` chain with `==` on each Char (Buff
+// rejects or-patterns in `match`, porting §8e).
+func line_matches_fn_decl_terminator(tail: String) -> Bool:
+    let first = string_first_char(tail)
+    match first {
+        None => return false,
+        Some(c) => return is_fn_decl_terminator_char(c),
+    }
+
+// Char classifier: returns true for the five chars that may legally
+// follow a function name in a `fn <name>` declaration. Extracted so
+// the `match` on `Option<Char>` stays single-expression.
+func is_fn_decl_terminator_char(c: Char) -> Bool:
+    if c == '(':
+        return true
+    if c == '<':
+        return true
+    if c == '{':
+        return true
+    if c == ' ':
+        return true
+    if c == '\t':
+        return true
+    return false
+
+// =============================================================================
+// find_fn_end_line — locate the closing `}` of a function body
+// =============================================================================
+
+// Find the 1-based Rust source line of the closing `}` of the function
+// that starts at `fn_start_line`.
+//
+// Walks from `fn_start_line` tracking brace depth. The function body's
+// opening `{` may be on the same line as `fn <name>(...)` or on the
+// next line; both shapes are handled by counting every `{` and `}`
+// encountered. Returns `fn_start_line` itself if no balanced close
+// brace is found (defensive — the formatted source always has one).
+func find_fn_end_line(rust_source: String, fn_start_line: Int) -> Int:
+    let lines = string_lines(rust_source)
+    let mut depth: Int = 0
+    let mut seen_open = false
+    let mut idx = saturating_sub(fn_start_line, 1)
+    for idx < lines.len():
+        let line = lines[idx]
+        let chars = string_chars(line)
+        let mut ci = 0
+        for ci < chars.len():
+            let ch = chars[ci]
+            if ch == '{':
+                depth = depth + 1
+                seen_open = true
+            if ch == '}':
+                depth = depth - 1
+            ci = ci + 1
+        if seen_open:
+            if depth == 0:
+                return idx + 1
+        idx = idx + 1
+    return fn_start_line
+
+// Defensive subtraction: clamps at 0 so `fn_start_line - 1` doesn't
+// underflow when `fn_start_line == 0` (which would be a bug, but the
+// port mirrors the Rust `fn_start_line.saturating_sub(1)` call verbatim).
+func saturating_sub(a: Int, b: Int) -> Int:
+    if a < b:
+        return 0
+    return a - b
+
+// Construct a `SourceId` from a raw integer. Mirrors the Rust tuple-
+// struct constructor `SourceId(n)` via the sibling error port's
+// `source_id_new` helper.
+func source_id_new(value: Int) -> SourceId:
+    return error_span_source_id_new(value)
+
+// extern trampoline to the sibling error port's `source_id_new`.
+// Per porting §6b, cross-file references go through `import` once M7
+// lands; until then the Buff check resolver falls back to a flat
+// namespace, so we forward through a stable local name. The Rust
+// original imports `SourceId` from `buff_lang_error` directly; the
+// Buff port mirrors the same intent through this trampoline.
+extern "C" from "buff_lang_error" func error_span_source_id_new(value: Int) -> SourceId

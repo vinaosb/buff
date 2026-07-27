@@ -1,0 +1,56 @@
+// Buff self-host port of `crates/buff-lang-ast/src/lib.rs` (P4.4).
+//
+// Buff AST crate — abstract syntax tree node definitions.
+//
+// This crate is **pure data**: it defines the node types produced by parsing
+// and consumed by later stages (type checking, codegen). It contains no
+// parsing logic and no type checking.
+//
+// # Module layout
+//
+// - op: binary/unary operator enums (BinaryOp, UnaryOp).
+// - common: Ident, Block, Param.
+// - ty: TypeRef type references.
+// - expr: Literal, Expr, MatchArm, Pattern.
+// - stmt: Stmt.
+// - decl: Decl and the specific declaration structs.
+// - ir: the dataflow-graph intermediate representation
+//   (IrGraph, IrNode, AstLowerer).
+// - lossless: trivia-preserving source representation for LSP and
+//   comment-preserving `buff fmt` (T57). See LosslessTree.
+//
+// Span is re-exported from `buff-lang-error` for convenience.
+//
+// Faithful 1:1 translation of the Rust reference. The Rust `lib.rs` is pure
+// module wiring (`pub mod ...` + `pub use <mod>::*` glob re-exports + a single
+// re-export of `Span` from `buff-lang-error`). Buff has no `mod` keyword and
+// no `pub use` glob — the M7 monolith loader (Phase 5) concatenates sibling
+// `.buff` files in the same directory into a flat namespace, and `export`
+// controls visibility per symbol. There is therefore nothing executable to
+// translate here; this file is a documentation-only header that mirrors the
+// Rust crate-doc comment block and records the translation decision.
+//
+// Translation decisions:
+//   * `pub mod common; pub mod decl; ...` (Rust module declarations) ->
+//     DELETED. Buff has no `mod` keyword; files in the same directory are
+//     auto-linkeded once the M7 monolith loader is active. Until then,
+//     single-file `buff check` treats cross-file references as opaque
+//     forward references (per `self-host/ast/stmt.buff` header lines 46-50).
+//   * `pub use common::*; pub use decl::*; ...` (glob re-exports) ->
+//     DELETED. Buff has no glob re-export. Each symbol is referred to by its
+//     bare name from any sibling file in the same directory (the monolith
+//     loader concatenates them into one namespace).
+//   * `pub use buff_lang_error::Span;` (re-export of a foreign type) ->
+//     DELETED. Buff has no syntax for cross-crate re-export; callers `import
+//     { Span } from "../error/span"` directly when needed. The semantic
+//     intent (Span is the canonical span type, defined in the error crate,
+//     used everywhere in the AST) is preserved as a comment below.
+//   * `pub use common::span_to_json;` (re-export of a free function) ->
+//     DELETED for the same reason. Callers reach `span_to_json` via
+//     `import { span_to_json } from "common"` once the monolith loader lands.
+//
+// The canonical span type used by every AST node.
+//
+// Defined in `crates/buff-lang-error/src/span.rs` (Rust) and ported to
+// `self-host/error/span.buff` (Buff). Every node in this crate carries a
+// `span: Span` field so diagnostics can point back at the source.

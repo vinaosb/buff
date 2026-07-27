@@ -1,8 +1,8 @@
-# PROJECT KNOWLEDGE BASE
+﻿# PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-24 (v1.26 real-use-cases launch; v1.25 launch-readiness refresh; originally v0.1 → v1.0 → v1.9 → v1.24 → v1.38)
-**Commit:** 0467fbd (`v1x-frameworks`, v1.26 launch infra polish — pages/CI/CodeOwners/funding; v1.0-v1.38 shipped)
-**Branch:** `v1x-frameworks` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.38.0; v0.1-dev preserved as historical marker)
+**Generated:** 2026-07-27 (v1.39 real-use-cases launch; v1.25 launch-readiness refresh; originally v0.1 → v1.0 → v1.9 → v1.24 → v1.39)
+**Commit:** 7ac027d (`main`, v1.39 real-use-cases launch — 5 use-case batches + golden harness + CI/pages; v1.0-v1.39 shipped)
+**Branch:** ``main`` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.39.0; v0.1-dev preserved as historical marker)
 
 ## OVERVIEW
 

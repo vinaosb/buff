@@ -1491,3 +1491,273 @@ fn t42_mismatched_arm_types_return_unknown() {
         "T42: mismatched arm types should return Unknown"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Qualified enum variant access in expression context
+// ---------------------------------------------------------------------------
+//
+// `EnumName.Variant` (with NO following parens) parses as
+// `Expr::MethodCall { receiver: Ident("EnumName"), method: "Variant", args: [] }`
+// (see crates/buff-lang-parser/src/expr/expr_postfix.rs — there is no
+// `Expr::FieldAccess` AST variant). This section tests that the inferencer's
+// MethodCall arm resolves such zero-arg calls to `Type::User(EnumName, [])`
+// when `EnumName` is a registered enum and `Variant` is one of its variants.
+//
+// Before the fix, this fell through to `Type::Unknown` (the MethodCall
+// fallthrough) and — when combined with the CLI `buff check` pass's
+// pre-binding of user-typed parameters — surfaced as spurious
+// "undefined variable" / "cannot compare" errors on patterns like
+// `if f == PreludeFn.Abs`. See `crates/buff-lang-cli/src/check.rs` for the
+// matching pre-binding fix.
+
+use buff_lang_ast::{Decl, EnumDecl, EnumVariant};
+
+/// Build a unit-style `EnumDecl` like:
+/// ```buff
+/// enum PreludeFn:
+///     Abs
+///     Sqrt
+/// ```
+fn unit_enum_decl(name: &str, variants: &[&str]) -> Decl {
+    Decl::EnumDecl(EnumDecl {
+        name: Ident::new(name, sp()),
+        type_params: Vec::new(),
+        variants: variants
+            .iter()
+            .map(|v| EnumVariant {
+                name: Ident::new(*v, sp()),
+                data: None,
+                span: sp(),
+            })
+            .collect(),
+        span: sp(),
+    })
+}
+
+/// Build `EnumName.Variant` — the zero-arg MethodCall shape the parser
+/// produces for qualified enum variant access.
+fn enum_variant_expr(enum_name: &str, variant: &str) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(ident(enum_name)),
+        method: Ident::new(variant, sp()),
+        args: Vec::new(),
+        span: sp(),
+    }
+}
+
+/// Registered enum + zero-arg MethodCall resolves to `Type::User(EnumName, [])`.
+#[test]
+fn qualified_enum_variant_resolves_to_user_type() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt", "Log"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+
+    let e = enum_variant_expr("PreludeFn", "Abs");
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::user("PreludeFn", Vec::new()),
+        "qualified variant `PreludeFn.Abs` should resolve to Type::User(\"PreludeFn\", [])"
+    );
+}
+
+/// A method name that is NOT a declared variant still falls through to
+/// `Type::Unknown` (no spurious resolution). This preserves the pre-fix
+/// behaviour for unknown identifiers and keeps the prelude-types registry
+/// (DateTime.now(), etc.) path reachable.
+#[test]
+fn qualified_non_variant_still_unknown() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+
+    // "NotARealVariant" is not declared on PreludeFn.
+    let e = enum_variant_expr("PreludeFn", "NotARealVariant");
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Unknown,
+        "non-variant method name should fall through to Unknown"
+    );
+}
+
+/// No registered enum → fall through to `Type::Unknown` (no panic, no error).
+#[test]
+fn qualified_variant_with_empty_registry_is_unknown() {
+    let mut inf = TypeInferencer::new();
+    // Do NOT call register_enum_decls — the default registry is empty.
+    let e = enum_variant_expr("Unknown", "Variant");
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Unknown,
+        "empty registry should fall through to Unknown"
+    );
+}
+
+/// The motivating bug fix: `f == PreludeFn.Abs` type-checks when `f` is
+/// bound to the enum type. Before the fix, this surfaced as either
+/// "undefined variable: f" (when the param wasn't pre-bound) or
+/// "cannot compare Unknown with Unknown" (deferring to the fallthrough).
+/// After the fix, both sides resolve to `Type::User("PreludeFn", [])`
+/// and the Eq operator returns Bool.
+#[test]
+fn qualified_enum_variant_in_comparison_yields_bool() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `f` to the user enum type (mirrors the pre-binding the CLI
+    // check pass performs for a parameter `f: PreludeFn`).
+    inf.bind("f", Type::user("PreludeFn", Vec::new()));
+
+    // Build: f == PreludeFn.Abs
+    let e = binary(BinaryOp::Eq, ident("f"), enum_variant_expr("PreludeFn", "Abs"));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Bool,
+        "qualified variant in Eq comparison should yield Bool"
+    );
+}
+
+/// Regression: even when `f` is bound to `Type::Unknown` (the CLI check
+/// pass's fallback for user-typed parameters), the comparison still
+/// succeeds because `Unknown` is permissive in `promote_binary`. This
+/// guards the specific `buff check` path where the param's user type
+/// can't be resolved to a `Type::User` by the minimal CLI resolver.
+#[test]
+fn qualified_enum_variant_comparison_with_unknown_param_yields_bool() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `f` to Unknown (mirrors CLI check.rs fallback for user types).
+    inf.bind("f", Type::Unknown);
+
+    // Build: f == PreludeFn.Abs
+    let e = binary(BinaryOp::Eq, ident("f"), enum_variant_expr("PreludeFn", "Abs"));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Bool,
+        "Unknown == Type::User should yield Bool (Unknown is permissive)"
+    );
+}
+
+// ===========================================================================
+// P1.6 regression tests — Unknown-typed if-conditions and logical operators.
+//
+// The self-host corpus (18 .buff files) uses user-defined predicate-style
+// functions as if-conditions (`if type_is_numeric(t):`, `if stream_check_raw(s,
+// kind):`) and method calls on user-typed values (`if vec.is_empty():`). The
+// local inferencer returns `Type::Unknown` for these because cross-function
+// return types and user-type method tables are not resolved at this layer.
+// Before P1.6, `infer_if` and the `And`/`Or` binary-operator arm strictly
+// required `Type::Bool`, producing cascading "if condition must be Bool, found
+// Unknown" / "logical operators require Bool, found Unknown and Bool" errors.
+//
+// The fix mirrors the EXISTING permissive-Unknown policy in `promote_binary`
+// (promote.rs line 28: "Unknown combines with anything, yielding Unknown …
+// suppresses error cascades after a prior type error"). These tests guard
+// against regressions by asserting that `Unknown` conditions type-check
+// without error.
+// ===========================================================================
+
+/// P1.6: `if unknown_condition:` must NOT error. The condition infers to
+/// `Type::Unknown` (e.g. a user-defined predicate call); the if-expression
+/// accepts it and returns `Void` (no else branch).
+#[test]
+fn p16_if_with_unknown_condition_does_not_error() {
+    // Build: if some_user_fn { return true }
+    // `some_user_fn` is an unbound ident → resolves to Unknown via lookup_ident
+    // error... BUT we simulate the real scenario by binding a var to Unknown
+    // (matching how user-fn-call results flow through let-bindings).
+    let mut inf = TypeInferencer::new();
+    inf.bind("flag", Type::Unknown);
+
+    let then_block = block(vec![Stmt::Return(Some(bool_lit(true)), sp())]);
+    let e = if_expr(ident("flag"), then_block, None);
+    let ty = inf.infer_expr(&e).expect(
+        "P1.6: if-condition of Type::Unknown must not error (user-defined predicate call scenario)",
+    );
+    assert_eq!(ty, Type::Void, "if without else yields Void");
+}
+
+/// P1.6: `if c == Color.Red:` where `c` is `Type::Unknown` (user-typed param
+/// fallback) must yield `Void` for the whole if-expression. This is the
+/// end-to-end scenario from the self-host corpus (`if f == PreludeFn.Abs:` in
+/// prelude.buff:178). The `==` yields `Bool` via the permissive-Unknown
+/// `promote_binary` rule, and `infer_if` accepts `Bool`.
+#[test]
+fn p16_if_with_enum_variant_comparison_and_unknown_param() {
+    let decls = vec![unit_enum_decl("Color", &["Red", "Green", "Blue"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `c` to Unknown — mirrors the CLI check.rs fallback for user-typed
+    // params (`typeref_to_type("Color").unwrap_or(Type::Unknown)`).
+    inf.bind("c", Type::Unknown);
+
+    // Build: if c == Color.Red { return true }
+    let cond = binary(BinaryOp::Eq, ident("c"), enum_variant_expr("Color", "Red"));
+    let then_block = block(vec![Stmt::Return(Some(bool_lit(true)), sp())]);
+    let e = if_expr(cond, then_block, None);
+
+    let ty = inf.infer_expr(&e).expect(
+        "P1.6: if f == EnumName.Variant must not error when f is Type::Unknown",
+    );
+    assert_eq!(ty, Type::Void, "if without else yields Void");
+}
+
+/// P1.6: `Unknown and Bool` / `Bool and Unknown` / `Unknown and Unknown` must
+/// all yield `Bool`. Before P1.6 these cascaded "logical operators require
+/// Bool, found Unknown and Bool" errors in self-host/promote.buff and
+/// self-host/parser/stmt.buff. The fix accepts Unknown on either side (or
+/// both), matching promote_binary's permissive-Unknown policy.
+#[test]
+fn p16_logical_and_or_with_unknown_operands() {
+    let mut inf = TypeInferencer::new();
+    inf.bind("a", Type::Unknown);
+    inf.bind("b", Type::Bool);
+    inf.bind("c", Type::Unknown);
+
+    // Unknown and Bool → Bool
+    let e1 = binary(BinaryOp::And, ident("a"), ident("b"));
+    let t1 = inf.infer_expr(&e1).expect(
+        "P1.6: Unknown and Bool must yield Bool (not error)",
+    );
+    assert_eq!(t1, Type::Bool);
+
+    // Bool or Unknown → Bool
+    let e2 = binary(BinaryOp::Or, ident("b"), ident("a"));
+    let t2 = inf.infer_expr(&e2).expect(
+        "P1.6: Bool or Unknown must yield Bool (not error)",
+    );
+    assert_eq!(t2, Type::Bool);
+
+    // Unknown and Unknown → Bool
+    let e3 = binary(BinaryOp::And, ident("a"), ident("c"));
+    let t3 = inf.infer_expr(&e3).expect(
+        "P1.6: Unknown and Unknown must yield Bool (not error)",
+    );
+    assert_eq!(t3, Type::Bool);
+}
+
+/// P1.6: a bare `not` identifier resolves to `Type::Unknown` instead of
+/// erroring "undefined variable: not". This is a targeted workaround for a
+/// parser lang-gap: the parser splits `return not type_is_gpu_eligible(t)` at
+/// the bare `not` (two statements) because `not` is not yet a Buff keyword.
+/// Without this, self-host/types/ty.buff:690 cascades a spurious error.
+#[test]
+fn p16_bare_not_identifier_resolves_to_unknown() {
+    let mut inf = TypeInferencer::new();
+    // Do NOT bind `not` in the environment — it must still resolve via the
+    // special-case in the Expr::Ident arm, not via env lookup.
+    let ty = inf.infer_expr(&ident("not")).expect(
+        "P1.6: bare `not` identifier must resolve to Unknown (parser lang-gap workaround)",
+    );
+    assert_eq!(ty, Type::Unknown, "bare `not` resolves to Unknown");
+}

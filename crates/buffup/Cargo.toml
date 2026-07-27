@@ -29,6 +29,9 @@ path = "src/lib.rs"
 #   (`GzDecoder` wrapping `tar::Archive::unpack`).
 # - `thiserror` derives `BuffupError`; `anyhow` is used in `main.rs`
 #   for the top-level error -> exit-code mapping only.
+# P0.9: sha2 for SHA-256 checksum verification of downloaded tarballs
+# (sec-001 — supply chain attack mitigation). Pure-Rust, no C deps.
+sha2.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

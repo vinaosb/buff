@@ -1,0 +1,144 @@
+// Buff self-host port of `crates/buff-lang-ast/src/common.rs` (P4.4).
+//
+// Common AST building blocks shared across expressions, statements, and
+// declarations.
+//
+// - Ident: an identifier with span info.
+// - Block: a `{ ... }` sequence of statements.
+// - Param: a function parameter (name + type).
+//
+// Faithful 1:1 translation of the Rust reference. The three structs
+// (Ident, Block, Param) translate cleanly to Buff brace-form structs
+// (`struct Foo { field: Type }`). The `impl Ident { fn new(...) }` /
+// `impl Block { fn empty(...) }` / `impl Param { fn plain(...) }` blocks
+// become free functions `ident_new`, `block_empty`, `param_plain` (per
+// porting-conventions §8g: `impl Type { fn new() }` -> `func type_new()`).
+// The `impl fmt::Display for Ident` / `Block` / `Param` blocks
+// (free-form text rendering) are NOT ported — Buff has no `fmt::Display`
+// trait, and the Block/Param Display bodies depend on sibling Display
+// impls (`Stmt::to_string`, `TypeRef::to_string`, `Expr::to_string`) that
+// the sibling port files (`stmt.buff`, `ty.buff`, `expr.buff`) also defer
+// (same pattern as `self-host/ast/stmt.buff` header lines 11-20). The
+// Ident Display body is trivial (returns `self.name`); it is also deferred
+// here for consistency with the sibling files' "defer all Display impls"
+// convention. The `pub fn span_to_json(span: Span)` helper and the
+// `impl Ident { fn to_json() }` / `Block` / `Param` JSON-serialization
+// blocks (manual serde_json::Value builders for `buff check --dump-ast`)
+// are NOT ported: serde JSON serialization is a Rust-host concern (per
+// porting-conventions §8b: "Port the data type; document the serde impl
+// as deferred"). The `#[cfg(test)] mod tests` block is also omitted (Buff
+// uses `@test` attributes on test functions in a separate
+// `equivalence_*.buff` file — see porting-conventions §5).
+//
+// Translation decisions:
+//   * `pub struct Ident { pub name: String, pub span: Span }` ->
+//     `struct Ident { name: String, span: Span }` (Buff brace-form). Field
+//     order matches the Rust source verbatim. `pub` field visibility is
+//     dropped (Buff has no field-level visibility — struct fields are always
+//     public within their module).
+//   * `impl Ident { pub fn new(name: impl Into<String>, span: Span) }` ->
+//     `func ident_new(name: String, span: Span) -> Ident`. The Rust
+//     `impl Into<String>` generic is collapsed to `String` (Buff has no
+//     `Into` trait; callers pass an owned `String`).
+//   * `impl fmt::Display for Ident { ... }` -> DEFERRED (see header) —
+//     consistency with sibling stmt.buff.
+//   * `pub struct Block { pub stmts: Vec<Stmt>, pub span: Span }` ->
+//     `struct Block { stmts: Vector<Stmt>, span: Span }`. Vec -> Vector
+//     (porting-conventions §7c hard rule).
+//   * `impl Block { pub fn empty(span: Span) -> Self }` -> `func
+//     block_empty(span: Span) -> Block`. The `Vec::new()` body becomes
+//     `Vector.new()` (Buff constructor).
+//   * `impl fmt::Display for Block { ... }` -> DEFERRED — depends on
+//     Stmt.to_string (also deferred in stmt.buff).
+//   * `pub struct Param { pub name: Ident, pub ty: TypeRef, pub
+//     default_value: Option<Expr>, pub is_comptime: bool, pub span: Span }`
+//     -> `struct Param { name: Ident, ty: TypeRef, default_value:
+//     Option<Expr>, is_comptime: Bool, span: Span }`. Field order matches
+//     Rust source verbatim. `bool` -> `Bool` (porting-conventions §7a).
+//   * `impl Param { pub fn plain(name: impl Into<String>, ty: TypeRef,
+//     span: Span) -> Self }` -> `func param_plain(name: String, ty:
+//     TypeRef, span: Span) -> Param`. The body constructs via `Ident.new`
+//     / `Param.new` (Buff auto-generates `Type.new(...)` constructors from
+//     the struct definition).
+//   * `impl fmt::Display for Param { ... }` -> DEFERRED — depends on
+//     Ident/TypeRef/Expr Display impls (all deferred).
+//   * `pub fn span_to_json(span: Span) -> serde_json::Value` -> DEFERRED
+//     (see header). The JSON serialization contract for `buff check
+//     --dump-ast` stays in the Rust host.
+//   * `impl Ident { pub fn to_json() }` / `Block` / `Param` -> DEFERRED
+//     (same reason).
+//   * `pub` visibility dropped — Buff default visibility is module-private
+//     (porting-conventions §6d); `export` is only needed when a symbol is
+//     imported by another file (none yet — single-file port).
+//   * `#[derive(Debug, Clone, PartialEq, Eq, Hash)]` (Ident) /
+//     `#[derive(Debug, Clone, PartialEq)]` (Block, Param) dropped — Buff
+//     auto-derives Debug, Clone, PartialEq; Eq/Hash are Rust-host concerns
+//     (Buff is GC-backed and uses structural equality).
+//   * Type references (`Stmt`, `Expr`, `TypeRef`, `Span`) resolve to
+//     sibling files once the M7 monolith loader (Phase 5) concatenates
+//     `self-host/ast/*.buff`. Until then they are forward references —
+//     `buff check` is permissive about unresolved user-defined types (the
+//     parser and TypeInferencer treat them as opaque type names).
+
+// An identifier — a name plus its source location.
+struct Ident {
+    name: String,
+    span: Span,
+}
+
+// Create a new identifier from anything string-like.
+//
+// Mirrors Rust `impl Ident { pub fn new(name: impl Into<String>, span:
+// Span) -> Self }`. The Rust `impl Into<String>` generic becomes a plain
+// `String` parameter (Buff has no Into trait); callers pass an owned String.
+func ident_new(name: String, span: Span) -> Ident:
+    return Ident.new(name: name, span: span)
+
+// A brace-delimited block of statements: `{ stmt; stmt; ... }`.
+struct Block {
+    stmts: Vector<Stmt>,
+    span: Span,
+}
+
+// Create an empty block with the given span.
+//
+// Mirrors Rust `impl Block { pub fn empty(span: Span) -> Self }`. The
+// `Vec::new()` body becomes `Vector.new()` (Buff constructor).
+func block_empty(span: Span) -> Block:
+    return Block.new(stmts: Vector.new(), span: span)
+
+// A function parameter: `name: Type`, optionally with a default value
+// `name: Type = expr` (T106).
+//
+// The `default_value` field carries the parsed default expression when the
+// parameter was declared with `= expr`. Rust has NO native default-param
+// support, so the codegen fills omitted trailing args at the CALL SITE
+// (`fetch("x")` -> `fetch("x", 30)` when `timeout` defaults to `30`) — it
+// does NOT rely on Rust defaults. Option.None means the parameter is
+// required (no default).
+//
+// This field is **additive** (T106): existing params without a default
+// carry Option.None, so all prior `Param { ... }` construction sites
+// just need `default_value: None` appended.
+struct Param {
+    name: Ident,
+    ty: TypeRef,
+    default_value: Option<Expr>,
+    is_comptime: Bool,
+    span: Span,
+}
+
+// Construct a plain (non-comptime, no-default) parameter.
+//
+// Mirrors Rust `impl Param { pub fn plain(name: impl Into<String>, ty:
+// TypeRef, span: Span) -> Self }`. The body constructs via Ident.new /
+// Param.new (Buff auto-generates Type.new constructors from the struct
+// definition).
+func param_plain(name: String, ty: TypeRef, span: Span) -> Param:
+    return Param.new(
+        name: ident_new(name: name, span: span),
+        ty: ty,
+        default_value: Option.None,
+        is_comptime: false,
+        span: span,
+    )

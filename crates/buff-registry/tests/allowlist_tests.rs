@@ -47,14 +47,18 @@ fn mock_github(server: &MockServer, login: &str, id: i64) {
     });
 }
 
-async fn do_callback(router: axum::Router) -> (StatusCode, Value) {
+async fn do_callback(router: axum::Router) -> (StatusCode, Value, axum::http::HeaderMap) {
+    // P0.25 (sec-003): callback validates `?state=` against the
+    // `buff_oauth_state` cookie. Tests send matching values.
     let request = Request::builder()
         .method("GET")
-        .uri("/auth/github/callback?code=mock")
+        .uri("/auth/github/callback?code=mock&state=test-csrf-state-123")
+        .header("cookie", "buff_oauth_state=test-csrf-state-123")
         .body(Body::empty())
         .expect("build");
     let response = router.oneshot(request).await.expect("oneshot");
     let status = response.status();
+    let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), 1024 * 1024)
         .await
         .expect("collect");
@@ -63,7 +67,25 @@ async fn do_callback(router: axum::Router) -> (StatusCode, Value) {
     } else {
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     };
-    (status, json)
+    (status, json, headers)
+}
+
+/// Extract `buff_session=<token>` value from a `set-cookie` header
+/// (sec-004: token no longer echoed in JSON body).
+fn session_from_set_cookie(headers: &axum::http::HeaderMap) -> String {
+    let cookie = headers
+        .get("set-cookie")
+        .expect("Set-Cookie header")
+        .to_str()
+        .expect("ascii");
+    let prefix = "buff_session=";
+    let start = cookie
+        .find(prefix)
+        .expect("buff_session cookie")
+        + prefix.len();
+    let rest = &cookie[start..];
+    let end = rest.find(';').unwrap_or(rest.len());
+    rest[..end].to_string()
 }
 
 #[tokio::test]
@@ -76,7 +98,7 @@ async fn allowlisted_user_can_login() {
     let state = oauth_app_with_allowlist(storage, &mock);
     let router = app(state);
 
-    let (status, body) = do_callback(router).await;
+    let (status, body, _) = do_callback(router).await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -95,7 +117,7 @@ async fn non_allowlisted_user_gets_403() {
     let state = oauth_app_with_allowlist(storage, &mock);
     let router = app(state);
 
-    let (status, body) = do_callback(router).await;
+    let (status, body, _) = do_callback(router).await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -127,7 +149,7 @@ async fn allowlist_disabled_allows_anyone() {
         .with_allowlist_enabled(false);
     let router = app(state);
 
-    let (status, _) = do_callback(router).await;
+    let (status, _, _) = do_callback(router).await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -145,7 +167,7 @@ async fn allowlist_is_case_sensitive() {
     let state = oauth_app_with_allowlist(storage, &mock);
     let router = app(state);
 
-    let (status, _) = do_callback(router).await;
+    let (status, _, _) = do_callback(router).await;
     // GitHub logins are case-insensitive but we store them case-sensitively.
     // "TestUser" != "testuser" → 403. This is a known limitation documented
     // in the allowlist docs. Production should normalize to lowercase.
@@ -166,9 +188,9 @@ async fn allowlisted_user_can_publish_after_login() {
     let state = oauth_app_with_allowlist(storage, &mock);
     let router = app(state);
 
-    // Login.
-    let (_, body) = do_callback(router.clone()).await;
-    let session = body["session_token"].as_str().expect("session").to_string();
+    // Login. sec-004: session token now comes from Set-Cookie header.
+    let (_, _, headers) = do_callback(router.clone()).await;
+    let session = session_from_set_cookie(&headers);
 
     // Publish using the session token.
     let payload = json!({

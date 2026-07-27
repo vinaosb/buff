@@ -54,15 +54,15 @@ pub use error::{Result, Web3Error};
 // as opaque enums (mirrors the `image::ImageFormat` re-export in
 // `buff-image`).
 pub use ethers::abi::Token;
-pub(crate) use Client as ClientKind;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, OnceLock};
 
 use ethers::abi::Contract as EthAbi;
-use ethers::providers::{Http, Provider as EthProvider};
+use ethers::middleware::SignerMiddleware;
+use ethers::providers::{Http, Middleware, Provider as EthProvider};
 use ethers::signers::{LocalWallet, Signer};
-use ethers::types::{Address, BlockNumber as EthBlockNumber, H256, U256, U64};
+use ethers::types::{Address, BlockNumber as EthBlockNumber, H256, U64};
 
 fn runtime() -> Result<&'static tokio::runtime::Runtime> {
     static RUNTIME: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
@@ -161,11 +161,9 @@ impl Provider {
     pub fn get_nonce(&self, address: &str) -> Result<u64> {
         let addr = parse_address(address)?;
         let rt = runtime()?;
+        let block_id = ethers::types::BlockId::Number(EthBlockNumber::Latest);
         let result = catch_unwind(AssertUnwindSafe(|| {
-            rt.block_on(
-                self.inner
-                    .get_transaction_count(addr, Some(EthBlockNumber::Latest)),
-            )
+            rt.block_on(self.inner.get_transaction_count(addr, Some(block_id)))
         }));
         match result {
             Ok(Ok(n)) => Ok(n.as_u64()),
@@ -202,25 +200,55 @@ impl Default for Provider {
         // A no-op provider pointed at localhost — never actually
         // used for RPC. Lets codegen emit `unwrap_or_default()` for
         // panic-free construction on Result<Provider, Web3Error>.
+        //
+        // URL parsing for these well-formed HTTP URLs cannot fail
+        // in practice — the chained `or_else` fallbacks are purely
+        // defensive against theoretical TLS-backend init failure.
         Provider::new("http://localhost:8545").unwrap_or(Provider {
-            inner: Arc::new(
-                EthProvider::<Http>::try_from("http://127.0.0.1:8545").unwrap_or(
-                    EthProvider::<Http>::try_from("http://0.0.0.0:8545")
-                        .unwrap_or_else(|_| unsafe_inert_provider()),
-                ),
-            ),
+            inner: Arc::new(inert_provider_fallback()),
         })
     }
 }
 
-fn unsafe_inert_provider() -> EthProvider<Http> {
-    // Last-resort fallback for `Provider::default()` when no URL
-    // parses (should be unreachable — localhost always parses).
-    // Uses reqwest's Client::new() which can fail only on
-    // TLS-backend init failure; in that case we build a Provider
-    // from the default reqwest Client via the Http::new ctor.
-    let client = reqwest::Client::new();
-    Http::new(client).into()
+fn inert_provider_fallback() -> EthProvider<Http> {
+    // Last-resort fallback for `Provider::default()` (provably
+    // unreachable — `http://localhost:8545` always parses under
+    // any non-broken TLS backend). We try a list of well-formed
+    // loopback URL spellings; URL parsing cannot fail in practice
+    // for any of them. The terminal `expect` below is justified by
+    // the `url` crate's documented invariant that `Url::parse`
+    // succeeds for `"http://"` + any non-empty ASCII host.
+    //
+    // The original v1.18 implementation called `reqwest::Client::new()`
+    // directly, but ethers 2.0.14's `Http::new` ctor takes
+    // `impl Into<Url>` rather than a pre-built reqwest::Client.
+    let candidates = [
+        "http://127.0.0.1:8545",
+        "http://0.0.0.0:8545",
+        "http://[::1]:8545",
+        "http://[::]:8545",
+        "http://0.0.0.0:0",
+        "http://localhost",
+        "http://0",
+        "http://a",
+        "http://b",
+    ];
+    for url_str in candidates {
+        if let Ok(p) = EthProvider::<Http>::try_from(url_str) {
+            return p;
+        }
+    }
+    // Truly unreachable: every well-formed URL string rejected by
+    // TLS-backend init. Construct via `Http::new(Url)` with a
+    // pre-parsed Url. The `url::Url::parse` for any well-formed
+    // HTTP URL cannot fail in practice — the terminal `expect`
+    // documents the impossibility of reaching this branch.
+    let url = url::Url::parse("http://localhost")
+        .or_else(|_| url::Url::parse("http://0.0.0.0"))
+        .or_else(|_| url::Url::parse("http://[::]"))
+        .or_else(|_| url::Url::parse("http://a"))
+        .expect("invariant: url::Url::parse succeeds for at least one well-formed HTTP URL — every reasonable URL spelling was rejected by the preceding try_from loop, which can only happen under a fundamentally broken TLS backend");
+    EthProvider::new(Http::new(url))
 }
 
 impl std::fmt::Debug for Provider {
@@ -291,11 +319,19 @@ impl Default for Wallet {
         // A "burner" wallet derived from a fixed test key. NEVER
         // use on mainnet. Lets codegen emit `unwrap_or_default()`
         // for panic-free construction (mirrors Image::default).
+        //
+        // Fallback path: if `from_private_key` fails (theoretical —
+        // the Hardhat/Anvil test key is always a valid secp256k1
+        // scalar), construct a fresh wallet via `LocalWallet::new`
+        // using `OsRng` from rand 0.8 (the version ethers 2.0.14
+        // pins internally). This preserves the panic-free invariant
+        // without falling back to `LocalWallet::default()` (which
+        // does not exist on the ethers 2.0.14 API surface).
         Wallet::from_private_key(
             "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
         )
         .unwrap_or(Wallet {
-            inner: LocalWallet::default(),
+            inner: LocalWallet::new(&mut rand_08::rngs::OsRng),
         })
     }
 }
@@ -310,7 +346,7 @@ impl std::fmt::Debug for Wallet {
 
 /// A [`Wallet`] bound to a [`Provider`] — the "client" type passed
 /// to [`Contract::new`] for signing transactions.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ConnectedWallet {
     provider: Provider,
     wallet: Wallet,
@@ -333,15 +369,6 @@ impl ConnectedWallet {
     }
 }
 
-impl Default for ConnectedWallet {
-    fn default() -> Self {
-        ConnectedWallet {
-            provider: Provider::default(),
-            wallet: Wallet::default(),
-        }
-    }
-}
-
 impl std::fmt::Debug for ConnectedWallet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConnectedWallet")
@@ -361,7 +388,12 @@ pub struct Contract {
     client: Client,
 }
 
-enum Client {
+/// The kind of client a [`Contract`] is bound to — read-only
+/// ([`Provider`]) or signing ([`ConnectedWallet`]). Exposed publicly
+/// because the [`IntoClient`] trait returns it; users typically do
+/// not need to interact with this enum directly.
+#[derive(Clone, Debug)]
+pub enum Client {
     ReadOnly(Provider),
     Signer(ConnectedWallet),
 }
@@ -407,10 +439,12 @@ impl Contract {
 
 impl Default for Contract {
     fn default() -> Self {
-        let abi = EthAbi::new();
+        // ethabi::Contract derives Default (empty functions/events
+        // maps). Used by codegen's `.unwrap_or_default()` panic-free
+        // collapse pattern.
         Contract {
             address: Address::zero(),
-            abi,
+            abi: EthAbi::default(),
             client: Client::ReadOnly(Provider::default()),
         }
     }
@@ -450,6 +484,7 @@ impl IntoClient for ConnectedWallet {
 /// Constructed via [`Contract::method`]. Chain `.arg()` calls to
 /// build the argument list, then terminate with `.call()` (read)
 /// or `.send()` (write, requires a Signer client).
+#[derive(Debug)]
 pub struct ContractMethod {
     address: Address,
     abi: EthAbi,
@@ -490,9 +525,13 @@ impl ContractMethod {
         let encoded = function
             .encode_input(&self.args)
             .map_err(|e| Web3Error::AbiEncode(e.to_string()))?;
+        let tx = ethers::types::TransactionRequest::new()
+            .to(self.address)
+            .data(ethers::types::Bytes::from(encoded))
+            .into();
         let result = catch_unwind(AssertUnwindSafe(|| {
             let provider = self.client.provider();
-            rt.block_on(provider.call_raw(encoded.into(), self.address))
+            rt.block_on(async { provider.call_raw(&tx).await })
         }));
         match result {
             Ok(Ok(return_bytes)) => {
@@ -531,18 +570,18 @@ impl ContractMethod {
             .to(to)
             .data(data);
         let provider = cw.provider().clone();
-        let chain_id = provider.get_chainid();
         let wallet = cw.wallet().clone();
         let result = catch_unwind(AssertUnwindSafe(|| {
             rt.block_on(async {
-                let cid = chain_id.await.map_err(|e| e.to_string())?;
+                // SignerMiddleware wraps the read-only Provider with
+                // the Wallet, giving us a client that can sign + submit
+                // transactions in one call. We set the chain_id on the
+                // wallet first (EIP-155 protection).
+                let cid = provider.get_chainid().await.map_err(|e| e.to_string())?;
                 let wallet = wallet.with_chain_id(cid.as_u64());
-                let signed = wallet
-                    .sign_transaction(&tx.clone().into())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let pending = provider
-                    .send_raw_transaction(signed)
+                let signer = SignerMiddleware::new(provider, wallet);
+                let pending = signer
+                    .send_transaction::<ethers::types::TransactionRequest>(tx, None)
                     .await
                     .map_err(|e| e.to_string())?;
                 Ok::<_, String>(*pending)
@@ -561,13 +600,6 @@ impl Client {
         match self {
             Client::ReadOnly(p) => &p.inner,
             Client::Signer(cw) => cw.provider(),
-        }
-    }
-
-    fn clone(&self) -> Self {
-        match self {
-            Client::ReadOnly(p) => Client::ReadOnly(p.clone()),
-            Client::Signer(cw) => Client::Signer(cw.clone()),
         }
     }
 }
@@ -625,7 +657,7 @@ fn format_token(t: &Token) -> String {
         Token::String(s) => s.clone(),
         Token::Bytes(b) => format!("0x{}", hex::encode(b)),
         Token::FixedBytes(b) => format!("0x{}", hex::encode(b)),
-        Token::Array(items) | Token::FixedArray(items, _) => {
+        Token::Array(items) | Token::FixedArray(items) => {
             let parts: Vec<String> = items.iter().map(format_token).collect();
             format!("[{}]", parts.join(", "))
         }

@@ -1,0 +1,5 @@
+---
+source: crates/buff-fake/tests/core.rs
+expression: faker.email()
+---
+santa@example.net

@@ -1,0 +1,263 @@
+// Buff self-host port of `crates/buff-lang-ast/src/ty.rs` (P4.4).
+//
+// Type reference nodes for the Buff AST.
+//
+// A TypeRef is a *reference* to a type (used in annotations, signatures,
+// and parameters). It is not the type itself — type resolution happens in
+// the `buff-lang-types` crate.
+//
+// Faithful 1:1 translation of the Rust reference. The `TypeRef` enum has
+// seven variants in the Rust source (Named, Generic, Option, Function,
+// Union, Tuple, TraitObject) — six are unit/struct/tuple variants in Rust
+// and one (TraitObject) is a struct variant. The Rust `impl fmt::Display
+// for TypeRef` block (free-form text rendering that recursively renders
+// nested TypeRefs) becomes a free function `typeref_to_string(t: TypeRef)
+// -> String` (Buff has no `fmt::Display` trait — the closest idiom is a
+// free function returning `String`; per porting-conventions §8g). The
+// `impl TypeRef { fn to_json() }` block (manual serde_json::Value
+// builders for `buff check --dump-ast`) is NOT ported: serde JSON
+// serialization is a Rust-host concern (per porting-conventions §8b:
+// "Port the data type; document the serde impl as deferred"). The
+// `#[cfg(test)] mod tests` block is also omitted (Buff uses `@test`
+// attributes on test functions in a separate `equivalence_*.buff` file —
+// see porting-conventions §5).
+//
+// Translation decisions:
+//   * `pub enum TypeRef { Named { name: Ident, span: Span }, ... }` (Rust
+//     STRUCT variants) -> tuple variants with a documented field order:
+//     `Named(Ident, Span)`, `Generic(TypeRef, Vector<TypeRef>, Span)`,
+//     `Option(TypeRef, Span)`, `Function(Vector<TypeRef>, TypeRef, Bool,
+//     Span)`, `Union(Vector<TypeRef>, Span)`, `Tuple(Vector<TypeRef>,
+//     Span)`, `TraitObject(Ident, Option<String>, Span)`. Buff has no
+//     named-field enum variants — the parser at
+//     `crates/buff-lang-parser/src/stmt/stmt_decl.rs:660-740` accepts
+//     only unit variants and tuple variants (verified by stmt.buff's
+//     header lines 22-33 which uses the same tuple-variant form for the
+//     same reason). Field order matches the Rust source declaration
+//     order verbatim. Construction stays positional; field semantics are
+//     documented in the per-variant comment.
+//   * `Box<TypeRef>` (recursive payload, so the enum is finite-size in
+//     Rust) -> bare `TypeRef`. Buff is GC-backed — there is no `Box` to
+//     mirror (per porting-conventions §7d and the precedent in
+//     `self-host/types/ty.buff` lines 8-12: "Where Rust uses `Box<Type>`
+//     for recursive payloads, Buff uses bare `Type` payloads").
+//   * `Vec<TypeRef>` -> `Vector<TypeRef>` (porting-conventions §7c hard
+//     rule).
+//   * `Option<TypeRef>` / `Option<String>` preserved verbatim (Buff has
+//     `Option<T>` in the prelude).
+//   * `bool` -> `Bool` (porting-conventions §7a).
+//   * `impl fmt::Display for TypeRef { fn fmt(&self, f) -> fmt::Result }`
+//     -> `func typeref_to_string(t: TypeRef) -> String`. The Rust body
+//     uses `write!(f, "{base}<")` + `for (i, a) in args.iter().enumerate()`
+//     + `?` to assemble rendered forms. The Buff port uses string
+//     concatenation and `for x in iter` loops with an explicit `first`
+//     flag (Buff `for` has no `.enumerate()` idiom in this style — uses
+//     a Bool flag instead, mirroring `self-host/types/ty.buff`'s pattern
+//     for the same Display body). The Rust `match self { Named { name,
+//     .. } => ... }` becomes `match t { Named(name, _) => ... }` with
+//     UNQUALIFIED variant names + tuple-destructure in match arms (per
+//     porting-conventions §8e — qualified patterns are rejected by the
+//     parser).
+//   * `f.write_str(s)` / `fmt::Result` plumbing is deleted — Buff has no
+//     `fmt::Formatter`; a Buff function just `return "..."`.
+//   * `impl TypeRef { pub fn to_json(&self) -> serde_json::Value }` ->
+//     DEFERRED (see header). The JSON serialization contract for
+//     `buff check --dump-ast` stays in the Rust host.
+//   * `pub` visibility dropped — Buff default visibility is module-private
+//     (porting-conventions §6d); `export` is only needed when a symbol is
+//     imported by another file (none yet — single-file port).
+//   * `#[derive(Debug, Clone, PartialEq, Eq)]` dropped — Buff auto-derives
+//     Debug, Clone, PartialEq; Eq is a Rust-host concern (Buff is GC-backed
+//     and uses structural equality).
+//   * Type references (`Ident`, `Span`) resolve to sibling files once the
+//     M7 monolith loader (Phase 5) concatenates `self-host/ast/*.buff`.
+//     Until then they are forward references — `buff check` is permissive
+//     about unresolved user-defined types (the parser and TypeInferencer
+//     treat them as opaque type names).
+
+// A reference to a type.
+//
+// Each variant is documented with its tuple-field order so the positional
+// construction sites stay readable. The Rust source uses struct variants
+// (Named { name, span }); Buff has no named-field enum variants, so the
+// port uses tuple variants with the same field order (Named(Ident, Span)).
+enum TypeRef {
+    // Named(name, span) — a named type, e.g. `Int`, `String`, `MyType`.
+    Named(Ident, Span),
+    // Generic(base, args, span) — a generic application, e.g.
+    // `Vector<Int>`, `Map<String, Int>`. The Rust `base: Box<TypeRef>`
+    // becomes a bare `TypeRef` (Buff is GC-backed — no Box).
+    Generic(TypeRef, Vector<TypeRef>, Span),
+    // Option(inner, span) — the builtin `Option<T>` wrapper. The Rust
+    // `inner: Box<TypeRef>` becomes a bare `TypeRef`.
+    Option(TypeRef, Span),
+    // Function(params, return_type, is_async, span) — a function type:
+    // `(T1, T2) -> T3`, optionally `async`. The Rust `return_type:
+    // Box<TypeRef>` becomes a bare `TypeRef`.
+    Function(Vector<TypeRef>, TypeRef, Bool, Span),
+    // Union(members, span) — A union (sum) type: `A | B | C` (T76).
+    //
+    // Rust has no anonymous unions, so codegen emits a named enum wrapper
+    // (e.g. `String | Int` -> `enum StringOrInt { String(String),
+    // Int(i64) }`). The wrapper name is deterministic: join the member
+    // type names with `Or` in source order (`String | Int` ->
+    // `StringOrInt`, `Int | Float | Bool` -> `IntOrFloatOrBool`). Codegen
+    // collects unique unions and emits each wrapper enum ONCE as a
+    // top-level item.
+    //
+    // Each member is itself a TypeRef (so unions compose with named,
+    // generic, option, and even nested-union members — though nested-union
+    // codegen flattening is deferred). The span covers the whole
+    // `A | B | C` sequence.
+    Union(Vector<TypeRef>, Span),
+    // Tuple(members, span) — A tuple type: `(T, U, ...)`, e.g.
+    // `(String, Int)` (T103).
+    //
+    // Each member is itself a TypeRef (so nested tuples like
+    // `(String, (Int, Bool))` compose). The 2+-element rule lives at
+    // parse time: a single `(T)` is grouping (returns the bare `T`),
+    // NOT a TypeRef.Tuple. So this variant always carries 2+ members
+    // — there is no single-element tuple in Buff (a trailing comma
+    // `(T,)` is the established Rust idiom but is deferred in Buff;
+    // the parser treats `(T,)` as `(T)` grouping for v0.5). The span
+    // covers the whole `( ... )` sequence.
+    //
+    // This is **additive** (T103): no existing variant was renamed,
+    // reordered, or had its payload altered. See the migration-note
+    // pattern on TypeRef and in `.sisyphus/notepads/` (T76 union
+    // types for the TypeRef ripple template).
+    Tuple(Vector<TypeRef>, Span),
+    // TraitObject(trait_name, lifetime, span) — A trait object type:
+    // `Box<dyn Trait>` or `&dyn Trait` (DR-020 / P2.1a).
+    //
+    // `dyn` is recognized contextually in type position (NOT a reserved
+    // keyword — it lexes as `Ident`). The `trait_name` identifies the
+    // trait (`Drawable`, `LexCallback`, etc.). The `lifetime` is None
+    // for the owned `Box<dyn Trait>` form; the borrowed `&dyn Trait`
+    // form carries an explicit lifetime (MVP: `'static` only — see
+    // DR-020 §Autoboxing Rules).
+    //
+    // The Rust source fields are `trait_name: Ident`, `lifetime:
+    // Option<String>`, `span: Span`. (The Rust source uses
+    // `Option<String>` for the lifetime — a string like "'static" — NOT
+    // `Option<Span>`. The port preserves the Rust source field types
+    // verbatim.)
+    //
+    // This is **additive** (P2.1a): no existing variant was renamed,
+    // reordered, or had its payload altered. The downstream lowering
+    // (`typeref_to_type`) maps this to the pre-existing
+    // `Type.DynamicDispatch(Box<Type>)` (T68, v1.19); codegen already
+    // handles `Type.DynamicDispatch` at
+    // `buff-lang-codegen-rust/src/rust_codegen/type_lowering.rs:240`.
+    TraitObject(Ident, Option<String>, Span),
+}
+
+// Render a TypeRef as its source-syntax form (e.g. `Int`, `Vector<Int>`,
+// `(Int) -> Bool`, `Box<dyn Drawable>`).
+//
+// Mirrors Rust `impl fmt::Display for TypeRef` body verbatim. The Rust
+// `match self { Named { name, .. } => write!(f, "{name}"), ... }` becomes
+// a Buff `match t { Named(name, _) => typeref_named_render(name), ... }`
+// — the variant patterns destructure positionally (per porting-conventions
+// §8e the variant names are UNQUALIFIED), and each arm builds the rendered
+// string via concatenation. The `write!(f, "{base}")` recursive calls
+// become `typeref_to_string(t: base)`. The `for (i, a) in args.iter()
+// .enumerate()` separator-test idiom becomes a `for x in iter` loop with
+// an explicit `first` flag (Buff `for` has no `.enumerate()` in this
+// style — same pattern as `self-host/types/ty.buff`'s Display body).
+//
+// NOTE on match-arm shape: Buff match arms must be single EXPRESSIONS
+// (porting-conventions §8e — statement bodies are rejected). The Rust
+// Display impl's `Generic { ... } => { write!(f, ...)?; for ...; Ok(()) }`
+// block arm becomes a single expression that builds the rendered string
+// via a `let` chain before the match (the per-variant rendering logic
+// lives in helper functions called from each match arm). Each arm body
+// is one expression: `base_str + "<" + args_joined + ">"`.
+func typeref_to_string(t: TypeRef) -> String:
+    return match t {
+        // Named(name, span) — Rust: `write!(f, "{name}")`.
+        Named(name, span) => ident_to_string(i: name),
+        // Generic(base, args, span) — Rust assembles `{base}<{arg0}, {arg1},
+        // ...>` via `write!` + `for (i, a) in args.iter().enumerate()` with
+        // an `if i > 0` separator test. The Buff port joins args into a
+        // comma-separated string with the same separator-test idiom (using
+        // an explicit `first` flag), then concatenates base + "<" + joined
+        // + ">".
+        Generic(base, args, span) => typeref_to_string(t: base) + "<" + typeref_join_args(args: args) + ">",
+        // Option(inner, span) — Rust: `write!(f, "Option<{inner}>")`.
+        Option(inner, span) => "Option<" + typeref_to_string(t: inner) + ">",
+        // Function(params, return_type, is_async, span) — Rust prefixes
+        // `async ` when is_async, then assembles `({p0}, {p1}, ...) ->
+        // {return_type}`. The Buff port reuses typeref_join_args for the
+        // params separator idiom.
+        Function(params, return_type, is_async, span) => typeref_function_render(params: params, return_type: return_type, is_async: is_async),
+        // Union(members, span) — Rust: `for (i, m) in members.iter().
+        // enumerate() { if i > 0 { " | " } write!(f, "{m}") }`. The Buff
+        // port reuses typeref_join_members for the same idiom with the
+        // ` | ` separator.
+        Union(members, span) => typeref_join_members(members: members, sep: " | "),
+        // Tuple(members, span) — same as Union but with the `, ` separator
+        // and surrounding parens.
+        Tuple(members, span) => "(" + typeref_join_members(members: members, sep: ", ") + ")",
+        // TraitObject(trait_name, lifetime, span) — DR-020 / P2.1a: trait
+        // object `Box<dyn Trait>` (owned, the canonical Buff form) or
+        // `&dyn Trait` (borrowed, MVP parameters-only). Rust uses two
+        // separate match arms (Some(lt) vs None) to render the two forms.
+        // The Buff port factors both into a single helper.
+        TraitObject(trait_name, lifetime, span) => typeref_trait_object_render(trait_name: trait_name, lifetime: lifetime),
+    }
+
+// Helper: join a Vector<TypeRef> of generic-args into a comma-separated
+// rendered string (mirrors the `for (i, a) in args.iter().enumerate()`
+// separator-test idiom from the Rust Display body).
+func typeref_join_args(args: Vector<TypeRef>) -> String:
+    let result = ""
+    let first = true
+    for a in args:
+        if first:
+            first = false
+        else:
+            result = result + ", "
+        result = result + typeref_to_string(t: a)
+    return result
+
+// Helper: join a Vector<TypeRef> of union/tuple members with a custom
+// separator (mirrors the same `for (i, m) in members.iter().enumerate()`
+// idiom from the Rust Display body, parameterised on the separator so
+// Union uses " | " and Tuple uses ", ").
+func typeref_join_members(members: Vector<TypeRef>, sep: String) -> String:
+    let result = ""
+    let first = true
+    for m in members:
+        if first:
+            first = false
+        else:
+            result = result + sep
+        result = result + typeref_to_string(t: m)
+    return result
+
+// Helper: render a Function variant (prefix `async `, then `(params) ->
+// return_type`). Mirrors the Rust Display arm for Function which uses
+// `if *is_async { f.write_str("async ")?; }` then `f.write_str("(")?;`
+// ... `write!(f, ") -> {return_type}")`.
+func typeref_function_render(params: Vector<TypeRef>, return_type: TypeRef, is_async: Bool) -> String:
+    let prefix = ""
+    if is_async:
+        prefix = "async "
+    return prefix + "(" + typeref_join_args(args: params) + ") -> " + typeref_to_string(t: return_type)
+
+// Helper: render a TraitObject variant. Mirrors the two Rust Display arms:
+//   TraitObject { trait_name, lifetime: Some(lt), .. } => write!(f,
+//       "&dyn {trait_name} {lt}")
+//   TraitObject { trait_name, lifetime: None, .. } => write!(f,
+//       "Box<dyn {trait_name}>")
+// The Buff port uses a single `match` on lifetime — the match arms are
+// pure expressions producing the rendered string (per porting-conventions
+// §8e). Buff `match` does NOT accept `if let` (porting-conventions §8e),
+// so the Rust two-arm match translates cleanly.
+func typeref_trait_object_render(trait_name: Ident, lifetime: Option<String>) -> String:
+    let name = ident_to_string(i: trait_name)
+    return match lifetime {
+        Option.Some(lt) => "&dyn " + name + " " + lt,
+        Option.None => "Box<dyn " + name + ">",
+    }

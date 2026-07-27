@@ -49,12 +49,12 @@ pub(crate) struct CallbackParams {
     /// The temporary authorization code GitHub issues after the user
     /// approves the app. Exchanged for an access token.
     pub(crate) code: String,
-    /// Optional state parameter (CSRF protection). Echoed back by
-    /// GitHub; we accept any value (the login endpoint generates a
-    /// random state that the callback SHOULD verify, but for the MVP
-    /// we skip strict state validation — the registry is localhost-only
-    /// by default).
-    #[allow(dead_code)]
+    /// CSRF-protection state parameter. Echoed back verbatim by GitHub
+    /// from the value we sent on the login redirect. The callback
+    /// handler validates this against the `buff_oauth_state` cookie set
+    /// by [`login`] — a mismatch indicates a CSRF attempt or a stale
+    /// / replayed callback URL and is rejected with
+    /// [`RegistryError::OAuthStateMismatch`] (P0.25 / sec-003).
     pub(crate) state: Option<String>,
 }
 
@@ -133,21 +133,24 @@ impl OAuthConfig {
         })
     }
 
-    /// Build the GitHub authorize URL with the client_id + redirect_uri
-    /// encoded as query params. The user's browser is redirected here
-    /// by the login endpoint.
+    /// Build the GitHub authorize URL with the client_id, redirect_uri,
+    /// and CSRF `state` encoded as query params. The user's browser is
+    /// redirected here by the login endpoint. The `state` value MUST
+    /// be echoed back by GitHub on callback and is validated against
+    /// the `buff_oauth_state` cookie to defeat CSRF (P0.25 / sec-003).
     #[must_use]
-    pub fn authorize_redirect_url(&self) -> String {
+    pub fn authorize_redirect_url(&self, state: &str) -> String {
         // Scope: `read:user` is the minimal scope needed to read the
         // user's GitHub login + numeric ID. We do NOT request `repo`
         // or `write:org` — the registry only needs identity, not repo
         // access.
         format!(
-            "{}?client_id={}&redirect_uri={}&scope={}",
+            "{}?client_id={}&redirect_uri={}&scope={}&state={}",
             self.authorize_url,
             url_encode(&self.client_id),
             url_encode(&self.redirect_uri),
             url_encode("read:user"),
+            url_encode(state),
         )
     }
 }
@@ -165,38 +168,65 @@ fn url_encode(s: &str) -> String {
 /// Returns `503 Service Unavailable` with a JSON body if OAuth is not
 /// configured (env vars missing). Returns `302 Found` with the GitHub
 /// authorize URL in the `Location` header otherwise.
+///
+/// P0.25 (sec-003): Generates a random CSRF `state` value, includes it
+/// in the authorize URL, AND sets it as the `buff_oauth_state` cookie
+/// (HttpOnly + SameSite=Lax). The [`callback`] handler validates the
+/// echoed state against this cookie — a mismatch is rejected as
+/// [`RegistryError::OAuthStateMismatch`].
 pub(crate) async fn login(State(state): State<AppState>) -> Result<Response, RegistryError> {
     let config = state
         .oauth_config
         .as_ref()
         .ok_or(RegistryError::OAuthNotConfigured)?;
-    let url = config.authorize_redirect_url();
+    // Generate a high-entropy random state (128-bit UUID v4 rendered as
+    // hex). Stored in a cookie the callback will read back. This is the
+    // classic double-submit-cookie CSRF defense — sufficient because we
+    // also send the state in the query string (which an attacker cannot
+    // read cross-origin due to the Same-Origin Policy).
+    let state_token = uuid::Uuid::new_v4().to_string();
+    let url = config.authorize_redirect_url(&state_token);
     // Manual 302 (Found) response — the traditional OAuth redirect
     // status. axum 0.8's Redirect::to returns 303 (See Other); we use
     // a manual response to match the GitHub OAuth convention (302).
     Ok((
         axum::http::StatusCode::FOUND,
-        [(axum::http::header::LOCATION, url.as_str())],
+        [
+            (axum::http::header::LOCATION, url.as_str()),
+            (
+                axum::http::header::SET_COOKIE,
+                format!(
+                    "buff_oauth_state={state_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300",
+                )
+                .as_str(),
+            ),
+        ],
     )
         .into_response())
 }
 
-/// `GET /auth/github/callback?code=<auth_code>` — exchange code for
-/// token, fetch user info, create session.
+/// `GET /auth/github/callback?code=<auth_code>&state=<state>` — exchange
+/// code for token, fetch user info, create session.
 ///
 /// Flow:
-/// 1. POST to `config.token_url` with (client_id, client_secret, code,
+/// 1. Validate the CSRF `state` query param against the `buff_oauth_state`
+///    cookie set by [`login`] (P0.25 / sec-003). Reject on mismatch.
+/// 2. POST to `config.token_url` with (client_id, client_secret, code,
 ///    redirect_uri) → receive `access_token`.
-/// 2. GET `config.user_url` with `Authorization: Bearer <access_token>`
+/// 3. GET `config.user_url` with `Authorization: Bearer <access_token>`
 ///    → receive GitHub user JSON (login, id).
-/// 3. `storage.create_session(login, id)` → receive session token.
-/// 4. Respond with `200 OK` + `Set-Cookie: buff_session=<token>`.
+/// 4. `storage.create_session(login, id)` → receive session token.
+/// 5. Respond with `200 OK` + `Set-Cookie: buff_session=<token>` (Secure
+///    + HttpOnly + SameSite=Lax — P0.25 / sec-004). The token is NOT
+///      echoed in the JSON body; clients read it from the cookie.
 ///
 /// Errors surface as JSON bodies with appropriate status codes:
+/// - `400 Bad Request` — OAuth state missing/mismatched (CSRF defense).
 /// - `502 Bad Gateway` — GitHub token exchange or user fetch failed.
 /// - `500 Internal Server Error` — session creation failed.
 pub(crate) async fn callback(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<CallbackParams>,
 ) -> Result<Response, RegistryError> {
     let config = state
@@ -204,17 +234,31 @@ pub(crate) async fn callback(
         .as_ref()
         .ok_or(RegistryError::OAuthNotConfigured)?;
 
-    // --- 1. Exchange code for access token ---
+    // --- 1. CSRF state validation (P0.25 / sec-003) ---
+    // Compare the `state` query param (echoed verbatim by GitHub) to
+    // the `buff_oauth_state` cookie we set in [`login`]. Mismatch or
+    // absence indicates a CSRF attempt OR a stale/replayed URL.
+    let cookie_state = extract_oauth_state_cookie(&headers);
+    let query_state = params.state.as_deref();
+    let states_match = match (cookie_state.as_deref(), query_state) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    if !states_match {
+        return Err(RegistryError::OAuthStateMismatch);
+    }
+
+    // --- 2. Exchange code for access token ---
     let token_resp = exchange_code(config, &params.code)
         .await
         .map_err(|e| RegistryError::OAuthExchangeFailed(e.to_string()))?;
 
-    // --- 2. Fetch GitHub user info ---
+    // --- 3. Fetch GitHub user info ---
     let user = fetch_github_user(config, &token_resp.access_token)
         .await
         .map_err(|e| RegistryError::OAuthUserFetchFailed(e.to_string()))?;
 
-    // --- 2b. T57: Invite-only beta allowlist enforcement ---
+    // --- 3b. T57: Invite-only beta allowlist enforcement ---
     // The registry is invite-only: only allowlisted GitHub users can
     // register / log in. Non-allowlisted users get 403 Forbidden with
     // an explanatory message. Static-token auth (no OAuth) bypasses
@@ -229,33 +273,41 @@ pub(crate) async fn callback(
         }
     }
 
-    // --- 3. Create session ---
+    // --- 4. Create session ---
     let session_token = state
         .storage
         .create_session(&user.login, user.id)
         .map_err(|e| RegistryError::Storage(e.to_string()))?;
 
-    // --- 4. Respond with session cookie ---
+    // --- 5. Respond with session cookie (Secure + HttpOnly; P0.25 / sec-004) ---
+    // The session token is delivered via Set-Cookie ONLY — it is NOT
+    // echoed in the JSON body (sec-004: previously the response body
+    // leaked the token to any script-readable channel). Clients that
+    // cannot use cookies should use the static-token flow instead.
     Ok((
         [(
             axum::http::header::SET_COOKIE,
-            format!("buff_session={session_token}; Path=/; HttpOnly; SameSite=Lax"),
+            format!(
+                "buff_session={session_token}; Path=/; HttpOnly; Secure; SameSite=Lax",
+            ),
         )],
         Json(CallbackResponse {
             message: "Login successful".to_string(),
             github_login: user.login,
-            session_token,
         }),
     )
         .into_response())
 }
 
 /// Response body for a successful OAuth callback.
+///
+/// P0.25 (sec-004): the session token is delivered via the
+/// `Set-Cookie` header ONLY. The JSON body carries just a status
+/// message + the GitHub login — never the token.
 #[derive(Debug, Serialize)]
 struct CallbackResponse {
     message: String,
     github_login: String,
-    session_token: String,
 }
 
 /// `POST /auth/logout` — delete the session, clear the cookie.
@@ -276,7 +328,7 @@ pub(crate) async fn logout(
     (
         [(
             axum::http::header::SET_COOKIE,
-            "buff_session=; Path=/; Max-Age=0",
+            "buff_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
         )],
         Json(serde_json::json!({"message": "Logged out"})),
     )
@@ -357,11 +409,26 @@ async fn fetch_github_user(
 
 /// Extract the `buff_session` cookie value from a `Cookie` header.
 fn extract_session_from_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    extract_cookie_value(headers, "buff_session")
+}
+
+/// Extract the `buff_oauth_state` cookie value from a `Cookie` header.
+/// Used by [`callback`] to validate the CSRF state echoed by GitHub
+/// (P0.25 / sec-003).
+fn extract_oauth_state_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    extract_cookie_value(headers, "buff_oauth_state")
+}
+
+/// Shared cookie-value extractor: scans the `Cookie` header for a
+/// `<name>=<value>` pair and returns the value (trimmed). Returns
+/// `None` if the header or the named cookie is absent.
+fn extract_cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
     let cookie_header = headers.get(axum::http::header::COOKIE)?;
     let cookie_str = cookie_header.to_str().ok()?;
+    let prefix = format!("{name}=");
     for pair in cookie_str.split(';') {
         let pair = pair.trim();
-        if let Some(val) = pair.strip_prefix("buff_session=") {
+        if let Some(val) = pair.strip_prefix(&prefix) {
             return Some(val.to_string());
         }
     }
@@ -438,9 +505,12 @@ mod tests {
             token_url: "https://github.com/login/oauth/access_token".to_string(),
             user_url: "https://api.github.com/user".to_string(),
         };
-        let url = config.authorize_redirect_url();
+        let url = config.authorize_redirect_url("abc-123-state");
         assert!(url.contains("client_id=myapp"));
         assert!(url.contains("scope=read%3Auser"));
+        // P0.25 (sec-003): state MUST be included in the authorize URL
+        // so GitHub echoes it back on callback.
+        assert!(url.contains("state=abc-123-state"));
     }
 
     #[test]

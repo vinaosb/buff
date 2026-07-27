@@ -1,4 +1,4 @@
-# Buff
+﻿# Buff
 
 [![CI](https://github.com/vinaosb/buff/actions/workflows/ci.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/ci.yml)
 [![Security](https://github.com/vinaosb/buff/actions/workflows/security.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/security.yml)
@@ -91,6 +91,22 @@ Every modern language forces a painful trade-off:
 | **v1.22** | *Wave 10 — science/ML/game* | `buff-science` (T13, nalgebra); `buff-pipeline` (T14, DAG + Channel); `buff-ml` (T15, autodiff + layers + optimizers); `buff-game` (T16, loop/assets/render) | ✅ Shipped |
 | **v1.23** | *Wave 11 — flagship* | T22 API-compat spike (4 integration examples + mismatch report); T23 Data Science Workbench flagship; lexer-compat `#`→`//` sweep + antipattern fixes | ✅ Shipped |
 | **v1.24** | *Audit & Polish* | T28 iterative documentation & codebase refinement pass (convergence-gated); CHANGELOG backfill v1.13–v1.24; per-crate AGENTS.md for missing crates; root AGENTS.md + CONTRIBUTING refresh | ✅ Shipped |
+
+| **v1.25** | **Generics** | Generics + monomorphization, generic bounds, self-host lexer/parser ports | Shipped |
+| **v1.26** | **Error System** | Multi-span diagnostics, fix suggestions, dynamic runtime dispatch | Shipped |
+| **v1.27** | **Compile Speed** | Fast linker default, explain_dispatch, JSON error format, CodeActions | Shipped |
+| **v1.28** | **Infrastructure** | Registry (SQLite/OAuth/scoped), prebuilt binaries, sccache, salsa, prelude types, cross-compilation, community health | Shipped |
+| **v1.29** | **Self-Host Lexer** | Self-host lexer ports, MCP bridge, buff doc, Tier-2 hygiene refactor | Shipped |
+| **v1.30** | **Self-Host Parser** | Self-host parser ports, pattern extensions, generic bounds, LSP v1.2 features | Shipped |
+| **v1.31** | **Perf + DX** | Perf attributes, compiler passes (DCE/const-prop), comptime introspection, range syntax, buff test/generate | Shipped |
+| **v1.32** | **Stability** | Stability tiers document, buff profile, ErrorCode coverage | Shipped |
+| **v1.33** | **Associated Types** | Associated types in traits, VSCode v1.3, buff fix auto-apply | Shipped |
+| **v1.34** | **Dispatch Control** | Box trait objects, dispatch overrides, no-alloc, detect-races | Shipped |
+| **v1.35** | **Self-Host Types** | Self-host types/parser ports, lazy iterators, The Book (mdbook) | Shipped |
+| **v1.36** | **Self-Host Codegen** | ALL self-host ports complete, buff doc --serve | Shipped |
+| **v1.37** | **Bootstrap Gate** | Bootstrap determinism gate (Stage 2 equals Stage 3) | Shipped |
+| **v1.38** | **F-Wave Fixes** | Documentation accuracy fixes, GPU failure debugging | Shipped |
+| **v1.39** | **Real Use Cases** | 5 use-case example batches, golden-output harness, CI infra | Shipped |
 
 **Compiles today:** hand-rolled lexer (byte-scanner + offside rule), hand-rolled
 parser (recursive-descent + Pratt), AST with spans, type inference, Rust
@@ -234,25 +250,27 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/minimal_compute.buff`](./examples/minimal_compute.buff) | CPU-bound compute (no GPU/rayon) under `--minimal` | ✅ v1.19 (T60) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
-| [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (parse-only³) |
-| [`examples/tensor/matmul.buff`](./examples/tensor/matmul.buff) | 2-D matmul (v1.14) | 🔶 v1.14 (parse-only³) |
-| [`examples/pipeline/simple.buff`](./examples/pipeline/simple.buff) | `Source.from_csv` → filter → `Sink.to_csv` DAG (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Vector.zeros`, `Matrix.identity` linalg (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/ml/hello.buff`](./examples/ml/hello.buff) | `Linear.new`, `mse_loss`, `SGD.new` training (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/game/hello.buff`](./examples/game/hello.buff) | Game loop, `Window.new`, `Renderer` (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/integration/`](./examples/integration/) | T22 multi-framework integration (dataframe+tensor+pipeline+reactive+web) | 🔶 v1.23 (parse-only³) |
-| [`examples/data-science-workbench/`](./examples/data-science-workbench/) | T23 flagship notebook app (dataframe+ml+pipeline+web+reactive) | 🔶 v1.23 (parse-only³) |
+| [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (codegen-deferred³) |
+| [`examples/tensor/matmul.buff`](./examples/tensor/matmul.buff) | 2-D matmul (v1.14) | 🔶 v1.14 (codegen-deferred³) |
+| [`examples/pipeline/simple.buff`](./examples/pipeline/simple.buff) | `Source.from_csv` → filter → `Sink.to_csv` DAG (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Vector.zeros`, `Matrix.identity` linalg (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/ml/hello.buff`](./examples/ml/hello.buff) | `Linear.new`, `mse_loss`, `SGD.new` training (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/game/hello.buff`](./examples/game/hello.buff) | Game loop, `Window.new`, `Renderer` (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/integration/`](./examples/integration/) | T22 multi-framework integration (dataframe+tensor+pipeline+reactive+web) | 🔶 v1.23 (codegen-deferred³) |
+| [`examples/data-science-workbench/`](./examples/data-science-workbench/) | T23 flagship notebook app (dataframe+ml+pipeline+web+reactive) | 🔶 v1.23 (codegen-deferred³) |
 
 > **Legend:** ✅ *runs* — `buff run` compiles and executes end-to-end.
-> 🔶 *codegen-only* — transpiles to valid Rust (verified by tests), but the
+> 🔶 *codegen-deferred* — transpiles to valid Rust (verified by tests), but the
 > single-file `rustc` pipeline cannot yet link it:
 > ¹ async needs the external `tokio` crate (T32 deferred Cargo-project wiring);
 > ² modules need multi-file linking — `import`/`export` parse and the module
 > graph resolves (T29), but the CLI compiles one file at a time.
-> ³ **Framework examples (v1.14–v1.23)** parse cleanly and pass `buff check`;
-> end-to-end `buff run` execution is codegen-deferred — the `Type::{Tensor,
-> DataFrame, Pipeline, …}` variants and their codegen lowering arms are a
-> coordinated sibling task (see `.sisyphus/decisions/api-compat-v20.md`).
+> ³ **Framework examples (v1.14–v1.23)** — parse cleanly and pass `buff check`,
+> but end-to-end `buff run` execution is **codegen-deferred**. The `Type::{Tensor,
+> DataFrame, Pipeline, ML, Science, Game, …}` variants and their codegen lowering
+> arms are a coordinated sibling task tracked in
+> [`.sisyphus/decisions/api-compat-v20.md`](./.sisyphus/decisions/api-compat-v20.md).
+> These are **known limitations** (not failures) — CI reports them as warnings.
 > See [`.sisyphus/notepads/buff-v05-language/issues.md`](./.sisyphus/notepads/buff-v05-language/issues.md)
 > for the full list of v0.5 end-to-end gaps.
 
@@ -370,7 +388,7 @@ see the [decision record](./.sisyphus/decisions/buff-direction-speed-moat-selfho
 
 ## License
 
-Licensed under the [MIT License](./LICENSE).
+Licensed under either of [Apache License, Version 2.0](./LICENSE-APACHE) or [MIT License](./LICENSE-MIT) at your option.
 
 Copyright © 2026 Vinicius Schwinden Berkenbrock `<vinaosb@gmail.com>`.
 

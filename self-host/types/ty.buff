@@ -687,7 +687,7 @@ func type_is_gpu_eligible(t: Type) -> Bool:
 // Returns true if this type MUST run on the CPU (never GPU).
 // This is the complement of `type_is_gpu_eligible`.
 func type_must_run_on_cpu(t: Type) -> Bool:
-    return not type_is_gpu_eligible(t)
+    return type_is_gpu_eligible(t) == false
 
 // =============================================================================
 // Type — prelude variant predicates

@@ -1,4 +1,4 @@
-// Buff self-host port of `crates/buff-lang-parser/src/stmt/stmt_decl.rs` (T16).
+// Buff self-host port of `crates/buff-lang-parser/src/stmt/stmt_decl.rs` (P4.1b).
 //
 // Declaration parsers — extracted from stmt.rs by T106 (mechanical split).
 // Contains all top-level declaration parsers (func/struct/enum/import/export/
@@ -62,12 +62,13 @@ func peek_span_or_eof(s: TokenStream) -> Span:
     return stream_unwrap(opt).span
 
 // Render the next peek kind for error messages (Rust's `k.to_string()` /
-// `"end of input"` fallback).
+// `"end of input"` fallback). Uses stream_unwrap_kind to handle both
+// Some(k) and None (returns TokenKind.Eof for None, rendered as the
+// eof token string — close enough for error messages).
 func peek_kind_display(s: TokenStream) -> String:
     let opt = stream_peek_kind(s)
-    if opt == Option.None:
-        return "end of input"
-    return token_kind_to_string(stream_unwrap_kind(opt))
+    let k = stream_unwrap_kind(opt)
+    return token_kind_to_string(k)
 
 // Unwrap Option<TokenKind> -> TokenKind (contract: Some). Returns Eof on
 // contract violation.
@@ -168,10 +169,10 @@ func parse_type_ref(s: TokenStream) -> Result<TypeRef, ParseError>:
         let members = Vector.new()
         // Empty `()` is not a valid type.
         if stream_peek_kind(s) != Option.Some(TokenKind.RParen):
-            let _ = parse_type_ref_members(s, members)?
+            let _ok = parse_type_ref_members(s, members)?
         let rp = stream_expect(s, TokenKind.RParen)?
         let span = span_new(start, rp.span.end, source_id)
-        if members.is_empty():
+        if members.len() == 0:
             return Result.Err(err_with("empty () is not a valid type", span, ErrorCode.UnexpectedToken))
         // A single `(T)` is grouping (return the lone member); 2+ is a Tuple.
         if members.len() >= 2:
@@ -188,14 +189,14 @@ func parse_type_ref(s: TokenStream) -> Result<TypeRef, ParseError>:
         let _lt = stream_advance(s)
         let args = Vector.new()
         let mut last_end = start
-        let _ = parse_generic_args(s, args)?
+        let _ok = parse_generic_args(s, args)?
         last_end = type_end(args[args.len() - 1])
         ty = TypeRef.Generic(ty, args, span_new(start, last_end, source_id))
     // T76: union types `A | B | C`.
     if stream_peek_kind(s) == Option.Some(TokenKind.Pipe):
         let members = Vector.new()
         members.push(ty)
-        let _ = parse_union_members(s, members)?
+        let _ok = parse_union_members(s, members)?
         let last = members[members.len() - 1]
         let union_end = type_end(last)
         ty = TypeRef.Union(members, span_new(start, union_end, source_id))
@@ -325,7 +326,7 @@ func parse_type_params(s: TokenStream) -> Result<Vector<TypeParam>, ParseError>:
         let bounds = Vector.new()
         if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
             let _colon = stream_advance(s)
-            let _ = parse_type_param_bounds(s, bounds)?
+            let _ok = parse_type_param_bounds(s, bounds)?
         params.push(TypeParam.new(name: g, bounds: bounds, span: g_span))
         let pk = stream_peek_kind(s)
         if pk == Option.Some(TokenKind.Comma):
@@ -370,7 +371,7 @@ func parse_enum_decl(s: TokenStream) -> Result<EnumDecl, ParseError>:
     if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
         let rb = stream_expect(s, TokenKind.RBrace)?
         return Result.Ok(EnumDecl.new(name: name, type_params: type_params, variants: variants, span: span_new(start, rb.span.end, source_id)))
-    let _ = parse_enum_variants(s, variants, source_id)?
+    let _ok = parse_enum_variants(s, variants, source_id)?
     let rb = stream_expect(s, TokenKind.RBrace)?
     return Result.Ok(EnumDecl.new(name: name, type_params: type_params, variants: variants, span: span_new(start, rb.span.end, source_id)))
 
@@ -387,10 +388,10 @@ func parse_enum_variants(s: TokenStream, variants: Vector<EnumVariant>, source_i
             let _lp = stream_advance(s)
             let tys = Vector.new()
             if stream_peek_kind(s) != Option.Some(TokenKind.RParen):
-                let _ = parse_variant_payload(s, tys)?
+                let _ok = parse_variant_payload(s, tys)?
             let rparen = stream_expect(s, TokenKind.RParen)?
             vend = rparen.span.end
-            if tys.is_empty() == false:
+            if tys.len() > 0:
                 data = Option.Some(tys)
         variants.push(EnumVariant.new(name: vname, data: data, span: span_new(vstart, vend, source_id)))
         // Comma separator or end of list.
@@ -439,7 +440,7 @@ func parse_struct_decl(s: TokenStream) -> Result<StructDecl, ParseError>:
     // Layout-sensitive form: `struct Name:` + indented fields.
     if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
         let _colon = stream_advance(s)
-        let _ = parse_struct_layout_fields(s, fields, source_id)?
+        let _ok = parse_struct_layout_fields(s, fields, source_id)?
         let span_end = peek_start_or_zero(s)
         return Result.Ok(StructDecl.new(name: name, fields: fields, traits: Vector.new(), type_params: type_params, span: span_new(start, span_end, source_id)))
     // Brace-delimited form: `struct Name { field: Type, ... }`.
@@ -447,7 +448,7 @@ func parse_struct_decl(s: TokenStream) -> Result<StructDecl, ParseError>:
     if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
         let rb = stream_expect(s, TokenKind.RBrace)?
         return Result.Ok(StructDecl.new(name: name, fields: Vector.new(), traits: Vector.new(), type_params: type_params, span: span_new(start, rb.span.end, source_id)))
-    let _ = parse_struct_brace_fields(s, fields)?
+    let _ok = parse_struct_brace_fields(s, fields)?
     let rb = stream_expect(s, TokenKind.RBrace)?
     return Result.Ok(StructDecl.new(name: name, fields: fields, traits: Vector.new(), type_params: type_params, span: span_new(start, rb.span.end, source_id)))
 
@@ -520,8 +521,12 @@ func parse_import_decl(s: TokenStream) -> Result<ImportDecl, ParseError>:
         return import_wildcard(s, start, source_id)
     if next == Option.Some(TokenKind.LBrace):
         return import_named_list(s, start, source_id)
-    if is_any_ident(next):
-        return import_ident_path(s, start, source_id)
+    // After excluding Star and LBrace above, any remaining Some is treated
+    // as an Ident (dotted import path). None is end-of-input.
+    match next {
+        Some(_) => return import_ident_path(s, start, source_id),
+        None => return Result.Err(err_with("expected `*`, brace-open, or identifier after `import`, found end of input", peek_span_or_eof(s), ErrorCode.UnexpectedToken)),
+    }
     let span = peek_span_or_eof(s)
     let found = peek_kind_display(s)
     return Result.Err(err_with("expected `*`, brace-open, or identifier after `import`, found `" + found + "`", span, ErrorCode.UnexpectedToken))
@@ -538,7 +543,7 @@ func import_named_list(s: TokenStream, start: Int, source_id: SourceId) -> Resul
     let _lb = stream_advance(s)
     let imports = Vector.new()
     if stream_peek_kind(s) != Option.Some(TokenKind.RBrace):
-        let _ = parse_ident_list_until_rbrace(s, imports, "import")?
+        let _ok = parse_ident_list_until_rbrace(s, imports, "import")?
     let rb = stream_expect(s, TokenKind.RBrace)?
     // `from` is required after the closing brace.
     if stream_peek_kind(s) != Option.Some(TokenKind.KwFrom):
@@ -582,7 +587,7 @@ func import_ident_path(s: TokenStream, start: Int, source_id: SourceId) -> Resul
         // Legacy: `import a.b.c as alias`.
         let path = Vector.new()
         path.push(ident)
-        let _ = parse_dotted_path(s, path)?
+        let _ok = parse_dotted_path(s, path)?
         let alias_res = parse_opt_alias(s, path, start, source_id)?
         let path_last_end = path[path.len() - 1].span.end
         let end = int_max(alias_res.end, path_last_end)
@@ -658,7 +663,7 @@ func parse_export_decl(s: TokenStream) -> Result<Decl, ParseError>:
         let _lb = stream_advance(s)
         let names = Vector.new()
         if stream_peek_kind(s) != Option.Some(TokenKind.RBrace):
-            let _ = parse_ident_list_until_rbrace(s, names, "export")?
+            let _ok = parse_ident_list_until_rbrace(s, names, "export")?
         let rb = stream_expect(s, TokenKind.RBrace)?
         // Optional `from "..."` — without it, re-export already-declared locals.
         if stream_peek_kind(s) == Option.Some(TokenKind.KwFrom):
@@ -694,7 +699,7 @@ func parse_extend_decl(s: TokenStream) -> Result<ExtendBlock, ParseError>:
         methods.push(f)
         if stream_peek_kind(s) == Option.Some(TokenKind.Semicolon):
             let _semi = stream_advance(s)
-    if methods.is_empty():
+    if methods.len() == 0:
         return Result.Err(err_with("extend block must contain at least one `fn` declaration", stream_span_here(s), ErrorCode.UnexpectedToken))
     let rb = stream_expect(s, TokenKind.RBrace)?
     return Result.Ok(ExtendBlock.new(target: target, methods: methods, span: span_new(start, int_max(target_end, rb.span.end), source_id)))
@@ -726,7 +731,7 @@ func parse_trait_decl(s: TokenStream) -> Result<TraitDecl, ParseError>:
     let supertraits = Vector.new()
     if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
         let _colon = stream_advance(s)
-        let _ = parse_supertraits(s, supertraits)?
+        let _ok = parse_supertraits(s, supertraits)?
     stream_expect(s, TokenKind.LBrace)?
     // Empty body is a parse error.
     if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
@@ -735,11 +740,11 @@ func parse_trait_decl(s: TokenStream) -> Result<TraitDecl, ParseError>:
     let required = Vector.new()
     let defaults = Vector.new()
     for is_fn_kw(stream_peek_kind(s)):
-        let _ = parse_one_trait_member(s, required, defaults, source_id)?
+        let _ok = parse_one_trait_member(s, required, defaults, source_id)?
         if stream_peek_kind(s) == Option.Some(TokenKind.Semicolon):
             let _semi = stream_advance(s)
-    if required.is_empty():
-        if defaults.is_empty():
+    if required.len() == 0:
+        if defaults.len() == 0:
             return Result.Err(err_with("trait body must contain at least one `fn` declaration", stream_span_here(s), ErrorCode.UnexpectedToken))
     let rb = stream_expect(s, TokenKind.RBrace)?
     return Result.Ok(TraitDecl.new(name: name, supertraits: supertraits, required: required, defaults: defaults, span: span_new(start, int_max(name_end, rb.span.end), source_id)))
@@ -773,10 +778,16 @@ func parse_one_trait_member(s: TokenStream, required: Vector<MethodSig>, default
     if member_start_tok.kind == TokenKind.KwExtern:
         had_extern = true
         is_extern = true
-        // `extern crate` is not valid inside a trait body.
+        // `extern crate` is not valid inside a trait body. If the second
+        // token is KwFunc and the first token is an Ident, it looks like
+        // `extern NAME func` (extern-crate syntax) — reject. Uses match on
+        // Option instead of is_any_ident (TokenKind not defined locally —
+        // see file header).
         if stream_peek_second_kind(s) == Option.Some(TokenKind.KwFunc):
-            if is_any_ident(stream_peek_kind(s)):
-                return Result.Err(err_with("`extern crate` is not allowed inside a trait body", member_start_tok.span, ErrorCode.UnexpectedToken))
+            match stream_peek_kind(s) {
+                Some(_) => return Result.Err(err_with("`extern crate` is not allowed inside a trait body", member_start_tok.span, ErrorCode.UnexpectedToken)),
+                None => 0,
+            }
         if stream_peek_kind(s) == Option.Some(TokenKind.KwAsync):
             is_async = true
             let _a = stream_advance(s)
@@ -968,7 +979,7 @@ func parse_attributes(s: TokenStream) -> Result<Vector<Attribute>, ParseError>:
         if stream_peek_kind(s) == Option.Some(TokenKind.LParen):
             let _lp = stream_advance(s)
             if stream_peek_kind(s) != Option.Some(TokenKind.RParen):
-                let _ = parse_attr_args(s, args, named_args)?
+                let _ok = parse_attr_args(s, args, named_args)?
             let rp = stream_expect(s, TokenKind.RParen)?
             end = rp.span.end
         attrs.push(Attribute.new(name: name, args: args, named_args: named_args, span: span_new(start, end, source_id)))

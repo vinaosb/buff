@@ -50,5 +50,24 @@ thiserror.workspace = true
 serde.workspace = true
 tokio.workspace = true
 
+# T48-fix: the lib.rs source uses these crates directly (not just via
+# `ethers` re-exports), so they must be declared as direct deps. All
+# three are pure-Rust (no native-tls / cc-rs) and already in the
+# workspace `[dependencies]` table — this just activates them for
+# buff-web3. The `ethers` 2.0.14 crate re-exports `reqwest` but NOT
+# `hex` / `serde_json` / `rand`, hence the direct declarations.
+#
+# - `serde_json`: ABI JSON parsing in `parse_abi()` (the wrapped
+#   `{"abi":[...]}` envelope uses a local `Wrapper` struct).
+# - `hex`: signature / tx-hash byte encoding in `sign_message()` and
+#   `format_token()` for `Token::Bytes` / `Token::FixedBytes`.
+# - `rand_08`: the workspace alias for rand 0.8 (matches ethers 2.0.14's
+#   internal rand pin). Used solely for `LocalWallet::new(&mut OsRng)`
+#   in the `Wallet::default` panic-safe fallback.
+serde_json.workspace = true
+hex.workspace = true
+url.workspace = true
+rand_08.workspace = true
+
 [dev-dependencies]
 insta.workspace = true

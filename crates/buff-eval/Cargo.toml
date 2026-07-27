@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "buff-eval"
 version = "1.0.0"
 edition = "2021"
@@ -11,6 +11,7 @@ buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-codegen-rust.workspace = true
 buff-lang-error.workspace = true
+buff-lang-pipeline.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

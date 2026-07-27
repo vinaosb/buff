@@ -22,13 +22,26 @@
 //! cross-language targets.
 
 use crate::error::CryptoError;
-use rand::rngs::OsRng;
+// p256 0.13 / rsa 0.9 API drift fix: `RsaPrivateKey::new` and
+// `SigningKey::sign_with_rng` require `&mut impl CryptoRngCore` from
+// `rand_core 0.6` (re-exported via `rsa::rand_core`). The workspace
+// `rand` crate resolves to 0.9 whose `rand::rngs::OsRng` implements
+// `rand_core 0.9` traits — NOT `0.6`. `aes_gcm::aead::OsRng`
+// (re-exported from `aead` → `rand_core 0.6::OsRng`) implements the
+// `0.6` traits that rsa/elliptic-curve expect. Same fix as ecc.rs.
+use aes_gcm::aead::OsRng;
+// rsa 0.9 API drift fix: `DecodePrivateKey` (pkcs8) is needed for
+// `RsaPrivateKey::from_pkcs8_pem` (was missing from the original
+// imports — only `DecodeRsaPrivateKey` from pkcs1 + `DecodePublicKey`
+// from pkcs8 were imported, but `from_pkcs8_pem` comes from pkcs8's
+// `DecodePrivateKey` trait).
 use rsa::pkcs1::DecodeRsaPrivateKey;
-use rsa::pkcs8::{DecodePublicKey, EncodePrivateKey, EncodePublicKey};
+use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use rsa::pkcs1v15::{SigningKey, VerifyingKey};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
-use signature::{RandomizedSigner, Verifier};
+use signature::{RandomizedSigner, SignatureEncoding, Verifier};
+use std::convert::TryInto;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Minimum acceptable RSA modulus size (bits). 2048 is the current
@@ -75,7 +88,11 @@ pub fn generate_keypair(bits: usize) -> Result<RsaKeypair, CryptoError> {
             .to_vec();
         let public_pem = public.to_public_key_pem(rsa::pkcs8::LineEnding::LF)?;
         Ok::<RsaKeypair, CryptoError>(RsaKeypair {
-            public_pem: String::from_utf8(public_pem).unwrap_or_default(),
+            // rsa 0.9 API drift fix: `to_public_key_pem` returns
+            // `Zeroizing<String>` (deref-targets `String`). The old code
+            // passed it through `String::from_utf8` which expects
+            // `Vec<u8>` — fixed by deref + clone via `as_str().to_string()`.
+            public_pem: public_pem.as_str().to_string(),
             private_pem: String::from_utf8(private_pem).unwrap_or_default(),
         })
     }));
@@ -117,7 +134,7 @@ pub fn sign(private_pem: &str, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
 /// Returns `true` iff the signature is valid. Returns `false` (NEVER
 /// an error) on signature mismatch, malformed PEM, or panic. The
 /// `false`-on-malformed-input stance mirrors the T26 Signature.verify
-/// + T34 Password.verify stance so a future `verify_allow` policy
+/// and T34 Password.verify stance so a future `verify_allow` policy
 /// can layer cleanly.
 pub fn verify(public_pem: &str, data: &[u8], signature: &[u8]) -> bool {
     let pem_owned = public_pem.to_string();
@@ -126,7 +143,9 @@ pub fn verify(public_pem: &str, data: &[u8], signature: &[u8]) -> bool {
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<bool, CryptoError> {
         let public_key = RsaPublicKey::from_public_key_pem(&pem_owned)?;
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-        let sig = rsa::pkcs1v15::Signature::from_bytes(&sig_owned)?;
+        // rsa 0.9 API drift fix: `Signature::from_bytes` was removed;
+        // use `TryFrom<&[u8]>` (re-exported via `TryInto`) instead.
+        let sig: rsa::pkcs1v15::Signature = sig_owned.as_slice().try_into()?;
         Ok(verifying_key.verify(&data_owned, &sig).is_ok())
     }));
     matches!(result, Ok(Ok(true)))

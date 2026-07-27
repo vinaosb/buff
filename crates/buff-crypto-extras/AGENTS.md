@@ -113,7 +113,13 @@ cargo clippy -p buff-crypto-extras --all-targets -- -D warnings
 cargo fmt -p buff-crypto-extras --check
 ```
 
-Tests are hermetic: inline unit tests inside each `src/*.rs` file (NIST test vectors for AES-GCM, RFC 8032 test vectors for ECDH P-256, RFC 9106 Argon2id vectors). NO insta snapshots (the cryptographic output is randomized per-call via OsRng — byte-level snapshots would be non-deterministic).
+Tests live in `tests/` (per-crate integration tests, NOT inline `#[cfg(test)]` in `src/*.rs`):
+- `tests/aes.rs` — AES-256-GCM KATs (McGrew-Viega / NIST SP 800-38D Test Case 13, `ring` `aead_aes_256_gcm_tests.txt`) + round-trip + tamper/auth-failure + InvalidLength coverage.
+- `tests/rsa.rs` — RSA PKCS#1 v1.5 SHA-256 round-trip + wrong-key + tampered-signature + malformed-PEM + MIN_BITS enforcement.
+- `tests/ecc.rs` — P-256 ECDH: RFC 6979 A.2.5 public-key-derivation KAT + Diffie-Hellman symmetry (NIST SP 800-56A §5.7.1.2) + P-384 length check + malformed-input robustness.
+- `tests/argon2.rs` — Argon2id determinism + password/salt avalanche + length validation + AES-GCM hybrid-pattern composition. NOTE: RFC 9106 §4 raw-output vectors use lighter params (m=32, t=3, p=4) than this crate's pinned OWASP defaults (m=19456, t=2, p=1) and so cannot be reproduced byte-for-byte through the public API; the determinism + differentiation tests are the KAT-equivalent for the fixed-parameter surface.
+
+NO insta snapshots (the cryptographic output is randomized per-call via OsRng — byte-level snapshots would be non-deterministic).
 
 Codegen integration tests live in `crates/buff-lang-codegen-rust/tests/crypto_extras_codegen.rs` — they verify the Rust lowering shape (NOT the cryptographic correctness, which the per-crate unit tests cover).
 

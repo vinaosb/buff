@@ -1,0 +1,139 @@
+// spike_multi_dispatch.buff - S1 Multiple Dispatch Coverage Spike
+//
+// PURPOSE: Determine whether Buff's T58 multiple dispatch can replace
+// Rust trait objects (dyn Trait, Box<dyn Trait>) in the 10 target
+// crates being considered for porting to Buff.
+//
+// INVENTORY RESULT (10 target crates, excludes codegen-rust/types per DR-014):
+//   - ZERO heterogeneous collections (Vec<Box<dyn T>>) found
+//   - 1 user-defined trait: LexCallback (single-method callback)
+//   - 1 usage as &mut dyn LexCallback (callback argument, NOT a collection)
+//   - 1 usage as fn source() -> Option<&dyn std::error::Error> (stdlib interop)
+//   - 20+ impl Into<String> patterns (compile-time generics, NOT dyn)
+//
+// HYPOTHESIS: Because no target crate stores heterogeneous types behind
+// a trait object, multi_dispatch (which dispatches on STATIC arg types
+// at compile time per multi_dispatch.rs:21) is theoretically sufficient.
+// This spike verifies that hypothesis by exercising the actual usage
+// patterns AND documenting the unreachable heterogeneous-collection limit.
+//
+// SPIKE OUTCOME (see .sisyphus/evidence/spike-multi-dispatch.md):
+//   - buff check passes (type-checker consults MultiDispatchTable)
+//   - buff run FAILS at rustc with E0428 (duplicate definition)
+//   - Root cause: codegen-rust has ZERO integration with MultiDispatchTable
+//   - Verdict: NEEDS_DYN_TRAIT (Phase 2 proceeds)
+//
+// Run:    buff run   examples/spike_multi_dispatch.buff
+// Check:  buff check examples/spike_multi_dispatch.buff
+
+// ---------------------------------------------------------------------------
+// PATTERN 1: Multi-dispatch on user structs (the trait-like pattern).
+//
+// Rust equivalent:
+//   trait Animal { fn speak(&self) -> String; }
+//   impl Animal for Dog { fn speak(&self) -> String { ... } }
+//   impl Animal for Cat { fn speak(&self) -> String { ... } }
+//
+// Buff (T58): same-name free functions with different arg types. The
+// compiler picks the impl from the STATIC arg type at the call site.
+// ---------------------------------------------------------------------------
+
+struct Dog { name: String }
+struct Cat { name: String }
+
+func speak(a: Dog) -> String:
+    return "${a.name} says Woof"
+
+func speak(a: Cat) -> String:
+    return "${a.name} says Meow"
+
+// ---------------------------------------------------------------------------
+// PATTERN 2: Multi-dispatch on numeric types (the canonical T58 use case).
+// ---------------------------------------------------------------------------
+
+func energy(a: Int) -> Int:
+    return a * 100
+
+func energy(a: Float) -> Float:
+    return a * 99.5
+
+// ---------------------------------------------------------------------------
+// PATTERN 3: HOMOGENEOUS collection iteration (the WORKING pattern).
+//
+// Each Vector has a single concrete element type. Multi-dispatch selects
+// the matching impl per-element. This is the only collection pattern any
+// of the 10 target crates needs.
+//
+// Vector<Dog> in a function signature parses (the angle brackets work
+// for built-in generic types in param position per buff check).
+// ---------------------------------------------------------------------------
+
+func announce_dogs(pack: Vector<Dog>) -> String:
+    let mut out = ""
+    for d in pack:
+        out = out + speak(d) + "\n"
+    return out
+
+func announce_cats(pride: Vector<Cat>) -> String:
+    let mut out = ""
+    for c in pride:
+        out = out + speak(c) + "\n"
+    return out
+
+// ---------------------------------------------------------------------------
+// PATTERN 4 (DOCUMENTED LIMIT): Heterogeneous collection (IMPOSSIBLE in Buff).
+//
+// IF a target crate needed Vec<Box<dyn Animal>>, multi_dispatch could NOT
+// replace it: the dispatcher requires a STATIC arg type at the call site,
+// but the whole point of Box<dyn Trait> is type erasure - the caller
+// does NOT know the concrete type until runtime.
+//
+// INVENTORY RESULT: This pattern does NOT appear in any of the 10 target
+// crates. Pseudocode (intentionally NOT valid Buff):
+//
+//   func announce_all(pets: Vector<???>) -> String:
+//       let mut out = ""
+//       for pet in pets:
+//           out = out + speak(pet) + "\n"
+//       return out
+//
+// The ??? cannot be spelled in Buff's type system because:
+//   - Buff has no Any / Object top type
+//   - Buff has no union types (Circle | Square)
+//   - Buff has no dyn Trait (the very feature under evaluation)
+//
+// CONSEQUENCE: any Rust crate that uses Vec<Box<dyn Trait>> cannot be
+// ported to Buff without re-architecting it to use enums + match (the
+// canonical Rust alternative to trait objects, which Buff DOES support).
+// The 10 target crates do NOT need this re-architecture.
+// ---------------------------------------------------------------------------
+
+func main():
+    print("=== S1 Spike: Multiple Dispatch Coverage ===")
+    print("")
+
+    let d = Dog.new(name: "Rex")
+    let c = Cat.new(name: "Whiskers")
+    print("[Pattern 1] direct calls:")
+    print(speak(d))
+    print(speak(c))
+    print("")
+
+    print("[Pattern 2] numeric dispatch:")
+    print(energy(5))
+    print(energy(2.5))
+    print("")
+
+    print("[Pattern 3] homogeneous collections:")
+    let pack: Vector<Dog> = [
+        Dog.new(name: "Rex"),
+        Dog.new(name: "Buddy"),
+    ]
+    let pride: Vector<Cat> = [
+        Cat.new(name: "Whiskers"),
+        Cat.new(name: "Mittens"),
+    ]
+    print(announce_dogs(pack))
+    print(announce_cats(pride))
+
+    print("=== Spike complete - see header comment for verdict ===")

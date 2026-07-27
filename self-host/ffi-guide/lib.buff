@@ -1,0 +1,26 @@
+// Buff self-host port of `crates/buff-lang-ffi-guide/src/lib.rs` (P3.1).
+//
+// Documentation-only crate. The Rust original is 19 lines of module doc
+// comments pointing to `GUIDE.md`; it declares zero pub fn/struct/enum
+// items. This Buff port mirrors that intent: zero export declarations,
+// preserving the 6 FFI safety rules as comment text.
+//
+// Faithful 1:1 translation. The Rust crate exists as a versioned reference
+// for wrapper-crate authors; the Buff port serves the same purpose inside
+// the self-host corpus.
+//
+// Translation decisions:
+//   - Rust `//!` crate doc → Buff `//` file header (Buff has no crate-level
+//     doc syntax; file-level `//` comments are the closest equivalent).
+//   - The 6 rules are preserved verbatim from the Rust module doc comment
+//     (originally derived from `GUIDE.md` §R1-R6).
+//   - No numeric primitives in this file — type-mapping table omitted.
+
+// ============ Quick summary (from GUIDE.md R1-R6) ============
+//
+// 1. No raw pointer exposure to Buff users.
+// 2. Rust owns heap memory; Buff sees borrowed views.
+// 3. Map Rust Result<T,E> to Buff Result<T,BuffError> with span-aware errors.
+// 4. Only Send + 'static types cross spawn boundaries.
+// 5. No Rust lifetimes in Buff types. Owned types or 'static only.
+// 6. Catch panics at the boundary; never propagate them into Buff code.

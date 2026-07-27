@@ -61,6 +61,23 @@ pub fn tokenize(source: &str, source_id: SourceId) -> Result<Vec<Token>, LexerEr
     Ok(tokens)
 }
 
+/// Net bracket-depth delta contributed by a token kind.
+///
+/// Open delimiters (`(`, `[`, `{`, and string-interpolation `{`) return `+1`;
+/// matching close delimiters return `-1`; everything else returns `0`. Used
+/// by the offside-rule scanner to detect **continuation lines**: when an
+/// earlier line left an open delimiter unmatched, the following line's
+/// indentation is part of the same expression and must NOT trigger
+/// synthetic [`Indent`](TokenKind::Indent)/[`Dedent`](TokenKind::Dedent)
+/// tokens.
+fn delim_delta(kind: &TokenKind) -> i32 {
+    match kind {
+        TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::InterpStart => 1,
+        TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace | TokenKind::InterpEnd => -1,
+        _ => 0,
+    }
+}
+
 /// Lex `source[start..end]`, appending tokens to `out`.
 ///
 /// When called for an interpolation expression (`track_indent = false`),
@@ -90,6 +107,27 @@ fn lex_range(
     let mut line_lead_ended = false;
     let mut indent_checked_this_line = false;
     let mut pending_indent: Option<(usize, usize)> = None;
+
+    // Continuation-line tracking. `paren_depth` is the running balance of
+    // open-minus-close delimiters seen so far. When positive, the current
+    // line lives inside an open `(`/`[`/`{`/interpolation from an earlier
+    // line and is therefore a **continuation line** — its leading
+    // whitespace is part of the same expression and MUST NOT trigger
+    // synthetic Indent/Dedent tokens (otherwise multi-line function
+    // signatures like
+    //
+    //     func f(
+    //         a: Int,
+    //         b: Int,
+    //     ) -> Int:
+    //         ...
+    //
+    // would spuriously fail with "inconsistent indentation level").
+    // `paren_sync_idx` tracks how far through `out` we have already
+    // accounted for, so each token contributes to the balance exactly once
+    // (O(n) total over the whole input, not O(n) per line).
+    let mut paren_depth: i32 = 0;
+    let mut paren_sync_idx: usize = 0;
 
     while pos < end {
         let tok_start = pos;
@@ -172,9 +210,42 @@ fn lex_range(
         if track_indent && !indent_checked_this_line {
             let (ws_start, ws_end) = pending_indent.take().unwrap_or((tok_start, tok_start));
             let indent_str = &source[ws_start..ws_end];
-            let kinds = indent_tracker.check_line(indent_str, source_id, ws_start)?;
-            for k in kinds {
-                out.push(Token::new(k, Span::new(ws_start, ws_end, source_id)));
+
+            // Bring `paren_depth` up to date with every token emitted since
+            // the last sync (covers tokens pushed by helper scanners too —
+            // scan_string's InterpStart/InterpEnd, scan_regex, etc.).
+            while paren_sync_idx < out.len() {
+                paren_depth += delim_delta(&out[paren_sync_idx].kind);
+                paren_sync_idx += 1;
+            }
+
+            // If we're inside an open delimiter, this line is a continuation
+            // of a multi-line expression — skip the offside check entirely
+            // (no Indent/Dedent emitted, no stack mutation). The next line
+            // after the delimiters balance back to zero resumes normal
+            // offside-rule tracking.
+            //
+            // Also skip when the line begins with a leading binary operator
+            // (`&&` or `||`) — this is the Haskell-style continuation idiom
+            // where a multi-line condition uses leading conjunctions:
+            //
+            //     if cond_a
+            //             && cond_b
+            //             && cond_c:
+            //         body
+            //
+            // Without this exemption the offside tracker would push a spurious
+            // indent for the `&&` line and then reject the body's (correct)
+            // indent as "inconsistent".
+            let starts_with_leading_op = matches!(
+                (bytes.get(pos).copied(), bytes.get(pos + 1).copied()),
+                (Some(b'&'), Some(b'&')) | (Some(b'|'), Some(b'|'))
+            );
+            if paren_depth <= 0 && !starts_with_leading_op {
+                let kinds = indent_tracker.check_line(indent_str, source_id, ws_start)?;
+                for k in kinds {
+                    out.push(Token::new(k, Span::new(ws_start, ws_end, source_id)));
+                }
             }
             indent_checked_this_line = true;
         }
@@ -284,6 +355,45 @@ fn lex_range(
         // Numbers.
         if c.is_ascii_digit() {
             let num_start = pos;
+
+            // Special-case the literal `-9223372036854775808` (i64::MIN).
+            // The 19-digit magnitude alone overflows the positive i64 range
+            // (max = 2^63 - 1 = 9223372036854775807), so `scan_number`
+            // would reject it with "invalid numeric literal". When the
+            // digits appear IMMEDIATELY after an emitted `Minus` token (no
+            // whitespace between), fuse the two into a single negative
+            // `IntLit(i64::MIN)` covering both spans. Any other context
+            // (whitespace-separated, suffix-bearing, longer digit run,
+            // decimal point, etc.) falls through to the normal path.
+            const I64_MIN_DIGITS: &str = "9223372036854775808";
+            let digits_end = num_start + I64_MIN_DIGITS.len();
+            if digits_end <= end
+                && source[num_start..digits_end] == *I64_MIN_DIGITS
+                && matches!(
+                    out.last(),
+                    Some(prev) if prev.kind == TokenKind::Minus && prev.span.end == num_start
+                )
+                && (digits_end == end
+                    || !matches!(
+                        bytes[digits_end],
+                        b'0'..=b'9' | b'.' | b'd' | b'D' | b'm' | b'M'
+                    ))
+            {
+                // Pop the preceding `Minus` and emit the fused literal.
+                let minus_span = out
+                    .pop()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| Span::new(num_start, num_start, source_id));
+                out.push(Token::new(
+                    TokenKind::IntLit(i64::MIN),
+                    Span::new(minus_span.start, digits_end, source_id),
+                ));
+                pos = digits_end;
+                seen_token_on_line = true;
+                line_lead_ended = true;
+                continue;
+            }
+
             let kind = scan_number(source, bytes, &mut pos, num_start, end, source_id)?;
             out.push(Token::new(kind, Span::new(num_start, pos, source_id)));
             continue;

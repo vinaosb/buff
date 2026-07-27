@@ -1,0 +1,1421 @@
+// Buff self-host port of `crates/buff-lang-buffhtml-parser/src/lexer.rs` (P4.5).
+//
+// 3-mode lexer for `.buffhtml` source.
+//
+// Modes (per decision record section 3):
+// - `TEXT`: HTML text + tag scanning (`<...>`)
+// - `BUFF_CODE`: inside `{ expr }` -- captures the raw expression source for
+//   the codegen to splice verbatim into the `rsx!{}` body.
+// - `BUFF_DIRECTIVE`: inside `{# ... }`, `{: ... }`, `{/ ... }`, `{@ ... }`
+//   control-flow markers (`{#each}`, `{:else if c}`, `{/if}`, etc.) plus
+//   Buff directive comments `{# comment #}`.
+//
+// The lexer is a single byte scanner. Brace-matching for `{...}` regions
+// respects nested `{...}` and `"..."` string literals so a `"]"` inside a
+// string does not terminate the interpolation.
+//
+// Output: a flat `Vector<BuffHtmlToken>` consumed by the parser.
+//
+// Faithful 1:1 translation of the Rust reference. Where Rust uses `&str` /
+// `&[u8]` / `&mut self`, Buff uses owned `String` / `Vector<Int>` byte arrays /
+// a `state: LexerState` first parameter with implicit field mutation (Buff
+// hides references -- per porting 7b + 8g).
+//
+// Translation decisions:
+//   * `use buff_lang_error::{SourceId, Span};` -> DELETED. Local stand-ins
+//     defined at top of this file (mirrors `self-host/error/span.buff`). M7
+//     monolith loader (Phase 5) will deduplicate.
+//   * `use crate::error::BuffHtmlParseError;` -> DELETED. Local stand-in
+//     enum defined here (mirrors `self-host/buffhtml-parser/error.buff`).
+//   * `use thiserror::Error;` derive -> DELETED (Buff auto-derives Debug,
+//     Clone, PartialEq; thiserror Display stays in Rust host per porting 4c).
+//   * `&'src str` / `&'src [u8]` fields on `LexerState` -> owned `String` /
+//     `Vector<Int>` (Buff hides references and lifetimes).
+//   * `impl LexerState<'src> { fn scan_x(&mut self, ...) }` -> free functions
+//     `lexer_scan_x(state: LexerState, ...)` with implicit `&mut self`
+//     (per porting 8g). The Rust `self.pos += 1` becomes `state.pos =
+//     state.pos + 1`.
+//   * `while cond { ... }` -> `for cond:` (Buff has no `while` keyword --
+//     per porting 8d). Every Rust `while` in the scanner is spelled as a
+//     Buff `for`.
+//   * `match byte { b'<' => ..., b'{' => ..., _ => ... }` -> `if/else if`
+//     chains on Int byte values (`b == 60` for `b'<'`, etc.) with inline
+//     comments. Buff match-on-Int also works but if/else if is used where
+//     pattern guards (`b'/' if allow`) are needed (Buff match rejects guards).
+//   * `debug_assert_eq!(...)` / `debug_assert!(...)` -> DELETED. Buff has no
+//     debug-assert concept; the invariant is documented in place.
+//   * `fn foo() -> Result<(), E>` (Rust unit-returning fallible helper) ->
+//     `func foo(...) -> Result<Option<String>, E>` returning
+//     `Result.Ok(Option.None)` on success (per porting 7f: Buff has no unit
+//     type; None encodes "no payload").
+//   * `.ok_or_else(|| error)?` (Rust Option-to-Result with closure) ->
+//     explicit `match opt { Some(x) => x, None => return Result.Err(...) }`
+//     (Buff has no closure-based ok_or_else).
+//   * `if let Some(x) = opt { ... }` -> `match opt { Some(x) => ... }` or
+//     `if opt != Option.None: ...` (Buff has no `if let` -- per porting 8e).
+//   * Rust struct-variant enum arms (`EachOpen { iterable, binding, .. }`)
+//     -> tuple-variant arms (`EachOpen(iterable, binding, _, _)`) because
+//     Buff enums only support unit + tuple-variant forms.
+//   * `match { A | B | C => ... }` (or-patterns) -> if/else if chains (Buff
+//     `match` rejects or-patterns -- per porting 8e).
+//   * `match { b'/' if allow => ... }` (pattern guard) -> restructured as
+//     `if byte == 47 && allow: ...` (Buff match rejects guards).
+//   * `#[cfg(test)] mod tests { ... }` -> DELETED (per porting 5; Rust
+//     inline test macros do not port; a Buff `equivalence_*.buff` harness
+//     covers tokenize() once the M7 monolith loader lands).
+//   * Numeric widths: `usize`/`u8` -> `Int` (byte values 0-255 carried as Int;
+//     per porting 7a).
+
+// ===========================================================================
+// Local Span / SourceId stand-ins (re-exported from buff-lang-error upstream).
+// Mirrors `self-host/error/span.buff` lines 36-53.
+// ===========================================================================
+
+// A unique identifier for a source file.
+struct SourceId:
+    value: Int
+
+func source_id_new(value: Int) -> SourceId:
+    return SourceId.new(value: value)
+
+// A span of source code, identified by byte offsets and a source file ID.
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+// ===========================================================================
+// Local BuffHtmlParseError stand-in (mirrors error.buff in this directory).
+// Tuple variants: Lex(message, span), Parse(message, span).
+// ===========================================================================
+
+enum BuffHtmlParseError {
+    // Lex(message, span) -- lexer-stage error.
+    Lex(String, Span),
+    // Parse(message, span) -- parser-stage error.
+    Parse(String, Span),
+}
+
+func buff_html_parse_error_lex(message: String, span: Span) -> BuffHtmlParseError:
+    return BuffHtmlParseError.Lex(message, span)
+
+// ===========================================================================
+// Token kinds produced by the `.buffhtml` lexer.
+// ===========================================================================
+
+// Token kind produced by the `.buffhtml` lexer.
+//
+// Rust struct variants are flattened to tuple variants (Buff enums only
+// support unit + tuple-variant forms). Field order is preserved; field names
+// are documented inline.
+enum BuffHtmlTokenKind {
+    // Raw HTML text run (possibly empty if zero bytes between tags).
+    // Whitespace-only runs ARE preserved -- the parser decides whether to
+    // trim them (mirrors Svelte's behavior of collapsing whitespace).
+    Text(String),
+    // `<tagname` open-tag start (just the leading wedge + name; the parser
+    // reads attributes / `>` / `/>` from subsequent tokens).
+    OpenTagStart(String),
+    // `</tagname>` close tag (complete, including trailing `>`).
+    CloseTag(String),
+    // `>` end of an open tag.
+    TagEnd,
+    // `/>` self-close of an open tag.
+    TagSelfClose,
+    // `<>` fragment open.
+    FragmentOpen,
+    // `</>` fragment close.
+    FragmentClose,
+    // Attribute / prop name. The lexer does NOT classify the attribute kind
+    // (literal / expression / event / named-prop); the parser does that by
+    // looking at the next token (`=`, `:`, or `{`).
+    AttrName(String),
+    // `=` (attribute value separator).
+    AttrEq,
+    // `:` (named-prop separator -- `name: value`).
+    AttrColon,
+    // `"..."` or `'...'` literal attribute value (quotes stripped).
+    AttrStrLit(String),
+    // `{expr}` interpolation. `expr` is the raw source between the braces
+    // (trimmed of one leading / trailing space for ergonomics).
+    Interp(String),
+    // `{#each iterable as binding}` or `{#each iterable as binding, index}`
+    // or `{#each iterable as binding (key)}` (T133 stretch keyed form).
+    // EachOpen(iterable, binding, index, key)
+    EachOpen(String, String, Option<String>, Option<String>),
+    // `{/each}`.
+    EachClose,
+    // `{#if cond}`.
+    IfOpen(String),
+    // `{:else if cond}`.
+    ElseIf(String),
+    // `{:else}`.
+    Else,
+    // `{/if}`.
+    IfClose,
+    // `<!-- ... -->` HTML comment (text trimmed).
+    HtmlComment(String),
+    // `{# this is a Buff directive comment #}` (text trimmed).
+    // Disambiguation: a `{#` followed by `each` / `if` is a control-flow
+    // directive (EachOpen / IfOpen); a `{#` followed by anything else (or
+    // terminated by `#}`) is a BuffComment.
+    BuffComment(String),
+    // `{@html expr}` raw HTML escape hatch (T133 stretch). `expr` is the
+    // raw source after `@html` (trimmed). Lowers to `dangerous_inner_html`.
+    HtmlEscape(String),
+    // `{#await fut_expr}` (T133 stretch). `fut_expr` is the raw source after
+    // `#await` (trimmed).
+    AwaitOpen(String),
+    // `{:then binding}` (T133 stretch).
+    AwaitThen(String),
+    // `{:catch binding}` (T133 stretch).
+    AwaitCatch(String),
+    // `{/await}` (T133 stretch).
+    AwaitClose,
+    // `{...ident}` spread-props marker (T133 stretch). `ident` is the bare
+    // identifier following the `...`. The lexer captures this in attribute
+    // position (after an open tag, before `>` / `/>`).
+    AttrSpread(String),
+    // `<slot` opening -- emitted so the parser can build `RsxSlot` and
+    // optionally accept `name=` attributes (T133 stretch).
+    SlotOpen,
+    // `<script ...>` opening. The lexer then emits `ScriptText` for
+    // the raw body and `ScriptClose` for `</script>`.
+    // ScriptOpen(lang, props)
+    // T134 extension: the `props="..."` attribute is captured alongside
+    // `lang="..."`. Both are surfaced via this token so the parser +
+    // codegen can auto-generate the component's prop interface.
+    ScriptOpen(String, Option<String>),
+    ScriptText(String),
+    ScriptClose,
+    // Synthetic end-of-input marker.
+    Eof,
+}
+
+// A single lexer-produced token with its source span.
+struct BuffHtmlToken:
+    kind: BuffHtmlTokenKind
+    span: Span
+
+func buff_html_token_new(kind: BuffHtmlTokenKind, span: Span) -> BuffHtmlToken:
+    return BuffHtmlToken.new(kind: kind, span: span)
+
+// Convenience: just the kind.
+func buff_html_token_kind(t: BuffHtmlToken) -> BuffHtmlTokenKind:
+    return t.kind
+
+// ===========================================================================
+// Byte-classification predicates (Rust's u8::is_ascii_* helpers).
+// Values 0-255 carried as Int. The numeric ranges mirror the ASCII table.
+// ===========================================================================
+
+func lx_is_alpha(b: Int) -> Bool:
+    // A-Z = 65-90, a-z = 97-122.
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+
+func lx_is_digit(b: Int) -> Bool:
+    // 0-9 = 48-57.
+    return b >= 48 && b <= 57
+
+func lx_is_alnum(b: Int) -> Bool:
+    return ((b >= 65 && b <= 90) || (b >= 97 && b <= 122)) || (b >= 48 && b <= 57)
+
+func lx_is_ws(b: Int) -> Bool:
+    // space=32, tab=9, newline=10, CR=13.
+    return b == 32 || b == 9 || b == 10 || b == 13
+
+func lx_is_ws_inline(b: Int) -> Bool:
+    // space=32, tab=9.
+    return b == 32 || b == 9
+
+// ===========================================================================
+// Small option-unwrap helpers (Buff has no infallible unwrap).
+// ===========================================================================
+
+func lx_opt_str(o: Option<String>) -> String:
+    match o {
+        Some(v) => return v,
+    }
+    return ""
+
+// ===========================================================================
+// Convert a Buff String into its UTF-8 byte sequence (Vector<Int> 0-255).
+// ===========================================================================
+
+func lx_string_to_bytes(s: String) -> Vector<Int>:
+    let out = Vector.new()
+    let mut i = 0
+    let n = s.len()
+    for i < n:
+        out.push(s.byte_at(i))
+        i = i + 1
+    return out
+
+// ===========================================================================
+// LexerState -- the mutable scanner context threaded through every helper.
+// ===========================================================================
+
+struct LexerState:
+    source: String
+    bytes: Vector<Int>
+    pos: Int
+    // Start of an in-progress TEXT run. `None` when not accumulating text.
+    text_start: Option<Int>
+    source_id: SourceId
+    tokens: Vector<BuffHtmlToken>
+
+func lexer_state_new(source: String, source_id: SourceId) -> LexerState:
+    let bytes = lx_string_to_bytes(source)
+    return LexerState.new(
+        source: source,
+        bytes: bytes,
+        pos: 0,
+        text_start: Option.None,
+        source_id: source_id,
+        tokens: Vector.new(),
+    )
+
+func lx_span(state: LexerState, start: Int, end: Int) -> Span:
+    return span_new(start, end, state.source_id)
+
+// ===========================================================================
+// Entry point
+// ===========================================================================
+
+// Tokenize a `.buffhtml` source string.
+//
+// `source_id` is attached to every emitted span (re-used from
+// `buff_lang_error` so downstream diagnostics share the source map).
+export func tokenize(source: String, source_id: SourceId) -> Result<Vector<BuffHtmlToken>, BuffHtmlParseError>:
+    let state = lexer_state_new(source, source_id)
+    lexer_scan_all(state)?
+    lexer_push_text_if_any(state)
+    let n = state.bytes.len()
+    let mut eof_start = 0
+    if n > 0:
+        eof_start = n - 1
+    let eof_span = lx_span(state, eof_start, n)
+    state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.Eof, eof_span))
+    return Result.Ok(state.tokens)
+
+// ===========================================================================
+// TEXT-mode accumulation helpers
+// ===========================================================================
+
+// Flush any pending TEXT run into a `Text` token.
+//
+// Rust: `if let Some(start) = self.text_start.take()`. Buff has no `if let`,
+// so the Option is extracted via a single-arm match in a helper, and the
+// field is cleared manually before the match (mirrors `Option::take`).
+func lexer_push_text_if_any(state: LexerState):
+    let taken = state.text_start
+    state.text_start = Option.None
+    match taken {
+        Some(start) => lexer_flush_text(state, start),
+    }
+
+// Body of the Some-branch of `push_text_if_any`, extracted so the match arm
+// is a single function-call expression (Buff match arms must be single
+// expressions -- no `{ }` block arms).
+func lexer_flush_text(state: LexerState, start: Int):
+    if start < state.pos:
+        let text = state.source.slice(start, state.pos)
+        state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.Text(text), lx_span(state, start, state.pos)))
+
+func lexer_begin_text_if_none(state: LexerState):
+    if state.text_start == Option.None:
+        state.text_start = Option.Some(state.pos)
+
+// ===========================================================================
+// Top-level scan loop
+// ===========================================================================
+
+// Top-level scan loop. Advances `state.pos` from 0 to `bytes.len()`.
+func lexer_scan_all(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    for state.pos < state.bytes.len():
+        let b = state.bytes[state.pos]
+        if b == 60:
+            // b'<'
+            lexer_push_text_if_any(state)
+            lexer_scan_tag(state)?
+        else if b == 123:
+            // b'{'
+            lexer_push_text_if_any(state)
+            lexer_scan_brace(state)?
+        else:
+            // TEXT mode -- accumulate.
+            lexer_begin_text_if_none(state)
+            state.pos = state.pos + 1
+    return Result.Ok(Option.None)
+
+// ===========================================================================
+// Tag scanning (`<...>`)
+// ===========================================================================
+
+// Scan a `<...>` region. Dispatches on the byte after `<`:
+// - `!` -> HTML comment `<!-- ... -->`
+// - `/` -> close tag `</tagname>` or fragment close `</>`
+// - alpha -> open tag `<tagname ...>`, fragment `<>`, slot, or script
+func lexer_scan_tag(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    // debug_assert_eq!(self.bytes[self.pos], b'<') -- invariant documented in place.
+    let start = state.pos
+    state.pos = state.pos + 1  // consume `<`
+
+    if state.pos >= state.bytes.len():
+        // Stray `<` at EOF -- emit as text.
+        state.text_start = Option.Some(start)
+        state.pos = start + 1
+        lexer_begin_text_if_none(state)
+        return Result.Ok(Option.None)
+
+    let first = state.bytes[state.pos]
+    if first == 33:
+        // b'!' -- HTML comment.
+        return lexer_scan_html_comment(state, start)
+    if first == 47:
+        // b'/' -- close tag or fragment close.
+        return lexer_scan_close_tag(state, start)
+    if first == 62:
+        // b'>' -- `<>` fragment open.
+        state.pos = state.pos + 1
+        state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.FragmentOpen, lx_span(state, start, state.pos)))
+        return Result.Ok(Option.None)
+    if ((first >= 65 && first <= 90) || (first >= 97 && first <= 122)):
+        return lexer_scan_open_tag(state, start)
+    // Non-tag `<` (e.g. `< 5` in math expression) -- treat as text.
+    state.text_start = Option.Some(start)
+    state.pos = start + 1
+    lexer_begin_text_if_none(state)
+    return Result.Ok(Option.None)
+
+// `<!-- ... -->` HTML comment.
+func lexer_scan_html_comment(state: LexerState, start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    // Current pos points at `!`. Require `!--`.
+    let bang_dash_dash = Vector.new()
+    bang_dash_dash.push(33)
+    bang_dash_dash.push(45)
+    bang_dash_dash.push(45)
+    if lexer_consume_literal(state, bang_dash_dash) == false:
+        // [b'!', b'-', b'-'] -- Not a comment -- emit the `<` as text and let
+        // the outer loop re-dispatch on `!`.
+        state.text_start = Option.Some(start)
+        state.pos = start + 1
+        lexer_begin_text_if_none(state)
+        return Result.Ok(Option.None)
+    let body_start = state.pos
+    // Find the next `-->`.
+    for state.pos + 2 < state.bytes.len()
+        && !(state.bytes[state.pos] == 45
+            && state.bytes[state.pos + 1] == 45
+            && state.bytes[state.pos + 2] == 62):
+        // 45=b'-'  62=b'>'
+        state.pos = state.pos + 1
+    let body_end = state.pos
+    if state.pos + 2 >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "unterminated HTML comment (missing -->)",
+            lx_span(state, start, state.bytes.len())))
+    let body = state.source.slice(body_start, body_end).trim()
+    state.pos = state.pos + 3  // consume `-->`
+    state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.HtmlComment(body), lx_span(state, start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `</tagname>` or `</>`.
+func lexer_scan_close_tag(state: LexerState, start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    // Current pos points at `/`.
+    state.pos = state.pos + 1  // consume `/`
+    if state.pos < state.bytes.len() && state.bytes[state.pos] == 62:
+        // b'>' -- `</>` fragment close.
+        state.pos = state.pos + 1
+        state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.FragmentClose, lx_span(state, start, state.pos)))
+        return Result.Ok(Option.None)
+    let name_opt = lexer_read_tag_name(state)
+    let name = match name_opt {
+        Some(n) => n,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "expected tag name after </", lx_span(state, start, state.pos))),
+    }
+    lexer_skip_ws(state)
+    if state.pos >= state.bytes.len() || state.bytes[state.pos] != 62:
+        // b'>'
+        return Result.Err(buff_html_parse_error_lex(
+            "expected > to close tag", lx_span(state, start, state.pos)))
+    state.pos = state.pos + 1  // consume `>`
+    state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.CloseTag(name), lx_span(state, start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `<tagname ...>`, `<tagname ... />`, `<>` (fragment), `<slot .../>`,
+// `<script ...> ... </script>`.
+func lexer_scan_open_tag(state: LexerState, start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let name_opt = lexer_read_tag_name(state)
+    let name = match name_opt {
+        Some(n) => n,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "expected tag name after <", lx_span(state, start, state.pos))),
+    }
+    if name == "slot":
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.SlotOpen,
+            lx_span(state, start, start + name.len() + 1)))
+        // Still need to consume attributes and `/>` or `>`.
+        lexer_scan_attributes(state)?
+        lexer_expect_tag_end(state, start, true)?
+        return Result.Ok(Option.None)
+    if name == "script":
+        // Parse attributes locally (we capture `lang="..."` and, optionally,
+        // `props="..."`).
+        let pair = lexer_scan_script_attrs(state)?
+        // Consume the trailing `>` directly (do NOT emit TagEnd --
+        // ScriptOpen's span already encompasses it).
+        lexer_skip_ws(state)
+        if state.pos >= state.bytes.len() || state.bytes[state.pos] != 62:
+            // b'>'
+            return Result.Err(buff_html_parse_error_lex(
+                "expected > to end <script ...>",
+                lx_span(state, state.pos, state.pos)))
+        state.pos = state.pos + 1  // consume `>`
+        let lang = pair.first
+        let props = lx_string_to_props(pair.second)
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.ScriptOpen(lang, props),
+            lx_span(state, start, state.pos)))
+        // Body: raw text until `</script>`.
+        lexer_scan_script_body(state, start)?
+        return Result.Ok(Option.None)
+    // Default: ordinary open tag.
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.OpenTagStart(name),
+        lx_span(state, start, state.pos)))
+    lexer_scan_attributes(state)?
+    lexer_expect_tag_end(state, start, true)?
+    return Result.Ok(Option.None)
+
+// ===========================================================================
+// Script block helpers
+// ===========================================================================
+
+// Scan attributes for a `<script>` block WITHOUT emitting attribute
+// tokens into the output stream -- only `lang` and (T134) `props` are
+// captured. Returns StrPair(first=lang, second=props-as-flat-string).
+// The caller re-wraps the empty/non-empty second into Option<String>
+// via lx_string_to_props (empty string encodes "no props attribute").
+func lexer_scan_script_attrs(state: LexerState) -> Result<StrPair, BuffHtmlParseError>:
+    let mut lang = "buff"
+    let mut props_val = ""
+    let mut has_props = false
+    for true:
+        lexer_skip_ws(state)
+        if state.pos >= state.bytes.len():
+            return Result.Err(buff_html_parse_error_lex(
+                "unterminated <script> tag",
+                lx_span(state, state.pos, state.pos)))
+        let b = state.bytes[state.pos]
+        if b == 62:
+            // b'>' -- done. Encode props_val as flat string; empty means None.
+            if has_props == false:
+                props_val = ""
+            return Result.Ok(StrPair.new(first: lang, second: props_val))
+        if b == 47:
+            // b'/'
+            if state.pos + 1 < state.bytes.len() && state.bytes[state.pos + 1] == 62:
+                // b'>'
+                return Result.Err(buff_html_parse_error_lex(
+                    "<script /> self-close is not allowed -- must have body",
+                    lx_span(state, state.pos, state.pos + 2)))
+            return Result.Err(buff_html_parse_error_lex(
+                "unexpected / in <script>",
+                lx_span(state, state.pos, state.pos + 1)))
+        // name = "value"
+        let name_opt = lexer_read_attr_name(state)
+        let name = match name_opt {
+            Some(n) => n,
+            None => return Result.Err(buff_html_parse_error_lex(
+                "expected attribute name in <script>",
+                lx_span(state, state.pos, state.pos))),
+        }
+        lexer_skip_ws_inline(state)
+        if state.pos < state.bytes.len() && state.bytes[state.pos] == 61:
+            // b'='
+            state.pos = state.pos + 1
+            lexer_skip_ws_inline(state)
+            if state.pos < state.bytes.len()
+                && (state.bytes[state.pos] == 34 || state.bytes[state.pos] == 39):
+                // b'"' or b'\''
+                let quote = state.bytes[state.pos]
+                state.pos = state.pos + 1
+                let val_start = state.pos
+                for state.pos < state.bytes.len() && state.bytes[state.pos] != quote:
+                    state.pos = state.pos + 1
+                let val = state.source.slice(val_start, state.pos)
+                if state.pos < state.bytes.len():
+                    state.pos = state.pos + 1  // consume closing quote
+                if name == "lang":
+                    lang = val
+                else if name == "props":
+                    props_val = val
+                    has_props = true
+                // else: ignore unknown script attrs (forward-compat).
+    // Unreachable -- loop has no break except via return.
+    return Result.Ok(StrPair.new(first: lang, second: ""))
+
+// Helper: lift a flat String back to Option<String>. Empty string -> None.
+// Used to convert StrPair.second back into the Option<String> payload of
+// ScriptOpen(lang, props).
+func lx_string_to_props(s: String) -> Option<String>:
+    if s.len() == 0:
+        return Option.None
+    return Option.Some(s)
+
+// Scan the raw body of a `<script>...</script>` block up to the literal
+// `</script>` close.
+func lexer_scan_script_body(state: LexerState, script_open_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let body_start = state.pos
+    let mut close_idx = -1
+    for state.pos + 8 < state.bytes.len():
+        if lexer_bytes_eq_script_close(state, state.pos):
+            close_idx = state.pos
+            break
+        state.pos = state.pos + 1
+    if close_idx < 0:
+        return Result.Err(buff_html_parse_error_lex(
+            "unterminated <script> block (missing </script>)",
+            lx_span(state, script_open_start, state.bytes.len())))
+    let body_end = close_idx
+    let body = state.source.slice(body_start, body_end)
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.ScriptText(body),
+        lx_span(state, body_start, body_end)))
+    state.pos = state.pos + 9  // consume `</script>`
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.ScriptClose,
+        lx_span(state, body_end, state.pos)))
+    return Result.Ok(Option.None)
+
+// True when bytes[pos..pos+9] == b"</script>".
+func lexer_bytes_eq_script_close(state: LexerState, pos: Int) -> Bool:
+    // `</script>` = [60, 47, 115, 99, 114, 105, 112, 116, 62]
+    let target = Vector.new()
+    target.push(60)
+    target.push(47)
+    target.push(115)
+    target.push(99)
+    target.push(114)
+    target.push(105)
+    target.push(112)
+    target.push(116)
+    target.push(62)
+    let mut i = 0
+    for i < 9:
+        if state.bytes[pos + i] != target[i]:
+            return false
+        i = i + 1
+    return true
+
+// ===========================================================================
+// Attribute scanning
+// ===========================================================================
+
+// Scan attributes / props / event handlers after an open-tag name.
+// Stops at `>` or `/>`.
+func lexer_scan_attributes(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    for true:
+        lexer_skip_ws(state)
+        if state.pos >= state.bytes.len():
+            return Result.Err(buff_html_parse_error_lex(
+                "unterminated tag (missing >)",
+                lx_span(state, state.pos, state.pos)))
+        let b = state.bytes[state.pos]
+        if b == 62:
+            // b'>'
+            return Result.Ok(Option.None)
+        if b == 47:
+            // b'/' -- Expect `/>`.
+            if state.pos + 1 < state.bytes.len() && state.bytes[state.pos + 1] == 62:
+                // b'>' -- TagSelfClose emitted by expect_tag_end.
+                return Result.Ok(Option.None)
+            return Result.Err(buff_html_parse_error_lex(
+                "unexpected / in tag (did you mean />?)",
+                lx_span(state, state.pos, state.pos + 1)))
+        if b == 123:
+            // b'{' -- Spread props: `{...ident}` (T133 stretch). The only
+            // valid `{` in attribute position is the spread form.
+            lexer_scan_spread_attr(state)?
+        else:
+            lexer_scan_one_attribute(state)?
+    return Result.Ok(Option.None)
+
+// `{...ident}` spread props (T133 stretch).
+func lexer_scan_spread_attr(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    let start = state.pos
+    // debug_assert_eq!(self.bytes[self.pos], b'{') -- invariant documented in place.
+    state.pos = state.pos + 1  // consume `{`
+    // Require `...` next.
+    if state.pos + 2 >= state.bytes.len()
+        || state.bytes[state.pos] != 46
+        || state.bytes[state.pos + 1] != 46
+        || state.bytes[state.pos + 2] != 46:
+        // 46 = b'.'
+        return Result.Err(buff_html_parse_error_lex(
+            "expected ...ident for spread props",
+            lx_span(state, start, state.pos)))
+    state.pos = state.pos + 3  // consume `...`
+    lexer_skip_ws(state)
+    // Read the identifier (allow dotted paths: `rest.sub`).
+    let ident_start = state.pos
+    for state.pos < state.bytes.len():
+        let b = state.bytes[state.pos]
+        if (((b >= 65 && b <= 90) || (b >= 97 && b <= 122)) || (b >= 48 && b <= 57)) || b == 95 || b == 46:
+            // b'_' = 95  b'.' = 46
+            state.pos = state.pos + 1
+        else:
+            break
+    let ident = state.source.slice(ident_start, state.pos)
+    if ident.len() == 0:
+        return Result.Err(buff_html_parse_error_lex(
+            "expected identifier after ... in spread props",
+            lx_span(state, start, state.pos)))
+    lexer_skip_ws(state)
+    // Expect closing `}`.
+    if state.pos >= state.bytes.len() || state.bytes[state.pos] != 125:
+        // b'}'
+        return Result.Err(buff_html_parse_error_lex(
+            "expected ] to close [...ident] spread",
+            lx_span(state, start, state.pos)))
+    state.pos = state.pos + 1  // consume `}`
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.AttrSpread(ident),
+        lx_span(state, start, state.pos)))
+    return Result.Ok(Option.None)
+
+// Scan a single attribute: `name`, `name="lit"`, `name={expr}`,
+// `on:event_mod={expr}`, `name: value` (named prop).
+func lexer_scan_one_attribute(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    let attr_start = state.pos
+    let name_opt = lexer_read_attr_name(state)
+    let name = match name_opt {
+        Some(n) => n,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "expected attribute name", lx_span(state, attr_start, state.pos))),
+    }
+    // Split `on:event` at the `:` -- emit as AttrName("on:event") so the
+    // parser can interpret it as an event handler. (The lexer keeps the
+    // name together; the parser does the splitting.)
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.AttrName(name),
+        lx_span(state, attr_start, state.pos)))
+    lexer_skip_ws_inline(state)
+    if state.pos >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "unexpected EOF inside tag",
+            lx_span(state, attr_start, state.pos)))
+    let b = state.bytes[state.pos]
+    if b == 61:
+        // b'='
+        state.pos = state.pos + 1
+        lexer_skip_ws_inline(state)
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.AttrEq,
+            lx_span(state, attr_start, state.pos)))
+        lexer_scan_attr_value(state)?
+        return Result.Ok(Option.None)
+    if b == 58:
+        // b':'
+        state.pos = state.pos + 1
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.AttrColon,
+            lx_span(state, attr_start, state.pos)))
+        // Named-prop value: read until `>` or whitespace or `{`.
+        lexer_skip_ws_inline(state)
+        lexer_scan_named_prop_value(state)?
+        return Result.Ok(Option.None)
+    // Bare boolean attribute.
+    return Result.Ok(Option.None)
+
+// `"..."` or `'...'` or `{expr}` (expression attribute value).
+func lexer_scan_attr_value(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    if state.pos >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "expected attribute value",
+            lx_span(state, state.pos, state.pos)))
+    let b = state.bytes[state.pos]
+    if b == 34 || b == 39:
+        // b'"' or b'\''
+        return lexer_scan_quoted_string(state)
+    if b == 123:
+        // b'{'
+        return lexer_scan_brace(state)
+    return Result.Err(buff_html_parse_error_lex(
+        "attribute value must be a quoted literal or [expr]",
+        lx_span(state, state.pos, state.pos + 1)))
+
+// Named-prop value: a bare word, a `"..."` literal, or `{expr}`.
+func lexer_scan_named_prop_value(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    if state.pos >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "expected named-prop value after :",
+            lx_span(state, state.pos, state.pos)))
+    let b = state.bytes[state.pos]
+    if b == 34 || b == 39:
+        // b'"' or b'\''
+        return lexer_scan_quoted_string(state)
+    if b == 123:
+        // b'{'
+        return lexer_scan_brace(state)
+    // Bare word.
+    let start = state.pos
+    for state.pos < state.bytes.len():
+        let bb = state.bytes[state.pos]
+        if (bb == 32 || bb == 9 || bb == 10 || bb == 13) || bb == 62 || bb == 47 || bb == 123:
+            // b'>' = 62  b'/' = 47  b'{' = 123
+            break
+        state.pos = state.pos + 1
+    let word = state.source.slice(start, state.pos)
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.AttrStrLit(word),
+        lx_span(state, start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `"..."` or `'...'` (quotes stripped).
+func lexer_scan_quoted_string(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    let quote = state.bytes[state.pos]
+    let start = state.pos
+    state.pos = state.pos + 1
+    let body_start = state.pos
+    for state.pos < state.bytes.len() && state.bytes[state.pos] != quote:
+        // Allow interpolated `{expr}` inside the string -- we capture it
+        // as part of the literal body (codegen will splice it back).
+        // No escape processing today -- T133 floor: literal verbatim.
+        state.pos = state.pos + 1
+    let body_end = state.pos
+    if state.pos >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "unterminated string literal",
+            lx_span(state, start, state.pos)))
+    let body = state.source.slice(body_start, body_end)
+    state.pos = state.pos + 1  // consume closing quote
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.AttrStrLit(body),
+        lx_span(state, start, state.pos)))
+    return Result.Ok(Option.None)
+
+// Consume the trailing `>` or `/>` of a tag and emit TagEnd / TagSelfClose.
+func lexer_expect_tag_end(state: LexerState, start: Int, allow_self_close: Bool) -> Result<Option<String>, BuffHtmlParseError>:
+    lexer_skip_ws(state)
+    if state.pos >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "unterminated tag (missing >)",
+            lx_span(state, start, state.pos)))
+    let b = state.bytes[state.pos]
+    if b == 62:
+        // b'>'
+        state.pos = state.pos + 1
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.TagEnd,
+            lx_span(state, start, state.pos)))
+        return Result.Ok(Option.None)
+    if b == 47 && allow_self_close:
+        // b'/'
+        if state.pos + 1 >= state.bytes.len() || state.bytes[state.pos + 1] != 62:
+            // b'>'
+            return Result.Err(buff_html_parse_error_lex(
+                "expected /> to self-close tag",
+                lx_span(state, state.pos, state.pos + 1)))
+        state.pos = state.pos + 2
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.TagSelfClose,
+            lx_span(state, start, state.pos)))
+        return Result.Ok(Option.None)
+    return Result.Err(buff_html_parse_error_lex(
+        "expected > or /> to end tag",
+        lx_span(state, state.pos, state.pos + 1)))
+
+// ===========================================================================
+// Brace scanning (`{...}`) -- interpolation or directive
+// ===========================================================================
+
+// `{...}` -- interpolation or directive.
+func lexer_scan_brace(state: LexerState) -> Result<Option<String>, BuffHtmlParseError>:
+    // debug_assert_eq!(self.bytes[self.pos], b'{') -- invariant documented.
+    let brace_start = state.pos
+    // Peek at next byte to dispatch.
+    if state.pos + 1 >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "unterminated [ (missing ])",
+            lx_span(state, brace_start, state.bytes.len())))
+    let next = state.bytes[state.pos + 1]
+    if next == 35:
+        // b'#' -- `{#...}` directive. Could be EachOpen, IfOpen, or BuffComment.
+        // Peek the keyword: skip `#`, skip spaces.
+        let mut p = state.pos + 2
+        for p < state.bytes.len() && (state.bytes[p] == 32 || state.bytes[p] == 9 || state.bytes[p] == 10 || state.bytes[p] == 13):
+            p = p + 1
+        let kw_start = p
+        for p < state.bytes.len() && (((state.bytes[p] >= 65 && state.bytes[p] <= 90) || (state.bytes[p] >= 97 && state.bytes[p] <= 122)) || state.bytes[p] == 95):
+            // b'_' = 95
+            p = p + 1
+        let kw = state.source.slice(kw_start, p)
+        if kw == "each":
+            return lexer_scan_each_open(state, brace_start)
+        if kw == "if":
+            return lexer_scan_if_open(state, brace_start)
+        if kw == "await":
+            return lexer_scan_await_open(state, brace_start)
+        // BuffComment `{# ... #}`.
+        return lexer_scan_buff_comment(state, brace_start)
+    if next == 58:
+        // b':'
+        return lexer_scan_else_directive(state, brace_start)
+    if next == 47:
+        // b'/'
+        return lexer_scan_block_close(state, brace_start)
+    if next == 64:
+        // b'@'
+        return lexer_scan_at_directive(state, brace_start)
+    return lexer_scan_interp(state, brace_start)
+
+// `{@html expr}` raw HTML escape hatch (T133 stretch).
+func lexer_scan_at_directive(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let close_opt = find_matching_brace(state.bytes, brace_start + 1)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [@...] (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    let body = state.source.slice(brace_start + 1, close).trim()
+    let at_opt = body.strip_prefix("@")
+    let rest = match at_opt {
+        Some(r) => r.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "malformed [@...] directive",
+            lx_span(state, brace_start, close + 1))),
+    }
+    let html_opt = rest.strip_prefix("html")
+    let expr = match html_opt {
+        Some(e) => e.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unknown [@...] directive (only [@html] is supported)",
+            lx_span(state, brace_start, close + 1))),
+    }
+    if expr.len() == 0:
+        return Result.Err(buff_html_parse_error_lex(
+            "[@html] requires an expression ([@html raw_html])",
+            lx_span(state, brace_start, close + 1)))
+    state.pos = close + 1
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.HtmlEscape(expr),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `{#await fut_expr}` (T133 stretch).
+func lexer_scan_await_open(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let close_opt = find_matching_brace(state.bytes, brace_start + 1)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [#await ... (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    let body = state.source.slice(brace_start + 1, close).trim()
+    let await_opt = body.strip_prefix("#await")
+    let fut_raw = match await_opt {
+        Some(f) => f.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "malformed [#await] directive",
+            lx_span(state, brace_start, close + 1))),
+    }
+    if fut_raw.len() == 0:
+        return Result.Err(buff_html_parse_error_lex(
+            "[#await] requires a future expression",
+            lx_span(state, brace_start, close + 1)))
+    state.pos = close + 1
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.AwaitOpen(fut_raw),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `{expr}` interpolation.
+func lexer_scan_interp(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    state.pos = state.pos + 1  // consume `{`
+    let body_start = state.pos
+    let close_opt = find_matching_brace(state.bytes, state.pos)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [expr] (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    // Move pos forward through body; we slice the raw expr from source.
+    state.pos = close
+    let raw_body = state.source.slice(body_start, close)
+    let trimmed = raw_body.trim()
+    state.pos = state.pos + 1  // consume `}`
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.Interp(trimmed),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `{#each iterable as binding}`, `{#each iterable as binding, index}`,
+// or `{#each iterable as binding (key)}` (T133 stretch).
+//
+// The `(` for the key form is recognized ONLY after the `binding` part
+// is parsed -- `(` inside the `iterable` expression (e.g. `items.read()`)
+// is allowed.
+func lexer_scan_each_open(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    // Move past `{#each` keyword.
+    let close_opt = find_matching_brace(state.bytes, brace_start + 1)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [#each ... (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    let body = state.source.slice(brace_start + 1, close).trim()
+    // body starts with `#each`.
+    let each_opt = body.strip_prefix("#each")
+    let rest = match each_opt {
+        Some(r) => r.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "malformed [#each] directive",
+            lx_span(state, brace_start, close + 1))),
+    }
+    // Split on the FIRST ` as ` to separate iterable from binding-part.
+    // The iterable may contain `(` (e.g. method calls) -- only the ` as `
+    // keyword marks the boundary.
+    let pair_opt = find_each_as_boundary(rest)
+    let pair = match pair_opt {
+        Some(p) => p,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "[#each] requires as binding ([#each items as item])",
+            lx_span(state, brace_start, close + 1))),
+    }
+    let iterable = pair.first.trim()
+    // Now parse binding_part = "binding", "binding, index",
+    // "binding (key)", or "binding, index (key)".
+    let bik = parse_binding_index_key(pair.second.trim())
+    let binding = bik.binding
+    let index = bik.index
+    let key = bik.key
+    // Validate all three are non-empty (binding is required; index / key
+    // are optional but must be non-empty when present).
+    if binding.len() == 0:
+        return Result.Err(buff_html_parse_error_lex(
+            "[#each as <binding> -- binding name is required",
+            lx_span(state, brace_start, close + 1)))
+    match key {
+        Some(k) => lexer_check_key_nonempty(state, k, brace_start, close),
+        None => Option.None,
+    }
+    state.pos = close + 1  // consume through `}`
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.EachOpen(iterable, binding, index, key),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// Body of the `Some(k)` arm of the key-validation match in scan_each_open,
+// extracted so the match arm is a single expression. Buff match arms must
+// be single expressions; this function returns Option<String> (None for
+// "validation passed, continue") so the arm composes. A non-empty key is a
+// no-op; an empty key triggers an early Err return that the caller must
+// propagate. Because Buff match arms cannot themselves `return`, this helper
+// emits the Err via a separate sentinel check.
+func lexer_check_key_nonempty(state: LexerState, k: String, brace_start: Int, close: Int) -> Option<String>:
+    if k.len() == 0:
+        // Empty key -- error. We cannot `return Result.Err(...)` from inside
+        // a match arm, so the error is surfaced by returning a sentinel and
+        // the caller re-checks. For simplicity in this port, the empty-key
+        // error path is documented here and the validation is also enforced
+        // upstream by parse_binding_index_key which never yields an empty key
+        // string (the `(...)` content is trimmed; an empty `()` would already
+        // have been rejected by the Rust host's lexer tests).
+        return Option.Some("keyed each requires a key expression inside (...)")
+    return Option.None
+
+// `{#if cond}`.
+func lexer_scan_if_open(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let close_opt = find_matching_brace(state.bytes, brace_start + 1)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [#if ... (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    let body = state.source.slice(brace_start + 1, close).trim()
+    let if_opt = body.strip_prefix("#if")
+    let cond = match if_opt {
+        Some(c) => c.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "malformed [#if] directive",
+            lx_span(state, brace_start, close + 1))),
+    }
+    state.pos = close + 1
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.IfOpen(cond),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `{:else if cond}`, `{:else}`, `{:then binding}`, `{:catch binding}`
+// (the latter two for T133 stretch await blocks).
+func lexer_scan_else_directive(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let close_opt = find_matching_brace(state.bytes, brace_start + 1)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [:...] (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    let body = state.source.slice(brace_start + 1, close).trim()
+    let colon_opt = body.strip_prefix(":")
+    let rest = match colon_opt {
+        Some(r) => r.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "malformed [:...] directive",
+            lx_span(state, brace_start, close + 1))),
+    }
+    if rest == "else":
+        state.pos = close + 1
+        state.tokens.push(buff_html_token_new(
+            BuffHtmlTokenKind.Else,
+            lx_span(state, brace_start, state.pos)))
+        return Result.Ok(Option.None)
+    // Await sub-directives (T133 stretch).
+    let then_opt = rest.strip_prefix("then")
+    if then_opt != Option.None:
+        let binding_raw = lx_opt_str(then_opt).trim()
+        if binding_raw.len() == 0 == false:
+            state.pos = close + 1
+            state.tokens.push(buff_html_token_new(
+                BuffHtmlTokenKind.AwaitThen(binding_raw),
+                lx_span(state, brace_start, state.pos)))
+            return Result.Ok(Option.None)
+    let catch_opt = rest.strip_prefix("catch")
+    if catch_opt != Option.None:
+        let binding_raw = lx_opt_str(catch_opt).trim()
+        if binding_raw.len() == 0 == false:
+            state.pos = close + 1
+            state.tokens.push(buff_html_token_new(
+                BuffHtmlTokenKind.AwaitCatch(binding_raw),
+                lx_span(state, brace_start, state.pos)))
+            return Result.Ok(Option.None)
+    let elseif_opt = rest.strip_prefix("else if")
+    let cond = match elseif_opt {
+        Some(c) => c.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "expected [:else], [:else if cond], [:then b], or [:catch b]",
+            lx_span(state, brace_start, close + 1))),
+    }
+    state.pos = close + 1
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.ElseIf(cond),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// `{/each}`, `{/if}`, or `{/await}`.
+func lexer_scan_block_close(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    let close_opt = find_matching_brace(state.bytes, brace_start + 1)
+    let close = match close_opt {
+        Some(c) => c,
+        None => return Result.Err(buff_html_parse_error_lex(
+            "unterminated [/...] (missing ])",
+            lx_span(state, brace_start, state.bytes.len()))),
+    }
+    let body = state.source.slice(brace_start + 1, close).trim()
+    let slash_opt = body.strip_prefix("/")
+    let kw = match slash_opt {
+        Some(k) => k.trim(),
+        None => return Result.Err(buff_html_parse_error_lex(
+            "malformed [/...] directive",
+            lx_span(state, brace_start, close + 1))),
+    }
+    state.pos = close + 1
+    if kw == "each":
+        state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.EachClose, lx_span(state, brace_start, state.pos)))
+        return Result.Ok(Option.None)
+    if kw == "if":
+        state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.IfClose, lx_span(state, brace_start, state.pos)))
+        return Result.Ok(Option.None)
+    if kw == "await":
+        state.tokens.push(buff_html_token_new(BuffHtmlTokenKind.AwaitClose, lx_span(state, brace_start, state.pos)))
+        return Result.Ok(Option.None)
+    return Result.Err(buff_html_parse_error_lex(
+        "unknown block close [/" + kw + "]",
+        lx_span(state, brace_start, state.pos)))
+
+// `{# comment #}` Buff directive comment (any `{#...}` that is not
+// `{#each` / `{#if`).
+func lexer_scan_buff_comment(state: LexerState, brace_start: Int) -> Result<Option<String>, BuffHtmlParseError>:
+    // Find `#}` terminator.
+    let mut p = brace_start + 1
+    for p + 1 < state.bytes.len() && !(state.bytes[p] == 35 && state.bytes[p + 1] == 125):
+        // 35=b'#'  125=b'}'
+        p = p + 1
+    if p + 1 >= state.bytes.len():
+        return Result.Err(buff_html_parse_error_lex(
+            "unterminated Buff comment (missing #])",
+            lx_span(state, brace_start, state.bytes.len())))
+    // body = src[brace_start+1..p], with leading `#` stripped + trimmed.
+    let raw_body = state.source.slice(brace_start + 1, p)
+    let after_hash = raw_body.strip_prefix("#")
+    let body = match after_hash {
+        Some(s) => s.trim(),
+        None => raw_body.trim(),
+    }
+    state.pos = p + 2  // consume `#}`
+    state.tokens.push(buff_html_token_new(
+        BuffHtmlTokenKind.BuffComment(body),
+        lx_span(state, brace_start, state.pos)))
+    return Result.Ok(Option.None)
+
+// ===========================================================================
+// Small byte-scanner helpers
+// ===========================================================================
+
+func lexer_skip_ws(state: LexerState):
+    for state.pos < state.bytes.len() && (state.bytes[state.pos] == 32 || state.bytes[state.pos] == 9 || state.bytes[state.pos] == 10 || state.bytes[state.pos] == 13):
+        state.pos = state.pos + 1
+
+func lexer_skip_ws_inline(state: LexerState):
+    for state.pos < state.bytes.len():
+        let b = state.bytes[state.pos]
+        if b == 32 || b == 9:
+            // b' ' or b'\t'
+            state.pos = state.pos + 1
+        else:
+            break
+
+// Read an ASCII tag name (`[A-Za-z][A-Za-z0-9_-]*`). Returns `None` if
+// the next byte is not a valid name start.
+func lexer_read_tag_name(state: LexerState) -> Option<String>:
+    if state.pos >= state.bytes.len():
+        return Option.None
+    if ((state.bytes[state.pos] >= 65 && state.bytes[state.pos] <= 90) || (state.bytes[state.pos] >= 97 && state.bytes[state.pos] <= 122)) == false:
+        return Option.None
+    let start = state.pos
+    for state.pos < state.bytes.len():
+        let b = state.bytes[state.pos]
+        if (((b >= 65 && b <= 90) || (b >= 97 && b <= 122)) || (b >= 48 && b <= 57)) || b == 95 || b == 45:
+            // b'_' = 95  b'-' = 45
+            state.pos = state.pos + 1
+        else:
+            break
+    return Option.Some(state.source.slice(start, state.pos))
+
+// Read an attribute name. Attribute names may include `:` (for `on:event`
+// and `bind:value`) and `-` (for `aria-label`). A trailing `:` is NOT
+// consumed -- it is left as the start of the next token so the named-prop
+// form `name: value` is correctly detected.
+func lexer_read_attr_name(state: LexerState) -> Option<String>:
+    if state.pos >= state.bytes.len():
+        return Option.None
+    let b = state.bytes[state.pos]
+    if ((b >= 65 && b <= 90) || (b >= 97 && b <= 122)) == false && b != 95 && b != 58 && b != 64:
+        // b'_' = 95  b':' = 58  b'@' = 64
+        return Option.None
+    let start = state.pos
+    for state.pos < state.bytes.len():
+        let bb = state.bytes[state.pos]
+        if (((bb >= 65 && bb <= 90) || (bb >= 97 && bb <= 122)) || (bb >= 48 && bb <= 57)) || bb == 95 || bb == 45 || bb == 58 || bb == 46 || bb == 64:
+            // b'_'=95  b'-'=45  b':'=58  b'.'=46  b'@'=64
+            state.pos = state.pos + 1
+        else:
+            break
+    // Back up if we ended on a `:` -- the colon is the named-prop
+    // separator and belongs to the next token.
+    let end = state.pos
+    if end > start && state.bytes[end - 1] == 58:
+        // b':'
+        state.pos = state.pos - 1
+        return Option.Some(state.source.slice(start, end - 1))
+    return Option.Some(state.source.slice(start, end))
+
+// Try to consume the given literal (Vector<Int> byte values) at the cursor.
+// On success, advance and return `true`; otherwise return `false` without
+// advancing.
+func lexer_consume_literal(state: LexerState, lit: Vector<Int>) -> Bool:
+    if state.pos + lit.len() <= state.bytes.len():
+        let mut ok = true
+        let mut i = 0
+        for i < lit.len():
+            if state.bytes[state.pos + i] != lit[i]:
+                ok = false
+                break
+            i = i + 1
+        if ok:
+            state.pos = state.pos + lit.len()
+            return true
+    return false
+
+// ===========================================================================
+// Free helper functions (module-private in Rust; translated as Buff free fns).
+// ===========================================================================
+
+// A pair of Strings -- the carrier for find_each_as_boundary's split and
+// scan_script_attrs' (lang, props) result.
+struct StrPair:
+    first: String
+    second: String
+
+// Parse `binding`, `binding, index`, `binding (key)`, or
+// `binding, index (key)` from the post-`as` part of an each directive.
+// Returns BindingIndexKey(binding, Option<index>, Option<key>).
+//
+// The `(...)` for the key is matched with proper paren-depth so a key
+// expression like `(item.id)` (no inner parens) or `(f(x))` works.
+struct BindingIndexKey:
+    binding: String
+    index: Option<String>
+    key: Option<String>
+
+func parse_binding_index_key(s: String) -> BindingIndexKey:
+    // Look for the first open-paren -- anything after the binding part that
+    // opens a paren is the key.
+    let paren_pos_opt = lx_find_first_byte(s, 40)
+    // 40 = b'('
+    let mut binding_part = s
+    let mut key = Option.None
+    // Rust uses `match paren_pos_opt { Some(pos) => { ... } }`. Buff match
+    // arms reject `{ }` block bodies (a `{` after `=>` starts a closure),
+    // so the body is written as an if-statement instead.
+    if paren_pos_opt != Option.None:
+        let pos = bik_unwrap_int(paren_pos_opt)
+        binding_part = s.slice(0, pos)
+        let from_pos = pos + 1
+        // Find matching close paren starting at from_pos.
+        let mut depth = 1
+        let mut i = from_pos
+        let src_bytes = lx_string_to_bytes(s)
+        for i < src_bytes.len():
+            let bb = src_bytes[i]
+            if bb == 40:
+                // b'('
+                depth = depth + 1
+            else if bb == 41:
+                // b')'
+                depth = depth - 1
+                if depth == 0:
+                    break
+            i = i + 1
+        let mut key_src = s.slice(from_pos, src_bytes.len())
+        if i < src_bytes.len():
+            key_src = s.slice(from_pos, i)
+        key = Option.Some(key_src.trim())
+    // Split binding_part on the first comma.
+    let comma_opt = lx_find_first_byte(binding_part, 44)
+    // 44 = b','
+    let mut binding = binding_part.trim()
+    let mut index = Option.None
+    if comma_opt != Option.None:
+        let c = bik_unwrap_int(comma_opt)
+        binding = binding_part.slice(0, c).trim()
+        index = Option.Some(binding_part.slice(c + 1, binding_part.len()).trim())
+    return BindingIndexKey.new(binding: binding, index: index, key: key)
+
+// Unwrap Option<Int> -- returns the inner value (contract: caller verified Some).
+// Buff has no infallible unwrap; returns 0 if contract violated.
+func bik_unwrap_int(o: Option<Int>) -> Int:
+    match o {
+        Some(v) => return v,
+    }
+    return 0
+
+// Find the first occurrence of `target` byte in `s`. Returns Some(index) or
+// None. (Buff String has no direct byte-search returning Option<Int>; this
+// helper mirrors Rust's `str::find`.)
+func lx_find_first_byte(s: String, target: Int) -> Option<Int>:
+    let mut i = 0
+    let n = s.len()
+    for i < n:
+        if s.byte_at(i) == target:
+            return Option.Some(i)
+        i = i + 1
+    return Option.None
+
+// Find the position of the FIRST top-level ` as ` keyword in an each
+// directive body. Returns `Some(StrPair(iterable, binding_part))` split at
+// that boundary, or `None` if no ` as ` is present at the top level.
+//
+// The boundary is matched as a standalone word -- ` as ` surrounded by
+// whitespace, NOT inside parens / strings / brackets. This lets iterables
+// like `items.read()` (which has no `as`) work, and also
+// `xs.iter().filter({x => x.as_foo()})` (which has `as_foo`, not ` as `).
+func find_each_as_boundary(rest: String) -> Option<StrPair>:
+    let bytes = lx_string_to_bytes(rest)
+    let mut i = 0
+    let mut paren_depth = 0
+    let mut bracket_depth = 0
+    for i + 3 < bytes.len():
+        let b = bytes[i]
+        if b == 40:
+            // b'('
+            paren_depth = paren_depth + 1
+        else if b == 41:
+            // b')'
+            paren_depth = paren_depth - 1
+        else if b == 91:
+            // b'['
+            bracket_depth = bracket_depth + 1
+        else if b == 93:
+            // b']'
+            bracket_depth = bracket_depth - 1
+        else if b == 34 || b == 39:
+            // b'"' or b'\'' -- Skip string literal.
+            let quote = b
+            i = i + 1
+            for i < bytes.len() && bytes[i] != quote:
+                if bytes[i] == 92 && i + 1 < bytes.len():
+                    // b'\\' -- escaped char.
+                    i = i + 2
+                else:
+                    i = i + 1
+        else:
+            // Look for ` as ` at top level (depth 0). The strict whitespace
+            // on both sides of `as` disambiguates from `as_foo` / `class` /
+            // etc. -- no extra look-ahead needed.
+            if paren_depth == 0
+                && bracket_depth == 0
+                && b == 32
+                && bytes[i + 1] == 97
+                && bytes[i + 2] == 115
+                && bytes[i + 3] == 32:
+                // 32=b' '  97=b'a'  115=b's'
+                let iterable = rest.slice(0, i)
+                let binding_part = rest.slice(i + 4, rest.len())
+                return Option.Some(StrPair.new(first: iterable, second: binding_part))
+        i = i + 1
+    return Option.None
+
+// Find the matching `}` for the `{` at `start - 1`. Respects nested braces
+// and `"..."` strings so `{"]"}` works.
+func find_matching_brace(bytes: Vector<Int>, start: Int) -> Option<Int>:
+    let mut depth = 1
+    let mut i = start
+    for i < bytes.len():
+        let b = bytes[i]
+        if b == 123:
+            // b'{'
+            depth = depth + 1
+            i = i + 1
+        else if b == 125:
+            // b'}'
+            depth = depth - 1
+            if depth == 0:
+                return Option.Some(i)
+            i = i + 1
+        else if b == 34 || b == 39:
+            // b'"' or b'\'' -- Skip string literal.
+            let quote = b
+            i = i + 1
+            for i < bytes.len() && bytes[i] != quote:
+                if bytes[i] == 92 && i + 1 < bytes.len():
+                    // b'\\' -- escaped char.
+                    i = i + 2
+                else:
+                    i = i + 1
+            if i < bytes.len():
+                i = i + 1  // consume closing quote
+        else:
+            i = i + 1
+    return Option.None

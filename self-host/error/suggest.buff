@@ -1,0 +1,250 @@
+// Buff self-host port of `crates/buff-lang-error/src/suggest.rs` (P3.3).
+//
+// T63 — Identifier suggestion engine ("did you mean `print`?").
+//
+// This file extends the T36 single-best-match helpers
+// (`suggest_close` / `format_did_you_mean`, defined in `diagnostic.buff`)
+// with two additions the error-quality pass (T63) needed:
+//
+//   * `suggest_identifier` — returns the top-3 closest matches (the T36
+//     helpers only ever return one). Useful for "did you mean one of …?" hints
+//     and for tooling (LSP completion, REPL `:help`) that wants a shortlist.
+//   * `suggest_with_message` — formats a single best match as a lowercase
+//     `did you mean \`X\`?` note, complementing the sentence-case
+//     `format_did_you_mean` used by the parser. Both formats appear in
+//     different parts of the diagnostic surface; the lowercase form is the
+//     canonical `help:` line payload.
+//
+// # Determinism
+//
+// Like the T36 helpers, this module never depends on `HashMap` iteration
+// order. Candidates are scored by `levenshtein` distance (defined in
+// `diagnostic.buff`), ties are broken alphabetically, and the result is a
+// stable `Vector<String>` / `Option<String>` for the same inputs every run.
+//
+// # No external dependency
+//
+// Levenshtein is reused from `diagnostic.buff` (char-based, two-row DP).
+// No `strsim` or other crate is pulled in — the workspace keeps
+// `buff-lang-error` a leaf crate with only `thiserror` as a dependency
+// (thiserror stays in the Rust host per porting-conventions §4c).
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions:
+//   * `&str` -> `String` (porting §7b — Buff hides references).
+//   * `&[&str]` -> `Vector<String>` (Buff has no `&str`; the call sites
+//     pass owned `String`s). The original lifetime dance
+//     `suggest_close<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str>`
+//     becomes a fully-owned signature.
+//   * `pub const SUGGESTION_TOP_N: usize = 3` -> `func suggestion_top_n() -> Int`
+//     returning `3`. Buff rejects top-level `let` declarations ("only function
+//     declarations are allowed at top level"); constants become zero-arg
+//     functions. This is documented as a deviation because the porting rules'
+//     `let MAX = ...` example does not match the implemented grammar.
+//   * `matches!(self, Applicability::MachineApplicable)` -> `==` on enum
+//     (Buff enum structural equality).
+//   * `vec![]` -> `Vector.new()`.
+//   * `.chars().count()` -> `.chars().len()` (Buff prelude).
+//   * `.saturating_sub(x)` -> explicit `if a < x: 0 else: a - x` (Buff's
+//     `Int` does not surface `saturating_sub` directly).
+//   * `.sort_by(|a, b| a.0.cmp(&b.0).then_with(...))` -> the sort is
+//     inlined: this port keeps the scored Vector and walks it twice (find
+//     the best by `(distance, name)` ordering) rather than relying on a
+//     sort_by closure (Buff lambdas are single-expression `{ x => ... }`
+//     and a comparator is multi-statement). The semantic is identical —
+//     deterministic ascending (distance, name) ordering — implemented as
+//     selection-sort-style passes that pick the next element.
+//   * `.into_iter().take(N).map(...).collect()` -> manual `for` loop with
+//     a counter (Buff prelude Vector does not surface `take` / chained
+//     `map` over `into_iter`).
+//   * Helper functions are declared BEFORE the public functions that call
+//     them — Buff's type-checker is single-pass and rejects forward
+//     references inside an `if` condition (the call resolves as "Unknown").
+//   * KNOWN WORKAROUND: user-defined functions returning `Bool` lose their
+//     return type at the call site, so an `if foo(...)` is rejected as
+//     "if condition must be Bool, found Unknown". The workaround (matches
+//     the existing corpus's handling of this gap) is to write
+//     `if foo(...) == true:` so the type-checker resolves through the
+//     `==` operator's Bool return. This affects `string_vector_contains`,
+//     `take_top_n_sorted` (indirectly), and any other user-defined Bool
+//     predicate.
+
+import { levenshtein, suggestion_max_distance } from "diagnostic"
+
+// -----------------------------------------------------------------------
+// Local helpers (Buff prelude gaps)
+// -----------------------------------------------------------------------
+
+// Count the number of characters in a string. Mirrors Rust's
+// `s.chars().count()`. The Buff prelude exposes `.chars().len()`.
+func string_char_count(s: String) -> Int:
+    return s.chars().len()
+
+// Absolute value of an Int. Buff's prelude does not surface `i64::abs`
+// directly; the inline conditional is identical.
+func int_abs(n: Int) -> Int:
+    if n < 0:
+        return 0 - n
+    return n
+
+// Linear membership test for `Vector<String>`. The Buff Vector prelude
+// does not surface `.contains(...)` directly.
+func string_vector_contains(v: Vector<String>, needle: String) -> Bool:
+    let mut i = 0
+    for i < v.len():
+        if v[i] == needle:
+            return true
+        i = i + 1
+    return false
+
+// Take the first element of a Vector as `Option<String>`. Mirrors
+// Rust's `vec.into_iter().next()`.
+func take_first_opt(v: Vector<String>) -> Option<String>:
+    if v.len() == 0:
+        return Option.None
+    return Option.Some(v[0])
+
+// Selection-sort the scored candidates by `(distance ascending, name
+// ascending)` and take the top `n`. Implements the same ordering as
+// Rust's `.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.as_str().cmp(b.1.as_str())))`
+// without depending on a comparator closure (Buff lambdas are single
+// expressions; a comparator needs `if/else`).
+func take_top_n_sorted(scored: Vector<(Int, String)>, n: Int) -> Vector<String>:
+    let result: Vector<String> = Vector.new()
+    let used: Vector<Bool> = Vector.new()
+    let mut init = 0
+    for init < scored.len():
+        used.push(false)
+        init = init + 1
+    let mut taken = 0
+    for taken < n:
+        let mut best_idx = -1
+        let mut best_dist = -1
+        let mut best_name = ""
+        let mut i = 0
+        for i < scored.len():
+            if used[i] == false:
+                let (d, name) = scored[i]
+                if best_idx == -1:
+                    best_idx = i
+                    best_dist = d
+                    best_name = name
+                else:
+                    if d < best_dist:
+                        best_idx = i
+                        best_dist = d
+                        best_name = name
+                    else:
+                        if d == best_dist:
+                            if name < best_name:
+                                best_idx = i
+                                best_dist = d
+                                best_name = name
+            i = i + 1
+        if best_idx == -1:
+            // No more unused candidates — exit early.
+            return result
+        result.push(best_name)
+        used[best_idx] = true
+        taken = taken + 1
+    return result
+
+// -----------------------------------------------------------------------
+// Public surface
+// -----------------------------------------------------------------------
+
+// Maximum number of candidates `suggest_identifier` returns.
+//
+// Three matches the density of rustc / clangd "did you mean" shortlists —
+// enough to cover the common typo cluster (e.g. `prin` -> `print`, `println`,
+// `printf`) without flooding the diagnostic with distant noise.
+func suggestion_top_n() -> Int:
+    return 3
+
+// Return the top-`N` closest candidates to `input`, sorted by ascending
+// Levenshtein distance with alphabetical tie-breaking.
+//
+// `N` is [`suggestion_top_n`] (3). Candidates outside
+// [`suggestion_max_distance`] edits of `input` are dropped — the same
+// threshold the single-match `suggest_close` uses, so the two helpers
+// agree on what counts as "close enough".
+//
+// Returns owned `String`s (not borrowed) so callers can freely mix the
+// result with other owned data (e.g. concatenating into a diagnostic note)
+// without juggling lifetimes across the candidate slice.
+//
+// # Determinism
+//
+// The sort key is `(distance, candidate_string)` so two candidates at the
+// same distance always come out in lexicographic order — the function is
+// a pure function of its inputs.
+func suggest_identifier(input: String, valid: Vector<String>) -> Vector<String>:
+    if input == "" || valid.len() == 0:
+        return Vector.new()
+    // An exact match means the input is already valid — no suggestion needed.
+    // Mirrors the `format_did_you_mean` contract: returning an empty Vec here
+    // lets callers distinguish "input was already correct" from "nothing was
+    // close enough" without an extra round-trip.
+    if string_vector_contains(valid, input) == true:
+        return Vector.new()
+
+    let input_len = string_char_count(input)
+    let max_dist = suggestion_max_distance()
+
+    // Score every candidate within the threshold. Collect into a Vector so
+    // we can sort by (distance, name) — deterministic ordering.
+    let mut scored: Vector<(Int, String)> = Vector.new()
+    let mut idx = 0
+    for idx < valid.len():
+        let cand = valid[idx]
+        let cand_len = string_char_count(cand)
+        // Cheap length pre-filter: edits needed >= abs(len delta).
+        let len_delta = int_abs(cand_len - input_len)
+        if len_delta > max_dist:
+            idx = idx + 1
+            continue
+        let d = levenshtein(input, cand)
+        if d > max_dist:
+            idx = idx + 1
+            continue
+        // Skip exact matches defensively (length pre-filter lets an exact
+        // match through; the early-return above already handles the common
+        // case, but a duplicate candidate in `valid` would otherwise resurface).
+        if d == 0:
+            idx = idx + 1
+            continue
+        scored.push((d, cand))
+        idx = idx + 1
+
+    // Sort by (distance ascending, then name ascending) for deterministic
+    // tie-breaking — same policy as `suggest_close`. Implemented as a
+    // selection pass into a fresh result Vector (Buff's Vector prelude
+    // does not surface a comparator-based `sort_by`).
+    return take_top_n_sorted(scored, suggestion_top_n())
+
+// Build a lowercase `did you mean \`X\`?` note for the closest candidate,
+// or `None` when no candidate is close enough / the input is already valid.
+//
+// This is the lowercase sibling of `format_did_you_mean` (defined in
+// `diagnostic.buff`): the parser emits the sentence-case
+// `Did you mean \`X\`?` form as a `note:` line, while the type-checker and
+// `buff check` linter emit the lowercase form as a `help:` line payload
+// (see T63 spec: *"help: did you mean \`print\`?"*). Both forms resolve to
+// the same best candidate via the same `levenshtein` scoring.
+//
+// Returns `None` when:
+//   * `input` is empty, or
+//   * `valid` is empty, or
+//   * `input` exactly matches a candidate (already valid — no suggestion), or
+//   * no candidate is within [`suggestion_max_distance`] edits.
+func suggest_with_message(input: String, valid: Vector<String>) -> Option<String>:
+    if input == "" || valid.len() == 0:
+        return Option.None
+    // Already-valid input -> no suggestion (mirrors suggest_identifier).
+    if string_vector_contains(valid, input) == true:
+        return Option.None
+    // Reuse the top-N shortlist, take the head. This keeps the two public
+    // helpers consistent: the best candidate is always the first element of
+    // suggest_identifier(input, valid).
+    let top = suggest_identifier(input, valid)
+    let head_opt = take_first_opt(top)
+    return head_opt.map({ c => "did you mean `" + c + "`?" })

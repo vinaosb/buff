@@ -144,6 +144,29 @@ impl Trivia {
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
+
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        json!({
+            "kind": self.kind.to_json(),
+            "text": self.text,
+        })
+    }
+}
+
+impl TriviaKind {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let name = match self {
+            TriviaKind::Whitespace => "Whitespace",
+            TriviaKind::Newline => "Newline",
+            TriviaKind::LineComment => "LineComment",
+            TriviaKind::BlockComment => "BlockComment",
+        };
+        json!({ "type": "TriviaKind", "variant": name })
+    }
 }
 
 /// A lossless token: a maximal run of "non-trivia" bytes — i.e. anything
@@ -179,6 +202,12 @@ impl LosslessToken {
     /// Whether this token is empty (should not occur for valid input).
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
+    }
+
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        json!({ "text": self.text })
     }
 }
 
@@ -273,6 +302,31 @@ impl Piece {
                 ..
             } => self.trivia_kind(),
             _ => None,
+        }
+    }
+
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Piece::Trivia {
+                kind,
+                start,
+                end,
+                text,
+            } => json!({
+                "type": "Trivia",
+                "kind": kind.to_json(),
+                "start": start,
+                "end": end,
+                "text": text,
+            }),
+            Piece::Token { start, end, text } => json!({
+                "type": "Token",
+                "start": start,
+                "end": end,
+                "text": text,
+            }),
         }
     }
 }
@@ -424,6 +478,22 @@ impl LosslessTree {
         new_src.push_str(replacement);
         new_src.push_str(&self.src[e..]);
         Self::parse(&new_src)
+    }
+
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    ///
+    /// Pieces are emitted in source order (already sorted by `start`);
+    /// the `src` field is omitted to keep the dump focused on structure
+    /// (the original source is the input the user already has).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let pieces_json: Vec<serde_json::Value> =
+            self.pieces.iter().map(Piece::to_json).collect();
+        json!({
+            "src_len": self.src.len(),
+            "piece_count": self.pieces.len(),
+            "pieces": pieces_json,
+        })
     }
 }
 

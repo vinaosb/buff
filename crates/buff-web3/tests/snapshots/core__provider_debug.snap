@@ -1,0 +1,6 @@
+---
+source: crates/buff-web3/tests/core.rs
+assertion_line: 233
+expression: "format!(\"{p:?}\")"
+---
+Provider { .. }

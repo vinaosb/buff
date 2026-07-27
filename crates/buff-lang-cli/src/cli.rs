@@ -611,6 +611,11 @@ pub enum Command {
         /// in JSON output mode.
         #[arg(long)]
         no_color: bool,
+
+        /// P0.1.2a: Print the parsed AST to stdout after a successful
+        /// parse. Currently a stub — full JSON serialization is P0.1.2b.
+        #[arg(long)]
+        dump_ast: bool,
     },
 
     /// Remove the `target/` build directory (wraps `cargo clean`).

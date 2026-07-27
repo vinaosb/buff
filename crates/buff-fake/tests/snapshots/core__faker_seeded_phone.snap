@@ -1,0 +1,5 @@
+---
+source: crates/buff-fake/tests/core.rs
+expression: faker.phone()
+---
+471-858-2601 x540

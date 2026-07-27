@@ -15,6 +15,8 @@
 
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::JobsError;
 
 /// The maximum delay cap (24 hours) so an exponential backoff can
@@ -30,7 +32,7 @@ const MAX_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
 ///
 /// `attempt` is 1-indexed: `delay(1)` is the delay BEFORE the first
 /// retry (i.e. after the initial execution failed).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Backoff {
     /// Constant delay between retries. `delay(N) == base` for every N.
     Fixed { base: Duration },

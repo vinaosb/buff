@@ -1,4 +1,4 @@
-//! Buff CLI library — exposes the compiler pipeline and command
+﻿//! Buff CLI library â€” exposes the compiler pipeline and command
 //! implementations so that integration tests (and future embedders) can drive
 //! `buff build` / `buff run` programmatically without spawning a subprocess.
 //!
@@ -9,20 +9,20 @@
 //!
 //! ```text
 //!   .buff source
-//!        │
-//!        ▼  read_to_string
+//!        â”‚
+//!        â–¼  read_to_string
 //!   String
-//!        │
-//!        ▼  buff_lang_lexer::tokenize
+//!        â”‚
+//!        â–¼  buff_lang_lexer::tokenize
 //!   Vec<Token>
-//!        │
-//!        ▼  buff_lang_parser::parse
+//!        â”‚
+//!        â–¼  buff_lang_parser::parse
 //!   Vec<Decl>
-//!        │
-//!        ▼  buff_lang_codegen_rust::generate_rust
+//!        â”‚
+//!        â–¼  buff_lang_codegen_rust::generate_rust
 //!   String  (valid Rust source)
-//!        │
-//!        ▼  pipeline::compile_rust_to_exe (rustc --edition 2021)
+//!        â”‚
+//!        â–¼  pipeline::compile_rust_to_exe (rustc --edition 2021)
 //!   native executable
 //! ```
 //!
@@ -33,34 +33,26 @@
 
 // Boxing the large error types (CodegenError etc. returned through the
 // pipeline) would reshape the public `compile_to_rust` / `compile_rust_to_exe`
-// surface and every command consumer. Out of scope — matches the same
+// surface and every command consumer. Out of scope â€” matches the same
 // documented trade-off applied in buff-eval / buff-lang-codegen-rust /
 // buff-lang-types. Allowed at the crate level.
 #![allow(clippy::result_large_err)]
 
 pub mod bench_harness;
-pub mod check;
 pub mod cli;
 pub mod commands;
-pub mod compile_speed;
 pub mod config;
 pub mod coverage;
-pub mod error_mapper;
-pub mod fmt;
-// T7: salsa-based incremental compilation front-end. The `incremental`
-// module wraps the lex + parse + typecheck passes in salsa tracked
-// queries so unchanged input files skip re-processing on subsequent
-// compiles within a single CLI session. Opt-in via `--incremental` /
-// `--no-incremental` CLI flags (default: ON for dev Debug builds, OFF
-// for Release/Minimal). Correctness is unaffected — salsa is purely a
-// memoization cache layered above the existing `pipeline` module.
-pub mod incremental;
-pub mod naming_lint;
-pub mod pipeline;
-// T35: shared rustc-invocation helpers (extracted from pipeline.rs so
-// buff-eval can reuse them without duplicating the logic).
-pub mod rustc_invoke;
-// T1: multi-file project compilation pipeline (parse_project + cargo).
+// P0.26: re-exports from extracted sibling crates.
+pub use buff_lang_check as check;
+pub use buff_lang_check::naming_lint;
+pub use buff_lang_fmt as fmt;
+pub use buff_lang_pipeline as pipeline;
+pub use buff_lang_pipeline::compile_speed;
+pub use buff_lang_pipeline::error_mapper;
+pub use buff_lang_pipeline::incremental;
+pub use buff_lang_pipeline::rustc_invoke;
+// T1: multi-file project compilation pipeline (CLI-specific).
 pub mod project_pipeline;
 pub mod scaffold;
 pub mod test_runner;

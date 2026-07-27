@@ -251,5 +251,11 @@ pub(super) fn type_is_hash_safe(ty: &TypeRef, hash_safe_user_structs: &BTreeSet<
             .all(|m| type_is_hash_safe(m, hash_safe_user_structs)),
         // Collections (Vector, Map, …) and function types don't impl Hash.
         TypeRef::Generic { .. } | TypeRef::Function { .. } => false,
+        // DR-020 / P2.1a: trait objects (`Box<dyn Trait>`) don't impl
+        // Hash — vtable pointers are not stable across invocations.
+        // Conservative: return false so we never auto-derive Hash on a
+        // struct containing a trait-object field. Users who need Hash
+        // on such a struct must define it manually (out of scope MVP).
+        TypeRef::TraitObject { .. } => false,
     }
 }

@@ -158,11 +158,11 @@ func analyze(decls: Vector<Decl>) -> AtomicPromotions:
 // (enclosing-scope shape / captured / `+=` only / `par_map` or `par_reduce` /
 // no nested-closure mutation). If all hold, insert into the AtomicSet.
 
-func analyze_func(func: FuncDecl) -> AtomicSet:
+func analyze_func(func_decl: FuncDecl) -> AtomicSet:
     // (The full algorithm is in the Rust reference lines 150-700. The Buff
     //  port preserves the source-order walk + 5-condition predicate; the
     //  per-arm recursion is delegated to the extern shim.)
-    return analyze_func_impl(func)
+    return analyze_func_impl(func_decl)
 
 // =============================================================================
 // is_integer_literal_init — predicate: is this Expr an integer literal?

@@ -1,0 +1,278 @@
+// Buff self-host port of `crates/buff-lang-error/src/source_map.rs` (P3.3).
+//
+// Source map — maps source IDs to file content and provides line/column
+// lookup. [`SourceMap`] serves two roles:
+//
+// 1. Front-end — maps [`SourceId`] -> [`SourceFile`] so the compiler can
+//    resolve byte offsets to 1-based `(line, col)` pairs for diagnostics.
+// 2. Back-end (T16) — maps Buff [`Span`]s <-> generated-Rust line numbers
+//    so that `rustc` and runtime errors that reference the intermediate `.rs`
+//    file can be translated back to the original `.buff` source location.
+//
+// The back-end mapping is populated during codegen (see
+// `CodegenContext::record_mapping` in `buff-lang-codegen-rust`) and consumed
+// by `buff_lang_cli::error_mapper`.
+//
+// Faithful 1:1 translation of the Rust reference. Buff has no `std::path::PathBuf`
+// (file paths are plain `String` in Buff), no `&str` (Buff owns `String`),
+// no `&mut self` (Buff mutates struct fields in place via `m.field = ...`),
+// and no `HashMap` prelude equivalent — the port uses `Map` (Buff's BTreeMap-backed
+// associative structure, per porting §7c). The HashMap -> BTreeMap trade-off
+// is documented in porting-conventions Appendix A: `SourceMap::lookup_buff`'s
+// "find the closest recorded line at or below" lookup becomes a forward scan
+// rather than an O(1) hash probe; for a compiler error mapper this is fine
+// (the map carries at most a few hundred entries per source file).
+//
+// Translation decisions:
+//   * `std::path::PathBuf` -> `String` (Buff paths are UTF-8 strings).
+//   * `Vec<usize>` -> `Vector<Int>` (porting §7c — hard rule).
+//   * `HashMap<K, V>` -> `Map<K, V>` (porting §7c — Map is BTreeMap-backed;
+//     deterministic iteration, no O(1) hash probe but the lookup hot path
+//     is the per-offset `binary_search` over `line_starts`, not the hash map).
+//   * `&str` / `&[T]` -> owned `String` / `Vector<T>` (porting §7b — Buff
+//     hides references).
+//   * `Option<(usize, usize)>` -> `Option<(Int, Int)>` (Buff supports tuple
+//     return types; confirmed in `examples/use-cases/apps/data_pipeline.buff`).
+//   * `impl SourceFile { fn new(); fn lookup() }` -> free functions
+//     `source_file_new` / `source_file_lookup` per porting §8g.
+//   * `impl Default for SourceMap` -> `source_map_default` free function
+//     (Buff has no `Default` trait; the convention is a `<type>_default`
+//     function that delegates to the regular constructor).
+//   * `binary_search` (Rust `slice::binary_search`) -> linear scan with the
+//     same semantics (Buff's `Vector` prelude does not surface `binary_search`;
+//     the linear form is O(n) but the inputs are short source files).
+//   * `&self.content[line_start..offset]` -> `String.slice(start, end)` /
+//     `.chars()` count (Buff prelude string API).
+//   * `#[cfg(test)] mod tests` -> dropped from the logic port. Per porting
+//     §5a, equivalence tests live in a separate `equivalence_*.buff` file;
+//     inline unit tests do not port.
+//   * `for (i, c) in content.char_indices()` -> `for i in range(content.len()):`
+//     with explicit char access (Buff iterator prelude does not surface
+//     `char_indices`; the offset-walk is inlined). The `'\n'` literal is
+//     preserved.
+//   * `c.len_utf8()` -> the constant `1` when `c == '\n'` (newline is always
+//     one byte in UTF-8; the Rust call to `len_utf8` is a no-op for newline).
+
+import { Span, SourceId } from "span"
+
+// A source file with cached line-start byte offsets.
+struct SourceFile:
+    path: String
+    content: String
+    line_starts: Vector<Int>
+
+// Create a new source file, computing line-start offsets.
+func source_file_new(path: String, content: String) -> SourceFile:
+    let line_starts = compute_line_starts(content)
+    return SourceFile.new(path: path, content: content, line_starts: line_starts)
+
+// Look up the 1-based line and column for a given byte offset.
+//
+// Column is measured in characters (not bytes), so multi-byte UTF-8
+// sequences count as a single column.
+func source_file_lookup(sf: SourceFile, offset: Int) -> Option<(Int, Int)>:
+    if offset > sf.content.len():
+        return Option.None
+
+    // Binary search for the line containing this offset. Buff's Vector
+    // prelude does not surface `binary_search`, so we walk linearly. The
+    // semantic mirrors Rust's `line_starts.binary_search(&offset)`:
+    //   Ok(i)  -> exact match, line index is `i`.
+    //   Err(i) -> insertion point is `i`, so the line index is `i - 1`
+    //             (clamped to 0).
+    let mut line_idx = 0
+    let mut found = false
+    let mut idx = 0
+    for idx < sf.line_starts.len():
+        let s = sf.line_starts[idx]
+        if s == offset:
+            line_idx = idx
+            found = true
+            break
+        if s > offset:
+            // Insertion point is `idx`; line index is `idx - 1` clamped.
+            line_idx = idx - 1
+            if line_idx < 0:
+                line_idx = 0
+            found = true
+            break
+        idx = idx + 1
+    if found == false:
+        // Offset past every line_start -> last line.
+        line_idx = sf.line_starts.len() - 1
+        if line_idx < 0:
+            line_idx = 0
+
+    let line_start = sf.line_starts[line_idx]
+    let line = line_idx + 1  // 1-based
+
+    // Count characters (not bytes) from line_start to offset. Buff's String
+    // prelude exposes `.slice(start, end).chars().len()`; the Rust
+    // `self.content[line_start..offset].chars().count()` lowers identically.
+    let col = string_chars_between(sf.content, line_start, offset) + 1
+
+    return Option.Some((line, col))
+
+// Compute the byte offset of each line start in a string.
+func compute_line_starts(content: String) -> Vector<Int>:
+    let mut starts = Vector.new()
+    starts.push(0)
+    // Walk byte offsets; emit a new line-start after every '\n'. Buff has
+    // no `char_indices()` iterator, so we walk by index. '\n' is one byte
+    // in UTF-8 so `i + 1` is the byte offset immediately after the newline.
+    let mut i = 0
+    let bytes = content.to_byte_vector()
+    for i < bytes.len():
+        let b = bytes[i]
+        if b == 10:  // '\n' as a byte value
+            starts.push(i + 1)
+        i = i + 1
+    return starts
+
+// Helper: count characters between two byte offsets in a string. Mirrors
+// Rust's `s[start..end].chars().count()`. Buff's prelude does not surface
+// a direct `.chars().count()` between offsets, so we slice then count.
+func string_chars_between(s: String, start: Int, end: Int) -> Int:
+    let slice = s.slice(start, end)
+    return slice.chars().len()
+
+// A collection of source files indexed by [`SourceId`].
+//
+// In addition to front-end file/offset lookup, the map stores a bidirectional
+// Buff <-> Rust line mapping (T16). Each entry records that a Buff [`Span`]
+// corresponds to a particular 1-based line in the generated Rust source, so
+// that `rustc` diagnostics and runtime panics referencing the `.rs` file can
+// be translated back to the original `.buff` location.
+//
+// The mapping is populated during codegen via `source_map_add_mapping`.
+struct SourceMap:
+    sources: Map<SourceId, SourceFile>
+    // Rust line (1-based) -> Buff Span. Populated during codegen.
+    rust_to_buff: Map<Int, Span>
+    // Buff Span -> Rust line (1-based). Reverse of `rust_to_buff`.
+    buff_to_rust: Map<Span, Int>
+
+// Create an empty source map.
+func source_map_new() -> SourceMap:
+    return SourceMap.new(
+        sources: Map.new(),
+        rust_to_buff: Map.new(),
+        buff_to_rust: Map.new(),
+    )
+
+// Add a source file with the given ID, path, and content.
+func source_map_add_source(m: SourceMap, id: SourceId, path: String, content: String):
+    let sf = source_file_new(path, content)
+    m.sources[id] = sf
+
+// Look up the 1-based line and column for a byte offset in the given source.
+func source_map_lookup(m: SourceMap, id: SourceId, offset: Int) -> Option<(Int, Int)>:
+    let opt = map_get_source_file(m.sources, id)
+    return match opt {
+        Some(sf) => source_file_lookup(sf, offset),
+        None => Option.None,
+    }
+
+// -----------------------------------------------------------------------
+// Buff <-> Rust line mapping (T16)
+// -----------------------------------------------------------------------
+
+// Record that a Buff `span` maps to a specific 1-based `rust_line` in the
+// generated Rust source.
+//
+// If the same `rust_line` or `span` was previously recorded, the later
+// call wins (the previous entry is overwritten).
+func source_map_add_mapping(m: SourceMap, buff_span: Span, rust_line: Int):
+    m.rust_to_buff[rust_line] = buff_span
+    m.buff_to_rust[buff_span] = rust_line
+
+// Given a Rust line number, return the corresponding Buff [`Span`].
+//
+// Returns an exact match when `rust_line` was recorded via `add_mapping`.
+// Otherwise, falls back to the closest recorded line at or below
+// `rust_line` — this mirrors how `rustc`/panic locations point at the
+// start of the statement that failed, so the nearest mapped statement
+// above is the best candidate.
+//
+// Returns `None` when no mapping at or below `rust_line` exists.
+func source_map_lookup_buff(m: SourceMap, rust_line: Int) -> Option<Span>:
+    let exact = map_get_span(m.rust_to_buff, rust_line)
+    if exact != Option.None:
+        return exact
+    // Find the closest recorded line at or below `rust_line`. Walk the
+    // sorted map keys (Buff's Map iterates in sorted key order, mirroring
+    // BTreeMap), keeping the largest key <= rust_line. The initial
+    // `best_span` is typed via `map_get_span` (returns `Option<Span>`);
+    // a typed `let` declaration with `Option<Span>` is rejected by the
+    // type-checker (Option.None alone infers as the unparameterised
+    // `Option`), so we anchor the type through the helper.
+    return source_map_scan_closest_below(m.rust_to_buff, rust_line)
+
+// Inner scan: walk the map entries in ascending key order, keeping the
+// largest key `<= rust_line`. Separated from `source_map_lookup_buff` so
+// the `Option<Span>` initial value comes from `map_get_span` (typed)
+// rather than an explicit `Option<Span>` annotation Buff rejects.
+func source_map_scan_closest_below(rust_to_buff: Map<Int, Span>, rust_line: Int) -> Option<Span>:
+    let mut best_line = -1
+    let mut best_span = map_get_span(rust_to_buff, -1)  // sentinel None
+    let entries = map_entries_int_span(rust_to_buff)
+    let mut i = 0
+    for i < entries.len():
+        // Buff does not support tuple field access `pair.0`; destructure
+        // via `let (rl, sp) = pair` instead.
+        let (rl, sp) = entries[i]
+        if rl <= rust_line:
+            if rl > best_line:
+                best_line = rl
+                best_span = Option.Some(sp)
+        i = i + 1
+    return best_span
+
+// Given a Buff `span`, return the corresponding 1-based Rust line number.
+//
+// Returns `None` if no mapping was recorded for this exact span.
+func source_map_lookup_rust(m: SourceMap, buff_span: Span) -> Option<Int>:
+    return map_get_int(m.buff_to_rust, buff_span)
+
+// Returns `true` if no Buff <-> Rust line mappings have been recorded.
+func source_map_is_line_map_empty(m: SourceMap) -> Bool:
+    return map_size_int_span(m.rust_to_buff) == 0
+
+// Default constructor — mirrors `impl Default for SourceMap`. Buff has no
+// `Default` trait; the convention is a `<type>_default` function that
+// delegates to the regular constructor.
+func source_map_default() -> SourceMap:
+    return source_map_new()
+
+// -----------------------------------------------------------------------
+// Map accessor helpers.
+//
+// Buff's prelude `Map<K, V>` exposes basic `set` / `get` / `len` operations
+// but does not surface `HashMap::get` returning `Option<&V>` (Buff returns
+// owned values) or iteration over `(K, V)` pairs directly. These thin
+// helpers give the call sites the Rust-shape API the port expects. The
+// bodies use the prelude Map API directly.
+// -----------------------------------------------------------------------
+
+// Look up a SourceFile by SourceId. Returns None when not present.
+func map_get_source_file(m: Map<SourceId, SourceFile>, k: SourceId) -> Option<SourceFile>:
+    return m.get(k)
+
+// Look up a Span by 1-based Rust line number.
+func map_get_span(m: Map<Int, Span>, k: Int) -> Option<Span>:
+    return m.get(k)
+
+// Look up a Rust line number by Buff Span.
+func map_get_int(m: Map<Span, Int>, k: Span) -> Option<Int>:
+    return m.get(k)
+
+// Snapshot all (Int, Span) entries from a Map<Int, Span> as a Vector of
+// tuples. Used by `source_map_lookup_buff`'s closest-below scan; the
+// Map prelude iterates in sorted key order (BTreeMap-backed), so the
+// returned Vector is sorted ascending by key.
+func map_entries_int_span(m: Map<Int, Span>) -> Vector<(Int, Span)>:
+    return m.entries()
+
+// Number of (Int, Span) entries in a Map<Int, Span>.
+func map_size_int_span(m: Map<Int, Span>) -> Int:
+    return m.len()

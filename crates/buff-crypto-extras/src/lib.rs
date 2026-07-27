@@ -46,6 +46,7 @@ pub mod aes;
 pub mod argon2;
 pub mod ecc;
 pub mod error;
+pub mod rsa;
 
 pub use error::CryptoError;
 

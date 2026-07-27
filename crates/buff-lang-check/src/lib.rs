@@ -1,6 +1,6 @@
-//! `buff check` — type-checker + naming-convention linter (T55).
+﻿//! `buff check` â€” type-checker + naming-convention linter (T55).
 //!
-//! Runs the compiler's front-end (`tokenize` → `parse`) and the
+//! Runs the compiler's front-end (`tokenize` â†’ `parse`) and the
 //! [`TypeInferencer`] over every function body WITHOUT invoking codegen
 //! or `rustc`. This makes `buff check` substantially faster than
 //! `buff build` (no syn/quote/prettyplease, no rustc compile), at the
@@ -11,34 +11,34 @@
 //!
 //! ```text
 //!   .buff source
-//!        │
-//!        ▼  tokenize
-//!   Vec<Token>      ── on error ──▶ HasErrors
-//!        │
-//!        ▼  parse
-//!   Vec<Decl>       ── on error ──▶ HasErrors
-//!        │
-//!        ▼  type_check_decls (drive TypeInferencer over each func body)
-//!   Vec<TypeError>  ── any? ──────▶ HasErrors
-//!        │
-//!        ▼  lint_naming
+//!        â”‚
+//!        â–¼  tokenize
+//!   Vec<Token>      â”€â”€ on error â”€â”€â–¶ HasErrors
+//!        â”‚
+//!        â–¼  parse
+//!   Vec<Decl>       â”€â”€ on error â”€â”€â–¶ HasErrors
+//!        â”‚
+//!        â–¼  type_check_decls (drive TypeInferencer over each func body)
+//!   Vec<TypeError>  â”€â”€ any? â”€â”€â”€â”€â”€â”€â–¶ HasErrors
+//!        â”‚
+//!        â–¼  lint_naming
 //!   Vec<Diagnostic> (Warnings only)
-//!        │
-//!        ▼
+//!        â”‚
+//!        â–¼
 //!   CheckReport { diagnostics, outcome }
 //! ```
 //!
 //! # Outcome mapping
 //!
 //! [`CheckOutcome`] is the library-level signal: [`CheckOutcome::Clean`]
-//! (no diagnostics), [`CheckOutcome::HasWarnings`] (only warnings — exit
-//! 0 by default), [`CheckOutcome::HasErrors`] (at least one error — exit 1).
+//! (no diagnostics), [`CheckOutcome::HasWarnings`] (only warnings â€” exit
+//! 0 by default), [`CheckOutcome::HasErrors`] (at least one error â€” exit 1).
 //! The CLI binary ([`crate::commands::check`]) translates this into an
 //! exit code; `--deny-warnings` / `-D` promotes warnings to exit-non-zero.
 //!
 //! # Why no codegen?
 //!
-//! `buff build` already runs the full pipeline (lex → parse → codegen →
+//! `buff build` already runs the full pipeline (lex â†’ parse â†’ codegen â†’
 //! rustc) and surfaces every error rustc finds. `buff check` is the FAST
 //! feedback path: it catches the errors the compiler can find on its own
 //! (lex/parse/type-check) in a fraction of the time. This mirrors
@@ -51,6 +51,7 @@
 // the next green-field refactor of this module.
 #![allow(clippy::items_after_test_module)]
 
+pub mod naming_lint;
 use std::path::Path;
 
 use buff_lang_ast::{Decl, Expr, Stmt, TypeRef};
@@ -65,7 +66,10 @@ use buff_lang_parser::parse;
 // the next green-field refactor of this module.
 use buff_lang_types::{Type, TypeInferencer};
 
-use crate::naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation};
+use naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation};
+
+// T133: inlined const (mirror of buff_lang_pipeline::BUFFHTML_EXT).
+const BUFFHTML_EXT: &str = "buffhtml";
 
 // ---------------------------------------------------------------------------
 // Error output format (T1, v1.25 Wave 0).
@@ -75,14 +79,14 @@ use crate::naming_lint::{lint_common_mistakes, lint_naming, lint_tab_indentation
 /// output. Selected via `--error-format <KIND>` on the CLI.
 ///
 /// - [`Human`](Self::Human) (default) renders rustc-style source-line +
-///   caret blocks to **stderr** — the pre-T1 behavior, byte-identical.
+///   caret blocks to **stderr** â€” the pre-T1 behavior, byte-identical.
 /// - [`Json`](Self::Json) emits a single JSON array of
 ///   [`buff_lang_error::DiagnosticJson`] to **stdout** (one line, no
 ///   trailing newline added by the serializer) so `buff check
 ///   --error-format json | jq '.[].code'` works.
 ///
 /// Unknown strings resolve to [`Human`](Self::Human) on parse (see
-/// [`ErrorFormat::from_str`]) — we never panic on a bad CLI flag value,
+/// [`ErrorFormat::from_str`]) â€” we never panic on a bad CLI flag value,
 /// we just fall back to the safe default. The CLI's clap `value_parser`
 /// rejects unknown values up front, so the from_str fallback is a
 /// belt-and-braces safety net for library callers.
@@ -98,7 +102,7 @@ pub enum ErrorFormat {
 impl ErrorFormat {
     /// Parse a `--error-format` value. Lowercase, case-sensitive (matches
     /// rustc / cargo conventions: `human` / `json`). Returns
-    /// [`Human`](Self::Human) for any unrecognized string — the CLI's clap
+    /// [`Human`](Self::Human) for any unrecognized string â€” the CLI's clap
     /// layer is responsible for rejecting bad values up front; this is
     /// the library-side safety net.
     #[allow(clippy::should_implement_trait)] // not a true FromStr (no Result); name kept for clarity.
@@ -135,7 +139,7 @@ impl ErrorFormat {
 /// applied to T55.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckOutcome {
-    /// No diagnostics at all — the source is clean.
+    /// No diagnostics at all â€” the source is clean.
     Clean,
     /// Only warning-level diagnostics (lint warnings). Default exit code 0.
     HasWarnings,
@@ -160,7 +164,7 @@ pub struct CheckReport {
 
 /// Run the full check pipeline on a source string.
 ///
-/// Drives lex → parse → type-check → naming-lint, collecting diagnostics
+/// Drives lex â†’ parse â†’ type-check â†’ naming-lint, collecting diagnostics
 /// from each phase. The phase ordering is fail-soft within a phase but
 /// fail-fast between phases: lex errors short-circuit parsing (there are
 /// no tokens to feed), parse errors short-circuit type-check (there's no
@@ -209,7 +213,7 @@ pub fn check_source(src: &str) -> CheckReport {
     let lint_warnings = lint_naming(&decls);
     diagnostics.extend(lint_warnings);
 
-    // 5. T63: common-mistake linter — prelude typos (Print/prin) + tab
+    // 5. T63: common-mistake linter â€” prelude typos (Print/prin) + tab
     //    indentation. Runs after parse (needs the AST) and over the raw
     //    source (tab scan is byte-level). Both emit warnings only.
     let mistake_warnings = lint_common_mistakes(&decls);
@@ -226,7 +230,7 @@ pub fn check_source(src: &str) -> CheckReport {
 
     // 7. T72: Compiler plugin dispatch. Calls into the global plugin
     //    registry (env-var-loaded via BUFF_PLUGIN_DIR /
-    //    BUFF_PLUGIN_PATH). Empty registry → empty Vec → no-op (no
+    //    BUFF_PLUGIN_PATH). Empty registry â†’ empty Vec â†’ no-op (no
     //    diagnostics added, no perf overhead beyond a Mutex lock).
     //    Each LintWarning is converted to a warning-severity
     //    Diagnostic; the plugin's `name()` is used as the code when
@@ -249,7 +253,7 @@ pub fn check_source(src: &str) -> CheckReport {
 
 /// Run the check pipeline on a file, render diagnostics to stderr, and
 /// return the outcome. Thin wrapper around [`run_check_file_with_format`]
-/// with [`ErrorFormat::Human`] — byte-identical to the pre-T1 behavior.
+/// with [`ErrorFormat::Human`] â€” byte-identical to the pre-T1 behavior.
 ///
 /// File-read failures propagate as `Err` (they are I/O errors, not
 /// diagnostics). All compile diagnostics are rendered to stderr via
@@ -258,13 +262,13 @@ pub fn check_source(src: &str) -> CheckReport {
 ///
 /// **T133:** Dispatches on file extension. `.buffhtml` files are checked
 /// via [`check_buffhtml_source`] (parse + codegen; rustc-level errors are
-/// surfaced via `buff build` not `buff check` — type-inference-on-codegen
+/// surfaced via `buff build` not `buff check` â€” type-inference-on-codegen
 /// is integrated inside `buff_lang_codegen_buffhtml::generate`).
 ///
 /// # Errors
 ///
 /// Returns `Err` only when the file cannot be read. Compile diagnostics
-/// are NOT errors here — they become the returned [`CheckReport`].
+/// are NOT errors here â€” they become the returned [`CheckReport`].
 pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
     run_check_file_with_format(file, ErrorFormat::Human, false)
 }
@@ -272,12 +276,12 @@ pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
 /// Run the full check pipeline on a `.buff` or `.buffhtml` file and emit
 /// diagnostics in the requested [`ErrorFormat`] (T1, v1.25 Wave 0).
 ///
-/// - [`ErrorFormat::Human`] (default) — rustc-style source-line + caret
+/// - [`ErrorFormat::Human`] (default) â€” rustc-style source-line + caret
 ///   blocks to **stderr**. Byte-identical to pre-T1 output.
-/// - [`ErrorFormat::Json`] — single JSON array of
+/// - [`ErrorFormat::Json`] â€” single JSON array of
 ///   [`buff_lang_error::DiagnosticJson`] to **stdout**. Each entry carries
 ///   byte offsets + 1-based line/col + suggestions + applicability. Empty
-///   diagnostics → `[]`. The "no issues found" stderr note is suppressed
+///   diagnostics â†’ `[]`. The "no issues found" stderr note is suppressed
 ///   in JSON mode (would pollute the JSON stream consumers parse).
 ///
 /// The JSON mode exists for tooling (LSP CodeAction round-trip, CI
@@ -289,7 +293,7 @@ pub fn run_check_file(file: &Path) -> anyhow::Result<CheckReport> {
 /// # Errors
 ///
 /// Returns `Err` only when the file cannot be read. Compile diagnostics
-/// are NOT errors here — they become the returned [`CheckReport`].
+/// are NOT errors here â€” they become the returned [`CheckReport`].
 pub fn run_check_file_with_format(
     file: &Path,
     format: ErrorFormat,
@@ -297,7 +301,7 @@ pub fn run_check_file_with_format(
 ) -> anyhow::Result<CheckReport> {
     let is_buffhtml = file
         .extension()
-        .is_some_and(|e| e == crate::pipeline::BUFFHTML_EXT);
+        .is_some_and(|e| e == BUFFHTML_EXT);
     if is_buffhtml {
         return run_check_buffhtml_file_with_format(file, format, no_color);
     }
@@ -330,7 +334,7 @@ fn emit_diagnostics(
 ) {
     match format {
         ErrorFormat::Json => {
-            // Single JSON array on stdout. Empty input → `[]` (clean file).
+            // Single JSON array on stdout. Empty input â†’ `[]` (clean file).
             let json = render_diagnostics_json(diagnostics, source);
             println!("{json}");
         }
@@ -376,7 +380,7 @@ fn run_check_buffhtml_file_with_format(
 ///
 /// Returns a [`CheckReport`] populated from the `.buffhtml` parser +
 /// codegen. The script-block contents are NOT type-checked at this layer
-/// (T133 floor: Rust-in-script-block pass-through — type-checking them
+/// (T133 floor: Rust-in-script-block pass-through â€” type-checking them
 /// would require running rustc on the spliced `.rs`, which is `buff
 /// build`'s job).
 pub fn check_buffhtml_source(src: &str, file: &Path) -> CheckReport {
@@ -417,33 +421,44 @@ pub fn check_buffhtml_source(src: &str, file: &Path) -> CheckReport {
 ///
 /// A fresh [`TypeInferencer`] is created per function so the env doesn't
 /// leak between sibling functions. Parameters are pre-bound using
-/// [`typeref_to_type`] — a minimal reimplementation of the private helper
+/// [`typeref_to_type`] â€” a minimal reimplementation of the private helper
 /// in `buff-lang-types::infer` that covers the primitive + Option/Result
 /// cases. User-defined types (struct/enum names) fall back to
-/// [`Type::Unknown`], which is permissive in the inference rules.
+/// [`Type::Unknown`] (still bound, so the parameter isn't reported as an
+/// "undefined variable" â€” see the param-binding loop in [`type_check_func`]).
+///
+/// The full program decl slice is threaded through so each per-function
+/// inferencer can be seeded with the program's enum declarations (via
+/// [`TypeInferencer::register_enum_decls`]). This is what unblocks
+/// qualified enum variant access in expression context â€” `PreludeFn.Abs`
+/// resolves to `Type::User("PreludeFn", [])` instead of `Type::Unknown`.
 fn type_check_decls(decls: &[Decl]) -> Vec<buff_lang_error::TypeError> {
     let mut errors = Vec::new();
     for d in decls {
-        type_check_decl(d, &mut errors);
+        type_check_decl(d, decls, &mut errors);
     }
     errors
 }
 
-fn type_check_decl(decl: &Decl, errors: &mut Vec<buff_lang_error::TypeError>) {
+fn type_check_decl(
+    decl: &Decl,
+    all_decls: &[Decl],
+    errors: &mut Vec<buff_lang_error::TypeError>,
+) {
     match decl {
-        Decl::FuncDecl(f) => type_check_func(f, errors),
+        Decl::FuncDecl(f) => type_check_func(f, all_decls, errors),
         Decl::TraitDecl(t) => {
             // Default methods carry real bodies that need checking.
             for d in &t.defaults {
-                type_check_func(d, errors);
+                type_check_func(d, all_decls, errors);
             }
         }
         Decl::ExtendBlock(b) => {
             for m in &b.methods {
-                type_check_func(m, errors);
+                type_check_func(m, all_decls, errors);
             }
         }
-        Decl::ExportDecl(inner) => type_check_decl(&inner.inner, errors),
+        Decl::ExportDecl(inner) => type_check_decl(&inner.inner, all_decls, errors),
         // Struct / Enum / Import / Module / Reexport / ExternCrate: no
         // function bodies to type-check at this layer (struct/enum field
         // types are checked at codegen in v1.0).
@@ -451,14 +466,40 @@ fn type_check_decl(decl: &Decl, errors: &mut Vec<buff_lang_error::TypeError>) {
     }
 }
 
-fn type_check_func(f: &buff_lang_ast::FuncDecl, errors: &mut Vec<buff_lang_error::TypeError>) {
+fn type_check_func(
+    f: &buff_lang_ast::FuncDecl,
+    all_decls: &[Decl],
+    errors: &mut Vec<buff_lang_error::TypeError>,
+) {
     let mut inferencer = TypeInferencer::new();
-    // Pre-bind parameters using the same primitive mapping the codegen
-    // uses internally. User-defined types fall back to Unknown (permissive).
+    // Seed the inferencer with the program's enum declarations so a
+    // qualified variant access like `PreludeFn.Abs` (parsed as a zero-arg
+    // `MethodCall` on an `Ident` receiver) resolves to the enum's
+    // `Type::User` instead of falling through to `Type::Unknown`. This
+    // mirrors the working match-arm path (which consults the same
+    // `EnumRegistry` via `exhaustiveness::check_match_expr`).
+    inferencer.register_enum_decls(all_decls);
+    // Seed the inferencer with ALL function signatures (user-defined +
+    // extern) from the program's top-level declarations. This unblocks
+    // `if path_exists(x):` and similar patterns where an extern stub or
+    // forward-referenced function's return type was previously `Unknown`
+    // to the inferencer. The `typeref_to_type` closure converts parse-time
+    // `TypeRef` annotations to resolved `Type` values (primitives only;
+    // user-defined types return `None` and stay `Unknown`, which is
+    // permissive in the inference rules).
+    inferencer.register_function_signatures(all_decls, |tr| typeref_to_type(tr));
+    // Pre-bind EVERY parameter. `typeref_to_type` only recognises
+    // primitives + Option/Result; user-defined types (struct/enum names)
+    // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED
+    // the binding entirely for user-typed parameters, which surfaced as a
+    // spurious "undefined variable: <param>" error on the first reference
+    // (e.g. `if f == PreludeFn.Abs` where `f: PreludeFn`). Binding to
+    // `Type::Unknown` keeps the parameter resolvable â€” `Unknown` is
+    // permissive in the inference rules (see `promote_binary`), so the
+    // subsequent `==` comparison against the resolved enum type succeeds.
     for p in &f.params {
-        if let Some(ty) = typeref_to_type(&p.ty) {
-            inferencer.bind(&p.name.name, ty);
-        }
+        let ty = typeref_to_type(&p.ty).unwrap_or(Type::Unknown);
+        inferencer.bind(&p.name.name, ty);
     }
     // Walk body statements via the public infer_stmt API. Errors are
     // collected (not propagated) so multiple type errors per function are
@@ -471,7 +512,7 @@ fn type_check_func(f: &buff_lang_ast::FuncDecl, errors: &mut Vec<buff_lang_error
 }
 
 // ---------------------------------------------------------------------------
-// TypeRef → Type (minimal reimplementation).
+// TypeRef â†’ Type (minimal reimplementation).
 // ---------------------------------------------------------------------------
 
 /// Convert a parse-time [`TypeRef`] into a resolved [`Type`] for the
@@ -481,7 +522,7 @@ fn type_check_func(f: &buff_lang_ast::FuncDecl, errors: &mut Vec<buff_lang_error
 /// `crates/buff-lang-types/src/infer.rs` so the CLI's check pass can pre-bind
 /// function parameters without modifying the types crate (which would be a
 /// cross-crate ripple for T55). User-defined type names and generic
-/// applications other than Option/Result fall back to [`Type::Unknown`] — a
+/// applications other than Option/Result fall back to [`Type::Unknown`] â€” a
 /// permissive type that doesn't trigger spurious errors in inference.
 fn typeref_to_type(ty: &TypeRef) -> Option<Type> {
     match ty {
@@ -588,7 +629,7 @@ fn render_diagnostic(d: &Diagnostic, source_file: &SourceFile, use_color: bool) 
     };
     let mut out = header;
     out.push('\n');
-    // The body of the render (source line + caret) — reuse the diagnostic's
+    // The body of the render (source line + caret) â€” reuse the diagnostic's
     // render helper from buff_lang_error.
     let body = if use_color {
         d.render_with_color(&source_file.content, true)
@@ -628,7 +669,7 @@ mod tests {
 
     #[test]
     fn check_type_error_returns_has_errors() {
-        // Annotation says Int, value is String → TypeError.
+        // Annotation says Int, value is String â†’ TypeError.
         let src = "func main():\n    let x: Int = \"hello\"\n    print(x)\n";
         let report = check_source(src);
         assert_eq!(
@@ -647,7 +688,7 @@ mod tests {
 
     #[test]
     fn check_lex_error_returns_has_errors() {
-        // Unterminated string literal → LexerError.
+        // Unterminated string literal â†’ LexerError.
         let src = "func main():\n    print(\"oops)\n";
         let report = check_source(src);
         assert_eq!(
@@ -659,7 +700,7 @@ mod tests {
 
     #[test]
     fn check_parse_error_returns_has_errors() {
-        // Top-level let (no enclosing func) → ParseError.
+        // Top-level let (no enclosing func) â†’ ParseError.
         let src = "let x = 1\n";
         let report = check_source(src);
         assert_eq!(
@@ -695,7 +736,7 @@ mod tests {
 
     #[test]
     fn check_pascal_type_emits_no_warning() {
-        // Enums ARE parser-supported (struct decls are not yet — T54 lessons).
+        // Enums ARE parser-supported (struct decls are not yet â€” T54 lessons).
         let src = "enum HttpRequest { Get, Post }\n\nfunc main():\n    print(\"hi\")\n";
         let report = check_source(src);
         assert_eq!(report.outcome, CheckOutcome::Clean);
@@ -741,7 +782,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // T0-G3 — @deprecated call-site warnings
+    // T0-G3 â€” @deprecated call-site warnings
     // -----------------------------------------------------------------------
 
     #[test]
@@ -814,7 +855,7 @@ func caller():
 
     #[test]
     fn deprecated_definition_alone_emits_no_warning() {
-        // A deprecated fn that is never CALLED doesn't warn — the
+        // A deprecated fn that is never CALLED doesn't warn â€” the
         // warning is at call sites, not at the definition.
         let src = r#"
 @deprecated(since = "1.0", replacement = "other")
@@ -831,7 +872,7 @@ func unused_old():
 }
 
 // ---------------------------------------------------------------------------
-// T0-G3 — @deprecated call-site walker
+// T0-G3 â€” @deprecated call-site walker
 // ---------------------------------------------------------------------------
 
 /// Walk `decls` looking for calls to functions marked `@deprecated`.
@@ -839,16 +880,16 @@ func unused_old():
 /// plus the `since` and `replacement` (when provided).
 ///
 /// The walker is single-pass: first build a map of deprecated fn names
-/// → their `(since, replacement)` info, then visit every Stmt/Expr in
+/// â†’ their `(since, replacement)` info, then visit every Stmt/Expr in
 /// every other FuncDecl body, looking for `Expr::FuncCall` whose
 /// callee is an `Expr::Ident` matching a deprecated name.
 ///
 /// Limitations (acceptable for v1.13):
 /// - Does NOT resolve through module imports (a deprecated fn imported
-///   from another file is invisible to this walker — full resolution
+///   from another file is invisible to this walker â€” full resolution
 ///   arrives with T1's multi-file linker).
 /// - Does NOT walk into match arms / lambda bodies (deferred to v1.18+
-///   — adds a small recursive visitor; the common case of top-level
+///   â€” adds a small recursive visitor; the common case of top-level
 ///   calls in `func` bodies is covered).
 pub fn collect_deprecated_call_warnings(decls: &[Decl]) -> Vec<Diagnostic> {
     use buff_lang_ast::FuncDecl;

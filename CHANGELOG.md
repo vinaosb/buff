@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to the Buff transpiler are documented in this file.
 
@@ -12,7 +12,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > the SDK tier (`1.0.0` for tooling/framework crates, `1.2.0`/`2.0.0` for
 > the core compiler crates) and are bumped independently of release tags.
 
-## [1.25.0] - 2026-07-23
+
+## [1.39.0] - 2026-07-26
+
+### Added
+
+- **Real use case examples** (T11-T21): 5 batches of real-world .buff examples covering HTTP servers, TCP echo, file processing, CSV analysis, CLI tools, concurrent workers, auth flows, ETL pipelines, REST APIs with middleware, and generic containers.
+- **Golden-output test harness** (T5): automated equivalence testing for use-case examples.
+- **Framework Type variants** (T8): Tensor, Signal, Spectrum, Web, and other framework types registered in the type system.
+- **CI/CD infrastructure**: CODEOWNERS, FUNDING.yml, pages.yml with base path configuration.
+
+## [1.38.0] - 2026-07-26
+
+### Fixed
+
+- **Documentation accuracy** (F-wave): AGENTS.md, decisions, CHANGELOG, and book chapter corrections.
+- **GPU failure debugging** (T70): BUFF_FAIL_LOUD_GPU environment variable for runtime GPU diagnostics.
+- **Prelude registry** (F-fix): removed unreachable-pattern warnings in prelude type registry.
+
+## [1.37.0] - 2026-07-25
+
+### Added
+
+- **Bootstrap determinism gate** (T19): Stage 2 output verified equal to Stage 3, confirming reproducible builds.
+
+## [1.36.0] - 2026-07-25
+
+### Added
+
+- **Self-host codegen ports** (T18): all remaining compiler modules (lowering_helpers, conv_helpers, extern_crate_detection, dependency_detection, gpu_alignment, syn_helpers, expr_lowering, method_call_lowering, decl_lowering, type_lowering, multi_crate, format, context, move_analysis, comptime, derive_attrs) transpiled to Buff.
+- **buff doc --serve** (T102): local documentation server with live reload.
+- **Playground rebuild** (T117): browser playground updated for v1.25+ features.
+
+## [1.35.0] - 2026-07-25
+
+### Added
+
+- **Self-host types port** (T17): infer, prelude, prelude_types, ty, lib, and small analysis modules transpiled to Buff.
+- **Lazy iterators** (T71): Iterator trait with associated types for chained lazy sequence operations.
+- **The Book** (T55): mdbook documentation with 9 chapters covering the language.
+- **Http prelude type** (T80): full method registry for HTTP client operations.
+
+## [1.34.0] - 2026-07-25
+
+### Added
+
+- **Box<dyn Trait>** (T68): trait objects for dynamic dispatch when concrete types are unknown at compile time.
+- **Dispatch control attributes**: @prefer(cpu) and @force(gpu) for overriding runtime dispatch decisions (T64).
+- **@no-alloc lint** (T69): allocation-free function annotation.
+- **--detect-races** (T113): ThreadSanitizer passthrough for data-race detection.
+
+### Fixed
+
+- **Complex pattern type inference** (T42): match arms now correctly infer types for complex patterns.
+
+## [1.33.0] - 2026-07-25
+
+### Added
+
+- **Associated types in traits** (T75): traits can declare `type Item` with concrete implementations.
+- **VSCode extension v1.3** (T118): code actions, inlay hints, semantic tokens, updated grammar.
+- **buff fix** (T98): auto-apply diagnostic suggestions from the compiler.
+
+## [1.32.0] - 2026-07-25
+
+### Added
+
+- **buff profile** (T111): CPU and allocation profiler for user programs.
+- **Stability tiers document** (T91): formal stability classification for language features.
+- **Invalid test fixtures** (T51): comprehensive ErrorCode coverage with invalid test cases.
+
+## [1.31.0] - 2026-07-25
+
+### Added
+
+- **Performance attributes**: @inline/@no_inline (T76), @pin (T70), @workgroup(N) (T66), @blocking (T65).
+- **Dead code elimination** (T77) and **constant propagation** (T78) optimization passes.
+- **Comptime type introspection** (T74): Type.of() and Type.fields() for compile-time queries.
+- **Range syntax** (T84): a..b and a..=b ranges.
+- **Cross-file modules** (T72): import/export symbol resolution across files.
+- **String operations** (T73): split, join, trim, replace, upper, lower, contains.
+- **Decimal prelude type** (T89): precise decimal arithmetic.
+- **buff test** (T100): snapshot testing runner.
+- **buff generate** (T103): boilerplate template generator.
+
+## [1.26.0] - 2026-07-24
+
+### Added
+
+- **Multi-span diagnostics** with fix suggestions (T1).
+- **Dynamic workload-aware CPU/GPU dispatch** (T5): runtime selects based on live workload.
+- **Colored diagnostic output** (T43).
+- **Did-you-mean suggestions** (T53) in parser and module errors.
+- **E14xx runtime error codes** (T47) and **E15xx warning codes** (T48).
+- **LSP capabilities** (T45/T46): hover dispatch info, code actions, code lenses, inlay hints, semantic tokens.
+- **MCP bridge** (T62): Model Context Protocol server wrapping buff-lsp.
+- **--error-format json** (T1), **--explain** (T6), **--linker** (T2) CLI flags.
+`n`n## [1.25.0] - 2026-07-23
 
 ### Added
 
