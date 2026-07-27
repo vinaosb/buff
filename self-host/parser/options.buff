@@ -38,13 +38,13 @@ func edition_is_scientific(ed: Edition) -> Bool:
 // Unicode comparison aliases (<= >= != ->) are NOT gated here because they
 // lex directly into the existing ASCII token kinds (LtEq, GtEq, NotEq,
 // Arrow) — the parser never sees them as distinct tokens.
-func edition_require_for(ed: Edition, kind: TokenKind) -> Result<Void, String>:
+func edition_require_for(ed: Edition, kind: TokenKind) -> Option<String>:
     let needs_scientific = edition_token_needs_scientific(kind)
     let is_sci = edition_is_scientific(ed)
     if needs_scientific:
         if is_sci == false:
-            return Result.Err("this syntax requires edition = \"scientific\" in buff.toml (T57 mathematical syntax edition)")
-    return Result.Ok(())
+            return Option.Some("this syntax requires edition = scientific in buff.toml (T57 mathematical syntax edition)")
+    return Option.None
 
 // Helper: check if a TokenKind requires the Scientific edition.
 // Ported from the Rust matches!(kind, TokenKind::Sum | ...) or-pattern.
