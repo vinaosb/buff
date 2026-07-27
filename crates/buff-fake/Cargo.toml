@@ -26,11 +26,24 @@ path = "src/lib.rs"
 # fake 2.x: pure-Rust fake data generation — matches "no C library" rule.
 # API surface used: fake::faker::name::en::Name, fake::faker::internet::en::SafeEmail,
 # fake::faker::address::en::StreetAddress, fake::faker::phone_number::en::PhoneNumber,
-# fake::uuid::UUIDv4, fake::faker::lorem::en::Words, fake::faker::number::en::Number,
-# fake::faker::datetime::en::DateTime, fake::locales::EN, fake::locales::PT_BR.
+# fake::uuid::UUIDv4, fake::faker::lorem::en::Words, fake::faker::chrono::en::DateTime,
+# fake::locales::EN, fake::locales::PT_BR.
+# fake 2.x API drift (v1.39 self-host-completion P6.1): the old paths
+# `fake::faker::number::en::Number` (removed; `number` now exposes only
+# `Digit` / `NumberWithFormat`) and `fake::faker::datetime::en::DateTime`
+# (renamed to `fake::faker::chrono::en::DateTime`) no longer exist. `int()`
+# now uses `rand_08::Rng::gen_range` directly (subsumes the old
+# generate-then-clamp). `Words(N..=N)` became `Words(N..(N+1))` because
+# fake 2.x's `Words` takes `Range<usize>` not `RangeInclusive<usize>`.
 fake.workspace = true
-rand.workspace = true
+# `rand_08` is the workspace alias for rand 0.8 (matches `buff-web3`'s
+# precedent). REQUIRED because fake 2.10 depends on rand 0.8 internally
+# (rand_core 0.6); using workspace `rand = "0.9"` (rand_core 0.9) yields
+# "trait `rand_core::RngCore` is not implemented for `StdRng`" — two
+# distinct `RngCore` traits in the dep graph.
+rand_08.workspace = true
 chrono.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

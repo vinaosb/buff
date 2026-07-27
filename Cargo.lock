@@ -1106,7 +1106,8 @@ dependencies = [
  "chrono",
  "fake",
  "insta",
- "rand 0.9.5",
+ "rand 0.8.7",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

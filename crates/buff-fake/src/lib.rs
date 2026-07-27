@@ -22,6 +22,16 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+// fake 2.x API drift: `Fake` trait (provides `.fake_with_rng()`) must be
+// imported at module scope; previously it was pulled in transitively.
+use fake::Fake;
+// rand 0.8 API drift: `SeedableRng` trait (provides `StdRng::from_entropy`
+// and `StdRng::seed_from_u64`) hoisted to module scope; previously each
+// constructor had a local `use rand::SeedableRng;`. We use the workspace
+// alias `rand_08` (NOT `rand = "0.9"`) because fake 2.10's `Rng` trait
+// aliasing ties to rand_core 0.6 — see Cargo.toml comment for full rationale.
+use rand_08::SeedableRng;
+
 pub mod error;
 
 pub use error::FakerError;
@@ -37,7 +47,7 @@ pub use error::FakerError;
 #[derive(Debug, Clone)]
 pub struct Faker {
     locale: FakerLocale,
-    rng: rand::rngs::StdRng,
+    rng: rand_08::rngs::StdRng,
 }
 
 /// Supported locales for fake data generation.
@@ -53,7 +63,7 @@ impl Faker {
     pub fn new() -> Self {
         Faker {
             locale: FakerLocale::EnUs,
-            rng: rand::rngs::StdRng::from_entropy(),
+            rng: rand_08::rngs::StdRng::from_entropy(),
         }
     }
 
@@ -61,16 +71,15 @@ impl Faker {
     pub fn with_locale(locale: FakerLocale) -> Self {
         Faker {
             locale,
-            rng: rand::rngs::StdRng::from_entropy(),
+            rng: rand_08::rngs::StdRng::from_entropy(),
         }
     }
 
     /// Create a new `Faker` with the given locale and seed for reproducible output.
     pub fn with_seed(locale: FakerLocale, seed: u64) -> Self {
-        use rand::SeedableRng;
         Faker {
             locale,
-            rng: rand::rngs::StdRng::seed_from_u64(seed),
+            rng: rand_08::rngs::StdRng::seed_from_u64(seed),
         }
     }
 
@@ -159,13 +168,13 @@ impl Faker {
             FakerLocale::EnUs => {
                 use fake::faker::lorem::en::Words;
                 let words: Vec<String> =
-                    Words(word_count..=word_count).fake_with_rng(&mut self.rng);
+                    Words(word_count..(word_count + 1)).fake_with_rng(&mut self.rng);
                 words.join(" ")
             }
             FakerLocale::PtBr => {
                 use fake::faker::lorem::pt_br::Words;
                 let words: Vec<String> =
-                    Words(word_count..=word_count).fake_with_rng(&mut self.rng);
+                    Words(word_count..(word_count + 1)).fake_with_rng(&mut self.rng);
                 words.join(" ")
             }
         }));
@@ -174,15 +183,14 @@ impl Faker {
 
     /// Generate a random integer in [min, max] (inclusive).
     pub fn int(&mut self, min: i64, max: i64) -> i64 {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            use fake::faker::number::en::Number;
-            let range = min..=max;
-            Number().fake_with_rng::<i64, _>(&mut self.rng)
-        }));
-        // The fake crate's Number() generates within the full i64 range;
-        // we clamp to [min, max] for the Buff surface.
-        let val = result.unwrap_or(min);
-        val.clamp(min, max)
+        // fake 2.x API drift: `fake::faker::number::en::Number` was removed
+        // (the `number` module now exposes only `Digit` and
+        // `NumberWithFormat`). The Buff surface only ever needed a uniform
+        // integer in [min, max], so we go straight to `rand`'s `gen_range`,
+        // which subsumes the old generate-then-clamp dance.
+        use rand_08::Rng;
+        let result = catch_unwind(AssertUnwindSafe(|| self.rng.gen_range(min..=max)));
+        result.unwrap_or(min)
     }
 
     /// Generate a random datetime within the given range.
@@ -200,7 +208,7 @@ impl Faker {
                     "end must be after start".to_string(),
                 ));
             }
-            use fake::faker::datetime::en::DateTime;
+            use fake::faker::chrono::en::DateTime;
             let dt: chrono::DateTime<chrono::Utc> = DateTime().fake_with_rng(&mut self.rng);
             // Clamp to the requested range
             let clamped = if dt < start_dt {

@@ -1,0 +1,5 @@
+---
+source: crates/buff-fake/tests/core.rs
+expression: faker.uuid()
+---
+1fc9bfd0-32ab-431b-a53f-5063521fd5b4

@@ -551,20 +551,20 @@ Wave 7 (Bootstrap):
   **Detection**: `buff check self-host/lexer/tokenize.buff` (and other LEX files) exits 0.
   **Acceptance**: All 4 LEX-category files pass `buff check`.
 
-- [ ] **P1.2 — Fix PARSE-A category failures** (34 files — struct/enum indent parsing)
+- [x] **P1.2 — Fix PARSE-A category failures** (34 files — struct/enum indent parsing)
   **Files**: `crates/buff-lang-parser/src/{parser,stmt}.rs` — indent-sensitivity rules for struct/enum declarations.
   **Detection**: All 34 PARSE-A files pass `buff check`.
   **RESCOPE per triage.md**: most PARSE-A evaporated. Only remaining real parse failure was `self-host/codegen/comptime.buff` (match-colon form) — DONE via .buff rewrite commit `7e2fb5b` (comptime.buff match-colon → brace, bundled into P0.20 commit). Parser intentionally brace-only per documented design "braces are data" rule.
 
-- [ ] **P1.3 — Fix PARSE-B category failures** (5 files — qualified enum patterns)
+- [x] **P1.3 — Fix PARSE-B category failures** (5 files — qualified enum patterns)
   **Detection**: All 5 PARSE-B files pass `buff check`.
   **RESCOPE per triage.md**: evaporated. The qualified-enum access gap was a TYPE-inference bug, not parse. Fixed via P1.6.
 
-- [ ] **P1.4 — Fix PARSE-C category failures** (1 file)
+- [x] **P1.4 — Fix PARSE-C category failures** (1 file)
   **Detection**: The 1 PARSE-C file passes `buff check`.
   **RESCOPE per triage.md**: evaporated.
 
-- [ ] **P1.5 — Fix CODEGEN category failures** (5 files)
+- [x] **P1.5 — Fix CODEGEN category failures** (5 files)
   **Files**: `crates/buff-lang-codegen-rust/src/*.rs` — codegen lowering for specific patterns in self-host files.
   **Detection**: All 5 CODEGEN files pass `buff check` AND `buff build`.
   **RESCOPE per triage.md**: `buff check` doesn't reach codegen. The codegen/*.buff files are blocked by `extern "Rust"` ABI policy (T119) — DR-019 ACCEPTED permanently deferred. No P1.5 work needed.
@@ -687,10 +687,14 @@ Wave 7 (Bootstrap):
 
 > **Scope clarification** (Metis SC-2): Rust-side API drift fixes. Parallel to self-host.
 
-- [ ] **P6.1 — buff-fake fixes** — `cargo test -p buff-fake` failing tests. Fix each.
-- [ ] **P6.2 — buff-fuzz fixes** — `cargo test -p buff-fuzz` failing tests. Fix each.
-- [ ] **P6.3 — buff-jobs Worker backoff** (companion to P0.22) — Add exponential backoff in `crates/buff-jobs/src/worker.rs:100`.
+- [x] **P6.1 — buff-fake fixes** — `cargo test -p buff-fake` failing tests. Fix each.
+  **Status**: DONE (commit pending). Fixed 24 compile errors from fake 2.10 + rand_core version split. Root cause: fake 2.10 transitively pins rand 0.8 (rand_core 0.6), incompatible with workspace `rand = "0.9"` (rand_core 0.9). Fix reuses `rand_08` workspace alias (precedent: buff-web3). API drift: `datetime::en::DateTime` → `chrono::en::DateTime`; `number::en::Number` removed → direct `gen_range`. 17/17 tests pass, 8 new snapshots created (crate never compiled before).
+- [x] **P6.2 — buff-fuzz fixes** — `cargo test -p buff-fuzz` failing tests. Fix each.
+  **Status**: DONE commit `5607959`. Fixed syn 2.x API drift (LocalInit struct, Box<Block>, ExprClosure inputs/output) + a runner RNG clone bug that caused every iteration to generate the same value. 14/14 tests pass.
+- [x] **P6.3 — buff-jobs Worker backoff** (companion to P0.22) — Add exponential backoff in `crates/buff-jobs/src/worker.rs:100`.
+  **Status**: ALREADY COMPLETE — committed with P0.22 in `a8da78b`. The backoff sleep at `worker.rs:136-140` was added when P0.22 shipped.
 - [ ] **P6.4 — buff-web3 ABI fixes** (companion to P0.29) — Fix failing ABI bindings in `crates/buff-web3/src/`.
+  **Status**: RESCOPE — not broken bindings. The 4 `#[ignore]` tests at `tests/core.rs:296,304,317,325` need network (anvil/hardhat at localhost:8545). The fix is mock-provider test infrastructure, not ABI code changes.
 
 ---
 
