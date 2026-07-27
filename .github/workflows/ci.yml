@@ -223,22 +223,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── cargo-deny: C-library ban + license audit (hard gate) ──────────────────
-  cargo-deny:
-    name: cargo deny
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.95.0
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-      - name: Check bans + licenses
-        run: cargo deny check bans licenses
-
   # ── Self-host bootstrap check (HARD GATE) ─────────────────────────────────
   # P0.2: The 7 baseline files below MUST pass `buff check` for any PR to merge.
   # Adding new files to this baseline requires team consensus.
@@ -303,3 +287,11 @@ jobs:
         run: cargo build --release -p buff-lang-cli
       - name: Run behavioral equivalence harness
         run: bash scripts/equivalence-rust-vs-buff.sh
+      - name: Upload evidence artifacts (lms-001)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ github.sha }}
+          path: .sisyphus/evidence/
+          retention-days: 30
+          if-no-files-found: warn

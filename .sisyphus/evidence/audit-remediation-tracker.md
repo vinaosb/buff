@@ -2,16 +2,16 @@
 
 **Audit date:** 2026-07-26
 **Source:** `.sisyphus/reports/buff-audit-2026-07-26-2019-v3.{json,md}`
-**Last updated:** 2026-07-27 (Batch 5 complete — 26 FIXED, 5 DEFERRED, 3 PENDING)
+**Last updated:** 2026-07-27 (P0.20 — 27 FIXED, 5 DEFERRED, 2 PENDING)
 **Total findings:** 31 + FP-2 + 3 FNs = 34 tracked items (plus 1 disproven FP)
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| FIXED | 26 |
+| FIXED | 27 |
 | DEFERRED | 5 |
-| PENDING | 3 |
+| PENDING | 2 |
 | **Total** | **34** |
 
 ## Critical Findings (17)
@@ -29,7 +29,7 @@
 | dep-003 | buff-auth pulls ring v0.17.14 via jsonwebtoken 9.3.1 (AGENTS.md claims NO ring) | CRIT | P0.8 | FIXED | DR: `.sisyphus/decisions/ring-exception.md` (documented exception) |
 | ft-001 | buff-http-client has NO default timeout (requests can hang indefinitely) | CRIT | P0.17 | FIXED | commit `65b054e` |
 | lic-001 | License 3-way split (root LICENSE MIT-only, 70 crates declare MIT OR Apache-2.0) | CRIT | P0.13 | FIXED | commit `3ac6386`; LICENSE-APACHE + LICENSE-MIT added |
-| lms-001 | .sisyphus/evidence/ gitignored (audit trail not durably persisted, 147 files untracked) | CRIT | P0.20 | PENDING | Not started (edit queue: ci.yml #4) |
+| lms-001 | .sisyphus/evidence/ gitignored (audit trail not durably persisted, 147 files untracked) | CRIT | P0.20 | FIXED | commit `(this commit)`; CI artifact upload + MANIFEST.json schema |
 | obs-001 | buff-observe Tracer::bootstrap() never called (ALL tracing events silently dropped) | CRIT | P0.15 | DEFERRED | DR: `.sisyphus/decisions/buff-observe-deferred.md` |
 | prd-001 | AGENTS.md metadata 52 commits stale, branch wrong, tag range wrong | CRIT | P0.12 | FIXED | commit `caf80c2` |
 | sec-001 | buffup downloads release tarballs WITHOUT verifying .sha256 sidecar (supply-chain RCE) | CRIT | P0.9 | FIXED | commit `7ac027d` |

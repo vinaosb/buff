@@ -18,6 +18,8 @@ buff.lock
 
 # Sisyphus evidence
 .sisyphus/evidence/
+# Exception: MANIFEST.json schema doc must be tracked in git
+!.sisyphus/evidence/MANIFEST.json
 
 # Snapshot new files
 *.snap.new

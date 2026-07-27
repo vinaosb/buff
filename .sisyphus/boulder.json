@@ -1,14 +1,14 @@
 {
-  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/v1.26-real-use-cases-launch.md",
-  "started_at": "2026-07-24T00:00:00.0000000-03:00",
+  "active_plan": "C:/Users/vsbb1/source/repos/buff/.sisyphus/plans/self-host-completion-roadmap.md",
+  "started_at": "2026-07-27T00:00:00.0000000-03:00",
   "session_ids": [
-    "ses_current_atlas_v1_26_real_use_cases"
+    "ses_current_atlas_self_host_completion"
   ],
-  "plan_name": "v1.26-real-use-cases-launch",
+  "plan_name": "self-host-completion-roadmap",
   "worktree_path": null,
   "task_sessions": {},
-  "previous_active_plan": "buff-launch-readiness",
-  "previous_session_count": 80,
+  "previous_active_plan": "v1.26-real-use-cases-launch",
+  "previous_session_count": 1,
   "master_preserved_session_ids": [
     "ses_current_atlas_buff_master",
     "ses_087555ce0ffeNOqNTee60G0RhT",
@@ -25,5 +25,8 @@
     "ses_0702b04baffeUnLphfW2q3EHJe",
     "ses_06ff0be57ffe6mdxhjOfO2Ec4r"
   ],
-  "notes": "Previous plan buff-launch-readiness COMPLETE (165 commits, 42 tags v0.1.0-v1.38.0, all F1-F4 APPROVED). Starting v1.26-real-use-cases-launch: 28 tasks (24 implementation + 4 F-verify) across 5 waves. Wave 0: AGENTS.md refresh + baseline verification. Wave 1: CI repair + framework audit + test harness + unreachable! catalog. Wave 2: 13 parallel (bug fixes + 15 examples + 3 full apps + Pages pipeline). Wave 3: discovered fixes + docs. Wave 4: branch rename + Pages deploy."
+  "v1_26_real_use_cases_preserved_session_ids": [
+    "ses_current_atlas_v1_26_real_use_cases"
+  ],
+  "notes": "Previous plan v1.26-real-use-cases-launch COMPLETE (shipped as v1.39 per README/AGENTS.md). Starting self-host-completion-roadmap v16: ~24 of ~60 tasks DONE across Batches 1-5. Audit tracker: 26/34 FIXED, 5 DEFERRED, 3 PENDING (lms-001=P0.20 evidence persistence; arch-002+arch-003=P0.26 layer-violation refactor). Phase 0.5 spikes complete; S1 verdict NEEDS_DYN_TRAIT (multi_dispatch codegen broken end-to-end; Phase 2 will add dyn Trait using extension cap slot 1). Phase 1 P1.1 LEX done (commit 4ea5d99). self-host/triage.md reveals Phase 1 needs re-scoping: dominant blocker is 18 TYPE-inference failures from ONE root cause (qualified enum variant access in expression context not resolved by inferencer); most PARSE-A/B/C evaporated; 20 codegen/*.buff files blocked by extern Rust ABI -> DR-019 ACCEPTED permanently deferred. Next (Batch 6): (1) close 3 PENDING audit findings P0.20 + P0.26; (2) re-scope Phase 1 per triage and execute the dominant TYPE-inference fix (unblocks 18 files); (3) then Phase 2 dyn Trait extension; (4) then Phase 3-4 ports on self-host/v1 branch."
 }
