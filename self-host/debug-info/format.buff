@@ -1,0 +1,426 @@
+// Buff self-host port of `crates/buff-lang-debug-info/src/format.rs` (P3.4).
+//
+// `.buffmap` JSON format — forward + reverse lookup tables.
+//
+// The sidecar file is a single JSON object carrying everything an offline
+// consumer needs to translate Rust locations ↔ Buff locations:
+//
+// - The originating `.buff` file path + the generated `.rs` file path.
+// - A `function_mappings` list (Buff function name → Buff span + Rust
+//   line range) — used by `buff backtrace` and the DAP server to resolve
+//   which Buff function a Rust frame is inside.
+// - A `line_mappings` list (Rust line → Buff `(line, col, span)`), sorted
+//   by Rust line. Used by the panic hook for per-frame remapping.
+//
+// Both lookup directions are derived from the same data — the format is
+// just the JSON projection of [`SourceMap`] (see lib.buff). Reverse lookup
+// (Buff → Rust) is computed on demand by walking the sorted line list.
+//
+// # Versioning
+//
+// The format carries a [`MAP_FORMAT_VERSION`] so consumers can detect
+// future schema changes. The version is bumped only on breaking schema
+// changes (renamed keys, removed fields, restructured objects) — additive
+// changes stay forward-compatible.
+//
+// Faithful 1:1 translation of the Rust reference. The format layer's
+// only OS-level touch is filesystem I/O (`std::fs::write` /
+// `std::fs::read_to_string`) and JSON (de)serialisation
+// (`serde_json::to_string_pretty` / `serde_json::from_str`). The
+// Rust `#[derive(Serialize, Deserialize)]` on the three structs does NOT
+// port (per porting §8b — serde derives stay in the Rust host); the
+// structs themselves port as plain data types, and the (de)serialisation
+// is delegated to extern trampolines that call into `serde_json` on the
+// Rust side.
+//
+// Translation decisions:
+//   * `#[derive(Serialize, Deserialize)]` dropped from all three structs
+//     (porting §8b — serde is a Rust-host concern). The structs themselves
+//     port as plain data; JSON (de)serialisation goes through
+//     `extern "C" from "serde_json"` trampolines that call
+//     `serde_json::to_string_pretty` and `serde_json::from_str` on the
+//     Rust side.
+//   * `std::path::Path` -> `String` (porting §7b — Buff paths are UTF-8
+//     strings, matching the source_map.buff precedent).
+//   * `std::fs::write(path, contents)` -> `extern "C" from "std::fs"
+//     func fs_write_string(path: String, contents: String) -> Result<Void, String>`.
+//     The `std::io::Error` return becomes `Result<Void, String>` (the
+//     `String` carries the error message) — matches the template/lib.buff
+//     precedent (`fs_read_to_string` extern).
+//   * `std::fs::read_to_string(path)` -> `extern "C" from "std::fs"
+//     func fs_read_to_string(path: String) -> Result<String, String>`.
+//     Same extern shape as template/lib.buff line 116.
+//   * `serde_json::Error` -> `String` (the error message). Buff has no
+//     typed JSON-error type; the extern returns `Result<_, String>`.
+//   * `Result<String, serde_json::Error>` -> `Result<String, String>`.
+//   * `Result<(), std::io::Error>` -> `Result<Void, String>` (Buff has
+//     no unit type — porting §7e — `Void` is the extern-side spelling
+//     for "no meaningful return"; on the Buff side callers `let _ = ...`
+//     the result).
+//   * `path.to_string_lossy().into_owned()` -> the path is already a
+//     `String` in the Buff port; the lossy-conversion call disappears
+//     (porting §7b — Buff strings are owned UTF-8).
+//   * `Option<PathBuf>` -> `Option<String>` (porting §7b).
+//   * `self.functions.iter().map(anchor_to_mapping).collect()` -> a
+//     manual `for` loop that grows a `Vector<FunctionMapping>` (Buff's
+//     iterator prelude does not surface `map().collect()` cleanly; the
+//     imperative form matches the source_map.buff style).
+//   * `self.rust_to_buff.iter().map(|(k, v)| ...).collect()` -> manual
+//     `for` over `rust_to_buff.entries()` (Buff `Map.entries()` returns
+//     `Vector<(K, V)>` — see source_map.buff line 274).
+//   * `function_mappings.sort_by_key(|m| (m.rust_start_line, m.buff_span_start))`
+//     -> `vector_sort_by_key_fn(...)` extern (Buff's Vector prelude does
+//     not surface a stable `sort_by_key` taking a closure; the sort is
+//     delegated to an extern trampoline that runs Rust's
+//     `Vec::sort_by_key` on the Buff-assembled vector). Determinism is
+//     preserved — same input produces same output, byte-identical.
+//   * `pub(crate) fn to_buff_map_file(&self) -> BuffMapFile` ->
+//     `source_map_to_buff_map_file(m: SourceMap) -> BuffMapFile` free
+//     function (Buff has no `pub(crate)` — porting §8g; the receiver
+//     becomes the first parameter).
+//   * `#[cfg(test)] mod tests { ... }` -> dropped. Per porting §5a,
+//     inline unit tests do not port.
+//   * `usize` / `u32` -> `Int` (porting §7a).
+//
+// Runtime intrinsics declared as extern stubs — actual linking deferred
+// to the buff-lang-runtime crate (filesystem I/O) and serde_json crate
+// (JSON (de)serialisation). The extern surface matches the
+// template/lib.buff precedent.
+
+import { Span, SourceId } from "../error/span"
+import {
+    BuffLocation,
+    FunctionAnchor,
+    SourceMap,
+    source_map_new,
+    source_map_with_buff_file,
+    source_map_with_rust_file,
+    source_map_add_function,
+    source_map_add_line_mapping,
+} from "lib"
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+// The `.buffmap` JSON schema version.
+//
+// Bump only on breaking schema changes. Additive changes stay
+// forward-compatible — consumers must ignore unknown keys (default
+// `serde` behaviour when no `#[serde(deny_unknown_fields)]` is set).
+// Ported from a Rust `const` to a function since Buff only allows
+// `func` declarations at the top level.
+func map_format_version() -> Int:
+    return 1
+
+// =============================================================================
+// JSON-friendly projection types
+// =============================================================================
+
+// Top-level JSON object written to `<binary>.buffmap`.
+//
+// Both `function_mappings` + `line_mappings` lists are sorted at
+// serialize time so the same [`SourceMap`] always produces byte-identical
+// JSON (project hard rule — see root AGENTS.md "Determinism").
+struct BuffMapFile:
+    version: Int
+    buff_file: Option<String>
+    rust_file: Option<String>
+    source_id: Int
+    function_mappings: Vector<FunctionMapping>
+    line_mappings: Vector<LineMapping>
+
+// JSON projection of a [`FunctionAnchor`].
+struct FunctionMapping:
+    buff_name: String
+    buff_span_start: Int
+    buff_span_end: Int
+    buff_source_id: Int
+    buff_line: Int
+    buff_col: Int
+    rust_start_line: Int
+    rust_end_line: Int
+
+// JSON projection of one entry of [`SourceMap::rust_to_buff`].
+struct LineMapping:
+    rust_line: Int
+    buff_line: Int
+    buff_col: Int
+    buff_span_start: Int
+    buff_span_end: Int
+    buff_source_id: Int
+    // serde `#[serde(default, skip_serializing_if = "Option::is_none")]`
+    // — the derive stays in Rust; the field is plain `Option<String>`
+    // in the Buff port, and the JSON-emission rule lives in the
+    // `serde_json_to_string_pretty` extern on the host side.
+    buff_name: Option<String>
+
+// =============================================================================
+// JSON extern trampolines (link to serde_json on the Rust side)
+// =============================================================================
+
+extern "C" from "serde_json" func serde_json_to_string_pretty(file: BuffMapFile) -> Result<String, String>
+
+extern "C" from "serde_json" func serde_json_from_buff_map_file(json: String) -> Result<BuffMapFile, String>
+
+// =============================================================================
+// Filesystem extern trampolines (link to std::fs on the Rust side)
+// =============================================================================
+
+extern "C" from "std::fs" func fs_write_string(path: String, contents: String) -> Result<Void, String>
+
+extern "C" from "std::fs" func fs_read_to_string(path: String) -> Result<String, String>
+
+// =============================================================================
+// Vector sort trampoline (link to Rust's Vec::sort_by_key)
+// =============================================================================
+//
+// Buff's Vector prelude does not surface a stable `sort_by_key` taking
+// a closure; the sort is delegated to an extern trampoline that runs
+// Rust's `Vec::sort_by_key` on the Buff-assembled vector. Determinism
+// is preserved — same input produces same output, byte-identical.
+
+extern "C" from "buff_lang_runtime" func vector_sort_function_mappings_by_key(v: Vector<FunctionMapping>) -> Vector<FunctionMapping>
+
+extern "C" from "buff_lang_runtime" func vector_sort_line_mappings_by_key(v: Vector<LineMapping>) -> Vector<LineMapping>
+
+// =============================================================================
+// Serialise / deserialise entry points
+// =============================================================================
+
+// Serialise a [`SourceMap`] into a pretty-printed `.buffmap` JSON string.
+//
+// Both `function_mappings` and `line_mappings` are sorted at serialize
+// time so JSON output is byte-identical across runs.
+func serialize_to_string(map: SourceMap) -> Result<String, String>:
+    let file = source_map_to_buff_map_file(map)
+    return serde_json_to_string_pretty(file)
+
+// Deserialise a `.buffmap` JSON string back into a [`SourceMap`].
+//
+// Unknown keys are silently ignored (forwards-compat with future
+// schema versions).
+func deserialize(json: String) -> Result<SourceMap, String>:
+    let result = serde_json_from_buff_map_file(json)
+    match result {
+        Err(msg) => return Err(msg),
+        Ok(file) => return Ok(source_map_from_buff_map_file(file)),
+    }
+
+// Write a [`SourceMap`] to a `.buffmap` file at `path`.
+func write_to_file(map: SourceMap, path: String) -> Result<Void, String>:
+    let json_result = serialize_to_string(map)
+    match json_result {
+        Err(msg) => return Err(msg),
+        Ok(json) => return fs_write_string(path, json),
+    }
+
+// Read a `.buffmap` file from `path` into a [`SourceMap`].
+func read_from_file(path: String) -> Result<SourceMap, String>:
+    let read_result = fs_read_to_string(path)
+    match read_result {
+        Err(msg) => return Err(msg),
+        Ok(json) => return deserialize(json),
+    }
+
+// =============================================================================
+// SourceMap <-> BuffMapFile projection
+// =============================================================================
+
+// Project this [`SourceMap`] into the JSON-friendly [`BuffMapFile`].
+//
+// Mirrors the Rust `pub(crate) fn to_buff_map_file(&self) -> BuffMapFile`.
+// Buff has no `pub(crate)` visibility — the function is plain `func`
+// (module-private by default per buff-conventions §15); callers in this
+// file reach it directly.
+func source_map_to_buff_map_file(m: SourceMap) -> BuffMapFile:
+    let mut function_mappings: Vector<FunctionMapping> = collect_function_mappings(m.functions)
+    function_mappings = vector_sort_function_mappings_by_key(function_mappings)
+
+    let mut line_mappings: Vector<LineMapping> = collect_line_mappings(m.rust_to_buff)
+    line_mappings = vector_sort_line_mappings_by_key(line_mappings)
+
+    return BuffMapFile.new(
+        version: MAP_FORMAT_VERSION,
+        buff_file: source_map_path_to_string(m.buff_file),
+        rust_file: source_map_path_to_string(m.rust_file),
+        source_id: source_id_value(m.source_id),
+        function_mappings: function_mappings,
+        line_mappings: line_mappings,
+    )
+
+// Rebuild a [`SourceMap`] from a deserialised [`BuffMapFile`].
+//
+// Mirrors the Rust `pub(crate) fn from_buff_map_file(file: BuffMapFile) -> Self`.
+func source_map_from_buff_map_file(file: BuffMapFile) -> SourceMap:
+    let mut map = source_map_with_buff_file(
+        source_map_new(),
+        unwrap_or_default_string(file.buff_file),
+        source_id_new(file.source_id),
+    )
+    match file.rust_file {
+        None => skip_option(),
+        Some(rust_file) => map = source_map_with_rust_file(map, rust_file),
+    }
+    map = add_function_mappings(map, file.function_mappings)
+    map = add_line_mappings(map, file.line_mappings)
+    return map
+
+// No-op marker for the `None` branch of the `match file.rust_file` above.
+// Buff `match` arms must be single expressions; a multi-statement "set
+// map and continue" body lives in the `Some(...)` branch, so the `None`
+// arm needs a function-call shape. Mirrors the `skip_decl` pattern from
+// capture.buff and the `marker` pattern from error/lib.buff.
+func skip_option():
+    return
+
+// Walk a `Vector<FunctionAnchor>` and produce the matching
+// `Vector<FunctionMapping>` projection. Extracted as a helper so
+// `source_map_to_buff_map_file` stays a single-expression chain.
+func collect_function_mappings(anchors: Vector<FunctionAnchor>) -> Vector<FunctionMapping>:
+    let out: Vector<FunctionMapping> = []
+    let mut i = 0
+    for i < anchors.len():
+        let anchor = anchors[i]
+        out.push(anchor_to_mapping(anchor))
+        i = i + 1
+    return out
+
+// Walk a `Map<Int, BuffLocation>` and produce the matching
+// `Vector<LineMapping>` projection. Buff `Map.entries()` returns
+// `Vector<(K, V)>`; the iteration uses the destructuring-tuple pattern
+// from source_map.buff line 223.
+func collect_line_mappings(rust_to_buff: Map<Int, BuffLocation>) -> Vector<LineMapping>:
+    let out: Vector<LineMapping> = []
+    let entries = rust_to_buff.entries()
+    let mut i = 0
+    for i < entries.len():
+        let (rust_line, loc) = entries[i]
+        out.push(LineMapping.new(
+            rust_line: rust_line,
+            buff_line: loc.line,
+            buff_col: loc.col,
+            buff_span_start: span_start(loc.span),
+            buff_span_end: span_end(loc.span),
+            buff_source_id: span_source_id_value(loc.span),
+            buff_name: loc.name,
+        ))
+        i = i + 1
+    return out
+
+// Walk a `Vector<FunctionMapping>` and append each as a `FunctionAnchor`
+// to the running SourceMap. Returns the updated map. Mirrors the Rust
+// `for fm in file.function_mappings { map.add_function(...) }` loop.
+func add_function_mappings(map: SourceMap, fms: Vector<FunctionMapping>) -> SourceMap:
+    let mut i = 0
+    for i < fms.len():
+        let fm = fms[i]
+        let span = span_new(fm.buff_span_start, fm.buff_span_end, source_id_new(fm.buff_source_id))
+        source_map_add_function(map, FunctionAnchor.new(
+            name: fm.buff_name,
+            buff_span: span,
+            buff_line: fm.buff_line,
+            buff_col: fm.buff_col,
+            rust_start_line: fm.rust_start_line,
+            rust_end_line: fm.rust_end_line,
+            buff_location: Option.Some(BuffLocation.new(
+                line: fm.buff_line,
+                col: fm.buff_col,
+                span: span,
+                name: Option.None,
+            )),
+        ))
+        i = i + 1
+    return map
+
+// Walk a `Vector<LineMapping>` and append each as a line-level
+// `BuffLocation` to the running SourceMap. Returns the updated map.
+// Mirrors the Rust `for lm in file.line_mappings { map.add_line_mapping(...) }`
+// loop.
+func add_line_mappings(map: SourceMap, lms: Vector<LineMapping>) -> SourceMap:
+    let mut i = 0
+    for i < lms.len():
+        let lm = lms[i]
+        source_map_add_line_mapping(
+            map,
+            lm.rust_line,
+            BuffLocation.new(
+                line: lm.buff_line,
+                col: lm.buff_col,
+                span: span_new(
+                    lm.buff_span_start,
+                    lm.buff_span_end,
+                    source_id_new(lm.buff_source_id),
+                ),
+                name: lm.buff_name,
+            ),
+        )
+        i = i + 1
+    return map
+
+// =============================================================================
+// anchor_to_mapping — FunctionAnchor -> FunctionMapping projection
+// =============================================================================
+
+// Project one [`FunctionAnchor`] into its JSON-friendly form.
+func anchor_to_mapping(anchor: FunctionAnchor) -> FunctionMapping:
+    return FunctionMapping.new(
+        buff_name: anchor.name,
+        buff_span_start: span_start(anchor.buff_span),
+        buff_span_end: span_end(anchor.buff_span),
+        buff_source_id: span_source_id_value(anchor.buff_span),
+        buff_line: anchor.buff_line,
+        buff_col: anchor.buff_col,
+        rust_start_line: anchor.rust_start_line,
+        rust_end_line: anchor.rust_end_line,
+    )
+
+// =============================================================================
+// Small accessor helpers (extern trampolines for sibling-crate fields)
+// =============================================================================
+//
+// The Buff port of `Span` (in self-host/error/span.buff) exposes fields
+// by name, but the corpus style (see conv_helpers.buff) standardises on
+// extern trampolines for cross-crate field reads — the named accessors
+// below keep call sites uniform with the codegen port. Each links to the
+// Rust host's `Span` accessors; the Buff side never inspects the layout.
+
+extern "C" from "buff_lang_error" func span_start(span: Span) -> Int
+
+extern "C" from "buff_lang_error" func span_end(span: Span) -> Int
+
+extern "C" from "buff_lang_error" func span_source_id_value(span: Span) -> Int
+
+extern "C" from "buff_lang_error" func span_new(start: Int, end: Int, source_id: SourceId) -> Span
+
+extern "C" from "buff_lang_error" func source_id_value(id: SourceId) -> Int
+
+// Construct a `SourceId` from a raw integer. Mirrors the Rust tuple-
+// struct constructor `SourceId(n)` via the sibling error port's
+// `source_id_new` helper.
+func source_id_new(value: Int) -> SourceId:
+    return error_span_source_id_new(value)
+
+// extern trampoline to the sibling error port's `source_id_new`. Same
+// shape as in lib.buff; duplicated here so this file is self-contained
+// for `buff check` (Buff's import resolver is the M7 monolith, not yet
+// active — until then each file imports/redeclares its externs locally).
+extern "C" from "buff_lang_error" func error_span_source_id_new(value: Int) -> SourceId
+
+// Extract the path string from an `Option<String>`, returning "" for
+// `None`. Mirrors the Rust `file.buff_file.unwrap_or_default()` pattern
+// (porting §8a — `unwrap_or_default` is allowed since it is not
+// `unwrap()`/`expect()`/`panic!`).
+func unwrap_or_default_string(opt: Option<String>) -> String:
+    return match opt {
+        Some(s) => s,
+        None => "",
+    }
+
+// Convert the `Option<String>` path field of a SourceMap into the
+// JSON-friendly form (`Some(s) => Some(s)`, `None => None`). The Rust
+// original calls `path.to_string_lossy().into_owned()` — in Buff the
+// path is already `String`, so the projection is identity. Extracted
+// as a named helper so the call site reads cleanly.
+func source_map_path_to_string(opt: Option<String>) -> Option<String>:
+    return opt

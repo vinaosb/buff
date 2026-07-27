@@ -1,0 +1,347 @@
+// Buff self-host port of `crates/buff-lang-debug-info/src/lib.rs` (P3.4).
+//
+// `buff-lang-debug-info` — Buff-span stack traces via `.buffmap` source-map
+// sidecar + `std::panic` hook.
+//
+// # T24 — Stack Traces with Buff Spans
+//
+// Every modern scripting language that lowers to a lower-level runtime
+// (TypeScript, Python, Dart, …) gives users stack traces in their own
+// language, not the underlying IR. Buff lowers to Rust, so without a
+// translation layer a panicked Buff program shows the user generated
+// `<file>.rs:LINE:COL` paths and Rust-internal frames — useless for
+// debugging the Buff source.
+//
+// This crate ships that translation layer in three pieces:
+//
+// 1. **Capture** ([`capture`]) — during codegen, walk the Buff AST +
+//    formatted Rust source and build a [`SourceMap`] carrying the
+//    bidirectional Rust-line ↔ Buff-(file,line,col,span) mapping plus
+//    the originating Buff identifier names (function names especially).
+// 2. **Format** ([`format`]) — serialise the [`SourceMap`] to a JSON
+//    `.buffmap` sidecar file written next to the compiled binary. Both
+//    forward (Rust → Buff) and reverse (Buff → Rust) lookup tables ship
+//    in the file so the DAP server (T136) and `buff backtrace` can
+//    consume it for offline work.
+// 3. **Panic hook** ([`panic_hook`]) — register a `std::panic::set_hook`
+//    interceptor at runtime that reads the `.buffmap` and walks the
+//    Rust backtrace, remapping each frame to its Buff source location.
+//    `RUST_BACKTRACE=1` is always preserved as an escape hatch (full
+//    Rust trace printed AFTER the Buff trace).
+//
+// # Pipeline wiring
+//
+// ```text
+//   buff-lang-codegen-rust::generate_rust(&[Decl]) -> String
+//        │
+//        ▼  capture::build_source_map(decls, &rust_source, buff_path)
+//   buff-lang-debug-info::SourceMap
+//        │
+//        ▼  format::serialize(&source_map) -> String
+//   <binary>.buffmap   (written alongside <binary>)
+//        │
+//        ▼  panic_hook::install("<binary>.buffmap")
+//   std::panic::set_hook(...)
+//        │
+//        ▼  on panic: panic_hook::remap_panic_backtrace(...) -> Buff trace
+//   stderr
+// ```
+//
+// # Determinism
+//
+// All map/set types in this crate are [`BTreeMap`] / [`BTreeSet`] — never
+// `HashMap`/`HashSet` — so the `.buffmap` JSON output is byte-identical
+// across runs (project hard rule, see root AGENTS.md).
+//
+// Faithful 1:1 translation of the Rust reference. Buff has no `&` / `&mut`
+// references (per porting §7b), no `PathBuf` (file paths are plain `String`,
+// per the source_map.buff precedent), no `usize`/`u32` distinction (porting
+// §7a collapses to `Int`), and no `impl Type { fn ... }` blocks as the
+// idiom (per porting §8g the Rust impl block becomes a family of free
+// functions taking the receiver as the first parameter; the receiver name
+// follows the `<type_prefix>_<method_name>` convention from the corpus).
+//
+// Translation decisions:
+//   * `//!` crate doc -> `//` file-level header block (porting §3).
+//   * `pub mod capture; pub mod format; pub mod panic_hook;` -> deleted.
+//     Buff has no `mod` keyword; sibling files in `self-host/debug-info/`
+//     are auto-linked by the monolith loader (Phase 5, M7). Until M7
+//     lands, multi-file ports are read as a flat namespace.
+//   * `pub use capture::build_source_map;` (and friends) -> deleted. Buff
+//     has no glob re-export; each sibling file's public symbols are
+//     surfaced via their qualified `<file>_<symbol>` names directly.
+//     M7 will resolve cross-file references; until then callers use the
+//     prefixed form.
+//   * `std::collections::BTreeMap<usize, BuffLocation>` ->
+//     `Map<Int, BuffLocation>` (porting §7c — Buff `Map` is BTreeMap-backed,
+//     deterministic iteration, matches the project hard rule).
+//   * `std::path::PathBuf` -> `Option<String>` (Buff paths are UTF-8
+//     strings; `Option<None>` mirrors the Rust `None` for "path not set").
+//   * `buff_lang_error::{SourceId, Span}` -> `import` from the sibling
+//     error port (`../error/span`). Buff's cross-file import resolves to
+//     the same SourceId/Span types defined there.
+//   * `impl SourceMap { fn new(); fn with_buff_file(); ... }` -> a family
+//     of free functions `source_map_new`, `source_map_with_buff_file`, etc.
+//     taking the receiver as the first parameter (`m: SourceMap`). The
+//     Rust `&mut self` of `add_line_mapping` / `add_function` is implicit
+//     (Buff mutates struct fields in place via `m.field = ...`).
+//   * `impl Default for SourceMap` -> `source_map_default()` free function
+//     (Buff has no `Default` trait; the convention from span.buff is a
+//     `<type>_default` function that delegates to the regular constructor).
+//   * `#[derive(Debug, Clone, PartialEq, Eq)]` dropped — Buff auto-derives
+//     `Debug, Clone, PartialEq`; the rest are Rust host concerns.
+//   * `usize` / `u32` -> `Int` (porting §7a — all unsigned widths collapse
+//     to `Int`; document if precision matters, which it does not for
+//     line/column/source_id values that fit in i64).
+//
+// Runtime intrinsics declared as extern stubs — actual linking deferred to
+// the buff-lang-runtime crate. This file itself has NO runtime intrinsics
+// (it is pure data + helper functions on that data); the extern stubs live
+// in `capture.buff` (AST access), `format.buff` (JSON + filesystem), and
+// `panic_hook.buff` (panic hook + backtrace).
+
+import { Span, SourceId } from "../error/span"
+
+// The bidirectional Rust-line ↔ Buff-location mapping that backs the
+// `.buffmap` sidecar file.
+//
+// Built during codegen by [`build_source_map`] (see capture.buff). Forward
+// lookup (Rust → Buff) is consulted by the panic hook at runtime; reverse
+// lookup (Buff → Rust) is consumed by the DAP server (T136) +
+// `buff backtrace`.
+//
+// All maps are [`BTreeMap`]s keyed by Rust line number so iteration order
+// is deterministic — the same Buff program produces the same `.buffmap`
+// JSON byte-for-byte across runs (project hard rule).
+struct SourceMap:
+    // Path of the originating `.buff` source file (recorded into the
+    // `.buffmap` so offline consumers — `buff backtrace`, DAP — know
+    // which file the mappings refer to without extra context).
+    buff_file: Option<String>
+    // Path of the generated `.rs` file (recorded for symmetry + for
+    // offline consumers that need to cross-reference rustc diagnostics).
+    rust_file: Option<String>
+    // Rust line (1-based) → Buff location. Populated during codegen by
+    // scanning the formatted Rust source for Buff identifier anchors
+    // (function names). See [`build_source_map`] in capture.buff.
+    rust_to_buff: Map<Int, BuffLocation>
+    // Function-level mapping: Buff function name → `(Buff span, Rust
+    // line range)`. Used by [`remap_panic_backtrace`] in panic_hook.buff
+    // to resolve which Buff function a Rust frame is inside, even when
+    // no per-line mapping exists for the exact Rust line of the frame.
+    functions: Vector<FunctionAnchor>
+    // Source ID of the originating `.buff` file. Stored so consumers
+    // that round-trip the [`Span`] back through `buff_lang_error`'s
+    // [`SourceMap`] (`lookup(id, offset)`) can resolve byte offsets to
+    // `(line, col)` pairs.
+    source_id: SourceId
+
+// A Buff source location: byte span + the resolved 1-based `(line, col)`
+// pair + the originating Buff identifier name (function name, etc.) when
+// known.
+//
+// `line` and `col` are pre-computed during capture (via the canonical
+// `buff_lang_error::SourceFile::lookup`) so consumers don't need to
+// re-resolve byte offsets at runtime. The `name` field is the
+// human-friendly identifier shown in stack traces (`helper`, `main`, …);
+// `None` when the location has no associated identifier (e.g. an
+// intermediate statement line).
+struct BuffLocation:
+    // 1-based line number in the originating `.buff` file.
+    line: Int
+    // 1-based column number in the originating `.buff` file.
+    col: Int
+    // Byte span in the originating `.buff` file. Round-trips through
+    // [`buff_lang_error::SourceMap`] for diagnostic rendering.
+    span: Span
+    // Originating Buff identifier name when known (e.g. "helper",
+    // "main"). `None` for locations that don't correspond to a named
+    // declaration.
+    name: Option<String>
+
+// Function-level anchor: Buff function name + Buff span + Rust line
+// range. Built by [`build_source_map`] in capture.buff for each top-level
+// Buff function declaration.
+//
+// Consulted by [`remap_panic_backtrace`] in panic_hook.buff (via
+// [`source_map_lookup_buff`]'s fallback path) when no exact per-line
+// mapping exists for a Rust frame's line — the frame is attributed to
+// whichever Buff function its Rust line falls inside.
+struct FunctionAnchor:
+    // Buff function name (e.g. "helper", "main").
+    name: String
+    // Byte span of the Buff function declaration.
+    buff_span: Span
+    // 1-based line of the Buff function declaration in the `.buff` file.
+    buff_line: Int
+    // 1-based column of the Buff function declaration.
+    buff_col: Int
+    // 1-based start line of the generated `fn <name>(...)` in the
+    // formatted Rust source.
+    rust_start_line: Int
+    // 1-based end line (closing `}`) of the generated fn in the Rust
+    // source.
+    rust_end_line: Int
+    // Cached Buff location used by [`source_map_lookup_buff`]'s
+    // fallback path. `None` when the anchor carries no resolvable
+    // Buff location (e.g. built manually without line/col context).
+    buff_location: Option<BuffLocation>
+
+// Create an empty source map with no file paths recorded.
+func source_map_new() -> SourceMap:
+    return SourceMap.new(
+        buff_file: Option.None,
+        rust_file: Option.None,
+        rust_to_buff: Map.new(),
+        functions: [],
+        source_id: source_id_new(0),
+    )
+
+// Record the originating `.buff` file path + its [`SourceId`].
+//
+// Returns a new SourceMap (the receiver is consumed); matches the Rust
+// builder pattern `Self -> Self`. Callers chain this with the other
+// `with_*` functions.
+func source_map_with_buff_file(m: SourceMap, path: String, source_id: SourceId) -> SourceMap:
+    let updated = m
+    updated.buff_file = Option.Some(path)
+    updated.source_id = source_id
+    return updated
+
+// Record the generated `.rs` file path.
+//
+// Returns a new SourceMap (the receiver is consumed); matches the Rust
+// builder pattern `Self -> Self`.
+func source_map_with_rust_file(m: SourceMap, path: String) -> SourceMap:
+    let updated = m
+    updated.rust_file = Option.Some(path)
+    return updated
+
+// Record that a 1-based `rust_line` corresponds to a Buff
+// [`BuffLocation`]. Later calls for the same `rust_line` win
+// (the previous entry is overwritten).
+func source_map_add_line_mapping(m: SourceMap, rust_line: Int, location: BuffLocation):
+    m.rust_to_buff[rust_line] = location
+
+// Record a function-level [`FunctionAnchor`] — name + Buff span +
+// Rust line range. The anchor is consulted by
+// [`remap_panic_backtrace`] in panic_hook.buff when no exact per-line
+// mapping exists for a Rust frame's line (the frame falls inside
+// the function's Rust line range).
+func source_map_add_function(m: SourceMap, anchor: FunctionAnchor):
+    m.functions = vector_push(m.functions, anchor)
+
+// Look up the [`BuffLocation`] for a 1-based `rust_line`.
+//
+// Returns the exact match when `rust_line` was recorded via
+// [`source_map_add_line_mapping`]. Otherwise, returns the closest
+// recorded line **at or below** `rust_line` — this mirrors how
+// `rustc`/panic locations point at the *start* of the statement that
+// failed, so the nearest mapped statement above is the best
+// candidate. As a final fallback, walks the [`functions`] list for any
+// anchor whose Rust line range contains `rust_line` and returns its
+// Buff location.
+func source_map_lookup_buff(m: SourceMap, rust_line: Int) -> Option<BuffLocation>:
+    let exact = m.rust_to_buff.get(rust_line)
+    if exact != Option.None:
+        return exact
+    let nearest_below = source_map_scan_closest_below(m.rust_to_buff, rust_line)
+    if nearest_below != Option.None:
+        return nearest_below
+    // Final fallback: function-level containment. The first function
+    // whose [rust_start_line, rust_end_line] range contains rust_line
+    // wins. functions is a Vec (declaration order, deterministic) so
+    // the order matches AST order.
+    return source_map_find_function_location(m.functions, rust_line)
+
+// Inner scan: walk the map entries in ascending key order, keeping the
+// largest key `<= rust_line`. Separated from `source_map_lookup_buff` so
+// the `Option<BuffLocation>` initial value comes from a typed helper
+// rather than an explicit annotation. Matches the source_map.buff
+// precedent (lines 215-229 of self-host/error/source_map.buff).
+func source_map_scan_closest_below(rust_to_buff: Map<Int, BuffLocation>, rust_line: Int) -> Option<BuffLocation>:
+    let mut best_line = -1
+    let mut best_loc = rust_to_buff.get(-1)  // sentinel None
+    let entries = rust_to_buff.entries()
+    let mut i = 0
+    for i < entries.len():
+        let (rl, loc) = entries[i]
+        if rl <= rust_line:
+            if rl > best_line:
+                best_line = rl
+                best_loc = Option.Some(loc)
+        i = i + 1
+    return best_loc
+
+// Inner fallback: scan the function-anchor list for the first anchor
+// whose [rust_start_line, rust_end_line] range contains `rust_line`,
+// then return its `buff_location` field (which may itself be `None`).
+func source_map_find_function_location(functions: Vector<FunctionAnchor>, rust_line: Int) -> Option<BuffLocation>:
+    let mut i = 0
+    for i < functions.len():
+        let f = functions[i]
+        if rust_line >= f.rust_start_line && rust_line <= f.rust_end_line:
+            return f.buff_location
+        i = i + 1
+    return Option.None
+
+// Look up the originating Buff identifier name for a 1-based
+// `rust_line`, if any. Convenience wrapper around
+// [`source_map_lookup_buff`] for the panic hook (which shows function
+// names in stack traces).
+func source_map_lookup_name(m: SourceMap, rust_line: Int) -> Option<String>:
+    let loc = source_map_lookup_buff(m, rust_line)
+    return source_map_extract_name(loc)
+
+// Inner helper: pull the `name` field out of `Option<BuffLocation>`.
+// Separated from `source_map_lookup_name` so the `Option<String>` return
+// is threaded through a single named function rather than inlined
+// `.map`/`.and_then` chains (the corpus style favours named helpers
+// over inline closure pipelines — see source_map.buff).
+func source_map_extract_name(loc: Option<BuffLocation>) -> Option<String>:
+    return match loc {
+        Some(l) => l.name,
+        None => Option.None,
+    }
+
+// Returns `true` when no Rust-line ↔ Buff mappings have been
+// recorded (line OR function level). Consumers can use this to
+// decide whether to fall back to the raw Rust trace.
+func source_map_is_empty(m: SourceMap) -> Bool:
+    let line_empty = m.rust_to_buff.len() == 0
+    let func_empty = m.functions.len() == 0
+    if line_empty:
+        return func_empty
+    return false
+
+// Vector push helper. Buff's Vector prelude exposes `.push()` but the
+// corpus style (see source_map.buff's `map_*` helpers) wraps mutations
+// in named functions for symmetry with the Map helpers. Returns the
+// updated vector (Buff vectors are move-by-default, so this matches the
+// `let v = vec![...]; v.push(x)` Rust shape: the receiver is consumed
+// and the new value returned).
+func vector_push(v: Vector<FunctionAnchor>, anchor: FunctionAnchor) -> Vector<FunctionAnchor>:
+    let updated = v
+    updated.push(anchor)
+    return updated
+
+// Default constructor — mirrors `impl Default for SourceMap`. Buff has
+// no `Default` trait; the convention is a `<type>_default` function
+// that delegates to the regular constructor (per span.buff precedent).
+func source_map_default() -> SourceMap:
+    return source_map_new()
+
+// Construct a `SourceId` from a raw integer. Mirrors the Rust tuple-
+// struct constructor `SourceId(n)` via the sibling error port's
+// `source_id_new` helper. Re-bound here so callers of this module don't
+// need a second import for the common case.
+func source_id_new(value: Int) -> SourceId:
+    return error_span_source_id_new(value)
+
+// extern trampoline to the sibling error port's `source_id_new`.
+// Per porting §6b, cross-file references go through `import` once M7
+// lands; until then the Buff check resolver falls back to a flat
+// namespace, so we forward through a stable local name. The Rust
+// original imports `SourceId` from `buff_lang_error` directly; the
+// Buff port mirrors the same intent through this trampoline.
+extern "C" from "buff_lang_error" func error_span_source_id_new(value: Int) -> SourceId
