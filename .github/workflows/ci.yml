@@ -32,6 +32,25 @@ env:
     -p buff-scrape -p buff-audit -p buff-validate -p buff-auth
 
 jobs:
+  # ── cargo-deny (C-library + license gate; HARD gate, no continue-on-error) ──
+  # P0.8: enforces the "no C library, no cc-rs, no native-tls" hard rule
+  # from AGENTS.md via cargo-deny. Configuration lives in `deny.toml` at
+  # the repo root. Documented exceptions (ring, libsqlite3-sys, and the
+  # transitive cc-rs they pull) live in `.sisyphus/decisions/` and are
+  # hidden from the gate via `bans.skip-tree`. Any NEW C-using crate
+  # without a DR will fail this gate and block the PR.
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses
+          arguments: --workspace
+
   # ── Format check (fast, runs first) ────────────────────────────────────────
   fmt:
     name: cargo fmt
