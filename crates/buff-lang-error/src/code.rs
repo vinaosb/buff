@@ -159,6 +159,17 @@ pub enum ErrorCode {
     /// (T53). Inspecting field layouts or calling methods by name is not
     /// allowed; only type-level queries are permitted.
     ComptimeReflectionForbidden,
+    /// E1213 — A trait object (`dyn Trait` / `Box<dyn Trait>`) references
+    /// a name that is not a known trait (DR-020 / P2.1d). Trait objects
+    /// can only be formed from declared trait names; using a struct,
+    /// enum, or undefined identifier after `dyn` triggers this code.
+    TraitObjectUndefinedType,
+    /// E1214 — A trait object carries a lifetime annotation other than
+    /// `'static` (DR-020 / P2.1d MVP restriction). The borrowed form
+    /// `&dyn Trait ('a)` is rejected at the lint layer for MVP
+    /// simplicity; only `'static` (explicit or implicit via
+    /// `Box<dyn Trait>`) is accepted.
+    TraitObjectUnsupportedLifetime,
 
     // -----------------------------------------------------------------------
     // E13xx — Codegen (buff-lang-codegen-rust)
@@ -326,6 +337,8 @@ impl ErrorCode {
             ErrorCode::ComptimeEvaluationFailed => "E1210",
             ErrorCode::ComptimeIoForbidden => "E1211",
             ErrorCode::ComptimeReflectionForbidden => "E1212",
+            ErrorCode::TraitObjectUndefinedType => "E1213",
+            ErrorCode::TraitObjectUnsupportedLifetime => "E1214",
             // E13xx — Codegen
             ErrorCode::UnsupportedCodegen => "E1301",
             ErrorCode::CodegenParseError => "E1302",
@@ -403,6 +416,12 @@ impl ErrorCode {
             ErrorCode::ComptimeReflectionForbidden => {
                 "reflection beyond type info is not allowed at comptime"
             }
+            ErrorCode::TraitObjectUndefinedType => {
+                "trait object references a name that is not a known trait"
+            }
+            ErrorCode::TraitObjectUnsupportedLifetime => {
+                "trait object lifetime annotation is not supported in this version"
+            }
             ErrorCode::UnsupportedCodegen => "unsupported language feature in code generation",
             ErrorCode::CodegenParseError => {
                 "codegen produced invalid rust (internal compiler error)"
@@ -477,6 +496,8 @@ impl ErrorCode {
             ErrorCode::ComptimeEvaluationFailed => "A `comptime { ... }` block failed to evaluate at compile time. The comptime interpreter could not reduce the block to a constant value — common causes are: a non-`comptime` function call, a value that depends on a runtime parameter, or an unsupported expression kind. Fix: mark the called function `comptime` as well, or move the work to runtime by removing the `comptime` wrapper.",
             ErrorCode::ComptimeIoForbidden => "A `comptime { ... }` block attempted an I/O operation (file read, network call, print with side effects, spawn, etc.). I/O is forbidden at compile time — only pure computation is allowed, mirroring Zig's comptime rules. Fix: move the I/O out of the `comptime` block, or replace it with a pure computation (e.g. a constant lookup table instead of a config-file read).",
             ErrorCode::ComptimeReflectionForbidden => "A `comptime { ... }` block attempted reflection beyond type-level queries. Inspecting field layouts, calling methods by string name, or walking struct definitions at runtime is not allowed at comptime. Fix: limit comptime code to type-level queries (`Type.of(x)`, `Type.fields(T)`) and ordinary value computation.",
+            ErrorCode::TraitObjectUndefinedType => "A `dyn Trait` or `Box<dyn Trait>` type annotation references a name that is not a known trait. Trait objects can only be formed from declared trait names (e.g. `dyn Drawable` where `Drawable` is declared via `trait Drawable { ... }`). Common causes: misspelled trait name, referencing a struct/enum as if it were a trait, or using a name that has not been declared yet. Fix: verify the trait name is spelled correctly and has been declared at the top level via a `trait Name { ... }` declaration.",
+            ErrorCode::TraitObjectUnsupportedLifetime => "A trait object lifetime annotation is not supported in this version of Buff. The MVP only accepts `'static` (explicitly written or implicit via the owned `Box<dyn Trait>` form). The borrowed form `&dyn Trait ('a)` with a non-`'static` lifetime is rejected at the lint layer to avoid lifetime-inference complexity in local bindings. Fix: remove the lifetime annotation, or use the owned form `Box<dyn Trait>` (which has no visible lifetime).",
             ErrorCode::UnsupportedCodegen => "The Buff AST node you wrote has no Rust codegen implementation yet in this version of the compiler. This is a feature-gated rejection, not a syntax or type error — the front-end accepted your code but codegen cannot lower it. The message names the construct. Fix: rewrite the construct using a supported equivalent, or wait for the feature in a later version.",
             ErrorCode::CodegenParseError => "Codegen produced a Rust token stream that `syn` refused to parse back into an AST. This is always an internal compiler error — the user's Buff program is well-formed; the bug is in the codegen pass. The message includes the `syn` parse error for triage. Fix: report the bug with a minimal reproducer; as a workaround, rewrite the offending construct using a simpler equivalent.",
             ErrorCode::AsyncBlockDeadlock => "`block()` was called inside an `async func`. `block_on` parks the current worker thread, which can prevent any future scheduled on the same worker from running — a deadlock. Codegen still emits the call (so you can see what you wrote), but treats it as a warning. Fix: remove `block()` and let the async fn `return` the future directly, or restructure so the blocking work happens in a non-async function.",
@@ -551,6 +572,8 @@ impl ErrorCode {
             ErrorCode::ComptimeEvaluationFailed,
             ErrorCode::ComptimeIoForbidden,
             ErrorCode::ComptimeReflectionForbidden,
+            ErrorCode::TraitObjectUndefinedType,
+            ErrorCode::TraitObjectUnsupportedLifetime,
             // E13xx — Codegen
             ErrorCode::UnsupportedCodegen,
             ErrorCode::CodegenParseError,
