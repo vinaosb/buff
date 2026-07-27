@@ -1,20 +1,24 @@
-//! `buff-eval` — a thin evaluation engine over the existing Buff compiler
+﻿//! `buff-eval` â€” a thin evaluation engine over the existing Buff compiler
 //! primitives (`tokenize`, `parse`, `TypeInferencer`, `generate_rust`).
 //!
 //! # Shared rustc-invoke helpers (T35)
 //!
-//! The `rustc_invoke` module is included via `#[path]` from
-//! `buff-lang-cli/src/rustc_invoke.rs` — the single source of truth for
-//! PATH probes, Cranelift detection, target-installed checks, and common
-//! rustc flag configuration. This avoids duplicating the logic while
-//! keeping `buff-eval` free of `clap`/`tokio` transitive dependencies
-//! (the shared module itself has zero CLI-specific deps).
+//! The `rustc_invoke` helpers are re-used from the narrow
+//! `buff-lang-pipeline` sibling crate (P0.26 audit-remediation arch-003).
+//! Pre-P0.26 these helpers were pulled in via a cross-crate `#[path]`
+//! include from `buff-lang-cli/src/rustc_invoke.rs`; the sibling-crate
+//! extraction moved them into `buff-lang-pipeline` so this crate can use
+//! a normal Cargo dependency instead. The helpers are the single source
+//! of truth for PATH probes, Cranelift detection, target-installed
+//! checks, and common rustc flag configuration. `buff-lang-pipeline` is
+//! a pure sibling crate (no `clap` / `tokio` / `reqwest`) so the eval
+//! crate's dependency footprint is unchanged.
 //!
 //! # Purpose
 //!
 //! T125-prep extracts a reusable evaluation API consumed by the REPL
 //! (T125a/b/c), the Jupyter kernel (T129b), and the Bufflings tutorial
-//! runner (T138c). This crate adds NO new compilation logic — it wires
+//! runner (T138c). This crate adds NO new compilation logic â€” it wires
 //! the existing lexer/parser/types/codegen-rust crates into a clean
 //! eval/eval_line/type_of surface with captured stdout.
 //!
@@ -22,30 +26,30 @@
 //!
 //! Each [`Evaluator::eval`] / [`Evaluator::eval_line`] call composes a
 //! full Buff program from the accumulated state + the new snippet, then
-//! runs the existing compile-to-Rust → rustc → spawn-and-capture pipeline:
+//! runs the existing compile-to-Rust â†’ rustc â†’ spawn-and-capture pipeline:
 //!
 //! ```text
 //!  snippet
-//!     │
-//!     ▼  classify (parse_expression / parse)
+//!     â”‚
+//!     â–¼  classify (parse_expression / parse)
 //!  SnippetKind { Expr | BodyStmt | TopLevelDecl | FullProgram }
-//!     │
-//!     ▼  compose accumulated state into a single Buff source
+//!     â”‚
+//!     â–¼  compose accumulated state into a single Buff source
 //!  full_source : String
-//!     │
-//!     ▼  buff_lang_lexer::tokenize  →  buff_lang_parser::parse
-//!                                 ↓
+//!     â”‚
+//!     â–¼  buff_lang_lexer::tokenize  â†’  buff_lang_parser::parse
+//!                                 â†“
 //!                       buff_lang_codegen_rust::generate_rust
-//!                                 ↓
+//!                                 â†“
 //!                          String (formatted Rust source)
-//!     │
-//!     ▼  write to <temp dir>/eval-<pid>-<n>.rs
+//!     â”‚
+//!     â–¼  write to <temp dir>/eval-<pid>-<n>.rs
 //!  rustc --edition 2021 -O <rs> -o <exe>
-//!     │
-//!     ▼  Command::new(<exe>).output()   (stdout/stderr captured)
+//!     â”‚
+//!     â–¼  Command::new(<exe>).output()   (stdout/stderr captured)
 //!  (stdout, stderr, exit_code)
-//!     │
-//!     ▼  EvalResult
+//!     â”‚
+//!     â–¼  EvalResult
 //! ```
 //!
 //! # State accumulation
@@ -64,7 +68,7 @@
 //! [`std::process::Command::output`], which captures the child's stdout
 //! into a `Vec<u8>` without ever touching the parent process's stdout.
 //! The captured bytes are surfaced as [`EvalResult::stdout`]. Consumers
-//! (Jupyter, Bufflings) depend on this — they format the captured buffer
+//! (Jupyter, Bufflings) depend on this â€” they format the captured buffer
 //! into their own display surfaces instead of inheriting process stdio.
 //!
 //! # No panics
@@ -74,7 +78,7 @@
 //! `panic!`/`unimplemented!`/`todo!` calls outside `#[cfg(test)]`.
 
 // Boxing all error types to satisfy `result_large_err` would be a massive
-// breaking API change across the eval/repl/jupyter pipeline — explicitly out
+// breaking API change across the eval/repl/jupyter pipeline â€” explicitly out
 // of scope. Tracked as a future refactor; allowed at the crate level.
 #![allow(clippy::result_large_err)]
 
@@ -89,11 +93,17 @@ use buff_lang_lexer::tokenize;
 use buff_lang_parser::{parse, parse_expression};
 use buff_lang_types::{Type, TypeInferencer};
 
-// T35: Include the shared rustc-invoke helpers from buff-lang-cli via
-// `#[path]` so we get the single source of truth WITHOUT pulling clap/
-// tokio transitively. The shared module has zero CLI-specific deps.
-#[path = "../../buff-lang-cli/src/rustc_invoke.rs"]
-mod rustc_invoke;
+// T35: shared rustc-invoke helpers — accessed via the narrow
+// `buff-lang-pipeline` sibling crate (P0.26 audit-remediation arch-003).
+// Pre-P0.26 these helpers were pulled in via a cross-crate `#[path]`
+// include from `buff-lang-cli/src/rustc_invoke.rs`; the sibling-crate
+// extraction moved them into `buff-lang-pipeline` so this crate can use
+// a normal Cargo dependency instead. The helpers are the single source
+// of truth for PATH probes, Cranelift detection, target-installed
+// checks, and common rustc flag configuration. `buff-lang-pipeline` is
+// a pure sibling crate (no `clap` / `tokio` / `reqwest`) so the eval
+// crate's dependency footprint is unchanged.
+use buff_lang_pipeline::rustc_invoke;
 
 // ---------------------------------------------------------------------------
 // T2: Fast-linker selection (mirrors buff_lang_cli::pipeline::LinkerChoice).
@@ -106,7 +116,7 @@ mod rustc_invoke;
 /// CLI crate. See AGENTS.md: "Keep the two copies in sync manually."
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum EvalLinker {
-    /// Auto-detect: probe PATH for mold (Linux) → rust-lld → system default.
+    /// Auto-detect: probe PATH for mold (Linux) â†’ rust-lld â†’ system default.
     #[default]
     Auto,
     /// Use rustc's default system linker (no `-C link-arg=-fuse-ld` flag).
@@ -122,8 +132,8 @@ enum EvalLinker {
 /// Resolve an [`EvalLinker`] to rustc `-C link-arg=-fuse-ld` flags.
 ///
 /// Returns an empty vec for [`EvalLinker::System`] (let rustc pick its
-/// default). For [`EvalLinker::Auto`], probes PATH for mold (Linux) →
-/// rust-lld → lld → system default (silent fallback).
+/// default). For [`EvalLinker::Auto`], probes PATH for mold (Linux) â†’
+/// rust-lld â†’ lld â†’ system default (silent fallback).
 fn resolve_eval_linker_flags(linker: EvalLinker) -> Vec<&'static str> {
     match linker {
         EvalLinker::Auto => {
@@ -175,10 +185,10 @@ fn cranelift_available() -> bool {
 /// Jupyter / Bufflings), so the backend choice is driven by an env var
 /// instead of a flag:
 ///
-/// - `BUFF_EVAL_BACKEND=cranelift` → opt in. Probes via
+/// - `BUFF_EVAL_BACKEND=cranelift` â†’ opt in. Probes via
 ///   [`cranelift_available`]; sets the env var on the rustc `Command`
 ///   when the probe succeeds, falls back silently to LLVM otherwise.
-/// - Any other value (or unset) → LLVM (rustc default). No probe, no
+/// - Any other value (or unset) â†’ LLVM (rustc default). No probe, no
 ///   env var, no overhead.
 ///
 /// This mirrors the CLI's `--backend=cranelift` opt-in nature without
@@ -224,7 +234,7 @@ pub use buff_lang_types::Type as ResolvedType;
 /// Result of evaluating a Buff snippet.
 ///
 /// All fallible phases (lex, parse, codegen, rustc, exec) surface their
-/// errors through [`EvalResult::diagnostic`] rather than `Result<>` — the
+/// errors through [`EvalResult::diagnostic`] rather than `Result<>` â€” the
 /// caller checks `diagnostic.is_some()` to detect failure. `value`,
 /// `stdout`, and `stderr` are always populated (to empty strings when the
 /// pipeline failed before producing output), so partial output from a
@@ -236,7 +246,7 @@ pub struct EvalResult {
     /// program's stdout. `None` for statements / declarations / errors.
     ///
     /// The value is the captured stdout `trim`-ed of surrounding
-    /// whitespace (so `print(2 + 3)` → `"5"`, not `"5\n"`).
+    /// whitespace (so `print(2 + 3)` â†’ `"5"`, not `"5\n"`).
     pub value: Option<String>,
     /// Everything the spawned program wrote to its stdout, verbatim.
     /// This is where Buff's `print` output lands.
@@ -299,7 +309,7 @@ pub struct Evaluator {
     top_level_src: String,
     /// Accumulated source for body statements inside the synthetic `main`
     /// (e.g. `let x = 42`). Each entry is one Buff source line (or block)
-    /// already stripped of leading indentation — `compose_program`
+    /// already stripped of leading indentation â€” `compose_program`
     /// re-indents when emitting.
     body_stmts_src: String,
 }
@@ -324,13 +334,13 @@ impl Evaluator {
     ///
     /// The snippet may be:
     ///
-    /// - a bare expression (`2 + 3`) — the spawned program prints its
+    /// - a bare expression (`2 + 3`) â€” the spawned program prints its
     ///   value, surfaced as [`EvalResult::value`] and [`EvalResult::stdout`],
-    /// - a body statement (`let x = 42`) — accumulated into the session
+    /// - a body statement (`let x = 42`) â€” accumulated into the session
     ///   state, no value returned,
-    /// - a top-level declaration (`func helper(): ...`) — accumulated into
+    /// - a top-level declaration (`func helper(): ...`) â€” accumulated into
     ///   the session state, no value returned,
-    /// - a full Buff program (`func main(): print("hi")`) — evaluated
+    /// - a full Buff program (`func main(): print("hi")`) â€” evaluated
     ///   verbatim; not accumulated (the caller owns `main`).
     ///
     /// State persists across `eval` and [`Self::eval_line`] calls.
@@ -342,7 +352,7 @@ impl Evaluator {
     /// Evaluate a single Buff line, incrementally accumulating `let`
     /// bindings and `func` declarations.
     ///
-    /// Functionally identical to [`Self::eval`] — the `eval` / `eval_line`
+    /// Functionally identical to [`Self::eval`] â€” the `eval` / `eval_line`
     /// split documents intent (`eval` for whole snippets, `eval_line`
     /// for one-statement-at-a-time REPL input). Both share the same
     /// classification + composition + compile + run path.
@@ -354,7 +364,7 @@ impl Evaluator {
     /// Type-introspect `expr` against the accumulated environment.
     ///
     /// Returns `None` on any lex/parse/inference error (no diagnostic is
-    /// surfaced — the caller treats `None` as "type unknown"). The
+    /// surfaced â€” the caller treats `None` as "type unknown"). The
     /// accumulated state is consulted but NOT modified, so a `type_of`
     /// query has no side effects on subsequent `eval` calls.
     #[must_use]
@@ -399,7 +409,7 @@ impl Evaluator {
         match classify(snippet) {
             SnippetKind::Empty => EvalResult::ok(String::new(), String::new(), Some(0), None),
             SnippetKind::FullProgram(src) => {
-                // User provided their own `main` — evaluate verbatim. We do
+                // User provided their own `main` â€” evaluate verbatim. We do
                 // NOT accumulate full programs into session state because
                 // the user owns `main`; a later `eval_line` would produce
                 // a duplicate `main` and a rustc error.
@@ -421,7 +431,7 @@ impl Evaluator {
                 // Bare expression: do NOT accumulate (state unchanged).
                 // Wrap as `print(<expr>)` to capture the value, unless the
                 // expression is itself a `print(...)` call (which returns
-                // Void — wrapping would yield `print(print(...))` and a
+                // Void â€” wrapping would yield `print(print(...))` and a
                 // rustc type error).
                 let contribution = if is_print {
                     expr_src.clone()
@@ -469,7 +479,7 @@ impl Evaluator {
     /// statement source like `print(x + 8)` or `let y = 10`).
     fn compose_program_body(&self, trailing: Option<&str>) -> String {
         let mut out = String::new();
-        // Top-level decls (functions, structs, etc.) — no indentation.
+        // Top-level decls (functions, structs, etc.) â€” no indentation.
         if !self.top_level_src.is_empty() {
             out.push_str(&self.top_level_src);
             if !out.ends_with('\n') {
@@ -494,15 +504,15 @@ impl Evaluator {
 
 /// Classification of a user-supplied snippet.
 ///
-/// Produced by [`classify`] — drives the accumulation + composition
+/// Produced by [`classify`] â€” drives the accumulation + composition
 /// strategy in [`Evaluator::evaluate`].
 #[derive(Debug, Clone)]
 enum SnippetKind {
-    /// Whitespace-only input — no-op.
+    /// Whitespace-only input â€” no-op.
     Empty,
     /// A bare expression (`2 + 3`). Carries the original source string
     /// and a flag indicating whether the expression is itself a
-    /// `print(...)` / `println(...)` call (Void-returning — must NOT be
+    /// `print(...)` / `println(...)` call (Void-returning â€” must NOT be
     /// wrapped again).
     BareExpr(String, bool),
     /// A body statement (`let x = 42`). Carries the original source.
@@ -520,7 +530,7 @@ enum SnippetKind {
 /// Strategy:
 /// 1. Trim-test for empty input.
 /// 2. Tokenize. If lex fails, fall back to BodyStmt (we can't say more).
-/// 3. Try `parse_expression` (strict — requires all tokens consumed).
+/// 3. Try `parse_expression` (strict â€” requires all tokens consumed).
 ///    If Ok, it's a [`SnippetKind::BareExpr`].
 /// 4. Try `parse`. If Ok:
 ///    - If any decl is `func main`, it's a [`SnippetKind::FullProgram`].
@@ -535,7 +545,7 @@ fn classify(snippet: &str) -> SnippetKind {
         Ok(t) => t,
         Err(_) => return SnippetKind::BodyStmt(snippet.to_string()),
     };
-    // Try as a single expression (strict — requires all tokens consumed).
+    // Try as a single expression (strict â€” requires all tokens consumed).
     if let Ok(expr) = parse_expression(&tokens, SourceId(0)) {
         let is_print = is_print_call(&expr);
         return SnippetKind::BareExpr(snippet.trim().to_string(), is_print);
@@ -571,7 +581,7 @@ fn is_print_call(expr: &buff_lang_ast::Expr) -> bool {
     false
 }
 
-/// Indent every line of `src` by 4 spaces. Empty input → empty output.
+/// Indent every line of `src` by 4 spaces. Empty input â†’ empty output.
 /// Trailing newline is preserved.
 fn indent_lines(src: &str) -> String {
     if src.is_empty() {
@@ -636,11 +646,11 @@ fn run_full_program(source: &str) -> EvalResult {
 
     // rustc invocation: edition 2021 + -O (debug mode = fast compile, no
     // LTO). Mirrors pipeline.rs `BuildMode::Debug` exactly.
-    // T2: auto-detect fast linker (mold → rust-lld → system default).
+    // T2: auto-detect fast linker (mold â†’ rust-lld â†’ system default).
     // T3: line-tables-only debuginfo (-C debuginfo=1) for backtraces.
     // T4: opt-in Cranelift dev backend via BUFF_EVAL_BACKEND=cranelift
     // (probe + set CARGO_PROFILE_DEV_CODEGEN_BACKEND env var on the
-    // child rustc process — scoped to the subprocess, no parent leak).
+    // child rustc process â€” scoped to the subprocess, no parent leak).
     // T9: opt-in sccache via BUFF_EVAL_SCCACHE=1 env var. When set AND
     // sccache is on PATH, sets RUSTC_WRAPPER=sccache on the child rustc
     // process. Falls back silently when sccache is missing.
@@ -648,7 +658,7 @@ fn run_full_program(source: &str) -> EvalResult {
     // When set, verifies the target is installed via `rustup target list
     // --installed` and passes `--target <triple>` to rustc.
     let mut rustc_cmd = Command::new("rustc");
-    // T9: sccache wrapper — opt-in via BUFF_EVAL_SCCACHE=1 env var.
+    // T9: sccache wrapper â€” opt-in via BUFF_EVAL_SCCACHE=1 env var.
     if std::env::var("BUFF_EVAL_SCCACHE").as_deref() == Ok("1") && sccache_available() {
         rustc_cmd.env("RUSTC_WRAPPER", "sccache");
     }
@@ -752,7 +762,7 @@ fn run_full_program(source: &str) -> EvalResult {
 }
 
 /// Return the per-eval temp directory (`<tmp>/buff-eval`), creating it
-/// if missing. Failure to create is silent — the caller's `std::fs::write`
+/// if missing. Failure to create is silent â€” the caller's `std::fs::write`
 /// will surface the error path with full context.
 fn temp_dir_for_eval() -> PathBuf {
     let dir = std::env::temp_dir().join("buff-eval");
@@ -788,7 +798,7 @@ fn with_exe_extension(path: &std::path::Path) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Smoke tests — exercise the public API end-to-end. The acceptance
+// Smoke tests â€” exercise the public API end-to-end. The acceptance
 // scenarios (expression eval, state accumulation, type introspection,
 // stdout capture, error handling) live in `tests/eval_tests.rs`.
 // ---------------------------------------------------------------------------
@@ -873,17 +883,17 @@ mod tests {
 
     #[test]
     fn is_print_call_detects_print_and_println() {
-        // print(...) — bare call expression
+        // print(...) â€” bare call expression
         let tokens = tokenize("print(42)", SourceId(0)).expect("tokenize");
         let expr = parse_expression(&tokens, SourceId(0)).expect("parse_expression");
         assert!(is_print_call(&expr));
 
-        // println(...) — same.
+        // println(...) â€” same.
         let tokens = tokenize("println(42)", SourceId(0)).expect("tokenize");
         let expr = parse_expression(&tokens, SourceId(0)).expect("parse_expression");
         assert!(is_print_call(&expr));
 
-        // Non-print call (e.g. user-defined foo(...)) — false.
+        // Non-print call (e.g. user-defined foo(...)) â€” false.
         // (We can't easily parse a non-prelude call here without a
         // supporting decl, so test the negative case with a bare ident
         // expression.)

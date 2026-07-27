@@ -2,16 +2,16 @@
 
 **Audit date:** 2026-07-26
 **Source:** `.sisyphus/reports/buff-audit-2026-07-26-2019-v3.{json,md}`
-**Last updated:** 2026-07-27 (P0.20 — 27 FIXED, 5 DEFERRED, 2 PENDING)
+**Last updated:** 2026-07-27 (P0.26 — 29 FIXED, 5 DEFERRED, 0 PENDING)
 **Total findings:** 31 + FP-2 + 3 FNs = 34 tracked items (plus 1 disproven FP)
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| FIXED | 27 |
+| FIXED | 29 |
 | DEFERRED | 5 |
-| PENDING | 2 |
+| PENDING | 0 |
 | **Total** | **34** |
 
 ## Critical Findings (17)
@@ -40,8 +40,8 @@
 
 | ID | Description | Sev | Task | Status | Evidence |
 |----|-------------|-----|------|--------|----------|
-| arch-002 | buff-lsp depends on entire buff-lang-cli for 1 fn (layer violation + bloat) | HIGH | P0.26 | PENDING | Not started (major refactor) |
-| arch-003 | buff-eval uses #[path] cross-crate include + 6 duplicated helpers | HIGH | P0.26 | PENDING | Not started (major refactor) |
+| arch-002 | buff-lsp depends on entire buff-lang-cli for 1 fn (layer violation + bloat) | HIGH | P0.26 | FIXED | commit `f3f472c`; extracted `buff-lang-fmt` sibling crate — `cargo tree -p buff-lsp \| grep buff-lang-cli` returns nothing |
+| arch-003 | buff-eval uses #[path] cross-crate include + 6 duplicated helpers | HIGH | P0.26 | FIXED | commit `f3f472c`; extracted `buff-lang-pipeline` sibling crate — buff-eval now uses `use buff_lang_pipeline::rustc_invoke;` instead of `#[path]` cross-crate include |
 | cicd-003 | GitHub Actions pinned to mutable @v4/@master refs + Docker tags mutable + no cosign | HIGH | P0.10 | FIXED | commit `4227090`; all Actions SHA-pinned + Docker digest-pinned |
 | cicd-004 | buff-validation emits ::notice not ::error (failures downgrade silently) | HIGH | P0.11 | FIXED | commit `3ac6386` |
 | cicd-005 | 4 of 6 workflows have no permissions block (default write-all) | HIGH | P0.10 | FIXED | commit `4227090`; permissions: contents: read added to all 6 workflows |

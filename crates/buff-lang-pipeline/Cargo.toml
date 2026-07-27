@@ -1,17 +1,17 @@
 ﻿[package]
-name = "buff-eval"
+name = "buff-lang-pipeline"
 version = "1.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
 buff-lang-ast.workspace = true
+buff-lang-codegen-buffhtml.workspace = true
+buff-lang-codegen-rust.workspace = true
+buff-lang-error.workspace = true
 buff-lang-lexer.workspace = true
 buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
-buff-lang-codegen-rust.workspace = true
-buff-lang-error.workspace = true
-buff-lang-pipeline.workspace = true
-
-[dev-dependencies]
-insta.workspace = true
+anyhow.workspace = true
+sha2.workspace = true
+salsa.workspace = true

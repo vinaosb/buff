@@ -1,28 +1,28 @@
-[workspace]
+﻿[workspace]
 resolver = "2"
 members = ["crates/*"]
 
 # T33: Version-tier consistency across all 69 workspace crates.
 #
 # Three tiers:
-#   1.2.0 — Core compiler crates (buff-lang-error, buff-lang-ast,
+#   1.2.0 â€” Core compiler crates (buff-lang-error, buff-lang-ast,
 #           buff-lang-lexer, buff-lang-parser, buff-lang-types,
 #           buff-lang-codegen-rust, buff-lang-codegen-wgsl,
 #           buff-lang-runtime). These are the foundational pipeline
 #           crates that every consumer depends on.
-#   1.0.0 — Tooling + framework crates (all buff-{lsp,eval,repl,
+#   1.0.0 â€” Tooling + framework crates (all buff-{lsp,eval,repl,
 #           jupyter,registry,playground-wasm,ui-dioxus,ast-rsx,
 #           buffhtml-parser,codegen-buffhtml,cli,dap,bufflings,
 #           buffup} + all 44 buff-{dataframe,tensor,...} framework
 #           crates). These ship alongside the compiler but are
 #           independently versioned.
-#   0.1.0 — Reserved for future experimental crates (not yet used).
+#   0.1.0 â€” Reserved for future experimental crates (not yet used).
 #
 # Exception: buff-dataframe is pinned at 2.0.0 (API-bumped during
-# its MVP — the only crate above 1.x). Leave as-is.
+# its MVP â€” the only crate above 1.x). Leave as-is.
 #
 # Every crate Cargo.toml MUST match its tier. The `cargo check`
-# workspace build verifies this — a version mismatch would cause
+# workspace build verifies this â€” a version mismatch would cause
 # a resolver error if any crate depends on another with a
 # semver-incompatible version.
 
@@ -40,16 +40,16 @@ proptest = "1.5"
 wgpu = "26.0"
 rayon = "1.10"
 tokio = { version = "1.40", features = ["full", "test-util"] }
-# T35: `cron` 0.13 — the canonical Rust cron-expression parser (the de-facto
+# T35: `cron` 0.13 â€” the canonical Rust cron-expression parser (the de-facto
 # standard for cron schedule parsing in the Rust ecosystem). API surface used:
 # `cron::Schedule::from_str(expr)` (returns `Result<Schedule, ScheduleParseError>`)
 # + `schedule.upcoming(Utc).take(1).next()` for next-fire-time computation.
-# Pure-Rust, no native deps, no cc-rs — matches the "no C library, no Docker"
-# hard rule. Pinned to major 0.13 (the long-standing surface since 2024 —
+# Pure-Rust, no native deps, no cc-rs â€” matches the "no C library, no Docker"
+# hard rule. Pinned to major 0.13 (the long-standing surface since 2024 â€”
 # `Schedule::from_str` + `upcoming(chrono::Utc)` has been stable for years).
 cron = "0.13"
 # T21 (buff-observe): opentelemetry OTLP export. Pinned to 0.27 (the
-# long-standing surface since 2024 — `opentelemetry::global::tracer()` +
+# long-standing surface since 2024 â€” `opentelemetry::global::tracer()` +
 # `opentelemetry_otlp::new_exporter().tonic()` API). Pure-Rust via tonic
 # + prost (no native C deps). Matches the "no C library" hard rule.
 opentelemetry = { version = "0.27", default-features = false, features = ["trace"] }
@@ -83,7 +83,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # wraps the mature `regex` crate. We use `regex` over `fancy-regex` or
 # `pcre2` because the upstream `regex` crate ships a linear-time
 # guarantees engine (no catastrophic backtracking), is the de-facto
-# Rust ecosystem default, and exposes a stable surface since 1.0 — every
+# Rust ecosystem default, and exposes a stable surface since 1.0 â€” every
 # method we lower to (`is_match`, `find`, `replace_all`, `captures`,
 # `capture_locations`, named-group iteration via `iter()` over
 # `captures.iter()`) has been stable for years. Recorded in the codegen
@@ -93,12 +93,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 regex = "1"
 # T32: clap powers the `buff` compiler binary (T0 buff-lang-cli uses derive
 # API with &'static str literals). buff-cli (T32) exposes clap to USER
-# programs via the builder API — runtime String values flow into clap's
+# programs via the builder API â€” runtime String values flow into clap's
 # `Arg::new` / `.long` / `.help` / `Command::new` / `.version`. The
 # `string` cargo feature unlocks `Str: From<String>` + `Id: From<String>`
 # + `Cow<'static, str>: Into<Str>` (otherwise clap only accepts `&'static
 # str`). Features are unioned across the workspace so adding `string`
-# here is additive — it does NOT change buff-lang-cli's behaviour (its
+# here is additive â€” it does NOT change buff-lang-cli's behaviour (its
 # derive macro emits &'static str literals; the `string` feature simply
 # makes additional From impls available). Pure-Rust, no native deps.
 clap = { version = "4.5", features = ["derive", "string"] }
@@ -106,19 +106,19 @@ anyhow = "1.0"
 thiserror = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# T51: `rmp-serde` 1.3 — pure-Rust MessagePack + serde integration.
+# T51: `rmp-serde` 1.3 â€” pure-Rust MessagePack + serde integration.
 # API surface used: `rmp_serde::to_vec(&value)` for serialize,
 # `rmp_serde::from_slice::<serde_json::Value>(&bytes)` for deserialize.
-# Pure-Rust, no native deps, no cc-rs — matches the "no C library"
+# Pure-Rust, no native deps, no cc-rs â€” matches the "no C library"
 # hard rule from AGENTS.md. Pinned to major 1 (the long-standing
-# surface since 2022 — the `to_vec` / `from_slice` API has been
+# surface since 2022 â€” the `to_vec` / `from_slice` API has been
 # stable across 1.x). Mirrors the conservative-pin philosophy already
 # in use across the workspace (chrono 0.4, rand 0.8, axum 0.8).
 rmp-serde = "1.3"
 toml = "0.8"
 # T114: Wasm transpile-only playground. wasm-bindgen + panic hook for
 # browser-side transpilation. The version floats within the 0.2.x range
-# (the workspace resolver picks one compatible with all dependents — wgpu
+# (the workspace resolver picks one compatible with all dependents â€” wgpu
 # requires >=0.2.100, so the resolved version is matched by installing
 # wasm-bindgen-cli at the same exact version). See playground/README.md
 # for the version-pinning procedure.
@@ -128,7 +128,7 @@ console_error_panic_hook = "0.1.7"
 # canonical LSP types crate. Both pin to the published crates.io versions
 # (no path deps). `lsp-types` 0.97 implements LSP 3.17; `lsp-server` 0.10
 # is the small stdio/JSON-RPC scaffold extracted from rust-analyzer. Both
-# are wasm-free, sink-only deps — pure Rust.
+# are wasm-free, sink-only deps â€” pure Rust.
 lsp-server = "0.10"
 lsp-types = "0.97"
 # `url` is required by lsp-types for `Url`. Workspace pin keeps it in sync
@@ -354,8 +354,11 @@ buff-lang-codegen-rust = { path = "crates/buff-lang-codegen-rust" }
 buff-lang-codegen-wgsl = { path = "crates/buff-lang-codegen-wgsl" }
 buff-lang-runtime = { path = "crates/buff-lang-runtime" }
 buff-lang-error = { path = "crates/buff-lang-error" }
+buff-lang-check = { path = "crates/buff-lang-check" }
+buff-lang-fmt = { path = "crates/buff-lang-fmt" }
+buff-lang-pipeline = { path = "crates/buff-lang-pipeline" }
 # T24: source-map sidecar + panic hook for Buff-span stack traces.
-# Surgical unblock — registered here so the workspace glob
+# Surgical unblock â€” registered here so the workspace glob
 # `members = ["crates/*"]` and the `buff-lang-debug-info.workspace = true`
 # references in buff-lang-cli, buff-lang-codegen-rust, and
 # buff-lang-runtime resolve consistently. T24 owns the runtime logic.
@@ -375,35 +378,35 @@ buff-eval = { path = "crates/buff-eval" }
 # (Jupyter kernel, IDE integrations) resolves to the same in-tree version.
 buff-repl = { path = "crates/buff-repl" }
 # T125a: `rustyline` is the readline implementation backing the Buff REPL.
-# We pin to major 15 (released 2024-11-15) — recent stable, ships the
+# We pin to major 15 (released 2024-11-15) â€” recent stable, ships the
 # `DefaultEditor::new()` API since 13.x, broad ecosystem adoption. We
 # deliberately do NOT chase the latest 18.x because:
 # - 15.x is the long-standing surface most REPL-style tools in the Rust
 #   ecosystem target (mirrors the rand-0.8-vs-0.9 / chrono-0.4 conservative
 #   pin philosophy already in use in this workspace).
 # - The DefaultEditor + readline + add_history_entry API surface we depend
-#   on is identical across 13/14/15/16/17/18 — pinning 15 gives us room to
+#   on is identical across 13/14/15/16/17/18 â€” pinning 15 gives us room to
 #   bump without churn.
-# `derive` / `with-dirs` / `with-file-history` features are NOT enabled —
+# `derive` / `with-dirs` / `with-file-history` features are NOT enabled â€”
 # history persistence is T125c territory (we want a fresh in-memory history
 # per session for now).
 rustyline = "15"
 # T125c: `dirs` resolves the user's home directory for the REPL history
-# file (`~/.buff_history`). We pin to major 5 (released 2022) — the
+# file (`~/.buff_history`). We pin to major 5 (released 2022) â€” the
 # long-standing surface most of the Rust ecosystem targets. dirs 6.0.0
 # (2025) ships the identical `home_dir() -> Option<PathBuf>` API but is
 # newer than necessary; pinning 5 mirrors the rand-0.8 / chrono-0.4
 # conservative-pin philosophy already in use. The single function we
-# consume is `dirs::home_dir()` — no other API surface is touched, so a
+# consume is `dirs::home_dir()` â€” no other API surface is touched, so a
 # future bump to 6.x is a one-line version change with no code change.
 dirs = "5"
 # T126: Minimal Buff package registry HTTP server (`crates/buff-registry`).
-# We pull three new top-level crates — `axum` (the web framework, already
+# We pull three new top-level crates â€” `axum` (the web framework, already
 # the de-facto Rust ecosystem default since 0.5 and the natural successor
 # to the `warp`/`rocket` lineage), `tower` (Service trait utilities, used
 # only via `ServiceExt::oneshot` for in-process integration tests so we
 # do NOT spawn a TCP server per test), and `semver` (the canonical
-# Cargo-compatible semver crate — implements `Version` + `VersionReq` and
+# Cargo-compatible semver crate â€” implements `Version` + `VersionReq` and
 # the exact match rules Cargo uses, which is what the Buff resolver must
 # mirror). Pinning all three at the workspace level mirrors the
 # buff-eval / buff-repl / buff-lsp precedent and lets future consumers
@@ -418,7 +421,7 @@ dirs = "5"
 #   expose a `pub fn app(state) -> Router` that tests build in-process
 #   via `Router::oneshot` (no TCP port allocation). Pinned to 0.8 (NOT
 #   0.7) because 0.8 introduced the `{param}` path syntax and the
-#   `axum::serve(listener, app)` API — both are the current canonical
+#   `axum::serve(listener, app)` API â€” both are the current canonical
 #   surface; 0.7 is in maintenance only.
 # - `tower` 0.5: the `ServiceExt` trait is used in tests ONLY
 #   (`tower::ServiceExt::oneshot` to drive a `Router<()>` directly with
@@ -436,13 +439,13 @@ dirs = "5"
 # `base64`, `serde`, `serde_json`, `tokio`, `thiserror` are already
 # pinned at the workspace level (T124h/T124-base/T124c) and reused here
 # without re-pinning. The publish request body carries the tarball as a
-# base64-encoded string inside a JSON envelope — pure Rust, no native
+# base64-encoded string inside a JSON envelope â€” pure Rust, no native
 # deps, matches the "no C library, no Docker" hard rule from the T126
 # task spec.
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower = "0.5"
 semver = "1"
-# T126: `buff-registry` workspace path dep — mirrors the buff-eval /
+# T126: `buff-registry` workspace path dep â€” mirrors the buff-eval /
 # buff-repl / buff-lsp pattern so any future consumer (T127 CLI, T128
 # web UI) resolves to the same in-tree version during the v1.6 tooling
 # wave.
@@ -450,26 +453,26 @@ buff-registry = { path = "crates/buff-registry" }
 # T127: HTTP client + tarball builder for `buff` CLI package-management
 # subcommands (`buff login` / `buff add <name>` / `buff publish` /
 # `buff install`). Two new top-level crates, both pure-Rust (no native
-# C deps, no OpenSSL — matches the "no C library, no Docker" hard rule
+# C deps, no OpenSSL â€” matches the "no C library, no Docker" hard rule
 # from the T127 task spec):
 #
 # - `reqwest` 0.12: the de-facto Rust HTTP client. We pin to 0.12 (the
-#   current stable major; the long-standing surface since 0.11 —
+#   current stable major; the long-standing surface since 0.11 â€”
 #   `reqwest::blocking::Client::post().json()` + `.bearer_auth(token)`
 #   is identical across both). Features:
-#     * `default-features = false` — drop the default-on native-tls
+#     * `default-features = false` â€” drop the default-on native-tls
 #       (OpenSSL on Linux, SChannel on Windows, SecureTransport on
 #       macOS) so we do NOT pull a native C TLS stack. The T126
 #       registry uses plain HTTP for v1.6 so technically any TLS would
 #       do, but the spec mandates rustls-tls so the same client can
 #       point at a TLS-fronted registry without a rebuild.
-#     * `rustls-tls` — pure-Rust TLS via rustls + ring (no native dep).
+#     * `rustls-tls` â€” pure-Rust TLS via rustls + ring (no native dep).
 #       Matches the "no OpenSSL on Windows" mandate from the T127
 #       task spec.
-#     * `json` — `reqwest::blocking::Response::json::<T>()` for
+#     * `json` â€” `reqwest::blocking::Response::json::<T>()` for
 #       decoding `PublishResponse` / `ResolveResponse` /
 #       `PackageMetadata`.
-#     * `blocking` — `reqwest::blocking::Client` for synchronous CLI
+#     * `blocking` â€” `reqwest::blocking::Client` for synchronous CLI
 #       use. The CLI commands are sync (matching the existing
 #       `commands::build`/`run`/`add` pattern); a blocking client
 #       avoids spinning up a tokio runtime inside each command. Tests
@@ -481,7 +484,7 @@ buff-registry = { path = "crates/buff-registry" }
 #   sources into a `Vec<u8>` for the publish endpoint, and
 #   `tar::Archive::new(&bytes[..])` + `unpack(dest)` for install.
 #   Pure-Rust, no native C deps, no compression (we ship the raw tar
-#   bytes — the registry base64-encodes them inside the JSON publish
+#   bytes â€” the registry base64-encodes them inside the JSON publish
 #   envelope, so gzip would just add CPU). The `flate2` optional
 #   compression crate is NOT pulled.
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
@@ -498,7 +501,7 @@ tar = "0.4"
 # pure-Rust `zeromq` crate (async, tokio-based, NO C libzmq) implements
 # the ZMQ wire transport for the 5 Jupyter sockets (shell / iopub /
 # stdin / control / heartbeat). We deliberately use `zeromq` (NOT `zmq`)
-# because `zmq` links C libzmq — which would FAIL on this Windows host
+# because `zmq` links C libzmq â€” which would FAIL on this Windows host
 # that has no C toolchain for such shims (same class of failure that
 # forced hand-rolling the lexer/parser per AGENTS.md). Verified
 # 2026-07-20 to compile cleanly on this build host (zeromq 0.4.1,
@@ -506,7 +509,7 @@ tar = "0.4"
 # long-standing surface (`Socket` / `SocketRecv` / `SocketSend` traits +
 # `RouterSocket` / `PubSocket` / `RepSocket` / `ZmqMessage`); 0.5+ /
 # 0.6.x ship the identical surface but bump MSRV unnecessarily for our
-# pinned 1.95.0 toolchain — mirrors the rand-0.8 / chrono-0.4
+# pinned 1.95.0 toolchain â€” mirrors the rand-0.8 / chrono-0.4
 # conservative-pin philosophy already in use across the workspace.
 zeromq = "0.4"
 # T129a: `bytes` is the refcounted byte-buffer crate zeromq uses for
@@ -516,7 +519,7 @@ zeromq = "0.4"
 # ZmqMessages without re-implementing a conversion shim. Pure-Rust,
 # no native deps.
 bytes = "1"
-# T129a: `buff-jupyter` workspace path dep — mirrors the buff-eval /
+# T129a: `buff-jupyter` workspace path dep â€” mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry pattern so any future consumer
 # (T129b execution engine, T129c rich display, IDE integrations)
 # resolves to the same in-tree version during the v1.x tooling wave.
@@ -531,7 +534,7 @@ buff-jupyter = { path = "crates/buff-jupyter" }
 # headless browser. The T121b spike pinned `=0.7.2` exactly because it
 # was a one-shot throwaway; the decision doc mandates v1.8 use the
 # caret pin `dioxus = "0.7"` at the workspace level and re-test on
-# every minor bump — the dioxus-rsx proc-macro internals are NOT
+# every minor bump â€” the dioxus-rsx proc-macro internals are NOT
 # covered by semver guarantees. T29 (v1.25 tech-debt batch) upgraded
 # to exact pin `=0.7.9` (the resolved version in Cargo.lock) to
 # prevent surprise breakage from dioxus-rsx proc-macro changes.
@@ -541,56 +544,56 @@ dioxus = "=0.7.9"
 # T135: Dioxus 0.7 Server-Side Rendering crate. Pinned at the workspace
 # level alongside the `dioxus` umbrella so the SSR version tracks the
 # dioxus-core / dioxus-signals minor bump in lockstep (the dioxus-rsx +
-# VirtualDom internals are NOT covered by semver guarantees — same
+# VirtualDom internals are NOT covered by semver guarantees â€” same
 # rationale as the umbrella pin). Exact pin `=0.7.9` matches the
 # umbrella (T29 v1.25 tech-debt batch).
 dioxus-ssr = "=0.7.9"
-# T130: `buff-ui-dioxus` workspace path dep — mirrors the buff-eval /
+# T130: `buff-ui-dioxus` workspace path dep â€” mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter pattern so any
 # future consumer (T133 RSX-for-Buff syntax surface, T138c Bufflings UI
 # tutorial runner) resolves to the same in-tree version during the v1.x
 # tooling wave.
 buff-ui-dioxus = { path = "crates/buff-ui-dioxus" }
 # T131 + T64: cross-platform file watcher. We pin `notify` to
-# major 6 (released 2023 — the long-standing surface). notify 6 ships
+# major 6 (released 2023 â€” the long-standing surface). notify 6 ships
 # the stable `RecommendedWatcher` + `Watcher` trait + `EventKind` enum
 # that the dev server consumes; 7.x (2024) and 8.x (2025) ship nearly
 # identical APIs but bump MSRV unnecessarily for our pinned 1.95.0
-# toolchain — mirrors the rand-0.8 / chrono-0.4 / rustyline-15
+# toolchain â€” mirrors the rand-0.8 / chrono-0.4 / rustyline-15
 # conservative-pin philosophy already in use across the workspace.
 # Pure-Rust on Windows (ReadDirectoryChangesW) + Linux (inotify) + macOS
-# (FSEvents / kqueue), no native C dep, no cc-rs — matches the "no C
+# (FSEvents / kqueue), no native C dep, no cc-rs â€” matches the "no C
 # library, no Docker" hard rule. The 200ms debounce is implemented
 # in-tree via a tokio::time::sleep buffer (see
 # `crates/buff-lang-cli/src/ui_dev/watcher.rs`), so we do NOT pull
-# `notify-debouncer-mini` — keeping the dep surface minimal.
+# `notify-debouncer-mini` â€” keeping the dep surface minimal.
 # T64: `buff watch <PATH>` reuses the same pin for the standalone
 # file-watcher subcommand (debounced 500ms via std::time::Instant).
 notify = "6"
-# T30: `figment` 0.10 — the canonical pure-Rust layered config crate
+# T30: `figment` 0.10 â€” the canonical pure-Rust layered config crate
 # (the de-facto Rust ecosystem default for config with layered
 # providers). API surface used: Figment::new(), Figment::merge(),
 # Figment::extract(), figment::providers::{Env, Serialized, Format,
-# Toml, Yaml, Json}. Pure-Rust, no native deps, no cc-rs — matches
+# Toml, Yaml, Json}. Pure-Rust, no native deps, no cc-rs â€” matches
 # the "no C library, no Docker" hard rule. Features: `toml`, `yaml`,
 # `json` enable the three file-format providers; `env` is always
 # available. Pinned to major 0.10 (the long-standing surface since
-# 2023 — the `Figment::merge` + `Figment::extract` API has been
+# 2023 â€” the `Figment::merge` + `Figment::extract` API has been
 # stable across 0.10.x). Mirrors the conservative-pin philosophy
 # already in use across the workspace (chrono 0.4, rand 0.8, axum
 # 0.8, rustyline 15, notify 6).
 figment = { version = "0.10", features = ["toml", "yaml", "json"] }
 # T133: RSX-for-Buff Option C (`.buffhtml` SFC). Two new core crates ship the
-# floor grammar (decision record `rsx-syntax-feasibility.md` §6):
+# floor grammar (decision record `rsx-syntax-feasibility.md` Â§6):
 # - `buff-lang-ast-rsx`: pure-data AST for the `.buffhtml` SFC. Separate from
 #   `buff-lang-ast` to avoid churning the existing lexer/parser/types/
-#   codegen-rust dependency tree (decision record §4 AST row: "MINOR — add
+#   codegen-rust dependency tree (decision record Â§4 AST row: "MINOR â€” add
 #   RsxTemplateFile top-level node in a new sibling crate").
 # - `buff-lang-buffhtml-parser`: hand-rolled 3-mode lexer + recursive-descent.
 #   Calls Buff's existing expression parser for `{...}` contents (T134+; for
 #   T133 the raw expression source is stored verbatim and emitted into the
 #   `rsx!{}` TokenStream by the codegen crate).
-# - `buff-lang-codegen-buffhtml`: lowers template AST → `rsx!{}` TokenStream
+# - `buff-lang-codegen-buffhtml`: lowers template AST â†’ `rsx!{}` TokenStream
 #   via syn/quote/prettyplease, reusing the T121b-proven emission pattern
 #   (`crates/buff-lang-codegen-rust/tests/dioxus_t121b.rs`). Implements the
 #   post-format span side-table per spike recommendation (evidence at
@@ -599,11 +602,11 @@ buff-lang-ast-rsx = { path = "crates/buff-lang-ast-rsx" }
 buff-lang-buffhtml-parser = { path = "crates/buff-lang-buffhtml-parser" }
 buff-lang-codegen-buffhtml = { path = "crates/buff-lang-codegen-buffhtml" }
 # T136: Debug Adapter Protocol translation proxy (`crates/buff-dap`).
-# The DAP server wraps the T60 SourceMap (buff_span ↔ rust_line
+# The DAP server wraps the T60 SourceMap (buff_span â†” rust_line
 # translation) into a translation proxy sitting between an editor
 # (VSCode via CodeLLDB / lldb-dap adapter type) and a Rust-capable
-# backend debugger (lldb-dap preferred — ships with llvm; codelldb /
-# vscode-lldb as fallbacks). Pure-Rust deps only — NO native C, NO
+# backend debugger (lldb-dap preferred â€” ships with llvm; codelldb /
+# vscode-lldb as fallbacks). Pure-Rust deps only â€” NO native C, NO
 # OpenSSL, matches the "no C library, no Docker" hard rule. The path
 # dep is mirrored at the workspace level so consumers (T136 CLI
 # `buff debug` subcommand, future IDE integrations) all resolve to the
@@ -612,21 +615,21 @@ buff-dap = { path = "crates/buff-dap" }
 # T139: `buffup` version manager CLI (`crates/buffup`). Downloads
 # pre-built Buff binaries from GitHub Releases and installs them under
 # `~/.buff/versions/<ver>/`. GitHub Releases serve the source tarball
-# as gzip-compressed tar — the `tar` crate (already pinned at line 413
+# as gzip-compressed tar â€” the `tar` crate (already pinned at line 413
 # for T127) handles the unpack but does NOT decompress gzip on its
 # own, so we pull `flate2` for `GzDecoder`. `flate2` is the
 # long-standing pure-Rust gzip impl (the RustCrypto / burntsushi
 # joint; stable since 1.0). Default features are kept on (the default
-# `Miniz_oxide` backend is pure-Rust — NO zlib native dep — which
+# `Miniz_oxide` backend is pure-Rust â€” NO zlib native dep â€” which
 # matches the "no C library, no Docker" hard rule from T126/T127).
 # Pinned to major 1 (the long-standing surface most of the Rust
 # ecosystem targets since 2018; 1.0.x for years, no breaking changes
 # to the `GzDecoder::new` + `Read` impl API we depend on).
 flate2 = "1"
 # T139: `httpmock` is the HTTP mocking library used by buffup's test
-# suite ONLY. We pin to major 0.7 (the long-standing surface —
+# suite ONLY. We pin to major 0.7 (the long-standing surface â€”
 # `MockServer::start`, `Mock::new().expect_method(...).return_*`,
-# `server.base_url()` — stable across 0.6/0.7). It is the
+# `server.base_url()` â€” stable across 0.6/0.7). It is the
 # de-facto pure-Rust HTTP mocking crate (spins up a real TCP listener
 # on an ephemeral port so both blocking and async reqwest clients can
 # drive it without any test-only middleware). Pure-Rust, no native
@@ -635,16 +638,16 @@ flate2 = "1"
 # (T140 setup-buff Action E2E, T128 registry web UI tests) can reuse
 # the same version without churn.
 httpmock = "0.7"
-# T139: `buffup` workspace path dep — mirrors the buff-eval /
+# T139: `buffup` workspace path dep â€” mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap
 # pattern so any future consumer (T140 setup-buff GitHub Action,
 # installer scripts, IDE integrations) resolves to the same in-tree
 # version during the v1.12 tooling wave.
 buffup = { path = "crates/buffup" }
-# T43: `scraper` 0.22 — the canonical pure-Rust HTML parser + CSS
+# T43: `scraper` 0.22 â€” the canonical pure-Rust HTML parser + CSS
 # selector engine built on `html5ever` (servo's HTML5 parser) +
 # `selectors` (servo's CSS selector engine) + `cssparser`. All
-# pure-Rust, NO cc-rs, NO native C shim — matches the "no C
+# pure-Rust, NO cc-rs, NO native C shim â€” matches the "no C
 # library, no Docker" hard rule from T126/T127 (same family of
 # cc-rs-avoidance that pushed hand-rolled lexer/parser per
 # AGENTS.md). API surface used by `crates/buff-scrape`:
@@ -661,23 +664,23 @@ buffup = { path = "crates/buffup" }
 # by caching the source String in Document/Element and re-parsing
 # per access (mirrors how Regex caches its pattern + SourceRegistry
 # for thread-safety). The wrapper types Document / Element /
-# Crawler are Send + Sync — the FFI guide R4 holds at the Buff-
+# Crawler are Send + Sync â€” the FFI guide R4 holds at the Buff-
 # visible boundary. Pinned to major 0.22 (the long-standing
-# surface since 2024 — the Html/Selector/ElementRef API has been
+# surface since 2024 â€” the Html/Selector/ElementRef API has been
 # stable across 0.18-0.27). 0.22 is conservative on Rust 1.95;
 # 0.27 (released 2026-05) requires Rust 1.74+ which the pinned
-# 1.95.0 toolchain satisfies — bump to 0.27 is a no-op follow-up.
+# 1.95.0 toolchain satisfies â€” bump to 0.27 is a no-op follow-up.
 scraper = "0.22"
-# T43: `buff-scrape` workspace path dep — mirrors the buff-image /
+# T43: `buff-scrape` workspace path dep â€” mirrors the buff-image /
 # buff-http-client / buff-cache / buff-auth pattern so any future
 # consumer (codegen-lowered `Document.from_html(...)` /
 # `doc.select(...)` / `Crawler.new(...)` calls, IDE hover/completion)
 # resolves to the same in-tree version during the v1.17 frameworks
-# wave. Records `buff-scrape` (NOT `buff_lang_scrape` — the
+# wave. Records `buff-scrape` (NOT `buff_lang_scrape` â€” the
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-scrape = { path = "crates/buff-scrape" }
-# T12: `buff-ecs` workspace path dep — Entity-Component-System
+# T12: `buff-ecs` workspace path dep â€” Entity-Component-System
 # foundation for buff-game (T16). Mirrors the buff-eval / buff-repl /
 # buff-lsp / buff-registry / buff-jupyter / buff-dap / buffup pattern
 # so any future consumer (T16 buff-game, T17+ framework wrappers,
@@ -685,10 +688,10 @@ buff-scrape = { path = "crates/buff-scrape" }
 # during the v1.13 frameworks wave.
 buff-ecs = { path = "crates/buff-ecs" }
 # T12: Entity-Component-System backing implementation for `buff-ecs`.
-# We pin `hecs` to major 0.10 (the long-standing surface since 2022 —
+# We pin `hecs` to major 0.10 (the long-standing surface since 2022 â€”
 # every method we lower through codegen: `World::new`, `spawn`,
 # `insert_one`, `remove_one`, `get`, `get_mut`, `query`, `query_mut`,
-# `despawn`, `len`, `clear`, `reserve_entity` — has been stable for
+# `despawn`, `len`, `clear`, `reserve_entity` â€” has been stable for
 # years). We prefer `hecs` over `bevy_ecs` because:
 #
 # - Smaller surface: `hecs::World` + `Entity` + `QueryBorrow` cover
@@ -699,7 +702,7 @@ buff-ecs = { path = "crates/buff-ecs" }
 # - Stable, narrowly-scoped API: every method we lower through codegen
 #   has been stable in `hecs` for years; we will not be chasing
 #   upstream API churn during the v1.13 frameworks wave.
-# - Pure-Rust: no native deps, no cc-rs, no OpenSSL — matches the
+# - Pure-Rust: no native deps, no cc-rs, no OpenSSL â€” matches the
 #   "no C library, no Docker" hard rule from the T12 task spec and
 #   the wider workspace stance that killed chumsky/logos/zmq.
 # - Single-crate dependency: `hecs` is one crate; `bevy_ecs` pulls
@@ -708,7 +711,7 @@ buff-ecs = { path = "crates/buff-ecs" }
 #
 # All FFI-safety rules from `crates/buff-lang-ffi-guide/GUIDE.md`
 # apply: the `buff-ecs` wrapper exposes only `Entity` (a transparent
-# `(u32, u32)` id newtype — no raw pointers), `World`, `System`,
+# `(u32, u32)` id newtype â€” no raw pointers), `World`, `System`,
 # `SystemFn`, `EcsError`, and the `Component` marker trait (blanket-
 # impl over `hecs::Component + Clone + Debug`). Every public entry
 # point wraps its body in `std::panic::catch_unwind` per Rule R6.
@@ -718,7 +721,7 @@ buff-ecs = { path = "crates/buff-ecs" }
 # hecs; cargo-project wiring is deferred). Snapshots + extern_crates
 # set is the verifiable contract.
 hecs = "0.10"
-# T8: `buff-tensor` workspace path dep — N-dim array framework (rank
+# T8: `buff-tensor` workspace path dep â€” N-dim array framework (rank
 # <= 4, f32 only for MVP). CPU-only via rayon per T6 decision
 # (`.sisyphus/decisions/wgsl-extensibility-v1x.md`); GPU dispatch for
 # elementwise ops is a v1.18+ enhancement (~50 LOC + dispatch wrapper
@@ -730,23 +733,23 @@ hecs = "0.10"
 # during the v1.x frameworks wave.
 buff-tensor = { path = "crates/buff-tensor" }
 # T13 (buff-science): industry-standard Rust linear algebra library.
-# Pure-Rust, no native C deps (no BLAS/LAPACK linking by default) —
+# Pure-Rust, no native C deps (no BLAS/LAPACK linking by default) â€”
 # matches the "no C library, no Docker" hard rule from T126/T127.
 # Used by buff-science for matrix inverse, determinant, solve, and
 # LU decomposition. API surface: `DMatrix::from_row_slice` /
 # `Matrix::try_inverse` / `Matrix::determinant` / `Matrix::solve` /
 # `Matrix::transpose`. Pinned to major 0.33 (the long-standing surface
-# since 2024 — stable across 0.32/0.33; core since 0.27). Mirrors the
+# since 2024 â€” stable across 0.32/0.33; core since 0.27). Mirrors the
 # chrono 0.4 / rand 0.8 conservative-pin philosophy.
 nalgebra = "0.33"
-# T13: `buff-science` workspace path dep — mirrors the buff-tensor /
+# T13: `buff-science` workspace path dep â€” mirrors the buff-tensor /
 # buff-dsp / buff-image pattern so any future consumer (codegen-lowered
 # `Science.*` calls, IDE hover/completion) resolves to the same
 # in-tree version during the v1.13 frameworks wave.
 buff-science = { path = "crates/buff-science" }
 # T8 (buff-tensor): the canonical Rust N-dimensional array crate.
 # Recorded at the workspace level so the T8 reference-comparison tests
-# (deferred to a follow-up — the MVP ships pure-Rust with no extern)
+# (deferred to a follow-up â€” the MVP ships pure-Rust with no extern)
 # and T15 (buff-ml, future autodiff) can pull it without re-pinning.
 # We pin to the `0.16` major.minor (the long-standing surface most of
 # the Rust ecosystem targets since 2024 - `ArrayBase::<S, Ix2>::dot`
@@ -766,10 +769,10 @@ buff-science = { path = "crates/buff-science" }
 ndarray = { version = "0.16", default-features = false }
 # T9 (buff-image) and T11 (buff-dsp) workspace deps (image, rustfft,
 # realfft, apodize) are added by those sibling tasks downstream in
-# this file — T8 does NOT duplicate them here.
+# this file â€” T8 does NOT duplicate them here.
 # T8 (buff-tensor): the canonical Rust N-dimensional array crate.
 # Recorded at the workspace level so the T8 reference-comparison tests
-# (deferred to a follow-up — the MVP ships pure-Rust with no extern)
+# (deferred to a follow-up â€” the MVP ships pure-Rust with no extern)
 # and T15 (buff-ml, future autodiff) can pull it without re-pinning.
 # We pin to the `0.16` major.minor (the long-standing surface most of
 # the Rust ecosystem targets since 2024 - `ArrayBase::<S, Ix2>::dot`
@@ -786,20 +789,20 @@ ndarray = { version = "0.16", default-features = false }
 # required" stance). Mirrors the chrono/tokio/regex codegen-only
 # linking boundary (single-file `buff run` rustc path does NOT link
 # ndarray; cargo-project wiring is deferred).
-# T9: `buff-image` MVP — image codecs + pixel ops (CPU-only). The
+# T9: `buff-image` MVP â€” image codecs + pixel ops (CPU-only). The
 # crate wraps the `image` crate (the de-facto Rust ecosystem umbrella
 # for image codecs, maintained by the image-rs org). Pure-Rust for
 # every T9-allowed format:
-#   - PNG  (pure-Rust `png` crate — no libpng)
-#   - JPEG (pure-Rust `jpeg-decoder` crate — no libjpeg-turbo)
-#   - GIF  (pure-Rust `gif` crate — no libgif)
+#   - PNG  (pure-Rust `png` crate â€” no libpng)
+#   - JPEG (pure-Rust `jpeg-decoder` crate â€” no libjpeg-turbo)
+#   - GIF  (pure-Rust `gif` crate â€” no libgif)
 #   - BMP  (in-tree pure-Rust impl inside image-rs)
-#   - WebP (pure-Rust `image-webp` crate — no libwebp)
+#   - WebP (pure-Rust `image-webp` crate â€” no libwebp)
 # Matches the "no C library, no Docker" hard rule from AGENTS.md
 # (same family of cc-rs avoidance that pushed hand-rolled lexer/parser
 # per the project's "Windows host with no MSVC" constraint). The T9
 # spec explicitly forbids exotic formats (DICOM, RAW, AVIF, TGA,
-# FARBFELD, DDS) — we do NOT enable any of image's optional features
+# FARBFELD, DDS) â€” we do NOT enable any of image's optional features
 # for those (the default features are exactly the 5 we surface).
 #
 # API surface used (all stable since 0.25):
@@ -813,7 +816,7 @@ ndarray = { version = "0.16", default-features = false }
 # - `image::ImageFormat::{Png, Jpeg, Gif, Bmp, WebP}` for the
 #   `ImageFormat` enum (exotic variants filtered to Unknown).
 #
-# Pinned to major 0.25 (released 2024 — the long-standing surface
+# Pinned to major 0.25 (released 2024 â€” the long-standing surface
 # most of the Rust ecosystem targets). 0.25 finalized the
 # `ImageReader` builder API and the `DynamicImage` method surface
 # we depend on; pre-0.25 had a slightly different `crop` API that
@@ -827,45 +830,45 @@ ndarray = { version = "0.16", default-features = false }
 # single-file `buff run` rustc path does NOT link it; cargo-project
 # wiring is deferred per the existing precedent).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
-# T9: `buff-image` workspace path dep — mirrors the buffup / buff-eval /
+# T9: `buff-image` workspace path dep â€” mirrors the buffup / buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap pattern
 # so any future consumer (T135 image-rendered `.buffhtml` assets, T138c
 # Bufflings image-processing exercises, IDE integrations) resolves to
 # the same in-tree version during the v1.13 frameworks wave.
 buff-image = { path = "crates/buff-image" }
-# T50: `buff-xml` — XML parsing for Buff. Wraps the `quick-xml` crate
-# (pure-Rust streaming XML parser — no native C deps, no cc-rs, matches
+# T50: `buff-xml` â€” XML parsing for Buff. Wraps the `quick-xml` crate
+# (pure-Rust streaming XML parser â€” no native C deps, no cc-rs, matches
 # the "no C library, no Docker" hard rule from AGENTS.md). API surface
 # used: `Reader::from_str` / `Reader::read_event_into` / `Event::{Start,
 # End, Text, Empty, Eof}` for parsing; `Writer::new` / `Writer::write_event`
 # for serialization (though the MVP serializes via string building to keep
 # the dependency surface minimal). Pinned to major 0.37 (the long-standing
-# surface since 2025 — the `Reader::from_str` + `read_event_into` +
+# surface since 2025 â€” the `Reader::from_str` + `read_event_into` +
 # `BytesStart::attributes` API has been stable across 0.36-0.37). Pure-Rust,
 # no native deps. Mirrors the conservative-pin philosophy already in use
 # across the workspace (chrono 0.4, rand 0.8, image 0.25, axum 0.8).
 quick-xml = "0.37"
-# T50: `buff-xml` workspace path dep — mirrors the buff-image / buff-cache
+# T50: `buff-xml` workspace path dep â€” mirrors the buff-image / buff-cache
 # pattern so any future consumer (codegen-lowered `Xml.from_str(...)` /
 # `doc.find(...)` calls, IDE hover/completion) resolves to the same in-tree
 # version during the v1.17 frameworks wave. Records `buff-xml` (NOT
-# `buff_lang_xml` — the framework-crate naming convention drops the `-lang`
+# `buff_lang_xml` â€” the framework-crate naming convention drops the `-lang`
 # infix per AGENTS.md).
 buff-xml = { path = "crates/buff-xml" }
 # T10: `buff-audio` AudioBuffer MVP wraps three pure-Rust audio crates.
 # All three are 100% pure-Rust (no cc-rs, no native C deps, no
-# assembler shims) — matches the "no C library, no Docker" hard rule
+# assembler shims) â€” matches the "no C library, no Docker" hard rule
 # from T126/T127. Verified to compile cleanly on the Windows MSVC
 # host (the vcruntime.h host issue that blocks cc-rs-based crates
 #
 # - `hound` 3.x: the canonical pure-Rust WAV reader/writer
-#   (ruuda/hound — the long-standing WAV impl; stable API since
+#   (ruuda/hound â€” the long-standing WAV impl; stable API since
 #   3.0). API surface used: `hound::WavReader::open(path)` /
 #   `WavReader::new(reader)` + `.spec()` (sample_rate / channels /
 #   bits_per_sample / sample_format) + `.samples::<i16>()` iterator
 #   for read; `hound::WavWriter::create(path, spec)` +
 #   `.write_sample(f32_value)` for write. We pin to major 3 (NOT 4.x
-#   which does not exist yet — 3.x is the stable surface).
+#   which does not exist yet â€” 3.x is the stable surface).
 #
 # - `symphonia` 0.6: pure-Rust audio decoder for MP3, FLAC, Vorbis,
 #   WAV, and more. Used by `buff-audio` for non-WAV codec loading
@@ -883,7 +886,7 @@ buff-xml = { path = "crates/buff-xml" }
 #   now that 0.6 has shipped the identical surface + bug fixes).
 #
 # - `symphonia-bundle-flac` etc. are pulled in transitively by the
-#   cargo features on the umbrella `symphonia` crate — we depend
+#   cargo features on the umbrella `symphonia` crate â€” we depend
 #   ONLY on the umbrella, never the sub-crates directly.
 #
 # NOTE: The T10 task spec lists `rodio` as the primary candidate.
@@ -893,9 +896,9 @@ buff-xml = { path = "crates/buff-xml" }
 # the "no C library, no Docker" hard rule AND fails on this Windows
 # MSVC vcruntime.h host. `symphonia` is the canonical pure-Rust
 # decoder-only crate (no playback), which is exactly what T10 needs
-# (the spec explicitly forbids real-time playback — defer to v1.18+).
+# (the spec explicitly forbids real-time playback â€” defer to v1.18+).
 # The spec also lists `symphonia` as an alternative ("rodio OR
-# symphonia") — we pick symphonia for those reasons. Commit body
+# symphonia") â€” we pick symphonia for those reasons. Commit body
 # documents the deviation.
 #
 # Mirrors the chrono/tracing/regex/toml/rand/tokio/base64/hex/
@@ -907,7 +910,7 @@ buff-xml = { path = "crates/buff-xml" }
 # is the verifiable contract.
 hound = "3"
 symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "vorbis", "pcm"] }
-# T10: `buff-audio` workspace path dep — mirrors the buff-eval /
+# T10: `buff-audio` workspace path dep â€” mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
 # buffup pattern so any future consumer (T11 buff-dsp, T12 buff-video,
 # the codegen `extern_crates` registration) resolves to the same
@@ -918,8 +921,8 @@ buff-audio = { path = "crates/buff-audio" }
 # guide (no raw pointers, owned `Vec<T>` at the boundary):
 # - `rustfft` is the de-facto pure-Rust FFT (mixed-radix; no C/FFI
 #   deps; stable API since 6.0; used by `realfft` under the hood).
-#   Pinned to major 6 (the long-standing surface — `FftPlanner::new`,
-#   `planner.fft(len, direction)` — that the rest of the Rust DSP
+#   Pinned to major 6 (the long-standing surface â€” `FftPlanner::new`,
+#   `planner.fft(len, direction)` â€” that the rest of the Rust DSP
 #   ecosystem targets). We extern to `rustfft::Fft` via a safe
 #   `buff_dsp::externs::dsp_fft` wrapper.
 # - `realfft` wraps `rustfft` with a real-to-complex hermitian
@@ -931,61 +934,61 @@ buff-audio = { path = "crates/buff-audio" }
 # - `apodize` is the window-function crate (Hann, Hamming,
 #   Blackman, Nuttall, triangular). Pure-Rust, no native deps.
 #   Provides `hanning_iter(n)` / `hamming_iter(n)` / `blackman_iter(n)`
-#   — stable iterators since 1.0.0. We pin to major 1 (the long-
-#   standing surface — iterators yield f64 window coefficients — that
+#   â€” stable iterators since 1.0.0. We pin to major 1 (the long-
+#   standing surface â€” iterators yield f64 window coefficients â€” that
 #   the codegen `Window::hann(n).collect()` arm relies on).
-# All four are pure-Rust, no cc-rs, no native deps — matches the
+# All four are pure-Rust, no cc-rs, no native deps â€” matches the
 # "no C library, no Docker" hard rule from T126/T127.
 rustfft = "6.2"
 realfft = "3.4"
 apodize = "1.0"
-# T11: `buff-dsp` workspace path dep — mirrors the buff-eval /
+# T11: `buff-dsp` workspace path dep â€” mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
 # buffup pattern so any future consumer (T11 codegen-lowered
 # `Signal.*` / `Window.*` calls, the future T139 bufflings DSP
 # tutorial) resolves to the same in-tree version during the v1.13
 # frameworks wave.
 buff-dsp = { path = "crates/buff-dsp" }
-# T7: `buff-dataframe` — Columnar DataFrames + CSV/JSON load + ops.
+# T7: `buff-dataframe` â€” Columnar DataFrames + CSV/JSON load + ops.
 # Workspace path dep mirrors the buff-dsp / buff-mock / buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
 # buffup pattern so any future consumer (codegen-lowered
 # `DataFrame.*` / `df.*` calls, the future flagship data-pipeline
 # example, IDE hover/completion) resolves to the same in-tree
 # version during the v1.13 frameworks wave. Records `buff-dataframe`
-# (NOT `buff_lang_dataframe` — the framework-crate naming convention
+# (NOT `buff_lang_dataframe` â€” the framework-crate naming convention
 # drops the `-lang` infix per AGENTS.md).
 buff-dataframe = { path = "crates/buff-dataframe" }
-# T27: `buff-fuzz` — property-based fuzzing framework. Workspace
+# T27: `buff-fuzz` â€” property-based fuzzing framework. Workspace
 # path dep mirrors the buff-mock / buff-dataframe / buff-image /
 # buff-audio pattern so any future consumer (codegen-lowered
 # `Fuzz.*` / `Strategy.*` calls, the buff-mock integration for
 # fuzz-with-mocks, IDE hover/completion) resolves to the same
 # in-tree version during the v1.13 frameworks wave. Records
-# `buff-fuzz` (NOT `buff_lang_fuzz` — the framework-crate naming
+# `buff-fuzz` (NOT `buff_lang_fuzz` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-fuzz = { path = "crates/buff-fuzz" }
-# T26: `buff-audit` — security scanning + code signing. Two pure-Rust
+# T26: `buff-audit` â€” security scanning + code signing. Two pure-Rust
 # crypto crates cover the extern surface per the T4 FFI guide (no raw
 # pointers, owned `Vec<u8>` / `String` at the boundary):
 #
 # - `ed25519-dalek` 2.0: the canonical pure-Rust Ed25519 implementation
-#   (no cc-rs, no native C deps, no assembler shims — matches the "no C
+#   (no cc-rs, no native C deps, no assembler shims â€” matches the "no C
 #   library, no Docker" hard rule from T126/T127 and the "no `ring` /
 #   no native-tls" rule from the T26 task spec). API surface used:
 #   `ed25519_dalek::SigningKey::generate()` (CSPRNG keypair via
-#   `rand_core::OsRng` — pulled transitively by ed25519-dalek's
+#   `rand_core::OsRng` â€” pulled transitively by ed25519-dalek's
 #   `rand_core` feature; re-exports `VerifyingKey` / `Signer` /
 #   `Verifier` traits), `signing_key.sign(data).to_bytes()` (64-byte
 #   detached signature), `verifying_key::VerifyingKey::from_bytes(&pk)?`
 #   + `verifying_key.verify_strict(data, &sig)?` (returns
-#   `Result<(), SignatureError>` — mapped to `AuditError::BadSignature`
+#   `Result<(), SignatureError>` â€” mapped to `AuditError::BadSignature`
 #   via `From`). We enable `rand_core` (CSPRNG keypair generation) +
 #   the `zeroize` feature is left at the default (on) for key
 #   material hygiene. The `fast` / `asm` features are NOT enabled
-#   (asm pulls cc-rs; fast uses nightly-only SIMD — neither belongs
+#   (asm pulls cc-rs; fast uses nightly-only SIMD â€” neither belongs
 #   on the Windows MSVC host). Pinned to major 2 (the long-standing
-#   surface — `SigningKey`/`VerifyingKey`/`Signer`/`Verifier` — that
+#   surface â€” `SigningKey`/`VerifyingKey`/`Signer`/`Verifier` â€” that
 #   the Rust ecosystem has targeted since the 2022 rework).
 #
 # - `sha2` is already pinned at the workspace level (T124k); T26
@@ -1013,40 +1016,40 @@ buff-fuzz = { path = "crates/buff-fuzz" }
 # precedent). Snapshots + extern_crates set is the verifiable
 # contract.
 ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "zeroize"] }
-# T26: `buff-audit` workspace path dep — mirrors the buff-fuzz /
+# T26: `buff-audit` workspace path dep â€” mirrors the buff-fuzz /
 # buff-image / buff-audio / buff-dsp / buff-dataframe pattern so any
 # future consumer (codegen-lowered `Audit.*` / `Signature.*` calls,
 # the codegen `extern_crates` registration, IDE hover/completion)
 # resolves to the same in-tree version during the v1.13 frameworks
-# wave. Records `buff-audit` (NOT `buff_lang_audit` — the framework-
+# wave. Records `buff-audit` (NOT `buff_lang_audit` â€” the framework-
 # crate naming convention drops the `-lang` infix per AGENTS.md).
 buff-audit = { path = "crates/buff-audit" }
-# T19: `handlebars` — pure-Rust runtime HTML templating engine (no macros,
+# T19: `handlebars` â€” pure-Rust runtime HTML templating engine (no macros,
 # no compile-time codegen). We use handlebars over askama because askama
 # requires a proc-macro at compile time (breaks the "no macro dependence"
 # rule from the T19 spec). handlebars 6.x is the stable major: the API
 # surface used is `Handlebars::new()`, `.register_template_string(name, src)`,
-# `.render(name, &ctx)` — all pure-Rust, no native deps, no cc-rs. Mirrors
+# `.render(name, &ctx)` â€” all pure-Rust, no native deps, no cc-rs. Mirrors
 # the chrono/tracing/regex/toml/rand codegen-only linking boundary (single-
 # file `buff run` rustc path does NOT link it; cargo-project wiring is
 # deferred). Pinned to major 6 (the long-standing surface since 2022).
 handlebars = "6"
-# T19: `buff-template` workspace path dep — mirrors the buff-image /
+# T19: `buff-template` workspace path dep â€” mirrors the buff-image /
 # buff-audio / buff-dsp / buff-dataframe pattern so the codegen
 # `extern_crates` registration resolves to the same in-tree version.
 buff-template = { path = "crates/buff-template" }
-# T18: `buff-db` — database access MVP wrapping `sqlx` (industry-standard
-# async Rust DB layer). Pure-Rust: NO libpq, NO native-tls, NO diesel —
+# T18: `buff-db` â€” database access MVP wrapping `sqlx` (industry-standard
+# async Rust DB layer). Pure-Rust: NO libpq, NO native-tls, NO diesel â€”
 # matches the "no C library, no Docker" hard rule from T126/T127 and the
 # workspace "rustls-tls NOT native-tls" rule from AGENTS.md.
 #
 # - `sqlx` 0.8: the canonical pure-Rust async SQL toolkit. We use the
-#   `runtime-tokio-rustls` feature (NOT `runtime-tokio-native-tls` —
+#   `runtime-tokio-rustls` feature (NOT `runtime-tokio-native-tls` â€”
 #   workspace hard rule per AGENTS.md "Pure-Rust preference" + the
 #   T126/T127 "no C library" rule). The `sqlite` + `postgres` cargo
 #   features enable the two MVP drivers (per T18 spec line 2336
 #   "Support SQLite + PostgreSQL for MVP"; MySQL/MSSQL/Oracle are
-#   explicitly deferred — T18 must-not #5). API surface used:
+#   explicitly deferred â€” T18 must-not #5). API surface used:
 #   `sqlx::AnyPool::connect(url).await` (pool ctor),
 #   `sqlx::query(sql).fetch_all(&pool).await` (SELECT),
 #   `sqlx::query(sql).execute(&pool).await` (DDL/DML),
@@ -1068,20 +1071,20 @@ buff-template = { path = "crates/buff-template" }
 # the existing precedent). Snapshots + extern_crates set is the
 # verifiable contract.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "any"] }
-# T18: `buff-db` workspace path dep — mirrors the buff-template /
+# T18: `buff-db` workspace path dep â€” mirrors the buff-template /
 # buff-image / buff-audio / buff-dsp / buff-dataframe pattern so any
 # future consumer (codegen-lowered `Database.*` calls, IDE
 # hover/completion) resolves to the same in-tree version during the
-# v1.15 frameworks wave. Records `buff-db` (NOT `buff_lang_db` — the
+# v1.15 frameworks wave. Records `buff-db` (NOT `buff_lang_db` â€” the
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-db = { path = "crates/buff-db" }
-# T17: `buff-web` workspace path dep — mirrors the buff-db /
+# T17: `buff-web` workspace path dep â€” mirrors the buff-db /
 # buff-template / buff-image / buff-audio / buff-dsp / buff-dataframe
 # pattern so any future consumer (codegen-lowered `Web.new()` /
 # `Web.bind(addr)` / `web.*` calls, IDE hover/completion) resolves to
 # the same in-tree version during the v1.15 frameworks wave. Records
-# `buff-web` (NOT `buff_lang_web` — the framework-crate naming
+# `buff-web` (NOT `buff_lang_web` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 #
 # The wrapper crate wraps `axum` 0.8 + `tokio` 1.40 + `serde_json` 1
@@ -1094,12 +1097,12 @@ buff-db = { path = "crates/buff-db" }
 # buff-web; cargo-project wiring is deferred). Snapshots +
 # extern_crates set is the verifiable contract.
 buff-web = { path = "crates/buff-web" }
-# T20: `buff-reactive` workspace path dep — Solid.js / Vue-inspired
+# T20: `buff-reactive` workspace path dep â€” Solid.js / Vue-inspired
 # callback-based reactive primitives (Signal + Computed + Effect +
 # batch). Single-threaded `Rc<RefCell>` MVP per the T20 spec; NO
 # Stream<T> dependency (deferred to v1.18+); NO multi-threaded
 # signals (deferred to v1.18+). Pure-Rust, no native C deps, no
-# cc-rs — matches the "no C library, no Docker" hard rule from
+# cc-rs â€” matches the "no C library, no Docker" hard rule from
 # T126/T127 and the wider workspace stance that killed
 # chumsky/logos/zmq. Mirrors the buff-image / buff-audio /
 # buff-dataframe / buff-template / buff-web pattern so any future
@@ -1109,14 +1112,14 @@ buff-web = { path = "crates/buff-web" }
 # resolves to the same in-tree version during the v1.13 frameworks
 # wave.
 buff-reactive = { path = "crates/buff-reactive" }
-# T29: `buff-validate` — declarative schema validation (pydantic-
+# T29: `buff-validate` â€” declarative schema validation (pydantic-
 # equivalent). The MVP wraps the `validator` crate's free-standing
-# trait validators (email / url / length / range / regex) — the
+# trait validators (email / url / length / range / regex) â€” the
 # `derive` macro feature is OFF per the T29 must-not #1 ("no
 # compile-time macro validation"). The `unicode` feature is ON for
 # proper char-counting in length rules (mirrors the workspace's
 # unicode-aware stance via `unicode-segmentation`). Pure-Rust, no
-# native C deps, no cc-rs — matches the "no C library, no Docker"
+# native C deps, no cc-rs â€” matches the "no C library, no Docker"
 # hard rule. API surface used:
 # - `validator::ValidateEmail::validate_email(&str) -> bool` for
 #   the `email` rule kind.
@@ -1125,23 +1128,23 @@ buff-reactive = { path = "crates/buff-reactive" }
 #   Some(max), None) -> bool` for `length`.
 # - `validator::ValidateRange::validate_range(Some(min),
 #   Some(max), None, None) -> bool` for `range`.
-# Pinned to major 0.20 (the long-standing surface — the trait
+# Pinned to major 0.20 (the long-standing surface â€” the trait
 # methods we consume are stable since 0.18; 0.19/0.20 ship the
 # identical trait API with bugfixes; mirrors the chrono 0.4 /
 # rand 0.8 conservative-pin philosophy already in use across the
 # workspace). The `card` feature is OFF (no credit-card validation
-# in MVP — not on the T29 surface).
+# in MVP â€” not on the T29 surface).
 validator = { version = "0.20", default-features = false, features = ["unicode"] }
-# T29: `buff-validate` workspace path dep — mirrors the buff-image /
+# T29: `buff-validate` workspace path dep â€” mirrors the buff-image /
 # buff-audio / buff-dataframe / buff-template / buff-web / buff-
 # reactive pattern so any future consumer (codegen-lowered
 # `Validator.new()` / `validator.with_email(...)` / `validator.
 # validate(...)` calls, IDE hover/completion) resolves to the same
 # in-tree version during the v1.16 frameworks wave. Records
-# `buff-validate` (NOT `buff_lang_validate` — the framework-crate
+# `buff-validate` (NOT `buff_lang_validate` â€” the framework-crate
 # naming convention drops the `-lang` infix per AGENTS.md).
 buff-validate = { path = "crates/buff-validate" }
-# T35: `buff-jobs` — background job queue + cron scheduler MVP.
+# T35: `buff-jobs` â€” background job queue + cron scheduler MVP.
 # Wraps the pure-Rust `cron` crate for cron-expression parsing +
 # ships an in-memory `tokio::sync::Mutex`-free queue (the MVP uses
 # `std::sync::Mutex` + `std::collections::VecDeque` so the surface
@@ -1151,7 +1154,7 @@ buff-validate = { path = "crates/buff-validate" }
 # boundary):
 #
 # - `cron` 0.12: the canonical pure-Rust cron expression parser
-#   (no cc-rs, no native C deps, no assembler shims — matches the
+#   (no cc-rs, no native C deps, no assembler shims â€” matches the
 #   "no C library, no Docker" hard rule from T126/T127 and the
 #   wider workspace stance that killed chumsky/logos/zmq). API
 #   surface used: `cron::Schedule::from_str(expr)` (returns
@@ -1168,33 +1171,33 @@ buff-validate = { path = "crates/buff-validate" }
 #   Cargo.toml. No new top-level deps beyond `cron`.
 #
 # The crate follows the buff-fuzz (T27) pattern exactly:
-# 1. Runtime API (Queue + Job + Worker + Scheduler + Backoff) —
+# 1. Runtime API (Queue + Job + Worker + Scheduler + Backoff) â€”
 #    pure-Rust library usable directly from any Rust test / binary.
-# 2. Codegen helper (`lower_jobs_register`) — emits a `syn::Item`
+# 2. Codegen helper (`lower_jobs_register`) â€” emits a `syn::Item`
 #    for the future `@job` attribute integration in
 #    `buff-lang-codegen-rust` (mirrors buff-fuzz's
 #    `lower_fuzz_harness` exactly).
-# Zero parser/AST/codegen-rust ripple — the MVP is self-contained
+# Zero parser/AST/codegen-rust ripple â€” the MVP is self-contained
 # (per the T3 macro-spike DEFER outcome documented in
 # `.sisyphus/decisions/macro-system-v1x.md`). The prelude /
 # `extern_crates` walker integration in `buff-lang-types` +
 # `buff-lang-codegen-rust` is deferred to a coordinated multi-task
 # finish commit once the conflict-zone dust settles (mirrors the
 # buff-fuzz precedent).
-# T35: `buff-jobs` workspace path dep — mirrors the buff-fuzz /
+# T35: `buff-jobs` workspace path dep â€” mirrors the buff-fuzz /
 # buff-image / buff-audio / buff-dataframe / buff-template /
 # buff-web / buff-reactive pattern so any future consumer
 # (codegen-lowered `Queue.memory()` / `scheduler.cron(...)` calls,
 # the future `@job` attribute codegen integration, IDE
 # hover/completion, T139 bufflings background-jobs tutorial)
 # resolves to the same in-tree version during the v1.15 frameworks
-# wave. Records `buff-jobs` (NOT `buff_lang_jobs` — the framework-
+# wave. Records `buff-jobs` (NOT `buff_lang_jobs` â€” the framework-
 # crate naming convention drops the `-lang` infix per AGENTS.md).
 buff-jobs = { path = "crates/buff-jobs" }
-# T31: `buff-cache` MVP — in-memory + distributed cache for Buff.
+# T31: `buff-cache` MVP â€” in-memory + distributed cache for Buff.
 # Wraps the `moka` crate (the de-facto pure-Rust concurrent cache
-# used by the Rust ecosystem — Tokio / TiKV / Amphora / etc). Pure-
-# Rust, no native deps, no cc-rs, no assembler shims — matches the
+# used by the Rust ecosystem â€” Tokio / TiKV / Amphora / etc). Pure-
+# Rust, no native deps, no cc-rs, no assembler shims â€” matches the
 # "no C library, no Docker" hard rule from T126/T127 and the wider
 # workspace stance that killed chumsky/logos/zmq.
 #
@@ -1211,7 +1214,7 @@ buff-jobs = { path = "crates/buff-jobs" }
 # - `cache.run_pending_tasks()` for the synchronous drain helper.
 # - `cache.entry_count()` for `cache.len()`.
 #
-# Pinned to major 0.12 (released 2024 — the long-standing surface
+# Pinned to major 0.12 (released 2024 â€” the long-standing surface
 # most of the Rust ecosystem targets). 0.12 finalised the
 # `sync::Cache` builder + entry-count API we depend on; pre-0.12
 # had a slightly different eviction-policy API that would require
@@ -1240,29 +1243,29 @@ buff-jobs = { path = "crates/buff-jobs" }
 # wiring is deferred per the existing precedent). Snapshots +
 # extern_crates set is the verifiable contract.
 moka = { version = "0.12", default-features = false, features = ["sync"] }
-# T31: `buff-cache` workspace path dep — mirrors the buff-template /
+# T31: `buff-cache` workspace path dep â€” mirrors the buff-template /
 # buff-image / buff-audio / buff-dsp / buff-dataframe / buff-reactive
 # pattern so any future consumer (codegen-lowered `Cache.new(...)` /
 # `cache.*` calls, IDE hover/completion, the future Redis backend
 # v1.18+) resolves to the same in-tree version during the v1.16
-# frameworks wave. Records `buff-cache` (NOT `buff_lang_cache` —
+# frameworks wave. Records `buff-cache` (NOT `buff_lang_cache` â€”
 # the framework-crate naming convention drops the `-lang` infix
 # per AGENTS.md).
 buff-cache = { path = "crates/buff-cache" }
-# T30: `buff-config` workspace path dep — mirrors the buff-image /
+# T30: `buff-config` workspace path dep â€” mirrors the buff-image /
 # buff-audio / buff-dsp / buff-dataframe pattern so any future
 # consumer (codegen-lowered `Config.*` calls, IDE hover/completion)
 # resolves to the same in-tree version during the v1.13 frameworks
-# wave. Records `buff-config` (NOT `buff_lang_config` — the
+# wave. Records `buff-config` (NOT `buff_lang_config` â€” the
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-config = { path = "crates/buff-config" }
-# T32: `buff-cli` workspace path dep — CLI framework for USER Buff
+# T32: `buff-cli` workspace path dep â€” CLI framework for USER Buff
 # programs (clap-equivalent). Mirrors the buff-config / buff-template
 # / buff-image pattern so any future consumer (codegen-lowered
 # `App.new()` / `app.flag(...)` / `app.parse(...)` calls, IDE
 # hover/completion) resolves to the same in-tree version during the
-# v1.16 frameworks wave. Records `buff-cli` (NOT `buff_lang_cli` —
+# v1.16 frameworks wave. Records `buff-cli` (NOT `buff_lang_cli` â€”
 # the framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md). NOTE: `buff-cli` is BOTH this new framework crate AND
 # the existing `crates/buff-lang-cli/` (the compiler binary). The
@@ -1270,26 +1273,26 @@ buff-config = { path = "crates/buff-config" }
 # `crates/buff-lang-cli/`. Both consume the same upstream `clap`
 # workspace pin; this crate exposes clap to USER `.buff` programs.
 buff-cli = { path = "crates/buff-cli" }
-# T33: `buff-http-client` workspace path dep — idiomatic HTTP client
+# T33: `buff-http-client` workspace path dep â€” idiomatic HTTP client
 # wrapping the `reqwest` crate (already pinned at the workspace level
 # for T127). Mirrors the buff-image / buff-audio / buff-dsp /
 # buff-dataframe pattern so any future consumer (codegen-lowered
 # `HttpClient.*` / `client.*` / `resp.*` calls, IDE hover/completion)
 # resolves to the same in-tree version during the v1.13 frameworks
-# wave. Records `buff-http-client` (NOT `buff_lang_http_client` —
+# wave. Records `buff-http-client` (NOT `buff_lang_http_client` â€”
 # the framework-crate naming convention drops the `-lang` infix
 # per AGENTS.md).
 buff-http-client = { path = "crates/buff-http-client" }
-# T34: `buff-auth` deps — JWT + OAuth2 + password hashing + RBAC.
+# T34: `buff-auth` deps â€” JWT + OAuth2 + password hashing + RBAC.
 # Three pure-Rust RustCrypto / community crates cover the extern
 # surface per the T4 FFI guide. Added by T31 (this commit) because
 # T34 created crates/buff-auth without registering the workspace
-# deps — workspace glob `crates/*` cannot load buff-auth otherwise,
+# deps â€” workspace glob `crates/*` cannot load buff-auth otherwise,
 # which blocks every sibling crate's `cargo check`. Versions chosen
 # to match the wider RustCrypto ecosystem pin philosophy:
 # - `jsonwebtoken` 9: HS256/RS256/ES256 JWT support.
 #   P0.8 (cargo-deny gate) investigation: jsonwebtoken 9's only
-#   features are `default` / `pem` / `simple_asn1` / `use_pem` — there
+#   features are `default` / `pem` / `simple_asn1` / `use_pem` â€” there
 #   is NO `rust_crypto` feature (the long-standing doc comment here
 #   that claimed otherwise was incorrect and has been removed).
 #   jsonwebtoken 9's default backend pulls `ring` transitively for
@@ -1305,12 +1308,12 @@ buff-http-client = { path = "crates/buff-http-client" }
 jsonwebtoken = "9"
 argon2 = "0.5"
 oauth2 = "4"
-# T39: `zip` crate — pure-Rust ZIP read+write. We pin to major 2
-# (the long-standing stable surface since the 1.x → 2.x graduation;
+# T39: `zip` crate â€” pure-Rust ZIP read+write. We pin to major 2
+# (the long-standing stable surface since the 1.x â†’ 2.x graduation;
 # `zip::ZipWriter::new`, `start_file`, `finish`, `ZipArchive::new`,
 # `by_index`, `extract` are all stable across both majors). The
 # default features pull in C libzstd transitively (via the optional
-# `zstd` feature flag → `zstd` crate → `zstd-sys` → `cc-rs` build of
+# `zstd` feature flag â†’ `zstd` crate â†’ `zstd-sys` â†’ `cc-rs` build of
 # the upstream C `libzstd` source). That violates the buff workspace's
 # hard "no C library, no cc-rs, no native-tls" rule from AGENTS.md
 # (same family that killed chumsky/logos/zmq per the NOTES section).
@@ -1319,7 +1322,7 @@ oauth2 = "4"
 # already pinned at the workspace level for T139). This drops support
 # for zstd-compressed entries INSIDE zip files (still uncommon in the
 # wild; deflate remains the dominant zip codec). NO encryption, NO
-# bzip2, NO lzma, NO ppmd, NO xz, NO aes-crypto — all of which either
+# bzip2, NO lzma, NO ppmd, NO xz, NO aes-crypto â€” all of which either
 # pull C deps or are explicitly forbidden by the T39 task spec
 # ("Must NOT do: No 7z, RAR, BZip2; no encryption-at-rest"). Pure-Rust
 # on all 3 CI OSes; mirrors the chrono/regex/tokio/tar/flate2
@@ -1327,7 +1330,7 @@ oauth2 = "4"
 # does NOT link zip; cargo-project wiring is deferred). Snapshots +
 # extern_crates set is the verifiable contract.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# T39: `ruzstd` crate — pure-Rust Zstandard (RFC 8878) implementation.
+# T39: `ruzstd` crate â€” pure-Rust Zstandard (RFC 8878) implementation.
 # We use `ruzstd` (NOT the canonical `zstd` crate) because the
 # canonical crate wraps C `libzstd` via `zstd-sys`'s `cc::Build::compile()`
 # build script (invokes the C compiler on Facebook's zstd C source).
@@ -1335,27 +1338,27 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # rule from AGENTS.md (same family that killed chumsky/logos/zmq).
 # `ruzstd` 0.8.x ships both `encoding::compress_to_vec(data, level)`
 # and `decoding::StreamingDecoder::new(reader)?.read_to_end(&mut out)`
-# — full compress+decompress roundtrip in 100% safe Rust (no `unsafe`,
+# â€” full compress+decompress roundtrip in 100% safe Rust (no `unsafe`,
 # no native deps, no cc-rs, no assembler shims). Compression ratio /
 # speed are below the C libzstd reference but the T39 acceptance only
-# requires "Roundtrip compress → extract preserves files" — ratio is
+# requires "Roundtrip compress â†’ extract preserves files" â€” ratio is
 # not on the surface. Pinned to major 0.8 (the long-standing surface
-# since 2024 — `CompressionLevel::Fastest` + `StreamingDecoder` API
+# since 2024 â€” `CompressionLevel::Fastest` + `StreamingDecoder` API
 # has been stable for years). Mirrors the chrono 0.4 / rand 0.8 /
 # rustyline 15 / notify 6 / image 0.25 / zip 2 conservative-pin
 # philosophy already in use across the workspace.
 ruzstd = "0.8"
-# T36: `buff-resilience` MVP — resilience patterns (retry + circuit
+# T36: `buff-resilience` MVP â€” resilience patterns (retry + circuit
 # breaker + rate limiter + timeout + composable pipeline). The crate
-# HAND-ROLLS all four primitives on `std::time` + `std::thread` — it
+# HAND-ROLLS all four primitives on `std::time` + `std::thread` â€” it
 # does NOT pull `tower` or `governor` even though the T36 task spec
 # mentioned them as candidate backends. Rationale:
 #
 # - `tower`'s `Service` trait is `async`-first (the `Response`
 #   associated type is wrapped in a `Future<Output = Result<T, E>>`).
-#   Adopting tower would force the Buff surface to be `async` —
+#   Adopting tower would force the Buff surface to be `async` â€”
 #   violating Buff's "no `await`, async propagates invisibly" rule
-#   (Buff §6 mandates no `_async` suffix; the language's anti-
+#   (Buff Â§6 mandates no `_async` suffix; the language's anti-
 #   function-coloring guarantee means users never write `await`).
 #   Buff's existing stdlib (`DateTime`, `Regex`, `Hash`, etc.) is
 #   sync-only for the same reason.
@@ -1378,23 +1381,23 @@ ruzstd = "0.8"
 # Future v1.18+ enhancements may add an async variant of the Pipeline
 # (e.g. `PipelineAsync`) backed by `tokio::time::sleep` + `tokio::select!`
 # for true timeout cancellation. The current sync Timeout is a SOFT
-# timeout — it spawns the handler on a worker thread and polls
+# timeout â€” it spawns the handler on a worker thread and polls
 # `JoinHandle::is_finished()` on a 1ms cadence; if the deadline
 # elapses, the join handle is dropped (worker thread continues in
 # the background until it finishes). This is the only safe way to
 # enforce a timeout in pure Rust without async.
 #
-# Pure-Rust, no native C deps, no cc-rs — matches the "no C library,
+# Pure-Rust, no native C deps, no cc-rs â€” matches the "no C library,
 # no Docker" hard rule from T126/T127. Mirrors the buff-image /
 # buff-template / buff-dsp / buff-dataframe / buff-fuzz / buff-audit
 # pattern so any future consumer (codegen-lowered `Pipeline.new()` /
 # `RetryPolicy.*` / `CircuitBreaker.*` / `RateLimiter.*` / `Timeout.*`
 # calls, IDE hover/completion) resolves to the same in-tree version
 # during the v1.16 frameworks wave. Records `buff-resilience` (NOT
-# `buff_lang_resilience` — the framework-crate naming convention
+# `buff_lang_resilience` â€” the framework-crate naming convention
 # drops the `-lang` infix per AGENTS.md).
 buff-resilience = { path = "crates/buff-resilience" }
-# T44: `buff-i18n` MVP — internationalization via Mozilla's Project Fluent.
+# T44: `buff-i18n` MVP â€” internationalization via Mozilla's Project Fluent.
 # Two pure-Rust crates cover the extern surface per the T4 FFI guide
 # (no raw pointers, owned String/Vec<String> at the boundary):
 #
@@ -1408,10 +1411,10 @@ buff-resilience = { path = "crates/buff-resilience" }
 #   Fluent's `{ $count -> [one] ... *[other] ... }` select syntax
 #   handles pluralization, gender, and ICU MessageFormat natively
 #   (the T44 spec's three required features). Pure-Rust, no cc-rs, no
-#   native C deps — matches the "no C library, no Docker" hard rule.
+#   native C deps â€” matches the "no C library, no Docker" hard rule.
 #   Pinned to major 0.16 (the long-standing surface since 2024; the
 #   API surface we depend on has been stable across the 0.15/0.16
-#   range). NOT the `fluent` 0.17 umbrella — we use the lower-level
+#   range). NOT the `fluent` 0.17 umbrella â€” we use the lower-level
 #   `fluent-bundle` to avoid pulling `fluent-pseudo` + `fluent-langneg`
 #   (not needed for MVP).
 #
@@ -1419,7 +1422,7 @@ buff-resilience = { path = "crates/buff-resilience" }
 #   (also from projectfluent). API surface used:
 #   `LanguageIdentifier::from_str(s)` (via `FromStr` trait),
 #   `langid.to_string()`. We do NOT use the `langid!` compile-time
-#   macro — Buff users supply locale names dynamically at runtime.
+#   macro â€” Buff users supply locale names dynamically at runtime.
 #   Stable since 0.9 (the long-standing surface).
 #
 # Mirrors the chrono/tracing/regex/tokio/image/fluent/etc. codegen-only
@@ -1430,23 +1433,23 @@ fluent-bundle = "0.16"
 unic-langid = "0.9"
 # T44: `intl-memoizer` is a transitive dep of `fluent-bundle`. We
 # pull it explicitly so we can name the `concurrent::IntlLangMemoizer`
-# type — the `Send + Sync` variant of the default memoizer that uses
+# type â€” the `Send + Sync` variant of the default memoizer that uses
 # `Mutex` instead of `RefCell`. Without this, `Arc<Mutex<I18nInner>>`
 # would fail clippy's `arc_with_non_send_sync` lint because the
 # default memoizer is `!Sync`. Version tracks `fluent-bundle` 0.16
 # (`intl-memoizer` 0.5.3).
 intl-memoizer = "0.5"
-# T44: `buff-i18n` workspace path dep — mirrors the buff-image /
+# T44: `buff-i18n` workspace path dep â€” mirrors the buff-image /
 # buff-audio / buff-cache / buff-resilience / buff-validate / buff-auth
 # pattern so any future consumer (codegen-lowered `I18n.new(...)` /
 # `i18n.*` calls, IDE hover/completion, the future buff-ui i18n-aware
 # component story) resolves to the same in-tree version during the
-# v1.17 frameworks wave. Records `buff-i18n` (NOT `buff_lang_i18n` —
+# v1.17 frameworks wave. Records `buff-i18n` (NOT `buff_lang_i18n` â€”
 # the framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-i18n = { path = "crates/buff-i18n" }
-# T37: `buff-fake` — fake data generation (Faker-equivalent). Wraps the
-# `fake` crate (pure-Rust, no native deps, no cc-rs — matches the "no C
+# T37: `buff-fake` â€” fake data generation (Faker-equivalent). Wraps the
+# `fake` crate (pure-Rust, no native deps, no cc-rs â€” matches the "no C
 # library, no Docker" hard rule). API surface used:
 # `fake::faker::name::en::Name`, `fake::faker::internet::en::SafeEmail`,
 # `fake::faker::address::en::StreetAddress`,
@@ -1454,7 +1457,7 @@ buff-i18n = { path = "crates/buff-i18n" }
 # `fake::faker::lorem::en::Words`, `fake::faker::number::en::Number`,
 # `fake::faker::datetime::en::DateTime`, `fake::locales::EN`,
 # `fake::locales::PT_BR`. Pinned to major 2 (the long-standing surface
-# since 2023 — `fake_with_rng(&mut rng)` + locale-specific faker modules
+# since 2023 â€” `fake_with_rng(&mut rng)` + locale-specific faker modules
 # have been stable across 2.x). Mirrors the rand 0.8 / chrono 0.4
 # conservative-pin philosophy already in use across the workspace.
 # Recorded in the codegen `extern_crates` BTreeSet when a Buff program
@@ -1464,24 +1467,24 @@ buff-i18n = { path = "crates/buff-i18n" }
 # `unresolved import fake::uuid` (T37 API-drift fix). In fake 2.x the
 # `uuid` and `chrono` modules are OPTIONAL cargo features (not enabled
 # by default). The import paths `fake::uuid::UUIDv4` and
-# `fake::faker::datetime::en::DateTime` are correct for fake 2.x — they
+# `fake::faker::datetime::en::DateTime` are correct for fake 2.x â€” they
 # just need the features enabled. Version pin untouched; no new
 # dependency added.
 fake = { version = "2", features = ["uuid", "chrono"] }
-# T37: `buff-fake` workspace path dep — mirrors the buff-image /
+# T37: `buff-fake` workspace path dep â€” mirrors the buff-image /
 # buff-audio / buff-dsp / buff-dataframe pattern so any future consumer
 # (codegen-lowered `Faker.*` calls, IDE hover/completion) resolves to
 # the same in-tree version during the v1.13 frameworks wave. Records
-# `buff-fake` (NOT `buff_lang_fake` — the framework-crate naming
+# `buff-fake` (NOT `buff_lang_fake` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-fake = { path = "crates/buff-fake" }
-# T40: `buff-fsm` MVP — state machine library (no external dep). The
+# T40: `buff-fsm` MVP â€” state machine library (no external dep). The
 # T40 spec offered `statig` OR hand-rolled; hand-rolled wins for MVP
 # because state/event identifiers are plain `String` (FFI guide R1
 # + R5), guard/action closures are `Box<dyn Fn(...) + Send + Sync>`
 # newtypes (R4 thread safety, R2 ownership), and <500 LOC for the
 # core surface. Pure-Rust, no cc-rs, no native C deps, no assembler
-# shims — matches the "no C library, no Docker" hard rule from
+# shims â€” matches the "no C library, no Docker" hard rule from
 # T126/T127 and the wider workspace stance that killed
 # chumsky/logos/zmq.
 #
@@ -1490,7 +1493,7 @@ buff-fake = { path = "crates/buff-fake" }
 #   for `Machine.new(initial: ...)`.
 # - `machine.add_transition(from, event, to, guard?, action?)` for
 #   `machine.add_transition(...)` (guards/actions optional).
-# - `machine.fire(event)` for `machine.fire(event: ...)` — wrapped
+# - `machine.fire(event)` for `machine.fire(event: ...)` â€” wrapped
 #   in `catch_unwind` per FFI guide R6 so user-supplied guard/action
 #   panics surface as `Err(FsmError::Panic)` instead of process
 #   abort.
@@ -1506,10 +1509,10 @@ buff-fake = { path = "crates/buff-fake" }
 # `Machine.new(...)` / `machine.*` calls, IDE hover/completion,
 # T139 bufflings state-machine tutorial) resolves to the same
 # in-tree version during the v1.16 frameworks wave. Records
-# `buff-fsm` (NOT `buff_lang_fsm` — the framework-crate naming
+# `buff-fsm` (NOT `buff_lang_fsm` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-fsm = { path = "crates/buff-fsm" }
-# T41: `buff-pubsub` MVP — in-process event bus for Buff. Built
+# T41: `buff-pubsub` MVP â€” in-process event bus for Buff. Built
 # standalone on T2 Channel<T> semantics (no extern required per the
 # T41 task spec). The MVP wraps `crossbeam-channel` (already pinned
 # at line 103 for the LSP server's `select!` debounce) for the
@@ -1517,9 +1520,9 @@ buff-fsm = { path = "crates/buff-fsm" }
 # `features = ["full", "test-util"]` for the runtime + async test
 # utilities) for runtime-aware worker spawning. The lib dep narrows
 # tokio's features to `["rt", "rt-multi-thread", "sync", "time"]`
-# (no `macros` — that's a dev-dep only) so production users don't
+# (no `macros` â€” that's a dev-dep only) so production users don't
 # pay for the proc-macro surface. Pure-Rust, no cc-rs, no native
-# deps — matches the "no C library, no Docker" hard rule from
+# deps â€” matches the "no C library, no Docker" hard rule from
 # T126/T127. Distributed pub/sub (Redis Pub/Sub, NATS, Kafka,
 # RabbitMQ bridges) DEFERRED to v1.18+ per the T41 task spec.
 # Mirrors the buff-image / buff-cache / buff-resilience codegen-only
@@ -1531,10 +1534,10 @@ buff-fsm = { path = "crates/buff-fsm" }
 # spawn_blocking` for runtime-aware worker spawn; `tokio::time::
 # sleep` for the async example / test polling cadence.
 buff-pubsub = { path = "crates/buff-pubsub" }
-# T42: `buff-email` MVP — SMTP + templated email for Buff. Wraps the
+# T42: `buff-email` MVP â€” SMTP + templated email for Buff. Wraps the
 # pure-Rust `lettre` crate (the de-facto Rust ecosystem SMTP
 # transport + message builder, maintained by the lettre org).
-# Pure-Rust TLS via the `rustls` feature (NOT `native-tls` —
+# Pure-Rust TLS via the `rustls` feature (NOT `native-tls` â€”
 # workspace hard rule from AGENTS.md "Pure-Rust preference" + the
 # T126/T127 "no C library" rule). NO `ring` runtime dep at the
 # workspace level (lettre's `ring` crypto backend is enabled in this
@@ -1560,7 +1563,7 @@ buff-pubsub = { path = "crates/buff-pubsub" }
 #   Rust TLS via rustls), `ring` (rustls crypto backend), `webpki-
 #   roots` (Mozilla root CA certs for cert validation). `default-
 #   features = false` drops the default-on `native-tls` + the tokio
-#   async runtime — matches the workspace hard rule + keeps the dep
+#   async runtime â€” matches the workspace hard rule + keeps the dep
 #   surface minimal (Buff's MVP uses the blocking transport; the
 #   async-std / tokio variants are deferred to v1.18+).
 #
@@ -1575,27 +1578,27 @@ buff-pubsub = { path = "crates/buff-pubsub" }
 # cargo-project wiring is deferred per the existing precedent).
 # Snapshots + extern_crates set is the verifiable contract.
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls", "ring", "webpki-roots"] }
-# T42: `buff-email` workspace path dep — mirrors the buff-template /
+# T42: `buff-email` workspace path dep â€” mirrors the buff-template /
 # buff-image / buff-audio / buff-dsp / buff-dataframe / buff-pubsub
 # pattern so any future consumer (codegen-lowered `Email.new(...)` /
 # `email.*` / `SmtpClient.new(...)` / `client.send(...)` calls, IDE
 # hover/completion, T139 bufflings email tutorial) resolves to the
 # same in-tree version during the v1.17 frameworks wave. Records
-# `buff-email` (NOT `buff_lang_email` — the framework-crate naming
+# `buff-email` (NOT `buff_lang_email` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-email = { path = "crates/buff-email" }
-# T39: `buff-archive` workspace path dep — mirrors the buff-image /
+# T39: `buff-archive` workspace path dep â€” mirrors the buff-image /
 # buff-cache / buff-resilience / buff-pubsub pattern so any future
 # consumer (codegen-lowered `Archive.compress_dir(...)` /
 # `Archive.extract(...)` calls, IDE hover/completion, the T139
 # bufflings archive tutorial) resolves to the same in-tree version
 # during the v1.17 frameworks wave. Records `buff-archive` (NOT
-# `buff_lang_archive` — the framework-crate naming convention drops
+# `buff_lang_archive` â€” the framework-crate naming convention drops
 # the `-lang` infix per AGENTS.md).
 buff-archive = { path = "crates/buff-archive" }
-# T52: `buff-protobuf` MVP — Protocol Buffers for Buff. Wraps the
+# T52: `buff-protobuf` MVP â€” Protocol Buffers for Buff. Wraps the
 # pure-Rust `prost` + `prost-types` crates (the canonical Rust
-# protobuf codec, maintained by tokio-rs — RustCrypto-adjacent,
+# protobuf codec, maintained by tokio-rs â€” RustCrypto-adjacent,
 # pure-Rust, no protoc / no C deps). Matches the "no C library, no
 # Docker" hard rule from AGENTS.md (same family of cc-rs avoidance
 # that pushed hand-rolled lexer/parser per the project's "Windows
@@ -1612,16 +1615,16 @@ buff-archive = { path = "crates/buff-archive" }
 #     format).
 #   * `prost::Message::decode::<prost_types::Struct>(&bytes)` for
 #     `Protobuf.deserialize(bytes) -> Value`.
-#   Pinned to major 0.13 (the long-standing surface since 2024 —
+#   Pinned to major 0.13 (the long-standing surface since 2024 â€”
 #   `Message::{encode, decode}` has been stable for years; 0.14 is
 #   also fine but 0.13 matches the conservative-pin philosophy
-#   already in use across the workspace — chrono 0.4, rand 0.8,
+#   already in use across the workspace â€” chrono 0.4, rand 0.8,
 #   rustyline 15, axum 0.8). `default-features = false` drops the
 #   unused `prost-derive` feature's std-only paths.
 #
 # - `prost-types` 0.13: the well-known types (`Struct` / `Value` /
 #   `ListValue` / `FileDescriptorSet` etc). Used by `buff-protobuf`
-#   as the dynamic message surface — `Struct` lets the MVP roundtrip
+#   as the dynamic message surface â€” `Struct` lets the MVP roundtrip
 #   arbitrary `serde_json::Value` through the protobuf wire format
 #   WITHOUT build-time `.proto` codegen. Pinned to 0.13 to match
 #   `prost` (they release in lockstep).
@@ -1634,36 +1637,36 @@ buff-archive = { path = "crates/buff-archive" }
 # extern_crates set is the verifiable contract.
 prost = { version = "0.13", default-features = false, features = ["std"] }
 prost-types = { version = "0.13", default-features = false }
-# T52: `buff-protobuf` workspace path dep — mirrors the buff-image /
+# T52: `buff-protobuf` workspace path dep â€” mirrors the buff-image /
 # buff-msgpack / buff-cache / buff-resilience / buff-pubsub pattern
 # so any future consumer (codegen-lowered `Protobuf.serialize(...)`
 # / `Protobuf.deserialize(...)` calls, IDE hover/completion, the
 # T139 bufflings protobuf tutorial, T17 buff-web gRPC unary
 # composition) resolves to the same in-tree version during the v1.17
 # frameworks wave. Records `buff-protobuf` (NOT `buff_lang_protobuf`
-# — the framework-crate naming convention drops the `-lang` infix
+# â€” the framework-crate naming convention drops the `-lang` infix
 # per AGENTS.md).
 buff-protobuf = { path = "crates/buff-protobuf" }
-# T46: `buff-nlp` workspace path dep — mirrors the buff-image /
+# T46: `buff-nlp` workspace path dep â€” mirrors the buff-image /
 # buff-archive / buff-pubsub pattern so any future consumer
 # (codegen-lowered `Text.detect_language(...)` / `Text.stem(...)`
 # / `Text.tokenize(...)` / `Text.sentences(...)` calls, IDE
 # hover/completion, the T139 bufflings NLP tutorial) resolves to the
 # same in-tree version during the v1.18 frameworks wave. Records
-# `buff-nlp` (NOT `buff_lang_nlp` — the framework-crate naming
+# `buff-nlp` (NOT `buff_lang_nlp` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-nlp = { path = "crates/buff-nlp" }
-# T46: `whatlang` 0.16 — pure-Rust natural-language identification
+# T46: `whatlang` 0.16 â€” pure-Rust natural-language identification
 # (69+ languages via trigram statistical classification). API surface
 # used: `whatlang::Detector::detect(text) -> Option<Info>` +
 # `Info::lang() -> Lang` + `Lang::code() -> &'static str` + `Lang::
-# name() -> &'static str`. Pure-Rust, no native deps, no cc-rs —
+# name() -> &'static str`. Pure-Rust, no native deps, no cc-rs â€”
 # matches the "no C library, no Docker" hard rule. Pinned to major
-# 0.16 (the long-standing surface since 2023 — `Detector::detect`
+# 0.16 (the long-standing surface since 2023 â€” `Detector::detect`
 # returning `Option<Info>` has been stable across 0.13-0.16; we pin
 # to the latest stable major).
 whatlang = "0.16"
-# T46: `rust-stemmers` 1.2 — pure-Rust Snowball stemmer for 18
+# T46: `rust-stemmers` 1.2 â€” pure-Rust Snowball stemmer for 18
 # languages (Arabic, Danish, Dutch, English, Finnish, French, German,
 # Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian,
 # Russian, Spanish, Swedish, Tamil, Turkish). API surface used:
@@ -1671,12 +1674,12 @@ whatlang = "0.16"
 # Error>` + `stemmer.stem(word: &str) -> Cow<str>`. The pure-Rust
 # reimplementation of the canonical Snowball reference (the upstream
 # Snowball project ships reference algorithms at snowballstem.org;
-# rust-stemmers ports them to pure Rust — NO C bindings, no cc-rs).
+# rust-stemmers ports them to pure Rust â€” NO C bindings, no cc-rs).
 # Pinned to major 1.2 (stable since 2019; the Algorithm enum +
 # Stemmer::new Result return + stem method have been stable for
 # years). Matches the "no C library" hard rule.
 rust-stemmers = "1.2"
-# T47: `buff-chat` MVP — Discord + Telegram bot framework for Buff.
+# T47: `buff-chat` MVP â€” Discord + Telegram bot framework for Buff.
 # Wraps two pure-Rust bot crates per the T4 FFI guide (no raw
 # pointers, owned String at the boundary, catch_unwind on every
 # public entry point):
@@ -1692,22 +1695,22 @@ rust-stemmers = "1.2"
 #     incoming messages to our `Bot::dispatch_inner`.
 #   * `serenity::model::gateway::GatewayIntents::{GUILD_MESSAGES,
 #     DIRECT_MESSAGES, MESSAGE_CONTENT}` for the required intent
-#     flags (MESSAGE_CONTENT is a privileged intent — must be enabled
+#     flags (MESSAGE_CONTENT is a privileged intent â€” must be enabled
 #     in the Discord Developer Portal).
 #   * `serenity::model::channel::Message::{content, author, channel_id,
 #     guild_id}` for converting serenity's Message to our platform-
 #     agnostic `buff_chat::Message`.
 #   Features enabled: `client`, `gateway`, `rustls_backend`, `model`.
 #   `default-features = false` drops the default-on `native_tls_backend`
-#   (OpenSSL/SChannel/SecureTransport) — matches the workspace hard
+#   (OpenSSL/SChannel/SecureTransport) â€” matches the workspace hard
 #   rule "Pure-Rust preference: rustls NOT native-tls". The
 #   `rustls_backend` feature uses rustls + ring (pure-Rust TLS stack,
-#   no cc-rs, no native C deps) — matches the "no C library, no Docker"
+#   no cc-rs, no native C deps) â€” matches the "no C library, no Docker"
 #   hard rule from T126/T127.
-#   Pinned to major 0.12 (the long-standing surface since 2024 — the
+#   Pinned to major 0.12 (the long-standing surface since 2024 â€” the
 #   Client::builder + EventHandler + GatewayIntents API has been stable
 #   across 0.11/0.12). NOT 0.13+ until verified on the pinned 1.95.0
-#   toolchain — mirrors the rand 0.8 / chrono 0.4 conservative-pin
+#   toolchain â€” mirrors the rand 0.8 / chrono 0.4 conservative-pin
 #   philosophy.
 #
 # - `teloxide` 0.13: the de-facto pure-Rust Telegram bot framework
@@ -1721,9 +1724,9 @@ rust-stemmers = "1.2"
 #   * `teloxide::types::ChatId` (i64 newtype) + the positive-ID-is-DM
 #     heuristic for `is_dm` detection.
 #   Features enabled: `rustls` (pure-Rust TLS via rustls). `default-
-#   features = false` drops the default-on `native-tls` — matches the
+#   features = false` drops the default-on `native-tls` â€” matches the
 #   workspace hard rule.
-#   Pinned to major 0.13 (the long-standing surface since 2024 —
+#   Pinned to major 0.13 (the long-standing surface since 2024 â€”
 #   `Bot::new` + `teloxide::repl` + `Message::{text, chat, from}` API
 #   has been stable across 0.12/0.13). NOT 0.14+ until verified on
 #   the pinned 1.95.0 toolchain.
@@ -1742,27 +1745,27 @@ rust-stemmers = "1.2"
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model"] }
 teloxide = { version = "0.13", default-features = false, features = ["rustls", "ctrlc_handler"] }
 async-trait = "0.1"
-# T47: `buff-chat` workspace path dep — mirrors the buff-image /
+# T47: `buff-chat` workspace path dep â€” mirrors the buff-image /
 # buff-pubsub / buff-email pattern so any future consumer
 # (codegen-lowered `Bot.new(...)` / `bot.*` calls, IDE
 # hover/completion, the T139 bufflings bot tutorial) resolves to the
 # same in-tree version during the v1.17 frameworks wave. Records
-# `buff-chat` (NOT `buff_lang_chat` — the framework-crate naming
+# `buff-chat` (NOT `buff_lang_chat` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-chat = { path = "crates/buff-chat" }
-# T51: `buff-msgpack` workspace path dep — MessagePack binary format
+# T51: `buff-msgpack` workspace path dep â€” MessagePack binary format
 # wrapping `rmp-serde`. Mirrors the buff-image / buff-audio / buff-dsp
 # pattern so any future consumer (codegen-lowered `MsgPack.serialize(...)`
 # / `MsgPack.deserialize(...)` calls, IDE hover/completion) resolves to
 # the same in-tree version during the v1.13 frameworks wave. Records
-# `buff-msgpack` (NOT `buff_lang_msgpack` — the framework-crate naming
+# `buff-msgpack` (NOT `buff_lang_msgpack` â€” the framework-crate naming
 # convention drops the `-lang` infix per AGENTS.md).
 buff-msgpack = { path = "crates/buff-msgpack" }
-# T45: `buff-geo` MVP — geospatial / GIS primitives for Buff. Wraps the
+# T45: `buff-geo` MVP â€” geospatial / GIS primitives for Buff. Wraps the
 # pure-Rust `geo` + `geo-types` crates (the de-facto Rust ecosystem
-# default for geospatial primitives — the geo-rs org's maintained
+# default for geospatial primitives â€” the geo-rs org's maintained
 # successor to `rust-geo`). Pure-Rust, no native C deps, no cc-rs, no
-# assembler shims — matches the "no C library, no Docker" hard rule
+# assembler shims â€” matches the "no C library, no Docker" hard rule
 # from T126/T127 and the wider workspace stance that killed
 # chumsky/logos/zmq.
 #
@@ -1778,7 +1781,7 @@ buff-msgpack = { path = "crates/buff-msgpack" }
 # - `geo::algorithm::webmercator::WebMercator` OR the inline EPSG:3857
 #   closed-form for `Projection.wgs84_to_web_mercator(point)`.
 #
-# Pinned to major 0.28 (released 2024 — the long-standing surface most
+# Pinned to major 0.28 (released 2024 â€” the long-standing surface most
 # of the Rust ecosystem targets). 0.28 finalised the
 # `algorithm::{EuclideanDistance, EuclideanLength, Area, Contains,
 # Intersects, BooleanOps}` trait surface we depend on; pre-0.28 had a
@@ -1802,26 +1805,26 @@ geo = "0.28"
 # release cadence).
 geo-types = "0.7"
 # T45: `geohash` is the pure-Rust geohash encoder/decoder (the
-# canonical Rust ecosystem default — stable since 0.13). Optional
+# canonical Rust ecosystem default â€” stable since 0.13). Optional
 # utility for the future `Point.geohash()` instance method; not
 # required for the T45 MVP surface (distance/area/buffer/intersect)
 # but workspace-pinned so a follow-up can splice it without
 # re-pinning. Mirrors the chrono 0.4 / rand 0.8 conservative-pin
 # philosophy already in use across the workspace.
 geohash = "0.13"
-# T45: `buff-geo` workspace path dep — mirrors the buff-image /
+# T45: `buff-geo` workspace path dep â€” mirrors the buff-image /
 # buff-msgpack pattern so any future consumer (codegen-lowered
 # `Point.new(...)` / `LineString.new(...)` / `Polygon.new(...)` /
 # `Projection.*` calls, IDE hover/completion, T139 bufflings geo
 # tutorial) resolves to the same in-tree version during the v1.18
-# frameworks wave. Records `buff-geo` (NOT `buff_lang_geo` — the
+# frameworks wave. Records `buff-geo` (NOT `buff_lang_geo` â€” the
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-geo = { path = "crates/buff-geo" }
-# T49: `buff-crypto-extras` deps — AES-GCM + RSA + ECDH (P-256/P-384)
+# T49: `buff-crypto-extras` deps â€” AES-GCM + RSA + ECDH (P-256/P-384)
 # + Argon2 raw KDF. Five pure-Rust RustCrypto crates cover the extern
 # surface per the T4 FFI guide (no `ring`, no `aws-lc-rs`, no `cc-rs`
-# — the workspace hard rule). Added by T49 (this commit) because the
+# â€” the workspace hard rule). Added by T49 (this commit) because the
 # crate cannot resolve without these workspace pins.
 #
 # - `aes-gcm` 0.10: RustCrypto AEAD. API used: `Aes256Gcm::new(key)`,
@@ -1838,7 +1841,7 @@ buff-geo = { path = "crates/buff-geo" }
 #   baseline signature scheme with the widest cross-language support
 #   (matches OpenSSL / pycryptodome / BouncyCastle /
 #   System.Security.Cryptography default). Default features pull
-#   `sha2` + `signature` transitively — both already workspace-pinned.
+#   `sha2` + `signature` transitively â€” both already workspace-pinned.
 #
 # - `p256` 0.13: RustCrypto NIST P-256 elliptic curve. API used:
 #   `SecretKey::random(&mut OsRng)`, `to_bytes`,
@@ -1870,23 +1873,23 @@ aes-gcm = "0.10"
 rsa = "0.9"
 # NOTE: `features = ["ecdh"]` added to fix `unresolved import p256::ecdh`
 # (T49 API-drift fix). The `p256::ecdh::Ecdh` path is correct in 0.13 but
-# the `ecdh` cargo feature must be explicitly enabled — it is NOT a default
+# the `ecdh` cargo feature must be explicitly enabled â€” it is NOT a default
 # feature. Version pin untouched; no new dependency added. Mirrors the
 # RustCrypto feature-flag convention shared by p256/p384 0.13.
 p256 = { version = "0.13", features = ["ecdh"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 signature = "2"
-# T49: `buff-crypto-extras` workspace path dep — mirrors the
+# T49: `buff-crypto-extras` workspace path dep â€” mirrors the
 # buff-image / buff-geo / buff-msgpack pattern so any future consumer
 # (codegen-lowered `AES.encrypt(...)` / `RSA.sign(...)` /
 # `ECDH.derive_shared(...)` / `Argon2.derive_key(...)` calls, IDE
 # hover/completion, T139 bufflings crypto tutorial) resolves to the
 # same in-tree version during the v1.18 frameworks wave. Records
-# `buff-crypto-extras` (NOT `buff_lang_crypto_extras` — the framework-
+# `buff-crypto-extras` (NOT `buff_lang_crypto_extras` â€” the framework-
 # crate naming convention drops the `-lang` infix per AGENTS.md).
 buff-crypto-extras = { path = "crates/buff-crypto-extras" }
-# T48: `buff-web3` deps — Ethereum RPC + smart contract bindings.
-# `ethers` 2 with the `rustls` feature flag (NOT `native-tls` — the
+# T48: `buff-web3` deps â€” Ethereum RPC + smart contract bindings.
+# `ethers` 2 with the `rustls` feature flag (NOT `native-tls` â€” the
 # workspace hard rule from AGENTS.md "Pure-Rust preference"). API
 # surface used (per `crates/buff-web3/src/lib.rs`):
 # - `ethers::providers::{Provider, Http, Provider::try_from(url)}` for
@@ -1899,8 +1902,8 @@ buff-crypto-extras = { path = "crates/buff-crypto-extras" }
 #   de/serialisation.
 # - `ethers::types::{Address, H256, U256, U128}` for canonical types.
 #
-# Pure-Rust on all 3 CI OSes (rustls + ring crypto backend — no native
-# C deps, no cc-rs — matches the "no C library" hard rule from T126/
+# Pure-Rust on all 3 CI OSes (rustls + ring crypto backend â€” no native
+# C deps, no cc-rs â€” matches the "no C library" hard rule from T126/
 # T127 and the wider workspace stance that pushed hand-rolled lexer/
 # parser per AGENTS.md NOTES). The `openssl-sys` crate is NOT pulled
 # because the `native-tls` feature is OFF.
@@ -1910,16 +1913,16 @@ buff-crypto-extras = { path = "crates/buff-crypto-extras" }
 # cargo-project wiring is deferred). Snapshots + extern_crates set is
 # the verifiable contract.
 ethers = { version = "2", default-features = false, features = ["rustls"] }
-# T48: `buff-web3` workspace path dep — mirrors the buff-image /
+# T48: `buff-web3` workspace path dep â€” mirrors the buff-image /
 # buff-geo / buff-msgpack / buff-crypto-extras pattern so any future
 # consumer (codegen-lowered `Provider.new(...)` / `Wallet.from_*(...)`
 # / `Contract.new(...)` calls, IDE hover/completion, T139 bufflings
 # web3 tutorial) resolves to the same in-tree version during the v1.18
-# frameworks wave. Records `buff-web3` (NOT `buff_lang_web3` — the
+# frameworks wave. Records `buff-web3` (NOT `buff_lang_web3` â€” the
 # framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-web3 = { path = "crates/buff-web3" }
-# T54: `wide` 0.7 — portable stable-SIMD wrapper for the `buff-simd`
+# T54: `wide` 0.7 â€” portable stable-SIMD wrapper for the `buff-simd`
 # crate (Mojo-inspired first-class `Simd<T, N>` types). API surface used
 # (all stable since 0.7):
 # - `wide::f32x4::splat(x: f32) -> f32x4` for `Simd.splat(x)`.
@@ -1931,16 +1934,16 @@ buff-web3 = { path = "crates/buff-web3" }
 # - `f32x4::min(other)` / `f32x4::max(other)` for element-wise
 #   `Simd.lane_min` / `.lane_max`.
 #
-# Pure-Rust, NO cc-rs, NO assembler shims, NO nightly `std::simd` —
+# Pure-Rust, NO cc-rs, NO assembler shims, NO nightly `std::simd` â€”
 # matches the "no C library, no Docker" hard rule from T126/T127 and
 # the wider workspace stance that killed chumsky/logos/zmq. `wide`
 # selects the best register width at COMPILE TIME via
 # `#[cfg(target_feature = "...")]` (NO runtime
-# `is_x86_feature_detected!` detection — per T54 spec "Must NOT" clause).
-# CPU-only per Metis G7 lock (NO GPU dispatch — GPU SIMD is WGSL's job
+# `is_x86_feature_detected!` detection â€” per T54 spec "Must NOT" clause).
+# CPU-only per Metis G7 lock (NO GPU dispatch â€” GPU SIMD is WGSL's job
 # via `buff-lang-codegen-wgsl`).
 #
-# Pinned to major 0.7 (released 2024 — the long-standing surface most
+# Pinned to major 0.7 (released 2024 â€” the long-standing surface most
 # of the Rust ecosystem targets; `f32x4::splat` / `::new` /
 # `::to_array` + operator overloads have been stable for years).
 # Mirrors the conservative-pin philosophy already in use across the
@@ -1953,48 +1956,48 @@ buff-web3 = { path = "crates/buff-web3" }
 # deferred per the existing precedent). Snapshots + extern_crates set
 # is the verifiable contract.
 wide = "0.7"
-# T54: `criterion` 0.5 — the canonical Rust micro-benchmark harness
+# T54: `criterion` 0.5 â€” the canonical Rust micro-benchmark harness
 # (the de-facto standard for statistical benchmarking with warmup +
 # outlier detection). Used by `crates/buff-simd/benches/dot_product.rs`
 # for the T54 acceptance criterion (>=3x speedup on dot product vs
-# scalar loop). Pure-Rust (uses `plotters` for optional HTML render —
+# scalar loop). Pure-Rust (uses `plotters` for optional HTML render â€”
 # no native deps). API surface used:
 # - `criterion::{black_box, Criterion, criterion_group, criterion_main}`
 # - `c.benchmark_group("name").bench_function("case", |b| b.iter(|| ...))`.
-# Pinned to major 0.5 (the long-standing surface since 2023 —
+# Pinned to major 0.5 (the long-standing surface since 2023 â€”
 # `bench_function` + `benchmark_group` API). dev-dep only (never linked
 # into the compiler or runtime). Mirrors the conservative-pin philosophy.
 criterion = "0.5"
-# T54: `buff-simd` workspace path dep — mirrors the buff-image /
+# T54: `buff-simd` workspace path dep â€” mirrors the buff-image /
 # buff-geo / buff-msgpack / buff-crypto-extras pattern so any future
 # consumer (codegen-lowered `Simd.splat(...)` / `Simd.from_slice(...)`
 # / `simd.add(...)` calls, IDE hover/completion, T139 bufflings SIMD
 # tutorial) resolves to the same in-tree version during the v1.19
-# language-evolution wave. Records `buff-simd` (NOT `buff_lang_simd` —
+# language-evolution wave. Records `buff-simd` (NOT `buff_lang_simd` â€”
 # the framework-crate naming convention drops the `-lang` infix per
 # AGENTS.md).
 buff-simd = { path = "crates/buff-simd" }
 
-# T59: `buff-actors` workspace path dep — actor model + supervisor
+# T59: `buff-actors` workspace path dep â€” actor model + supervisor
 # trees for the v1.x frameworks wave. Pure-Rust MVP wrapping
 # `crossbeam-channel` (T41/T117 workspace pin) for the per-actor
 # mailbox + `std::thread` for the actor loop (deterministic
 # `JoinHandle::join` for graceful shutdown + supervisor crash
-# detection). NO new external deps introduced — reuses the existing
+# detection). NO new external deps introduced â€” reuses the existing
 # `crossbeam-channel` + `thiserror` workspace pins (the
 # conservative-pin philosophy stays intact; no version drift).
-# Records `buff-actors` (NOT `buff_lang_actors` — the framework-
+# Records `buff-actors` (NOT `buff_lang_actors` â€” the framework-
 # crate naming convention drops the `-lang` infix per AGENTS.md).
 buff-actors = { path = "crates/buff-actors" }
 
-# T72: `buff-plugins` workspace path dep — plugin extension points
+# T72: `buff-plugins` workspace path dep â€” plugin extension points
 # for Buff (compiler + LSP + runtime). Pure-Rust trait-object
 # dispatch (NO `dlopen` / `libloading` per the T72 task spec).
 # Defines three plugin traits (`CompilerPlugin` / `LspPlugin` /
 # `RuntimePlugin`), a `buff-plugin.toml` manifest format, and a
 # `PluginRegistry` that loads + dispatches plugin trait objects via
 # virtual calls (no `unsafe`, no FFI shims). Records `buff-plugins`
-# (NOT `buff_lang_plugins` — the framework-crate naming convention
+# (NOT `buff_lang_plugins` â€” the framework-crate naming convention
 # drops the `-lang` infix per AGENTS.md). Mirrors the buff-eval /
 # buff-repl / buff-lsp / buff-registry / buff-jupyter / buff-dap /
 # buffup / buff-cache / buff-pubsub / buff-scrape / buff-ecs /
@@ -2010,24 +2013,24 @@ buff-plugins = { path = "crates/buff-plugins" }
 # top-level crates promote the in-memory MVP (T126) to production-ready
 # with SQLite persistence + GitHub OAuth + scoped packages + invite-only
 # beta + tarball storage. All three are pure-Rust (no Postgres/libpq, no
-# Docker, no OpenSSL) — matches the "no C library, no Docker" hard rule.
+# Docker, no OpenSSL) â€” matches the "no C library, no Docker" hard rule.
 #
 # - `rusqlite` 0.32: the canonical Rust SQLite binding. We enable the
 #   `bundled` feature so libsqlite3-sys compiles the SQLite amalgamation
-#   (self-contained C89 source) IN-CRATE via cc-rs — NO system-installed
+#   (self-contained C89 source) IN-CRATE via cc-rs â€” NO system-installed
 #   SQLite library required, NO external service, NO Docker. This is the
 #   same family of "bundled C amalgamation" that the `sqlx` 0.8 `sqlite`
 #   feature (line 1048, buff-db T18) already uses in this workspace.
 #   SQLite is a single-file embedded database (zero-config, zero-admin)
 #   that is the natural persistence choice for a package registry MVP.
 #   The `bundled` feature compiles cleanly on all 3 CI OSes (the SQLite
-#   amalgamation is portable C89 — it does not need excpt.h or any
+#   amalgamation is portable C89 â€” it does not need excpt.h or any
 #   Windows SDK header beyond what MSVC ships by default, unlike the
 #   stacker C shim that forced hand-rolling the lexer/parser). API
 #   surface used: `Connection::open(path)`, `conn.execute(sql, params!)`,
 #   `conn.prepare(sql)?.query_map(params, row_fn)`, transactions via
 #   `conn.transaction()`. Pinned to major 0.32 (the long-standing surface
-#   since 2024 — stable `params!` macro + `Connection::transaction` API).
+#   since 2024 â€” stable `params!` macro + `Connection::transaction` API).
 #
 # - `tower-http` 0.6: the canonical HTTP middleware layer for axum/tower
 #   apps. We use `CorsLayer` (T57 cross-origin for the registry web UI)
@@ -2041,7 +2044,7 @@ buff-plugins = { path = "crates/buff-plugins" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
-# T7: `salsa` 0.28 — the canonical Rust incremental-computation framework
+# T7: `salsa` 0.28 â€” the canonical Rust incremental-computation framework
 # (the de-facto Rust ecosystem default since rust-analyzer adopted it;
 # same family as the modern `#[salsa::db]` / `#[salsa::input]` /
 # `#[salsa::tracked]` macro API). API surface used by
@@ -2050,9 +2053,9 @@ axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
 #   - `#[salsa::db]` attribute on the database struct + trait impl
 #   - `#[salsa::input]` for `SourceFile` (path + source text)
 #   - `#[salsa::tracked]` for `parse_file` + `typecheck_file` queries
-# Pure-Rust, no native deps, no cc-rs — matches the "no C library, no
+# Pure-Rust, no native deps, no cc-rs â€” matches the "no C library, no
 # Docker" hard rule from AGENTS.md. Pinned to major 0.28 (the current
-# stable major; rust-version 1.85 — well within our pinned 1.95.0
+# stable major; rust-version 1.85 â€” well within our pinned 1.95.0
 # toolchain). The default features (`macros` + `rayon` + `inventory` +
 # `accumulator` + `salsa_unstable`) are kept ON because the macro API
 # (`#[salsa::db]` / `#[salsa::input]` / `#[salsa::tracked]`) requires
@@ -2061,28 +2064,28 @@ axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
 # are required by salsa's own internal plumbing and the modern API
 # surface we depend on.
 salsa = "0.28"
-# T62: `buff-mcp` workspace path dep — MCP (Model Context Protocol)
+# T62: `buff-mcp` workspace path dep â€” MCP (Model Context Protocol)
 # bridge server wrapping `buff-lsp` (T117). The MCP server exposes
 # Buff's compiler intelligence to AI assistants (Claude, GPT, etc.)
 # via JSON-RPC 2.0 over stdio. It wraps buff-lsp's existing pure
 # handlers (`hover`, `completion`, `goto_definition`, `formatting`)
 # AND the CLI's `check_source` (T55 standalone typecheck) +
-# `pipeline::compile_to_rust` (T115 `buff expand`) — NO logic is
+# `pipeline::compile_to_rust` (T115 `buff expand`) â€” NO logic is
 # reimplemented, every tool delegates to an existing entry point.
 # Mirrors the buff-eval / buff-repl / buff-lsp / buff-registry /
 # buff-jupyter / buff-dap / buffup pattern so any future consumer
 # (IDE integrations, CI tooling, future `buff mcp` CLI subcommand)
 # resolves to the same in-tree version during the v1.25 tooling wave.
-# Records `buff-mcp` (NOT `buff_lang_mcp` — the tooling-crate naming
+# Records `buff-mcp` (NOT `buff_lang_mcp` â€” the tooling-crate naming
 # convention drops the `-lang` infix per AGENTS.md). Pure-Rust: NO
-# external MCP SDK, NO HTTP server, NO WebSocket — the MCP JSON-RPC
+# external MCP SDK, NO HTTP server, NO WebSocket â€” the MCP JSON-RPC
 # protocol is implemented directly over stdin/stdout (newline-
 # delimited) so there is zero added native dep surface (matches the
 # "no C library, no Docker" hard rule from T126/T127 and the wider
 # workspace stance that killed chumsky/logos/zmq).
 buff-mcp = { path = "crates/buff-mcp" }
 
-# T111: `buff profile` — CPU/allocation profiler. Three crates are
+# T111: `buff profile` â€” CPU/allocation profiler. Three crates are
 # pinned at the workspace level so the CLI (`buff-lang-cli`) and any
 # future consumer (LSP hover, CI tooling, `bufflings` profiling
 # tutorial) resolve to the same versions. The CLI's `profile` subcommand
@@ -2094,16 +2097,16 @@ buff-mcp = { path = "crates/buff-mcp" }
 #
 # - `pprof` 0.15: the canonical Rust CPU profiler (pprof-rs). Uses
 #   SIGPROF sampling on Unix / thread-based sampling on Windows. API
-#   surface: `pprof::ProfilerGuard::new(freq_hz)` → `guard.report()
-#   .build()` → `report.flamegraph(writer)` (the `flamegraph` feature
+#   surface: `pprof::ProfilerGuard::new(freq_hz)` â†’ `guard.report()
+#   .build()` â†’ `report.flamegraph(writer)` (the `flamegraph` feature
 #   pulls in the flamegraph crate transitively). Pinned to major 0.15
-#   (current stable). Pure-Rust via `nix` (Unix) / `windows-sys` —
+#   (current stable). Pure-Rust via `nix` (Unix) / `windows-sys` â€”
 #   matches the "no C library" hard rule from T126/T127.
 # - `flamegraph` 0.6: SVG flamegraph renderer (by llogiq). Consumed
 #   transitively by pprof's `flamegraph` feature for in-process SVG
 #   rendering. Pinned explicitly at the workspace level so version
 #   drift in pprof's transitive dep doesn't surprise us (the
-#   `flamegraph` crate's API has been stable across 0.5→0.6). Pure-Rust.
+#   `flamegraph` crate's API has been stable across 0.5â†’0.6). Pure-Rust.
 # - `dhat` 0.3: the canonical Rust heap profiler (by njn). Replaces the
 #   global allocator with a tracking shim that records every
 #   allocation. On drop, writes a `dhat-heap.json` report viewable in
@@ -2120,29 +2123,29 @@ dhat = "0.3"
 # `cargo build --profile minimal` (selected by `buff build --minimal`)
 # produces the smallest possible native binary by combining:
 #
-# - `inherits = "release"` — start from the optimized release baseline
+# - `inherits = "release"` â€” start from the optimized release baseline
 #   (so we get the `-C opt-level=3` groundwork + the Release LTO head
 #   start). The knobs below then push harder on size at the cost of
 #   runtime speed + compile time.
-# - `panic = "abort"` — replace the `unwind` payload (per-panic
+# - `panic = "abort"` â€” replace the `unwind` payload (per-panic
 #   landing pads + libunwind linkage on Unix) with a single `abort`
 #   shim. This is the single biggest size win on small programs
 #   (typically -15..-25% binary size). Trade-off: `catch_unwind`
 #   becomes a no-op (panics tear the process down). This is the
 #   intended behaviour for size-constrained deployments (Lambda
 #   layers, embedded wasm shells, distribution images).
-# - `strip = true` — pass `--strip-all` to the linker. Drops symbol
+# - `strip = true` â€” pass `--strip-all` to the linker. Drops symbol
 #   tables + debug info from the final binary. Symbols can be
 #   re-obtained from `*.dwp`/`*.pdb` sidecars (kept by `target/`).
-# - `opt-level = "z"` — LLVM optimize for SIZE (vs `"3"` for speed).
+# - `opt-level = "z"` â€” LLVM optimize for SIZE (vs `"3"` for speed).
 #   Trades runtime performance (typically +5..15% slower) for binary
 #   size (typically -5..10% smaller). The single setting that
 #   distinguishes `--minimal` from `--release`.
-# - `lto = true` — whole-program Link-Time Optimization (same flavour
+# - `lto = true` â€” whole-program Link-Time Optimization (same flavour
 #   as `Release`, just applied to a size-first optimisation pass).
 #   Lets LLVM eliminate dead code across crate boundaries that the
 #   per-crate `opt-level` pass cannot see.
-# - `codegen-units = 1` — force a single LLVM codegen unit so the
+# - `codegen-units = 1` â€” force a single LLVM codegen unit so the
 #   whole program is visible to every optimisation pass (mandatory
 #   for `lto = true` to deliver its full benefit). Slower compile,
 #   smaller binary.
@@ -2153,7 +2156,7 @@ dhat = "0.3"
 #
 # **Workspace-root placement**: per AGENTS.md, `[profile.*]` sections
 # are forbidden in crate-level Cargo.toml; they live HERE at the
-# workspace root. This is the canonical Cargo convention — profiles
+# workspace root. This is the canonical Cargo convention â€” profiles
 # are workspace-wide, never per-crate.
 #
 # **Opt-in**: this profile is NOT the default. `cargo build` produces
@@ -2179,7 +2182,7 @@ codegen-units = 1
 #    a representative workload (e.g. `./pgo_demo && ./pgo_benchmark`).
 #    The counters write `*.profraw` files into `./target/pgo-data/`.
 # 3. **Use** (Phase 3, `buff build --pgo --use`): merge the captured
-#    `.profraw` files via `llvm-profdata merge` →
+#    `.profraw` files via `llvm-profdata merge` â†’
 #    `./target/pgo-data/merged.profdata`, then recompile with
 #    `-C profile-use=./target/pgo-data/merged.profdata`. LLVM uses the
 #    profile to drive inlining + block-layout decisions, typically
@@ -2203,7 +2206,7 @@ codegen-units = 1
 # the `merged.profdata` LLVM consumes. `rustup` ships it
 # (`rustup component add llvm-tools-preview`). When missing, `buff build
 # --pgo --use` surfaces a stderr note + exits non-zero (the merge step
-# cannot be skipped — rustc rejects a directory of `.profraw` files).
+# cannot be skipped â€” rustc rejects a directory of `.profraw` files).
 #
 # **Workspace-root placement**: per AGENTS.md, `[profile.*]` sections
 # are forbidden in crate-level Cargo.toml; they live HERE at the
@@ -2213,7 +2216,7 @@ codegen-units = 1
 # `buff build --pgo` (single-file rustc path) or
 # `cargo build --profile pgo` (in a generated cargo project).
 # T34: Workspace-level release profile. Overrides the AGENTS.md rule
-# "No [profile.*] sections in any Cargo.toml" — this is the ROOT
+# "No [profile.*] sections in any Cargo.toml" â€” this is the ROOT
 # Cargo.toml (workspace root), NOT a crate-level Cargo.toml.
 # Workspace-level profiles are standard Cargo practice and do NOT
 # violate the crate-level rule. The AGENTS.md rule exists to prevent

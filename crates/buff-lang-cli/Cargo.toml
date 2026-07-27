@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "buff-lang-cli"
 version = "1.0.0"
 edition = "2021"
@@ -56,6 +56,9 @@ buff-lang-parser.workspace = true
 buff-lang-types.workspace = true
 buff-lang-codegen-rust.workspace = true
 buff-lang-error.workspace = true
+buff-lang-fmt.workspace = true
+buff-lang-check.workspace = true
+buff-lang-pipeline.workspace = true
 # T24: `buff backtrace <LOG>` subcommand + `.buffmap` sidecar emission
 # in the build pipeline. Pure consumer of the crate's public API
 # (build_source_map + serialize_to_string + remap_panic_backtrace);
@@ -63,8 +66,8 @@ buff-lang-error.workspace = true
 buff-lang-debug-info.workspace = true
 # T133: `.buffhtml` SFC integration. The 3 core crates (ast-rsx, parser,
 # codegen-buffhtml) shipped at commit 1d879f3 with the floor grammar
-# (decision record `rsx-syntax-feasibility.md` §6). These deps wire them
-# into the CLI's compile pipeline — see `pipeline::compile_buffhtml_to_rust`
+# (decision record `rsx-syntax-feasibility.md` Â§6). These deps wire them
+# into the CLI's compile pipeline â€” see `pipeline::compile_buffhtml_to_rust`
 # + `error_mapper::translate_buffhtml_rustc_errors`.
 buff-lang-ast-rsx.workspace = true
 buff-lang-buffhtml-parser.workspace = true
@@ -78,7 +81,7 @@ buff-ui-dioxus.workspace = true
 # T133: `syn` + `prettyplease` are needed by `pipeline::inline_script_block`
 # to transform the codegen-buffhtml `const __BUFF_SCRIPT_SOURCE: &str` holder
 # into actual Rust statements inside the generated component fn body (the
-# T133 floor "Rust-in-script-block pass-through" — see decision record §6
+# T133 floor "Rust-in-script-block pass-through" â€” see decision record Â§6
 # MUST-ship list). Both already pinned at the workspace level; reused here
 # without re-pinning.
 syn.workspace = true
@@ -91,18 +94,18 @@ prettyplease.workspace = true
 quote.workspace = true
 proc-macro2.workspace = true
 # T125a: REPL delegation. `buff repl` is a thin shim that delegates to
-# buff_repl::Repl::run() — all real logic (rustyline + buff-eval) lives
+# buff_repl::Repl::run() â€” all real logic (rustyline + buff-eval) lives
 # in the dedicated crate.
 buff-repl.workspace = true
 # T129a: Jupyter kernel delegation. `buff jupyter install` /
 # `buff jupyter start` are thin shims that delegate to
-# buff_jupyter::install() / buff_jupyter::run_kernel() — all real
+# buff_jupyter::install() / buff_jupyter::run_kernel() â€” all real
 # protocol / HMAC / kernelspec logic lives in the dedicated crate.
-# Pure-Rust deps (no libzmq, no OpenSSL) — verified to build on this
+# Pure-Rust deps (no libzmq, no OpenSSL) â€” verified to build on this
 # Windows host.
 buff-jupyter.workspace = true
 # T131: `buff ui dev` dev-server dependencies. We pull `axum` 0.8 (the
-# workspace-pinned HTTP framework — re-uses the same version
+# workspace-pinned HTTP framework â€” re-uses the same version
 # `buff-registry` and the registry CLI integration tests already
 # consume) for HTTP + WebSocket serving. axum 0.8 ships the
 # `axum::extract::ws::WebSocketUpgrade` extractor + `axum::serve`
@@ -118,7 +121,7 @@ buff-jupyter.workspace = true
 # `tower` is needed for the `ServiceExt` trait used in the dev-server
 # unit tests (`tower::ServiceExt::oneshot` to drive the `Router`
 # directly without TCP bind, mirroring the registry test pattern).
-# Production code does NOT use tower — only test helpers.
+# Production code does NOT use tower â€” only test helpers.
 axum.workspace = true
 notify.workspace = true
 # T131: `futures-util` provides the `SinkExt` + `StreamExt` traits the
@@ -128,17 +131,17 @@ notify.workspace = true
 # without re-pinning.
 futures-util.workspace = true
 # T136: `buff debug` DAP translation proxy. The subcommand is a thin
-# shim that delegates to buff_dap::run_session — all real protocol /
+# shim that delegates to buff_dap::run_session â€” all real protocol /
 # translation / backend-spawn logic lives in the dedicated crate.
 # Mirrors the buff-repl / buff-jupyter workspace path-dep pattern.
-# Pure-Rust deps (serde + serde_json + thiserror + buff-lang-error) —
+# Pure-Rust deps (serde + serde_json + thiserror + buff-lang-error) â€”
 # verified to build on this Windows host (no native C dep).
 buff-dap.workspace = true
-# T72: `buff-plugins` — plugin extension points (compiler + LSP +
+# T72: `buff-plugins` â€” plugin extension points (compiler + LSP +
 # runtime). `buff check` calls
 # `buff_plugins::dispatch_global_compiler_lint` after the built-in
 # linters when `BUFF_PLUGIN_DIR` / `BUFF_PLUGIN_PATH` is set (no-op
-# otherwise). Pure-Rust trait-object dispatch (NO dlopen) — reuses
+# otherwise). Pure-Rust trait-object dispatch (NO dlopen) â€” reuses
 # the existing serde + toml + thiserror + syn + buff-lang-ast +
 # buff-lang-error workspace pins. Minimal hook: 5 lines in
 # `check.rs::check_source`; empty registry is a pure no-op.
@@ -152,16 +155,16 @@ buff-plugins.workspace = true
 # re-pinning. The pipeline integration is opt-in via the
 # `--incremental` / `--no-incremental` CLI flags (default: ON for
 # dev Debug builds, OFF for Release/Minimal). Correctness is
-# unaffected — salsa is purely a memoization cache; the underlying
+# unaffected â€” salsa is purely a memoization cache; the underlying
 # lex + parse + codegen pipeline is byte-identical with or without it.
 salsa.workspace = true
 # T111: `buff profile` CPU/allocation profiler. The three crates are
 # listed in the CLI's [dependencies] for version-pinning via the
 # workspace pin (the temp Cargo project generated by the profile
 # subcommand references the SAME versions via string interpolation).
-# `pprof` + `flamegraph` power CPU profiling (SIGPROF sampling →
+# `pprof` + `flamegraph` power CPU profiling (SIGPROF sampling â†’
 # flamegraph SVG). `dhat` powers allocation profiling (global-allocator
-# replacement → heap report). Pure-Rust, no native deps — matches the
+# replacement â†’ heap report). Pure-Rust, no native deps â€” matches the
 # "no C library, no Docker" hard rule. The profiling code is INJECTED
 # into the user binary's `fn main()` via syn transform (see
 # `pipeline::inject_profiling`); the CLI itself does not call these
@@ -174,7 +177,7 @@ dhat.workspace = true
 insta.workspace = true
 syn.workspace = true
 # T127: integration tests in `tests/registry_cli_t127.rs` drive the
-# `buff-registry` HTTP app IN-PROCESS — they build
+# `buff-registry` HTTP app IN-PROCESS â€” they build
 # `buff_registry::app(state)` and serve it on an ephemeral
 # `tokio::net::TcpListener` bound to `127.0.0.1:0` via
 # `axum::serve(listener, app)`, then point the CLI's reqwest client at
@@ -183,6 +186,6 @@ syn.workspace = true
 buff-registry.workspace = true
 axum.workspace = true
 # T131: `buff ui dev` unit tests drive the dev-server `Router<()>`
-# in-process via `tower::ServiceExt::oneshot` — the same pattern the
+# in-process via `tower::ServiceExt::oneshot` â€” the same pattern the
 # `buff-registry` integration tests use. Pure-Rust, no native C deps.
 tower.workspace = true

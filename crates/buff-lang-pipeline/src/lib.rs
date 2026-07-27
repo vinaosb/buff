@@ -1,16 +1,23 @@
-//! Shared compiler pipeline used by both `buff build` and `buff run`.
+﻿//! Shared compiler pipeline used by both `buff build` and `buff run`.
 //!
 //! The pipeline is split into two phases so callers can decide what to do
 //! with the intermediate Rust source:
 //!
-//! - [`compile_to_rust`] — read a `.buff` file, lex, parse, and codegen into a
+//! - [`compile_to_rust`] â€” read a `.buff` file, lex, parse, and codegen into a
 //!   Rust source string, writing it to `<file>.rs` alongside the input.
-//! - [`compile_rust_to_exe`] — invoke `rustc --edition 2021` on a `.rs` file to
+//! - [`compile_rust_to_exe`] â€” invoke `rustc --edition 2021` on a `.rs` file to
 //!   produce a native executable. Takes a [`BuildMode`] (T56) to switch
 //!   between fast-debug and release-with-LTO rustc flag sets.
 //!
 //! All fallible operations return [`anyhow::Result`] with rich, user-facing
 //! context. No panics, no `unwrap`/`expect`.
+
+#![allow(clippy::result_large_err)]
+
+pub mod rustc_invoke;
+pub mod compile_speed;
+pub mod incremental;
+pub mod error_mapper;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -31,15 +38,15 @@ use crate::compile_speed;
 /// Compile-time optimization profile (T56 release / T60 minimal / T55 fast).
 ///
 /// Selects which set of rustc flags [`compile_rust_to_exe`] passes to the
-/// backend. `Debug` (the default) preserves the v0.1 behavior — a single
+/// backend. `Debug` (the default) preserves the v0.1 behavior â€” a single
 /// `-O` flag for fast compilation. `Release` enables LTO + maximum
 /// optimization via [`rustc_release_flags`] for production-ready binaries.
 /// `Minimal` (T60) optimizes for binary size via [`rustc_minimal_flags`]
 /// (`opt-level=z`, `panic=abort`, `strip=symbols`, `lto=true`,
-/// `codegen-units=1`) — used when the size budget matters more than
+/// `codegen-units=1`) â€” used when the size budget matters more than
 /// runtime speed (Lambda layers, embedded wasm shells, distribution
 /// images). `Fast` (T55) disables optimization entirely
-/// (`opt-level=0`, no LTO) for the fastest possible inner-loop compile —
+/// (`opt-level=0`, no LTO) for the fastest possible inner-loop compile â€”
 /// the dev "I just want to see if it runs" mode.
 ///
 /// This enum intentionally mirrors the user-facing `--release` /
@@ -54,7 +61,7 @@ pub enum BuildMode {
     /// tight as possible. The binary is slower at runtime, but for "does
     /// it compile + run?" inner-loop feedback this is the right default.
     /// Distinct from [`BuildMode::Debug`] (which keeps `-O` =
-    /// `opt-level=2`) — `Fast` is strictly faster to compile.
+    /// `opt-level=2`) â€” `Fast` is strictly faster to compile.
     Fast,
     /// Fast-debug compilation (v0.1 behavior): `rustc -O`. No LTO.
     /// Use this during development for tight edit-compile-run loops.
@@ -67,7 +74,7 @@ pub enum BuildMode {
     /// `strip=symbols` + `lto=true` + `codegen-units=1`. Slowest compile,
     /// smallest binary. Use when binary size is the primary constraint
     /// (e.g. <5 MB target for console apps). Functional inverse of
-    /// [`BuildMode::Release`] — Release trades size for speed, Minimal
+    /// [`BuildMode::Release`] â€” Release trades size for speed, Minimal
     /// trades speed for size.
     Minimal,
 }
@@ -75,13 +82,13 @@ pub enum BuildMode {
 impl BuildMode {
     /// Translate the CLI `--release` boolean into a [`BuildMode`].
     ///
-    /// `true` → [`BuildMode::Release`], `false` → [`BuildMode::Debug`].
-    /// This is the single source of truth for the flag→mode mapping — every
+    /// `true` â†’ [`BuildMode::Release`], `false` â†’ [`BuildMode::Debug`].
+    /// This is the single source of truth for the flagâ†’mode mapping â€” every
     /// caller (`buff build`, `buff run`) goes through here so the behavior
     /// stays consistent across subcommands.
     ///
     /// T60 note: subcommands that also accept `--minimal` should use
-    /// [`BuildMode::from_flags`] instead — `Minimal` takes precedence over
+    /// [`BuildMode::from_flags`] instead â€” `Minimal` takes precedence over
     /// `Release` when both are set (mirrors `--release` precedence in
     /// cargo: a more-specific profile wins).
     pub fn from_release_flag(release: bool) -> Self {
@@ -95,12 +102,12 @@ impl BuildMode {
     /// Translate the CLI `--release` + `--minimal` booleans into a
     /// [`BuildMode`] (T60).
     ///
-    /// Precedence (mirrors cargo's `--profile` semantics — more specific
+    /// Precedence (mirrors cargo's `--profile` semantics â€” more specific
     /// wins):
     ///
-    /// - `minimal=true` → [`BuildMode::Minimal`] (regardless of `release`).
-    /// - `minimal=false, release=true` → [`BuildMode::Release`].
-    /// - `minimal=false, release=false` → [`BuildMode::Debug`] (default).
+    /// - `minimal=true` â†’ [`BuildMode::Minimal`] (regardless of `release`).
+    /// - `minimal=false, release=true` â†’ [`BuildMode::Release`].
+    /// - `minimal=false, release=false` â†’ [`BuildMode::Debug`] (default).
     ///
     /// The T60 acceptance ("console template builds <5 MB with `--minimal`")
     /// exercises the `minimal=true` arm. The `release=true` arm is the
@@ -118,14 +125,14 @@ impl BuildMode {
     /// Translate the CLI `--release` + `--minimal` + `--fast` booleans into a
     /// [`BuildMode`] (T55).
     ///
-    /// Precedence (mirrors cargo's `--profile` semantics — more specific
+    /// Precedence (mirrors cargo's `--profile` semantics â€” more specific
     /// wins; the size-vs-speed-vs-compile-speed axes are mutually
     /// exclusive):
     ///
-    /// - `minimal=true` → [`BuildMode::Minimal`] (regardless of others).
-    /// - `minimal=false, release=true` → [`BuildMode::Release`].
-    /// - `minimal=false, release=false, fast=true` → [`BuildMode::Fast`].
-    /// - all `false` → [`BuildMode::Debug`] (default).
+    /// - `minimal=true` â†’ [`BuildMode::Minimal`] (regardless of others).
+    /// - `minimal=false, release=true` â†’ [`BuildMode::Release`].
+    /// - `minimal=false, release=false, fast=true` â†’ [`BuildMode::Fast`].
+    /// - all `false` â†’ [`BuildMode::Debug`] (default).
     ///
     /// `--fast` is strictly a dev-inner-loop flag (skip ALL optimisation
     /// for the fastest compile); `--release` (runtime speed) and
@@ -166,14 +173,14 @@ impl BuildMode {
 /// The pipeline passes the corresponding `-C debuginfo=N` flag to rustc.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DebugInfoChoice {
-    /// `-C debuginfo=1` — line numbers only. Fast to compile, enough for
+    /// `-C debuginfo=1` â€” line numbers only. Fast to compile, enough for
     /// backtraces and basic debugging. Default for dev builds.
     #[default]
     LineTablesOnly,
-    /// `-C debuginfo=2` — full debug info (DWARF, etc.). Use when you
+    /// `-C debuginfo=2` â€” full debug info (DWARF, etc.). Use when you
     /// need to step through code in gdb/lldb.
     Full,
-    /// `-C debuginfo=0` — no debug info. Smallest binary, fastest
+    /// `-C debuginfo=0` â€” no debug info. Smallest binary, fastest
     /// compile. Use for production when you don't need backtraces.
     None,
 }
@@ -209,24 +216,24 @@ impl DebugInfoChoice {
 /// the `CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift` env var on the
 /// spawned rustc process when [`BackendChoice::Cranelift`] is selected
 /// AND the build mode is [`BuildMode::Debug`]. Release builds always
-/// use LLVM (no exception — Cranelift output is for dev inner-loop
+/// use LLVM (no exception â€” Cranelift output is for dev inner-loop
 /// speed only, never for shipped binaries).
 ///
 /// When `Cranelift` is requested but not available (probe via
 /// [`cranelift_available`] fails), the pipeline falls back to LLVM with
 /// an `eprintln!` warning. Correctness is NEVER affected by the backend
-/// choice — Cranelift output is behaviorally identical to LLVM output,
+/// choice â€” Cranelift output is behaviorally identical to LLVM output,
 /// just (sometimes) faster to produce and slower to run.
 ///
 /// # Stability
 ///
-/// This enum is additive — future backends (`Cranelift`, others) are
+/// This enum is additive â€” future backends (`Cranelift`, others) are
 /// appended as new variants. The `llvm` default never changes so the
 /// absence of `--backend` always means "rustc's default backend".
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BackendChoice {
     /// LLVM backend (rustc default). The only backend used for release
-    /// builds. Default for dev builds too — Cranelift is opt-in.
+    /// builds. Default for dev builds too â€” Cranelift is opt-in.
     #[default]
     Llvm,
     /// Cranelift backend (dev only). Faster compile, slower runtime.
@@ -249,7 +256,7 @@ pub fn backend_from_str(s: &str) -> Result<BackendChoice> {
 
 /// Probe whether the Cranelift codegen backend is available (T4).
 ///
-/// Delegates to [`crate::rustc_invoke::cranelift_available`] (T35 — the
+/// Delegates to [`crate::rustc_invoke::cranelift_available`] (T35 â€” the
 /// single source of truth for Cranelift probing across the CLI and
 /// buff-eval).
 pub fn cranelift_available() -> bool {
@@ -263,7 +270,7 @@ pub fn cranelift_available() -> bool {
 /// [`resolve_linker`] before passing flags to rustc.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LinkerChoice {
-    /// Auto-detect: probe PATH for mold (Linux) → rust-lld → system default.
+    /// Auto-detect: probe PATH for mold (Linux) â†’ rust-lld â†’ system default.
     #[default]
     Auto,
     /// Explicitly use the `mold` linker. Errors if mold is not on PATH.
@@ -292,13 +299,13 @@ pub fn linker_from_str(s: &str) -> Result<LinkerChoice> {
 /// Resolve a [`LinkerChoice`] to a concrete [`compile_speed::FastLinker`],
 /// probing PATH as needed.
 ///
-/// - [`LinkerChoice::Auto`] → [`compile_speed::FastLinker::detect()`]
-///   (mold → rust-lld → lld → None).
-/// - [`LinkerChoice::Mold`] → [`compile_speed::FastLinker::Mold`] if mold
+/// - [`LinkerChoice::Auto`] â†’ [`compile_speed::FastLinker::detect()`]
+///   (mold â†’ rust-lld â†’ lld â†’ None).
+/// - [`LinkerChoice::Mold`] â†’ [`compile_speed::FastLinker::Mold`] if mold
 ///   is on PATH, else an error.
-/// - [`LinkerChoice::Lld`] → [`compile_speed::FastLinker::Lld`] if rust-lld
+/// - [`LinkerChoice::Lld`] â†’ [`compile_speed::FastLinker::Lld`] if rust-lld
 ///   or lld is on PATH, else an error.
-/// - [`LinkerChoice::System`] → [`compile_speed::FastLinker::None`].
+/// - [`LinkerChoice::System`] â†’ [`compile_speed::FastLinker::None`].
 ///
 /// # Errors
 ///
@@ -343,7 +350,7 @@ pub struct CompileOutput {
     pub rust_file_path: PathBuf,
 }
 
-/// Run the front-end of the compiler: read → lex → parse → codegen → write.
+/// Run the front-end of the compiler: read â†’ lex â†’ parse â†’ codegen â†’ write.
 ///
 /// Writes the generated Rust source to `file.with_extension("rs")` (i.e. the
 /// `.rs` file sits next to the `.buff` source). The type-checking pass is
@@ -351,8 +358,8 @@ pub struct CompileOutput {
 ///
 /// **T55 caching**: this entry point checks the generated-Rust cache
 /// ([`compile_speed::read_cache`]) keyed on a SHA-256 hash of the source
-/// bytes BEFORE running codegen. On a cache hit, the entire lex → parse →
-/// codegen pass is skipped — the cached `.rs` content is written alongside
+/// bytes BEFORE running codegen. On a cache hit, the entire lex â†’ parse â†’
+/// codegen pass is skipped â€” the cached `.rs` content is written alongside
 /// the source and returned directly. This saves 30-50% on repeat builds
 /// (the codegen pass is the bulk of front-end time). Equivalent to
 /// [`compile_to_rust_with_cache`] with `use_cache = true`.
@@ -372,13 +379,13 @@ pub fn compile_to_rust(file: &Path) -> Result<CompileOutput> {
 /// When `use_cache` is `true` (the default for [`compile_to_rust`]):
 /// 1. Read the source, compute [`compile_speed::source_cache_key`].
 /// 2. Probe [`compile_speed::read_cache`] for a cached `.rs`.
-/// 3. On hit → write the cached content to `file.rs` and return (codegen
+/// 3. On hit â†’ write the cached content to `file.rs` and return (codegen
 ///    skipped entirely).
-/// 4. On miss → run the normal lex → parse → codegen, then
+/// 4. On miss â†’ run the normal lex â†’ parse â†’ codegen, then
 ///    [`compile_speed::write_cache`] the result for next time.
 ///
 /// When `use_cache` is `false` (`buff build --no-cache`), the cache is
-/// bypassed completely — always runs the full front-end. Used for
+/// bypassed completely â€” always runs the full front-end. Used for
 /// debugging cache-corruption suspicion and for forcing a codegen refresh
 /// after a compiler upgrade (the cache key is source-only, so a new
 /// compiler version would serve stale output).
@@ -386,7 +393,7 @@ pub fn compile_to_rust(file: &Path) -> Result<CompileOutput> {
 /// # Cache-write failure is non-fatal
 ///
 /// If [`compile_speed::write_cache`] fails (disk full, permissions), the
-/// error is logged to stderr but the build proceeds — the `.rs` file is
+/// error is logged to stderr but the build proceeds â€” the `.rs` file is
 /// already written alongside the source, so rustc can still compile it.
 /// A cache that can't be written to simply can't accelerate the NEXT build.
 pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<CompileOutput> {
@@ -395,7 +402,7 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
         .with_context(|| format!("failed to read source file `{}`", file.display()))?;
 
     // T55: probe the generated-Rust cache BEFORE running codegen. A hit
-    // skips the entire lex → parse → syn/quote/prettyplease pass.
+    // skips the entire lex â†’ parse â†’ syn/quote/prettyplease pass.
     let cache_key = compile_speed::source_cache_key(&source);
     if use_cache {
         if let Some(cached) = compile_speed::read_cache(&cache_key) {
@@ -410,7 +417,7 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
     }
 
     // Build a SourceFile so we can map byte offsets to 1-based line/col for
-    // diagnostic messages. SourceId(0) is fine — we only lex a single file.
+    // diagnostic messages. SourceId(0) is fine â€” we only lex a single file.
     let source_id = SourceId(0);
     let source_file = SourceFile::new(file.to_path_buf(), source.clone());
 
@@ -428,7 +435,7 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
 
     // Self-host codegen workaround: strip trailing semicolons on the last
     // expression in functions with non-void return types. The codegen emits
-    // `expr;` (statement → `()`) instead of `expr` (tail expression → value).
+    // `expr;` (statement â†’ `()`) instead of `expr` (tail expression â†’ value).
     // This simple fix scans for `;\n}` at function-body indentation level
     // and removes the semicolon, making the expression the function's tail.
     // TODO: move this fix into lower_func in the codegen (investigate why
@@ -480,7 +487,7 @@ pub struct MultiCrateCompileOutput {
     pub module_rust_paths: Vec<PathBuf>,
     /// Aggregated extern-crate deps across root + all modules. Populated
     /// for future Cargo-project wiring (the single-file rustc path does
-    /// NOT link these — same codegen-only boundary as
+    /// NOT link these â€” same codegen-only boundary as
     /// [`RustCodegen::extern_crates`]).
     pub extern_crates: std::collections::BTreeSet<String>,
     /// The generated root Rust source (also written to
@@ -493,7 +500,7 @@ pub struct MultiCrateCompileOutput {
 /// and call the matching compile path (T8).
 ///
 /// - Reads + parses `file`.
-/// - If [`uses_multi_crate`] returns `false` → falls back to
+/// - If [`uses_multi_crate`] returns `false` â†’ falls back to
 ///   [`compile_to_rust`] (single-file codegen, full backwards compat).
 /// - Otherwise walks the import graph (BFS, de-duplicating on
 ///   `from_path`), reads + parses each referenced `.buff` file, calls
@@ -516,7 +523,7 @@ pub fn compile_to_rust_multi(file: &Path, out_dir: &Path) -> Result<MultiCrateCo
         .with_context(|| format!("failed to read source file `{}`", file.display()))?;
     let root_decls = parse_source(&root_source, file)?;
 
-    // 2. Single-file fast path: no ES6 imports → existing codegen path.
+    // 2. Single-file fast path: no ES6 imports â†’ existing codegen path.
     if !uses_multi_crate(&root_decls) {
         let single = compile_to_rust(file)?;
         return Ok(MultiCrateCompileOutput {
@@ -540,7 +547,7 @@ pub fn compile_to_rust_multi(file: &Path, out_dir: &Path) -> Result<MultiCrateCo
         .map(|s| (s, file.to_path_buf()))
         .collect();
     while let Some((from_path, importer)) = queue.pop_front() {
-        // De-dup on the raw from_path string (NOT the sanitised ident —
+        // De-dup on the raw from_path string (NOT the sanitised ident â€”
         // `./greet.buff` and `./greet.v2.buff` produce distinct idents).
         if !visited.insert(from_path.clone()) {
             continue;
@@ -554,7 +561,7 @@ pub fn compile_to_rust_multi(file: &Path, out_dir: &Path) -> Result<MultiCrateCo
         // Read + parse the imported file. Missing file is a clear error.
         let mod_source = std::fs::read_to_string(&resolved).with_context(|| {
             format!(
-                "failed to resolve import `from {from_path:?}` — cannot read `{}`",
+                "failed to resolve import `from {from_path:?}` â€” cannot read `{}`",
                 resolved.display()
             )
         })?;
@@ -623,7 +630,7 @@ fn parse_source(source: &str, file: &Path) -> Result<Vec<buff_lang_ast::Decl>> {
 ///
 /// Used by [`compile_to_rust_multi`] to seed the BFS walk over the
 /// import graph. The legacy `import a.b.c as alias` form (no
-/// `from_path`) is skipped — it has no file to link.
+/// `from_path`) is skipped â€” it has no file to link.
 fn root_es6_imports(decls: &[buff_lang_ast::Decl]) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -645,7 +652,7 @@ fn root_es6_imports(decls: &[buff_lang_ast::Decl]) -> Vec<String> {
 /// codegen stage, so there's no `SourceFile` in scope. We construct a
 /// minimal one (path + empty content) so the error formatter's
 /// `lookup()` returns `None` and the error falls through to the
-/// "in <file>" branch — losing line/col context but keeping the
+/// "in <file>" branch â€” losing line/col context but keeping the
 /// filename.
 fn empty_source_file(file: &Path) -> SourceFile {
     SourceFile::new(file.to_path_buf(), String::new())
@@ -668,7 +675,7 @@ fn empty_source_file(file: &Path) -> SourceFile {
 /// to materialize the `Vec<Decl>` for codegen. Salsa's memoization
 /// guarantees the source bytes are hot in the OS file cache for that
 /// re-materialization, so the overhead is one extra tokenize + parse
-/// pass — negligible relative to the rustc backend. The T55 `.rs`
+/// pass â€” negligible relative to the rustc backend. The T55 `.rs`
 /// byte-cache (keyed on a SHA-256 of the source) short-circuits
 /// codegen entirely when the source is unchanged across invocations.
 ///
@@ -695,7 +702,7 @@ pub fn compile_to_rust_incremental(
         .with_context(|| format!("failed to read source file `{}`", file.display()))?;
 
     // 2. Register the file as a salsa input. Salsa tracks (path,
-    //    source) for change detection — a subsequent call with the
+    //    source) for change detection â€” a subsequent call with the
     //    same pair is a memoized no-op.
     let src_file = crate::incremental::SourceFile::new(db, file.to_path_buf(), source);
 
@@ -704,7 +711,7 @@ pub fn compile_to_rust_incremental(
     //    immediately without re-running tokenize + parse. On a miss
     //    they execute the full front-end inline.
     //
-    //    We ignore the outcomes here — the actual diagnostic surface
+    //    We ignore the outcomes here â€” the actual diagnostic surface
     //    + codegen happens via the fallthrough below. The salsa layer
     //    is purely for change detection + memoization.
     let _parse_outcome = crate::incremental::parse_file(db, src_file);
@@ -734,7 +741,7 @@ pub const BUFFHTML_EXT: &str = "buffhtml";
 #[derive(Debug, Clone)]
 pub struct BuffHtmlCompileOutput {
     /// The generated Rust source (after the script-block pass-through
-    /// transformation — see [`inline_script_block`]).
+    /// transformation â€” see [`inline_script_block`]).
     pub rust_source: String,
     /// Path of the `.rs` file written alongside the input `.buffhtml`.
     pub rust_file_path: PathBuf,
@@ -768,18 +775,18 @@ pub fn compile_to_rust_for_ext(file: &Path) -> Result<CompileOutput> {
     }
 }
 
-/// Run the front-end of the compiler on a `.buffhtml` file: read → parse →
-/// codegen → script-block pass-through → write the `.rs` file.
+/// Run the front-end of the compiler on a `.buffhtml` file: read â†’ parse â†’
+/// codegen â†’ script-block pass-through â†’ write the `.rs` file.
 ///
 /// This is the T133 sibling of [`compile_to_rust`]. The pipeline is:
 ///
 /// 1. Read the `.buffhtml` source.
-/// 2. Parse via [`buff_lang_buffhtml_parser::parse`] → [`RsxTemplateFile`].
+/// 2. Parse via [`buff_lang_buffhtml_parser::parse`] â†’ [`RsxTemplateFile`].
 /// 3. Derive the component name from the file stem (e.g. `counter.buffhtml`
-///    → `Counter`). Falls back to
+///    â†’ `Counter`). Falls back to
 ///    [`buffhtml_codegen::DEFAULT_COMPONENT_NAME`] if the stem is empty or
 ///    contains no alphabetic chars.
-/// 4. Codegen via [`buffhtml_codegen::generate`] → [`CodegenResult`] (the
+/// 4. Codegen via [`buffhtml_codegen::generate`] â†’ [`CodegenResult`] (the
 ///    codegen emits `<script>` block contents as a `const
 ///    __BUFF_SCRIPT_SOURCE: &str = ...;` placeholder).
 /// 5. Post-process via [`inline_script_block`] to splice the script source
@@ -839,7 +846,7 @@ pub fn compile_buffhtml_to_rust(file: &Path) -> Result<BuffHtmlCompileOutput> {
 
 /// Derive the Rust component function name from a `.buffhtml` file path.
 ///
-/// `counter.buffhtml` → `Counter`, `todo_list.buffhtml` → `TodoList`. The
+/// `counter.buffhtml` â†’ `Counter`, `todo_list.buffhtml` â†’ `TodoList`. The
 /// result is sanitised: PascalCased, non-alphanumeric chars stripped. If
 /// the stem is empty or contains no alphanumeric chars, falls back to
 /// [`buffhtml_codegen::DEFAULT_COMPONENT_NAME`].
@@ -883,7 +890,7 @@ fn derive_component_name(file: &Path) -> String {
 /// placeholder top-level constant:
 ///
 /// ```text
-/// #[doc = "buffhtml script block — extracted by buff-lang-cli"]
+/// #[doc = "buffhtml script block â€” extracted by buff-lang-cli"]
 /// const __BUFF_SCRIPT_SOURCE: &str = "<raw script source>";
 /// ```
 ///
@@ -892,8 +899,8 @@ fn derive_component_name(file: &Path) -> String {
 ///
 /// 1. Parses the generated `.rs` source via [`syn::parse_file`].
 /// 2. Locates the `__BUFF_SCRIPT_SOURCE` const item and extracts its string
-///    value (uses syn's `LitStr::value()` so any quoting form — `"..."`,
-///    `r#"..."#`, escapes — is handled correctly).
+///    value (uses syn's `LitStr::value()` so any quoting form â€” `"..."`,
+///    `r#"..."#`, escapes â€” is handled correctly).
 /// 3. Removes the const item from the file.
 /// 4. Parses the script source as a Rust block (`{ <script> }`) and
 ///    prepends the resulting statements to the component fn's body
@@ -903,13 +910,13 @@ fn derive_component_name(file: &Path) -> String {
 /// When no `__BUFF_SCRIPT_SOURCE` const is present (no `<script>` block),
 /// the input is returned unchanged.
 ///
-/// # T133 limitation — Rust-in-script-block pass-through
+/// # T133 limitation â€” Rust-in-script-block pass-through
 ///
 /// The script block contents are spliced as-is into the component fn body
-/// — they must already be valid Rust (e.g. `let mut count =
+/// â€” they must already be valid Rust (e.g. `let mut count =
 /// use_signal(|| 0);`). Full Buff-syntax script transpilation (the
 /// `component Name = fn(...) -> Element:` shorthand from decision record
-/// §3 example 1) is **deferred to T134+**. The examples in `examples/*.buffhtml`
+/// Â§3 example 1) is **deferred to T134+**. The examples in `examples/*.buffhtml`
 /// use Rust-compatible script syntax matching the T121b/T130 counter
 /// pattern.
 fn inline_script_block(rust_source: String) -> Result<String> {
@@ -938,7 +945,7 @@ fn inline_script_block(rust_source: String) -> Result<String> {
 
     let script_source = match extracted {
         Some(s) => s,
-        None => return Ok(rust_source), // no script block — pass-through unchanged
+        None => return Ok(rust_source), // no script block â€” pass-through unchanged
     };
 
     // 2. Parse the script source as a block of Rust statements.
@@ -1001,35 +1008,35 @@ pub enum ProfileMode {
 ///   `report.flamegraph(File)`.
 /// - [`ProfileMode::Alloc`]: ALSO injects a top-level
 ///   `#[global_allocator] static __BUFF_DHAT_ALLOC: dhat::DhatAlloc`
-///   item (required — global allocators must be `static`, not locals),
+///   item (required â€” global allocators must be `static`, not locals),
 ///   wraps the body in `catch_unwind`, starts `dhat::Dhat::new_heap()`
 ///   before the closure runs, and on exit drops the `Dhat` handle so
 ///   `dhat-heap.json` is written.
 ///
 /// Panics from the user code are caught by `catch_unwind` so the
-/// profiling dump ALWAYS runs (even on panic) — the binary then re-exits
+/// profiling dump ALWAYS runs (even on panic) â€” the binary then re-exits
 /// with code 1 to preserve the user program's exit semantics.
 ///
 /// **Zero overhead when off**: this function is ONLY called by
-/// [`commands::profile`](crate::commands::profile) — normal
+/// [`commands::profile`](crate::commands::profile) â€” normal
 /// `buff build` / `buff run` never invoke it, so their generated Rust is
-/// byte-identical to pre-T111 (no env-var gate, no runtime check — the
+/// byte-identical to pre-T111 (no env-var gate, no runtime check â€” the
 /// instrumentation simply isn't there).
 ///
 /// # Errors
 ///
 /// Returns an error when:
-/// - `rust_source` cannot be parsed as a valid `syn::File` (defensive —
+/// - `rust_source` cannot be parsed as a valid `syn::File` (defensive â€”
 ///   the caller passes freshly-codegen'd Rust that is always parseable).
 /// - No `fn main()` is found in the source (the user program has no
 ///   entry point to instrument).
 /// - The injected instrumentation cannot be parsed back by syn (defensive
-///   — the injected token streams are hand-audited to be valid Rust).
+///   â€” the injected token streams are hand-audited to be valid Rust).
 pub fn inject_profiling(rust_source: &str, mode: ProfileMode) -> Result<String> {
     let mut file: syn::File =
         syn::parse_str(rust_source).context("failed to parse generated Rust as a syn::File")?;
 
-    // Locate fn main() — capture its stmts + replace the block.
+    // Locate fn main() â€” capture its stmts + replace the block.
     let mut main_found = false;
     for item in &mut file.items {
         if let syn::Item::Fn(fn_item) = item {
@@ -1045,12 +1052,12 @@ pub fn inject_profiling(rust_source: &str, mode: ProfileMode) -> Result<String> 
     if !main_found {
         bail!(
             "`buff profile` requires the .buff program to have a `fn main()` \
-             entry point to instrument — none was found in the generated Rust"
+             entry point to instrument â€” none was found in the generated Rust"
         );
     }
 
     // For Alloc mode: prepend the global-allocator item at the TOP of
-    // the file (it must come before any fn that allocates — which is
+    // the file (it must come before any fn that allocates â€” which is
     // effectively "before everything"). We use Box::new to build the
     // Item::Static via quote!+parse2 (the `parse_quote!` macro is
     // banned per AGENTS.md).
@@ -1186,20 +1193,20 @@ fn format_buffhtml_parse_error(
 /// Invokes `rustc --edition 2021 <opt-flags> <rust_file> -o <output>`, where
 /// `<opt-flags>` depends on `mode`:
 ///
-/// - [`BuildMode::Fast`] (T55): [`rustc_fast_flags()`] — `opt-level=0`, no
+/// - [`BuildMode::Fast`] (T55): [`rustc_fast_flags()`] â€” `opt-level=0`, no
 ///   LTO. Fastest compile, slowest runtime. The dev inner-loop default
 ///   behind `buff build --fast`.
 /// - [`BuildMode::Debug`] (default, v0.1 behavior): just `-O`
 ///   (equivalent to `-C opt-level=2`). Fast compilation, no LTO.
-/// - [`BuildMode::Release`] (T56): [`rustc_release_flags()`] — `opt-level=3`
+/// - [`BuildMode::Release`] (T56): [`rustc_release_flags()`] â€” `opt-level=3`
 ///   + `lto=fat` + `codegen-units=1`. Slower compilation, faster runtime.
 ///
 /// **Linker selection**: uses [`LinkerChoice::default()`] (Auto) which
-/// probes PATH for mold (Linux) → rust-lld → system default. Callers that
+/// probes PATH for mold (Linux) â†’ rust-lld â†’ system default. Callers that
 /// need explicit control should use [`compile_rust_to_exe_with_speed`]
 /// with a [`LinkerChoice`] argument.
 ///
-/// The `output` path is passed verbatim to rustc — callers should pre-append
+/// The `output` path is passed verbatim to rustc â€” callers should pre-append
 /// the platform executable extension (see [`with_exe_extension`]) if they
 /// want a conventional name (e.g. `ola.exe` on Windows).
 ///
@@ -1262,7 +1269,7 @@ pub fn compile_rust_to_exe(
 ///   [`BackendChoice::default()`] for the same behaviour as
 ///   [`compile_rust_to_exe`]. `Cranelift` is honoured ONLY for
 ///   [`BuildMode::Debug`]; release/minimal/fast builds always use LLVM
-///   (the env-var gate is the safety rail — a `--release --backend=cranelift`
+///   (the env-var gate is the safety rail â€” a `--release --backend=cranelift`
 ///   invocation silently uses LLVM rather than risking a non-LLVM
 ///   shipped binary).
 /// - The cross-compilation target is selected via `target` (T112). When
@@ -1289,7 +1296,7 @@ pub fn compile_rust_to_exe_with_speed(
             "ThreadSanitizer (--detect-races) requires a nightly rustc toolchain.\n\
              Run: rustup override set nightly\n\n\
              Note: --detect-races adds 2-10x runtime overhead and is a \
-             development-time tool only — do not use in release builds."
+             development-time tool only â€” do not use in release builds."
         );
     }
 
@@ -1303,7 +1310,7 @@ pub fn compile_rust_to_exe_with_speed(
     let mut cmd = compile_speed::rustc_command(use_sccache);
 
     // Select the optimization/LTO flag set based on the build mode.
-    // Debug keeps the v0.1 `-O` exactly — byte-identical behavior with the
+    // Debug keeps the v0.1 `-O` exactly â€” byte-identical behavior with the
     // pre-T56 pipeline. Release swaps in the LTO + opt-level=3 + single
     // codegen-unit block. Minimal (T60) adds size-first knobs:
     // opt-level=z + panic=abort + strip=symbols. Fast (T55) disables all
@@ -1326,17 +1333,17 @@ pub fn compile_rust_to_exe_with_speed(
         &[]
     };
 
-    // T4: Cranelift dev backend. ONLY honoured for Debug builds —
+    // T4: Cranelift dev backend. ONLY honoured for Debug builds â€”
     // release/minimal/fast always use LLVM (the env-var gate is the
     // safety rail that prevents a non-LLVM shipped binary even when the
     // user passes `--release --backend=cranelift`). When Cranelift is
     // requested but unavailable (probe fails), fall back to LLVM with
-    // a warning — correctness is never affected, only compile speed.
+    // a warning â€” correctness is never affected, only compile speed.
     let use_cranelift =
         matches!(backend, BackendChoice::Cranelift) && matches!(mode, BuildMode::Debug) && {
             if cranelift_available() {
                 eprintln!(
-                    "note: using Cranelift dev backend (T4) — faster compile, \
+                    "note: using Cranelift dev backend (T4) â€” faster compile, \
                      slower runtime; release builds always use LLVM"
                 );
                 true
@@ -1371,7 +1378,7 @@ pub fn compile_rust_to_exe_with_speed(
 
     let result = cmd
         .output()
-        .context("failed to invoke `rustc` — is it installed and on your PATH?")?;
+        .context("failed to invoke `rustc` â€” is it installed and on your PATH?")?;
 
     // Forward rustc's stderr (diagnostics / warnings), translating `.rs`
     // references to `.buff` so the user sees their original source location.
@@ -1401,7 +1408,7 @@ pub fn compile_rust_to_exe_with_speed(
 /// to the originating `.buffhtml` line:col (with filename translation
 /// always applied as a baseline).
 ///
-/// Behaviour matches [`compile_rust_to_exe`] exactly otherwise — same
+/// Behaviour matches [`compile_rust_to_exe`] exactly otherwise â€” same
 /// rustc invocation, same [`BuildMode`] flag selection, same exit-status
 /// handling.
 pub fn compile_buffhtml_rust_to_exe(
@@ -1419,7 +1426,7 @@ pub fn compile_buffhtml_rust_to_exe(
             "ThreadSanitizer (--detect-races) requires a nightly rustc toolchain.\n\
              Run: rustup override set nightly\n\n\
              Note: --detect-races adds 2-10x runtime overhead and is a \
-             development-time tool only — do not use in release builds."
+             development-time tool only â€” do not use in release builds."
         );
     }
 
@@ -1455,7 +1462,7 @@ pub fn compile_buffhtml_rust_to_exe(
 
     let result = cmd
         .output()
-        .context("failed to invoke `rustc` — is it installed and on your PATH?")?;
+        .context("failed to invoke `rustc` â€” is it installed and on your PATH?")?;
 
     // Translate rustc stderr: filename (.rs -> .buffhtml) + line:col
     // reverse-mapping via the SpanMap side-table.
@@ -1483,10 +1490,10 @@ pub fn compile_buffhtml_rust_to_exe(
 /// Returns the argument sequence passed verbatim to `rustc` when
 /// [`compile_rust_to_exe`] is called with [`BuildMode::Fast`]:
 ///
-/// - `-C opt-level=0` — disable ALL LLVM optimization. The single biggest
+/// - `-C opt-level=0` â€” disable ALL LLVM optimization. The single biggest
 ///   compile-time knob: LLVM's optimisation passes are the bulk of rustc's
 ///   wall-clock time on small programs. `opt-level=0` skips them entirely.
-/// - `-C debuginfo=0` — omit debug symbols (they slow the linker). The
+/// - `-C debuginfo=0` â€” omit debug symbols (they slow the linker). The
 ///   `--fast` mode is for "does it compile + run?" feedback, not
 ///   debugging; users who want debug info should use the default
 ///   [`BuildMode::Debug`] (which keeps the v0.1 `-O` + default debuginfo).
@@ -1497,7 +1504,7 @@ pub fn compile_buffhtml_rust_to_exe(
 ///
 /// These are the rustc-level equivalent of a Cargo `[profile.dev]` block
 /// with `opt-level = 0`. The split exists because the v0.1 Buff pipeline
-/// invokes `rustc` directly on a single `.rs` file (no Cargo project) —
+/// invokes `rustc` directly on a single `.rs` file (no Cargo project) â€”
 /// so the functional path goes through these flags, while a Cargo-driven
 /// backend would use the profile block.
 pub fn rustc_fast_flags() -> Vec<&'static str> {
@@ -1509,18 +1516,18 @@ pub fn rustc_fast_flags() -> Vec<&'static str> {
 /// Returns the argument sequence passed verbatim to `rustc` when
 /// [`compile_rust_to_exe`] is called with [`BuildMode::Release`]:
 ///
-/// - `-C opt-level=3` — maximum LLVM optimization (overrides the `-O`
+/// - `-C opt-level=3` â€” maximum LLVM optimization (overrides the `-O`
 ///   default of `opt-level=2`).
-/// - `-C lto=fat` — full link-time optimization across the entire crate
+/// - `-C lto=fat` â€” full link-time optimization across the entire crate
 ///   graph (the `fat` flavor gives LLVM the most inlining room; `thin` is
 ///   faster but less aggressive).
-/// - `-C codegen-units=1` — force a single codegen unit so LLVM sees the
+/// - `-C codegen-units=1` â€” force a single codegen unit so LLVM sees the
 ///   whole program at once (required for LTO to deliver its full benefit).
 ///
 /// These are the rustc-level equivalent of Cargo's
 /// `[profile.release]` block emitted by [`release_profile_toml`]. The
 /// split exists because the v0.1 Buff pipeline invokes `rustc` directly on
-/// a single `.rs` file (no Cargo project) — so the functional path goes
+/// a single `.rs` file (no Cargo project) â€” so the functional path goes
 /// through these flags, while the TOML block is the documented contract
 /// for any future Cargo-driven backend.
 pub fn rustc_release_flags() -> Vec<&'static str> {
@@ -1539,20 +1546,20 @@ pub fn rustc_release_flags() -> Vec<&'static str> {
 /// Returns the argument sequence passed verbatim to `rustc` when
 /// [`compile_rust_to_exe`] is called with [`BuildMode::Minimal`]:
 ///
-/// - `-C opt-level=z` — LLVM optimize for SIZE (vs `opt-level=3` for
+/// - `-C opt-level=z` â€” LLVM optimize for SIZE (vs `opt-level=3` for
 ///   speed in [`BuildMode::Release`]). The single setting that
 ///   distinguishes `--minimal` from `--release`.
-/// - `-C panic=abort` — replace the unwind payload (landing pads +
+/// - `-C panic=abort` â€” replace the unwind payload (landing pads +
 ///   libunwind linkage) with a single abort shim. Biggest single
 ///   size win on small programs (typically -15..-25%).
-/// - `-C strip=symbols` — pass `--strip-all` to the linker. Drops
+/// - `-C strip=symbols` â€” pass `--strip-all` to the linker. Drops
 ///   symbol tables + debug info from the final binary.
-/// - `-C lto=true` — whole-program Link-Time Optimization. Lets LLVM
+/// - `-C lto=true` â€” whole-program Link-Time Optimization. Lets LLVM
 ///   eliminate dead code across crate boundaries that per-crate
 ///   `opt-level` cannot see. (`true` is the thin-lto default flavor;
-///   [`rustc_release_flags`] uses `lto=fat` for max inlining — Minimal
+///   [`rustc_release_flags`] uses `lto=fat` for max inlining â€” Minimal
 ///   prefers the smaller `true` since size is the primary target.)
-/// - `-C codegen-units=1` — force a single codegen unit so LLVM sees
+/// - `-C codegen-units=1` â€” force a single codegen unit so LLVM sees
 ///   the whole program at once (required for LTO to deliver its full
 ///   benefit).
 ///
@@ -1560,7 +1567,7 @@ pub fn rustc_release_flags() -> Vec<&'static str> {
 /// `[profile.minimal]` block emitted by [`minimal_profile_toml`] (and
 /// declared in the workspace-root `Cargo.toml`). The split exists
 /// because the v0.1 Buff pipeline invokes `rustc` directly on a single
-/// `.rs` file (no Cargo project) — so the functional path goes through
+/// `.rs` file (no Cargo project) â€” so the functional path goes through
 /// these flags, while the TOML block is the contract for any
 /// Cargo-driven backend.
 ///
@@ -1597,13 +1604,13 @@ pub fn rustc_minimal_flags() -> Vec<&'static str> {
 /// Although the current pipeline drives `rustc` directly (and therefore
 /// uses [`rustc_release_flags`] functionally), this string is:
 ///
-/// 1. The T56 QA assertion target — `release_profile_toml().contains("lto = true")`.
+/// 1. The T56 QA assertion target â€” `release_profile_toml().contains("lto = true")`.
 /// 2. The ready-to-inject block for `buff new` / `buff init` the day they
 ///    scaffold a `Cargo.toml` (multi-crate / FFI programs will need one).
 /// 3. Documentation of the contract between the rustc-level flags and the
 ///    equivalent Cargo profile, so the two never silently drift.
 ///
-/// Determinism: this is a pure fixed-string function — same output on every
+/// Determinism: this is a pure fixed-string function â€” same output on every
 /// call, no environment dependence, no side effects.
 pub fn release_profile_toml() -> String {
     "[profile.release]\nlto = true\nopt-level = 3\ncodegen-units = 1\n".to_string()
@@ -1625,7 +1632,7 @@ pub fn release_profile_toml() -> String {
 /// codegen-units = 1
 /// ```
 ///
-/// `inherits = "release"` is the key Cargo-only knob — it layers the
+/// `inherits = "release"` is the key Cargo-only knob â€” it layers the
 /// size-first settings on top of the release-grade baseline (so users
 /// get the `-C opt-level=3` groundwork + Release LTO head start before
 /// the size-first overrides kick in). The rustc-level equivalent
@@ -1636,14 +1643,14 @@ pub fn release_profile_toml() -> String {
 /// (and therefore uses [`rustc_minimal_flags`] functionally), this
 /// string is:
 ///
-/// 1. The T60 QA assertion target — `minimal_profile_toml().contains("opt-level = \"z\"")`.
+/// 1. The T60 QA assertion target â€” `minimal_profile_toml().contains("opt-level = \"z\"")`.
 /// 2. Already declared in the workspace-root `Cargo.toml` so
 ///    `cargo build --profile minimal` works in any cargo-driven path
 ///    (project / workspace builds via [`crate::project_pipeline`]).
 /// 3. Documentation of the contract between the rustc-level flags and
 ///    the equivalent Cargo profile, so the two never silently drift.
 ///
-/// Determinism: this is a pure fixed-string function — same output on
+/// Determinism: this is a pure fixed-string function â€” same output on
 /// every call, no environment dependence, no side effects.
 pub fn minimal_profile_toml() -> String {
     "[profile.minimal]\ninherits = \"release\"\npanic = \"abort\"\nstrip = true\nopt-level = \"z\"\nlto = true\ncodegen-units = 1\n".to_string()
@@ -1651,7 +1658,7 @@ pub fn minimal_profile_toml() -> String {
 
 /// Probe whether a rustc target triple is installed (T112).
 ///
-/// Delegates to [`crate::rustc_invoke::target_is_installed`] (T35 — the
+/// Delegates to [`crate::rustc_invoke::target_is_installed`] (T35 â€” the
 /// single source of truth for target-installed probing across the CLI
 /// and buff-eval).
 #[allow(dead_code)] // T112 helper; consumed by `--target` cross-compile dispatch.
@@ -1680,15 +1687,15 @@ pub const PGO_DATA_DIR: &str = "./target/pgo-data";
 /// `-C profile-use=<PGO_DATA_DIR>/<PGO_MERGED_PROFILE>`.
 pub const PGO_MERGED_PROFILE: &str = "merged.profdata";
 
-/// The rustc CLI flags for Phase 1 of PGO — the instrumented build (T62).
+/// The rustc CLI flags for Phase 1 of PGO â€” the instrumented build (T62).
 ///
 /// Returns the argument sequence passed verbatim to `rustc` when
 /// `buff build --pgo` runs Phase 1:
 ///
-/// - `-C profile-generate=<dir>` — emit edge-profiling counters into
+/// - `-C profile-generate=<dir>` â€” emit edge-profiling counters into
 ///   `<dir>/` on every execution of the resulting binary. The counters
 ///   land as `*.profraw` files (one per process run).
-/// - `-C opt-level=3` + `-C lto=fat` + `-C codegen-units=1` — the same
+/// - `-C opt-level=3` + `-C lto=fat` + `-C codegen-units=1` â€” the same
 ///   release-grade baseline as [`rustc_release_flags`], so the
 ///   instrumented binary's runtime characteristics match the final
 ///   profile-guided build (the profile is only useful if the workload
@@ -1710,17 +1717,17 @@ pub fn rustc_pgo_instrument_flags(profile_dir: &str) -> Vec<String> {
     ]
 }
 
-/// The rustc CLI flags for Phase 3 of PGO — the profile-guided rebuild (T62).
+/// The rustc CLI flags for Phase 3 of PGO â€” the profile-guided rebuild (T62).
 ///
 /// Returns the argument sequence passed verbatim to `rustc` when
 /// `buff build --pgo --use` runs Phase 3:
 ///
-/// - `-C profile-use=<merged.profdata>` — feed the merged profile data
+/// - `-C profile-use=<merged.profdata>` â€” feed the merged profile data
 ///   (produced by `llvm-profdata merge` over the Phase 1 `.profraw`
 ///   files) back to LLVM so it can drive inlining + block-layout
 ///   decisions. Typically yields 10%+ speedup vs `--release` on
 ///   compute-heavy code.
-/// - `-C opt-level=3` + `-C lto=fat` + `-C codegen-units=1` — the same
+/// - `-C opt-level=3` + `-C lto=fat` + `-C codegen-units=1` â€” the same
 ///   release-grade baseline as [`rustc_release_flags`] (must match
 ///   Phase 1's [`rustc_pgo_instrument_flags`] so the profile maps onto
 ///   the same inlining decisions).
@@ -1773,7 +1780,7 @@ pub fn pgo_merged_profile_path(profile_dir: Option<&str>) -> String {
 /// phases share so cargo-driven paths selecting `--profile pgo` get
 /// the same groundwork as the single-file rustc path.
 ///
-/// Determinism: this is a pure fixed-string function — same output on
+/// Determinism: this is a pure fixed-string function â€” same output on
 /// every call, no environment dependence, no side effects.
 pub fn pgo_profile_toml() -> String {
     "[profile.pgo]\ninherits = \"release\"\nlto = \"fat\"\ncodegen-units = 1\n".to_string()
@@ -1889,10 +1896,10 @@ mod tests {
     fn extract_source_line_handles_utf8_and_multibyte() {
         let sf = SourceFile::new(
             PathBuf::from("test"),
-            "first\nOlá, Buff!\nthird".to_string(),
+            "first\nOlÃ¡, Buff!\nthird".to_string(),
         );
         assert_eq!(extract_source_line(&sf, 1), "first");
-        assert_eq!(extract_source_line(&sf, 2), "Olá, Buff!");
+        assert_eq!(extract_source_line(&sf, 2), "OlÃ¡, Buff!");
         assert_eq!(extract_source_line(&sf, 3), "third");
         assert_eq!(extract_source_line(&sf, 99), "");
     }
@@ -1940,7 +1947,7 @@ mod tests {
 
     #[test]
     fn release_profile_toml_contains_lto_true_qa() {
-        // T56 QA target — MUST contain `lto = true` (Cargo-profile form).
+        // T56 QA target â€” MUST contain `lto = true` (Cargo-profile form).
         let toml = release_profile_toml();
         assert!(
             toml.contains("lto = true"),
@@ -1967,7 +1974,7 @@ mod tests {
 
     #[test]
     fn release_profile_toml_is_deterministic() {
-        // Pure fixed-string helper — same output every call.
+        // Pure fixed-string helper â€” same output every call.
         assert_eq!(release_profile_toml(), release_profile_toml());
     }
 
@@ -2023,7 +2030,7 @@ mod tests {
     fn derive_component_name_handles_dotfile_stem() {
         // On Windows, `Path::new(".buffhtml").file_stem()` may return
         // "buffhtml" (treated as extension-only). Our function must still
-        // produce a valid Rust ident — either the codegen default or a
+        // produce a valid Rust ident â€” either the codegen default or a
         // sanitised form. Both are acceptable; we only assert non-empty
         // + valid first char.
         let name = derive_component_name(&PathBuf::from(".buffhtml"));
@@ -2039,10 +2046,10 @@ mod tests {
 
     #[test]
     fn inline_script_block_passes_through_when_no_const() {
-        // No __BUFF_SCRIPT_SOURCE → unchanged.
+        // No __BUFF_SCRIPT_SOURCE â†’ unchanged.
         let src = "use dioxus::prelude::*;\nfn Foo() -> Element { rsx! {} }\n";
         let out = inline_script_block(src.to_string()).expect("inline ok");
-        assert_eq!(out, src, "no script block → pass-through unchanged");
+        assert_eq!(out, src, "no script block â†’ pass-through unchanged");
     }
 
     #[test]
@@ -2071,7 +2078,7 @@ fn Counter() -> Element {\n    rsx! { \"hi\" }\n}\n";
 
     #[test]
     fn inline_script_block_errors_when_no_component_fn() {
-        // Script present, but no #[component] fn → bail.
+        // Script present, but no #[component] fn â†’ bail.
         let raw = "const __BUFF_SCRIPT_SOURCE: &str = \"let x = 1;\";\n";
         let result = inline_script_block(raw.to_string());
         assert!(result.is_err(), "expected error when no #[component] fn");
@@ -2080,7 +2087,7 @@ fn Counter() -> Element {\n    rsx! { \"hi\" }\n}\n";
     #[test]
     fn compile_buffhtml_to_rust_end_to_end_no_rustc() {
         // Vertical-slice test: parse + codegen + script-block splice + .rs write.
-        // Does NOT invoke rustc — that's covered by `buff build` integration tests.
+        // Does NOT invoke rustc â€” that's covered by `buff build` integration tests.
         let src = "<script lang=\"buff\">\n    let mut count = use_signal(|| 0);\n</script>\n\n<div>{count}</div>\n";
         let path = write_buffhtml_fixture("counter_test.buffhtml", src);
 
@@ -2170,7 +2177,7 @@ fn Counter() -> Element {\n    rsx! { \"hi\" }\n}\n";
     fn resolve_linker_auto_never_errors() {
         // Auto must always resolve without error (may be None on any host).
         let _resolved = resolve_linker(LinkerChoice::Auto).unwrap();
-        // No assertion on is_fast — it depends on what's on PATH.
+        // No assertion on is_fast â€” it depends on what's on PATH.
         // The important thing is it doesn't panic or error.
     }
 }

@@ -1094,6 +1094,7 @@ dependencies = [
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-parser",
+ "buff-lang-pipeline",
  "buff-lang-types",
  "insta",
 ]
@@ -1243,6 +1244,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "buff-lang-check"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "buff-lang-ast",
+ "buff-lang-buffhtml-parser",
+ "buff-lang-codegen-buffhtml",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "buff-lang-types",
+ "buff-plugins",
+]
+
+[[package]]
 name = "buff-lang-cli"
 version = "1.0.0"
 dependencies = [
@@ -1254,12 +1270,15 @@ dependencies = [
  "buff-lang-ast",
  "buff-lang-ast-rsx",
  "buff-lang-buffhtml-parser",
+ "buff-lang-check",
  "buff-lang-codegen-buffhtml",
  "buff-lang-codegen-rust",
  "buff-lang-debug-info",
  "buff-lang-error",
+ "buff-lang-fmt",
  "buff-lang-lexer",
  "buff-lang-parser",
+ "buff-lang-pipeline",
  "buff-lang-types",
  "buff-plugins",
  "buff-registry",
@@ -1366,6 +1385,17 @@ name = "buff-lang-ffi-guide"
 version = "1.0.0"
 
 [[package]]
+name = "buff-lang-fmt"
+version = "1.0.0"
+dependencies = [
+ "buff-lang-ast",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "buff-lang-lexer"
 version = "1.2.0"
 dependencies = [
@@ -1384,6 +1414,22 @@ dependencies = [
  "buff-lang-lexer",
  "buff-lang-types",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "buff-lang-pipeline"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "buff-lang-ast",
+ "buff-lang-codegen-buffhtml",
+ "buff-lang-codegen-rust",
+ "buff-lang-error",
+ "buff-lang-lexer",
+ "buff-lang-parser",
+ "buff-lang-types",
+ "salsa",
+ "sha2",
 ]
 
 [[package]]
@@ -1420,8 +1466,8 @@ name = "buff-lsp"
 version = "1.0.0"
 dependencies = [
  "buff-lang-ast",
- "buff-lang-cli",
  "buff-lang-error",
+ "buff-lang-fmt",
  "buff-lang-lexer",
  "buff-lang-parser",
  "buff-lang-types",
