@@ -1,715 +1,96 @@
-// Buff self-host port of `crates/buff-lang-parser/src/expr.rs` (T16).
+// Buff self-host port of `crates/buff-lang-parser/src/expr.rs` (P4.1a).
 //
 // Expression parser — hand-rolled recursive-descent with operator-precedence
-// climbing (Pratt-style) for binary operators. Precedence ladder (lowest to
-// highest): assignment `=`/`+=`.. (right-assoc); pipeline `|>`; range `..`/
-// `..=`; null-coalesce `??`; `||`; `&&`; `==`/`!=`; `<`/`>`/`<=`/`>=`; `|`;
-// `^`; `&`; `<<`/`>>`; `+`/`-`; `*`/`/`/`%`; unary prefix `-`/`!`/`~`; postfix
-// `(...)`/`.m(...)`/`[...]`/`?`; primary.
+// climbing (Pratt-style) for binary operators.
 //
-// Postfix + pattern/match/closure parsers live in expr_postfix.buff and
-// expr_pattern.buff (the T106 mechanical split, mirrored here).
+// Precedence ladder (lowest to highest):
+// 1.  Assignment (`=`, `+=`, ...) — right-assoc
+// 2.  Pipeline `|>`  — left-assoc; desugars `LHS |> f(args)` to `f(LHS, args)`
+// 3.  Range `..`, `..=`
+// 4.  Null-coalesce `??`
+// 5.  Logical OR `||`
+// 6.  Logical AND `&&`
+// 7.  Equality `==`, `!=`
+// 8.  Comparison `<`, `>`, `<=`, `>=`
+// 9.  Bitwise OR `|`
+// 10. Bitwise XOR `^`
+// 11. Bitwise AND `&`
+// 12. Shift `<<`, `>>`
+// 13. Additive `+`, `-`
+// 14. Multiplicative `*`, `/`, `%`
+// 15. Unary prefix `-`, `!`, `~`
+// 16. Postfix `(...)` call, `.method(...)` call (in `expr_postfix.buff`)
+// 17. Primary — literals, identifiers, `( expr )`
 //
-// SYNTAX MAPPING NOTES (Buff grammar differs from the Rust it lowers to):
-//   * `while matches!(peek, Some(K))` → `for stream_peek_kind(s) ==
-//     Option.Some(K):`.
-//   * `while let Some(op) = peek.and_then(op_fn)` → `for true: { let opt =
-//     op_fn(..); if opt == Option.None: break; .. }` (Buff has no `while let`).
-//   * `peek.and_then(op_fn)` op-lookup helpers keep their shape
-//     (op_fn(kind) -> Option<BinaryOp>).
-//   * `let Some(op) = .. else { return Ok(lhs) }` → `if opt == Option.None:
-//     return Result.Ok(lhs)`.
-//   * parse_primary's `match tok.kind { Lit(v) => .., other => return Err }`
-//     becomes an if-chain for the structural kinds + an Option-returning
-//     `extract_literal_or_ident` extractor for the literal/ident kinds (Buff
-//     match arms cannot `return`).
-//   * No `{`/`}` in string literals → diagnostics reworded to closing-brace etc.
+// Postfix + pattern/match/closure parsers live in `expr_postfix.buff` and
+// `expr_pattern.buff` (the T106 mechanical split, mirrored here).
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions
+// (deviations from Rust grammar, per porting-conventions §1):
+//   * `pub fn parse_expression(stream: &mut TokenStream<'_>)` -> `func
+//     parse_expression(s: TokenStream)` — the `&mut self` of a Rust method is
+//     implicit (Buff mutates struct fields in place via `s.pos = ...`).
+//   * `&Expr` / `&Token` / `&TokenKind` -> owned values (Buff has no
+//     references — porting-conventions §7b).
+//   * `Box::new(lhs)` -> bare `lhs` (Buff has no `Box`; recursive owned data
+//     is handled via Arc/COW at codegen time — porting-conventions §7d).
+//   * `while matches!(stream.peek_kind(), Some(K))` ->
+//     `for stream_peek_kind(s) == Option.Some(K):` (Buff has no `while`;
+//     `match` rejects or-patterns — porting-conventions §8d, §8e).
+//   * `while let Some(op) = peek.and_then(fn)` ->
+//     `for true: let opt = fn(..); if opt == Option.None: break; ...` (Buff
+//     has no `while let`).
+//   * `let Some(op) = .. else { return Ok(lhs) }` ->
+//     `let opt = ..; if opt == Option.None: return Result.Ok(lhs)` (no
+//     let-else in Buff).
+//   * Rust struct-variant enum payloads (`Expr::BinaryOp { op, lhs, rhs,
+//     span }`) -> tuple variants (`Expr.BinaryOp(op, lhs, rhs, span)`) —
+//     Buff enums lack struct variants (same decision as
+//     `self-host/ast/expr.buff`).
+//   * `stream.peek_kind().and_then(assignment_op)` ->
+//     `assignment_op(stream_unwrap_kind(stream_peek_kind(s)))`.
+//   * Bool-returning helper functions (ends_with_numberlike, is_numeric_primary,
+//     edition_is_scientific, is_any_token_kind, etc.) MUST be defined BEFORE
+//     any function that calls them in an `if` condition: the Buff
+//     type-checker is single-pass, so a forward-referenced function's return
+//     type is Unknown, which fails `if cond must be Bool` (same gap noted in
+//     `stream.buff` line 338). Result-returning forward references used with
+//     `?` are fine — only Bool-as-condition is affected. All non-recursive
+//     helpers therefore appear at the TOP of this file (before the parse
+//     chain); the parse chain itself is mutually recursive on `?`/comparisons
+//     only, so its order does not matter for type inference.
+//   * `if/else: break` inside `for true:` loops is restructured to
+//     `if cond == false: break` (early exit) because Buff's layout parser
+//     mis-parses some `if/else`-with-break patterns as continuing the
+//     enclosing function body.
+//   * `std::mem::take(&mut text_buf)` (take ownership, leave empty) ->
+//     `let old = text_buf; text_buf = ""; <use old>`.
+//   * `text_buf.is_empty()` -> `text_buf.len() == 0` (Bool-returning method
+//     calls in `if` conditions hit the type-inference gap).
+//   * `format!("msg {x}")` -> string concatenation with `+`.
+//   * `ParseError::new(Diagnostic::error(msg, span))` ->
+//     `err_with(msg, span, ErrorCode.X)` (helper trampoline).
+//   * Cross-file dependencies (`TokenStream`, `Token`, `TokenKind`, `Expr`,
+//     `Literal`, `Ident`, `InterpPart`, `BinaryOp`, `UnaryOp`, `Span`,
+//     `ParseError`, `Diagnostic`, `ErrorCode`, `Stmt`, `Block`, `Param`,
+//     `TypeRef`, `Pattern`, `MatchArm`, `SourceId`) resolve automatically
+//     from sibling port files (the buff front-end links `self-host/` files
+//     without `import`; the M7 monolith loader concatenates them).
+//   * `mod expr_pattern; mod expr_postfix; pub use ...` dropped — Buff has
+//     no `mod`; files are auto-linked.
+//   * `#[cfg(test)] mod tests` omitted (porting-conventions §5a).
+//
+// Numeric widths map to the natural Buff primitives:
+//   usize / i64 / isize -> Int
+//   f32              -> Float
+//   f64              -> Double
+//   u8               -> Byte
+//   char             -> Char
+//   bool             -> Bool
 
-// Public entry point — parse one expression (precedence: assignment level).
-func expr_parse_expression(s: TokenStream) -> Result<Expr, ParseError>:
-    return parse_assignment(s)
-
-// ---------------------------------------------------------------------------
-// Level 1 — assignment (right-associative)
-// ---------------------------------------------------------------------------
-
-func parse_assignment(s: TokenStream) -> Result<Expr, ParseError>:
-    let lhs = parse_pipeline(s)?
-    let opt = assignment_op(stream_unwrap_kind(stream_peek_kind(s)))
-    if opt == Option.None:
-        return Result.Ok(lhs)
-    let op = unwrap_binop_opt(opt)
-    let _a = stream_advance(s)
-    // Right-associative: recursively parse the assignment-level RHS.
-    let rhs = parse_assignment(s)?
-    let span = combine_span(lhs, rhs)
-    return Result.Ok(Expr.BinaryOp(op, lhs, rhs, span))
-
-// ---------------------------------------------------------------------------
-// Level 2 — pipeline `|>` (left-assoc; desugars to a FuncCall/MethodCall)
-// ---------------------------------------------------------------------------
-
-func parse_pipeline(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_range(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.PipeGt):
-        let pipe_tok = stream_advance_after_peek(s)
-        let rhs = parse_range(s)?
-        lhs = desugar_pipeline(lhs, rhs, pipe_tok)?
-    return Result.Ok(lhs)
-
-// Rewrite `LHS |> RHS` into a call with LHS prepended as the first arg.
-// Accepts a FuncCall / MethodCall RHS (prepend LHS to args), a bare Ident RHS
-// (`x |> f` -> `f(x)`); any other shape is a ParseError (the RHS must be
-// callable).
-func desugar_pipeline(lhs: Expr, rhs: Expr, pipe_tok: Token) -> Result<Expr, ParseError>:
-    let span = combine_span(lhs, rhs)
-    let callee_case = expr_as_fun_call(rhs)
-    if callee_case != Option.None:
-        let parts = unwrap_fun_call_parts(callee_case)
-        return Result.Ok(Expr.FuncCall(parts.callee, vec_prepend(lhs, parts.args), span))
-    let method_case = expr_as_method_call(rhs)
-    if method_case != Option.None:
-        let parts = unwrap_method_call_parts(method_case)
-        return Result.Ok(Expr.MethodCall(parts.receiver, parts.method, vec_prepend(lhs, parts.args), span))
-    let ident_case = expr_as_ident(rhs)
-    if ident_case != Option.None:
-        let name = unwrap_ident_parts(ident_case)
-        return Result.Ok(Expr.FuncCall(Expr.Ident(name, span), [lhs], span))
-    let found = token_kind_to_string(TokenKind.PipeGt)
-    return Result.Err(err_with("right-hand side of `|>` must be a function call, found `" + found + "`", pipe_tok.span, ErrorCode.UnexpectedToken))
-
-// ---------------------------------------------------------------------------
-// Level 3 — range `..` / `..=` (lower than additive, higher than pipeline)
-// ---------------------------------------------------------------------------
-
-func parse_range(s: TokenStream) -> Result<Expr, ParseError>:
-    let lhs = parse_null_coalesce(s)?
-    let pk = stream_peek_kind(s)
-    if pk == Option.Some(TokenKind.DotDot):
-        let _d = stream_advance(s)
-        let rhs = parse_null_coalesce(s)?
-        return Result.Ok(Expr.Range(lhs, rhs, false, combine_span(lhs, rhs)))
-    if pk == Option.Some(TokenKind.DotDotEq):
-        let _d = stream_advance(s)
-        let rhs = parse_null_coalesce(s)?
-        return Result.Ok(Expr.Range(lhs, rhs, true, combine_span(lhs, rhs)))
-    return Result.Ok(lhs)
-
-// ---------------------------------------------------------------------------
-// Level 4 — null coalescing `??` (between range and logical OR)
-// ---------------------------------------------------------------------------
-
-func parse_null_coalesce(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_or(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.QuestionQuestion):
-        let _q = stream_advance(s)
-        let rhs = parse_or(s)?
-        lhs = Expr.BinaryOp(BinaryOp.NullCoalesce, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-// ---------------------------------------------------------------------------
-// Levels 5–12 — left-associative binary operators (regular Pratt rungs)
-// ---------------------------------------------------------------------------
-
-func parse_or(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_and(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.OrOr):
-        let _o = stream_advance(s)
-        let rhs = parse_and(s)?
-        lhs = Expr.BinaryOp(BinaryOp.Or, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_and(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_equality(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.AndAnd):
-        let _a = stream_advance(s)
-        let rhs = parse_equality(s)?
-        lhs = Expr.BinaryOp(BinaryOp.And, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_equality(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_comparison(s)?
-    for true:
-        let opt = eq_op(stream_unwrap_kind(stream_peek_kind(s)))
-        if opt == Option.None:
-            break
-        let op = unwrap_binop_opt(opt)
-        let _a = stream_advance(s)
-        let rhs = parse_comparison(s)?
-        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_comparison(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_bitor(s)?
-    for true:
-        let opt = cmp_op(stream_unwrap_kind(stream_peek_kind(s)))
-        if opt == Option.None:
-            break
-        let op = unwrap_binop_opt(opt)
-        let _a = stream_advance(s)
-        let rhs = parse_bitor(s)?
-        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_bitor(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_bitxor(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.Pipe):
-        let _p = stream_advance(s)
-        let rhs = parse_bitxor(s)?
-        lhs = Expr.BinaryOp(BinaryOp.BitOr, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_bitxor(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_bitand(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.Caret):
-        let _c = stream_advance(s)
-        let rhs = parse_bitand(s)?
-        lhs = Expr.BinaryOp(BinaryOp.BitXor, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_bitand(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_shift(s)?
-    for stream_peek_kind(s) == Option.Some(TokenKind.Amp):
-        let _a = stream_advance(s)
-        let rhs = parse_shift(s)?
-        lhs = Expr.BinaryOp(BinaryOp.BitAnd, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_shift(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_additive(s)?
-    for true:
-        let opt = shift_op(stream_unwrap_kind(stream_peek_kind(s)))
-        if opt == Option.None:
-            break
-        let op = unwrap_binop_opt(opt)
-        let _a = stream_advance(s)
-        let rhs = parse_additive(s)?
-        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-func parse_additive(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_multiplicative(s)?
-    for true:
-        let opt = additive_op(stream_unwrap_kind(stream_peek_kind(s)))
-        if opt == Option.None:
-            break
-        let op = unwrap_binop_opt(opt)
-        let _a = stream_advance(s)
-        let rhs = parse_multiplicative(s)?
-        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
-    return Result.Ok(lhs)
-
-// Level 14 — multiplicative. Also handles T57 implicit multiplication
-// (`2x`, `2(x+y)`) in the scientific edition when the LHS is numeric-primary
-// and the next token starts a fresh postfix primary.
-func parse_multiplicative(s: TokenStream) -> Result<Expr, ParseError>:
-    let mut lhs = parse_unary(s)?
-    for true:
-        let opt = mul_op(stream_unwrap_kind(stream_peek_kind(s)))
-        if opt != Option.None:
-            let op = unwrap_binop_opt(opt)
-            let _a = stream_advance(s)
-            let rhs = parse_unary(s)?
-            lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
-        if opt != Option.None:
-            // consumed a real operator above; keep looping
-            pass
-        if opt == Option.None:
-            // T57 implicit multiplication check.
-            if edition_is_scientific(stream_edition(s)):
-                if stream_in_matrix_row(s) == false:
-                    if ends_with_numberlike(lhs):
-                        if is_implicit_mult_start(stream_peek_kind(s)):
-                            let rhs = parse_unary(s)?
-                            lhs = Expr.BinaryOp(BinaryOp.Mul, lhs, rhs, combine_span(lhs, rhs))
-                        if is_implicit_mult_start(stream_peek_kind(s)) == false:
-                            break
-                    if ends_with_numberlike(lhs) == false:
-                        break
-                if stream_in_matrix_row(s):
-                    break
-            if edition_is_scientific(stream_edition(s)) == false:
-                break
-    return Result.Ok(lhs)
-
-// Whether `expr` is a numeric primary suitable as the LHS of an implicit
-// multiplication (T57): any numeric literal, or a closing-delimiter-terminated
-// postfix expression.
-func ends_with_numberlike(e: Expr) -> Bool:
-    let lit = expr_as_numeric_literal(e)
-    if lit != Option.None:
-        return true
-    if expr_is_postfix_terminated(e):
-        return true
-    return false
-
-// Whether `expr` is a bare numeric/char literal (T57).
-func is_numeric_primary(e: Expr) -> Bool:
-    return expr_as_number_or_char_literal(e) != Option.None
-
-// Whether the upcoming token would start a fresh postfix primary suitable as
-// the RHS of an implicit multiplication (T57).
-func is_implicit_mult_start(kind: Option<TokenKind>) -> Bool:
-    let k = stream_unwrap_kind(kind)
-    if is_any_ident_kind(k):
-        return true
-    if k == TokenKind.LParen:
-        return true
-    if k == TokenKind.LBracket:
-        return true
-    if is_numeric_lit_kind(k):
-        return true
-    return false
-
-// ---------------------------------------------------------------------------
-// Level 12 — unary prefix operators (`-`, `!`, `~`) + T57 Unicode prefix
-// desugar (∑/∏/√ -> sum/product/sqrt free prelude calls).
-// ---------------------------------------------------------------------------
-
-func parse_unary(s: TokenStream) -> Result<Expr, ParseError>:
-    let opt = unary_op(stream_unwrap_kind(stream_peek_kind(s)))
-    if opt != Option.None:
-        let op = unwrap_unary_opt(opt)
-        let op_tok = stream_advance_after_peek(s)
-        let operand = parse_unary(s)?
-        let span = span_new(op_tok.span.start, expr_span(operand).end, stream_source_id(s))
-        return Result.Ok(Expr.UnaryOp(op, operand, span))
-    // T57: Unicode prefix operators ∑ ∏ √.
-    let kind = stream_unwrap_kind(stream_peek_kind(s))
-    let callee_opt = unicode_prefix_desugar(kind)
-    if callee_opt != Option.None:
-        // Edition gate: these tokens require the scientific edition.
-        let req = edition_require_for(stream_edition(s), kind)
-        if req != Option.None:
-            return Result.Err(err_with(unwrap_opt_str(req), peek_span_or_eof(s), ErrorCode.UnexpectedToken))
-        let prefix_tok = stream_advance_after_peek(s)
-        let operand = parse_unary(s)?
-        let span = span_new(prefix_tok.span.start, expr_span(operand).end, stream_source_id(s))
-        let callee = Expr.Ident(ident_new(unwrap_opt_str(callee_opt), prefix_tok.span), prefix_tok.span)
-        return Result.Ok(Expr.FuncCall(callee, [operand], span))
-    return parse_postfix(s)
-
-// Maps a Unicode prefix operator token to its ASCII prelude-function name.
-func unicode_prefix_desugar(kind: TokenKind) -> Option<String>:
-    if kind == TokenKind.Sum:
-        return Option.Some("sum")
-    if kind == TokenKind.Product:
-        return Option.Some("product")
-    if kind == TokenKind.Sqrt:
-        return Option.Some("sqrt")
-    return Option.None
-
-// ---------------------------------------------------------------------------
-// Level 14 — primary: literals, identifiers, parenthesized expressions,
-// collections, maps, closures, if/match/spawn.
-// ---------------------------------------------------------------------------
-
-func parse_primary(s: TokenStream) -> Result<Expr, ParseError>:
-    let opt = stream_peek(s)
-    if opt == Option.None:
-        return Result.Err(err_with("expected an expression, found end of input", stream_eof_span(s), ErrorCode.UnexpectedToken))
-    let tok = stream_unwrap(opt)
-    // T9: `if` as an expression.
-    if tok.kind == TokenKind.KwIf:
-        return parse_if_expr(s)
-    // T27: `match scrutinee { arms }`.
-    if tok.kind == TokenKind.KwMatch:
-        return parse_match(s)
-    // T31: `spawn <expr>`.
-    if tok.kind == TokenKind.KwSpawn:
-        let spawn_tok = stream_advance_after_peek(s)
-        let start = spawn_tok.span.start
-        let task = parse_unary(s)?
-        let end = expr_span(task).end
-        return Result.Ok(Expr.Spawn(task, span_new(start, end, stream_source_id(s))))
-    // Parenthesized expression OR tuple (T103).
-    if tok.kind == TokenKind.LParen:
-        return parse_paren_or_tuple(s)
-    // Collection / matrix literal (T23 / T57).
-    if tok.kind == TokenKind.LBracket:
-        return parse_collection_literal(s)
-    // Brace at primary position: closure OR map literal (T25).
-    if tok.kind == TokenKind.LBrace:
-        return parse_brace_primary(s)
-    // Consume the token and turn it into a literal/ident/string node.
-    let _adv = stream_advance(s)
-    let span = tok.span
-    if tok.kind == TokenKind.StringStart:
-        return parse_string_literal(s, span)
-    let lit_opt = extract_literal_or_ident(tok, span)
-    if lit_opt != Option.None:
-        return Result.Ok(unwrap_expr_opt(lit_opt))
-    return Result.Err(err_with("expected an expression, found `" + token_kind_to_string(tok.kind) + "`", span, ErrorCode.UnexpectedToken))
-
-// Parenthesized expression OR tuple: `(e)` is grouping; `(e1, e2, ...)` is a
-// TupleLit (2+ members). Empty `()` is an error (unit is not a value).
-func parse_paren_or_tuple(s: TokenStream) -> Result<Expr, ParseError>:
-    let lp = stream_expect(s, TokenKind.LParen)?
-    let source_id = stream_source_id(s)
-    if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
-        return Result.Err(err_with("empty () is not a valid expression", lp.span, ErrorCode.UnexpectedToken))
-    let first = expr_parse_expression(s)?
-    // No comma -> plain grouping.
-    if stream_peek_kind(s) != Option.Some(TokenKind.Comma):
-        stream_expect(s, TokenKind.RParen)?
-        return Result.Ok(first)
-    // One or more commas -> tuple.
-    let members = Vector.new()
-    members.push(first)
-    for true:
-        let _c = stream_advance(s)
-        if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
-            break
-        members.push(expr_parse_expression(s)?)
-        if stream_peek_kind(s) != Option.Some(TokenKind.Comma):
-            break
-    let rp = stream_expect(s, TokenKind.RParen)?
-    let span = span_new(lp.span.start, rp.span.end, source_id)
-    // A 1-element trailing-comma `(e,)` is treated as grouping `(e)`.
-    if members.len() == 1:
-        return Result.Ok(members[0])
-    return Result.Ok(Expr.TupleLit(members, span))
-
-// Parse a `[...]` collection literal, dispatching between the historical
-// comma-separated ArrayLit (T23) and the scientific-edition matrix literal
-// `[1 2; 3 4]` (T57).
-func parse_collection_literal(s: TokenStream) -> Result<Expr, ParseError>:
-    let lb = stream_expect(s, TokenKind.LBracket)?
-    let source_id = stream_source_id(s)
-    // Empty `[]`.
-    if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
-        let rb = stream_expect(s, TokenKind.RBracket)?
-        return Result.Ok(Expr.ArrayLit(Vector.new(), span_new(lb.span.start, rb.span.end, source_id)))
-    let row_res = parse_matrix_row(s)?
-    let row_elements = row_res.elements
-    let saw_ws = row_res.saw_whitespace
-    let is_matrix = saw_ws || stream_peek_kind(s) == Option.Some(TokenKind.Semicolon)
-    if is_matrix:
-        if edition_is_scientific(stream_edition(s)) == false:
-            return Result.Err(err_with("matrix literals require edition = \"scientific\" in buff.toml", lb.span, ErrorCode.UnexpectedToken))
-        let rows = Vector.new()
-        let row_span_start = vec_first_span_start(row_elements, lb.span.start)
-        let row_span_end = vec_last_span_end(row_elements, lb.span.end)
-        rows.push(Expr.ArrayLit(row_elements, span_new(row_span_start, row_span_end, source_id)))
-        for stream_peek_kind(s) == Option.Some(TokenKind.Semicolon):
-            let _semi = stream_advance(s)
-            if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
-                break
-            let inner = parse_matrix_row(s)?
-            let elems = inner.elements
-            let rs = vec_first_span_start(elems, stream_span_here(s).start)
-            let re = vec_last_span_end(elems, stream_span_here(s).end)
-            rows.push(Expr.ArrayLit(elems, span_new(rs, re, source_id)))
-        let rb = stream_expect(s, TokenKind.RBracket)?
-        return Result.Ok(Expr.ArrayLit(rows, span_new(lb.span.start, rb.span.end, source_id)))
-    // Comma-separated shape: continue the historical ArrayLit loop.
-    let merged = row_elements
-    for stream_peek_kind(s) == Option.Some(TokenKind.Comma):
-        let _c = stream_advance(s)
-        if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
-            break
-        merged.push(expr_parse_expression(s)?)
-    let rb = stream_expect(s, TokenKind.RBracket)?
-    return Result.Ok(Expr.ArrayLit(merged, span_new(lb.span.start, rb.span.end, source_id)))
-
-// Result of parsing one matrix row: the elements + whether whitespace
-// separation was observed.
-struct MatrixRow {
-    elements: Vector<Expr>,
-    saw_whitespace: Bool,
-}
-
-// Parse ONE row of a matrix literal (T57). While inside a matrix row, implicit
-// multiplication is SUPPRESSED — whitespace is the row-element separator.
-func parse_matrix_row(s: TokenStream) -> Result<MatrixRow, ParseError>:
-    stream_enter_matrix_row(s)
-    let result = parse_matrix_row_inner(s)
-    stream_exit_matrix_row(s)
-    return result
-
-func parse_matrix_row_inner(s: TokenStream) -> Result<MatrixRow, ParseError>:
-    let elements = Vector.new()
-    let mut saw_whitespace_sep = false
-    elements.push(expr_parse_expression(s)?)
-    for true:
-        let pk = stream_peek_kind(s)
-        if pk == Option.Some(TokenKind.Comma):
-            let _c = stream_advance(s)
-            if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
-                break
-            if stream_peek_kind(s) == Option.Some(TokenKind.Semicolon):
-                break
-            elements.push(expr_parse_expression(s)?)
-        if pk == Option.Some(TokenKind.Comma):
-            // handled above; loop again
-            pass
-        if pk != Option.Some(TokenKind.Comma):
-            let k = stream_unwrap_kind(pk)
-            if starts_matrix_element(k):
-                saw_whitespace_sep = true
-                elements.push(expr_parse_expression(s)?)
-            if starts_matrix_element(k) == false:
-                break
-    return Result.Ok(MatrixRow.new(elements: elements, saw_whitespace: saw_whitespace_sep))
-
-// Whether a token kind can begin a fresh matrix-row element (T57).
-func starts_matrix_element(k: TokenKind) -> Bool:
-    if is_numeric_lit_kind(k):
-        return true
-    if is_char_lit_kind(k):
-        return true
-    if k == TokenKind.StringStart:
-        return true
-    if is_regex_lit_kind(k):
-        return true
-    if is_any_ident_kind(k):
-        return true
-    if k == TokenKind.LParen:
-        return true
-    if k == TokenKind.LBracket:
-        return true
-    if k == TokenKind.LBrace:
-        return true
-    if k == TokenKind.Minus:
-        return true
-    if k == TokenKind.Not:
-        return true
-    if k == TokenKind.Tilde:
-        return true
-    if k == TokenKind.KwTrue:
-        return true
-    if k == TokenKind.KwFalse:
-        return true
-    if k == TokenKind.KwIf:
-        return true
-    if k == TokenKind.KwMatch:
-        return true
-    if k == TokenKind.KwSpawn:
-        return true
-    if k == TokenKind.Sum:
-        return true
-    if k == TokenKind.Product:
-        return true
-    if k == TokenKind.Sqrt:
-        return true
-    return false
-
-func is_char_lit_kind(k: TokenKind) -> Bool:
-    return match k {
-        CharLit(_) => true,
-        _ => false,
-    }
-
-func is_regex_lit_kind(k: TokenKind) -> Bool:
-    return match k {
-        RegexLit(_) => true,
-        _ => false,
-    }
-
-// Speculative lookahead: true when the cursor is at a `{` whose contents match
-// the struct-init field shape (T26). Save/restore leaves the cursor unchanged.
-func cursor_at_struct_init_body(s: TokenStream) -> Bool:
-    if stream_peek_kind(s) != Option.Some(TokenKind.LBrace):
-        return false
-    let saved = stream_save(s)
-    let _lb = stream_advance(s)
-    let pk = stream_peek_kind(s)
-    let result = cursor_struct_init_classify(pk, stream_peek_second_kind(s))
-    stream_restore(s, saved)
-    return result
-
-// Classify the (peek, second_peek) pair after `{` for struct-init shape.
-func cursor_struct_init_classify(pk: Option<TokenKind>, sk: Option<TokenKind>) -> Bool:
-    if pk == Option.Some(TokenKind.RBrace):
-        return true
-    if is_any_ident_kind(stream_unwrap_kind(pk)):
-        if sk == Option.Some(TokenKind.Colon):
-            return true
-    return false
-
-// Parse struct-init field list `ident : expr (, ...)* ,?` after the opening
-// `{`. The closing `}` is left for the caller to expect.
-func parse_struct_init_fields(s: TokenStream) -> Result<Vector<(Ident, Expr)>, ParseError>:
-    let fields = Vector.new()
-    if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
-        return Result.Ok(fields)
-    for true:
-        let tok = opt_advance_or_err(s, "expected struct field name, found end of input")?
-        if is_any_ident_kind(tok.kind) == false:
-            let found = token_kind_to_string(tok.kind)
-            return Result.Err(err_with("expected struct field name (identifier), found `" + found + "`", tok.span, ErrorCode.UnexpectedToken))
-        let field_ident = ident_new(ident_kind_value(tok.kind), tok.span)
-        stream_expect(s, TokenKind.Colon)?
-        let value = expr_parse_expression(s)?
-        fields.push((field_ident, value))
-        if stream_peek_kind(s) == Option.Some(TokenKind.Comma):
-            let _c = stream_advance(s)
-            if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
-                return Result.Ok(fields)
-        if stream_peek_kind(s) != Option.Some(TokenKind.Comma):
-            return Result.Ok(fields)
-
-// Parse a map literal `{"k": v, ...}` or `{:}` (empty) (T25).
-func parse_map_literal(s: TokenStream) -> Result<Expr, ParseError>:
-    let lb = stream_expect(s, TokenKind.LBrace)?
-    let source_id = stream_source_id(s)
-    // Empty map: `{:}`.
-    if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
-        let _c = stream_advance(s)
-        let rb = stream_expect(s, TokenKind.RBrace)?
-        return Result.Ok(Expr.MapLit(Vector.new(), span_new(lb.span.start, rb.span.end, source_id)))
-    let entries = Vector.new()
-    for true:
-        let key = expr_parse_expression(s)?
-        stream_expect(s, TokenKind.Colon)?
-        let value = expr_parse_expression(s)?
-        entries.push((key, value))
-        if stream_peek_kind(s) == Option.Some(TokenKind.Comma):
-            let _c = stream_advance(s)
-            if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
-                break
-        if stream_peek_kind(s) != Option.Some(TokenKind.Comma):
-            break
-    let rb = stream_expect(s, TokenKind.RBrace)?
-    return Result.Ok(Expr.MapLit(entries, span_new(lb.span.start, rb.span.end, source_id)))
-
-// Disambiguate a `{` at primary position into a closure or a map literal (T25).
-// Speculative save/restore: try the closure shape first (historical default);
-// on failure roll back and try the map shape.
-func parse_brace_primary(s: TokenStream) -> Result<Expr, ParseError>:
-    let saved = stream_save(s)
-    let closure_res = parse_closure(s)
-    if result_is_ok_expr(closure_res):
-        return closure_res
-    let closure_err = result_err_expr(closure_res)
-    // Roll back and try the map shape.
-    stream_restore(s, saved)
-    let map_res = parse_map_literal(s)
-    if result_is_ok_expr(map_res):
-        return map_res
-    // Both failed — prefer the closure error (the more common shape).
-    let _ = closure_err
-    return map_res
-
-// Parse a string literal whose `StringStart` has been consumed (T21). With no
-// interpolation, collapse the StringPart text into one Literal::String; with
-// at least one `{expr}`, build an Expr::StringInterp.
-func parse_string_literal(s: TokenStream, start_span: Span) -> Result<Expr, ParseError>:
-    let parts = Vector.new()
-    let mut text_buf = ""
-    let mut has_interp = false
-    let mut end_off = start_span.end
-    for true:
-        let opt = stream_advance(s)
-        if opt == Option.None:
-            return Result.Err(err_with("unterminated string literal (missing StringEnd)", start_span, ErrorCode.UnexpectedToken))
-        let tok = stream_unwrap(opt)
-        if is_string_part_kind(tok.kind):
-            text_buf = text_buf + string_part_text(tok.kind)
-        if tok.kind == TokenKind.InterpStart:
-            if string_len(text_buf) > 0:
-                parts.push(InterpPart.Literal(text_buf))
-                text_buf = ""
-            let expr = expr_parse_expression(s)?
-            // T81: optional format specifier before InterpEnd.
-            let spec = peek_interp_spec(s)
-            parts.push(InterpPart.Expr(expr, spec))
-            has_interp = true
-            stream_expect(s, TokenKind.InterpEnd)?
-        if tok.kind == TokenKind.StringEnd:
-            end_off = tok.span.end
-            break
-        if is_string_part_kind(tok.kind) == false:
-            if tok.kind != TokenKind.InterpStart:
-                if tok.kind != TokenKind.StringEnd:
-                    let found = token_kind_to_string(tok.kind)
-                    return Result.Err(err_with("malformed string literal: unexpected `" + found + "` inside string token stream", tok.span, ErrorCode.UnexpectedToken))
-    let span = span_new(start_span.start, end_off, start_span.source_id)
-    if has_interp:
-        if string_len(text_buf) > 0:
-            parts.push(InterpPart.Literal(text_buf))
-        return Result.Ok(Expr.StringInterp(parts, span))
-    return Result.Ok(Expr.Literal(Literal.String(text_buf), span))
-
-// Peek + consume an optional InterpSpec format specifier (T81).
-func peek_interp_spec(s: TokenStream) -> Option<String>:
-    let pk = stream_peek_kind(s)
-    let k = stream_unwrap_kind(pk)
-    let spec = interp_spec_value(k)
-    if spec != Option.None:
-        let _sp = stream_advance(s)
-    return spec
-
-// ---------------------------------------------------------------------------
-// Operator-class lookup helpers (TokenKind -> Option<BinaryOp>)
-// ---------------------------------------------------------------------------
-
-func assignment_op(kind: TokenKind) -> Option<BinaryOp>:
-    return match kind {
-        Assign => Option.Some(BinaryOp.Assign),
-        PlusEq => Option.Some(BinaryOp.AddAssign),
-        MinusEq => Option.Some(BinaryOp.SubAssign),
-        StarEq => Option.Some(BinaryOp.MulAssign),
-        SlashEq => Option.Some(BinaryOp.DivAssign),
-        PercentEq => Option.Some(BinaryOp.ModAssign),
-        _ => Option.None,
-    }
-
-func eq_op(kind: TokenKind) -> Option<BinaryOp>:
-    return match kind {
-        EqEq => Option.Some(BinaryOp.Eq),
-        NotEq => Option.Some(BinaryOp.Neq),
-        _ => Option.None,
-    }
-
-func cmp_op(kind: TokenKind) -> Option<BinaryOp>:
-    return match kind {
-        Lt => Option.Some(BinaryOp.Lt),
-        Gt => Option.Some(BinaryOp.Gt),
-        LtEq => Option.Some(BinaryOp.Lte),
-        GtEq => Option.Some(BinaryOp.Gte),
-        _ => Option.None,
-    }
-
-func shift_op(kind: TokenKind) -> Option<BinaryOp>:
-    return match kind {
-        Shl => Option.Some(BinaryOp.Shl),
-        Shr => Option.Some(BinaryOp.Shr),
-        _ => Option.None,
-    }
-
-func additive_op(kind: TokenKind) -> Option<BinaryOp>:
-    return match kind {
-        Plus => Option.Some(BinaryOp.Add),
-        Minus => Option.Some(BinaryOp.Sub),
-        _ => Option.None,
-    }
-
-func mul_op(kind: TokenKind) -> Option<BinaryOp>:
-    return match kind {
-        Star => Option.Some(BinaryOp.Mul),
-        Slash => Option.Some(BinaryOp.Div),
-        Percent => Option.Some(BinaryOp.Mod),
-        _ => Option.None,
-    }
-
-func unary_op(kind: TokenKind) -> Option<UnaryOp>:
-    return match kind {
-        Minus => Option.Some(UnaryOp.Neg),
-        Not => Option.Some(UnaryOp.Not),
-        Tilde => Option.Some(UnaryOp.BitNot),
-        _ => Option.None,
-    }
-
-// ---------------------------------------------------------------------------
-// Combine span + small extraction/inspection helpers
-// ---------------------------------------------------------------------------
-
-// Combine the spans of two expressions into a parent span.
-func combine_span(lhs: Expr, rhs: Expr) -> Span:
-    let l = expr_span(lhs)
-    let r = expr_span(rhs)
-    return span_new(int_min(l.start, r.start), int_max(l.end, r.end), l.source_id)
+// ===========================================================================
+// SECTION 1 — Low-level helpers (defined first; single-pass type-checker).
+// ===========================================================================
 
 func int_min(a: Int, b: Int) -> Int:
     if a < b:
@@ -721,59 +102,98 @@ func int_max(a: Int, b: Int) -> Int:
         return a
     return b
 
-// Unwrap Option<BinaryOp> (contract: Some). Sentinel: BinaryOp.Assign.
-func unwrap_binop_opt(opt: Option<BinaryOp>) -> BinaryOp:
+// Unwrap Option<TokenKind> with an Eof sentinel (contract: caller verified
+// Some via peek).
+func stream_unwrap_kind(opt: Option<TokenKind>) -> TokenKind:
     return match opt {
-        Some(o) => o,
-        None => BinaryOp.Assign,
+        Some(k) => k,
+        None => TokenKind.Eof,
     }
 
-// Unwrap Option<UnaryOp> (contract: Some). Sentinel: UnaryOp.Neg.
-func unwrap_unary_opt(opt: Option<UnaryOp>) -> UnaryOp:
+// Build a ParseError from (msg, span, code) — helper trampoline.
+func err_with(msg: String, span: Span, code: ErrorCode) -> ParseError:
+    return parse_error_new(diagnostic_error(msg, span), code)
+
+// Unwrap Option<String> with empty-string sentinel.
+func unwrap_opt_str(opt: Option<String>) -> String:
     return match opt {
-        Some(o) => o,
-        None => UnaryOp.Neg,
+        Some(s) => s,
+        None => "",
     }
 
-// Build a literal/ident Expr from a token whose kind is a literal/ident kind.
-// Returns Option.None for non-literal kinds (handled by the caller).
-func extract_literal_or_ident(tok: Token, span: Span) -> Option<Expr>:
-    return match tok.kind {
-        IntLit(v) => Option.Some(Expr.Literal(Literal.Int(v), span)),
-        FloatLit(v) => Option.Some(Expr.Literal(Literal.Float(v), span)),
-        DoubleLit(v) => Option.Some(Expr.Literal(Literal.Double(v), span)),
-        ByteLit(v) => Option.Some(Expr.Literal(Literal.Byte(v), span)),
-        CharLit(c) => Option.Some(Expr.Literal(Literal.Char(c), span)),
-        DecimalLit(t) => Option.Some(Expr.Literal(Literal.Decimal(t), span)),
-        RegexLit(t) => Option.Some(Expr.Literal(Literal.Regex(t), span)),
-        KwTrue => Option.Some(Expr.Literal(Literal.Bool(true), span)),
-        KwFalse => Option.Some(Expr.Literal(Literal.Bool(false), span)),
-        Ident(name) => Option.Some(Expr.Ident(ident_new(name, span), span)),
-        _ => Option.None,
-    }
-
-func unwrap_expr_opt(opt: Option<Expr>) -> Expr:
-    return match opt {
-        Some(e) => e,
-        None => expr_sentinel(),
-    }
+// Span of the current peek token, or eof span when at end.
+func peek_span_or_eof(s: TokenStream) -> Span:
+    let opt = stream_peek(s)
+    if opt == Option.None:
+        return stream_eof_span(s)
+    return stream_unwrap(opt).span
 
 func expr_sentinel() -> Expr:
     return Expr.Literal(Literal.Int(0), span_dummy())
 
-// Whether `expr` is a numeric literal (Int/Float/Double/Byte/Decimal).
-func expr_as_numeric_literal(e: Expr) -> Option<Int>:
-    return match e {
-        Literal(lit, _) => numeric_lit_classify(lit),
+// ===========================================================================
+// SECTION 2 — TokenKind predicates (replace Rust or-patterns / matches!).
+// ===========================================================================
+
+// Whether a token kind is a numeric literal kind (Int/Float/Double/Byte/
+// Decimal).
+func is_numeric_lit_kind(k: TokenKind) -> Bool:
+    return match k {
+        IntLit(_) => true,
+        FloatLit(_) => true,
+        DoubleLit(_) => true,
+        ByteLit(_) => true,
+        DecimalLit(_) => true,
+        _ => false,
+    }
+
+// Whether a token kind is an `InterpSpec(text)` kind.
+func is_interp_spec_kind(k: TokenKind) -> Bool:
+    return match k {
+        InterpSpec(_) => true,
+        _ => false,
+    }
+
+// True when `kind` is a `TokenKind` variant whose name matches `tag`. Used to
+// test payload-carrying variants (Ident, etc.) without exposing the payload
+// at the call site. Replaces Rust `matches!(kind, TokenKind::Ident(_))`.
+func is_any_token_kind(kind: TokenKind, tag: String) -> Bool:
+    if tag == "Ident":
+        return match kind {
+            Ident(_) => true,
+            _ => false,
+        }
+    return false
+
+// True when `opt` carries a `TokenKind` variant whose name matches `tag`.
+func is_any_opt_kind(opt: Option<TokenKind>, tag: String) -> Bool:
+    let k = stream_unwrap_kind(opt)
+    return is_any_token_kind(k, tag)
+
+// The String text inside a `StringPart(...)` kind.
+func string_part_text(k: TokenKind) -> String:
+    return match k {
+        StringPart(s) => s,
+        _ => "",
+    }
+
+// The spec text inside an `InterpSpec(...)` kind (Option.None for others).
+func interp_spec_value(k: TokenKind) -> Option<String>:
+    return match k {
+        InterpSpec(s) => Option.Some(s),
         _ => Option.None,
     }
 
-// Whether `expr` is a numeric OR char literal (T57 is_numeric_primary).
-func expr_as_number_or_char_literal(e: Expr) -> Option<Int>:
-    return match e {
-        Literal(lit, _) => number_or_char_lit_classify(lit),
-        _ => Option.None,
+// The name text inside an `Ident(name)` kind.
+func ident_kind_value(k: TokenKind) -> String:
+    return match k {
+        Ident(s) => s,
+        _ => "",
     }
+
+// ===========================================================================
+// SECTION 3 — Expr shape extractors + literal classifiers.
+// ===========================================================================
 
 // Classify a Literal as numeric (Int/Float/Double/Byte/Decimal).
 func numeric_lit_classify(lit: Literal) -> Option<Int>:
@@ -798,6 +218,20 @@ func number_or_char_lit_classify(lit: Literal) -> Option<Int>:
         _ => Option.None,
     }
 
+// Whether `expr` is a numeric literal (Int/Float/Double/Byte/Decimal).
+func expr_as_numeric_literal(e: Expr) -> Option<Int>:
+    return match e {
+        Literal(lit, _) => numeric_lit_classify(lit),
+        _ => Option.None,
+    }
+
+// Whether `expr` is a numeric OR char literal (T57 is_numeric_primary).
+func expr_as_number_or_char_literal(e: Expr) -> Option<Int>:
+    return match e {
+        Literal(lit, _) => number_or_char_lit_classify(lit),
+        _ => Option.None,
+    }
+
 // Whether `expr` is a closing-delimiter-terminated postfix expression
 // (FuncCall/MethodCall/Index/Try/TupleLit) — qualifies as an implicit-mult LHS.
 func expr_is_postfix_terminated(e: Expr) -> Bool:
@@ -810,50 +244,33 @@ func expr_is_postfix_terminated(e: Expr) -> Bool:
         _ => false,
     }
 
-// Whether a token kind is a numeric literal kind.
-func is_numeric_lit_kind(k: TokenKind) -> Bool:
-    return match k {
-        IntLit(_) => true,
-        FloatLit(_) => true,
-        DoubleLit(_) => true,
-        ByteLit(_) => true,
-        DecimalLit(_) => true,
-        _ => false,
-    }
+// Whether `expr` is a numeric primary suitable as the LHS of an implicit
+// multiplication (T57).
+func ends_with_numberlike(e: Expr) -> Bool:
+    let lit = expr_as_numeric_literal(e)
+    if lit != Option.None:
+        return true
+    return expr_is_postfix_terminated(e)
 
-// ---------------------------------------------------------------------------
-// Expr shape extractors (replace Rust `if let Expr::..`)
-// ---------------------------------------------------------------------------
+// Whether `expr` is a bare numeric/char literal (T57).
+export func is_numeric_primary(e: Expr) -> Bool:
+    return expr_as_number_or_char_literal(e) != Option.None
 
-func expr_span(e: Expr) -> Span:
-    return match e {
-        Literal(_, s) => s,
-        Ident(_, s) => s,
-        BinaryOp(_, _, _, s) => s,
-        UnaryOp(_, _, s) => s,
-        IfExpr(_, _, _, s) => s,
-        FuncCall(_, _, s) => s,
-        MethodCall(_, _, _, s) => s,
-        Lambda(_, _, _, s) => s,
-        StructInit(_, _, s) => s,
-        MatchExpr(_, _, s) => s,
-        SuspendExpr(_, s) => s,
-        ArrayLit(_, s) => s,
-        Index(_, _, s) => s,
-        StringInterp(_, s) => s,
-        MapLit(_, s) => s,
-        Try(_, s) => s,
-        Spawn(_, s) => s,
-        Range(_, _, _, s) => s,
-        IfLet(_, _, _, _, s) => s,
-        TupleLit(_, s) => s,
-        NamedArg(_, _, s) => s,
-    }
+// Whether the upcoming token would start a fresh postfix primary suitable as
+// the RHS of an implicit multiplication (T57).
+func is_implicit_mult_start(kind: Option<TokenKind>) -> Bool:
+    let k = stream_unwrap_kind(kind)
+    if is_any_token_kind(k, "Ident") == true:
+        return true
+    if k == TokenKind.LParen:
+        return true
+    if k == TokenKind.LBracket:
+        return true
+    return is_numeric_lit_kind(k)
 
-struct FunCallParts {
-    callee: Expr,
-    args: Vector<Expr>,
-}
+struct FunCallParts:
+    callee: Expr
+    args: Vector<Expr>
 
 func expr_as_fun_call(e: Expr) -> Option<FunCallParts>:
     return match e {
@@ -867,11 +284,10 @@ func unwrap_fun_call_parts(opt: Option<FunCallParts>) -> FunCallParts:
         None => FunCallParts.new(callee: expr_sentinel(), args: Vector.new()),
     }
 
-struct MethodCallParts {
-    receiver: Expr,
-    method: Ident,
-    args: Vector<Expr>,
-}
+struct MethodCallParts:
+    receiver: Expr
+    method: Ident
+    args: Vector<Expr>
 
 func expr_as_method_call(e: Expr) -> Option<MethodCallParts>:
     return match e {
@@ -897,24 +313,49 @@ func unwrap_ident_parts(opt: Option<Ident>) -> Ident:
         None => ident_new("", span_dummy()),
     }
 
-// Result<Expr, ParseError> inspectors (Buff Result has no infallible unwrap;
-// match arms cannot contain statements, so these return via small accessors).
-
-func result_is_ok_expr(r: Result<Expr, ParseError>) -> Bool:
-    return match r {
-        Ok(_) => true,
-        Err(_) => false,
+// Build a literal/ident Expr from a token whose kind is a literal/ident kind.
+// Returns Option.None for non-literal kinds (handled by the caller).
+func extract_literal_or_ident(tok: Token, span: Span) -> Option<Expr>:
+    return match tok.kind {
+        IntLit(v) => Option.Some(Expr.Literal(Literal.Int(v), span)),
+        FloatLit(v) => Option.Some(Expr.Literal(Literal.Float(v), span)),
+        DoubleLit(v) => Option.Some(Expr.Literal(Literal.Double(v), span)),
+        ByteLit(v) => Option.Some(Expr.Literal(Literal.Byte(v), span)),
+        CharLit(c) => Option.Some(Expr.Literal(Literal.Char(c), span)),
+        DecimalLit(t) => Option.Some(Expr.Literal(Literal.Decimal(t), span)),
+        RegexLit(t) => Option.Some(Expr.Literal(Literal.Regex(t), span)),
+        KwTrue => Option.Some(Expr.Literal(Literal.Bool(true), span)),
+        KwFalse => Option.Some(Expr.Literal(Literal.Bool(false), span)),
+        Ident(name) => Option.Some(Expr.Ident(ident_new(name, span), span)),
+        _ => Option.None,
     }
 
-func result_err_expr(r: Result<Expr, ParseError>) -> ParseError:
-    return match r {
-        Ok(_) => parse_error_sentinel(),
-        Err(e) => e,
+func unwrap_expr_opt(opt: Option<Expr>) -> Expr:
+    return match opt {
+        Some(e) => e,
+        None => expr_sentinel(),
     }
 
-// ---------------------------------------------------------------------------
-// Vector helpers used by the pipeline desugar + matrix-row span computation
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// SECTION 4 — MatrixRow packed-return struct + accessors.
+// ===========================================================================
+
+// Small struct packing `(elements, saw_whitespace_separator)` so the caller
+// can detect a scientific-edition matrix vs. a historical comma-separated
+// Vector. Mirrors the Rust `(Vec<Expr>, bool)` tuple return.
+struct MatrixRow:
+    elements: Vector<Expr>
+    saw_whitespace_separator: Bool
+
+func matrix_row_elems(r: MatrixRow) -> Vector<Expr>:
+    return r.elements
+
+func matrix_row_saw_ws(r: MatrixRow) -> Bool:
+    return r.saw_whitespace_separator
+
+// ===========================================================================
+// SECTION 5 — Misc helpers (vector, result, span, operators).
+// ===========================================================================
 
 // Prepend `head` to `rest`, returning a new vector.
 func vec_prepend(head: Expr, rest: Vector<Expr>) -> Vector<Expr>:
@@ -926,84 +367,679 @@ func vec_prepend(head: Expr, rest: Vector<Expr>) -> Vector<Expr>:
         i = i + 1
     return out
 
-// Span start of the first element, or `fallback` when empty.
+// Span start of the first element, or `fallback` when empty. Uses `.len()`
+// rather than `.is_empty()` to sidestep the Bool-method type-inference gap.
 func vec_first_span_start(v: Vector<Expr>, fallback: Int) -> Int:
-    if v.is_empty():
+    if v.len() == 0:
         return fallback
     return expr_span(v[0]).start
 
 // Span end of the last element, or `fallback` when empty.
 func vec_last_span_end(v: Vector<Expr>, fallback: Int) -> Int:
-    if v.is_empty():
+    if v.len() == 0:
         return fallback
     return expr_span(v[v.len() - 1]).end
 
-// ---------------------------------------------------------------------------
-// Shared helpers (re-declared so this file is self-contained for the parse
-// path; the buff front-end does not resolve cross-file symbols)
-// ---------------------------------------------------------------------------
+// Buff Result has no infallible `is_ok`; match arms cannot contain statements,
+// so this returns via a single-expression match.
+func result_is_ok_expr(r: Result<Expr, ParseError>) -> Bool:
+    return match r {
+        Ok(_) => true,
+        Err(_) => false,
+    }
 
-func opt_advance_or_err(s: TokenStream, msg: String) -> Result<Token, ParseError>:
-    let opt = stream_advance(s)
+// Combine the spans of two expressions into a parent span. Both spans should
+// share the same source_id; uses the LHS's.
+func combine_span(lhs: Expr, rhs: Expr) -> Span:
+    let l = expr_span(lhs)
+    let r = expr_span(rhs)
+    return span_new(int_min(l.start, r.start), int_max(l.end, r.end), l.source_id)
+
+// Unwrap Option<BinaryOp> (contract: Some). Sentinel: BinaryOp.Assign.
+func unwrap_binop_opt(opt: Option<BinaryOp>) -> BinaryOp:
+    return match opt {
+        Some(o) => o,
+        None => BinaryOp.Assign,
+    }
+
+// Operator-class lookup helpers — each maps a TokenKind to an Option<BinaryOp>.
+func assignment_op(kind: TokenKind) -> Option<BinaryOp>:
+    if kind == TokenKind.Assign:
+        return Option.Some(BinaryOp.Assign)
+    if kind == TokenKind.PlusEq:
+        return Option.Some(BinaryOp.AddAssign)
+    if kind == TokenKind.MinusEq:
+        return Option.Some(BinaryOp.SubAssign)
+    if kind == TokenKind.StarEq:
+        return Option.Some(BinaryOp.MulAssign)
+    if kind == TokenKind.SlashEq:
+        return Option.Some(BinaryOp.DivAssign)
+    if kind == TokenKind.PercentEq:
+        return Option.Some(BinaryOp.ModAssign)
+    return Option.None
+
+func eq_op(kind: TokenKind) -> Option<BinaryOp>:
+    if kind == TokenKind.EqEq:
+        return Option.Some(BinaryOp.Eq)
+    if kind == TokenKind.NotEq:
+        return Option.Some(BinaryOp.Neq)
+    return Option.None
+
+func cmp_op(kind: TokenKind) -> Option<BinaryOp>:
+    if kind == TokenKind.Lt:
+        return Option.Some(BinaryOp.Lt)
+    if kind == TokenKind.Gt:
+        return Option.Some(BinaryOp.Gt)
+    if kind == TokenKind.LtEq:
+        return Option.Some(BinaryOp.Lte)
+    if kind == TokenKind.GtEq:
+        return Option.Some(BinaryOp.Gte)
+    return Option.None
+
+func shift_op(kind: TokenKind) -> Option<BinaryOp>:
+    if kind == TokenKind.Shl:
+        return Option.Some(BinaryOp.Shl)
+    if kind == TokenKind.Shr:
+        return Option.Some(BinaryOp.Shr)
+    return Option.None
+
+func additive_op(kind: TokenKind) -> Option<BinaryOp>:
+    if kind == TokenKind.Plus:
+        return Option.Some(BinaryOp.Add)
+    if kind == TokenKind.Minus:
+        return Option.Some(BinaryOp.Sub)
+    return Option.None
+
+func mul_op(kind: TokenKind) -> Option<BinaryOp>:
+    if kind == TokenKind.Star:
+        return Option.Some(BinaryOp.Mul)
+    if kind == TokenKind.Slash:
+        return Option.Some(BinaryOp.Div)
+    if kind == TokenKind.Percent:
+        return Option.Some(BinaryOp.Mod)
+    return Option.None
+
+// Maps a Unicode prefix operator token to its ASCII prelude-function name
+// (T57). Returns Some(name) for sum / product / sqrt and None for every
+// other token kind.
+func unicode_prefix_desugar(kind_opt: Option<TokenKind>) -> Option<String>:
+    let k = stream_unwrap_kind(kind_opt)
+    if k == TokenKind.Sum:
+        return Option.Some("sum")
+    if k == TokenKind.Product:
+        return Option.Some("product")
+    if k == TokenKind.Sqrt:
+        return Option.Some("sqrt")
+    return Option.None
+
+// Whether a token kind can begin a fresh matrix-row element (T57).
+func starts_matrix_element(kind: TokenKind) -> Bool:
+    if is_numeric_lit_kind(kind) == true:
+        return true
+    if kind == TokenKind.CharLit:
+        return true
+    if kind == TokenKind.StringStart:
+        return true
+    if kind == TokenKind.RegexLit:
+        return true
+    if is_any_token_kind(kind, "Ident") == true:
+        return true
+    if kind == TokenKind.LParen:
+        return true
+    if kind == TokenKind.LBracket:
+        return true
+    if kind == TokenKind.LBrace:
+        return true
+    if kind == TokenKind.Minus:
+        return true
+    if kind == TokenKind.Not:
+        return true
+    if kind == TokenKind.Tilde:
+        return true
+    if kind == TokenKind.KwTrue:
+        return true
+    if kind == TokenKind.KwFalse:
+        return true
+    if kind == TokenKind.KwIf:
+        return true
+    if kind == TokenKind.KwMatch:
+        return true
+    if kind == TokenKind.KwSpawn:
+        return true
+    if kind == TokenKind.Sum:
+        return true
+    if kind == TokenKind.Product:
+        return true
+    if kind == TokenKind.Sqrt:
+        return true
+    return false
+
+// Helper: consume an optional `InterpSpec(text)` token following an
+// interpolated expression. Returns Some(spec) if present, None otherwise.
+func take_interp_spec(s: TokenStream) -> Option<String>:
+    let pk = stream_peek_kind(s)
+    let k = stream_unwrap_kind(pk)
+    if is_interp_spec_kind(k) == true:
+        let _consumed = stream_advance(s)
+        return interp_spec_value(k)
+    return Option.None
+
+// Helper: dispatch for `cursor_at_struct_init_body` after `{` has been
+// consumed. Returns true for `}` (empty init) or `Ident :` (first field).
+func cursor_struct_init_dispatch(s: TokenStream) -> Bool:
+    let pk = stream_peek_kind(s)
+    if pk == Option.Some(TokenKind.RBrace):
+        return true
+    if is_any_opt_kind(pk, "Ident") == true:
+        let sk = stream_peek_second_kind(s)
+        return sk == Option.Some(TokenKind.Colon)
+    return false
+
+// Speculative lookahead: return true if the cursor is positioned at an
+// `LBrace` whose contents match the struct-init field shape (T26).
+export func cursor_at_struct_init_body(s: TokenStream) -> Bool:
+    if stream_peek_kind(s) != Option.Some(TokenKind.LBrace):
+        return false
+    let saved = stream_save(s)
+    // Consume the `{` then peek the next two significant tokens.
+    let _consumed = stream_advance(s)
+    let result = cursor_struct_init_dispatch(s)
+    stream_restore(s, saved)
+    return result
+
+// ===========================================================================
+// SECTION 6 — Parse chain (mutually recursive on `?` / comparisons; order
+// does not matter for the single-pass type-checker because Result-returning
+// forward references used with `?` resolve cleanly — verified via spike).
+// ===========================================================================
+
+// Public entry point — parse one expression (precedence: assignment level).
+export func parse_expression(s: TokenStream) -> Result<Expr, ParseError>:
+    return parse_assignment(s)
+
+// Level 1 — assignment (right-associative).
+func parse_assignment(s: TokenStream) -> Result<Expr, ParseError>:
+    let lhs = parse_pipeline(s)?
+    let opt = assignment_op(stream_unwrap_kind(stream_peek_kind(s)))
     if opt == Option.None:
-        return Result.Err(err_with(msg, stream_eof_span(s), ErrorCode.UnexpectedToken))
-    return Result.Ok(stream_unwrap(opt))
+        return Result.Ok(lhs)
+    let op = unwrap_binop_opt(opt)
+    let _consumed = stream_advance(s)
+    // Right-associative: recursively parse the assignment-level RHS.
+    let rhs = parse_assignment(s)?
+    let span = combine_span(lhs, rhs)
+    return Result.Ok(Expr.BinaryOp(op, lhs, rhs, span))
 
-func peek_span_or_eof(s: TokenStream) -> Span:
+// Level 2 — pipeline `|>` (left-assoc; desugars to a FuncCall/MethodCall).
+func parse_pipeline(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_range(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.PipeGt):
+        let pipe_tok = stream_advance_after_peek(s)
+        let rhs = parse_range(s)?
+        lhs = desugar_pipeline(lhs, rhs, pipe_tok)?
+    return Result.Ok(lhs)
+
+// Rewrite `LHS |> RHS` into a call with `LHS` prepended as the first arg.
+func desugar_pipeline(lhs: Expr, rhs: Expr, pipe_tok: Token) -> Result<Expr, ParseError>:
+    let span = combine_span(lhs, rhs)
+    let fun_case = expr_as_fun_call(rhs)
+    if fun_case != Option.None:
+        let parts = unwrap_fun_call_parts(fun_case)
+        return Result.Ok(Expr.FuncCall(parts.callee, vec_prepend(lhs, parts.args), span))
+    let method_case = expr_as_method_call(rhs)
+    if method_case != Option.None:
+        let parts = unwrap_method_call_parts(method_case)
+        return Result.Ok(Expr.MethodCall(parts.receiver, parts.method, vec_prepend(lhs, parts.args), span))
+    let ident_case = expr_as_ident(rhs)
+    if ident_case != Option.None:
+        let name = unwrap_ident_parts(ident_case)
+        return Result.Ok(Expr.FuncCall(Expr.Ident(name, span), [lhs], span))
+    let found = expr_to_string(rhs)
+    return Result.Err(err_with("right-hand side of |> must be a function call, found " + found, pipe_tok.span, ErrorCode.UnexpectedToken))
+
+// Level 3 — range `..` / `..=`.
+func parse_range(s: TokenStream) -> Result<Expr, ParseError>:
+    let lhs = parse_null_coalesce(s)?
+    let pk = stream_peek_kind(s)
+    if pk == Option.Some(TokenKind.DotDot):
+        let _consumed = stream_advance(s)
+        let rhs = parse_null_coalesce(s)?
+        return Result.Ok(Expr.Range(lhs, rhs, false, combine_span(lhs, rhs)))
+    if pk == Option.Some(TokenKind.DotDotEq):
+        let _consumed = stream_advance(s)
+        let rhs = parse_null_coalesce(s)?
+        return Result.Ok(Expr.Range(lhs, rhs, true, combine_span(lhs, rhs)))
+    return Result.Ok(lhs)
+
+// Level 4 — null coalescing `??`.
+func parse_null_coalesce(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_or(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.QuestionQuestion):
+        let _consumed = stream_advance(s)
+        let rhs = parse_or(s)?
+        lhs = Expr.BinaryOp(BinaryOp.NullCoalesce, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+// Levels 5–12 — left-associative binary operators.
+func parse_or(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_and(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.OrOr):
+        let _consumed = stream_advance(s)
+        let rhs = parse_and(s)?
+        lhs = Expr.BinaryOp(BinaryOp.Or, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_and(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_equality(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.AndAnd):
+        let _consumed = stream_advance(s)
+        let rhs = parse_equality(s)?
+        lhs = Expr.BinaryOp(BinaryOp.And, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_equality(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_comparison(s)?
+    for true:
+        let opt = eq_op(stream_unwrap_kind(stream_peek_kind(s)))
+        if opt == Option.None:
+            break
+        let op = unwrap_binop_opt(opt)
+        let _consumed = stream_advance(s)
+        let rhs = parse_comparison(s)?
+        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_comparison(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_bitor(s)?
+    for true:
+        let opt = cmp_op(stream_unwrap_kind(stream_peek_kind(s)))
+        if opt == Option.None:
+            break
+        let op = unwrap_binop_opt(opt)
+        let _consumed = stream_advance(s)
+        let rhs = parse_bitor(s)?
+        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_bitor(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_bitxor(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.Pipe):
+        let _consumed = stream_advance(s)
+        let rhs = parse_bitxor(s)?
+        lhs = Expr.BinaryOp(BinaryOp.BitOr, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_bitxor(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_bitand(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.Caret):
+        let _consumed = stream_advance(s)
+        let rhs = parse_bitand(s)?
+        lhs = Expr.BinaryOp(BinaryOp.BitXor, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_bitand(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_shift(s)?
+    for stream_peek_kind(s) == Option.Some(TokenKind.Amp):
+        let _consumed = stream_advance(s)
+        let rhs = parse_shift(s)?
+        lhs = Expr.BinaryOp(BinaryOp.BitAnd, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_shift(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_additive(s)?
+    for true:
+        let opt = shift_op(stream_unwrap_kind(stream_peek_kind(s)))
+        if opt == Option.None:
+            break
+        let op = unwrap_binop_opt(opt)
+        let _consumed = stream_advance(s)
+        let rhs = parse_additive(s)?
+        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+func parse_additive(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_multiplicative(s)?
+    for true:
+        let opt = additive_op(stream_unwrap_kind(stream_peek_kind(s)))
+        if opt == Option.None:
+            break
+        let op = unwrap_binop_opt(opt)
+        let _consumed = stream_advance(s)
+        let rhs = parse_multiplicative(s)?
+        lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+// Level 14 — multiplicative. Also handles T57 implicit multiplication
+// (`2x`, `2(x+y)`) in the scientific edition when the LHS is numeric-primary
+// and the next token starts a fresh postfix primary.
+func parse_multiplicative(s: TokenStream) -> Result<Expr, ParseError>:
+    let mut lhs = parse_unary(s)?
+    for true:
+        let opt = mul_op(stream_unwrap_kind(stream_peek_kind(s)))
+        if opt != Option.None:
+            let op = unwrap_binop_opt(opt)
+            let _consumed = stream_advance(s)
+            let rhs = parse_unary(s)?
+            lhs = Expr.BinaryOp(op, lhs, rhs, combine_span(lhs, rhs))
+        else:
+            // T57: implicit multiplication — `2x`, `2(x+y)`, `3sin(x)`.
+            // Synthesise a `*` without consuming any operator token.
+            //
+            // Bool-returning calls are bound to `let` first to give them
+            // concrete `Bool` types, then combined into a single flag whose
+            // `== false` comparison drives the early break (avoids both the
+            // type-inference gap on bare method-call conditions AND the
+            // `if/else: break` layout mis-parse).
+            let sci = edition_is_scientific(stream_edition(s)) == true
+            let in_mat_ok = stream_in_matrix_row(s) == false
+            let num_like = ends_with_numberlike(lhs) == true
+            let impl_start = is_implicit_mult_start(stream_peek_kind(s)) == true
+            let do_impl = (sci && in_mat_ok && num_like && impl_start)
+            if do_impl == false:
+                break
+            let rhs = parse_unary(s)?
+            lhs = Expr.BinaryOp(BinaryOp.Mul, lhs, rhs, combine_span(lhs, rhs))
+    return Result.Ok(lhs)
+
+// Level 15 — unary prefix operators (`-`, `!`, `~`) + Unicode prefix desugar.
+func parse_unary(s: TokenStream) -> Result<Expr, ParseError>:
+    let pk = stream_peek_kind(s)
+    let neg_case = pk == Option.Some(TokenKind.Minus)
+    let not_case = pk == Option.Some(TokenKind.Not)
+    let bitnot_case = pk == Option.Some(TokenKind.Tilde)
+    if neg_case:
+        return parse_unary_prefix(s, UnaryOp.Neg)
+    if not_case:
+        return parse_unary_prefix(s, UnaryOp.Not)
+    if bitnot_case:
+        return parse_unary_prefix(s, UnaryOp.BitNot)
+    // T57: Unicode prefix operators (sum / product / sqrt) desugar to free
+    // prelude function calls.
+    let kind_opt = stream_peek_kind(s)
+    let callee_name = unicode_prefix_desugar(kind_opt)
+    if callee_name != Option.None:
+        let kind = stream_unwrap_kind(kind_opt)
+        let req = edition_require_for(stream_edition(s), kind)
+        if req != Option.None:
+            let msg = unwrap_opt_str(req)
+            let span = peek_span_or_eof(s)
+            return Result.Err(err_with(msg, span, ErrorCode.UnsupportedEdition))
+        let prefix_tok = stream_advance_after_peek(s)
+        let operand = parse_unary(s)?
+        let op_end = expr_span(operand).end
+        let span = span_new(prefix_tok.span.start, op_end, stream_source_id(s))
+        let callee = Expr.Ident(ident_new(unwrap_opt_str(callee_name), prefix_tok.span), prefix_tok.span)
+        return Result.Ok(Expr.FuncCall(callee, [operand], span))
+    return parse_postfix(s)
+
+// Helper: parse a standard unary prefix operator (`-` / `!` / `~`).
+func parse_unary_prefix(s: TokenStream, op: UnaryOp) -> Result<Expr, ParseError>:
+    let op_tok = stream_advance_after_peek(s)
+    let operand = parse_unary(s)?
+    let end = expr_span(operand).end
+    let span = span_new(op_tok.span.start, end, stream_source_id(s))
+    return Result.Ok(Expr.UnaryOp(op, operand, span))
+
+// Level 17 — primary: literals, identifiers, parenthesized expressions.
+func parse_primary(s: TokenStream) -> Result<Expr, ParseError>:
     let opt = stream_peek(s)
     if opt == Option.None:
-        return stream_eof_span(s)
-    return stream_unwrap(opt).span
+        return Result.Err(err_with("expected an expression, found end of input", stream_eof_span(s), ErrorCode.ExpectedToken))
+    let tok = stream_unwrap(opt)
+    // T9: `if` can appear as an expression.
+    if tok.kind == TokenKind.KwIf:
+        return parse_if_expr(s)
+    // T27: `match scrutinee { arms }`.
+    if tok.kind == TokenKind.KwMatch:
+        return parse_match(s)
+    // T31: `spawn <expr>` — async task spawn.
+    if tok.kind == TokenKind.KwSpawn:
+        let spawn_tok = stream_advance_after_peek(s)
+        let start = spawn_tok.span.start
+        let task = parse_unary(s)?
+        let end = expr_span(task).end
+        return Result.Ok(Expr.Spawn(task, span_new(start, end, stream_source_id(s))))
+    // Parenthesized expression or tuple.
+    if tok.kind == TokenKind.LParen:
+        return parse_parenthesized(s)
+    // T23/T57: collection literal or matrix literal.
+    if tok.kind == TokenKind.LBracket:
+        return parse_collection_literal(s)
+    // T25: closure or map literal.
+    if tok.kind == TokenKind.LBrace:
+        return parse_brace_primary(s)
+    // Otherwise consume the token and turn it into a literal/ident node.
+    let _advanced = stream_advance(s)
+    let span = tok.span
+    let lit_or_ident = extract_literal_or_ident(tok, span)
+    if lit_or_ident != Option.None:
+        return Result.Ok(unwrap_expr_opt(lit_or_ident))
+    // A string literal whose `StringStart` opening token was consumed above.
+    if tok.kind == TokenKind.StringStart:
+        return parse_string_literal(s, span)
+    let found = token_kind_to_string(tok.kind)
+    return Result.Err(err_with("expected an expression, found " + found, span, ErrorCode.UnexpectedToken))
 
-func stream_unwrap_kind(opt: Option<TokenKind>) -> TokenKind:
-    return match opt {
-        Some(k) => k,
-        None => TokenKind.Eof,
-    }
+// Helper: parse a parenthesized expression `( e )` or tuple `(e1, e2, ...)`.
+func parse_parenthesized(s: TokenStream) -> Result<Expr, ParseError>:
+    let lp = stream_expect(s, TokenKind.LParen)?
+    let source_id = stream_source_id(s)
+    // Empty `()` is not a valid expression in v0.5.
+    if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
+        return Result.Err(err_with("empty () is not a valid expression", lp.span, ErrorCode.UnexpectedToken))
+    let first = parse_expression(s)?
+    // No comma -> plain grouping `( expr )`. Return `first`.
+    if stream_peek_kind(s) != Option.Some(TokenKind.Comma):
+        let _rp = stream_expect(s, TokenKind.RParen)?
+        return Result.Ok(first)
+    // One or more commas -> tuple.
+    let mut members: Vector<Expr> = Vector.new()
+    members.push(first)
+    for true:
+        let _consumed = stream_advance(s)
+        // Trailing comma terminates the tuple.
+        if stream_peek_kind(s) == Option.Some(TokenKind.RParen):
+            break
+        members.push(parse_expression(s)?)
+        let has_more = stream_peek_kind(s) == Option.Some(TokenKind.Comma)
+        if has_more == false:
+            break
+    let rp = stream_expect(s, TokenKind.RParen)?
+    let span = span_new(lp.span.start, rp.span.end, source_id)
+    // `(e,)` as grouping fallback (1-element vec).
+    if members.len() == 1:
+        return Result.Ok(members[0])
+    return Result.Ok(Expr.TupleLit(members, span))
 
-func err_with(msg: String, span: Span, code: ErrorCode) -> ParseError:
-    return parse_error_new(diagnostic_error(msg, span), code)
+// Parse a `[...]` collection literal, dispatching between the historical
+// comma-separated `ArrayLit` (T23) and the scientific-edition matrix literal
+// `[1 2; 3 4]` (T57).
+func parse_collection_literal(s: TokenStream) -> Result<Expr, ParseError>:
+    let lb = stream_expect(s, TokenKind.LBracket)?
+    let source_id = stream_source_id(s)
+    // Empty `[]` -> empty ArrayLit.
+    if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
+        let rb = stream_expect(s, TokenKind.RBracket)?
+        let span = span_new(lb.span.start, rb.span.end, source_id)
+        return Result.Ok(Expr.ArrayLit(Vector.new(), span))
+    // Parse first row, tracking separator usage.
+    let row_result = parse_matrix_row(s)?
+    let row_elements = matrix_row_elems(row_result)
+    let saw_ws = matrix_row_saw_ws(row_result)
+    let after_first = stream_peek_kind(s)
+    let sees_semi = after_first == Option.Some(TokenKind.Semicolon)
+    let is_matrix = ((saw_ws == true) || sees_semi)
+    if is_matrix == true:
+        // Scientific-edition gate.
+        let sci = edition_is_scientific(stream_edition(s))
+        if sci == false:
+            return Result.Err(err_with("matrix literals ([1 2; 3 4]) require edition = \"scientific\" in buff.toml", lb.span, ErrorCode.UnsupportedEdition))
+        let mut rows: Vector<Expr> = Vector.new()
+        let row_span_start = vec_first_span_start(row_elements, lb.span.start)
+        let row_span_end = vec_last_span_end(row_elements, lb.span.end)
+        rows.push(Expr.ArrayLit(row_elements, span_new(row_span_start, row_span_end, source_id)))
+        for stream_peek_kind(s) == Option.Some(TokenKind.Semicolon):
+            let _consumed = stream_advance(s)
+            // Allow trailing semicolon: `[1; 2; 3;]`.
+            if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
+                break
+            let next_row = parse_matrix_row(s)?
+            let elems = matrix_row_elems(next_row)
+            let rs = vec_first_span_start(elems, stream_span_here(s).start)
+            let re = vec_last_span_end(elems, stream_span_here(s).end)
+            rows.push(Expr.ArrayLit(elems, span_new(rs, re, source_id)))
+        let rb = stream_expect(s, TokenKind.RBracket)?
+        let span = span_new(lb.span.start, rb.span.end, source_id)
+        return Result.Ok(Expr.ArrayLit(rows, span))
+    // Comma-separated shape: continue the historical ArrayLit loop.
+    let mut acc = row_elements
+    for stream_peek_kind(s) == Option.Some(TokenKind.Comma):
+        let _consumed = stream_advance(s)
+        if stream_peek_kind(s) == Option.Some(TokenKind.RBracket):
+            break
+        acc.push(parse_expression(s)?)
+    let rb = stream_expect(s, TokenKind.RBracket)?
+    let span = span_new(lb.span.start, rb.span.end, source_id)
+    return Result.Ok(Expr.ArrayLit(acc, span))
 
-func unwrap_opt_str(opt: Option<String>) -> String:
-    return match opt {
-        Some(s) => s,
-        None => "",
-    }
+// Parse ONE row of a matrix literal: a sequence of expressions separated by
+// whitespace and/or commas, terminated by `;` or `]` (not consumed here).
+func parse_matrix_row(s: TokenStream) -> Result<MatrixRow, ParseError>:
+    // T57: while inside a matrix row, implicit multiplication is SUPPRESSED.
+    stream_enter_matrix_row(s)
+    let result = parse_matrix_row_inner(s)
+    stream_exit_matrix_row(s)
+    return result
 
-// The String text inside a StringPart(...) kind.
-func string_part_text(k: TokenKind) -> String:
-    return match k {
-        StringPart(s) => s,
-        _ => "",
-    }
+func parse_matrix_row_inner(s: TokenStream) -> Result<MatrixRow, ParseError>:
+    let mut elements: Vector<Expr> = Vector.new()
+    let mut saw_ws = false
+    elements.push(parse_expression(s)?)
+    for true:
+        let pk = stream_peek_kind(s)
+        if pk == Option.Some(TokenKind.Comma):
+            let _consumed = stream_advance(s)
+            let next_is_end = stream_peek_kind(s) == Option.Some(TokenKind.RBracket)
+            let next_is_semi = stream_peek_kind(s) == Option.Some(TokenKind.Semicolon)
+            if next_is_end || next_is_semi:
+                break
+            elements.push(parse_expression(s)?)
+        else:
+            // Whitespace-separated continuation.
+            let k = stream_unwrap_kind(pk)
+            let starts = starts_matrix_element(k)
+            if starts == false:
+                break
+            saw_ws = true
+            elements.push(parse_expression(s)?)
+    return Result.Ok(MatrixRow.new(elements: elements, saw_whitespace_separator: saw_ws))
 
-// The spec text inside an InterpSpec(...) kind (Option.None for other kinds).
-func interp_spec_value(k: TokenKind) -> Option<String>:
-    return match k {
-        InterpSpec(s) => Option.Some(s),
-        _ => Option.None,
-    }
+// Called by `parse_postfix` AFTER the opening `{` has been consumed. The
+// closing `}` is left for the caller to expect. Shape: `ident : expr` entries.
+export func parse_struct_init_fields(s: TokenStream) -> Result<Vector<(Ident, Expr)>, ParseError>:
+    let mut fields: Vector<(Ident, Expr)> = Vector.new()
+    if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
+        return Result.Ok(fields)
+    for true:
+        let opt = stream_advance(s)
+        if opt == Option.None:
+            return Result.Err(err_with("expected struct field name, found end of input", stream_eof_span(s), ErrorCode.ExpectedToken))
+        let ftok = stream_unwrap(opt)
+        let is_ident = is_any_token_kind(ftok.kind, "Ident")
+        if is_ident == false:
+            return Result.Err(err_with("expected struct field name (identifier), found " + token_kind_to_string(ftok.kind), ftok.span, ErrorCode.ExpectedToken))
+        let fname = ident_kind_value(ftok.kind)
+        let field_ident = ident_new(fname, ftok.span)
+        let _colon = stream_expect(s, TokenKind.Colon)?
+        let value = parse_expression(s)?
+        fields.push((field_ident, value))
+        let has_comma = stream_peek_kind(s) == Option.Some(TokenKind.Comma)
+        if has_comma == false:
+            break
+        let _consumed = stream_advance(s)
+        // Allow trailing comma.
+        if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
+            break
+    return Result.Ok(fields)
 
-func is_any_ident_kind(k: TokenKind) -> Bool:
-    return match k {
-        Ident(_) => true,
-        _ => false,
-    }
+// Parse a map literal `{"k": v, ...}` or `{:}` (empty).
+func parse_map_literal(s: TokenStream) -> Result<Expr, ParseError>:
+    let lb = stream_expect(s, TokenKind.LBrace)?
+    if stream_peek_kind(s) == Option.Some(TokenKind.Colon):
+        let _consumed = stream_advance(s)
+        let rb = stream_expect(s, TokenKind.RBrace)?
+        let span = span_new(lb.span.start, rb.span.end, stream_source_id(s))
+        return Result.Ok(Expr.MapLit(Vector.new(), span))
+    let mut entries: Vector<(Expr, Expr)> = Vector.new()
+    for true:
+        let key = parse_expression(s)?
+        let _colon = stream_expect(s, TokenKind.Colon)?
+        let value = parse_expression(s)?
+        entries.push((key, value))
+        let has_comma = stream_peek_kind(s) == Option.Some(TokenKind.Comma)
+        if has_comma == false:
+            break
+        let _consumed = stream_advance(s)
+        if stream_peek_kind(s) == Option.Some(TokenKind.RBrace):
+            break
+    let rb = stream_expect(s, TokenKind.RBrace)?
+    let span = span_new(lb.span.start, rb.span.end, stream_source_id(s))
+    return Result.Ok(Expr.MapLit(entries, span))
 
-func is_string_part_kind(k: TokenKind) -> Bool:
-    return match k {
-        StringPart(_) => true,
-        _ => false,
-    }
+// Disambiguate a `{` at primary position into a closure or a map literal.
+func parse_brace_primary(s: TokenStream) -> Result<Expr, ParseError>:
+    let saved = stream_save(s)
+    // Try the closure shape first (historical default since T23).
+    let closure_res = parse_closure(s)
+    let closure_ok = result_is_ok_expr(closure_res)
+    if closure_ok == true:
+        return closure_res
+    // Roll back and try the map shape.
+    stream_restore(s, saved)
+    let map_res = parse_map_literal(s)
+    let map_ok = result_is_ok_expr(map_res)
+    if map_ok == true:
+        return map_res
+    // Both failed — prefer whichever made more progress.
+    let map_progress = stream_save(s)
+    stream_restore(s, saved)
+    let _closure_probe = parse_closure(s)
+    let closure_progress = stream_save(s)
+    if map_progress > closure_progress:
+        return map_res
+    return closure_res
 
-func ident_kind_value(k: TokenKind) -> String:
-    return match k {
-        Ident(s) => s,
-        _ => "",
-    }
-
-func parse_error_sentinel() -> ParseError:
-    return parse_error_new(diagnostic_error("internal: sentinel", span_dummy()), ErrorCode.Other)
-
-func string_len(s: String) -> Int:
-    return s.len()
+// Parse a string literal whose `StringStart` token has already been consumed.
+func parse_string_literal(s: TokenStream, start_span: Span) -> Result<Expr, ParseError>:
+    let mut parts: Vector<InterpPart> = Vector.new()
+    let mut text_buf = ""
+    let mut has_interp = false
+    let mut end_off = start_span.end
+    for true:
+        let opt = stream_advance(s)
+        if opt == Option.None:
+            return Result.Err(err_with("unterminated string literal (missing StringEnd)", start_span, ErrorCode.UnterminatedString))
+        let tok = stream_unwrap(opt)
+        if tok.kind == TokenKind.StringPart:
+            text_buf = text_buf + string_part_text(tok.kind)
+        else:
+            if tok.kind == TokenKind.InterpStart:
+                if text_buf.len() > 0:
+                    parts.push(InterpPart.Literal(text_buf))
+                    text_buf = ""
+                let expr = parse_expression(s)?
+                let spec = take_interp_spec(s)
+                parts.push(InterpPart.Expr(expr, spec))
+                has_interp = true
+                let _ie = stream_expect(s, TokenKind.InterpEnd)?
+            else:
+                if tok.kind == TokenKind.StringEnd:
+                    end_off = tok.span.end
+                    break
+                return Result.Err(err_with("malformed string literal: unexpected token inside string token stream", tok.span, ErrorCode.MalformedString))
+    let span = span_new(start_span.start, end_off, start_span.source_id)
+    if has_interp:
+        if text_buf.len() > 0:
+            parts.push(InterpPart.Literal(text_buf))
+        return Result.Ok(Expr.StringInterp(parts, span))
+    return Result.Ok(Expr.Literal(Literal.String(text_buf), span))
