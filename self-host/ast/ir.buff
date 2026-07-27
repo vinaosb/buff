@@ -1,0 +1,1622 @@
+// Buff self-host port of `crates/buff-lang-ast/src/ir.rs` (P4.4).
+//
+// Buff Intermediate Representation (IR) — a dataflow graph.
+//
+// The IR separates what to compute from how to schedule it (the
+// Halide algorithm/schedule split). Each node records its data dependencies;
+// the scheduler (v1.0 T40) later decides CPU vs GPU, serial vs parallel.
+//
+// Module layout (mirrors the Rust reference):
+// - NodeId: opaque identifier for a graph node.
+// - IrNode / ComputeNode / IoNode / TransferNode / ScheduleNode: the node types.
+// - IrGraph: the dependency DAG with forward/reverse edges and topo sort.
+// - AstLowerer: converts typed AST (Decl/Block) into an IrGraph.
+//
+// Faithful 1:1 translation of the Rust reference. Buff has no `&`/lifetimes,
+// no `Box<T>`, no `HashMap`/`HashSet` (Buff uses `Map`/`Set`, BTree-backed),
+// no `thiserror::Error` derive, no `serde_json::Value`, no `fmt::Display`
+// trait, and no newtype tuples. Each Rust idiom is translated below; the
+// comprehensive list lives in the translation-decisions block.
+//
+// Translation decisions:
+//   * `pub struct NodeId(pub u32)` (newtype) -> `struct NodeId: value: Int`
+//     (named struct). The Rust call `NodeId(0)` becomes `NodeId.new(value: 0)`
+//     or `node_id_new(0)`. Rust tuple-struct access `id.0` -> `id.value`.
+//   * `TransferNode { from, to }` fields -> `from_space` / `to_space`
+//     (Buff reserves `from` as a keyword for `import { x } from "module"`;
+//     the Rust field name can't be preserved verbatim).
+//   * `Box<ComputeNode>` (IrNode::Compute variant) -> `ComputeNode` (Buff has
+//     no Box; the enum-variant-size optimization the Box performed is a
+//     Rust-host codegen concern, invisible to the Buff surface).
+//   * `HashMap<NodeId, IrNode>` -> `Map<NodeId, IrNode>` (Buff `Map` is
+//     BTreeMap-backed, deterministic iteration — also satisfies the Rust
+//     reference's deterministic-output requirement without extra sorting).
+//   * `HashMap<NodeId, HashSet<NodeId>>` -> `Map<NodeId, Set<NodeId>>`.
+//   * `Vec<T>` -> `Vector<T>` (hard rule, porting §7c).
+//   * `&str` / `String` -> `String` (Buff hides the slice/owned distinction).
+//   * `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]`
+//     dropped — Buff auto-derives `Debug, Clone, PartialEq`; the rest are
+//     Rust-host concerns.
+//   * `impl fmt::Display for X` -> free function `x_to_string(x: X) -> String`
+//     (Buff has no `fmt::Display` trait; the closest idiom is a free function
+//     returning `String`, matching the corpus convention).
+//   * `impl Default for X { fn default() }` dropped — Buff has its own default
+//     mechanism; callers use `x_new()` directly.
+//   * `to_json() -> serde_json::Value` methods DEFERRED — per porting §9 the
+//     serde/serde_json crate is a Rust-host concern (Buff has no `serde_json`
+//     in its prelude). The data types port cleanly; the JSON serialization
+//     impls stay in the Rust host. Documented inline at each would-be site.
+//   * `IrCycleError` (Rust unit struct + thiserror::Error) -> single-variant
+//     enum `IrCycleError { Cycle }` (Buff has no unit-struct literal; the
+//     thiserror Display impl stays in Rust host).
+//   * `mut self` / `&mut self` methods -> free functions taking the value as
+//     the first parameter; Buff mutates struct fields in place via
+//     `s.field = ...`, so `&mut self` is implicit (porting §8g).
+//   * `matches!(self, IrNode::IONode(io) if io.is_suspension_point)` ->
+//     `match` with a single extraction arm + `if` test (Buff has no `matches!`
+//     macro and no pattern guards).
+//   * Rust `if let Some(x) = opt` -> `match opt { Some(x) => ..., None => ... }`
+//     (Buff has no `if let`).
+//   * `Option::map_or(default, f)` -> explicit `match` on the Option
+//     (Buff has no `map_or` on Option in the porting surface).
+//   * `BTreeSet<NodeId>` for the topo-sort ready queue -> `Set<NodeId>`
+//     (Buff `Set` is BTreeSet-backed, deterministic ordering preserved).
+//   * `HashMap::entry(id).or_default()` for lazy edge-set creation ->
+//     explicit `if not edges.contains(id): edges.set(id, Set.new())`.
+//   * `HashMap::is_some_and(|s| !s.is_empty())` -> two-step Option extraction.
+//   * `while let Some(&id) = ready.iter().next()` -> `for true:` with an
+//     explicit break on empty (Buff has no `while let`; `while` is not a
+//     keyword at all).
+//   * `std::mem::take(&mut self.graph)` -> `let g = self.graph; self.graph =
+//     ir_graph_new(); return g` (Buff has no `std::mem::take`).
+//   * `collect_uses` / `collect_stmt_uses` recursion over Expr/Stmt variants:
+//     Buff match REJECTS or-patterns, qualified patterns with struct fields,
+//     and statement bodies in arms. The Rust reference uses all three. The
+//     dispatch is ported as a family of per-variant helper functions called
+//     from a top-level match (single-expression arms, one per variant), with
+//     the per-variant body preserved as a dispatch summary where it would
+//     otherwise require multi-statement arms. Each helper carries the Rust
+//     reference's inline comment verbatim.
+//   * `format!("%{}", self.0)` -> `"%" + value.to_string()` (Buff string
+//     interpolation uses `+` concatenation on owned String pieces).
+//   * `write!(f, "...")` -> return a `String` (no Formatter in Buff).
+//   * `writeln!(f, "...")` -> return the line with a trailing "\n".
+//   * Numeric widths: `usize`/`u32`/`i64` -> `Int` (porting §7a).
+//   * `bool` -> `Bool` (porting §7a).
+//   * Test module (`#[cfg(test)] mod tests`) NOT ported — per task spec.
+//     The pre-existing Rust test breakage (FuncDecl missing `type_params`
+//     field, line ~1926) lives in test code and is irrelevant to the port.
+//
+// Forward references: this port references `Block`, `Decl`, `Expr`, `Ident`,
+// `Span`, `Stmt`, `InterpPart`, `GuardCondition`, `Pattern` from sibling
+// self-host/ast ports (stmt.buff, expr.buff, decl.buff, common.buff). They
+// are treated as opaque types here — only their variant shapes (positional,
+// per the parser/stmt.buff convention) appear in match arms.
+
+// ---------------------------------------------------------------------------
+// NodeId
+// ---------------------------------------------------------------------------
+
+// Unique identifier for an IR node. Assigned monotonically by IrGraph.
+//
+// (Rust writes `pub struct NodeId(pub u32)`; Buff has no tuple-struct, so the
+// inner `u32` becomes a named `value: Int` field. The Rust call `NodeId(0)`
+// becomes `node_id_new(0)`; Rust tuple access `id.0` becomes `id.value`.)
+struct NodeId:
+    value: Int
+
+// Construct a `NodeId` from a raw integer. Mirrors the Rust tuple-struct
+// constructor `NodeId(n)` — Buff has no tuple-struct, so the integer is
+// named `value`.
+func node_id_new(value: Int) -> NodeId:
+    return NodeId.new(value: value)
+
+// Format a NodeId as `%<n>` (the LLVM-style temporary name). Mirrors the
+// Rust `impl fmt::Display for NodeId` body `write!(f, "%{}", self.0)`.
+func node_id_to_string(id: NodeId) -> String:
+    return "%" + id.value.to_string()
+
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b) — DEFERRED
+// ---------------------------------------------------------------------------
+//
+// The Rust reference defines `to_json() -> serde_json::Value` on NodeId,
+// MemorySpace, DispatchDecision, ComputeNode, IoNode, TransferNode,
+// ScheduleNode, IrNode, IrGraph, and AstLowerer. These power the
+// `buff check --dump-ast` diagnostic emitter.
+//
+// Buff has no `serde_json` in its prelude (per porting §9, serde/serde_json
+// stays in the Rust host). The data types port cleanly above and below;
+// their JSON serialization impls are deferred to the Rust host. Each would-
+// be `to_json` site is documented inline.
+
+// ---------------------------------------------------------------------------
+// Memory spaces & dispatch decisions (v1.0 placeholders)
+// ---------------------------------------------------------------------------
+
+// Memory space for data transfers (populated by the v1.0 scheduler).
+enum MemorySpace {
+    // Host RAM.
+    Cpu,
+    // Per-thread GPU local memory.
+    GpuLocal,
+    // GPU shared/block memory.
+    GpuShared,
+}
+
+// Format a MemorySpace as its variant name. Mirrors the Rust
+// `impl fmt::Display for MemorySpace` body.
+func memory_space_to_string(ms: MemorySpace) -> String:
+    return match ms {
+        MemorySpace.Cpu => return "Cpu",
+        MemorySpace.GpuLocal => return "GpuLocal",
+        MemorySpace.GpuShared => return "GpuShared",
+    }
+
+// Dispatch decision filled in by the scheduler (v1.0 T40).
+// In v0.1 every node is effectively DispatchDecision::SequentialCpu.
+enum DispatchDecision {
+    // Sequential CPU execution (v0.1 default).
+    SequentialCpu,
+    // Parallel CPU via Rayon (v1.0).
+    ParallelCpu,
+    // GPU compute dispatch (v1.0).
+    GpuCompute,
+    // Auto-decide based on heuristics (v1.0).
+    Auto,
+}
+
+// Format a DispatchDecision as its variant name. Mirrors the Rust
+// `impl fmt::Display for DispatchDecision` body.
+func dispatch_decision_to_string(dd: DispatchDecision) -> String:
+    return match dd {
+        DispatchDecision.SequentialCpu => return "SequentialCpu",
+        DispatchDecision.ParallelCpu => return "ParallelCpu",
+        DispatchDecision.GpuCompute => return "GpuCompute",
+        DispatchDecision.Auto => return "Auto",
+    }
+
+// ---------------------------------------------------------------------------
+// Node payload structs
+// ---------------------------------------------------------------------------
+
+// Pure computation — no side effects, deterministic.
+struct ComputeNode:
+    id: NodeId
+    // The AST expression this node computes (kept for traceability).
+    source_expr: Option<Expr>
+    // The AST statement (for let bindings, assignments, control flow).
+    source_stmt: Option<Stmt>
+    // Variables this node produces (defined bindings).
+    defs: Vector<Ident>
+    // Variables this node reads (used bindings).
+    uses: Vector<Ident>
+    span: Span
+    // Human-readable description for debugging/snapshots.
+    description: String
+
+// I/O boundary — async function call, network, file system.
+// These are suspension points in the async runtime.
+struct IoNode:
+    id: NodeId
+    // The async function being called.
+    callee: Ident
+    // Argument expressions.
+    args: Vector<Expr>
+    // Result variable(s) defined by this I/O operation.
+    defs: Vector<Ident>
+    // Variables read as arguments.
+    uses: Vector<Ident>
+    span: Span
+    // This node is a suspension point in the async runtime (always true
+    // for IrNode::IONode).
+    is_suspension_point: Bool
+
+// Data movement between CPU and GPU memory (v1.0 GPU dispatch planning).
+struct TransferNode:
+    id: NodeId
+    // Variable being transferred.
+    var: Ident
+    // Source memory space.
+    from_space: MemorySpace
+    // Destination memory space.
+    to_space: MemorySpace
+    span: Span
+
+// Dispatch decision placeholder governing a group of nodes.
+// The scheduler (v1.0 T40) fills in the real decision.
+struct ScheduleNode:
+    id: NodeId
+    // The nodes this schedule governs.
+    governed: Vector<NodeId>
+    // Current dispatch decision (placeholder — full lowering is post-v1.0 work).
+    decision: DispatchDecision
+    span: Span
+
+// A node in the IR dataflow graph.
+//
+// The Rust reference boxes the Compute variant because it dominates the enum
+// size (it carries the source Expr/Stmt). Buff has no Box; the variant holds
+// the ComputeNode directly. Use ir_node_compute to construct one.
+enum IrNode {
+    // Pure computation — no side effects, deterministic.
+    // Examples: literals, arithmetic, pure function calls.
+    Compute(ComputeNode),
+
+    // I/O boundary — async function call, network, file system.
+    // These are suspension points in the async runtime.
+    IONode(IoNode),
+
+    // Data movement between CPU and GPU memory.
+    // Used in v1.0 GPU dispatch planning.
+    Transfer(TransferNode),
+
+    // Dispatch decision placeholder.
+    // The scheduler (v1.0 T40) fills in CPU/GPU/parallel decision.
+    // In v0.1 IR, all ScheduleNodes are placeholders marked "Sequential CPU".
+    Schedule(ScheduleNode),
+}
+
+// Convenience constructor that wraps a ComputeNode into an IrNode.Compute
+// (the Rust reference boxes it; Buff has no Box, so this is just a typed
+// wrapper — kept for API parity with `IrNode::compute`).
+func ir_node_compute(node: ComputeNode) -> IrNode:
+    return IrNode.Compute(node)
+
+// Returns the NodeId stored on this node. Mirrors Rust `IrNode::id(&self)`.
+func ir_node_id(node: IrNode) -> NodeId:
+    return match node {
+        IrNode.Compute(n) => return n.id,
+        IrNode.IONode(n) => return n.id,
+        IrNode.Transfer(n) => return n.id,
+        IrNode.Schedule(n) => return n.id,
+    }
+
+// Overwrite the stored NodeId (used by ir_graph_add_node when it assigns the
+// canonical id). Mirrors Rust `IrNode::set_id(&mut self, id)`.
+func ir_node_set_id(node: IrNode, id: NodeId):
+    match node {
+        IrNode.Compute(n) => n.id = id,
+        IrNode.IONode(n) => n.id = id,
+        IrNode.Transfer(n) => n.id = id,
+        IrNode.Schedule(n) => n.id = id,
+    }
+
+// Returns true if this node is a suspension point (always an IoNode with
+// `is_suspension_point` set). Mirrors Rust
+// `matches!(self, IrNode::IONode(io) if io.is_suspension_point)` — Buff has
+// no pattern guards, so the guard becomes an explicit `if` test after
+// extraction.
+func ir_node_is_suspension_point(node: IrNode) -> Bool:
+    match node {
+        IrNode.IONode(io) =>
+            return ir_node_io_suspend_check(io),
+        IrNode.Compute(_) => return false,
+        IrNode.Transfer(_) => return false,
+        IrNode.Schedule(_) => return false,
+    }
+
+// Helper for ir_node_is_suspension_point — extracts the IoNode's suspend flag.
+// (Buff match has no pattern guards; this factoring replaces
+// `IrNode::IONode(io) if io.is_suspension_point`.)
+func ir_node_io_suspend_check(io: IoNode) -> Bool:
+    return io.is_suspension_point
+
+// ---------------------------------------------------------------------------
+// Cycle error
+// ---------------------------------------------------------------------------
+
+// Returned by ir_graph_topological_order when the graph contains a cycle.
+//
+// A valid AST lowering never produces a cycle; this error indicates either a
+// manually-constructed test graph or a lowering bug.
+//
+// (Rust writes `pub struct IrCycleError;` — a unit struct with a thiserror
+// Display impl. Buff has no unit-struct literal, so the error is modelled as
+// a single-variant enum. The thiserror Display impl stays in the Rust host.)
+enum IrCycleError {
+    Cycle,
+}
+
+// ---------------------------------------------------------------------------
+// IrGraph
+// ---------------------------------------------------------------------------
+
+// A dataflow graph of IR nodes with dependency edges.
+//
+// Edge semantics:
+//   - edges[B] = the set of nodes that depend on B (B's dependents).
+//   - reverse_edges[A] = the set of nodes that A depends on (A's dependencies).
+//
+// Use ir_graph_dependencies / ir_graph_dependents for ergonomic access.
+//
+// (Rust stores `HashMap<NodeId, IrNode>` and `HashMap<NodeId, HashSet<NodeId>>`.
+// Buff ports as `Map<NodeId, IrNode>` and `Map<NodeId, Set<NodeId>>` — Buff
+// Map/Set are BTree-backed, so iteration is already deterministic, matching
+// the Rust reference's deterministic-output requirement without extra sorting.)
+struct IrGraph:
+    // All nodes indexed by NodeId.
+    nodes: Map<NodeId, IrNode>
+    // Forward edges: edges[B] contains A when A depends on B.
+    edges: Map<NodeId, Set<NodeId>>
+    // Reverse edges: reverse_edges[A] contains B when A depends on B.
+    reverse_edges: Map<NodeId, Set<NodeId>>
+    // Entry nodes (no dependencies). Populated by ir_graph_finalize.
+    entry_nodes: Vector<NodeId>
+    // Exit nodes (no dependents). Populated by ir_graph_finalize.
+    exit_nodes: Vector<NodeId>
+    // Next available NodeId.
+    next_id: Int
+
+// Create an empty graph. Mirrors Rust `IrGraph::new()` (and `Default::default()`).
+func ir_graph_new() -> IrGraph:
+    return IrGraph.new(
+        nodes: Map.new(),
+        edges: Map.new(),
+        reverse_edges: Map.new(),
+        entry_nodes: Vector.new(),
+        exit_nodes: Vector.new(),
+        next_id: 0,
+    )
+
+// Returns the number of nodes in the graph.
+func ir_graph_len(g: IrGraph) -> Int:
+    return g.nodes.len()
+
+// Returns true if the graph has no nodes.
+func ir_graph_is_empty(g: IrGraph) -> Bool:
+    return g.nodes.len() == 0
+
+// Insert a node, assigning it the next canonical NodeId.
+// Returns the assigned id. The node's stored id field is overwritten.
+func ir_graph_add_node(g: IrGraph, node: IrNode) -> NodeId:
+    let id = node_id_new(g.next_id)
+    g.next_id = g.next_id + 1
+    ir_node_set_id(node, id)
+    g.nodes.set(id, node)
+    // Lazy edge-set creation: mirrors Rust `self.edges.entry(id).or_default()`.
+    if g.edges.contains(id) == false:
+        g.edges.set(id, Set.new())
+    if g.reverse_edges.contains(id) == false:
+        g.reverse_edges.set(id, Set.new())
+    return id
+
+// Add a dependency edge: `dependent` uses an output of `dependency`.
+//
+// After this call, `dependent` is in edges[dependency] and `dependency`
+// is in reverse_edges[dependent]. Duplicate insertions are idempotent.
+func ir_graph_add_dependency(g: IrGraph, dependent: NodeId, dependency: NodeId):
+    let mut deps_set = ir_graph_edge_set_or_default(g.edges, dependency)
+    deps_set.insert(dependent)
+    g.edges.set(dependency, deps_set)
+    let mut rev_set = ir_graph_edge_set_or_default(g.reverse_edges, dependent)
+    rev_set.insert(dependency)
+    g.reverse_edges.set(dependent, rev_set)
+
+// Helper for ir_graph_add_dependency — fetch the edge Set for `key` from
+// `map`, or an empty Set if absent. Mirrors Rust
+// `HashMap::entry(key).or_default()`.
+func ir_graph_edge_set_or_default(map: Map<NodeId, Set<NodeId>>, key: NodeId) -> Set<NodeId>:
+    let opt = map.get(key)
+    return match opt {
+        Some(s) => return s,
+        None => return Set.new(),
+    }
+
+// All nodes that this node directly depends on (its inputs), sorted by
+// NodeId for deterministic output. (Buff Set is BTreeSet-backed, so iteration
+// is already ascending; the explicit sort is a no-op parity with the Rust
+// reference, which sorts the Vec<NodeId> collected from a HashSet.)
+func ir_graph_dependencies(g: IrGraph, node: NodeId) -> Vector<NodeId>:
+    let opt = g.reverse_edges.get(node)
+    return match opt {
+        Some(s) => return ir_graph_set_to_sorted_vector(s),
+        None => return Vector.new(),
+    }
+
+// All nodes that directly depend on this node (its consumers), sorted by
+// NodeId for deterministic output.
+func ir_graph_dependents(g: IrGraph, node: NodeId) -> Vector<NodeId>:
+    let opt = g.edges.get(node)
+    return match opt {
+        Some(s) => return ir_graph_set_to_sorted_vector(s),
+        None => return Vector.new(),
+    }
+
+// Helper — materialize a Set<NodeId> into a Vector<NodeId> in ascending order.
+// (Buff Set iterates in ascending order, so this is a straight copy.)
+func ir_graph_set_to_sorted_vector(s: Set<NodeId>) -> Vector<NodeId>:
+    let out = Vector.new()
+    for id in s:
+        out.push(id)
+    return out
+
+// Compute entry_nodes and exit_nodes from the current edge sets.
+//
+// Call this once after all nodes and edges have been added.
+func ir_graph_finalize(g: IrGraph):
+    g.entry_nodes = Vector.new()
+    g.exit_nodes = Vector.new()
+    for id in g.nodes.keys():
+        let has_deps = ir_graph_has_nonempty_set(g.reverse_edges, id)
+        let has_dependents = ir_graph_has_nonempty_set(g.edges, id)
+        if has_deps == false:
+            g.entry_nodes.push(id)
+        if has_dependents == false:
+            g.exit_nodes.push(id)
+    // Buff Vector doesn't have an in-place sort method in the port surface;
+    // the entry/exit lists are constructed in ascending-key iteration order
+    // (Buff Map iterates keys in ascending order), so they are already
+    // sorted by NodeId — matching the Rust reference's `entry_nodes.sort()`.
+    return
+
+// Helper — true iff `map.get(id)` is a non-empty Set. Mirrors Rust
+// `self.reverse_edges.get(&id).is_some_and(|s| !s.is_empty())`.
+func ir_graph_has_nonempty_set(map: Map<NodeId, Set<NodeId>>, id: NodeId) -> Bool:
+    let opt = map.get(id)
+    return match opt {
+        Some(s) => return s.len() > 0,
+        None => return false,
+    }
+
+// Topological sort via Kahn's algorithm. Returns nodes in an order where
+// every dependency appears before its dependent. Ties are broken by ascending
+// NodeId for deterministic output.
+//
+// Returns Err(IrCycleError.Cycle) if the graph contains a cycle.
+func ir_graph_topological_order(g: IrGraph) -> Result<Vector<NodeId>, IrCycleError>:
+    // in_degree[N] = number of dependencies of N (size of reverse_edges[N]).
+    let in_degree = Map.new()
+    for id in g.nodes.keys():
+        let deg = ir_graph_in_degree(g, id)
+        in_degree.set(id, deg)
+
+    // BTreeSet gives us deterministic ascending-NodeId ordering.
+    // (Buff Set is BTreeSet-backed, so the ready queue iterates in ascending
+    // NodeId order — same semantics as the Rust BTreeSet<NodeId>.)
+    let ready = Set.new()
+    for id in in_degree.keys():
+        let d = ir_graph_in_degree_lookup(in_degree, id)
+        if d == 0:
+            ready.insert(id)
+
+    let order = Vector.new()
+    // Buff has no `while let`; `while` is not a Buff keyword at all. The
+    // Rust `while let Some(&id) = ready.iter().next()` becomes a `for true:`
+    // loop with an explicit break when the ready set is empty.
+    for true:
+        let next_opt = ir_graph_set_first(ready)
+        if next_opt == Option.None:
+            break
+        let id = ir_graph_unwrap_node_id(next_opt)
+        ready.remove(id)
+        order.push(id)
+        let deps_opt = g.edges.get(id)
+        if deps_opt != Option.None:
+            let dependents = ir_graph_unwrap_set(deps_opt)
+            for dep in dependents:
+                let cur_opt = in_degree.get(dep)
+                if cur_opt != Option.None:
+                    let cur = ir_graph_unwrap_int(cur_opt)
+                    let updated = cur - 1
+                    in_degree.set(dep, updated)
+                    if updated == 0:
+                        ready.insert(dep)
+
+    if order.len() != g.nodes.len():
+        return Result.Err(IrCycleError.Cycle)
+    return Result.Ok(order)
+
+// Helper — in-degree of `id` (size of reverse_edges[id], or 0 if absent).
+// Mirrors Rust `self.reverse_edges.get(&id).map_or(0, |s| s.len())`.
+func ir_graph_in_degree(g: IrGraph, id: NodeId) -> Int:
+    let opt = g.reverse_edges.get(id)
+    return match opt {
+        Some(s) => return s.len(),
+        None => return 0,
+    }
+
+// Helper — look up the in-degree value from the working map (Kahn's algo).
+func ir_graph_in_degree_lookup(map: Map<NodeId, Int>, id: NodeId) -> Int:
+    let opt = map.get(id)
+    return match opt {
+        Some(n) => return n,
+        None => return 0,
+    }
+
+// Helper — first element of a Set<NodeId> in ascending order, or None.
+// Mirrors Rust `ready.iter().next()` on a BTreeSet.
+func ir_graph_set_first(s: Set<NodeId>) -> Option<NodeId>:
+    for id in s:
+        return Option.Some(id)
+    return Option.None
+
+// Helper — unwrap an Option<NodeId> after a checked Option.None test.
+// (Buff has no infallible unwrap; this is the contract-checked equivalent.)
+func ir_graph_unwrap_node_id(opt: Option<NodeId>) -> NodeId:
+    return match opt {
+        Some(id) => return id,
+        None => return node_id_new(0),
+    }
+
+// Helper — unwrap an Option<Set<NodeId>> after a checked Option.None test.
+func ir_graph_unwrap_set(opt: Option<Set<NodeId>>) -> Set<NodeId>:
+    return match opt {
+        Some(s) => return s,
+        None => return Set.new(),
+    }
+
+// Helper — unwrap an Option<Int> after a checked Option.None test.
+func ir_graph_unwrap_int(opt: Option<Int>) -> Int:
+    return match opt {
+        Some(n) => return n,
+        None => return 0,
+    }
+
+// ---------------------------------------------------------------------------
+// AstLowerer
+// ---------------------------------------------------------------------------
+
+// Lowers typed AST (decls/statements) into an IrGraph dataflow graph.
+//
+// The lowerer maintains a `bindings` map (variable name -> defining NodeId)
+// in single-static-assignment style: a later `let` with the same name
+// shadows the earlier definition for downstream uses.
+struct AstLowerer:
+    graph: IrGraph
+    // Current variable -> defining NodeId mapping.
+    bindings: Map<String, NodeId>
+    // Known async function names (I/O boundary markers).
+    async_functions: Set<String>
+
+// Create a new lowerer with an empty graph and no registered async fns.
+// Mirrors Rust `AstLowerer::new()` (and `Default::default()`).
+func ast_lowerer_new() -> AstLowerer:
+    return AstLowerer.new(
+        graph: ir_graph_new(),
+        bindings: Map.new(),
+        async_functions: Set.new(),
+    )
+
+// Register a function name as async (I/O boundary). Calls to it will be
+// lowered to IrNode.IONode suspension points.
+func ast_lowerer_mark_async(alt: AstLowerer, name: String):
+    alt.async_functions.insert(name)
+    return
+
+// Lower a list of declarations (typically a module/function body).
+//
+// Resets the lowerer's graph and bindings but preserves the registered
+// async-function set. The returned graph has been finalized.
+func ast_lowerer_lower(alt: AstLowerer, decls: Vector<Decl>) -> IrGraph:
+    alt.graph = ir_graph_new()
+    alt.bindings = Map.new()
+    for decl in decls:
+        ast_lowerer_lower_decl(alt, decl)
+    ir_graph_finalize(alt.graph)
+    // Mirrors Rust `std::mem::take(&mut self.graph)` — swap out the built
+    // graph for a fresh empty one and return the built one.
+    let built = alt.graph
+    alt.graph = ir_graph_new()
+    return built
+
+// Lower a block of statements into self.graph (does not finalize).
+// Public so callers can lower a standalone Block without wrapping it in a
+// Decl.
+func ast_lowerer_lower_block(alt: AstLowerer, block: Block):
+    for stmt in block.stmts:
+        ast_lowerer_lower_stmt(alt, stmt)
+    return
+
+// Returns true if `name` is registered as an async function.
+func ast_lowerer_is_async_call(alt: AstLowerer, name: String) -> Bool:
+    return alt.async_functions.contains(name)
+
+// If expr is a direct call to a registered async function, return the callee
+// Ident and cloned args. Mirrors Rust `AstLowerer::detect_async_call`.
+// Returns Option.None when the expression is not an async call.
+//
+// (Buff has no `if let`; the Rust `if let Expr::FuncCall { callee, args, .. }
+// = expr` becomes a match with Some/None arms. The inner Rust `if let
+// Expr::Ident(name, _) = callee.as_ref()` becomes a nested match.)
+func ast_lowerer_detect_async_call(alt: AstLowerer, expr: Expr) -> Option<Tuple2IdentExprs>:
+    let parts_opt = ast_lowerer_extract_func_call(expr)
+    if parts_opt == Option.None:
+        return Option.None
+    let parts = ast_lowerer_unwrap_func_call_parts(parts_opt)
+    let callee = parts.callee
+    let args = parts.args
+    let name_opt = ast_lowerer_extract_ident(callee)
+    if name_opt == Option.None:
+        return Option.None
+    let name = ast_lowerer_unwrap_ident(name_opt)
+    if ast_lowerer_is_async_call(alt, name.name):
+        return Option.Some(Tuple2IdentExprs.new(ident: name, exprs: args))
+    return Option.None
+
+// Lower a single declaration. Currently only Decl.FuncDecl produces IR nodes;
+// other declarations (struct/enum/import/module/trait) are type metadata and
+// are skipped (full IR lowering is post-v1.0 work).
+//
+// (Rust `if let Decl::FuncDecl(f) = decl` becomes a match with a single
+// extraction arm + None fallback — Buff has no `if let`.)
+func ast_lowerer_lower_decl(alt: AstLowerer, decl: Decl):
+    let f_opt = ast_lowerer_extract_func_decl(decl)
+    if f_opt == Option.None:
+        return
+    let f = ast_lowerer_unwrap_func_decl(f_opt)
+    // Auto-register async-declared functions as I/O boundaries.
+    if f.is_async:
+        ast_lowerer_mark_async(alt, f.name.name)
+    ast_lowerer_lower_block(alt, f.body)
+    return
+
+// Lower a single statement, producing exactly one IR node and returning its
+// NodeId.
+//
+// The Rust reference is a 250-line match on Stmt variants with multi-
+// statement arms (each arm mutates self.graph, self.bindings, etc.). Buff
+// match arms must be single expressions, so the dispatch is factored into a
+// per-variant helper function (one helper per Stmt variant) called from a
+// top-level match. Each helper carries the Rust reference's inline comment
+// verbatim and preserves the per-variant data flow.
+func ast_lowerer_lower_stmt(alt: AstLowerer, stmt: Stmt) -> NodeId:
+    return match stmt {
+        Stmt.LetDecl(name, value, span) => return ast_lowerer_lower_let_decl(alt, name, value, stmt, span),
+        Stmt.LetPattern(pattern, value, span) => return ast_lowerer_lower_let_pattern(alt, pattern, value, stmt, span),
+        Stmt.ExprStmt(expr, span) => return ast_lowerer_create_expr_node(alt, expr, Option.None, Option.Some(stmt), span),
+        Stmt.Assignment(target, value, span) => return ast_lowerer_lower_assignment(alt, target, value, stmt, span),
+        Stmt.Return(opt_expr, span) => return ast_lowerer_lower_return(alt, opt_expr, stmt, span),
+        Stmt.Break(span) => return ast_lowerer_add_pure_control_node(alt, stmt, span, "Break"),
+        Stmt.Continue(span) => return ast_lowerer_add_pure_control_node(alt, stmt, span, "Continue"),
+        Stmt.ForIn(var, iter, body, span) => return ast_lowerer_lower_for_in(alt, var, iter, body, stmt, span),
+        Stmt.ForWhile(cond, body, span) => return ast_lowerer_lower_for_while(alt, cond, body, stmt, span),
+        Stmt.ForLet(pattern, value, body, span) => return ast_lowerer_lower_for_let(alt, pattern, value, body, stmt, span),
+        Stmt.Guard(conditions, else_block, span) => return ast_lowerer_lower_guard(alt, conditions, else_block, stmt, span),
+        Stmt.Defer(expr, span) => return ast_lowerer_lower_defer(alt, expr, stmt, span),
+        Stmt.ComptimeBlock(body, span) => return ast_lowerer_lower_comptime_block(alt, body, stmt, span),
+    }
+
+// Helper for Break/Continue: a ComputeNode with no data flow.
+func ast_lowerer_add_pure_control_node(alt: AstLowerer, stmt: Stmt, span: Span, label: String) -> NodeId:
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.None,
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: Vector.new(),
+        span: span,
+        description: label,
+    )
+    return ir_graph_add_node(alt.graph, ir_node_compute(node))
+
+// Core node-creation routine: inspects expr to pick IrNode.IONode vs
+// IrNode.Compute, wires dependencies, and updates bindings.
+//
+// - binding: if Some, the node defines that variable (let binding).
+// - source_stmt: the originating statement, kept for traceability.
+func ast_lowerer_create_expr_node(alt: AstLowerer, expr: Expr, binding: Option<Ident>, source_stmt: Option<Stmt>, span: Span) -> NodeId:
+    let defs = ast_lowerer_defs_from_binding(binding)
+    let uses = Vector.new()
+    collect_uses(expr, uses)
+    let async_parts_opt = ast_lowerer_detect_async_call(alt, expr)
+    let id = match async_parts_opt {
+        Some(parts) => return ast_lowerer_make_io_node(alt.graph, parts, defs, uses, span),
+        None => return ast_lowerer_make_compute_node(alt.graph, expr, source_stmt, defs, uses, span),
+    }
+    ast_lowerer_wire_dependencies(alt, id, defs, uses)
+    let binding_opt = binding
+    if binding_opt != Option.None:
+        let name = ast_lowerer_unwrap_ident(binding_opt)
+        alt.bindings.set(name.name, id)
+    return id
+
+// Helper — wrap IoNode construction (kept factored so the
+// create_expr_node match arm stays a single expression).
+func ast_lowerer_make_io_node(g: IrGraph, parts: Tuple2IdentExprs, defs: Vector<Ident>, uses: Vector<Ident>, span: Span) -> NodeId:
+    let node = IoNode.new(
+        id: node_id_new(0),
+        callee: parts.ident,
+        args: parts.exprs,
+        defs: defs,
+        uses: uses,
+        span: span,
+        is_suspension_point: true,
+    )
+    return ir_graph_add_node(g, IrNode.IONode(node))
+
+// Helper — wrap ComputeNode construction for create_expr_node's None arm.
+func ast_lowerer_make_compute_node(g: IrGraph, expr: Expr, source_stmt: Option<Stmt>, defs: Vector<Ident>, uses: Vector<Ident>, span: Span) -> NodeId:
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.Some(expr),
+        source_stmt: source_stmt,
+        defs: defs,
+        uses: uses,
+        span: span,
+        description: expr_to_string(expr),
+    )
+    return ir_graph_add_node(g, ir_node_compute(node))
+
+// Helper — `binding.map_or(Vec::new(), |n| vec![n.clone()])`.
+func ast_lowerer_defs_from_binding(binding: Option<Ident>) -> Vector<Ident>:
+    return match binding {
+        Some(n) => return ast_lowerer_singleton_ident(n),
+        None => return Vector.new(),
+    }
+
+// Helper — materialize `vec![n.clone()]`.
+func ast_lowerer_singleton_ident(n: Ident) -> Vector<Ident>:
+    let out = Vector.new()
+    out.push(n)
+    return out
+
+// Build dependency edges for a freshly added node.
+//
+// For each used variable, look up its defining node in bindings and add a
+// `new_node -> def_node` dependency. For each defined variable, update
+// bindings (shadowing any prior definition).
+func ast_lowerer_wire_dependencies(alt: AstLowerer, new_node: NodeId, defs: Vector<Ident>, uses: Vector<Ident>):
+    for u in uses:
+        let def_opt = alt.bindings.get(u.name)
+        if def_opt != Option.None:
+            let def_node = ast_lowerer_unwrap_node_id(def_opt)
+            ir_graph_add_dependency(alt.graph, new_node, def_node)
+        // Variables not in bindings are free (parameters/globals) — no edge.
+    for d in defs:
+        alt.bindings.set(d.name, new_node)
+    return
+
+// ---------------------------------------------------------------------------
+// Per-Stmt-variant lowering helpers (each mirrors one Rust match arm body)
+// ---------------------------------------------------------------------------
+
+// Lower a `let name = value` statement. The Rust reference's arm body:
+//   create_expr_node(value, Some(name), Some(stmt), *span)
+func ast_lowerer_lower_let_decl(alt: AstLowerer, name: Ident, value: Expr, stmt: Stmt, span: Span) -> NodeId:
+    return ast_lowerer_create_expr_node(alt, value, Option.Some(name), Option.Some(stmt), span)
+
+// T71: destructuring let — the value is the data-flow source; the pattern's
+// bindings are all defined by this one node (we register each in the
+// bindings map so later reads wire back here). The node's own defs list
+// stays empty (the IR defs field is a single-name nicety; the bindings map
+// is the source of truth for dependency wiring — see wire_dependencies).
+func ast_lowerer_lower_let_pattern(alt: AstLowerer, pattern: Pattern, value: Expr, stmt: Stmt, span: Span) -> NodeId:
+    let node = ast_lowerer_create_expr_node(alt, value, Option.None, Option.Some(stmt), span)
+    for b in pattern_bindings(pattern):
+        alt.bindings.set(b.name, node)
+    return node
+
+// Lower an assignment: collect uses from both target and value; defs is the
+// target Ident when the target is a plain Ident.
+func ast_lowerer_lower_assignment(alt: AstLowerer, target: Expr, value: Expr, stmt: Stmt, span: Span) -> NodeId:
+    let uses = Vector.new()
+    collect_uses(target, uses)
+    collect_uses(value, uses)
+    let defs = ast_lowerer_assignment_defs(target)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.Some(value),
+        source_stmt: Option.Some(stmt),
+        defs: defs,
+        uses: uses,
+        span: span,
+        description: stmt_to_string(stmt),
+    )
+    let id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, id, defs, uses)
+    let target_ident_opt = ast_lowerer_extract_ident(target)
+    if target_ident_opt != Option.None:
+        let ident = ast_lowerer_unwrap_ident(target_ident_opt)
+        alt.bindings.set(ident.name, id)
+    return id
+
+// Helper — defs for an assignment: [target] when target is an Ident, else [].
+func ast_lowerer_assignment_defs(target: Expr) -> Vector<Ident>:
+    let opt = ast_lowerer_extract_ident(target)
+    return match opt {
+        Some(id) => return ast_lowerer_singleton_ident(id),
+        None => return Vector.new(),
+    }
+
+// Lower a `return [expr]` statement: collect uses from the optional return
+// expression; defs is always empty.
+func ast_lowerer_lower_return(alt: AstLowerer, opt_expr: Option<Expr>, stmt: Stmt, span: Span) -> NodeId:
+    let uses = Vector.new()
+    let source_expr = opt_expr
+    if source_expr != Option.None:
+        let e = ast_lowerer_unwrap_expr(source_expr)
+        collect_uses(e, uses)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: opt_expr,
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: uses,
+        span: span,
+        description: stmt_to_string(stmt),
+    )
+    let id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, id, Vector.new(), uses)
+    return id
+
+// Lower a `for VAR in ITER { body }` statement. Represent the loop header
+// as a Compute node that consumes the iterator expression; the loop variable
+// is bound inside the loop body.
+func ast_lowerer_lower_for_in(alt: AstLowerer, var: Ident, iter: Expr, body: Block, stmt: Stmt, span: Span) -> NodeId:
+    // The iterator expression's uses count; the loop variable is bound by
+    // the statement (introduces a new name, doesn't read an outer one).
+    let uses = Vector.new()
+    collect_uses(iter, uses)
+    ast_lowerer_drop_named(uses, var.name)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.Some(iter),
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: uses,
+        span: span,
+        description: "ForIn(" + var.name + " in {...})",
+    )
+    let header_id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, header_id, Vector.new(), uses)
+    // Lower the loop body in this context. The resulting node IDs depend on
+    // the iterator header via the bindings map only if they read the loop
+    // variable; we model the loop var binding as a synthetic binding
+    // pointing at the header so reads inside the body wire back to it.
+    alt.bindings.set(var.name, header_id)
+    ast_lowerer_lower_block(alt, body)
+    return header_id
+
+// Lower a `for cond { body }` (while-style) statement.
+func ast_lowerer_lower_for_while(alt: AstLowerer, cond: Expr, body: Block, stmt: Stmt, span: Span) -> NodeId:
+    let uses = Vector.new()
+    collect_uses(cond, uses)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.Some(cond),
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: uses,
+        span: span,
+        description: "ForWhile({...})",
+    )
+    let header_id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, header_id, Vector.new(), uses)
+    ast_lowerer_lower_block(alt, body)
+    return header_id
+
+// T72: `for let PAT = EXPR { body }` — a looping binding. The value
+// expression is the data-flow source (consumed each iteration); the
+// pattern's bindings are introduced inside the loop body only. We model the
+// header as a Compute node that consumes the value's uses, then register
+// each pattern binding pointing at the header so reads inside the body wire
+// back to it (mirroring the ForIn treatment of the loop variable).
+func ast_lowerer_lower_for_let(alt: AstLowerer, pattern: Pattern, value: Expr, body: Block, stmt: Stmt, span: Span) -> NodeId:
+    let uses = Vector.new()
+    collect_uses(value, uses)
+    // The pattern's bindings don't read outer names (they bind), but a
+    // binding NAME that also appears in value would be a shadow — drop it
+    // from the header's uses for the same reason ForIn drops the loop
+    // variable.
+    let binding_names = pattern_binding_names(pattern)
+    for bn in binding_names:
+        ast_lowerer_drop_named(uses, bn)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.Some(value),
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: uses,
+        span: span,
+        description: "ForLet(" + pattern_to_string(pattern) + " = {...})",
+    )
+    let header_id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, header_id, Vector.new(), uses)
+    for b in pattern_bindings(pattern):
+        alt.bindings.set(b.name, header_id)
+    ast_lowerer_lower_block(alt, body)
+    return header_id
+
+// T73: `guard <conds> else { block }` — model each condition as a Compute
+// node that consumes the condition's uses; the else-block is walked as a
+// continuation. For `let` conditions, the pattern's bindings are introduced
+// IN THE ENCLOSING SCOPE (mirroring Rust let-else semantics) — register
+// each binding pointing at the condition's node so subsequent reads wire
+// back to it. The whole guard collapses to its LAST condition's node ID
+// (or the else-block's last node if conditions is empty, which is a parse-
+// time error anyway).
+func ast_lowerer_lower_guard(alt: AstLowerer, conditions: Vector<GuardCondition>, else_block: Block, stmt: Stmt, span: Span) -> NodeId:
+    let mut last_id = ast_lowerer_add_pure_control_node(alt, stmt, span, "Guard")
+    for c in conditions:
+        let extracted = ast_lowerer_extract_guard_condition(c)
+        let expr_opt = extracted.expr
+        let pat_bindings = extracted.bindings
+        let uses = Vector.new()
+        if expr_opt != Option.None:
+            let e = ast_lowerer_unwrap_expr(expr_opt)
+            collect_uses(e, uses)
+        let binding_names = ast_lowerer_binding_names_from_idents(pat_bindings)
+        for bn in binding_names:
+            ast_lowerer_drop_named(uses, bn)
+        let node = ComputeNode.new(
+            id: node_id_new(0),
+            source_expr: expr_opt,
+            source_stmt: Option.Some(stmt),
+            defs: pat_bindings,
+            uses: uses,
+            span: span,
+            description: "GuardCond(" + guard_condition_to_string(c) + ")",
+        )
+        let node_id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+        ast_lowerer_wire_dependencies(alt, node_id, Vector.new(), uses)
+        // Register the let-pattern's bindings in the ENCLOSING scope (let-
+        // else semantics: they survive the guard).
+        for b in pat_bindings:
+            alt.bindings.set(b.name, node_id)
+        last_id = node_id
+    // Walk the else-block as a continuation (its stmts are reachable when
+    // any condition fails).
+    ast_lowerer_lower_block(alt, else_block)
+    return last_id
+
+// T100: `defer EXPR` — model the deferred expression as a Compute node
+// consuming its uses (the expression reads outer names at the defer site).
+// The actual function-exit re-emission happens in codegen, not here; the IR
+// just records the data-flow fact that the expression's uses are live at
+// this point. No bindings are introduced.
+func ast_lowerer_lower_defer(alt: AstLowerer, expr: Expr, stmt: Stmt, span: Span) -> NodeId:
+    let uses = Vector.new()
+    collect_uses(expr, uses)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.Some(expr),
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: uses,
+        span: span,
+        description: "Defer(" + expr_to_string(expr) + ")",
+    )
+    let node_id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, node_id, Vector.new(), uses)
+    return node_id
+
+// Lower a `comptime { body }` block — sum the body's uses.
+func ast_lowerer_lower_comptime_block(alt: AstLowerer, body: Block, stmt: Stmt, span: Span) -> NodeId:
+    let uses = Vector.new()
+    for s in body.stmts:
+        collect_stmt_uses(s, uses)
+    let node = ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.None,
+        source_stmt: Option.Some(stmt),
+        defs: Vector.new(),
+        uses: uses,
+        span: span,
+        description: "Comptime({ " + body.stmts.len().to_string() + " stmts })",
+    )
+    let node_id = ir_graph_add_node(alt.graph, ir_node_compute(node))
+    ast_lowerer_wire_dependencies(alt, node_id, Vector.new(), uses)
+    return node_id
+
+// ---------------------------------------------------------------------------
+// AST-extraction helpers (Buff has no `if let`; these replace Rust's
+// `if let Variant { .. } = expr` patterns with Option-returning extractors)
+// ---------------------------------------------------------------------------
+
+// Extract the callee + args from an Expr.FuncCall, or None.
+// Mirrors Rust `if let Expr::FuncCall { callee, args, .. } = expr`.
+func ast_lowerer_extract_func_call(expr: Expr) -> Option<FuncCallParts>:
+    return match expr {
+        Expr.FuncCall(callee, args, span) => return Option.Some(FuncCallParts.new(callee: callee, args: args, span: span)),
+        _ => return Option.None,
+    }
+
+// Extract the inner Ident from an Expr.Ident, or None.
+// Mirrors Rust `if let Expr::Ident(name, _) = expr`.
+func ast_lowerer_extract_ident(expr: Expr) -> Option<Ident>:
+    return match expr {
+        Expr.Ident(name, span) => return Option.Some(name),
+        _ => return Option.None,
+    }
+
+// Extract the FuncDecl from a Decl.FuncDecl, or None.
+// Mirrors Rust `if let Decl::FuncDecl(f) = decl`.
+func ast_lowerer_extract_func_decl(decl: Decl) -> Option<FuncDecl>:
+    return match decl {
+        Decl.FuncDecl(f) => return Option.Some(f),
+        _ => return Option.None,
+    }
+
+// Extract the (expr?, bindings) pair from a GuardCondition.
+// Mirrors Rust `match c { GuardCondition::Let { pattern, value, .. } => ...,
+// GuardCondition::Bool(e) => ... }`. Buff has no or-patterns and no named-
+// field enum variants, so the dispatch goes through helper functions.
+func ast_lowerer_extract_guard_condition(c: GuardCondition) -> GuardConditionParts:
+    return match c {
+        GuardCondition.Let(pattern, value, span) => return GuardConditionParts.new(expr: Option.Some(value), bindings: pattern_bindings(pattern)),
+        GuardCondition.Bool(e) => return GuardConditionParts.new(expr: Option.Some(e), bindings: Vector.new()),
+    }
+
+// Unwrap helpers (Buff has no infallible unwrap — each follows a checked
+// Option.None test at the call site).
+func ast_lowerer_unwrap_func_call_parts(opt: Option<FuncCallParts>) -> FuncCallParts:
+    return match opt {
+        Some(p) => return p,
+        None => return FuncCallParts.new(callee: expr_missing_sentinel(), args: Vector.new(), span: span_dummy()),
+    }
+
+func ast_lowerer_unwrap_ident(opt: Option<Ident>) -> Ident:
+    return match opt {
+        Some(i) => return i,
+        None => return ident_missing_sentinel(),
+    }
+
+func ast_lowerer_unwrap_node_id(opt: Option<NodeId>) -> NodeId:
+    return match opt {
+        Some(n) => return n,
+        None => return node_id_new(0),
+    }
+
+func ast_lowerer_unwrap_expr(opt: Option<Expr>) -> Expr:
+    return match opt {
+        Some(e) => return e,
+        None => return expr_missing_sentinel(),
+    }
+
+// Drop any entry in `uses` whose Ident.name equals `name`. Mirrors Rust
+// `uses.retain(|i| i.name != var.name)`.
+func ast_lowerer_drop_named(uses: Vector<Ident>, name: String):
+    let kept = Vector.new()
+    for u in uses:
+        if u.name != name:
+            kept.push(u)
+    // Buff Vector has no in-place retain; copy the kept vector back into
+    // uses by clearing + re-pushing (the Rust reference's `uses.retain`
+    // mutates in place).
+    let mut i = 0
+    for i < uses.len():
+        if i < kept.len():
+            uses.set(i, kept.get(i))
+        i = i + 1
+    // Truncate any tail beyond the kept length.
+    for uses.len() > kept.len():
+        uses.pop()
+    return
+
+// Helper — list the binding names of a Vector<Ident>.
+func ast_lowerer_binding_names_from_idents(idents: Vector<Ident>) -> Vector<String>:
+    let out = Vector.new()
+    for i in idents:
+        out.push(i.name)
+    return out
+
+// ---------------------------------------------------------------------------
+// Holder / sentinel structs for the extractor helpers above
+// ---------------------------------------------------------------------------
+
+// Pair of (Ident callee, Vector<Expr> args) returned by detect_async_call.
+// (Buff has no tuple types in the public port surface; a named struct
+// replaces Rust's `(Ident, Vec<Expr>)`.)
+struct Tuple2IdentExprs:
+    ident: Ident
+    exprs: Vector<Expr>
+
+// Unpacked FuncCall fields (helper for extract_func_call).
+struct FuncCallParts:
+    callee: Expr
+    args: Vector<Expr>
+    span: Span
+
+// Unpacked GuardCondition fields (helper for extract_guard_condition).
+struct GuardConditionParts:
+    expr: Option<Expr>
+    bindings: Vector<Ident>
+
+// ---------------------------------------------------------------------------
+// Sentinel constructors (Buff has no infallible unwrap/expect; these replace
+// panic-on-None with documented zero-values for contract-violation paths)
+// ---------------------------------------------------------------------------
+
+// Zero-value Ident returned when an Option<Ident>.None is unwrapped after a
+// checked None test (should never execute if the caller followed the
+// `if opt != Option.None:` contract).
+func ident_missing_sentinel() -> Ident:
+    return ident_new("", span_dummy())
+
+// Zero-value Expr returned on contract violation. Mirrors the Rust host's
+// Expr::Literal(Literal::Int(0), Span::dummy()) sentinel.
+func expr_missing_sentinel() -> Expr:
+    return expr_literal_int_sentinel()
+
+// ---------------------------------------------------------------------------
+// Free-variable extraction
+// ---------------------------------------------------------------------------
+
+// Collect all free-variable Idents read by expr into out.
+//
+// Function-call callee identifiers that are simple names are NOT counted as
+// data uses (they name the function, not a variable). Method-call receivers
+// ARE counted (they carry state).
+//
+// The Rust reference is a single 130-line match on Expr variants with multi-
+// statement arms (each arm pushes Idents or recurses). Buff match arms must
+// be single expressions, so each variant's body is factored into a per-
+// variant helper called from the top-level dispatch match.
+func collect_uses(expr: Expr, out: Vector<Ident>):
+    match expr {
+        Expr.Literal(lit, span) => return collect_uses_literal(out),
+        Expr.Ident(id, span) => return collect_uses_push_ident(out, id),
+        Expr.BinaryOp(lhs, rhs, op, span) => return collect_uses_binary(out, lhs, rhs),
+        Expr.UnaryOp(operand, op, span) => return collect_uses(out, operand),
+        Expr.FuncCall(callee, args, span) => return collect_uses_func_call(out, callee, args),
+        Expr.MethodCall(receiver, method, args, span) => return collect_uses_method_call(out, receiver, args),
+        Expr.StructInit(name, fields, span) => return collect_uses_struct_init(out, fields),
+        Expr.SuspendExpr(inner, span) => return collect_uses(out, inner),
+        Expr.ArrayLit(elements, span) => return collect_uses_each(out, elements),
+        Expr.Index(base, indices, span) => return collect_uses_index(out, base, indices),
+        Expr.IfExpr(cond, then_block, else_block, span) => return collect_uses_if_expr(out, cond, then_block, else_block),
+        Expr.Lambda(params, body, span) => return collect_uses_lambda(out, body),
+        Expr.MatchExpr(scrutinee, arms, span) => return collect_uses_match_expr(out, scrutinee, arms),
+        Expr.StringInterp(parts, span) => return collect_uses_string_interp(out, parts),
+        Expr.MapLit(entries, span) => return collect_uses_map_lit(out, entries),
+        Expr.Try(inner, span) => return collect_uses(out, inner),
+        Expr.Spawn(task, span) => return collect_uses(out, task),
+        Expr.Range(start, end, inclusive, span) => return collect_uses_range(out, start, end),
+        Expr.IfLet(pattern, value, then_block, else_block, span) => return collect_uses_if_let(out, value, then_block, else_block),
+        Expr.TupleLit(members, span) => return collect_uses_each(out, members),
+        Expr.NamedArg(name, value, span) => return collect_uses(out, value),
+    }
+
+// Helper — Expr.Literal arm: no uses.
+func collect_uses_literal(out: Vector<Ident>):
+    return
+
+// Helper — Expr.Ident arm: push the Ident.
+func collect_uses_push_ident(out: Vector<Ident>, id: Ident):
+    out.push(id)
+    return
+
+// Helper — Expr.BinaryOp arm: recurse into lhs and rhs.
+func collect_uses_binary(out: Vector<Ident>, lhs: Expr, rhs: Expr):
+    collect_uses(lhs, out)
+    collect_uses(rhs, out)
+    return
+
+// Helper — Expr.FuncCall arm: a simple-Ident callee names the function, not
+// a data variable. A complex callee (e.g. (fptr)(x)) is treated as a use.
+func collect_uses_func_call(out: Vector<Ident>, callee: Expr, args: Vector<Expr>):
+    let callee_is_ident = ast_lowerer_extract_ident(callee)
+    if callee_is_ident == Option.None:
+        collect_uses(callee, out)
+    for a in args:
+        collect_uses(a, out)
+    return
+
+// Helper — Expr.MethodCall arm: recurse into receiver + each arg.
+func collect_uses_method_call(out: Vector<Ident>, receiver: Expr, args: Vector<Expr>):
+    collect_uses(receiver, out)
+    for a in args:
+        collect_uses(a, out)
+    return
+
+// Helper — Expr.StructInit arm: recurse into each field's value expression.
+func collect_uses_struct_init(out: Vector<Ident>, fields: Vector<Tuple2StrExpr>):
+    for pair in fields:
+        collect_uses(pair.value, out)
+    return
+
+// Helper — Expr.ArrayLit / Expr.TupleLit arm: recurse into each element.
+func collect_uses_each(out: Vector<Ident>, elements: Vector<Expr>):
+    for e in elements:
+        collect_uses(e, out)
+    return
+
+// Helper — Expr.Index arm: recurse into base + each index.
+func collect_uses_index(out: Vector<Ident>, base: Expr, indices: Vector<Expr>):
+    collect_uses(base, out)
+    for idx in indices:
+        collect_uses(idx, out)
+    return
+
+// Helper — Expr.IfExpr arm: recurse into cond + both blocks.
+func collect_uses_if_expr(out: Vector<Ident>, cond: Expr, then_block: Block, else_block: Option<Block>):
+    collect_uses(cond, out)
+    for s in then_block.stmts:
+        collect_stmt_uses(s, out)
+    if else_block != Option.None:
+        let eb = collect_uses_unwrap_block(else_block)
+        for s in eb.stmts:
+            collect_stmt_uses(s, out)
+    return
+
+// Helper — Expr.Lambda arm: conservatively collect all body uses without
+// subtracting params.
+func collect_uses_lambda(out: Vector<Ident>, body: Block):
+    for s in body.stmts:
+        collect_stmt_uses(s, out)
+    return
+
+// Helper — Expr.MatchExpr arm: recurse into scrutinee + each arm body.
+func collect_uses_match_expr(out: Vector<Ident>, scrutinee: Expr, arms: Vector<MatchArm>):
+    collect_uses(scrutinee, out)
+    for arm in arms:
+        for s in arm.body.stmts:
+            collect_stmt_uses(s, out)
+    return
+
+// T21: a string interpolation uses every embedded expression. Literal text
+// runs do not contribute any uses.
+func collect_uses_string_interp(out: Vector<Ident>, parts: Vector<InterpPart>):
+    for part in parts:
+        collect_uses_interp_part(out, part)
+    return
+
+// Helper — one InterpPart: Expr parts contribute uses; Literal parts don't.
+func collect_uses_interp_part(out: Vector<Ident>, part: InterpPart):
+    let expr_opt = interp_part_as_expr(part)
+    if expr_opt != Option.None:
+        let e = ast_lowerer_unwrap_expr(expr_opt)
+        collect_uses(e, out)
+    return
+
+// T25: a map literal uses every key and value expression.
+func collect_uses_map_lit(out: Vector<Ident>, entries: Vector<Tuple2ExprExpr>):
+    for entry in entries:
+        collect_uses(entry.first, out)
+        collect_uses(entry.second, out)
+    return
+
+// T68: `start..end` uses both bounds.
+func collect_uses_range(out: Vector<Ident>, start: Expr, end: Expr):
+    collect_uses(start, out)
+    collect_uses(end, out)
+    return
+
+// T72: `if let PAT = EXPR { then } else { else }` uses the value expression
+// and conservatively recurses into both blocks. The pattern's bindings are
+// NOT uses (they bind names in the then-block).
+func collect_uses_if_let(out: Vector<Ident>, value: Expr, then_block: Block, else_block: Option<Block>):
+    collect_uses(value, out)
+    for s in then_block.stmts:
+        collect_stmt_uses(s, out)
+    if else_block != Option.None:
+        let eb = collect_uses_unwrap_block(else_block)
+        for s in eb.stmts:
+            collect_stmt_uses(s, out)
+    return
+
+// Helper — unwrap an Option<Block> after a checked None test.
+func collect_uses_unwrap_block(opt: Option<Block>) -> Block:
+    return match opt {
+        Some(b) => return b,
+        None => return block_missing_sentinel(),
+    }
+
+// Collect free-variable uses inside a statement (used when recursing into
+// nested blocks for if/lambda/match expressions).
+//
+// The Rust reference is a single 80-line match on Stmt variants with multi-
+// statement arms. Each variant's body is factored into a helper below.
+func collect_stmt_uses(stmt: Stmt, out: Vector<Ident>):
+    match stmt {
+        Stmt.LetDecl(name, value, span) => return collect_uses(value, out),
+        Stmt.LetPattern(pattern, value, span) => return collect_uses(value, out),
+        Stmt.Assignment(target, value, span) => return collect_stmt_uses_assignment(out, target, value),
+        Stmt.ExprStmt(e, span) => return collect_uses(e, out),
+        Stmt.Return(opt_expr, span) => return collect_stmt_uses_return(out, opt_expr),
+        Stmt.Break(span) => return collect_stmt_uses_noop(out),
+        Stmt.Continue(span) => return collect_stmt_uses_noop(out),
+        Stmt.ForIn(var, iter, body, span) => return collect_stmt_uses_for_in(out, var, iter, body),
+        Stmt.ForWhile(cond, body, span) => return collect_stmt_uses_for_while(out, cond, body),
+        Stmt.ForLet(pattern, value, body, span) => return collect_stmt_uses_for_let(out, pattern, value, body),
+        Stmt.Guard(conditions, else_block, span) => return collect_stmt_uses_guard(out, conditions, else_block),
+        Stmt.Defer(expr, span) => return collect_uses(expr, out),
+        Stmt.ComptimeBlock(body, span) => return collect_stmt_uses_comptime(out, body),
+    }
+
+// Helper — LetPattern arm: the destructured bindings don't read outer names
+// (they bind); only the RHS value contributes uses.
+// (Reuses collect_uses(value, out) — handled directly in the match arm.)
+
+// Helper — Assignment arm: collect uses from target and value.
+func collect_stmt_uses_assignment(out: Vector<Ident>, target: Expr, value: Expr):
+    collect_uses(target, out)
+    collect_uses(value, out)
+    return
+
+// Helper — Return arm: collect uses from the optional return expression.
+func collect_stmt_uses_return(out: Vector<Ident>, opt_expr: Option<Expr>):
+    if opt_expr != Option.None:
+        let e = ast_lowerer_unwrap_expr(opt_expr)
+        collect_uses(e, out)
+    return
+
+// Helper — Break/Continue arm: no uses.
+func collect_stmt_uses_noop(out: Vector<Ident>):
+    return
+
+// Helper — ForIn arm: the iterator expression's uses count; the loop
+// variable is bound by the statement (introduces a new name, doesn't read
+// an outer one). Remove the loop variable if it was added by the iter expr.
+func collect_stmt_uses_for_in(out: Vector<Ident>, var: Ident, iter: Expr, body: Block):
+    collect_uses(iter, out)
+    for s in body.stmts:
+        collect_stmt_uses(s, out)
+    // Remove the loop variable if it was added by the iter expr.
+    ast_lowerer_drop_named(out, var.name)
+    return
+
+// Helper — ForWhile arm: cond's uses + each body stmt's uses.
+func collect_stmt_uses_for_while(out: Vector<Ident>, cond: Expr, body: Block):
+    collect_uses(cond, out)
+    for s in body.stmts:
+        collect_stmt_uses(s, out)
+    return
+
+// T72: `for let PAT = EXPR { body }` — the value's uses count; the pattern's
+// bindings are loop-local (drop them from uses if the value happened to
+// mention the same name). Mirrors ForIn's handling of the loop variable.
+func collect_stmt_uses_for_let(out: Vector<Ident>, pattern: Pattern, value: Expr, body: Block):
+    collect_uses(value, out)
+    for s in body.stmts:
+        collect_stmt_uses(s, out)
+    for b in pattern_bindings(pattern):
+        ast_lowerer_drop_named(out, b.name)
+    return
+
+// T73: `guard <conds> else { block }` — each condition's value/expr reads
+// outer names; let-pattern bindings are introduced in the ENCLOSING scope
+// (so they don't count as uses after the binding site, but we still scan
+// them out defensively). The else-block's stmts are recursed.
+func collect_stmt_uses_guard(out: Vector<Ident>, conditions: Vector<GuardCondition>, else_block: Block):
+    for c in conditions:
+        collect_stmt_uses_guard_cond(out, c)
+    for s in else_block.stmts:
+        collect_stmt_uses(s, out)
+    return
+
+// Helper — one GuardCondition.
+func collect_stmt_uses_guard_cond(out: Vector<Ident>, c: GuardCondition):
+    let extracted = ast_lowerer_extract_guard_condition(c)
+    let expr_opt = extracted.expr
+    if expr_opt != Option.None:
+        let e = ast_lowerer_unwrap_expr(expr_opt)
+        collect_uses(e, out)
+    // The pattern's bindings are introduced by this guard; remove any same-
+    // named uses that the value may have added (mirroring ForLet's treatment).
+    let pat_bindings = extracted.bindings
+    for b in pat_bindings:
+        ast_lowerer_drop_named(out, b.name)
+    return
+
+// Helper — ComptimeBlock arm: collect uses from each body stmt.
+func collect_stmt_uses_comptime(out: Vector<Ident>, body: Block):
+    for s in body.stmts:
+        collect_stmt_uses(s, out)
+    return
+
+// ---------------------------------------------------------------------------
+// Holder structs for free-variable extraction (Buff has no tuple types)
+// ---------------------------------------------------------------------------
+
+// A (name, value) pair inside an Expr.StructInit fields vector.
+struct Tuple2StrExpr:
+    name: String
+    value: Expr
+
+// A (key, value) pair inside an Expr.MapLit entries vector.
+struct Tuple2ExprExpr:
+    first: Expr
+    second: Expr
+
+// ---------------------------------------------------------------------------
+// Display
+// ---------------------------------------------------------------------------
+
+// Format a slice of Idents as `a, b, c`.
+func fmt_idents(idents: Vector<Ident>) -> String:
+    let out = ""
+    let mut i = 0
+    let mut first = true
+    for id in idents:
+        if first == false:
+            out = out + ", "
+        out = out + id.name
+        first = false
+    return out
+
+// Format a ComputeNode. Mirrors Rust `impl fmt::Display for ComputeNode`.
+func compute_node_to_string(n: ComputeNode) -> String:
+    return "Compute(" + n.description + ") defs=[" + fmt_idents(n.defs) + "] uses=[" + fmt_idents(n.uses) + "]"
+
+// Format an IoNode. Mirrors Rust `impl fmt::Display for IoNode`.
+func io_node_to_string(n: IoNode) -> String:
+    return "IO(" + ident_to_string(n.callee) + ") defs=[" + fmt_idents(n.defs) + "] uses=[" + fmt_idents(n.uses) + "] suspend=" + n.is_suspension_point.to_string()
+
+// Format a TransferNode. Mirrors Rust `impl fmt::Display for TransferNode`.
+func transfer_node_to_string(n: TransferNode) -> String:
+    return "Transfer(" + ident_to_string(n.var) + ", " + memory_space_to_string(n.from_space) + " -> " + memory_space_to_string(n.to_space) + ")"
+
+// Format a ScheduleNode. Mirrors Rust `impl fmt::Display for ScheduleNode`.
+func schedule_node_to_string(n: ScheduleNode) -> String:
+    let governed_str = schedule_node_fmt_governed(n.governed)
+    return "Schedule(decision=" + dispatch_decision_to_string(n.decision) + ", governed=[" + governed_str + "])"
+
+// Helper — join a Vector<NodeId> as `%n, %m, ...`.
+func schedule_node_fmt_governed(governed: Vector<NodeId>) -> String:
+    let out = ""
+    let mut first = true
+    for id in governed:
+        if first == false:
+            out = out + ", "
+        out = out + node_id_to_string(id)
+        first = false
+    return out
+
+// Format an IrNode (dispatches to the variant's display). Mirrors Rust
+// `impl fmt::Display for IrNode`.
+func ir_node_to_string(node: IrNode) -> String:
+    return match node {
+        IrNode.Compute(n) => return compute_node_to_string(n),
+        IrNode.IONode(n) => return io_node_to_string(n),
+        IrNode.Transfer(n) => return transfer_node_to_string(n),
+        IrNode.Schedule(n) => return schedule_node_to_string(n),
+    }
+
+// Format an IrGraph as a human-readable dump. Mirrors Rust `impl fmt::Display
+// for IrGraph`.
+func ir_graph_to_string(g: IrGraph) -> String:
+    let edge_count = ir_graph_count_edges(g)
+    let out = "IR Graph (" + g.nodes.len().to_string() + " nodes, " + edge_count.to_string() + " edges):\n"
+    // Nodes in ascending NodeId order (Buff Map iterates keys in ascending
+    // order, so the explicit sort is implicit).
+    let body = ir_graph_render_body(g)
+    return out + body
+
+// Helper — count total edges across the graph.
+func ir_graph_count_edges(g: IrGraph) -> Int:
+    let mut total = 0
+    for id in g.edges.keys():
+        let opt = g.edges.get(id)
+        if opt != Option.None:
+            let s = ir_graph_unwrap_set(opt)
+            total = total + s.len()
+    return total
+
+// Helper — render the node list, edge list, and entry/exit lists.
+func ir_graph_render_body(g: IrGraph) -> String:
+    let s = ""
+    for id in g.nodes.keys():
+        let node_opt = g.nodes.get(id)
+        if node_opt != Option.None:
+            let node = ir_graph_render_unwrap_node(node_opt)
+            s = s + "  " + node_id_to_string(id) + " " + ir_node_to_string(node) + "\n"
+    s = s + "Edges:\n"
+    for id in g.nodes.keys():
+        let deps_opt = g.edges.get(id)
+        if deps_opt != Option.None:
+            let deps = ir_graph_unwrap_set(deps_opt)
+            for dep in deps:
+                s = s + "  " + node_id_to_string(id) + " -> " + node_id_to_string(dep) + "\n"
+    s = s + "Entry: [" + ir_graph_render_id_list(g.entry_nodes) + "]\n"
+    s = s + "Exit: [" + ir_graph_render_id_list(g.exit_nodes) + "]\n"
+    return s
+
+// Helper — render a Vector<NodeId> as `%n, %m, ...`.
+func ir_graph_render_id_list(ids: Vector<NodeId>) -> String:
+    let out = ""
+    let mut first = true
+    for id in ids:
+        if first == false:
+            out = out + ", "
+        out = out + node_id_to_string(id)
+        first = false
+    return out
+
+// Helper — unwrap Option<IrNode> after a checked None test.
+func ir_graph_render_unwrap_node(opt: Option<IrNode>) -> IrNode:
+    return match opt {
+        Some(n) => return n,
+        None => return ir_node_compute(compute_node_missing_sentinel()),
+    }
+
+// Helper — zero-value ComputeNode for sentinel paths.
+func compute_node_missing_sentinel() -> ComputeNode:
+    return ComputeNode.new(
+        id: node_id_new(0),
+        source_expr: Option.None,
+        source_stmt: Option.None,
+        defs: Vector.new(),
+        uses: Vector.new(),
+        span: span_dummy(),
+        description: "<missing>",
+    )
+
+// Helper — zero-value Block for sentinel paths.
+func block_missing_sentinel() -> Block:
+    return block_new(Vector.new(), span_dummy())
+
+// ---------------------------------------------------------------------------
+// Forward declarations — opaque types from sibling self-host/ast ports.
+// ---------------------------------------------------------------------------
+//
+// The following types and functions are defined in sibling files
+// (self-host/ast/{common,expr,stmt,decl}.buff, self-host/error/span.buff).
+// They are referenced here as opaque types — only their positional-variant
+// shapes (per the parser-port convention) appear in match arms. Definitions
+// are elided from this port; the M7 monolith loader will link them.
+//
+// This section documents the assumed API surface so readers of this port can
+// map the Rust reference to the Buff calls without leaving the file.
+
+// Ident — opaque. Field `name: String` is read in several places.
+// Construction: `ident_new(name: String, span: Span) -> Ident`.
+// Display: `ident_to_string(i: Ident) -> String`.
+
+// Block — opaque. Field `stmts: Vector<Stmt>` is iterated in several places.
+// Construction: `block_new(stmts: Vector<Stmt>, span: Span) -> Block`.
+
+// Pattern — opaque.
+// `pattern_bindings(p: Pattern) -> Vector<Ident>` — list the Ident bindings.
+// `pattern_to_string(p: Pattern) -> String`.
+// `pattern_binding_names(p: Pattern) -> Vector<String>`.
+
+// MatchArm — opaque. Field `body: Block` is iterated.
+
+// InterpPart — opaque.
+// `interp_part_as_expr(p: InterpPart) -> Option<Expr>` — Some(e) for Expr
+// parts, None for Literal parts.
+
+// GuardCondition — opaque tuple-variant enum:
+//   GuardCondition.Let(pattern: Pattern, value: Expr, span: Span)
+//   GuardCondition.Bool(e: Expr)
+// `guard_condition_to_string(c: GuardCondition) -> String`.
+
+// Stmt — opaque tuple-variant enum, field order per parser/stmt.buff
+// convention:
+//   Stmt.LetDecl(name: Ident, value: Expr, span: Span)
+//   Stmt.LetPattern(pattern: Pattern, value: Expr, span: Span)
+//   Stmt.ExprStmt(expr: Expr, span: Span)
+//   Stmt.Assignment(target: Expr, value: Expr, span: Span)
+//   Stmt.Return(opt_expr: Option<Expr>, span: Span)
+//   Stmt.Break(span: Span)
+//   Stmt.Continue(span: Span)
+//   Stmt.ForIn(var: Ident, iter: Expr, body: Block, span: Span)
+//   Stmt.ForWhile(cond: Expr, body: Block, span: Span)
+//   Stmt.ForLet(pattern: Pattern, value: Expr, body: Block, span: Span)
+//   Stmt.Guard(conditions: Vector<GuardCondition>, else_block: Block, span: Span)
+//   Stmt.Defer(expr: Expr, span: Span)
+//   Stmt.ComptimeBlock(body: Block, span: Span)
+// `stmt_to_string(s: Stmt) -> String`.
+
+// Expr — opaque tuple-variant enum, field order per parser/expr.buff
+// convention:
+//   Expr.Literal(lit: Literal, span: Span)
+//   Expr.Ident(id: Ident, span: Span)
+//   Expr.BinaryOp(lhs: Expr, rhs: Expr, op: BinaryOp, span: Span)
+//   Expr.UnaryOp(operand: Expr, op: UnaryOp, span: Span)
+//   Expr.FuncCall(callee: Expr, args: Vector<Expr>, span: Span)
+//   Expr.MethodCall(receiver: Expr, method: Ident, args: Vector<Expr>, span: Span)
+//   Expr.StructInit(name: String, fields: Vector<Tuple2StrExpr>, span: Span)
+//   Expr.SuspendExpr(inner: Expr, span: Span)
+//   Expr.ArrayLit(elements: Vector<Expr>, span: Span)
+//   Expr.Index(base: Expr, indices: Vector<Expr>, span: Span)
+//   Expr.IfExpr(cond: Expr, then_block: Block, else_block: Option<Block>, span: Span)
+//   Expr.Lambda(params: Vector<Param>, body: Block, span: Span)
+//   Expr.MatchExpr(scrutinee: Expr, arms: Vector<MatchArm>, span: Span)
+//   Expr.StringInterp(parts: Vector<InterpPart>, span: Span)
+//   Expr.MapLit(entries: Vector<Tuple2ExprExpr>, span: Span)
+//   Expr.Try(inner: Expr, span: Span)
+//   Expr.Spawn(task: Expr, span: Span)
+//   Expr.Range(start: Expr, end: Expr, inclusive: Bool, span: Span)
+//   Expr.IfLet(pattern: Pattern, value: Expr, then_block: Block, else_block: Option<Block>, span: Span)
+//   Expr.TupleLit(members: Vector<Expr>, span: Span)
+//   Expr.NamedArg(name: String, value: Expr, span: Span)
+// `expr_to_string(e: Expr) -> String`.
+// `expr_literal_int_sentinel() -> Expr`.
+
+// Decl — opaque tuple-variant enum:
+//   Decl.FuncDecl(f: FuncDecl)
+
+// FuncDecl — opaque. Fields read: `is_async: Bool`, `name: Ident`, `body: Block`.
