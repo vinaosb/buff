@@ -231,7 +231,7 @@ func resolve_buff_map_path() -> Option<String>:
 // return it; otherwise fall through to the `<current_exe>.buffmap`
 // branch. Extracted so the `match` chain stays single-expression.
 func resolve_from_env_var(path_str: String) -> Option<String>:
-    if path_exists(path_str):
+    if path_exists(path_str) == true:
         return Option.Some(path_str)
     return resolve_from_current_exe()
 
@@ -310,15 +310,9 @@ func unwrap_thread_name(opt: Option<String>) -> String:
 // helper.
 func render_location_or_skip(location: Option<(String, Int, Int)>, map_opt: Option<SourceMap>):
     match location {
-        None => skip_render(),
+        None => "",
         Some(loc) => render_loc_with_map(loc, map_opt),
     }
-
-// No-op marker for the `None` branch of `render_location_or_skip`'s
-// outer match. Buff `match` arms must be single expressions — a
-// "do-nothing" body needs a function-call shape.
-func skip_render():
-    return
 
 // Inner step: render the `-->` line for the `(file, line, col)` triple,
 // consulting the SourceMap (if any) for a Buff-location translation.
@@ -359,19 +353,18 @@ func unwrap_buff_path(map: SourceMap) -> String:
 // No-op when the trace is empty.
 func render_buff_stack_trace(map_opt: Option<SourceMap>):
     let trace = remap_panic_backtrace(map_opt)
-    if trace.frames.len() == 0:
-        return
-    stderr_writeln("")
-    stderr_writeln("Buff stack trace:")
-    let mut idx = 0
-    for idx < trace.frames.len():
-        let frame = trace.frames[idx]
-        let name = unwrap_frame_name(frame.buff_name)
-        stderr_writeln(
-            "  " + idx.to_string() + ": " + name + " ("
-            + trace.buff_file_display + ":" + frame.buff_line.to_string() + ":" + frame.buff_col.to_string() + ")",
-        )
-        idx = idx + 1
+    if trace.frames.len() > 0:
+        stderr_writeln("")
+        stderr_writeln("Buff stack trace:")
+        let mut idx = 0
+        for idx < trace.frames.len():
+            let frame = trace.frames[idx]
+            let name = unwrap_frame_name(frame.buff_name)
+            stderr_writeln(
+                "  " + idx.to_string() + ": " + name + " ("
+                + trace.buff_file_display + ":" + frame.buff_line.to_string() + ":" + frame.buff_col.to_string() + ")",
+            )
+            idx = idx + 1
 
 // Extract the frame name from `Option<String>`, falling back to
 // `"<anonymous>"`. Mirrors the Rust `frame.buff_name.as_deref()
@@ -392,7 +385,7 @@ func render_full_rust_backtrace_if_enabled():
     let env_result = env_var("RUST_BACKTRACE")
     match env_result {
         Some(v) => render_full_rust_backtrace_if_one(v),
-        None => skip_render(),
+        None => "",
     }
 
 // Inner step: emit the full Rust backtrace when the env-var value is
@@ -404,7 +397,7 @@ func render_full_rust_backtrace_if_one(v: String):
         stderr_writeln("Full Rust backtrace (RUST_BACKTRACE=1):")
         stderr_writeln(backtrace_force_capture_to_string())
     else:
-        skip_render()
+        ""
 
 // =============================================================================
 // BuffTrace / BuffTraceFrame data types
@@ -469,7 +462,7 @@ func collect_remapped_frames(backtrace_str: String, map: SourceMap) -> Vector<Bu
         let rust_line = rust_lines[i]
         let loc_opt = source_map_lookup_buff(map, rust_line)
         match loc_opt {
-            None => skip_frame(),
+            None => "",
             Some(loc) => frames.push(BuffTraceFrame.new(
                 buff_line: loc.line,
                 buff_col: loc.col,
@@ -483,9 +476,6 @@ func collect_remapped_frames(backtrace_str: String, map: SourceMap) -> Vector<Bu
 // No-op marker for the `None` branch of the per-frame `match` above.
 // Buff `match` arms must be single expressions; a "skip this frame"
 // body needs a function-call shape.
-func skip_frame():
-    return
-
 // =============================================================================
 // Backtrace-string line extraction
 // =============================================================================
@@ -502,7 +492,7 @@ func extract_rust_lines_from_backtrace(backtrace_str: String) -> Vector<Int>:
     for i < frame_lines.len():
         let line = frame_lines[i]
         match extract_rust_line_from_frame(line) {
-            None => skip_frame(),
+            None => "",
             Some(rust_line) => lines.push(rust_line),
         }
         i = i + 1

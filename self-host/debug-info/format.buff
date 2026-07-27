@@ -258,21 +258,15 @@ func source_map_from_buff_map_file(file: BuffMapFile) -> SourceMap:
         unwrap_or_default_string(file.buff_file),
         source_id_new(file.source_id),
     )
-    match file.rust_file {
-        None => skip_option(),
-        Some(rust_file) => map = source_map_with_rust_file(map, rust_file),
+    // Buff match arms must be expressions, not assignments. Restructure
+    // `match { Some(x) => map = f(map, x) }` into `map = match { Some(x) => f(map, x) }`.
+    map = match file.rust_file {
+        None => map,
+        Some(rust_file) => source_map_with_rust_file(map, rust_file),
     }
     map = add_function_mappings(map, file.function_mappings)
     map = add_line_mappings(map, file.line_mappings)
     return map
-
-// No-op marker for the `None` branch of the `match file.rust_file` above.
-// Buff `match` arms must be single expressions; a multi-statement "set
-// map and continue" body lives in the `Some(...)` branch, so the `None`
-// arm needs a function-call shape. Mirrors the `skip_decl` pattern from
-// capture.buff and the `marker` pattern from error/lib.buff.
-func skip_option():
-    return
 
 // Walk a `Vector<FunctionAnchor>` and produce the matching
 // `Vector<FunctionMapping>` projection. Extracted as a helper so
