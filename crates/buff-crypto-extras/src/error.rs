@@ -97,3 +97,35 @@ impl From<argon2::Error> for CryptoError {
         CryptoError::Argon2(err.to_string())
     }
 }
+
+// p256 0.13 / p384 0.13 API drift fix: `SecretKey::from_slice` and
+// `PublicKey::from_sec1_bytes` return `Result<_, elliptic_curve::Error>`
+// (re-exported via `p256::elliptic_curve` / `p384::elliptic_curve` —
+// same underlying `elliptic-curve 0.13` crate). The `?` operator in
+// `ecc.rs` needs this `From` impl to convert the curve error into
+// `CryptoError::Ecdh`. `elliptic_curve::Error` impls `Display`.
+impl From<p256::elliptic_curve::Error> for CryptoError {
+    fn from(err: p256::elliptic_curve::Error) -> Self {
+        CryptoError::Ecdh(err.to_string())
+    }
+}
+
+// rsa 0.9 API drift fix: `RsaPrivateKey::from_pkcs1_pem` returns
+// `Result<_, rsa::pkcs1::Error>` (distinct from `rsa::errors::Error`).
+// The `?` operator in `rsa.rs::sign`'s pkcs1 fallback path needs this
+// `From` impl. `rsa::pkcs1::Error` impls `Display`.
+impl From<rsa::pkcs1::Error> for CryptoError {
+    fn from(err: rsa::pkcs1::Error) -> Self {
+        CryptoError::Rsa(err.to_string())
+    }
+}
+
+// rsa 0.9 API drift fix: `Signature::try_from(&[u8])` returns
+// `Result<_, signature::Error>` (from the `signature` crate, distinct
+// from `rsa::errors::Error`). The `?` operator in `rsa.rs::verify`
+// needs this `From` impl. `signature::Error` impls `Display`.
+impl From<signature::Error> for CryptoError {
+    fn from(err: signature::Error) -> Self {
+        CryptoError::Rsa(err.to_string())
+    }
+}
