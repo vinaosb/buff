@@ -635,8 +635,9 @@ Wave 7 (Bootstrap):
 
 > **CORRECTED v16**: Parser is 3,640 LOC (not 14,204). 2-way split (not 5-way).
 
-- [ ] **P4.4 — buff-lang-ast port** (5,246 LOC, 9 files — MOST PORTABLE, 0 dyn-trait)
+- [x] **P4.4 — buff-lang-ast port** (5,246 LOC, 9 files — MOST PORTABLE, 0 dyn-trait)
   **Parallelization**: 9 agents (one per file: common, decl, expr, ir, lib, lossless, op, stmt, ty).
+  **Status**: DONE commit `fdb9589`. All 9/9 files pass `buff check` (5,327 .buff lines).
 
 - [ ] **P4.1 — buff-lang-parser port** (3,640 LOC, 6 files)
   **Split** (v16 CORRECTED — by file boundary, not syntax category):
