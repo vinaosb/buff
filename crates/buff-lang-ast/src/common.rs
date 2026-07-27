@@ -114,6 +114,66 @@ impl fmt::Display for Param {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+/// Serialize a [`Span`] (foreign type from `buff-lang-error`) into a
+/// deterministic JSON object.
+///
+/// Emits all three fields verbatim — `start`, `end`, `source_id` (unwrapped
+/// from its newtype). This is a free function (not a method on `Span`)
+/// because `Span` is defined in another crate and we use manual `to_json`
+/// everywhere instead of serde derives.
+pub fn span_to_json(span: Span) -> serde_json::Value {
+    use serde_json::json;
+    json!({
+        "start": span.start,
+        "end": span.end,
+        "source_id": span.source_id.0,
+    })
+}
+
+impl Ident {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        json!({
+            "name": self.name,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl Block {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let stmts: Vec<serde_json::Value> = self.stmts.iter().map(Stmt::to_json).collect();
+        json!({
+            "stmts": stmts,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl Param {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        json!({
+            "name": self.name.to_json(),
+            "ty": self.ty.to_json(),
+            "default_value": match &self.default_value {
+                Some(e) => e.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "is_comptime": self.is_comptime,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

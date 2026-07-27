@@ -121,6 +121,74 @@ impl fmt::Display for TypeRef {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl TypeRef {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        match self {
+            TypeRef::Named { name, span } => json!({
+                "type": "Named",
+                "name": name.to_json(),
+                "span": span_to_json(*span),
+            }),
+            TypeRef::Generic { base, args, span } => {
+                let args_json: Vec<serde_json::Value> =
+                    args.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Generic",
+                    "base": base.to_json(),
+                    "args": args_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            TypeRef::Option(inner, span) => json!({
+                "type": "Option",
+                "inner": inner.to_json(),
+                "span": span_to_json(*span),
+            }),
+            TypeRef::Function {
+                params,
+                return_type,
+                is_async,
+                span,
+            } => {
+                let params_json: Vec<serde_json::Value> =
+                    params.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Function",
+                    "params": params_json,
+                    "return_type": return_type.to_json(),
+                    "is_async": is_async,
+                    "span": span_to_json(*span),
+                })
+            }
+            TypeRef::Union(members, span) => {
+                let members_json: Vec<serde_json::Value> =
+                    members.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Union",
+                    "members": members_json,
+                    "span": span_to_json(*span),
+                })
+            }
+            TypeRef::Tuple(members, span) => {
+                let members_json: Vec<serde_json::Value> =
+                    members.iter().map(TypeRef::to_json).collect();
+                json!({
+                    "type": "Tuple",
+                    "members": members_json,
+                    "span": span_to_json(*span),
+                })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

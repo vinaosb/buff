@@ -38,3 +38,10 @@ pub use ty::*;
 
 // Re-export `Span` from `buff-lang-error` for convenience — do not redefine.
 pub use buff_lang_error::Span;
+
+// P0.1.2b: Re-export the deterministic `Span` JSON serializer so consumers
+// (e.g. `buff check --dump-ast`) can call `buff_lang_ast::span_to_json(span)`
+// without reaching into the `common` submodule. Defined in `common.rs`
+// because `Span` is a foreign type and `common` is the natural home for
+// span-related helpers.
+pub use common::span_to_json;

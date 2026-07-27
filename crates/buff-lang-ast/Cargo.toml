@@ -7,6 +7,12 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 thiserror.workspace = true
 buff-lang-error.workspace = true
+# P0.1.2b: `to_json()` deterministic JSON serialization for `buff check --dump-ast`.
+# Workspace-pinned at the root (`serde_json = "1"`). Default feature set gives
+# BTreeMap-backed objects → alphabetical key order → byte-identical output for
+# the same AST. Do NOT enable the `preserve_order` feature (it would switch
+# objects to IndexMap and break determinism).
+serde_json.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

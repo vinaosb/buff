@@ -155,6 +155,362 @@ impl fmt::Display for Decl {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl Decl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Decl::FuncDecl(d) => json!({ "type": "FuncDecl", "decl": d.to_json() }),
+            Decl::StructDecl(d) => json!({ "type": "StructDecl", "decl": d.to_json() }),
+            Decl::EnumDecl(d) => json!({ "type": "EnumDecl", "decl": d.to_json() }),
+            Decl::ImportDecl(d) => json!({ "type": "ImportDecl", "decl": d.to_json() }),
+            Decl::ModuleDecl(d) => json!({ "type": "ModuleDecl", "decl": d.to_json() }),
+            Decl::TraitDecl(d) => json!({ "type": "TraitDecl", "decl": d.to_json() }),
+            Decl::ExportDecl(d) => json!({ "type": "ExportDecl", "decl": d.to_json() }),
+            Decl::ReexportDecl(d) => json!({ "type": "ReexportDecl", "decl": d.to_json() }),
+            Decl::ExternCrateDecl(d) => json!({ "type": "ExternCrateDecl", "decl": d.to_json() }),
+            Decl::ExternFuncDecl(d) => json!({ "type": "ExternFuncDecl", "decl": d.to_json() }),
+            Decl::ExtendBlock(d) => json!({ "type": "ExtendBlock", "decl": d.to_json() }),
+            Decl::ImplBlock(d) => json!({ "type": "ImplBlock", "decl": d.to_json() }),
+        }
+    }
+}
+
+impl TypeParam {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let bounds_json: Vec<serde_json::Value> =
+            self.bounds.iter().map(TypeRef::to_json).collect();
+        json!({
+            "name": self.name.to_json(),
+            "bounds": bounds_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl FuncDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let params_json: Vec<serde_json::Value> =
+            self.params.iter().map(|p| p.to_json()).collect();
+        let attributes_json: Vec<serde_json::Value> =
+            self.attributes.iter().map(Attribute::to_json).collect();
+        let type_params_json: Vec<serde_json::Value> =
+            self.type_params.iter().map(TypeParam::to_json).collect();
+        json!({
+            "name": self.name.to_json(),
+            "params": params_json,
+            "return_type": match &self.return_type {
+                Some(t) => t.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "body": self.body.to_json(),
+            "is_async": self.is_async,
+            "is_unsafe": self.is_unsafe,
+            "is_extern": self.is_extern,
+            "attributes": attributes_json,
+            "type_params": type_params_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl Attribute {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        // BTreeMap<String, String> → deterministic object via json!() macro.
+        let named_args_json: serde_json::Value =
+            serde_json::to_value(&self.named_args).unwrap_or(serde_json::Value::Null);
+        json!({
+            "name": self.name.to_json(),
+            "args": self.args,
+            "named_args": named_args_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl StructDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let fields_json: Vec<serde_json::Value> = self
+            .fields
+            .iter()
+            .map(|(n, t)| json!({ "name": n.to_json(), "ty": t.to_json() }))
+            .collect();
+        let traits_json: Vec<serde_json::Value> =
+            self.traits.iter().map(|i| i.to_json()).collect();
+        let type_params_json: Vec<serde_json::Value> =
+            self.type_params.iter().map(TypeParam::to_json).collect();
+        json!({
+            "name": self.name.to_json(),
+            "fields": fields_json,
+            "traits": traits_json,
+            "type_params": type_params_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl EnumDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let type_params_json: Vec<serde_json::Value> =
+            self.type_params.iter().map(TypeParam::to_json).collect();
+        let variants_json: Vec<serde_json::Value> =
+            self.variants.iter().map(EnumVariant::to_json).collect();
+        json!({
+            "name": self.name.to_json(),
+            "type_params": type_params_json,
+            "variants": variants_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl EnumVariant {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let data_json = match &self.data {
+            Some(tys) => {
+                let tys_json: Vec<serde_json::Value> =
+                    tys.iter().map(TypeRef::to_json).collect();
+                serde_json::Value::Array(tys_json)
+            }
+            None => serde_json::Value::Null,
+        };
+        json!({
+            "name": self.name.to_json(),
+            "data": data_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ImportDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let path_json: Vec<serde_json::Value> =
+            self.path.iter().map(|i| i.to_json()).collect();
+        let imports_json: Vec<serde_json::Value> =
+            self.imports.iter().map(|i| i.to_json()).collect();
+        json!({
+            "path": path_json,
+            "imports": imports_json,
+            "alias": match &self.alias {
+                Some(a) => a.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "from_path": self.from_path,
+            "wildcard": self.wildcard,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ExportDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        json!({
+            "inner": self.inner.to_json(),
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ReexportDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let names_json: Vec<serde_json::Value> =
+            self.names.iter().map(|i| i.to_json()).collect();
+        json!({
+            "from": self.from,
+            "names": names_json,
+            "wildcard": self.wildcard,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ModuleDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        json!({
+            "name": self.name.to_json(),
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ExternCrateDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        json!({
+            "name": self.name,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ExternFuncDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let params_json: Vec<serde_json::Value> =
+            self.params.iter().map(|p| p.to_json()).collect();
+        json!({
+            "abi": self.abi,
+            "crate_name": self.crate_name,
+            "name": self.name.to_json(),
+            "params": params_json,
+            "return_type": match &self.return_type {
+                Some(t) => t.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl TraitDecl {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let supertraits_json: Vec<serde_json::Value> =
+            self.supertraits.iter().map(TypeRef::to_json).collect();
+        let associated_types_json: Vec<serde_json::Value> = self
+            .associated_types
+            .iter()
+            .map(AssociatedType::to_json)
+            .collect();
+        let required_json: Vec<serde_json::Value> =
+            self.required.iter().map(MethodSig::to_json).collect();
+        let defaults_json: Vec<serde_json::Value> =
+            self.defaults.iter().map(FuncDecl::to_json).collect();
+        json!({
+            "name": self.name.to_json(),
+            "supertraits": supertraits_json,
+            "associated_types": associated_types_json,
+            "required": required_json,
+            "defaults": defaults_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl MethodSig {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let params_json: Vec<serde_json::Value> =
+            self.params.iter().map(|p| p.to_json()).collect();
+        json!({
+            "name": self.name.to_json(),
+            "params": params_json,
+            "return_type": match &self.return_type {
+                Some(t) => t.to_json(),
+                None => serde_json::Value::Null,
+            },
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl AssociatedType {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let bounds_json: Vec<serde_json::Value> =
+            self.bounds.iter().map(TypeRef::to_json).collect();
+        json!({
+            "name": self.name.to_json(),
+            "bounds": bounds_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl AssociatedTypeBinding {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        json!({
+            "name": self.name.to_json(),
+            "target": self.target.to_json(),
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ImplBlock {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let type_bindings_json: Vec<serde_json::Value> = self
+            .type_bindings
+            .iter()
+            .map(AssociatedTypeBinding::to_json)
+            .collect();
+        let methods_json: Vec<serde_json::Value> =
+            self.methods.iter().map(FuncDecl::to_json).collect();
+        json!({
+            "trait_name": self.trait_name.to_json(),
+            "target": self.target.to_json(),
+            "type_bindings": type_bindings_json,
+            "methods": methods_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
+impl ExtendBlock {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        let methods_json: Vec<serde_json::Value> =
+            self.methods.iter().map(FuncDecl::to_json).collect();
+        json!({
+            "target": self.target.to_json(),
+            "methods": methods_json,
+            "span": span_to_json(self.span),
+        })
+    }
+}
+
 /// A generic type parameter declaration (T13).
 ///
 /// Represents a single `<T>` or `<T: Bound>` in a generic parameter list.

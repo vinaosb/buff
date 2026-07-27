@@ -242,6 +242,165 @@ impl fmt::Display for GuardCondition {
     }
 }
 
+// ---------------------------------------------------------------------------
+// JSON serialization (P0.1.2b)
+// ---------------------------------------------------------------------------
+
+impl Stmt {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        match self {
+            Stmt::LetDecl {
+                name,
+                value,
+                mutable,
+                ty,
+                span,
+            } => json!({
+                "type": "LetDecl",
+                "name": name.to_json(),
+                "value": value.to_json(),
+                "mutable": mutable,
+                "ty": match ty {
+                    Some(t) => t.to_json(),
+                    None => serde_json::Value::Null,
+                },
+                "span": span_to_json(*span),
+            }),
+            Stmt::Assignment {
+                target,
+                op,
+                value,
+                span,
+            } => json!({
+                "type": "Assignment",
+                "target": target.to_json(),
+                "op": op.to_json(),
+                "value": value.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::ExprStmt(e, span) => json!({
+                "type": "ExprStmt",
+                "expr": e.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::Return(opt, span) => json!({
+                "type": "Return",
+                "value": match opt {
+                    Some(e) => e.to_json(),
+                    None => serde_json::Value::Null,
+                },
+                "span": span_to_json(*span),
+            }),
+            Stmt::Break(span) => json!({
+                "type": "Break",
+                "span": span_to_json(*span),
+            }),
+            Stmt::Continue(span) => json!({
+                "type": "Continue",
+                "span": span_to_json(*span),
+            }),
+            Stmt::ForIn {
+                var,
+                iter,
+                body,
+                span,
+            } => json!({
+                "type": "ForIn",
+                "var": var.to_json(),
+                "iter": iter.to_json(),
+                "body": body.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::ForWhile { cond, body, span } => json!({
+                "type": "ForWhile",
+                "cond": cond.to_json(),
+                "body": body.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::LetPattern {
+                pattern,
+                value,
+                mutable,
+                ty,
+                span,
+            } => json!({
+                "type": "LetPattern",
+                "pattern": pattern.to_json(),
+                "value": value.to_json(),
+                "mutable": mutable,
+                "ty": match ty {
+                    Some(t) => t.to_json(),
+                    None => serde_json::Value::Null,
+                },
+                "span": span_to_json(*span),
+            }),
+            Stmt::ForLet {
+                pattern,
+                value,
+                body,
+                span,
+            } => json!({
+                "type": "ForLet",
+                "pattern": pattern.to_json(),
+                "value": value.to_json(),
+                "body": body.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::Guard {
+                conditions,
+                else_block,
+                span,
+            } => {
+                let conditions_json: Vec<serde_json::Value> =
+                    conditions.iter().map(GuardCondition::to_json).collect();
+                json!({
+                    "type": "Guard",
+                    "conditions": conditions_json,
+                    "else_block": else_block.to_json(),
+                    "span": span_to_json(*span),
+                })
+            }
+            Stmt::Defer { expr, span } => json!({
+                "type": "Defer",
+                "expr": expr.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::ComptimeBlock { body, span } => json!({
+                "type": "ComptimeBlock",
+                "body": body.to_json(),
+                "span": span_to_json(*span),
+            }),
+        }
+    }
+}
+
+impl GuardCondition {
+    /// Deterministic JSON serialization for `buff check --dump-ast` (P0.1.2b).
+    pub fn to_json(&self) -> serde_json::Value {
+        use crate::common::span_to_json;
+        use serde_json::json;
+        match self {
+            GuardCondition::Let {
+                pattern,
+                value,
+                span,
+            } => json!({
+                "type": "Let",
+                "pattern": pattern.to_json(),
+                "value": value.to_json(),
+                "span": span_to_json(*span),
+            }),
+            GuardCondition::Bool(expr) => json!({
+                "type": "Bool",
+                "expr": expr.to_json(),
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
