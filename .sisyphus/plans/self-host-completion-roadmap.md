@@ -233,12 +233,12 @@ Wave 7 (Bootstrap):
 
 > These are SPECS, not code. Complete before any Wave 0 work. All are writing tasks.
 
-- [ ] **P0.0 — Author Porting Conventions doc** (Metis PP-2)
+- [x] **P0.0 — Author Porting Conventions doc** (Metis PP-2)
   **What**: Create `.sisyphus/decisions/porting-conventions.md` specifying: `.buff` file header format, naming conventions (snake_case preserved), comment policy (preserve Rust comments), error-handling pattern (Buff has no `?` — use Result propagation), test file layout (`tests/equivalence_{fn_name}.buff`), import ordering, module structure. ALL 10 port agents MUST read this as first step.
   **Acceptance**: Doc covers 7+ convention categories with before/after snippets per convention.
   **Commit**: `docs: porting conventions (P0.0)`
 
-- [ ] **P0.0.1 — Initialize extensions-counter.json** (Metis PP-4)
+- [x] **P0.0.1 — Initialize extensions-counter.json** (Metis PP-4)
   **What**: Create `.sisyphus/evidence/extensions-counter.json` with `{"used": 0, "max": 3, "items": [], "reserved": []}`. Add pre-commit hook (`.githooks/pre-commit`) that rejects commits where `extensions-counter.json` has `used > max`.
   **Acceptance**: File exists; pre-commit hook executable; `echo '{"used":4}' > extensions-counter.json && git commit` gets REJECTED.
   **Commit**: `ci: extension cap enforcement (P0.0.1)`
@@ -300,7 +300,7 @@ Wave 7 (Bootstrap):
   **Acceptance**: All 49 failures classified; counts: bugs + lang-gaps + unsupported + unknown = 49; unknown ≤ 10.
   **Commit**: `docs: self-host triage (P0.3)`
 
-- [ ] **P0.4 — PARITY audit (CRITICAL UNBLOCK)**
+- [x] **P0.4 — PARITY audit (CRITICAL UNBLOCK)**
   **Files**: `.sisyphus/evidence/parity-audit.json` (NEW), `.sisyphus/evidence/parity-audit.md`
   **What**: For each of 10 target crates: count pub fns/structs/enums, classify portability (GREEN/YELLOW/RED), classify purity (T1/T2/T3/T4 per Contract), list volatile fields (T3 only).
   **Method**: `grep -rn "pub fn\|pub struct\|pub enum" crates/<crate>/src/` directly — SKIP `cargo doc` (slow + flaky).
@@ -376,7 +376,7 @@ Wave 7 (Bootstrap):
 
 #### Wave 0.8A — Supply Chain
 
-- [ ] **P0.8 — cargo-deny hard gate** (dep-001/002/003 + FP-2 prevention)
+- [x] **P0.8 — cargo-deny hard gate** (dep-001/002/003 + FP-2 prevention)
   **Files**: `deny.toml` (NEW), `.github/workflows/ci.yml`
   **deny.toml skeleton**:
   ```toml
@@ -398,7 +398,7 @@ Wave 7 (Bootstrap):
   **Edit queue**: First in ci.yml queue.
   **Commit**: `ci: cargo-deny gate (P0.8)`
 
-- [ ] **P0.9 — buffup SHA-256 verification** (sec-001)
+- [x] **P0.9 — buffup SHA-256 verification** (sec-001)
   **Files**: `crates/buffup/src/commands/install.rs:60-67`, `crates/buffup/src/github.rs:75-97`
   **What**: Fetch `.sha256` sidecar, compute local SHA-256 (`sha2::Sha256::digest(&tarball_bytes)`), refuse on mismatch. Add `--skip-checksum` flag with security warning.
   **Detection**: `grep -r 'sha256\|Sha256' crates/buffup/src/` returns matches.
@@ -424,7 +424,7 @@ Wave 7 (Bootstrap):
 
 #### Wave 0.8C — Documentation
 
-- [ ] **P0.12 — AGENTS.md + CHANGELOG + README reconciliation** (prd-001/002/003)
+- [x] **P0.12 — AGENTS.md + CHANGELOG + README reconciliation** (prd-001/002/003)
   **Files**: `AGENTS.md:3-6` (commit `0467fbd`→HEAD, branch `v1x-frameworks`→`main`), `CHANGELOG.md` (backfill v1.26-v1.39 from tag annotations), `README.md` (extend Status table to v1.39), `.githooks/pre-commit` (NEW — regenerate metadata from git)
   **Detection**: `grep "$(git rev-parse --short HEAD)" AGENTS.md` returns match.
   **Acceptance**: AGENTS.md matches HEAD; branch=main; README has v1.26-v1.39 rows; pre-commit hook works.
@@ -450,7 +450,7 @@ Wave 7 (Bootstrap):
 
 - [ ] **P0.16 — crypto-extras test vectors** (tc-001) — Add `crates/buff-crypto-extras/tests/{aes,rsa,ecc,argon2}.rs` with NIST/RFC vectors. Fix AGENTS.md false claim. **Edit queue**: Third in AGENTS.md queue. **Commit**: `test(crypto-extras): NIST vectors (P0.16)`
 
-- [ ] **P0.17 — http-client default timeout** (ft-001) — Add `.timeout(Duration::from_secs(30)).connect_timeout(Duration::from_secs(10))` to `crates/buff-http-client/src/lib.rs:75-82`. **Commit**: `fix(http-client): timeout (P0.17)`
+- [x] **P0.17 — http-client default timeout** (ft-001) — Add `.timeout(Duration::from_secs(30)).connect_timeout(Duration::from_secs(10))` to `crates/buff-http-client/src/lib.rs:75-82`. **Commit**: `fix(http-client): timeout (P0.17)`
 
 - [ ] **P0.18 — registry /health + /ready** (obs-003) — Add to `crates/buff-registry/src/lib.rs:257-282`. **Edit queue**: First in registry/lib.rs queue. **Commit**: `feat(registry): health endpoints (P0.18)`
 
@@ -458,11 +458,11 @@ Wave 7 (Bootstrap):
 
 - [ ] **P0.20 — Evidence persistence** (lms-001) — CI artifact upload + MANIFEST.json. **Edit queue**: Fourth in ci.yml queue. **Commit**: `ci(evidence): artifact backup (P0.20)`
 
-- [ ] **P0.22 — buff-jobs Scheduler.start() executes handlers** (arch-001) — Add handler dispatch in `crates/buff-jobs/src/scheduler.rs:87-102` after `next_fire` update. Add Worker backoff (hi-014 companion). Integration test proves execution. **Commit**: `fix(jobs): scheduler executes (P0.22)`
+- [x] **P0.22 — buff-jobs Scheduler.start() executes handlers** (arch-001) — Add handler dispatch in `crates/buff-jobs/src/scheduler.rs:87-102` after `next_fire` update. Add Worker backoff (hi-014 companion). Integration test proves execution. **Commit**: `fix(jobs): scheduler executes (P0.22)`
 
-- [ ] **P0.23 — Homebrew sha256 placeholders** (cicd-002) — Compute real hashes for `installers/homebrew/buff.rb:23,28,35,40`. Add CI check for `<FILL-ME`. **Commit**: `fix(homebrew): sha256 (P0.23)`
+- [x] **P0.23 — Homebrew sha256 placeholders** (cicd-002) — Compute real hashes for `installers/homebrew/buff.rb:23,28,35,40`. Add CI check for `<FILL-ME`. **Commit**: `fix(homebrew): sha256 (P0.23)`
 
-- [ ] **P0.24 — Plan reconciliation** (coh-001) — DONE in v16 (tags acknowledged as EXISTING, all contradictions resolved). **Commit**: `docs(plan): v16 reconciled (P0.24)`
+- [x] **P0.24 — Plan reconciliation** (coh-001) — DONE in v16 (tags acknowledged as EXISTING, all contradictions resolved). **Commit**: `docs(plan): v16 reconciled (P0.24)`
 
 - [ ] **P0.25 — buff-auth OAuth + buff-resilience timeout + doc.rs Mutex** (sec-003/004 + ft-002/003)
   **Files**: `crates/buff-registry/src/oauth.rs` (CSRF state, Secure cookie, no token echo, exchange timeout), `crates/buff-resilience/src/lib.rs:485` (timeout thread leak), `crates/buff-lang-cli/src/commands/doc.rs:1233,1250` (Mutex::lock().unwrap())
@@ -478,7 +478,7 @@ Wave 7 (Bootstrap):
   **Edit queue**: Second in Cargo.toml queue.
   **Commit**: `refactor: extract sibling crates (P0.26)`
 
-- [ ] **P0.27 — WebSocket hardening** (FN-1)
+- [x] **P0.27 — WebSocket hardening** (FN-1)
   **Files**: `crates/buff-lang-cli/src/ui_dev/http.rs`, `broadcaster.rs`, `mod.rs` (NOT `server.rs` — doesn't exist per Oracle)
   **What**: Add origin validation, message size cap (1MB default), connection lifecycle timeout (60s idle).
   **Detection**: `grep -r 'origin\|max_size\|idle_timeout' crates/buff-lang-cli/src/ui_dev/` returns matches.
@@ -495,7 +495,7 @@ Wave 7 (Bootstrap):
   **What**: ABI binding round-trip tests, mock provider integration tests.
   **Commit**: `test(web3): ABI coverage (P0.29)`
 
-- [ ] **P0.21 — Audit remediation tracker**
+- [x] **P0.21 — Audit remediation tracker**
   **What**: Create `.sisyphus/evidence/audit-remediation-tracker.md` tracking ALL 31+3 findings with status (FIXED by Px / DEFERRED via DR / N/A).
   **Unreachable criterion FIXED** (Metis B3): "0 UNRESOLVED critical + 0 UNRESOLVED high **EXCLUDING** findings formally deferred in DR-X" (deferred ≠ resolved, but tracked).
   **Detection**: `grep -c 'FIXED\|DEFERRED\|N/A' audit-remediation-tracker.md` ≥ 34.
@@ -507,7 +507,7 @@ Wave 7 (Bootstrap):
 
 > **Exit**: ALL S1-S7 complete. S1 AND S4 BOTH fail → ABORT.
 
-- [ ] **S1 — Multiple dispatch coverage spike** (REFRAMED v16 — NOT "add TypeRef::Dyn")
+- [x] **S1 — Multiple dispatch coverage spike — NEEDS_DYN_TRAIT** (REFRAMED v16 — NOT "add TypeRef::Dyn")
   **What**: Buff v1.19 shipped `multi_dispatch.rs` (500 LOC, Julia-style). Test if multiple dispatch covers the parser's trait-object needs WITHOUT adding `dyn Trait` / `TypeRef::Dyn`.
   **Steps**:
   1. Identify all trait-object usages in 10 target crates: `grep -rn 'dyn\|Box<dyn\|&dyn' crates/buff-lang-{ast,error,lexer,parser,debug-info,buffhtml-parser}/src/ crates/buff-{eval,template}/src/`
@@ -518,18 +518,18 @@ Wave 7 (Bootstrap):
   **If MULTIPLE_DISPATCH_SUFFICIENT**: Phase 2 is SKIPPED. Extension cap slots freed. Massive simplification.
   **Commit**: `spike: multiple dispatch coverage — <verdict> (S1)`
 
-- [ ] **S2 — insta rustc drift** — Run 154 snapshots on 1.95.0. Document any drift.
+- [x] **S2 — insta rustc drift** — Run 154 snapshots on 1.95.0. Document any drift.
 
-- [ ] **S3 — HashMap audit** (CRITICAL — run BEFORE P0.1.2b)
+- [x] **S3 — HashMap audit** (CRITICAL — run BEFORE P0.1.2b)
   **What**: `grep -rn 'HashMap' crates/buff-lang-{ast,error,lexer,parser,debug-info,buffhtml-parser,ast-rsx}/src/ crates/buff-{eval,template}/src/`
   **If HashMap found in target crate**: Either (a) switch to BTreeMap in Rust original FIRST (on `main`), or (b) mark crate YELLOW and use T2 sorted comparison.
   **PREREQUISITE FOR**: P0.1.2b (deterministic serialization requires no HashMap).
 
-- [ ] **S4 — LexCallback portability** — Read `crates/buff-lang-lexer/src/string_interp.rs:1-100`. Can Buff express `&mut dyn LexCallback` via multiple dispatch?
+- [x] **S4 — LexCallback portability** — Read `crates/buff-lang-lexer/src/string_interp.rs:1-100`. Can Buff express `&mut dyn LexCallback` via multiple dispatch?
 
 - [ ] **S6 — Extend harness to 10 targets** — Add 1 entry to `scripts/equivalence-rust-vs-buff.sh` (currently 9 tests, need 10 for 10 targets per P0.4).
 
-- [ ] **S7 — Unsafe audit (CORRECTED)** — Verify **10 TARGET crates** have ZERO unsafe (NOT codegen-rust — it's IMPOSSIBLE per DR-014). `grep -rn 'unsafe' crates/buff-lang-{ast,ast-rsx,error,debug-info,lexer,parser,buffhtml-parser,ffi-guide}/src/ crates/buff-{eval,template}/src/` → expect 0.
+- [x] **S7 — Unsafe audit (CORRECTED)** — Verify **10 TARGET crates** have ZERO unsafe (NOT codegen-rust — it's IMPOSSIBLE per DR-014). `grep -rn 'unsafe' crates/buff-lang-{ast,ast-rsx,error,debug-info,lexer,parser,buffhtml-parser,ffi-guide}/src/ crates/buff-{eval,template}/src/` → expect 0.
 
 ---
 
