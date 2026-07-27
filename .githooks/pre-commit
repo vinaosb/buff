@@ -1,0 +1,32 @@
+#!/bin/bash
+# Extension Cap Enforcement Hook
+# Rejects commits where extensions-counter.json has used > max
+
+COUNTER_FILE=".sisyphus/evidence/extensions-counter.json"
+
+if [ ! -f "$COUNTER_FILE" ]; then
+    exit 0
+fi
+
+# Check if the counter file is in this commit's changes
+if git diff --cached --name-only | grep -q "$COUNTER_FILE"; then
+    # Parse JSON with grep/sed (no jq dependency — works on Windows Git Bash)
+    USED=$(grep -o '"used":[[:space:]]*[0-9]*' "$COUNTER_FILE" | grep -o '[0-9]*$')
+    MAX=$(grep -o '"max":[[:space:]]*[0-9]*' "$COUNTER_FILE" | grep -o '[0-9]*$')
+
+    # Defaults if parsing failed
+    USED="${USED:-0}"
+    MAX="${MAX:-3}"
+
+    if [ "$USED" -gt "$MAX" ]; then
+        echo "ERROR: Extension cap exceeded! used=$USED > max=$MAX"
+        echo "Extensions committed:"
+        grep -o '"items":[[:space:]]*\[[^]]*\]' "$COUNTER_FILE" | head -1
+        echo ""
+        echo "If >3 genuine gaps found, RE-SCOPE target crate list (drop affected crate)."
+        echo "Do NOT raise cap above 3."
+        exit 1
+    fi
+fi
+
+exit 0

@@ -36,3 +36,6 @@ editors/vscode/**/*.vsix
 # OS
 .DS_Store
 Thumbs.db
+
+# Exception: extension cap counter must be tracked in git
+!.sisyphus/evidence/extensions-counter.json

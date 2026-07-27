@@ -1,0 +1,15 @@
+{
+    "used":  0,
+    "max":  3,
+    "items":  [
+
+              ],
+    "reserved":  [
+                     {
+                         "slot":  1,
+                         "feature":  "multiple_dispatch_test",
+                         "status":  "testing",
+                         "task":  "S1"
+                     }
+                 ]
+}
