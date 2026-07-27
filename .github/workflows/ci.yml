@@ -148,9 +148,16 @@ jobs:
       - name: Check for placeholder strings in installer files
         run: |
           FAIL=0
-          # Reject any <FILL-ME or FILL_ME patterns in installers/
-          # (empty sha256 "" is a valid intermediate state — the release
-          #  workflow fills it via update-sha256.sh before publishing.)
+          # Reject any placeholder patterns in installers/:
+          #   - <FILL-ME or FILL_ME (legacy placeholders)
+          #   - sha256 "" (empty hash — must be filled by release workflow)
+          #   - sha256 "FILL (any FILL-prefixed placeholder)
+          # The release workflow (release.yml job: update-sha256) fills all
+          # hashes via update-sha256.sh before publishing.
+          if grep -rnE 'sha256\s+("(FILL|<)|"")' installers/ 2>/dev/null; then
+            echo "::error::Found placeholder sha256 in installer files (must be filled by release workflow)"
+            FAIL=1
+          fi
           for pattern in '<FILL-ME' 'FILL_ME'; do
             if grep -rn "$pattern" installers/ 2>/dev/null; then
               echo "::error::Found placeholder '$pattern' in installer files"
@@ -179,6 +186,22 @@ jobs:
           tags: buff:builder-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── cargo-deny: C-library ban + license audit (hard gate) ──────────────────
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Check bans + licenses
+        run: cargo deny check bans licenses
 
   # ── Self-host bootstrap check (informational, not required) ──────────────
   # Runs `buff check` on all self-host .buff files and reports the pass rate.

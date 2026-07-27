@@ -11,8 +11,10 @@
 # sha256 hashes automatically.  The on_arm/on_intel + on_macos/on_linux
 # blocks select the right prebuilt artifact for the host.
 #
-# NOTE: sha256 values are filled by the release workflow
-# (installers/homebrew/update-sha256.sh).  Do NOT edit them by hand.
+# SHA-256 hashes are filled by the release workflow (release.yml job: update-sha256).
+# Do NOT compute manually — they must match the binaries built by GitHub Actions
+# per-platform.  The CI installer-lint job verifies no placeholders remain before release.
+# Placeholder format uses FILL-BY-RELEASE-WORKFLOW (caught by CI installer-lint).
 
 class Buff < Formula
   desc "Buff — a high-level language that transpiles to Rust"
@@ -24,24 +26,24 @@ class Buff < Formula
   on_macos do
     on_arm do
       url "https://github.com/buff-lang/buff/releases/download/v1.38.0/buff-v1.38.0-macos-arm64.tar.gz"
-      sha256 ""
+      sha256 "FILL-BY-RELEASE-WORKFLOW"
     end
 
     on_intel do
       url "https://github.com/buff-lang/buff/releases/download/v1.38.0/buff-v1.38.0-macos-x64.tar.gz"
-      sha256 ""
+      sha256 "FILL-BY-RELEASE-WORKFLOW"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/buff-lang/buff/releases/download/v1.38.0/buff-v1.38.0-linux-arm64.tar.gz"
-      sha256 ""
+      sha256 "FILL-BY-RELEASE-WORKFLOW"
     end
 
     on_intel do
       url "https://github.com/buff-lang/buff/releases/download/v1.38.0/buff-v1.38.0-linux-x64.tar.gz"
-      sha256 "00a124e71f9f06e77e5aea6487b6c993ffbd157a8f2f374cce09a8bc8ff48b88"
+      sha256 "FILL-BY-RELEASE-WORKFLOW"
     end
   end
 
