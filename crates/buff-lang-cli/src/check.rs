@@ -420,30 +420,41 @@ pub fn check_buffhtml_source(src: &str, file: &Path) -> CheckReport {
 /// [`typeref_to_type`] — a minimal reimplementation of the private helper
 /// in `buff-lang-types::infer` that covers the primitive + Option/Result
 /// cases. User-defined types (struct/enum names) fall back to
-/// [`Type::Unknown`], which is permissive in the inference rules.
+/// [`Type::Unknown`] (still bound, so the parameter isn't reported as an
+/// "undefined variable" — see the param-binding loop in [`type_check_func`]).
+///
+/// The full program decl slice is threaded through so each per-function
+/// inferencer can be seeded with the program's enum declarations (via
+/// [`TypeInferencer::register_enum_decls`]). This is what unblocks
+/// qualified enum variant access in expression context — `PreludeFn.Abs`
+/// resolves to `Type::User("PreludeFn", [])` instead of `Type::Unknown`.
 fn type_check_decls(decls: &[Decl]) -> Vec<buff_lang_error::TypeError> {
     let mut errors = Vec::new();
     for d in decls {
-        type_check_decl(d, &mut errors);
+        type_check_decl(d, decls, &mut errors);
     }
     errors
 }
 
-fn type_check_decl(decl: &Decl, errors: &mut Vec<buff_lang_error::TypeError>) {
+fn type_check_decl(
+    decl: &Decl,
+    all_decls: &[Decl],
+    errors: &mut Vec<buff_lang_error::TypeError>,
+) {
     match decl {
-        Decl::FuncDecl(f) => type_check_func(f, errors),
+        Decl::FuncDecl(f) => type_check_func(f, all_decls, errors),
         Decl::TraitDecl(t) => {
             // Default methods carry real bodies that need checking.
             for d in &t.defaults {
-                type_check_func(d, errors);
+                type_check_func(d, all_decls, errors);
             }
         }
         Decl::ExtendBlock(b) => {
             for m in &b.methods {
-                type_check_func(m, errors);
+                type_check_func(m, all_decls, errors);
             }
         }
-        Decl::ExportDecl(inner) => type_check_decl(&inner.inner, errors),
+        Decl::ExportDecl(inner) => type_check_decl(&inner.inner, all_decls, errors),
         // Struct / Enum / Import / Module / Reexport / ExternCrate: no
         // function bodies to type-check at this layer (struct/enum field
         // types are checked at codegen in v1.0).
@@ -451,14 +462,31 @@ fn type_check_decl(decl: &Decl, errors: &mut Vec<buff_lang_error::TypeError>) {
     }
 }
 
-fn type_check_func(f: &buff_lang_ast::FuncDecl, errors: &mut Vec<buff_lang_error::TypeError>) {
+fn type_check_func(
+    f: &buff_lang_ast::FuncDecl,
+    all_decls: &[Decl],
+    errors: &mut Vec<buff_lang_error::TypeError>,
+) {
     let mut inferencer = TypeInferencer::new();
-    // Pre-bind parameters using the same primitive mapping the codegen
-    // uses internally. User-defined types fall back to Unknown (permissive).
+    // Seed the inferencer with the program's enum declarations so a
+    // qualified variant access like `PreludeFn.Abs` (parsed as a zero-arg
+    // `MethodCall` on an `Ident` receiver) resolves to the enum's
+    // `Type::User` instead of falling through to `Type::Unknown`. This
+    // mirrors the working match-arm path (which consults the same
+    // `EnumRegistry` via `exhaustiveness::check_match_expr`).
+    inferencer.register_enum_decls(all_decls);
+    // Pre-bind EVERY parameter. `typeref_to_type` only recognises
+    // primitives + Option/Result; user-defined types (struct/enum names)
+    // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED
+    // the binding entirely for user-typed parameters, which surfaced as a
+    // spurious "undefined variable: <param>" error on the first reference
+    // (e.g. `if f == PreludeFn.Abs` where `f: PreludeFn`). Binding to
+    // `Type::Unknown` keeps the parameter resolvable — `Unknown` is
+    // permissive in the inference rules (see `promote_binary`), so the
+    // subsequent `==` comparison against the resolved enum type succeeds.
     for p in &f.params {
-        if let Some(ty) = typeref_to_type(&p.ty) {
-            inferencer.bind(&p.name.name, ty);
-        }
+        let ty = typeref_to_type(&p.ty).unwrap_or(Type::Unknown);
+        inferencer.bind(&p.name.name, ty);
     }
     // Walk body statements via the public infer_stmt API. Errors are
     // collected (not propagated) so multiple type errors per function are

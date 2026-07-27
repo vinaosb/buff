@@ -1491,3 +1491,158 @@ fn t42_mismatched_arm_types_return_unknown() {
         "T42: mismatched arm types should return Unknown"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Qualified enum variant access in expression context
+// ---------------------------------------------------------------------------
+//
+// `EnumName.Variant` (with NO following parens) parses as
+// `Expr::MethodCall { receiver: Ident("EnumName"), method: "Variant", args: [] }`
+// (see crates/buff-lang-parser/src/expr/expr_postfix.rs — there is no
+// `Expr::FieldAccess` AST variant). This section tests that the inferencer's
+// MethodCall arm resolves such zero-arg calls to `Type::User(EnumName, [])`
+// when `EnumName` is a registered enum and `Variant` is one of its variants.
+//
+// Before the fix, this fell through to `Type::Unknown` (the MethodCall
+// fallthrough) and — when combined with the CLI `buff check` pass's
+// pre-binding of user-typed parameters — surfaced as spurious
+// "undefined variable" / "cannot compare" errors on patterns like
+// `if f == PreludeFn.Abs`. See `crates/buff-lang-cli/src/check.rs` for the
+// matching pre-binding fix.
+
+use buff_lang_ast::{Decl, EnumDecl, EnumVariant};
+
+/// Build a unit-style `EnumDecl` like:
+/// ```buff
+/// enum PreludeFn:
+///     Abs
+///     Sqrt
+/// ```
+fn unit_enum_decl(name: &str, variants: &[&str]) -> Decl {
+    Decl::EnumDecl(EnumDecl {
+        name: Ident::new(name, sp()),
+        type_params: Vec::new(),
+        variants: variants
+            .iter()
+            .map(|v| EnumVariant {
+                name: Ident::new(*v, sp()),
+                data: None,
+                span: sp(),
+            })
+            .collect(),
+        span: sp(),
+    })
+}
+
+/// Build `EnumName.Variant` — the zero-arg MethodCall shape the parser
+/// produces for qualified enum variant access.
+fn enum_variant_expr(enum_name: &str, variant: &str) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(ident(enum_name)),
+        method: Ident::new(variant, sp()),
+        args: Vec::new(),
+        span: sp(),
+    }
+}
+
+/// Registered enum + zero-arg MethodCall resolves to `Type::User(EnumName, [])`.
+#[test]
+fn qualified_enum_variant_resolves_to_user_type() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt", "Log"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+
+    let e = enum_variant_expr("PreludeFn", "Abs");
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::user("PreludeFn", Vec::new()),
+        "qualified variant `PreludeFn.Abs` should resolve to Type::User(\"PreludeFn\", [])"
+    );
+}
+
+/// A method name that is NOT a declared variant still falls through to
+/// `Type::Unknown` (no spurious resolution). This preserves the pre-fix
+/// behaviour for unknown identifiers and keeps the prelude-types registry
+/// (DateTime.now(), etc.) path reachable.
+#[test]
+fn qualified_non_variant_still_unknown() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+
+    // "NotARealVariant" is not declared on PreludeFn.
+    let e = enum_variant_expr("PreludeFn", "NotARealVariant");
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Unknown,
+        "non-variant method name should fall through to Unknown"
+    );
+}
+
+/// No registered enum → fall through to `Type::Unknown` (no panic, no error).
+#[test]
+fn qualified_variant_with_empty_registry_is_unknown() {
+    let mut inf = TypeInferencer::new();
+    // Do NOT call register_enum_decls — the default registry is empty.
+    let e = enum_variant_expr("Unknown", "Variant");
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Unknown,
+        "empty registry should fall through to Unknown"
+    );
+}
+
+/// The motivating bug fix: `f == PreludeFn.Abs` type-checks when `f` is
+/// bound to the enum type. Before the fix, this surfaced as either
+/// "undefined variable: f" (when the param wasn't pre-bound) or
+/// "cannot compare Unknown with Unknown" (deferring to the fallthrough).
+/// After the fix, both sides resolve to `Type::User("PreludeFn", [])`
+/// and the Eq operator returns Bool.
+#[test]
+fn qualified_enum_variant_in_comparison_yields_bool() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `f` to the user enum type (mirrors the pre-binding the CLI
+    // check pass performs for a parameter `f: PreludeFn`).
+    inf.bind("f", Type::user("PreludeFn", Vec::new()));
+
+    // Build: f == PreludeFn.Abs
+    let e = binary(BinaryOp::Eq, ident("f"), enum_variant_expr("PreludeFn", "Abs"));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Bool,
+        "qualified variant in Eq comparison should yield Bool"
+    );
+}
+
+/// Regression: even when `f` is bound to `Type::Unknown` (the CLI check
+/// pass's fallback for user-typed parameters), the comparison still
+/// succeeds because `Unknown` is permissive in `promote_binary`. This
+/// guards the specific `buff check` path where the param's user type
+/// can't be resolved to a `Type::User` by the minimal CLI resolver.
+#[test]
+fn qualified_enum_variant_comparison_with_unknown_param_yields_bool() {
+    let decls = vec![unit_enum_decl("PreludeFn", &["Abs", "Sqrt"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `f` to Unknown (mirrors CLI check.rs fallback for user types).
+    inf.bind("f", Type::Unknown);
+
+    // Build: f == PreludeFn.Abs
+    let e = binary(BinaryOp::Eq, ident("f"), enum_variant_expr("PreludeFn", "Abs"));
+    let ty = inf.infer_expr(&e).unwrap();
+    assert_eq!(
+        ty,
+        Type::Bool,
+        "Unknown == Type::User should yield Bool (Unknown is permissive)"
+    );
+}

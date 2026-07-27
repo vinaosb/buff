@@ -9,12 +9,13 @@
 //! recursion detection.
 
 use buff_lang_ast::{
-    Block, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp,
+    Block, Decl, Expr, Ident, InterpPart, Literal, MatchArm, Pattern, Stmt, TypeRef, UnaryOp,
 };
 use buff_lang_error::{Diagnostic, ErrorCode, Span, TypeError};
 use std::collections::BTreeMap;
 
 use crate::env::TypeEnv;
+use crate::exhaustiveness::{build_enum_registry_with_prelude, EnumRegistry};
 use crate::prelude;
 use crate::prelude_types;
 use crate::promote::{assignable_to, promote_binary};
@@ -191,6 +192,21 @@ pub struct TypeInferencer {
     /// calls [`Self::register_trait_impls`]). Empty by default — keeps
     /// standalone/test inferencers behaving exactly as before T75b.
     trait_impls: TraitImplRegistry,
+    /// Registry of user-defined enum names → their declared variant names.
+    /// Consulted by the `Expr::MethodCall` arm of [`Self::infer_expr`] so
+    /// that an expression like `PreludeFn.Abs` (parsed by the postfix parser
+    /// as `MethodCall { receiver: Ident("PreludeFn"), method: "Abs", args: [] }`)
+    /// resolves to `Type::User("PreludeFn", [])` instead of falling through
+    /// to `Type::Unknown`. This mirrors the WORKING match-arm path
+    /// (`exhaustiveness::check_match_expr` uses the same registry to
+    /// validate `Pattern::Variant` arms).
+    ///
+    /// Seeded by the driver via [`Self::register_enum_decls`] or
+    /// [`Self::set_enum_registry`]. Empty by default — keeps
+    /// standalone/test inferencers behaving exactly as before this field
+    /// was added (a missing registration yields `Unknown`, which is
+    /// permissive in the inference rules).
+    enum_registry: EnumRegistry,
 }
 
 impl TypeInferencer {
@@ -200,6 +216,7 @@ impl TypeInferencer {
             env: TypeEnv::new(),
             user_generic_decls: UserGenericDecls::new(),
             trait_impls: TraitImplRegistry::new(),
+            enum_registry: EnumRegistry::new(),
         }
     }
 
@@ -261,6 +278,41 @@ impl TypeInferencer {
     /// the decl list.
     pub fn trait_impls(&self) -> &TraitImplRegistry {
         &self.trait_impls
+    }
+
+    /// Register the program's enum declarations so that the `MethodCall` arm
+    /// of [`Self::infer_expr`] can resolve a qualified enum variant access
+    /// like `PreludeFn.Abs` (parsed as
+    /// `MethodCall { receiver: Ident("PreludeFn"), method: "Abs", args: [] }`)
+    /// to `Type::User("PreludeFn", [])`.
+    ///
+    /// This mirrors the WORKING match-arm path: [`exhaustiveness::check_match_expr`]
+    /// uses the SAME [`EnumRegistry`] (built via
+    /// [`build_enum_registry_with_prelude`]) to validate `Pattern::Variant`
+    /// arms. Before this registry was consulted from `infer_expr`, an
+    /// expression-context use like `if f == PreludeFn.Abs` would fall
+    /// through to `Type::Unknown` (and — when combined with the CLI check
+    /// pass's pre-binding of user-typed parameters — manifest as spurious
+    /// "undefined variable" / "cannot compare" errors).
+    ///
+    /// Purely additive: when no `Decl::EnumDecl`s are registered (the
+    /// default), behaviour is identical to before this method existed
+    /// (every lookup misses → `Type::Unknown`).
+    pub fn register_enum_decls(&mut self, decls: &[Decl]) {
+        self.enum_registry = build_enum_registry_with_prelude(decls);
+    }
+
+    /// Replace the enum registry wholesale (mirrors
+    /// [`Self::set_user_generic_decls`]). Lets a driver build an
+    /// [`EnumRegistry`] once and install it in one call instead of
+    /// re-walking the decl list per inferencer.
+    pub fn set_enum_registry(&mut self, registry: EnumRegistry) {
+        self.enum_registry = registry;
+    }
+
+    /// Borrow the enum registry (read-only).
+    pub fn enum_registry(&self) -> &EnumRegistry {
+        &self.enum_registry
     }
 
     /// Pre-binds `name` to `ty` in the environment. Useful for seeding the
@@ -361,6 +413,38 @@ impl TypeInferencer {
                 args,
                 ..
             } => {
+                // Qualified enum variant access in expression context. The
+                // parser lowers `EnumName.Variant` (no following parens) to
+                // exactly this MethodCall shape (see
+                // `crates/buff-lang-parser/src/expr/expr_postfix.rs` — there
+                // is no `Expr::FieldAccess` AST variant). When the receiver
+                // is a bare `Expr::Ident` naming a REGISTERED user-defined
+                // enum AND the method names one of that enum's declared
+                // variants AND no arguments are present, the expression is
+                // the unit-style variant value — type `Type::User(EnumName,
+                // [])`.
+                //
+                // This mirrors the WORKING match-arm path:
+                // `exhaustiveness::check_match_expr` consults the SAME
+                // `EnumRegistry` to validate `Pattern::Variant` arms. Before
+                // this arm existed, an expression like `f ==
+                // PreludeFn.Abs` fell through to `Type::Unknown` (the
+                // MethodCall fallthrough at the end of this match arm) and —
+                // when combined with the CLI check pass pre-binding
+                // user-typed parameters — surfaced as spurious "undefined
+                // variable" / "cannot compare" errors. Variant-carrying
+                // enums (`Color.RGB(r, g, b)`) still fall through because
+                // they require parens + args; the bare `.Variant` form is
+                // the unit-style case this arm resolves.
+                if args.is_empty() {
+                    if let Expr::Ident(id, _) = receiver.as_ref() {
+                        if let Some(variants) = self.enum_registry.get(&id.name) {
+                            if variants.iter().any(|v| v == &method.name) {
+                                return Ok(Type::user(id.name.clone(), Vec::new()));
+                            }
+                        }
+                    }
+                }
                 // T124b: prelude-types registry. A `Type.method(args)` call
                 // whose receiver is a bare `Expr::Ident` naming a prelude
                 // type (DateTime, Date, Time, Duration, Instant) is resolved
