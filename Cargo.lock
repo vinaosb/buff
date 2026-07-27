@@ -1220,6 +1220,7 @@ dependencies = [
  "buff-lang-error",
  "insta",
  "proptest",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

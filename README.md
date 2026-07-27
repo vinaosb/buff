@@ -250,25 +250,27 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/minimal_compute.buff`](./examples/minimal_compute.buff) | CPU-bound compute (no GPU/rayon) under `--minimal` | ✅ v1.19 (T60) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
-| [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (parse-only³) |
-| [`examples/tensor/matmul.buff`](./examples/tensor/matmul.buff) | 2-D matmul (v1.14) | 🔶 v1.14 (parse-only³) |
-| [`examples/pipeline/simple.buff`](./examples/pipeline/simple.buff) | `Source.from_csv` → filter → `Sink.to_csv` DAG (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Vector.zeros`, `Matrix.identity` linalg (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/ml/hello.buff`](./examples/ml/hello.buff) | `Linear.new`, `mse_loss`, `SGD.new` training (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/game/hello.buff`](./examples/game/hello.buff) | Game loop, `Window.new`, `Renderer` (v1.22) | 🔶 v1.22 (parse-only³) |
-| [`examples/integration/`](./examples/integration/) | T22 multi-framework integration (dataframe+tensor+pipeline+reactive+web) | 🔶 v1.23 (parse-only³) |
-| [`examples/data-science-workbench/`](./examples/data-science-workbench/) | T23 flagship notebook app (dataframe+ml+pipeline+web+reactive) | 🔶 v1.23 (parse-only³) |
+| [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (codegen-deferred³) |
+| [`examples/tensor/matmul.buff`](./examples/tensor/matmul.buff) | 2-D matmul (v1.14) | 🔶 v1.14 (codegen-deferred³) |
+| [`examples/pipeline/simple.buff`](./examples/pipeline/simple.buff) | `Source.from_csv` → filter → `Sink.to_csv` DAG (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Vector.zeros`, `Matrix.identity` linalg (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/ml/hello.buff`](./examples/ml/hello.buff) | `Linear.new`, `mse_loss`, `SGD.new` training (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/game/hello.buff`](./examples/game/hello.buff) | Game loop, `Window.new`, `Renderer` (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/integration/`](./examples/integration/) | T22 multi-framework integration (dataframe+tensor+pipeline+reactive+web) | 🔶 v1.23 (codegen-deferred³) |
+| [`examples/data-science-workbench/`](./examples/data-science-workbench/) | T23 flagship notebook app (dataframe+ml+pipeline+web+reactive) | 🔶 v1.23 (codegen-deferred³) |
 
 > **Legend:** ✅ *runs* — `buff run` compiles and executes end-to-end.
-> 🔶 *codegen-only* — transpiles to valid Rust (verified by tests), but the
+> 🔶 *codegen-deferred* — transpiles to valid Rust (verified by tests), but the
 > single-file `rustc` pipeline cannot yet link it:
 > ¹ async needs the external `tokio` crate (T32 deferred Cargo-project wiring);
 > ² modules need multi-file linking — `import`/`export` parse and the module
 > graph resolves (T29), but the CLI compiles one file at a time.
-> ³ **Framework examples (v1.14–v1.23)** parse cleanly and pass `buff check`;
-> end-to-end `buff run` execution is codegen-deferred — the `Type::{Tensor,
-> DataFrame, Pipeline, …}` variants and their codegen lowering arms are a
-> coordinated sibling task (see `.sisyphus/decisions/api-compat-v20.md`).
+> ³ **Framework examples (v1.14–v1.23)** — parse cleanly and pass `buff check`,
+> but end-to-end `buff run` execution is **codegen-deferred**. The `Type::{Tensor,
+> DataFrame, Pipeline, ML, Science, Game, …}` variants and their codegen lowering
+> arms are a coordinated sibling task tracked in
+> [`.sisyphus/decisions/api-compat-v20.md`](./.sisyphus/decisions/api-compat-v20.md).
+> These are **known limitations** (not failures) — CI reports them as warnings.
 > See [`.sisyphus/notepads/buff-v05-language/issues.md`](./.sisyphus/notepads/buff-v05-language/issues.md)
 > for the full list of v0.5 end-to-end gaps.
 

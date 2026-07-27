@@ -292,7 +292,7 @@ tempfile = "3"
 # boundary (single-file `buff run` rustc path does NOT link them;
 # cargo-project wiring is deferred). Snapshots + extern_crates set is
 # the verifiable contract.
-sha2 = "0.10"
+sha2 = { version = "0.10", features = ["oid"] }
 md5 = "0.7"
 hmac = "0.12"
 # T124l: System modules (Process / OS). `Process.*` + `OS.name` /
