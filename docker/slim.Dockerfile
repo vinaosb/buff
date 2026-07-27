@@ -4,8 +4,12 @@
 #
 # Expected size: ~90MB (debian:bookworm-slim ~80MB + ca-certificates ~10MB).
 # Use as the final stage in a multi-stage build (see Dockerfile.example).
+#
+# P0.10 — base image pinned by digest (sha256:) for supply-chain protection.
+# To bump: pull the new tag, capture its `docker manifest inspect <tag>` digest,
+# and replace BOTH the tag and the digest below in lock-step.
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \

@@ -31,6 +31,10 @@ env:
     -p buff-http-client -p buff-lsp -p buff-mcp -p buff-protobuf
     -p buff-scrape -p buff-audit -p buff-validate -p buff-auth
 
+# P0.10 — least-privilege default; jobs needing more override at the job level.
+permissions:
+  contents: read
+
 jobs:
   # ── cargo-deny (C-library + license gate; HARD gate, no continue-on-error) ──
   # P0.8: enforces the "no C library, no cc-rs, no native-tls" hard rule
@@ -45,8 +49,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check bans licenses
           arguments: --workspace
@@ -56,7 +60,7 @@ jobs:
     name: cargo fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
@@ -68,12 +72,12 @@ jobs:
     name: cargo clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: clippy
       - name: Clippy (core + working framework crates, lib only)
@@ -93,11 +97,11 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: test-core-${{ matrix.os }}
       - name: Test (core compiler crates)
@@ -111,11 +115,11 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: test-framework
       - name: Test (framework crates)
@@ -126,11 +130,11 @@ jobs:
     name: buff check + run
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: buff-validation
       - name: Build buff CLI
@@ -176,7 +180,7 @@ jobs:
     name: Installer lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check for placeholder strings in installer files
         run: |
           FAIL=0
@@ -207,10 +211,10 @@ jobs:
     name: Docker image build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build builder image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/builder.Dockerfile
@@ -226,7 +230,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
@@ -250,11 +254,11 @@ jobs:
     name: Self-host bootstrap
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: self-host
       - name: Build buff CLI
@@ -277,3 +281,25 @@ jobs:
           done
           echo "::notice::Self-host bootstrap: $PASS/$TOTAL files pass buff check"
           echo "Total: $TOTAL, Pass: $PASS, Fail: $FAIL"
+
+  # ── Behavioral equivalence harness (HARD GATE) ──────────────────────────────
+  # P0.1: Compares the stdout of 10 .buff self-host ports against their Rust
+  # reference example binaries. Any divergence fails the build (no
+  # continue-on-error). Ports are listed in scripts/equivalence-rust-vs-buff.sh.
+  equivalence-check:
+    name: Equivalence check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: equivalence
+      - name: Build buff CLI
+        run: cargo build --release -p buff-lang-cli
+      - name: Run behavioral equivalence harness
+        run: bash scripts/equivalence-rust-vs-buff.sh
