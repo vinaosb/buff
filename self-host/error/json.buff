@@ -1,0 +1,478 @@
+// Buff self-host port of `crates/buff-lang-error/src/json.rs` (P3.3).
+//
+// T1 (v1.25 Wave 0) — JSON diagnostic serialization.
+//
+// `to_json` resolves a Diagnostic against a source string and emits a
+// `DiagnosticJson` that's directly serializable to JSON via
+// `serde_json::to_string`. Consumed by:
+//
+//   * `buff check --error-format json` (CLI tooling — see
+//     `buff-lang-cli::commands::json_diagnostics`)
+//   * LSP CodeAction conversion (see `buff-lsp::handlers`)
+//   * Future tooling (CI integrations, custom reporters)
+//
+// # Shape
+//
+//   {
+//     "code":      "E1001" | null,
+//     "severity":  "Error" | "Warning" | "Info",
+//     "message":   "unexpected character: '@'",
+//     "spans": [
+//       {
+//         "style":      "Primary" | "Secondary",
+//         "label":      "..." | null,
+//         "byte_start": 8,
+//         "byte_end":   9,
+//         "line_start": 1,
+//         "col_start":  9,
+//         "line_end":   1,
+//         "col_end":    10
+//       },
+//       ...
+//     ],
+//     "notes":       ["...", ...],
+//     "suggestions": [
+//       {
+//         "byte_start":   0,
+//         "byte_end":     5,
+//         "replacement":  "print",
+//         "applicability":"MachineApplicable",
+//         "label":        "change `pritn` to `print`" | null
+//       },
+//       ...
+//     ]
+//   }
+//
+// # Design notes
+//
+//   * Line/column resolution happens HERE, not in the consumer. The
+//     consumer passes raw source text; the JSON shape carries both byte
+//     offsets (for tooling that wants to map back to source) and 1-based
+//     `(line, col)` (for human-readable tooling like a CI report).
+//     Mirrors `source_map.buff::source_file_lookup` — character-based columns
+//     (multi-byte UTF-8 counts as 1 col).
+//   * The primary span becomes the first entry in `spans` with
+//     `style: "Primary"` and `label: null` (no per-primary label field on
+//     Diagnostic; the message already names the location). Additional
+//     `Diagnostic::labels` are appended in declaration order.
+//   * Out-of-bounds spans (e.g. EOF errors with synthetic spans past the
+//     end of source) emit `byte_start`/`byte_end` unchanged but
+//     `line_*`/`col_*` as `null` (so JSON consumers can still see the byte
+//     offset without crashing on the lookup).
+//   * Stable: the JSON shape is part of the v1.25+ public tooling
+//     contract — once shipped, field names + nesting are stable. Adding
+//     optional fields later is fine; renaming or removing is not.
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions:
+//   * `&Diagnostic` / `&CodeSuggestion` / `&str` -> owned values (porting
+//     §7b — Buff hides references).
+//   * `usize` -> `Int` (porting §7a).
+//   * `Vec<SpanJson>` -> `Vector<SpanJson>`.
+//   * `Option<usize>` -> `Option<Int>`.
+//   * `#[derive(Debug, Clone, PartialEq, Eq, Serialize)]` -> drop. The
+//     Rust host's serde derive stays in Rust (porting §8b — "serde derive
+//     does NOT port; port the data type, document the serde impl as
+//     deferred"). The Buff port provides a `to_json_string` helper that
+//     produces the JSON output by hand (no serde-equivalent on the Buff
+//     side yet).
+//   * `serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())`
+//     -> a hand-written `diagnostic_json_render` that walks the shape and
+//     emits JSON text. Buff has no serde_json; the JSON output is produced
+//     by string concatenation with the same shape serde would produce
+//     (field names, ordering, nesting all preserved).
+//   * `impl ErrorCode { pub fn from_code_str(...) }` is defined in
+//     `code.rs` (Rust) but is hosted in `code.buff` here — see the
+//     documentation in `code.buff::error_code_from_code_str` for the
+//     placement rationale.
+//   * `impl SpanLabel { pub fn style_str(...) }` is a one-liner
+//     delegation to `label_style_str`; the Buff port collapses it into
+//     the free function `span_label_style_str`.
+//   * `#[cfg(test)] mod tests` -> not ported (porting §5a — equivalence
+//     tests live in separate files).
+//   * String literals containing `{` / `}` use `\{` / `\}` escapes
+//     (Buff treats `{` as opening an interpolation; the literal brace
+//     escape is required by the lexer).
+//   * KNOWN WORKAROUND: user-defined `Bool` returns lose their type at
+//     the call site (`if foo()` is rejected as "if condition must be
+//     Bool, found Unknown"). Every user-defined Bool call inside an `if`
+//     is written `if foo() == true:` / `if foo() == false:`.
+
+import {
+    Applicability,
+    CodeSuggestion,
+    Diagnostic,
+    LabelStyle,
+    Severity,
+    SpanLabel,
+} from "diagnostic"
+import { Span } from "span"
+import { ErrorCode, error_code_code_str, error_code_from_code_str } from "code"
+
+// ---------------------------------------------------------------------------
+// Public JSON shape (Buff data types; serde derives stay in Rust host)
+// ---------------------------------------------------------------------------
+
+// Top-level JSON shape for one serialized Diagnostic.
+//
+// See the file header for the full schema. Build via `diagnostic_to_json`
+// (which resolves byte offsets to line/col against source text).
+struct DiagnosticJson:
+    // Stable error code ("E1001") or null when the diagnostic has no code.
+    code: Option<String>
+    // "Error" / "Warning" / "Info" (matches Severity's Debug rendering so
+    // consumers can compare against the enum name).
+    severity: String
+    // The diagnostic message (no code prefix; consumers format as needed).
+    message: String
+    // All spans the diagnostic points at — primary first, then secondary
+    // labels in declaration order. Each entry carries byte offsets AND
+    // 1-based (line, col) (or null line/col for out-of-bounds spans).
+    spans: Vector<SpanJson>
+    // Free-form note lines (rendered as `note: ...` in the human-readable
+    // format).
+    notes: Vector<String>
+    // Machine-readable fix suggestions (rendered as `help: ...` lines in
+    // the human-readable format).
+    suggestions: Vector<SuggestionJson>
+
+// JSON shape for one labeled span.
+struct SpanJson:
+    // "Primary" (`^^^`) or "Secondary" (`~~~`) — controls caret char in
+    // the human-readable render.
+    style: String
+    // Per-span label (e.g. "declared here", "expected `Int`"). null for
+    // the primary span (the diagnostic message names the location).
+    label: Option<String>
+    // Byte offset of the span start in source.
+    byte_start: Int
+    // Byte offset of the span end (exclusive) in source.
+    byte_end: Int
+    // 1-based line of `byte_start`. null when `byte_start` lies past the
+    // end of source (out-of-bounds span).
+    line_start: Option<Int>
+    // 1-based column (character-based, mirroring source_file_lookup) of
+    // `byte_start`. null when out of bounds.
+    col_start: Option<Int>
+    // 1-based line of `byte_end`. null when out of bounds.
+    line_end: Option<Int>
+    // 1-based column of `byte_end`. null when out of bounds.
+    col_end: Option<Int>
+
+// JSON shape for one fix suggestion.
+struct SuggestionJson:
+    // Byte offset of the span to replace.
+    byte_start: Int
+    // Byte offset (exclusive) of the span to replace.
+    byte_end: Int
+    // Replacement text to splice in.
+    replacement: String
+    // "MachineApplicable" / "MaybeIncorrect" / "HasPlaceholders" /
+    // "Unspecified".
+    applicability: String
+    // Human-readable label ("change `pritn` to `print`") or null.
+    label: Option<String>
+
+// ---------------------------------------------------------------------------
+// Conversion
+// ---------------------------------------------------------------------------
+
+// Resolve a Diagnostic against `source` and produce the serializable
+// DiagnosticJson shape.
+//
+// `source` is the raw text the diagnostic was emitted against (the same
+// string you'd pass to `diagnostic_render`). Byte offsets in the
+// diagnostic's spans must be relative to this string.
+//
+// See the file header for the full JSON schema. Use
+// `diagnostic_json_render` to serialize the result to a JSON string.
+func diagnostic_to_json(diag: Diagnostic, source: String) -> DiagnosticJson:
+    let spans: Vector<SpanJson> = Vector.new()
+    // Primary span — first entry, no per-span label.
+    spans.push(span_to_json(diag.span, LabelStyle.Primary, Option.None, source))
+    // Secondary / additional primary labels — in declaration order.
+    let mut i = 0
+    for i < diag.labels.len():
+        let lbl = diag.labels[i]
+        spans.push(span_to_json(lbl.span, lbl.style, Option.Some(lbl.label), source))
+        i = i + 1
+
+    let suggestions: Vector<SuggestionJson> = Vector.new()
+    let mut j = 0
+    for j < diag.suggestions.len():
+        suggestions.push(suggestion_to_json(diag.suggestions[j]))
+        j = j + 1
+
+    let code_opt = diagnostic_code_to_string_opt(diag)
+    return DiagnosticJson.new(
+        code: code_opt,
+        severity: severity_str(diag.severity),
+        message: diag.message,
+        spans: spans,
+        notes: diag.notes,
+        suggestions: suggestions,
+    )
+
+// Serialize a list of diagnostics to a single JSON array string. Each
+// entry is one DiagnosticJson (see `diagnostic_to_json`).
+//
+// Convenience wrapper for the common case (`buff check --error-format
+// json` emits this on stdout). Returns the serialized JSON string.
+//
+// The Rust reference uses `serde_json::to_string(&arr).unwrap_or_else(...)`
+// which never fails on our shape (no maps, no floats, no custom
+// serializers that can error). The Buff port hand-renders the JSON (Buff
+// has no serde_json); the shape is identical: a `[...]` array with each
+// element rendered by `diagnostic_json_render`.
+func render_diagnostics_json(diagnostics: Vector<Diagnostic>, source: String) -> String:
+    let items: Vector<String> = Vector.new()
+    let mut i = 0
+    for i < diagnostics.len():
+        let dj = diagnostic_to_json(diagnostics[i], source)
+        items.push(diagnostic_json_render(dj))
+        i = i + 1
+    return json_join_array(items)
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+// Convert one Span + label-style + label into a SpanJson, resolving the
+// byte offsets against `source`.
+func span_to_json(span: Span, style: LabelStyle, label: Option<String>, source: String) -> SpanJson:
+    let start_pair = lookup_line_col(source, span.start)
+    let end_pair = lookup_line_col(source, span.end)
+    let (ls, cs) = start_pair
+    let (le, ce) = end_pair
+    return SpanJson.new(
+        style: label_style_str(style),
+        label: label,
+        byte_start: span.start,
+        byte_end: span.end,
+        line_start: ls,
+        col_start: cs,
+        line_end: le,
+        col_end: ce,
+    )
+
+// Convert one CodeSuggestion into a SuggestionJson (byte ranges pass
+// through unchanged; the applicability is rendered to its stable string).
+func suggestion_to_json(s: CodeSuggestion) -> SuggestionJson:
+    return SuggestionJson.new(
+        byte_start: s.span.start,
+        byte_end: s.span.end,
+        replacement: s.replacement,
+        applicability: applicability_str(s.applicability),
+        label: s.label,
+    )
+
+// Resolve a byte offset to 1-based (line, col) against `source`, or
+// (None, None) when the offset lies past the end of source.
+//
+// Mirrors source_file_lookup (binary search on cached line starts +
+// character-based column) but is self-contained (no SourceMap needed)
+// so `diagnostic_to_json` stays a pure function of (Diagnostic, source).
+func lookup_line_col(source: String, offset: Int) -> (Option<Int>, Option<Int>):
+    if offset > source.len():
+        return (Option.None, Option.None)
+    // Count '\n' before `offset` -> 0-based line index. Buff's String
+    // prelude exposes `.matches(needle).len()` to count occurrences.
+    let bytes_before = source.slice(0, offset)
+    let line_idx = bytes_before.matches("\n").len()
+    let line = line_idx + 1  // 1-based.
+    // Walk back to the start of this line. `rfind` -> Buff prelude
+    // `.last_index_of(needle)`; -1 sentinel means "no newline before".
+    let line_start = last_newline_before(source, offset)
+    // Column = char count from line_start to offset (1-based).
+    let col = source.slice(line_start, offset).chars().len() + 1
+    return (Option.Some(line), Option.Some(col))
+
+// Walk backward from `offset` to find the byte index immediately after
+// the last '\n' before `offset`. Returns 0 when no '\n' precedes
+// `offset`. Mirrors Rust's `bytes_before.rfind('\n').map(|i| i+1).unwrap_or(0)`.
+func last_newline_before(source: String, offset: Int) -> Int:
+    let prefix = source.slice(0, offset)
+    let idx = prefix.last_index_of("\n")
+    if idx < 0:
+        return 0
+    return idx + 1
+
+// Stable string for a Severity (matches Rust's Debug rendering).
+func severity_str(s: Severity) -> String:
+    if s == Severity.Error:
+        return "Error"
+    if s == Severity.Warning:
+        return "Warning"
+    return "Info"
+
+// Stable string for a LabelStyle.
+func label_style_str(s: LabelStyle) -> String:
+    if s == LabelStyle.Primary:
+        return "Primary"
+    return "Secondary"
+
+// Stable string for an Applicability.
+func applicability_str(a: Applicability) -> String:
+    if a == Applicability.MachineApplicable:
+        return "MachineApplicable"
+    if a == Applicability.MaybeIncorrect:
+        return "MaybeIncorrect"
+    if a == Applicability.HasPlaceholders:
+        return "HasPlaceholders"
+    return "Unspecified"
+
+// JSON-style style string ("Primary" / "Secondary") for a SpanLabel.
+// (Rust reference: `impl SpanLabel { pub fn style_str(&self) -> &'static str }`.)
+func span_label_style_str(s: SpanLabel) -> String:
+    return label_style_str(s.style)
+
+// Convert `diag.code` (Option<ErrorCode>) to its JSON string form,
+// applying `error_code_code_str` when present.
+func diagnostic_code_to_string_opt(diag: Diagnostic) -> Option<String>:
+    return match diag.code {
+        Some(c) => Option.Some(error_code_code_str(c)),
+        None => Option.None,
+    }
+
+// ---------------------------------------------------------------------------
+// JSON renderer (hand-rolled; replaces serde_json::to_string).
+// ---------------------------------------------------------------------------
+
+// Render a DiagnosticJson to a single JSON object string. Field order
+// matches the file-header schema (code, severity, message, spans,
+// notes, suggestions).
+func diagnostic_json_render(dj: DiagnosticJson) -> String:
+    let parts: Vector<String> = Vector.new()
+    parts.push("\"code\":" + render_option_string(dj.code))
+    parts.push("\"severity\":" + json_quote(dj.severity))
+    parts.push("\"message\":" + json_quote(dj.message))
+    parts.push("\"spans\":" + render_span_json_array(dj.spans))
+    parts.push("\"notes\":" + render_string_array(dj.notes))
+    parts.push("\"suggestions\":" + render_suggestion_json_array(dj.suggestions))
+    return "\{" + json_join(parts, ",") + "\}"
+
+// Render a Vector<SpanJson> as a JSON array string.
+func render_span_json_array(spans: Vector<SpanJson>) -> String:
+    let items: Vector<String> = Vector.new()
+    let mut i = 0
+    for i < spans.len():
+        items.push(render_span_json(spans[i]))
+        i = i + 1
+    return json_join_array(items)
+
+// Render a single SpanJson to a JSON object string.
+func render_span_json(s: SpanJson) -> String:
+    let parts: Vector<String> = Vector.new()
+    parts.push("\"style\":" + json_quote(s.style))
+    parts.push("\"label\":" + render_option_string(s.label))
+    parts.push("\"byte_start\":" + s.byte_start.to_string())
+    parts.push("\"byte_end\":" + s.byte_end.to_string())
+    parts.push("\"line_start\":" + render_option_int(s.line_start))
+    parts.push("\"col_start\":" + render_option_int(s.col_start))
+    parts.push("\"line_end\":" + render_option_int(s.line_end))
+    parts.push("\"col_end\":" + render_option_int(s.col_end))
+    return "\{" + json_join(parts, ",") + "\}"
+
+// Render a Vector<SuggestionJson> as a JSON array string.
+func render_suggestion_json_array(sugs: Vector<SuggestionJson>) -> String:
+    let items: Vector<String> = Vector.new()
+    let mut i = 0
+    for i < sugs.len():
+        items.push(render_suggestion_json(sugs[i]))
+        i = i + 1
+    return json_join_array(items)
+
+// Render a single SuggestionJson to a JSON object string.
+func render_suggestion_json(s: SuggestionJson) -> String:
+    let parts: Vector<String> = Vector.new()
+    parts.push("\"byte_start\":" + s.byte_start.to_string())
+    parts.push("\"byte_end\":" + s.byte_end.to_string())
+    parts.push("\"replacement\":" + json_quote(s.replacement))
+    parts.push("\"applicability\":" + json_quote(s.applicability))
+    parts.push("\"label\":" + render_option_string(s.label))
+    return "\{" + json_join(parts, ",") + "\}"
+
+// Render a Vector<String> as a JSON array of strings.
+func render_string_array(v: Vector<String>) -> String:
+    let items: Vector<String> = Vector.new()
+    let mut i = 0
+    for i < v.len():
+        items.push(json_quote(v[i]))
+        i = i + 1
+    return json_join_array(items)
+
+// Render an Option<String> as `null` or a JSON-quoted string.
+func render_option_string(opt: Option<String>) -> String:
+    return match opt {
+        Some(s) => json_quote(s),
+        None => "null",
+    }
+
+// Render an Option<Int> as `null` or a JSON number.
+func render_option_int(opt: Option<Int>) -> String:
+    return match opt {
+        Some(n) => n.to_string(),
+        None => "null",
+    }
+
+// Join a Vector<String> of pre-rendered JSON items into a JSON array
+// (`[a,b,c]`). Empty Vector renders as `[]`.
+func json_join_array(items: Vector<String>) -> String:
+    return "[" + json_join(items, ",") + "]"
+
+// Join a Vector<String> with a separator. The Buff Vector prelude does
+// not surface `join` directly.
+func json_join(items: Vector<String>, sep: String) -> String:
+    let mut out = ""
+    let mut i = 0
+    for i < items.len():
+        if i > 0:
+            out = out + sep
+        out = out + items[i]
+        i = i + 1
+    return out
+
+// Quote a string for JSON output. Escapes `"` and `\` and control chars;
+// wraps in `"..."`. The escape set is the minimal one our shape produces
+// (no control chars in error messages today; backslashes appear in
+// regex/WGSL examples).
+func json_quote(s: String) -> String:
+    // Walk the source string; emit a JSON-quoted copy. Two-pass: first
+    // count the size, then build. Simpler: build a Vector<String> of
+    // segments and join.
+    let segments: Vector<String> = Vector.new()
+    segments.push("\"")
+    let mut i = 0
+    let chars = s.chars_to_vector()
+    for i < chars.len():
+        let c = chars[i]
+        if c == '"':
+            segments.push("\\\"")
+        else:
+            if c == '\\':
+                segments.push("\\\\")
+            else:
+                if c == '\n':
+                    segments.push("\\n")
+                else:
+                    if c == '\r':
+                        segments.push("\\r")
+                    else:
+                        if c == '\t':
+                            segments.push("\\t")
+                        else:
+                            segments.push(c.to_string())
+        i = i + 1
+    segments.push("\"")
+    return json_join(segments, "")
+
+// Re-export of `error_code_from_code_str` so consumers that import from
+// this file (matching the Rust `json.rs` hosting of the impl) see the
+// round-trip helper at the same name in the same module.
+//
+// (Rust reference: `impl ErrorCode { pub fn from_code_str(...) } { ... }`
+// lives in `json.rs` even though ErrorCode itself lives in `code.rs`.
+// The Buff port hosts the function body in `code.buff` next to the enum
+// it walks; this thin alias preserves the call-site shape from the Rust
+// reference.)
+func error_code_from_code_str_alias(s: String) -> Option<ErrorCode>:
+    return error_code_from_code_str(s)
