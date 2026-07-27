@@ -1,0 +1,106 @@
+// Buff self-host port of `crates/buff-lang-buffhtml-parser/src/error.rs` (P4.5).
+//
+// Error type for `.buffhtml` parsing.
+//
+// Wraps `Span` for diagnostic locations. Re-uses the existing `ParseError`
+// machinery downstream (the CLI error_mapper already understands `Span`).
+//
+// Faithful 1:1 translation of the Rust reference. The Rust enum uses STRUCT
+// variants (`Lex { message: String, span: Span }`); Buff enums only support
+// unit and tuple-variant forms (per `crates/buff-lang-ast-rsx/selfhost/ast_rsx.buff`
+// mapping convention), so each variant becomes a tuple variant with the fields
+// in declaration order. Field names are preserved as inline comments.
+//
+// Translation decisions:
+//   * `use buff_lang_error::Span;` -> DELETED. Buff has no cross-crate
+//     imports for the prelude; a LOCAL `Span` stand-in is defined at the top
+//     of this file (3 Int fields, mirrors `self-host/error/span.buff`). The
+//     M7 monolith loader (Phase 5) will deduplicate these local stand-ins.
+//   * `use thiserror::Error;` + `#[derive(Debug, Clone, PartialEq, Eq, Error)]`
+//     -> DELETED. Buff auto-derives `Debug, Clone, PartialEq`; the thiserror
+//     derive (Display + std::error::Error) does NOT port (per porting §4c).
+//     The `#[error("...")]` format strings are documented inline as comments
+//     but no Display impl is emitted by this port — the Rust host's error
+//     mapper constructs user-facing messages from `message + span`.
+//   * `pub enum BuffHtmlParseError { Lex { message, span }, Parse { message, span } }`
+//     -> tuple variants `Lex(String, Span)` and `Parse(String, Span)` where
+//     `(message, span)` is the field order.
+//   * `impl BuffHtmlParseError { fn lex(...); fn parse(...); fn span(...) }`
+//     -> free functions `buff_html_parse_error_lex`, `buff_html_parse_error_parse`,
+//     `buff_html_parse_error_span` (per porting §8g impl-block convention).
+//   * `pub fn lex(message: impl Into<String>, span: Span)` -> the `impl
+//     Into<String>` bound is dropped (Buff has no `impl Trait` bound on
+//     non-closure args); callers pass a `String` directly.
+//   * `usize`/`u32` -> `Int` per porting §7a.
+//   * `#[cfg(test)] mod tests { ... }` -> DELETED. Inline Rust unit tests do
+//     not port; the `assert!(matches!(...))` / `assert_eq!(...)` macros are
+//     Rust host concerns (per porting §5 + §8a macro table). A Buff
+//     `equivalence_*.buff` harness will cover this enum once the M7 monolith
+//     loader lands.
+
+// ---------------------------------------------------------------------------
+// Local Span / SourceId stand-ins (re-exported from buff-lang-error upstream).
+// Mirrors `self-host/error/span.buff` lines 36-53.
+// ---------------------------------------------------------------------------
+
+// A unique identifier for a source file.
+struct SourceId:
+    value: Int
+
+func source_id_new(value: Int) -> SourceId:
+    return SourceId.new(value: value)
+
+// A span of source code, identified by byte offsets and a source file ID.
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+// ---------------------------------------------------------------------------
+// The error enum.
+// ---------------------------------------------------------------------------
+
+// Error produced by the `.buffhtml` lexer or parser.
+//
+// Rust thiserror format strings (NOT emitted by this port — the Rust host's
+// error_mapper builds the user-facing message from `message + span`):
+//   Lex:    "buffhtml lex error at {span:?}: {message}"
+//   Parse:  "buffhtml parse error at {span:?}: {message}"
+enum BuffHtmlParseError {
+    // Lex(message, span) — lexer-stage error.
+    Lex(String, Span),
+    // Parse(message, span) — parser-stage error.
+    Parse(String, Span),
+}
+
+// Construct a lex-stage error. Mirrors
+// `BuffHtmlParseError::lex(message: impl Into<String>, span: Span)`.
+func buff_html_parse_error_lex(message: String, span: Span) -> BuffHtmlParseError:
+    return BuffHtmlParseError.Lex(message, span)
+
+// Construct a parse-stage error. Mirrors
+// `BuffHtmlParseError::parse(message: impl Into<String>, span: Span)`.
+func buff_html_parse_error_parse(message: String, span: Span) -> BuffHtmlParseError:
+    return BuffHtmlParseError.Parse(message, span)
+
+// Span where the error occurred (lex or parse). Mirrors
+// `impl BuffHtmlParseError { pub fn span(&self) -> Span }`.
+//
+// The Rust body is an or-pattern `Self::Lex { span, .. } | Self::Parse { span, .. }`.
+// Buff `match` rejects or-patterns (per porting §8e), so the extraction is
+// written as two single-arm `match` statements — one per variant. Each
+// variant's `span` field is at tuple position 1.
+func buff_html_parse_error_span(e: BuffHtmlParseError) -> Span:
+    match e {
+        Lex(_msg, span) => return span,
+    }
+    match e {
+        Parse(_msg, span) => return span,
+    }
+    // Unreachable: the two matches above cover every variant. Buff has no
+    // `unreachable!()` and no exhaustive-match enforcement, so this fallback
+    // returns a dummy span for safety.
+    return span_new(0, 0, source_id_new(0))
