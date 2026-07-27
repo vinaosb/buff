@@ -1,0 +1,200 @@
+// Buff self-host port of `crates/buff-template/src/lib.rs` (P3.6).
+//
+// Defines [`Template`] — a compiled HTML template, ready to render with a
+// context. Three public methods on the Rust side (`from_string`,
+// `from_path`, `render`) plus `Default` and `Display` impls. The crate wraps
+// the pure-Rust `handlebars` templating engine.
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions:
+//   * `pub mod error;` — deleted. Buff has no `mod` keyword; sibling files
+//     in `self-host/template/` are auto-linked by the monolith loader
+//     (Phase 5, M7). Per §6b the cross-file dependency is documented via an
+//     explicit `import` line until M7 resolves it.
+//   * `pub use error::TemplateError;` — becomes `import { TemplateError }
+//     from "error"` (Buff's cross-file re-export spelling).
+//   * `use std::panic::{catch_unwind, AssertUnwindSafe};` — deleted. Buff has
+//     its own error model (fallible ops return `Result`; panics do not cross
+//     the FFI boundary). The `catch_unwind` panic boundary stays in the Rust
+//     host (per §9: std::panic runtime details do NOT port). The
+//     `TemplateError::Panic` variant is preserved for API fidelity but is
+//     never constructed by the Buff port itself — the Rust host still raises
+//     it if a downstream handlebars call panics.
+//   * `handlebars::Handlebars<'static>` (opaque upstream type) — modelled as
+//     an opaque `Int` handle. The handlebars API surface used (`new` /
+//     `register_template_string` / `render`) is declared as Buff
+//     `extern "C" from "handlebars"` functions, following the task spec's
+//     FFI rule and the `examples/extern_*.buff` precedent. The real
+//     handlebars registry lives in the Rust host; the Buff port threads the
+//     handle through these extern trampolines.
+//   * `std::fs::read_to_string` — declared as `extern "C" from "std::fs"`.
+//   * `serde_json::from_str` — declared as `extern "C" from "serde_json"`.
+//     The JSON context is parsed on the Rust side for validation; the Buff
+//     port passes the raw JSON string to `handlebars_render`.
+//   * `impl Template { ... }` — becomes a family of free functions taking
+//     the receiver as the first parameter (`t: Template`), per §8g. The
+//     `&self` / `&mut self` of Rust methods is implicit (Buff is move-by-
+//     default; struct fields are mutated in place).
+//   * `impl Default for Template` — becomes `template_default()` free
+//     function (Buff has no `Default` trait; the constructor-style naming
+//     follows §2b).
+//   * `impl std::fmt::Display for Template` — becomes `template_display()`
+//     free function returning `String` (Buff has no `fmt::Display` trait;
+//     per §4c the Display impl becomes a free function).
+//   * `&str` params -> `String` (Buff owns at the boundary, per §7b).
+//   * `Self` in return position -> `Template` (Buff free functions have no
+//     `Self`).
+//   * Generic `<P: AsRef<std::path::Path>>` -> `String` (Buff has no
+//     `AsRef`; callers pass an owned path string).
+//   * Function bodies: the Rust `match result { Ok(Ok(t)) => ..., Ok(Err(e))
+//     => ..., Err(_) => ... }` double-Result flattening (from catch_unwind
+//     wrapping a Result) collapses to a single Result check — the catch_unwind
+//     layer is gone (see above), so only the inner Result remains.
+//
+// Numeric widths: no numeric primitives in the public surface (all String /
+// Result / Template / opaque Int handle).
+
+// --- Preserved module-doc content (Rust `//!` → Buff `//`, per §3) ---
+//
+// `buff-template` — HTML templating for the Buff language.
+//
+// Pure-Rust MVP wrapping the [`handlebars`](https://docs.rs/handlebars)
+// crate. Runtime-only (no compile-time macros). Per T19 spec:
+// `Template.from_path(path)`, `Template.from_string(source)`,
+// `template.render(context)` returns String.
+//
+// Pipeline:
+//
+//   Template.from_string(src) ──┐
+//                               ▼
+//   Template.from_path(p) ──────▶ Template { handlebars::Handlebars }
+//                                        │
+//                                        └─ template.render(ctx) → String
+//
+// FFI safety — every public entry point follows the 6 hard rules from
+// `crates/buff-lang-ffi-guide/GUIDE.md` (compliance is on the Rust host
+// side; the Buff port inherits the same guarantees via the extern layer):
+//
+//   R1 — No raw pointers: Public surface exposes only `Template`,
+//        `TemplateError`. No `*const` / `*mut` anywhere.
+//   R2 — Ownership boundary: `from_path` / `from_string` return owned
+//        `Template`. `render` returns owned `String`.
+//   R3 — Error mapping: Every fallible op returns
+//        `Result<T, TemplateError>`. handlebars errors mapped via `From`.
+//   R4 — Thread safety: `Template` is `Send + Sync` (wraps
+//        `handlebars::Handlebars` which is itself `Send + Sync`).
+//   R5 — Lifetime hiding: No public lifetime parameters. `Template` owns
+//        its `Handlebars` registry.
+//   R6 — Panic boundary: `from_path` / `from_string` / `render` wrap
+//        their bodies in `catch_unwind` (per FFI guide §6).
+//
+// Panic-free contract:
+//
+// No `unwrap` / `expect` / `panic!` / `todo!` / `unimplemented!` in
+// non-test code.
+
+import { TemplateError } from "error"
+
+// --- FFI: handlebars API surface (opaque Int handles) ---
+//
+// The real `handlebars::Handlebars<'static>` registry lives in the Rust host.
+// The Buff port threads an opaque `Int` handle through these extern
+// trampolines. Each extern wraps the corresponding handlebars method as a
+// free C-ABI fn; the compiler records `handlebars` as a Rust-side dependency
+// and wraps call sites in `unsafe { ... }` automatically (Buff hides it).
+//
+// The template-name constant `"__buff_template_main"` is threaded through
+// `register_template_string` and `render` verbatim, matching the Rust
+// original's "register under a fixed name, render by that name" pattern.
+extern "C" from "handlebars" func handlebars_new() -> Int
+
+extern "C" from "handlebars" func handlebars_register_template_string(hb: Int, name: String, source: String) -> Result<Void, String>
+
+extern "C" from "handlebars" func handlebars_render(hb: Int, name: String, ctx_json: String) -> Result<String, String>
+
+// --- FFI: stdlib helpers used by from_path / render ---
+
+extern "C" from "std::fs" func fs_read_to_string(path: String) -> Result<String, String>
+
+extern "C" from "serde_json" func serde_json_parse(json: String) -> Result<String, String>
+
+// A compiled HTML template, ready to render with a context.
+//
+// Constructed via [`template_from_string`] (parse a template source
+// string) or [`template_from_path`] (load a `.html` file from disk).
+// Rendered via [`template_render`] with a JSON-like context.
+//
+// Internally wraps `handlebars::Handlebars<'static>` — a compiled
+// template registry. The template is registered under the name
+// `"__buff_template_main"` and rendered by that name.
+struct Template {
+    // Opaque handle to a `handlebars::Handlebars<'static>` registry.
+    // The real type lives in the Rust host; Buff threads it as an `Int`
+    // (per the `examples/use-cases/tcp_echo.buff` opaque-handle precedent).
+    inner: Int,
+}
+
+// Compile a template from a source string.
+//
+// The source uses handlebars syntax: `{{ variable }}`,
+// `{% if cond %}...{% endif %}`, `{% for item in list %}...{% endfor %}`.
+//
+// Wraps `handlebars::Handlebars::register_template_string`. The body
+// is wrapped in `catch_unwind` per T4 FFI guide R6 so a panic in the
+// parser becomes a stable `Err(TemplateError::Panic)` instead of
+// process abort.
+func template_from_string(source: String) -> Result<Template, TemplateError>:
+    let hb = handlebars_new()
+    let result = handlebars_register_template_string(hb: hb, name: "__buff_template_main", source: source)
+    match result {
+        Ok(_) => return Ok(Template { inner: hb }),
+        Err(msg) => return Err(TemplateError.Parse(msg)),
+    }
+
+// Load a template from a file path. The file is read as UTF-8 text
+// and compiled as a handlebars template.
+//
+// Wraps `std::fs::read_to_string` + `Template::from_string`. The
+// body is wrapped in `catch_unwind` per T4 FFI guide R6.
+func template_from_path(path: String) -> Result<Template, TemplateError>:
+    let read_result = fs_read_to_string(path: path)
+    match read_result {
+        Err(msg) => return Err(TemplateError.Parse("failed to read file: " + msg)),
+        Ok(source) => return template_from_string(source: source),
+    }
+
+// Render the template with the given context.
+//
+// The context is a JSON string representing a map of variable names
+// to values. For example: `{"name": "Buff", "items": ["a", "b"]}`.
+//
+// Returns the rendered HTML string. Wraps
+// `handlebars::Handlebars::render`. The body is wrapped in
+// `catch_unwind` per T4 FFI guide R6.
+func template_render(t: Template, context_json: String) -> Result<String, TemplateError>:
+    // Parse the JSON context into a serde_json::Value (validation only —
+    // the Buff extern passes the raw JSON string to handlebars_render).
+    let parsed = serde_json_parse(json: context_json)
+    match parsed {
+        Err(msg) => return Err(TemplateError.Render("invalid context JSON: " + msg)),
+        Ok(_ctx) => return match handlebars_render(hb: t.inner, name: "__buff_template_main", ctx_json: context_json) {
+            Ok(s) => Ok(s),
+            Err(msg) => Err(TemplateError.Render(msg)),
+        },
+    }
+
+// An empty template that renders to empty string.
+// Direct construction to avoid recursion (from_string -> catch_unwind
+// -> Ok(Template { inner: hb }) is fine, but unwrap_or_default would
+// loop).
+func template_default() -> Template:
+    let hb = handlebars_new()
+    // Result intentionally discarded — the empty template is registered for
+    // the side effect of occupying the "__buff_template_main" slot, matching
+    // the Rust `let _ = hb.register_template_string(...)` pattern.
+    let _discard = handlebars_register_template_string(hb: hb, name: "__buff_template_main", source: "")
+    return Template { inner: hb }
+
+// Display impl translated as a free function (Buff has no `fmt::Display`
+// trait; per §4c the closest idiom is a free function returning `String`).
+func template_display(t: Template) -> String:
+    return "Template(compiled)"

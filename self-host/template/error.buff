@@ -1,0 +1,48 @@
+// Buff self-host port of `crates/buff-template/src/error.rs` (P3.6).
+//
+// Defines [`TemplateError`] — the single error enum returned by every fallible
+// `buff-template` operation. Three variants: Parse(String), Render(String),
+// and the unit variant Panic.
+//
+// Faithful 1:1 translation of the Rust reference. Translation decisions:
+//   * `use thiserror::Error;` — deleted. Buff has no thiserror; the prelude
+//     covers the error primitives (Result, Ok, Err, Error builtin).
+//   * `#[derive(Debug, Error)]` — the `Debug` portion is implicit in Buff
+//     (auto-derived on every enum per the project derive-defaults rule). The
+//     `thiserror::Error` derive DOES NOT PORT (Buff has no thiserror) — see
+//     porting-conventions §4c. The generated `std::error::Error` + `Display`
+//     impls stay in the Rust host.
+//   * `#[error("...")]` attributes — manually translated into the
+//     `template_error_display` free function below. Per §4c the thiserror
+//     Display bodies become a free function returning `String`.
+//   * Tuple-variant payload `String` stays as `String` (Buff has no `&str`).
+//   * `pub enum` -> `enum` (Buff module-private by default; visibility is
+//     controlled by sibling `lib.buff` re-exports, matching the error-crate
+//     port precedent in `self-host/error/`).
+
+// The single error type returned by every fallible `buff-template` operation.
+enum TemplateError {
+    // The template source string could not be parsed by handlebars.
+    Parse(String),
+
+    // The template rendered but the context was missing a referenced variable.
+    Render(String),
+
+    // A wrapper-internal panic was caught by `catch_unwind` (per
+    // T4 FFI guide R6). The user sees a stable diagnostic instead
+    // of a process abort.
+    Panic,
+}
+
+// Manual translation of the Rust `Display for TemplateError` impl.
+//
+// Returns the same strings the thiserror `#[error("...")]` attributes would
+// emit on the Rust side. Per porting-conventions §4c: the thiserror derive
+// stays in the Rust host; this free function bridges the gap so the Buff port
+// can render a human-readable diagnostic without the derive.
+func template_error_display(err: TemplateError) -> String:
+    match err {
+        Parse(msg) => return "template parse error: " + msg,
+        Render(msg) => return "template render error: " + msg,
+        Panic => return "internal error: template operation panicked",
+    }
