@@ -1,0 +1,43 @@
+// dyn Trait demo (DR-020 / P2.1e)
+//
+// Demonstrates the `Box<dyn Trait>` language extension added in Phase 2
+// of the self-host-completion-roadmap. This is the "heterogeneous
+// collection" use case from DR-020 §5: a single Vector whose elements
+// are different concrete types unified by a common trait.
+//
+// NOTE: requires the buff-lang-cli runtime to actually execute. Compile
+// via `buff check examples/dyn_trait_demo.buff` to verify it parses +
+// type-checks; `buff run` will execute once the runtime trait-dispatch
+// glue is wired (tracked separately from the P2.1a-e language surface).
+
+trait Drawable:
+    func draw(self) -> String
+
+struct Circle:
+    radius: Float
+
+struct Square:
+    side: Float
+
+extend Circle:
+    func draw(self) -> String:
+        return "circle(radius=" + self.radius.to_string() + ")"
+
+extend Square:
+    func draw(self) -> String:
+        return "square(side=" + self.side.to_string() + ")"
+
+func describe_all(items: Vector<Box<dyn Drawable>>) -> String:
+    var parts: Vector<String> = []
+    for item in items:
+        parts.push(item.draw())
+    return parts.join(", ")
+
+func main():
+    let shapes: Vector<Box<dyn Drawable>> = [
+        Circle.new(radius: 1.0),
+        Square.new(side: 2.0),
+        Circle.new(radius: 3.5),
+    ]
+    let description = describe_all(shapes)
+    print(description)

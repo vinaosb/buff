@@ -272,11 +272,15 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
     // continue to work in expression position; only type-position
     // `dyn <ident>` is intercepted.
     //
-    // MVP lifetime handling: an optional parenthesized `('static)` is
-    // accepted and recorded; other lifetimes are rejected at the lint
-    // layer (E1214, P2.1d). The borrowed form `&dyn Trait` is parsed
-    // via the same path (the `&` is consumed by the prefix-type parser
-    // upstream, leaving `dyn Trait` for this function).
+    // MVP: the `lifetime` field is recorded in the AST for future
+    // expansion but the parser does not yet accept explicit lifetime
+    // syntax (`('static)` etc.) — Buff's lexer does not produce an
+    // `Ident("static")` token for `'static` (single-quote lexes as the
+    // start of a char literal). Per DR-020 §Autoboxing Rules, codegen
+    // always emits `Box<dyn Trait>` regardless, so the lifetime field
+    // has no observable effect today. A future T-numbered task will
+    // add Lifetime token support to the lexer when borrowed-form
+    // lifetimes become a real user need.
     if name.name == "dyn" {
         let trait_tok = stream.advance().ok_or_else(|| {
             ParseError::new(Diagnostic::error(
@@ -286,35 +290,9 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
         })?;
         let trait_end = trait_tok.span.end;
         let trait_name = extract_ident(trait_tok)?;
-        // Optional lifetime: `('static)`. Other lifetimes parse here but
-        // are rejected at the type-check layer (E1214) — keeps the
-        // grammar permissive, the policy at the lint.
-        let lifetime = if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
-            stream.advance(); // consume `(`
-            let lt_tok = stream.advance().ok_or_else(|| {
-                ParseError::new(Diagnostic::error(
-                    "expected lifetime identifier inside parens",
-                    stream.eof_span(),
-                ))
-            })?;
-            // Accept any identifier as a lifetime; lint validates 'static-only.
-            let lt = match lt_tok.kind {
-                TokenKind::Ident(s) => s,
-                other => {
-                    return Err(ParseError::new(Diagnostic::error(
-                        format!("expected lifetime identifier, found `{other}`"),
-                        lt_tok.span,
-                    )));
-                }
-            };
-            stream.expect(TokenKind::RParen)?;
-            Some(lt)
-        } else {
-            None
-        };
         return Ok(TypeRef::TraitObject {
             trait_name,
-            lifetime,
+            lifetime: None,
             span: Span::new(start, trait_end, source_id),
         });
     }
