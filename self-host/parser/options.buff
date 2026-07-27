@@ -22,7 +22,7 @@
 // Which language edition the parser should accept.
 //
 // Default: Edition.Standard (backwards-compatible with all prior Buff releases).
-enum Edition:
+enum Edition {
     // The default Buff language (v0.1 -> v1.18 surface).
     // All historical programs parse identically under this edition. Unicode
     // mathematical operators and the adjoint postfix are REJECTED as parse
@@ -37,6 +37,7 @@ enum Edition:
     // Unicode operators, matrix literals ([1 2; 3 4]), and the adjoint
     // postfix (A' -> A.transpose()).
     Scientific
+}
 
 // Returns true when this is Edition.Scientific.
 func edition_is_scientific(ed: Edition) -> Bool:
