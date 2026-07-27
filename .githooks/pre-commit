@@ -1,23 +1,38 @@
-#!/bin/bash
-# Extension Cap Enforcement Hook
-# Rejects commits where extensions-counter.json has used > max
+﻿#!/bin/bash
+# Pre-commit hook: extension cap enforcement + AGENTS.md metadata refresh
 
 COUNTER_FILE=".sisyphus/evidence/extensions-counter.json"
 
 if [ ! -f "$COUNTER_FILE" ]; then
+    AGENTS_UPDATED=0
+else
+    AGENTS_UPDATED=0
+fi
+
+# --- AGENTS.md metadata refresh ---
+if git diff --cached --name-only | grep -q "^AGENTS.md$"; then
+    : # already staged, skip
+else
+    COMMIT_HASH=$(git rev-parse --short HEAD)
+    BRANCH_NAME=$(git branch --show-current)
+    if [ -f "AGENTS.md" ]; then
+        sed -i "s/\*\*Commit:\*\* [a-f0-9]*/**Commit:** $COMMIT_HASH/" AGENTS.md
+        sed -i "s/\*\*Branch:\*\* \`[^`]*\`/**Branch:** \`$BRANCH_NAME\`/" AGENTS.md
+        git add AGENTS.md
+        AGENTS_UPDATED=1
+    fi
+fi
+
+# --- Extension Cap Enforcement ---
+if [ ! -f "$COUNTER_FILE" ]; then
     exit 0
 fi
 
-# Check if the counter file is in this commit's changes
 if git diff --cached --name-only | grep -q "$COUNTER_FILE"; then
-    # Parse JSON with grep/sed (no jq dependency — works on Windows Git Bash)
     USED=$(grep -o '"used":[[:space:]]*[0-9]*' "$COUNTER_FILE" | grep -o '[0-9]*$')
     MAX=$(grep -o '"max":[[:space:]]*[0-9]*' "$COUNTER_FILE" | grep -o '[0-9]*$')
-
-    # Defaults if parsing failed
     USED="${USED:-0}"
     MAX="${MAX:-3}"
-
     if [ "$USED" -gt "$MAX" ]; then
         echo "ERROR: Extension cap exceeded! used=$USED > max=$MAX"
         echo "Extensions committed:"
