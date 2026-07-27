@@ -159,12 +159,25 @@ struct Param:
 
 // Stub Display for `Param` — placeholder until `common.buff` lands.
 // Mirrors the Rust reference's `Param::fmt` (`[comptime ]name: ty[ = dv]`).
+//
+// NOTE: `is_comptime` is checked via a match (not `if p.is_comptime:`)
+// because the Buff type-checker has a known gap where field access used
+// directly as an `if` condition loses type information (returns Unknown).
+// The `match b { true => ..., false => ... }` form is the workaround;
+// field access bound through a `let` then matched works correctly.
 func param_to_string(p: Param) -> String:
-    let mut s = ""
-    if p.is_comptime:
-        s = s + "comptime "
-    s = s + ident_to_string(p.name) + ": " + typeref_to_string(p.ty) + param_default_suffix(p.default_value)
-    return s
+    let prefix = comptime_prefix(p.is_comptime)
+    return prefix + ident_to_string(p.name) + ": " + typeref_to_string(p.ty) + param_default_suffix(p.default_value)
+
+// Helper: render the optional `comptime ` prefix of a `Param`. Mirrors the
+// Rust reference's `if self.is_comptime { f.write_str("comptime ")?; }`.
+// Factored as a separate function so the caller avoids the
+// `if <field access>:` type-inference gap (see note on `param_to_string`).
+func comptime_prefix(b: Bool) -> String:
+    return match b {
+        true => "comptime ",
+        false => "",
+    }
 
 // Helper: render the `= default_value` suffix of a `Param` (T106), or the
 // empty string when no default is present. Mirrors the Rust reference's
