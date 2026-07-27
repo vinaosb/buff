@@ -396,6 +396,7 @@ func render_full_rust_backtrace_if_one(v: String):
         stderr_writeln("")
         stderr_writeln("Full Rust backtrace (RUST_BACKTRACE=1):")
         stderr_writeln(backtrace_force_capture_to_string())
+        ""
     else:
         ""
 

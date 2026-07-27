@@ -98,7 +98,7 @@ func scan_string(
             i = closing + 1
             part_start = i
         else if b == rbrace_byte:
-            return Result.Err(lexer_error_new("unexpected '}' inside string literal", span_new(i, i + 1, source_id)))
+            return Result.Err(lexer_error_new(r#"unexpected '}' inside string literal"#, span_new(i, i + 1, source_id)))
         else:
             // Multi-byte UTF-8 sequences are handled implicitly: we walk one
             // byte at a time but never split a UTF-8 boundary because we only

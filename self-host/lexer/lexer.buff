@@ -988,7 +988,7 @@ func scan_string_tokens(state: LexerState, quote_start: Int) -> Result<Int, Lexe
             i = closing + 1
             part_start = i
         else if b == rbrace_byte:
-            return Result.Err(lexer_error_new("unexpected '}' inside string literal", lx_span(state, i, i + 1)))
+            return Result.Err(lexer_error_new(r#"unexpected '}' inside string literal"#, lx_span(state, i, i + 1)))
         else:
             i = i + 1
 

@@ -79,7 +79,8 @@ func adjust_to_level(
     if level > top:
         tracker.stack.push(level)
         tokens.push(TokenKind.Indent)
-    else if level < top:
+
+    if level < top:
         for tracker_peek(tracker) > level:
             tracker.stack.pop()
             tokens.push(TokenKind.Dedent)
