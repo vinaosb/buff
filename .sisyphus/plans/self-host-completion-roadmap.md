@@ -613,12 +613,16 @@ Wave 7 (Bootstrap):
 > 5. Fix divergences by editing the .buff port (NEVER the Rust original)
 > 6. Ratchet self-host baseline
 
-- [ ] **P3.1 — buff-lang-ffi-guide port** (0 LOC — docs only, trivial)
-- [ ] **P3.2 — buff-lang-ast-rsx port** (418 LOC, 1 file, pure data)
-- [ ] **P3.3 — buff-lang-error port** (2,404 LOC, Span structs only — thiserror derives stay in Rust)
-- [ ] **P3.4 — buff-lang-debug-info port** (1,117 LOC, 2 files)
-- [ ] **P3.5 — buff-eval port** (865 LOC, 2 files)
-- [ ] **P3.6 — buff-template port** (150 LOC, 2 files — FFI dependency)
+- [x] **P3.1 — buff-lang-ffi-guide port** (0 LOC — docs only, trivial)
+  **Status**: DONE commit `ee41af4`. 26 lines docs-only port.
+- [x] **P3.2 — buff-lang-ast-rsx port** (418 LOC, 1 file, pure data)
+  **Status**: DONE commit `76b104e`. 574 lines .buff. Verified `buff check` clean.
+- [x] **P3.3 — buff-lang-error port** (2,404 LOC, Span structs only — thiserror derives stay in Rust)
+  **Status**: DONE commit `b09ae73`. 7 files, 3044 lines .buff. All pass `buff check`. ErrorCode variants preserved verbatim (STABILITY GUARANTEE).
+- [ ] **P3.4 — buff-lang-debug-info port** (1,117 LOC, 2 files) — YELLOW: needs runtime intrinsics (panic hook, backtrace)
+- [ ] **P3.5 — buff-eval port** (865 LOC, 2 files) — YELLOW: needs runtime intrinsics
+- [x] **P3.6 — buff-template port** (150 LOC, 2 files — FFI dependency)
+  **Status**: DONE commit `f927335`. 2 files, 248 lines .buff. Verified `buff check` clean.
 - [ ] **P3.7-P3.8** — Remaining per P0.4 verdict
 
 **All Phase 3 tasks parallel** (after P0.4, P0.0 conventions doc).
