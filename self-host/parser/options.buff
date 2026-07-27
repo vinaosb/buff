@@ -23,20 +23,8 @@
 //
 // Default: Edition.Standard (backwards-compatible with all prior Buff releases).
 enum Edition {
-    // The default Buff language (v0.1 -> v1.18 surface).
-    // All historical programs parse identically under this edition. Unicode
-    // mathematical operators and the adjoint postfix are REJECTED as parse
-    // errors with a helpful note. The four Unicode comparison aliases
-    // (<= >= != ->) ARE lexed into their existing ASCII token kinds
-    // regardless of edition, so they continue to work.
-    Standard  // #[default]
-
-    // The opt-in mathematical edition (T57, v1.19).
-    // Accepts every Standard-edition program PLUS the Julia-inspired
-    // extensions: implicit multiplication (2x, 2(x+y), 3sin(x)),
-    // Unicode operators, matrix literals ([1 2; 3 4]), and the adjoint
-    // postfix (A' -> A.transpose()).
-    Scientific
+    Standard,
+    Scientific,
 }
 
 // Returns true when this is Edition.Scientific.
