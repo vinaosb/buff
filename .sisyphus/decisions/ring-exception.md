@@ -30,23 +30,47 @@ ring@0.16.20
 └── jsonwebtoken v8.3.0 ← ethers v2.0.14 ← buff-web3
 ```
 
-## Mitigation Already Applied
+## Mitigations Investigated
 
-P0.8 tightened the workspace `jsonwebtoken` pin from `"9"` to
-`{ version = "9", default-features = false, features = ["rust_crypto"] }`.
-This aligns the pin with its long-standing doc comment (Cargo.toml
-~line 1272) which incorrectly claimed the `rust_crypto` backend was
-already in use. The fix:
+### `jsonwebtoken` `rust_crypto` feature (REJECTED)
 
-- Removes ring from `jsonwebtoken v9`'s direct dep graph (replaced
-  by RustCrypto sha2/hmac/etc., which are pure-Rust).
-- Does NOT remove ring from `rustls`'s dep graph — rustls has no
-  audited pure-Rust provider (both `ring` and `aws-lc-rs` use cc-rs).
+The long-standing doc comment on the workspace `jsonwebtoken = "9"`
+pin (Cargo.toml ~line 1272) and `crates/buff-auth/{Cargo.toml,AGENTS.md,
+README.md,src/jwt.rs,src/lib.rs}` claim jsonwebtoken 9 ships a
+`rust_crypto` cargo feature that swaps ring for RustCrypto sha2/hmac.
 
-The legacy `ring@0.16.20` remains because it is pulled by
-`jsonwebtoken v8`, which is in turn pulled by `ethers v2` (used by
-`buff-web3`). Bumping ethers to a hypothetical v3 that uses
-jsonwebtoken v9 is upstream-blocked.
+**This is a documentation error.** Verified 2026-07-27 via
+`cargo tree -i ring --workspace --locked` + the cargo resolver error
+`package buff-auth depends on jsonwebtoken with feature rust_crypto
+but jsonwebtoken does not have that feature. available features:
+default, pem, simple_asn1, use_pem`:
+
+- jsonwebtoken 9.3.1 has NO `rust_crypto` cargo feature.
+- jsonwebtoken 9.x unconditionally depends on `ring 0.17.x`.
+- The RustCrypto integration was proposed in jsonwebtoken issue
+  trackers but never landed in the 9.x line.
+
+The doc comments claiming otherwise across `buff-auth` are tracked as
+a separate follow-up to correct. The workspace pin stays at the
+plain `jsonwebtoken = "9"` (no features).
+
+### `rustls` crypto-provider swap (REJECTED)
+
+rustls 0.23+ supports pluggable crypto providers (`ring` or
+`aws-lc-rs`). Both use cc-rs to compile C/asm primitives — there is
+no FIPS-adjacent pure-Rust provider. Swapping `ring` for `aws-lc-rs`
+would not change the cc-rs situation (both fail the "no C library"
+rule equally).
+
+## Remaining Sources of ring
+
+- `rustls v0.21.12` / `v0.22.4` / `v0.23.42` — pulled transitively by
+  every HTTP-touching crate in the workspace (reqwest, hyper-rustls,
+  tokio-rustls, lettre, sqlx-core).
+- `jsonwebtoken v9.3.1` — pulled by `buff-auth`.
+- `jsonwebtoken v8.3.0` (pulls the legacy `ring@0.16.20` duplicate) —
+  pulled by `ethers v2.0.14` ← `buff-web3`. Bumping ethers to a
+  hypothetical v3 that uses jsonwebtoken v9 is upstream-blocked.
 
 ## Why ring Cannot Be Fully Removed
 

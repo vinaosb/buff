@@ -1269,8 +1269,16 @@ buff-http-client = { path = "crates/buff-http-client" }
 # deps — workspace glob `crates/*` cannot load buff-auth otherwise,
 # which blocks every sibling crate's `cargo check`. Versions chosen
 # to match the wider RustCrypto ecosystem pin philosophy:
-# - `jsonwebtoken` 9: HS256/RS256/ES256 via the `rust_crypto`
-#   backend (NOT `ring` / `aws-lc-rs` — pure-Rust, no cc-rs).
+# - `jsonwebtoken` 9: HS256/RS256/ES256 JWT support.
+#   P0.8 (cargo-deny gate) investigation: jsonwebtoken 9's only
+#   features are `default` / `pem` / `simple_asn1` / `use_pem` — there
+#   is NO `rust_crypto` feature (the long-standing doc comment here
+#   that claimed otherwise was incorrect and has been removed).
+#   jsonwebtoken 9's default backend pulls `ring` transitively for
+#   algorithm primitives. This is documented as part of the ring
+#   exception in `.sisyphus/decisions/ring-exception.md`. Switching
+#   to `default-features = false` is NOT viable (drops HS256 support,
+#   which is the only algorithm buff-auth's MVP surface uses).
 # - `argon2` 0.5: RustCrypto Argon2id PHC-string format (pure-Rust).
 # - `oauth2` 4: rustls-tls via reqwest (NOT native-tls).
 # All three are recorded in `extern_crates` when a Buff program

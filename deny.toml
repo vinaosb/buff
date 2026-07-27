@@ -110,7 +110,11 @@ skip-tree = [
 
 [licenses]
 # Allow only the permissive licenses used across the workspace.
-# - MIT / Apache-2.0 — Rust ecosystem defaults.
+# - MIT / Apache-2.0 — Rust ecosystem defaults. The combined SPDX
+#   expression "MIT OR Apache-2.0" is automatically satisfied because
+#   both MIT and Apache-2.0 are individually listed (cargo-deny's
+#   older `allow` parser does not accept compound SPDX expressions,
+#   but the semantic is preserved).
 # - BSD-2-Clause / BSD-3-Clause — regex, hashbrown, unicode-width, etc.
 # - ISC — crypto crates (sha2, hmac, etc.).
 # - Unicode-3-Clause — ICU / unicode-ident (newer Unicode data crates).
@@ -121,6 +125,8 @@ skip-tree = [
 # - MPL-2.0 — Mozilla Public License (some transitive crates).
 # - CC0-1.0 — Creative Commons Zero (some transitive crates).
 # - CDDL-1.0 — Common Development and Distribution License.
+# - OpenSSL — ring 0.16.20 (legacy dual OpenSSL/ISC license).
+# - CDLA-Permissive-2.0 — some transitive data-licensed crates.
 allow = [
     "MIT",
     "Apache-2.0",
