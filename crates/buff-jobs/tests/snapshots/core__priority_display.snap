@@ -1,0 +1,6 @@
+---
+source: crates/buff-jobs/tests/core.rs
+assertion_line: 263
+expression: "format!(\"{}|{}|{}|{}\", Priority::Low, Priority::Normal, Priority::High,\nPriority::Critical)"
+---
+low|normal|high|critical

@@ -1,0 +1,6 @@
+---
+source: crates/buff-jobs/tests/core.rs
+assertion_line: 277
+expression: "format!(\"{}|{}|{}|{}|{}\", JobStatus::Pending, JobStatus::InProgress,\nJobStatus::Completed, JobStatus::Failed, JobStatus::DeadLetter)"
+---
+pending|in_progress|completed|failed|dead_letter

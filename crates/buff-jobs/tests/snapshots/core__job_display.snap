@@ -1,0 +1,6 @@
+---
+source: crates/buff-jobs/tests/core.rs
+assertion_line: 316
+expression: redacted
+---
+Job(<uuid>, prio=high, status=pending, attempts=0/5)

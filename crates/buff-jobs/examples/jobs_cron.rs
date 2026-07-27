@@ -1,39 +1,68 @@
-// T35 example: cron + interval scheduling.
+// T35 example: cron + interval scheduling with handler dispatch
+// (P0.22: handler invocation now actually fires).
 //
-// Demonstrates the Scheduler API. Registers a cron-expression
-// schedule (top of every hour), a fixed-interval schedule (every
-// 60 seconds), and a weekday-morning schedule. Prints each
-// schedule's next fire time relative to "now".
+// Registers three schedules with handlers, starts the scheduler,
+// lets it run for a few seconds, then stops. Each handler bumps an
+// Arc<AtomicU32> counter so the user can see the schedule firing.
 
 use buff_jobs::{Job, Scheduler};
-use chrono::Utc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
-fn main() {
-    let scheduler = Scheduler::new()
-        .cron("0 0 * * * *", Job::new("hourly-report").unwrap())
-        .expect("cron parses")
-        .interval(Duration::from_secs(60), Job::new("health-check").unwrap())
-        .cron("0 0 9 * * Mon-Fri *", Job::new("weekday-morning").unwrap())
-        .expect("weekday cron parses");
+#[tokio::main]
+async fn main() {
+    let scheduler = Scheduler::new();
 
-    println!("registered {} schedules:", scheduler.len());
-    for s in scheduler.schedules() {
-        println!("  - {s}");
+    let hourly_fires = Arc::new(AtomicU32::new(0));
+    let hourly_fires_clone = hourly_fires.clone();
+    scheduler
+        .cron_with_handler(
+            "0 0 * * * *",
+            Job::new("hourly-report").expect("job"),
+            move |_job| {
+                hourly_fires_clone.fetch_add(1, Ordering::SeqCst);
+                println!("[hourly-report] tick");
+                Ok(())
+            },
+        )
+        .await
+        .expect("cron parses");
+
+    let health_fires = Arc::new(AtomicU32::new(0));
+    let health_fires_clone = health_fires.clone();
+    scheduler
+        .interval_with_handler(
+            Duration::from_secs(1),
+            Job::new("health-check").expect("job"),
+            move |_job| {
+                health_fires_clone.fetch_add(1, Ordering::SeqCst);
+                println!("[health-check] tick");
+                Ok(())
+            },
+        )
+        .await
+        .expect("interval registers");
+
+    println!("registered {} schedules:", scheduler.pending_count().await);
+    for s in scheduler.schedules().await {
+        println!("  - {} (next_fire={:?})", s.job.payload(), s.next_fire);
     }
 
-    let now = Utc::now();
-    match scheduler.next_due(now).expect("next_due") {
-        Some(s) => {
-            let next = s.next_fire(now).expect("next_fire").expect("reachable");
-            let delta = next.signed_duration_since(now).num_seconds();
-            println!(
-                "next due: {} (fires in {}s = {})",
-                s.job().payload(),
-                delta,
-                next
-            );
-        }
-        None => println!("no schedules due"),
-    }
+    scheduler.start().await;
+
+    // Let the schedules fire for 3 seconds, then stop.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    scheduler.stop().await;
+
+    println!("---");
+    println!(
+        "hourly-report fired {} times",
+        hourly_fires.load(Ordering::SeqCst)
+    );
+    println!(
+        "health-check fired {} times",
+        health_fires.load(Ordering::SeqCst)
+    );
 }

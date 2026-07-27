@@ -123,16 +123,6 @@ impl Job {
         self
     }
 
-    pub(crate) fn with_id(mut self, id: impl Into<String>) -> Self {
-        self.id = JobId(id.into());
-        self
-    }
-
-    pub(crate) fn with_attempts(mut self, attempts: u32) -> Self {
-        self.attempts = attempts;
-        self
-    }
-
     pub fn id(&self) -> &JobId {
         &self.id
     }
