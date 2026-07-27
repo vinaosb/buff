@@ -25,7 +25,9 @@
 //   * `impl Type { pub fn new(...) }` blocks → free functions `type_new(...)`
 //     whose bodies call `Type.new(...)` (conventions §2b / §8g — Type.new() /
 //     Type.from() only on the type; helper builders are free functions named
-//     after the type).
+//     after the type). Only the 7 types with Rust `impl` blocks get
+//     constructor fns; structs without Rust impls are constructible via
+//     `Type.new(...)` directly at call sites (Buff auto-generates this).
 //   * `pub fn is_component_tag(tag: &str) -> bool` → `export func
 //     is_component_tag(tag: String) -> Bool` (`&str` → owned `String`;
 //     `pub fn` → `export func`).
@@ -112,9 +114,6 @@ struct RsxTemplateFile:
     script: Option<ScriptBlock>
     root: Vector<RsxNode>
     span: Span
-
-func rsx_template_file_new(script: Option<ScriptBlock>, root: Vector<RsxNode>, span: Span) -> RsxTemplateFile:
-    return RsxTemplateFile.new(script: script, root: root, span: span)
 
 // ---------------------------------------------------------------------------
 // (2) ScriptBlock — <script lang="buff" props="Props"> ... </script>
@@ -277,9 +276,6 @@ struct RsxAttribute:
     kind: RsxAttributeKind
     span: Span
 
-func rsx_attribute_new(kind: RsxAttributeKind, span: Span) -> RsxAttribute:
-    return RsxAttribute.new(kind: kind, span: span)
-
 // ---------------------------------------------------------------------------
 // (9) RsxAttributeKind — 7 attribute forms.
 // Rust struct variants flattened to tuple variants (field order kept, names
@@ -328,9 +324,6 @@ struct RsxIf:
     else_branch: Option<Vector<RsxNode>>
     span: Span
 
-func rsx_if_new(branches: Vector<RsxIfBranch>, else_branch: Option<Vector<RsxNode>>, span: Span) -> RsxIf:
-    return RsxIf.new(branches: branches, else_branch: else_branch, span: span)
-
 // ---------------------------------------------------------------------------
 // (11) RsxIfBranch — one branch of an {#if}/{:else if} chain.
 // ---------------------------------------------------------------------------
@@ -340,9 +333,6 @@ struct RsxIfBranch:
     cond: String
     cond_span: Span
     body: Vector<RsxNode>
-
-func rsx_if_branch_new(cond: String, cond_span: Span, body: Vector<RsxNode>) -> RsxIfBranch:
-    return RsxIfBranch.new(cond: cond, cond_span: cond_span, body: body)
 
 // ---------------------------------------------------------------------------
 // (12) RsxEach — {#each iterable as binding} ... {:else} ... {/each}
@@ -370,18 +360,6 @@ struct RsxEach:
     // `{:else}` body, if present (runs when `iterable` is empty).
     else_branch: Option<Vector<RsxNode>>
     span: Span
-
-func rsx_each_new(iterable: String, iterable_span: Span, binding: String, index_binding: Option<String>, key: Option<String>, body: Vector<RsxNode>, else_branch: Option<Vector<RsxNode>>, span: Span) -> RsxEach:
-    return RsxEach.new(
-        iterable: iterable,
-        iterable_span: iterable_span,
-        binding: binding,
-        index_binding: index_binding,
-        key: key,
-        body: body,
-        else_branch: else_branch,
-        span: span,
-    )
 
 // ---------------------------------------------------------------------------
 // (13) RsxSlot — <slot /> (default) or <slot name="x" /> (named).
@@ -431,9 +409,6 @@ struct RsxRawHtml:
     expr: String
     span: Span
 
-func rsx_raw_html_new(expr: String, span: Span) -> RsxRawHtml:
-    return RsxRawHtml.new(expr: expr, span: span)
-
 // ---------------------------------------------------------------------------
 // (16) RsxAwait — {#await fut}{:then binding}{:catch binding}{/await}
 // ---------------------------------------------------------------------------
@@ -461,18 +436,6 @@ struct RsxAwait:
     catch_binding: Option<String>
     catch_body: Option<Vector<RsxNode>>
     span: Span
-
-func rsx_await_new(fut_expr: String, fut_span: Span, pending_body: Option<Vector<RsxNode>>, then_binding: String, then_body: Vector<RsxNode>, catch_binding: Option<String>, catch_body: Option<Vector<RsxNode>>, span: Span) -> RsxAwait:
-    return RsxAwait.new(
-        fut_expr: fut_expr,
-        fut_span: fut_span,
-        pending_body: pending_body,
-        then_binding: then_binding,
-        then_body: then_body,
-        catch_binding: catch_binding,
-        catch_body: catch_body,
-        span: span,
-    )
 
 // ---------------------------------------------------------------------------
 // is_component_tag — first char of the tag is ASCII uppercase (Svelte/JSX).
