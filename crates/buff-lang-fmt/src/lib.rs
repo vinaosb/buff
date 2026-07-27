@@ -571,6 +571,13 @@ impl<'a> Formatter<'a> {
                 }
                 self.raw(")");
             }
+            // P2.1a: TraitObject renders as `dyn TraitName` in Buff source
+            // (matches the parser's contextual-keyword recognition). The
+            // codegen layer wraps it in Box<dyn ...> per DR-020.
+            TypeRef::TraitObject { trait_name, .. } => {
+                self.raw("dyn ");
+                let _ = write!(self.buf, "{trait_name}");
+            }
         }
     }
 
