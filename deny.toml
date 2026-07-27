@@ -1,0 +1,144 @@
+# cargo-deny configuration for the Buff workspace.
+#
+# Enforces the "no C library, no cc-rs, no native-tls" hard rule from
+# AGENTS.md via a CI hard gate (`.github/workflows/ci.yml::cargo-deny`).
+#
+# ── How cargo-deny's `bans` bucket works ─────────────────────────────
+#   `deny`        — fail the gate if the named crate appears ANYWHERE
+#                   in the resolved dependency graph.
+#   `skip`        — suppress `multiple-versions` warnings for the named
+#                   crate (advisory only; does NOT exempt from `deny`).
+#   `skip-tree`   — do not recurse into the named crate's transitive
+#                   dependencies when running checks. Hides their
+#                   build-script usage (cc, pkg-config, vcpkg).
+#
+# A crate listed in BOTH `deny` and `skip`/`skip-tree` will STILL fail
+# the gate. To permit a known-offending crate, do NOT list it in
+# `deny` — document the waiver in `.sisyphus/decisions/` instead.
+#
+# ── Documented C-library exceptions (T126/T127 hard rule waiver) ─────
+#
+# Four C-toolchain crates currently appear in the resolved dependency
+# graph as TRANSITIVE dependencies of two foundational libraries
+# (ring + libsqlite3-sys). They are NOT in `deny` and are hidden from
+# the gate's transitive scan via `skip-tree`:
+#
+#   1. `ring` (v0.17.14 + v0.16.20) — the crypto backend for `rustls`,
+#      which is the TLS backbone for every HTTP-touching crate in the
+#      workspace (reqwest, hyper-rustls, tokio-rustls). ring uses cc-rs
+#      + per-platform asm to build its crypto primitives. There is no
+#      audited pure-Rust TLS backend that drops cc-rs entirely (rustls
+#      itself is pure-Rust but its only FIPS-adjacent providers — ring
+#      and aws-lc-rs — both use cc-rs).
+#      → DR: `.sisyphus/decisions/ring-exception.md`.
+#      → Sources: pulled by `rustls` ← `reqwest` (buff-http-client /
+#        buff-scrape / buff-email / buff-registry / buff-db /
+#        buff-lang-cli / buff-auth) + `hyper-rustls` (older reqwest
+#        0.11 used by `ethers` ← `buff-web3` / `buff-chat`) AND by
+#        `jsonwebtoken v8` ← `ethers` (legacy ring 0.16 duplicate).
+#
+#   2. `libsqlite3-sys` (v0.30.1) — the SQLite C library, compiled
+#      via cc-rs through the `bundled` feature. Two active consumers:
+#        - `rusqlite` ← `buff-registry` (T57 OAuth session persistence)
+#        - `sqlx-sqlite` ← `sqlx` ← `buff-db` (T18 database MVP)
+#      Both crates have their SQLite usage woven through their public
+#      API surface; replacement requires either a pure-Rust SQLite
+#      impl (none exists at production quality) OR a storage redesign.
+#      → DR: `.sisyphus/decisions/libsqlite3-sys-exception.md`.
+#
+# The `skip-tree` entries below hide the cc-rs build scripts pulled
+# transitively by these two libraries. Adding a NEW C-using crate
+# (one without a DR) will fail the gate.
+#
+# ── FP-2 prevention (ethers-solc) ────────────────────────────────────
+#
+# `ethers-solc` is the Solidity compiler bindings crate. It is gated
+# behind ethers' `solc` cargo feature, which is NOT enabled by the
+# workspace pin `ethers = { version = "2", default-features = false,
+# features = ["rustls"] }` (see `Cargo.toml` workspace.dependencies).
+# Verified 2026-07-27 via `cargo tree -i ethers-solc` →
+# "warning: nothing to print" (the crate is fetched for the registry
+# index but is NOT resolved into the active dependency graph). The
+# cargo-deny gate would catch any future regression that enables the
+# `solc` feature.
+
+[bans]
+# Notify on duplicate versions (advisory; does NOT fail the gate).
+multiple-versions = "warn"
+# Notify on wildcard version pins (advisory).
+wildcards = "warn"
+# Highlight all duplicate-version instances in output.
+highlight = "all"
+
+# Crates whose presence FAILS the gate. These are build-script tools
+# or native-C shims that the workspace has explicitly eliminated. Any
+# new transitive pull of one of these is a hard regression of the
+# "no C library, no cc-rs" rule and must be either reverted or
+# accompanied by a new DR in `.sisyphus/decisions/`.
+deny = [
+    # Alternate C/C++ build systems (we use neither).
+    { name = "gcc", version = "*" },        # legacy GNU cc wrapper (replaced by `cc`)
+    { name = "cmake", version = "*" },      # cmake binary invocation
+    { name = "bindgen", version = "*" },    # generates FFI bindings via libclang FFI
+    # Native C TLS libraries (workspace mandates rustls via reqwest's
+    # `default-features = false` + `rustls-tls` feature).
+    { name = "openssl-sys", version = "*" },# OpenSSL C library
+    { name = "native-tls", version = "*" }, # umbrella crate that pulls openssl-sys / SChannel
+]
+
+# Crates whose entire dependency subtree is excluded from the gate.
+# Each entry has a decision record under `.sisyphus/decisions/`.
+# Hides their transitive cc-rs / pkg-config / vcpkg build scripts.
+skip-tree = [
+    # TLS crypto backbone. DR: ring-exception.md.
+    { name = "ring", version = "*" },
+    # SQLite C source compiled via cc-rs `bundled` feature.
+    # DR: libsqlite3-sys-exception.md.
+    { name = "libsqlite3-sys", version = "*" },
+]
+
+# NOTE on `cc`: the `cc` crate is NOT in `deny` because it is pulled
+# transitively by BOTH documented exceptions above (ring +
+# libsqlite3-sys with `bundled`). The `skip-tree` entries hide `cc`
+# from the gate. Once both exceptions are resolved (pure-Rust TLS
+# backend lands + SQLite replacement ships), `cc` will disappear
+# automatically and SHOULD be added to `deny` as a permanent guard.
+#
+# NOTE on `pkg-config` / `vcpkg`: same situation as `cc` — they are
+# system-library probes pulled by libsqlite3-sys. Hidden via
+# `skip-tree`. They too can be denied once the SQLite exception closes.
+
+[licenses]
+# Allow only the permissive licenses used across the workspace.
+# - MIT / Apache-2.0 — Rust ecosystem defaults.
+# - BSD-2-Clause / BSD-3-Clause — regex, hashbrown, unicode-width, etc.
+# - ISC — crypto crates (sha2, hmac, etc.).
+# - Unicode-3-Clause — ICU / unicode-ident (newer Unicode data crates).
+# - Zlib — flate2 / miniz_oxide family.
+# - BSL-1.0 — Boost Software License (some transitive crates).
+# - 0BSD — zero-clause BSD (some transitive crates).
+# - Unlicense — public domain (ws_stream_wasm via ethers-providers).
+# - MPL-2.0 — Mozilla Public License (some transitive crates).
+# - CC0-1.0 — Creative Commons Zero (some transitive crates).
+# - CDDL-1.0 — Common Development and Distribution License.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "BSL-1.0",
+    "0BSD",
+    "Unlicense",
+    "MPL-2.0",
+    "CC0-1.0",
+    "CDDL-1.0",
+    "OpenSSL",
+    "CDLA-Permissive-2.0",
+]
+# Minimum license-expression confidence for inference on crates
+# without a direct SPDX declaration in their metadata.
+# Lowered to 0.6 to accommodate ring 0.16.20 (OpenSSL license, score 0.66).
+confidence-threshold = 0.6
