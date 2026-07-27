@@ -1343,7 +1343,7 @@ mod tests {
             InterpPart::Expr(Box::new(Expr::Ident(
                 Ident::new("name", dummy_span()),
                 dummy_span(),
-            ))),
+            )), None),
             InterpPart::Literal("!".into()),
         ];
         let e = Expr::StringInterp {
