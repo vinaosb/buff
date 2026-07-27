@@ -253,7 +253,7 @@ Wave 7 (Bootstrap):
   **Edit queue**: After P0.8, P0.11 in ci.yml queue.
   **Commit**: `ci: equivalence-check hard gate (P0.1)`
 
-- [ ] **P0.1.2a — `buff check --dump-ast` flag plumbing**
+- [x] **P0.1.2a — `buff check --dump-ast` flag plumbing**
   **Files**: `crates/buff-lang-cli/src/cli.rs` (add `DumpAst(bool)` to Command enum), `crates/buff-lang-cli/src/check.rs` (wire flag — after successful parse, if flag set, print stub message)
   **Detection**: `cargo run -p buff-lang-cli -- check --dump-ast examples/ola.buff` prints output.
   **Acceptance**: Flag in `--help`; prints something (stub OK for now).
@@ -287,7 +287,7 @@ Wave 7 (Bootstrap):
   **Acceptance**: continue-on-error removed; 7 files listed; breaking any FAILS CI.
   **Commit**: `ci: lock self-host baseline (P0.2)`
 
-- [ ] **P0.3 — Triage 49 transpile failures**
+- [x] **P0.3 — Triage 49 transpile failures**
   **Files**: `self-host/triage.md` (NEW)
   **What**: Independently re-run `buff check` on EACH of the 56 self-host/*.buff files (do NOT trust bootstrap-report categorization blindly). Classify each failure as: `bug` (Rust compiler fix), `lang-gap` (needs Buff extension), `unsupported` (fundamental limit), or `unknown` (needs spike). Cap `unknown` at 10.
   **Template**:
@@ -414,7 +414,7 @@ Wave 7 (Bootstrap):
 
 #### Wave 0.8B — CI Hardening
 
-- [ ] **P0.11 — Split CI test job** (cicd-001 + cicd-004)
+- [x] **P0.11 — Split CI test job** (cicd-001 + cicd-004)
   **Files**: `.github/workflows/ci.yml`
   **What**: Replace `cargo test --lib` with: `test-core` (gating, `cargo test -p buff-lang-*`, HARD gate) + `test-framework` (advisory, `cargo test --workspace --exclude buff-lang-*`, continue-on-error + 15min deadline). Flip buff-validation `::notice` → `::error`.
   **Detection**: `grep 'test-core\|test-framework' .github/workflows/ci.yml` returns matches.
@@ -431,7 +431,7 @@ Wave 7 (Bootstrap):
   **Edit queue**: First in AGENTS.md queue. First in README.md queue.
   **Commit**: `docs: reconcile metadata (P0.12)`
 
-- [ ] **P0.13 — LICENSE-APACHE + LICENSE-MIT** (lic-001)
+- [x] **P0.13 — LICENSE-APACHE + LICENSE-MIT** (lic-001)
   **Files**: `LICENSE-APACHE` (NEW), `LICENSE-MIT` (rename from LICENSE), `README.md` (## License section)
   **Detection**: `test -f LICENSE-APACHE && test -f LICENSE-MIT` returns 0.
   **Acceptance**: Both files exist; README references dual license; `cargo deny check licenses` passes.
@@ -440,19 +440,19 @@ Wave 7 (Bootstrap):
 
 #### Wave 0.8D-G — Remaining Audit Tasks
 
-- [ ] **P0.14 — Document codegen-rust god-functions as deferred** (cq-001/002/003)
+- [x] **P0.14 — Document codegen-rust god-functions as deferred** (cq-001/002/003)
   **Files**: `.sisyphus/decisions/codegen-rust-god-functions-deferred.md` (NEW DR)
   **Acceptance**: DR documents deferral + references cq-001/002/003.
   **Edit queue**: Second in AGENTS.md queue.
   **Commit**: `docs(codegen-rust): defer god-fn split (P0.14)`
 
-- [ ] **P0.15 — buff-observe: defer (obs-001/002)** — Write DR documenting deferral. Feature-gate the crate. **Commit**: `decision(observe): defer (P0.15)`
+- [x] **P0.15 — buff-observe: defer (obs-001/002)** — Write DR documenting deferral. Feature-gate the crate. **Commit**: `decision(observe): defer (P0.15)`
 
 - [ ] **P0.16 — crypto-extras test vectors** (tc-001) — Add `crates/buff-crypto-extras/tests/{aes,rsa,ecc,argon2}.rs` with NIST/RFC vectors. Fix AGENTS.md false claim. **Edit queue**: Third in AGENTS.md queue. **Commit**: `test(crypto-extras): NIST vectors (P0.16)`
 
 - [x] **P0.17 — http-client default timeout** (ft-001) — Add `.timeout(Duration::from_secs(30)).connect_timeout(Duration::from_secs(10))` to `crates/buff-http-client/src/lib.rs:75-82`. **Commit**: `fix(http-client): timeout (P0.17)`
 
-- [ ] **P0.18 — registry /health + /ready** (obs-003) — Add to `crates/buff-registry/src/lib.rs:257-282`. **Edit queue**: First in registry/lib.rs queue. **Commit**: `feat(registry): health endpoints (P0.18)`
+- [x] **P0.18 — registry /health + /ready** (obs-003) — Add to `crates/buff-registry/src/lib.rs:257-282`. **Edit queue**: First in registry/lib.rs queue. **Commit**: `feat(registry): health endpoints (P0.18)`
 
 - [ ] **P0.19 — Strategy-practice relabel** — Mark codegen-deferred examples in README; flip buff-validation severity. **Edit queue**: Third in README.md queue. **Commit**: `docs: honest labeling (P0.19)`
 
@@ -490,7 +490,7 @@ Wave 7 (Bootstrap):
   **Acceptance**: Invalid names rejected; path traversal blocked; size limit enforced.
   **Commit**: `fix(registry): input validation (P0.28)`
 
-- [ ] **P0.29 — buff-web3 test coverage** (FN-3)
+- [x] **P0.29 — buff-web3 test coverage** (FN-3)
   **Files**: `crates/buff-web3/tests/` (NEW)
   **What**: ABI binding round-trip tests, mock provider integration tests.
   **Commit**: `test(web3): ABI coverage (P0.29)`
@@ -535,7 +535,7 @@ Wave 7 (Bootstrap):
 
 ### PHASE 0.6-0.7 — Baseline + Meta-Validation
 
-- [ ] **P0.6 — Baseline benchmark** — `cargo build --release -p buff-lang-cli --timings` + `buff run examples/{ola,fibonacci}.buff`. Save to `.sisyphus/evidence/baseline-benchmark.json`.
+- [x] **P0.6 — Baseline benchmark** — `cargo build --release -p buff-lang-cli --timings` + `buff run examples/{ola,fibonacci}.buff`. Save to `.sisyphus/evidence/baseline-benchmark.json`.
 - [ ] **P0.6.1 — Per-phase re-record** — After each phase, re-benchmark. Gate: ≤3% regression.
 - [ ] **P0.7 — Harness divergence detection** — Inject deliberate divergence. Verify harness catches it.
 
