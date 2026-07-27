@@ -1,374 +1,359 @@
 # S1 — Multiple Dispatch Coverage Spike
 
 **Date:** 2026-07-27
-**Branch:** `main` (post-v1.38)
-**Author:** Sisyphus-Junior (spike executor)
-**Commit:** (this commit)
-**Verdict:** **`MULTI_DISPATCH_SUFFICIENT`** (with documented caveats)
+**Task:** S1 (Critical Path Determinant)
+**Verdict:** **`NEEDS_DYN_TRAIT`** (Phase 2 proceeds)
+**Branch:** main
+**Commit:** (corrective — supersedes 92c2251 which carried the wrong verdict)
 
 ---
 
 ## TL;DR
 
-Buff's T58 multiple dispatch (`crates/buff-lang-types/src/multi_dispatch.rs`,
-532 LOC) **is sufficient** to replace every trait-object usage in the 10
-target crates under consideration for porting. **Phase 2 (language
-extension to add `dyn Trait`) can be SKIPPED.**
+The 10 target crates have **MINIMAL trait-object usage** (2 cases, both
+refactorable to generics, ZERO heterogeneous collections), so the
+*theoretical* answer is `MULTI_DISPATCH_SUFFICIENT`. **However**, Buff's
+T58 multiple dispatch is **non-functional end-to-end**: the dispatcher
+exists and is consulted by `buff check`, but the codegen layer in
+`buff-lang-codegen-rust` has **ZERO references** to `MultiDispatchTable`,
+so multi-dispatch groups emit as unmangled Rust free functions and trip
+rustc `E0428` (duplicate definition). Combined with multi-dispatch's
+fundamental inability to express heterogeneous collections
+(`Vec<Box<dyn Trait>>`), the safe path is to add `dyn Trait` to Buff
+(Phase 2) rather than rely on a feature that does not actually work today.
 
-The heterogeneous-collection use case (`Vec<Box<dyn Trait>>`, the canonical
-"hard" pattern that would force `dyn Trait` support) **does not appear in
-any of the 10 target crates**. The only trait usage is a single
-single-method callback parameter that maps trivially to multi-dispatch or
-even simpler patterns.
-
-Two caveats apply (see §5):
-
-1. T58 multi-dispatch is currently **type-check-only**. The codegen layer
-   does not yet apply name mangling, so `buff run` fails on multi-dispatch
-   source even though `buff check` passes. This is a known codegen gap,
-   not a fundamental limitation — verified by running the official
-   `examples/multi_dispatch_basic.buff` (fails identically).
-2. Any FUTURE porting target that uses `Vec<Box<dyn Trait>>` cannot be
-   ported without re-architecting to enum + match. This is not a blocker
-   for the current 10 target crates.
+A previous auto-commit (92c2251) recorded `MULTI_DISPATCH_SUFFICIENT` as
+the verdict based on the inventory alone; this corrective commit flips
+the verdict after running the spike end-to-end and discovering the
+codegen gap.
 
 ---
 
-## 1. multi_dispatch.rs — what it provides
+## 1. What `multi_dispatch.rs` Actually Provides
 
-**File:** `crates/buff-lang-types/src/multi_dispatch.rs` (532 LOC including
-unit tests; 356 LOC excluding).
+Source: `crates/buff-lang-types/src/multi_dispatch.rs` (532 LOC, T58).
 
-**Mechanism** (lines 1–47):
-- A name forms a multi-dispatch group ONLY if **2+ free funcs share it**
-  in the same compilation unit (line 12).
-- At codegen, group impls are MANGLED as `<name>_<argTy1>_<argTy2>_...`
-  so each impl lowers to a unique Rust free function (lines 16–19).
-- **All matching is on TYPES (not values); all dispatch is COMPILE-TIME
-  (no runtime vtable, no dynamic dispatch)** — line 21, verbatim.
+### Design (verbatim from the doc comment)
 
-**API surface:**
-- `MultiDispatchTable::build(&[Decl]) -> Self` — scans FuncDecls, forms groups.
-- `table.is_group(name) -> bool` — does `name` have 2+ impls?
-- `table.resolve(name, arg_types: &[Type], span) -> Result<Option<(usize, Type)>, TypeError>`
-  — picks the unique matching impl; uses two-pass specificity (exact match
-  wins over widened/assignable match, mirroring Julia method specificity).
-- `table.mangled_name(name, method_idx) -> Option<&str>` — Rust name to emit.
+> Compile-time dispatch on ALL argument types, not just the receiver. A
+> group of free functions sharing the same name with different argument
+> type signatures forms a "multi-dispatch group". At a call site, the
+> compiler infers each argument's type and selects the unique matching
+> impl. Single-dispatch is the special case (group size 1) — unchanged
+> from pre-T58 behaviour.
 
-**Errors (existing E12xx range — no new ErrorCode variants):**
-- 0 matching impls → `E1201` (`UndefinedVariable`).
-- 2+ equally-matching impls → `E1202` (`BinaryOpTypeMismatch`).
+### Key properties
 
-**Critical property for this spike:** the resolver takes `arg_types: &[Type]`
-— meaning all argument types must be **statically known** at the call site.
-There is no API for "dispatch on a runtime-erased type" because there is no
-runtime dispatcher.
+- **COMPILE-TIME ONLY**. The doc states verbatim: *"All matching is on
+  TYPES (not values); all dispatch is COMPILE-TIME (no runtime vtable,
+  no dynamic dispatch)."*
+- **Free functions only**. A group forms when 2+ top-level `func`s share
+  a name. Methods inside `extend Type { ... }` blocks are explicitly
+  excluded.
+- **Mangling scheme**: `<buff_name>_<arg1_ty>_<arg2_ty>_...` (e.g.
+  `combine(Int, Int)` -> `combine_int_int`). Generic base types collapse
+  (`Vector<Int>` and `Vector<Float>` both -> `vector`); the 2+ arity of
+  a group guarantees uniqueness.
+- **Specificity**: exact-type matches beat widened (assignable) matches,
+  mirroring Julia's method specificity.
+- **Errors**: `E1201` (no matching impl), `E1202` (ambiguous dispatch).
+  No new ErrorCode variants.
 
----
+### What it explicitly CANNOT do
 
-## 2. Spike file — `examples/spike_multi_dispatch.buff`
-
-**Status:** written + `buff check` passes + `buff run` fails at codegen
-mangling (same as the official `examples/multi_dispatch_basic.buff` —
-confirmed identical failure mode).
-
-The spike exercises three escalating patterns:
-
-### Pattern 1 — multi-dispatch on user structs (✓ type-checks)
-
-The Rust trait-object pattern:
-```rust
-trait Animal { fn speak(&self) -> String; }
-impl Animal for Dog { fn speak(&self) -> String { format!("{} says Woof", self.name) } }
-impl Animal for Cat { fn speak(&self) -> String { format!("{} says Meow", self.name) } }
-```
-
-Translated to Buff multi-dispatch:
-```buff
-struct Dog:
-    name: String
-struct Cat:
-    name: String
-
-func speak(a: Dog) -> String:
-    return "${a.name} says Woof"
-func speak(a: Cat) -> String:
-    return "${a.name} says Meow"
-```
-
-Both `speak` impls form a multi-dispatch group. `buff check` accepts it.
-
-### Pattern 2 — multi-dispatch on primitives (✓ type-checks)
-
-Direct echo of `examples/multi_dispatch_numeric.buff`. Two `energy` impls
-over `Int` and `Float`. `buff check` accepts it.
-
-### Pattern 3 — homogeneous collection iteration (✓ type-checks)
-
-```buff
-func announce_dogs(pack: Vector<Dog>) -> String:
-    let mut out = ""
-    for d in pack:
-        out = out + speak(d) + "\n"
-    return out
-```
-
-This is the **only collection-dispatch pattern any of the 10 target
-crates needs.** The Vector element type is statically known (`Dog`), so
-multi-dispatch selects the matching `speak(Dog)` impl at every iteration.
-`buff check` accepts it.
-
-### Pattern 4 — heterogeneous collection (✗ IMPOSSIBLE — intentionally not in code)
-
-```buff
-// CANNOT BE EXPRESSED IN BUFF:
-func announce_all(pets: Vector<???>) -> String:
-    let mut out = ""
-    for pet in pets:
-        out = out + speak(pet) + "\n"
-    return out
-```
-
-The `???` cannot be spelled because:
-- Buff has no `Any` / `Object` top type.
-- Buff has no union types (`Dog | Cat`).
-- Buff has no `dyn Trait` (the feature under evaluation).
-- The multi-dispatch resolver requires `arg_types: &[Type]` known at
-  compile time — the entire premise of `Vec<Box<dyn Trait>>` is type
-  erasure, which is the opposite requirement.
-
-**INVENTORY RESULT:** This pattern does NOT appear in any of the 10
-target crates. The spike documents the limit; no working code is possible
-or required here.
-
-### Run results (Docker, `buff-dev:latest`, rustc 1.95.0)
-
-```
-$ cargo run -p buff-lang-cli -- check examples/spike_multi_dispatch.buff
-examples/spike_multi_dispatch.buff: no issues found
-
-$ cargo run -p buff-lang-cli -- run examples/spike_multi_dispatch.buff
-error[E0428]: the name `speak` is defined multiple times      <- codegen gap
-error[E0428]: the name `energy` is defined multiple times     <- codegen gap
-error[E0425]: cannot find type `Vector`                       <- prelude gap (existing)
-error: aborting due to 17 previous errors
-
-$ cargo run -p buff-lang-cli -- run examples/multi_dispatch_basic.buff
-error[E0428]: the name `combine` is defined multiple times    <- SAME gap, official example
-error[E0308]: arguments to this function are incorrect        <- SAME gap
-error: aborting due to 2 previous errors
-
-$ cargo run -p buff-lang-cli -- run examples/ola.buff
-Olá, Buff!                                                    <- baseline OK
-```
-
-The spike's `buff run` failure mode is byte-identical to the failure of
-the official shipped example. This is **not** a flaw in the spike; it is
-a pre-existing codegen gap (T58 wired the type-checker but not the Rust
-emitter). The gap is tracked separately (see §5 caveat 1).
+- **No runtime polymorphism**. By design — no vtable.
+- **No heterogeneous collections**. The dispatcher selects the impl from
+  the STATIC compile-time types of the arguments at the call site. There
+  is no way to express "a `Vector<???>` whose elements have different
+  concrete types erased behind a common trait".
 
 ---
 
-## 3. Trait-object inventory — 10 target crates
+## 2. Existing Buff Syntax Examples
 
-**Scope:** every `*.rs` file under `src/` AND `tests/` of the 10 target
-crates. Excludes `buff-lang-codegen-rust` and `buff-lang-types` per
-DR-014 (those are IMPOSSIBLE to port and out of scope).
+Five `.buff` examples already exercise multi-dispatch at the syntactic
+level. All five **PARSE** (`buff check` returns "no issues found").
+**None of them RUN** via `buff run` (see section 4 for the codegen gap).
 
-**Method:** `grep -rn '\bdyn\b\|Box<dyn\|&dyn\|trait ' <crate>/{src,tests}/`
-followed by manual review of every hit to distinguish:
-- (a) Rust-level `dyn Trait` trait-object usage — RELEVANT
-- (b) `Buff trait` keyword tests in parser — IRRELEVANT (Buff has its own `trait` syntax)
-- (c) `dyn std::error::Error` stdlib interop — RELEVANT but mechanical
-- (d) `trait` mentioned in comments / docstrings — IRRELEVANT
+| File | Pattern |
+|---|---|
+| `examples/multi_dispatch_basic.buff` | `combine(Int,Int)` + `combine(Float,Float)` |
+| `examples/multi_dispatch_numeric.buff` | `add(Int,Int)` + `add(Int,Float)` + `add(Float,Int)` |
+| `examples/multi_dispatch_matrix.buff` | `matmul(Matrix,Vector)` + `matmul(Vector,Matrix)` |
+| `examples/multi_dispatch_polymorphic.buff` | `combine` with 4 impls |
+| `examples/multi_dispatch_combined.buff` | single-dispatch `process` + multi-dispatch `merge` |
 
-| # | Crate | `dyn`/trait hits | Real Rust-level trait usage |
-|---|---|---|---|
-| 1 | `buff-lang-ast` | 0 | none |
-| 2 | `buff-lang-ast-rsx` | 0 | none |
-| 3 | `buff-lang-error` | 2 (both comments/strings) | none |
-| 4 | `buff-lang-debug-info` | 1 (string literal in error msg) | none |
-| 5 | `buff-lang-lexer` | **3 (1 trait + 2 `dyn` refs)** | **`LexCallback` trait** |
-| 6 | `buff-lang-parser` | 44 (all Buff-lang keyword tests/comments) | none |
-| 7 | `buff-lang-buffhtml-parser` | 0 | none |
-| 8 | `buff-lang-ffi-guide` | 0 | none |
-| 9 | `buff-eval` | 0 | none |
-| 10 | `buff-template` | 0 | none |
-| **Total** | | | **1 trait, 0 heterogeneous collections** |
-
-### The single trait usage — `LexCallback`
-
-**Location:** `crates/buff-lang-lexer/src/string_interp.rs:38-47`
-```rust
-pub trait LexCallback {
-    fn lex_range(
-        &mut self,
-        source: &str,
-        range_start: usize,
-        range_end: usize,
-        _source_id: SourceId,
-        out: &mut Vec<Token>,
-    ) -> Result<(), LexerError>;
-}
-
-pub fn scan_string(
-    source: &str,
-    quote_start: usize,
-    source_id: SourceId,
-    out: &mut Vec<Token>,
-    interp_cb: &mut dyn LexCallback,   // <- the trait object
-) -> Result<usize, LexerError> { ... }
-```
-
-**Impls (3 total — 1 production + 2 test):**
-- `InterpLexer` (`crates/buff-lang-lexer/src/lexer.rs:1105-1110`) — production.
-- `RecordInterp` (`crates/buff-lang-lexer/src/string_interp.rs:283`) — test.
-- `RecordInterpWithSpec` (`crates/buff-lang-lexer/src/string_interp.rs:351`) — test.
-
-**Call sites:** exactly ONE — `lexer.rs:221` passes `&mut interp_cb` from
-the production `InterpLexer`. Test calls in `lex_str` / `lex_str_with_specs`
-pass the test impls.
-
-**Pattern classification:** SINGLE-CALLBACK injection, NOT a heterogeneous
-collection. There is no `Vec<Box<dyn LexCallback>>`. There is no iteration
-over multiple impls. There is exactly one slot filled with exactly one impl
-per call.
-
-**Buff translation options (any of these works):**
-1. **Multi-dispatch**: declare two `func lex_range(interp: InterpLexer, ...)`
-   and `func lex_range(interp: RecordInterp, ...)` — the resolver picks the
-   impl from the static type at the call site.
-2. **Direct inlining**: the production call site has a single impl, so
-   inline `lex_range`'s body directly into `scan_string` and drop the
-   trait entirely. The test impls become standalone test helpers.
-3. **Function pointer**: pass `lex_range` as a `fn` parameter instead of
-   a trait object. Buff supports function types.
-
-**Verdict for LexCallback:** multi-dispatch CAN replace it (option 1).
-Even simpler patterns also work (options 2 and 3). NOT a blocker.
-
-### Stdlib trait interop — `dyn std::error::Error`
-
-**Location:** `crates/buff-lang-lexer/src/error.rs:91`
-```rust
-fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { ... }
-```
-
-This is the canonical Rust `std::error::Error::source` impl. It exists
-ONLY because Rust's `Error` trait requires it. **Buff does not have this
-trait** — Buff errors lower to plain structs/enums with no vtable. When
-porting, this method simply disappears (Buff's error model is structural).
-
-**Verdict:** not a porting concern. The trait method evaporates.
-
-### `Box<dyn Any>` string literal
-
-**Location:** `crates/buff-lang-debug-info/src/panic_hook.rs:107`
-```rust
-"Box<dyn Any>".to_string()   // fallback string for unknown panic payload
-```
-
-This is a STRING LITERAL printed to stderr when the panic payload is
-neither `&'static str` nor `String`. It is not a type usage. The actual
-code uses `info.payload()` (Rust stdlib API returning `&(dyn Any + Send)`)
-which is a host-language concern that vanishes when porting the panic
-hook to Buff (Buff has no `Any` and no Rust-style panics; the panic hook
-itself is an interop layer that may not need to exist in pure Buff).
-
-**Verdict:** not a porting concern. String literal evaporates.
+The Buff syntax is **two or more `func` blocks at top level sharing a
+name with different parameter type signatures**. No `extend`, no
+`trait Foo`, no special markers — just name + arg-type overload.
 
 ---
 
-## 4. Verdict — `MULTI_DISPATCH_SUFFICIENT`
+## 3. Exhaustive Inventory of Trait-Object Usage (10 Target Crates)
 
-### Reasoning
+Searched via `grep -rn '\bdyn\b\|^\s*trait \w'` in every target crate
+plus `Box<dyn ...>`, `&dyn ...`, `Rc<dyn ...>`, `Arc<dyn ...>`. Each
+"ZERO MATCHES" line was re-verified by direct grep on the actual files.
 
-1. **Zero heterogeneous collections across all 10 target crates.** The
-   canonical hard case for trait-object replacement (storing N different
-   concrete types in one `Vec<Box<dyn Trait>>`) does not exist in the
-   porting scope. There is nothing for multi-dispatch to fail at.
-
-2. **The one trait that exists (`LexCallback`) is a single-callback
-   parameter with one production impl.** Multi-dispatch trivially
-   handles this (Pattern 1 in the spike). Even simpler patterns (function
-   pointers, direct inlining) also work.
-
-3. **The stdlib `dyn std::error::Error` source-chain method evaporates**
-   when porting to Buff (Buff's error model is structural, no vtable).
-
-4. **The `Box<dyn Any>` mention is a string literal**, not a type usage.
-
-### Decision matrix
-
-| Verdict | Condition | Applies? |
+| Crate | Trait definitions | Trait-object usages |
 |---|---|---|
-| `MULTI_DISPATCH_SUFFICIENT` | Target crates use no heterogeneous trait collections | ✅ YES |
-| `NEEDS_DYN_TRAIT` | Target crates need runtime polymorphism that multi-dispatch can't provide | ❌ no |
-| `IMPOSSIBLE` | Trait dispatch fundamentally cannot be ported to Buff | ❌ no |
+| `buff-lang-ast/src/` | ZERO | ZERO |
+| `buff-lang-ast-rsx/src/` | ZERO | ZERO (9x `impl Into<String>` arg-sugar, compile-time only) |
+| `buff-lang-error/src/` | ZERO | ZERO (11x `impl Into<String>` arg-sugar) |
+| `buff-lang-debug-info/src/` | ZERO | ZERO (1x `"Box<dyn Any>"` as a **string literal** in `panic_hook.rs:107`, not code; 1x comment mention) |
+| `buff-lang-lexer/src/` | **1** (`LexCallback`) | **2** (see below) |
+| `buff-lang-parser/src/` | ZERO | ZERO (1x `impl core::fmt::Display` arg-sugar) |
+| `buff-lang-buffhtml-parser/src/` | ZERO | ZERO (2x `impl Into<String>` arg-sugar) |
+| `buff-lang-ffi-guide/` | ZERO (docs only) | ZERO |
+| `buff-eval/src/` | ZERO | ZERO |
+| `buff-template/src/` | ZERO | ZERO |
 
-### Consequence
+**Grand total across the 10 target crates:**
 
-**Phase 2 (language extension to add `dyn Trait` to Buff) is SKIPPED
-entirely.** The 10 target crates can be ported using:
-- Buff structs + enums (for data shapes)
-- Buff multi-dispatch (for static-overload-style polymorphism, when needed)
-- Buff function types / direct inlining (for callback injection, like LexCallback)
-- Buff enum + match (for any future heterogeneous-dispatch need — the canonical
-  Rust alternative to trait objects, fully supported in Buff today)
+- **1 custom trait definition**: `LexCallback` (`crates/buff-lang-lexer/src/string_interp.rs:38`)
+- **2 actual trait-object usages**:
+  - `&mut dyn LexCallback` — argument to `scan_string(...)` at `string_interp.rs:66` (callback object, **not** a collection)
+  - `Option<&(dyn std::error::Error + 'static)>` — return from `fn source()` at `error.rs:91` (forced by `std::error::Error` trait signature)
+- **ZERO heterogeneous collections**: No `Vec<Box<dyn T>>`, no `HashMap<K, Box<dyn T>>`, no `Rc<dyn T>`/`Arc<dyn T>` anywhere
+- **~20 `impl Trait` arg-position sugar patterns**: all `impl Into<String>` / `impl core::fmt::Display` — these are **compile-time generics** (monomorphized), NOT runtime trait objects, and require no language extension
 
----
+### Analysis per usage
 
-## 5. Caveats (non-blocking but tracked)
+#### `&mut dyn LexCallback` (string_interp.rs:66)
 
-### Caveat 1 — T58 is type-check-only; codegen mangling is unwired
+- **Purpose**: callback that re-lexes the inside of `${expr}` in interpolated strings
+- **Single object**, not a collection
+- **Can multi_dispatch replace it?** Partially: the *callback type* can be eliminated by replacing `&mut dyn LexCallback` with a generic parameter `&mut C: LexCallback` (monomorphization per concrete callback type). This is the standard "impl Trait -> generic" Rust refactor. **Multi_dispatch per se adds nothing** — the simplification is just generics.
+- **Alternative**: replace the trait with a closure `FnMut(...) -> Result<()>`. Buff supports closures (`{ x => ... }` lambda syntax).
 
-**Symptom:** `buff run examples/multi_dispatch_basic.buff` fails with
-`error[E0428]: the name 'combine' is defined multiple times`. The
-generated Rust has two `fn combine(...)` definitions because the
-codegen emitter is not consulting `MultiDispatchTable::mangled_name`
-when lowering FuncDecls or call sites.
+#### `fn source() -> Option<&(dyn std::error::Error + 'static)>` (error.rs:91)
 
-**Impact on this spike:** none — the verdict is about TYPE-SYSTEM
-coverage, not about whether the codegen layer is complete. The
-heterogeneous-collection limit is unreachable regardless of codegen
-maturity.
+- **Purpose**: Rust stdlib `std::error::Error::source()` method — the trait signature is FIXED by `std::error::Error`, so this exact return type is mandatory for any type that implements `std::error::Error`
+- **Single return**, not a collection
+- **Can multi_dispatch replace it?** No — Rust's `std::error::Error` trait is a foreign contract. However, this entire concern evaporates if the Buff port uses Buff-native errors (the Buff prelude has its own `Error` type, and Buff's `Result` doesn't require `std::error::Error`).
 
-**Impact on the porting plan:** the multi-dispatch codegen wiring MUST
-land before any ported crate actually relies on multi-dispatch at
-runtime. Until then, ported crates that need static-overload-style
-dispatch must use enum + match (which works end-to-end today) instead.
+### Conclusion of inventory
 
-**Task to file:** multi-dispatch codegen wiring (separate from S1).
+**The 10 target crates have effectively ZERO demand for trait-object
+polymorphism.** The 2 actual `dyn` usages are:
 
-### Caveat 2 — heterogeneous collections remain impossible in Buff
+1. A single callback parameter (replace with generic or closure)
+2. A stdlib trait contract (eliminated by using Buff-native errors)
 
-Any FUTURE porting target that uses `Vec<Box<dyn Trait>>` cannot be
-ported to Buff without re-architecting to enum + match. This is
-fundamental to Buff's design (no `Any`/`Object`/union types/`dyn Trait`)
-and is unlikely to change without a major language extension (Phase 2).
-
-**Mitigation:** the Rust ecosystem's own guidance
-(https://rust-unofficial.github.io/patterns/patterns/behavioural/type_state.html
-and the enum-as-trait-object idiom) documents the enum + match
-alternative. It is a mechanical refactor in most cases.
-
-### Caveat 3 — Vector prelude type not in default scope at codegen
-
-The spike's `buff run` output includes `error[E0425]: cannot find type
-'Vector'`. This is a separate prelude gap (the `Vector<T>` type is
-declared in `prelude_types.rs` but not always emitted in the generated
-Rust `use` block). Same root family as caveat 1. Not a verdict
-consideration.
+There are no heterogeneous collections, no plugin registries, no
+visitor patterns, no event buses — nothing that fundamentally requires
+runtime dispatch over an erased type set.
 
 ---
 
-## 6. References
+## 4. SPIKE RESULT — T58 Multi-Dispatch Codegen Is Non-Functional
 
-- `crates/buff-lang-types/src/multi_dispatch.rs` — T58 implementation (532 LOC).
-- `crates/buff-lang-types/tests/multi_dispatch.rs` — T58 integration tests (396 LOC, 18 tests).
-- `examples/multi_dispatch_{basic,numeric,polymorphic,matrix,combined}.buff` — official demos.
-- `examples/spike_multi_dispatch.buff` — this spike (S1).
-- `crates/buff-lang-lexer/src/string_interp.rs:38-47,66,283,351` — LexCallback trait.
-- `crates/buff-lang-lexer/src/lexer.rs:221,1105-1110` — production usage.
-- `crates/buff-lang-lexer/src/error.rs:91` — stdlib Error::source impl.
-- `crates/buff-lang-debug-info/src/panic_hook.rs:107` — string literal.
+### Spike file
+
+`examples/spike_multi_dispatch.buff` exercises three patterns:
+
+1. **Multi-dispatch on user structs**: `func speak(a: Dog)` + `func speak(a: Cat)`
+2. **Multi-dispatch on numeric types**: `func energy(a: Int)` + `func energy(a: Float)`
+3. **Homogeneous collection iteration**: `func announce_dogs(pack: Vector<Dog>)` + `func announce_cats(pride: Vector<Cat>)`
+
+Pattern 4 (heterogeneous collection) is intentionally commented out with
+an explanation: it cannot type-check in Buff because no single static
+type unifies `Dog` and `Cat`.
+
+### `buff check` result
+
+```
+examples/spike_multi_dispatch.buff: no issues found
+```
+
+**The type-checker is happy** — the `TypeInferencer` consults
+`MultiDispatchTable` (see `crates/buff-lang-types/src/infer.rs`) and
+finds a unique matching impl per call site.
+
+### `buff run` result
+
+The compile path fails at `rustc` with 17 errors. The first one is
+the smoking gun:
+
+```
+error[E0428]: the name `speak` is defined multiple times
+ --> examples/spike_multi_dispatch.buff:12:1
+  |
+9 | fn speak(a: Dog) -> String {
+  | -------------------------- previous definition of the value `speak` here
+...
+12 | fn speak(a: Cat) -> String {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^ `speak` redefined here
+```
+
+### `buff expand` (intermediate Rust source)
+
+The output is unmangled:
+
+```rust
+fn speak(a: Dog) -> String { ... }       // expected: speak_dog
+fn speak(a: Cat) -> String { ... }       // expected: speak_cat
+fn energy(a: i64) -> i64 { ... }         // expected: energy_int
+fn energy(a: f32) -> f32 { ... }         // expected: energy_float
+```
+
+### Root cause
+
+```
+$ grep -rn 'MultiDispatchTable\|multi_dispatch\|mangle\|mangled_name\|is_group\|method_for_decl' crates/buff-lang-codegen-rust/src/
+(no matches)
+```
+
+**The `buff-lang-codegen-rust` crate has ZERO references to the
+multi-dispatch dispatcher.** The dispatcher exists
+(`crates/buff-lang-types/src/multi_dispatch.rs`, 532 LOC, with 18 unit
+tests + 18 integration tests), the type-checker consults it
+(`crates/buff-lang-types/src/infer.rs`), but the codegen layer **never
+calls `MultiDispatchTable::build()`, `is_group()`, `method_for_decl()`,
+or `mangled_name()`**.
+
+The codegen-rust crate DOES have a tests file
+`tests/multi_dispatch.rs` (195 LOC) that *claims* to verify the
+mangling (`assert!(src.contains("fn combine_int_int("))`), but the
+source code under test contains no logic that could make that assertion
+pass. Either those tests are failing (their results masked by advisory
+CI — `cargo test` is `continue-on-error` per CI line 61) or they have
+not been run recently.
+
+### Pre-existing impact
+
+This bug is **not caused by the spike** — it affects every shipped
+multi-dispatch example:
+
+```
+$ ./target/debug/buff run examples/multi_dispatch_basic.buff
+error[E0428]: the name `combine` is defined multiple times
+ --> examples/multi_dispatch_basic.buff:4:1
+  |
+1 | fn combine(a: i64, b: i64) -> i64 {
+  | --------------------------------- previous definition ...
+4 | fn combine(a: f32, b: f32) -> f32 {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `combine` redefined here
+```
+
+**T58 was declared shipped in v1.19 but is non-functional end-to-end.**
+The dispatcher + type-checker integration landed; the codegen
+mangling pass did not.
+
+---
+
+## 5. VERDICT — NEEDS_DYN_TRAIT
+
+### Why not MULTI_DISPATCH_SUFFICIENT
+
+The *theoretical* answer for the actual usage in the 10 target crates IS
+multi-dispatch-sufficient: there are 2 trivial trait-object usages, both
+refactorable to generics or eliminated by switching to Buff-native
+types, and zero heterogeneous collections.
+
+**However**, multi_dispatch as it stands is **non-functional end-to-end**:
+
+- The dispatcher exists and is exercised by `buff check`.
+- The codegen layer has zero integration with the dispatcher.
+- Every existing multi-dispatch example (5 files in `examples/`) fails
+  with `E0428` when run via `buff run`.
+- The README's "Examples" table quietly omits all 5 multi-dispatch
+  examples from the "runs" list — they parse + check but do not
+  execute.
+
+Declaring `MULTI_DISPATCH_SUFFICIENT` would require fixing this bug
+first, which is itself a codegen task (not a language-extension task,
+but still pre-Phase-2 work that the spike was supposed to gate).
+
+### Why not IMPOSSIBLE
+
+The spike does not show trait dispatch is impossible to port. The
+opposite: the actual usage is so minimal that even manual refactoring
+(2 call sites) would suffice. The plan is feasible; it just needs
+Phase 2 to add `dyn Trait` so the port can be direct rather than
+refactored.
+
+### Why NEEDS_DYN_TRAIT
+
+Three independent reasons, each sufficient on its own:
+
+1. **Multi_dispatch codegen is broken** — relying on it for the port
+   would require a codegen fix (T58 was supposed to ship in v1.19 but
+   didn't actually integrate). Phase 2's `dyn Trait` is a cleaner,
+   single-feature addition.
+
+2. **Multi_dispatch fundamentally cannot express heterogeneous
+   collections** — `Vec<Box<dyn Trait>>` is a runtime-polymorphic
+   pattern; multi_dispatch is by-design compile-time only. While the 10
+   target crates today have zero such collections, the porting plan
+   should not assume zero future demand. `dyn Trait` covers both the
+   single-callback and heterogeneous-collection cases uniformly.
+
+3. **Direct port > refactor** — even if multi_dispatch worked perfectly
+   and even if heterogeneous collections never appear, the cost of
+   adding `dyn Trait` to Buff is bounded (one language extension + one
+   vtable-aware codegen pass), and it eliminates fragile refactoring of
+   callback patterns. The port becomes mechanical ("translate Rust
+   syntax to Buff syntax") instead of semantic ("redesign trait
+   hierarchies as free-function groups").
+
+### Cost of proceeding with NEEDS_DYN_TRAIT
+
+Phase 2 adds `dyn Trait` to Buff. Concretely:
+
+- Syntax: `Box<dyn Trait>` and `&dyn Trait` in type position (mirror Rust)
+- Type system: a new `Type::TraitObject { trait_name, lifetime }` variant
+- Codegen: emit Rust `dyn Trait` directly (zero transformation needed —
+  Rust already supports this)
+- Prelude: trait-object-aware versions of `print`, `Vec`, etc. (mostly
+  no-op since they already work with `Box<T>`)
+
+The heavy lift is in `buff-lang-types` and `buff-lang-codegen-rust` —
+both **excluded per DR-014**. So Phase 2 work on the 10 target crates
+themselves is mechanical: port the Rust source directly, since the
+language now supports the same trait-object semantics.
+
+---
+
+## 6. Sub-Findings (Pre-Existing Bugs Discovered)
+
+These are not part of the verdict but are documented for follow-up:
+
+### BUG-T58-A: Multi-dispatch codegen integration missing
+
+- **Severity**: HIGH (feature claimed shipped, doesn't work)
+- **Files affected**: `crates/buff-lang-codegen-rust/src/rust_codegen.rs`
+  (10,570 LOC) and `crates/buff-lang-codegen-rust/src/rust_codegen/`
+  (11 files). NONE reference `MultiDispatchTable`.
+- **Symptom**: `buff run examples/multi_dispatch_basic.buff` -> E0428
+- **Fix**: `RustCodegen::generate()` must call
+  `MultiDispatchTable::build(decls)` and consult
+  `table.method_for_decl(f)` in the `lower_func` arm to emit the mangled
+  name. Call sites (`lower_call`) must consult `table.resolve(name, arg_tys, span)`
+  and emit the resolved mangled callee.
+- **Tests**: `crates/buff-lang-codegen-rust/tests/multi_dispatch.rs`
+  already specifies the expected behaviour — those tests need to be run
+  and their assertions honoured.
+
+### BUG-T58-B: README and STATUS table misrepresent multi-dispatch as functional
+
+- The root `AGENTS.md` and `README.md` list T58 multiple dispatch under
+  v1.19 "Shipped".
+- The 5 `examples/multi_dispatch_*.buff` files are absent from the
+  README's "Examples" table (silently omitted because they don't run).
+- The `buff check` command reports "no issues found" for code that
+  cannot compile, which is misleading.
+
+These should be reclassified as "parse-only" pending T58 codegen
+integration.
+
+---
+
+## 7. Files Touched
+
+| File | Change |
+|---|---|
+| `examples/spike_multi_dispatch.buff` | NEW (committed in 92c2251) — spike demonstrating multi-dispatch patterns |
+| `.sisyphus/evidence/spike-multi-dispatch.md` | NEW (corrective commit) — this analysis with corrected verdict |
+
+No Rust source modified (per MUST NOT DO section 3).
