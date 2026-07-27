@@ -861,3 +861,116 @@ fn test_snapshot_arithmetic_buff() {
     let lines: Vec<String> = tokens.iter().map(|t| t.to_string()).collect();
     insta::assert_snapshot!(lines.join("\n"));
 }
+
+// ---------------------------------------------------------------------------
+// P1.1 regression tests: continuation-line indentation + i64::MIN literal.
+// ---------------------------------------------------------------------------
+
+/// Multi-line `func` signature with parameters on continuation lines at a
+/// deeper indent than the function body. Before the fix, the offside tracker
+/// pushed a spurious Indent for the parameter indent level and then rejected
+/// the body's indent as "inconsistent".
+#[test]
+fn test_multiline_func_signature_no_inconsistent_indent() {
+    // The key assertion: this must NOT return a lexer error.
+    let src = "func check_line(\n        tracker: Int,\n        indent: String,\n    ) -> Int:\n    let level = 0\n    return level\n";
+    let tokens = tokenize(src, SourceId(0)).expect("multiline func sig should tokenize");
+    // Body should be indented exactly one level (4 spaces) relative to `func`.
+    let indent_count = tokens
+        .iter()
+        .filter(|t| t.kind == TokenKind::Indent)
+        .count();
+    let dedent_count = tokens
+        .iter()
+        .filter(|t| t.kind == TokenKind::Dedent)
+        .count();
+    assert_eq!(indent_count, 1, "exactly one Indent for the body");
+    assert_eq!(dedent_count, 1, "exactly one Dedent at end");
+}
+
+/// Multi-line `if` condition with leading `&&` operators at a deeper indent.
+/// Before the fix, the offside tracker treated the `&&` lines as a new indent
+/// level, causing "inconsistent indentation level" on the body line.
+#[test]
+fn test_leading_andand_continuation_no_inconsistent_indent() {
+    let src = "func f():\n    if a\n            && b\n            && c:\n        return 1\n";
+    let tokens = tokenize(src, SourceId(0)).expect("leading-&& continuation should tokenize");
+    // Body of `if` at indent 8, body of `func` at indent 4.
+    let indent_count = tokens
+        .iter()
+        .filter(|t| t.kind == TokenKind::Indent)
+        .count();
+    assert_eq!(
+        indent_count, 2,
+        "two Indents: func body (4) + if body (8); no indent for && continuations"
+    );
+}
+
+/// Continuation lines inside parentheses must not interfere with the indent
+/// stack. The body after the closing `)` should be at the expected level.
+#[test]
+fn test_multiline_call_args_no_spurious_indent() {
+    let src = "func f():\n    let x = foo(\n        1,\n        2,\n    )\n    let y = x\n";
+    let tokens = tokenize(src, SourceId(0)).expect("multiline call args should tokenize");
+    // Only one Indent (func body). The call args are inside parens so they
+    // don't generate Indent/Dedent tokens.
+    let indent_count = tokens
+        .iter()
+        .filter(|t| t.kind == TokenKind::Indent)
+        .count();
+    assert_eq!(indent_count, 1, "only one Indent for the func body");
+}
+
+/// `-9223372036854775808` (i64::MIN) must lex as a single negative IntLit.
+/// Before the fix, the 19-digit magnitude overflowed the positive i64 range
+/// (max = 2^63 - 1) and the lexer rejected it as "invalid numeric literal".
+#[test]
+fn test_i64_min_literal_negative() {
+    let tokens = kinds("-9223372036854775808");
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0], TokenKind::IntLit(i64::MIN));
+}
+
+/// `-9223372036854775808` must have a span covering BOTH the `-` and the
+/// digits (fused into a single token).
+#[test]
+fn test_i64_min_literal_fused_span() {
+    let src = "-9223372036854775808";
+    let tokens = full(src);
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].kind, TokenKind::IntLit(i64::MIN));
+    // Span must start at the `-` (byte 0) and end after the last digit (byte 20).
+    assert_eq!(tokens[0].span.start, 0);
+    assert_eq!(tokens[0].span.end, 20);
+}
+
+/// A space between `-` and the digits must NOT trigger the i64::MIN fusion.
+/// `- 9223372036854775808` should still error (overflow on the positive
+/// magnitude).
+#[test]
+fn test_i64_min_no_fusion_with_space() {
+    let result = tokenize("- 9223372036854775808", SourceId(0));
+    assert!(
+        result.is_err(),
+        "space-separated minus and overflow digits must still error"
+    );
+}
+
+/// `9223372036854775808` WITHOUT a preceding `-` must still error (genuine
+/// overflow, not i64::MIN).
+#[test]
+fn test_i64_max_plus_one_still_errors_without_minus() {
+    let result = tokenize("9223372036854775808", SourceId(0));
+    assert!(result.is_err(), "positive overflow must still error");
+}
+
+/// `i64::MAX` (9223372036854775807) must still parse normally.
+#[test]
+fn test_i64_max_literal_unchanged() {
+    let tokens = kinds("9223372036854775807");
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0], TokenKind::IntLit(i64::MAX));
+}
+
+
+
