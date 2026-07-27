@@ -1010,6 +1010,17 @@ impl TypeInferencer {
         })
     }
 
+    /// Check if a type is Option-like (either Type::Option(_) or
+    /// Type::User("Option", _)). Used by the comparison logic to allow
+    /// Option == Option comparisons regardless of representation.
+    fn is_option_like(ty: &Type) -> bool {
+        match ty {
+            Type::Option(_) => true,
+            Type::User { name, .. } => name == "Option",
+            _ => false,
+        }
+    }
+
     fn infer_binary(
         &mut self,
         op: &buff_lang_ast::BinaryOp,
@@ -1030,7 +1041,28 @@ impl TypeInferencer {
             | BinaryOp::Gt
             | BinaryOp::Lte
             | BinaryOp::Gte => {
-                if lhs_ty == rhs_ty || promote_binary(&lhs_ty, &rhs_ty).is_some() {
+                // Comparison operators always yield Bool, provided the
+                // operands are comparable. The permissive cases are:
+                // 1. Exact type match.
+                // 2. Numeric promotion succeeds (promote_binary).
+                // 3. Either side is Unknown (mirrors the logical-op policy
+                //    at line 1053 — predicate-style user functions infer to
+                //    Unknown because cross-function return types are not
+                //    resolved at this layer; rejecting them would cascade
+                //    errors on every comparison involving a user predicate).
+                // 4. Both sides are Option-like (either Type::Option(_) or
+                //    Type::User("Option", _)). Option.None infers as
+                //    Type::User("Option", []) via the MethodCall→enum arm,
+                //    while a let-bound Option variable infers as
+                //    Type::Option(Box<Unknown>). Both representations are
+                //    semantically Option — allow their comparison, mirroring
+                //    Rust's PartialEq derive on Option<T>.
+                if lhs_ty == rhs_ty
+                    || promote_binary(&lhs_ty, &rhs_ty).is_some()
+                    || lhs_ty == Type::Unknown
+                    || rhs_ty == Type::Unknown
+                    || (Self::is_option_like(&lhs_ty) && Self::is_option_like(&rhs_ty))
+                {
                     Ok(Type::Bool)
                 } else {
                     Err(TypeError::new(
