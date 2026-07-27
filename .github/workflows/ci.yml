@@ -235,13 +235,20 @@ jobs:
       - name: Check bans + licenses
         run: cargo deny check bans licenses
 
-  # ── Self-host bootstrap check (informational, not required) ──────────────
-  # Runs `buff check` on all self-host .buff files and reports the pass rate.
-  # This tracks progress as codegen/parser gaps are fixed.
+  # ── Self-host bootstrap check (HARD GATE) ─────────────────────────────────
+  # P0.2: The 7 baseline files below MUST pass `buff check` for any PR to merge.
+  # Adding new files to this baseline requires team consensus.
+  # Baseline files (self-host/):
+  #   - parser/expr_pattern.buff
+  #   - parser/expr_postfix.buff
+  #   - parser/parser.buff
+  #   - parser/stmt.buff
+  #   - parser/stream.buff
+  #   - types/lib.buff
+  #   - types/prelude_types.buff
   self-host-check:
     name: Self-host bootstrap
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

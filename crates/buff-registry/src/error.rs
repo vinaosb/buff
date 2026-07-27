@@ -104,6 +104,13 @@ pub enum RegistryError {
     #[error("GitHub user fetch failed: {0}")]
     OAuthUserFetchFailed(String),
 
+    /// P0.25 (sec-003): The OAuth `state` parameter is missing or does
+    /// not match the value bound to the login redirect via the
+    /// `buff_oauth_state` cookie. Indicates a CSRF attempt or a stale
+    /// / replayed callback URL. HTTP 400 Bad Request.
+    #[error("OAuth state parameter missing or mismatched (possible CSRF attempt)")]
+    OAuthStateMismatch,
+
     /// T57: The GitHub user is not on the invite-only beta allowlist.
     /// HTTP 403 Forbidden.
     #[error("Buff registry is in invite-only beta. Your GitHub account is not on the allowlist.")]
@@ -132,6 +139,7 @@ impl IntoResponse for RegistryError {
             Self::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::OAuthNotConfigured => StatusCode::SERVICE_UNAVAILABLE,
             Self::OAuthExchangeFailed(_) | Self::OAuthUserFetchFailed(_) => StatusCode::BAD_GATEWAY,
+            Self::OAuthStateMismatch => StatusCode::BAD_REQUEST,
             Self::NotAllowlisted | Self::ScopeForbidden => StatusCode::FORBIDDEN,
         };
         let body = Json(ErrorBody {

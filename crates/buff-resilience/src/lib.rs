@@ -447,8 +447,8 @@ impl Default for RateLimiter {
 // Timeout
 // ===========================================================================
 
-/// Timeout policy: runs a handler on a spawned thread and joins
-/// with a deadline.
+/// Timeout policy: runs a handler on a spawned thread and waits for
+/// its result on an mpsc channel with a deadline.
 ///
 /// Constructed via [`Timeout::new(duration)`]. The handler must
 /// be `Send + 'static` (it crosses a thread boundary); the
@@ -457,11 +457,14 @@ impl Default for RateLimiter {
 /// IMPORTANT: this is a best-effort SOFT timeout. The handler
 /// runs in its own OS thread; Rust does not provide a safe way
 /// to forcibly cancel a thread. If the handler does not finish
-/// within `duration`, the join handle is dropped (worker thread
-/// continues in the background until it returns or panics — it
-/// does NOT block process exit). The caller sees
-/// `Err(Timeout(duration))`. A future v1.18+ async variant could
-/// use `tokio::select!` for true cancellation.
+/// within `duration`, the supervisor returns
+/// `Err(Timeout(duration))` and drops the JoinHandle — the worker
+/// thread continues in the background until it returns or panics
+/// (it does NOT block process exit; the OS reclaims its stack
+/// when it returns). The calling code is free to continue. A
+/// future v1.18+ async variant could use `tokio::select!` for
+/// true future cancellation — the sync MVP per the T36 spec
+/// deliberately avoids pulling in an async runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timeout {
     duration: Duration,
@@ -477,31 +480,64 @@ impl Timeout {
         self.duration
     }
 
-    /// Run `handler` on a spawned thread and join with timeout.
-    /// Returns:
+    /// Run `handler` on a spawned worker thread and wait for its
+    /// result with a deadline. Returns:
     /// - `Ok(T)` if the handler finishes within `duration`.
     /// - `Err(Timeout(duration))` if the deadline elapses first.
     /// - `Err(Panic)` if the spawn fails OR the handler panics.
+    ///
+    /// P0.25 (ft-002): replaced the busy-wait polling loop
+    /// (`JoinHandle::is_finished` + `thread::sleep`) with an mpsc
+    /// channel + `recv_timeout`. The channel blocks the supervisor
+    /// without polling, eliminating the 1ms-cadence wake-ups. The
+    /// residual thread-leak on timeout (worker keeps running until
+    /// the handler returns) is inherent to sync Rust — see the struct
+    /// doc — and cannot be eliminated without an async runtime.
     pub fn execute<F, T>(&self, handler: F) -> Result<T, ResilienceError>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        let handle = thread::Builder::new()
+        use std::sync::mpsc::channel;
+        let (tx, rx) = channel();
+        let build_result = thread::Builder::new()
             .name("buff-resilience-timeout".to_string())
-            .spawn(handler)
-            .map_err(|_| ResilienceError::Panic)?;
-        let deadline = Instant::now() + self.duration;
-        while Instant::now() < deadline {
-            if handle.is_finished() {
-                return handle.join().map_err(|_| ResilienceError::Panic);
+            .spawn(move || {
+                let result = handler();
+                // If the supervisor already returned (deadline elapsed
+                // and rx was dropped), the send fails — we intentionally
+                // discard the error because the result is unwanted.
+                let _ = tx.send(result);
+            });
+        let handle = build_result.map_err(|_| ResilienceError::Panic)?;
+
+        match rx.recv_timeout(self.duration) {
+            Ok(value) => {
+                // Worker finished and sent its result. Join to reclaim
+                // the thread's resources (non-blocking — worker exited).
+                // A join error here means the worker panicked AFTER
+                // sending, which is impossible for `FnOnce`; we map it
+                // to Panic defensively.
+                match handle.join() {
+                    Ok(_) => Ok(value),
+                    Err(_) => Err(ResilienceError::Panic),
+                }
             }
-            thread::sleep(POLL_CADENCE);
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Deadline elapsed first. The worker thread is NOT
+                // cancelled (impossible in sync Rust); it continues
+                // until the handler returns. Dropping `handle` here
+                // detaches it — see the struct doc.
+                Err(ResilienceError::Timeout(self.duration))
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // Worker thread panicked before sending — channel
+                // closed with no value. Join to observe the panic,
+                // then map to ResilienceError::Panic.
+                let _ = handle.join();
+                Err(ResilienceError::Panic)
+            }
         }
-        if handle.is_finished() {
-            return handle.join().map_err(|_| ResilienceError::Panic);
-        }
-        Err(ResilienceError::Timeout(self.duration))
     }
 }
 
