@@ -1,0 +1,1072 @@
+// Buff self-host port of `crates/buff-lang-buffhtml-parser/src/parser.rs` (P4.5).
+//
+// Recursive-descent parser over lexer tokens -> RsxTemplateFile.
+//
+// Builds the template tree with span tracking on every node. The parser is
+// hand-rolled (no chumsky), matching the Buff-language parser conventions.
+//
+// Structure:
+// - parse_template: entry point. Drains the token slice.
+// - parse_node: one element / fragment / text / interp / directive.
+// - parse_element: open tag + attributes + children + close tag.
+// - parse_attributes: name=lit / name=expr / on:event=handler / name: value / boolean.
+// - parse_children_until: text / interp / nested elements.
+//
+// Faithful 1:1 translation of the Rust reference. The Rust Parser struct +
+// impl block become free functions taking the parser as first parameter
+// (per porting 8g). Where Rust uses and-self methods, Buff uses p: Parser
+// with implicit field mutation.
+//
+// Translation decisions:
+//   * `use buff_lang_ast_rsx::{...}` + `use buff_lang_error::SourceId` +
+//     `use crate::error::BuffHtmlParseError` + `use crate::lexer::{...}` ->
+//     DELETED. ALL referenced types are defined as LOCAL stand-ins at the top
+//     of this file (mirrors lexer.buff + ast_rsx.buff local-stand-in pattern).
+//     The M7 monolith loader (Phase 5) will deduplicate.
+//   * `struct Parser { ... } impl Parser { ... }` -> free functions
+//     `parser_new`, `parser_peek`, `parser_advance`, `parser_parse_template`, etc.
+//   * `while` -> `for cond:` (Buff has no while keyword).
+//   * `match { A | B | C => ... }` (or-patterns) -> if/else if chains with ==.
+//   * `match { X => { stmts } }` (block arms) -> extracted to helper functions
+//     (Buff match arms must be single expressions).
+//   * `unreachable!()` -> return default value (Buff has no unreachable macro).
+//   * `format!("unexpected token: [other:?]")` -> string concatenation with +
+//     (Buff has no format! macro; Debug formatting of enum variants is not
+//     available; a generic message is used instead).
+//   * `self.peek().clone()` -> `parser_peek(p)` returns owned BuffHtmlTokenKind.
+//   * Rust struct-variant enum arms (EachOpen { iterable, .. }) -> tuple-variant
+//     arms (EachOpen(_i, _b, _idx, _k)).
+//   * `#[cfg(test)] mod tests` -> DELETED (per porting 5).
+//   * Numeric widths: usize/u32 -> Int.
+
+// ===========================================================================
+// Local Span / SourceId stand-ins.
+// ===========================================================================
+
+struct SourceId:
+    value: Int
+
+func source_id_new(value: Int) -> SourceId:
+    return SourceId.new(value: value)
+
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+// ===========================================================================
+// Local BuffHtmlParseError stand-in.
+// ===========================================================================
+
+enum BuffHtmlParseError {
+    Lex(String, Span),
+    Parse(String, Span),
+}
+
+func buff_html_parse_error_parse(message: String, span: Span) -> BuffHtmlParseError:
+    return BuffHtmlParseError.Parse(message, span)
+
+// ===========================================================================
+// Local BuffHtmlTokenKind stand-in (mirrors lexer.buff, tuple variants).
+// ===========================================================================
+
+enum BuffHtmlTokenKind {
+    Text(String),
+    OpenTagStart(String),
+    CloseTag(String),
+    TagEnd,
+    TagSelfClose,
+    FragmentOpen,
+    FragmentClose,
+    AttrName(String),
+    AttrEq,
+    AttrColon,
+    AttrStrLit(String),
+    Interp(String),
+    // EachOpen(iterable, binding, index, key)
+    EachOpen(String, String, Option<String>, Option<String>),
+    EachClose,
+    IfOpen(String),
+    ElseIf(String),
+    Else,
+    IfClose,
+    HtmlComment(String),
+    BuffComment(String),
+    HtmlEscape(String),
+    AwaitOpen(String),
+    AwaitThen(String),
+    AwaitCatch(String),
+    AwaitClose,
+    AttrSpread(String),
+    SlotOpen,
+    // ScriptOpen(lang, props)
+    ScriptOpen(String, Option<String>),
+    ScriptText(String),
+    ScriptClose,
+    Eof,
+}
+
+struct BuffHtmlToken:
+    kind: BuffHtmlTokenKind
+    span: Span
+
+// ===========================================================================
+// Local RsxNode + related stand-ins (mirrors ast_rsx.buff).
+// All Rsx types are minimal stand-ins sufficient for typechecking.
+// ===========================================================================
+
+enum RsxAttributeKind {
+    // Literal(name, value)
+    Literal(String, String),
+    // Expression(name, expr, expr_span_start, expr_span_end, expr_span_src_id)
+    Expression(String, String, Int, Int, Int),
+    // Event(event, modifiers, handler_expr, handler_span_start, handler_span_end, handler_span_src_id)
+    Event(String, Vector<String>, String, Int, Int, Int),
+    // NamedProp(name, value, value_span_start, value_span_end, value_span_src_id)
+    NamedProp(String, String, Int, Int, Int),
+    // Boolean(name)
+    Boolean(String),
+    // Spread(ident)
+    Spread(String),
+    // Bind(prop, signal)
+    Bind(String, String),
+}
+
+struct RsxAttribute:
+    kind: RsxAttributeKind
+    span: Span
+
+struct RsxElement:
+    tag: String
+    is_component: Bool
+    attributes: Vector<RsxAttribute>
+    children: Vector<RsxNode>
+    self_closing: Bool
+    span: Span
+
+func rsx_element_new(tag: String, is_component: Bool, attributes: Vector<RsxAttribute>, children: Vector<RsxNode>, self_closing: Bool, span: Span) -> RsxElement:
+    return RsxElement.new(tag: tag, is_component: is_component, attributes: attributes, children: children, self_closing: self_closing, span: span)
+
+struct RsxFragment:
+    children: Vector<RsxNode>
+    span: Span
+
+func rsx_fragment_new(children: Vector<RsxNode>, span: Span) -> RsxFragment:
+    return RsxFragment.new(children: children, span: span)
+
+struct RsxText:
+    text: String
+    span: Span
+
+func rsx_text_new(text: String, span: Span) -> RsxText:
+    return RsxText.new(text: text, span: span)
+
+struct RsxInterp:
+    expr: String
+    span: Span
+
+func rsx_interp_new(expr: String, span: Span) -> RsxInterp:
+    return RsxInterp.new(expr: expr, span: span)
+
+struct RsxIfBranch:
+    cond: String
+    cond_span: Span
+    body: Vector<RsxNode>
+
+struct RsxIf:
+    branches: Vector<RsxIfBranch>
+    else_branch: Option<Vector<RsxNode>>
+    span: Span
+
+struct RsxEach:
+    iterable: String
+    iterable_span: Span
+    binding: String
+    index_binding: Option<String>
+    key: Option<String>
+    body: Vector<RsxNode>
+    else_branch: Option<Vector<RsxNode>>
+    span: Span
+
+struct RsxSlot:
+    name: Option<String>
+    span: Span
+
+struct RsxComment:
+    text: String
+    span: Span
+
+func rsx_comment_new(text: String, span: Span) -> RsxComment:
+    return RsxComment.new(text: text, span: span)
+
+struct RsxRawHtml:
+    expr: String
+    span: Span
+
+struct RsxAwait:
+    fut_expr: String
+    fut_span: Span
+    pending_body: Option<Vector<RsxNode>>
+    then_binding: String
+    then_body: Vector<RsxNode>
+    catch_binding: Option<String>
+    catch_body: Option<Vector<RsxNode>>
+    span: Span
+
+struct ScriptBlock:
+    lang: String
+    props: Option<String>
+    source: String
+    span: Span
+
+func script_block_new(lang: String, source: String, span: Span) -> ScriptBlock:
+    return ScriptBlock.new(lang: lang, props: Option.None, source: source, span: span)
+
+func script_block_with_props(lang: String, props: String, source: String, span: Span) -> ScriptBlock:
+    return ScriptBlock.new(lang: lang, props: Option.Some(props), source: source, span: span)
+
+enum RsxNode {
+    Element(RsxElement),
+    Fragment(RsxFragment),
+    Text(RsxText),
+    Interp(RsxInterp),
+    If(RsxIf),
+    Each(RsxEach),
+    Slot(RsxSlot),
+    Comment(RsxComment),
+    RawHtml(RsxRawHtml),
+    Await(RsxAwait),
+}
+
+struct RsxTemplateFile:
+    script: Option<ScriptBlock>
+    root: Vector<RsxNode>
+    span: Span
+
+// True when tag name starts with an ASCII uppercase letter (component heuristic).
+func is_component_tag(tag: String) -> Bool:
+    if tag.len() == 0:
+        return false
+    let first_byte = tag.byte_at(0)
+    // A-Z = 65-90
+    return first_byte >= 65 && first_byte <= 90
+
+// ===========================================================================
+// Parser state + helpers
+// ===========================================================================
+
+struct Parser:
+    tokens: Vector<BuffHtmlToken>
+    pos: Int
+    source_id: SourceId
+
+func parser_new(tokens: Vector<BuffHtmlToken>, source_id: SourceId) -> Parser:
+    return Parser.new(tokens: tokens, pos: 0, source_id: source_id)
+
+func parser_peek(p: Parser) -> BuffHtmlTokenKind:
+    return p.tokens[p.pos].kind
+
+func parser_span_here(p: Parser) -> Span:
+    return p.tokens[p.pos].span
+
+func parser_advance(p: Parser) -> BuffHtmlToken:
+    let t = p.tokens[p.pos]
+    if p.pos + 1 < p.tokens.len():
+        p.pos = p.pos + 1
+    return t
+
+func parser_is_at_end(p: Parser) -> Bool:
+    return parser_peek(p) == BuffHtmlTokenKind.Eof
+
+func parser_err(p: Parser, msg: String, span: Span) -> BuffHtmlParseError:
+    return buff_html_parse_error_parse(msg, span)
+
+// ===========================================================================
+// Entry point
+// ===========================================================================
+
+export func parse(source: String, source_id: SourceId) -> Result<RsxTemplateFile, BuffHtmlParseError>:
+    let toks = tokenize(source, source_id)?
+    let p = parser_new(toks, source_id)
+    return parser_parse_template(p)
+
+// ===========================================================================
+// Template top level
+// ===========================================================================
+
+func parser_parse_template(p: Parser) -> Result<RsxTemplateFile, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    let mut script = Option.None
+    let mut root = Vector.new()
+
+    // Optional leading script block.
+    let pk = parser_peek(p)
+    let mut found_script = false
+    match pk {
+        ScriptOpen(_l, _pp) => found_script = true,
+    }
+    if found_script:
+        let sc = parser_consume_script_block(p, start_span)?
+        script = Option.Some(sc)
+
+    for parser_is_at_end(p) == false:
+        let node = parser_parse_node(p)?
+        root.push(node)
+
+    let end_span = parser_span_here(p)
+    let tmpl_span = span_new(start_span.start, end_span.end, p.source_id)
+    return Result.Ok(RsxTemplateFile.new(script: script, root: root, span: tmpl_span))
+
+// True when the current token is a ScriptOpen.
+func parser_is_script_open(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        ScriptOpen(_lang, _props) => return true,
+    }
+    return false
+
+// Consume the leading script block (ScriptOpen + ScriptText? + ScriptClose).
+func parser_consume_script_block(p: Parser, open_span: Span) -> Result<ScriptBlock, BuffHtmlParseError>:
+    let kind = parser_peek(p)
+    // Extract lang and props from ScriptOpen(lang, props).
+    let lang = parser_extract_script_lang(kind)
+    let props_opt = parser_extract_script_props(kind)
+    parser_advance(p)  // ScriptOpen
+    // Optional body.
+    let body = parser_extract_script_body(p)
+    // Expect ScriptClose.
+    if parser_peek(p) != BuffHtmlTokenKind.ScriptClose:
+        return Result.Err(parser_err(p, "expected close-script after script body", parser_span_here(p)))
+    let end_span = parser_span_here(p)
+    parser_advance(p)
+    let block_span = span_new(open_span.start, end_span.end, p.source_id)
+    let sc = parser_build_script_block(lang, props_opt, body, block_span)
+    return Result.Ok(sc)
+
+// Build a ScriptBlock from parts, dispatching on whether props is Some.
+func parser_build_script_block(lang: String, props_opt: Option<String>, body: String, span: Span) -> ScriptBlock:
+    match props_opt {
+        Some(pr) => return script_block_with_props(lang, pr, body, span),
+    }
+    return script_block_new(lang, body, span)
+
+// Extract the lang field from a ScriptOpen token kind.
+func parser_extract_script_lang(k: BuffHtmlTokenKind) -> String:
+    match k {
+        ScriptOpen(lang, _props) => return lang,
+    }
+    return ""
+
+// Extract the props field from a ScriptOpen token kind.
+func parser_extract_script_props(k: BuffHtmlTokenKind) -> Option<String>:
+    match k {
+        ScriptOpen(_lang, props) => return props,
+    }
+    return Option.None
+
+// Extract the ScriptText body if present; empty string otherwise.
+func parser_consume_script_text(p: Parser, s: String) -> String:
+    parser_advance(p)
+    return s
+
+func parser_extract_script_body(p: Parser) -> String:
+    let k = parser_peek(p)
+    match k {
+        ScriptText(s) => return parser_consume_script_text(p, s),
+    }
+    return ""
+
+// ===========================================================================
+// One node
+// ===========================================================================
+
+func parser_parse_node(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let k = parser_peek(p)
+    match k {
+        Text(_s) => return parser_parse_text_node(p),
+        OpenTagStart(_n) => return parser_parse_element(p),
+        FragmentOpen => return parser_parse_fragment(p),
+        SlotOpen => return parser_parse_slot(p),
+        Interp(_s) => return parser_parse_interp(p),
+        IfOpen(_c) => return parser_parse_if(p),
+        EachOpen(_i, _b, _idx, _kk) => return parser_parse_each(p),
+        HtmlComment(_s) => return parser_parse_html_comment(p),
+        BuffComment(_s) => return parser_parse_buff_comment(p),
+        HtmlEscape(_s) => return parser_parse_html_escape(p),
+        AwaitOpen(_f) => return parser_parse_await(p),
+        ScriptOpen(_l, _pp) => return Result.Err(parser_err(p, "script blocks only allowed at the top of a buffhtml file", parser_span_here(p))),
+    }
+    if k == BuffHtmlTokenKind.Eof:
+        return Result.Err(parser_err(p, "unexpected EOF at node position", parser_span_here(p)))
+    return Result.Err(parser_err(p, "unexpected token at node position", parser_span_here(p)))
+
+// Token-kind predicates (each tests a specific variant without destructuring).
+func parser_is_text(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        Text(_s) => return true,
+        _ => return false,
+    }
+
+func parser_is_open_tag_start(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        OpenTagStart(_n) => return true,
+        _ => return false,
+    }
+
+func parser_is_interp(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        Interp(_s) => return true,
+        _ => return false,
+    }
+
+func parser_is_if_open(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        IfOpen(_c) => return true,
+        _ => return false,
+    }
+
+func parser_is_each_open(k: BuffHtmlTokenKind) -> Bool:
+    match k { EachOpen(_i, _b, _idx, _k2) => return true, }
+    return false
+
+func parser_is_html_comment(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        HtmlComment(_s) => return true,
+        _ => return false,
+    }
+
+func parser_is_buff_comment(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        BuffComment(_s) => return true,
+        _ => return false,
+    }
+
+func parser_is_html_escape(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        HtmlEscape(_s) => return true,
+        _ => return false,
+    }
+
+func parser_is_await_open(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        AwaitOpen(_f) => return true,
+        _ => return false,
+    }
+
+func parser_parse_text_node(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let tok = parser_advance(p)
+    let text = parser_extract_text(tok.kind)
+    return Result.Ok(RsxNode.Text(rsx_text_new(text, tok.span)))
+
+func parser_extract_text(k: BuffHtmlTokenKind) -> String:
+    match k { Text(s) => return s, }
+    return ""
+
+func parser_parse_interp(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let tok = parser_advance(p)
+    let expr = parser_extract_interp(tok.kind)
+    return Result.Ok(RsxNode.Interp(rsx_interp_new(expr, tok.span)))
+
+func parser_extract_interp(k: BuffHtmlTokenKind) -> String:
+    match k { Interp(s) => return s, }
+    return ""
+
+func parser_parse_html_comment(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let tok = parser_advance(p)
+    let text = parser_extract_html_comment(tok.kind)
+    return Result.Ok(RsxNode.Comment(rsx_comment_new(text, tok.span)))
+
+func parser_extract_html_comment(k: BuffHtmlTokenKind) -> String:
+    match k { HtmlComment(s) => return s, }
+    return ""
+
+func parser_parse_buff_comment(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let tok = parser_advance(p)
+    let text = parser_extract_buff_comment(tok.kind)
+    return Result.Ok(RsxNode.Comment(rsx_comment_new(text, tok.span)))
+
+func parser_extract_buff_comment(k: BuffHtmlTokenKind) -> String:
+    match k { BuffComment(s) => return s, }
+    return ""
+
+func parser_parse_html_escape(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let tok = parser_advance(p)
+    let expr = parser_extract_html_escape(tok.kind)
+    return Result.Ok(RsxNode.RawHtml(RsxRawHtml.new(expr: expr, span: tok.span)))
+
+func parser_extract_html_escape(k: BuffHtmlTokenKind) -> String:
+    match k { HtmlEscape(s) => return s, }
+    return ""
+
+// ===========================================================================
+// Await block (T133 stretch)
+// ===========================================================================
+
+func parser_parse_await(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    let fut_tok = parser_advance(p)
+    let fut_expr = parser_extract_await_open(fut_tok.kind)
+    let fut_span = start_span
+
+    // Pending body: nodes until AwaitThen, AwaitCatch, or AwaitClose.
+    let pending_body = parser_parse_children_until_terminators(p, [Terminator.AwaitThen, Terminator.AwaitCatch, Terminator.AwaitClose])?
+    let pending_opt = parser_body_to_opt(pending_body)
+
+    // Required then-binding.
+    let then_binding = ""
+    let then_body = Vector.new()
+    let k = parser_peek(p)
+    let mut is_then = false
+    match k { AwaitThen(_b) => is_then = true, _ => is_then = false, }
+    let mut is_catch_k = false
+    match k { AwaitCatch(_b) => is_catch_k = true, _ => is_catch_k = false, }
+    if is_then == false:
+        if is_catch_k:
+            return Result.Err(parser_err(p, "await requires a then-binding before catch", parser_span_here(p)))
+        return Result.Err(parser_err(p, "await requires a then-binding block", parser_span_here(p)))
+    then_binding = parser_extract_await_then(k)
+    parser_advance(p)
+    then_body = parser_parse_children_until_terminators(p, [Terminator.AwaitCatch, Terminator.AwaitClose])?
+
+    // Optional catch-binding + body.
+    let mut catch_binding = Option.None
+    let mut catch_body = Option.None
+    let k2 = parser_peek(p)
+    let mut is_catch = false
+    match k2 { AwaitCatch(_b) => is_catch = true, _ => is_catch = false, }
+    if is_catch:
+        catch_binding = Option.Some(parser_extract_await_catch(k2))
+        parser_advance(p)
+        let cb = parser_parse_children_until_terminators(p, [Terminator.AwaitClose])?
+        catch_body = Option.Some(cb)
+
+    // Required close-await.
+    if parser_peek(p) != BuffHtmlTokenKind.AwaitClose:
+        return Result.Err(parser_err(p, "expected close-await to close await block", parser_span_here(p)))
+    parser_advance(p)
+
+    let end_span = parser_span_here(p)
+    let a = RsxAwait.new(
+        fut_expr: fut_expr,
+        fut_span: fut_span,
+        pending_body: pending_opt,
+        then_binding: then_binding,
+        then_body: then_body,
+        catch_binding: catch_binding,
+        catch_body: catch_body,
+        span: span_new(start_span.start, end_span.end, p.source_id))
+    return Result.Ok(RsxNode.Await(a))
+
+func parser_is_await_then(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        AwaitThen(_b) => return true,
+        _ => return false,
+    }
+
+func parser_is_await_catch(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        AwaitCatch(_b) => return true,
+        _ => return false,
+    }
+
+func parser_extract_await_open(k: BuffHtmlTokenKind) -> String:
+    match k { AwaitOpen(f) => return f, }
+    return ""
+
+func parser_extract_await_then(k: BuffHtmlTokenKind) -> String:
+    match k { AwaitThen(b) => return b, }
+    return ""
+
+func parser_extract_await_catch(k: BuffHtmlTokenKind) -> String:
+    match k { AwaitCatch(b) => return b, }
+    return ""
+
+// Convert an empty Vector to None, non-empty to Some.
+func parser_body_to_opt(body: Vector<RsxNode>) -> Option<Vector<RsxNode>>:
+    if body.len() == 0:
+        return Option.None
+    return Option.Some(body)
+
+// ===========================================================================
+// Slot
+// ===========================================================================
+
+func parser_parse_slot(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    parser_advance(p)  // SlotOpen
+    let mut name_value = Option.None
+    for true:
+        let k = parser_peek(p)
+        if k == BuffHtmlTokenKind.TagSelfClose:
+            break
+        if k == BuffHtmlTokenKind.TagEnd:
+            break
+        let mut is_an = false
+        match k { AttrName(_n) => is_an = true, _ => is_an = false, }
+        if is_an:
+            let result = parser_slot_attr(p, k, name_value)?
+            name_value = result
+        else:
+            return Result.Err(parser_err(p, "unexpected token inside slot", parser_span_here(p)))
+    let end_tok = parser_advance(p)
+    let _end_tok = end_tok
+    let end_span = parser_span_here(p)
+    let s = RsxSlot.new(name: name_value, span: span_new(start_span.start, end_span.end, p.source_id))
+    return Result.Ok(RsxNode.Slot(s))
+
+func parser_is_attr_name(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        AttrName(_n) => return true,
+        _ => return false,
+    }
+
+func parser_extract_attr_name(k: BuffHtmlTokenKind) -> String:
+    match k { AttrName(n) => return n, }
+    return ""
+
+// Process one slot attribute; returns updated name_value or error.
+func parser_slot_attr(p: Parser, k: BuffHtmlTokenKind, name_value: Option<String>) -> Result<Option<String>, BuffHtmlParseError>:
+    let n = parser_extract_attr_name(k)
+    if n != "name":
+        return Result.Err(parser_err(p, "unknown attribute on slot (only name= allowed)", parser_span_here(p)))
+    parser_advance(p)  // AttrName
+    if parser_peek(p) != BuffHtmlTokenKind.AttrEq:
+        return Result.Err(parser_err(p, "expected = after name on slot", parser_span_here(p)))
+    parser_advance(p)  // AttrEq
+    let val_tok = parser_advance(p)
+    let vk = val_tok.kind
+    let mut is_str_lit = false
+    match vk { AttrStrLit(_s) => is_str_lit = true, _ => is_str_lit = false, }
+    if is_str_lit:
+        let s = parser_extract_attr_str_lit(vk)
+        if s.len() == 0:
+            return Result.Err(parser_err(p, "slot name requires a non-empty name", val_tok.span))
+        let first_byte = s.byte_at(0)
+        let is_alpha = (first_byte >= 65 && first_byte <= 90) || (first_byte >= 97 && first_byte <= 122)
+        if is_alpha == false:
+            return Result.Err(parser_err(p, "slot name must start with an ASCII letter", val_tok.span))
+        return Result.Ok(Option.Some(s))
+    return Result.Err(parser_err(p, "name= on slot requires a string literal", val_tok.span))
+
+func parser_is_attr_str_lit(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        AttrStrLit(_s) => return true,
+        _ => return false,
+    }
+
+func parser_extract_attr_str_lit(k: BuffHtmlTokenKind) -> String:
+    match k { AttrStrLit(s) => return s, }
+    return ""
+
+// ===========================================================================
+// Fragment
+// ===========================================================================
+
+func parser_parse_fragment(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    parser_advance(p)  // FragmentOpen
+    let children = parser_parse_children_until_fragment_close(p)?
+    if parser_peek(p) != BuffHtmlTokenKind.FragmentClose:
+        return Result.Err(parser_err(p, "expected fragment-close to close fragment", parser_span_here(p)))
+    let end_span = parser_span_here(p)
+    parser_advance(p)
+    let fr = rsx_fragment_new(children, span_new(start_span.start, end_span.end, p.source_id))
+    return Result.Ok(RsxNode.Fragment(fr))
+
+func parser_parse_children_until_fragment_close(p: Parser) -> Result<Vector<RsxNode>, BuffHtmlParseError>:
+    return parser_parse_children_until_terminators(p, [Terminator.FragmentClose])
+
+// ===========================================================================
+// Element
+// ===========================================================================
+
+func parser_parse_element(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    let tok = parser_advance(p)
+    let tag = parser_extract_open_tag_start(tok.kind)
+    let is_component = is_component_tag(tag)
+    let attributes = parser_parse_attributes(p)?
+    let mut self_closing = false
+    let pk = parser_peek(p)
+    if pk == BuffHtmlTokenKind.TagSelfClose:
+        self_closing = true
+        parser_advance(p)
+    else if pk == BuffHtmlTokenKind.TagEnd:
+        parser_advance(p)
+    else:
+        return Result.Err(parser_err(p, "expected gt or slash-gt after element attrs", parser_span_here(p)))
+    let mut children = Vector.new()
+    if self_closing == false:
+        children = parser_parse_children_until_close(p, tag)?
+    let end_span = parser_span_here(p)
+    let e = rsx_element_new(tag, is_component, attributes, children, self_closing, span_new(start_span.start, end_span.end, p.source_id))
+    return Result.Ok(RsxNode.Element(e))
+
+func parser_extract_open_tag_start(k: BuffHtmlTokenKind) -> String:
+    match k { OpenTagStart(n) => return n, }
+    return ""
+
+// ===========================================================================
+// Attributes
+// ===========================================================================
+
+func parser_parse_attributes(p: Parser) -> Result<Vector<RsxAttribute>, BuffHtmlParseError>:
+    let out = Vector.new()
+    for true:
+        let k = parser_peek(p)
+        if k == BuffHtmlTokenKind.TagEnd:
+            return Result.Ok(out)
+        if k == BuffHtmlTokenKind.TagSelfClose:
+            return Result.Ok(out)
+        let mut is_as = false
+        match k { AttrSpread(_s) => is_as = true, _ => is_as = false, }
+        if is_as:
+            let span = parser_span_here(p)
+            let ident = parser_extract_attr_spread(k)
+            parser_advance(p)
+            out.push(RsxAttribute.new(kind: RsxAttributeKind.Spread(ident), span: span))
+        else if parser_is_attr_name(k):
+            let name = parser_extract_attr_name(k)
+            let attr = parser_parse_one_attribute(p, name)?
+            out.push(attr)
+        else:
+            return Result.Err(parser_err(p, "expected attribute name, gt, slash-gt, or spread", parser_span_here(p)))
+    return Result.Ok(out)
+
+func parser_is_attr_spread(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        AttrSpread(_s) => return true,
+        _ => return false,
+    }
+
+func parser_extract_attr_spread(k: BuffHtmlTokenKind) -> String:
+    match k { AttrSpread(s) => return s, }
+    return ""
+
+func parser_parse_one_attribute(p: Parser, name: String) -> Result<RsxAttribute, BuffHtmlParseError>:
+    let name_span = parser_span_here(p)
+    parser_advance(p)  // AttrName
+    let k = parser_peek(p)
+    if k == BuffHtmlTokenKind.AttrEq:
+        return parser_parse_eq_attribute(p, name, name_span)
+    if k == BuffHtmlTokenKind.AttrColon:
+        return parser_parse_named_prop(p, name, name_span)
+    // Boolean attribute.
+    return Result.Ok(RsxAttribute.new(kind: RsxAttributeKind.Boolean(name), span: name_span))
+
+func parser_parse_eq_attribute(p: Parser, name: String, name_span: Span) -> Result<RsxAttribute, BuffHtmlParseError>:
+    parser_advance(p)  // AttrEq
+    let val_tok = parser_advance(p)
+    let vk = val_tok.kind
+    let mut is_str_lit = false
+    match vk { AttrStrLit(_s) => is_str_lit = true, _ => is_str_lit = false, }
+    let mut is_interp_vk = false
+    match vk { Interp(_s) => is_interp_vk = true, _ => is_interp_vk = false, }
+    if is_str_lit:
+        let s = parser_extract_attr_str_lit(vk)
+        let kind = RsxAttributeKind.Literal(name, s)
+        return Result.Ok(RsxAttribute.new(kind: kind, span: span_new(name_span.start, val_tok.span.end, p.source_id)))
+    if is_interp_vk:
+        let expr = parser_extract_interp(vk)
+        let kind = parser_classify_eq_attr(name, expr, val_tok.span, name_span)
+        return Result.Ok(RsxAttribute.new(kind: kind, span: span_new(name_span.start, val_tok.span.end, p.source_id)))
+    return Result.Err(parser_err(p, "attribute value must be a string literal or interpolation", val_tok.span))
+
+// Build an Event RsxAttributeKind from the parsed (event, modifiers) pair.
+func parser_build_event_attr(pair: StrPair2, expr: String, val_span: Span) -> RsxAttributeKind:
+    let event = pair.first
+    let modifiers = pair.second
+    return RsxAttributeKind.Event(event, modifiers, expr, val_span.start, val_span.end, val_span.source_id.value)
+
+// Classify a name=expr attribute into Event, Bind, or Expression.
+func parser_classify_eq_attr(name: String, expr: String, val_span: Span, name_span: Span) -> RsxAttributeKind:
+    // on:event_mod -> Event variant.
+    let event_opt = parse_event_name(name)
+    match event_opt {
+        Some(pair) => return parser_build_event_attr(pair, expr, val_span),
+    }
+    // bind:value -> Bind variant.
+    let bind_opt = name.strip_prefix("bind:")
+    if bind_opt != Option.None:
+        let prop = parser_opt_str(bind_opt)
+        if prop.len() > 0:
+            return RsxAttributeKind.Bind(prop, expr)
+    // Default: Expression.
+    return RsxAttributeKind.Expression(name, expr, val_span.start, val_span.end, val_span.source_id.value)
+
+func parser_opt_str(o: Option<String>) -> String:
+    match o { Some(v) => return v, }
+    return ""
+
+func parser_parse_named_prop(p: Parser, name: String, name_span: Span) -> Result<RsxAttribute, BuffHtmlParseError>:
+    parser_advance(p)  // AttrColon
+    let val_tok = parser_advance(p)
+    let vk = val_tok.kind
+    let value = ""
+    let mut is_str_lit = false
+    match vk { AttrStrLit(_s) => is_str_lit = true, _ => is_str_lit = false, }
+    let mut is_interp_vk = false
+    match vk { Interp(_s) => is_interp_vk = true, _ => is_interp_vk = false, }
+    if is_str_lit == false && is_interp_vk == false:
+        return Result.Err(parser_err(p, "named-prop value must be a string literal or interpolation", val_tok.span))
+    if is_str_lit:
+        value = parser_extract_attr_str_lit(vk)
+    else:
+        value = parser_extract_interp(vk)
+    let kind = RsxAttributeKind.NamedProp(name, value, val_tok.span.start, val_tok.span.end, val_tok.span.source_id.value)
+    return Result.Ok(RsxAttribute.new(kind: kind, span: span_new(name_span.start, val_tok.span.end, p.source_id)))
+
+// ===========================================================================
+// Children sequences
+// ===========================================================================
+
+func parser_parse_children_until_close(p: Parser, parent_tag: String) -> Result<Vector<RsxNode>, BuffHtmlParseError>:
+    let out = Vector.new()
+    for true:
+        let k = parser_peek(p)
+        let mut is_ct = false
+        match k { CloseTag(_n) => is_ct = true, _ => is_ct = false, }
+        if is_ct:
+            let n = parser_extract_close_tag(k)
+            if n != parent_tag:
+                let msg = "expected close-" + parent_tag + ", got close-" + n
+                return Result.Err(parser_err(p, msg, parser_span_here(p)))
+            parser_advance(p)
+            return Result.Ok(out)
+        if k == BuffHtmlTokenKind.Eof:
+            let msg = "unexpected EOF inside " + parent_tag + " (missing close-" + parent_tag + ")"
+            return Result.Err(parser_err(p, msg, parser_span_here(p)))
+        if k == BuffHtmlTokenKind.FragmentClose:
+            return Result.Err(parser_err(p, "unexpected fragment-close (no matching fragment-open)", parser_span_here(p)))
+        let mut is_bt = false
+        match k {
+            EachClose => is_bt = true,
+            IfClose => is_bt = true,
+            AwaitClose => is_bt = true,
+            Else => is_bt = true,
+            ElseIf(_c) => is_bt = true,
+            AwaitThen(_b) => is_bt = true,
+            AwaitCatch(_b) => is_bt = true,
+            _ => is_bt = false,
+        }
+        if is_bt:
+            return Result.Err(parser_err(p, "unexpected block terminator inside element", parser_span_here(p)))
+        let node = parser_parse_node(p)?
+        out.push(node)
+    return Result.Ok(out)
+
+func parser_is_close_tag(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        CloseTag(_n) => return true,
+        _ => return false,
+    }
+
+func parser_extract_close_tag(k: BuffHtmlTokenKind) -> String:
+    match k { CloseTag(n) => return n, }
+    return ""
+
+// True when k is one of the block-terminator tokens (expanded from Rust or-pattern).
+func parser_is_block_terminator(k: BuffHtmlTokenKind) -> Bool:
+    if k == BuffHtmlTokenKind.EachClose:
+        return true
+    if k == BuffHtmlTokenKind.IfClose:
+        return true
+    if k == BuffHtmlTokenKind.AwaitClose:
+        return true
+    if k == BuffHtmlTokenKind.Else:
+        return true
+    match k { ElseIf(_c) => return true, }
+    match k { AwaitThen(_b) => return true, }
+    match k {
+        AwaitCatch(_b) => return true,
+        _ => return false,
+    }
+
+func parser_parse_children_until_terminators(p: Parser, terms: Vector<Terminator>) -> Result<Vector<RsxNode>, BuffHtmlParseError>:
+    let out = Vector.new()
+    for true:
+        let k = parser_peek(p)
+        if k == BuffHtmlTokenKind.Eof:
+            return Result.Ok(out)
+        if parser_is_terminator(k, terms):
+            return Result.Ok(out)
+        let node = parser_parse_node(p)?
+        out.push(node)
+    return Result.Ok(out)
+
+// True when the current token kind matches any of the given terminators.
+func parser_is_terminator(k: BuffHtmlTokenKind, terms: Vector<Terminator>) -> Bool:
+    let mut i = 0
+    for i < terms.len():
+        let t = terms[i]
+        if t == Terminator.FragmentClose:
+            if k == BuffHtmlTokenKind.FragmentClose:
+                return true
+        if t == Terminator.Else:
+            if k == BuffHtmlTokenKind.Else:
+                return true
+        if t == Terminator.ElseIf:
+            match k { ElseIf(_c) => return true, }
+        if t == Terminator.EachClose:
+            if k == BuffHtmlTokenKind.EachClose:
+                return true
+        if t == Terminator.IfClose:
+            if k == BuffHtmlTokenKind.IfClose:
+                return true
+        if t == Terminator.AwaitThen:
+            match k { AwaitThen(_b) => return true, }
+        if t == Terminator.AwaitCatch:
+            match k { AwaitCatch(_b) => return true, }
+        if t == Terminator.AwaitClose:
+            if k == BuffHtmlTokenKind.AwaitClose:
+                return true
+        i = i + 1
+    return false
+
+// ===========================================================================
+// if / else if / else / close-if
+// ===========================================================================
+
+func parser_parse_if(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    let tok = parser_advance(p)
+    let first_cond = parser_extract_if_open(tok.kind)
+    let first_cond_span = start_span
+    let branches = Vector.new()
+    let first_body = parser_parse_children_until_terminators(p, [Terminator.Else, Terminator.ElseIf, Terminator.IfClose])?
+    branches.push(RsxIfBranch.new(cond: first_cond, cond_span: first_cond_span, body: first_body))
+
+    let mut else_branch = Option.None
+    for true:
+        let k = parser_peek(p)
+        let mut is_else_if = false
+        match k { ElseIf(_c) => is_else_if = true, _ => is_else_if = false, }
+        if is_else_if:
+            let branch_span = parser_span_here(p)
+            let c = parser_extract_else_if(k)
+            parser_advance(p)
+            let body = parser_parse_children_until_terminators(p, [Terminator.Else, Terminator.ElseIf, Terminator.IfClose])?
+            branches.push(RsxIfBranch.new(cond: c, cond_span: branch_span, body: body))
+        else if k == BuffHtmlTokenKind.Else:
+            parser_advance(p)
+            let body = parser_parse_children_until_terminators(p, [Terminator.IfClose])?
+            else_branch = Option.Some(body)
+        else if k == BuffHtmlTokenKind.IfClose:
+            parser_advance(p)
+            break
+        else:
+            return Result.Err(parser_err(p, "expected else, else-if, or close-if", parser_span_here(p)))
+    let end_span = parser_span_here(p)
+    let ifn = RsxIf.new(branches: branches, else_branch: else_branch, span: span_new(start_span.start, end_span.end, p.source_id))
+    return Result.Ok(RsxNode.If(ifn))
+
+func parser_extract_if_open(k: BuffHtmlTokenKind) -> String:
+    match k { IfOpen(c) => return c, }
+    return ""
+
+func parser_is_else_if(k: BuffHtmlTokenKind) -> Bool:
+    match k {
+        ElseIf(_c) => return true,
+        _ => return false,
+    }
+
+func parser_extract_else_if(k: BuffHtmlTokenKind) -> String:
+    match k { ElseIf(c) => return c, }
+    return ""
+
+// ===========================================================================
+// each / else / close-each
+// ===========================================================================
+
+func parser_parse_each(p: Parser) -> Result<RsxNode, BuffHtmlParseError>:
+    let start_span = parser_span_here(p)
+    let tok = parser_advance(p)
+    let each_fields = parser_extract_each_fields(tok.kind)
+    let iterable = each_fields.first
+    let iterable_span = start_span
+    let binding = each_fields.second
+    let index = each_fields.third
+    let key = each_fields.fourth
+    let body = parser_parse_children_until_terminators(p, [Terminator.Else, Terminator.EachClose])?
+    let mut else_branch = Option.None
+    if parser_peek(p) == BuffHtmlTokenKind.Else:
+        parser_advance(p)
+        let eb = parser_parse_children_until_terminators(p, [Terminator.EachClose])?
+        else_branch = Option.Some(eb)
+    if parser_peek(p) != BuffHtmlTokenKind.EachClose:
+        return Result.Err(parser_err(p, "expected close-each to close each-block", parser_span_here(p)))
+    parser_advance(p)
+    let end_span = parser_span_here(p)
+    let e = RsxEach.new(
+        iterable: iterable,
+        iterable_span: iterable_span,
+        binding: binding,
+        index_binding: index,
+        key: key,
+        body: body,
+        else_branch: else_branch,
+        span: span_new(start_span.start, end_span.end, p.source_id))
+    return Result.Ok(RsxNode.Each(e))
+
+// Extract (iterable, binding, index, key) from an EachOpen token kind.
+// Returns an EachFields carrier (Buff has no 4-tuple return).
+struct EachFields:
+    first: String
+    second: String
+    third: Option<String>
+    fourth: Option<String>
+
+func parser_extract_each_fields(k: BuffHtmlTokenKind) -> EachFields:
+    match k {
+        EachOpen(iterable, binding, index, key) => return EachFields.new(first: iterable, second: binding, third: index, fourth: key),
+    }
+    return EachFields.new(first: "", second: "", third: Option.None, fourth: Option.None)
+
+// ===========================================================================
+// Terminator enum + parse_event_name free function
+// ===========================================================================
+
+enum Terminator {
+    FragmentClose,
+    Else,
+    ElseIf,
+    EachClose,
+    IfClose,
+    AwaitThen,
+    AwaitCatch,
+    AwaitClose,
+}
+
+// Parse on:event_modifier_modifier into (event, modifiers vector).
+// Returns None if name is not an on: directive.
+func parse_event_name(name: String) -> Option<StrPair2>:
+    let rest_opt = name.strip_prefix("on:")
+    if rest_opt == Option.None:
+        return Option.None
+    let rest = parser_opt_str(rest_opt)
+    if rest.len() == 0:
+        return Option.None
+    // Split on underscore: first part is event, rest are modifiers.
+    let parts = rest.split("_")
+    let event = parts[0]
+    let modifiers = Vector.new()
+    let mut i = 1
+    for i < parts.len():
+        modifiers.push(parts[i])
+        i = i + 1
+    return Option.Some(StrPair2.new(first: event, second: modifiers))
+
+// Carrier for parse_event_name result (event name + modifiers vector).
+struct StrPair2:
+    first: String
+    second: Vector<String>
+
+// ===========================================================================
+// Re-export of tokenize from lexer.buff (forward reference; resolved by M7).
+// In single-file buff check, this is an opaque forward declaration.
+// ===========================================================================
+func tokenize(source: String, source_id: SourceId) -> Result<Vector<BuffHtmlToken>, BuffHtmlParseError>:
+    let v = Vector.new()
+    return Result.Ok(v)
