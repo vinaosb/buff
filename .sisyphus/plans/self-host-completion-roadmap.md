@@ -259,7 +259,7 @@ Wave 7 (Bootstrap):
   **Acceptance**: Flag in `--help`; prints something (stub OK for now).
   **Commit**: `feat(check): --dump-ast flag (P0.1.2a)`
 
-- [ ] **P0.1.2b — AST JSON serializers (BTreeMap-ordered, deterministic)**
+- [x] **P0.1.2b — AST JSON serializers (BTreeMap-ordered, deterministic)**
   **Files**: ALL 9 AST files: `crates/buff-lang-ast/src/{common,decl,expr,ir,lib,lossless,op,stmt,ty}.rs` (add `to_json() -> serde_json::Value` per node type — ~100 enum variants total)
   **Code pattern** (apply identically across all 9 files):
   ```rust
@@ -280,7 +280,7 @@ Wave 7 (Bootstrap):
   **Acceptance**: Valid JSON; deterministic (2 runs = identical); `jq .` accepts.
   **Commit**: `feat(check): AST JSON serializers (P0.1.2b)`
 
-- [ ] **P0.2 — Self-host-check hard gate; lock 7-file baseline**
+- [x] **P0.2 — Self-host-check hard gate; lock 7-file baseline**
   **Files**: `.github/workflows/ci.yml` (~line 162-193)
   **What**: Remove `continue-on-error: true` from `self-host-check`. Lock 7 baseline files in `self-host/` directory (NOT `crates/buff-lang-cli/selfhost/`): `parser/expr_pattern.buff`, `parser/expr_postfix.buff`, `parser/parser.buff`, `parser/stmt.buff`, `parser/stream.buff`, `types/lib.buff`, `types/prelude_types.buff`.
   **Detection**: `grep 'continue-on-error' .github/workflows/ci.yml | grep -c 'self-host-check'` returns 0.
@@ -454,7 +454,7 @@ Wave 7 (Bootstrap):
 
 - [x] **P0.18 — registry /health + /ready** (obs-003) — Add to `crates/buff-registry/src/lib.rs:257-282`. **Edit queue**: First in registry/lib.rs queue. **Commit**: `feat(registry): health endpoints (P0.18)`
 
-- [ ] **P0.19 — Strategy-practice relabel** — Mark codegen-deferred examples in README; flip buff-validation severity. **Edit queue**: Third in README.md queue. **Commit**: `docs: honest labeling (P0.19)`
+- [x] **P0.19 — Strategy-practice relabel** — Mark codegen-deferred examples in README; flip buff-validation severity. **Edit queue**: Third in README.md queue. **Commit**: `docs: honest labeling (P0.19)`
 
 - [ ] **P0.20 — Evidence persistence** (lms-001) — CI artifact upload + MANIFEST.json. **Edit queue**: Fourth in ci.yml queue. **Commit**: `ci(evidence): artifact backup (P0.20)`
 
@@ -464,7 +464,7 @@ Wave 7 (Bootstrap):
 
 - [x] **P0.24 — Plan reconciliation** (coh-001) — DONE in v16 (tags acknowledged as EXISTING, all contradictions resolved). **Commit**: `docs(plan): v16 reconciled (P0.24)`
 
-- [ ] **P0.25 — buff-auth OAuth + buff-resilience timeout + doc.rs Mutex** (sec-003/004 + ft-002/003)
+- [x] **P0.25 — buff-auth OAuth + buff-resilience timeout + doc.rs Mutex** (sec-003/004 + ft-002/003)
   **Files**: `crates/buff-registry/src/oauth.rs` (CSRF state, Secure cookie, no token echo, exchange timeout), `crates/buff-resilience/src/lib.rs:485` (timeout thread leak), `crates/buff-lang-cli/src/commands/doc.rs:1233,1250` (Mutex::lock().unwrap())
   **Edit queue**: Second in registry/lib.rs queue.
   **Acceptance**: State param validated; Secure flag set; token not echoed; exchange has timeout; no thread leak; no unwrap on Mutex.
@@ -527,7 +527,7 @@ Wave 7 (Bootstrap):
 
 - [x] **S4 — LexCallback portability** — Read `crates/buff-lang-lexer/src/string_interp.rs:1-100`. Can Buff express `&mut dyn LexCallback` via multiple dispatch?
 
-- [ ] **S6 — Extend harness to 10 targets** — Add 1 entry to `scripts/equivalence-rust-vs-buff.sh` (currently 9 tests, need 10 for 10 targets per P0.4).
+- [x] **S6 — Extend harness to 10 targets** — Add 1 entry to `scripts/equivalence-rust-vs-buff.sh` (currently 9 tests, need 10 for 10 targets per P0.4).
 
 - [x] **S7 — Unsafe audit (CORRECTED)** — Verify **10 TARGET crates** have ZERO unsafe (NOT codegen-rust — it's IMPOSSIBLE per DR-014). `grep -rn 'unsafe' crates/buff-lang-{ast,ast-rsx,error,debug-info,lexer,parser,buffhtml-parser,ffi-guide}/src/ crates/buff-{eval,template}/src/` → expect 0.
 
@@ -537,7 +537,7 @@ Wave 7 (Bootstrap):
 
 - [x] **P0.6 — Baseline benchmark** — `cargo build --release -p buff-lang-cli --timings` + `buff run examples/{ola,fibonacci}.buff`. Save to `.sisyphus/evidence/baseline-benchmark.json`.
 - [ ] **P0.6.1 — Per-phase re-record** — After each phase, re-benchmark. Gate: ≤3% regression.
-- [ ] **P0.7 — Harness divergence detection** — Inject deliberate divergence. Verify harness catches it.
+- [x] **P0.7 — Harness divergence detection** — Inject deliberate divergence. Verify harness catches it.
 
 ---
 
