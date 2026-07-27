@@ -40,7 +40,7 @@ struct InterpSplit:
 func slice_to_string(bytes: Vector<Int>, start: Int, end: Int) -> String:
     let mut out = ""
     let mut i = start
-    while i < end:
+    for i < end:
         out = out + Char.to_string(Int.to_char(bytes[i]))
         i = i + 1
     return out
@@ -69,7 +69,7 @@ func scan_string(
     let mut i = quote_start + 1
     let mut part_start = i
 
-    while i < bytes.len():
+    for i < bytes.len():
         let b = bytes[i]
         if b == quote_byte:
             flush_part(bytes, part_start, i, source_id, out)
@@ -126,7 +126,7 @@ func find_matching_brace(bytes: Vector<Int>, start: Int, source_id: SourceId) ->
     let backslash_byte = 92
     let mut depth = 1
     let mut i = start
-    while i < bytes.len():
+    for i < bytes.len():
         let b = bytes[i]
         if b == lbrace_byte:
             depth = depth + 1
@@ -139,7 +139,7 @@ func find_matching_brace(bytes: Vector<Int>, start: Int, source_id: SourceId) ->
         else if b == quote_byte:
             // Skip a nested string literal: walk to the next unescaped ".
             i = i + 1
-            while i < bytes.len() && bytes[i] != quote_byte:
+            for i < bytes.len() && bytes[i] != quote_byte:
                 if bytes[i] == backslash_byte && i + 1 < bytes.len():
                     i = i + 2
                 else:
@@ -174,7 +174,7 @@ func split_interp_spec(
     let backslash_byte = 92
     let mut depth = 0
     let mut i = start
-    while i < closing:
+    for i < closing:
         let b = bytes[i]
         if b == lbrace_byte:
             depth = depth + 1
@@ -192,7 +192,7 @@ func split_interp_spec(
         else if b == quote_byte:
             // Skip a nested string literal so its `:` doesn't confuse us.
             i = i + 1
-            while i < closing && bytes[i] != quote_byte:
+            for i < closing && bytes[i] != quote_byte:
                 if bytes[i] == backslash_byte && i + 1 < closing:
                     i = i + 2
                 else:

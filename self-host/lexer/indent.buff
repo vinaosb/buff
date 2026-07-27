@@ -61,7 +61,7 @@ func check_line(
 // 0). Called once at end-of-input.
 func finalize(tracker: IndentationTracker) -> Vector<TokenKind>:
     let tokens = Vector.new()
-    while tracker.stack.len() > 1:
+    for tracker.stack.len() > 1:
         tracker.stack.pop()
         tokens.push(TokenKind.Dedent)
     return tokens
@@ -80,7 +80,7 @@ func adjust_to_level(
         tracker.stack.push(level)
         tokens.push(TokenKind.Indent)
     else if level < top:
-        while tracker_peek(tracker) > level:
+        for tracker_peek(tracker) > level:
             tracker.stack.pop()
             tokens.push(TokenKind.Dedent)
         if tracker_peek(tracker) != level:
@@ -100,7 +100,7 @@ func compute_level(indent: String, source_id: SourceId, span_start: Int) -> Resu
     let mut has_tab = false
     let mut has_space = false
     let mut idx = 0
-    while idx < indent.len():
+    for idx < indent.len():
         let c = indent[idx]
         if c == '\t':
             has_tab = true
