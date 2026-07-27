@@ -133,8 +133,8 @@ impl OAuthConfig {
         })
     }
 
-    /// Build the GitHub authorize URL with the client_id + redirect_uri
-    /// + CSRF `state` encoded as query params. The user's browser is
+    /// Build the GitHub authorize URL with the client_id, redirect_uri,
+    /// and CSRF `state` encoded as query params. The user's browser is
     /// redirected here by the login endpoint. The `state` value MUST
     /// be echoed back by GitHub on callback and is validated against
     /// the `buff_oauth_state` cookie to defeat CSRF (P0.25 / sec-003).
@@ -218,7 +218,7 @@ pub(crate) async fn login(State(state): State<AppState>) -> Result<Response, Reg
 /// 4. `storage.create_session(login, id)` → receive session token.
 /// 5. Respond with `200 OK` + `Set-Cookie: buff_session=<token>` (Secure
 ///    + HttpOnly + SameSite=Lax — P0.25 / sec-004). The token is NOT
-///    echoed in the JSON body; clients read it from the cookie.
+///      echoed in the JSON body; clients read it from the cookie.
 ///
 /// Errors surface as JSON bodies with appropriate status codes:
 /// - `400 Bad Request` — OAuth state missing/mismatched (CSRF defense).

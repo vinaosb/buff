@@ -270,12 +270,15 @@ async fn publish_with_path_traversal_name_returns_400() {
     let payload = publish_payload("../evil", "1.0.0", &[], &[]);
     let (status, body) = do_publish(router, &payload, Some("test-token")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    // P0.28: validate_no_path_traversal now runs FIRST (before
+    // validate_package_name), so the message is the more descriptive
+    // "invalid input: contains '..' (path traversal forbidden)". The
+    // legacy "invalid package name" message from validate_name is
+    // still produced for non-traversal charset violations.
+    let err = body["error"].as_str().unwrap_or_default();
     assert!(
-        body["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("invalid package name"),
-        "expected invalid-name error: {body}"
+        err.contains("path traversal") || err.contains("invalid package name"),
+        "expected path-traversal or invalid-name error: {body}"
     );
 }
 

@@ -120,6 +120,22 @@ pub enum RegistryError {
     /// to the requested scope (e.g. not a member of `@org`). HTTP 403.
     #[error("you do not have permission to publish to this scope")]
     ScopeForbidden,
+
+    /// P0.28 (sec-hardening): A user-supplied input failed one of the
+    /// handler-level validation helpers in [`crate::handlers`]:
+    /// strict package-name regex, semver shape, path-traversal /
+    /// null-byte / absolute-path defense. The `String` carries a
+    /// human-readable reason ("invalid package name: must start with
+    /// lowercase letter a-z (got 'T')") so the client can surface a
+    /// useful error. HTTP 400 Bad Request.
+    ///
+    /// This is distinct from [`RegistryError::InvalidName`] (static
+    /// "invalid package name" message, retained for backwards compat)
+    /// and [`RegistryError::InvalidVersion`] (semver-parse-failure
+    /// message). `InvalidInput` carries the validator's exact
+    /// rejection reason for any input kind (name, version, path).
+    #[error("{0}")]
+    InvalidInput(String),
 }
 
 impl IntoResponse for RegistryError {
@@ -129,7 +145,8 @@ impl IntoResponse for RegistryError {
             | Self::InvalidVersion(_)
             | Self::InvalidBody(_)
             | Self::VersionExists { .. }
-            | Self::InvalidTarball(_) => StatusCode::BAD_REQUEST,
+            | Self::InvalidTarball(_)
+            | Self::InvalidInput(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::CycleDetected => StatusCode::CONFLICT,
