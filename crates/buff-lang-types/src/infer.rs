@@ -207,6 +207,18 @@ pub struct TypeInferencer {
     /// was added (a missing registration yields `Unknown`, which is
     /// permissive in the inference rules).
     enum_registry: EnumRegistry,
+    /// Registry of user-defined and extern function signatures (function name
+    /// → resolved return type). Consulted by the `Expr::FuncCall` arm of
+    /// [`Self::infer_expr`] so that a call like `path_exists(x)` resolves to
+    /// the declared `-> Bool` return type instead of falling through to
+    /// `Type::Unknown`. This unblocks `if path_exists(x):` and similar
+    /// patterns in self-host ports where extern stubs declare return types.
+    ///
+    /// Seeded by the driver via [`Self::register_function_signatures`].
+    /// Empty by default — keeps standalone/test inferencers behaving
+    /// exactly as before (a missing registration yields `Unknown`, which
+    /// is permissive in the inference rules).
+    function_signatures: BTreeMap<String, Type>,
 }
 
 impl TypeInferencer {
@@ -217,6 +229,7 @@ impl TypeInferencer {
             user_generic_decls: UserGenericDecls::new(),
             trait_impls: TraitImplRegistry::new(),
             enum_registry: EnumRegistry::new(),
+            function_signatures: BTreeMap::new(),
         }
     }
 
@@ -300,6 +313,32 @@ impl TypeInferencer {
     /// (every lookup misses → `Type::Unknown`).
     pub fn register_enum_decls(&mut self, decls: &[Decl]) {
         self.enum_registry = build_enum_registry_with_prelude(decls);
+    }
+
+    /// Register function signatures from the program's top-level declarations.
+    /// Walks all `Decl::FuncDecl` and `Decl::ExternFuncDecl` items, extracting
+    /// their name and return type. The return type (a `TypeRef`) is converted
+    /// to a resolved `Type` by the caller-supplied `typeref_to_type` closure.
+    ///
+    /// This unblocks `if path_exists(x):` and similar patterns where an extern
+    /// or user-defined function's return type was previously `Unknown` to the
+    /// inferencer.
+    pub fn register_function_signatures<F>(&mut self, decls: &[Decl], typeref_to_type: F)
+    where
+        F: Fn(&buff_lang_ast::TypeRef) -> Option<Type>,
+    {
+        for d in decls {
+            let (name, ret_ref) = match d {
+                Decl::FuncDecl(f) => (&f.name.name, f.return_type.as_ref()),
+                Decl::ExternFuncDecl(ef) => (&ef.name.name, ef.return_type.as_ref()),
+                _ => continue,
+            };
+            if let Some(ret_ty) = ret_ref {
+                if let Some(ty) = typeref_to_type(ret_ty) {
+                    self.function_signatures.insert(name.clone(), ty);
+                }
+            }
+        }
     }
 
     /// Replace the enum registry wholesale (mirrors
@@ -418,6 +457,16 @@ impl TypeInferencer {
                             arg_tys.push(self.infer_expr(a)?);
                         }
                         return Ok(prelude::return_type(fn_, &arg_tys));
+                    }
+                }
+                // User-defined and extern function signatures. If the callee
+                // name matches a registered function (seeded via
+                // `register_function_signatures`), return its declared return
+                // type. This unblocks `if path_exists(x):` and similar
+                // patterns where the return type was previously `Unknown`.
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    if let Some(ret_ty) = self.function_signatures.get(&name.name) {
+                        return Ok(ret_ty.clone());
                     }
                 }
                 // v0.5: real call resolution.

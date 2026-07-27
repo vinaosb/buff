@@ -1423,14 +1423,19 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "buff-lang-ast",
+ "buff-lang-buffhtml-parser",
  "buff-lang-codegen-buffhtml",
  "buff-lang-codegen-rust",
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-parser",
  "buff-lang-types",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
  "salsa",
  "sha2",
+ "syn 2.0.119",
 ]
 
 [[package]]

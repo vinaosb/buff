@@ -33,7 +33,9 @@ use buff_lang_error::{SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
 
-use crate::compile_speed;
+// Note: compile_speed, incremental, error_mapper, rustc_invoke are all
+// declared as `pub mod` above (lines 17-20) — no explicit `use crate::`
+// re-import needed (it would shadow the mod declaration, E0255).
 
 /// Compile-time optimization profile (T56 release / T60 minimal / T55 fast).
 ///

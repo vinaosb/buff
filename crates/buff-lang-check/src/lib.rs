@@ -479,6 +479,15 @@ fn type_check_func(
     // mirrors the working match-arm path (which consults the same
     // `EnumRegistry` via `exhaustiveness::check_match_expr`).
     inferencer.register_enum_decls(all_decls);
+    // Seed the inferencer with ALL function signatures (user-defined +
+    // extern) from the program's top-level declarations. This unblocks
+    // `if path_exists(x):` and similar patterns where an extern stub or
+    // forward-referenced function's return type was previously `Unknown`
+    // to the inferencer. The `typeref_to_type` closure converts parse-time
+    // `TypeRef` annotations to resolved `Type` values (primitives only;
+    // user-defined types return `None` and stay `Unknown`, which is
+    // permissive in the inference rules).
+    inferencer.register_function_signatures(all_decls, |tr| typeref_to_type(tr));
     // Pre-bind EVERY parameter. `typeref_to_type` only recognises
     // primitives + Option/Result; user-defined types (struct/enum names)
     // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED
