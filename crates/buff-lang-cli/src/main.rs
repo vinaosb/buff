@@ -183,6 +183,7 @@ fn main() -> Result<()> {
             error_format,
             target,
             no_color,
+            dump_ast,
         } => {
             use buff_lang_cli::check::{CheckOutcome, ErrorFormat};
             let format = ErrorFormat::from_str(&error_format);
@@ -192,6 +193,7 @@ fn main() -> Result<()> {
                 format,
                 target.as_deref(),
                 no_color,
+                dump_ast,
             )?;
             if matches!(outcome, CheckOutcome::HasErrors) {
                 std::process::exit(1);

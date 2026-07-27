@@ -1716,10 +1716,14 @@ name = "buff-web3"
 version = "1.0.0"
 dependencies = [
  "ethers",
+ "hex",
  "insta",
+ "rand 0.8.7",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -1759,6 +1763,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tar",
  "tempfile",
  "thiserror 1.0.69",

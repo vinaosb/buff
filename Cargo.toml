@@ -153,6 +153,16 @@ crossbeam-channel = "0.5"
 # linking boundary (single-file `buff run` rustc path does NOT link it;
 # cargo-project wiring is deferred).
 rand = "0.9"
+# T48-fix: ethers 2.0.14 internally pins `rand` to 0.8 (its
+# `LocalWallet::new(rng)` ctor requires the 0.8 `Rng + CryptoRng` trait
+# surface). The workspace `rand = "0.9"` (above) is API-incompatible.
+# To let `buff-web3` (T48) call `LocalWallet::new(&mut rand_08::rngs::OsRng)`
+# for its panic-free `Wallet::default` fallback, we expose a workspace
+# alias `rand_08` that pulls rand 0.8 under a different crate name. Both
+# versions coexist in the dependency tree (ethers pulls 0.8 transitively;
+# buff-stdlib uses 0.9). Mirrors the conservative "pin the version the
+# upstream crate needs" philosophy already in use for chrono 0.4 / tokio 1.x.
+rand_08 = { package = "rand", version = "0.8" }
 # T124h: Web modules (Base64 / Hex / URLEncode / UUID / URL) wrap four
 # mature Rust crates. Each codegen-lowered call uses fully-qualified
 # paths so generated code requires no `use` import - but the recorded
@@ -475,6 +485,14 @@ buff-registry = { path = "crates/buff-registry" }
 #   envelope, so gzip would just add CPU). The `flate2` optional
 #   compression crate is NOT pulled.
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+# T48-fix: ethers 2.0.14 internally pins `reqwest` to 0.11 (its
+# `Http::new(reqwest::Client)` ctor expects the 0.11 type). The workspace
+# `reqwest = "0.12"` (above) is API-incompatible. To let `buff-web3` (T48)
+# call `Http::new(reqwest_011::Client::new())` for its panic-free
+# `Provider::default` fallback, we expose reqwest 0.11 under the alias
+# `reqwest_011`. Both versions coexist (ethers pulls 0.11 transitively).
+# Pure-Rust via the `rustls-tls` feature (no native-tls, no cc-rs).
+reqwest_011 = { package = "reqwest", version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 tar = "0.4"
 # T129a: Jupyter kernel protocol scaffold (`crates/buff-jupyter`). The
 # pure-Rust `zeromq` crate (async, tokio-based, NO C libzmq) implements

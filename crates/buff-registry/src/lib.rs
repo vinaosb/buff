@@ -271,6 +271,10 @@ pub fn app(state: AppState) -> Router {
             "/api/v1/packages/{name}/{version}/download",
             get(handlers::multipart_download),
         )
+        // P0.18: Health / readiness probes (BEFORE rate-limiting middleware
+        // so probes are never throttled).
+        .route("/health", get(handlers::health_handler))
+        .route("/ready", get(handlers::ready_handler))
         // T57: GitHub OAuth login flow.
         .route("/auth/github/login", get(oauth::login))
         .route("/auth/github/callback", get(oauth::callback))

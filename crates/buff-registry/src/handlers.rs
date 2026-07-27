@@ -577,6 +577,25 @@ pub(crate) async fn get_stats(
     })))
 }
 
+/// `GET /health` — liveness probe.
+///
+/// Returns `200 OK` with `{"status":"ok"}`. Always succeeds — the
+/// registry has no external dependencies that would make it unhealthy
+/// while the process is running.
+pub(crate) async fn health_handler() -> impl IntoResponse {
+    (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
+}
+
+/// `GET /ready` — readiness probe.
+///
+/// Returns `200 OK` with `{"status":"ready"}`. The in-memory storage
+/// backend is always ready — there is no database connection to wait
+/// for. A future backend (e.g. Postgres) would check connectivity here
+/// and return `503 Service Unavailable` on failure.
+pub(crate) async fn ready_handler() -> impl IntoResponse {
+    (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "ready"})))
+}
+
 // --- Filesystem tarball helpers ---
 
 /// Sanitize a package name for use as a filesystem path component.

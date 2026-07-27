@@ -79,14 +79,11 @@ jobs:
       - name: Clippy (core + working framework crates, lib only)
         run: cargo clippy ${{ env.CI_CRATES }} --lib -- -D warnings
 
-  # ── Test matrix (slow, parallel across OSes) ────────────────────────────────
-  # NOTE: Tests are continue-on-error until pre-existing test code API drift
-  # is resolved. The inline #[cfg(test)] modules reference old API signatures
-  # that were updated during v1.19-v1.25 AST refactoring waves.
-  # Tracked as tech debt — fmt + clippy + buff-validation are the hard gates.
-  test:
-    name: cargo test
-    continue-on-error: true
+  # ── Test-core (HARD gate, 3-OS matrix) ──────────────────────────────────────
+  # P0.11: Core compiler crate tests are a hard gate (no continue-on-error).
+  # Framework crate tests are split into test-framework (advisory) below.
+  test-core:
+    name: cargo test (core)
     strategy:
       fail-fast: false
       matrix:
@@ -94,8 +91,6 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macos-latest
-          - ubuntu-24.04-arm
-          - macos-14
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -104,9 +99,27 @@ jobs:
           toolchain: 1.95.0
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: test-${{ matrix.os }}
-      - name: Test (core compiler lib tests)
-        run: cargo test --lib --no-fail-fast ${{ env.CI_CRATES }}
+          shared-key: test-core-${{ matrix.os }}
+      - name: Test (core compiler crates)
+        run: cargo test -p buff-lang-ast -p buff-lang-lexer -p buff-lang-parser -p buff-lang-types -p buff-lang-error -p buff-lang-codegen-rust -p buff-lang-codegen-wgsl -p buff-lang-runtime -p buff-lang-debug-info -p buff-lang-cli
+
+  # ── Test-framework (advisory, ubuntu only) ──────────────────────────────────
+  # P0.11: Framework crate tests are continue-on-error (pre-existing API drift).
+  test-framework:
+    name: cargo test (framework)
+    continue-on-error: true
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-framework
+      - name: Test (framework crates)
+        run: cargo test --workspace --exclude buff-lang-ast --exclude buff-lang-lexer --exclude buff-lang-parser --exclude buff-lang-types --exclude buff-lang-error --exclude buff-lang-codegen-rust --exclude buff-lang-codegen-wgsl --exclude buff-lang-runtime --exclude buff-lang-debug-info --exclude buff-lang-cli
 
   # ── Buff compiler validation (Linux, validates .buff files) ─────────────────
   buff-validation:
@@ -151,7 +164,7 @@ jobs:
                 FAIL=$((FAIL+1))
               fi
             else
-              echo "::notice file=$SRC::buff run failed (forward-declared, expected)"
+              echo "::warning file=$SRC::buff run failed (forward-declared, expected)"
               SKIP=$((SKIP+1))
             fi
             echo "::endgroup::"

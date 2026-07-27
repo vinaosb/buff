@@ -386,7 +386,7 @@ see the [decision record](./.sisyphus/decisions/buff-direction-speed-moat-selfho
 
 ## License
 
-Licensed under the [MIT License](./LICENSE).
+Licensed under either of [Apache License, Version 2.0](./LICENSE-APACHE) or [MIT License](./LICENSE-MIT) at your option.
 
 Copyright © 2026 Vinicius Schwinden Berkenbrock `<vinaosb@gmail.com>`.
 

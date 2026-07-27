@@ -29,7 +29,8 @@ use anyhow::Result;
 use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 
 /// Library entry point for `buff check <FILE> [--deny-warnings/-D]
-/// [--error-format <human|json>] [--target <TRIPLE>] [--no-color]`.
+/// [--error-format <human|json>] [--target <TRIPLE>] [--no-color]
+/// [--dump-ast]`.
 ///
 /// Returns the outcome directly (no process::exit) so tests can inspect it
 /// and the CLI binary can translate it to an exit code.
@@ -42,6 +43,9 @@ use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 ///
 /// T43: `--no-color` disables ANSI color in human-readable output.
 ///
+/// P0.1.2a: `--dump-ast` prints a stub message after successful parse.
+/// Full JSON serialization is P0.1.2b.
+///
 /// # Errors
 ///
 /// Propagates file-read errors. Compile diagnostics are NOT errors at this
@@ -53,8 +57,13 @@ pub fn run(
     format: ErrorFormat,
     _target: Option<&str>,
     no_color: bool,
+    dump_ast: bool,
 ) -> Result<CheckOutcome> {
     let report = run_check_file_with_format(file, format, no_color)?;
+    if dump_ast {
+        // P0.1.2a: stub — full AST JSON serialization is P0.1.2b.
+        println!("AST dump not yet implemented — see P0.1.2b");
+    }
     let outcome = if deny_warnings && matches!(report.outcome, CheckOutcome::HasWarnings) {
         CheckOutcome::HasErrors
     } else {
