@@ -245,7 +245,7 @@ Wave 7 (Bootstrap):
 
 ### PHASE 0 — Foundation & Triage
 
-- [ ] **P0.1 — Equivalence harness as required CI check**
+- [x] **P0.1 — Equivalence harness as required CI check**
   **Files**: `.github/workflows/ci.yml`
   **What**: Add `equivalence-check` job: ubuntu-only, Docker, builds buff-lang-cli release, runs `scripts/equivalence-rust-vs-buff.sh` (9 tests), HARD gate (no continue-on-error).
   **Detection**: `grep 'equivalence-check' .github/workflows/ci.yml` returns match.
@@ -405,7 +405,7 @@ Wave 7 (Bootstrap):
   **Acceptance**: Checksum verified; mismatch → error; --skip-checksum documented.
   **Commit**: `fix(buffup): checksum verification (P0.9)`
 
-- [ ] **P0.10 — Pin Actions to SHAs + Docker by digest + permissions blocks** (sec-002 + cicd-003/005)
+- [x] **P0.10 — Pin Actions to SHAs + Docker by digest + permissions blocks** (sec-002 + cicd-003/005)
   **Files**: `.github/workflows/*.yml`, `docker/builder.Dockerfile`, `docker/slim.Dockerfile`
   **What**: Replace `@v4`/`@master` with SHA pins. Pin Docker base by digest. Add `permissions:` block to all 6 workflows (4 currently missing).
   **Detection**: `grep -r '@v[0-9]\|@master' .github/workflows/` returns 0 matches.
@@ -448,7 +448,7 @@ Wave 7 (Bootstrap):
 
 - [x] **P0.15 — buff-observe: defer (obs-001/002)** — Write DR documenting deferral. Feature-gate the crate. **Commit**: `decision(observe): defer (P0.15)`
 
-- [ ] **P0.16 — crypto-extras test vectors** (tc-001) — Add `crates/buff-crypto-extras/tests/{aes,rsa,ecc,argon2}.rs` with NIST/RFC vectors. Fix AGENTS.md false claim. **Edit queue**: Third in AGENTS.md queue. **Commit**: `test(crypto-extras): NIST vectors (P0.16)`
+- [x] **P0.16 — crypto-extras test vectors** (tc-001) — Add `crates/buff-crypto-extras/tests/{aes,rsa,ecc,argon2}.rs` with NIST/RFC vectors. Fix AGENTS.md false claim. **Edit queue**: Third in AGENTS.md queue. **Commit**: `test(crypto-extras): NIST vectors (P0.16)`
 
 - [x] **P0.17 — http-client default timeout** (ft-001) — Add `.timeout(Duration::from_secs(30)).connect_timeout(Duration::from_secs(10))` to `crates/buff-http-client/src/lib.rs:75-82`. **Commit**: `fix(http-client): timeout (P0.17)`
 
@@ -484,7 +484,7 @@ Wave 7 (Bootstrap):
   **Detection**: `grep -r 'origin\|max_size\|idle_timeout' crates/buff-lang-cli/src/ui_dev/` returns matches.
   **Commit**: `fix(ui-dev): WebSocket hardening (P0.27)`
 
-- [ ] **P0.28 — Registry input validation** (FN-2)
+- [x] **P0.28 — Registry input validation** (FN-2)
   **Files**: `crates/buff-registry/src/handlers.rs`
   **What**: Package name regex validation (`^[a-z][a-z0-9-]{1,63}$`), path traversal check (reject `..`), size limit (50MB default).
   **Acceptance**: Invalid names rejected; path traversal blocked; size limit enforced.
@@ -546,7 +546,7 @@ Wave 7 (Bootstrap):
 > **Exit**: All `bug`-class failures from P0.3 fixed. Baseline ratcheted beyond 7 files.
 > **Branch**: `main` (these fix the RUST COMPILER — allowed by F1 since F1 greps `self-host/v1` only).
 
-- [ ] **P1.1 — Fix LEX category failures** (4 files per bootstrap-report)
+- [x] **P1.1 — Fix LEX category failures** (4 files per bootstrap-report)
   **Files**: `crates/buff-lang-lexer/src/*.rs` — identify which specific lexer rules fail on the 4 LEX-category self-host files.
   **Detection**: `buff check self-host/lexer/tokenize.buff` (and other LEX files) exits 0.
   **Acceptance**: All 4 LEX-category files pass `buff check`.

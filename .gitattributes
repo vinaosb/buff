@@ -1,0 +1,22 @@
+# Normalize line endings: git stores LF, checks out as-is on all platforms.
+# This prevents Docker (Linux) agents from creating spurious CRLF→LF diffs
+# when writing files on a Windows checkout.
+
+* text=auto eol=lf
+
+# Binary files — never normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.svg binary
+*.wasm binary
+*.snap binary
+*.gz binary
+*.zip binary
+*.tar binary

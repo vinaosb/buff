@@ -2,16 +2,15 @@
 
 **Audit date:** 2026-07-26
 **Source:** `.sisyphus/reports/buff-audit-2026-07-26-2019-v3.{json,md}`
-**Last updated:** 2026-07-27 (Batch 4 complete, Batch 5 in-progress)
+**Last updated:** 2026-07-27 (Batch 5 complete — 26 FIXED, 5 DEFERRED, 3 PENDING)
 **Total findings:** 31 + FP-2 + 3 FNs = 34 tracked items (plus 1 disproven FP)
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| FIXED | 22 |
-| DEFERRED | 6 |
-| IN-PROGRESS | 3 |
+| FIXED | 26 |
+| DEFERRED | 5 |
 | PENDING | 3 |
 | **Total** | **34** |
 
@@ -34,8 +33,8 @@
 | obs-001 | buff-observe Tracer::bootstrap() never called (ALL tracing events silently dropped) | CRIT | P0.15 | DEFERRED | DR: `.sisyphus/decisions/buff-observe-deferred.md` |
 | prd-001 | AGENTS.md metadata 52 commits stale, branch wrong, tag range wrong | CRIT | P0.12 | FIXED | commit `caf80c2` |
 | sec-001 | buffup downloads release tarballs WITHOUT verifying .sha256 sidecar (supply-chain RCE) | CRIT | P0.9 | FIXED | commit `7ac027d` |
-| sec-002 | setup-buff GitHub Action uses curl pipe sh with no checksum verification | CRIT | P0.10 | IN-PROGRESS | Batch 5: bg_7003aff7 (SHA pinning) |
-| tc-001 | buff-crypto-extras has ZERO tests for 622 LOC of AES-GCM/RSA/ECDH/Argon2 | CRIT | P0.16 | IN-PROGRESS | Batch 5: bg_30effa36 (NIST test vectors) |
+| sec-002 | setup-buff GitHub Action uses curl pipe sh with no checksum verification | CRIT | P0.10 | FIXED | commit `4227090`; all Actions SHA-pinned + Docker digest-pinned + permissions blocks |
+| tc-001 | buff-crypto-extras has ZERO tests for 622 LOC of AES-GCM/RSA/ECDH/Argon2 | CRIT | P0.16 | FIXED | commit `5707069`; NIST AES-GCM + RFC ECDH + RSA round-trip + Argon2 tests (36 pass) |
 
 ## High Findings (14)
 
@@ -43,9 +42,9 @@
 |----|-------------|-----|------|--------|----------|
 | arch-002 | buff-lsp depends on entire buff-lang-cli for 1 fn (layer violation + bloat) | HIGH | P0.26 | PENDING | Not started (major refactor) |
 | arch-003 | buff-eval uses #[path] cross-crate include + 6 duplicated helpers | HIGH | P0.26 | PENDING | Not started (major refactor) |
-| cicd-003 | GitHub Actions pinned to mutable @v4/@master refs + Docker tags mutable + no cosign | HIGH | P0.10 | IN-PROGRESS | Batch 5: bg_7003aff7 |
+| cicd-003 | GitHub Actions pinned to mutable @v4/@master refs + Docker tags mutable + no cosign | HIGH | P0.10 | FIXED | commit `4227090`; all Actions SHA-pinned + Docker digest-pinned |
 | cicd-004 | buff-validation emits ::notice not ::error (failures downgrade silently) | HIGH | P0.11 | FIXED | commit `3ac6386` |
-| cicd-005 | 4 of 6 workflows have no permissions block (default write-all) | HIGH | P0.10 | IN-PROGRESS | Batch 5: bg_7003aff7 |
+| cicd-005 | 4 of 6 workflows have no permissions block (default write-all) | HIGH | P0.10 | FIXED | commit `4227090`; permissions: contents: read added to all 6 workflows |
 | cq-003 | Third god function generate() spans ~1038 lines (entry dispatcher) | HIGH | P0.14 | DEFERRED | DR: `.sisyphus/decisions/codegen-rust-god-functions-deferred.md` |
 | ft-002 | buff-jobs Worker ignores backoff configuration (retry storm risk) | HIGH | P0.25 | FIXED | commit `44f04b9` |
 | ft-003 | buff-resilience Timeout leaks worker thread on timeout (no cancellation) | HIGH | P0.25 | FIXED | commit `44f04b9`; polling → mpsc channel |
@@ -67,7 +66,7 @@
 | ID | Description | Sev | Task | Status | Evidence |
 |----|-------------|-----|------|--------|----------|
 | FN-1 | WebSocket hardening (ui_dev/server.rs CSWSH attack surface) | FN | P0.27 | FIXED | commit `a3031a5`; Origin header validation |
-| FN-2 | Registry input validation (axum handlers accept arbitrary bytes, path traversal) | FN | P0.28 | IN-PROGRESS | Batch 5: bg_e4c1dae1 |
+| FN-2 | Registry input validation (axum handlers accept arbitrary bytes, path traversal) | FN | P0.28 | FIXED | commit `d8cf8dd`; name regex + path traversal + semver + null byte + 50MB limit + 22 tests |
 | FN-3 | buff-web3 zero test coverage | FN | P0.29 | FIXED | commit `3ac6386`; ABI binding round-trip tests + mock provider tests |
 
 ## Additional DRs (outside audit scope)
