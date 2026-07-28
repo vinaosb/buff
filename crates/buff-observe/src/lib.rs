@@ -181,11 +181,7 @@ impl Span {
     /// The value must be a type that implements both
     /// `tracing::field::AsField` (for the field name lookup) and
     /// `tracing::Value` (the value trait bound on `Span::record`).
-    pub fn field<V: tracing::field::AsField + std::fmt::Debug + tracing::Value>(
-        &self,
-        name: &str,
-        value: V,
-    ) {
+    pub fn field<V: std::fmt::Debug + tracing::Value>(&self, name: &str, value: V) {
         self.inner.record(name, value);
     }
 

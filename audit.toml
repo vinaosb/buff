@@ -1,0 +1,17 @@
+# cargo-audit configuration
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+# Ignore unmaintained-crate warnings for transitive dependencies we cannot
+# directly upgrade. These are not security vulnerabilities — they're
+# "unmaintained" notices for crates deep in the dependency tree (typically
+# pulled in by prettyplease → syn → unic-*). Removing them requires upstream
+# changes we don't control.
+
+# unic-ucd-common (pulled by prettyplease/syn transitively)
+ignore = [
+    "RUSTSEC-2025-0101",  # unic-ucd-common unmaintained
+    "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
+    "RUSTSEC-2026-0194",  # quick-xml quadratic run time (transitive dep, fix = upgrade to >=0.41.0)
+    "RUSTSEC-2026-0195",  # quick-xml unbounded namespace allocation (transitive dep, fix = upgrade to >=0.41.0)
+]

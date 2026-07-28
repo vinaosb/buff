@@ -1,4 +1,4 @@
-//! T124g integration tests - system prelude modules codegen.
+﻿//! T124g integration tests - system prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the four T124g system modules:
 //!
@@ -96,7 +96,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })

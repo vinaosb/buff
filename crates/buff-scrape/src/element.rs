@@ -91,7 +91,7 @@ impl Element {
     /// pub(crate): all attributes as an ordered map. Used by the
     /// crawler's link extractor + snapshot tests. NOT part of the
     /// stable Buff-visible surface (T43 caps public API at 20 fns).
-    pub(crate) fn attrs(&self) -> &BTreeMap<String, String> {
+    pub fn attrs(&self) -> &BTreeMap<String, String> {
         &self.attrs
     }
 }

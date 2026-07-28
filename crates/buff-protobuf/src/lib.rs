@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn serialize_large_array() {
-        let arr: Vec<serde_json::Value> = (0..500).map(json).collect();
+        let arr: Vec<serde_json::Value> = (0..500).map(|i| serde_json::json!(i)).collect();
         let value = serde_json::Value::Array(arr);
         let bytes = serialize(&value).expect("serialize large");
         let back = deserialize(&bytes).expect("deserialize large");

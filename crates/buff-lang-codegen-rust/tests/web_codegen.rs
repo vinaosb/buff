@@ -1,4 +1,4 @@
-//! T124h integration tests - web prelude modules codegen.
+﻿//! T124h integration tests - web prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the five T124h web modules:
 //!
@@ -99,7 +99,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })

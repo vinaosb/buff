@@ -342,13 +342,16 @@ mod tests {
 
     // T81: format specifier tests
     //
-    // We use a callback that records the inner expression text AND the spec
-    // text (if any) by scanning the source for `:` at depth 0.
-    struct RecordInterpWithSpec {
-        captured: Vec<(String, Option<String>)>,
+    // Extracts `(expr_text, spec)` pairs by scanning the token stream that
+    // `scan_string` emits. Each interpolation produces zero or one
+    // `InterpSpec` tokens between `InterpStart` and `InterpEnd`. The
+    // expression text is captured by a simple callback that records the raw
+    // range; the spec is read from the `InterpSpec` token.
+    struct RecordExprOnly {
+        captured: Vec<String>,
     }
 
-    impl LexCallback for RecordInterpWithSpec {
+    impl LexCallback for RecordExprOnly {
         fn lex_range(
             &mut self,
             source: &str,
@@ -357,93 +360,51 @@ mod tests {
             _source_id: SourceId,
             _out: &mut Vec<Token>,
         ) -> Result<(), LexerError> {
-            // Scan for `:` at depth 0 to find the spec separator.
-            let bytes = source.as_bytes();
-            let mut depth = 0usize;
-            let mut i = range_start;
-            let spec = loop {
-                if i >= range_end {
-                    break None;
-                }
-                match bytes[i] {
-                    b'{' => {
-                        depth += 1;
-                        i += 1;
-                    }
-                    b'}' => {
-                        if depth == 0 {
-                            break None;
-                        }
-                        depth -= 1;
-                        i += 1;
-                    }
-                    b':' if depth == 0 => {
-                        let s = source[i + 1..range_end].to_string();
-                        break Some(s);
-                    }
-                    b'"' => {
-                        i += 1;
-                        while i < range_end && bytes[i] != b'"' {
-                            if bytes[i] == b'\\' && i + 1 < range_end {
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-                        if i < range_end {
-                            i += 1;
-                        }
-                    }
-                    _ => {
-                        i += 1;
-                    }
-                }
-            };
-            let expr_text = match &spec {
-                Some(_) => {
-                    // Find the `:` position
-                    let mut depth2 = 0usize;
-                    let mut j = range_start;
-                    let colon_pos = loop {
-                        if j >= range_end {
-                            break range_end;
-                        }
-                        match bytes[j] {
-                            b'{' => {
-                                depth2 += 1;
-                                j += 1;
-                            }
-                            b'}' => {
-                                if depth2 == 0 {
-                                    break range_end;
-                                }
-                                depth2 -= 1;
-                                j += 1;
-                            }
-                            b':' if depth2 == 0 => {
-                                break j;
-                            }
-                            _ => {
-                                j += 1;
-                            }
-                        }
-                    };
-                    source[range_start..colon_pos].to_string()
-                }
-                None => source[range_start..range_end].to_string(),
-            };
-            self.captured.push((expr_text, spec));
+            self.captured
+                .push(source[range_start..range_end].to_string());
             Ok(())
         }
     }
 
     fn lex_str_with_specs(src: &str) -> Vec<(String, Option<String>)> {
         let mut out = Vec::new();
-        let mut cb = RecordInterpWithSpec {
+        let mut cb = RecordExprOnly {
             captured: Vec::new(),
         };
         let _ = scan_string(src, 0, SourceId(0), &mut out, &mut cb);
+
+        // Walk the token stream to find specs. Each interpolation block is
+        // `InterpStart, <expr tokens>, [InterpSpec(spec)], InterpEnd`.
+        // We track whether the CURRENT block has a spec.
+        let mut specs: Vec<Option<String>> = Vec::new();
+        let mut current_spec: Option<String> = None;
+        let mut in_interp = false;
+        for tok in &out {
+            match &tok.kind {
+                TokenKind::InterpStart => {
+                    in_interp = true;
+                    current_spec = None;
+                }
+                TokenKind::InterpSpec(s) => {
+                    if in_interp {
+                        current_spec = Some(s.clone());
+                    }
+                }
+                TokenKind::InterpEnd => {
+                    if in_interp {
+                        specs.push(current_spec.take());
+                        in_interp = false;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         cb.captured
+            .into_iter()
+            .zip(specs.into_iter())
+            .map(|(expr, spec)| (expr, spec))
+            .collect()
     }
 
     #[test]

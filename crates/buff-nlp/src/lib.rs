@@ -142,7 +142,7 @@ impl StemAlgorithm {
     /// pub(crate) — map to the underlying `rust_stemmers::Algorithm`.
     /// Not Buff-visible (the codegen layer never crosses this bound
     /// directly; it goes through `Text::stem` which dispatches here).
-    pub(crate) fn to_rust_stemmers(self) -> rust_stemmers::Algorithm {
+    pub fn to_rust_stemmers(self) -> rust_stemmers::Algorithm {
         match self {
             StemAlgorithm::Arabic => rust_stemmers::Algorithm::Arabic,
             StemAlgorithm::Danish => rust_stemmers::Algorithm::Danish,

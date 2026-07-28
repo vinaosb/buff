@@ -133,7 +133,7 @@ impl Cache {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn run_pending_tasks(&self) {
+    pub fn run_pending_tasks(&self) {
         self.inner.run_pending_tasks();
     }
 }

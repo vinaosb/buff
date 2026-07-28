@@ -1,4 +1,4 @@
-//! T124j integration tests - filesystem prelude modules codegen.
+﻿//! T124j integration tests - filesystem prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the three T124j filesystem
 //! modules:
@@ -96,7 +96,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })

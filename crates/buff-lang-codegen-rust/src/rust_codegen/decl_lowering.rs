@@ -1543,10 +1543,9 @@ mod no_alloc_tests {
     use super::*;
 
     fn block_from(src: &str) -> syn::Block {
-        let item: syn::ItemFn = syn::parse_quote!(
-            fn __no_alloc_probe() { #src }
-        );
-        *item.block
+        syn::parse_str(&format!("fn __no_alloc_probe() {{ {src} }}"))
+            .map(|item: syn::ItemFn| *item.block)
+            .expect("no_alloc test fixture should parse as valid Rust")
     }
 
     #[test]

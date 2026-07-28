@@ -267,7 +267,7 @@ impl Game {
     }
 
     /// Number of [`Game::step`] calls since creation. Test helper.
-    pub(crate) fn frame_count(&self) -> usize {
+    pub fn frame_count(&self) -> usize {
         self.frame_count
     }
 

@@ -1,4 +1,4 @@
-use buff_dataframe::{AggOp, ColumnKind, DataFrame, DfError, Series};
+use buff_dataframe::{AggOp, ColumnKind, DataFrame, DfError};
 
 fn fixture_users() -> DataFrame {
     DataFrame::from_rows(

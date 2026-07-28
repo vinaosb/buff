@@ -351,6 +351,7 @@ mod tests {
                 span: span(),
             }),
             default_value: None,
+            is_comptime: false,
             span: span(),
         }
     }

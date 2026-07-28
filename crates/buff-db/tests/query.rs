@@ -103,7 +103,7 @@ async fn transaction_commit_persists() {
     let pool = Pool::connect("sqlite::memory:").await.unwrap();
     pool.execute(SCHEMA, &[]).await.unwrap();
 
-    let tx = pool.begin().await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
     tx.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
         &[
@@ -125,7 +125,7 @@ async fn transaction_rollback_does_not_persist() {
     let pool = Pool::connect("sqlite::memory:").await.unwrap();
     pool.execute(SCHEMA, &[]).await.unwrap();
 
-    let tx = pool.begin().await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
     tx.execute(
         "INSERT INTO users (id, name, age) VALUES (?, ?, ?)",
         &[

@@ -52,7 +52,7 @@ fn build_source_dir(root: &std::path::Path) {
     fs::write(root.join("sub/deep/c.txt"), "gamma").expect("write sub/deep/c.txt");
 }
 
-fn assert_roundtrip(input_root: &std::path::Path, extracted_root: &std::path::Path) {
+fn assert_roundtrip(_input_root: &std::path::Path, extracted_root: &std::path::Path) {
     let pairs = [
         ("a.txt", "alpha"),
         ("sub/b.txt", "beta"),

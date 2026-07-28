@@ -117,7 +117,7 @@ pub mod renderer;
 pub mod scene;
 pub mod transform;
 
-pub use asset::{Asset, AssetRef, Texture};
+pub use asset::{Asset, AssetCache, AssetRef, AudioBuffer, Texture};
 pub use error::{GameError, GameResult};
 pub use game::{Game, GameConfig};
 pub use input::{Input, Key};

@@ -150,7 +150,9 @@ async fn install_downloads_and_extracts() {
             .body(tarball.clone());
     });
 
-    install::run("1.0.0".to_string()).await.expect("install");
+    install::run("1.0.0".to_string(), false)
+        .await
+        .expect("install");
 
     // Verify the binary landed in the version dir.
     let version_dir = paths::versions_dir().expect("versions_dir").join("1.0.0");
@@ -176,7 +178,7 @@ async fn install_fails_gracefully_on_404() {
         then.status(404).body("{\"message\": \"Not Found\"}");
     });
 
-    let err = install::run("9.9.9".to_string())
+    let err = install::run("9.9.9".to_string(), false)
         .await
         .expect_err("should fail");
     // Could be HttpStatus(404) or another wrapping variant — the key
@@ -208,7 +210,7 @@ async fn install_rejects_already_installed() {
     let mut f = fs::File::create(v_dir.join(paths::binary_name())).expect("create");
     f.write_all(b"stub\n").expect("write");
 
-    let err = install::run("1.0.0".to_string())
+    let err = install::run("1.0.0".to_string(), false)
         .await
         .expect_err("should fail");
     let msg = format!("{err}");
@@ -222,7 +224,7 @@ async fn install_rejects_already_installed() {
 async fn install_rejects_invalid_version() {
     let _lock = env_lock();
     let _env = BuffupEnvGuard::new();
-    let err = install::run("not-a-version".to_string())
+    let err = install::run("not-a-version".to_string(), false)
         .await
         .expect_err("should fail");
     let msg = format!("{err}");

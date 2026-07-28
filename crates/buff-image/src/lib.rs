@@ -60,7 +60,7 @@ pub enum PixelFormat {
 }
 
 impl PixelFormat {
-    pub(crate) const fn channels(self) -> usize {
+    pub const fn channels(self) -> usize {
         match self {
             PixelFormat::Rgb => 3,
             PixelFormat::Rgba => 4,
@@ -103,7 +103,7 @@ impl ImageFormat {
     /// Returns `None` for [`ImageFormat::Unknown`] (cannot save an
     /// unknown format — caller must pick a concrete format).
     /// pub(crate) — not part of the stable Buff-visible surface.
-    pub(crate) fn to_image_format(self) -> Option<image::ImageFormat> {
+    pub fn to_image_format(self) -> Option<image::ImageFormat> {
         match self {
             ImageFormat::Png => Some(image::ImageFormat::Png),
             ImageFormat::Jpeg => Some(image::ImageFormat::Jpeg),
@@ -229,7 +229,7 @@ impl Image {
     /// Consume self and return the underlying `image::DynamicImage`.
     /// Inverse of [`Image::from_dynamic`]. pub(crate) — round-trip
     /// helper for codegen tests; not Buff-visible.
-    pub(crate) fn into_dynamic(self) -> image::DynamicImage {
+    pub fn into_dynamic(self) -> image::DynamicImage {
         self.inner
     }
 
