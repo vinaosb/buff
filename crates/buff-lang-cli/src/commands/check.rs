@@ -26,8 +26,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use buff_lang_ast::Decl;
 use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
+use buff_lang_ast::Decl;
 
 /// Library entry point for `buff check <FILE> [--deny-warnings/-D]
 /// [--error-format <human|json>] [--target <TRIPLE>] [--no-color]
@@ -115,7 +115,10 @@ fn dump_ast_json(file: &Path) -> Result<()> {
     let mut output = BTreeMap::new();
     output.insert("declarations".to_string(), Value::Array(declarations));
     output.insert("count".to_string(), json!(decls.len()));
-    println!("{}", serde_json::to_string(&Value::Object(output.into_iter().collect()))?);
+    println!(
+        "{}",
+        serde_json::to_string(&Value::Object(output.into_iter().collect()))?
+    );
     Ok(())
 }
 
