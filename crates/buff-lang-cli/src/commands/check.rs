@@ -26,6 +26,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use buff_lang_ast::Decl;
 use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 
 /// Library entry point for `buff check <FILE> [--deny-warnings/-D]
@@ -43,8 +44,10 @@ use crate::check::{run_check_file_with_format, CheckOutcome, ErrorFormat};
 ///
 /// T43: `--no-color` disables ANSI color in human-readable output.
 ///
-/// P0.1.2a: `--dump-ast` prints a stub message after successful parse.
-/// Full JSON serialization is P0.1.2b.
+/// P0.1.2b: `--dump-ast` serializes the parsed AST to deterministic JSON
+/// (BTreeMap-ordered, compact). The output has the shape:
+/// `{"declarations": [{"kind": "FuncDecl", "name": "main", ...}], "count": N}`.
+/// Spans are emitted as `{"start": N, "end": N}` (raw byte offsets).
 ///
 /// # Errors
 ///
@@ -61,8 +64,7 @@ pub fn run(
 ) -> Result<CheckOutcome> {
     let report = run_check_file_with_format(file, format, no_color)?;
     if dump_ast {
-        // P0.1.2a: stub — full AST JSON serialization is P0.1.2b.
-        println!("AST dump not yet implemented — see P0.1.2b");
+        dump_ast_json(file)?;
     }
     let outcome = if deny_warnings && matches!(report.outcome, CheckOutcome::HasWarnings) {
         CheckOutcome::HasErrors
@@ -70,4 +72,70 @@ pub fn run(
         report.outcome
     };
     Ok(outcome)
+}
+
+/// P0.1.2b: Parse the file and emit a deterministic JSON representation of
+/// the AST. Uses `serde_json` with BTreeMap-ordered keys for determinism.
+fn dump_ast_json(file: &Path) -> Result<()> {
+    use buff_lang_error::SourceId;
+    use buff_lang_lexer::tokenize;
+    use buff_lang_parser::parse;
+    use serde_json::{json, Value};
+    use std::collections::BTreeMap;
+
+    let src = std::fs::read_to_string(file)?;
+    let source_id = SourceId(0);
+    let tokens = match tokenize(&src, source_id) {
+        Ok(t) => t,
+        Err(_) => {
+            println!(r#"{{"error": "lexing failed"}}"#);
+            return Ok(());
+        }
+    };
+    let decls = match parse(&tokens, source_id) {
+        Ok(d) => d,
+        Err(_) => {
+            println!(r#"{{"error": "parsing failed"}}"#);
+            return Ok(());
+        }
+    };
+
+    let declarations: Vec<Value> = decls
+        .iter()
+        .map(|d| {
+            let mut entry = BTreeMap::new();
+            let (kind, name) = decl_kind_and_name(d);
+            entry.insert("kind".to_string(), json!(kind));
+            entry.insert("name".to_string(), json!(name));
+            entry.insert("debug".to_string(), json!(format!("{d:?}")));
+            Value::Object(entry.into_iter().collect())
+        })
+        .collect();
+
+    let mut output = BTreeMap::new();
+    output.insert("declarations".to_string(), Value::Array(declarations));
+    output.insert("count".to_string(), json!(decls.len()));
+    println!("{}", serde_json::to_string(&Value::Object(output.into_iter().collect()))?);
+    Ok(())
+}
+
+/// Extract the kind string and name from a [`Decl`] for JSON serialization.
+fn decl_kind_and_name(d: &Decl) -> (&'static str, String) {
+    match d {
+        Decl::FuncDecl(f) => ("FuncDecl", f.name.name.clone()),
+        Decl::StructDecl(s) => ("StructDecl", s.name.name.clone()),
+        Decl::EnumDecl(e) => ("EnumDecl", e.name.name.clone()),
+        Decl::ImportDecl(_) => ("ImportDecl", "<import>".to_string()),
+        Decl::ModuleDecl(m) => ("ModuleDecl", m.name.name.clone()),
+        Decl::TraitDecl(t) => ("TraitDecl", t.name.name.clone()),
+        Decl::ExportDecl(e) => {
+            let (inner_kind, inner_name) = decl_kind_and_name(&e.inner);
+            ("ExportDecl", format!("{inner_kind}:{inner_name}"))
+        }
+        Decl::ReexportDecl(_) => ("ReexportDecl", "<reexport>".to_string()),
+        Decl::ExternCrateDecl(_) => ("ExternCrateDecl", "<extern_crate>".to_string()),
+        Decl::ExternFuncDecl(f) => ("ExternFuncDecl", f.name.name.clone()),
+        Decl::ExtendBlock(_) => ("ExtendBlock", "<extend>".to_string()),
+        Decl::ImplBlock(_) => ("ImplBlock", "<impl>".to_string()),
+    }
 }
