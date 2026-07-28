@@ -74,8 +74,8 @@ fn mock_contract_decimals_call() {
     let abi = r#"[{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"}]"#;
 
     let provider = Provider::new(&server.base_url()).expect("provider");
-    let contract =
-        Contract::new("0x0000000000000000000000000000000000000000", abi, provider).expect("contract");
+    let contract = Contract::new("0x0000000000000000000000000000000000000000", abi, provider)
+        .expect("contract");
 
     let result = contract
         .method("decimals")
