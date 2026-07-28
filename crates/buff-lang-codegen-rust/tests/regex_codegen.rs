@@ -1,4 +1,4 @@
-//! T124d integration tests — `Regex` prelude module codegen.
+﻿//! T124d integration tests â€” `Regex` prelude module codegen.
 //!
 //! Verifies that the Rust codegen:
 //! - Lowers `Regex.compile(p)` to `regex::Regex::new(p).unwrap_or_else(...)`.
@@ -74,7 +74,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })
@@ -160,7 +159,7 @@ fn regex_codegen_compile_string_literal() {
         src.contains(r#""a^""#),
         "expected fallback regex `\"a^\"` in: {src}"
     );
-    // unwrap_or_else (NOT bare unwrap) — panicking-generated-code rule.
+    // unwrap_or_else (NOT bare unwrap) â€” panicking-generated-code rule.
     assert!(
         src.contains("unwrap_or_else"),
         "expected `unwrap_or_else` (panic-free fallback) in: {src}"
@@ -178,7 +177,7 @@ fn regex_codegen_compile_string_literal() {
 
 #[test]
 fn regex_codegen_compile_via_ident_arg() {
-    // Regex.compile(my_pattern_var) — non-literal arg borrows via &.
+    // Regex.compile(my_pattern_var) â€” non-literal arg borrows via &.
     let src = codegen_one_expr_in(
         "f",
         regex_assoc_call("compile", vec![ident_expr("my_pattern_var")]),
@@ -198,7 +197,7 @@ fn regex_codegen_compile_via_ident_arg() {
 
 #[test]
 fn regex_codegen_match_string_literal() {
-    // `r.match("text")` — note `match` is a Buff keyword; the parser
+    // `r.match("text")` â€” note `match` is a Buff keyword; the parser
     // doesn't accept it from source, but AST-constructed tests can.
     let r_pat = let_stmt("r", regex_assoc_call("compile", vec![str_expr(r"\d+")]));
     let body = vec![
@@ -258,7 +257,7 @@ fn regex_codegen_find_string_literal() {
 #[test]
 fn regex_codegen_replace_all_semantics() {
     // The task's canonical acceptance: regex.replace("a1b2","\d","X") == "aXbX".
-    // replace_all (NOT replace) — verifies ALL matches are replaced.
+    // replace_all (NOT replace) â€” verifies ALL matches are replaced.
     let r_pat = let_stmt("r", regex_assoc_call("compile", vec![str_expr(r"\d")]));
     let body = vec![
         r_pat,
@@ -283,7 +282,7 @@ fn regex_codegen_replace_all_semantics() {
 
 #[test]
 fn regex_codegen_replace_via_ident_args() {
-    // replace(my_text, my_repl) — non-literal args borrow via &.
+    // replace(my_text, my_repl) â€” non-literal args borrow via &.
     let r_pat = let_stmt("r", regex_assoc_call("compile", vec![str_expr(r"\d")]));
     let body = vec![
         r_pat,
@@ -354,7 +353,7 @@ fn regex_codegen_captures_builds_hashmap() {
 
 #[test]
 fn regex_codegen_captures_deterministic_source() {
-    // Same AST → byte-identical Rust. Run codegen twice; assert equality.
+    // Same AST â†’ byte-identical Rust. Run codegen twice; assert equality.
     let r_pat = let_stmt("r", regex_assoc_call("compile", vec![str_expr(r"(\w+)")]));
     let body = vec![
         r_pat,
@@ -470,7 +469,7 @@ fn regex_codegen_records_regex_via_type_annotation() {
 
 #[test]
 fn regex_codegen_rejects_compile_with_wrong_arity() {
-    // Regex.compile() with no args — should error.
+    // Regex.compile() with no args â€” should error.
     let result = std::panic::catch_unwind(|| {
         let _ = codegen_one_expr_in("f", regex_assoc_call("compile", vec![]));
     });
@@ -482,7 +481,7 @@ fn regex_codegen_rejects_compile_with_wrong_arity() {
 
 #[test]
 fn regex_codegen_rejects_match_with_wrong_arity() {
-    // regex.match(a, b) — too many args. The receiver must be a known
+    // regex.match(a, b) â€” too many args. The receiver must be a known
     // Regex value (via `let r = Regex.compile(...)`) so the codegen
     // dispatches to the prelude-instance-fn path that enforces arity.
     let result = std::panic::catch_unwind(|| {
@@ -505,7 +504,7 @@ fn regex_codegen_rejects_match_with_wrong_arity() {
 
 #[test]
 fn regex_codegen_rejects_replace_with_wrong_arity() {
-    // regex.replace(a) — too few args. Same setup as above.
+    // regex.replace(a) â€” too few args. Same setup as above.
     let result = std::panic::catch_unwind(|| {
         let r_pat = let_stmt("r", regex_assoc_call("compile", vec![str_expr(r"\d")]));
         let body = vec![
@@ -521,7 +520,7 @@ fn regex_codegen_rejects_replace_with_wrong_arity() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. insta snapshots — byte-stable codegen pinning.
+// 8. insta snapshots â€” byte-stable codegen pinning.
 // ---------------------------------------------------------------------------
 
 #[test]

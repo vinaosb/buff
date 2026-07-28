@@ -1,4 +1,4 @@
-//! T2 (v1.13 wave 1): codegen tests for the Channel MPSC primitive.
+﻿//! T2 (v1.13 wave 1): codegen tests for the Channel MPSC primitive.
 //!
 //! Verifies that the Rust codegen lowers:
 //!
@@ -34,7 +34,7 @@
 //!
 //! Channel is a prelude namespace (or runtime-value types constructed
 //! via a prelude assoc fn), so source parsing requires no new keyword
-//! / AST node — the existing `MethodCall` shape handles them. We
+//! / AST node â€” the existing `MethodCall` shape handles them. We
 //! construct ASTs by hand here for the same reasons
 //! `networking_codegen.rs` (T124m) does: direct AST construction
 //! decouples the codegen-pinning snapshots from any future parser-
@@ -54,7 +54,7 @@
 //! the buff_lang_runtime lowering. An unbound receiver ident would
 //! infer to `Type::Unknown` and the instance-method dispatch would
 //! silently fall through to a bare `recv.method()` (non-async, non-
-//! compiling) lowering — the test would then assert against a string
+//! compiling) lowering â€” the test would then assert against a string
 //! the codegen never produces.
 
 use buff_lang_ast::common::{Block, Ident, Param};
@@ -96,8 +96,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })
@@ -216,7 +214,7 @@ fn channel_codegen_new_with_ident_arg_splices_through() {
 fn channel_body_with_extra(extra: Expr) -> Vec<Stmt> {
     vec![
         let_stmt(
-            "(sender, receiver)", // destructured tuple — codegen handles this
+            "(sender, receiver)", // destructured tuple â€” codegen handles this
             ns_assoc_call("Channel", "new", vec![int_expr(8)]),
         ),
         expr_stmt(extra),
@@ -234,7 +232,7 @@ fn sender_body_with_extra(extra: Expr) -> Vec<Stmt> {
             // simplest way: bind the whole tuple to `pair` then access
             // `.0`. But we can't easily express that without a richer
             // helper. Instead we rely on the test binding a fresh ident
-            // `sender` whose RHS is `Channel.new(8)` (a tuple) —
+            // `sender` whose RHS is `Channel.new(8)` (a tuple) â€”
             // codegen won't know it's a Sender; but the assertion
             // checks the codegen LOWERING of `sender.send(value)` which
             // only fires when the receiver infers to Type::Sender. So
@@ -274,7 +272,7 @@ fn sender_codegen_send_uses_runtime_send_with_await_ok() {
     );
     assert!(
         src.contains(".ok()"),
-        "expected `.ok()` (collapse Result to Option, discard — panic-free) in: {src}"
+        "expected `.ok()` (collapse Result to Option, discard â€” panic-free) in: {src}"
     );
     // Must NOT use bare .unwrap() (panicking-generated-code rule).
     assert!(
@@ -291,7 +289,7 @@ fn sender_codegen_send_uses_runtime_send_with_await_ok() {
 #[test]
 fn receiver_codegen_recv_uses_runtime_recv_with_await() {
     // receiver.recv() -> receiver.recv().await
-    // Returns Option<T> — Some(value) when value arrives; None on close.
+    // Returns Option<T> â€” Some(value) when value arrives; None on close.
     let stmts = vec![
         let_stmt(
             "receiver",
@@ -332,7 +330,7 @@ fn receiver_codegen_close_uses_runtime_close_sync() {
         src.contains(".close()"),
         "expected `receiver.close()` (runtime Receiver::close, sync) in: {src}"
     );
-    // close is sync — must NOT emit `.await` for the close call itself.
+    // close is sync â€” must NOT emit `.await` for the close call itself.
     // (Prettyplease might emit .await elsewhere if the surrounding fn
     // has other async calls, but our minimal test has none.)
     assert!(

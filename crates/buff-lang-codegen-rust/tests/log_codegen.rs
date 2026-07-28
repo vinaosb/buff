@@ -1,4 +1,4 @@
-//! T124c integration tests — `Log` prelude module codegen.
+﻿//! T124c integration tests â€” `Log` prelude module codegen.
 //!
 //! Verifies that the Rust codegen:
 //! - Lowers `Log.<level>("msg")` to `tracing::<level>!("msg")`.
@@ -70,7 +70,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })
@@ -323,7 +322,7 @@ fn log_codegen_emits_subscriber_init_in_main() {
         vec![expr_stmt(log_call("info", vec![str_expr("hi")]))],
     );
     let src = generate_rust(&[main]).expect("codegen must succeed");
-    // The init uses try_init() (NOT init() — must not panic on duplicate).
+    // The init uses try_init() (NOT init() â€” must not panic on duplicate).
     assert!(
         src.contains("try_init()"),
         "expected `try_init()` (panic-free init) in: {src}"
@@ -352,7 +351,7 @@ fn log_codegen_emits_subscriber_init_in_main() {
 
 #[test]
 fn log_codegen_subscriber_init_only_in_main_not_helpers() {
-    // A helper function `helper` that calls Log.info — the init should
+    // A helper function `helper` that calls Log.info â€” the init should
     // NOT be emitted inside `helper` (only `main` is the install site).
     let helper = func_decl(
         "helper",
@@ -366,7 +365,7 @@ fn log_codegen_subscriber_init_only_in_main_not_helpers() {
     );
     let src = generate_rust(&[helper, main]).expect("codegen must succeed");
     // The init block uses BUFF_LOG env var once per install. Counting
-    // `try_init()` is wrong (it appears TWICE per init — once per
+    // `try_init()` is wrong (it appears TWICE per init â€” once per
     // cfg! branch). Counting `BUFF_LOG` is the stable marker: it
     // appears exactly once per emitted init.
     let buff_log_count = src.matches("BUFF_LOG").count();
@@ -376,7 +375,7 @@ fn log_codegen_subscriber_init_only_in_main_not_helpers() {
         "expected exactly 1 init block (BUFF_LOG marker) in main only, got {buff_log_count} in:\n{src}"
     );
     // Defensive: also check that the `tracing_subscriber::fmt()` builder
-    // appears exactly TWICE (one per cfg! branch) — i.e. exactly ONE
+    // appears exactly TWICE (one per cfg! branch) â€” i.e. exactly ONE
     // init block was emitted.
     let fmt_builder_count = src.matches("tracing_subscriber::fmt()").count();
     assert_eq!(
@@ -440,7 +439,7 @@ fn log_codegen_rejects_empty_args() {
 
 #[test]
 fn log_codegen_rejects_positional_arg_after_message() {
-    // Log.info("msg", 42) — positional arg after the message is not allowed.
+    // Log.info("msg", 42) â€” positional arg after the message is not allowed.
     let result = std::panic::catch_unwind(|| {
         let _ = codegen_one_expr_in("f", log_call("info", vec![str_expr("msg"), int_expr(42)]));
     });
@@ -451,12 +450,12 @@ fn log_codegen_rejects_positional_arg_after_message() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. insta snapshot — proves byte-stable codegen for a canonical Log call.
+// 6. insta snapshot â€” proves byte-stable codegen for a canonical Log call.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn log_codegen_snapshot_stability() {
-    // The canonical acceptance snapshot: Log.info("msg", a: 1, b: 2) →
+    // The canonical acceptance snapshot: Log.info("msg", a: 1, b: 2) â†’
     // tracing::info!(a = 1, b = 2, "msg"). insta provides a byte-stable
     // snapshot that catches ANY regression in field ordering, macro path,
     // or surrounding codegen shape.

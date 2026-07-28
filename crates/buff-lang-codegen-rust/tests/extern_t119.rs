@@ -1,23 +1,23 @@
-//! T119 integration tests — minimal extern/bindgen.
+﻿//! T119 integration tests â€” minimal extern/bindgen.
 //!
 //! Coverage:
 //!
-//! - **`extern "C" func name(...)` parse + codegen** — the new (v1.3)
+//! - **`extern "C" func name(...)` parse + codegen** â€” the new (v1.3)
 //!   ABI-string form lowers to a Rust `extern "C" { fn ...; }` foreign
 //!   mod, identical to the legacy `extern func` lowering except that the
 //!   ABI string is sourced from the user's declaration.
-//! - **`extern "C" from "serde_json" func ...`** — the `from "crate"`
+//! - **`extern "C" from "serde_json" func ...`** â€” the `from "crate"`
 //!   annotation records the crate in the codegen's `extern_crates` set
 //!   AND contributes to `collect_rust_deps` so the CLI can populate
 //!   `[rust-deps]` in `buff.toml`.
-//! - **Type marshalling** — String, Int, Float, Bool, Vector all map
-//!   correctly to their Rust counterparts (String→String, Int→i64,
-//!   Float→f32, Double→f64, Bool→bool, Vector<T>→Vec<T>).
-//! - **Call-site `unsafe` wrapping** — Buff calls to declared extern
+//! - **Type marshalling** â€” String, Int, Float, Bool, Vector all map
+//!   correctly to their Rust counterparts (Stringâ†’String, Intâ†’i64,
+//!   Floatâ†’f32, Doubleâ†’f64, Boolâ†’bool, Vector<T>â†’Vec<T>).
+//! - **Call-site `unsafe` wrapping** â€” Buff calls to declared extern
 //!   functions are silently wrapped in `unsafe { ... }` (Rust requires
 //!   it; Buff hides it from the user per the README "no unsafe Rust"
 //!   guarantee).
-//! - **Generic rejection** — `extern "C" func parse<T>(...)` produces a
+//! - **Generic rejection** â€” `extern "C" func parse<T>(...)` produces a
 //!   clear parse error mentioning the v1.3 generics-unsupported policy.
 //!
 //! Run via:
@@ -54,7 +54,7 @@ fn named_ty(s: &str) -> TypeRef {
     }
 }
 
-/// Round-trip Buff source → AST → Rust source.
+/// Round-trip Buff source â†’ AST â†’ Rust source.
 fn rust_for(src: &str) -> String {
     let sid = SourceId(0);
     let tokens = tokenize(src, sid).expect("tokenize must succeed");
@@ -74,7 +74,7 @@ fn must_reparse(src: &str) {
 
 #[test]
 fn t119_extern_c_func_lowers_to_rust_foreign_mod() {
-    // `extern "C" func rust_fn(x: Int) -> Int` → Rust
+    // `extern "C" func rust_fn(x: Int) -> Int` â†’ Rust
     // `extern "C" { fn rust_fn(x: i64) -> i64; }`.
     let src = "extern \"C\" func rust_fn(x: Int) -> Int\n";
     let rust = rust_for(src);
@@ -101,7 +101,7 @@ fn t119_extern_c_func_snapshot() {
 }
 
 // ---------------------------------------------------------------------------
-// `from "crate"` annotation → extern_crates + collect_rust_deps
+// `from "crate"` annotation â†’ extern_crates + collect_rust_deps
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -164,13 +164,13 @@ fn t119_collect_rust_deps_dedupes_repeated_crates() {
     let tokens = tokenize(src, sid).expect("tokenize must succeed");
     let decls = parse(&tokens, sid).expect("parse must succeed");
     let deps = collect_rust_deps(&decls);
-    // Two decls, same crate → dedup to one entry (BTreeSet semantics).
+    // Two decls, same crate â†’ dedup to one entry (BTreeSet semantics).
     assert_eq!(deps.len(), 1, "expected serde_json deduped, got {deps:?}");
     assert!(deps.contains("serde_json"));
 }
 
 // ---------------------------------------------------------------------------
-// Type marshalling — String/Int/Float/Double/Bool/Vector all map correctly
+// Type marshalling â€” String/Int/Float/Double/Bool/Vector all map correctly
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -179,7 +179,7 @@ fn t119_marshal_string_param_and_return() {
     let rust = rust_for(src);
     assert!(
         rust.contains("fn echo(s: String) -> String"),
-        "expected String→String mapping in: {rust}"
+        "expected Stringâ†’String mapping in: {rust}"
     );
     must_reparse(&rust);
 }
@@ -190,18 +190,18 @@ fn t119_marshal_int_param() {
     let rust = rust_for(src);
     assert!(
         rust.contains("fn incr(n: i64) -> i64"),
-        "expected Int→i64 mapping in: {rust}"
+        "expected Intâ†’i64 mapping in: {rust}"
     );
 }
 
 #[test]
 fn t119_marshal_float_and_double_params() {
-    // Buff `Float` → Rust `f32`, Buff `Double` → Rust `f64`.
+    // Buff `Float` â†’ Rust `f32`, Buff `Double` â†’ Rust `f64`.
     let src = "extern \"C\" func mix(a: Float, b: Double) -> Double\n";
     let rust = rust_for(src);
     assert!(
         rust.contains("fn mix(a: f32, b: f64) -> f64"),
-        "expected Float→f32 and Double→f64 mapping in: {rust}"
+        "expected Floatâ†’f32 and Doubleâ†’f64 mapping in: {rust}"
     );
 }
 
@@ -211,15 +211,15 @@ fn t119_marshal_bool_param() {
     let rust = rust_for(src);
     assert!(
         rust.contains("fn negate(b: bool) -> bool"),
-        "expected Bool→bool mapping in: {rust}"
+        "expected Boolâ†’bool mapping in: {rust}"
     );
 }
 
 #[test]
 fn t119_marshal_vector_param_via_generic_typeref() {
     // NOTE: the unresolved TypeRef::Generic path passes the BASE name
-    // through verbatim, so user-written `Vector<Int>` → `Vector<i64>`
-    // (the inner-arg mapping IS applied). The `Vector`→`Vec` spelling
+    // through verbatim, so user-written `Vector<Int>` â†’ `Vector<i64>`
+    // (the inner-arg mapping IS applied). The `Vector`â†’`Vec` spelling
     // rewrite happens on the RESOLVED `Type` path (`buff_type_to_syn`),
     // not on the unresolved TypeRef path the extern-fn signature uses.
     // This is the same limitation as the pre-T119 test
@@ -228,7 +228,7 @@ fn t119_marshal_vector_param_via_generic_typeref() {
     let rust = rust_for(src);
     assert!(
         rust.contains("Vector<i64>"),
-        "expected Vector<Int> → Vector<i64> in unresolved form: {rust}"
+        "expected Vector<Int> â†’ Vector<i64> in unresolved form: {rust}"
     );
 }
 
@@ -239,7 +239,7 @@ fn t119_marshal_vector_param_via_generic_typeref() {
 #[test]
 fn t119_call_to_extern_fn_wraps_in_unsafe_block() {
     // A Buff program that calls a declared extern fn must lower the call
-    // site to `unsafe { name(args) }` — Rust requires this, Buff hides it.
+    // site to `unsafe { name(args) }` â€” Rust requires this, Buff hides it.
     let src = concat!(
         "extern \"C\" func parse(input: String) -> String\n",
         "func main():\n",
@@ -258,7 +258,7 @@ fn t119_call_to_extern_fn_wraps_in_unsafe_block() {
 
 #[test]
 fn t119_call_to_non_extern_fn_does_not_wrap_in_unsafe() {
-    // A regular user fn call is NOT wrapped in `unsafe` — only declared
+    // A regular user fn call is NOT wrapped in `unsafe` â€” only declared
     // extern fns are.
     let src = concat!(
         "func helper(x: Int) -> Int:\n",
@@ -297,7 +297,7 @@ fn t119_generic_extern_func_rejected_with_clear_error() {
 
 #[test]
 fn t119_unsupported_abi_rejected_with_clear_error() {
-    // `extern "system" func ...` is unsupported in v1.3 — only "C".
+    // `extern "system" func ...` is unsupported in v1.3 â€” only "C".
     let src = "extern \"system\" func go():\n";
     let sid = SourceId(0);
     let tokens = tokenize(src, sid).expect("tokenize must succeed");
@@ -365,7 +365,7 @@ fn t119_serde_json_pattern_round_trip() {
 #[test]
 fn t119_legacy_extern_func_still_works() {
     // The v0.5 form `extern func name(...) -> Ret` (no ABI string) is
-    // preserved — it lowers to FuncDecl with is_extern=true and emits
+    // preserved â€” it lowers to FuncDecl with is_extern=true and emits
     // the same `extern "C" { ... }` foreign-mod as before.
     let src = "extern func legacy_fn(x: Int) -> Int\n";
     let sid = SourceId(0);
@@ -433,7 +433,6 @@ fn t119_direct_externfuncdecl_construction_lowers_correctly() {
             name: ident("s"),
             ty: named_ty("String"),
             default_value: None,
-            is_comptime: false,
             is_comptime: false,
             span: span(),
         }],

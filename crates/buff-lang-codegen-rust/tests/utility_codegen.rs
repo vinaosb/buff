@@ -1,4 +1,4 @@
-//! T124f integration tests - utility prelude modules codegen.
+﻿//! T124f integration tests - utility prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the four T124f utility modules:
 //!
@@ -95,7 +95,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 ty: named_type(t),
                 default_value: None,
                 is_comptime: false,
-                is_comptime: false,
                 span: span(),
             })
             .collect(),
@@ -177,7 +176,6 @@ fn lambda(params: &[&str], body: Expr) -> Expr {
                 name: ident(n),
                 ty: named_type("Int"),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })

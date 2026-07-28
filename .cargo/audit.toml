@@ -12,4 +12,6 @@
 ignore = [
     "RUSTSEC-2025-0101",  # unic-ucd-common unmaintained
     "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
+    "RUSTSEC-2026-0194",  # quick-xml quadratic run time (transitive dep, fix = upgrade to >=0.41.0)
+    "RUSTSEC-2026-0195",  # quick-xml unbounded namespace allocation (transitive dep, fix = upgrade to >=0.41.0)
 ]

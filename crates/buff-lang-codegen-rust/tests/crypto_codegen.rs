@@ -1,4 +1,4 @@
-//! T124k integration tests - cryptographic prelude modules codegen.
+﻿//! T124k integration tests - cryptographic prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the two T124k crypto modules:
 //!
@@ -90,7 +90,6 @@ fn func_decl(name: &str, params: &[(&str, &str)], body_stmts: Vec<Stmt>) -> Decl
                 name: ident(n),
                 ty: named_type(t),
                 default_value: None,
-                is_comptime: false,
                 is_comptime: false,
                 span: span(),
             })
