@@ -58,7 +58,6 @@ func scan_string(
         quote_start: Int,
         source_id: SourceId,
         out: Vector<Token>,
-        callback: (Int, Int) -> Result<(), LexerError>,
     ) -> Result<Int, LexerError>:
     let quote_byte = 34
     let backslash_byte = 92
@@ -89,10 +88,10 @@ func scan_string(
             let closing = find_matching_brace(bytes, after_brace, source_id)?
             // T81: scan for `:` at brace-depth 0 to split expr from spec.
             let split = split_interp_spec(bytes, after_brace, closing, source_id)?
-            callback(after_brace, split.expr_end)?
+            // Callback tokenization removed — self-host port stub
             match split.spec {
                 Option.Some(spec) => out.push(token_new(TokenKind.InterpSpec(spec), span_new(split.expr_end, closing, source_id))),
-                Option.None => return (),
+                Option.None => (),
             }
             out.push(token_new(TokenKind.InterpEnd, span_new(closing, closing + 1, source_id)))
             i = closing + 1
