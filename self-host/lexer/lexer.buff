@@ -151,7 +151,7 @@ func lex_range(
         end: Int,
         tracker: IndentationTracker,
         track_indent: Bool,
-    ) -> Result<(), LexerError>:
+    ) -> Result<Bool, LexerError>:
     state.pos = start
     // Local byte constants (Buff has no module-level let).
     let newline_byte = 10
@@ -317,9 +317,9 @@ func lex_range(
         match scan_operator(state, tok_start, end) {
             Option.Some(kind) => {
                 push_kind(state, kind, lx_span(state, tok_start, state.pos))
-                continue,
+                continue
             }
-            Option.None => return (),
+            Option.None => return Ok(false)
         }
 
         // --- Single-char delimiters / operators ---
@@ -327,9 +327,9 @@ func lex_range(
             Option.Some(kind) => {
                 state.pos = state.pos + 1
                 push_kind(state, kind, lx_span(state, tok_start, state.pos))
-                continue,
+                continue
             }
-            Option.None => return (),
+            Option.None => return Ok(false)
         }
 
         // --- T57: Unicode mathematical operators ---
@@ -338,9 +338,9 @@ func lex_range(
                 Option.Some(pair) => {
                     state.pos = state.pos + pair.len
                     push_kind(state, pair.kind, lx_span(state, tok_start, state.pos))
-                    continue,
+                    continue
                 }
-                Option.None => return (),
+                Option.None => return Ok(false)
             }
         }
 
@@ -982,7 +982,7 @@ func scan_string_tokens(state: LexerState, quote_start: Int) -> Result<Int, Lexe
             lex_range(state, after_brace, split.expr_end, dummy_tracker, false)?
             match split.spec {
                 Option.Some(spec) => push_kind(state, TokenKind.InterpSpec(spec), lx_span(state, split.expr_end, closing)),
-                Option.None => return (),
+                Option.None => return Ok(false)
             }
             push_kind(state, TokenKind.InterpEnd, lx_span(state, closing, closing + 1))
             i = closing + 1
