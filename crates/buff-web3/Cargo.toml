@@ -71,3 +71,4 @@ rand_08.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+httpmock.workspace = true

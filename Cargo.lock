@@ -1777,6 +1777,7 @@ version = "1.0.0"
 dependencies = [
  "ethers",
  "hex",
+ "httpmock",
  "insta",
  "rand 0.8.7",
  "serde",
