@@ -1,0 +1,1433 @@
+// buff_compiler.buff -- Self-hosting monolith (P4.10a-d, M7 bootstrap proof).
+//
+// Combines the error + AST + lexer + parser front-end into one file so the
+// Buff compiler can type-check its own front-end data model IN Buff.
+//
+// This monolith exists because Buff does not yet support multi-file linking
+// (T29). Until that lands, a single concatenated file is the only way to
+// prove that lex + parse -> AST can be expressed in Buff itself (M7).
+//
+// Sections:
+//   1. Error types   (deduplicated from self-host/error/*.buff)
+//   2. AST types     (deduplicated from self-host/ast/*.buff)
+//   3. Lexer types   (deduplicated from self-host/lexer/token.buff)
+//   4. Parser types  (deduplicated from self-host/parser/stream.buff)
+//   5. Constructors + helpers (real bodies where trivial, stubs elsewhere)
+//   6. Lexer function signatures (stub bodies -- P4.10 proof-of-concept)
+//   7. Parser function signatures (stub bodies -- P4.10 proof-of-concept)
+//   8. Front-end entry points (compile_frontend + main)
+//
+// All shared types (Span, SourceId, Ident, TypeRef, Expr, Stmt, Decl, etc.)
+// appear EXACTLY ONCE. The canonical form is the most complete definition
+// found across the individual port files.
+//
+// Scope note: function BODIES are stubs returning default values. The goal is
+// structural correctness (types defined, signatures present, buff check passes)
+// not behavioral completeness. Real logic is deferred to post-M7 multi-file
+// linking.
+
+// =============================================================================
+// SECTION 1: Error types
+// (from self-host/error/span.buff, code.buff, diagnostic.buff)
+// =============================================================================
+
+// --- SourceId + Span (from span.buff) ---
+
+// A unique identifier for a source file.
+struct SourceId:
+    value: Int
+
+// A span of source code, identified by byte offsets and a source file ID.
+struct Span:
+    start: Int
+    end: Int
+    source_id: SourceId
+
+// --- ErrorCode (from code.buff) ---
+
+// A stable error code identifying a class of Buff diagnostic.
+// Stability guarantee: codes are never renumbered, reused, or removed.
+enum ErrorCode {
+    // E10xx -- Lexing
+    UnexpectedChar,
+    UnterminatedString,
+    InvalidNumber,
+    MixedTabsSpaces,
+    InconsistentIndent,
+    UnterminatedBlockComment,
+    UnterminatedRegex,
+    EmptyRegex,
+    UnterminatedCharLiteral,
+    EmptyCharLiteral,
+    InvalidCharEscape,
+    InvalidUnicodeEscape,
+    UnexpectedBraceInString,
+    UnterminatedInterpolation,
+    // E11xx -- Parsing
+    ExpectedToken,
+    UnexpectedToken,
+    ExpectedLayoutNewline,
+    ExpectedIndentedBlock,
+    FuncMustBeTopLevel,
+    ExpectedIdentifier,
+    UnterminatedList,
+    UnsupportedAbi,
+    ExternGenericsUnsupported,
+    MalformedComptime,
+    // E12xx -- Type-checking
+    UndefinedVariable,
+    BinaryOpTypeMismatch,
+    AssignTypeMismatch,
+    InvalidUnaryOperand,
+    IfConditionMustBeBool,
+    IfBranchTypeMismatch,
+    NonExhaustiveMatch,
+    PreferGpuOnRecursiveFunction,
+    ModuleError,
+    ComptimeEvaluationFailed,
+    ComptimeIoForbidden,
+    ComptimeReflectionForbidden,
+    TraitObjectUndefinedType,
+    TraitObjectUnsupportedLifetime,
+    // E13xx -- Codegen
+    UnsupportedCodegen,
+    CodegenParseError,
+    AsyncBlockDeadlock,
+    ComptimeLoweringFailed,
+    // E14xx -- Runtime
+    GpuDispatchFailed,
+    GpuShaderPanic,
+    GpuInitFailed,
+    GpuUnavailable,
+    VramBudgetExceeded,
+    ShaderCompileFailed,
+    ChannelClosed,
+    ChannelDisconnected,
+    AsyncTaskPanicked,
+    RuntimeTimeout,
+    // E15xx -- Warnings
+    DeprecatedApiUsed,
+    UnusedVariable,
+    UnusedParameter,
+    UnreachableCode,
+    UnusedImport,
+    DeadCode,
+    ShadowedBinding,
+    UnusedEnumVariant,
+    RedundantIfBranch,
+    TrailingWildArm,
+}
+
+// --- Severity + LabelStyle (from diagnostic.buff) ---
+
+// The severity of a diagnostic message.
+enum Severity {
+    Error,
+    Warning,
+    Info,
+}
+
+// Style of a labeled span (rustc-style primary vs secondary).
+enum LabelStyle {
+    Primary,
+    Secondary,
+}
+
+// --- SpanLabel (from diagnostic.buff) ---
+
+// A labeled span attached to a Diagnostic for multi-span rendering.
+struct SpanLabel:
+    span: Span
+    label: String
+    style: LabelStyle
+
+// --- Applicability + CodeSuggestion (from diagnostic.buff) ---
+
+// How confidently a CodeSuggestion can be auto-applied by tooling.
+enum Applicability {
+    MachineApplicable,
+    MaybeIncorrect,
+    HasPlaceholders,
+    Unspecified,
+}
+
+// A machine-readable fix suggestion attached to a Diagnostic.
+struct CodeSuggestion:
+    span: Span
+    replacement: String
+    applicability: Applicability
+    label: Option<String>
+
+// --- Diagnostic (from diagnostic.buff) ---
+
+// A diagnostic message with severity, message text, source span, notes,
+// optional secondary labels, and optional stable ErrorCode.
+struct Diagnostic:
+    severity: Severity
+    message: String
+    span: Span
+    notes: Vector<String>
+    code: Option<ErrorCode>
+    labels: Vector<SpanLabel>
+    suggestions: Vector<CodeSuggestion>
+
+// --- Sub-error types (from diagnostic.buff) ---
+
+// A lexer error.
+struct LexError:
+    diagnostic: Diagnostic
+
+// A parser error.
+struct ParseError:
+    diagnostic: Diagnostic
+
+// A type-checking error.
+struct TypeError:
+    diagnostic: Diagnostic
+
+// A code-generation error.
+struct CodegenError:
+    diagnostic: Diagnostic
+
+// A runtime error.
+struct RuntimeError:
+    diagnostic: Diagnostic
+
+// --- BuffError (top-level error enum, from diagnostic.buff) ---
+
+// The top-level error type for the Buff compiler.
+enum BuffError {
+    Lex(LexError),
+    Parse(ParseError),
+    Type(TypeError),
+    Codegen(CodegenError),
+    Runtime(RuntimeError),
+}
+
+// =============================================================================
+// SECTION 2: AST types
+// (from self-host/ast/common.buff, op.buff, ty.buff, expr.buff, stmt.buff,
+//  decl.buff -- canonical = most complete definition found)
+// =============================================================================
+
+// --- Ident (from common.buff) ---
+
+// An identifier -- a name plus its source location.
+struct Ident:
+    name: String
+    span: Span
+
+// --- BinaryOp + UnaryOp (from op.buff) ---
+
+// A binary operator (e.g. +, ==, +=).
+enum BinaryOp {
+    // Arithmetic
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    // Comparison
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+    // Logical
+    And,
+    Or,
+    // Bitwise
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    // Assignment (compound included)
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    // T101: Null coalescing
+    NullCoalesce,
+}
+
+// A unary operator (e.g. -x, !x, ~x).
+enum UnaryOp {
+    Neg,
+    Not,
+    BitNot,
+}
+
+// --- TypeRef (from ty.buff -- the FULL 7-variant enum) ---
+
+// A reference to a type. Used in annotations, signatures, and parameters.
+enum TypeRef {
+    // Named(name, span) -- a named type, e.g. Int, String, MyType.
+    Named(Ident, Span),
+    // Generic(base, args, span) -- a generic application: Vector<Int>.
+    Generic(TypeRef, Vector<TypeRef>, Span),
+    // Option(inner, span) -- the builtin Option<T> wrapper.
+    Option(TypeRef, Span),
+    // Function(params, return_type, is_async, span) -- a function type.
+    Function(Vector<TypeRef>, TypeRef, Bool, Span),
+    // Union(members, span) -- A union (sum) type: A | B | C (T76).
+    Union(Vector<TypeRef>, Span),
+    // Tuple(members, span) -- A tuple type: (T, U, ...) (T103).
+    Tuple(Vector<TypeRef>, Span),
+    // TraitObject(trait_name, lifetime, span) -- Box<dyn Trait> (DR-020).
+    TraitObject(Ident, Option<String>, Span),
+}
+
+// --- Literal (from expr.buff) ---
+
+// A literal value embedded directly in the source.
+enum Literal {
+    Int(Int),
+    Float(Float),
+    Double(Double),
+    Bool(Bool),
+    String(String),
+    Byte(Byte),
+    Char(Char),
+    Decimal(String),
+    Regex(String),
+}
+
+// --- InterpPart (from expr.buff) ---
+
+// One piece of a string-interpolation expression (T21).
+enum InterpPart {
+    Literal(String),
+    Expr(Expr, Option<String>),
+}
+
+// --- Expr (from expr.buff -- the FULL 21-variant enum) ---
+
+// A top-level expression. Every variant carries a Span.
+enum Expr {
+    Literal(Literal, Span),
+    Ident(Ident, Span),
+    BinaryOp(BinaryOp, Expr, Expr, Span),
+    UnaryOp(UnaryOp, Expr, Span),
+    IfExpr(Expr, Block, Option<Block>, Span),
+    FuncCall(Expr, Vector<Expr>, Span),
+    MethodCall(Expr, Ident, Vector<Expr>, Span),
+    Lambda(Vector<Param>, Block, Option<TypeRef>, Span),
+    StructInit(Ident, Vector<(Ident, Expr)>, Span),
+    MatchExpr(Expr, Vector<MatchArm>, Span),
+    SuspendExpr(Expr, Span),
+    ArrayLit(Vector<Expr>, Span),
+    Index(Expr, Vector<Expr>, Span),
+    StringInterp(Vector<InterpPart>, Span),
+    MapLit(Vector<(Expr, Expr)>, Span),
+    Try(Expr, Span),
+    Spawn(Expr, Span),
+    Range(Expr, Expr, Bool, Span),
+    IfLet(Pattern, Expr, Block, Option<Block>, Span),
+    TupleLit(Vector<Expr>, Span),
+    NamedArg(Ident, Expr, Span),
+}
+
+// --- Pattern (from expr.buff) ---
+
+// A pattern usable inside a MatchArm.
+enum Pattern {
+    Wildcard(Span),
+    Literal(Literal, Span),
+    Ident(Ident, Span),
+    Variant(Ident, Ident, Vector<Pattern>, Span),
+    Tuple(Vector<Pattern>, Span),
+    Struct(Ident, Vector<(Ident, Pattern)>, Span, Bool),
+    Or(Vector<Pattern>, Span),
+}
+
+// --- MatchArm (from expr.buff) ---
+
+// A single arm of a match expression.
+struct MatchArm:
+    pattern: Pattern
+    guard_expr: Option<Expr>
+    body: Block
+    span: Span
+
+// --- Block (from common.buff) ---
+
+// A brace-delimited block of statements.
+struct Block:
+    stmts: Vector<Stmt>
+    span: Span
+
+// --- Param (from common.buff) ---
+
+// A function parameter: name: Type, optionally with a default value.
+struct Param:
+    name: Ident
+    ty: TypeRef
+    default_value: Option<Expr>
+    is_comptime: Bool
+    span: Span
+
+// --- GuardCondition (from stmt.buff) ---
+
+// A single condition inside a Stmt.Guard (T73).
+enum GuardCondition {
+    Let(Pattern, Expr, Span),
+    Bool(Expr),
+}
+
+// --- Stmt (from stmt.buff -- the FULL 14-variant enum) ---
+
+// A single statement.
+enum Stmt {
+    LetDecl(Ident, Expr, Bool, Option<TypeRef>, Span),
+    Assignment(Expr, BinaryOp, Expr, Span),
+    ExprStmt(Expr, Span),
+    Return(Option<Expr>, Span),
+    Break(Span),
+    Continue(Span),
+    ForIn(Ident, Expr, Block, Span),
+    ForWhile(Expr, Block, Span),
+    LetPattern(Pattern, Expr, Bool, Option<TypeRef>, Span),
+    ForLet(Pattern, Expr, Block, Span),
+    Guard(Vector<GuardCondition>, Block, Span),
+    Defer(Expr, Span),
+    ComptimeBlock(Block, Span),
+}
+
+// --- StructField (from decl.buff) ---
+
+// A name-and-type pair for StructDecl.fields.
+struct StructField:
+    name: Ident
+    ty: TypeRef
+
+// --- TypeParam (from decl.buff) ---
+
+// A generic type parameter declaration (T13).
+struct TypeParam:
+    name: Ident
+    bounds: Vector<TypeRef>
+    span: Span
+
+// --- Attribute (from decl.buff) ---
+
+// A @name attribute attached to a declaration (T35).
+struct Attribute:
+    name: Ident
+    args: Vector<String>
+    named_args: Map<String, String>
+    span: Span
+
+// --- FuncDecl (from decl.buff) ---
+
+// A function declaration: func name(params) -> ret { body }.
+struct FuncDecl:
+    name: Ident
+    params: Vector<Param>
+    return_type: Option<TypeRef>
+    body: Block
+    is_async: Bool
+    is_unsafe: Bool
+    is_extern: Bool
+    attributes: Vector<Attribute>
+    type_params: Vector<TypeParam>
+    span: Span
+
+// --- StructDecl (from decl.buff) ---
+
+// A struct declaration: struct Name { field: Ty, ... }.
+struct StructDecl:
+    name: Ident
+    fields: Vector<StructField>
+    traits: Vector<Ident>
+    type_params: Vector<TypeParam>
+    span: Span
+
+// --- EnumVariant + EnumDecl (from decl.buff) ---
+
+// A single variant inside an EnumDecl.
+struct EnumVariant:
+    name: Ident
+    data: Option<Vector<TypeRef>>
+    span: Span
+
+// An enum declaration: enum Name { Variant, Variant(T, U), ... }.
+struct EnumDecl:
+    name: Ident
+    type_params: Vector<TypeParam>
+    variants: Vector<EnumVariant>
+    span: Span
+
+// --- ImportDecl (from decl.buff) ---
+
+// An import declaration (ES6 form or legacy module-path form).
+struct ImportDecl:
+    path: Vector<Ident>
+    imports: Vector<Ident>
+    alias: Option<Ident>
+    from_path: Option<String>
+    wildcard: Bool
+    span: Span
+
+// --- ModuleDecl (from decl.buff) ---
+
+// A module declaration: module name;.
+struct ModuleDecl:
+    name: Ident
+    span: Span
+
+// --- ExportDecl (from decl.buff) ---
+
+// A export <decl> wrapper declaration (T29).
+struct ExportDecl:
+    inner: Decl
+    span: Span
+
+// --- ReexportDecl (from decl.buff) ---
+
+// A re-export declaration: export * from "./path" (T29).
+struct ReexportDecl:
+    from_src: String
+    names: Vector<Ident>
+    wildcard: Bool
+    span: Span
+
+// --- ExternCrateDecl (from decl.buff) ---
+
+// An extern crate "name" declaration (T32 -- FFI basics).
+struct ExternCrateDecl:
+    name: String
+    span: Span
+
+// --- ExternFuncDecl (from decl.buff) ---
+
+// An extern "ABI" [from "crate"] func name(...) -> Ret declaration (T119).
+struct ExternFuncDecl:
+    abi: String
+    crate_name: Option<String>
+    name: Ident
+    params: Vector<Param>
+    return_type: Option<TypeRef>
+    span: Span
+
+// --- TraitDecl + MethodSig + AssociatedType (from decl.buff) ---
+
+// A trait declaration with default methods and inheritance (T93).
+struct TraitDecl:
+    name: Ident
+    supertraits: Vector<TypeRef>
+    associated_types: Vector<AssociatedType>
+    required: Vector<MethodSig>
+    defaults: Vector<FuncDecl>
+    span: Span
+
+// A REQUIRED (bodyless) trait-method signature (T93).
+struct MethodSig:
+    name: Ident
+    params: Vector<Param>
+    return_type: Option<TypeRef>
+    span: Span
+
+// An ASSOCIATED TYPE declaration inside a trait body (T75b).
+struct AssociatedType:
+    name: Ident
+    bounds: Vector<TypeRef>
+    span: Span
+
+// An ASSOCIATED-TYPE BINDING inside an ImplBlock (T75b).
+struct AssociatedTypeBinding:
+    name: Ident
+    target: TypeRef
+    span: Span
+
+// --- ImplBlock (from decl.buff) ---
+
+// An impl Trait for Type { ... } trait-implementation block (T75b).
+struct ImplBlock:
+    trait_name: TypeRef
+    target: TypeRef
+    type_bindings: Vector<AssociatedTypeBinding>
+    methods: Vector<FuncDecl>
+    span: Span
+
+// --- ExtendBlock (from decl.buff) ---
+
+// An extend TYPE { fn ...; ... } extension-method block (T75).
+struct ExtendBlock:
+    target: TypeRef
+    methods: Vector<FuncDecl>
+    span: Span
+
+// --- Decl (from decl.buff -- the FULL 12-variant enum) ---
+
+// A top-level declaration -- the root of every top-level item in a Buff file.
+enum Decl {
+    FuncDecl(FuncDecl),
+    StructDecl(StructDecl),
+    EnumDecl(EnumDecl),
+    ImportDecl(ImportDecl),
+    ModuleDecl(ModuleDecl),
+    TraitDecl(TraitDecl),
+    ExportDecl(ExportDecl),
+    ReexportDecl(ReexportDecl),
+    ExternCrateDecl(ExternCrateDecl),
+    ExternFuncDecl(ExternFuncDecl),
+    ExtendBlock(ExtendBlock),
+    ImplBlock(ImplBlock),
+}
+
+// =============================================================================
+// SECTION 3: Lexer types (from self-host/lexer/token.buff)
+// =============================================================================
+
+// --- TokenKind -- every token variant the scanner can emit ---
+enum TokenKind {
+    // --- Literals ---
+    IntLit(Int),
+    FloatLit(Float),
+    DoubleLit(Double),
+    StringLit(String),
+    ByteLit(Byte),
+    CharLit(Char),
+    DecimalLit(String),
+    RegexLit(String),
+    // --- String interpolation tokens ---
+    StringStart,
+    StringPart(String),
+    InterpStart,
+    InterpSpec(String),
+    InterpEnd,
+    StringEnd,
+    // --- Identifiers ---
+    Ident(String),
+    // --- Keywords (28) ---
+    KwFunc,
+    KwLet,
+    KwMut,
+    KwStruct,
+    KwEnum,
+    KwTrait,
+    KwType,
+    KwIf,
+    KwElse,
+    KwFor,
+    KwReturn,
+    KwBreak,
+    KwContinue,
+    KwIn,
+    KwMatch,
+    KwAsync,
+    KwSpawn,
+    KwImport,
+    KwExport,
+    KwFrom,
+    KwAs,
+    KwTrue,
+    KwFalse,
+    KwExtern,
+    KwUnsafe,
+    KwGuard,
+    KwExtend,
+    KwDefer,
+    // --- Operators ---
+    DotDot,
+    DotDotEq,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    AndAnd,
+    OrOr,
+    Not,
+    Question,
+    QuestionQuestion,
+    QuestionDot,
+    Caret,
+    Pipe,
+    Amp,
+    Shl,
+    Shr,
+    Tilde,
+    Arrow,
+    FatArrow,
+    Assign,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    PercentEq,
+    PipeGt,
+    // --- T57: Unicode mathematical operators ---
+    Sum,
+    Product,
+    Sqrt,
+    InUni,
+    NotInUni,
+    SubsetUni,
+    ApproxUni,
+    Adjoint,
+    // --- Delimiters ---
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    Colon,
+    Comma,
+    Dot,
+    Semicolon,
+    At,
+    // --- Layout tokens ---
+    Newline,
+    Indent,
+    Dedent,
+    Eof,
+}
+
+// --- Token -- a single token produced by the lexer ---
+struct Token:
+    kind: TokenKind
+    span: Span
+
+// =============================================================================
+// SECTION 4: Parser types (from self-host/parser/stream.buff)
+// =============================================================================
+
+// --- Edition (from stream.buff/options.buff) ---
+
+// An Edition selects which language extensions the parser accepts.
+enum Edition {
+    Standard,
+    Scientific,
+}
+
+// --- TokenStream (from stream.buff) ---
+
+// A read-only cursor over a slice of tokens. Tracks the current position
+// and the source id used to fabricate spans for synthetic nodes.
+struct TokenStream:
+    tokens: Vector<Token>
+    pos: Int
+    source_id: SourceId
+    edition: Edition
+    matrix_row_depth: Int
+
+// --- RecoveryResult (from parser.buff) ---
+
+// Result of the recovering parse: declarations + accumulated errors.
+struct RecoveryResult:
+    decls: Vector<Decl>
+    errors: Vector<ParseError>
+
+// =============================================================================
+// SECTION 5: Constructors + trivial helpers (real bodies)
+// =============================================================================
+
+// --- Span constructors (from span.buff) ---
+
+func source_id_new(value: Int) -> SourceId:
+    return SourceId.new(value: value)
+
+func span_new(start: Int, end: Int, source_id: SourceId) -> Span:
+    return Span.new(start: start, end: end, source_id: source_id)
+
+func span_dummy() -> Span:
+    return Span.new(start: 0, end: 0, source_id: source_id_new(0))
+
+// --- Ident constructor (from common.buff) ---
+
+func ident_new(name: String, span: Span) -> Ident:
+    return Ident.new(name: name, span: span)
+
+// --- Block constructor (from common.buff) ---
+
+func block_empty(span: Span) -> Block:
+    return Block.new(stmts: Vector.new(), span: span)
+
+// --- Param constructor (from common.buff) ---
+
+func param_plain(name: String, ty: TypeRef, span: Span) -> Param:
+    return Param.new(
+        name: ident_new(name, span),
+        ty: ty,
+        default_value: Option.None,
+        is_comptime: false,
+        span: span,
+    )
+
+// --- Token constructor (from token.buff) ---
+
+func token_new(kind: TokenKind, span: Span) -> Token:
+    return Token.new(kind: kind, span: span)
+
+// --- Diagnostic constructors (from diagnostic.buff) ---
+
+func diagnostic_error(message: String, span: Span) -> Diagnostic:
+    return Diagnostic.new(
+        severity: Severity.Error,
+        message: message,
+        span: span,
+        notes: Vector.new(),
+        code: Option.None,
+        labels: Vector.new(),
+        suggestions: Vector.new(),
+    )
+
+func diagnostic_warning(message: String, span: Span) -> Diagnostic:
+    return Diagnostic.new(
+        severity: Severity.Warning,
+        message: message,
+        span: span,
+        notes: Vector.new(),
+        code: Option.None,
+        labels: Vector.new(),
+        suggestions: Vector.new(),
+    )
+
+// --- Sub-error constructors (from diagnostic.buff) ---
+
+func lex_error_new(diagnostic: Diagnostic) -> LexError:
+    return LexError.new(diagnostic: diagnostic)
+
+func parse_error_new(diagnostic: Diagnostic) -> ParseError:
+    return ParseError.new(diagnostic: diagnostic)
+
+func type_error_new(diagnostic: Diagnostic) -> TypeError:
+    return TypeError.new(diagnostic: diagnostic)
+
+func codegen_error_new(diagnostic: Diagnostic) -> CodegenError:
+    return CodegenError.new(diagnostic: diagnostic)
+
+func runtime_error_new(diagnostic: Diagnostic) -> RuntimeError:
+    return RuntimeError.new(diagnostic: diagnostic)
+
+// --- SpanLabel constructors (from diagnostic.buff) ---
+
+func span_label_primary(span: Span, label: String) -> SpanLabel:
+    return SpanLabel.new(span: span, label: label, style: LabelStyle.Primary)
+
+func span_label_secondary(span: Span, label: String) -> SpanLabel:
+    return SpanLabel.new(span: span, label: label, style: LabelStyle.Secondary)
+
+// --- Edition helpers (from stream.buff) ---
+
+func edition_default() -> Edition:
+    return Edition.Standard
+
+func edition_is_scientific(e: Edition) -> Bool:
+    return e == Edition.Scientific
+
+// =============================================================================
+// SECTION 6: Error function signatures (stub bodies)
+// =============================================================================
+
+// --- ErrorCode functions (from code.buff) ---
+
+func error_code_code_str(c: ErrorCode) -> String:
+    return ""
+
+func error_code_title(c: ErrorCode) -> String:
+    return ""
+
+func error_code_explanation(c: ErrorCode) -> String:
+    return ""
+
+func error_code_all() -> Vector<ErrorCode>:
+    return Vector.new()
+
+// --- Diagnostic functions (from diagnostic.buff) ---
+
+func severity_default() -> Severity:
+    return Severity.Error
+
+func severity_debug(s: Severity) -> String:
+    return ""
+
+func severity_color(severity: Severity) -> String:
+    return ""
+
+func diagnostic_info(message: String, span: Span) -> Diagnostic:
+    return diagnostic_error(message, span)
+
+func diagnostic_with_note(d: Diagnostic, note: String) -> Diagnostic:
+    return d
+
+func diagnostic_with_code(d: Diagnostic, code: ErrorCode) -> Diagnostic:
+    return d
+
+func diagnostic_with_label(d: Diagnostic, span: Span, label: String) -> Diagnostic:
+    return d
+
+func diagnostic_with_secondary_label(d: Diagnostic, span: Span, label: String) -> Diagnostic:
+    return d
+
+func diagnostic_with_span_label(d: Diagnostic, label: SpanLabel) -> Diagnostic:
+    return d
+
+func diagnostic_with_suggestion(d: Diagnostic, span: Span, replacement: String, applicability: Applicability) -> Diagnostic:
+    return d
+
+func diagnostic_with_labeled_suggestion(d: Diagnostic, span: Span, replacement: String, applicability: Applicability, label: String) -> Diagnostic:
+    return d
+
+func diagnostic_display(d: Diagnostic) -> String:
+    return ""
+
+func diagnostic_render(d: Diagnostic, source: String) -> String:
+    return ""
+
+func diagnostic_render_with_color(d: Diagnostic, source: String, use_color: Bool) -> String:
+    return ""
+
+func render_diagnostics(diagnostics: Vector<Diagnostic>, source: String) -> String:
+    return ""
+
+func render_diagnostics_with_color(diagnostics: Vector<Diagnostic>, source: String, use_color: Bool) -> String:
+    return ""
+
+// --- Display functions for sub-error types (from diagnostic.buff) ---
+
+func lex_error_display(e: LexError) -> String:
+    return ""
+
+func parse_error_display(e: ParseError) -> String:
+    return ""
+
+func type_error_display(e: TypeError) -> String:
+    return ""
+
+func codegen_error_display(e: CodegenError) -> String:
+    return ""
+
+func runtime_error_display(e: RuntimeError) -> String:
+    return ""
+
+func buff_error_display(e: BuffError) -> String:
+    return ""
+
+// --- ANSI color helpers (from diagnostic.buff) ---
+
+func ansi_reset() -> String:
+    return ""
+
+func ansi_red() -> String:
+    return ""
+
+func ansi_yellow() -> String:
+    return ""
+
+func ansi_cyan() -> String:
+    return ""
+
+func ansi_green() -> String:
+    return ""
+
+func color_text(color: String, text: String) -> String:
+    return ""
+
+func color_severity(text: String, severity: Severity) -> String:
+    return ""
+
+func should_use_color() -> Bool:
+    return false
+
+// --- Applicability helpers (from diagnostic.buff) ---
+
+func applicability_is_machine_applicable(a: Applicability) -> Bool:
+    return a == Applicability.MachineApplicable
+
+func applicability_display(a: Applicability) -> String:
+    return ""
+
+func applicability_str(a: Applicability) -> String:
+    return ""
+
+func code_suggestion_render_help_line(s: CodeSuggestion) -> String:
+    return ""
+
+// --- Levenshtein + suggestion helpers (from diagnostic.buff) ---
+
+func levenshtein(a: String, b: String) -> Int:
+    return 0
+
+func suggest_close(input: String, candidates: Vector<String>) -> Option<String>:
+    return Option.None
+
+func format_did_you_mean(input: String, candidates: Vector<String>) -> Option<String>:
+    return Option.None
+
+// --- Render helpers (from diagnostic.buff) ---
+
+func render_span_in_source(span: Span, source: String) -> Option<String>:
+    return Option.None
+
+func render_span_in_source_with_color(span: Span, source: String, severity: Severity) -> Option<String>:
+    return Option.None
+
+func render_span_label_in_source(span: Span, source: String, style: LabelStyle, label: String) -> Option<String>:
+    return Option.None
+
+func render_span_label_in_source_with_color(span: Span, source: String, style: LabelStyle, label: String, severity: Severity) -> Option<String>:
+    return Option.None
+
+func caret_char_for_style(style: LabelStyle) -> String:
+    return ""
+
+func caret_width(source: String, start: Int, span_end_in_line: Int) -> Int:
+    return 1
+
+func suggestion_max_distance() -> Int:
+    return 2
+
+// =============================================================================
+// SECTION 7: AST function signatures (stub bodies)
+// =============================================================================
+
+// --- TypeRef functions (from ty.buff) ---
+
+func typeref_to_string(t: TypeRef) -> String:
+    return ""
+
+func typeref_join_args(args: Vector<TypeRef>) -> String:
+    return ""
+
+func typeref_join_members(members: Vector<TypeRef>, sep: String) -> String:
+    return ""
+
+func typeref_function_render(params: Vector<TypeRef>, return_type: TypeRef, is_async: Bool) -> String:
+    return ""
+
+func typeref_trait_object_render(trait_name: Ident, lifetime: Option<String>) -> String:
+    return ""
+
+// --- BinaryOp + UnaryOp functions (from op.buff) ---
+
+func binary_op_to_string(op: BinaryOp) -> String:
+    return ""
+
+func unary_op_to_string(op: UnaryOp) -> String:
+    return ""
+
+// --- Expr functions (from expr.buff) ---
+
+func expr_span(e: Expr) -> Span:
+    return span_dummy()
+
+func expr_to_string(e: Expr) -> String:
+    return ""
+
+func literal_to_string(l: Literal) -> String:
+    return ""
+
+func interp_part_to_string(p: InterpPart) -> String:
+    return ""
+
+func pattern_span(p: Pattern) -> Span:
+    return span_dummy()
+
+func pattern_to_string(p: Pattern) -> String:
+    return ""
+
+func match_arm_to_string(arm: MatchArm) -> String:
+    return ""
+
+func ident_to_string(i: Ident) -> String:
+    return i.name
+
+func block_to_string(b: Block) -> String:
+    return ""
+
+func param_to_string(p: Param) -> String:
+    return ""
+
+// --- Decl display functions (from decl.buff) ---
+
+func decl_display(d: Decl) -> String:
+    return ""
+
+func func_decl_display(fd: FuncDecl) -> String:
+    return ""
+
+func struct_decl_display(sd: StructDecl) -> String:
+    return ""
+
+func enum_decl_display(ed: EnumDecl) -> String:
+    return ""
+
+func enum_variant_display(v: EnumVariant) -> String:
+    return ""
+
+func import_decl_display(id: ImportDecl) -> String:
+    return ""
+
+func module_decl_display(md: ModuleDecl) -> String:
+    return ""
+
+func trait_decl_display(td: TraitDecl) -> String:
+    return ""
+
+func export_decl_display(ed: ExportDecl) -> String:
+    return ""
+
+func reexport_decl_display(rd: ReexportDecl) -> String:
+    return ""
+
+func extern_crate_decl_display(e: ExternCrateDecl) -> String:
+    return ""
+
+func extern_func_decl_display(e: ExternFuncDecl) -> String:
+    return ""
+
+func extend_block_display(eb: ExtendBlock) -> String:
+    return ""
+
+func impl_block_display(ib: ImplBlock) -> String:
+    return ""
+
+func attribute_display(a: Attribute) -> String:
+    return ""
+
+func method_sig_display(ms: MethodSig) -> String:
+    return ""
+
+func associated_type_display(at: AssociatedType) -> String:
+    return ""
+
+func associated_type_binding_display(atb: AssociatedTypeBinding) -> String:
+    return ""
+
+func typeparam_display(tp: TypeParam) -> String:
+    return ""
+
+func quote_string(s: String) -> String:
+    return ""
+
+// =============================================================================
+// SECTION 8: Lexer function signatures (stub bodies)
+// =============================================================================
+
+// --- TokenKind functions (from token.buff) ---
+
+func from_keyword(s: String) -> Option<TokenKind>:
+    return Option.None
+
+func is_keyword(kind: TokenKind) -> Bool:
+    return false
+
+func all_keywords() -> Vector<String>:
+    return Vector.new()
+
+func token_kind_to_string(kind: TokenKind) -> String:
+    return ""
+
+func token_to_string(tok: Token) -> String:
+    return ""
+
+func debug_quote(s: String) -> String:
+    return ""
+
+// --- Primitive render helpers (from token.buff) ---
+
+func int_to_string(n: Int) -> String:
+    return ""
+
+func float_to_string(n: Float) -> String:
+    return ""
+
+func double_to_string(n: Double) -> String:
+    return ""
+
+func byte_to_string(b: Byte) -> String:
+    return ""
+
+func char_to_string(c: Char) -> String:
+    return ""
+
+// --- Tokenize entry point (from lexer.buff) ---
+
+func tokenize(source: String, source_id: SourceId) -> Result<Vector<Token>, LexError>:
+    return Result.Ok(Vector.new())
+
+// --- Layout/indent helpers (from indent.buff) ---
+
+func compute_level(line: String) -> Int:
+    return 0
+
+func is_layout_kind(k: TokenKind) -> Bool:
+    if k == TokenKind.Newline:
+        return true
+    if k == TokenKind.Indent:
+        return true
+    if k == TokenKind.Dedent:
+        return true
+    return false
+
+// --- Lexer error helpers (from lexer/error.buff) ---
+
+func lex_error_unexpected_char(ch: Char, span: Span) -> LexError:
+    return lex_error_new(diagnostic_error("unexpected character", span))
+
+func lex_error_unterminated_string(span: Span) -> LexError:
+    return lex_error_new(diagnostic_error("unterminated string literal", span))
+
+// --- String interpolation helpers (from string_interp.buff) ---
+
+func parse_string_interpolation(source: String, offset: Int) -> Result<Vector<TokenKind>, LexError>:
+    return Result.Ok(Vector.new())
+
+// =============================================================================
+// SECTION 9: Parser function signatures (stub bodies)
+// =============================================================================
+
+// --- TokenStream constructors + accessors (from stream.buff) ---
+
+func stream_new(tokens: Vector<Token>, source_id: SourceId) -> TokenStream:
+    return stream_with_edition(tokens, source_id, edition_default())
+
+func stream_with_edition(tokens: Vector<Token>, source_id: SourceId, edition: Edition) -> TokenStream:
+    return TokenStream.new(
+        tokens: tokens,
+        pos: 0,
+        source_id: source_id,
+        edition: edition,
+        matrix_row_depth: 0,
+    )
+
+func stream_source_id(s: TokenStream) -> SourceId:
+    return s.source_id
+
+func stream_edition(s: TokenStream) -> Edition:
+    return s.edition
+
+func stream_in_matrix_row(s: TokenStream) -> Bool:
+    return s.matrix_row_depth > 0
+
+func stream_enter_matrix_row(s: TokenStream):
+    let _noop = 0
+
+func stream_exit_matrix_row(s: TokenStream):
+    let _noop = 0
+
+// --- TokenStream peek/advance (from stream.buff) ---
+
+func stream_peek(s: TokenStream) -> Option<Token>:
+    return Option.None
+
+func stream_peek_kind(s: TokenStream) -> Option<TokenKind>:
+    return Option.None
+
+func stream_peek_second_kind(s: TokenStream) -> Option<TokenKind>:
+    return Option.None
+
+func stream_advance(s: TokenStream) -> Option<Token>:
+    return Option.None
+
+func stream_advance_after_peek(s: TokenStream) -> Token:
+    return Token.new(kind: TokenKind.Eof, span: span_dummy())
+
+func tok_missing_sentinel() -> Token:
+    return Token.new(kind: TokenKind.Eof, span: span_dummy())
+
+func stream_check(s: TokenStream, kind: TokenKind) -> Bool:
+    return false
+
+func stream_is_at_end(s: TokenStream) -> Bool:
+    return true
+
+func stream_expect(s: TokenStream, expected_kind: TokenKind) -> Result<Token, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("expected token", span_dummy())))
+
+func stream_unexpected(s: TokenStream, what: String) -> ParseError:
+    return parse_error_new(diagnostic_error("unexpected token", span_dummy()))
+
+func stream_eof_span(s: TokenStream) -> Span:
+    return span_dummy()
+
+func stream_span_between(start_tok: Token, end_tok: Token, source_id: SourceId) -> Span:
+    return span_dummy()
+
+// --- Save/restore (from stream.buff) ---
+
+func stream_save(s: TokenStream) -> Int:
+    return 0
+
+func stream_restore(s: TokenStream, pos: Int):
+    let _noop = 0
+
+// --- Raw peek/advance (from stream.buff) ---
+
+func stream_vec_get(tokens: Vector<Token>, i: Int) -> Option<Token>:
+    return Option.None
+
+func stream_peek_raw(s: TokenStream) -> Option<Token>:
+    return Option.None
+
+func stream_peek_raw_kind(s: TokenStream) -> Option<TokenKind>:
+    return Option.None
+
+func stream_advance_raw(s: TokenStream) -> Option<Token>:
+    return Option.None
+
+func stream_check_raw(s: TokenStream, kind: TokenKind) -> Bool:
+    return false
+
+func stream_consume_indent(s: TokenStream) -> Bool:
+    return false
+
+func stream_consume_dedent(s: TokenStream) -> Bool:
+    return false
+
+func stream_consume_newline(s: TokenStream) -> Bool:
+    return false
+
+func stream_span_here(s: TokenStream) -> Span:
+    return span_dummy()
+
+func stream_sync_to_recovery_point(s: TokenStream) -> Bool:
+    return false
+
+func stream_unwrap(opt: Option<Token>) -> Token:
+    return tok_missing_sentinel()
+
+// --- Top-level parse entry points (from parser.buff) ---
+
+func parse(tokens: Vector<Token>, source_id: SourceId) -> Result<Vector<Decl>, ParseError>:
+    return Result.Ok(Vector.new())
+
+func parse_with_edition(tokens: Vector<Token>, source_id: SourceId, edition: Edition) -> Result<Vector<Decl>, ParseError>:
+    return Result.Ok(Vector.new())
+
+func parse_recovering(tokens: Vector<Token>, source_id: SourceId) -> RecoveryResult:
+    return RecoveryResult.new(decls: Vector.new(), errors: Vector.new())
+
+func parse_one_decl(s: TokenStream) -> Result<Option<Decl>, ParseError>:
+    return Result.Ok(Option.None)
+
+func parse_expression(tokens: Vector<Token>, source_id: SourceId) -> Result<Expr, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_expression_with_edition(tokens: Vector<Token>, source_id: SourceId, edition: Edition) -> Result<Expr, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+// --- Statement parser signatures (from stmt.buff) ---
+
+func parse_statement(s: TokenStream) -> Result<Stmt, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_block(s: TokenStream) -> Result<Block, ParseError>:
+    return Result.Ok(block_empty(span_dummy()))
+
+func parse_block_braces(s: TokenStream) -> Result<Block, ParseError>:
+    return Result.Ok(block_empty(span_dummy()))
+
+func parse_attributes(s: TokenStream) -> Result<Vector<Attribute>, ParseError>:
+    return Result.Ok(Vector.new())
+
+func parse_params(s: TokenStream) -> Result<Vector<Param>, ParseError>:
+    return Result.Ok(Vector.new())
+
+func parse_type_ref(s: TokenStream) -> Result<TypeRef, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_type_params(s: TokenStream) -> Result<Vector<TypeParam>, ParseError>:
+    return Result.Ok(Vector.new())
+
+func parse_if_expr(s: TokenStream) -> Result<Expr, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+// --- Declaration parser signatures (from stmt_decl.buff) ---
+
+func parse_func_decl(s: TokenStream, attributes: Vector<Attribute>) -> Result<FuncDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_struct_decl(s: TokenStream) -> Result<StructDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_enum_decl(s: TokenStream) -> Result<EnumDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_import_decl(s: TokenStream) -> Result<ImportDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_export_decl(s: TokenStream) -> Result<Decl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_extend_decl(s: TokenStream) -> Result<ExtendBlock, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_extern_crate_decl(s: TokenStream) -> Result<ExternCrateDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_extern_func_decl_with_abi(s: TokenStream) -> Result<ExternFuncDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_trait_decl(s: TokenStream) -> Result<TraitDecl, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+// --- Expression parser signatures (from expr.buff) ---
+
+func parse_match(s: TokenStream) -> Result<Expr, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+func parse_pattern(s: TokenStream) -> Result<Pattern, ParseError>:
+    return Result.Err(parse_error_new(diagnostic_error("not implemented", span_dummy())))
+
+// --- Edition helper (from stream.buff) ---
+
+func is_scientific_only(kind: TokenKind) -> Bool:
+    return false
+
+func edition_require_for(e: Edition, kind: TokenKind) -> Option<String>:
+    return Option.None
+
+// =============================================================================
+// SECTION 10: Front-end entry points
+// =============================================================================
+
+// Compile the Buff front-end: lex source -> parse tokens -> emit AST as JSON.
+//
+// Returns a JSON-string representation of the parsed AST. In this P4.10
+// proof-of-concept the lexer and parser are stubs, so the function returns
+// a structural skeleton identifying the pipeline stages.
+func compile_frontend(source: String) -> String:
+    let sid = source_id_new(0)
+    let lex_result = tokenize(source, sid)
+    let tokens = match lex_result {
+        Result.Ok(ts) => ts,
+        Result.Err(le) => Vector.new(),
+    }
+    let parse_result = parse(tokens, sid)
+    let ast_json = match parse_result {
+        Result.Ok(decls) => frontend_render_decls(decls),
+        Result.Err(pe) => frontend_render_error(pe),
+    }
+    return ast_json
+
+// Render a vector of Decls as a JSON-like string.
+func frontend_render_decls(decls: Vector<Decl>) -> String:
+    let n = decls.len()
+    return "\{\"kind\":\"Program\",\"decl_count\":" + n.to_string() + "\}"
+
+// Render a ParseError as a JSON-like error string.
+func frontend_render_error(pe: ParseError) -> String:
+    return "\{\"kind\":\"Error\",\"message\":\"parse failed\"\}"
+
+// =============================================================================
+// SECTION 11: Main entry point
+// =============================================================================
+
+func main():
+    let source = "func hello(): print(\"hello\")"
+    let result = compile_frontend(source)
+    print(result)
