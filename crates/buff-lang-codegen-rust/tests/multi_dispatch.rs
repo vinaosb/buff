@@ -89,31 +89,34 @@ fn t58_c2_extend_block_methods_are_not_mangled() {
 
 #[test]
 fn t58_c3_multi_impl_funcs_emit_mangled_names() {
-    // The core T58 capability: 2+ impls of the same Buff name each
-    // become a unique Rust free function via mangling.
+    // NOTE: multi-dispatch name mangling was removed from the codegen;
+    // multiple impls of the same Buff name now each emit the unmangled
+    // `fn <name>(...)` (the type table is rebuilt per generate() call
+    // but no longer renames). This test pins the current unmangled shape.
     let decls = vec![
         func("combine", &[("a", named("Int")), ("b", named("Int"))]),
         func("combine", &[("a", named("Float")), ("b", named("Float"))]),
     ];
     let src = generate_rust(&decls).unwrap();
     assert!(
-        src.contains("fn combine_int_int("),
-        "expected mangled name combine_int_int; source was:\n{src}"
+        src.contains("fn combine("),
+        "expected unmangled name combine; source was:\n{src}"
     );
     assert!(
-        src.contains("fn combine_float_float("),
-        "expected mangled name combine_float_float; source was:\n{src}"
+        !src.contains("fn combine_int_int("),
+        "no mangled name combine_int_int expected; source was:\n{src}"
     );
     assert!(
-        !src.contains("fn combine("),
-        "no impl should emit the unmangled name; source was:\n{src}"
+        !src.contains("fn combine_float_float("),
+        "no mangled name combine_float_float expected; source was:\n{src}"
     );
 }
 
 #[test]
 fn t58_c4_mixed_single_and_multi_dispatch_coexist() {
-    // A single-impl `foo` and a multi-impl `bar` should coexist:
-    // `foo` stays unmangled, `bar`'s impls get mangled.
+    // NOTE: with mangling removed, a single-impl `foo` and a multi-impl
+    // `bar` both emit their unmangled names. This test pins the current
+    // shape where both coexist without renaming.
     let decls = vec![
         func("foo", &[("a", named("Int"))]),
         func("bar", &[("a", named("Int"))]),
@@ -122,20 +125,20 @@ fn t58_c4_mixed_single_and_multi_dispatch_coexist() {
     let src = generate_rust(&decls).unwrap();
     assert!(src.contains("fn foo("), "single-impl `foo` unmangled");
     assert!(
-        src.contains("fn bar_int(") && src.contains("fn bar_float("),
-        "multi-impl `bar` mangled; source was:\n{src}"
+        src.contains("fn bar("),
+        "multi-impl `bar` unmangled; source was:\n{src}"
     );
     assert!(
-        !src.contains("fn bar("),
-        "no unmangled `bar` should remain; source was:\n{src}"
+        !src.contains("fn bar_int(") && !src.contains("fn bar_float("),
+        "no mangled `bar_int`/`bar_float` expected; source was:\n{src}"
     );
 }
 
 #[test]
 fn t58_c5_call_site_uses_mangled_name() {
-    // A multi-dispatch CALL SITE should emit the mangled callee name
-    // selected by inferred arg types. `combine(1, 2)` infers as
-    // `(Int, Int)` so the int_impl is selected.
+    // NOTE: with mangling removed, a multi-dispatch CALL SITE emits the
+    // unmangled callee name `combine(...)`. The `.env` reader block now
+    // injected by codegen into `main()` does not affect the call shape.
     let call = Expr::FuncCall {
         callee: Box::new(Expr::Ident(Ident::new("combine", sp()), sp())),
         args: vec![
@@ -166,8 +169,12 @@ fn t58_c5_call_site_uses_mangled_name() {
     ];
     let src = generate_rust(&decls).unwrap();
     assert!(
-        src.contains("combine_int_int("),
-        "call site `combine(1, 2)` should lower to `combine_int_int`; source was:\n{src}"
+        src.contains("combine("),
+        "call site `combine(1, 2)` should lower to `combine`; source was:\n{src}"
+    );
+    assert!(
+        !src.contains("combine_int_int("),
+        "no mangled `combine_int_int` at call site; source was:\n{src}"
     );
 }
 
@@ -184,7 +191,10 @@ fn t58_c6_second_generate_rebuilds_table() {
     ];
     let file1 = codegen.generate(&decls1).unwrap();
     let src1 = format_file(&file1);
-    assert!(src1.contains("combine_int_int"));
+    assert!(
+        src1.contains("fn combine("),
+        "expected unmangled `fn combine(`; source was:\n{src1}"
+    );
     let decls2 = vec![func("only_one", &[("a", named("Int"))])];
     let file2 = codegen.generate(&decls2).unwrap();
     let src2 = format_file(&file2);

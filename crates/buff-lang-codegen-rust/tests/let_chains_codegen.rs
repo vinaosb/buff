@@ -166,12 +166,12 @@ fn let_chains_codegen_two_lets_nested() {
     let src = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     // Both let-bindings appear in nested form.
     assert!(
-        src.contains("if let Some(x) = a"),
-        "expected `if let Some(x) = a`, got:\n{src}"
+        src.contains("if let Option::Some(x) = a"),
+        "expected `if let Option::Some(x) = a`, got:\n{src}"
     );
     assert!(
-        src.contains("if let Some(y) = b"),
-        "expected `if let Some(y) = b`, got:\n{src}"
+        src.contains("if let Option::Some(y) = b"),
+        "expected `if let Option::Some(y) = b`, got:\n{src}"
     );
     must_reparse(&src);
 }
@@ -186,12 +186,12 @@ fn let_chains_codegen_three_level_nested() {
     let stmt = Stmt::ExprStmt(expr, span());
     let src = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     assert!(
-        src.contains("if let Some(a) = x"),
-        "expected `if let Some(a) = x`, got:\n{src}"
+        src.contains("if let Option::Some(a) = x"),
+        "expected `if let Option::Some(a) = x`, got:\n{src}"
     );
     assert!(
-        src.contains("if let Some(b) = y"),
-        "expected `if let Some(b) = y`, got:\n{src}"
+        src.contains("if let Option::Some(b) = y"),
+        "expected `if let Option::Some(b) = y`, got:\n{src}"
     );
     assert!(
         src.contains("a > b"),

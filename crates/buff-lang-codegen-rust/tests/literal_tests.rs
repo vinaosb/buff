@@ -283,7 +283,10 @@ fn test_codegen_raw_string_regex() {
 fn test_codegen_let_string() {
     let f = func_with_stmts("f", vec![let_stmt("s", string_expr("hi"))]);
     let src = generate_rust(&[f]).unwrap();
-    assert!(src.contains(r#"let s: String = "hi";"#), "src = {src}");
+    assert!(
+        src.contains(r#"let s: String = "hi".to_string();"#),
+        "src = {src}"
+    );
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
 
@@ -412,7 +415,7 @@ fn literals() {
     let f: f32 = 2.5f32;
     let d: f64 = 9.9f64;
     let b: bool = true;
-    let s: String = \"hi\";
+    let s: String = \"hi\".to_string();
     let byte: u8 = 255;
 }
 ");

@@ -96,8 +96,8 @@ fn let_bindings_codegen_if_let_some() {
     let stmt = Stmt::ExprStmt(expr, span());
     let src = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     assert!(
-        src.contains("if let Some(x) = opt"),
-        "expected Rust `if let Some(x) = opt`, got:\n{src}"
+        src.contains("if let Option::Some(x) = opt"),
+        "expected Rust `if let Option::Some(x) = opt`, got:\n{src}"
     );
     must_reparse(&src);
 }
@@ -138,8 +138,8 @@ fn let_bindings_codegen_if_let_with_else() {
     let stmt = Stmt::ExprStmt(expr, span());
     let src = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     assert!(
-        src.contains("if let Some(x) = opt"),
-        "expected `if let Some(x) = opt`, got:\n{src}"
+        src.contains("if let Option::Some(x) = opt"),
+        "expected `if let Option::Some(x) = opt`, got:\n{src}"
     );
     assert!(src.contains("else"), "expected an `else` arm, got:\n{src}");
     must_reparse(&src);
@@ -210,8 +210,8 @@ fn let_bindings_codegen_for_let_while_let() {
     };
     let src = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     assert!(
-        src.contains("while let Some(x) ="),
-        "expected Rust `while let Some(x) =`, got:\n{src}"
+        src.contains("while let Option::Some(x) ="),
+        "expected Rust `while let Option::Some(x) =`, got:\n{src}"
     );
     assert!(
         src.contains("iter.next()"),
