@@ -128,7 +128,7 @@ fn string_methods_interp_single_expression() {
     // `"Hello {name}!"` → `format!("Hello {}!", name)`
     let e = interp(vec![
         InterpPart::Literal("Hello ".to_string()),
-        InterpPart::Expr(Box::new(ident_expr("name"))),
+        InterpPart::Expr(Box::new(ident_expr("name")), None),
         InterpPart::Literal("!".to_string()),
     ]);
     let src = codegen_one_stmt(Stmt::LetDecl {
@@ -148,11 +148,11 @@ fn string_methods_interp_single_expression() {
 fn string_methods_interp_multiple_expressions() {
     // `"{a} + {b} = {c}"` → `format!("{} + {} = {}", a, b, c)`
     let e = interp(vec![
-        InterpPart::Expr(Box::new(ident_expr("a"))),
+        InterpPart::Expr(Box::new(ident_expr("a")), None),
         InterpPart::Literal(" + ".to_string()),
-        InterpPart::Expr(Box::new(ident_expr("b"))),
+        InterpPart::Expr(Box::new(ident_expr("b")), None),
         InterpPart::Literal(" = ".to_string()),
-        InterpPart::Expr(Box::new(ident_expr("c"))),
+        InterpPart::Expr(Box::new(ident_expr("c")), None),
     ]);
     let src = codegen_one_stmt(Stmt::LetDecl {
         name: ident("equation"),
@@ -178,7 +178,7 @@ fn string_methods_interp_with_arithmetic_expression() {
     };
     let e = interp(vec![
         InterpPart::Literal("total = ".to_string()),
-        InterpPart::Expr(Box::new(inner)),
+        InterpPart::Expr(Box::new(inner), None),
     ]);
     let src = codegen_one_stmt(Stmt::LetDecl {
         name: ident("msg"),
@@ -199,7 +199,7 @@ fn string_methods_interp_escapes_braces() {
     // must be escaped to `{{`/`}}` in the format string.
     let e = interp(vec![
         InterpPart::Literal("literal braces: {".to_string()),
-        InterpPart::Expr(Box::new(ident_expr("x"))),
+        InterpPart::Expr(Box::new(ident_expr("x")), None),
         InterpPart::Literal("}".to_string()),
     ]);
     let src = codegen_one_stmt(Stmt::LetDecl {
@@ -221,7 +221,7 @@ fn string_methods_interp_escapes_braces() {
 #[test]
 fn string_methods_interp_only_expression_no_literal() {
     // `"{x}"` → `format!("{}", x)` — no surrounding literal text.
-    let e = interp(vec![InterpPart::Expr(Box::new(ident_expr("x")))]);
+    let e = interp(vec![InterpPart::Expr(Box::new(ident_expr("x")), None)]);
     let src = codegen_one_stmt(Stmt::ExprStmt(e, span()));
     assert!(
         src.contains(r#"format!("{}", x)"#),
@@ -425,7 +425,7 @@ fn string_methods_combined_interp_and_method_snapshot() {
     // method call on the resulting interpolated string.
     let interp_expr = interp(vec![
         InterpPart::Literal("Hello ".to_string()),
-        InterpPart::Expr(Box::new(ident_expr("name"))),
+        InterpPart::Expr(Box::new(ident_expr("name")), None),
         InterpPart::Literal("!".to_string()),
     ]);
     let method = method_call(interp_expr, "char_count", vec![]);
