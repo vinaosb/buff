@@ -1,7 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+assertion_line: 868
 expression: src
 ---
 fn f() {
-    std::fs::remove_dir_all("/tmp/a").ok();
+    std::fs::remove_dir_all("/tmp/a".to_string()).ok();
 }

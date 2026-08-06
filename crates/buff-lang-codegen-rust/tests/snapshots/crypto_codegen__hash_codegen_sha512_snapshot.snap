@@ -1,10 +1,11 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/crypto_codegen.rs
+assertion_line: 685
 expression: src
 ---
 fn f() {
     {
         use sha2::Digest;
-        hex::encode(sha2::Sha512::digest("hello".as_bytes()))
+        hex::encode(sha2::Sha512::digest("hello".to_string().as_bytes()))
     };
 }

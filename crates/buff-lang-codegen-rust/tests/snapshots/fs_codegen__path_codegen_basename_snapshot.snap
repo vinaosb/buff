@@ -1,8 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+assertion_line: 835
 expression: src
 ---
 fn f() {
-    let p: std::path::PathBuf = std::path::PathBuf::from("a").join("b");
+    let p: std::path::PathBuf = std::path::PathBuf::from("a".to_string())
+        .join("b".to_string());
     p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
 }

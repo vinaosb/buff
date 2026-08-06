@@ -1,13 +1,13 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/format_codegen.rs
-assertion_line: 577
+assertion_line: 591
 expression: src
 ---
 fn f() {
     {
         let mut __rdr = csv::ReaderBuilder::new()
             .has_headers(false)
-            .from_reader("a,b\n1,2\n".as_bytes());
+            .from_reader("a,b\n1,2\n".to_string().as_bytes());
         __rdr
             .records()
             .filter_map(|r| r.ok())

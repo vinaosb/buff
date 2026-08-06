@@ -1,27 +1,16 @@
 ---
-source: crates/buff-lang-codegen-rust/tests/crypto_codegen.rs
-assertion_line: 744
+source: crates/buff-lang-codegen-rust/tests/geo_codegen.rs
+assertion_line: 501
 expression: src
 ---
 fn main() {
-    let sha256hex: String = {
-        use sha2::Digest;
-        hex::encode(sha2::Sha256::digest("hello".to_string().as_bytes()))
-    };
-    let sha512hex: String = {
-        use sha2::Digest;
-        hex::encode(sha2::Sha512::digest("hello".to_string().as_bytes()))
-    };
-    let md5hex: String = hex::encode(md5::compute("hello".to_string().as_bytes()).0);
-    let hmachex: String = {
-        use hmac::Mac;
-        hmac::Hmac::<sha2::Sha256>::new_from_slice("secret".to_string().as_bytes())
-            .map(|mut mac| {
-                mac.update("message".to_string().as_bytes());
-                hex::encode(mac.finalize().into_bytes())
-            })
-            .unwrap_or_default()
-    };
+    let p: buff_geo::Point = buff_geo::Point::new(1.0f64, 2.0f64);
+    let q: buff_geo::Point = buff_geo::Point::new(4.0f64, 6.0f64);
+    p.distance_to(q);
+    let ring = buff_geo::LineString::from_coords(coords).unwrap_or_default();
+    let poly = buff_geo::Polygon::new(ring).unwrap_or_default();
+    poly.area;
+    poly.clone().contains(p.clone());
     {
         if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
             for __buff_line in __buff_contents.lines() {

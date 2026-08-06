@@ -1,7 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/crypto_codegen.rs
+assertion_line: 691
 expression: src
 ---
 fn f() {
-    hex::encode(md5::compute("hello".as_bytes()).0);
+    hex::encode(md5::compute("hello".to_string().as_bytes()).0);
 }
