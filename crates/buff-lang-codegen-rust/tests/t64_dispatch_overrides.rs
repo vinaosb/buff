@@ -1,7 +1,7 @@
 //! T64 — `@prefer(cpu)` / `@prefer(gpu)` / `@force(gpu)` dispatch overrides.
 //!
 //! Verifies the codegen lowers the dispatch-hint attributes to machine-readable
-//! `#[doc = "@..."]` markers (mirrors the T65 `@blocking` and T66 `@workgroup`
+//! `///@...` doc-comment markers (mirrors the T65 `@blocking` and T66 `@workgroup`
 //! pattern). The runtime dispatch layer (`buff_lang_runtime::hints`) reads these
 //! markers from the generated source metadata; codegen itself emits no Rust
 //! semantic effect — the generated function always compiles unchanged.
@@ -48,8 +48,8 @@ fn prefer_cpu_emits_doc_marker() {
     let src = generate_rust(&decls).expect("codegen");
     assert!(src.contains("fn scalar_work"), "src: {src}");
     assert!(
-        src.contains(r#"#[doc = "@prefer(cpu)"]"#),
-        "@prefer(cpu) must emit a #[doc] marker: {src}"
+        src.contains("///@prefer(cpu)"),
+        "@prefer(cpu) must emit a /// doc marker: {src}"
     );
     // No semantic Rust attribute — pure metadata.
     assert!(
@@ -66,8 +66,8 @@ fn prefer_gpu_emits_doc_marker() {
     )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains(r#"#[doc = "@prefer(gpu)"]"#),
-        "@prefer(gpu) must emit a #[doc] marker: {src}"
+        src.contains("///@prefer(gpu)"),
+        "@prefer(gpu) must emit a /// doc marker: {src}"
     );
 }
 
@@ -79,8 +79,8 @@ fn prefer_npu_emits_doc_marker() {
     )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains(r#"#[doc = "@prefer(npu)"]"#),
-        "@prefer(npu) must emit a #[doc] marker: {src}"
+        src.contains("///@prefer(npu)"),
+        "@prefer(npu) must emit a /// doc marker: {src}"
     );
 }
 
@@ -93,8 +93,8 @@ fn force_gpu_emits_doc_marker() {
     let src = generate_rust(&decls).expect("codegen");
     assert!(src.contains("fn heavy_gpu"), "src: {src}");
     assert!(
-        src.contains(r#"#[doc = "@force(gpu)"]"#),
-        "@force(gpu) must emit a #[doc] marker: {src}"
+        src.contains("///@force(gpu)"),
+        "@force(gpu) must emit a /// doc marker: {src}"
     );
     assert!(
         !src.contains("#[force"),
@@ -118,7 +118,7 @@ fn prefer_and_force_coexist_with_other_attrs() {
         ],
     )];
     let src = generate_rust(&decls).expect("codegen");
-    assert!(src.contains(r#"#[doc = "@prefer(cpu)"]"#), "src: {src}");
+    assert!(src.contains("///@prefer(cpu)"), "src: {src}");
     assert!(src.contains("#[inline]"), "src: {src}");
 }
 
@@ -137,7 +137,7 @@ fn prefer_without_arg_defaults_to_cpu() {
     )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains(r#"#[doc = "@prefer(cpu)"]"#),
+        src.contains("///@prefer(cpu)"),
         "argument-less @prefer defaults to cpu: {src}"
     );
 }
@@ -155,7 +155,7 @@ fn force_without_arg_defaults_to_gpu() {
     )];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains(r#"#[doc = "@force(gpu)"]"#),
+        src.contains("///@force(gpu)"),
         "argument-less @force defaults to gpu: {src}"
     );
 }

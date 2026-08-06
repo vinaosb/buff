@@ -287,8 +287,8 @@ fn udp_codegen_bind_with_literals_uses_udpsocket_bind_ok() {
         "expected `tokio::net::UdpSocket::bind(` in: {src}"
     );
     assert!(
-        src.contains(".await.ok()"),
-        "expected `.await.ok()` (panic-free async) in: {src}"
+        src.contains(".await") && src.contains(".ok()"),
+        "expected `.await` AND `.ok()` (panic-free async, prettyplease may line-wrap) in: {src}"
     );
     // Must NOT use bare .unwrap() (panicking-generated-code rule).
     assert!(
@@ -522,8 +522,8 @@ fn socket_codegen_send_to_uses_udpsocket_send_to() {
         "expected `.as_bytes()` (String -> &[u8]) in: {src}"
     );
     assert!(
-        src.contains(".await.ok()"),
-        "expected `.await.ok()` (panic-free async send) in: {src}"
+        src.contains(".await") && src.contains(".ok()"),
+        "expected `.await` AND `.ok()` (panic-free async send, prettyplease may line-wrap) in: {src}"
     );
     // Must NOT use bare .unwrap() (panicking-generated-code rule).
     assert!(
@@ -649,8 +649,8 @@ fn wsconnection_codegen_send_uses_sink_ext_send_message_text() {
         "expected `tokio_tungstenite::tungstenite::Message::Text(` (Text frame) in: {src}"
     );
     assert!(
-        src.contains(".await.ok()"),
-        "expected `.await.ok()` (panic-free async send) in: {src}"
+        src.contains(".await") && src.contains(".ok()"),
+        "expected `.await` AND `.ok()` (panic-free async send, prettyplease may line-wrap) in: {src}"
     );
     // Must NOT use bare .unwrap() (panicking-generated-code rule).
     assert!(

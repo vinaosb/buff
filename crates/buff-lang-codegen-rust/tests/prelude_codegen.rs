@@ -456,8 +456,27 @@ fn prelude_codegen_combined_snapshot() {
     fn main() {
         println!("{}", (- 5).abs());
         println!("{}", (3).max(7));
-        println!("{}", "42".parse:: < i64 > ().unwrap_or(0));
+        println!("{}", "42".to_string().parse:: < i64 > ().unwrap_or(0));
         println!("{}", 42.to_string());
+        {
+            if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+                for __buff_line in __buff_contents.lines() {
+                    let __buff_line = __buff_line.trim();
+                    if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                        let __buff_k = __buff_key.trim().to_string();
+                        let __buff_v = __buff_val.trim().to_string();
+                        if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                            unsafe {
+                                std::env::set_var(&__buff_k, &__buff_v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     "###);
 }

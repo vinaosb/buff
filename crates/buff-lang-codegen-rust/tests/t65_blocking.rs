@@ -1,7 +1,7 @@
 //! T65 — `@blocking` attribute lowering tests.
 //!
-//! Verifies that `@blocking` on a function emits a `#[doc = "@blocking"]`
-//! marker attribute in the generated Rust source. The marker is machine-
+//! Verifies that `@blocking` on a function emits a `///@blocking`
+//! doc-comment marker in the generated Rust source. The marker is machine-
 //! readable metadata for the async runtime dispatch layer (future
 //! `spawn_blocking` wrapping) and does not change the function's async
 //! propagation.
@@ -44,8 +44,8 @@ fn blocking_emits_doc_marker() {
     let decls = vec![fn_with_attrs("slow_io", vec![attr("blocking")])];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains("#[doc = \"@blocking\"]"),
-        "expected #[doc = \"@blocking\"] marker, src: {src}"
+        src.contains("///@blocking"),
+        "expected ///@blocking doc marker, src: {src}"
     );
     assert!(src.contains("fn slow_io"), "fn name preserved, src: {src}");
 }
@@ -69,7 +69,7 @@ fn blocking_preserves_function_body() {
         Span::dummy(),
     ));
     let src = generate_rust(&[Decl::FuncDecl(func)]).expect("codegen");
-    assert!(src.contains("#[doc = \"@blocking\"]"), "src: {src}");
+    assert!(src.contains("///@blocking"), "src: {src}");
     assert!(src.contains("placeholder"), "body preserved, src: {src}");
 }
 
@@ -80,6 +80,6 @@ fn blocking_does_not_break_other_attributes() {
         vec![attr("blocking"), attr("test")],
     )];
     let src = generate_rust(&decls).expect("codegen");
-    assert!(src.contains("#[doc = \"@blocking\"]"), "src: {src}");
+    assert!(src.contains("///@blocking"), "src: {src}");
     assert!(src.contains("#[test]"), "src: {src}");
 }

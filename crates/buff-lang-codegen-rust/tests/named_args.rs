@@ -110,7 +110,7 @@ fn named_args_codegen_declaration_order() {
     // The generated Rust should contain `greet("Alice", "Hi")` — values
     // extracted from NamedArg nodes, in source order.
     assert!(
-        src.contains(r#"greet("Alice", "Hi")"#),
+        src.contains(r#"greet("Alice".to_string(), "Hi".to_string())"#),
         "expected `greet(\"Alice\", \"Hi\")` in generated Rust, got: {src}"
     );
     // Verify it re-parses as valid Rust.
@@ -145,7 +145,7 @@ fn named_args_codegen_reordered() {
     // The generated Rust should reorder to declaration order:
     // `greet("Alice", "Hi")` even though source wrote `greeting` first.
     assert!(
-        src.contains(r#"greet("Alice", "Hi")"#),
+        src.contains(r#"greet("Alice".to_string(), "Hi".to_string())"#),
         "expected reordered `greet(\"Alice\", \"Hi\")` in generated Rust, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
@@ -173,7 +173,7 @@ fn named_args_codegen_create_example() {
     );
     let src = generate_rust(&[create, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"create("x", 80)"#),
+        src.contains(r#"create("x".to_string(), 80)"#),
         "expected `create(\"x\", 80)` in generated Rust, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
@@ -200,7 +200,7 @@ fn named_args_codegen_create_reordered() {
     );
     let src = generate_rust(&[create, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"create("x", 80)"#),
+        src.contains(r#"create("x".to_string(), 80)"#),
         "expected reordered `create(\"x\", 80)` in generated Rust, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
@@ -228,7 +228,7 @@ fn named_args_codegen_positional_unchanged() {
     );
     let src = generate_rust(&[greet, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"greet("Alice", "Hi")"#),
+        src.contains(r#"greet("Alice".to_string(), "Hi".to_string())"#),
         "positional call should codegen unchanged: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
@@ -256,7 +256,7 @@ fn named_args_codegen_mixed_positional_and_named() {
     );
     let src = generate_rust(&[greet, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"greet("Alice", "Hi")"#),
+        src.contains(r#"greet("Alice".to_string(), "Hi".to_string())"#),
         "mixed positional+named should codegen to `greet(\"Alice\", \"Hi\")`: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
@@ -284,7 +284,7 @@ fn named_args_codegen_unknown_callee_extracts_values() {
     let src = generate_rust(&[main]).expect("codegen should succeed");
     // No matching fn decl → extract values in source order (no reorder).
     assert!(
-        src.contains(r#"other("Hi", "Alice")"#),
+        src.contains(r#"other("Hi".to_string(), "Alice".to_string())"#),
         "unknown callee should extract values in source order: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");

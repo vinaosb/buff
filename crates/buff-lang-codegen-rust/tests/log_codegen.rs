@@ -127,8 +127,8 @@ fn must_reparse(src: &str) {
 fn log_codegen_debug_string_literal() {
     let src = codegen_one_expr_in("f", log_call("debug", vec![str_expr("hello")]));
     assert!(
-        src.contains("tracing::debug!(\"hello\")"),
-        "expected `tracing::debug!(\"hello\")` in: {src}"
+        src.contains("tracing::debug!(\"hello\".to_string())"),
+        "expected `tracing::debug!(\"hello\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -137,8 +137,8 @@ fn log_codegen_debug_string_literal() {
 fn log_codegen_info_string_literal() {
     let src = codegen_one_expr_in("f", log_call("info", vec![str_expr("hello")]));
     assert!(
-        src.contains("tracing::info!(\"hello\")"),
-        "expected `tracing::info!(\"hello\")` in: {src}"
+        src.contains("tracing::info!(\"hello\".to_string())"),
+        "expected `tracing::info!(\"hello\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -147,8 +147,8 @@ fn log_codegen_info_string_literal() {
 fn log_codegen_warn_string_literal() {
     let src = codegen_one_expr_in("f", log_call("warn", vec![str_expr("careful")]));
     assert!(
-        src.contains("tracing::warn!(\"careful\")"),
-        "expected `tracing::warn!(\"careful\")` in: {src}"
+        src.contains("tracing::warn!(\"careful\".to_string())"),
+        "expected `tracing::warn!(\"careful\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -157,8 +157,8 @@ fn log_codegen_warn_string_literal() {
 fn log_codegen_error_string_literal() {
     let src = codegen_one_expr_in("f", log_call("error", vec![str_expr("boom")]));
     assert!(
-        src.contains("tracing::error!(\"boom\")"),
-        "expected `tracing::error!(\"boom\")` in: {src}"
+        src.contains("tracing::error!(\"boom\".to_string())"),
+        "expected `tracing::error!(\"boom\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -181,8 +181,8 @@ fn log_codegen_single_named_field() {
     );
     // tracing macro syntax: fields first, message LAST.
     assert!(
-        src.contains("tracing::info!(user_id = 42, \"user logged in\")"),
-        "expected `tracing::info!(user_id = 42, \"user logged in\")` in: {src}"
+        src.contains("tracing::info!(user_id = 42, \"user logged in\".to_string())"),
+        "expected `tracing::info!(user_id = 42, \"user logged in\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -203,8 +203,8 @@ fn log_codegen_multiple_named_fields_preserve_source_order() {
         ),
     );
     assert!(
-        src.contains("tracing::info!(a = 1, b = 2, \"msg\")"),
-        "expected `tracing::info!(a = 1, b = 2, \"msg\")` in: {src}"
+        src.contains("tracing::info!(a = 1, b = 2, \"msg\".to_string())"),
+        "expected `tracing::info!(a = 1, b = 2, \"msg\".to_string())` in: {src}"
     );
     // Determinism: the same AST must always produce the same Rust. Run
     // the codegen twice and assert byte-identical output.
@@ -239,8 +239,8 @@ fn log_codegen_field_order_does_not_sort_alphabetically() {
         ),
     );
     assert!(
-        src.contains("tracing::debug!(z = 1, a = 2, \"ev\")"),
-        "expected source order preserved `tracing::debug!(z = 1, a = 2, \"ev\")` in: {src}"
+        src.contains("tracing::debug!(z = 1, a = 2, \"ev\".to_string())"),
+        "expected source order preserved `tracing::debug!(z = 1, a = 2, \"ev\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -256,8 +256,8 @@ fn log_codegen_string_field_value() {
     );
     // String field values splice as string literals.
     assert!(
-        src.contains("tracing::warn!(ip = \"10.0.0.1\", \"auth\")"),
-        "expected `tracing::warn!(ip = \"10.0.0.1\", \"auth\")` in: {src}"
+        src.contains("tracing::warn!(ip = \"10.0.0.1\".to_string(), \"auth\".to_string())"),
+        "expected `tracing::warn!(ip = \"10.0.0.1\".to_string(), \"auth\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }

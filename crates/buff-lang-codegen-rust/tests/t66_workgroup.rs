@@ -2,7 +2,7 @@
 //!
 //! Verifies:
 //! 1. The parser accepts `@workgroup(64)` with an integer literal arg.
-//! 2. The codegen emits a `#[doc = "@workgroup(64)"]` marker.
+//! 2. The codegen emits a `///@workgroup(64)` doc-comment marker.
 //! 3. Argument-less `@workgroup` defaults to 64.
 
 use buff_lang_ast::{
@@ -41,8 +41,8 @@ fn workgroup_with_explicit_size_emits_marker() {
     let decls = vec![fn_with_workgroup(Some("64"))];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains("#[doc = \"@workgroup(64)\"]"),
-        "expected workgroup marker, src: {src}"
+        src.contains("///@workgroup(64)"),
+        "expected workgroup doc marker, src: {src}"
     );
     assert!(
         src.contains("fn gpu_kernel"),
@@ -55,7 +55,7 @@ fn workgroup_without_arg_defaults_to_64() {
     let decls = vec![fn_with_workgroup(None)];
     let src = generate_rust(&decls).expect("codegen");
     assert!(
-        src.contains("#[doc = \"@workgroup(64)\"]"),
+        src.contains("///@workgroup(64)"),
         "default workgroup size 64, src: {src}"
     );
 }
