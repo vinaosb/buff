@@ -248,8 +248,27 @@ fn env_access_combined_snapshot() {
     insta::assert_snapshot!(src, @r###"
     fn main() {
         let a: Vec<String> = std::env::args().collect::<Vec<String>>();
-        let p: Option<String> = std::env::var("PATH").ok();
+        let p: Option<String> = std::env::var("PATH".to_string()).ok();
         std::process::exit(0);
+        {
+            if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+                for __buff_line in __buff_contents.lines() {
+                    let __buff_line = __buff_line.trim();
+                    if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                        let __buff_k = __buff_key.trim().to_string();
+                        let __buff_v = __buff_val.trim().to_string();
+                        if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                            unsafe {
+                                std::env::set_var(&__buff_k, &__buff_v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     "###);
 }

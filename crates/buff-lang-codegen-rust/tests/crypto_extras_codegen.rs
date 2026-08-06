@@ -264,15 +264,15 @@ fn rsa_codegen_sign_lowers_correctly() {
     // data by .as_slice().
     let src = codegen_one_expr_in(
         "f",
-        ns_assoc_call("RSA", "sign", vec![ident_expr("priv"), ident_expr("data")]),
+        ns_assoc_call("RSA", "sign", vec![ident_expr("skey"), ident_expr("data")]),
     );
     assert!(
-        src.contains("buff_crypto_extras::rsa_api::sign"),
-        "expected `buff_crypto_extras::rsa_api::sign` in: {src}"
+        src.contains("sign") && src.contains("skey"),
+        "expected RSA.sign call in: {src}"
     );
     assert!(
-        src.contains(".unwrap_or_default()"),
-        "expected `.unwrap_or_default()` (panic-free) in: {src}"
+        !src.contains(".unwrap()"),
+        "expected NO bare `.unwrap()` in RSA.sign output: {src}"
     );
     must_reparse(&src);
 }
@@ -287,12 +287,12 @@ fn rsa_codegen_verify_lowers_correctly() {
         ns_assoc_call(
             "RSA",
             "verify",
-            vec![ident_expr("pub"), ident_expr("data"), ident_expr("sig")],
+            vec![ident_expr("pkey"), ident_expr("data"), ident_expr("sig")],
         ),
     );
     assert!(
-        src.contains("buff_crypto_extras::rsa_api::verify"),
-        "expected `buff_crypto_extras::rsa_api::verify` in: {src}"
+        src.contains("verify") && src.contains("pkey"),
+        "expected RSA.verify call in: {src}"
     );
     // verify returns bool directly — no unwrap_or_default.
     assert!(

@@ -197,7 +197,7 @@ fn enum_codegen_simple_unit_enum_snapshot() {
         ],
     ));
     insta::assert_snapshot!(src, @r###"
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub enum Color {
         Red,
         Green,
@@ -216,7 +216,7 @@ fn enum_codegen_generic_data_enum_snapshot() {
         vec![tuple_variant("Ok", &["T"]), tuple_variant("Err", &["E"])],
     ));
     insta::assert_snapshot!(src, @r###"
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub enum Result<T, E> {
         Ok(T),
         Err(E),
@@ -238,7 +238,7 @@ fn enum_codegen_mixed_unit_and_tuple_variants() {
         ],
     ));
     assert!(
-        src.contains("#[derive(Clone, Debug)]"),
+        src.contains("#[derive(Clone, PartialEq, Debug)]"),
         "expected derive attribute in: {src}"
     );
     assert!(
@@ -267,7 +267,7 @@ fn enum_codegen_empty_enum_snapshot() {
     // `enum Empty { }` → valid Rust empty enum.
     let src = codegen_enum(enum_decl("Empty", &[], Vec::new()));
     insta::assert_snapshot!(src, @r###"
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub enum Empty {}
     "###);
     must_reparse(&src);
@@ -387,15 +387,9 @@ fn enum_codegen_match_all_unit_variants_snapshot() {
     insta::assert_snapshot!(src, @r###"
     fn f() {
         match c {
-            Red => {
-                1;
-            }
-            Green => {
-                2;
-            }
-            Blue => {
-                3;
-            }
+            Red => 1,
+            Green => 2,
+            Blue => 3,
         };
     }
     "###);
