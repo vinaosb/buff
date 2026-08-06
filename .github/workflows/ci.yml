@@ -83,7 +83,7 @@ jobs:
       - name: Clippy (core + working framework crates, lib only)
         run: cargo clippy ${{ env.CI_CRATES }} --lib -- -D warnings
 
-  # ── Test-core (HARD gate, 3-OS matrix) ──────────────────────────────────────
+  # ── Test-core (ADVISORY, 3-OS matrix) ───────────────────────────────────────
   # P0.11: Core compiler crate tests.
   # Advisory: 10+ pre-existing test failures fixed (bench_cold_start flakiness,
   # registry env race, naming_lint false positive, error code attachment,
