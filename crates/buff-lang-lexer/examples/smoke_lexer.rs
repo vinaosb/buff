@@ -267,17 +267,32 @@ fn main() {
     println!("{}", token_kind_num(&TokenKind::IntLit(42)));
     println!("{}", token_kind_num(&TokenKind::FloatLit(3.14)));
     println!("{}", token_kind_num(&TokenKind::DoubleLit(2.71828)));
-    println!("{}", token_kind_num(&TokenKind::StringLit("hi".to_string())));
+    println!(
+        "{}",
+        token_kind_num(&TokenKind::StringLit("hi".to_string()))
+    );
     println!("{}", token_kind_num(&TokenKind::ByteLit(255)));
     println!("{}", token_kind_num(&TokenKind::CharLit('A')));
-    println!("{}", token_kind_num(&TokenKind::DecimalLit("99.90".to_string())));
-    println!("{}", token_kind_num(&TokenKind::RegexLit("\\d+".to_string())));
+    println!(
+        "{}",
+        token_kind_num(&TokenKind::DecimalLit("99.90".to_string()))
+    );
+    println!(
+        "{}",
+        token_kind_num(&TokenKind::RegexLit("\\d+".to_string()))
+    );
 
     // --- String interpolation (9-14) ---
     println!("{}", token_kind_num(&TokenKind::StringStart));
-    println!("{}", token_kind_num(&TokenKind::StringPart("hello ".to_string())));
+    println!(
+        "{}",
+        token_kind_num(&TokenKind::StringPart("hello ".to_string()))
+    );
     println!("{}", token_kind_num(&TokenKind::InterpStart));
-    println!("{}", token_kind_num(&TokenKind::InterpSpec(".2".to_string())));
+    println!(
+        "{}",
+        token_kind_num(&TokenKind::InterpSpec(".2".to_string()))
+    );
     println!("{}", token_kind_num(&TokenKind::InterpEnd));
     println!("{}", token_kind_num(&TokenKind::StringEnd));
 

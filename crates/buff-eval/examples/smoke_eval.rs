@@ -121,10 +121,15 @@ fn main() {
         "{}",
         snippet_kind_tag(&SnippetKind::BareExpr("2 + 3".to_string(), false))
     );
-    println!("{}", snippet_kind_tag(&SnippetKind::BodyStmt("let x = 42".to_string())));
     println!(
         "{}",
-        snippet_kind_tag(&SnippetKind::TopLevelDecl("func helper(): return 1".to_string()))
+        snippet_kind_tag(&SnippetKind::BodyStmt("let x = 42".to_string()))
+    );
+    println!(
+        "{}",
+        snippet_kind_tag(&SnippetKind::TopLevelDecl(
+            "func helper(): return 1".to_string()
+        ))
     );
     println!(
         "{}",

@@ -156,10 +156,7 @@ fn main() {
     println!("{}", dummy.source_id.0);
 
     // --- BuffHtmlParseError: Lex variant ---
-    let lex_err = BuffHtmlParseError::lex(
-        "unterminated interpolation, missing close brace",
-        sp,
-    );
+    let lex_err = BuffHtmlParseError::lex("unterminated interpolation, missing close brace", sp);
     println!("{}", error_message(&lex_err));
 
     // --- BuffHtmlParseError: Parse variant ---
@@ -198,8 +195,12 @@ fn main() {
     print_kind_info(&BuffHtmlTokenKind::Else);
     print_kind_info(&BuffHtmlTokenKind::IfClose);
     print_kind_info(&BuffHtmlTokenKind::HtmlComment("hi".to_string()));
-    print_kind_info(&BuffHtmlTokenKind::BuffComment("this is a comment".to_string()));
-    print_kind_info(&BuffHtmlTokenKind::HtmlEscape("raw_trusted_html".to_string()));
+    print_kind_info(&BuffHtmlTokenKind::BuffComment(
+        "this is a comment".to_string(),
+    ));
+    print_kind_info(&BuffHtmlTokenKind::HtmlEscape(
+        "raw_trusted_html".to_string(),
+    ));
     print_kind_info(&BuffHtmlTokenKind::AwaitOpen("fetchUser(id)".to_string()));
     print_kind_info(&BuffHtmlTokenKind::AwaitThen("user".to_string()));
     print_kind_info(&BuffHtmlTokenKind::AwaitCatch("err".to_string()));
@@ -218,10 +219,7 @@ fn main() {
     print_kind_info(&BuffHtmlTokenKind::Eof);
 
     // --- Wrap a few kinds in BuffHtmlToken, exercise accessors ---
-    let tok_text = BuffHtmlToken::new(
-        BuffHtmlTokenKind::Text("hello world".to_string()),
-        sp,
-    );
+    let tok_text = BuffHtmlToken::new(BuffHtmlTokenKind::Text("hello world".to_string()), sp);
     print_token_info(&tok_text);
     println!("{}", sp.start);
     println!("{}", sp.end);
@@ -307,10 +305,7 @@ fn main() {
     }
 
     // --- Remaining accessors ---
-    println!(
-        "{}",
-        BuffHtmlParseError::lex("x", sp).span().start
-    );
+    println!("{}", BuffHtmlParseError::lex("x", sp).span().start);
     println!(
         "{}",
         matches!(
