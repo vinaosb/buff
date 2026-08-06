@@ -155,8 +155,8 @@ fn some_string_codegen_lowers_to_rust_some_call() {
     // `Some("hi")` -> Rust `Some(\"hi\")`.
     let src = codegen_one_expr(some_expr(string_expr("hi")));
     assert!(
-        src.contains("Some(\"hi\")"),
-        "expected `Some(\"hi\")` in generated Rust: {src}"
+        src.contains("Some(\"hi\".to_string())"),
+        "expected `Some(\"hi\".to_string())` in generated Rust: {src}"
     );
     must_reparse(&src);
 }

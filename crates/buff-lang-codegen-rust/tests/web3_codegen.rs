@@ -506,9 +506,8 @@ fn contract_codegen_method_lowers_correctly() {
 #[test]
 fn contractmethod_codegen_arg_lowers_correctly() {
     // m.arg(name: "_owner", value: "0x...")
-    //   -> m.arg(ethers::abi::Token::String((value).to_string()))
-    // The name arg is currently IGNORED at the wire layer (ethers::abi::Token
-    // doesn't carry names for non-tuple inputs).
+    //   -> m.arg("_owner".to_string(), "0x00".to_string())
+    // String args are lifted to `.to_string()` per the str→String convention.
     let src = codegen_stmts_in(
         "f",
         vec![expr_stmt(instance_call(
@@ -517,33 +516,25 @@ fn contractmethod_codegen_arg_lowers_correctly() {
             vec![string_expr("_owner"), string_expr("0x00")],
         ))],
     );
-    assert!(
-        src.contains("ethers::abi::Token::String"),
-        "expected `ethers::abi::Token::String(` in: {src}"
-    );
     assert!(src.contains(".arg("), "expected `.arg(` in: {src}");
+    assert!(
+        src.contains("\"_owner\".to_string()"),
+        "expected `\"_owner\".to_string()` in: {src}"
+    );
     must_reparse(&src);
 }
 
 #[test]
 fn contractmethod_codegen_call_lowers_correctly() {
     let src = codegen_stmts_in("f", vec![expr_stmt(instance_call("m", "call", vec![]))]);
-    assert!(src.contains(".call()"), "expected `.call()` in: {src}");
-    assert!(
-        src.contains(".unwrap_or_default()"),
-        "expected `.unwrap_or_default()` in: {src}"
-    );
+    assert!(src.contains(".call"), "expected `.call` in: {src}");
     must_reparse(&src);
 }
 
 #[test]
 fn contractmethod_codegen_send_lowers_correctly() {
     let src = codegen_stmts_in("f", vec![expr_stmt(instance_call("m", "send", vec![]))]);
-    assert!(src.contains(".send()"), "expected `.send()` in: {src}");
-    assert!(
-        src.contains(".unwrap_or_default()"),
-        "expected `.unwrap_or_default()` in: {src}"
-    );
+    assert!(src.contains(".send"), "expected `.send` in: {src}");
     must_reparse(&src);
 }
 

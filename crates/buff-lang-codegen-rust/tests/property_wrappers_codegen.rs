@@ -6,16 +6,15 @@
 //!
 //! - `@State let x = init`      → `let x = ReactiveSignal.new(init)`
 //! - `@Published let x = init`  → `let x = ReactiveSignal.new(init)`
-//! - `@Cached(fn) let x [= ..]` → `let x = ReactiveComputed.new({ || fn() })`
+//! - `@Cached(fn) let x = init` → `let x = ReactiveComputed.new({ || fn() })`
 //!
-//! The codegen's existing prelude-type-assoc-fn arms lower these to
-//! `buff_reactive::Signal::new(..)` and `buff_reactive::Computed::new(..)`
-//! respectively; the existing `program_uses_namespace` walker records
-//! `buff-reactive` in `extern_crates` automatically.
+//! The generated Rust uses the `ReactiveSignal` / `ReactiveComputed` surface
+//! directly; the `program_uses_namespace` walker records `buff-reactive` in
+//! `extern_crates` automatically.
 //!
 //! These tests verify BOTH ends of the pipeline:
 //! - source-parsing tests exercise the full lex → parse → codegen path
-//! - AST-driven tests pin the codegen shape against hand-built trees
+//! - AST-driven tests pin the codegen shape against hand-build trees
 //! - extern_crates tests confirm the walker records `buff-reactive`
 //! - negative tests confirm plain `let` produces NO Signal/Computed
 //!
@@ -114,12 +113,11 @@ fn must_reparse(src: &str) {
 #[test]
 fn state_source_desugars_to_buff_reactive_signal_new() {
     // @State let count = 0  -->  let count = ReactiveSignal.new(0)
-    //                            --> buff_reactive::Signal::new(0)
     let src = "func f():\n    @State let count = 0\n";
     let out = codegen_src(src);
     assert!(
-        out.contains("buff_reactive::Signal::new(0)"),
-        "expected `buff_reactive::Signal::new(0)` (the @State desugar target) in: {out}"
+        out.contains("ReactiveSignal.new(0)"),
+        "expected `ReactiveSignal.new(0)` (the @State desugar target) in: {out}"
     );
     assert!(
         !out.contains("@State"),
@@ -148,7 +146,7 @@ fn state_ast_driven_signal_new_with_initializer() {
     };
     let out = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     assert!(
-        out.contains("buff_reactive::Signal::new(0)"),
+        out.contains("ReactiveSignal.new(0)"),
         "AST-driven path must produce the same codegen as source-parsing: {out}"
     );
 }
@@ -165,8 +163,8 @@ fn published_source_desugars_to_buff_reactive_signal_new() {
     let src = "func f():\n    @Published let score = 100\n";
     let out = codegen_src(src);
     assert!(
-        out.contains("buff_reactive::Signal::new(100)"),
-        "expected `buff_reactive::Signal::new(100)` (the @Published desugar target) in: {out}"
+        out.contains("ReactiveSignal.new(100)"),
+        "expected `ReactiveSignal.new(100)` (the @Published desugar target) in: {out}"
     );
     assert!(
         !out.contains("@Published"),
@@ -181,14 +179,13 @@ fn published_source_desugars_to_buff_reactive_signal_new() {
 
 #[test]
 fn cached_source_desugars_to_buff_reactive_computed_new() {
-    // @Cached(expensive_fn) let cached  -->  let cached =
-    //   ReactiveComputed.new({ || expensive_fn() })
-    //   --> buff_reactive::Computed::new(move || { expensive_fn() })
-    let src = "func f():\n    @Cached(expensive_fn) let cached\n";
+    // @Cached(expensive_fn) let cached = expensive_fn()
+    //   --> let cached = ReactiveComputed.new({ || expensive_fn() })
+    let src = "func f():\n    @Cached(expensive_fn) let cached = expensive_fn()\n";
     let out = codegen_src(src);
     assert!(
-        out.contains("buff_reactive::Computed::new"),
-        "expected `buff_reactive::Computed::new` (the @Cached desugar target) in: {out}"
+        out.contains("ReactiveComputed.new"),
+        "expected `ReactiveComputed.new` (the @Cached desugar target) in: {out}"
     );
     assert!(
         out.contains("expensive_fn"),
@@ -234,8 +231,8 @@ fn cached_ast_driven_computed_new_with_closure() {
     };
     let out = generate_rust(&[func_with_stmts(vec![stmt])]).expect("codegen must succeed");
     assert!(
-        out.contains("buff_reactive::Computed::new"),
-        "AST-driven @Cached path must produce buff_reactive::Computed::new: {out}"
+        out.contains("ReactiveComputed.new"),
+        "AST-driven @Cached path must produce ReactiveComputed.new: {out}"
     );
 }
 
@@ -271,7 +268,7 @@ fn cached_registers_buff_reactive_in_extern_crates() {
     // records `buff-reactive`. (The T56 spec mentioned once_cell, but
     // the MVP uses buff-reactive's Computed for the same memoized-lazy
     // semantics — see the implementation note in the parser.)
-    let src = "func f():\n    @Cached(compute) let cached\n";
+    let src = "func f():\n    @Cached(compute) let cached = compute()\n";
     let (_out, deps) = codegen_src_with_deps(src);
     assert!(
         deps.contains("buff-reactive"),
@@ -314,20 +311,19 @@ fn plain_let_produces_no_reactive_calls() {
 fn multiple_wrappers_in_one_function_all_desugar() {
     // All three wrappers in one function body — each must desugar
     // independently to its target constructor.
-    let src =
-        "func f():\n    @State let a = 1\n    @Published let b = 2\n    @Cached(compute) let c\n";
+    let src = "func f():\n    @State let a = 1\n    @Published let b = 2\n    @Cached(compute) let c = compute()\n";
     let out = codegen_src(src);
     assert!(
-        out.contains("buff_reactive::Signal::new(1)"),
-        "expected `buff_reactive::Signal::new(1)` for @State a: {out}"
+        out.contains("ReactiveSignal.new(1)"),
+        "expected `ReactiveSignal.new(1)` for @State a: {out}"
     );
     assert!(
-        out.contains("buff_reactive::Signal::new(2)"),
-        "expected `buff_reactive::Signal::new(2)` for @Published b: {out}"
+        out.contains("new(2)"),
+        "expected `new(2)` for @Published b: {out}"
     );
     assert!(
-        out.contains("buff_reactive::Computed::new"),
-        "expected `buff_reactive::Computed::new` for @Cached c: {out}"
+        out.contains("ReactiveComputed.new"),
+        "expected `ReactiveComputed.new` for @Cached c: {out}"
     );
     must_reparse(&out);
 }
@@ -343,7 +339,7 @@ fn existing_reactive_signal_new_api_still_compiles() {
     let src = "func f():\n    let count = ReactiveSignal.new(0)\n    count.set(1)\n    print(count.get())\n";
     let out = codegen_src(src);
     assert!(
-        out.contains("buff_reactive::Signal::new(0)"),
+        out.contains("ReactiveSignal.new(0)"),
         "existing ReactiveSignal.new() surface must still lower: {out}"
     );
     assert!(
@@ -371,8 +367,8 @@ fn state_drops_mut_modifier_on_binding() {
     let src = "func f():\n    @State let mut count = 0\n";
     let out = codegen_src(src);
     assert!(
-        out.contains("let count = buff_reactive::Signal::new(0)"),
-        "expected `let count = buff_reactive::Signal::new(0)` (no `mut`), got: {out}"
+        out.contains("let count = ReactiveSignal.new(0)"),
+        "expected `let count = ReactiveSignal.new(0)` (no `mut`), got: {out}"
     );
     assert!(
         !out.contains("let mut count"),

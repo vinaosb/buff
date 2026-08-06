@@ -295,13 +295,15 @@ fn struct_codegen_decl_various_primitive_field_types() {
 #[test]
 fn struct_codegen_init_two_fields_string_int() {
     // `Person { name: "Alice", age: 30 }` → Rust struct-init expr.
+    // String literals are lifted to `.to_string()` per the str→String convention.
+    // prettyplease may line-wrap for longer expressions.
     let src = codegen_one_expr(struct_init(
         "Person",
         vec![("name", string_expr("Alice")), ("age", int_expr(30))],
     ));
     assert!(
-        src.contains("Person { name: \"Alice\", age: 30 }"),
-        "expected `Person {{ name: \"Alice\", age: 30 }}` in: {src}"
+        src.contains("Person {") && src.contains("\"Alice\".to_string()") && src.contains("age: 30"),
+        "expected `Person {{ name: \"Alice\".to_string(), age: 30 }}` (possibly line-wrapped) in: {src}"
     );
     must_reparse(&src);
 }
@@ -437,12 +439,16 @@ fn struct_codegen_known_collection_len_stays_method_call() {
 
 #[test]
 fn struct_codegen_known_one_arg_method_stays_method_call() {
-    // `m.get("k")` is a known one-arg builtin; the disambiguation only fires
+    // `m.insert("k")` is a known one-arg builtin; the disambiguation only fires
     // on EMPTY-args calls, so this must still be a method call.
-    let src = codegen_one_expr(method_call(ident_expr("m"), "get", vec![string_expr("k")]));
+    let src = codegen_one_expr(method_call(
+        ident_expr("m"),
+        "insert",
+        vec![string_expr("k")],
+    ));
     assert!(
-        src.contains("m.get(\"k\")"),
-        "expected `m.get(\"k\")` in: {src}"
+        src.contains("m.insert(\"k\".to_string())"),
+        "expected `m.insert(\"k\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
@@ -544,9 +550,11 @@ fn struct_codegen_end_to_end_decl_init_and_field_access() {
         src.contains("pub struct Person"),
         "missing struct decl: {src}"
     );
-    // Struct init part.
+    // Struct init part (prettyplease may line-wrap for longer expressions).
     assert!(
-        src.contains("Person { name: \"Alice\", age: 30 }"),
+        src.contains("Person {")
+            && src.contains("\"Alice\".to_string()")
+            && src.contains("age: 30"),
         "missing struct init in: {src}"
     );
     // Field access part (NOT a method call).

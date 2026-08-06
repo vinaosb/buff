@@ -88,8 +88,8 @@ fn null_coalescing_string() {
         span(),
     ));
     assert!(
-        src.contains("name.unwrap_or(\"unknown\")"),
-        r#"name ?? "unknown" should codegen to `name.unwrap_or("unknown")`, got: {src}"#
+        src.contains("name.unwrap_or(\"unknown\".to_string())"),
+        r#"name ?? "unknown" should codegen to `name.unwrap_or("unknown".to_string())`, got: {src}"#
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }
